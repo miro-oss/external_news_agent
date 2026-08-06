@@ -1,0 +1,14 @@
+.DS_Store
+
+# Frontend
+FE/node_modules/
+FE/dist/
+FE/dist-ssr/
+
+# Backend
+BE/.gradle/
+BE/build/
+
+# IDE
+.idea/
+.vscode/
