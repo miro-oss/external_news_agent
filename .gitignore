@@ -12,3 +12,5 @@ BE/build/
 # IDE
 .idea/
 .vscode/
+
+docs/
