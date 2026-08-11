@@ -12,8 +12,9 @@ import lombok.Getter;
 @JsonPropertyOrder({"isSuccess", "code", "message", "result"})
 public class ApiResponse<T> {
 
+    // 필드명을 success로 두어야 Lombok이 만든 isSuccess() 게터와 같은 프로퍼티로 묶여 isSuccess 키 하나만 나간다.
     @JsonProperty("isSuccess")
-    private final boolean isSuccess;
+    private final boolean success;
 
     @JsonProperty("code")
     private final String code;
