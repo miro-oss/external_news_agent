@@ -36,4 +36,5 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    systemProperty 'news.integration.db', System.getProperty('news.integration.db', 'false')
 }
