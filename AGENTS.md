@@ -71,6 +71,15 @@ Close #issue-number
 
 When creating a branch, commit, or PR, always ask for or infer the issue number first. If no issue exists, create the issue before creating the branch.
 
+## API Specification Source of Truth
+
+- Before implementing, changing, or reviewing any backend or frontend API work, always inspect the Notion page `API 명세서` and the matching endpoint page in the `외부 뉴스 크롤링 에이전트 API` database.
+- Treat the Notion API specification as the source of truth for HTTP method, URI, request header, path variable, query string, request body, response body, success code, error code, and user-facing message.
+- Start API work from `공통 응답 규격 · 에러 코드`, then read the specific domain pages such as `소스(sources)`, `주제(topics)`, `수집실행(runs)`, `기사(articles)`, `보고서(reports)`, `검색(search)`, or `알림(notifications)`.
+- Match Swagger/OpenAPI annotations and examples to the Notion API specification.
+- If Notion and local docs conflict, state the conflict explicitly and ask for a decision before implementing the conflicting behavior.
+- Do not invent API shapes from local assumptions when a Notion endpoint spec exists.
+
 ## Secrets and Environment Files
 
 - Do not open, read, print, summarize, or quote real secret files such as `.env`, `.env.*`, `application-secret.*`, or credential JSON files.
