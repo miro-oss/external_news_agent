@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -26,6 +27,7 @@ class ApiResponseTest {
         assertEquals("COMMON200", json.get("code"));
         assertEquals("성공입니다.", json.get("message"));
         assertEquals(Map.of("id", 1), json.get("result"));
+        assertEquals(Set.of("isSuccess", "code", "message", "result"), json.keySet());
     }
 
     @Test
