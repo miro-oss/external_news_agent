@@ -62,3 +62,10 @@ Close #issue-number
 ## Codex Instructions
 
 When creating a branch, commit, or PR, always ask for or infer the issue number first. If no issue exists, create the issue before creating the branch.
+
+## Secrets and Environment Files
+
+- Do not open, read, print, summarize, or quote real secret files such as `.env`, `.env.*`, `application-secret.*`, or credential JSON files.
+- Use `.env.example`, application config files without secrets, or user-provided key names when environment variable names are needed.
+- Never commit API keys, tokens, passwords, client secrets, private keys, or full authorization headers.
+- If a command accidentally prints a secret, do not repeat the value in chat or documentation. Stop using that output and ask the user to rotate the exposed credential if needed.
