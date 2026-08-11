@@ -59,6 +59,21 @@ PR body must include:
 Close #issue-number
 ```
 
+## GitHub Issue and PR Templates
+
+- Before creating or updating any GitHub issue, always inspect `.github/ISSUE_TEMPLATE/` and use the matching template for the issue type.
+- Before creating or updating any pull request, always inspect `.github/pull_request_template.md` and preserve its headings, checkbox sections, and required wording.
+- Fill in every relevant template section concretely. Do not replace the template with a free-form summary.
+- Keep `Close #issue-number` in the PR body according to the template and repository rule.
+- If a required template is missing, state that explicitly before falling back to the naming and body rules in this file.
+
 ## Codex Instructions
 
 When creating a branch, commit, or PR, always ask for or infer the issue number first. If no issue exists, create the issue before creating the branch.
+
+## Secrets and Environment Files
+
+- Do not open, read, print, summarize, or quote real secret files such as `.env`, `.env.*`, `application-secret.*`, or credential JSON files.
+- Use `.env.example`, application config files without secrets, or user-provided key names when environment variable names are needed.
+- Never commit API keys, tokens, passwords, client secrets, private keys, or full authorization headers.
+- If a command accidentally prints a secret, do not repeat the value in chat or documentation. Stop using that output and ask the user to rotate the exposed credential if needed.
