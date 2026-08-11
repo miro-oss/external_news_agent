@@ -33,7 +33,7 @@ public class GlobalExceptionHandler {
             HttpMessageNotReadableException.class
     })
     public ResponseEntity<ApiResponse<Map<String, Object>>> handleBadRequest(Exception exception) {
-        return failure(GeneralErrorCode.BAD_REQUEST, exception.getMessage());
+        return failure(GeneralErrorCode.BAD_REQUEST, GeneralErrorCode.BAD_REQUEST.getMessage());
     }
 
     @ExceptionHandler(Exception.class)
