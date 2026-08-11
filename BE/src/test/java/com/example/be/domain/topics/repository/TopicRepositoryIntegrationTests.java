@@ -57,9 +57,9 @@ class TopicRepositoryIntegrationTests {
     @Test
     void findsTopicsByFilterAndPage() {
         Topic active = topicRepository.save(topic("HBM 활성 통합테스트"));
-        Topic inactive = topic("DRAM 비활성 통합테스트");
-        inactive.changeActive(false);
-        topicRepository.save(inactive);
+        Topic inactiveTopic = topic("DRAM 비활성 통합테스트");
+        inactiveTopic.changeActive(false);
+        Topic inactive = topicRepository.save(inactiveTopic);
         flushAndClear();
 
         Page<Topic> page = topicRepository.findAll(
@@ -73,10 +73,27 @@ class TopicRepositoryIntegrationTests {
         assertFalse(topicRepository.existsByNameAndIdNot("HBM 활성 통합테스트", active.getId()));
 
         Page<Topic> inactiveOnly = topicRepository.findAll(
-                TopicSpecification.filter(false, null),
+                TopicSpecification.filter(false, "DRAM 비활성"),
                 PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, "id"))
         );
-        assertTrue(inactiveOnly.getContent().stream().noneMatch(Topic::isActive));
+        assertEquals(1, inactiveOnly.getTotalElements());
+        assertEquals(inactive.getId(), inactiveOnly.getContent().get(0).getId());
+        assertFalse(inactiveOnly.getContent().get(0).isActive());
+    }
+
+    @Test
+    void findsTopicsByKeywordContainingLikeWildcard() {
+        Topic saved = topicRepository.save(topic("수율 100% 통합테스트"));
+        topicRepository.save(topic("수율 100퍼센트 통합테스트"));
+        flushAndClear();
+
+        Page<Topic> page = topicRepository.findAll(
+                TopicSpecification.filter(null, "100%"),
+                PageRequest.of(0, 20, Sort.by(Sort.Direction.ASC, "id"))
+        );
+
+        assertEquals(1, page.getTotalElements());
+        assertEquals(saved.getId(), page.getContent().get(0).getId());
     }
 
     @Test
@@ -99,6 +116,22 @@ class TopicRepositoryIntegrationTests {
         assertEquals(1, counts.size());
         assertEquals(saved.getId(), counts.get(0).getTopicId());
         assertEquals(2, counts.get(0).getLinkedSourceCount());
+    }
+
+    @Test
+    void deletingTopicRemovesLinksButKeepsSources() {
+        Source feed = sourceRepository.save(source(Source.KIND_FEED, "삭제 통합테스트", "https://example.com/delete-rss"));
+        Topic topic = topic("연결 삭제 통합테스트");
+        topic.replaceSources(List.of(feed));
+        Topic saved = topicRepository.save(topic);
+        flushAndClear();
+
+        topicRepository.delete(topicRepository.findById(saved.getId()).orElseThrow());
+        flushAndClear();
+
+        assertTrue(topicRepository.findById(saved.getId()).isEmpty());
+        assertTrue(sourceRepository.findById(feed.getId()).isPresent());
+        assertEquals(List.of(), topicRepository.countLinkedSources(List.of(saved.getId())));
     }
 
     @Test

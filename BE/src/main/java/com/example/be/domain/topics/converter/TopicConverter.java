@@ -4,10 +4,11 @@ import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.dto.req.TopicReqDTO;
 import com.example.be.domain.topics.dto.res.TopicResDTO;
 import com.example.be.domain.topics.entity.Topic;
+import com.example.be.global.config.ApiTimeZone;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 
@@ -20,9 +21,9 @@ public class TopicConverter {
         return Topic.builder()
                 .name(trim(request.getName()))
                 .queryText(trim(request.getQueryText()))
-                .requiredKeywords(orEmpty(request.getRequiredKeywords()))
-                .optionalKeywords(orEmpty(request.getOptionalKeywords()))
-                .excludedKeywords(orEmpty(request.getExcludedKeywords()))
+                .requiredKeywords(normalizeKeywords(request.getRequiredKeywords()))
+                .optionalKeywords(normalizeKeywords(request.getOptionalKeywords()))
+                .excludedKeywords(normalizeKeywords(request.getExcludedKeywords()))
                 .batchSize(request.getBatchSize() == null ? Topic.DEFAULT_BATCH_SIZE : request.getBatchSize())
                 .intervalMinutes(request.getIntervalMinutes() == null
                         ? Topic.DEFAULT_INTERVAL_MINUTES
@@ -110,7 +111,7 @@ public class TopicConverter {
     public static TopicResDTO.Deleted toDeleted(Long topicId, int unlinkedSourceCount) {
         return TopicResDTO.Deleted.builder()
                 .id(topicId)
-                .deletedAt(OffsetDateTime.now())
+                .deletedAt(OffsetDateTime.now(ApiTimeZone.ZONE))
                 .unlinkedSourceCount(unlinkedSourceCount)
                 .build();
     }
@@ -144,16 +145,25 @@ public class TopicConverter {
         }
         LocalDateTime lastCollectedAt = topic.getLastCollectedAt();
         return lastCollectedAt == null
-                ? OffsetDateTime.now()
+                ? OffsetDateTime.now(ApiTimeZone.ZONE)
                 : toOffsetDateTime(lastCollectedAt.plusMinutes(topic.getIntervalMinutes()));
     }
 
     private static OffsetDateTime toOffsetDateTime(LocalDateTime value) {
-        return value == null ? null : value.atZone(ZoneId.systemDefault()).toOffsetDateTime();
+        return value == null ? null : value.atZone(ApiTimeZone.ZONE).toOffsetDateTime();
     }
 
-    private static List<String> orEmpty(List<String> values) {
-        return values == null ? List.of() : List.copyOf(values);
+    /**
+     * 요청 배열에 null이나 공백 항목이 섞여 와도 그대로 저장하지 않는다.
+     */
+    public static List<String> normalizeKeywords(List<String> values) {
+        if (values == null) {
+            return List.of();
+        }
+        return values.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .toList();
     }
 
     private static String trim(String value) {

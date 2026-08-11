@@ -11,6 +11,8 @@ import java.util.Locale;
 
 public class TopicSpecification {
 
+    private static final char LIKE_ESCAPE = '\\';
+
     private TopicSpecification() {
     }
 
@@ -22,11 +24,21 @@ public class TopicSpecification {
                 predicates.add(builder.equal(root.get("active"), active));
             }
             if (StringUtils.hasText(keyword)) {
-                String pattern = "%" + keyword.trim().toLowerCase(Locale.ROOT) + "%";
-                predicates.add(builder.like(builder.lower(root.get("name")), pattern));
+                String pattern = "%" + escapeLikePattern(keyword.trim().toLowerCase(Locale.ROOT)) + "%";
+                predicates.add(builder.like(builder.lower(root.get("name")), pattern, LIKE_ESCAPE));
             }
 
             return builder.and(predicates.toArray(new Predicate[0]));
         };
+    }
+
+    /**
+     * 검색어에 들어온 LIKE 와일드카드를 리터럴로 취급한다. 예를 들어 "100%"는 접두사 검색이 아니라 그 문자열을 찾는다.
+     */
+    private static String escapeLikePattern(String keyword) {
+        return keyword
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
     }
 }

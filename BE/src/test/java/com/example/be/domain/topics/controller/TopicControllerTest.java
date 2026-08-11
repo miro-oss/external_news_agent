@@ -7,6 +7,8 @@ import com.example.be.domain.topics.exception.code.TopicErrorCode;
 import com.example.be.domain.topics.service.command.TopicCommandService;
 import com.example.be.domain.topics.service.query.TopicQueryService;
 import com.example.be.global.apiPayload.PageResponse;
+import com.example.be.global.apiPayload.code.GeneralErrorCode;
+import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -14,12 +16,15 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -103,6 +108,68 @@ class TopicControllerTest {
                 .andExpect(jsonPath("$.message").value("수정되었습니다."))
                 .andExpect(jsonPath("$.result.active").value(false))
                 .andExpect(jsonPath("$.result.nextScheduledAt").value(nullValue()));
+    }
+
+    @Test
+    void updateTopicRespondsWithUpdatedEnvelope() throws Exception {
+        when(topicCommandService.updateTopic(eq(1L), any(TopicReqDTO.Update.class)))
+                .thenReturn(TopicResDTO.Updated.builder()
+                        .id(1L)
+                        .name("HBM")
+                        .queryText("HBM4 반도체")
+                        .requiredKeywords(List.of("HBM"))
+                        .optionalKeywords(List.of())
+                        .excludedKeywords(List.of("광고", "채용", "주가"))
+                        .batchSize(20)
+                        .intervalMinutes(30)
+                        .active(true)
+                        .build());
+
+        mockMvc.perform(patch("/api/news/topics/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "queryText": "HBM4 반도체",
+                                  "excludedKeywords": ["광고", "채용", "주가"],
+                                  "batchSize": 20,
+                                  "intervalMinutes": 30
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("COMMON200"))
+                .andExpect(jsonPath("$.message").value("수정되었습니다."))
+                .andExpect(jsonPath("$.result.queryText").value("HBM4 반도체"))
+                .andExpect(jsonPath("$.result.batchSize").value(20))
+                .andExpect(jsonPath("$.result.intervalMinutes").value(30));
+    }
+
+    @Test
+    void deleteTopicRespondsWithDeletedEnvelope() throws Exception {
+        when(topicCommandService.deleteTopic(1L)).thenReturn(TopicResDTO.Deleted.builder()
+                .id(1L)
+                .deletedAt(OffsetDateTime.of(2026, 8, 10, 10, 0, 0, 0, ZoneOffset.ofHours(9)))
+                .unlinkedSourceCount(3)
+                .build());
+
+        mockMvc.perform(delete("/api/news/topics/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("COMMON200"))
+                .andExpect(jsonPath("$.message").value("삭제되었습니다."))
+                .andExpect(jsonPath("$.result.id").value(1))
+                .andExpect(jsonPath("$.result.deletedAt").value("2026-08-10T10:00:00+09:00"))
+                .andExpect(jsonPath("$.result.unlinkedSourceCount").value(3));
+    }
+
+    @Test
+    void getTopicsRespondsWithBadRequestEnvelopeOnInvalidSize() throws Exception {
+        when(topicQueryService.getTopics(null, null, 0, 101)).thenThrow(
+                new GeneralException(GeneralErrorCode.BAD_REQUEST, "size는 1 이상 100 이하여야 합니다."));
+
+        mockMvc.perform(get("/api/news/topics").param("size", "101"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.isSuccess").value(false))
+                .andExpect(jsonPath("$.code").value("COMMON400"))
+                .andExpect(jsonPath("$.message").value("size는 1 이상 100 이하여야 합니다."));
     }
 
     private TopicResDTO.Created created() {

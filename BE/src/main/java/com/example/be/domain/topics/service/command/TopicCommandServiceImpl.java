@@ -12,17 +12,21 @@ import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
 @Transactional
 public class TopicCommandServiceImpl implements TopicCommandService {
+
+    private static final String TOPIC_NAME_CONSTRAINT = "UQ_NEWS_TOPIC_NAME";
 
     private final TopicRepository topicRepository;
     private final SourceRepository sourceRepository;
@@ -42,7 +46,7 @@ public class TopicCommandServiceImpl implements TopicCommandService {
         validateQueryTextForSearchSources(topic.getQueryText(), sources);
         topic.replaceSources(sources);
 
-        return TopicConverter.toCreated(topicRepository.save(topic));
+        return TopicConverter.toCreated(saveTopic(topic));
     }
 
     @Override
@@ -71,6 +75,7 @@ public class TopicCommandServiceImpl implements TopicCommandService {
 
         topic.update(name, queryText, requiredKeywords, optionalKeywords, excludedKeywords,
                 batchSize, intervalMinutes, active);
+        flushTopic();
 
         return TopicConverter.toUpdated(topic);
     }
@@ -105,6 +110,36 @@ public class TopicCommandServiceImpl implements TopicCommandService {
                 .orElseThrow(() -> new TopicException(TopicErrorCode.TOPIC_NOT_FOUND));
     }
 
+    /**
+     * 주제명 중복은 위에서 미리 막지만, 동시 요청은 유니크 제약에서만 걸린다.
+     * 그 경우에도 500이 아니라 TOPIC409로 응답하도록 서비스 안에서 flush하고 변환한다.
+     */
+    private Topic saveTopic(Topic topic) {
+        try {
+            return topicRepository.saveAndFlush(topic);
+        } catch (DataIntegrityViolationException exception) {
+            throw translateDuplicatedName(exception);
+        }
+    }
+
+    private void flushTopic() {
+        try {
+            topicRepository.flush();
+        } catch (DataIntegrityViolationException exception) {
+            throw translateDuplicatedName(exception);
+        }
+    }
+
+    private RuntimeException translateDuplicatedName(DataIntegrityViolationException exception) {
+        Throwable cause = exception.getMostSpecificCause();
+        String message = cause.getMessage();
+
+        if (message != null && message.toUpperCase(Locale.ROOT).contains(TOPIC_NAME_CONSTRAINT)) {
+            return new TopicException(TopicErrorCode.DUPLICATED_TOPIC_NAME);
+        }
+        return exception;
+    }
+
     private List<Source> findSources(List<Long> requestedSourceIds) {
         if (requestedSourceIds == null || requestedSourceIds.isEmpty()) {
             return List.of();
@@ -123,7 +158,7 @@ public class TopicCommandServiceImpl implements TopicCommandService {
     }
 
     private List<String> keywordsOrCurrent(List<String> requested, List<String> current) {
-        return requested == null ? current : List.copyOf(requested);
+        return requested == null ? current : TopicConverter.normalizeKeywords(requested);
     }
 
     private void validateName(String name) {
