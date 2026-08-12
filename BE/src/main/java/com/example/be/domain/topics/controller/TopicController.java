@@ -84,6 +84,19 @@ public class TopicController {
                             }
                             """))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "404",
+                    description = "sourceIds에 존재하지 않는 소스가 섞인 경우",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                            {
+                              "isSuccess": false,
+                              "code": "SOURCE404",
+                              "message": "수집 소스를 찾을 수 없습니다.",
+                              "result": {
+                                "notFoundSourceIds": [99]
+                              }
+                            }
+                            """))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "409",
                     description = "주제명이 중복된 경우",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
@@ -153,10 +166,12 @@ public class TopicController {
                             """)))
     })
     public ApiResponse<PageResponse<TopicResDTO.Summary>> getTopics(
-            @Parameter(description = "활성 여부 필터. 생략하면 전체", example = "true")
+            // 선택 필터에는 example을 두지 않는다. Swagger UI가 example을 "Try it out" 폼에 미리 채워 넣어서
+            // 비워둔 줄 알았던 필터가 그대로 적용된다.
+            @Parameter(description = "활성 여부 필터. 생략하면 전체")
             @RequestParam(required = false) Boolean active,
 
-            @Parameter(description = "주제명 부분 일치 검색", example = "HBM")
+            @Parameter(description = "주제명 부분 일치 검색. 생략하면 전체")
             @RequestParam(required = false) String keyword,
 
             @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")

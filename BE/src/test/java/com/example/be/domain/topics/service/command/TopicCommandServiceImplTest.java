@@ -126,6 +126,7 @@ class TopicCommandServiceImplTest {
                 () -> topicCommandService.createTopic(request));
 
         assertEquals(TopicErrorCode.SOURCE_NOT_FOUND, exception.getCode());
+        assertEquals(List.of(99L), exception.getResult().get("notFoundSourceIds"));
     }
 
     @Test

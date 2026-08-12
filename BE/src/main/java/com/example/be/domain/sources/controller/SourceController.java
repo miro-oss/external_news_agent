@@ -161,13 +161,15 @@ public class SourceController {
                             """)))
     })
     public ApiResponse<PageResponse<SourceResDTO.Summary>> getSources(
-            @Parameter(description = "소스 종류 필터. 생략하면 전체", example = "FEED")
+            // 선택 필터에는 example을 두지 않는다. Swagger UI가 example을 "Try it out" 폼에 미리 채워 넣어서
+            // 비워둔 줄 알았던 필터가 그대로 적용된다.
+            @Parameter(description = "소스 종류 필터(FEED / SEARCH). 생략하면 전체")
             @RequestParam(required = false) String sourceKind,
 
-            @Parameter(description = "활성 여부 필터. 생략하면 전체", example = "true")
+            @Parameter(description = "활성 여부 필터. 생략하면 전체")
             @RequestParam(required = false) Boolean active,
 
-            @Parameter(description = "소스명 부분 일치 검색", example = "ETNews")
+            @Parameter(description = "소스명 부분 일치 검색. 생략하면 전체")
             @RequestParam(required = false) String keyword,
 
             @Parameter(description = "페이지 번호 (0부터 시작)", example = "0")
