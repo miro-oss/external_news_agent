@@ -19,7 +19,10 @@ import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -152,9 +155,18 @@ public class TopicCommandServiceImpl implements TopicCommandService {
 
         List<Source> sources = sourceRepository.findAllById(sourceIds);
         if (sources.size() != sourceIds.size()) {
-            throw new TopicException(TopicErrorCode.SOURCE_NOT_FOUND);
+            throw new TopicException(TopicErrorCode.SOURCE_NOT_FOUND,
+                    Map.of("notFoundSourceIds", notFoundSourceIds(sourceIds, sources)));
         }
         return sources;
+    }
+
+    /**
+     * 어떤 소스가 없는지 알려주지 않으면 호출자가 id를 하나씩 지워가며 찾아야 한다.
+     */
+    private List<Long> notFoundSourceIds(List<Long> requestedIds, List<Source> foundSources) {
+        Set<Long> foundIds = foundSources.stream().map(Source::getId).collect(Collectors.toSet());
+        return requestedIds.stream().filter(id -> !foundIds.contains(id)).toList();
     }
 
     private List<String> keywordsOrCurrent(List<String> requested, List<String> current) {

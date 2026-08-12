@@ -43,7 +43,7 @@ public class TopicReqDTO {
         @Schema(description = "활성 여부. 기본값 true", example = "true")
         private Boolean active;
 
-        @Schema(description = "동시에 연결할 소스 ID 목록", example = "[1, 2, 5]")
+        @Schema(description = "동시에 연결할 소스 ID 목록. 소스 목록 조회로 확인한 실제 ID를 넣는다")
         private List<Long> sourceIds;
     }
 
