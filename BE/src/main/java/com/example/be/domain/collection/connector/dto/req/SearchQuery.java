@@ -1,4 +1,4 @@
-package com.example.be.domain.collection.connector;
+package com.example.be.domain.collection.connector.dto.req;
 
 import org.springframework.util.StringUtils;
 
@@ -21,5 +21,12 @@ public record SearchQuery(String queryText, int batchSize, String language) {
             throw new IllegalArgumentException(
                     "batchSize는 %d 이상 %d 이하여야 합니다. 값=%d".formatted(MIN_BATCH_SIZE, MAX_BATCH_SIZE, batchSize));
         }
+    }
+
+    /**
+     * 주제에 언어가 없을 때 provider마다 기본값이 다르다. 네이버는 한국어 매체만 주고 Tavily는 해외 보강용이다.
+     */
+    public String languageOr(String fallback) {
+        return StringUtils.hasText(language) ? language : fallback;
     }
 }

@@ -1,5 +1,10 @@
-package com.example.be.domain.collection.connector;
+package com.example.be.domain.collection.connector.provider;
 
+import com.example.be.domain.collection.connector.SearchConnector;
+import com.example.be.domain.collection.connector.converter.CollectedArticleConverter;
+import com.example.be.domain.collection.connector.converter.HtmlTextSanitizer;
+import com.example.be.domain.collection.connector.dto.req.SearchQuery;
+import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.sources.entity.SearchProvider;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -28,7 +33,7 @@ public class NaverSearchConnector implements SearchConnector {
     /** 최신 기사를 먼저 받는다. 수집 주기가 짧아 정확도순으로 받으면 새 기사를 놓친다. */
     private static final String SORT_BY_DATE = "date";
 
-    /** 네이버 뉴스 검색은 한국어 매체만 돌려준다. */
+    /** 네이버 뉴스 검색은 한국어 매체만 돌려준다. 주제에 어떤 언어가 적혀 있든 결과는 한국어다. */
     private static final String LANGUAGE = "ko";
 
     private final RestClient restClient;
@@ -69,7 +74,7 @@ public class NaverSearchConnector implements SearchConnector {
 
             return toArticles(response);
         } catch (RestClientException e) {
-            return ConnectorSupport.emptyOnFailure(log, provider(), query, e);
+            return emptyOnFailure(query, e);
         }
     }
 
@@ -108,8 +113,8 @@ public class NaverSearchConnector implements SearchConnector {
                 HtmlTextSanitizer.sanitize(item.title()),
                 canonicalUrl,
                 HtmlTextSanitizer.sanitize(item.description()),
-                ConnectorSupport.parsePublishedAt(log, item.pubDate()),
-                ConnectorSupport.hostOf(canonicalUrl),
+                CollectedArticleConverter.toPublishedAt(item.pubDate()),
+                CollectedArticleConverter.toSourceName(canonicalUrl),
                 LANGUAGE
         );
     }

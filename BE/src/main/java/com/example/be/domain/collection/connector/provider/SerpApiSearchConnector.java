@@ -1,5 +1,10 @@
-package com.example.be.domain.collection.connector;
+package com.example.be.domain.collection.connector.provider;
 
+import com.example.be.domain.collection.connector.SearchConnector;
+import com.example.be.domain.collection.connector.converter.CollectedArticleConverter;
+import com.example.be.domain.collection.connector.converter.HtmlTextSanitizer;
+import com.example.be.domain.collection.connector.dto.req.SearchQuery;
+import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.sources.entity.SearchProvider;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -55,7 +60,7 @@ public class SerpApiSearchConnector implements SearchConnector {
                     .uri(uriBuilder -> uriBuilder.path(SEARCH_PATH)
                             .queryParam("engine", GOOGLE_NEWS_ENGINE)
                             .queryParam("q", query.queryText())
-                            .queryParam("hl", language(query))
+                            .queryParam("hl", query.languageOr(DEFAULT_LANGUAGE))
                             .queryParam("api_key", apiKey)
                             .build())
                     .retrieve()
@@ -63,12 +68,8 @@ public class SerpApiSearchConnector implements SearchConnector {
 
             return toArticles(response, query);
         } catch (RestClientException e) {
-            return ConnectorSupport.emptyOnFailure(log, provider(), query, e);
+            return emptyOnFailure(query, e);
         }
-    }
-
-    private String language(SearchQuery query) {
-        return StringUtils.hasText(query.language()) ? query.language() : DEFAULT_LANGUAGE;
     }
 
     /**
@@ -91,9 +92,9 @@ public class SerpApiSearchConnector implements SearchConnector {
                 HtmlTextSanitizer.sanitize(result.title()),
                 result.link(),
                 HtmlTextSanitizer.sanitize(result.snippet()),
-                ConnectorSupport.parsePublishedAt(log, result.date()),
+                CollectedArticleConverter.toPublishedAt(result.date()),
                 sourceName(result),
-                language(query)
+                query.languageOr(DEFAULT_LANGUAGE)
         );
     }
 
@@ -102,7 +103,7 @@ public class SerpApiSearchConnector implements SearchConnector {
             return result.source().name();
         }
 
-        return ConnectorSupport.hostOf(result.link());
+        return CollectedArticleConverter.toSourceName(result.link());
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

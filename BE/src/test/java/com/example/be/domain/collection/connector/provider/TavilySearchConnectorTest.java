@@ -1,5 +1,7 @@
-package com.example.be.domain.collection.connector;
+package com.example.be.domain.collection.connector.provider;
 
+import com.example.be.domain.collection.connector.dto.req.SearchQuery;
+import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.sources.entity.SearchProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -95,6 +97,19 @@ class TavilySearchConnectorTest {
         assertEquals("SK hynix started shipping HBM4 samples & more", article.summary());
         assertEquals(OffsetDateTime.of(2026, 8, 10, 9, 0, 0, 0, ZoneOffset.UTC), article.publishedAt());
         assertEquals("www.eetimes.com", article.sourceName());
+        assertEquals("en", article.language());
+    }
+
+    /**
+     * 주제에 언어가 없으면 language가 null로 새어 나간다. M3가 이 값을 그대로 저장한다.
+     */
+    @Test
+    void fallsBackToEnglishWhenQueryHasNoLanguage() {
+        server.expect(requestTo(SEARCH_URI))
+                .andRespond(withSuccess(SEARCH_JSON, MediaType.APPLICATION_JSON));
+
+        CollectedArticle article = connector().search(new SearchQuery("HBM4", 5, null)).get(0);
+
         assertEquals("en", article.language());
     }
 

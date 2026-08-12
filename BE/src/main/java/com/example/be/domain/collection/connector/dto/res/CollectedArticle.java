@@ -1,4 +1,4 @@
-package com.example.be.domain.collection.connector;
+package com.example.be.domain.collection.connector.dto.res;
 
 import java.time.OffsetDateTime;
 

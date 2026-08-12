@@ -1,4 +1,4 @@
-package com.example.be.domain.collection.connector;
+package com.example.be.domain.collection.connector.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

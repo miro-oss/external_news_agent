@@ -1,5 +1,7 @@
-package com.example.be.domain.collection.connector;
+package com.example.be.domain.collection.connector.provider;
 
+import com.example.be.domain.collection.connector.dto.req.SearchQuery;
+import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.sources.entity.SearchProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;

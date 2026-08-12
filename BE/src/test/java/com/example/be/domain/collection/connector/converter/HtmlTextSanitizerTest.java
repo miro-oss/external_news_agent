@@ -1,4 +1,4 @@
-package com.example.be.domain.collection.connector;
+package com.example.be.domain.collection.connector.converter;
 
 import org.junit.jupiter.api.Test;
 
@@ -23,6 +23,22 @@ class HtmlTextSanitizerTest {
     @Test
     void removesEveryTagNotOnlyTheFirst() {
         assertEquals("HBM4 양산", HtmlTextSanitizer.sanitize("<b>HBM4</b> <em>양산</em>"));
+    }
+
+    /**
+     * 여는 꺾쇠 뒤에 영문자가 없으면 태그가 아니다. 이걸 안 보면 비교식이 통째로 사라진다.
+     */
+    @Test
+    void keepsComparisonText() {
+        assertEquals("A < B > C", HtmlTextSanitizer.sanitize("A < B > C"));
+    }
+
+    /**
+     * 반도체 기사에 흔한 표기다. {@code <7nm ... >}를 태그로 보면 공정 이야기가 사라진다.
+     */
+    @Test
+    void keepsAngleBracketsAroundNonLetters() {
+        assertEquals("<7nm 공정에서 5nm로> 전환", HtmlTextSanitizer.sanitize("<7nm 공정에서 5nm로> 전환"));
     }
 
     @Test

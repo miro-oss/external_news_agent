@@ -1,5 +1,10 @@
-package com.example.be.domain.collection.connector;
+package com.example.be.domain.collection.connector.provider;
 
+import com.example.be.domain.collection.connector.SearchConnector;
+import com.example.be.domain.collection.connector.converter.CollectedArticleConverter;
+import com.example.be.domain.collection.connector.converter.HtmlTextSanitizer;
+import com.example.be.domain.collection.connector.dto.req.SearchQuery;
+import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.sources.entity.SearchProvider;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -31,6 +36,9 @@ public class TavilySearchConnector implements SearchConnector {
 
     /** Tavily는 한 번에 돌려주는 결과 수에 상한이 있다. 주제의 batchSize가 더 커도 여기서 자른다. */
     private static final int MAX_RESULTS = 20;
+
+    /** 해외 보강용이라 주제에 언어가 없으면 영어로 본다. */
+    private static final String DEFAULT_LANGUAGE = "en";
 
     private final RestClient restClient;
     private final String apiKey;
@@ -69,7 +77,7 @@ public class TavilySearchConnector implements SearchConnector {
 
             return toArticles(response, query);
         } catch (RestClientException e) {
-            return ConnectorSupport.emptyOnFailure(log, provider(), query, e);
+            return emptyOnFailure(query, e);
         }
     }
 
@@ -89,9 +97,9 @@ public class TavilySearchConnector implements SearchConnector {
                 HtmlTextSanitizer.sanitize(result.title()),
                 result.url(),
                 HtmlTextSanitizer.sanitize(result.content()),
-                ConnectorSupport.parsePublishedAt(log, result.publishedDate()),
-                ConnectorSupport.hostOf(result.url()),
-                query.language()
+                CollectedArticleConverter.toPublishedAt(result.publishedDate()),
+                CollectedArticleConverter.toSourceName(result.url()),
+                query.languageOr(DEFAULT_LANGUAGE)
         );
     }
 
