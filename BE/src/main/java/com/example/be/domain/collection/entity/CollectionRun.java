@@ -1,0 +1,151 @@
+package com.example.be.domain.collection.entity;
+
+import com.example.be.global.converter.YnBooleanConverter;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.Table;
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 수집 실행 1건. 화면의 "지금 실행" 한 번이 이 행 하나다.
+ *
+ * <p>집계 카운트는 조합별 값의 합계를 들고 있는 비정규화다. 내역 조회가 실행마다 조합을 훑지 않게 하려는 것이다.
+ */
+@Entity
+@Table(name = "news_collection_runs")
+@Getter
+@Builder
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class CollectionRun {
+
+    public static final int MAX_IDEMPOTENCY_KEY_LENGTH = 100;
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id")
+    private Long id;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private RunStatus status;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "trigger_type", nullable = false, length = 20)
+    private TriggerType triggerType;
+
+    @Column(name = "idempotency_key", length = MAX_IDEMPOTENCY_KEY_LENGTH)
+    private String idempotencyKey;
+
+    @Convert(converter = YnBooleanConverter.class)
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "force_refresh_yn", nullable = false, length = 1)
+    private boolean forceRefresh;
+
+    @Column(name = "started_at", nullable = false)
+    private LocalDateTime startedAt;
+
+    @Column(name = "finished_at")
+    private LocalDateTime finishedAt;
+
+    @Column(name = "scanned_count", nullable = false)
+    private int scannedCount;
+
+    @Column(name = "new_count", nullable = false)
+    private int newCount;
+
+    @Column(name = "updated_count", nullable = false)
+    private int updatedCount;
+
+    @Column(name = "skipped_count", nullable = false)
+    private int skippedCount;
+
+    /** news_reports는 M5에 생긴다. 그때까지는 FK 없는 참조값이다. */
+    @Column(name = "report_id")
+    private Long reportId;
+
+    @Builder.Default
+    @OneToMany(mappedBy = "run", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<CollectionRunItem> items = new ArrayList<>();
+
+    @Builder.Default
+    @OneToMany(mappedBy = "run", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<CollectionRunWarning> warnings = new ArrayList<>();
+
+    public void addItem(CollectionRunItem item) {
+        items.add(item);
+        item.assignRun(this);
+    }
+
+    public void addWarning(CollectionRunWarning warning) {
+        warnings.add(warning);
+        warning.assignRun(this);
+    }
+
+    public void start() {
+        this.status = RunStatus.RUNNING;
+    }
+
+    /**
+     * 조합별 결과를 합쳐 실행을 닫는다. 하나라도 실패했으면 PARTIAL이고, 전부 실패면 FAILED다.
+     * 크롤러 하나가 죽었다고 실행 전체를 실패로 적으면 나머지 성공한 수집이 묻힌다.
+     */
+    public void finish(LocalDateTime finishedAt) {
+        this.scannedCount = items.stream().mapToInt(CollectionRunItem::getScannedCount).sum();
+        this.newCount = items.stream().mapToInt(CollectionRunItem::getNewCount).sum();
+        this.updatedCount = items.stream().mapToInt(CollectionRunItem::getUpdatedCount).sum();
+        this.skippedCount = this.scannedCount - this.newCount - this.updatedCount;
+        this.status = resolveStatus();
+        this.finishedAt = finishedAt;
+    }
+
+    public void fail(LocalDateTime finishedAt) {
+        this.status = RunStatus.FAILED;
+        this.finishedAt = finishedAt;
+    }
+
+    public void attachReport(Long reportId) {
+        this.reportId = reportId;
+    }
+
+    public int getWarningCount() {
+        return warnings.size();
+    }
+
+    private RunStatus resolveStatus() {
+        if (items.isEmpty()) {
+            return RunStatus.SUCCESS;
+        }
+
+        boolean anyFailed = items.stream().anyMatch(item -> item.getStatus() == RunItemStatus.FAILED);
+        boolean allFailed = items.stream().allMatch(item -> item.getStatus() == RunItemStatus.FAILED);
+        boolean anyPartial = items.stream().anyMatch(item -> item.getStatus() == RunItemStatus.PARTIAL);
+
+        if (allFailed) {
+            return RunStatus.FAILED;
+        }
+        if (anyFailed || anyPartial || !warnings.isEmpty()) {
+            return RunStatus.PARTIAL;
+        }
+        return RunStatus.SUCCESS;
+    }
+}
