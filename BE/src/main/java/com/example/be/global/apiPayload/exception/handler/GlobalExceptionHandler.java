@@ -21,9 +21,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(GeneralException.class)
     public ResponseEntity<ApiResponse<Map<String, Object>>> handleGeneralException(GeneralException exception) {
         BaseErrorCode code = exception.getCode();
+        Map<String, Object> result = exception.getResult() == null ? EMPTY_RESULT : exception.getResult();
+
         return ResponseEntity
                 .status(code.getStatus())
-                .body(ApiResponse.onFailure(code, exception.getMessage(), EMPTY_RESULT));
+                .body(ApiResponse.onFailure(code, exception.getMessage(), result));
     }
 
     @ExceptionHandler({
