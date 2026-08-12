@@ -113,6 +113,10 @@ public class SourceConverter {
                 .build();
     }
 
+    /**
+     * deletedAt은 비활성 시각이 아니라 응답 시각이다. news_sources에 비활성 시각 컬럼이 없어서
+     * 이미 비활성인 소스에 다시 삭제를 호출하면 매번 새 시각이 나간다.
+     */
     public static SourceResDTO.Deleted toDeleted(Source source) {
         return SourceResDTO.Deleted.builder()
                 .id(source.getId())

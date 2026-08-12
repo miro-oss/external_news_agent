@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -92,6 +93,36 @@ class SourceCommandServiceImplTest {
     @Test
     void createSourceRejectsFeedTemplateThatIsNotHttpUrl() {
         SourceReqDTO.Create request = feedRequest("rss.etnews.com/Section902.xml");
+
+        SourceException exception = assertThrows(SourceException.class,
+                () -> sourceCommandService.createSource(request));
+
+        assertEquals(SourceErrorCode.INVALID_FEED_URL_TEMPLATE, exception.getCode());
+    }
+
+    @Test
+    void createSourceRejectsFeedTemplateWithoutHost() {
+        SourceReqDTO.Create request = feedRequest("https://");
+
+        SourceException exception = assertThrows(SourceException.class,
+                () -> sourceCommandService.createSource(request));
+
+        assertEquals(SourceErrorCode.INVALID_FEED_URL_TEMPLATE, exception.getCode());
+    }
+
+    @Test
+    void createSourceRejectsSearchTemplateWithoutHost() {
+        SourceReqDTO.Create request = searchRequest("https://?q={query}");
+
+        SourceException exception = assertThrows(SourceException.class,
+                () -> sourceCommandService.createSource(request));
+
+        assertEquals(SourceErrorCode.INVALID_SEARCH_URL_TEMPLATE, exception.getCode());
+    }
+
+    @Test
+    void createSourceRejectsFeedTemplateThatIsNotParsableAsUri() {
+        SourceReqDTO.Create request = feedRequest("https://rss.etnews.com/Section 902.xml");
 
         SourceException exception = assertThrows(SourceException.class,
                 () -> sourceCommandService.createSource(request));
@@ -228,6 +259,38 @@ class SourceCommandServiceImplTest {
                 () -> sourceCommandService.updateSource(1L, request));
 
         assertEquals(SourceErrorCode.DUPLICATED_SOURCE, exception.getCode());
+    }
+
+    @Test
+    void updateSourceTranslatesUniqueViolationToConflict() {
+        SourceReqDTO.Update request = new SourceReqDTO.Update();
+        request.setUrlTemplate("https://rss.etnews.com/Section903.xml");
+        when(sourceRepository.findById(1L)).thenReturn(Optional.of(existingFeedSource()));
+        when(sourceRepository.existsBySourceKindAndUrlTemplateAndIdNot(
+                Source.KIND_FEED, "https://rss.etnews.com/Section903.xml", 1L)).thenReturn(false);
+        doThrow(new DataIntegrityViolationException(
+                "could not execute statement",
+                new SQLException("ORA-00001: unique constraint (NEWS_AGENT.UQ_NEWS_SOURCE) violated")))
+                .when(sourceRepository).flush();
+
+        SourceException exception = assertThrows(SourceException.class,
+                () -> sourceCommandService.updateSource(1L, request));
+
+        assertEquals(SourceErrorCode.DUPLICATED_SOURCE, exception.getCode());
+    }
+
+    @Test
+    void updateSourcePropagatesUnrelatedIntegrityViolationOnFlush() {
+        SourceReqDTO.Update request = new SourceReqDTO.Update();
+        request.setName("이름만 변경");
+        when(sourceRepository.findById(1L)).thenReturn(Optional.of(existingFeedSource()));
+        doThrow(new DataIntegrityViolationException(
+                "could not execute statement",
+                new SQLException("ORA-02290: check constraint (NEWS_AGENT.CK_SOURCE_POLICY) violated")))
+                .when(sourceRepository).flush();
+
+        assertThrows(DataIntegrityViolationException.class,
+                () -> sourceCommandService.updateSource(1L, request));
     }
 
     @Test

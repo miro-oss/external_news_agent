@@ -206,7 +206,11 @@ public class SourceResDTO {
         @Schema(description = "활성 여부. 항상 false", example = "false")
         private final boolean active;
 
-        @Schema(description = "삭제 처리 시각", example = "2026-08-10T10:00:00+09:00")
+        @Schema(description = """
+                삭제를 처리한 응답 시각이다. 소스가 언제 비활성이 됐는지를 나타내는 값이 아니다.
+                news_sources에는 비활성 시각 컬럼이 없어서(plan-final §3-1) 이미 비활성인 소스에 다시 요청하면 매번 새 시각이 나온다.
+                비활성 시점을 추적해야 하면 컬럼을 추가해야 한다.
+                """, example = "2026-08-10T10:00:00+09:00")
         private final OffsetDateTime deletedAt;
     }
 

@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.net.URI;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -207,8 +208,20 @@ public class SourceCommandServiceImpl implements SourceCommandService {
         }
     }
 
+    /**
+     * 스킴만 보면 "https://"처럼 호스트가 없는 값이 통과해서 수집 시점에야 실패한다. 호스트까지 확인한다.
+     * {query}는 URI 문법에서 허용되지 않는 문자라 자리표시자를 치환한 뒤 파싱한다.
+     */
     private boolean isHttpUrl(String value) {
         String lowered = value.toLowerCase(Locale.ROOT);
-        return lowered.startsWith(HTTP_PREFIX) || lowered.startsWith(HTTPS_PREFIX);
+        if (!lowered.startsWith(HTTP_PREFIX) && !lowered.startsWith(HTTPS_PREFIX)) {
+            return false;
+        }
+
+        try {
+            return StringUtils.hasText(URI.create(value.replace(Source.QUERY_PLACEHOLDER, "q")).getHost());
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 }
