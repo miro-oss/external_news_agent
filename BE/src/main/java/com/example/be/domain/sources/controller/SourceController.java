@@ -237,7 +237,7 @@ public class SourceController {
                             """)))
     })
     public ApiResponse<SourceResDTO.Detail> getSource(
-            @Parameter(description = "수집 소스 ID", example = "1")
+            @Parameter(description = "수집 소스 ID. 목록 조회로 확인한 실제 ID를 넣는다")
             @PathVariable Long sourceId
     ) {
         return ApiResponse.of(GeneralSuccessCode.OK, sourceQueryService.getSource(sourceId));
@@ -305,7 +305,7 @@ public class SourceController {
                             """)))
     })
     public ApiResponse<SourceResDTO.Updated> updateSource(
-            @Parameter(description = "수집 소스 ID", example = "1")
+            @Parameter(description = "수집 소스 ID. 목록 조회로 확인한 실제 ID를 넣는다")
             @PathVariable Long sourceId,
             @RequestBody SourceReqDTO.Update request
     ) {
@@ -364,7 +364,7 @@ public class SourceController {
                             """)))
     })
     public ApiResponse<SourceResDTO.Deleted> deleteSource(
-            @Parameter(description = "수집 소스 ID", example = "1")
+            @Parameter(description = "수집 소스 ID. 목록 조회로 확인한 실제 ID를 넣는다")
             @PathVariable Long sourceId
     ) {
         return ApiResponse.of(GeneralSuccessCode.DELETED, sourceCommandService.deleteSource(sourceId));

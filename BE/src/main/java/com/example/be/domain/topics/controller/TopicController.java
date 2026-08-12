@@ -234,7 +234,7 @@ public class TopicController {
                             """)))
     })
     public ApiResponse<TopicResDTO.Detail> getTopic(
-            @Parameter(description = "수집 주제 ID", example = "1")
+            @Parameter(description = "수집 주제 ID. 목록 조회로 확인한 실제 ID를 넣는다")
             @PathVariable Long topicId
     ) {
         return ApiResponse.of(GeneralSuccessCode.OK, topicQueryService.getTopic(topicId));
@@ -295,7 +295,7 @@ public class TopicController {
                             """)))
     })
     public ApiResponse<TopicResDTO.Updated> updateTopic(
-            @Parameter(description = "수집 주제 ID", example = "1")
+            @Parameter(description = "수집 주제 ID. 목록 조회로 확인한 실제 ID를 넣는다")
             @PathVariable Long topicId,
             @RequestBody TopicReqDTO.Update request
     ) {
@@ -351,7 +351,7 @@ public class TopicController {
                             """)))
     })
     public ApiResponse<TopicResDTO.Activated> updateActivation(
-            @Parameter(description = "수집 주제 ID", example = "1")
+            @Parameter(description = "수집 주제 ID. 목록 조회로 확인한 실제 ID를 넣는다")
             @PathVariable Long topicId,
             @RequestBody TopicReqDTO.Activation request
     ) {
@@ -394,7 +394,7 @@ public class TopicController {
                             """)))
     })
     public ApiResponse<TopicResDTO.Deleted> deleteTopic(
-            @Parameter(description = "수집 주제 ID", example = "1")
+            @Parameter(description = "수집 주제 ID. 목록 조회로 확인한 실제 ID를 넣는다")
             @PathVariable Long topicId
     ) {
         return ApiResponse.of(GeneralSuccessCode.DELETED, topicCommandService.deleteTopic(topicId));
