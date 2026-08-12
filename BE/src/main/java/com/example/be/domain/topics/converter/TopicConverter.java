@@ -3,7 +3,9 @@ package com.example.be.domain.topics.converter;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.dto.req.TopicReqDTO;
 import com.example.be.domain.topics.dto.res.TopicResDTO;
+import com.example.be.domain.topics.dto.res.TopicSourceResDTO;
 import com.example.be.domain.topics.entity.Topic;
+import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.config.ApiTimeZone;
 import org.springframework.util.StringUtils;
 
@@ -113,6 +115,42 @@ public class TopicConverter {
                 .id(topicId)
                 .deletedAt(OffsetDateTime.now(ApiTimeZone.ZONE))
                 .unlinkedSourceCount(unlinkedSourceCount)
+                .build();
+    }
+
+    public static TopicResDTO.SourcesLinked toSourcesLinked(Topic topic, int addedCount, int removedCount) {
+        List<TopicResDTO.SourceBrief> sources = topic.getSources().stream()
+                .map(TopicConverter::toSourceBrief)
+                .toList();
+
+        return TopicResDTO.SourcesLinked.builder()
+                .topicId(topic.getId())
+                .sources(sources)
+                .addedCount(addedCount)
+                .removedCount(removedCount)
+                .combinationCount(sources.size())
+                .build();
+    }
+
+    /**
+     * queryText는 SEARCH 소스에 넘길 검색어라 FEED 조합에서는 내려보내지 않는다.
+     * lastCollectedCount는 조합별 수집 건수라 news_collection_runs가 생기는 M3에서 채운다.
+     */
+    public static TopicSourceResDTO.Combination toCombination(TopicRepository.CombinationRow row) {
+        boolean searchKind = Source.KIND_SEARCH.equals(row.getSourceKind());
+
+        return TopicSourceResDTO.Combination.builder()
+                .topicId(row.getTopicId())
+                .topicName(row.getTopicName())
+                .sourceId(row.getSourceId())
+                .sourceName(row.getSourceName())
+                .sourceKind(row.getSourceKind())
+                .queryText(searchKind ? row.getQueryText() : null)
+                .batchSize(row.getBatchSize())
+                .intervalMinutes(row.getIntervalMinutes())
+                .active(row.getTopicActive() && row.getSourceActive())
+                .lastCollectedAt(toOffsetDateTime(row.getLastCollectedAt()))
+                .lastCollectedCount(null)
                 .build();
     }
 

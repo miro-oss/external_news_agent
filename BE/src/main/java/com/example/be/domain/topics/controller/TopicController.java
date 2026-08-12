@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -356,6 +357,71 @@ public class TopicController {
             @RequestBody TopicReqDTO.Activation request
     ) {
         return ApiResponse.of(GeneralSuccessCode.UPDATED, topicCommandService.updateActivation(topicId, request));
+    }
+
+    @PutMapping("/{topicId}/sources")
+    @Operation(
+            summary = "주제-소스 연결 설정",
+            description = """
+                    주제에 연결된 소스 목록을 전체 교체합니다. 주제와 소스는 M:N 관계이고, 이 API가 그 매핑 테이블을 재구성합니다.
+                    전달한 목록에 없는 기존 연결은 제거됩니다. 빈 배열을 보내면 모든 연결이 해제됩니다.
+                    소스 수 × 주제 수만큼 조합이 늘어나므로, 응답의 combinationCount를 화면에 표시해 조합 폭발을 인지할 수 있게 합니다.
+                    """
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "200",
+                    description = "연결되었습니다.",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                            {
+                              "isSuccess": true,
+                              "code": "COMMON200",
+                              "message": "연결되었습니다.",
+                              "result": {
+                                "topicId": 1,
+                                "sources": [
+                                  { "id": 1, "name": "ETNews 반도체", "sourceKind": "FEED" },
+                                  { "id": 2, "name": "Google News RSS", "sourceKind": "SEARCH" },
+                                  { "id": 5, "name": "EE Times", "sourceKind": "FEED" },
+                                  { "id": 8, "name": "Naver 뉴스 검색", "sourceKind": "SEARCH" }
+                                ],
+                                "addedCount": 1,
+                                "removedCount": 0,
+                                "combinationCount": 4
+                              }
+                            }
+                            """))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "400",
+                    description = "SEARCH 소스를 연결했지만 주제에 검색어가 없는 경우",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                            {
+                              "isSuccess": false,
+                              "code": "TOPIC400",
+                              "message": "SEARCH 소스를 연결하려면 검색어가 필요합니다.",
+                              "result": {}
+                            }
+                            """))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "404",
+                    description = "주제가 없거나(TOPIC404), 존재하지 않는 소스 ID가 포함된 경우(SOURCE404)",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                            {
+                              "isSuccess": false,
+                              "code": "SOURCE404",
+                              "message": "수집 소스를 찾을 수 없습니다.",
+                              "result": {
+                                "notFoundSourceIds": [99]
+                              }
+                            }
+                            """)))
+    })
+    public ApiResponse<TopicResDTO.SourcesLinked> replaceSources(
+            @Parameter(description = "수집 주제 ID. 목록 조회로 확인한 실제 ID를 넣는다")
+            @PathVariable Long topicId,
+            @RequestBody TopicReqDTO.SourceLink request
+    ) {
+        return ApiResponse.of(GeneralSuccessCode.LINKED, topicCommandService.replaceSources(topicId, request));
     }
 
     @DeleteMapping("/{topicId}")

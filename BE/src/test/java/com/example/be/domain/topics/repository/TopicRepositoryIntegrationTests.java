@@ -2,6 +2,8 @@ package com.example.be.domain.topics.repository;
 
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
+import com.example.be.domain.topics.converter.TopicConverter;
+import com.example.be.domain.topics.dto.res.TopicSourceResDTO;
 import com.example.be.domain.topics.entity.Topic;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
@@ -132,6 +135,79 @@ class TopicRepositoryIntegrationTests {
         assertTrue(topicRepository.findById(saved.getId()).isEmpty());
         assertTrue(sourceRepository.findById(feed.getId()).isPresent());
         assertEquals(List.of(), topicRepository.countLinkedSources(List.of(saved.getId())));
+    }
+
+    @Test
+    void findsCombinationsAsFlattenedTopicSourcePairs() {
+        Source feed = sourceRepository.save(source(Source.KIND_FEED, "조합 FEED 통합테스트",
+                "https://example.com/combination-feed"));
+        Source search = sourceRepository.save(source(Source.KIND_SEARCH, "조합 SEARCH 통합테스트",
+                "https://example.com?q={query}&t=combination"));
+
+        Topic topic = topic("조합 통합테스트");
+        topic.replaceSources(List.of(feed, search));
+        Topic saved = topicRepository.save(topic);
+        flushAndClear();
+
+        Page<TopicRepository.CombinationRow> rows =
+                topicRepository.findCombinations(saved.getId(), null, null, PageRequest.of(0, 20));
+
+        assertEquals(2, rows.getTotalElements());
+        TopicRepository.CombinationRow first = rows.getContent().get(0);
+        assertEquals(saved.getId(), first.getTopicId());
+        assertEquals("조합 통합테스트", first.getTopicName());
+        assertEquals(10, first.getBatchSize());
+        assertEquals(60, first.getIntervalMinutes());
+        assertTrue(first.getTopicActive());
+        assertTrue(first.getSourceActive());
+
+        // FEED와 SEARCH가 한 주제에 같이 걸린 상태에서 queryText가 SEARCH 조합에만 나가는지 본다
+        List<TopicSourceResDTO.Combination> combinations = rows.getContent().stream()
+                .map(TopicConverter::toCombination)
+                .toList();
+        TopicSourceResDTO.Combination feedPair = combinations.stream()
+                .filter(c -> Source.KIND_FEED.equals(c.getSourceKind()))
+                .findFirst()
+                .orElseThrow();
+        TopicSourceResDTO.Combination searchPair = combinations.stream()
+                .filter(c -> Source.KIND_SEARCH.equals(c.getSourceKind()))
+                .findFirst()
+                .orElseThrow();
+
+        assertNull(feedPair.getQueryText());
+        assertEquals("HBM 반도체", searchPair.getQueryText());
+    }
+
+    @Test
+    void findsCombinationsFilteredBySourceAndActiveFlag() {
+        Source activeSource = sourceRepository.save(source(Source.KIND_FEED, "조합 활성 소스 통합테스트",
+                "https://example.com/combination-active"));
+        Source inactive = source(Source.KIND_FEED, "조합 비활성 소스 통합테스트",
+                "https://example.com/combination-inactive");
+        inactive.changeActive(false);
+        Source inactiveSource = sourceRepository.save(inactive);
+
+        Topic topic = topic("조합 필터 통합테스트");
+        topic.replaceSources(List.of(activeSource, inactiveSource));
+        Topic saved = topicRepository.save(topic);
+        flushAndClear();
+
+        Page<TopicRepository.CombinationRow> activeOnly =
+                topicRepository.findCombinations(saved.getId(), null, true, PageRequest.of(0, 20));
+        assertEquals(1, activeOnly.getTotalElements());
+        assertEquals(activeSource.getId(), activeOnly.getContent().get(0).getSourceId());
+
+        // 소스가 꺼져 있으면 주제가 켜져 있어도 조합은 비활성이다
+        Page<TopicRepository.CombinationRow> inactiveOnly =
+                topicRepository.findCombinations(saved.getId(), null, false, PageRequest.of(0, 20));
+        assertEquals(1, inactiveOnly.getTotalElements());
+        assertEquals(inactiveSource.getId(), inactiveOnly.getContent().get(0).getSourceId());
+        assertFalse(inactiveOnly.getContent().get(0).getSourceActive());
+
+        Page<TopicRepository.CombinationRow> bySource =
+                topicRepository.findCombinations(null, activeSource.getId(), null, PageRequest.of(0, 20));
+        assertEquals(1, bySource.getTotalElements());
+        assertEquals(saved.getId(), bySource.getContent().get(0).getTopicId());
     }
 
     @Test

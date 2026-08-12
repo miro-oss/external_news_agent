@@ -87,4 +87,16 @@ public class TopicReqDTO {
         @Schema(description = "활성 여부", example = "false", requiredMode = Schema.RequiredMode.REQUIRED)
         private Boolean active;
     }
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @Schema(name = "TopicSourceLinkRequest",
+            description = "주제-소스 연결 설정 요청. 목록을 전체 교체하며, 빈 배열을 보내면 모든 연결이 해제된다")
+    public static class SourceLink {
+
+        @Schema(description = "연결할 소스 ID 목록. 소스 목록 조회로 확인한 실제 ID를 넣는다",
+                requiredMode = Schema.RequiredMode.REQUIRED)
+        private List<Long> sourceIds;
+    }
 }

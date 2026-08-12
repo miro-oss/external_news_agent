@@ -96,6 +96,27 @@ public class TopicCommandServiceImpl implements TopicCommandService {
     }
 
     /**
+     * 연결 목록을 통째로 교체한다. 전달한 목록에 없던 기존 연결은 제거되고, 빈 배열이면 전부 해제된다.
+     */
+    @Override
+    public TopicResDTO.SourcesLinked replaceSources(Long topicId, TopicReqDTO.SourceLink request) {
+        Topic topic = getTopic(topicId);
+        List<Long> requestedSourceIds = requireSourceIds(request.getSourceIds());
+
+        Set<Long> beforeIds = topic.getSources().stream().map(Source::getId).collect(Collectors.toSet());
+        List<Source> sources = findSources(requestedSourceIds);
+        validateQueryTextForSearchSources(topic.getQueryText(), sources);
+
+        Set<Long> afterIds = sources.stream().map(Source::getId).collect(Collectors.toSet());
+        int addedCount = (int) afterIds.stream().filter(id -> !beforeIds.contains(id)).count();
+        int removedCount = (int) beforeIds.stream().filter(id -> !afterIds.contains(id)).count();
+
+        topic.replaceSources(sources);
+
+        return TopicConverter.toSourcesLinked(topic, addedCount, removedCount);
+    }
+
+    /**
      * 수집이 진행 중인 주제를 막는 TOPIC409 검사는 news_collection_runs가 생기는 M3에서 추가한다.
      */
     @Override
@@ -141,6 +162,21 @@ public class TopicCommandServiceImpl implements TopicCommandService {
             return new TopicException(TopicErrorCode.DUPLICATED_TOPIC_NAME);
         }
         return exception;
+    }
+
+    /**
+     * 연결 설정에서 sourceIds는 필수다. 필드를 빼먹은 요청을 빈 배열과 같이 취급하면 오타 하나로 연결이 전부 사라진다.
+     * 배열 안의 null도 막는다. findSources가 null을 걸러내기 때문에 [null]이 조용히 전체 해제가 된다.
+     * 주제 등록은 sourceIds가 선택 항목이라(소스 없이 주제만 만들 수 있다) 이 규칙을 적용하지 않는다.
+     */
+    private List<Long> requireSourceIds(List<Long> sourceIds) {
+        if (sourceIds == null) {
+            throw new GeneralException(GeneralErrorCode.BAD_REQUEST, "sourceIds는 필수입니다.");
+        }
+        if (sourceIds.stream().anyMatch(Objects::isNull)) {
+            throw new GeneralException(GeneralErrorCode.BAD_REQUEST, "sourceIds에는 null을 넣을 수 없습니다.");
+        }
+        return sourceIds;
     }
 
     private List<Source> findSources(List<Long> requestedSourceIds) {

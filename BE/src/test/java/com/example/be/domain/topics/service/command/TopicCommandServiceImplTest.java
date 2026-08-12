@@ -212,6 +212,118 @@ class TopicCommandServiceImplTest {
     }
 
     @Test
+    void replaceSourcesReportsAddedAndRemovedCounts() {
+        Topic topic = existingTopic();
+        topic.replaceSources(List.of(feedSource()));
+        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(sourceRepository.findAllById(List.of(2L))).thenReturn(List.of(searchSource()));
+
+        TopicResDTO.SourcesLinked result = topicCommandService.replaceSources(1L, sourceLink(List.of(2L)));
+
+        assertEquals(1L, result.getTopicId());
+        assertEquals(1, result.getAddedCount());
+        assertEquals(1, result.getRemovedCount());
+        assertEquals(1, result.getCombinationCount());
+        assertEquals(List.of(2L), topic.getSources().stream().map(Source::getId).toList());
+    }
+
+    @Test
+    void replaceSourcesCountsKeptSourceAsNeitherAddedNorRemoved() {
+        Topic topic = existingTopic();
+        topic.replaceSources(List.of(feedSource()));
+        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(sourceRepository.findAllById(List.of(1L, 2L))).thenReturn(List.of(feedSource(), searchSource()));
+
+        TopicResDTO.SourcesLinked result = topicCommandService.replaceSources(1L, sourceLink(List.of(1L, 2L)));
+
+        assertEquals(1, result.getAddedCount());
+        assertEquals(0, result.getRemovedCount());
+        assertEquals(2, result.getCombinationCount());
+    }
+
+    @Test
+    void replaceSourcesClearsAllLinksOnEmptyArray() {
+        Topic topic = existingTopic();
+        topic.replaceSources(List.of(feedSource(), searchSource()));
+        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+
+        TopicResDTO.SourcesLinked result = topicCommandService.replaceSources(1L, sourceLink(List.of()));
+
+        assertEquals(0, result.getCombinationCount());
+        assertEquals(2, result.getRemovedCount());
+        assertEquals(0, result.getAddedCount());
+        assertEquals(List.of(), topic.getSources());
+        verify(sourceRepository, never()).findAllById(any());
+    }
+
+    @Test
+    void replaceSourcesRejectsOmittedSourceIds() {
+        when(topicRepository.findById(1L)).thenReturn(Optional.of(existingTopic()));
+
+        GeneralException exception = assertThrows(GeneralException.class,
+                () -> topicCommandService.replaceSources(1L, new TopicReqDTO.SourceLink()));
+
+        assertEquals("COMMON400", exception.getCode().getCode());
+        assertEquals("sourceIds는 필수입니다.", exception.getMessage());
+        verify(sourceRepository, never()).findAllById(any());
+    }
+
+    @Test
+    void replaceSourcesRejectsNullSourceId() {
+        Topic topic = existingTopic();
+        topic.replaceSources(List.of(feedSource()));
+        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+
+        GeneralException exception = assertThrows(GeneralException.class,
+                () -> topicCommandService.replaceSources(1L, sourceLink(Arrays.asList(1L, null))));
+
+        assertEquals("COMMON400", exception.getCode().getCode());
+        assertEquals("sourceIds에는 null을 넣을 수 없습니다.", exception.getMessage());
+        assertEquals(1, topic.getSources().size());
+    }
+
+    @Test
+    void replaceSourcesRejectsUnknownSourceId() {
+        Topic topic = existingTopic();
+        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(sourceRepository.findAllById(List.of(1L, 99L))).thenReturn(List.of(feedSource()));
+
+        TopicException exception = assertThrows(TopicException.class,
+                () -> topicCommandService.replaceSources(1L, sourceLink(List.of(1L, 99L))));
+
+        assertEquals(TopicErrorCode.SOURCE_NOT_FOUND, exception.getCode());
+        assertEquals(List.of(99L), exception.getResult().get("notFoundSourceIds"));
+    }
+
+    @Test
+    void replaceSourcesRejectsSearchSourceWhenTopicHasNoQueryText() {
+        Topic topic = Topic.builder()
+                .id(1L)
+                .name("HBM")
+                .batchSize(10)
+                .intervalMinutes(60)
+                .active(true)
+                .build();
+        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(sourceRepository.findAllById(List.of(2L))).thenReturn(List.of(searchSource()));
+
+        TopicException exception = assertThrows(TopicException.class,
+                () -> topicCommandService.replaceSources(1L, sourceLink(List.of(2L))));
+
+        assertEquals(TopicErrorCode.QUERY_TEXT_REQUIRED, exception.getCode());
+    }
+
+    @Test
+    void replaceSourcesRejectsMissingTopic() {
+        when(topicRepository.findById(99L)).thenReturn(Optional.empty());
+
+        TopicException exception = assertThrows(TopicException.class,
+                () -> topicCommandService.replaceSources(99L, sourceLink(List.of(1L))));
+
+        assertEquals(TopicErrorCode.TOPIC_NOT_FOUND, exception.getCode());
+    }
+
+    @Test
     void deleteTopicReportsUnlinkedSourceCount() {
         Topic topic = existingTopic();
         topic.replaceSources(List.of(feedSource(), searchSource()));
@@ -311,6 +423,12 @@ class TopicCommandServiceImplTest {
 
         assertThrows(DataIntegrityViolationException.class,
                 () -> topicCommandService.createTopic(request));
+    }
+
+    private TopicReqDTO.SourceLink sourceLink(List<Long> sourceIds) {
+        TopicReqDTO.SourceLink request = new TopicReqDTO.SourceLink();
+        request.setSourceIds(sourceIds);
+        return request;
     }
 
     private TopicReqDTO.Create createRequest() {
