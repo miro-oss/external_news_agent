@@ -1,0 +1,44 @@
+spring:
+  application:
+    name: BE
+  # 대괄호가 들어 있어 YAML에서 흐름 시퀀스로 읽히지 않도록 따옴표로 감싼다
+  config:
+    import: "optional:file:.env[.properties]"
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: oracle.jdbc.OracleDriver
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: "0"
+
+  jpa:
+    # 스키마 소유권은 Flyway에 있고 Hibernate는 매핑 검증만 한다
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  jackson:
+    mapper:
+      # 응답 필드를 API 명세서와 같은 선언 순서로 내려준다
+      sort-properties-alphabetically: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
