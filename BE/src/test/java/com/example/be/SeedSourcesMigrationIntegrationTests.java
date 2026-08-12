@@ -18,6 +18,7 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -39,27 +40,39 @@ class SeedSourcesMigrationIntegrationTests {
 
     private static final String SEED_SCRIPT = "db/migration/V3__seed_sources.sql";
 
-    private static final List<String> SEEDED_URLS = List.of(
+    /**
+     * country/language는 F10(크로스링구얼)이 해외 소스를 골라내는 기준이고 설정 화면의 표시값이기도 하다.
+     * 시드가 잘못 넣어도 조회는 그대로 성공하므로 URL만 보지 않고 값까지 고정해 둔다.
+     */
+    private static final List<SeededSource> SEEDED_SOURCES = List.of(
             // 국내 11건
-            "https://www.hankyung.com/feed/economy",
-            "https://www.mk.co.kr/rss/50000001/",
-            "https://www.mk.co.kr/rss/30100041/",
-            "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR",
-            "https://www.hankyung.com/feed/politics",
-            "https://www.hankyung.com/feed/international",
-            "https://www.mk.co.kr/rss/30200030/",
-            "https://news.google.com/rss/headlines/section/topic/WORLD?hl=ko&gl=KR",
-            "https://rss.etnews.com/Section901.xml",
-            "https://www.hankyung.com/feed/it",
-            "https://news.google.com/rss/search?q=%EB%B0%98%EB%8F%84%EC%B2%B4&hl=ko&gl=KR",
+            new SeededSource("https://www.hankyung.com/feed/economy", "한국경제 경제", "KR", "ko"),
+            new SeededSource("https://www.mk.co.kr/rss/50000001/", "매일경제 이코노미", "KR", "ko"),
+            new SeededSource("https://www.mk.co.kr/rss/30100041/", "매일경제 증권·금융", "KR", "ko"),
+            new SeededSource("https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR",
+                    "구글 뉴스 비즈니스(KR)", "KR", "ko"),
+            new SeededSource("https://www.hankyung.com/feed/politics", "한국경제 정치", "KR", "ko"),
+            new SeededSource("https://www.hankyung.com/feed/international", "한국경제 국제·외교", "KR", "ko"),
+            new SeededSource("https://www.mk.co.kr/rss/30200030/", "매일경제 정치", "KR", "ko"),
+            new SeededSource("https://news.google.com/rss/headlines/section/topic/WORLD?hl=ko&gl=KR",
+                    "구글 뉴스 세계(KR)", "KR", "ko"),
+            new SeededSource("https://rss.etnews.com/Section901.xml", "전자신문 오늘의뉴스", "KR", "ko"),
+            new SeededSource("https://www.hankyung.com/feed/it", "한국경제 IT·과학", "KR", "ko"),
+            new SeededSource("https://news.google.com/rss/search?q=%EB%B0%98%EB%8F%84%EC%B2%B4&hl=ko&gl=KR",
+                    "구글 뉴스 반도체 검색", "KR", "ko"),
             // 해외 6건
-            "https://www.eetimes.com/feed/",
-            "https://semiengineering.com/feed/",
-            "https://semiwiki.com/feed/",
-            "https://www.digitimes.com/rss/daily.xml",
-            "https://www.trendforce.com/news/feed/",
-            "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss25&id=19854910"
+            new SeededSource("https://www.eetimes.com/feed/", "EE Times", "US", "en"),
+            new SeededSource("https://semiengineering.com/feed/", "Semiconductor Engineering", "US", "en"),
+            new SeededSource("https://semiwiki.com/feed/", "SemiWiki", "US", "en"),
+            new SeededSource("https://www.digitimes.com/rss/daily.xml", "Digitimes Asia", "TW", "en"),
+            new SeededSource("https://www.trendforce.com/news/feed/", "TrendForce", "TW", "en"),
+            new SeededSource("https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss25&id=19854910",
+                    "CNBC Technology", "US", "en")
     );
+
+    private static final Set<String> SEEDED_URLS = SEEDED_SOURCES.stream()
+            .map(SeededSource::url)
+            .collect(Collectors.toUnmodifiableSet());
 
     @Autowired
     private SourceRepository sourceRepository;
@@ -83,8 +96,14 @@ class SeedSourcesMigrationIntegrationTests {
     void seedsEveryVerifiedFeedSource() {
         Map<String, Source> seeded = seededSources();
 
-        assertEquals(SEEDED_URLS.size(), seeded.size());
-        SEEDED_URLS.forEach(url -> assertNotNull(seeded.get(url), url + " 이(가) 시드되지 않았다"));
+        assertEquals(SEEDED_SOURCES.size(), seeded.size());
+        SEEDED_SOURCES.forEach(expected -> {
+            Source source = seeded.get(expected.url());
+            assertNotNull(source, expected.url() + " 이(가) 시드되지 않았다");
+            assertEquals(expected.name(), source.getName(), expected.url());
+            assertEquals(expected.country(), source.getCountry(), expected.url());
+            assertEquals(expected.language(), source.getLanguage(), expected.url());
+        });
     }
 
     /**
@@ -134,5 +153,8 @@ class SeedSourcesMigrationIntegrationTests {
                 new ClassPathResource(SEED_SCRIPT).getInputStream(), StandardCharsets.UTF_8)) {
             return FileCopyUtils.copyToString(reader).strip().replaceAll(";$", "");
         }
+    }
+
+    private record SeededSource(String url, String name, String country, String language) {
     }
 }
