@@ -41,7 +41,7 @@ class TopicSourceQueryServiceImplTest {
     @Test
     void getCombinationsFlattensTopicAndSourcePairs() {
         when(topicRepository.findCombinations(eq(null), eq(null), eq(null), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of(row(true, true)), PageRequest.of(0, 20), 1L));
+                .thenReturn(new PageImpl<>(List.of(row(Source.KIND_SEARCH, true, true)), PageRequest.of(0, 20), 1L));
 
         TopicSourceResDTO.CombinationPage result =
                 topicSourceQueryService.getCombinations(null, null, null, 0, 20);
@@ -59,9 +59,23 @@ class TopicSourceQueryServiceImplTest {
     }
 
     @Test
+    void getCombinationsOmitsQueryTextForFeedPairs() {
+        when(topicRepository.findCombinations(any(), any(), any(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(
+                        List.of(row(Source.KIND_SEARCH, true, true), row(Source.KIND_FEED, true, true)),
+                        PageRequest.of(0, 20), 2L));
+
+        TopicSourceResDTO.CombinationPage result =
+                topicSourceQueryService.getCombinations(null, null, null, 0, 20);
+
+        assertEquals("HBM 반도체", result.getContent().get(0).getQueryText());
+        assertNull(result.getContent().get(1).getQueryText());
+    }
+
+    @Test
     void getCombinationsMarksPairInactiveWhenSourceIsOff() {
         when(topicRepository.findCombinations(any(), any(), any(), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of(row(true, false)), PageRequest.of(0, 20), 1L));
+                .thenReturn(new PageImpl<>(List.of(row(Source.KIND_SEARCH, true, false)), PageRequest.of(0, 20), 1L));
 
         TopicSourceResDTO.CombinationPage result =
                 topicSourceQueryService.getCombinations(null, null, null, 0, 20);
@@ -72,7 +86,7 @@ class TopicSourceQueryServiceImplTest {
     @Test
     void getCombinationsLeavesLastCollectedCountEmptyUntilRunsExist() {
         when(topicRepository.findCombinations(any(), any(), any(), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of(row(true, true)), PageRequest.of(0, 20), 1L));
+                .thenReturn(new PageImpl<>(List.of(row(Source.KIND_SEARCH, true, true)), PageRequest.of(0, 20), 1L));
 
         TopicSourceResDTO.CombinationPage result =
                 topicSourceQueryService.getCombinations(null, null, null, 0, 20);
@@ -84,7 +98,7 @@ class TopicSourceQueryServiceImplTest {
     void getCombinationsPassesTopicFilterAfterCheckingItExists() {
         when(topicRepository.existsById(1L)).thenReturn(true);
         when(topicRepository.findCombinations(eq(1L), eq(2L), eq(true), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of(row(true, true)), PageRequest.of(0, 20), 1L));
+                .thenReturn(new PageImpl<>(List.of(row(Source.KIND_SEARCH, true, true)), PageRequest.of(0, 20), 1L));
 
         TopicSourceResDTO.CombinationPage result =
                 topicSourceQueryService.getCombinations(1L, 2L, true, 0, 20);
@@ -120,7 +134,7 @@ class TopicSourceQueryServiceImplTest {
         assertEquals("page는 0 이상이어야 합니다.", exception.getMessage());
     }
 
-    private TopicRepository.CombinationRow row(boolean topicActive, boolean sourceActive) {
+    private TopicRepository.CombinationRow row(String sourceKind, boolean topicActive, boolean sourceActive) {
         return new TopicRepository.CombinationRow() {
 
             @Override
@@ -145,7 +159,7 @@ class TopicSourceQueryServiceImplTest {
 
             @Override
             public String getSourceKind() {
-                return Source.KIND_SEARCH;
+                return sourceKind;
             }
 
             @Override

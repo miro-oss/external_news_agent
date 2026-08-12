@@ -133,16 +133,19 @@ public class TopicConverter {
     }
 
     /**
+     * queryText는 SEARCH 소스에 넘길 검색어라 FEED 조합에서는 내려보내지 않는다.
      * lastCollectedCount는 조합별 수집 건수라 news_collection_runs가 생기는 M3에서 채운다.
      */
     public static TopicSourceResDTO.Combination toCombination(TopicRepository.CombinationRow row) {
+        boolean searchKind = Source.KIND_SEARCH.equals(row.getSourceKind());
+
         return TopicSourceResDTO.Combination.builder()
                 .topicId(row.getTopicId())
                 .topicName(row.getTopicName())
                 .sourceId(row.getSourceId())
                 .sourceName(row.getSourceName())
                 .sourceKind(row.getSourceKind())
-                .queryText(row.getQueryText())
+                .queryText(searchKind ? row.getQueryText() : null)
                 .batchSize(row.getBatchSize())
                 .intervalMinutes(row.getIntervalMinutes())
                 .active(row.getTopicActive() && row.getSourceActive())

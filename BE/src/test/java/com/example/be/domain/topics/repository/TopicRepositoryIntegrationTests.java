@@ -2,6 +2,8 @@ package com.example.be.domain.topics.repository;
 
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
+import com.example.be.domain.topics.converter.TopicConverter;
+import com.example.be.domain.topics.dto.res.TopicSourceResDTO;
 import com.example.be.domain.topics.entity.Topic;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
@@ -153,13 +156,26 @@ class TopicRepositoryIntegrationTests {
         TopicRepository.CombinationRow first = rows.getContent().get(0);
         assertEquals(saved.getId(), first.getTopicId());
         assertEquals("조합 통합테스트", first.getTopicName());
-        assertEquals("HBM 반도체", first.getQueryText());
         assertEquals(10, first.getBatchSize());
         assertEquals(60, first.getIntervalMinutes());
         assertTrue(first.getTopicActive());
         assertTrue(first.getSourceActive());
-        assertTrue(rows.getContent().stream()
-                .anyMatch(row -> Source.KIND_SEARCH.equals(row.getSourceKind())));
+
+        // FEED와 SEARCH가 한 주제에 같이 걸린 상태에서 queryText가 SEARCH 조합에만 나가는지 본다
+        List<TopicSourceResDTO.Combination> combinations = rows.getContent().stream()
+                .map(TopicConverter::toCombination)
+                .toList();
+        TopicSourceResDTO.Combination feedPair = combinations.stream()
+                .filter(c -> Source.KIND_FEED.equals(c.getSourceKind()))
+                .findFirst()
+                .orElseThrow();
+        TopicSourceResDTO.Combination searchPair = combinations.stream()
+                .filter(c -> Source.KIND_SEARCH.equals(c.getSourceKind()))
+                .findFirst()
+                .orElseThrow();
+
+        assertNull(feedPair.getQueryText());
+        assertEquals("HBM 반도체", searchPair.getQueryText());
     }
 
     @Test

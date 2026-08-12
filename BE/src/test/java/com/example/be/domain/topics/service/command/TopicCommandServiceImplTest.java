@@ -257,6 +257,32 @@ class TopicCommandServiceImplTest {
     }
 
     @Test
+    void replaceSourcesRejectsOmittedSourceIds() {
+        when(topicRepository.findById(1L)).thenReturn(Optional.of(existingTopic()));
+
+        GeneralException exception = assertThrows(GeneralException.class,
+                () -> topicCommandService.replaceSources(1L, new TopicReqDTO.SourceLink()));
+
+        assertEquals("COMMON400", exception.getCode().getCode());
+        assertEquals("sourceIds는 필수입니다.", exception.getMessage());
+        verify(sourceRepository, never()).findAllById(any());
+    }
+
+    @Test
+    void replaceSourcesRejectsNullSourceId() {
+        Topic topic = existingTopic();
+        topic.replaceSources(List.of(feedSource()));
+        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+
+        GeneralException exception = assertThrows(GeneralException.class,
+                () -> topicCommandService.replaceSources(1L, sourceLink(Arrays.asList(1L, null))));
+
+        assertEquals("COMMON400", exception.getCode().getCode());
+        assertEquals("sourceIds에는 null을 넣을 수 없습니다.", exception.getMessage());
+        assertEquals(1, topic.getSources().size());
+    }
+
+    @Test
     void replaceSourcesRejectsUnknownSourceId() {
         Topic topic = existingTopic();
         when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
