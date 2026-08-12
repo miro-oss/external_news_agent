@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
@@ -28,6 +29,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -141,6 +143,52 @@ class TopicControllerTest {
                 .andExpect(jsonPath("$.result.queryText").value("HBM4 반도체"))
                 .andExpect(jsonPath("$.result.batchSize").value(20))
                 .andExpect(jsonPath("$.result.intervalMinutes").value(30));
+    }
+
+    @Test
+    void replaceSourcesRespondsWithLinkedEnvelope() throws Exception {
+        when(topicCommandService.replaceSources(eq(1L), any(TopicReqDTO.SourceLink.class)))
+                .thenReturn(TopicResDTO.SourcesLinked.builder()
+                        .topicId(1L)
+                        .sources(List.of(
+                                TopicResDTO.SourceBrief.builder()
+                                        .id(1L).name("ETNews 반도체").sourceKind("FEED").build(),
+                                TopicResDTO.SourceBrief.builder()
+                                        .id(2L).name("Google News RSS").sourceKind("SEARCH").build()))
+                        .addedCount(1)
+                        .removedCount(0)
+                        .combinationCount(2)
+                        .build());
+
+        mockMvc.perform(put("/api/news/topics/1/sources")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "sourceIds": [1, 2] }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("COMMON200"))
+                .andExpect(jsonPath("$.message").value("연결되었습니다."))
+                .andExpect(jsonPath("$.result.topicId").value(1))
+                .andExpect(jsonPath("$.result.sources[1].sourceKind").value("SEARCH"))
+                .andExpect(jsonPath("$.result.addedCount").value(1))
+                .andExpect(jsonPath("$.result.removedCount").value(0))
+                .andExpect(jsonPath("$.result.combinationCount").value(2));
+    }
+
+    @Test
+    void replaceSourcesRespondsWithNotFoundSourceIds() throws Exception {
+        when(topicCommandService.replaceSources(eq(1L), any(TopicReqDTO.SourceLink.class)))
+                .thenThrow(new TopicException(TopicErrorCode.SOURCE_NOT_FOUND,
+                        Map.of("notFoundSourceIds", List.of(99L))));
+
+        mockMvc.perform(put("/api/news/topics/1/sources")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "sourceIds": [99] }
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("SOURCE404"))
+                .andExpect(jsonPath("$.result.notFoundSourceIds[0]").value(99));
     }
 
     @Test

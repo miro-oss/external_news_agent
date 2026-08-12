@@ -96,6 +96,26 @@ public class TopicCommandServiceImpl implements TopicCommandService {
     }
 
     /**
+     * 연결 목록을 통째로 교체한다. 전달한 목록에 없던 기존 연결은 제거되고, 빈 배열이면 전부 해제된다.
+     */
+    @Override
+    public TopicResDTO.SourcesLinked replaceSources(Long topicId, TopicReqDTO.SourceLink request) {
+        Topic topic = getTopic(topicId);
+
+        Set<Long> beforeIds = topic.getSources().stream().map(Source::getId).collect(Collectors.toSet());
+        List<Source> sources = findSources(request.getSourceIds());
+        validateQueryTextForSearchSources(topic.getQueryText(), sources);
+
+        Set<Long> afterIds = sources.stream().map(Source::getId).collect(Collectors.toSet());
+        int addedCount = (int) afterIds.stream().filter(id -> !beforeIds.contains(id)).count();
+        int removedCount = (int) beforeIds.stream().filter(id -> !afterIds.contains(id)).count();
+
+        topic.replaceSources(sources);
+
+        return TopicConverter.toSourcesLinked(topic, addedCount, removedCount);
+    }
+
+    /**
      * 수집이 진행 중인 주제를 막는 TOPIC409 검사는 news_collection_runs가 생기는 M3에서 추가한다.
      */
     @Override

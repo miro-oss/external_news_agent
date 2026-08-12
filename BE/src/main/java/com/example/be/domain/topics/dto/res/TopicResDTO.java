@@ -203,6 +203,28 @@ public class TopicResDTO {
     @Getter
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @Schema(name = "TopicSourceLinkResponse", description = "주제-소스 연결 설정 결과")
+    public static class SourcesLinked {
+
+        @Schema(description = "수집 주제 ID", example = "1")
+        private final Long topicId;
+
+        @Schema(description = "교체 후 연결된 소스 목록")
+        private final List<SourceBrief> sources;
+
+        @Schema(description = "새로 연결된 소스 수", example = "1")
+        private final int addedCount;
+
+        @Schema(description = "연결이 해제된 소스 수", example = "0")
+        private final int removedCount;
+
+        @Schema(description = "이 주제가 만들어내는 (주제 × 소스) 조합 수", example = "4")
+        private final int combinationCount;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @Schema(name = "TopicSourceBriefResponse", description = "주제에 연결된 소스 요약")
     public static class SourceBrief {
 

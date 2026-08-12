@@ -135,6 +135,66 @@ class TopicRepositoryIntegrationTests {
     }
 
     @Test
+    void findsCombinationsAsFlattenedTopicSourcePairs() {
+        Source feed = sourceRepository.save(source(Source.KIND_FEED, "조합 FEED 통합테스트",
+                "https://example.com/combination-feed"));
+        Source search = sourceRepository.save(source(Source.KIND_SEARCH, "조합 SEARCH 통합테스트",
+                "https://example.com?q={query}&t=combination"));
+
+        Topic topic = topic("조합 통합테스트");
+        topic.replaceSources(List.of(feed, search));
+        Topic saved = topicRepository.save(topic);
+        flushAndClear();
+
+        Page<TopicRepository.CombinationRow> rows =
+                topicRepository.findCombinations(saved.getId(), null, null, PageRequest.of(0, 20));
+
+        assertEquals(2, rows.getTotalElements());
+        TopicRepository.CombinationRow first = rows.getContent().get(0);
+        assertEquals(saved.getId(), first.getTopicId());
+        assertEquals("조합 통합테스트", first.getTopicName());
+        assertEquals("HBM 반도체", first.getQueryText());
+        assertEquals(10, first.getBatchSize());
+        assertEquals(60, first.getIntervalMinutes());
+        assertTrue(first.getTopicActive());
+        assertTrue(first.getSourceActive());
+        assertTrue(rows.getContent().stream()
+                .anyMatch(row -> Source.KIND_SEARCH.equals(row.getSourceKind())));
+    }
+
+    @Test
+    void findsCombinationsFilteredBySourceAndActiveFlag() {
+        Source activeSource = sourceRepository.save(source(Source.KIND_FEED, "조합 활성 소스 통합테스트",
+                "https://example.com/combination-active"));
+        Source inactive = source(Source.KIND_FEED, "조합 비활성 소스 통합테스트",
+                "https://example.com/combination-inactive");
+        inactive.changeActive(false);
+        Source inactiveSource = sourceRepository.save(inactive);
+
+        Topic topic = topic("조합 필터 통합테스트");
+        topic.replaceSources(List.of(activeSource, inactiveSource));
+        Topic saved = topicRepository.save(topic);
+        flushAndClear();
+
+        Page<TopicRepository.CombinationRow> activeOnly =
+                topicRepository.findCombinations(saved.getId(), null, true, PageRequest.of(0, 20));
+        assertEquals(1, activeOnly.getTotalElements());
+        assertEquals(activeSource.getId(), activeOnly.getContent().get(0).getSourceId());
+
+        // 소스가 꺼져 있으면 주제가 켜져 있어도 조합은 비활성이다
+        Page<TopicRepository.CombinationRow> inactiveOnly =
+                topicRepository.findCombinations(saved.getId(), null, false, PageRequest.of(0, 20));
+        assertEquals(1, inactiveOnly.getTotalElements());
+        assertEquals(inactiveSource.getId(), inactiveOnly.getContent().get(0).getSourceId());
+        assertFalse(inactiveOnly.getContent().get(0).getSourceActive());
+
+        Page<TopicRepository.CombinationRow> bySource =
+                topicRepository.findCombinations(null, activeSource.getId(), null, PageRequest.of(0, 20));
+        assertEquals(1, bySource.getTotalElements());
+        assertEquals(saved.getId(), bySource.getContent().get(0).getTopicId());
+    }
+
+    @Test
     void updatesAndDeletesTopic() {
         Topic saved = topicRepository.save(topic("수정 통합테스트"));
         flushAndClear();
