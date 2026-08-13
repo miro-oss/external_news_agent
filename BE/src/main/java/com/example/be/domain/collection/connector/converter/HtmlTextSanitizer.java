@@ -1,8 +1,6 @@
 package com.example.be.domain.collection.connector.converter;
 
-import org.springframework.web.util.HtmlUtils;
-
-import java.util.regex.Pattern;
+import org.jsoup.Jsoup;
 
 /**
  * 검색 API가 돌려주는 제목·요약에서 마크업을 걷어낸다. 네이버는 검색어에 {@code <b>}를 씌워서 주고,
@@ -10,28 +8,30 @@ import java.util.regex.Pattern;
  */
 public final class HtmlTextSanitizer {
 
-    /**
-     * 여는 꺾쇠 바로 뒤에 영문자가 와야 태그로 본다. HTML5도 같은 규칙이고, 이게 없으면
-     * {@code "<7nm 공정에서 5nm로>"} 같은 본문이나 {@code "A < B > C"} 같은 비교식이 통째로 지워진다.
-     */
-    private static final Pattern HTML_TAG = Pattern.compile("</?[a-zA-Z][^>]*>");
-
     private HtmlTextSanitizer() {
     }
 
     /**
-     * <b>순서가 중요하다 — 태그 제거가 먼저, 엔티티 디코드가 나중이다.</b> 반대로 하면 {@code &lt;b&gt;}가
-     * 진짜 태그로 변한 뒤 지워져서, 원문이 이스케이프해 둔 글자를 우리가 삼켜버린다.
+     * 파서로 태그를 걷고 텍스트만 남긴다.
      *
-     * <p>속성값 안에 {@code >}가 든 태그({@code <a title="x > y">})는 정규식으로 끊을 수 없다. 세 provider가
-     * 제목·요약에 보내는 건 {@code <b>} 같은 강조 태그뿐이라 여기서는 다루지 않는다. 임의의 HTML을 상대하는
-     * 본문 추출(F6, M3)은 파서를 쓴다.
+     * <p>예전에는 정규식({@code </?[a-zA-Z][^>]*>})이었다. <b>속성값 안의 {@code >}를 끊지 못해</b>
+     * {@code <a title="x > y">링크</a>}가 {@code y">링크}로 남았다(PR #24 리뷰 항목). 여는 꺾쇠부터
+     * 다음 꺾쇠까지를 태그로 보는 규칙으로는 속성 안의 꺾쇠를 구분할 수 없다 — 파서가 있어야 한다.
+     * #29에서 Jsoup이 들어왔으므로 그걸 쓴다.
+     *
+     * <p>정규식이 지키던 계약은 그대로다. 파서도 여는 꺾쇠 뒤에 영문자가 와야 태그로 보기 때문에
+     * {@code "A < B > C"} 같은 비교식이나 {@code "<7nm 공정에서 5nm로>"} 같은 표기는 살아남고,
+     * <b>원문이 이스케이프해 둔 {@code &lt;b&gt;}는 태그로 승격되지 않고 글자로 남는다</b> —
+     * 디코드된 결과를 다시 파싱하지 않기 때문이다.
+     *
+     * <p>달라진 점 하나: 연속 공백과 줄바꿈이 공백 하나로 접힌다. 제목·요약은 한 줄짜리라 영향이 없고,
+     * 블록 태그로 붙어 있던 낱말이 {@code "HBM4양산"}처럼 눌어붙지 않는 쪽이 낫다.
      */
     public static String sanitize(String text) {
         if (text == null) {
             return null;
         }
 
-        return HtmlUtils.htmlUnescape(HTML_TAG.matcher(text).replaceAll("")).strip();
+        return Jsoup.parseBodyFragment(text).body().text();
     }
 }

@@ -4,8 +4,6 @@ import com.example.be.domain.collection.connector.SearchConnector;
 import com.example.be.domain.collection.connector.SearchConnectorRegistry;
 import com.example.be.domain.collection.connector.dto.req.SearchQuery;
 import com.example.be.domain.collection.connector.dto.res.FetchResult;
-import com.example.be.domain.collection.entity.CollectionRun;
-import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.feed.FeedClient;
 import com.example.be.domain.collection.feed.FeedFetch;
 import com.example.be.domain.collection.feed.FeedRequest;
@@ -37,17 +35,6 @@ public class CollectionExecutor {
     private final RobotsPolicyService robotsPolicyService;
     private final SearchConnectorRegistry searchConnectorRegistry;
     private final CollectionResultWriter resultWriter;
-
-    public void execute(CollectionRun run, CollectionRunItem item, Topic topic, Source source) {
-        try {
-            CollectionOutcome outcome = collect(topic, source, run.isForceRefresh());
-            resultWriter.write(run, item, topic, source, outcome);
-        } catch (RuntimeException e) {
-            log.warn("조합 수집에 실패했다. topicId={} sourceId={} error={}",
-                    topic.getId(), source.getId(), e.getMessage(), e);
-            resultWriter.writeFailure(run, item, source, messageOf(e));
-        }
-    }
 
     public void execute(Long runId, Long itemId, Topic topic, Source source, boolean forceRefresh) {
         try {
