@@ -1,5 +1,6 @@
 package com.example.be.domain.topics.repository;
 
+import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -56,6 +57,25 @@ public interface TopicRepository extends JpaRepository<Topic, Long>, JpaSpecific
                                           @Param("active") Boolean active,
                                           Pageable pageable);
 
+    @Query("""
+            SELECT t AS topic, s AS source
+            FROM Topic t JOIN t.sources s
+            WHERE t.active = TRUE
+              AND s.active = TRUE
+            ORDER BY t.id ASC, s.id ASC
+            """)
+    List<CollectionTarget> findActiveCollectionTargets();
+
+    @Query("""
+            SELECT t AS topic, s AS source
+            FROM Topic t JOIN t.sources s
+            WHERE t.id IN :topicIds
+              AND t.active = TRUE
+              AND s.active = TRUE
+            ORDER BY t.id ASC, s.id ASC
+            """)
+    List<CollectionTarget> findActiveCollectionTargetsByTopicIds(@Param("topicIds") Collection<Long> topicIds);
+
     interface LinkedSourceCount {
 
         Long getTopicId();
@@ -86,5 +106,12 @@ public interface TopicRepository extends JpaRepository<Topic, Long>, JpaSpecific
         boolean getSourceActive();
 
         LocalDateTime getLastCollectedAt();
+    }
+
+    interface CollectionTarget {
+
+        Topic getTopic();
+
+        Source getSource();
     }
 }

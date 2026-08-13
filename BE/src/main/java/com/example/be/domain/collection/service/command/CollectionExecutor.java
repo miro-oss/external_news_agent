@@ -40,7 +40,7 @@ public class CollectionExecutor {
 
     public void execute(CollectionRun run, CollectionRunItem item, Topic topic, Source source) {
         try {
-            CollectionOutcome outcome = collect(run, topic, source);
+            CollectionOutcome outcome = collect(topic, source, run.isForceRefresh());
             resultWriter.write(run, item, topic, source, outcome);
         } catch (RuntimeException e) {
             log.warn("조합 수집에 실패했다. topicId={} sourceId={} error={}",
@@ -49,10 +49,21 @@ public class CollectionExecutor {
         }
     }
 
+    public void execute(Long runId, Long itemId, Topic topic, Source source, boolean forceRefresh) {
+        try {
+            CollectionOutcome outcome = collect(topic, source, forceRefresh);
+            resultWriter.write(runId, itemId, topic.getId(), source.getId(), outcome);
+        } catch (RuntimeException e) {
+            log.warn("조합 수집에 실패했다. topicId={} sourceId={} error={}",
+                    topic.getId(), source.getId(), e.getMessage(), e);
+            resultWriter.writeFailure(runId, itemId, source.getId(), messageOf(e));
+        }
+    }
+
     /**
      * 외부 호출과 대기만 한다. DB는 건드리지 않는다.
      */
-    private CollectionOutcome collect(CollectionRun run, Topic topic, Source source) {
+    private CollectionOutcome collect(Topic topic, Source source, boolean forceRefresh) {
         if (source.isSearchKind()) {
             return CollectionOutcome.of(searchOf(topic, source), RobotsDecision.skipped(source));
         }
@@ -62,7 +73,7 @@ public class CollectionExecutor {
             return CollectionOutcome.blockedByRobots(robots);
         }
 
-        FeedFetch fetch = feedClient.fetch(FeedRequest.of(source, robots.crawlDelay(), run.isForceRefresh()));
+        FeedFetch fetch = feedClient.fetch(FeedRequest.of(source, robots.crawlDelay(), forceRefresh));
         return new CollectionOutcome(fetch.result(), robots, fetch.notModified(),
                 fetch.etag(), fetch.lastModified(), fetch.result().success());
     }
