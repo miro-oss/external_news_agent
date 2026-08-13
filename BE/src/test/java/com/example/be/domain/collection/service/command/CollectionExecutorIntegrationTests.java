@@ -6,11 +6,13 @@ import com.example.be.domain.collection.entity.ArticleVersion;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
+import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.feed.FeedClient;
+import com.example.be.domain.collection.feed.FeedFetchResult;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.ArticleVersionRepository;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
@@ -237,6 +239,61 @@ class CollectionExecutorIntegrationTests {
     }
 
     /**
+     * 404 난 피드가 SUCCESS 0건으로 기록되면 화면에서 "왜 기사가 없지?"를 설명할 수 없다.
+     * 기사가 정말 0건인 피드와 읽기 실패는 다른 사건이다.
+     */
+    @Test
+    void marksItemFailedWhenFeedCouldNotBeRead() {
+        given(feedClient.fetch(anyString(), any()))
+                .willReturn(FeedFetchResult.unreadable("피드 응답 404 NOT_FOUND"));
+        CollectionRun run = newRun();
+        CollectionRunItem item = newItem(run);
+
+        collectionExecutor.execute(run, item, topic, source);
+
+        assertEquals(RunItemStatus.FAILED, item.getStatus());
+        assertEquals(0, item.getScannedCount());
+        assertEquals(1, run.getWarningCount());
+        assertEquals(CollectionRunWarning.CODE_FEED_UNREADABLE, run.getWarnings().get(0).getCode());
+    }
+
+    /**
+     * 항목 없는 정상 피드는 실패가 아니다.
+     */
+    @Test
+    void marksItemSuccessWhenFeedIsLegitimatelyEmpty() {
+        givenFeed();
+        CollectionRun run = newRun();
+        CollectionRunItem item = newItem(run);
+
+        collectionExecutor.execute(run, item, topic, source);
+
+        assertEquals(RunItemStatus.SUCCESS, item.getStatus());
+        assertEquals(0, run.getWarningCount());
+    }
+
+    /**
+     * 한 기사를 여러 섹션에 중복 노출하는 피드가 있다. 접지 않으면 uq_run_article을 위반해
+     * 조합 전체가 FAILED가 된다.
+     */
+    @Test
+    void collapsesDuplicateUrlsWithinOneCombination() {
+        givenFeed(
+                article("HBM4 양산 시작", "요약"),
+                article("HBM4 양산 시작", "요약"));
+        CollectionRun run = newRun();
+        CollectionRunItem item = newItem(run);
+
+        collectionExecutor.execute(run, item, topic, source);
+        flushAndClear();
+
+        assertEquals(RunItemStatus.SUCCESS, item.getStatus());
+        assertEquals(2, item.getScannedCount());
+        assertEquals(1, item.getNewCount());
+        assertEquals(1, runArticleRepository.findByRunIdOrderByIdAsc(run.getId()).size());
+    }
+
+    /**
      * 조합 하나가 죽어도 실행은 계속돼야 한다. 사유는 경고로 남아 화면에서 보인다.
      */
     @Test
@@ -254,7 +311,7 @@ class CollectionExecutorIntegrationTests {
     }
 
     private void givenFeed(CollectedArticle... articles) {
-        given(feedClient.fetch(anyString(), any())).willReturn(List.of(articles));
+        given(feedClient.fetch(anyString(), any())).willReturn(FeedFetchResult.ok(List.of(articles)));
     }
 
     private CollectedArticle article(String title, String summary) {

@@ -9,6 +9,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FeedParserTest {
@@ -105,15 +106,49 @@ class FeedParserTest {
      * 시트 URL이 HTML 섹션 페이지인 경우가 있었다(#15). 파서가 터지면 실행 전체가 죽는다.
      */
     @Test
-    void returnsEmptyForHtmlPage() {
-        assertTrue(FeedParser.parse("<!DOCTYPE html><html><body><h1>News</h1></body></html>", "ko").isEmpty());
+    void rejectsHtmlPage() {
+        assertThrows(FeedParseException.class,
+                () -> FeedParser.parse("<!DOCTYPE html><html><body><h1>News</h1></body></html>", "ko"));
+    }
+
+    /**
+     * "기사가 0건인 피드"와 "읽지 못한 피드"는 다른 사건이다. 뒤엣것만 예외로 알린다.
+     */
+    @Test
+    void rejectsBlankOrBrokenXml() {
+        assertThrows(FeedParseException.class, () -> FeedParser.parse(null, "ko"));
+        assertThrows(FeedParseException.class, () -> FeedParser.parse("   ", "ko"));
+        assertThrows(FeedParseException.class, () -> FeedParser.parse("<rss><channel><item>", "ko"));
     }
 
     @Test
-    void returnsEmptyForBlankOrBrokenXml() {
-        assertTrue(FeedParser.parse(null, "ko").isEmpty());
-        assertTrue(FeedParser.parse("   ", "ko").isEmpty());
-        assertTrue(FeedParser.parse("<rss><channel><item>", "ko").isEmpty());
+    void returnsEmptyForFeedWithoutItems() {
+        assertTrue(FeedParser.parse("<rss version=\"2.0\"><channel><title>빈 피드</title></channel></rss>", "ko")
+                .isEmpty());
+    }
+
+    /**
+     * Atom 피드가 접두사를 붙여 오는 경우가 있다. 지역명으로 찾지 않으면 기사가 0건이 된다.
+     */
+    @Test
+    void parsesPrefixedAtomEntries() {
+        String prefixed = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <atom:feed xmlns:atom="http://www.w3.org/2005/Atom">
+                  <atom:entry>
+                    <atom:title>Prefixed HBM4</atom:title>
+                    <atom:link rel="alternate" href="https://www.eetimes.com/prefixed/"/>
+                    <atom:summary>요약</atom:summary>
+                    <atom:published>2026-08-10T09:00:00Z</atom:published>
+                  </atom:entry>
+                </atom:feed>
+                """;
+
+        List<CollectedArticle> articles = FeedParser.parse(prefixed, "en");
+
+        assertEquals(1, articles.size());
+        assertEquals("Prefixed HBM4", articles.get(0).title());
+        assertEquals("https://www.eetimes.com/prefixed/", articles.get(0).canonicalUrl());
     }
 
     /**
@@ -130,7 +165,7 @@ class FeedParserTest {
                 </item></channel></rss>
                 """;
 
-        assertTrue(FeedParser.parse(xxe, "ko").isEmpty());
+        assertThrows(FeedParseException.class, () -> FeedParser.parse(xxe, "ko"));
     }
 
     /**
@@ -151,7 +186,7 @@ class FeedParserTest {
                 </item></channel></rss>
                 """;
 
-        assertTrue(FeedParser.parse(bomb, "ko").isEmpty());
+        assertThrows(FeedParseException.class, () -> FeedParser.parse(bomb, "ko"));
     }
 
     @Test

@@ -34,18 +34,20 @@ public final class FeedParser {
     private FeedParser() {
     }
 
+    /**
+     * @throws FeedParseException XML로 읽지 못했을 때. "항목이 0건"과 구분하려고 예외로 알린다.
+     */
     public static List<CollectedArticle> parse(String xml, String fallbackLanguage) {
         if (!StringUtils.hasText(xml)) {
-            return List.of();
+            throw new FeedParseException("피드 본문이 비어 있다.");
         }
 
         Document document;
         try {
             document = secureDocumentBuilder().parse(new InputSource(new StringReader(xml)));
         } catch (Exception e) {
-            // HTML 페이지를 FEED로 등록해 둔 경우가 여기로 온다. 실행을 죽이지 않고 경고로 남긴다.
-            log.warn("피드를 파싱하지 못했다. error={}", e.getMessage());
-            return List.of();
+            // HTML 페이지를 FEED로 등록해 둔 경우가 여기로 온다.
+            throw new FeedParseException("피드를 XML로 읽지 못했다: " + e.getMessage(), e);
         }
 
         List<CollectedArticle> articles = new ArrayList<>();
@@ -59,6 +61,8 @@ public final class FeedParser {
      */
     private static DocumentBuilder secureDocumentBuilder() throws ParserConfigurationException {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        // atom: 같은 접두사가 붙은 피드를 지역명으로 찾으려면 켜야 한다.
+        factory.setNamespaceAware(true);
         factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
         factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
@@ -69,7 +73,7 @@ public final class FeedParser {
     }
 
     private static List<CollectedArticle> parseItems(Document document, String tagName, String fallbackLanguage) {
-        NodeList nodes = document.getElementsByTagName(tagName);
+        NodeList nodes = document.getElementsByTagNameNS("*", tagName);
         List<CollectedArticle> articles = new ArrayList<>();
 
         for (int i = 0; i < nodes.getLength(); i++) {
@@ -103,7 +107,7 @@ public final class FeedParser {
      * Atom은 링크가 여러 개일 수 있어 {@code rel="alternate"}(또는 rel 없음)인 것을 원문으로 본다.
      */
     private static String linkOf(Element element) {
-        NodeList links = element.getElementsByTagName("link");
+        NodeList links = element.getElementsByTagNameNS("*", "link");
 
         for (int i = 0; i < links.getLength(); i++) {
             if (!(links.item(i) instanceof Element link)) {

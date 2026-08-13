@@ -16,6 +16,7 @@ import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.feed.FeedClient;
+import com.example.be.domain.collection.feed.FeedFetchResult;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.ArticleVersionRepository;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
@@ -26,16 +27,23 @@ import com.example.be.domain.topics.entity.Topic;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 조합(주제 × 소스) 하나를 실제로 수집한다.
  *
  * <p>실행 전체를 여는·닫는 일은 호출부(runs API)가 하고, 여기서는 조합 하나만 책임진다.
  * 조합 하나가 실패해도 예외를 밖으로 던지지 않는다 — 실행 상태는 그 결과들을 합쳐서 정해진다.
+ *
+ * <p>{@code @Transactional}을 붙여 둔 이유는 여기서 엔티티를 더티 체킹으로 고치기 때문이다.
+ * 경계 없이 호출되면 변경이 반영되지 않는다. <b>조합별 격리(REQUIRES_NEW)는 오케스트레이터가 생기는
+ * 후속 이슈에서 정한다</b> — 실행 행이 먼저 커밋돼 있어야 하고, 그 시점을 정하는 건 runs API다.
  */
 @Slf4j
 @Component
@@ -57,10 +65,18 @@ public class CollectionExecutor {
      * <p>{@code scannedCount}는 <b>필터 전에 받은 건수</b>다. 키워드로 걸러진 기사도 "훑기는 했다".
      * 그래서 {@code skipped = scanned - new - updated}에는 중복과 필터 탈락이 함께 들어간다.
      */
+    @Transactional
     public void execute(CollectionRun run, CollectionRunItem item, Topic topic, Source source) {
         try {
-            List<CollectedArticle> collected = collect(topic, source);
-            List<CollectedArticle> matched = TopicKeywordFilter.filter(topic, collected)
+            FeedFetchResult fetched = collect(topic, source);
+            if (!fetched.success()) {
+                item.markFailed();
+                run.addWarning(warning(source, fetched.failureCode(), fetched.failureMessage()));
+                return;
+            }
+
+            List<CollectedArticle> collected = fetched.articles();
+            List<CollectedArticle> matched = dedupeByUrl(TopicKeywordFilter.filter(topic, collected))
                     .stream()
                     .limit(maxArticlesPerRun(source))
                     .toList();
@@ -83,17 +99,31 @@ public class CollectionExecutor {
             log.warn("조합 수집에 실패했다. topicId={} sourceId={} error={}",
                     topic.getId(), source.getId(), e.getMessage(), e);
             item.markFailed();
-            run.addWarning(CollectionRunWarning.builder()
-                    .source(source)
-                    .code(CollectionRunWarning.CODE_FEED_UNREADABLE)
-                    .message(messageOf(e))
-                    .articleCount(0)
-                    .occurredAt(LocalDateTime.now())
-                    .build());
+            run.addWarning(warning(source, CollectionRunWarning.CODE_FEED_UNREADABLE, messageOf(e)));
         }
     }
 
-    private List<CollectedArticle> collect(Topic topic, Source source) {
+    private CollectionRunWarning warning(Source source, String code, String message) {
+        return CollectionRunWarning.builder()
+                .source(source)
+                .code(code)
+                .message(message)
+                .articleCount(0)
+                .occurredAt(LocalDateTime.now())
+                .build();
+    }
+
+    /**
+     * 같은 실행·같은 조합에서 같은 URL이 두 번 오면 uq_run_article을 위반해 조합 전체가 실패한다.
+     * 실제로 한 기사를 여러 섹션에 중복 노출하는 피드가 있다. 저장 전에 접는다.
+     */
+    private List<CollectedArticle> dedupeByUrl(List<CollectedArticle> articles) {
+        Map<String, CollectedArticle> byUrlHash = new LinkedHashMap<>();
+        articles.forEach(article -> byUrlHash.putIfAbsent(ArticleHasher.urlHash(article.canonicalUrl()), article));
+        return List.copyOf(byUrlHash.values());
+    }
+
+    private FeedFetchResult collect(Topic topic, Source source) {
         if (!source.isSearchKind()) {
             return feedClient.fetch(source.getUrlTemplate(), source.getLanguage());
         }
@@ -103,14 +133,14 @@ public class CollectionExecutor {
             // {query} 자리표시자를 쓰는 SEARCH 소스는 아직 어댑터가 없다. 조용히 비우지 않고 남긴다.
             log.warn("provider 키가 아닌 SEARCH 소스는 아직 수집하지 않는다. sourceId={} urlTemplate={}",
                     source.getId(), source.getUrlTemplate());
-            return List.of();
+            return FeedFetchResult.unreadable("어댑터가 없는 SEARCH 소스다: " + source.getUrlTemplate());
         }
 
         return searchConnectorRegistry.find(provider)
-                .map(connector -> search(connector, topic, source))
+                .map(connector -> FeedFetchResult.ok(search(connector, topic, source)))
                 .orElseGet(() -> {
                     log.warn("등록된 커넥터가 없다. provider={}", provider);
-                    return List.of();
+                    return FeedFetchResult.unreadable("등록된 커넥터가 없다: " + provider);
                 });
     }
 
