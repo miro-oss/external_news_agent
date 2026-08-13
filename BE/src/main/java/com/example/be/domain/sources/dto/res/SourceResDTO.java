@@ -8,6 +8,7 @@ import lombok.Builder;
 import lombok.Getter;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -225,5 +226,42 @@ public class SourceResDTO {
 
         @Schema(description = "주제명", example = "HBM")
         private final String name;
+    }
+
+    @Getter
+    @Builder
+    @Schema(name = "SourceRobotsChecked", description = "robots.txt 재확인 결과")
+    public static class RobotsChecked {
+
+        @Schema(description = "수집 소스 ID", example = "1")
+        private Long sourceId;
+
+        @Schema(description = "수집 허용 여부", example = "allowed",
+                allowableValues = {"allowed", "disallowed", "unknown"})
+        private String robotsStatus;
+
+        @Schema(description = "확인 시각", example = "2026-08-10T10:05:00+09:00")
+        private LocalDateTime robotsCheckedAt;
+
+        @Schema(description = "robots.txt가 요구한 요청 간격(초). 없으면 null", example = "5")
+        private Long crawlDelaySeconds;
+
+        @Schema(description = "조회한 robots.txt 주소", example = "https://www.etnews.com/robots.txt")
+        private String robotsTxtUrl;
+    }
+
+    @Getter
+    @Builder
+    @Schema(name = "SourceRobotsCheckFailed", description = "robots.txt 확인 실패")
+    public static class RobotsCheckFailed {
+
+        @Schema(description = "수집 소스 ID", example = "1")
+        private Long sourceId;
+
+        @Schema(description = "저장된 상태. 확인하지 못하면 unknown으로 둡니다", example = "unknown")
+        private String robotsStatus;
+
+        @Schema(description = "실패 사유", example = "CONNECT_TIMEOUT")
+        private String reason;
     }
 }

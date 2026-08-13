@@ -83,6 +83,16 @@ public class Source {
     @Column(name = "reliability_score")
     private BigDecimal reliabilityScore;
 
+    /** 조건부 GET 상태. 다음 요청에 If-None-Match로 실어 보내고 304면 파싱을 건너뛴다(F6). */
+    @Column(name = "etag", length = 200)
+    private String etag;
+
+    @Column(name = "last_modified", length = 100)
+    private String lastModified;
+
+    @Column(name = "last_fetched_at")
+    private LocalDateTime lastFetchedAt;
+
     @Convert(converter = YnBooleanConverter.class)
     @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "active_yn", nullable = false, length = 1)
@@ -122,6 +132,31 @@ public class Source {
 
     public void changeActive(boolean active) {
         this.active = active;
+    }
+
+    /**
+     * robots.txt를 실제로 확인한 결과를 남긴다. 요청으로 바꿀 수 없는 값이라 update()가 아니라 여기로 들어온다.
+     */
+    public void applyRobotsCheck(String robotsStatus, LocalDateTime checkedAt) {
+        this.robotsStatus = robotsStatus;
+        this.robotsCheckedAt = checkedAt;
+    }
+
+    /**
+     * 다음 조건부 GET에 쓸 검증자. 상대가 주지 않으면 null이고, 그러면 다음 요청은 전체 조회가 된다.
+     */
+    public void applyFetchState(String etag, String lastModified, LocalDateTime fetchedAt) {
+        this.etag = etag;
+        this.lastModified = lastModified;
+        this.lastFetchedAt = fetchedAt;
+    }
+
+    public boolean respectsRobots() {
+        return crawlPolicy == null || !CrawlPolicy.ROBOTS_MODE_IGNORE.equals(crawlPolicy.robotsMode());
+    }
+
+    public boolean isRobotsDisallowed() {
+        return ROBOTS_STATUS_DISALLOWED.equals(robotsStatus);
     }
 
     public int getLinkedTopicCount() {

@@ -5,6 +5,8 @@ import com.example.be.domain.sources.dto.req.SourceReqDTO;
 import com.example.be.domain.sources.dto.res.SourceResDTO;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.SearchProvider;
+import com.example.be.domain.collection.robots.RobotsDecision;
+import com.example.be.domain.collection.robots.RobotsPolicyService;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.exception.SourceException;
 import com.example.be.domain.sources.exception.code.SourceErrorCode;
@@ -34,6 +36,7 @@ public class SourceCommandServiceImpl implements SourceCommandService {
     private static final String HTTPS_PREFIX = "https://";
 
     private final SourceRepository sourceRepository;
+    private final RobotsPolicyService robotsPolicyService;
 
     @Override
     public SourceResDTO.Created createSource(SourceReqDTO.Create request) {
@@ -223,5 +226,29 @@ public class SourceCommandServiceImpl implements SourceCommandService {
         } catch (IllegalArgumentException exception) {
             return false;
         }
+    }
+
+    /**
+     * 명세대로 조회에 실패하면 상태를 unknown으로 <b>저장한 뒤</b> SOURCE502를 낸다. 실패를 응답으로만
+     * 알리고 상태를 그대로 두면 목록 화면이 옛 값을 계속 보여준다.
+     *
+     * <p>{@code noRollbackFor}가 없으면 아래에서 던지는 예외가 방금 적은 unknown까지 함께 되돌린다.
+     * 런타임 예외는 기본이 롤백이라, "저장한 뒤 502" 계약이 조용히 깨진다.
+     */
+    @Transactional(noRollbackFor = SourceException.class)
+    @Override
+    public SourceResDTO.RobotsChecked checkRobots(Long sourceId) {
+        Source source = getSource(sourceId);
+        RobotsDecision decision = robotsPolicyService.evaluate(source);
+        decision.applyTo(source);
+
+        if (!decision.resolved()) {
+            throw new SourceException(SourceErrorCode.ROBOTS_CHECK_FAILED, Map.of(
+                    "sourceId", sourceId,
+                    "robotsStatus", Source.ROBOTS_STATUS_UNKNOWN,
+                    "reason", decision.failureReason()));
+        }
+
+        return SourceConverter.toRobotsChecked(sourceId, decision);
     }
 }

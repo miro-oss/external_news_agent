@@ -22,7 +22,9 @@ public enum SourceErrorCode implements BaseErrorCode {
     DUPLICATED_SOURCE(HttpStatus.CONFLICT, "SOURCE409",
             "이미 등록된 수집 소스입니다."),
     SOURCE_LINKED_TO_TOPIC(HttpStatus.CONFLICT, "SOURCE409",
-            "주제에 연결된 소스는 삭제할 수 없습니다. 연결을 먼저 해제해 주세요.");
+            "주제에 연결된 소스는 삭제할 수 없습니다. 연결을 먼저 해제해 주세요."),
+    ROBOTS_CHECK_FAILED(HttpStatus.BAD_GATEWAY, "SOURCE502",
+            "robots.txt를 확인하지 못했습니다.");
 
     private final HttpStatus status;
     private final String code;

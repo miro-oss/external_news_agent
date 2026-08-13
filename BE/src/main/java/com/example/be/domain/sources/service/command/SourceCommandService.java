@@ -10,4 +10,6 @@ public interface SourceCommandService {
     SourceResDTO.Updated updateSource(Long sourceId, SourceReqDTO.Update request);
 
     SourceResDTO.Deleted deleteSource(Long sourceId);
+
+    SourceResDTO.RobotsChecked checkRobots(Long sourceId);
 }
