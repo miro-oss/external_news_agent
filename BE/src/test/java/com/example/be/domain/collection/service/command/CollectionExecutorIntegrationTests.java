@@ -16,6 +16,9 @@ import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.feed.FeedClient;
+import com.example.be.domain.collection.feed.FeedFetch;
+import com.example.be.domain.collection.robots.RobotsDecision;
+import com.example.be.domain.collection.robots.RobotsPolicyService;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.ArticleVersionRepository;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
@@ -45,8 +48,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import static org.mockito.BDDMockito.willThrow;
 
 /**
@@ -90,6 +93,10 @@ class CollectionExecutorIntegrationTests {
     @MockitoBean
     private SearchConnectorRegistry searchConnectorRegistry;
 
+    /** 대역으로 두지 않으면 테스트가 실제 네트워크로 robots.txt를 부른다. */
+    @MockitoBean
+    private RobotsPolicyService robotsPolicyService;
+
     private Topic topic;
     private Source source;
     private String articleUrl;
@@ -119,6 +126,8 @@ class CollectionExecutorIntegrationTests {
                 .build());
 
         articleUrl = "https://www.hankyung.com/article/" + UUID.randomUUID();
+
+        given(robotsPolicyService.check(any())).willReturn(allowedRobots());
     }
 
     @Test
@@ -252,8 +261,8 @@ class CollectionExecutorIntegrationTests {
      */
     @Test
     void marksItemFailedWhenFeedCouldNotBeRead() {
-        given(feedClient.fetch(anyString(), any()))
-                .willReturn(FetchResult.unreadable("피드 응답 404 NOT_FOUND"));
+        given(feedClient.fetch(any()))
+                .willReturn(new FeedFetch(FetchResult.unreadable("피드 응답 404 NOT_FOUND"), false, null, null));
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run);
 
@@ -299,6 +308,65 @@ class CollectionExecutorIntegrationTests {
         assertEquals(2, item.getScannedCount());
         assertEquals(1, item.getNewCount());
         assertEquals(1, runArticleRepository.findByRunIdOrderByIdAsc(run.getId()).size());
+    }
+
+    /**
+     * robots.txt가 막은 소스는 요청하지 않는다. 정책대로 동작한 것이므로 실패가 아니라 SKIPPED다 —
+     * FAILED로 적으면 실행이 매번 PARTIAL이 된다.
+     */
+    @Test
+    void skipsSourceBlockedByRobots() {
+        given(robotsPolicyService.check(any())).willReturn(new RobotsDecision(
+                false, Source.ROBOTS_STATUS_DISALLOWED, LocalDateTime.now(),
+                "https://example.com/robots.txt", null, null));
+        CollectionRun run = newRun();
+        CollectionRunItem item = newItem(run);
+
+        collectionExecutor.execute(run, item, topic, source);
+
+        assertEquals(RunItemStatus.SKIPPED, item.getStatus());
+        assertEquals(1, run.getWarningCount());
+        assertEquals(CollectionRunWarning.CODE_ROBOTS_DISALLOWED, run.getWarnings().get(0).getCode());
+        then(feedClient).shouldHaveNoInteractions();
+    }
+
+    /**
+     * 304도 실패가 아니다. 바뀐 게 없다는 뜻이라 경고를 남기지 않는다.
+     */
+    @Test
+    void skipsSourceWhenFeedIsNotModified() {
+        given(feedClient.fetch(any()))
+                .willReturn(new FeedFetch(FetchResult.ok(List.of()), true, "\"v1\"", null));
+        CollectionRun run = newRun();
+        CollectionRunItem item = newItem(run);
+
+        collectionExecutor.execute(run, item, topic, source);
+
+        assertEquals(RunItemStatus.SKIPPED, item.getStatus());
+        assertEquals(0, run.getWarningCount());
+        assertEquals("\"v1\"", source.getEtag());
+    }
+
+    /**
+     * 다음 실행이 조건부 GET을 보낼 수 있도록 검증자를 소스에 남긴다.
+     */
+    @Test
+    void storesValidatorsOnSource() {
+        given(feedClient.fetch(any())).willReturn(new FeedFetch(
+                FetchResult.ok(List.of(article("HBM4 양산 시작", "요약"))), false,
+                "\"v2\"", "Mon, 10 Aug 2026 09:00:00 GMT"));
+        CollectionRun run = newRun();
+
+        collectionExecutor.execute(run, newItem(run), topic, source);
+
+        assertEquals("\"v2\"", source.getEtag());
+        assertEquals("Mon, 10 Aug 2026 09:00:00 GMT", source.getLastModified());
+        assertNotNull(source.getLastFetchedAt());
+    }
+
+    private RobotsDecision allowedRobots() {
+        return new RobotsDecision(true, Source.ROBOTS_STATUS_ALLOWED, LocalDateTime.now(),
+                "https://example.com/robots.txt", null, null);
     }
 
     /**
@@ -351,7 +419,7 @@ class CollectionExecutorIntegrationTests {
     @Test
     void recordsWarningInsteadOfPropagatingFailure() {
         willThrow(new IllegalStateException("피드 서버가 응답하지 않는다"))
-                .given(feedClient).fetch(anyString(), any());
+                .given(feedClient).fetch(any());
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run);
 
@@ -363,7 +431,7 @@ class CollectionExecutorIntegrationTests {
     }
 
     private void givenFeed(CollectedArticle... articles) {
-        given(feedClient.fetch(anyString(), any())).willReturn(FetchResult.ok(List.of(articles)));
+        given(feedClient.fetch(any())).willReturn(new FeedFetch(FetchResult.ok(List.of(articles)), false, null, null));
     }
 
     private CollectedArticle article(String title, String summary) {

@@ -1,6 +1,7 @@
 package com.example.be.domain.sources.converter;
 
 import com.example.be.domain.sources.dto.req.SourceReqDTO;
+import com.example.be.domain.collection.robots.RobotsDecision;
 import com.example.be.domain.sources.dto.res.SourceResDTO;
 import com.example.be.domain.sources.entity.SearchProvider;
 import com.example.be.domain.sources.entity.Source;
@@ -159,5 +160,15 @@ public class SourceConverter {
 
     private static String trim(String value) {
         return value == null ? null : value.trim();
+    }
+
+    public static SourceResDTO.RobotsChecked toRobotsChecked(Long sourceId, RobotsDecision decision) {
+        return SourceResDTO.RobotsChecked.builder()
+                .sourceId(sourceId)
+                .robotsStatus(decision.robotsStatus())
+                .robotsCheckedAt(decision.checkedAt())
+                .crawlDelaySeconds(decision.crawlDelaySeconds())
+                .robotsTxtUrl(decision.robotsTxtUrl())
+                .build();
     }
 }

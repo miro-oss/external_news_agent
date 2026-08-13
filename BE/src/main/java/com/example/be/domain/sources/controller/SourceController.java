@@ -369,4 +369,67 @@ public class SourceController {
     ) {
         return ApiResponse.of(GeneralSuccessCode.DELETED, sourceCommandService.deleteSource(sourceId));
     }
+
+    @PostMapping("/{sourceId}/robots-check")
+    @Operation(
+            summary = "robots.txt 정책 재확인",
+            description = """
+                    소스 URL의 robots.txt를 조회해 수집 허용 여부를 갱신합니다.
+                    결과는 robots_status와 robots_checked_at에 저장되어 목록 화면에서 재계산 없이 표시됩니다.
+                    수집 실행 전에 서버가 자동으로도 확인하지만, 소스 등록 직후나 정책이 바뀐 경우 수동 재확인에 씁니다.
+                    robots.txt가 없으면(404) 제한이 없다는 뜻이라 allowed입니다.
+                    조회 자체에 실패하면 상태를 unknown으로 저장한 뒤 SOURCE502로 응답합니다.
+                    """
+    )
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "200",
+                    description = "성공입니다.",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                            {
+                              "isSuccess": true,
+                              "code": "COMMON200",
+                              "message": "성공입니다.",
+                              "result": {
+                                "sourceId": 1,
+                                "robotsStatus": "allowed",
+                                "robotsCheckedAt": "2026-08-10T10:05:00+09:00",
+                                "crawlDelaySeconds": 5,
+                                "robotsTxtUrl": "https://www.etnews.com/robots.txt"
+                              }
+                            }
+                            """))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "404",
+                    description = "수집 소스를 찾을 수 없습니다.",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                            {
+                              "isSuccess": false,
+                              "code": "SOURCE404",
+                              "message": "수집 소스를 찾을 수 없습니다.",
+                              "result": {}
+                            }
+                            """))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "502",
+                    description = "robots.txt를 확인하지 못했습니다.",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                            {
+                              "isSuccess": false,
+                              "code": "SOURCE502",
+                              "message": "robots.txt를 확인하지 못했습니다.",
+                              "result": {
+                                "sourceId": 1,
+                                "robotsStatus": "unknown",
+                                "reason": "CONNECT_TIMEOUT"
+                              }
+                            }
+                            """)))
+    })
+    public ApiResponse<SourceResDTO.RobotsChecked> checkRobots(
+            @Parameter(description = "수집 소스 ID", example = "1")
+            @PathVariable Long sourceId
+    ) {
+        return ApiResponse.of(GeneralSuccessCode.OK, sourceCommandService.checkRobots(sourceId));
+    }
 }

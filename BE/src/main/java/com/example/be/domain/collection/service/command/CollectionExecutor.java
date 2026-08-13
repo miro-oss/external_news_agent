@@ -16,6 +16,10 @@ import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.feed.FeedClient;
+import com.example.be.domain.collection.feed.FeedFetch;
+import com.example.be.domain.collection.feed.FeedRequest;
+import com.example.be.domain.collection.robots.RobotsDecision;
+import com.example.be.domain.collection.robots.RobotsPolicyService;
 import com.example.be.domain.collection.connector.dto.res.FetchResult;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.ArticleVersionRepository;
@@ -54,6 +58,7 @@ public class CollectionExecutor {
     private static final int DEFAULT_MAX_ARTICLES_PER_RUN = 30;
 
     private final FeedClient feedClient;
+    private final RobotsPolicyService robotsPolicyService;
     private final SearchConnectorRegistry searchConnectorRegistry;
     private final ArticleRepository articleRepository;
     private final ArticleVersionRepository articleVersionRepository;
@@ -68,7 +73,11 @@ public class CollectionExecutor {
     @Transactional
     public void execute(CollectionRun run, CollectionRunItem item, Topic topic, Source source) {
         try {
-            FetchResult fetched = collect(topic, source);
+            FetchResult fetched = collect(run, item, topic, source);
+            if (item.getStatus() == RunItemStatus.SKIPPED) {
+                return;
+            }
+
             if (!fetched.success()) {
                 item.markFailed();
                 run.addWarning(warning(source, fetched.failureCode(), fetched.failureMessage()));
@@ -123,9 +132,9 @@ public class CollectionExecutor {
         return List.copyOf(byUrlHash.values());
     }
 
-    private FetchResult collect(Topic topic, Source source) {
+    private FetchResult collect(CollectionRun run, CollectionRunItem item, Topic topic, Source source) {
         if (!source.isSearchKind()) {
-            return feedClient.fetch(source.getUrlTemplate(), source.getLanguage());
+            return collectFeed(run, item, source);
         }
 
         SearchProvider provider = SearchProvider.fromKey(source.getUrlTemplate());
@@ -142,6 +151,30 @@ public class CollectionExecutor {
                     log.warn("등록된 커넥터가 없다. provider={}", provider);
                     return FetchResult.unreadable("등록된 커넥터가 없다: " + provider);
                 });
+    }
+
+    /**
+     * robots를 먼저 보고, 막혔으면 요청하지 않는다. 조건부 GET으로 304가 오면 파싱도 하지 않는다.
+     * 둘 다 실패가 아니라 SKIPPED다 — 정책대로 동작한 것을 FAILED로 적으면 실행이 매번 PARTIAL이 된다.
+     */
+    private FetchResult collectFeed(CollectionRun run, CollectionRunItem item, Source source) {
+        RobotsDecision robots = robotsPolicyService.check(source);
+        if (!robots.allowed()) {
+            item.markSkipped();
+            run.addWarning(warning(source, CollectionRunWarning.CODE_ROBOTS_DISALLOWED,
+                    "robots.txt가 수집을 막는다: " + robots.robotsTxtUrl()));
+            return FetchResult.ok(List.of());
+        }
+
+        FeedFetch fetch = feedClient.fetch(FeedRequest.of(source, robots.crawlDelay(), run.isForceRefresh()));
+        source.applyFetchState(fetch.etag(), fetch.lastModified(), LocalDateTime.now());
+
+        if (fetch.notModified()) {
+            item.markSkipped();
+            return FetchResult.ok(List.of());
+        }
+
+        return fetch.result();
     }
 
     private FetchResult search(SearchConnector connector, Topic topic, Source source) {
