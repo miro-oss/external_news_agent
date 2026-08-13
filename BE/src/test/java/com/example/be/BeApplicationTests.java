@@ -1,5 +1,9 @@
 package com.example.be;
 
+import com.example.be.domain.collection.repository.ArticleRepository;
+import com.example.be.domain.collection.repository.ArticleVersionRepository;
+import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.repository.TopicRepository;
@@ -26,6 +30,18 @@ class BeApplicationTests {
 
     @MockitoBean
     private CollectionRunRepository collectionRunRepository;
+
+    @MockitoBean
+    private ArticleRepository articleRepository;
+
+    @MockitoBean
+    private ArticleVersionRepository articleVersionRepository;
+
+    @MockitoBean
+    private CollectionRunArticleRepository collectionRunArticleRepository;
+
+    @MockitoBean
+    private CollectionRunItemRepository collectionRunItemRepository;
 
     @Test
     void contextLoads() {
