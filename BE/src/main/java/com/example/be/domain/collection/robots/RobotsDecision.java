@@ -18,7 +18,17 @@ public record RobotsDecision(boolean allowed,
                              Duration crawlDelay,
                              String failureReason) {
 
-    static RobotsDecision skipped(Source source) {
+    /**
+     * 판정을 소스에 적는다. 확인을 건너뛴 경우(robotsMode=ignore)에는 상태를 덮지 않는다.
+     */
+    public void applyTo(Source source) {
+        if (checkedAt != null && robotsStatus != null) {
+            source.applyRobotsCheck(robotsStatus, checkedAt);
+        }
+    }
+
+    /** 확인하지 않았다는 뜻. SEARCH 소스와 robotsMode=ignore가 여기로 온다. */
+    public static RobotsDecision skipped(Source source) {
         return new RobotsDecision(true, source.getRobotsStatus(), source.getRobotsCheckedAt(), null, null, null);
     }
 
@@ -26,7 +36,14 @@ public record RobotsDecision(boolean allowed,
         return failureReason == null;
     }
 
+    /**
+     * 초 단위로 올림한다. {@code Crawl-delay: 0.5}를 내림하면 0이 되는데, 응답의 0은 "간격이 없다"로 읽힌다.
+     */
     public Long crawlDelaySeconds() {
-        return crawlDelay == null ? null : crawlDelay.toSeconds();
+        if (crawlDelay == null) {
+            return null;
+        }
+
+        return (crawlDelay.toMillis() + 999) / 1000;
     }
 }

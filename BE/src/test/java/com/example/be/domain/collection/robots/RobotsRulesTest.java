@@ -106,6 +106,52 @@ class RobotsRulesTest {
         assertTrue(rules.allows("https://example.com/feed"));
     }
 
+    /**
+     * 연달아 붙은 User-agent 줄은 하나의 그룹이고 규칙을 공유한다. 줄마다 덮어쓰면
+     * "우리" 다음에 "남"이 오는 순간 우리에게 적용될 금지 규칙을 놓친다.
+     */
+    @Test
+    void sharesRulesAcrossUserAgentsInOneGroup() {
+        RobotsRules rules = RobotsRules.parse("""
+                User-agent: external-news-agent
+                User-agent: another-bot
+                Disallow: /private/
+                """, "external-news-agent");
+
+        assertFalse(rules.allows("https://example.com/private/x"));
+    }
+
+    /**
+     * 규칙 줄을 지나 다시 User-agent가 나오면 새 그룹이다. 앞 그룹의 매칭이 이어지면 안 된다.
+     */
+    @Test
+    void startsNewGroupAfterRuleLine() {
+        RobotsRules rules = RobotsRules.parse("""
+                User-agent: external-news-agent
+                Disallow: /mine/
+                User-agent: another-bot
+                Disallow: /theirs/
+                """, "external-news-agent");
+
+        assertFalse(rules.allows("https://example.com/mine/x"));
+        assertTrue(rules.allows("https://example.com/theirs/x"));
+    }
+
+    /**
+     * 0.5초를 내림하면 0이 되고, 응답의 0은 "간격이 없다"로 읽힌다.
+     */
+    @Test
+    void roundsSubSecondCrawlDelayUp() {
+        RobotsRules rules = RobotsRules.parse("""
+                User-agent: *
+                Crawl-delay: 0.5
+                """, "external-news-agent");
+        RobotsDecision decision = new RobotsDecision(true, "allowed", null, null, rules.crawlDelay(), null);
+
+        assertEquals(Duration.ofMillis(500), rules.crawlDelay());
+        assertEquals(1L, decision.crawlDelaySeconds());
+    }
+
     @Test
     void permitsEverythingWhenFileIsEmpty() {
         assertTrue(RobotsRules.parse("", "external-news-agent").allows("https://example.com/x"));

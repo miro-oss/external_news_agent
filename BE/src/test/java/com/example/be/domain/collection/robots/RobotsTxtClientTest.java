@@ -63,6 +63,20 @@ class RobotsTxtClientTest {
         assertTrue(lookup.allows(FEED_URL));
     }
 
+    /**
+     * 401·403은 "없다"가 아니라 "안 보여준다"이다. 제한 없음으로 읽으면 접근이 거부된 robots.txt를
+     * 허용으로 오판한다.
+     */
+    @Test
+    void reportsUnknownWhenLookupIsForbidden() {
+        server.expect(requestTo(ROBOTS_URL)).andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        RobotsLookup lookup = client.lookup(FEED_URL);
+
+        assertFalse(lookup.resolved());
+        assertEquals("HTTP_403", lookup.reason());
+    }
+
     @Test
     void detectsDisallowedFeed() {
         server.expect(requestTo(ROBOTS_URL))

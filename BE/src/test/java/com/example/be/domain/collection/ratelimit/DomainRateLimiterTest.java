@@ -20,15 +20,15 @@ class DomainRateLimiterTest {
 
     @Test
     void doesNotWaitForTheFirstRequest() {
-        assertEquals(Duration.ZERO, limiter.waitFor("https://www.hankyung.com/feed/economy", null));
+        assertEquals(Duration.ZERO, limiter.reserve("https://www.hankyung.com/feed/economy", null));
     }
 
     @Test
     void waitsForTheRemainderOfTheInterval() {
-        limiter.recordRequest("https://www.hankyung.com/feed/economy");
+        limiter.reserve("https://www.hankyung.com/feed/economy", null);
         clock.advance(Duration.ofMillis(400));
 
-        assertEquals(Duration.ofMillis(600), limiter.waitFor("https://www.hankyung.com/feed/it", null));
+        assertEquals(Duration.ofMillis(600), limiter.reserve("https://www.hankyung.com/feed/it", null));
     }
 
     /**
@@ -36,10 +36,21 @@ class DomainRateLimiterTest {
      */
     @Test
     void tracksEachDomainSeparately() {
-        limiter.recordRequest("https://www.hankyung.com/feed/economy");
+        limiter.reserve("https://www.hankyung.com/feed/economy", null);
 
-        assertEquals(Duration.ZERO, limiter.waitFor("https://www.mk.co.kr/rss/50000001/", null));
-        assertTrue(limiter.waitFor("https://www.hankyung.com/feed/it", null).toMillis() > 0);
+        assertEquals(Duration.ZERO, limiter.reserve("https://www.mk.co.kr/rss/50000001/", null));
+        assertTrue(limiter.reserve("https://www.hankyung.com/feed/it", null).toMillis() > 0);
+    }
+
+    /**
+     * 슬롯을 원자적으로 잡지 않으면 스레드 둘이 같은 대기 시간을 계산하고 함께 깨어나 동시에 요청한다.
+     * 시간을 전혀 흘리지 않고 연속으로 잡아도 간격이 누적돼야 한다.
+     */
+    @Test
+    void stacksReservationsWithoutAdvancingTime() {
+        assertEquals(Duration.ZERO, limiter.reserve("https://example.com/feed", null));
+        assertEquals(Duration.ofSeconds(1), limiter.reserve("https://example.com/feed", null));
+        assertEquals(Duration.ofSeconds(2), limiter.reserve("https://example.com/feed", null));
     }
 
     /**
@@ -47,9 +58,9 @@ class DomainRateLimiterTest {
      */
     @Test
     void prefersCrawlDelayOverDefault() {
-        limiter.recordRequest("https://example.com/feed");
+        limiter.reserve("https://example.com/feed", Duration.ofSeconds(5));
 
-        assertEquals(Duration.ofSeconds(5), limiter.waitFor("https://example.com/feed", Duration.ofSeconds(5)));
+        assertEquals(Duration.ofSeconds(5), limiter.reserve("https://example.com/feed", Duration.ofSeconds(5)));
     }
 
     /**
@@ -57,17 +68,17 @@ class DomainRateLimiterTest {
      */
     @Test
     void capsAbsurdCrawlDelay() {
-        limiter.recordRequest("https://example.com/feed");
+        limiter.reserve("https://example.com/feed", Duration.ofHours(1));
 
-        assertEquals(MAX_INTERVAL, limiter.waitFor("https://example.com/feed", Duration.ofHours(1)));
+        assertEquals(MAX_INTERVAL, limiter.reserve("https://example.com/feed", Duration.ofHours(1)));
     }
 
     @Test
     void doesNotWaitAfterIntervalPassed() {
-        limiter.recordRequest("https://example.com/feed");
+        limiter.reserve("https://example.com/feed", null);
         clock.advance(Duration.ofSeconds(2));
 
-        assertEquals(Duration.ZERO, limiter.waitFor("https://example.com/feed", null));
+        assertEquals(Duration.ZERO, limiter.reserve("https://example.com/feed", null));
     }
 
     private static final class MutableClock extends Clock {

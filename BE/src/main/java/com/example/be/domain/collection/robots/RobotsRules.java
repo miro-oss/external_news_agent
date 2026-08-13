@@ -43,7 +43,11 @@ public record RobotsRules(List<String> disallowedPaths, List<String> allowedPath
         List<String> disallowed = new ArrayList<>();
         List<String> allowed = new ArrayList<>();
         Duration crawlDelay = null;
+
+        // 연달아 붙은 User-agent 줄은 하나의 그룹이고 뒤따르는 규칙을 공유한다.
+        // 줄마다 덮어쓰면 "User-agent: 우리" 다음에 "User-agent: 남" 이 오는 순간 우리 규칙을 놓친다.
         boolean applies = false;
+        boolean readingGroupHeader = false;
 
         for (String rawLine : robotsTxt.split("\\R")) {
             String line = stripComment(rawLine).trim();
@@ -53,11 +57,18 @@ public record RobotsRules(List<String> disallowedPaths, List<String> allowedPath
 
             String lowered = line.toLowerCase(Locale.ROOT);
             if (lowered.startsWith(USER_AGENT_DIRECTIVE)) {
+                if (!readingGroupHeader) {
+                    // 규칙 줄을 지나 다시 User-agent가 나왔다 = 새 그룹의 시작이다.
+                    applies = false;
+                    readingGroupHeader = true;
+                }
+
                 String agent = valueOf(line, USER_AGENT_DIRECTIVE);
-                applies = WILDCARD_AGENT.equals(agent) || agent.equalsIgnoreCase(userAgent);
+                applies |= WILDCARD_AGENT.equals(agent) || agent.equalsIgnoreCase(userAgent);
                 continue;
             }
 
+            readingGroupHeader = false;
             if (!applies) {
                 continue;
             }

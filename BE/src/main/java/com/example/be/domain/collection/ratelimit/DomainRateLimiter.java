@@ -26,7 +26,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class DomainRateLimiter {
 
-    private final Map<String, Instant> lastRequestAt = new ConcurrentHashMap<>();
+    /** 호스트별 "다음에 요청해도 되는 시각". 마지막 요청 시각이 아니라 예약된 슬롯이다. */
+    private final Map<String, Instant> nextSlotAt = new ConcurrentHashMap<>();
     private final Duration defaultInterval;
     private final Duration maxInterval;
     private final Clock clock;
@@ -45,43 +46,40 @@ public class DomainRateLimiter {
     }
 
     /**
-     * 다음 요청까지 기다려야 하는 시간. 계산과 대기를 나눠 둔 이유는 테스트에서 실제로 재우지 않기 위해서다.
+     * 다음 요청 슬롯을 <b>원자적으로</b> 잡고, 그때까지 기다려야 하는 시간을 돌려준다.
+     *
+     * <p>"마지막 요청 시각을 읽고 → 자고 → 기록한다"로 나누면, 스레드 둘이 같은 대기 시간을 계산한 뒤
+     * 함께 깨어나 동시에 요청한다. 간격도 Crawl-delay도 지켜지지 않는다. 그래서 조회와 예약을
+     * {@code compute} 한 번으로 묶는다.
+     *
+     * <p>대기는 호출부가 한다 — 테스트에서 실제로 재우지 않기 위해서다.
      */
-    public Duration waitFor(String url, Duration crawlDelay) {
+    public Duration reserve(String url, Duration crawlDelay) {
         String host = hostOf(url);
         if (host == null) {
             return Duration.ZERO;
         }
 
-        Instant last = lastRequestAt.get(host);
-        if (last == null) {
-            return Duration.ZERO;
-        }
-
         Duration interval = intervalFor(crawlDelay);
-        Duration elapsed = Duration.between(last, clock.instant());
-        Duration remaining = interval.minus(elapsed);
-        return remaining.isNegative() ? Duration.ZERO : remaining;
+        Instant now = clock.instant();
+        Instant slot = nextSlotAt.compute(host, (ignored, reserved) -> {
+            Instant earliest = reserved == null || reserved.isBefore(now) ? now : reserved;
+            return earliest.plus(interval);
+        });
+
+        Duration wait = Duration.between(now, slot.minus(interval));
+        return wait.isNegative() ? Duration.ZERO : wait;
     }
 
     /**
-     * 간격이 찰 때까지 기다리고 요청 시각을 남긴다.
+     * 슬롯을 잡고 그때까지 기다린다.
      */
     public void await(String url, Duration crawlDelay) {
-        Duration wait = waitFor(url, crawlDelay);
+        Duration wait = reserve(url, crawlDelay);
 
         if (!wait.isZero()) {
             log.debug("도메인 간격을 지키려고 대기한다. host={} waitMs={}", hostOf(url), wait.toMillis());
             sleep(wait);
-        }
-
-        recordRequest(url);
-    }
-
-    public void recordRequest(String url) {
-        String host = hostOf(url);
-        if (host != null) {
-            lastRequestAt.put(host, clock.instant());
         }
     }
 

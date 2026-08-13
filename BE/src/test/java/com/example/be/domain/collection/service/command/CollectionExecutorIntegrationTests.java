@@ -127,7 +127,7 @@ class CollectionExecutorIntegrationTests {
 
         articleUrl = "https://www.hankyung.com/article/" + UUID.randomUUID();
 
-        given(robotsPolicyService.check(any())).willReturn(allowedRobots());
+        given(robotsPolicyService.evaluate(any())).willReturn(allowedRobots());
     }
 
     @Test
@@ -316,7 +316,7 @@ class CollectionExecutorIntegrationTests {
      */
     @Test
     void skipsSourceBlockedByRobots() {
-        given(robotsPolicyService.check(any())).willReturn(new RobotsDecision(
+        given(robotsPolicyService.evaluate(any())).willReturn(new RobotsDecision(
                 false, Source.ROBOTS_STATUS_DISALLOWED, LocalDateTime.now(),
                 "https://example.com/robots.txt", null, null));
         CollectionRun run = newRun();
@@ -367,6 +367,38 @@ class CollectionExecutorIntegrationTests {
     private RobotsDecision allowedRobots() {
         return new RobotsDecision(true, Source.ROBOTS_STATUS_ALLOWED, LocalDateTime.now(),
                 "https://example.com/robots.txt", null, null);
+    }
+
+    /**
+     * 503 한 번에 저장해 둔 ETag가 사라지면 다음 실행부터 피드를 통째로 다시 받는다.
+     */
+    @Test
+    void keepsStoredValidatorsWhenFetchFails() {
+        source.applyFetchState("\"v1\"", "Mon, 10 Aug 2026 09:00:00 GMT", LocalDateTime.now());
+        given(feedClient.fetch(any()))
+                .willReturn(new FeedFetch(FetchResult.rateLimited("피드 응답 503"), false, null, null));
+        CollectionRun run = newRun();
+        CollectionRunItem item = newItem(run);
+
+        collectionExecutor.execute(run, item, topic, source);
+
+        assertEquals(RunItemStatus.FAILED, item.getStatus());
+        assertEquals("\"v1\"", source.getEtag());
+        assertEquals("Mon, 10 Aug 2026 09:00:00 GMT", source.getLastModified());
+    }
+
+    /**
+     * robots 판정도 저장돼야 목록 화면이 소스마다 robots.txt를 다시 받지 않는다.
+     */
+    @Test
+    void storesRobotsDecisionOnSource() {
+        givenFeed(article("HBM4 양산 시작", "요약"));
+        CollectionRun run = newRun();
+
+        collectionExecutor.execute(run, newItem(run), topic, source);
+
+        assertEquals(Source.ROBOTS_STATUS_ALLOWED, source.getRobotsStatus());
+        assertNotNull(source.getRobotsCheckedAt());
     }
 
     /**
