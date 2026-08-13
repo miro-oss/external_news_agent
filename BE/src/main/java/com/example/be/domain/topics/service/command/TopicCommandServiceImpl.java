@@ -1,5 +1,7 @@
 package com.example.be.domain.topics.service.command;
 
+import com.example.be.domain.collection.entity.RunStatus;
+import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.converter.TopicConverter;
@@ -33,6 +35,7 @@ public class TopicCommandServiceImpl implements TopicCommandService {
 
     private final TopicRepository topicRepository;
     private final SourceRepository sourceRepository;
+    private final CollectionRunRepository collectionRunRepository;
 
     @Override
     public TopicResDTO.Created createTopic(TopicReqDTO.Create request) {
@@ -117,16 +120,34 @@ public class TopicCommandServiceImpl implements TopicCommandService {
     }
 
     /**
-     * 수집이 진행 중인 주제를 막는 TOPIC409 검사는 news_collection_runs가 생기는 M3에서 추가한다.
+     * 명세는 "주제-소스 연결은 함께 제거되고, 이미 수집된 기사와 보고서 이력은 유지됩니다"라고 정의한다.
+     * V4에서 run_items·articles가 topic_id를 FK로 참조하게 되면서 행을 실제로 지우면 ORA-02292가 나고,
+     * 지울 수 있게 FK를 풀면 이력에서 주제를 복원할 수 없다. 둘 다 명세를 어긴다.
+     *
+     * <p>그래서 소스와 같은 방식(비활성화)으로 맞춘다 — 연결은 끊고 행은 남긴다.
+     * 이미 소스 삭제가 "기사 이력이 소스를 참조하므로 soft delete"로 정의돼 있어 규칙이 한 벌로 유지된다.
+     * 수집이 도는 중이면 그 사이 결과가 유실되므로 TOPIC409로 막는다.
      */
     @Override
     public TopicResDTO.Deleted deleteTopic(Long topicId) {
         Topic topic = getTopic(topicId);
-        int unlinkedSourceCount = topic.getLinkedSourceCount();
+        validateNotCollecting(topicId);
 
-        topicRepository.delete(topic);
+        int unlinkedSourceCount = topic.getLinkedSourceCount();
+        topic.replaceSources(List.of());
+        topic.changeActive(false);
 
         return TopicConverter.toDeleted(topicId, unlinkedSourceCount);
+    }
+
+    private void validateNotCollecting(Long topicId) {
+        boolean collecting = !collectionRunRepository
+                .findInProgressByTopicIds(List.of(topicId), RunStatus.IN_PROGRESS_STATUSES)
+                .isEmpty();
+
+        if (collecting) {
+            throw new TopicException(TopicErrorCode.TOPIC_COLLECTING);
+        }
     }
 
     private Topic getTopic(Long topicId) {
