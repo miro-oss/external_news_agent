@@ -153,6 +153,32 @@ public class CollectionResultWriter {
         run.addWarning(warning(source, CollectionRunWarning.CODE_FEED_UNREADABLE, message));
     }
 
+    /**
+     * 전문 추출 결과 1건을 반영한다. HTTP는 이미 끝났고 여기서는 DB만 만진다.
+     */
+    @Transactional
+    public void applyFullText(Long articleId, FetchStatus fetchStatus, String body) {
+        articleRepository.findById(articleId)
+                .ifPresent(article -> article.applyFullText(body, fetchStatus, LocalDateTime.now()));
+    }
+
+    /**
+     * 페이월로 막힌 기사를 소스별로 묶어 경고 하나로 남긴다. 기사마다 경고를 남기면 상세 화면이 도배된다.
+     */
+    @Transactional
+    public void addFullTextBlockedWarning(Long runId, Long sourceId, int articleCount) {
+        CollectionRun run = runRepository.findById(runId).orElseThrow();
+        Source source = sourceRepository.findById(sourceId).orElseThrow();
+
+        run.addWarning(CollectionRunWarning.builder()
+                .source(source)
+                .code(CollectionRunWarning.CODE_FULLTEXT_BLOCKED)
+                .message("페이월로 전문을 가져오지 못했습니다. 제목과 링크만 저장했습니다.")
+                .articleCount(articleCount)
+                .occurredAt(LocalDateTime.now())
+                .build());
+    }
+
     @Transactional
     public void finishRun(Long runId) {
         CollectionRun run = runRepository.findById(runId).orElseThrow();
