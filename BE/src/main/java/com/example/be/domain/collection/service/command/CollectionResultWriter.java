@@ -159,10 +159,21 @@ public class CollectionResultWriter {
         run.finish(LocalDateTime.now());
     }
 
+    /**
+     * 실행을 비정상 종료로 닫는다.
+     *
+     * <p>무조건 FAILED로 적으면 앞에서 성공한 조합이 묻힌다. 아직 안 끝난 조합만 실패로 닫고
+     * 나머지는 저장된 결과 그대로 두면, finish()가 PARTIAL / FAILED를 정확히 계산한다.
+     */
     @Transactional
     public void failRun(Long runId) {
-        runRepository.findById(runId)
-                .ifPresent(run -> run.fail(LocalDateTime.now()));
+        runRepository.findById(runId).ifPresent(run -> {
+            run.getItems().stream()
+                    .filter(item -> item.getStatus() == RunItemStatus.PENDING
+                            || item.getStatus() == RunItemStatus.RUNNING)
+                    .forEach(CollectionRunItem::markFailed);
+            run.finish(LocalDateTime.now());
+        });
     }
 
     private CollectionRunWarning warning(Source source, String code, String message) {

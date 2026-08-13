@@ -16,7 +16,9 @@ import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -31,6 +33,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional
@@ -42,6 +45,7 @@ public class CollectionRunCommandServiceImpl implements CollectionRunCommandServ
     private final CollectionRunRepository runRepository;
     private final CollectionRunItemRepository runItemRepository;
     private final CollectionRunAsyncService runAsyncService;
+    private final CollectionResultWriter resultWriter;
 
     @Override
     public CollectionRunStartResult startManualRun(CollectionRunReqDTO.Create request) {
@@ -66,6 +70,8 @@ public class CollectionRunCommandServiceImpl implements CollectionRunCommandServ
         }
 
         List<Long> targetTopicIds = distinctTopicIds(targets);
+        // 검사와 생성 사이에 다른 요청이 끼어들지 못하게 대상 주제를 먼저 잠근다.
+        topicRepository.lockByIds(targetTopicIds);
         validateNoTopicConflict(targetTopicIds);
 
         CollectionRun run = CollectionRun.builder()
@@ -165,15 +171,28 @@ public class CollectionRunCommandServiceImpl implements CollectionRunCommandServ
 
     private void scheduleAfterCommit(Long runId) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            runAsyncService.execute(runId);
+            dispatch(runId);
             return;
         }
 
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                runAsyncService.execute(runId);
+                dispatch(runId);
             }
         });
+    }
+
+    /**
+     * 실행 행은 이미 RUNNING으로 커밋돼 있다. 스레드풀이 작업을 거절하면 아무도 그 행을 닫지 않아
+     * 영원히 RUNNING으로 남고, 그 주제는 충돌 검사에 걸려 다시 실행할 수도 없게 된다.
+     */
+    private void dispatch(Long runId) {
+        try {
+            runAsyncService.execute(runId);
+        } catch (TaskRejectedException exception) {
+            log.error("수집 실행을 시작하지 못했다. 실행을 실패로 닫는다. runId={}", runId, exception);
+            resultWriter.failRun(runId);
+        }
     }
 }
