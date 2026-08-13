@@ -49,20 +49,27 @@ public final class ArticleContentExtractor {
      *
      * <p>문자열로 먼저 디코드하면 charset 헤더가 없는 응답이 ISO-8859-1로 읽혀 한글이 깨진다.
      * 국내 매체 중에는 헤더 없이 {@code <meta charset>}에만 적어 두거나 EUC-KR을 쓰는 곳이 있다.
-     * Jsoup은 BOM과 meta 태그를 보고 정하고, 못 찾으면 UTF-8로 본다.
+     *
+     * @param charsetName HTTP 헤더가 말한 인코딩. null이면 Jsoup이 BOM·meta를 보고 정하고 못 찾으면 UTF-8
      *
      * @return 본문 텍스트. 쓸 만한 본문을 못 찾으면 null
      */
-    public static String extract(byte[] html, String baseUrl) {
+    public static String extract(byte[] html, String charsetName, String baseUrl) {
         if (html == null || html.length == 0) {
             return null;
         }
 
         try {
-            return extract(Jsoup.parse(new ByteArrayInputStream(html), null, baseUrl == null ? "" : baseUrl));
+            // charsetName이 null이면 Jsoup이 BOM과 meta를 보고 정한다. HTTP 헤더가 말한 값이 있으면 그게 우선이다.
+            return extract(Jsoup.parse(
+                    new ByteArrayInputStream(html), charsetName, baseUrl == null ? "" : baseUrl));
         } catch (IOException e) {
             return null;
         }
+    }
+
+    public static String extract(byte[] html, String baseUrl) {
+        return extract(html, null, baseUrl);
     }
 
     /**

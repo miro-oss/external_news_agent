@@ -9,7 +9,9 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -65,15 +67,59 @@ class ArticleContentClientTest {
     }
 
     /**
-     * 200인데 본문이 없는 경우도 차단이다. 페이월이 로그인 안내만 주는 흔한 형태다.
+     * 200인데 본문을 못 뽑은 건 "막혔다"가 아니라 "못 읽었다"이다. 차단으로 적으면 짧은 정상 기사가
+     * 페이월 경고를 만든다.
      */
     @Test
-    void reportsBlockedWhenPageHasNoBody() {
+    void reportsFailureWhenPageHasNoExtractableBody() {
         server.expect(requestTo(ARTICLE_URL))
                 .andRespond(withSuccess("<html><body><p>로그인 후 이용해 주세요.</p></body></html>",
                         MediaType.TEXT_HTML));
 
-        assertEquals(FetchStatus.FULLTEXT_BLOCKED, client.fetch(ARTICLE_URL, null).status());
+        assertEquals(FetchStatus.FETCH_FAILED, client.fetch(ARTICLE_URL, null).status());
+    }
+
+    /**
+     * 짧은 기사도 정상 응답이다. 이걸 FULLTEXT_BLOCKED로 적으면 실행 상세에 없는 페이월이 보고된다.
+     */
+    @Test
+    void doesNotCallShortArticleAPaywall() {
+        server.expect(requestTo(ARTICLE_URL))
+                .andRespond(withSuccess(
+                        "<html><body><article><p>속보. 삼성전자 HBM4 양산.</p></article></body></html>",
+                        MediaType.TEXT_HTML));
+
+        assertEquals(FetchStatus.FETCH_FAILED, client.fetch(ARTICLE_URL, null).status());
+    }
+
+    /**
+     * charset이 헤더에만 있고 meta에는 없는 매체가 있다. 헤더를 버리면 본문이 깨진다.
+     */
+    @Test
+    void usesCharsetFromContentTypeHeader() {
+        String html = """
+                <html><body><article><p>%s</p><p>%s</p></article></body></html>
+                """.formatted(PARAGRAPH, PARAGRAPH);
+        server.expect(requestTo(ARTICLE_URL))
+                .andRespond(withSuccess(html.getBytes(Charset.forName("EUC-KR")),
+                        MediaType.valueOf("text/html;charset=EUC-KR")));
+
+        ArticleContentResult result = client.fetch(ARTICLE_URL, null);
+
+        assertEquals(FetchStatus.FULLTEXT, result.status());
+        assertTrue(result.body().contains("HBM4 양산 일정"));
+    }
+
+    /**
+     * 상한을 넘는 응답은 다 받아 놓고 재는 게 아니라 상한까지만 읽고 버린다.
+     */
+    @Test
+    void rejectsOversizedBody() {
+        byte[] huge = new byte[3 * 1024 * 1024];
+        Arrays.fill(huge, (byte) 'a');
+        server.expect(requestTo(ARTICLE_URL)).andRespond(withSuccess(huge, MediaType.TEXT_HTML));
+
+        assertEquals(FetchStatus.FETCH_FAILED, client.fetch(ARTICLE_URL, null).status());
     }
 
     @Test

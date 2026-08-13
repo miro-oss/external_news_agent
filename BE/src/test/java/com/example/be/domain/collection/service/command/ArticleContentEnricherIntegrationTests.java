@@ -230,4 +230,63 @@ class ArticleContentEnricherIntegrationTests {
         entityManager.flush();
         entityManager.clear();
     }
+
+    /**
+     * 일시 실패한 기사를 대상에서 빼면 그 상태가 영구가 된다. 5xx 한 번에 전문을 영영 못 받는다.
+     */
+    @Test
+    void retriesArticlesThatFailedEarlier() {
+        Article article = observedArticle(source(true));
+        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.failed());
+        enricher.enrich(run.getId());
+        flushAndClear();
+
+        assertEquals(FetchStatus.FETCH_FAILED,
+                articleRepository.findById(article.getId()).orElseThrow().getFetchStatus());
+
+        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.fullText(BODY));
+        enricher.enrich(run.getId());
+        flushAndClear();
+
+        Article reloaded = articleRepository.findById(article.getId()).orElseThrow();
+        assertEquals(FetchStatus.FULLTEXT, reloaded.getFetchStatus());
+        assertTrue(reloaded.getBody().startsWith("본문"));
+    }
+
+    /**
+     * 차단은 상대가 명시적으로 막은 것이라 다시 불러도 같은 답이다. 대상에 넣으면 매 실행 헛걸음한다.
+     */
+    @Test
+    void doesNotRetryBlockedArticles() {
+        observedArticle(source(true));
+        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.blocked());
+        enricher.enrich(run.getId());
+        flushAndClear();
+
+        org.mockito.Mockito.clearInvocations(contentClient);
+        enricher.enrich(run.getId());
+
+        then(contentClient).shouldHaveNoInteractions();
+    }
+
+    /**
+     * robotsMode=ignore면 robots.txt를 조회조차 하지 않는다. 수집 경로(RobotsPolicyService)와 해석을 맞춘다.
+     */
+    @Test
+    void skipsRobotsLookupWhenPolicyIgnoresIt() {
+        Source ignoring = sourceRepository.save(Source.builder()
+                .sourceKind(Source.KIND_FEED)
+                .name("robots 무시 소스")
+                .urlTemplate("https://example.com/ignore-" + UUID.randomUUID())
+                .language("ko")
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 30, true))
+                .active(true)
+                .build());
+        observedArticle(ignoring);
+        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.fullText(BODY));
+
+        enricher.enrich(run.getId());
+
+        then(robotsTxtClient).shouldHaveNoInteractions();
+    }
 }

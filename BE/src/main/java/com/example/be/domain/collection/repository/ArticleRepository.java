@@ -28,6 +28,12 @@ public interface ArticleRepository extends JpaRepository<Article, Long>, JpaSpec
      * 이번 실행에서 관측했지만 아직 본문을 못 받은 기사. 소스를 함께 가져오는 이유는 본문 추출이
      * 트랜잭션 밖에서 돌면서 crawl_policy와 robots 설정을 봐야 하기 때문이다.
      *
+     * <p><b>{@code FETCH_FAILED}도 대상이다.</b> 5xx나 네트워크 오류로 한 번 실패한 기사를 빼 버리면
+     * 그 상태가 영구가 된다. 후보를 "이번 실행에서 관측한 기사"로 좁혀 두었으므로, 피드에서 빠지면
+     * 재시도도 자연히 멈춘다.
+     *
+     * <p>{@code FULLTEXT_BLOCKED}는 넣지 않는다. 상대가 명시적으로 막은 것이라 다시 불러도 같은 답이다.
+     *
      * <p>관측 테이블과 조인해 DISTINCT를 걸면 Oracle이 <b>ORA-22848</b>로 거부한다 — 결과 행에
      * CLOB(body·summary)이 들어 있고 CLOB은 비교 키가 될 수 없다. 서브쿼리로 id만 좁힌다.
      */
@@ -35,7 +41,10 @@ public interface ArticleRepository extends JpaRepository<Article, Long>, JpaSpec
             SELECT article
             FROM Article article
             JOIN FETCH article.source
-            WHERE article.fetchStatus = com.example.be.domain.collection.entity.FetchStatus.METADATA_ONLY
+            WHERE article.fetchStatus IN (
+                    com.example.be.domain.collection.entity.FetchStatus.METADATA_ONLY,
+                    com.example.be.domain.collection.entity.FetchStatus.FETCH_FAILED
+              )
               AND article.id IN (
                   SELECT observation.article.id
                   FROM CollectionRunArticle observation
@@ -43,5 +52,5 @@ public interface ArticleRepository extends JpaRepository<Article, Long>, JpaSpec
               )
             ORDER BY article.id ASC
             """)
-    List<Article> findMetadataOnlyByRunId(@Param("runId") Long runId);
+    List<Article> findFullTextTargetsByRunId(@Param("runId") Long runId);
 }

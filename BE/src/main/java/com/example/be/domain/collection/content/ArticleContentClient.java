@@ -5,12 +5,13 @@ import com.example.be.domain.collection.ratelimit.DomainRateLimiter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestClientResponseException;
 
+import java.io.IOException;
+import java.nio.charset.Charset;
 import java.time.Duration;
 
 /**
@@ -24,9 +25,14 @@ import java.time.Duration;
 public class ArticleContentClient {
 
     /**
-     * 기사 페이지는 robots.txt보다 크지만 무한정은 아니다. 상한이 없으면 응답 하나로 메모리를 밀어낼 수 있다.
+     * 기사 페이지는 robots.txt보다 크지만 무한정은 아니다. <b>상한까지만 읽는다</b> — 다 받아 놓고 크기를
+     * 재면 이미 메모리에 올라온 뒤라 보호가 되지 않는다.
      */
     private static final int MAX_BODY_BYTES = 2 * 1024 * 1024;
+
+    private static final int UNAUTHORIZED = 401;
+    private static final int FORBIDDEN = 403;
+    private static final int UNAVAILABLE_FOR_LEGAL_REASONS = 451;
 
     private final RestClient restClient;
     private final DomainRateLimiter rateLimiter;
@@ -50,64 +56,86 @@ public class ArticleContentClient {
     }
 
     public ArticleContentResult fetch(String articleUrl, Duration crawlDelay) {
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+        Attempt attempt = null;
+
+        for (int tries = 1; tries <= maxAttempts; tries++) {
             rateLimiter.await(articleUrl, crawlDelay);
 
             try {
-                return handle(articleUrl, restClient.get()
+                attempt = restClient.get()
                         .uri(articleUrl)
                         .header(HttpHeaders.USER_AGENT, userAgent)
-                        .retrieve()
-                        .toEntity(byte[].class));
-            } catch (RestClientResponseException e) {
-                if (isPaywall(e)) {
-                    // 401·403은 "막았다"이다. 재시도해도 같은 답이고, 명세가 FULLTEXT_BLOCKED로 부르는 경우다.
-                    log.debug("본문이 막혀 있다. status={} url={}", e.getStatusCode(), articleUrl);
-                    return ArticleContentResult.blocked();
-                }
-
-                if (!Backoff.isRetryable(e.getStatusCode()) || attempt == maxAttempts) {
-                    log.debug("본문을 받지 못했다. status={} url={}", e.getStatusCode(), articleUrl);
-                    return ArticleContentResult.failed();
-                }
-
-                sleep(Backoff.delayAfter(attempt, backoffBase, backoffMax));
-            } catch (RestClientException e) {
+                        // 상태 처리를 직접 한다. 본문을 읽기 전에 헤더로 크기를 먼저 보려면 이 방법뿐이다.
+                        .exchange((request, response) -> read(articleUrl, response), false);
+            } catch (RuntimeException e) {
                 log.debug("본문 호출에 실패했다. url={} error={}", articleUrl, e.getMessage());
-                return ArticleContentResult.failed();
+                attempt = new Attempt(ArticleContentResult.failed(), true);
             }
+
+            if (!attempt.retryable() || tries == maxAttempts) {
+                return attempt.result();
+            }
+
+            sleep(Backoff.delayAfter(tries, backoffBase, backoffMax));
         }
 
-        return ArticleContentResult.failed();
+        return attempt == null ? ArticleContentResult.failed() : attempt.result();
     }
 
-    private ArticleContentResult handle(String articleUrl, ResponseEntity<byte[]> response) {
-        if (isTooLarge(response)) {
-            log.warn("기사 본문이 너무 커서 읽지 않는다. url={}", articleUrl);
-            return ArticleContentResult.failed();
+    private Attempt read(String articleUrl, org.springframework.http.client.ClientHttpResponse response)
+            throws IOException {
+        HttpStatusCode status = response.getStatusCode();
+
+        if (isPaywall(status)) {
+            // 상대가 명시적으로 막은 경우만 차단으로 본다. 재시도해도 같은 답이다.
+            log.debug("본문이 막혀 있다. status={} url={}", status, articleUrl);
+            return new Attempt(ArticleContentResult.blocked(), false);
         }
 
-        String body = ArticleContentExtractor.extract(response.getBody(), articleUrl);
-        if (body == null) {
-            // 응답은 왔는데 본문이 없다. 페이월이 로그인 안내만 주는 경우가 대부분이다.
-            return ArticleContentResult.blocked();
+        if (status.isError()) {
+            return new Attempt(ArticleContentResult.failed(), Backoff.isRetryable(status));
         }
 
-        return ArticleContentResult.fullText(body);
-    }
-
-    private boolean isPaywall(RestClientResponseException exception) {
-        int status = exception.getStatusCode().value();
-        return status == 401 || status == 403 || status == 451;
-    }
-
-    private boolean isTooLarge(ResponseEntity<byte[]> response) {
         if (response.getHeaders().getContentLength() > MAX_BODY_BYTES) {
-            return true;
+            log.warn("기사 본문이 너무 커서 읽지 않는다. url={}", articleUrl);
+            return new Attempt(ArticleContentResult.failed(), false);
         }
 
-        byte[] body = response.getBody();
-        return body != null && body.length > MAX_BODY_BYTES;
+        // 상한 + 1까지만 읽는다. 넘치면 그 이상은 메모리에 올리지 않는다.
+        byte[] body = response.getBody().readNBytes(MAX_BODY_BYTES + 1);
+        if (body.length > MAX_BODY_BYTES) {
+            log.warn("기사 본문이 너무 커서 읽지 않는다. url={}", articleUrl);
+            return new Attempt(ArticleContentResult.failed(), false);
+        }
+
+        String content = ArticleContentExtractor.extract(body, charsetOf(response), articleUrl);
+        if (content == null) {
+            // 응답은 정상인데 본문을 못 뽑았다. 이건 "막혔다"가 아니라 "못 읽었다"이다.
+            // 차단으로 적으면 짧은 정상 기사가 페이월 경고를 만든다.
+            log.debug("본문을 뽑지 못했다. url={}", articleUrl);
+            return new Attempt(ArticleContentResult.failed(), false);
+        }
+
+        return new Attempt(ArticleContentResult.fullText(content), false);
+    }
+
+    /**
+     * HTTP 헤더의 charset이 meta 태그보다 우선이다. {@code charset=EUC-KR}을 헤더에만 적어 두고
+     * meta에는 없는 매체가 있어, 이걸 버리면 본문이 깨진다.
+     */
+    private String charsetOf(org.springframework.http.client.ClientHttpResponse response) {
+        MediaType contentType = response.getHeaders().getContentType();
+        if (contentType == null || contentType.getCharset() == null) {
+            return null;
+        }
+
+        Charset charset = contentType.getCharset();
+        return charset.name();
+    }
+
+    private boolean isPaywall(HttpStatusCode status) {
+        int value = status.value();
+        return value == UNAUTHORIZED || value == FORBIDDEN || value == UNAVAILABLE_FOR_LEGAL_REASONS;
     }
 
     private void sleep(Duration duration) {
@@ -116,5 +144,9 @@ public class ArticleContentClient {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /** 한 번의 시도 결과와, 다시 불러 볼 가치가 있는지. */
+    private record Attempt(ArticleContentResult result, boolean retryable) {
     }
 }

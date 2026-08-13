@@ -40,7 +40,7 @@ public class ArticleContentEnricher {
     private final CollectionResultWriter resultWriter;
 
     public void enrich(Long runId) {
-        List<Article> targets = articleRepository.findMetadataOnlyByRunId(runId);
+        List<Article> targets = articleRepository.findFullTextTargetsByRunId(runId);
         if (targets.isEmpty()) {
             return;
         }
@@ -82,9 +82,15 @@ public class ArticleContentEnricher {
             return ArticleContentResult.failed();
         }
 
+        // robotsMode=ignore면 조회조차 하지 않는다. RobotsPolicyService와 해석을 맞춘다 —
+        // 여기서만 robots를 받아 crawl-delay까지 적용하면 같은 정책이 경로마다 다르게 동작한다.
+        if (!source.respectsRobots()) {
+            return contentClient.fetch(url, null);
+        }
+
         // robots는 기사 URL의 호스트 기준이다. 구글 뉴스 RSS처럼 소스와 기사 호스트가 다른 경우가 있다.
         RobotsLookup robots = robotsByHost.computeIfAbsent(host, ignored -> robotsTxtClient.lookup(url));
-        if (source.respectsRobots() && !robots.allows(url)) {
+        if (!robots.allows(url)) {
             log.debug("robots.txt가 본문 수집을 막는다. url={}", url);
             return ArticleContentResult.robotsDisallowed();
         }
