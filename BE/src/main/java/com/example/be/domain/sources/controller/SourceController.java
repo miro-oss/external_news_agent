@@ -43,7 +43,7 @@ public class SourceController {
             description = """
                     새 수집 소스를 등록합니다. 설정 화면의 소스 등록 폼에 대응합니다.
                     같은 소스 종류에서 같은 URL 템플릿은 중복 등록할 수 없습니다.
-                    FEED는 고정 URL이고, SEARCH는 {query} 자리표시자를 포함한 URL이거나 provider 키(NAVER/TAVILY/SERPAPI)입니다.
+                    FEED는 고정 http/https URL이고, SEARCH는 provider 키(NAVER/TAVILY/SERPAPI) 중 하나입니다.
                     robotsStatus는 요청으로 넣을 수 없고 등록 직후에는 항상 unknown입니다.
                     """
     )
@@ -77,12 +77,12 @@ public class SourceController {
                             """))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "400",
-                    description = "SEARCH 소스인데 질의 자리표시자도 provider 키도 아닌 경우",
+                    description = "SEARCH 소스인데 urlTemplate이 provider 키가 아닌 경우",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
                             {
                               "isSuccess": false,
                               "code": "SOURCE400",
-                              "message": "SEARCH 소스의 URL 템플릿에는 질의 자리표시자가 필요합니다.",
+                              "message": "SEARCH 소스의 URL 템플릿은 provider 키(NAVER, TAVILY, SERPAPI) 중 하나여야 합니다.",
                               "result": {}
                             }
                             """))),

@@ -3,6 +3,7 @@ package com.example.be.domain.sources.service.command;
 import com.example.be.domain.sources.dto.req.SourceReqDTO;
 import com.example.be.domain.sources.dto.res.SourceResDTO;
 import com.example.be.domain.sources.entity.CrawlPolicy;
+import com.example.be.domain.sources.entity.SearchProvider;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.exception.SourceException;
 import com.example.be.domain.sources.exception.code.SourceErrorCode;
@@ -58,20 +59,14 @@ class SourceCommandServiceImplTest {
         assertTrue(result.isActive());
     }
 
+    /**
+     * ★ #31 B1. {@code {query}} 자리표시자 URL은 등록 당시에는 받았지만 수집할 어댑터가 없다.
+     * 등록만 성공하고 실행에서 매번 실패하니, 사용자는 수집 이력을 열어야 잘못됐다는 걸 안다.
+     * 등록 단계에서 막는다.
+     */
     @Test
-    void createSourceAcceptsSearchUrlTemplateWithQueryPlaceholder() {
+    void createSourceRejectsSearchUrlTemplateWithQueryPlaceholder() {
         SourceReqDTO.Create request = searchRequest("https://news.google.com/rss/search?q={query}&hl=ko");
-        when(sourceRepository.existsBySourceKindAndUrlTemplate(any(), anyString())).thenReturn(false);
-        when(sourceRepository.saveAndFlush(any(Source.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        SourceResDTO.Created result = sourceCommandService.createSource(request);
-
-        assertEquals("https://news.google.com/rss/search?q={query}&hl=ko", result.getUrlTemplate());
-    }
-
-    @Test
-    void createSourceRejectsSearchTemplateThatIsNeitherPlaceholderNorProviderKey() {
-        SourceReqDTO.Create request = searchRequest("네이버");
 
         SourceException exception = assertThrows(SourceException.class,
                 () -> sourceCommandService.createSource(request));
@@ -81,13 +76,14 @@ class SourceCommandServiceImplTest {
     }
 
     @Test
-    void createSourceRejectsSearchPlaceholderWithoutHttpScheme() {
-        SourceReqDTO.Create request = searchRequest("news.google.com/rss/search?q={query}");
+    void createSourceRejectsSearchTemplateThatIsNotProviderKey() {
+        SourceReqDTO.Create request = searchRequest("네이버");
 
         SourceException exception = assertThrows(SourceException.class,
                 () -> sourceCommandService.createSource(request));
 
         assertEquals(SourceErrorCode.INVALID_SEARCH_URL_TEMPLATE, exception.getCode());
+        verify(sourceRepository, never()).saveAndFlush(any(Source.class));
     }
 
     @Test
@@ -110,14 +106,18 @@ class SourceCommandServiceImplTest {
         assertEquals(SourceErrorCode.INVALID_FEED_URL_TEMPLATE, exception.getCode());
     }
 
+    /**
+     * provider 키는 대소문자를 정규화해서 받는다. SEARCH에서 받는 값은 이제 이 3종뿐이다.
+     */
     @Test
-    void createSourceRejectsSearchTemplateWithoutHost() {
-        SourceReqDTO.Create request = searchRequest("https://?q={query}");
+    void createSourceAcceptsLowerCaseProviderKey() {
+        SourceReqDTO.Create request = searchRequest("tavily");
+        when(sourceRepository.existsBySourceKindAndUrlTemplate(any(), anyString())).thenReturn(false);
+        when(sourceRepository.saveAndFlush(any(Source.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        SourceException exception = assertThrows(SourceException.class,
-                () -> sourceCommandService.createSource(request));
+        SourceResDTO.Created result = sourceCommandService.createSource(request);
 
-        assertEquals(SourceErrorCode.INVALID_SEARCH_URL_TEMPLATE, exception.getCode());
+        assertEquals(SearchProvider.TAVILY.name(), result.getUrlTemplate());
     }
 
     @Test

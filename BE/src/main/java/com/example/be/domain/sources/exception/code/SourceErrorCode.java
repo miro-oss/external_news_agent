@@ -10,7 +10,7 @@ import org.springframework.http.HttpStatus;
 public enum SourceErrorCode implements BaseErrorCode {
 
     INVALID_SEARCH_URL_TEMPLATE(HttpStatus.BAD_REQUEST, "SOURCE400",
-            "SEARCH 소스의 URL 템플릿에는 질의 자리표시자가 필요합니다."),
+            "SEARCH 소스의 URL 템플릿은 provider 키(NAVER, TAVILY, SERPAPI) 중 하나여야 합니다."),
     INVALID_FEED_URL_TEMPLATE(HttpStatus.BAD_REQUEST, "SOURCE400",
             "FEED 소스의 URL 템플릿은 http 또는 https URL이어야 합니다."),
     INVALID_SOURCE_KIND(HttpStatus.BAD_REQUEST, "SOURCE400",

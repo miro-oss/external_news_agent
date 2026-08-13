@@ -94,7 +94,8 @@ class SourceControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.isSuccess").value(false))
                 .andExpect(jsonPath("$.code").value("SOURCE400"))
-                .andExpect(jsonPath("$.message").value("SEARCH 소스의 URL 템플릿에는 질의 자리표시자가 필요합니다."));
+                .andExpect(jsonPath("$.message")
+                        .value("SEARCH 소스의 URL 템플릿은 provider 키(NAVER, TAVILY, SERPAPI) 중 하나여야 합니다."));
     }
 
     @Test

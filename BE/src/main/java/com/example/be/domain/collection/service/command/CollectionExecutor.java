@@ -81,8 +81,9 @@ public class CollectionExecutor {
     private FetchResult searchOf(Topic topic, Source source) {
         SearchProvider provider = SearchProvider.fromKey(source.getUrlTemplate());
         if (provider == null) {
-            // {query} 자리표시자를 쓰는 SEARCH 소스는 아직 어댑터가 없다. 조용히 비우지 않고 남긴다.
-            log.warn("provider 키가 아닌 SEARCH 소스는 아직 수집하지 않는다. sourceId={} urlTemplate={}",
+            // provider 키가 아닌 SEARCH 소스는 #31에서 등록 단계에서 막았다. 여기 오는 건 그 전에 저장된
+            // 행뿐이라 새로 생기지는 않는다. 조용히 비우지 않고 사유를 남긴다.
+            log.warn("provider 키가 아닌 SEARCH 소스는 수집하지 않는다. 등록 당시의 잔여 데이터다. sourceId={} urlTemplate={}",
                     source.getId(), source.getUrlTemplate());
             return FetchResult.unreadable("어댑터가 없는 SEARCH 소스다: " + source.getUrlTemplate());
         }

@@ -125,6 +125,22 @@ public class CollectionRun {
         this.finishedAt = finishedAt;
     }
 
+    /**
+     * 끝나지 않은 조합을 실패로 닫고 실행을 마감한다. 스레드풀 거절이나 프로세스 종료처럼
+     * <b>아무도 조합을 닫아 주지 않는 경로</b>에서 쓴다.
+     *
+     * <p>상태는 {@link #finish}가 정한다 — 이미 성공한 조합이 있으면 FAILED가 아니라 PARTIAL이다.
+     * 중간에 끊긴 실행에서 앞부분의 성공한 수집까지 실패로 적으면 이력이 사실과 달라진다.
+     */
+    public void abort(LocalDateTime finishedAt) {
+        items.stream()
+                .filter(item -> item.getStatus() == RunItemStatus.PENDING
+                        || item.getStatus() == RunItemStatus.RUNNING)
+                .forEach(CollectionRunItem::markFailed);
+
+        finish(finishedAt);
+    }
+
     public void attachReport(Long reportId) {
         this.reportId = reportId;
     }

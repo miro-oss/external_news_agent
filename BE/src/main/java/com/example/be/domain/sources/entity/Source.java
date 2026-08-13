@@ -39,8 +39,6 @@ public class Source {
     public static final String ROBOTS_STATUS_DISALLOWED = "disallowed";
     public static final String ROBOTS_STATUS_UNKNOWN = "unknown";
 
-    public static final String QUERY_PLACEHOLDER = "{query}";
-
     public static final int MAX_NAME_LENGTH = 200;
     public static final int MAX_URL_TEMPLATE_LENGTH = 1000;
     public static final int MAX_COUNTRY_LENGTH = 2;
