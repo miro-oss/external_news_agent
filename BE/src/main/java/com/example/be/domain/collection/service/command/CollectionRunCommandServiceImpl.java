@@ -14,6 +14,7 @@ import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
+import com.example.be.global.config.ApiTimeZone;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +32,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -72,6 +74,17 @@ public class CollectionRunCommandServiceImpl implements CollectionRunCommandServ
         List<Long> targetTopicIds = distinctTopicIds(targets);
         // 검사와 생성 사이에 다른 요청이 끼어들지 못하게 대상 주제를 먼저 잠근다.
         topicRepository.lockByIds(targetTopicIds);
+
+        // 잠금을 잡은 뒤 키를 다시 본다. 앞의 조회는 먼저 들어온 요청이 커밋되기 전이었을 수 있고,
+        // 그대로 진행하면 버튼 연타가 유니크 위반 → 409로 끝난다. 명세는 200 + 기존 run이다.
+        Optional<CollectionRun> alreadyRunning =
+                runRepository.findInProgressByOptionalIdempotencyKey(idempotencyKey, RunStatus.IN_PROGRESS_STATUSES);
+        if (alreadyRunning.isPresent()) {
+            return new CollectionRunStartResult(
+                    GeneralSuccessCode.COLLECTION_ALREADY_RUNNING,
+                    CollectionRunConverter.toAlreadyRunning(alreadyRunning.get()));
+        }
+
         validateNoTopicConflict(targetTopicIds);
 
         CollectionRun run = CollectionRun.builder()
@@ -79,7 +92,7 @@ public class CollectionRunCommandServiceImpl implements CollectionRunCommandServ
                 .triggerType(TriggerType.MANUAL)
                 .idempotencyKey(idempotencyKey)
                 .forceRefresh(Boolean.TRUE.equals(request.getForceRefresh()))
-                .startedAt(LocalDateTime.now())
+                .startedAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build();
 
         targets.forEach(target -> run.addItem(CollectionRunItem.builder()
@@ -128,11 +141,15 @@ public class CollectionRunCommandServiceImpl implements CollectionRunCommandServ
             return;
         }
 
+        // conflictRunId는 단수라 가장 먼저 시작한 실행을 대표로 내보내고,
+        // conflictTopicIds는 충돌한 실행 전부에서 모은다.
         CollectionRun conflict = conflicts.stream()
                 .min(Comparator.comparing(CollectionRun::getId))
                 .orElseThrow();
+        List<Long> conflictRunIds = conflicts.stream().map(CollectionRun::getId).toList();
         List<Long> conflictTopicIds =
-                runItemRepository.findTopicIdsByRunIdAndTopicIdIn(conflict.getId(), targetTopicIds);
+                runItemRepository.findTopicIdsByRunIdInAndTopicIdIn(conflictRunIds, targetTopicIds);
+
         throw new RunException(RunErrorCode.RUN_IN_PROGRESS, Map.of(
                 "conflictRunId", conflict.getId(),
                 "conflictTopicIds", conflictTopicIds));

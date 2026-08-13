@@ -147,7 +147,7 @@ class CollectionRunCommandServiceImplTest {
         CollectionRun conflict = CollectionRun.builder().id(41L).status(RunStatus.RUNNING).build();
         when(runRepository.findInProgressByTopicIds(List.of(1L), RunStatus.IN_PROGRESS_STATUSES))
                 .thenReturn(List.of(conflict));
-        when(runItemRepository.findTopicIdsByRunIdAndTopicIdIn(41L, List.of(1L)))
+        when(runItemRepository.findTopicIdsByRunIdInAndTopicIdIn(List.of(41L), List.of(1L)))
                 .thenReturn(List.of(1L));
 
         RunException exception = assertThrows(RunException.class,
@@ -300,5 +300,60 @@ class CollectionRunCommandServiceImplTest {
         runCommandService.startManualRun(request);
 
         verify(resultWriter).failRun(any());
+    }
+
+    /**
+     * 충돌한 실행이 여럿이면 주제도 여럿이다. run A가 1을, run B가 2를 수집 중인데 [1, 2]를 요청하면
+     * 둘 다 알려줘야 한다. 대표 실행 하나만 보고 계산하면 [1]만 내려간다.
+     */
+    @Test
+    void startManualRunReportsEveryConflictingTopic() {
+        when(runRepository.findInProgressByOptionalIdempotencyKey(null, RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(Optional.empty());
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L, 2L)))
+                .thenReturn(List.of(
+                        target(topic(1L, "HBM"), source(10L)),
+                        target(topic(2L, "DRAM"), source(11L))));
+        CollectionRun first = CollectionRun.builder().id(41L).status(RunStatus.RUNNING).build();
+        CollectionRun second = CollectionRun.builder().id(42L).status(RunStatus.RUNNING).build();
+        when(runRepository.findInProgressByTopicIds(List.of(1L, 2L), RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(List.of(second, first));
+        when(runItemRepository.findTopicIdsByRunIdInAndTopicIdIn(List.of(42L, 41L), List.of(1L, 2L)))
+                .thenReturn(List.of(1L, 2L));
+
+        RunException exception = assertThrows(RunException.class,
+                () -> runCommandService.startManualRun(request(List.of(1L, 2L), null, false)));
+
+        // conflictRunId는 단수라 가장 먼저 시작한 실행이 대표다.
+        assertEquals(41L, exception.getResult().get("conflictRunId"));
+        assertEquals(List.of(1L, 2L), exception.getResult().get("conflictTopicIds"));
+    }
+
+    /**
+     * 버튼 연타는 앞의 조회로 못 막는다 — 첫 요청이 아직 커밋되기 전이다. 주제를 잠근 뒤 키를 다시 보면
+     * 그때는 커밋돼 있어서, 명세대로 200 + 기존 run을 돌려줄 수 있다.
+     */
+    @Test
+    void startManualRunReturnsRunningRunWhenKeyAppearsAfterLock() {
+        CollectionRun running = CollectionRun.builder()
+                .id(41L)
+                .status(RunStatus.RUNNING)
+                .triggerType(TriggerType.MANUAL)
+                .idempotencyKey("manual-key")
+                .startedAt(LocalDateTime.now())
+                .build();
+        when(runRepository.findInProgressByOptionalIdempotencyKey("manual-key", RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(running));
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L)))
+                .thenReturn(List.of(target(topic(1L, "HBM"), source(10L))));
+
+        CollectionRunStartResult result =
+                runCommandService.startManualRun(request(List.of(1L), "manual-key", false));
+
+        assertEquals(GeneralSuccessCode.COLLECTION_ALREADY_RUNNING, result.successCode());
+        assertEquals(41L, result.response().getRunId());
+        verify(runRepository, never()).saveAndFlush(any());
+        verify(runAsyncService, never()).execute(any());
     }
 }

@@ -34,6 +34,20 @@ public interface CollectionRunItemRepository extends JpaRepository<CollectionRun
                                                @Param("topicIds") Collection<Long> topicIds);
 
     /**
+     * 충돌한 실행이 여럿일 수 있다. run A가 주제 1을, run B가 주제 2를 수집 중이면 요청 [1, 2]는
+     * 둘 다와 부딪힌다. 명세의 conflictTopicIds가 복수형인 만큼 전부 모아서 내려준다.
+     */
+    @Query("""
+            SELECT DISTINCT item.topic.id
+            FROM CollectionRunItem item
+            WHERE item.run.id IN :runIds
+              AND item.topic.id IN :topicIds
+            ORDER BY item.topic.id ASC
+            """)
+    List<Long> findTopicIdsByRunIdInAndTopicIdIn(@Param("runIds") Collection<Long> runIds,
+                                                 @Param("topicIds") Collection<Long> topicIds);
+
+    /**
      * 소스 상세의 lastCollectedAt / lastRunStatus를 채우는 자리다(M2에서 null로 비워둔 항목).
      */
     List<CollectionRunItem> findByRunIdInOrderByIdAsc(List<Long> runIds);

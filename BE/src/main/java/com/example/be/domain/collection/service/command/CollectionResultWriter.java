@@ -22,6 +22,7 @@ import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
+import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -97,7 +98,7 @@ public class CollectionResultWriter {
 
         // 실패한 응답에는 검증자가 없다. 그대로 덮으면 503 한 번에 저장해 둔 ETag가 사라진다.
         if (outcome.validatorsUpdated()) {
-            source.applyFetchState(outcome.etag(), outcome.lastModified(), LocalDateTime.now());
+            source.applyFetchState(outcome.etag(), outcome.lastModified(), LocalDateTime.now(ApiTimeZone.ZONE));
         }
 
         if (outcome.notModified()) {
@@ -182,7 +183,7 @@ public class CollectionResultWriter {
     @Transactional
     public void finishRun(Long runId) {
         CollectionRun run = runRepository.findById(runId).orElseThrow();
-        run.finish(LocalDateTime.now());
+        run.finish(LocalDateTime.now(ApiTimeZone.ZONE));
     }
 
     /**
@@ -198,7 +199,7 @@ public class CollectionResultWriter {
                     .filter(item -> item.getStatus() == RunItemStatus.PENDING
                             || item.getStatus() == RunItemStatus.RUNNING)
                     .forEach(CollectionRunItem::markFailed);
-            run.finish(LocalDateTime.now());
+            run.finish(LocalDateTime.now(ApiTimeZone.ZONE));
         });
     }
 
@@ -208,7 +209,7 @@ public class CollectionResultWriter {
                 .code(code)
                 .message(trim(message))
                 .articleCount(0)
-                .occurredAt(LocalDateTime.now())
+                .occurredAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build();
     }
 
@@ -229,7 +230,7 @@ public class CollectionResultWriter {
     private ChangeType save(CollectionRun run, Topic topic, Source source, CollectedArticle collected) {
         String urlHash = ArticleHasher.urlHash(collected.canonicalUrl());
         String contentHash = ArticleHasher.contentHash(collected.title(), collected.summary(), null);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
 
         Article article = articleRepository.findByUrlHash(urlHash).orElse(null);
         ChangeType changeType;
