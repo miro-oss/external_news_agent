@@ -177,11 +177,11 @@ public class CollectionRunController {
             @Parameter(description = "해당 주제를 포함한 실행만 조회. 생략하면 전체")
             @RequestParam(required = false) Long topicId,
 
-            @Parameter(description = "시작 시각 하한. ISO-8601", example = "2026-08-10T00:00:00+09:00")
+            @Parameter(description = "시작 시각 하한. ISO-8601(예: 2026-08-10T00:00:00+09:00). 생략하면 전체")
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
             @RequestParam(required = false) OffsetDateTime from,
 
-            @Parameter(description = "시작 시각 상한. ISO-8601", example = "2026-08-11T00:00:00+09:00")
+            @Parameter(description = "시작 시각 상한. ISO-8601(예: 2026-08-11T00:00:00+09:00). 생략하면 전체")
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
             @RequestParam(required = false) OffsetDateTime to,
 

@@ -20,6 +20,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -204,5 +205,48 @@ class CollectionRunCommandServiceImplTest {
                 return source;
             }
         };
+    }
+
+    /**
+     * 같은 키가 거의 동시에 들어오면 앞의 조회로는 못 막는다 — 첫 요청이 아직 커밋되기 전이다.
+     * DB 유니크 인덱스가 잡아 주는데, 그 위반을 번역하지 않으면 사용자에게 500이 나간다.
+     */
+    @Test
+    void startManualRunTranslatesActiveIdempotencyKeyViolationToConflict() {
+        CollectionRunReqDTO.Create request = request(List.of(1L), "manual-key", false);
+        when(runRepository.findInProgressByOptionalIdempotencyKey("manual-key", RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(Optional.empty());
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L)))
+                .thenReturn(List.of(target(topic(1L, "HBM"), source(1L))));
+        when(runRepository.findInProgressByTopicIds(List.of(1L), RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(List.of());
+        when(runRepository.saveAndFlush(any(CollectionRun.class)))
+                .thenThrow(new DataIntegrityViolationException(
+                        "could not execute statement [ORA-00001: UQ_RUN_ACTIVE_IDEMPOTENCY_KEY]"));
+
+        RunException exception = assertThrows(RunException.class,
+                () -> runCommandService.startManualRun(request));
+
+        assertEquals(RunErrorCode.RUN_IN_PROGRESS, exception.getCode());
+        verify(runAsyncService, never()).execute(any());
+    }
+
+    /**
+     * idempotencyKey와 무관한 제약 위반까지 409로 바꾸면 진짜 원인이 가려진다.
+     */
+    @Test
+    void startManualRunRethrowsUnrelatedConstraintViolation() {
+        CollectionRunReqDTO.Create request = request(List.of(1L), "manual-key", false);
+        when(runRepository.findInProgressByOptionalIdempotencyKey("manual-key", RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(Optional.empty());
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L)))
+                .thenReturn(List.of(target(topic(1L, "HBM"), source(1L))));
+        when(runRepository.findInProgressByTopicIds(List.of(1L), RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(List.of());
+        when(runRepository.saveAndFlush(any(CollectionRun.class)))
+                .thenThrow(new DataIntegrityViolationException("ORA-00001: UQ_RUN_ITEM"));
+
+        assertThrows(DataIntegrityViolationException.class,
+                () -> runCommandService.startManualRun(request));
     }
 }

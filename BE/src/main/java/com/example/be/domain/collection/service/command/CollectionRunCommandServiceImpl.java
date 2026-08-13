@@ -16,6 +16,7 @@ import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -26,6 +27,7 @@ import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -33,6 +35,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Transactional
 public class CollectionRunCommandServiceImpl implements CollectionRunCommandService {
+
+    private static final String ACTIVE_IDEMPOTENCY_KEY_INDEX = "UQ_RUN_ACTIVE_IDEMPOTENCY_KEY";
 
     private final TopicRepository topicRepository;
     private final CollectionRunRepository runRepository;
@@ -78,12 +82,37 @@ public class CollectionRunCommandServiceImpl implements CollectionRunCommandServ
                 .status(RunItemStatus.RUNNING)
                 .build()));
 
-        CollectionRun saved = runRepository.saveAndFlush(run);
+        CollectionRun saved = saveRun(run);
         scheduleAfterCommit(saved.getId());
 
         return new CollectionRunStartResult(
                 GeneralSuccessCode.COLLECTION_STARTED,
                 CollectionRunConverter.toCreated(saved, targetTopicIds, targets.size()));
+    }
+
+    /**
+     * 같은 키가 거의 동시에 들어오면 앞의 조회로는 못 막는다 — 첫 요청이 아직 커밋되기 전이라 둘 다 통과한다.
+     * 그래서 진행 중일 때만 유니크한 인덱스를 DB에 걸어 뒀는데(#21), 그 위반을 잡지 않으면 500이 나간다.
+     *
+     * <p>여기서 기존 실행을 다시 조회해 200으로 돌려주지는 못한다. 제약 위반이 난 시점에 영속성 컨텍스트가
+     * 롤백 표시되기 때문이다. 지는 요청에게는 "이미 실행 중"이 사실이므로 RUN409로 알린다.
+     */
+    private CollectionRun saveRun(CollectionRun run) {
+        try {
+            return runRepository.saveAndFlush(run);
+        } catch (DataIntegrityViolationException exception) {
+            throw translateDuplicatedIdempotencyKey(exception);
+        }
+    }
+
+    private RuntimeException translateDuplicatedIdempotencyKey(DataIntegrityViolationException exception) {
+        Throwable cause = exception.getMostSpecificCause();
+        String message = cause.getMessage();
+
+        if (message != null && message.toUpperCase(Locale.ROOT).contains(ACTIVE_IDEMPOTENCY_KEY_INDEX)) {
+            return new RunException(RunErrorCode.RUN_IN_PROGRESS);
+        }
+        return exception;
     }
 
     private void validateNoTopicConflict(List<Long> targetTopicIds) {
