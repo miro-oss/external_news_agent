@@ -70,6 +70,9 @@ class CollectionExecutorIntegrationTests {
     private CollectionRunRepository runRepository;
 
     @Autowired
+    private CollectionResultWriter resultWriter;
+
+    @Autowired
     private ArticleRepository articleRepository;
 
     @Autowired
@@ -499,5 +502,38 @@ class CollectionExecutorIntegrationTests {
     private void flushAndClear() {
         entityManager.flush();
         entityManager.clear();
+    }
+
+    /**
+     * 실행을 무조건 FAILED로 닫으면 앞에서 성공한 조합이 묻힌다. 안 끝난 조합만 실패로 닫고
+     * 나머지는 저장된 결과 그대로 둬야 PARTIAL이 나온다.
+     */
+    @Test
+    void failRunKeepsPartialWhenSomeCombinationsAlreadySucceeded() {
+        givenFeed(article("HBM4 양산 시작", "요약"));
+        CollectionRun run = newRun();
+        CollectionRunItem succeeded = newItem(run);
+        CollectionRunItem stillRunning = newItem(run, otherSource());
+        collectionExecutor.execute(run, succeeded, topic, source);
+        runRepository.saveAndFlush(run);
+
+        resultWriter.failRun(run.getId());
+        flushAndClear();
+
+        CollectionRun reloaded = runRepository.findById(run.getId()).orElseThrow();
+        assertEquals(RunStatus.PARTIAL, reloaded.getStatus());
+        assertNotNull(reloaded.getFinishedAt());
+        assertEquals(RunItemStatus.SUCCESS, succeeded.getStatus());
+        assertEquals(RunItemStatus.FAILED, stillRunning.getStatus());
+    }
+
+    private Source otherSource() {
+        return sourceRepository.save(Source.builder()
+                .sourceKind(Source.KIND_FEED)
+                .name("두 번째 소스")
+                .urlTemplate(FEED_URL_PREFIX + UUID.randomUUID())
+                .language("ko")
+                .active(true)
+                .build());
     }
 }

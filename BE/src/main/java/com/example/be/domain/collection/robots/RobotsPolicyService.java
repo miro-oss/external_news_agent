@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.robots;
 
 import com.example.be.domain.sources.entity.Source;
+import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -32,7 +33,7 @@ public class RobotsPolicyService {
         }
 
         RobotsLookup lookup = robotsTxtClient.lookup(source.getUrlTemplate());
-        LocalDateTime checkedAt = LocalDateTime.now();
+        LocalDateTime checkedAt = LocalDateTime.now(ApiTimeZone.ZONE);
 
         if (!lookup.resolved()) {
             // 못 받았다고 막지 않는다. 판단할 근거가 없다는 뜻이지 금지가 아니다.

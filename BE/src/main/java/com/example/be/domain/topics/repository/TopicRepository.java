@@ -1,10 +1,13 @@
 package com.example.be.domain.topics.repository;
 
+import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -56,6 +59,40 @@ public interface TopicRepository extends JpaRepository<Topic, Long>, JpaSpecific
                                           @Param("active") Boolean active,
                                           Pageable pageable);
 
+    @Query("""
+            SELECT t AS topic, s AS source
+            FROM Topic t JOIN t.sources s
+            WHERE t.active = TRUE
+              AND s.active = TRUE
+            ORDER BY t.id ASC, s.id ASC
+            """)
+    List<CollectionTarget> findActiveCollectionTargets();
+
+    @Query("""
+            SELECT t AS topic, s AS source
+            FROM Topic t JOIN t.sources s
+            WHERE t.id IN :topicIds
+              AND t.active = TRUE
+              AND s.active = TRUE
+            ORDER BY t.id ASC, s.id ASC
+            """)
+    List<CollectionTarget> findActiveCollectionTargetsByTopicIds(@Param("topicIds") Collection<Long> topicIds);
+
+    /**
+     * 수집 대상 주제를 잠근다. 충돌 검사(findInProgressByTopicIds)와 실행 생성 사이에 다른 요청이
+     * 끼어들면 같은 주제를 동시에 수집하게 되는데, idempotencyKey와 달리 이건 DB 제약으로 막을 수 없다.
+     *
+     * <p>id 순서로 잠근다. 요청마다 순서가 다르면 서로를 기다리는 교착이 생긴다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT t
+            FROM Topic t
+            WHERE t.id IN :topicIds
+            ORDER BY t.id ASC
+            """)
+    List<Topic> lockByIds(@Param("topicIds") Collection<Long> topicIds);
+
     interface LinkedSourceCount {
 
         Long getTopicId();
@@ -86,5 +123,12 @@ public interface TopicRepository extends JpaRepository<Topic, Long>, JpaSpecific
         boolean getSourceActive();
 
         LocalDateTime getLastCollectedAt();
+    }
+
+    interface CollectionTarget {
+
+        Topic getTopic();
+
+        Source getSource();
     }
 }

@@ -15,9 +15,14 @@ import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.ArticleVersionRepository;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.collection.repository.CollectionRunItemRepository;
+import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
+import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.entity.Topic;
+import com.example.be.domain.topics.repository.TopicRepository;
+import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -45,17 +50,43 @@ public class CollectionResultWriter {
     private final ArticleRepository articleRepository;
     private final ArticleVersionRepository articleVersionRepository;
     private final CollectionRunArticleRepository runArticleRepository;
+    private final CollectionRunRepository runRepository;
+    private final CollectionRunItemRepository runItemRepository;
+    private final TopicRepository topicRepository;
+    private final SourceRepository sourceRepository;
 
     /**
      * {@code scannedCount}는 <b>필터 전에 받은 건수</b>다. 키워드로 걸러진 기사도 "훑기는 했다".
      * 그래서 {@code skipped = scanned - new - updated}에는 중복과 필터 탈락이 함께 들어간다.
      */
     @Transactional
+    public void write(Long runId,
+                      Long itemId,
+                      Long topicId,
+                      Long sourceId,
+                      CollectionOutcome outcome) {
+        CollectionRun run = runRepository.findById(runId).orElseThrow();
+        CollectionRunItem item = runItemRepository.findById(itemId).orElseThrow();
+        Topic topic = topicRepository.findById(topicId).orElseThrow();
+        Source source = sourceRepository.findById(sourceId).orElseThrow();
+
+        writeManaged(run, item, topic, source, outcome);
+    }
+
+    @Transactional
     public void write(CollectionRun run,
                       CollectionRunItem item,
                       Topic topic,
                       Source source,
                       CollectionOutcome outcome) {
+        writeManaged(run, item, topic, source, outcome);
+    }
+
+    private void writeManaged(CollectionRun run,
+                              CollectionRunItem item,
+                              Topic topic,
+                              Source source,
+                              CollectionOutcome outcome) {
         outcome.robots().applyTo(source);
 
         if (!outcome.robots().allowed()) {
@@ -67,7 +98,7 @@ public class CollectionResultWriter {
 
         // 실패한 응답에는 검증자가 없다. 그대로 덮으면 503 한 번에 저장해 둔 ETag가 사라진다.
         if (outcome.validatorsUpdated()) {
-            source.applyFetchState(outcome.etag(), outcome.lastModified(), LocalDateTime.now());
+            source.applyFetchState(outcome.etag(), outcome.lastModified(), LocalDateTime.now(ApiTimeZone.ZONE));
         }
 
         if (outcome.notModified()) {
@@ -105,9 +136,45 @@ public class CollectionResultWriter {
      * 조합 하나가 죽어도 실행은 계속돼야 한다. 사유는 경고로 남아 화면에서 보인다.
      */
     @Transactional
+    public void writeFailure(Long runId, Long itemId, Long sourceId, String message) {
+        CollectionRun run = runRepository.findById(runId).orElseThrow();
+        CollectionRunItem item = runItemRepository.findById(itemId).orElseThrow();
+        Source source = sourceRepository.findById(sourceId).orElseThrow();
+
+        writeFailureManaged(run, item, source, message);
+    }
+
+    @Transactional
     public void writeFailure(CollectionRun run, CollectionRunItem item, Source source, String message) {
+        writeFailureManaged(run, item, source, message);
+    }
+
+    private void writeFailureManaged(CollectionRun run, CollectionRunItem item, Source source, String message) {
         item.markFailed();
         run.addWarning(warning(source, CollectionRunWarning.CODE_FEED_UNREADABLE, message));
+    }
+
+    @Transactional
+    public void finishRun(Long runId) {
+        CollectionRun run = runRepository.findById(runId).orElseThrow();
+        run.finish(LocalDateTime.now(ApiTimeZone.ZONE));
+    }
+
+    /**
+     * 실행을 비정상 종료로 닫는다.
+     *
+     * <p>무조건 FAILED로 적으면 앞에서 성공한 조합이 묻힌다. 아직 안 끝난 조합만 실패로 닫고
+     * 나머지는 저장된 결과 그대로 두면, finish()가 PARTIAL / FAILED를 정확히 계산한다.
+     */
+    @Transactional
+    public void failRun(Long runId) {
+        runRepository.findById(runId).ifPresent(run -> {
+            run.getItems().stream()
+                    .filter(item -> item.getStatus() == RunItemStatus.PENDING
+                            || item.getStatus() == RunItemStatus.RUNNING)
+                    .forEach(CollectionRunItem::markFailed);
+            run.finish(LocalDateTime.now(ApiTimeZone.ZONE));
+        });
     }
 
     private CollectionRunWarning warning(Source source, String code, String message) {
@@ -116,7 +183,7 @@ public class CollectionResultWriter {
                 .code(code)
                 .message(trim(message))
                 .articleCount(0)
-                .occurredAt(LocalDateTime.now())
+                .occurredAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build();
     }
 
@@ -137,7 +204,7 @@ public class CollectionResultWriter {
     private ChangeType save(CollectionRun run, Topic topic, Source source, CollectedArticle collected) {
         String urlHash = ArticleHasher.urlHash(collected.canonicalUrl());
         String contentHash = ArticleHasher.contentHash(collected.title(), collected.summary(), null);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
 
         Article article = articleRepository.findByUrlHash(urlHash).orElse(null);
         ChangeType changeType;
