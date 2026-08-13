@@ -160,7 +160,7 @@ public class CollectionResultWriter {
     @Transactional
     public void applyFullText(Long articleId, FetchStatus fetchStatus, String body) {
         articleRepository.findById(articleId)
-                .ifPresent(article -> article.applyFullText(body, fetchStatus, LocalDateTime.now()));
+                .ifPresent(article -> article.applyFullText(body, fetchStatus, LocalDateTime.now(ApiTimeZone.ZONE)));
     }
 
     /**
@@ -176,7 +176,7 @@ public class CollectionResultWriter {
                 .code(CollectionRunWarning.CODE_FULLTEXT_BLOCKED)
                 .message("페이월로 전문을 가져오지 못했습니다. 제목과 링크만 저장했습니다.")
                 .articleCount(articleCount)
-                .occurredAt(LocalDateTime.now())
+                .occurredAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build());
     }
 
