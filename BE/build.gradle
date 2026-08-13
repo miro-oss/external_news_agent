@@ -25,6 +25,8 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
     implementation 'org.flywaydb:flyway-database-oracle'
+    // 기사 본문 추출용 HTML 파서. 임의의 뉴스 페이지에서 본문만 뽑는 건 정규식으로 되지 않는다.
+    implementation 'org.jsoup:jsoup:1.18.3'
     runtimeOnly 'com.oracle.database.jdbc:ojdbc11'
 
     compileOnly 'org.projectlombok:lombok'

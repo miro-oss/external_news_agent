@@ -24,4 +24,5 @@ public interface CollectionRunArticleRepository
     List<CollectionRunArticle> findByArticleIdOrderByObservedAtAsc(Long articleId);
 
     long countByRunIdAndChangeType(Long runId, ChangeType changeType);
+
 }

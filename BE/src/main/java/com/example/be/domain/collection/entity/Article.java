@@ -125,6 +125,19 @@ public class Article {
         this.lastSeenRun = run;
     }
 
+    /**
+     * 전문 추출 결과만 반영한다.
+     *
+     * <p><b>{@code contentHash}를 건드리지 않는다.</b> 변경 판정은 매 실행 피드가 주는 제목+요약 지문으로 한다.
+     * 여기서 본문 해시로 덮으면, 다음 실행이 메타데이터 지문과 비교하게 되어 <b>모든 기사가 매번 UPDATED</b>가 된다.
+     * 본문은 한 번만 받고 다시 받지 않으므로 실행 간 비교의 기준이 될 수 없다.
+     */
+    public void applyFullText(String body, FetchStatus fetchStatus, LocalDateTime updatedAt) {
+        this.body = body;
+        this.fetchStatus = fetchStatus;
+        this.updatedAt = updatedAt;
+    }
+
     public void applyUpdate(String title,
                             String summary,
                             String body,
