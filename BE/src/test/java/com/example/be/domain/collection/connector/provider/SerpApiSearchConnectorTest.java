@@ -2,6 +2,8 @@ package com.example.be.domain.collection.connector.provider;
 
 import com.example.be.domain.collection.connector.dto.req.SearchQuery;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
+import com.example.be.domain.collection.connector.dto.res.FetchResult;
+import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.sources.entity.SearchProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -11,6 +13,7 @@ import org.springframework.web.client.RestClient;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -67,7 +70,7 @@ class SerpApiSearchConnectorTest {
     void mapsSourceNameAndFallsBackToHost() {
         expectNewsRequest("en");
 
-        List<CollectedArticle> articles = connector().search(new SearchQuery("TSMC", 5, "en"));
+        List<CollectedArticle> articles = connector().search(new SearchQuery("TSMC", 5, "en")).articles();
 
         assertEquals(2, articles.size());
         assertEquals("TSMC said capex will rise", articles.get(0).summary());
@@ -82,14 +85,17 @@ class SerpApiSearchConnectorTest {
     void trimsResultsToBatchSize() {
         expectNewsRequest("en");
 
-        assertEquals(1, connector().search(new SearchQuery("TSMC", 1, "en")).size());
+        assertEquals(1, connector().search(new SearchQuery("TSMC", 1, "en")).articles().size());
     }
 
     @Test
-    void returnsEmptyAndSkipsHttpWithoutApiKey() {
+    void reportsMissingKeyAndSkipsHttp() {
         SerpApiSearchConnector connector = new SerpApiSearchConnector(builder, "");
 
-        assertTrue(connector.search(new SearchQuery("TSMC", 5, "en")).isEmpty());
+        FetchResult result = connector.search(new SearchQuery("TSMC", 5, "en"));
+
+        assertFalse(result.success());
+        assertEquals(CollectionRunWarning.CODE_PROVIDER_KEY_MISSING, result.failureCode());
         server.verify();
     }
 

@@ -2,6 +2,8 @@ package com.example.be.domain.collection.connector.provider;
 
 import com.example.be.domain.collection.connector.dto.req.SearchQuery;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
+import com.example.be.domain.collection.connector.dto.res.FetchResult;
+import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.sources.entity.SearchProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -14,6 +16,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
@@ -88,7 +91,7 @@ class TavilySearchConnectorTest {
         server.expect(requestTo(SEARCH_URI))
                 .andRespond(withSuccess(SEARCH_JSON, MediaType.APPLICATION_JSON));
 
-        List<CollectedArticle> articles = connector().search(new SearchQuery("HBM4", 5, "en"));
+        List<CollectedArticle> articles = connector().search(new SearchQuery("HBM4", 5, "en")).articles();
 
         assertEquals(1, articles.size());
         CollectedArticle article = articles.get(0);
@@ -108,16 +111,19 @@ class TavilySearchConnectorTest {
         server.expect(requestTo(SEARCH_URI))
                 .andRespond(withSuccess(SEARCH_JSON, MediaType.APPLICATION_JSON));
 
-        CollectedArticle article = connector().search(new SearchQuery("HBM4", 5, null)).get(0);
+        CollectedArticle article = connector().search(new SearchQuery("HBM4", 5, null)).articles().get(0);
 
         assertEquals("en", article.language());
     }
 
     @Test
-    void returnsEmptyAndSkipsHttpWithoutApiKey() {
+    void reportsMissingKeyAndSkipsHttp() {
         TavilySearchConnector connector = new TavilySearchConnector(builder, "");
 
-        assertTrue(connector.search(new SearchQuery("HBM4", 5, "en")).isEmpty());
+        FetchResult result = connector.search(new SearchQuery("HBM4", 5, "en"));
+
+        assertFalse(result.success());
+        assertEquals(CollectionRunWarning.CODE_PROVIDER_KEY_MISSING, result.failureCode());
         server.verify();
     }
 

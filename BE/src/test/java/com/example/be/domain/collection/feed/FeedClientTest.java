@@ -1,5 +1,6 @@
 package com.example.be.domain.collection.feed;
 
+import com.example.be.domain.collection.connector.dto.res.FetchResult;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -36,7 +37,7 @@ class FeedClientTest {
         server.expect(requestTo(FEED_URL))
                 .andRespond(withSuccess(RSS, MediaType.APPLICATION_XML));
 
-        FeedFetchResult result = feedClient.fetch(FEED_URL, "ko");
+        FetchResult result = feedClient.fetch(FEED_URL, "ko");
 
         assertTrue(result.success());
         assertEquals(1, result.articles().size());
@@ -52,7 +53,7 @@ class FeedClientTest {
                 .andRespond(withSuccess("<rss version=\"2.0\"><channel><title>빈 피드</title></channel></rss>",
                         MediaType.APPLICATION_XML));
 
-        FeedFetchResult result = feedClient.fetch(FEED_URL, "ko");
+        FetchResult result = feedClient.fetch(FEED_URL, "ko");
 
         assertTrue(result.success());
         assertTrue(result.articles().isEmpty());
@@ -67,7 +68,7 @@ class FeedClientTest {
         server.expect(requestTo(FEED_URL))
                 .andRespond(withSuccess("<!DOCTYPE html><html><body>News</body></html>", MediaType.TEXT_HTML));
 
-        FeedFetchResult result = feedClient.fetch(FEED_URL, "ko");
+        FetchResult result = feedClient.fetch(FEED_URL, "ko");
 
         assertFalse(result.success());
         assertEquals(CollectionRunWarning.CODE_FEED_UNREADABLE, result.failureCode());
@@ -79,7 +80,7 @@ class FeedClientTest {
         server.expect(requestTo(FEED_URL))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND));
 
-        FeedFetchResult result = feedClient.fetch(FEED_URL, "ko");
+        FetchResult result = feedClient.fetch(FEED_URL, "ko");
 
         assertFalse(result.success());
         assertEquals(CollectionRunWarning.CODE_FEED_UNREADABLE, result.failureCode());
@@ -91,7 +92,7 @@ class FeedClientTest {
         server.expect(requestTo(FEED_URL))
                 .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
 
-        FeedFetchResult result = feedClient.fetch(FEED_URL, "ko");
+        FetchResult result = feedClient.fetch(FEED_URL, "ko");
 
         assertFalse(result.success());
         assertEquals(CollectionRunWarning.CODE_RATE_LIMITED, result.failureCode());

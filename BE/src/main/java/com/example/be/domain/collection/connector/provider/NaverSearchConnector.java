@@ -5,6 +5,7 @@ import com.example.be.domain.collection.connector.converter.CollectedArticleConv
 import com.example.be.domain.collection.connector.converter.HtmlTextSanitizer;
 import com.example.be.domain.collection.connector.dto.req.SearchQuery;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
+import com.example.be.domain.collection.connector.dto.res.FetchResult;
 import com.example.be.domain.sources.entity.SearchProvider;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -54,10 +55,9 @@ public class NaverSearchConnector implements SearchConnector {
     }
 
     @Override
-    public List<CollectedArticle> search(SearchQuery query) {
+    public FetchResult search(SearchQuery query) {
         if (!hasCredentials()) {
-            log.warn("NAVER_CLIENT_ID/NAVER_CLIENT_SECRET이 없어 네이버 검색을 건너뛴다. queryText={}", query.queryText());
-            return List.of();
+            return missingKey(query, "NAVER_CLIENT_ID/NAVER_CLIENT_SECRET");
         }
 
         try {
@@ -72,9 +72,9 @@ public class NaverSearchConnector implements SearchConnector {
                     .retrieve()
                     .body(NewsResponse.class);
 
-            return toArticles(response);
+            return FetchResult.ok(toArticles(response));
         } catch (RestClientException e) {
-            return emptyOnFailure(query, e);
+            return failureOf(query, e);
         }
     }
 

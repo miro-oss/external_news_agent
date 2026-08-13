@@ -1,7 +1,7 @@
 package com.example.be.domain.collection.connector;
 
 import com.example.be.domain.collection.connector.dto.req.SearchQuery;
-import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
+import com.example.be.domain.collection.connector.dto.res.FetchResult;
 import com.example.be.domain.sources.entity.SearchProvider;
 import org.junit.jupiter.api.Test;
 
@@ -65,8 +65,8 @@ class SearchConnectorRegistryTest {
     private record StubConnector(SearchProvider provider) implements SearchConnector {
 
         @Override
-        public List<CollectedArticle> search(SearchQuery query) {
-            return List.of();
+        public FetchResult search(SearchQuery query) {
+            return FetchResult.ok(List.of());
         }
     }
 }

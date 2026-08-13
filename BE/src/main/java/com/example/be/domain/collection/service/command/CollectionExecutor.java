@@ -16,7 +16,7 @@ import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.feed.FeedClient;
-import com.example.be.domain.collection.feed.FeedFetchResult;
+import com.example.be.domain.collection.connector.dto.res.FetchResult;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.ArticleVersionRepository;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
@@ -68,7 +68,7 @@ public class CollectionExecutor {
     @Transactional
     public void execute(CollectionRun run, CollectionRunItem item, Topic topic, Source source) {
         try {
-            FeedFetchResult fetched = collect(topic, source);
+            FetchResult fetched = collect(topic, source);
             if (!fetched.success()) {
                 item.markFailed();
                 run.addWarning(warning(source, fetched.failureCode(), fetched.failureMessage()));
@@ -123,7 +123,7 @@ public class CollectionExecutor {
         return List.copyOf(byUrlHash.values());
     }
 
-    private FeedFetchResult collect(Topic topic, Source source) {
+    private FetchResult collect(Topic topic, Source source) {
         if (!source.isSearchKind()) {
             return feedClient.fetch(source.getUrlTemplate(), source.getLanguage());
         }
@@ -133,21 +133,21 @@ public class CollectionExecutor {
             // {query} 자리표시자를 쓰는 SEARCH 소스는 아직 어댑터가 없다. 조용히 비우지 않고 남긴다.
             log.warn("provider 키가 아닌 SEARCH 소스는 아직 수집하지 않는다. sourceId={} urlTemplate={}",
                     source.getId(), source.getUrlTemplate());
-            return FeedFetchResult.unreadable("어댑터가 없는 SEARCH 소스다: " + source.getUrlTemplate());
+            return FetchResult.unreadable("어댑터가 없는 SEARCH 소스다: " + source.getUrlTemplate());
         }
 
         return searchConnectorRegistry.find(provider)
-                .map(connector -> FeedFetchResult.ok(search(connector, topic, source)))
+                .map(connector -> search(connector, topic, source))
                 .orElseGet(() -> {
                     log.warn("등록된 커넥터가 없다. provider={}", provider);
-                    return FeedFetchResult.unreadable("등록된 커넥터가 없다: " + provider);
+                    return FetchResult.unreadable("등록된 커넥터가 없다: " + provider);
                 });
     }
 
-    private List<CollectedArticle> search(SearchConnector connector, Topic topic, Source source) {
+    private FetchResult search(SearchConnector connector, Topic topic, Source source) {
         if (!StringUtils.hasText(topic.getQueryText())) {
             log.warn("검색어가 없는 주제는 SEARCH 소스를 돌릴 수 없다. topicId={}", topic.getId());
-            return List.of();
+            return FetchResult.unreadable("주제에 검색어가 없어 SEARCH 소스를 돌릴 수 없다.");
         }
 
         return connector.search(new SearchQuery(topic.getQueryText(), topic.getBatchSize(), source.getLanguage()));

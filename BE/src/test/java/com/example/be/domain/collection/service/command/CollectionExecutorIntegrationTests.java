@@ -1,6 +1,10 @@
 package com.example.be.domain.collection.service.command;
 
+import com.example.be.domain.collection.connector.SearchConnector;
+import com.example.be.domain.collection.connector.SearchConnectorRegistry;
+import com.example.be.domain.collection.connector.dto.req.SearchQuery;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
+import com.example.be.domain.collection.connector.dto.res.FetchResult;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ArticleVersion;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -12,12 +16,12 @@ import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.feed.FeedClient;
-import com.example.be.domain.collection.feed.FeedFetchResult;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.ArticleVersionRepository;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.sources.entity.CrawlPolicy;
+import com.example.be.domain.sources.entity.SearchProvider;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.entity.Topic;
@@ -34,6 +38,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -81,6 +86,9 @@ class CollectionExecutorIntegrationTests {
 
     @MockitoBean
     private FeedClient feedClient;
+
+    @MockitoBean
+    private SearchConnectorRegistry searchConnectorRegistry;
 
     private Topic topic;
     private Source source;
@@ -245,7 +253,7 @@ class CollectionExecutorIntegrationTests {
     @Test
     void marksItemFailedWhenFeedCouldNotBeRead() {
         given(feedClient.fetch(anyString(), any()))
-                .willReturn(FeedFetchResult.unreadable("피드 응답 404 NOT_FOUND"));
+                .willReturn(FetchResult.unreadable("피드 응답 404 NOT_FOUND"));
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run);
 
@@ -294,6 +302,50 @@ class CollectionExecutorIntegrationTests {
     }
 
     /**
+     * 검색 커넥터도 피드와 같은 계약이다. 키가 없어 호출조차 못 한 소스가 SUCCESS 0건으로 기록되면
+     * "네이버 키를 안 넣었다"는 사실이 아무 데도 남지 않는다.
+     */
+    @Test
+    void marksItemFailedWhenSearchConnectorReports() {
+        // (SEARCH, NAVER)에는 유니크 제약이 있고 로컬에 이미 등록돼 있을 수 있다. 있으면 그걸 쓴다.
+        Source searchSource = sourceRepository.findAll().stream()
+                .filter(candidate -> Source.KIND_SEARCH.equals(candidate.getSourceKind())
+                        && SearchProvider.NAVER.name().equals(candidate.getUrlTemplate()))
+                .findFirst()
+                .orElseGet(() -> sourceRepository.save(Source.builder()
+                        .sourceKind(Source.KIND_SEARCH)
+                        .name("검색 소스")
+                        .urlTemplate(SearchProvider.NAVER.name())
+                        .language("ko")
+                        .active(true)
+                        .build()));
+        given(searchConnectorRegistry.find(SearchProvider.NAVER))
+                .willReturn(Optional.of(new StubConnector(
+                        FetchResult.providerKeyMissing("NAVER_CLIENT_ID가 설정되지 않았다."))));
+        CollectionRun run = newRun();
+        CollectionRunItem item = newItem(run, searchSource);
+
+        collectionExecutor.execute(run, item, topic, searchSource);
+
+        assertEquals(RunItemStatus.FAILED, item.getStatus());
+        assertEquals(1, run.getWarningCount());
+        assertEquals(CollectionRunWarning.CODE_PROVIDER_KEY_MISSING, run.getWarnings().get(0).getCode());
+    }
+
+    private record StubConnector(FetchResult result) implements SearchConnector {
+
+        @Override
+        public SearchProvider provider() {
+            return SearchProvider.NAVER;
+        }
+
+        @Override
+        public FetchResult search(SearchQuery query) {
+            return result;
+        }
+    }
+
+    /**
      * 조합 하나가 죽어도 실행은 계속돼야 한다. 사유는 경고로 남아 화면에서 보인다.
      */
     @Test
@@ -311,7 +363,7 @@ class CollectionExecutorIntegrationTests {
     }
 
     private void givenFeed(CollectedArticle... articles) {
-        given(feedClient.fetch(anyString(), any())).willReturn(FeedFetchResult.ok(List.of(articles)));
+        given(feedClient.fetch(anyString(), any())).willReturn(FetchResult.ok(List.of(articles)));
     }
 
     private CollectedArticle article(String title, String summary) {

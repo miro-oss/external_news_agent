@@ -35,6 +35,9 @@ public class CollectionRunWarning {
     public static final String CODE_ROBOTS_DISALLOWED = "ROBOTS_DISALLOWED";
     public static final String CODE_FEED_UNREADABLE = "FEED_UNREADABLE";
     public static final String CODE_RATE_LIMITED = "RATE_LIMITED";
+    /** 검색 API 키가 없어 호출조차 하지 않았다. 소스 설정이나 환경변수 문제다. */
+    public static final String CODE_PROVIDER_KEY_MISSING = "PROVIDER_KEY_MISSING";
+    public static final String CODE_SEARCH_FAILED = "SEARCH_FAILED";
 
     public static final int MAX_CODE_LENGTH = 50;
     public static final int MAX_MESSAGE_LENGTH = 1000;

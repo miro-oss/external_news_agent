@@ -2,6 +2,8 @@ package com.example.be.domain.collection.connector.provider;
 
 import com.example.be.domain.collection.connector.dto.req.SearchQuery;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
+import com.example.be.domain.collection.connector.dto.res.FetchResult;
+import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.sources.entity.SearchProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -15,6 +17,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
@@ -67,7 +70,7 @@ class NaverSearchConnectorTest {
     void mapsOriginalLinkAndNeverTheNaverMirror() {
         expectNewsRequest();
 
-        List<CollectedArticle> articles = connector().search(new SearchQuery("HBM", 5, "ko"));
+        List<CollectedArticle> articles = connector().search(new SearchQuery("HBM", 5, "ko")).articles();
 
         assertEquals(1, articles.size());
         assertEquals("https://www.hankyung.com/article/2026081200001", articles.get(0).canonicalUrl());
@@ -79,7 +82,7 @@ class NaverSearchConnectorTest {
     void stripsTagsBeforeDecodingEntities() {
         expectNewsRequest();
 
-        CollectedArticle article = connector().search(new SearchQuery("HBM", 5, "ko")).get(0);
+        CollectedArticle article = connector().search(new SearchQuery("HBM", 5, "ko")).articles().get(0);
 
         assertEquals("삼성전자 HBM4 양산 & 공급", article.title());
         assertEquals("삼성전자가 HBM4를 <b>양산</b>한다", article.summary());
@@ -89,7 +92,7 @@ class NaverSearchConnectorTest {
     void parsesRfc2822PublishedAt() {
         expectNewsRequest();
 
-        CollectedArticle article = connector().search(new SearchQuery("HBM", 5, "ko")).get(0);
+        CollectedArticle article = connector().search(new SearchQuery("HBM", 5, "ko")).articles().get(0);
 
         assertEquals(OffsetDateTime.of(2026, 8, 10, 9, 0, 0, 0, ZoneOffset.ofHours(9)), article.publishedAt());
         assertEquals("www.hankyung.com", article.sourceName());
@@ -113,7 +116,7 @@ class NaverSearchConnectorTest {
                         }
                         """.formatted(NAVER_MIRROR), MediaType.APPLICATION_JSON));
 
-        CollectedArticle article = connector().search(new SearchQuery("HBM", 5, "ko")).get(0);
+        CollectedArticle article = connector().search(new SearchQuery("HBM", 5, "ko")).articles().get(0);
 
         assertNull(article.publishedAt());
     }
@@ -133,29 +136,57 @@ class NaverSearchConnectorTest {
 
     /**
      * 키가 없으면 예외를 던지지 않고 아예 호출하지 않는다. 새 팀원이 키 없이 bootRun 할 수 있어야 한다.
+     * 다만 결과는 성공이 아니다 — 그 소스를 실제로 쓰는 실행에서는 경고로 드러나야 한다.
      */
     @Test
-    void returnsEmptyAndSkipsHttpWithoutCredentials() {
+    void reportsMissingKeyAndSkipsHttp() {
         NaverSearchConnector connector = new NaverSearchConnector(builder, "", "");
 
-        assertTrue(connector.search(new SearchQuery("HBM", 5, "ko")).isEmpty());
+        FetchResult result = connector.search(new SearchQuery("HBM", 5, "ko"));
+
+        assertFalse(result.success());
+        assertEquals(CollectionRunWarning.CODE_PROVIDER_KEY_MISSING, result.failureCode());
+        assertTrue(result.articles().isEmpty());
+        server.verify();
+    }
+
+    /**
+     * 401은 키가 틀린 것이다. 빈 결과로 뭉개면 조합이 SUCCESS 0건으로 기록돼 원인을 알 수 없다.
+     */
+    @Test
+    void reportsFailureWhenNaverRejectsTheRequest() {
+        server.expect(requestTo(newsUri(5)))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+
+        FetchResult result = connector().search(new SearchQuery("HBM", 5, "ko"));
+
+        assertFalse(result.success());
+        assertEquals(CollectionRunWarning.CODE_SEARCH_FAILED, result.failureCode());
+        server.verify();
+    }
+
+    /**
+     * 5xx는 잠시 뒤에는 될 수 있다. 401과 같은 코드로 남기면 재시도 대상을 못 가른다.
+     */
+    @Test
+    void marksServerFailureAsRetryable() {
+        server.expect(requestTo(newsUri(5)))
+                .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+
+        FetchResult result = connector().search(new SearchQuery("HBM", 5, "ko"));
+
+        assertFalse(result.success());
+        assertEquals(CollectionRunWarning.CODE_RATE_LIMITED, result.failureCode());
         server.verify();
     }
 
     @Test
-    void returnsEmptyWhenNaverRejectsTheRequest() {
+    void marksRateLimitAsRetryable() {
         server.expect(requestTo(newsUri(5)))
-                .andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+                .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
 
-        assertTrue(connector().search(new SearchQuery("HBM", 5, "ko")).isEmpty());
-    }
-
-    @Test
-    void returnsEmptyWhenNaverIsDown() {
-        server.expect(requestTo(newsUri(5)))
-                .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
-
-        assertTrue(connector().search(new SearchQuery("HBM", 5, "ko")).isEmpty());
+        assertEquals(CollectionRunWarning.CODE_RATE_LIMITED,
+                connector().search(new SearchQuery("HBM", 5, "ko")).failureCode());
     }
 
     private NaverSearchConnector connector() {
