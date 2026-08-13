@@ -19,7 +19,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.InOrder;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDateTime;
@@ -32,6 +34,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -50,6 +54,9 @@ class CollectionRunCommandServiceImplTest {
 
     @Mock
     private CollectionRunAsyncService runAsyncService;
+
+    @Mock
+    private CollectionResultWriter resultWriter;
 
     @InjectMocks
     private CollectionRunCommandServiceImpl runCommandService;
@@ -248,5 +255,50 @@ class CollectionRunCommandServiceImplTest {
 
         assertThrows(DataIntegrityViolationException.class,
                 () -> runCommandService.startManualRun(request));
+    }
+
+    /**
+     * 충돌 검사와 실행 생성 사이에 다른 요청이 끼어들면 같은 주제를 동시에 수집하게 된다.
+     * idempotencyKey와 달리 DB 제약으로 막을 수 없어 대상 주제를 먼저 잠근다.
+     */
+    @Test
+    void startManualRunLocksTargetTopicsBeforeCheckingConflict() {
+        CollectionRunReqDTO.Create request = request(List.of(1L), "manual-key", false);
+        when(runRepository.findInProgressByOptionalIdempotencyKey("manual-key", RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(Optional.empty());
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L)))
+                .thenReturn(List.of(target(topic(1L, "HBM"), source(1L))));
+        when(runRepository.findInProgressByTopicIds(List.of(1L), RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(List.of());
+        when(runRepository.saveAndFlush(any(CollectionRun.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        runCommandService.startManualRun(request);
+
+        InOrder order = inOrder(topicRepository, runRepository);
+        order.verify(topicRepository).lockByIds(List.of(1L));
+        order.verify(runRepository).findInProgressByTopicIds(List.of(1L), RunStatus.IN_PROGRESS_STATUSES);
+    }
+
+    /**
+     * 실행 행은 이미 RUNNING으로 커밋돼 있다. 스레드풀이 거절하면 아무도 그 행을 닫지 않아
+     * 영원히 RUNNING으로 남고, 그 주제는 충돌 검사에 걸려 다시 실행할 수도 없게 된다.
+     */
+    @Test
+    void startManualRunFailsTheRunWhenExecutorRejectsTheTask() {
+        CollectionRunReqDTO.Create request = request(List.of(1L), "manual-key", false);
+        when(runRepository.findInProgressByOptionalIdempotencyKey("manual-key", RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(Optional.empty());
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L)))
+                .thenReturn(List.of(target(topic(1L, "HBM"), source(1L))));
+        when(runRepository.findInProgressByTopicIds(List.of(1L), RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(List.of());
+        when(runRepository.saveAndFlush(any(CollectionRun.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        doThrow(new TaskRejectedException("queue full")).when(runAsyncService).execute(any());
+
+        runCommandService.startManualRun(request);
+
+        verify(resultWriter).failRun(any());
     }
 }
