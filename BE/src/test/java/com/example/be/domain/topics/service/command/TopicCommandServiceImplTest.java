@@ -1,6 +1,8 @@
 package com.example.be.domain.topics.service.command;
 
 import com.example.be.domain.sources.entity.Source;
+import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.dto.req.TopicReqDTO;
 import com.example.be.domain.topics.dto.res.TopicResDTO;
@@ -41,6 +43,9 @@ class TopicCommandServiceImplTest {
 
     @Mock
     private SourceRepository sourceRepository;
+
+    @Mock
+    private CollectionRunRepository collectionRunRepository;
 
     @InjectMocks
     private TopicCommandServiceImpl topicCommandService;
@@ -323,17 +328,24 @@ class TopicCommandServiceImplTest {
         assertEquals(TopicErrorCode.TOPIC_NOT_FOUND, exception.getCode());
     }
 
+    /**
+     * 기사·실행 이력이 주제를 참조하게 되면서 행을 지울 수 없다. 명세도 "기사와 보고서 이력은 유지"라고
+     * 정의하므로 소스와 같은 방식으로 비활성화하고 연결만 끊는다.
+     */
     @Test
-    void deleteTopicReportsUnlinkedSourceCount() {
+    void deleteTopicUnlinksSourcesAndDeactivatesInsteadOfRemovingRow() {
         Topic topic = existingTopic();
         topic.replaceSources(List.of(feedSource(), searchSource()));
         when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(collectionRunRepository.findInProgressByTopicIds(any(), any())).thenReturn(List.of());
 
         TopicResDTO.Deleted result = topicCommandService.deleteTopic(1L);
 
         assertEquals(1L, result.getId());
         assertEquals(2, result.getUnlinkedSourceCount());
-        verify(topicRepository).delete(topic);
+        assertFalse(topic.isActive());
+        assertEquals(0, topic.getLinkedSourceCount());
+        verify(topicRepository, never()).delete(any(Topic.class));
     }
 
     @Test
@@ -345,6 +357,23 @@ class TopicCommandServiceImplTest {
 
         assertEquals(TopicErrorCode.TOPIC_NOT_FOUND, exception.getCode());
         verify(topicRepository, never()).delete(any(Topic.class));
+    }
+
+    /**
+     * 수집이 도는 중에 연결을 끊으면 그 실행의 남은 결과가 유실된다.
+     */
+    @Test
+    void deleteTopicRejectsWhileCollecting() {
+        Topic topic = existingTopic();
+        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(collectionRunRepository.findInProgressByTopicIds(any(), any()))
+                .thenReturn(List.of(CollectionRun.builder().build()));
+
+        TopicException exception = assertThrows(TopicException.class,
+                () -> topicCommandService.deleteTopic(1L));
+
+        assertEquals(TopicErrorCode.TOPIC_COLLECTING, exception.getCode());
+        assertTrue(topic.isActive());
     }
 
     @Test

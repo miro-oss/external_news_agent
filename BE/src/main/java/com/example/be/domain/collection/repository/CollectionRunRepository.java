@@ -17,9 +17,33 @@ public interface CollectionRunRepository
     /**
      * 버튼 연타로 들어온 같은 키의 요청은 새 실행을 만들지 않고 진행 중인 실행을 돌려준다.
      * DB에도 함수 기반 유니크 인덱스가 걸려 있어, 동시 요청은 제약에서 한 번 더 걸린다.
+     *
+     * <p>{@code idempotencyKey}는 명세에서 선택값이다. 파생 쿼리로 두면 null 인자가
+     * {@code idempotency_key IS NULL}로 해석돼, 키를 안 보낸 요청이 남이 만든 키 없는 실행을 집어
+     * "이미 진행 중"이라고 답한다. 선택값의 의미를 저장 계층에서도 지키려고 조건을 직접 적는다.
      */
-    Optional<CollectionRun> findFirstByIdempotencyKeyAndStatusIn(String idempotencyKey,
-                                                                 Collection<RunStatus> statuses);
+    @Query("""
+            SELECT run
+            FROM CollectionRun run
+            WHERE run.idempotencyKey IS NOT NULL
+              AND run.idempotencyKey = :idempotencyKey
+              AND run.status IN :statuses
+            ORDER BY run.id ASC
+            """)
+    List<CollectionRun> findInProgressByIdempotencyKey(@Param("idempotencyKey") String idempotencyKey,
+                                                       @Param("statuses") Collection<RunStatus> statuses);
+
+    /**
+     * 키가 없으면 조회 자체를 하지 않는다. 키 없는 요청은 언제나 새 실행이다.
+     */
+    default Optional<CollectionRun> findInProgressByOptionalIdempotencyKey(String idempotencyKey,
+                                                                           Collection<RunStatus> statuses) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return Optional.empty();
+        }
+
+        return findInProgressByIdempotencyKey(idempotencyKey, statuses).stream().findFirst();
+    }
 
     /**
      * 같은 주제를 이미 수집 중인 실행을 찾는다. 명세의 RUN409가 이 결과로 판정된다.

@@ -1,5 +1,6 @@
 package com.example.be;
 
+import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.repository.TopicRepository;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,9 @@ class BeApplicationTests {
 
     @MockitoBean
     private SourceRepository sourceRepository;
+
+    @MockitoBean
+    private CollectionRunRepository collectionRunRepository;
 
     @Test
     void contextLoads() {

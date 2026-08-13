@@ -65,7 +65,22 @@ public class CollectionRunItem {
         this.run = run;
     }
 
+    /**
+     * DB에도 같은 CHECK가 걸려 있다. 여기서 먼저 막는 이유는, 제약 위반이 커밋 시점에 터지면
+     * 어느 조합이 잘못됐는지가 스택에서 사라지기 때문이다.
+     */
     public void recordResult(RunItemStatus status, int scannedCount, int newCount, int updatedCount) {
+        if (scannedCount < 0 || newCount < 0 || updatedCount < 0) {
+            throw new IllegalArgumentException(
+                    "수집 카운트는 음수일 수 없다. scanned=%d new=%d updated=%d"
+                            .formatted(scannedCount, newCount, updatedCount));
+        }
+        if (newCount + updatedCount > scannedCount) {
+            throw new IllegalArgumentException(
+                    "새 기사와 변경 기사의 합이 훑은 기사 수를 넘을 수 없다. scanned=%d new=%d updated=%d"
+                            .formatted(scannedCount, newCount, updatedCount));
+        }
+
         this.status = status;
         this.scannedCount = scannedCount;
         this.newCount = newCount;

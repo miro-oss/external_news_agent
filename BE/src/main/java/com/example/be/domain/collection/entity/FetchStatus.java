@@ -21,5 +21,20 @@ public enum FetchStatus {
     ROBOTS_DISALLOWED,
 
     /** 네트워크·5xx 등으로 실패했다. 재시도 대상이다. */
-    FETCH_FAILED
+    FETCH_FAILED;
+
+    /** Notion 기사 목록·상세 명세가 쓰는 값. 내부 상태보다 거칠다. */
+    public static final String API_OK = "OK";
+    public static final String API_BLOCKED = "BLOCKED";
+
+    /**
+     * 저장값을 명세의 응답값으로 좁힌다.
+     *
+     * <p>명세의 {@code fetchStatus}는 {@code OK} / {@code BLOCKED} 두 가지다. 내부에서는 왜 못 받았는지를
+     * 구분해야 재시도 대상과 포기 대상이 갈리므로 다섯 가지로 저장하고, 바깥으로 나갈 때 여기서 좁힌다.
+     * 매핑을 두지 않으면 후속 기사 API가 내부 값을 그대로 흘려보내 명세와 다른 enum이 나간다.
+     */
+    public String toApiValue() {
+        return this == FULLTEXT ? API_OK : API_BLOCKED;
+    }
 }

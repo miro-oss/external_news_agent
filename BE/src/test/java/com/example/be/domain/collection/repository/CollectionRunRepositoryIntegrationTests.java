@@ -3,6 +3,8 @@ package com.example.be.domain.collection.repository;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ArticleVersion;
 import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.domain.collection.entity.ChangeType;
+import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.FetchStatus;
@@ -57,6 +59,9 @@ class CollectionRunRepositoryIntegrationTests {
 
     @Autowired
     private ArticleVersionRepository articleVersionRepository;
+
+    @Autowired
+    private CollectionRunArticleRepository runArticleRepository;
 
     @Autowired
     private TopicRepository topicRepository;
@@ -173,9 +178,9 @@ class CollectionRunRepositoryIntegrationTests {
         runRepository.save(run);
         flushAndClear();
 
-        assertTrue(runRepository.findFirstByIdempotencyKeyAndStatusIn(
-                run.getIdempotencyKey(), List.of(RunStatus.PENDING, RunStatus.RUNNING)).isPresent());
-        assertTrue(runRepository.findFirstByIdempotencyKeyAndStatusIn(
+        assertTrue(runRepository.findInProgressByOptionalIdempotencyKey(
+                run.getIdempotencyKey(), RunStatus.IN_PROGRESS_STATUSES).isPresent());
+        assertTrue(runRepository.findInProgressByOptionalIdempotencyKey(
                 run.getIdempotencyKey(), List.of(RunStatus.SUCCESS)).isEmpty());
     }
 
@@ -251,7 +256,7 @@ class CollectionRunRepositoryIntegrationTests {
         flushAndClear();
 
         Article found = articleRepository.findById(saved.getId()).orElseThrow();
-        assertTrue(publishedAt.isEqual(found.getPublishedAt()));
+        assertEquals(publishedAt, found.getPublishedAt());
         assertEquals(FetchStatus.METADATA_ONLY, found.getFetchStatus());
         assertEquals(source.getId(), found.getSource().getId());
     }
@@ -297,6 +302,104 @@ class CollectionRunRepositoryIntegrationTests {
         assertEquals(ArticleVersion.FIRST_VERSION_NO,
                 articleVersionRepository.findFirstByArticleIdOrderByVersionNoDesc(saved.getId())
                         .orElseThrow().getVersionNo());
+    }
+
+    /**
+     * idempotencyKey는 선택값이다. 키 없는 요청이 남이 만든 키 없는 실행을 집어 "이미 진행 중"이라고
+     * 답하면 안 된다.
+     */
+    @Test
+    void treatsMissingIdempotencyKeyAsAlwaysNewRun() {
+        CollectionRun keyless = newRun(null);
+        keyless.start();
+        runRepository.save(keyless);
+        flushAndClear();
+
+        assertTrue(runRepository.findInProgressByOptionalIdempotencyKey(
+                null, RunStatus.IN_PROGRESS_STATUSES).isEmpty());
+        assertTrue(runRepository.findInProgressByOptionalIdempotencyKey(
+                "  ", RunStatus.IN_PROGRESS_STATUSES).isEmpty());
+    }
+
+    /**
+     * 키 없는 실행은 여러 건이 동시에 진행될 수 있어야 한다. 함수 기반 인덱스는 NULL 행을 세지 않는다.
+     */
+    @Test
+    void allowsManyInProgressRunsWithoutIdempotencyKey() {
+        runRepository.save(newRunInProgress(null));
+        runRepository.save(newRunInProgress(null));
+
+        entityManager.flush();
+    }
+
+    /**
+     * 같은 기사가 run 42에서 NEW, run 43에서 UPDATED일 수 있다. 기사 행만으로는 복원되지 않는다.
+     */
+    @Test
+    void keepsPerRunObservationHistory() {
+        CollectionRun firstRun = runRepository.save(newRun("observe-1-" + UUID.randomUUID()));
+        CollectionRun secondRun = runRepository.save(newRun("observe-2-" + UUID.randomUUID()));
+        Article saved = articleRepository.save(article(firstRun, randomHash(), OffsetDateTime.now()));
+
+        runArticleRepository.save(CollectionRunArticle.observe(
+                firstRun, saved, topic, source, ChangeType.NEW, LocalDateTime.now()));
+        runArticleRepository.save(CollectionRunArticle.observe(
+                secondRun, saved, topic, source, ChangeType.UPDATED, LocalDateTime.now()));
+        flushAndClear();
+
+        assertEquals(1, runArticleRepository.findByRunIdOrderByIdAsc(firstRun.getId()).size());
+        assertEquals(ChangeType.NEW,
+                runArticleRepository.findByRunIdOrderByIdAsc(firstRun.getId()).get(0).getChangeType());
+        assertEquals(1, runArticleRepository.countByRunIdAndChangeType(secondRun.getId(), ChangeType.UPDATED));
+        assertEquals(2, runArticleRepository.findByArticleIdOrderByObservedAtAsc(saved.getId()).size());
+    }
+
+    /**
+     * 같은 URL이 다른 주제에서 발견돼도 기사 행은 하나다. 주제별 관측은 관측 테이블이 갖는다.
+     */
+    @Test
+    void recordsSameArticleUnderTwoTopics() {
+        Topic otherTopic = topicRepository.save(Topic.builder()
+                .name("두 번째 주제 " + UUID.randomUUID())
+                .queryText("DRAM")
+                .requiredKeywords(List.of("DRAM"))
+                .optionalKeywords(List.of())
+                .excludedKeywords(List.of())
+                .batchSize(10)
+                .intervalMinutes(60)
+                .active(true)
+                .build());
+        CollectionRun run = runRepository.save(newRun("multi-topic-" + UUID.randomUUID()));
+        Article saved = articleRepository.save(article(run, randomHash(), OffsetDateTime.now()));
+
+        runArticleRepository.save(CollectionRunArticle.observe(
+                run, saved, topic, source, ChangeType.NEW, LocalDateTime.now()));
+        runArticleRepository.save(CollectionRunArticle.observe(
+                run, saved, otherTopic, source, ChangeType.UNCHANGED, LocalDateTime.now()));
+        flushAndClear();
+
+        assertEquals(2, runArticleRepository.findByRunIdOrderByIdAsc(run.getId()).size());
+        assertEquals(1, runArticleRepository.findByRunIdAndChangeTypeOrderByIdAsc(
+                run.getId(), ChangeType.NEW).size());
+    }
+
+    @Test
+    void refusesToFinishWhileAnItemIsStillRunning() {
+        CollectionRun run = newRun("unfinished");
+        run.addItem(item(source, RunItemStatus.SUCCESS, 10, 1, 0));
+        run.addItem(item(otherSource, RunItemStatus.RUNNING, 0, 0, 0));
+
+        assertThrows(IllegalStateException.class, () -> run.finish(LocalDateTime.now()));
+    }
+
+    @Test
+    void rejectsImpossibleItemCounts() {
+        CollectionRunItem runItem = item(source, RunItemStatus.SUCCESS, 0, 0, 0);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> runItem.recordResult(RunItemStatus.SUCCESS, -1, 0, 0));
+        assertThrows(IllegalArgumentException.class,
+                () -> runItem.recordResult(RunItemStatus.SUCCESS, 5, 4, 3));
     }
 
     private CollectionRun newRun(String idempotencyKey) {

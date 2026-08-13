@@ -14,6 +14,9 @@ public enum RunStatus {
     PARTIAL,
     FAILED;
 
+    /** 진행 중 판정이 여러 곳에서 필요하다. 목록을 흩뿌리면 한 곳만 고치고 나머지를 빠뜨린다. */
+    public static final java.util.Set<RunStatus> IN_PROGRESS_STATUSES = java.util.Set.of(PENDING, RUNNING);
+
     public boolean isInProgress() {
         return this == PENDING || this == RUNNING;
     }

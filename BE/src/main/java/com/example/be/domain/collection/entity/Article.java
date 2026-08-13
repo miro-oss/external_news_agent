@@ -23,6 +23,7 @@ import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.Objects;
 
 /**
  * 수집된 기사 1건.
@@ -108,9 +109,13 @@ public class Article {
     /**
      * 이미 있던 기사를 다시 만났을 때 내용이 바뀌었는지 본다. 발행일이나 요약이 조금 달라지는 일은 흔해서,
      * 본문 해시가 같으면 갱신으로 치지 않는다.
+     *
+     * <p>둘 다 없으면 "바뀐 게 없다"로 본다. 본문을 못 받은 METADATA_ONLY 기사를 매 실행마다 UPDATED로 찍으면
+     * 실행 통계가 부풀고 바뀌지도 않은 버전이 계속 쌓인다. 본문이 없을 때 무엇으로 해시를 만들지는
+     * 수집 엔진이 정한다(제목·요약 지문) — 여기서는 비교만 한다.
      */
     public boolean hasSameContent(String contentHash) {
-        return this.contentHash != null && this.contentHash.equals(contentHash);
+        return Objects.equals(this.contentHash, contentHash);
     }
 
     /**

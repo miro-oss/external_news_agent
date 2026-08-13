@@ -110,6 +110,8 @@ public class CollectionRun {
      * 크롤러 하나가 죽었다고 실행 전체를 실패로 적으면 나머지 성공한 수집이 묻힌다.
      */
     public void finish(LocalDateTime finishedAt) {
+        requireEveryItemTerminal();
+
         this.scannedCount = items.stream().mapToInt(CollectionRunItem::getScannedCount).sum();
         this.newCount = items.stream().mapToInt(CollectionRunItem::getNewCount).sum();
         this.updatedCount = items.stream().mapToInt(CollectionRunItem::getUpdatedCount).sum();
@@ -129,6 +131,23 @@ public class CollectionRun {
 
     public int getWarningCount() {
         return warnings.size();
+    }
+
+    /**
+     * 아직 도는 조합이 있는데 실행을 닫으면 SUCCESS로 기록될 수 있다. 이력에 거짓 성공이 남는 쪽이
+     * 예외로 멈추는 것보다 나쁘다.
+     */
+    private void requireEveryItemTerminal() {
+        List<Long> pendingItemIds = items.stream()
+                .filter(item -> item.getStatus() == RunItemStatus.PENDING
+                        || item.getStatus() == RunItemStatus.RUNNING)
+                .map(CollectionRunItem::getId)
+                .toList();
+
+        if (!pendingItemIds.isEmpty()) {
+            throw new IllegalStateException(
+                    "아직 끝나지 않은 조합이 있어 실행을 닫을 수 없다. itemIds=" + pendingItemIds);
+        }
     }
 
     private RunStatus resolveStatus() {
