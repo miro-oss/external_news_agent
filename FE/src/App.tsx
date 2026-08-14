@@ -1,11 +1,8 @@
 import './App.css'
+import { SettingsPage } from './features/settings/SettingsPage'
 
 function App() {
-  return (
-    <>
-      <h1>Hello React</h1>
-    </>
-  )
+  return <SettingsPage />
 }
 
 export default App

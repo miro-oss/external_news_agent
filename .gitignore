@@ -18,5 +18,9 @@ BE/build/
 .idea/
 .vscode/
 
+# Claude Code — 로컬 전용. launch.json은 절대 경로라 남의 기계에서 안 돈다
+.claude/settings.local.json
+.claude/launch.json
+
 # Docs
 docs/
