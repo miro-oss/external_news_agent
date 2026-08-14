@@ -518,9 +518,16 @@ class CollectionExecutorIntegrationTests {
     /**
      * 실행을 무조건 FAILED로 닫으면 앞에서 성공한 조합이 묻힌다. 안 끝난 조합만 실패로 닫고
      * 나머지는 저장된 결과 그대로 둬야 PARTIAL이 나온다.
+     *
+     * <p><b>{@code failRun}이 아니라 그것이 위임하는 {@code abortRun}을 부른다.</b> {@code failRun}은
+     * {@code REQUIRES_NEW}라 이 테스트의 트랜잭션을 밀어내고 새 트랜잭션에서 실행을 찾는데,
+     * 여기서 만든 실행은 아직 커밋 전이라 그쪽에서 보이지 않는다 — 조용히 아무것도 하지 않고 끝난다.
+     * 여기서 고정하려는 것은 propagation이 아니라 PARTIAL / FAILED 판정이고, 그 로직은 둘이 공유한다.
+     * {@code REQUIRES_NEW}로 커밋되는지는 커밋을 실제로 일으키는
+     * {@code CollectionResultWriterIntegrationTests}가 본다.
      */
     @Test
-    void failRunKeepsPartialWhenSomeCombinationsAlreadySucceeded() {
+    void abortRunKeepsPartialWhenSomeCombinationsAlreadySucceeded() {
         givenFeed(article("HBM4 양산 시작", "요약"));
         CollectionRun run = newRun();
         CollectionRunItem succeeded = newItem(run);
@@ -528,7 +535,8 @@ class CollectionExecutorIntegrationTests {
         execute(run, succeeded, topic, source);
         runRepository.saveAndFlush(run);
 
-        resultWriter.failRun(run.getId());
+        resultWriter.abortRun(run.getId(), CollectionRunWarning.CODE_RUN_REJECTED,
+                "수집 작업이 거절되어 실행을 시작하지 못했습니다.");
         flushAndClear();
 
         CollectionRun reloaded = runRepository.findById(run.getId()).orElseThrow();
