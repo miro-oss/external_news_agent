@@ -139,7 +139,7 @@ class CollectionExecutorIntegrationTests {
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run);
 
-        collectionExecutor.execute(run, item, topic, source);
+        execute(run, item, topic, source);
         flushAndClear();
 
         Article saved = articleRepository.findAll().stream()
@@ -171,7 +171,7 @@ class CollectionExecutorIntegrationTests {
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run);
 
-        collectionExecutor.execute(run, item, topic, source);
+        execute(run, item, topic, source);
         flushAndClear();
 
         // scanned는 필터 전에 받은 건수다. 저장된 건 1건뿐이다.
@@ -185,12 +185,12 @@ class CollectionExecutorIntegrationTests {
     void marksUnchangedWhenContentIsTheSame() {
         givenFeed(article("HBM4 양산 시작", "삼성전자가 HBM4를 양산한다"));
         CollectionRun firstRun = newRun();
-        collectionExecutor.execute(firstRun, newItem(firstRun), topic, source);
+        execute(firstRun, newItem(firstRun), topic, source);
         flushAndClear();
 
         CollectionRun secondRun = newRun();
         CollectionRunItem secondItem = newItem(secondRun);
-        collectionExecutor.execute(secondRun, secondItem, topic, source);
+        execute(secondRun, secondItem, topic, source);
         flushAndClear();
 
         assertEquals(0, secondItem.getNewCount());
@@ -208,13 +208,13 @@ class CollectionExecutorIntegrationTests {
     void keepsPreviousStateAsVersionWhenContentChanged() {
         givenFeed(article("HBM4 양산 시작", "삼성전자가 HBM4를 양산한다"));
         CollectionRun firstRun = newRun();
-        collectionExecutor.execute(firstRun, newItem(firstRun), topic, source);
+        execute(firstRun, newItem(firstRun), topic, source);
         flushAndClear();
 
         givenFeed(article("HBM4 양산 시작 (정정)", "양산 일정이 앞당겨졌다"));
         CollectionRun secondRun = newRun();
         CollectionRunItem secondItem = newItem(secondRun);
-        collectionExecutor.execute(secondRun, secondItem, topic, source);
+        execute(secondRun, secondItem, topic, source);
         flushAndClear();
 
         Article updated = articleRepository.findAll().stream()
@@ -251,7 +251,7 @@ class CollectionExecutorIntegrationTests {
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run, limited);
 
-        collectionExecutor.execute(run, item, topic, limited);
+        execute(run, item, topic, limited);
         flushAndClear();
 
         assertEquals(3, item.getScannedCount());
@@ -269,7 +269,7 @@ class CollectionExecutorIntegrationTests {
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run);
 
-        collectionExecutor.execute(run, item, topic, source);
+        execute(run, item, topic, source);
 
         assertEquals(RunItemStatus.FAILED, item.getStatus());
         assertEquals(0, item.getScannedCount());
@@ -286,7 +286,7 @@ class CollectionExecutorIntegrationTests {
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run);
 
-        collectionExecutor.execute(run, item, topic, source);
+        execute(run, item, topic, source);
 
         assertEquals(RunItemStatus.SUCCESS, item.getStatus());
         assertEquals(0, run.getWarningCount());
@@ -304,7 +304,7 @@ class CollectionExecutorIntegrationTests {
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run);
 
-        collectionExecutor.execute(run, item, topic, source);
+        execute(run, item, topic, source);
         flushAndClear();
 
         assertEquals(RunItemStatus.SUCCESS, item.getStatus());
@@ -325,7 +325,7 @@ class CollectionExecutorIntegrationTests {
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run);
 
-        collectionExecutor.execute(run, item, topic, source);
+        execute(run, item, topic, source);
 
         assertEquals(RunItemStatus.SKIPPED, item.getStatus());
         assertEquals(1, run.getWarningCount());
@@ -343,7 +343,7 @@ class CollectionExecutorIntegrationTests {
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run);
 
-        collectionExecutor.execute(run, item, topic, source);
+        execute(run, item, topic, source);
 
         assertEquals(RunItemStatus.SKIPPED, item.getStatus());
         assertEquals(0, run.getWarningCount());
@@ -360,7 +360,7 @@ class CollectionExecutorIntegrationTests {
                 "\"v2\"", "Mon, 10 Aug 2026 09:00:00 GMT"));
         CollectionRun run = newRun();
 
-        collectionExecutor.execute(run, newItem(run), topic, source);
+        execute(run, newItem(run), topic, source);
 
         assertEquals("\"v2\"", source.getEtag());
         assertEquals("Mon, 10 Aug 2026 09:00:00 GMT", source.getLastModified());
@@ -383,7 +383,7 @@ class CollectionExecutorIntegrationTests {
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run);
 
-        collectionExecutor.execute(run, item, topic, source);
+        execute(run, item, topic, source);
 
         assertEquals(RunItemStatus.FAILED, item.getStatus());
         assertEquals("\"v1\"", source.getEtag());
@@ -398,7 +398,7 @@ class CollectionExecutorIntegrationTests {
         givenFeed(article("HBM4 양산 시작", "요약"));
         CollectionRun run = newRun();
 
-        collectionExecutor.execute(run, newItem(run), topic, source);
+        execute(run, newItem(run), topic, source);
 
         assertEquals(Source.ROBOTS_STATUS_ALLOWED, source.getRobotsStatus());
         assertNotNull(source.getRobotsCheckedAt());
@@ -428,7 +428,7 @@ class CollectionExecutorIntegrationTests {
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run, searchSource);
 
-        collectionExecutor.execute(run, item, topic, searchSource);
+        execute(run, item, topic, searchSource);
 
         assertEquals(RunItemStatus.FAILED, item.getStatus());
         assertEquals(1, run.getWarningCount());
@@ -458,7 +458,7 @@ class CollectionExecutorIntegrationTests {
         CollectionRun run = newRun();
         CollectionRunItem item = newItem(run);
 
-        collectionExecutor.execute(run, item, topic, source);
+        execute(run, item, topic, source);
 
         assertEquals(RunItemStatus.FAILED, item.getStatus());
         assertEquals(1, run.getWarningCount());
@@ -496,7 +496,18 @@ class CollectionExecutorIntegrationTests {
                 .status(RunItemStatus.RUNNING)
                 .build();
         run.addItem(item);
+        // 운영 경로가 조합을 id로 찾으므로 여기서 id가 붙어 있어야 한다. 저장은 run에서 cascade된다.
+        entityManager.flush();
         return item;
+    }
+
+    /**
+     * 운영 경로와 같은 진입점으로 부른다. 수집은 트랜잭션 밖에서 돌아 엔티티가 detached가 되므로
+     * 실행·조합은 id로 넘기고 writer가 다시 읽는다(#27). 테스트만 엔티티로 부르면
+     * 그 경로에서 나는 문제가 테스트에 걸리지 않는다.
+     */
+    private void execute(CollectionRun run, CollectionRunItem item, Topic itemTopic, Source itemSource) {
+        collectionExecutor.execute(run.getId(), item.getId(), itemTopic, itemSource, run.isForceRefresh());
     }
 
     private void flushAndClear() {
@@ -514,7 +525,7 @@ class CollectionExecutorIntegrationTests {
         CollectionRun run = newRun();
         CollectionRunItem succeeded = newItem(run);
         CollectionRunItem stillRunning = newItem(run, otherSource());
-        collectionExecutor.execute(run, succeeded, topic, source);
+        execute(run, succeeded, topic, source);
         runRepository.saveAndFlush(run);
 
         resultWriter.failRun(run.getId());

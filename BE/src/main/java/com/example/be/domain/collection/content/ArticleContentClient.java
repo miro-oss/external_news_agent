@@ -66,7 +66,9 @@ public class ArticleContentClient {
                         .uri(articleUrl)
                         .header(HttpHeaders.USER_AGENT, userAgent)
                         // 상태 처리를 직접 한다. 본문을 읽기 전에 헤더로 크기를 먼저 보려면 이 방법뿐이다.
-                        .exchange((request, response) -> read(articleUrl, response), false);
+                        // 닫는 건 Spring에 맡긴다 — close=false로 두면 본문을 읽지 않는 차단·에러·크기 초과
+                        // 경로에서 커넥션이 풀로 돌아가지 못한다. 여기가 기사 수만큼 도는 자리라 더 빨리 마른다.
+                        .exchange((request, response) -> read(articleUrl, response));
             } catch (RuntimeException e) {
                 log.debug("본문 호출에 실패했다. url={} error={}", articleUrl, e.getMessage());
                 attempt = new Attempt(ArticleContentResult.failed(), true);

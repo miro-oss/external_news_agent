@@ -3,6 +3,8 @@ package com.example.be.domain.collection.feed;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -53,7 +55,7 @@ class FeedParserTest {
 
     @Test
     void parsesRssItems() {
-        List<CollectedArticle> articles = FeedParser.parse(RSS, "ko");
+        List<CollectedArticle> articles = parse(RSS, "ko");
 
         assertEquals(1, articles.size());
         CollectedArticle article = articles.get(0);
@@ -71,12 +73,12 @@ class FeedParserTest {
      */
     @Test
     void sanitizesTitleMarkup() {
-        assertEquals("삼성전자 HBM4 양산 & 공급", FeedParser.parse(RSS, "ko").get(0).title());
+        assertEquals("삼성전자 HBM4 양산 & 공급", parse(RSS, "ko").get(0).title());
     }
 
     @Test
     void skipsItemsWithoutLink() {
-        assertTrue(FeedParser.parse(RSS, "ko").stream()
+        assertTrue(parse(RSS, "ko").stream()
                 .noneMatch(article -> "링크 없는 기사".equals(article.title())));
     }
 
@@ -85,7 +87,7 @@ class FeedParserTest {
      */
     @Test
     void parsesAtomEntries() {
-        List<CollectedArticle> articles = FeedParser.parse(ATOM, "en");
+        List<CollectedArticle> articles = parse(ATOM, "en");
 
         assertEquals(1, articles.size());
         assertEquals("SK hynix ships HBM4", articles.get(0).title());
@@ -99,7 +101,7 @@ class FeedParserTest {
     @Test
     void picksAlternateLinkFromAtom() {
         assertEquals("https://www.eetimes.com/sk-hynix-ships-hbm4/",
-                FeedParser.parse(ATOM, "en").get(0).canonicalUrl());
+                parse(ATOM, "en").get(0).canonicalUrl());
     }
 
     /**
@@ -108,7 +110,7 @@ class FeedParserTest {
     @Test
     void rejectsHtmlPage() {
         assertThrows(FeedParseException.class,
-                () -> FeedParser.parse("<!DOCTYPE html><html><body><h1>News</h1></body></html>", "ko"));
+                () -> parse("<!DOCTYPE html><html><body><h1>News</h1></body></html>", "ko"));
     }
 
     /**
@@ -116,14 +118,14 @@ class FeedParserTest {
      */
     @Test
     void rejectsBlankOrBrokenXml() {
-        assertThrows(FeedParseException.class, () -> FeedParser.parse(null, "ko"));
-        assertThrows(FeedParseException.class, () -> FeedParser.parse("   ", "ko"));
-        assertThrows(FeedParseException.class, () -> FeedParser.parse("<rss><channel><item>", "ko"));
+        assertThrows(FeedParseException.class, () -> parse(null, "ko"));
+        assertThrows(FeedParseException.class, () -> parse("   ", "ko"));
+        assertThrows(FeedParseException.class, () -> parse("<rss><channel><item>", "ko"));
     }
 
     @Test
     void returnsEmptyForFeedWithoutItems() {
-        assertTrue(FeedParser.parse("<rss version=\"2.0\"><channel><title>빈 피드</title></channel></rss>", "ko")
+        assertTrue(parse("<rss version=\"2.0\"><channel><title>빈 피드</title></channel></rss>", "ko")
                 .isEmpty());
     }
 
@@ -144,7 +146,7 @@ class FeedParserTest {
                 </atom:feed>
                 """;
 
-        List<CollectedArticle> articles = FeedParser.parse(prefixed, "en");
+        List<CollectedArticle> articles = parse(prefixed, "en");
 
         assertEquals(1, articles.size());
         assertEquals("Prefixed HBM4", articles.get(0).title());
@@ -165,7 +167,7 @@ class FeedParserTest {
                 </item></channel></rss>
                 """;
 
-        assertThrows(FeedParseException.class, () -> FeedParser.parse(xxe, "ko"));
+        assertThrows(FeedParseException.class, () -> parse(xxe, "ko"));
     }
 
     /**
@@ -186,7 +188,7 @@ class FeedParserTest {
                 </item></channel></rss>
                 """;
 
-        assertThrows(FeedParseException.class, () -> FeedParser.parse(bomb, "ko"));
+        assertThrows(FeedParseException.class, () -> parse(bomb, "ko"));
     }
 
     @Test
@@ -199,7 +201,7 @@ class FeedParserTest {
                 </item></channel></rss>
                 """;
 
-        assertNull(FeedParser.parse(feed, "ko").get(0).publishedAt());
+        assertNull(parse(feed, "ko").get(0).publishedAt());
     }
 
     /**
@@ -215,6 +217,35 @@ class FeedParserTest {
                 </item></channel></rss>
                 """;
 
-        assertEquals("https://example.com/from-guid", FeedParser.parse(feed, "ko").get(0).canonicalUrl());
+        assertEquals("https://example.com/from-guid", parse(feed, "ko").get(0).canonicalUrl());
+    }
+
+    /**
+     * ★ #32 C2. 파서가 바이트를 받는 이유다 — 진짜 인코딩은 응답 헤더가 아니라 XML 선언에 있다.
+     * 문자열로 미리 디코드하면 charset을 잘못 짚은 순간 한글이 깨진다(#29에서 기사 본문으로 겪었다).
+     */
+    @Test
+    void readsEncodingFromXmlDeclarationNotFromCaller() {
+        String feed = """
+                <?xml version="1.0" encoding="EUC-KR"?>
+                <rss version="2.0"><channel><item>
+                  <title>삼성전자 HBM4 양산</title>
+                  <link>https://example.com/1</link>
+                </item></channel></rss>
+                """;
+
+        List<CollectedArticle> articles = FeedParser.parse(feed.getBytes(Charset.forName("EUC-KR")), "ko");
+
+        assertEquals("삼성전자 HBM4 양산", articles.get(0).title());
+    }
+
+    @Test
+    void rejectsEmptyBody() {
+        assertThrows(FeedParseException.class, () -> FeedParser.parse((byte[]) null, "ko"));
+        assertThrows(FeedParseException.class, () -> FeedParser.parse(new byte[0], "ko"));
+    }
+
+    private List<CollectedArticle> parse(String xml, String fallbackLanguage) {
+        return FeedParser.parse(xml == null ? null : xml.getBytes(StandardCharsets.UTF_8), fallbackLanguage);
     }
 }

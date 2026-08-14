@@ -7,13 +7,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestClientResponseException;
 
+import java.io.IOException;
 import java.time.Duration;
 
 /**
@@ -27,6 +28,12 @@ import java.time.Duration;
 @Slf4j
 @Component
 public class FeedClient {
+
+    /**
+     * 남이 주는 응답이라 크기를 신뢰할 수 없다. robots.txt는 512KiB, 기사 본문은 2MiB 상한이 있는데
+     * 피드만 없었다(#32 C2). 피드는 헤더+요약 목록이라 본문보다 작다 — 넘으면 정상적인 피드가 아니다.
+     */
+    private static final int MAX_BODY_BYTES = 1024 * 1024;
 
     private final RestClient restClient;
     private final DomainRateLimiter rateLimiter;
@@ -50,33 +57,41 @@ public class FeedClient {
     }
 
     public FeedFetch fetch(FeedRequest request) {
-        RestClientException lastFailure = null;
+        Attempt attempt = null;
 
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+        for (int tries = 1; tries <= maxAttempts; tries++) {
             rateLimiter.await(request.feedUrl(), request.crawlDelay());
 
             try {
-                return handle(request, exchange(request));
-            } catch (RestClientResponseException e) {
-                lastFailure = e;
-                if (!Backoff.isRetryable(e.getStatusCode()) || attempt == maxAttempts) {
-                    break;
-                }
-
-                Duration delay = Backoff.delayAfter(attempt, backoffBase, backoffMax);
-                log.warn("피드를 일시적으로 읽지 못해 다시 시도한다. status={} attempt={}/{} delayMs={} url={}",
-                        e.getStatusCode(), attempt, maxAttempts, delay.toMillis(), request.feedUrl());
-                sleep(delay);
+                attempt = exchange(request);
             } catch (RestClientException e) {
-                lastFailure = e;
-                break;
+                log.warn("피드 호출에 실패했다. url={} error={}", request.feedUrl(), e.getMessage());
+                attempt = Attempt.terminal(FeedFetch.of(
+                        FetchResult.unreadable("피드 호출 실패: " + e.getMessage())));
             }
+
+            if (!attempt.retryable() || tries == maxAttempts) {
+                return attempt.fetch();
+            }
+
+            Duration delay = Backoff.delayAfter(tries, backoffBase, backoffMax);
+            log.warn("피드를 일시적으로 읽지 못해 다시 시도한다. attempt={}/{} delayMs={} url={}",
+                    tries, maxAttempts, delay.toMillis(), request.feedUrl());
+            sleep(delay);
         }
 
-        return FeedFetch.of(failureOf(request.feedUrl(), lastFailure));
+        return attempt.fetch();
     }
 
-    private ResponseEntity<String> exchange(FeedRequest request) {
+    /**
+     * 상태 처리를 직접 한다. 본문을 읽기 전에 헤더로 크기를 먼저 보려면 이 방법뿐이다.
+     *
+     * <p>응답은 Spring이 닫게 둔다({@code close} 기본값 {@code true}). {@code false}로 두면
+     * <b>닫는 책임이 호출자에게 넘어오는데</b>, 304·에러·크기 초과 경로는 본문을 읽지도 않고 빠져나가서
+     * 커넥션이 풀로 돌아가지 못한다. {@link #read}가 {@code byte[]}를 다 읽고 파싱까지 끝낸 뒤
+     * 리턴하므로 콜백 이후에 스트림이 필요한 곳은 없다.
+     */
+    private Attempt exchange(FeedRequest request) {
         return restClient.get()
                 .uri(request.feedUrl())
                 .header(HttpHeaders.USER_AGENT, userAgent)
@@ -88,52 +103,73 @@ public class FeedClient {
                         headers.set(HttpHeaders.IF_MODIFIED_SINCE, request.lastModified());
                     }
                 })
-                .retrieve()
-                .toEntity(String.class);
+                .exchange((httpRequest, response) -> read(request, response));
     }
 
-    /**
-     * 304는 실패가 아니다. 바뀐 게 없다는 뜻이고, 그게 조건부 GET의 목적이다.
-     */
-    private FeedFetch handle(FeedRequest request, ResponseEntity<String> response) {
+    private Attempt read(FeedRequest request, ClientHttpResponse response) throws IOException {
+        HttpStatusCode status = response.getStatusCode();
         String etag = response.getHeaders().getFirst(HttpHeaders.ETAG);
         String lastModified = response.getHeaders().getFirst(HttpHeaders.LAST_MODIFIED);
 
-        if (response.getStatusCode().value() == HttpStatus.NOT_MODIFIED.value()) {
+        // 304는 실패가 아니다. 바뀐 게 없다는 뜻이고, 그게 조건부 GET의 목적이다.
+        if (status.value() == HttpStatus.NOT_MODIFIED.value()) {
             log.debug("바뀐 게 없어 파싱을 건너뛴다. url={}", request.feedUrl());
-            return FeedFetch.notModified(etag != null ? etag : request.etag(),
-                    lastModified != null ? lastModified : request.lastModified());
+            return Attempt.terminal(FeedFetch.notModified(
+                    etag != null ? etag : request.etag(),
+                    lastModified != null ? lastModified : request.lastModified()));
+        }
+
+        if (status.isError()) {
+            return errorOf(request.feedUrl(), status);
+        }
+
+        byte[] body = readWithinLimit(request.feedUrl(), response);
+        if (body == null) {
+            return Attempt.terminal(FeedFetch.of(FetchResult.unreadable("피드가 너무 크다")));
         }
 
         try {
-            return new FeedFetch(FetchResult.ok(FeedParser.parse(response.getBody(), request.language())),
-                    false, etag, lastModified);
+            return Attempt.terminal(new FeedFetch(
+                    FetchResult.ok(FeedParser.parse(body, request.language())), false, etag, lastModified));
         } catch (FeedParseException e) {
             log.warn("피드를 읽지 못했다. HTML 페이지를 FEED로 등록했을 수 있다. url={} error={}",
                     request.feedUrl(), e.getMessage());
-            return FeedFetch.of(FetchResult.unreadable(e.getMessage()));
+            return Attempt.terminal(FeedFetch.of(FetchResult.unreadable(e.getMessage())));
         }
     }
 
     /**
-     * 4xx는 다시 불러도 같은 답이라 여기서 멈춘다. 429·5xx로 여기 왔다면 재시도를 이미 다 쓴 것이다.
+     * {@code Content-Length}가 없는 응답(chunked)이 흔하다. 헤더만 믿으면 상한이 없는 것과 같아서,
+     * 상한 + 1까지만 읽어 실제로 넘치는지 본다. 넘치면 그 이상은 메모리에 올리지 않는다.
+     *
+     * @return 상한을 넘으면 {@code null}
      */
-    private FetchResult failureOf(String feedUrl, RestClientException exception) {
-        if (exception instanceof RestClientResponseException response) {
-            if (Backoff.isRetryable(response.getStatusCode())) {
-                log.warn("재시도를 다 썼는데도 피드를 읽지 못했다. status={} url={}",
-                        response.getStatusCode(), feedUrl);
-                return FetchResult.rateLimited("피드 응답 " + response.getStatusCode());
-            }
-
-            log.warn("피드 요청이 거부됐다. 재시도해도 같은 응답이라 여기서 멈춘다. status={} url={}",
-                    response.getStatusCode(), feedUrl);
-            return FetchResult.unreadable("피드 응답 " + response.getStatusCode());
+    private byte[] readWithinLimit(String feedUrl, ClientHttpResponse response) throws IOException {
+        if (response.getHeaders().getContentLength() > MAX_BODY_BYTES) {
+            log.warn("피드가 너무 커서 읽지 않는다. contentLength={} url={}",
+                    response.getHeaders().getContentLength(), feedUrl);
+            return null;
         }
 
-        String message = exception == null ? "알 수 없는 오류" : exception.getMessage();
-        log.warn("피드 호출에 실패했다. url={} error={}", feedUrl, message);
-        return FetchResult.unreadable("피드 호출 실패: " + message);
+        byte[] body = response.getBody().readNBytes(MAX_BODY_BYTES + 1);
+        if (body.length > MAX_BODY_BYTES) {
+            log.warn("피드가 너무 커서 읽지 않는다. maxBytes={} url={}", MAX_BODY_BYTES, feedUrl);
+            return null;
+        }
+        return body;
+    }
+
+    /**
+     * 4xx는 다시 불러도 같은 답이라 여기서 멈춘다. 429·5xx는 재시도 대상이고, 다 쓰고도 실패하면
+     * 호출자에게는 rate limit으로 알린다.
+     */
+    private Attempt errorOf(String feedUrl, HttpStatusCode status) {
+        if (Backoff.isRetryable(status)) {
+            return new Attempt(FeedFetch.of(FetchResult.rateLimited("피드 응답 " + status)), true);
+        }
+
+        log.warn("피드 요청이 거부됐다. 재시도해도 같은 응답이라 여기서 멈춘다. status={} url={}", status, feedUrl);
+        return Attempt.terminal(FeedFetch.of(FetchResult.unreadable("피드 응답 " + status)));
     }
 
     private void sleep(Duration duration) {
@@ -141,6 +177,14 @@ public class FeedClient {
             Thread.sleep(duration.toMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    /** 한 번의 시도 결과와, 다시 불러 볼 가치가 있는지. */
+    private record Attempt(FeedFetch fetch, boolean retryable) {
+
+        private static Attempt terminal(FeedFetch fetch) {
+            return new Attempt(fetch, false);
         }
     }
 }

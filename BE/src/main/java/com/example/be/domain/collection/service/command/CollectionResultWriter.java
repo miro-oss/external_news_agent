@@ -57,7 +57,10 @@ public class CollectionResultWriter {
     private final SourceRepository sourceRepository;
 
     /**
-     * {@code scannedCount}는 <b>필터 전에 받은 건수</b>다. 키워드로 걸러진 기사도 "훑기는 했다".
+     * <b>ID로 받는다.</b> 수집은 트랜잭션 밖에서 돌아 그동안 엔티티가 detached 상태가 되므로,
+     * 이 트랜잭션에 붙은 인스턴스를 여기서 다시 읽어야 변경이 반영된다(#27).
+     *
+     * <p>{@code scannedCount}는 <b>필터 전에 받은 건수</b>다. 키워드로 걸러진 기사도 "훑기는 했다".
      * 그래서 {@code skipped = scanned - new - updated}에는 중복과 필터 탈락이 함께 들어간다.
      */
     @Transactional
@@ -71,23 +74,6 @@ public class CollectionResultWriter {
         Topic topic = topicRepository.findById(topicId).orElseThrow();
         Source source = sourceRepository.findById(sourceId).orElseThrow();
 
-        writeManaged(run, item, topic, source, outcome);
-    }
-
-    @Transactional
-    public void write(CollectionRun run,
-                      CollectionRunItem item,
-                      Topic topic,
-                      Source source,
-                      CollectionOutcome outcome) {
-        writeManaged(run, item, topic, source, outcome);
-    }
-
-    private void writeManaged(CollectionRun run,
-                              CollectionRunItem item,
-                              Topic topic,
-                              Source source,
-                              CollectionOutcome outcome) {
         outcome.robots().applyTo(source);
 
         if (!outcome.robots().allowed()) {
@@ -142,15 +128,6 @@ public class CollectionResultWriter {
         CollectionRunItem item = runItemRepository.findById(itemId).orElseThrow();
         Source source = sourceRepository.findById(sourceId).orElseThrow();
 
-        writeFailureManaged(run, item, source, message);
-    }
-
-    @Transactional
-    public void writeFailure(CollectionRun run, CollectionRunItem item, Source source, String message) {
-        writeFailureManaged(run, item, source, message);
-    }
-
-    private void writeFailureManaged(CollectionRun run, CollectionRunItem item, Source source, String message) {
         item.markFailed();
         run.addWarning(warning(source, CollectionRunWarning.CODE_FEED_UNREADABLE, message));
     }

@@ -50,4 +50,45 @@ class HtmlTextSanitizerTest {
     void returnsNullForNull() {
         assertNull(HtmlTextSanitizer.sanitize(null));
     }
+
+    /**
+     * ★ #32 C1. 정규식이 못 끊던 자리다 — 속성값 안의 {@code >}에서 태그가 잘려
+     * {@code y">링크}가 본문에 남았다. 파서는 속성 안이라는 걸 안다.
+     */
+    @Test
+    void removesTagWhoseAttributeContainsAngleBracket() {
+        assertEquals("링크", HtmlTextSanitizer.sanitize("<a title=\"x > y\">링크</a>"));
+    }
+
+    @Test
+    void removesTagWhoseAttributeContainsAngleBracketInSingleQuotes() {
+        assertEquals("HBM4 양산",
+                HtmlTextSanitizer.sanitize("<span data-note='7nm -> 5nm'>HBM4</span> 양산"));
+    }
+
+    /**
+     * 닫는 태그가 없는 마크업도 온다. 정규식은 열린 태그만 지우고 끝냈고, 파서는 문서로 복구한다.
+     */
+    @Test
+    void handlesUnclosedTags() {
+        assertEquals("삼성전자 실적", HtmlTextSanitizer.sanitize("<b>삼성전자 <i>실적"));
+    }
+
+    /**
+     * 블록 태그로 나뉜 낱말이 눌어붙지 않는다. 정규식은 태그만 지워 "HBM4양산"이 됐다.
+     */
+    @Test
+    void keepsWordsApartAcrossBlockTags() {
+        assertEquals("HBM4 양산", HtmlTextSanitizer.sanitize("<p>HBM4</p><p>양산</p>"));
+    }
+
+    @Test
+    void collapsesWhitespaceAndNewlines() {
+        assertEquals("HBM4 양산", HtmlTextSanitizer.sanitize("HBM4  \n\t 양산"));
+    }
+
+    @Test
+    void returnsEmptyStringForMarkupOnlyInput() {
+        assertEquals("", HtmlTextSanitizer.sanitize("<br/><hr>"));
+    }
 }

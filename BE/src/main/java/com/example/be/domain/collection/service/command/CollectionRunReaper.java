@@ -6,6 +6,7 @@ import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -26,11 +27,13 @@ import java.util.List;
  *
  * <p>⚠️ 한 DB를 여러 인스턴스가 함께 쓰면 이 전제가 깨진다 — 뒤에 뜬 인스턴스가 앞의 인스턴스에서
  * <b>돌고 있는</b> 실행을 닫아 버린다. 로컬 단일 인스턴스 전제이며, 다중 인스턴스로 가면
- * 실행에 소유자와 heartbeat를 두고 만료된 것만 닫아야 한다.
+ * 실행에 소유자와 heartbeat를 두고 만료된 것만 닫아야 한다. 그때까지의 탈출구로
+ * {@code news.collection.reap-on-startup=false}를 두었다 — 끄면 정리는 손으로 해야 한다.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "news.collection.reap-on-startup", havingValue = "true", matchIfMissing = true)
 public class CollectionRunReaper {
 
     private final CollectionRunRepository runRepository;

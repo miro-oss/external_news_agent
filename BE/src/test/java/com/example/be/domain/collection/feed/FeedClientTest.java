@@ -1,5 +1,6 @@
 package com.example.be.domain.collection.feed;
 
+import com.example.be.domain.collection.ResponseCloseProbe;
 import com.example.be.domain.collection.connector.dto.res.FetchResult;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.ratelimit.DomainRateLimiter;
@@ -9,6 +10,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -181,5 +184,110 @@ class FeedClientTest {
 
         assertFalse(retrying.fetch(request()).result().success());
         server.verify();
+    }
+
+    /**
+     * ★ #32 C2. 남이 주는 응답이라 크기를 신뢰할 수 없다. 상한이 없으면 큰 피드 하나가
+     * Free 컨테이너 메모리(2GB)에 그대로 얹힌다.
+     *
+     * <p>{@code Content-Length}가 없는 chunked 응답이 흔해서, 헤더만 보는 걸로는 부족하다.
+     * 이 테스트가 그 경로다 — MockRestServiceServer는 길이를 붙이지 않는다.
+     */
+    @Test
+    void rejectsFeedLargerThanTheLimitWithoutContentLength() {
+        server.expect(requestTo(FEED_URL))
+                .andRespond(withSuccess(oversizedFeed(), MediaType.APPLICATION_XML));
+
+        FetchResult result = fetch();
+
+        assertFalse(result.success());
+        assertEquals(CollectionRunWarning.CODE_FEED_UNREADABLE, result.failureCode());
+        // 파싱 실패와 구분한다 — 둘 다 FEED_UNREADABLE이라 코드만 보면 무엇이 걸렸는지 알 수 없다.
+        assertEquals("피드가 너무 크다", result.failureMessage());
+        server.verify();
+    }
+
+    /**
+     * 길이를 알려주면 본문을 읽기 전에 끊는다.
+     */
+    @Test
+    void rejectsFeedLargerThanTheLimitByContentLength() {
+        server.expect(requestTo(FEED_URL))
+                .andRespond(withSuccess(RSS, MediaType.APPLICATION_XML)
+                        .header(HttpHeaders.CONTENT_LENGTH, String.valueOf(64L * 1024 * 1024)));
+
+        FetchResult result = fetch();
+
+        assertFalse(result.success());
+        assertEquals(CollectionRunWarning.CODE_FEED_UNREADABLE, result.failureCode());
+        assertEquals("피드가 너무 크다", result.failureMessage());
+        server.verify();
+    }
+
+    /**
+     * 상한 아래는 그대로 통과해야 한다. 경계를 잘못 잡으면 정상 피드가 통째로 막힌다.
+     */
+    @Test
+    void acceptsFeedUnderTheLimit() {
+        server.expect(requestTo(FEED_URL))
+                .andRespond(withSuccess(RSS, MediaType.APPLICATION_XML));
+
+        assertTrue(fetch().success());
+        server.verify();
+    }
+
+    /**
+     * ★ #35 리뷰 P1. <b>어느 경로로 빠져나가든 응답은 닫혀야 한다.</b> 닫지 않으면 커넥션이 풀로
+     * 돌아가지 않고, 수집은 소스마다 반복 호출이라 몇 바퀴만 돌아도 마른다.
+     *
+     * <p>특히 304·에러·{@code Content-Length} 초과는 <b>본문을 읽지도 않고</b> 빠져나가는 경로라
+     * 스트림이 소진되며 저절로 닫히는 일도 없다. 위쪽 테스트들이 쓰는 {@code MockRestServiceServer}로는
+     * 이걸 못 본다 — 응답이 메모리에 있어 닫든 말든 결과가 같다.
+     */
+    @Test
+    void closesResponseOnEveryPath() {
+        assertClosesResponse(ResponseCloseProbe.responding(
+                HttpStatus.OK, MediaType.APPLICATION_XML, RSS.getBytes(StandardCharsets.UTF_8)));
+        assertClosesResponse(ResponseCloseProbe.responding(HttpStatus.NOT_MODIFIED));
+        assertClosesResponse(ResponseCloseProbe.responding(HttpStatus.NOT_FOUND));
+        assertClosesResponse(ResponseCloseProbe.responding(
+                        HttpStatus.OK, MediaType.APPLICATION_XML, RSS.getBytes(StandardCharsets.UTF_8))
+                .withHeader(HttpHeaders.CONTENT_LENGTH, String.valueOf(64L * 1024 * 1024)));
+    }
+
+    /**
+     * 재시도는 부를 때마다 새 응답을 받는다. 마지막 것만 닫으면 앞의 것들이 그대로 샌다.
+     */
+    @Test
+    void closesEveryResponseAcrossRetries() {
+        ResponseCloseProbe probe = ResponseCloseProbe.responding(HttpStatus.SERVICE_UNAVAILABLE);
+
+        new FeedClient(RestClient.builder().requestFactory(probe), rateLimiter, "external-news-agent", 3, 0L, 0L)
+                .fetch(request());
+
+        assertEquals(3, probe.created(), "재시도가 돌지 않았다");
+        assertEquals(probe.created(), probe.closed(), "닫지 않고 흘린 응답이 있다");
+    }
+
+    private void assertClosesResponse(ResponseCloseProbe probe) {
+        new FeedClient(RestClient.builder().requestFactory(probe), rateLimiter, "external-news-agent", 1, 0L, 0L)
+                .fetch(request());
+
+        assertEquals(1, probe.created(), probe + "을 부르지 않았다");
+        assertEquals(probe.created(), probe.closed(), probe + "을 닫지 않았다");
+    }
+
+    /** 상한(1MiB)을 확실히 넘기는 피드. 항목을 늘려 채운다. */
+    private String oversizedFeed() {
+        StringBuilder feed = new StringBuilder("<rss version=\"2.0\"><channel>");
+        String item = """
+                <item><title>HBM4 양산</title><link>https://www.hankyung.com/article/%d</link>
+                <description>%s</description></item>
+                """;
+        String padding = "가".repeat(500);
+        for (int i = 0; feed.length() < 1024 * 1024 + 4096; i++) {
+            feed.append(item.formatted(i, padding));
+        }
+        return feed.append("</channel></rss>").toString();
     }
 }

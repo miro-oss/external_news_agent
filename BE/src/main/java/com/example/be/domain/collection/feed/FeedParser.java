@@ -16,7 +16,7 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 
-import java.io.StringReader;
+import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,16 +35,20 @@ public final class FeedParser {
     }
 
     /**
+     * <b>바이트로 받는다.</b> 문자열로 미리 디코드하면 응답 헤더의 charset을 믿게 되는데, 피드의 진짜 인코딩은
+     * XML 선언(<code>&lt;?xml encoding="euc-kr"?&gt;</code>)에 있다. 둘이 다르면 한글이 깨진다 —
+     * 기사 본문에서 이미 겪은 문제다(#29). XML 파서는 선언을 보고 스스로 정한다.
+     *
      * @throws FeedParseException XML로 읽지 못했을 때. "항목이 0건"과 구분하려고 예외로 알린다.
      */
-    public static List<CollectedArticle> parse(String xml, String fallbackLanguage) {
-        if (!StringUtils.hasText(xml)) {
+    public static List<CollectedArticle> parse(byte[] xml, String fallbackLanguage) {
+        if (xml == null || xml.length == 0) {
             throw new FeedParseException("피드 본문이 비어 있다.");
         }
 
         Document document;
         try {
-            document = secureDocumentBuilder().parse(new InputSource(new StringReader(xml)));
+            document = secureDocumentBuilder().parse(new InputSource(new ByteArrayInputStream(xml)));
         } catch (Exception e) {
             // HTML 페이지를 FEED로 등록해 둔 경우가 여기로 온다.
             throw new FeedParseException("피드를 XML로 읽지 못했다: " + e.getMessage(), e);
