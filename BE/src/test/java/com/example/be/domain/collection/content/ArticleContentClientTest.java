@@ -1,5 +1,6 @@
 package com.example.be.domain.collection.content;
 
+import com.example.be.domain.collection.ResponseCloseProbe;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.ratelimit.DomainRateLimiter;
 import org.junit.jupiter.api.Test;
@@ -170,5 +171,46 @@ class ArticleContentClientTest {
 
         assertEquals(FetchStatus.FULLTEXT, result.status());
         assertTrue(result.body().contains("HBM4 양산 일정"));
+    }
+
+    /**
+     * ★ #35 리뷰 P1. <b>어느 경로로 빠져나가든 응답은 닫혀야 한다.</b> 여기는 피드와 달리
+     * <b>기사 수만큼</b> 도는 자리라 닫지 않으면 커넥션 풀이 훨씬 빨리 마른다.
+     *
+     * <p>차단(401·403)·에러·{@code Content-Length} 초과는 본문을 읽지도 않고 빠져나가는 경로라
+     * 스트림이 소진되며 저절로 닫히는 일도 없다. 위쪽 테스트들이 쓰는 {@code MockRestServiceServer}로는
+     * 이걸 못 본다 — 응답이 메모리에 있어 닫든 말든 결과가 같다.
+     */
+    @Test
+    void closesResponseOnEveryPath() {
+        assertClosesResponse(ResponseCloseProbe.responding(
+                HttpStatus.OK, MediaType.TEXT_HTML, HTML.getBytes(StandardCharsets.UTF_8)));
+        assertClosesResponse(ResponseCloseProbe.responding(HttpStatus.FORBIDDEN));
+        assertClosesResponse(ResponseCloseProbe.responding(HttpStatus.NOT_FOUND));
+        assertClosesResponse(ResponseCloseProbe.responding(
+                        HttpStatus.OK, MediaType.TEXT_HTML, HTML.getBytes(StandardCharsets.UTF_8))
+                .withHeader(HttpHeaders.CONTENT_LENGTH, String.valueOf(64L * 1024 * 1024)));
+    }
+
+    /**
+     * 재시도는 부를 때마다 새 응답을 받는다. 마지막 것만 닫으면 앞의 것들이 그대로 샌다.
+     */
+    @Test
+    void closesEveryResponseAcrossRetries() {
+        ResponseCloseProbe probe = ResponseCloseProbe.responding(HttpStatus.SERVICE_UNAVAILABLE);
+
+        new ArticleContentClient(RestClient.builder().requestFactory(probe), rateLimiter,
+                "external-news-agent", 3, 0L, 0L).fetch(ARTICLE_URL, null);
+
+        assertEquals(3, probe.created(), "재시도가 돌지 않았다");
+        assertEquals(probe.created(), probe.closed(), "닫지 않고 흘린 응답이 있다");
+    }
+
+    private void assertClosesResponse(ResponseCloseProbe probe) {
+        new ArticleContentClient(RestClient.builder().requestFactory(probe), rateLimiter,
+                "external-news-agent", 1, 0L, 0L).fetch(ARTICLE_URL, null);
+
+        assertEquals(1, probe.created(), probe + "을 부르지 않았다");
+        assertEquals(probe.created(), probe.closed(), probe + "을 닫지 않았다");
     }
 }

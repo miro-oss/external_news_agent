@@ -85,6 +85,11 @@ public class FeedClient {
 
     /**
      * 상태 처리를 직접 한다. 본문을 읽기 전에 헤더로 크기를 먼저 보려면 이 방법뿐이다.
+     *
+     * <p>응답은 Spring이 닫게 둔다({@code close} 기본값 {@code true}). {@code false}로 두면
+     * <b>닫는 책임이 호출자에게 넘어오는데</b>, 304·에러·크기 초과 경로는 본문을 읽지도 않고 빠져나가서
+     * 커넥션이 풀로 돌아가지 못한다. {@link #read}가 {@code byte[]}를 다 읽고 파싱까지 끝낸 뒤
+     * 리턴하므로 콜백 이후에 스트림이 필요한 곳은 없다.
      */
     private Attempt exchange(FeedRequest request) {
         return restClient.get()
@@ -98,7 +103,7 @@ public class FeedClient {
                         headers.set(HttpHeaders.IF_MODIFIED_SINCE, request.lastModified());
                     }
                 })
-                .exchange((httpRequest, response) -> read(request, response), false);
+                .exchange((httpRequest, response) -> read(request, response));
     }
 
     private Attempt read(FeedRequest request, ClientHttpResponse response) throws IOException {
