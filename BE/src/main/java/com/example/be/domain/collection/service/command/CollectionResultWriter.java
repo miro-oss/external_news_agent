@@ -26,6 +26,7 @@ import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -192,15 +193,27 @@ public class CollectionResultWriter {
      * <p>무조건 FAILED로 적으면 앞에서 성공한 조합이 묻힌다. 아직 안 끝난 조합만 실패로 닫고
      * 나머지는 저장된 결과 그대로 두면, finish()가 PARTIAL / FAILED를 정확히 계산한다.
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void failRun(Long runId) {
-        runRepository.findById(runId).ifPresent(run -> {
-            run.getItems().stream()
-                    .filter(item -> item.getStatus() == RunItemStatus.PENDING
-                            || item.getStatus() == RunItemStatus.RUNNING)
-                    .forEach(CollectionRunItem::markFailed);
-            run.finish(LocalDateTime.now(ApiTimeZone.ZONE));
-        });
+        abortRun(runId, CollectionRunWarning.CODE_RUN_REJECTED,
+                "수집 작업이 거절되어 실행을 시작하지 못했습니다.");
+    }
+
+    /**
+     * 사유를 남기고 실행을 닫는다. 실행이 없으면 아무것도 하지 않고 {@code false}를 돌려준다.
+     *
+     * <p>경고를 같이 적는 이유는, 사유 없이 FAILED만 남으면 화면에서 "왜 실패했지"에 답할 수 없기 때문이다.
+     * 소스와 무관한 실행 수준의 경고라 {@code source}는 null이다.
+     */
+    @Transactional
+    public boolean abortRun(Long runId, String warningCode, String warningMessage) {
+        return runRepository.findById(runId)
+                .map(run -> {
+                    run.addWarning(warning(null, warningCode, warningMessage));
+                    run.abort(LocalDateTime.now(ApiTimeZone.ZONE));
+                    return true;
+                })
+                .orElse(false);
     }
 
     private CollectionRunWarning warning(Source source, String code, String message) {

@@ -60,9 +60,10 @@ public class SourceCommandServiceImpl implements SourceCommandService {
         Source source = getSource(sourceId);
 
         String name = request.getName() == null ? source.getName() : request.getName().trim();
-        String urlTemplate = request.getUrlTemplate() == null
-                ? source.getUrlTemplate()
-                : SourceConverter.normalizeUrlTemplate(request.getUrlTemplate());
+        boolean urlTemplateSupplied = request.getUrlTemplate() != null;
+        String urlTemplate = urlTemplateSupplied
+                ? SourceConverter.normalizeUrlTemplate(request.getUrlTemplate())
+                : source.getUrlTemplate();
         String country = request.getCountry() == null
                 ? source.getCountry()
                 : request.getCountry().trim().toUpperCase(Locale.ROOT);
@@ -74,7 +75,9 @@ public class SourceCommandServiceImpl implements SourceCommandService {
         boolean active = request.getActive() == null ? source.isActive() : request.getActive();
 
         validateName(name);
-        validateUrlTemplate(source.getSourceKind(), urlTemplate);
+        if (urlTemplateSupplied) {
+            validateUrlTemplate(source.getSourceKind(), urlTemplate);
+        }
         validateCountryAndLanguage(country, language);
         validateReliabilityScore(reliabilityScore);
 
@@ -161,8 +164,15 @@ public class SourceCommandServiceImpl implements SourceCommandService {
     }
 
     /**
-     * FEED는 고정 URL이어야 한다. SEARCH는 질의를 넣어야 결과가 나오므로 {query} 자리표시자를 가진 URL이거나,
-     * 인증 헤더·POST 바디가 필요해 URL 하나로 표현되지 않는 provider(NAVER/TAVILY/SERPAPI)의 키여야 한다.
+     * FEED는 고정 URL이어야 한다. <b>SEARCH는 provider 키(NAVER/TAVILY/SERPAPI)만 받는다.</b>
+     *
+     * <p>등록 당시에는 {@code {query}} 자리표시자를 가진 URL 템플릿도 함께 받았는데(#9), 그걸 수집할 어댑터가
+     * 없다. 등록은 201로 성공하고 실행에서만 매번 실패하니, 사용자는 소스가 잘못됐다는 사실을 수집 이력을 열어야
+     * 알게 된다. <b>동작하지 않는 것을 등록 가능하게 두는 쪽이 더 나쁘다</b>(#31 B1).
+     *
+     * <p>범용 URL 어댑터를 만들지 않는 이유는 provider마다 인증 방식과 응답 형식이 제각각이기 때문이다 —
+     * Naver는 인증 헤더, Tavily는 POST 바디, SerpAPI는 URL 안의 api_key다. URL 하나로 표현되지 않는다는
+     * 판단은 {@code plan-final.md} §2-6에 이미 있다.
      */
     private void validateUrlTemplate(String sourceKind, String urlTemplate) {
         if (!StringUtils.hasText(urlTemplate)) {
@@ -174,10 +184,7 @@ public class SourceCommandServiceImpl implements SourceCommandService {
         }
 
         if (Source.KIND_SEARCH.equals(sourceKind)) {
-            boolean hasPlaceholder = urlTemplate.contains(Source.QUERY_PLACEHOLDER) && isHttpUrl(urlTemplate);
-            boolean isProviderKey = SearchProvider.fromKey(urlTemplate) != null;
-
-            if (!hasPlaceholder && !isProviderKey) {
+            if (SearchProvider.fromKey(urlTemplate) == null) {
                 throw new SourceException(SourceErrorCode.INVALID_SEARCH_URL_TEMPLATE);
             }
             return;
@@ -213,7 +220,9 @@ public class SourceCommandServiceImpl implements SourceCommandService {
 
     /**
      * 스킴만 보면 "https://"처럼 호스트가 없는 값이 통과해서 수집 시점에야 실패한다. 호스트까지 확인한다.
-     * {query}는 URI 문법에서 허용되지 않는 문자라 자리표시자를 치환한 뒤 파싱한다.
+     *
+     * <p>자리표시자를 치환하지 않고 그대로 파싱한다. {@code {}}는 URI 문법에서 허용되지 않는 문자라
+     * 자리표시자가 든 값은 여기서 걸린다 — FEED는 고정 URL이어야 하므로 그게 맞는 판정이다.
      */
     private boolean isHttpUrl(String value) {
         String lowered = value.toLowerCase(Locale.ROOT);
@@ -222,7 +231,7 @@ public class SourceCommandServiceImpl implements SourceCommandService {
         }
 
         try {
-            return StringUtils.hasText(URI.create(value.replace(Source.QUERY_PLACEHOLDER, "q")).getHost());
+            return StringUtils.hasText(URI.create(value).getHost());
         } catch (IllegalArgumentException exception) {
             return false;
         }

@@ -3,6 +3,7 @@ package com.example.be.domain.sources.service.command;
 import com.example.be.domain.sources.dto.req.SourceReqDTO;
 import com.example.be.domain.sources.dto.res.SourceResDTO;
 import com.example.be.domain.sources.entity.CrawlPolicy;
+import com.example.be.domain.sources.entity.SearchProvider;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.exception.SourceException;
 import com.example.be.domain.sources.exception.code.SourceErrorCode;
@@ -58,20 +59,14 @@ class SourceCommandServiceImplTest {
         assertTrue(result.isActive());
     }
 
+    /**
+     * ★ #31 B1. {@code {query}} 자리표시자 URL은 등록 당시에는 받았지만 수집할 어댑터가 없다.
+     * 등록만 성공하고 실행에서 매번 실패하니, 사용자는 수집 이력을 열어야 잘못됐다는 걸 안다.
+     * 등록 단계에서 막는다.
+     */
     @Test
-    void createSourceAcceptsSearchUrlTemplateWithQueryPlaceholder() {
+    void createSourceRejectsSearchUrlTemplateWithQueryPlaceholder() {
         SourceReqDTO.Create request = searchRequest("https://news.google.com/rss/search?q={query}&hl=ko");
-        when(sourceRepository.existsBySourceKindAndUrlTemplate(any(), anyString())).thenReturn(false);
-        when(sourceRepository.saveAndFlush(any(Source.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        SourceResDTO.Created result = sourceCommandService.createSource(request);
-
-        assertEquals("https://news.google.com/rss/search?q={query}&hl=ko", result.getUrlTemplate());
-    }
-
-    @Test
-    void createSourceRejectsSearchTemplateThatIsNeitherPlaceholderNorProviderKey() {
-        SourceReqDTO.Create request = searchRequest("네이버");
 
         SourceException exception = assertThrows(SourceException.class,
                 () -> sourceCommandService.createSource(request));
@@ -81,13 +76,14 @@ class SourceCommandServiceImplTest {
     }
 
     @Test
-    void createSourceRejectsSearchPlaceholderWithoutHttpScheme() {
-        SourceReqDTO.Create request = searchRequest("news.google.com/rss/search?q={query}");
+    void createSourceRejectsSearchTemplateThatIsNotProviderKey() {
+        SourceReqDTO.Create request = searchRequest("네이버");
 
         SourceException exception = assertThrows(SourceException.class,
                 () -> sourceCommandService.createSource(request));
 
         assertEquals(SourceErrorCode.INVALID_SEARCH_URL_TEMPLATE, exception.getCode());
+        verify(sourceRepository, never()).saveAndFlush(any(Source.class));
     }
 
     @Test
@@ -110,14 +106,18 @@ class SourceCommandServiceImplTest {
         assertEquals(SourceErrorCode.INVALID_FEED_URL_TEMPLATE, exception.getCode());
     }
 
+    /**
+     * provider 키는 대소문자를 정규화해서 받는다. SEARCH에서 받는 값은 이제 이 3종뿐이다.
+     */
     @Test
-    void createSourceRejectsSearchTemplateWithoutHost() {
-        SourceReqDTO.Create request = searchRequest("https://?q={query}");
+    void createSourceAcceptsLowerCaseProviderKey() {
+        SourceReqDTO.Create request = searchRequest("tavily");
+        when(sourceRepository.existsBySourceKindAndUrlTemplate(any(), anyString())).thenReturn(false);
+        when(sourceRepository.saveAndFlush(any(Source.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        SourceException exception = assertThrows(SourceException.class,
-                () -> sourceCommandService.createSource(request));
+        SourceResDTO.Created result = sourceCommandService.createSource(request);
 
-        assertEquals(SourceErrorCode.INVALID_SEARCH_URL_TEMPLATE, exception.getCode());
+        assertEquals(SearchProvider.TAVILY.name(), result.getUrlTemplate());
     }
 
     @Test
@@ -234,6 +234,38 @@ class SourceCommandServiceImplTest {
 
         assertEquals(Source.ROBOTS_STATUS_ALLOWED, source.getRobotsStatus());
         assertEquals(Source.ROBOTS_STATUS_ALLOWED, result.getRobotsStatus());
+    }
+
+    /**
+     * 이전에 저장된 {query} SEARCH 행은 실행에서 실패 사유를 남기되, 설정 화면에서 이름이나 활성 상태는
+     * 고칠 수 있어야 한다. PATCH가 urlTemplate을 안 보냈다면 새 검증 규칙을 기존 값에 소급하지 않는다.
+     */
+    @Test
+    void updateSourceAllowsPartialUpdateForLegacySearchTemplate() {
+        SourceReqDTO.Update request = new SourceReqDTO.Update();
+        request.setName("Google News RSS 비활성화");
+        request.setActive(false);
+        Source source = existingLegacySearchSource();
+        when(sourceRepository.findById(1L)).thenReturn(Optional.of(source));
+
+        SourceResDTO.Updated result = sourceCommandService.updateSource(1L, request);
+
+        assertEquals("Google News RSS 비활성화", result.getName());
+        assertEquals("https://news.google.com/rss/search?q={query}&hl=ko", result.getUrlTemplate());
+        assertFalse(result.isActive());
+        verify(sourceRepository, never()).existsBySourceKindAndUrlTemplateAndIdNot(anyString(), anyString(), anyLong());
+    }
+
+    @Test
+    void updateSourceStillRejectsSuppliedLegacySearchTemplate() {
+        SourceReqDTO.Update request = new SourceReqDTO.Update();
+        request.setUrlTemplate("https://news.google.com/rss/search?q={query}&hl=ko");
+        when(sourceRepository.findById(1L)).thenReturn(Optional.of(existingSearchProviderSource()));
+
+        SourceException exception = assertThrows(SourceException.class,
+                () -> sourceCommandService.updateSource(1L, request));
+
+        assertEquals(SourceErrorCode.INVALID_SEARCH_URL_TEMPLATE, exception.getCode());
     }
 
     @Test
@@ -379,6 +411,36 @@ class SourceCommandServiceImplTest {
                 .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_RESPECT, 30, true))
                 .robotsStatus(Source.ROBOTS_STATUS_ALLOWED)
                 .reliabilityScore(new BigDecimal("0.85"))
+                .active(true)
+                .build();
+    }
+
+    private Source existingSearchProviderSource() {
+        return Source.builder()
+                .id(1L)
+                .sourceKind(Source.KIND_SEARCH)
+                .name("Naver 뉴스 검색")
+                .urlTemplate(SearchProvider.NAVER.name())
+                .country("KR")
+                .language("ko")
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_RESPECT, 50, true))
+                .robotsStatus(Source.ROBOTS_STATUS_UNKNOWN)
+                .reliabilityScore(new BigDecimal("0.9"))
+                .active(true)
+                .build();
+    }
+
+    private Source existingLegacySearchSource() {
+        return Source.builder()
+                .id(1L)
+                .sourceKind(Source.KIND_SEARCH)
+                .name("Google News RSS")
+                .urlTemplate("https://news.google.com/rss/search?q={query}&hl=ko")
+                .country("KR")
+                .language("ko")
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_RESPECT, 50, true))
+                .robotsStatus(Source.ROBOTS_STATUS_UNKNOWN)
+                .reliabilityScore(new BigDecimal("0.9"))
                 .active(true)
                 .build();
     }
