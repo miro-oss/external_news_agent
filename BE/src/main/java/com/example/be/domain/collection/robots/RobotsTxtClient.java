@@ -57,7 +57,7 @@ public class RobotsTxtClient {
             ResponseEntity<String> response = restClient.get()
                     .uri(robotsUrl)
                     .header("User-Agent", userAgent)
-                    .retrieve()
+                    .retrieve() 
                     .toEntity(String.class);
 
             if (isTooLarge(response)) {
