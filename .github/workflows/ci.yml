@@ -27,10 +27,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 버전을 여기 적지 않는다. version이 없으면 action이 packageManager 필드를 읽으므로
+      # CI와 로컬이 같은 한 곳을 본다. defaults의 working-directory는 run 스텝에만 걸리고
+      # action 입력에는 걸리지 않아서, 레포 루트가 아닌 FE/package.json을 명시해야 한다.
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11
+          package_json_file: FE/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
