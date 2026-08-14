@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -58,8 +59,7 @@ public interface CollectionRunRepository
                                                  @Param("statuses") Collection<RunStatus> statuses);
 
     /**
-     * 기동 시점에 진행 중으로 남아 있는 실행. 새 JVM에는 도는 작업이 없으므로 여기 걸리는 건 전부
-     * 지난 프로세스가 닫지 못하고 죽인 실행이다.
+     * reaper가 잡은 기동 cutoff보다 전에 시작했고, 아직 진행 중으로 남아 있는 실행.
      *
      * <p>엔티티가 아니라 id만 가져온다. 닫는 작업은 실행마다 짧은 트랜잭션을 따로 열어야 하고
      * (하나가 터져도 나머지는 닫혀야 한다), 그 안에서 어차피 다시 로드한다.
@@ -68,9 +68,11 @@ public interface CollectionRunRepository
             SELECT run.id
             FROM CollectionRun run
             WHERE run.status IN :statuses
+              AND run.startedAt < :startedBefore
             ORDER BY run.id ASC
             """)
-    List<Long> findIdsByStatusIn(@Param("statuses") Collection<RunStatus> statuses);
+    List<Long> findIdsByStatusInAndStartedAtBefore(@Param("statuses") Collection<RunStatus> statuses,
+                                                   @Param("startedBefore") LocalDateTime startedBefore);
 
     /**
      * 목록 조회에서 실행마다 경고를 지연 로딩하지 않도록 개수만 한 번에 센다.

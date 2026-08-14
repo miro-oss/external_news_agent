@@ -22,12 +22,16 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -265,6 +269,15 @@ class CollectionRunCreatorTest {
         runCreator.create(request(List.of(1L), false), "manual-key");
 
         verify(resultWriter).failRun(any());
+    }
+
+    @Test
+    void failRunUsesNewTransactionForAfterCommitFailureHandling() throws NoSuchMethodException {
+        Method method = CollectionResultWriter.class.getMethod("failRun", Long.class);
+        Transactional transactional = method.getAnnotation(Transactional.class);
+
+        assertNotNull(transactional);
+        assertEquals(Propagation.REQUIRES_NEW, transactional.propagation());
     }
 
     private CollectionRunReqDTO.Create request(List<Long> topicIds, boolean forceRefresh) {

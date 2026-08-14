@@ -9,6 +9,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -38,7 +39,8 @@ class CollectionRunReaperTest {
 
     @Test
     void reapClosesEveryRunLeftInProgress() {
-        when(runRepository.findIdsByStatusIn(RunStatus.IN_PROGRESS_STATUSES)).thenReturn(List.of(41L, 42L));
+        when(runRepository.findIdsByStatusInAndStartedAtBefore(
+                eq(RunStatus.IN_PROGRESS_STATUSES), any(LocalDateTime.class))).thenReturn(List.of(41L, 42L));
 
         reaper.reapInterruptedRuns();
 
@@ -48,7 +50,8 @@ class CollectionRunReaperTest {
 
     @Test
     void reapDoesNothingWhenNoRunIsLeftInProgress() {
-        when(runRepository.findIdsByStatusIn(RunStatus.IN_PROGRESS_STATUSES)).thenReturn(List.of());
+        when(runRepository.findIdsByStatusInAndStartedAtBefore(
+                eq(RunStatus.IN_PROGRESS_STATUSES), any(LocalDateTime.class))).thenReturn(List.of());
 
         reaper.reapInterruptedRuns();
 
@@ -60,7 +63,8 @@ class CollectionRunReaperTest {
      */
     @Test
     void reapKeepsClosingAfterOneRunFails() {
-        when(runRepository.findIdsByStatusIn(RunStatus.IN_PROGRESS_STATUSES)).thenReturn(List.of(41L, 42L, 43L));
+        when(runRepository.findIdsByStatusInAndStartedAtBefore(
+                eq(RunStatus.IN_PROGRESS_STATUSES), any(LocalDateTime.class))).thenReturn(List.of(41L, 42L, 43L));
         doThrow(new IllegalStateException("닫을 수 없다"))
                 .when(resultWriter).abortRun(eq(42L), anyString(), anyString());
 
@@ -76,11 +80,13 @@ class CollectionRunReaperTest {
      */
     @Test
     void reapOnlyLooksAtInProgressStatuses() {
-        when(runRepository.findIdsByStatusIn(RunStatus.IN_PROGRESS_STATUSES)).thenReturn(List.of());
+        when(runRepository.findIdsByStatusInAndStartedAtBefore(
+                eq(RunStatus.IN_PROGRESS_STATUSES), any(LocalDateTime.class))).thenReturn(List.of());
 
         reaper.reapInterruptedRuns();
 
-        verify(runRepository).findIdsByStatusIn(RunStatus.IN_PROGRESS_STATUSES);
+        verify(runRepository).findIdsByStatusInAndStartedAtBefore(
+                eq(RunStatus.IN_PROGRESS_STATUSES), any(LocalDateTime.class));
         verify(runRepository, never()).findAll();
         verify(resultWriter, never()).abortRun(any(), anyString(), anyString());
     }

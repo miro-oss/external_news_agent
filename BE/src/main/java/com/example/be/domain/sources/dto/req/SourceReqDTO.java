@@ -30,7 +30,7 @@ public class SourceReqDTO {
 
         @Schema(description = """
                 FEED는 고정 http/https URL. SEARCH는 provider 키(NAVER, TAVILY, SERPAPI) 중 하나.
-                Naver·Tavily·SerpAPI는 인증 헤더나 POST 바디가 필요해 URL 하나로 표현되지 않으므로 provider 키를 쓴다.
+                Naver는 인증 헤더, Tavily는 POST 바디, SerpAPI는 api_key 쿼리 파라미터를 쓰므로 provider 키를 쓴다.
                 최대 1000자
                 """, example = "NAVER", requiredMode = Schema.RequiredMode.REQUIRED)
         private String urlTemplate;

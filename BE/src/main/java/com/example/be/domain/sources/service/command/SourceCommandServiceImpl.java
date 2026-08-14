@@ -60,9 +60,10 @@ public class SourceCommandServiceImpl implements SourceCommandService {
         Source source = getSource(sourceId);
 
         String name = request.getName() == null ? source.getName() : request.getName().trim();
-        String urlTemplate = request.getUrlTemplate() == null
-                ? source.getUrlTemplate()
-                : SourceConverter.normalizeUrlTemplate(request.getUrlTemplate());
+        boolean urlTemplateSupplied = request.getUrlTemplate() != null;
+        String urlTemplate = urlTemplateSupplied
+                ? SourceConverter.normalizeUrlTemplate(request.getUrlTemplate())
+                : source.getUrlTemplate();
         String country = request.getCountry() == null
                 ? source.getCountry()
                 : request.getCountry().trim().toUpperCase(Locale.ROOT);
@@ -74,7 +75,9 @@ public class SourceCommandServiceImpl implements SourceCommandService {
         boolean active = request.getActive() == null ? source.isActive() : request.getActive();
 
         validateName(name);
-        validateUrlTemplate(source.getSourceKind(), urlTemplate);
+        if (urlTemplateSupplied) {
+            validateUrlTemplate(source.getSourceKind(), urlTemplate);
+        }
         validateCountryAndLanguage(country, language);
         validateReliabilityScore(reliabilityScore);
 

@@ -3,12 +3,14 @@ package com.example.be.domain.collection.service.command;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -18,8 +20,9 @@ import java.util.List;
  * <b>그 행을 닫아 줄 주체가 아무도 없다.</b> 남은 RUNNING 실행은 주제 충돌 검사에 걸려
  * <b>해당 주제의 다음 실행을 영구히 막는다</b> — 운영 중 한 번만 죽어도 그 주제 수집이 멈춘다.
  *
- * <p>새 JVM에는 도는 수집이 없으므로, 기동 시점에 진행 중인 실행은 <b>정의상 전부 유실된 것</b>이다.
- * 살아 있는 작업을 잘못 닫을 위험이 없다는 뜻이라, 시간 기준(heartbeat·timeout) 없이 상태만 보고 닫는다.
+ * <p>새 JVM에는 도는 수집이 없으므로, reaper bean이 만들어진 시각보다 전에 시작된 진행 중 실행은
+ * <b>정의상 전부 유실된 것</b>이다. {@link ApplicationReadyEvent} 직후 들어온 새 실행을 잘못 닫지 않도록
+ * 상태와 시작 시각을 함께 본다.
  *
  * <p>⚠️ 한 DB를 여러 인스턴스가 함께 쓰면 이 전제가 깨진다 — 뒤에 뜬 인스턴스가 앞의 인스턴스에서
  * <b>돌고 있는</b> 실행을 닫아 버린다. 로컬 단일 인스턴스 전제이며, 다중 인스턴스로 가면
@@ -32,6 +35,7 @@ public class CollectionRunReaper {
 
     private final CollectionRunRepository runRepository;
     private final CollectionResultWriter resultWriter;
+    private final LocalDateTime startedBefore = LocalDateTime.now(ApiTimeZone.ZONE);
 
     /**
      * 웹 서버가 요청을 받기 시작한 직후에 돈다. 그 사이 짧은 창에 들어온 요청은 아직 남아 있는
@@ -40,7 +44,8 @@ public class CollectionRunReaper {
      */
     @EventListener(ApplicationReadyEvent.class)
     public void reapInterruptedRuns() {
-        List<Long> interruptedRunIds = runRepository.findIdsByStatusIn(RunStatus.IN_PROGRESS_STATUSES);
+        List<Long> interruptedRunIds =
+                runRepository.findIdsByStatusInAndStartedAtBefore(RunStatus.IN_PROGRESS_STATUSES, startedBefore);
         if (interruptedRunIds.isEmpty()) {
             return;
         }
