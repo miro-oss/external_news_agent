@@ -15,19 +15,33 @@ const keys = {
   sources: ['sources'] as const,
 }
 
+const PAGE_SIZE = 100
+
+async function getAllPages<T, TPage extends PageResult<T> = PageResult<T>>(path: string): Promise<TPage> {
+  const first = await get<TPage>(path, { page: 0, size: PAGE_SIZE })
+  const content = [...first.content]
+
+  for (let page = first.page + 1; page < first.totalPages; page += 1) {
+    const next = await get<TPage>(path, { page, size: PAGE_SIZE })
+    content.push(...next.content)
+  }
+
+  return { ...first, content, hasNext: false }
+}
+
 /** 설정 화면의 "등록된 수집 주제" 테이블. 한 행 = (주제 × 소스). */
 export function useCombinations() {
   return useQuery({
     queryKey: keys.combinations,
-    queryFn: () => get<CombinationPage>('/topic-sources', { size: 100 }),
+    queryFn: () => getAllPages<Combination, CombinationPage>('/topic-sources'),
   })
 }
 
-/** 주제 등록 폼의 소스 선택 후보. 목록이 짧아 페이징 UI 없이 상한까지 받는다. */
+/** 주제 등록 폼의 소스 선택 후보. size 상한이 100이라 페이지를 이어서 받는다. */
 export function useSources() {
   return useQuery({
     queryKey: keys.sources,
-    queryFn: () => get<PageResult<Source>>('/sources', { size: 100 }),
+    queryFn: () => getAllPages<Source>('/sources'),
   })
 }
 

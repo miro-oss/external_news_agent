@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ApiError } from '../../api/client'
 import { useCreateTopic, useSources } from '../../api/queries'
 import { FormStatus } from './FormStatus'
 
@@ -29,6 +30,10 @@ export function TopicForm() {
   const { mutate, isPending, error, reset } = useCreateTopic()
 
   const options = sources.data?.content ?? []
+  const sourceError =
+    sources.error instanceof ApiError
+      ? `${sources.error.message} (${sources.error.code})`
+      : '소스 목록을 불러오지 못했습니다.'
   /** SEARCH 소스를 연결하면 검색어가 필수다(TOPIC400). 보내기 전에 화면에서 먼저 알려 준다. */
   const needsQueryText = options.some(
     (source) => selected.includes(source.id) && source.sourceKind === 'SEARCH',
@@ -48,6 +53,9 @@ export function TopicForm() {
 
   function submit(event: React.FormEvent) {
     event.preventDefault()
+    const batchSize = form.batchSize.trim() ? Number(form.batchSize) : undefined
+    const intervalMinutes = form.intervalMinutes.trim() ? Number(form.intervalMinutes) : undefined
+
     mutate(
       {
         name: form.name.trim(),
@@ -55,8 +63,8 @@ export function TopicForm() {
         requiredKeywords: toKeywords(form.requiredKeywords),
         optionalKeywords: toKeywords(form.optionalKeywords),
         excludedKeywords: toKeywords(form.excludedKeywords),
-        batchSize: Number(form.batchSize),
-        intervalMinutes: Number(form.intervalMinutes),
+        batchSize,
+        intervalMinutes,
         // 아무것도 고르지 않았으면 필드를 아예 빼서 보낸다. 명세가 "누락"과 "빈 배열"을 다르게 보므로
         // 빈 배열을 보내면 "연결 없음"이 아니라 "전체 해제"라는 다른 뜻이 된다.
         sourceIds: selected.length > 0 ? selected : undefined,
@@ -96,6 +104,8 @@ export function TopicForm() {
           placeholder="HBM 반도체"
           maxLength={500}
           required={needsQueryText}
+          pattern={needsQueryText ? '.*\\S.*' : undefined}
+          title="검색어에는 공백이 아닌 문자를 입력하세요."
         />
         <p className="hint">SEARCH 소스에 넘길 질의어입니다. FEED 소스만 연결한다면 비워 두어도 됩니다.</p>
       </div>
@@ -103,7 +113,7 @@ export function TopicForm() {
       <fieldset className="field">
         <legend>연결할 소스</legend>
         {sources.isPending && <p className="muted">소스를 불러오는 중…</p>}
-        {sources.error && <p className="error">소스 목록을 불러오지 못했습니다.</p>}
+        {sources.error && <p className="error">{sourceError}</p>}
         {!sources.isPending && options.length === 0 && (
           <p className="muted">등록된 소스가 없습니다. 먼저 소스를 등록하세요.</p>
         )}

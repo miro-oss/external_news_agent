@@ -8,11 +8,13 @@ import type { ApiEnvelope } from './types'
  */
 export class ApiError extends Error {
   readonly code: string
+  readonly status: number | null
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, status?: number) {
     super(message)
     this.name = 'ApiError'
     this.code = code
+    this.status = status ?? null
   }
 }
 
@@ -40,11 +42,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     envelope = await response.json()
   } catch {
     // 봉투가 아닌 응답(프록시 오류, 502 HTML 등)은 서버가 준 사유가 없다.
-    throw new ApiError('NETWORK', `서버에 연결하지 못했습니다. (HTTP ${response.status})`)
+    throw new ApiError('NETWORK', `서버에 연결하지 못했습니다. (HTTP ${response.status})`, response.status)
   }
 
   if (!envelope.isSuccess) {
-    throw new ApiError(envelope.code, envelope.message)
+    throw new ApiError(envelope.code, envelope.message, response.status)
   }
   return envelope.result
 }

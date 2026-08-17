@@ -54,7 +54,7 @@ section {
 /* 폼 둘을 나란히 두면 소스 → 주제 순서가 눈에 보인다. 좁은 화면에서는 위아래로 접힌다. */
 .forms {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: 2rem;
 }
 
@@ -155,6 +155,7 @@ form {
 
 .field-row .field {
   flex: 1;
+  min-width: 0;
 }
 
 label,
