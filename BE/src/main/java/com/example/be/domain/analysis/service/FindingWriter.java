@@ -27,12 +27,13 @@ public class FindingWriter {
 
     @Transactional
     public void write(Long runId, Long articleId, ChangeType changeType, AnalysisResult result) {
+        CollectionRun run = runRepository.findById(runId).orElseThrow();
+        // 동일 기사 행을 잠근 뒤 존재 여부를 확인해 동시 호출도 하나의 finding만 남긴다.
+        Article article = articleRepository.findByIdForUpdate(articleId).orElseThrow();
         if (findingRepository.existsByRunIdAndArticleId(runId, articleId)) {
             return;
         }
 
-        CollectionRun run = runRepository.findById(runId).orElseThrow();
-        Article article = articleRepository.findById(articleId).orElseThrow();
         findingRepository.save(Finding.builder()
                 .run(run)
                 .article(article)
@@ -54,15 +55,9 @@ public class FindingWriter {
         CollectionRun run = runRepository.findById(runId).orElseThrow();
         run.addWarning(CollectionRunWarning.builder()
                 .code(CODE_ANALYSIS_FAILED)
-                .message(trim("기사 " + articleId + " 분석 실패: " + message))
+                .message(CollectionRunWarning.truncateMessage("기사 " + articleId + " 분석 실패: " + message))
                 .articleCount(1)
                 .occurredAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build());
-    }
-
-    private String trim(String message) {
-        return message.length() <= CollectionRunWarning.MAX_MESSAGE_LENGTH
-                ? message
-                : message.substring(0, CollectionRunWarning.MAX_MESSAGE_LENGTH);
     }
 }

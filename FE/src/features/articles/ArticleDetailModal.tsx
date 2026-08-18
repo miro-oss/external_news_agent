@@ -29,7 +29,13 @@ export function ArticleDetailModal({ articleId, onClose }: Props) {
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="article-modal" role="dialog" aria-modal="true" aria-labelledby="article-modal-title">
+      <div
+        className="article-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={article.data ? 'article-modal-title' : undefined}
+        aria-label={article.data ? undefined : '기사 상세'}
+      >
         <button ref={closeButton} type="button" className="modal-close" aria-label="본문보기 닫기" onClick={onClose}>×</button>
         {article.isPending && <div className="modal-state">기사를 불러오는 중입니다.</div>}
         {article.isError && <div className="modal-state error" role="alert">{article.error.message}</div>}

@@ -3,10 +3,12 @@ package com.example.be.domain.analysis.service;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
+import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -55,6 +57,42 @@ class ArticleAnalysisPipelineTest {
         verify(findingWriter).addFailureWarning(42L, 10L, "stub failure");
         verify(findingWriter, never()).write(eq(42L), eq(10L), any(), any());
         verify(findingWriter).write(42L, 11L, ChangeType.NEW, result);
+    }
+
+    @Test
+    void reanalyzesUnchangedArticleAfterFullTextRefresh() {
+        Article article = Article.builder()
+                .id(10L)
+                .title("기사")
+                .body("새로 확보한 전문")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+        when(runArticleRepository.findAnalysisTargetsByRunId(42L)).thenReturn(List.of());
+        when(runArticleRepository.findAnalysisTargetsByRunIdAndArticleIdIn(42L, Set.of(10L)))
+                .thenReturn(List.of(observation(article, ChangeType.UNCHANGED)));
+        AnalysisResult result = mock(AnalysisResult.class);
+        when(analyzer.analyze(article)).thenReturn(result);
+
+        pipeline.analyze(42L, Set.of(10L));
+
+        verify(findingWriter).write(42L, 10L, ChangeType.UPDATED, result);
+    }
+
+    @Test
+    void skipsUpdatedArticleWhenOldBodyIsKeptAfterRefreshFailure() {
+        Article article = Article.builder()
+                .id(10L)
+                .title("정정 기사")
+                .body("직전 전문")
+                .fetchStatus(FetchStatus.FETCH_FAILED)
+                .build();
+        when(runArticleRepository.findAnalysisTargetsByRunId(42L))
+                .thenReturn(List.of(observation(article, ChangeType.UPDATED)));
+
+        pipeline.analyze(42L);
+
+        verify(analyzer, never()).analyze(article);
+        verify(findingWriter, never()).write(eq(42L), eq(10L), any(), any());
     }
 
     private CollectionRunArticle observation(Article article, ChangeType changeType) {

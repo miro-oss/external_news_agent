@@ -10,10 +10,12 @@ import com.example.be.domain.articles.service.ArticleQueryService;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.repository.ArticleRepository;
+import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
@@ -65,6 +67,9 @@ class FindingRepositoryIntegrationTests {
     private ArticleQueryService articleQueryService;
 
     @Autowired
+    private CollectionRunArticleRepository runArticleRepository;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
@@ -72,10 +77,12 @@ class FindingRepositoryIntegrationTests {
 
     private CollectionRun run;
     private Article article;
+    private Topic topic;
+    private Source source;
 
     @BeforeEach
     void setUp() {
-        Topic topic = topicRepository.save(Topic.builder()
+        topic = topicRepository.save(Topic.builder()
                 .name("M4 finding 통합테스트 " + UUID.randomUUID())
                 .queryText("HBM")
                 .requiredKeywords(List.of())
@@ -85,7 +92,7 @@ class FindingRepositoryIntegrationTests {
                 .intervalMinutes(60)
                 .active(true)
                 .build());
-        Source source = sourceRepository.save(Source.builder()
+        source = sourceRepository.save(Source.builder()
                 .sourceKind(Source.KIND_FEED)
                 .name("M4 finding 소스 " + UUID.randomUUID())
                 .urlTemplate("https://example.com/" + UUID.randomUUID())
@@ -131,6 +138,7 @@ class FindingRepositoryIntegrationTests {
                 SELECT "version" FROM "flyway_schema_history" WHERE "success" = 1
                 """, String.class);
         assertTrue(versions.contains("5"));
+        assertTrue(versions.contains("6"));
 
         Finding saved = findingRepository.save(finding());
         flushAndClear();
@@ -168,9 +176,76 @@ class FindingRepositoryIntegrationTests {
         assertEquals("high", response.getContent().get(0).getRiskLevel());
     }
 
+    @Test
+    void buildsDetailSentencesFromCurrentBodyInsteadOfStaleFindingSections() {
+        findingRepository.save(finding());
+        flushAndClear();
+
+        Article current = articleRepository.findById(article.getId()).orElseThrow();
+        current.applyFullText("Fresh full text first. Fresh full text second.",
+                FetchStatus.FULLTEXT, LocalDateTime.now());
+        flushAndClear();
+
+        var detail = articleQueryService.getArticle(article.getId(), null);
+
+        assertEquals("Fresh full text first.", detail.getSentences().get(0).getText());
+        assertEquals(2, detail.getSentences().size());
+    }
+
+    @Test
+    void topicAndSourceFiltersUseArticleObservationHistory() {
+        runArticleRepository.save(CollectionRunArticle.observe(
+                run, article, topic, source, ChangeType.NEW, LocalDateTime.now().minusMinutes(1)));
+        Topic otherTopic = topicRepository.save(Topic.builder()
+                .name("다른 주제 " + UUID.randomUUID())
+                .queryText("AI")
+                .requiredKeywords(List.of())
+                .optionalKeywords(List.of())
+                .excludedKeywords(List.of())
+                .batchSize(10)
+                .intervalMinutes(60)
+                .active(true)
+                .build());
+        Source otherSource = sourceRepository.save(Source.builder()
+                .sourceKind(Source.KIND_FEED)
+                .name("다른 소스 " + UUID.randomUUID())
+                .urlTemplate("https://example.com/other/" + UUID.randomUUID())
+                .language("en")
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_RESPECT, 30, true))
+                .robotsStatus(Source.ROBOTS_STATUS_ALLOWED)
+                .active(true)
+                .build());
+        CollectionRun latestRun = runRepository.save(CollectionRun.builder()
+                .status(RunStatus.SUCCESS)
+                .triggerType(TriggerType.MANUAL)
+                .forceRefresh(false)
+                .startedAt(LocalDateTime.now().minusSeconds(30))
+                .finishedAt(LocalDateTime.now())
+                .scannedCount(1)
+                .newCount(0)
+                .updatedCount(1)
+                .skippedCount(0)
+                .build());
+        runArticleRepository.save(CollectionRunArticle.observe(
+                latestRun, article, otherTopic, otherSource, ChangeType.UPDATED, LocalDateTime.now()));
+        findingRepository.save(finding(latestRun));
+        flushAndClear();
+
+        var response = articleQueryService.getArticles(
+                null, topic.getId(), source.getId(), null, null, null, null, null,
+                null, null, "PUBLISHED_DESC", 0, 20);
+
+        assertEquals(1, response.getTotalElements());
+        assertEquals(article.getId(), response.getContent().get(0).getId());
+    }
+
     private Finding finding() {
+        return finding(run);
+    }
+
+    private Finding finding(CollectionRun findingRun) {
         return Finding.builder()
-                .run(run)
+                .run(findingRun)
                 .article(article)
                 .changeType(ChangeType.NEW)
                 .summary("미국의 첨단 반도체 장비 수출 통제 강화와 관련된 소식이 보도됐다.")

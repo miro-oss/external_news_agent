@@ -197,7 +197,7 @@ public class CollectionResultWriter {
         return CollectionRunWarning.builder()
                 .source(source)
                 .code(code)
-                .message(trim(message))
+                .message(CollectionRunWarning.truncateMessage(message))
                 .articleCount(0)
                 .occurredAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build();
@@ -234,9 +234,9 @@ public class CollectionResultWriter {
         } else {
             articleVersionRepository.save(
                     ArticleVersion.snapshotOf(article, run, nextVersionNo(article.getId()), now));
-            // UPDATED인데 이전 본문을 그대로 두면 M4 분석이 새 제목·요약과 과거 전문을 섞어 읽는다.
-            // 버전에는 직전 본문을 이미 보존했으므로 현재 행은 전문 재수집 대상으로 되돌린다.
-            article.applyUpdate(collected.title(), collected.summary(), null, contentHash,
+            // 이전 전문은 상세 조회를 위해 보존하되 상태를 되돌려 새 전문을 다시 받는다.
+            // 재수집에 실패한 UPDATED 기사는 분석 파이프라인에서 제외해 새 메타데이터와 옛 본문을 섞지 않는다.
+            article.applyUpdate(collected.title(), collected.summary(), article.getBody(), contentHash,
                     FetchStatus.METADATA_ONLY, run, now);
             changeType = ChangeType.UPDATED;
         }
@@ -286,13 +286,4 @@ public class CollectionResultWriter {
         return policy.maxArticlesPerRun();
     }
 
-    private String trim(String message) {
-        if (message == null) {
-            return null;
-        }
-
-        return message.length() > CollectionRunWarning.MAX_MESSAGE_LENGTH
-                ? message.substring(0, CollectionRunWarning.MAX_MESSAGE_LENGTH)
-                : message;
-    }
 }

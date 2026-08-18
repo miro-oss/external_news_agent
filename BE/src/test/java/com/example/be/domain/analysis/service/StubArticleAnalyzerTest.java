@@ -4,6 +4,7 @@ import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.FetchStatus;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -20,6 +21,7 @@ class StubArticleAnalyzerTest {
                 .title("SK하이닉스, HBM4 양산 일정 앞당겨")
                 .body("SK하이닉스가 HBM4 양산 일정을 앞당겼다. AI 서버 수요 증가가 배경이다.")
                 .language("ko")
+                .fetchStatus(FetchStatus.FULLTEXT)
                 .build();
 
         AnalysisResult result = analyzer.analyze(article);
@@ -50,5 +52,17 @@ class StubArticleAnalyzerTest {
         assertFalse(result.sections().isEmpty());
         assertTrue(result.summary().matches(".*[가-힣].*"));
         assertEquals("weak", result.keyPoints().get(0).groundedness());
+    }
+
+    @Test
+    void classifiesUnrelatedArticleAsReference() {
+        Article article = Article.builder()
+                .title("지역 축제 일정이 공개됐다")
+                .summary("주말 행사와 공연 시간이 안내됐다.")
+                .language("ko")
+                .fetchStatus(FetchStatus.METADATA_ONLY)
+                .build();
+
+        assertEquals(Relevance.REFERENCE, analyzer.analyze(article).relevance());
     }
 }

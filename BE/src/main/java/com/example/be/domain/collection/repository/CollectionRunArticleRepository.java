@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 기사 목록 조회의 runId/topicId/sourceId/changeType 필터가 이 테이블 위에서 돈다.
@@ -42,5 +43,20 @@ public interface CollectionRunArticleRepository
             ORDER BY observation.id ASC
             """)
     List<CollectionRunArticle> findAnalysisTargetsByRunId(@Param("runId") Long runId);
+
+    /** 이번 실행에서 전문 재수집에 성공한 기사는 UNCHANGED 관측이어도 다시 분석한다. */
+    @Query("""
+            SELECT observation
+            FROM CollectionRunArticle observation
+            JOIN FETCH observation.article article
+            JOIN FETCH article.topic
+            JOIN FETCH article.source
+            WHERE observation.run.id = :runId
+              AND article.id IN :articleIds
+            ORDER BY observation.id ASC
+            """)
+    List<CollectionRunArticle> findAnalysisTargetsByRunIdAndArticleIdIn(
+            @Param("runId") Long runId,
+            @Param("articleIds") Set<Long> articleIds);
 
 }

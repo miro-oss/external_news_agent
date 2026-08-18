@@ -14,6 +14,7 @@ import org.springframework.data.jpa.domain.Specification;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class FindingSpecification {
 
@@ -53,8 +54,8 @@ public class FindingSpecification {
                 Subquery<Long> observed = query.subquery(Long.class);
                 Root<CollectionRunArticle> observation = observed.from(CollectionRunArticle.class);
                 List<Predicate> observationPredicates = new ArrayList<>();
+                // 주제·소스는 최신 finding 실행이 아니라 기사의 전체 수집 이력에 대해 필터링한다.
                 observationPredicates.add(builder.equal(observation.get("article"), root.get("article")));
-                observationPredicates.add(builder.equal(observation.get("run"), root.get("run")));
                 if (topicId != null) {
                     observationPredicates.add(builder.equal(observation.get("topic").get("id"), topicId));
                 }
@@ -71,7 +72,9 @@ public class FindingSpecification {
             addEqual(predicates, builder, root, "riskLevel", riskLevel);
             addEqual(predicates, builder, root, "category", category);
             if (language != null) {
-                predicates.add(builder.equal(builder.lower(root.get("article").get("language")), language.toLowerCase()));
+                predicates.add(builder.equal(
+                        builder.lower(root.get("article").get("language")),
+                        language.toLowerCase(Locale.ROOT)));
             }
             if (from != null) {
                 predicates.add(builder.greaterThanOrEqualTo(root.get("article").get("publishedAt"), from));

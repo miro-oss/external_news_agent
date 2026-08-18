@@ -1,8 +1,10 @@
 package com.example.be.domain.collection.repository;
 
 import com.example.be.domain.collection.entity.Article;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -23,6 +25,11 @@ public interface ArticleRepository extends JpaRepository<Article, Long>, JpaSpec
     List<Article> findByUrlHashIn(Collection<String> urlHashes);
 
     boolean existsByUrlHash(String urlHash);
+
+    /** 같은 기사의 분석 결과를 동시에 저장할 때 unique check와 insert를 직렬화한다. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT article FROM Article article WHERE article.id = :articleId")
+    Optional<Article> findByIdForUpdate(@Param("articleId") Long articleId);
 
     /**
      * 이번 실행에서 관측했지만 아직 본문을 못 받은 기사. 소스를 함께 가져오는 이유는 본문 추출이

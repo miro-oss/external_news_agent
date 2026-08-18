@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -32,9 +33,9 @@ public class CollectionRunExecutionService {
                         item.getRun().isForceRefresh());
             }
             // 메타데이터를 다 모은 뒤에 본문을 받는다. 조합마다 섞으면 같은 호스트를 번갈아 두드리게 된다.
-            contentEnricher.enrich(runId);
+            Set<Long> refreshedArticleIds = contentEnricher.enrich(runId);
             // 분석도 외부 어댑터 경계다. Stub 단계부터 실행 트랜잭션과 분리해 실제 LLM 교체 시에도 DB를 잡지 않는다.
-            analysisPipeline.analyze(runId);
+            analysisPipeline.analyze(runId, refreshedArticleIds);
             resultWriter.finishRun(runId);
         } catch (RuntimeException exception) {
             log.error("수집 실행을 완료하지 못했다. runId={} error={}", runId, exception.getMessage(), exception);

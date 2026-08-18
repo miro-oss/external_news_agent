@@ -46,7 +46,6 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
@@ -212,6 +211,13 @@ class CollectionExecutorIntegrationTests {
         execute(firstRun, newItem(firstRun), topic, source);
         flushAndClear();
 
+        Article first = articleRepository.findAll().stream()
+                .filter(candidate -> articleUrl.equals(candidate.getCanonicalUrl()))
+                .findFirst()
+                .orElseThrow();
+        first.applyFullText("정정 전 전문", FetchStatus.FULLTEXT, LocalDateTime.now());
+        flushAndClear();
+
         givenFeed(article("HBM4 양산 시작 (정정)", "양산 일정이 앞당겨졌다"));
         CollectionRun secondRun = newRun();
         CollectionRunItem secondItem = newItem(secondRun);
@@ -225,7 +231,7 @@ class CollectionExecutorIntegrationTests {
 
         assertEquals("HBM4 양산 시작 (정정)", updated.getTitle());
         assertEquals(FetchStatus.METADATA_ONLY, updated.getFetchStatus());
-        assertNull(updated.getBody());
+        assertEquals("정정 전 전문", updated.getBody());
         assertEquals(1, secondItem.getUpdatedCount());
         assertEquals(1, runArticleRepository.countByRunIdAndChangeType(secondRun.getId(), ChangeType.UPDATED));
 

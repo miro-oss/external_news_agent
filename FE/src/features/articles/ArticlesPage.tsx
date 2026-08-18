@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useArticles } from '../../api/queries'
 import type { ArticleFilters, ArticleSummary } from '../../api/types'
 import { ArticleDetailModal } from './ArticleDetailModal'
@@ -13,6 +13,7 @@ export function ArticlesPage() {
     sort: 'PUBLISHED_DESC',
   })
   const articles = useArticles(filters)
+  const closeArticle = useCallback(() => setSelectedId(null), [])
 
   function changeFilter<K extends keyof ArticleFilters>(key: K, value: ArticleFilters[K]) {
     setFilters((current) => ({ ...current, [key]: value || undefined, page: 0 }))
@@ -132,7 +133,7 @@ export function ArticlesPage() {
         </>
       )}
 
-      <ArticleDetailModal articleId={selectedId} onClose={() => setSelectedId(null)} />
+      <ArticleDetailModal articleId={selectedId} onClose={closeArticle} />
     </main>
   )
 }

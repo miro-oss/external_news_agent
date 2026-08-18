@@ -53,8 +53,8 @@ public class ArticleController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) @RequestParam(required = false) OffsetDateTime from,
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) @RequestParam(required = false) OffsetDateTime to,
             @RequestParam(defaultValue = "PUBLISHED_DESC") String sort,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size
+            @RequestParam(defaultValue = "" + PageResponse.DEFAULT_PAGE) int page,
+            @RequestParam(defaultValue = "" + PageResponse.DEFAULT_SIZE) int size
     ) {
         return ApiResponse.of(GeneralSuccessCode.OK,
                 articleQueryService.getArticles(runId, topicId, sourceId, changeType, relevance, riskLevel,

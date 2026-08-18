@@ -1,6 +1,6 @@
 package com.example.be.domain.analysis.entity;
 
-public enum Sentiment {
+public enum Sentiment implements ApiValue {
 
     POSITIVE("positive"),
     NEUTRAL("neutral"),
@@ -14,5 +14,9 @@ public enum Sentiment {
 
     public String toApiValue() {
         return apiValue;
+    }
+
+    public static Sentiment fromApiValue(String value) {
+        return ApiValue.parse(values(), value, "감정");
     }
 }

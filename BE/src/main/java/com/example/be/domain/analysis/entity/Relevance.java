@@ -1,8 +1,6 @@
 package com.example.be.domain.analysis.entity;
 
-import java.util.Arrays;
-
-public enum Relevance {
+public enum Relevance implements ApiValue {
 
     IMPORTANT("important"),
     WATCH("watch"),
@@ -19,9 +17,6 @@ public enum Relevance {
     }
 
     public static Relevance fromApiValue(String value) {
-        return Arrays.stream(values())
-                .filter(relevance -> relevance.apiValue.equalsIgnoreCase(value))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("지원하지 않는 관련도입니다."));
+        return ApiValue.parse(values(), value, "관련도");
     }
 }
