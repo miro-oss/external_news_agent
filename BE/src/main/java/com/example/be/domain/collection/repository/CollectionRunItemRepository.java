@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 public interface CollectionRunItemRepository extends JpaRepository<CollectionRunItem, Long> {
 
@@ -47,8 +48,5 @@ public interface CollectionRunItemRepository extends JpaRepository<CollectionRun
     List<Long> findTopicIdsByRunIdInAndTopicIdIn(@Param("runIds") Collection<Long> runIds,
                                                  @Param("topicIds") Collection<Long> topicIds);
 
-    /**
-     * 소스 상세의 lastCollectedAt / lastRunStatus를 채우는 자리다(M2에서 null로 비워둔 항목).
-     */
-    List<CollectionRunItem> findByRunIdInOrderByIdAsc(List<Long> runIds);
+    Optional<CollectionRunItem> findFirstBySourceIdOrderByRunStartedAtDescRunIdDescIdDesc(Long sourceId);
 }

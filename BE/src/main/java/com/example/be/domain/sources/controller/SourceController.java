@@ -186,8 +186,8 @@ public class SourceController {
     @Operation(
             summary = "수집 소스 상세 조회",
             description = """
-                    수집 소스 1건의 상세 정보를 조회합니다. 소스에 연결된 주제 목록을 함께 내려 소스 상태 점검 화면을 그립니다.
-                    lastCollectedAt과 lastRunStatus는 수집 실행 이력이 생기는 M3까지 null입니다.
+                    수집 소스 1건의 상세 정보를 조회합니다.
+                    소스에 연결된 주제 목록과 최근 수집 상태를 함께 내려 소스 상태 점검 화면을 그립니다.
                     """
     )
     @ApiResponses({
@@ -219,8 +219,8 @@ public class SourceController {
                                   { "id": 1, "name": "HBM" },
                                   { "id": 2, "name": "DRAM" }
                                 ],
-                                "lastCollectedAt": null,
-                                "lastRunStatus": null
+                                "lastCollectedAt": "2026-08-10T08:00:00+09:00",
+                                "lastRunStatus": "SUCCESS"
                               }
                             }
                             """))),

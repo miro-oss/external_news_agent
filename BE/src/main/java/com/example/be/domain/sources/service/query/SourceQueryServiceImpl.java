@@ -1,5 +1,6 @@
 package com.example.be.domain.sources.service.query;
 
+import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.sources.converter.SourceConverter;
 import com.example.be.domain.sources.dto.res.SourceResDTO;
 import com.example.be.domain.sources.entity.Source;
@@ -29,6 +30,7 @@ import java.util.stream.Collectors;
 public class SourceQueryServiceImpl implements SourceQueryService {
 
     private final SourceRepository sourceRepository;
+    private final CollectionRunItemRepository runItemRepository;
 
     @Override
     public PageResponse<SourceResDTO.Summary> getSources(String sourceKind,
@@ -57,7 +59,10 @@ public class SourceQueryServiceImpl implements SourceQueryService {
         Source source = sourceRepository.findById(sourceId)
                 .orElseThrow(() -> new SourceException(SourceErrorCode.SOURCE_NOT_FOUND));
 
-        return SourceConverter.toDetail(source);
+        return SourceConverter.toDetail(source,
+                runItemRepository.findFirstBySourceIdOrderByRunStartedAtDescRunIdDescIdDesc(sourceId)
+                        .map(item -> item.getRun())
+                        .orElse(null));
     }
 
     private Map<Long, Integer> countLinkedTopics(List<Source> sources) {

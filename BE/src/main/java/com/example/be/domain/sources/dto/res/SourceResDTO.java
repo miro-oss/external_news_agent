@@ -145,11 +145,12 @@ public class SourceResDTO {
         @Schema(description = "이 소스가 연결된 주제 목록")
         private final List<TopicBrief> linkedTopics;
 
-        @Schema(description = "마지막 수집 시각. 수집 실행 이력이 생기는 M3까지는 null",
+        @Schema(description = "마지막 수집 시작 시각. 실행 이력이 없으면 null",
                 example = "2026-08-10T08:00:00+09:00")
         private final OffsetDateTime lastCollectedAt;
 
-        @Schema(description = "마지막 수집 결과. 수집 실행 이력이 생기는 M3까지는 null", example = "SUCCESS")
+        @Schema(description = "마지막 수집 실행 상태. 실행 이력이 없으면 null", example = "SUCCESS",
+                allowableValues = {"PENDING", "RUNNING", "SUCCESS", "PARTIAL", "FAILED"})
         private final String lastRunStatus;
     }
 

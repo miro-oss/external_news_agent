@@ -15,21 +15,23 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 
 /**
- * 네이버 뉴스 검색. 한국어 뉴스의 1차 수집 provider다 (plan-final §2-6).
+ * NAVER API HUB 뉴스 검색. 한국어 뉴스의 1차 수집 provider다 (plan-final §2-6).
  */
 @Slf4j
 @Component
 public class NaverSearchConnector implements SearchConnector {
 
-    private static final String BASE_URL = "https://openapi.naver.com";
-    private static final String NEWS_PATH = "/v1/search/news.json";
+    private static final String BASE_URL = "https://naverapihub.apigw.ntruss.com";
+    private static final String NEWS_PATH = "/search/v1/news";
 
-    private static final String CLIENT_ID_HEADER = "X-Naver-Client-Id";
-    private static final String CLIENT_SECRET_HEADER = "X-Naver-Client-Secret";
+    private static final String CLIENT_ID_HEADER = "X-NCP-APIGW-API-KEY-ID";
+    private static final String CLIENT_SECRET_HEADER = "X-NCP-APIGW-API-KEY";
 
     /** 최신 기사를 먼저 받는다. 수집 주기가 짧아 정확도순으로 받으면 새 기사를 놓친다. */
     private static final String SORT_BY_DATE = "date";
@@ -38,13 +40,16 @@ public class NaverSearchConnector implements SearchConnector {
     private static final String LANGUAGE = "ko";
 
     private final RestClient restClient;
+    private final ObjectMapper objectMapper;
     private final String clientId;
     private final String clientSecret;
 
     public NaverSearchConnector(RestClient.Builder restClientBuilder,
+                                ObjectMapper objectMapper,
                                 @Value("${NAVER_CLIENT_ID:}") String clientId,
                                 @Value("${NAVER_CLIENT_SECRET:}") String clientSecret) {
         this.restClient = restClientBuilder.baseUrl(BASE_URL).build();
+        this.objectMapper = objectMapper;
         this.clientId = clientId;
         this.clientSecret = clientSecret;
     }
@@ -61,7 +66,7 @@ public class NaverSearchConnector implements SearchConnector {
         }
 
         try {
-            NewsResponse response = restClient.get()
+            String responseBody = restClient.get()
                     .uri(uriBuilder -> uriBuilder.path(NEWS_PATH)
                             .queryParam("query", query.queryText())
                             .queryParam("display", query.batchSize())
@@ -70,16 +75,25 @@ public class NaverSearchConnector implements SearchConnector {
                     .header(CLIENT_ID_HEADER, clientId)
                     .header(CLIENT_SECRET_HEADER, clientSecret)
                     .retrieve()
-                    .body(NewsResponse.class);
+                    .body(String.class);
 
-            return FetchResult.ok(toArticles(response));
+            return FetchResult.ok(toArticles(parseResponse(responseBody)));
         } catch (RestClientException e) {
             return failureOf(query, e);
+        } catch (JacksonException e) {
+            return failureOf(query, new RestClientException("NAVER 응답 JSON 파싱 실패", e));
         }
     }
 
     private boolean hasCredentials() {
         return StringUtils.hasText(clientId) && StringUtils.hasText(clientSecret);
+    }
+
+    /** API HUB는 JSON 본문을 {@code text/plain;charset=UTF-8}로 응답할 수 있어 문자열로 받은 뒤 파싱한다. */
+    private NewsResponse parseResponse(String responseBody) {
+        return StringUtils.hasText(responseBody)
+                ? objectMapper.readValue(responseBody, NewsResponse.class)
+                : null;
     }
 
     private List<CollectedArticle> toArticles(NewsResponse response) {

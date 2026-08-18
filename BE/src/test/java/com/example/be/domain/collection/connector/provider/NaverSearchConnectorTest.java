@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -122,15 +123,43 @@ class NaverSearchConnectorTest {
     }
 
     @Test
-    void sendsCredentialsAndBatchSizeAsDisplay() {
+    void sendsApiHubCredentialsAndBatchSizeAsDisplay() {
         server.expect(requestTo(newsUri(7)))
                 .andExpect(method(HttpMethod.GET))
-                .andExpect(header("X-Naver-Client-Id", "test-id"))
-                .andExpect(header("X-Naver-Client-Secret", "test-secret"))
+                .andExpect(header("X-NCP-APIGW-API-KEY-ID", "test-id"))
+                .andExpect(header("X-NCP-APIGW-API-KEY", "test-secret"))
                 .andRespond(withSuccess(NEWS_JSON, MediaType.APPLICATION_JSON));
 
         connector().search(new SearchQuery("HBM", 7, "ko"));
 
+        server.verify();
+    }
+
+    @Test
+    void parsesJsonWhenApiHubRespondsWithTextPlainContentType() {
+        server.expect(requestTo(newsUri(5)))
+                .andRespond(withSuccess(
+                        NEWS_JSON,
+                        MediaType.parseMediaType("text/plain;charset=UTF-8")));
+
+        FetchResult result = connector().search(new SearchQuery("HBM", 5, "ko"));
+
+        assertTrue(result.success());
+        assertEquals(1, result.articles().size());
+        server.verify();
+    }
+
+    @Test
+    void reportsFailureWhenApiHubReturnsMalformedJson() {
+        server.expect(requestTo(newsUri(5)))
+                .andRespond(withSuccess(
+                        "not-json",
+                        MediaType.parseMediaType("text/plain;charset=UTF-8")));
+
+        FetchResult result = connector().search(new SearchQuery("HBM", 5, "ko"));
+
+        assertFalse(result.success());
+        assertEquals(CollectionRunWarning.CODE_SEARCH_FAILED, result.failureCode());
         server.verify();
     }
 
@@ -140,7 +169,7 @@ class NaverSearchConnectorTest {
      */
     @Test
     void reportsMissingKeyAndSkipsHttp() {
-        NaverSearchConnector connector = new NaverSearchConnector(builder, "", "");
+        NaverSearchConnector connector = new NaverSearchConnector(builder, new ObjectMapper(), "", "");
 
         FetchResult result = connector.search(new SearchQuery("HBM", 5, "ko"));
 
@@ -190,7 +219,7 @@ class NaverSearchConnectorTest {
     }
 
     private NaverSearchConnector connector() {
-        return new NaverSearchConnector(builder, "test-id", "test-secret");
+        return new NaverSearchConnector(builder, new ObjectMapper(), "test-id", "test-secret");
     }
 
     private void expectNewsRequest() {
@@ -199,6 +228,8 @@ class NaverSearchConnectorTest {
     }
 
     private String newsUri(int display) {
-        return "https://openapi.naver.com/v1/search/news.json?query=HBM&display=" + display + "&sort=date";
+        return "https://naverapihub.apigw.ntruss.com/search/v1/news?query=HBM&display="
+                + display
+                + "&sort=date";
     }
 }
