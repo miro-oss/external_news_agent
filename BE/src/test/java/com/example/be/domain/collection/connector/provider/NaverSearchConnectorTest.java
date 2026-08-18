@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -134,13 +135,41 @@ class NaverSearchConnectorTest {
         server.verify();
     }
 
+    @Test
+    void parsesJsonWhenApiHubRespondsWithTextPlainContentType() {
+        server.expect(requestTo(newsUri(5)))
+                .andRespond(withSuccess(
+                        NEWS_JSON,
+                        MediaType.parseMediaType("text/plain;charset=UTF-8")));
+
+        FetchResult result = connector().search(new SearchQuery("HBM", 5, "ko"));
+
+        assertTrue(result.success());
+        assertEquals(1, result.articles().size());
+        server.verify();
+    }
+
+    @Test
+    void reportsFailureWhenApiHubReturnsMalformedJson() {
+        server.expect(requestTo(newsUri(5)))
+                .andRespond(withSuccess(
+                        "not-json",
+                        MediaType.parseMediaType("text/plain;charset=UTF-8")));
+
+        FetchResult result = connector().search(new SearchQuery("HBM", 5, "ko"));
+
+        assertFalse(result.success());
+        assertEquals(CollectionRunWarning.CODE_SEARCH_FAILED, result.failureCode());
+        server.verify();
+    }
+
     /**
      * 키가 없으면 예외를 던지지 않고 아예 호출하지 않는다. 새 팀원이 키 없이 bootRun 할 수 있어야 한다.
      * 다만 결과는 성공이 아니다 — 그 소스를 실제로 쓰는 실행에서는 경고로 드러나야 한다.
      */
     @Test
     void reportsMissingKeyAndSkipsHttp() {
-        NaverSearchConnector connector = new NaverSearchConnector(builder, "", "");
+        NaverSearchConnector connector = new NaverSearchConnector(builder, new ObjectMapper(), "", "");
 
         FetchResult result = connector.search(new SearchQuery("HBM", 5, "ko"));
 
@@ -190,7 +219,7 @@ class NaverSearchConnectorTest {
     }
 
     private NaverSearchConnector connector() {
-        return new NaverSearchConnector(builder, "test-id", "test-secret");
+        return new NaverSearchConnector(builder, new ObjectMapper(), "test-id", "test-secret");
     }
 
     private void expectNewsRequest() {
