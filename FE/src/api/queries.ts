@@ -7,6 +7,8 @@ import type {
   Combination,
   CombinationPage,
   PageResult,
+  ReportDetail,
+  ReportSummary,
   Source,
   SourceCreateRequest,
   Topic,
@@ -18,6 +20,9 @@ const keys = {
   sources: ['sources'] as const,
   articles: (filters: ArticleFilters) => ['articles', filters] as const,
   article: (id: number | null) => ['article', id] as const,
+  reports: ['reports'] as const,
+  latestReport: ['reports', 'latest'] as const,
+  report: (id: number | null) => ['reports', id] as const,
 }
 
 const PAGE_SIZE = 100
@@ -99,6 +104,28 @@ export function useArticle(articleId: number | null) {
     queryKey: keys.article(articleId),
     queryFn: () => get<ArticleDetail>(`/articles/${articleId}`),
     enabled: articleId !== null,
+  })
+}
+
+export function useReports() {
+  return useQuery({
+    queryKey: keys.reports,
+    queryFn: () => get<PageResult<ReportSummary>>('/reports', { page: 0, size: PAGE_SIZE }),
+  })
+}
+
+export function useLatestReport() {
+  return useQuery({
+    queryKey: keys.latestReport,
+    queryFn: () => get<ReportDetail | null>('/reports/latest', { includeFindings: true }),
+  })
+}
+
+export function useReport(reportId: number | null) {
+  return useQuery({
+    queryKey: keys.report(reportId),
+    queryFn: () => get<ReportDetail>(`/reports/${reportId}`, { includeFindings: true }),
+    enabled: reportId !== null,
   })
 }
 

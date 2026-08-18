@@ -3,6 +3,7 @@ package com.example.be.domain.collection.service.command;
 import com.example.be.domain.analysis.service.ArticleAnalysisPipeline;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
+import com.example.be.domain.reports.service.ReportCreationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ public class CollectionRunExecutionService {
     private final CollectionExecutor collectionExecutor;
     private final ArticleContentEnricher contentEnricher;
     private final ArticleAnalysisPipeline analysisPipeline;
+    private final ReportCreationService reportCreationService;
     private final CollectionResultWriter resultWriter;
 
     public void executeRun(Long runId) {
@@ -36,6 +38,8 @@ public class CollectionRunExecutionService {
             Set<Long> refreshedArticleIds = contentEnricher.enrich(runId);
             // 분석도 외부 어댑터 경계다. Stub 단계부터 실행 트랜잭션과 분리해 실제 LLM 교체 시에도 DB를 잡지 않는다.
             analysisPipeline.analyze(runId, refreshedArticleIds);
+            // M5 보고서는 findings를 모두 저장한 뒤 만든다. 생성과 reportId 연결은 별도 짧은 트랜잭션이다.
+            reportCreationService.generate(runId);
             resultWriter.finishRun(runId);
         } catch (RuntimeException exception) {
             log.error("수집 실행을 완료하지 못했다. runId={} error={}", runId, exception.getMessage(), exception);

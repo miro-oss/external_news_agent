@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import './App.css'
 import { ArticlesPage } from './features/articles/ArticlesPage'
+import { ReportsPage } from './features/reports/ReportsPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 
 function App() {
-  const [page, setPage] = useState<'articles' | 'settings'>('articles')
+  const [page, setPage] = useState<'articles' | 'reports' | 'settings'>('articles')
 
   return (
     <div className="app-shell">
@@ -21,6 +22,14 @@ function App() {
           </button>
           <button
             type="button"
+            className={page === 'reports' ? 'nav-link active' : 'nav-link'}
+            aria-current={page === 'reports' ? 'page' : undefined}
+            onClick={() => setPage('reports')}
+          >
+            리포트
+          </button>
+          <button
+            type="button"
             className={page === 'settings' ? 'nav-link active' : 'nav-link'}
             aria-current={page === 'settings' ? 'page' : undefined}
             onClick={() => setPage('settings')}
@@ -29,7 +38,9 @@ function App() {
           </button>
         </div>
       </nav>
-      {page === 'articles' ? <ArticlesPage /> : <SettingsPage />}
+      {page === 'articles' && <ArticlesPage />}
+      {page === 'reports' && <ReportsPage />}
+      {page === 'settings' && <SettingsPage />}
     </div>
   )
 }

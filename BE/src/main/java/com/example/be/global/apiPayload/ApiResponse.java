@@ -37,6 +37,10 @@ public class ApiResponse<T> {
         return new ApiResponse<>(true, code.getCode(), code.getMessage(), result);
     }
 
+    public static <T> ApiResponse<T> of(BaseSuccessCode code, String message, T result) {
+        return new ApiResponse<>(true, code.getCode(), message, result);
+    }
+
     public static <T> ApiResponse<T> of(BaseSuccessCode code) {
         return new ApiResponse<>(true, code.getCode(), code.getMessage(), null);
     }

@@ -79,7 +79,7 @@ public class CollectionRun {
     @Column(name = "skipped_count", nullable = false)
     private int skippedCount;
 
-    /** news_reports는 M5에 생긴다. 그때까지는 FK 없는 참조값이다. */
+    /** 실행 종료 시 생성된 보고서의 역참조. 보고서 쪽 run_id와 함께 애플리케이션이 같은 쌍으로 연결한다. */
     @Column(name = "report_id")
     private Long reportId;
 
