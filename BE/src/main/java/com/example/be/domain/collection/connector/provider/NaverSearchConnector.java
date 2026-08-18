@@ -19,17 +19,17 @@ import org.springframework.web.client.RestClientException;
 import java.util.List;
 
 /**
- * 네이버 뉴스 검색. 한국어 뉴스의 1차 수집 provider다 (plan-final §2-6).
+ * NAVER API HUB 뉴스 검색. 한국어 뉴스의 1차 수집 provider다 (plan-final §2-6).
  */
 @Slf4j
 @Component
 public class NaverSearchConnector implements SearchConnector {
 
-    private static final String BASE_URL = "https://openapi.naver.com";
-    private static final String NEWS_PATH = "/v1/search/news.json";
+    private static final String BASE_URL = "https://naverapihub.apigw.ntruss.com";
+    private static final String NEWS_PATH = "/search/v1/news";
 
-    private static final String CLIENT_ID_HEADER = "X-Naver-Client-Id";
-    private static final String CLIENT_SECRET_HEADER = "X-Naver-Client-Secret";
+    private static final String CLIENT_ID_HEADER = "X-NCP-APIGW-API-KEY-ID";
+    private static final String CLIENT_SECRET_HEADER = "X-NCP-APIGW-API-KEY";
 
     /** 최신 기사를 먼저 받는다. 수집 주기가 짧아 정확도순으로 받으면 새 기사를 놓친다. */
     private static final String SORT_BY_DATE = "date";

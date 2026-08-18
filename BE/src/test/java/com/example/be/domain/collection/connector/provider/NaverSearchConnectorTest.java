@@ -122,11 +122,11 @@ class NaverSearchConnectorTest {
     }
 
     @Test
-    void sendsCredentialsAndBatchSizeAsDisplay() {
+    void sendsApiHubCredentialsAndBatchSizeAsDisplay() {
         server.expect(requestTo(newsUri(7)))
                 .andExpect(method(HttpMethod.GET))
-                .andExpect(header("X-Naver-Client-Id", "test-id"))
-                .andExpect(header("X-Naver-Client-Secret", "test-secret"))
+                .andExpect(header("X-NCP-APIGW-API-KEY-ID", "test-id"))
+                .andExpect(header("X-NCP-APIGW-API-KEY", "test-secret"))
                 .andRespond(withSuccess(NEWS_JSON, MediaType.APPLICATION_JSON));
 
         connector().search(new SearchQuery("HBM", 7, "ko"));
@@ -199,6 +199,8 @@ class NaverSearchConnectorTest {
     }
 
     private String newsUri(int display) {
-        return "https://openapi.naver.com/v1/search/news.json?query=HBM&display=" + display + "&sort=date";
+        return "https://naverapihub.apigw.ntruss.com/search/v1/news?query=HBM&display="
+                + display
+                + "&sort=date";
     }
 }
