@@ -33,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -115,13 +116,14 @@ class ArticleContentEnricherIntegrationTests {
         Article article = observedArticle(source(true));
         given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.fullText(BODY));
 
-        enricher.enrich(run.getId());
+        Set<Long> refreshed = enricher.enrich(run.getId());
         flushAndClear();
 
         Article reloaded = articleRepository.findById(article.getId()).orElseThrow();
         assertEquals(FetchStatus.FULLTEXT, reloaded.getFetchStatus());
         assertTrue(reloaded.getBody().startsWith("본문"));
         assertNotNull(reloaded.getUpdatedAt());
+        assertEquals(Set.of(article.getId()), refreshed);
     }
 
     /**
@@ -251,6 +253,21 @@ class ArticleContentEnricherIntegrationTests {
         Article reloaded = articleRepository.findById(article.getId()).orElseThrow();
         assertEquals(FetchStatus.FULLTEXT, reloaded.getFetchStatus());
         assertTrue(reloaded.getBody().startsWith("본문"));
+    }
+
+    @Test
+    void keepsPreviousBodyWhenRefreshFails() {
+        Article article = observedArticle(source(true));
+        article.applyUpdate(article.getTitle(), article.getSummary(), "직전 전문", article.getContentHash(),
+                FetchStatus.METADATA_ONLY, run, LocalDateTime.now());
+        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.failed());
+
+        enricher.enrich(run.getId());
+        flushAndClear();
+
+        Article reloaded = articleRepository.findById(article.getId()).orElseThrow();
+        assertEquals(FetchStatus.FETCH_FAILED, reloaded.getFetchStatus());
+        assertEquals("직전 전문", reloaded.getBody());
     }
 
     /**

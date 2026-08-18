@@ -17,8 +17,10 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 수집이 끝난 뒤 이번 실행에서 본 기사의 본문을 채운다.
@@ -39,15 +41,16 @@ public class ArticleContentEnricher {
     private final RobotsTxtClient robotsTxtClient;
     private final CollectionResultWriter resultWriter;
 
-    public void enrich(Long runId) {
+    public Set<Long> enrich(Long runId) {
         List<Article> targets = articleRepository.findFullTextTargetsByRunId(runId);
         if (targets.isEmpty()) {
-            return;
+            return Set.of();
         }
 
         // 기사마다 robots.txt를 받으면 요청이 두 배가 된다. 실행 안에서 호스트별로 한 번만 본다.
         Map<String, RobotsLookup> robotsByHost = new HashMap<>();
         Map<Long, Integer> blockedCountBySource = new LinkedHashMap<>();
+        Set<Long> refreshedArticleIds = new LinkedHashSet<>();
 
         for (Article article : targets) {
             ArticleContentResult result = fetch(article, robotsByHost);
@@ -56,6 +59,9 @@ public class ArticleContentEnricher {
             }
 
             resultWriter.applyFullText(article.getId(), result.status(), result.body());
+            if (result.status() == FetchStatus.FULLTEXT) {
+                refreshedArticleIds.add(article.getId());
+            }
             if (result.status() == FetchStatus.FULLTEXT_BLOCKED) {
                 blockedCountBySource.merge(article.getSource().getId(), 1, Integer::sum);
             }
@@ -63,6 +69,7 @@ public class ArticleContentEnricher {
 
         blockedCountBySource.forEach((sourceId, count) ->
                 resultWriter.addFullTextBlockedWarning(runId, sourceId, count));
+        return Set.copyOf(refreshedArticleIds);
     }
 
     /**

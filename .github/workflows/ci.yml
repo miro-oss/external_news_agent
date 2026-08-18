@@ -54,6 +54,25 @@ jobs:
   backend:
     name: Backend
     runs-on: ubuntu-latest
+    env:
+      SPRING_DATASOURCE_URL: jdbc:oracle:thin:@localhost:1521/FREEPDB1
+      SPRING_DATASOURCE_USERNAME: news_ci
+      SPRING_DATASOURCE_PASSWORD: ci_${{ github.run_id }}_A1
+
+    services:
+      oracle:
+        image: gvenzl/oracle-free:latest-faststart
+        env:
+          ORACLE_RANDOM_PASSWORD: true
+          APP_USER: news_ci
+          APP_USER_PASSWORD: ci_${{ github.run_id }}_A1
+        ports:
+          - 1521:1521
+        options: >-
+          --health-cmd healthcheck.sh
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
 
     steps:
       - name: Checkout
@@ -74,4 +93,4 @@ jobs:
 
       - name: Test
         working-directory: BE
-        run: ./gradlew test
+        run: ./gradlew test -Dnews.integration.db=true

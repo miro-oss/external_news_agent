@@ -58,7 +58,6 @@ class BeDatabaseIntegrationTests {
                 ORDER BY "installed_rank"
                 """, String.class);
 
-        assertTrue(versions.contains("0"));
-        assertTrue(versions.contains("1"));
+        assertTrue(versions.containsAll(List.of("1", "2", "3", "4", "5", "6")));
     }
 }

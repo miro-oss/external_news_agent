@@ -1,0 +1,132 @@
+package com.example.be.domain.articles.dto.res;
+
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+
+import java.time.OffsetDateTime;
+import java.util.List;
+
+public class ArticleResDTO {
+
+    private ArticleResDTO() {
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @JsonPropertyOrder({
+            "id", "title", "publisher", "canonicalUrl", "urlHash", "language", "publishedAt", "fetchedAt",
+            "fetchStatus", "topicId", "topicName", "sourceId", "sourceName", "changeType", "summary",
+            "category", "relevance", "riskLevel", "sentiment"
+    })
+    @Schema(name = "ArticleSummaryResponse", description = "수집 기사 목록 항목")
+    public static class Summary {
+
+        private final Long id;
+        private final String title;
+        private final String publisher;
+        private final String canonicalUrl;
+        private final String urlHash;
+        private final String language;
+        private final OffsetDateTime publishedAt;
+        private final OffsetDateTime fetchedAt;
+        private final String fetchStatus;
+        private final Long topicId;
+        private final String topicName;
+        private final Long sourceId;
+        private final String sourceName;
+        private final String changeType;
+        private final String summary;
+        private final String category;
+        private final String relevance;
+        private final String riskLevel;
+        private final String sentiment;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @JsonPropertyOrder({
+            "id", "title", "publisher", "canonicalUrl", "language", "publishedAt", "fetchedAt", "fetchStatus",
+            "topicId", "topicName", "sourceId", "sourceName", "bodyText", "sentences", "analysis",
+            "eventId", "relatedArticles"
+    })
+    @Schema(name = "ArticleDetailResponse", description = "수집 기사 상세")
+    public static class Detail {
+
+        private final Long id;
+        private final String title;
+        private final String publisher;
+        private final String canonicalUrl;
+        private final String language;
+        private final OffsetDateTime publishedAt;
+        private final OffsetDateTime fetchedAt;
+        private final String fetchStatus;
+        private final Long topicId;
+        private final String topicName;
+        private final Long sourceId;
+        private final String sourceName;
+        private final String bodyText;
+        private final List<Sentence> sentences;
+        private final Analysis analysis;
+        private final Long eventId;
+        private final List<RelatedArticle> relatedArticles;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @JsonPropertyOrder({"index", "text"})
+    public static class Sentence {
+
+        private final int index;
+        private final String text;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @JsonPropertyOrder({
+            "changeType", "summary", "keyPoints", "intent", "sentiment", "riskLevel", "relevance",
+            "category", "analyzedAt", "runId"
+    })
+    public static class Analysis {
+
+        private final String changeType;
+        private final String summary;
+        private final List<KeyPoint> keyPoints;
+        private final String intent;
+        private final String sentiment;
+        private final String riskLevel;
+        private final String relevance;
+        private final String category;
+        private final OffsetDateTime analyzedAt;
+        private final Long runId;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @JsonPropertyOrder({"text", "evidence", "groundedness"})
+    public static class KeyPoint {
+
+        private final String text;
+        private final List<Integer> evidence;
+        private final String groundedness;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @JsonPropertyOrder({"id", "title", "publisher"})
+    public static class RelatedArticle {
+
+        private final Long id;
+        private final String title;
+        private final String publisher;
+    }
+}

@@ -46,6 +46,13 @@ public class CollectionRunWarning {
     public static final int MAX_CODE_LENGTH = 50;
     public static final int MAX_MESSAGE_LENGTH = 1000;
 
+    public static String truncateMessage(String message) {
+        if (message == null) {
+            return null;
+        }
+        return message.length() > MAX_MESSAGE_LENGTH ? message.substring(0, MAX_MESSAGE_LENGTH) : message;
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id")

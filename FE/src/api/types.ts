@@ -92,3 +92,84 @@ export interface Topic {
   intervalMinutes: number
   active: boolean
 }
+
+export type ChangeType = 'NEW' | 'UPDATED'
+export type Relevance = 'important' | 'watch' | 'reference'
+export type RiskLevel = 'low' | 'medium' | 'high'
+export type Sentiment = 'positive' | 'neutral' | 'negative'
+
+export interface ArticleSummary {
+  id: number
+  title: string
+  publisher: string | null
+  canonicalUrl: string
+  urlHash: string
+  language: string | null
+  publishedAt: string | null
+  fetchedAt: string
+  fetchStatus: 'OK' | 'BLOCKED'
+  topicId: number
+  topicName: string
+  sourceId: number
+  sourceName: string
+  changeType: ChangeType
+  summary: string
+  category: '제품/공정' | '기업' | '정책' | '공급망'
+  relevance: Relevance
+  riskLevel: RiskLevel
+  sentiment: Sentiment
+}
+
+export interface ArticleSentence {
+  index: number
+  text: string
+}
+
+export interface ArticleKeyPoint {
+  text: string
+  evidence: number[]
+  groundedness: 'grounded' | 'weak' | 'ungrounded'
+}
+
+export interface ArticleAnalysis {
+  changeType: ChangeType
+  summary: string
+  keyPoints: ArticleKeyPoint[]
+  intent: string | null
+  sentiment: Sentiment
+  riskLevel: RiskLevel
+  relevance: Relevance
+  category: string
+  analyzedAt: string
+  runId: number
+}
+
+export interface ArticleDetail {
+  id: number
+  title: string
+  publisher: string | null
+  canonicalUrl: string
+  language: string | null
+  publishedAt: string | null
+  fetchedAt: string
+  fetchStatus: 'OK' | 'BLOCKED'
+  topicId: number
+  topicName: string
+  sourceId: number
+  sourceName: string
+  bodyText: string | null
+  sentences: ArticleSentence[]
+  analysis: ArticleAnalysis | null
+  eventId: number | null
+  relatedArticles: Array<{ id: number; title: string; publisher: string | null }>
+}
+
+export interface ArticleFilters {
+  riskLevel?: RiskLevel
+  relevance?: Relevance
+  category?: ArticleSummary['category']
+  language?: string
+  sort?: 'PUBLISHED_DESC' | 'PUBLISHED_ASC' | 'RISK_DESC'
+  page: number
+  size: number
+}

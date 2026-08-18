@@ -130,10 +130,13 @@ public class Article {
      *
      * <p><b>{@code contentHash}를 건드리지 않는다.</b> 변경 판정은 매 실행 피드가 주는 제목+요약 지문으로 한다.
      * 여기서 본문 해시로 덮으면, 다음 실행이 메타데이터 지문과 비교하게 되어 <b>모든 기사가 매번 UPDATED</b>가 된다.
-     * 본문은 한 번만 받고 다시 받지 않으므로 실행 간 비교의 기준이 될 수 없다.
+     * 본문은 별도 수집 단계에서 갱신되므로 실행 간 메타데이터 변경 비교의 기준이 될 수 없다.
      */
     public void applyFullText(String body, FetchStatus fetchStatus, LocalDateTime updatedAt) {
-        this.body = body;
+        // 재수집 실패나 차단이 직전 전문까지 지우지 않게 성공한 응답만 본문을 교체한다.
+        if (fetchStatus == FetchStatus.FULLTEXT) {
+            this.body = body;
+        }
         this.fetchStatus = fetchStatus;
         this.updatedAt = updatedAt;
     }
