@@ -1,6 +1,8 @@
 package com.example.be.domain.analysis.repository;
 
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.collection.entity.ChangeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -38,6 +40,17 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
     List<Finding> findForReportByRunId(@Param("runId") Long runId);
 
     @Query("""
+            SELECT finding.riskLevel AS riskLevel,
+                   finding.category AS category,
+                   finding.changeType AS changeType,
+                   COUNT(finding) AS findingCount
+            FROM Finding finding
+            WHERE finding.run.id = :runId
+            GROUP BY finding.riskLevel, finding.category, finding.changeType
+            """)
+    List<ReportStatsCount> countStatsByRunId(@Param("runId") Long runId);
+
+    @Query("""
             SELECT finding.run.id AS runId,
                    COUNT(finding) AS findingCount,
                    SUM(CASE WHEN finding.riskLevel = com.example.be.domain.analysis.entity.RiskLevel.HIGH
@@ -55,5 +68,16 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
         long getFindingCount();
 
         long getHighRiskCount();
+    }
+
+    interface ReportStatsCount {
+
+        RiskLevel getRiskLevel();
+
+        String getCategory();
+
+        ChangeType getChangeType();
+
+        long getFindingCount();
     }
 }

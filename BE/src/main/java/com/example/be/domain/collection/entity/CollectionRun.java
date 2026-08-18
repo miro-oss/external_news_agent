@@ -168,7 +168,7 @@ public class CollectionRun {
 
     private RunStatus resolveStatus() {
         if (items.isEmpty()) {
-            return RunStatus.SUCCESS;
+            return warnings.isEmpty() ? RunStatus.SUCCESS : RunStatus.PARTIAL;
         }
 
         boolean anyFailed = items.stream().anyMatch(item -> item.getStatus() == RunItemStatus.FAILED);

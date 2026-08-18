@@ -1,14 +1,13 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.entity.Finding;
-import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.reports.entity.NewsReport;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,12 +21,7 @@ public class ReportGenerator {
     private static final DateTimeFormatter TITLE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     public ReportDocument generate(List<Finding> findings, LocalDateTime generatedAt) {
-        List<Finding> ordered = findings.stream()
-                .sorted(Comparator
-                        .comparingInt((Finding finding) -> riskOrder(finding.getRiskLevel())).reversed()
-                        .thenComparingInt(finding -> relevanceOrder(finding.getRelevance()))
-                        .thenComparing(Finding::getId, Comparator.nullsLast(Comparator.naturalOrder())))
-                .toList();
+        List<Finding> ordered = ReportFindingOrder.sort(findings);
         String title = title(ordered, generatedAt);
         return new ReportDocument(title, markdown(title, ordered), MODEL_NAME);
     }
@@ -39,7 +33,7 @@ public class ReportGenerator {
                 .distinct()
                 .toList();
         String prefix = topics.size() == 1 ? topics.getFirst() + " 뉴스" : topics.isEmpty() ? "뉴스" : "통합 뉴스";
-        return truncate(prefix + " 보고서 " + generatedAt.format(TITLE_TIME), 500);
+        return truncateUtf8(prefix + " 보고서 " + generatedAt.format(TITLE_TIME), NewsReport.MAX_TITLE_LENGTH);
     }
 
     private String markdown(String title, List<Finding> findings) {
@@ -94,27 +88,22 @@ public class ReportGenerator {
         return counts;
     }
 
-    private int riskOrder(RiskLevel riskLevel) {
-        return switch (riskLevel) {
-            case HIGH -> 3;
-            case MEDIUM -> 2;
-            case LOW -> 1;
-        };
-    }
-
-    private int relevanceOrder(Relevance relevance) {
-        return switch (relevance) {
-            case IMPORTANT -> 1;
-            case WATCH -> 2;
-            case REFERENCE -> 3;
-        };
-    }
-
     private String singleLine(String value) {
         return value == null ? "" : value.replaceAll("\\s+", " ").trim();
     }
 
-    private String truncate(String value, int maxLength) {
-        return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    private String truncateUtf8(String value, int maxBytes) {
+        int byteCount = 0;
+        int endIndex = 0;
+        while (endIndex < value.length()) {
+            int codePoint = value.codePointAt(endIndex);
+            int codePointBytes = new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8).length;
+            if (byteCount + codePointBytes > maxBytes) {
+                break;
+            }
+            byteCount += codePointBytes;
+            endIndex += Character.charCount(codePoint);
+        }
+        return endIndex == value.length() ? value : value.substring(0, endIndex);
     }
 }

@@ -159,5 +159,7 @@ class ReportOracleIntegrationTests {
 
         ReportResDTO.Detail withoutFindings = queryService.getReport(firstId, false);
         assertNull(withoutFindings.getFindings());
+        assertEquals(1, withoutFindings.getSummaryStats().getFindingCount());
+        assertEquals(1, withoutFindings.getSummaryStats().getByRiskLevel().get("high"));
     }
 }

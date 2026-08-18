@@ -39,7 +39,12 @@ public class CollectionRunExecutionService {
             // 분석도 외부 어댑터 경계다. Stub 단계부터 실행 트랜잭션과 분리해 실제 LLM 교체 시에도 DB를 잡지 않는다.
             analysisPipeline.analyze(runId, refreshedArticleIds);
             // M5 보고서는 findings를 모두 저장한 뒤 만든다. 생성과 reportId 연결은 별도 짧은 트랜잭션이다.
-            reportCreationService.generate(runId);
+            try {
+                reportCreationService.generate(runId);
+            } catch (RuntimeException exception) {
+                log.error("보고서를 생성하지 못했다. runId={} error={}", runId, exception.getMessage(), exception);
+                resultWriter.addReportGenerationFailedWarning(runId, exception.getMessage());
+            }
             resultWriter.finishRun(runId);
         } catch (RuntimeException exception) {
             log.error("수집 실행을 완료하지 못했다. runId={} error={}", runId, exception.getMessage(), exception);

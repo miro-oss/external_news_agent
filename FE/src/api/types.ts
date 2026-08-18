@@ -189,7 +189,7 @@ export interface ReportSummaryStats {
   findingCount: number
   newCount: number
   updatedCount: number
-  byRiskLevel: Record<RiskLevel, number>
+  byRiskLevel: Partial<Record<RiskLevel, number>>
   byCategory: Record<string, number>
 }
 

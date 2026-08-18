@@ -41,14 +41,17 @@ class CollectionRunExecutionServiceTest {
     }
 
     @Test
-    void closesRunAsFailureWhenReportGenerationFails() {
+    void recordsWarningAndFinishesRunWhenReportGenerationFails() {
         when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
         when(contentEnricher.enrich(42L)).thenReturn(Set.of());
         when(reportCreationService.generate(42L)).thenThrow(new IllegalStateException("report failure"));
 
         service.executeRun(42L);
 
-        verify(resultWriter).failRun(42L);
-        verify(resultWriter, never()).finishRun(42L);
+        InOrder order = inOrder(reportCreationService, resultWriter);
+        order.verify(reportCreationService).generate(42L);
+        order.verify(resultWriter).addReportGenerationFailedWarning(42L, "report failure");
+        order.verify(resultWriter).finishRun(42L);
+        verify(resultWriter, never()).failRun(42L);
     }
 }

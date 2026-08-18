@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
@@ -47,8 +48,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         validatePage(page, size);
         LocalDateTime parsedFrom = parseDateTime(from, false);
         LocalDateTime parsedTo = parseDateTime(to, true);
-        if (parsedFrom != null && parsedTo != null && !parsedFrom.isBefore(parsedTo)) {
-            throw badRequest("from은 to보다 이전이어야 합니다.");
+        if (parsedFrom != null && parsedTo != null && parsedFrom.isAfter(parsedTo)) {
+            throw badRequest("from은 to보다 이후일 수 없습니다.");
         }
 
         Page<NewsReport> reports = reportRepository.findAll(
@@ -90,15 +91,21 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     }
 
     private ReportResDTO.Detail toDetail(NewsReport report, boolean includeFindings) {
-        List<Finding> findings = findingRepository.findForReportByRunId(report.getRun().getId());
+        Long runId = report.getRun().getId();
+        List<Finding> findings = includeFindings
+                ? ReportFindingOrder.sort(findingRepository.findForReportByRunId(runId))
+                : null;
+        ReportResDTO.SummaryStats summaryStats = includeFindings
+                ? toStats(findings)
+                : toStatsFromCounts(findingRepository.countStatsByRunId(runId));
         return ReportResDTO.Detail.builder()
                 .id(report.getId())
-                .runId(report.getRun().getId())
+                .runId(runId)
                 .title(report.getTitle())
                 .markdownBody(report.getMarkdownBody())
                 .modelName(report.getModelName())
                 .generatedAt(toOffset(report.getGeneratedAt()))
-                .summaryStats(toStats(findings))
+                .summaryStats(summaryStats)
                 .findings(includeFindings ? findings.stream().map(this::toFinding).toList() : null)
                 .build();
     }
@@ -107,11 +114,37 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         Map<String, Long> byRiskLevel = orderedCounts(findings,
                 finding -> finding.getRiskLevel().toApiValue(), List.of("high", "medium", "low"));
         Map<String, Long> byCategory = orderedCounts(findings, Finding::getCategory,
-                List.of("제품/공정", "기업", "정책", "공급망"));
+                FindingCategory.ORDERED_VALUES);
         return ReportResDTO.SummaryStats.builder()
                 .findingCount(findings.size())
                 .newCount(findings.stream().filter(finding -> finding.getChangeType() == ChangeType.NEW).count())
                 .updatedCount(findings.stream().filter(finding -> finding.getChangeType() == ChangeType.UPDATED).count())
+                .byRiskLevel(byRiskLevel)
+                .byCategory(byCategory)
+                .build();
+    }
+
+    private ReportResDTO.SummaryStats toStatsFromCounts(List<FindingRepository.ReportStatsCount> counts) {
+        Map<String, Long> byRiskLevel = emptyOrderedCounts(List.of("high", "medium", "low"));
+        Map<String, Long> byCategory = emptyOrderedCounts(FindingCategory.ORDERED_VALUES);
+        long findingCount = 0;
+        long newCount = 0;
+        long updatedCount = 0;
+        for (FindingRepository.ReportStatsCount count : counts) {
+            long value = count.getFindingCount();
+            findingCount += value;
+            if (count.getChangeType() == ChangeType.NEW) {
+                newCount += value;
+            } else if (count.getChangeType() == ChangeType.UPDATED) {
+                updatedCount += value;
+            }
+            byRiskLevel.merge(count.getRiskLevel().toApiValue(), value, Long::sum);
+            byCategory.merge(count.getCategory(), value, Long::sum);
+        }
+        return ReportResDTO.SummaryStats.builder()
+                .findingCount(findingCount)
+                .newCount(newCount)
+                .updatedCount(updatedCount)
                 .byRiskLevel(byRiskLevel)
                 .byCategory(byCategory)
                 .build();
@@ -154,7 +187,13 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         return ordered;
     }
 
-    private LocalDateTime parseDateTime(String value, boolean upperBoundary) {
+    private Map<String, Long> emptyOrderedCounts(List<String> keyOrder) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        keyOrder.forEach(key -> counts.put(key, 0L));
+        return counts;
+    }
+
+    LocalDateTime parseDateTime(String value, boolean upperBoundary) {
         if (!StringUtils.hasText(value)) {
             return null;
         }

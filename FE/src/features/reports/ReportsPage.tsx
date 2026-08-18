@@ -1,13 +1,15 @@
 import { Fragment, useState, type ReactNode } from 'react'
 import { useLatestReport, useReport, useReports } from '../../api/queries'
 import type { ReportDetail, ReportFinding, ReportSummary } from '../../api/types'
+import { formatFullDate, formatShortDate } from '../../lib/datetime'
 
 export function ReportsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const reports = useReports()
   const latest = useLatestReport()
   const activeId = selectedId ?? latest.data?.id ?? null
-  const detail = useReport(activeId)
+  const selectedReport = useReport(selectedId)
+  const activeReport = selectedId === null ? latest : selectedReport
   const isInitialLoading = latest.isPending || reports.isPending
   const initialError = latest.isError ? latest.error : reports.isError ? reports.error : null
 
@@ -34,6 +36,12 @@ export function ReportsPage() {
           <span>수집을 실행하면 분석 완료 후 첫 보고서가 자동으로 만들어집니다.</span>
         </div>
       )}
+      {!isInitialLoading && !initialError && latest.data !== null && reports.data?.content.length === 0 && (
+        <div className="state-panel report-empty">
+          <strong>최신 보고서는 있지만 아카이브 목록이 비어 있습니다.</strong>
+          <span>잠시 후 새로고침해 보고, 계속되면 보고서 목록 API 상태를 확인해 주세요.</span>
+        </div>
+      )}
 
       {reports.data && reports.data.content.length > 0 && activeId !== null && (
         <div className="report-workspace">
@@ -47,15 +55,17 @@ export function ReportsPage() {
                 key={report.id}
                 report={report}
                 active={report.id === activeId}
-                onSelect={() => setSelectedId(report.id)}
+                onSelect={() => setSelectedId(report.id === latest.data?.id ? null : report.id)}
               />
             ))}
           </aside>
 
           <section className="report-detail-shell" aria-live="polite">
-            {detail.isPending && <div className="report-detail-state">보고서 본문을 불러오는 중입니다.</div>}
-            {detail.isError && <div className="report-detail-state error" role="alert">{detail.error.message}</div>}
-            {detail.data && <ReportView report={detail.data} />}
+            {activeReport.isPending && <div className="report-detail-state">보고서 본문을 불러오는 중입니다.</div>}
+            {activeReport.isError && (
+              <div className="report-detail-state error" role="alert">{activeReport.error.message}</div>
+            )}
+            {activeReport.data && <ReportView report={activeReport.data} />}
           </section>
         </div>
       )}
@@ -75,7 +85,7 @@ function ReportListItem({ report, active, onSelect }: {
       aria-pressed={active}
       onClick={onSelect}
     >
-      <span className="report-list-date">{formatDate(report.generatedAt)}</span>
+      <span className="report-list-date">{formatShortDate(report.generatedAt)}</span>
       <strong>{report.title}</strong>
       <span className="report-list-meta">
         finding {report.findingCount}
@@ -143,7 +153,7 @@ function FindingCard({ finding }: { finding: ReportFinding }) {
       <h4>{finding.articleTitle}</h4>
       <p>{finding.summary}</p>
       {finding.keyPoints.length > 0 && (
-        <ul>{finding.keyPoints.map((point) => <li key={point}>{point}</li>)}</ul>
+        <ul>{finding.keyPoints.map((point, index) => <li key={`${index}-${point}`}>{point}</li>)}</ul>
       )}
       <a href={finding.canonicalUrl} target="_blank" rel="noreferrer">원문 열기 <span aria-hidden="true">↗</span></a>
     </article>
@@ -154,6 +164,8 @@ function FindingCard({ finding }: { finding: ReportFinding }) {
 function MarkdownBody({ markdown }: { markdown: string }) {
   const nodes: ReactNode[] = []
   let bullets: string[] = []
+  const lines = markdown.split(/\r?\n/)
+  const firstContentLine = lines.findIndex((line) => line.trim().length > 0)
   const flushBullets = () => {
     if (bullets.length === 0) return
     const current = bullets
@@ -163,8 +175,9 @@ function MarkdownBody({ markdown }: { markdown: string }) {
     ))}</ul>)
   }
 
-  markdown.split(/\r?\n/).forEach((rawLine, index) => {
+  lines.forEach((rawLine, index) => {
     const line = rawLine.trim()
+    if (index === firstContentLine && line.startsWith('# ')) return
     if (line.startsWith('- ')) {
       bullets.push(line.slice(2))
       return
@@ -181,20 +194,21 @@ function MarkdownBody({ markdown }: { markdown: string }) {
 }
 
 function linkify(text: string): ReactNode {
-  const match = text.match(/^(.*)<(https?:\/\/[^>]+)>(.*)$/)
-  if (!match) return text
-  return <>{match[1]}<a href={match[2]} target="_blank" rel="noreferrer">{match[2]}</a>{match[3]}</>
+  const matches = [...text.matchAll(/<(https?:\/\/[^>]+)>/g)]
+  if (matches.length === 0) return text
+
+  const nodes: ReactNode[] = []
+  let cursor = 0
+  matches.forEach((match, index) => {
+    const start = match.index ?? cursor
+    if (start > cursor) nodes.push(text.slice(cursor, start))
+    nodes.push(<a key={`${index}-${match[1]}`} href={match[1]} target="_blank" rel="noreferrer">{match[1]}</a>)
+    cursor = start + match[0].length
+  })
+  if (cursor < text.length) nodes.push(text.slice(cursor))
+  return <>{nodes}</>
 }
 
 function riskLabel(value: ReportFinding['riskLevel']) {
   return { high: '높은 위험', medium: '중간 위험', low: '낮은 위험' }[value]
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-    .format(new Date(value))
-}
-
-function formatFullDate(value: string) {
-  return new Intl.DateTimeFormat('ko-KR', { dateStyle: 'full', timeStyle: 'short' }).format(new Date(value))
 }

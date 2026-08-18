@@ -1,6 +1,7 @@
 package com.example.be.domain.articles.service;
 
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
@@ -34,8 +35,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class ArticleQueryServiceImpl implements ArticleQueryService {
-
-    private static final Set<String> CATEGORIES = Set.of("제품/공정", "기업", "정책", "공급망");
 
     private final FindingRepository findingRepository;
     private final ArticleRepository articleRepository;
@@ -214,7 +213,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
 
     private String normalizeCategory(String value) {
         String normalized = normalize(value);
-        if (normalized != null && !CATEGORIES.contains(normalized)) {
+        if (normalized != null && !FindingCategory.ALLOWED_VALUES.contains(normalized)) {
             throw badRequest("category는 제품/공정, 기업, 정책, 공급망 중 하나여야 합니다.");
         }
         return normalized;

@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -26,6 +27,15 @@ class ReportCreationServiceTest {
     private final ReportGenerator reportGenerator = mock(ReportGenerator.class);
     private final ReportCreationService service = new ReportCreationService(
             runRepository, findingRepository, reportRepository, reportGenerator);
+
+    @Test
+    void describesMissingRunInGenerationFailure() {
+        when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.empty());
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class, () -> service.generate(42L));
+
+        assertEquals("보고서를 만들 수집 실행이 없습니다. runId=42", exception.getMessage());
+    }
 
     @Test
     void createsOneReportAndConnectsItToLockedRun() {

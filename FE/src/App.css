@@ -896,10 +896,6 @@ body.modal-open {
   color: #30342f;
 }
 
-.markdown-report > h2:first-child {
-  display: none;
-}
-
 .markdown-report h3 {
   margin: 2.25rem 0 0.8rem;
   padding-top: 1.1rem;

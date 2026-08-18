@@ -20,7 +20,7 @@ const keys = {
   sources: ['sources'] as const,
   articles: (filters: ArticleFilters) => ['articles', filters] as const,
   article: (id: number | null) => ['article', id] as const,
-  reports: ['reports'] as const,
+  reports: ['reports', 'list'] as const,
   latestReport: ['reports', 'latest'] as const,
   report: (id: number | null) => ['reports', id] as const,
 }
@@ -110,7 +110,7 @@ export function useArticle(articleId: number | null) {
 export function useReports() {
   return useQuery({
     queryKey: keys.reports,
-    queryFn: () => get<PageResult<ReportSummary>>('/reports', { page: 0, size: PAGE_SIZE }),
+    queryFn: () => getAllPages<ReportSummary>('/reports'),
   })
 }
 
