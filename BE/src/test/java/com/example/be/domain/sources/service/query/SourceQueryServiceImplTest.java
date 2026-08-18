@@ -1,5 +1,11 @@
 package com.example.be.domain.sources.service.query;
 
+import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.domain.collection.entity.CollectionRunItem;
+import com.example.be.domain.collection.entity.RunItemStatus;
+import com.example.be.domain.collection.entity.RunStatus;
+import com.example.be.domain.collection.entity.TriggerType;
+import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.sources.dto.res.SourceResDTO;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
@@ -20,6 +26,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,6 +46,9 @@ class SourceQueryServiceImplTest {
 
     @Mock
     private SourceRepository sourceRepository;
+
+    @Mock
+    private CollectionRunItemRepository runItemRepository;
 
     @InjectMocks
     private SourceQueryServiceImpl sourceQueryService;
@@ -125,6 +137,33 @@ class SourceQueryServiceImplTest {
         assertEquals("HBM", result.getLinkedTopics().get(0).getName());
         assertNull(result.getLastCollectedAt());
         assertNull(result.getLastRunStatus());
+    }
+
+    @Test
+    void getSourceReturnsLatestCollectionRunState() {
+        Source source = source();
+        CollectionRun latestRun = CollectionRun.builder()
+                .id(42L)
+                .status(RunStatus.SUCCESS)
+                .triggerType(TriggerType.MANUAL)
+                .startedAt(LocalDateTime.of(2026, 8, 18, 14, 5, 7))
+                .build();
+        CollectionRunItem latestRunItem = CollectionRunItem.builder()
+                .id(101L)
+                .run(latestRun)
+                .topic(topic(1L, "HBM"))
+                .source(source)
+                .status(RunItemStatus.SUCCESS)
+                .build();
+        when(sourceRepository.findById(1L)).thenReturn(Optional.of(source));
+        when(runItemRepository.findFirstBySourceIdOrderByRunStartedAtDescRunIdDescIdDesc(1L))
+                .thenReturn(Optional.of(latestRunItem));
+
+        SourceResDTO.Detail result = sourceQueryService.getSource(1L);
+
+        assertEquals(OffsetDateTime.of(2026, 8, 18, 14, 5, 7, 0, ZoneOffset.ofHours(9)),
+                result.getLastCollectedAt());
+        assertEquals("SUCCESS", result.getLastRunStatus());
     }
 
     @Test

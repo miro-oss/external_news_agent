@@ -1,7 +1,8 @@
 package com.example.be.domain.sources.converter;
 
-import com.example.be.domain.sources.dto.req.SourceReqDTO;
+import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.robots.RobotsDecision;
+import com.example.be.domain.sources.dto.req.SourceReqDTO;
 import com.example.be.domain.sources.dto.res.SourceResDTO;
 import com.example.be.domain.sources.entity.SearchProvider;
 import com.example.be.domain.sources.entity.Source;
@@ -76,10 +77,7 @@ public class SourceConverter {
                 .build();
     }
 
-    /**
-     * lastCollectedAt과 lastRunStatus는 news_collection_runs가 생기는 M3에서 채운다.
-     */
-    public static SourceResDTO.Detail toDetail(Source source) {
+    public static SourceResDTO.Detail toDetail(Source source, CollectionRun latestRun) {
         return SourceResDTO.Detail.builder()
                 .id(source.getId())
                 .sourceKind(source.getSourceKind())
@@ -93,8 +91,8 @@ public class SourceConverter {
                 .reliabilityScore(source.getReliabilityScore())
                 .active(source.isActive())
                 .linkedTopics(source.getTopics().stream().map(SourceConverter::toTopicBrief).toList())
-                .lastCollectedAt(null)
-                .lastRunStatus(null)
+                .lastCollectedAt(latestRun == null ? null : toOffsetDateTime(latestRun.getStartedAt()))
+                .lastRunStatus(latestRun == null ? null : latestRun.getStatus().name())
                 .build();
     }
 

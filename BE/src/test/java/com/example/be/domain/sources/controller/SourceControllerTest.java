@@ -113,6 +113,29 @@ class SourceControllerTest {
     }
 
     @Test
+    void getSourceRespondsWithLatestCollectionState() throws Exception {
+        when(sourceQueryService.getSource(1L)).thenReturn(SourceResDTO.Detail.builder()
+                .id(1L)
+                .sourceKind(Source.KIND_FEED)
+                .name("ETNews 반도체")
+                .urlTemplate("https://rss.etnews.com/Section902.xml")
+                .country("KR")
+                .language("ko")
+                .robotsStatus(Source.ROBOTS_STATUS_ALLOWED)
+                .active(true)
+                .linkedTopics(List.of())
+                .lastCollectedAt(OffsetDateTime.of(2026, 8, 18, 14, 5, 7, 0, ZoneOffset.ofHours(9)))
+                .lastRunStatus("SUCCESS")
+                .build());
+
+        mockMvc.perform(get("/api/news/sources/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("COMMON200"))
+                .andExpect(jsonPath("$.result.lastCollectedAt").value("2026-08-18T14:05:07+09:00"))
+                .andExpect(jsonPath("$.result.lastRunStatus").value("SUCCESS"));
+    }
+
+    @Test
     void getSourceRespondsWithSourceNotFoundCode() throws Exception {
         when(sourceQueryService.getSource(99L)).thenThrow(new SourceException(SourceErrorCode.SOURCE_NOT_FOUND));
 

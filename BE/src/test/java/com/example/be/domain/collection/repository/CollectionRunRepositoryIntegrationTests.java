@@ -230,6 +230,39 @@ class CollectionRunRepositoryIntegrationTests {
     }
 
     @Test
+    void findsLatestRunItemForSource() {
+        CollectionRun olderRun = CollectionRun.builder()
+                .status(RunStatus.PENDING)
+                .triggerType(TriggerType.MANUAL)
+                .idempotencyKey("source-latest-old-" + UUID.randomUUID())
+                .forceRefresh(false)
+                .startedAt(LocalDateTime.of(2026, 8, 18, 13, 0))
+                .build();
+        olderRun.addItem(item(source, RunItemStatus.SUCCESS, 10, 1, 0));
+        olderRun.finish(LocalDateTime.of(2026, 8, 18, 13, 1));
+        runRepository.save(olderRun);
+
+        CollectionRun latestRun = CollectionRun.builder()
+                .status(RunStatus.PENDING)
+                .triggerType(TriggerType.MANUAL)
+                .idempotencyKey("source-latest-new-" + UUID.randomUUID())
+                .forceRefresh(false)
+                .startedAt(LocalDateTime.of(2026, 8, 18, 14, 0))
+                .build();
+        latestRun.addItem(item(source, RunItemStatus.FAILED, 0, 0, 0));
+        latestRun.finish(LocalDateTime.of(2026, 8, 18, 14, 1));
+        CollectionRun savedLatestRun = runRepository.save(latestRun);
+        flushAndClear();
+
+        CollectionRunItem found = runItemRepository
+                .findFirstBySourceIdOrderByRunStartedAtDescRunIdDescIdDesc(source.getId())
+                .orElseThrow();
+
+        assertEquals(savedLatestRun.getId(), found.getRun().getId());
+        assertEquals(RunStatus.FAILED, found.getRun().getStatus());
+    }
+
+    @Test
     void countsWarningsWithoutLoadingThem() {
         CollectionRun run = newRun("warning-count");
         run.addWarning(warning(CollectionRunWarning.CODE_FULLTEXT_BLOCKED, 5));
