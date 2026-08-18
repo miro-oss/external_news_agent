@@ -38,6 +38,8 @@ public class CollectionRunWarning {
     /** 검색 API 키가 없어 호출조차 하지 않았다. 소스 설정이나 환경변수 문제다. */
     public static final String CODE_PROVIDER_KEY_MISSING = "PROVIDER_KEY_MISSING";
     public static final String CODE_SEARCH_FAILED = "SEARCH_FAILED";
+    /** 분석은 끝났지만 실행 보고서를 만들지 못했다. 수집 결과는 보존하고 실행은 PARTIAL로 닫는다. */
+    public static final String CODE_REPORT_GENERATION_FAILED = "REPORT_GENERATION_FAILED";
     /** 실행 도중 애플리케이션이 내려가 아무도 닫지 못한 실행. 다음 기동에서 reaper가 닫는다. */
     public static final String CODE_RUN_INTERRUPTED = "RUN_INTERRUPTED";
     /** 스레드풀이 작업을 거절해 시작조차 못 한 실행. */

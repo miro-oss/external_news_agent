@@ -79,6 +79,21 @@ class CollectionRunTest {
         assertNotNull(exception.getMessage());
     }
 
+    @Test
+    void finishMarksRunPartialWhenRunLevelWarningExistsWithoutItems() {
+        CollectionRun run = run();
+        run.addWarning(CollectionRunWarning.builder()
+                .code(CollectionRunWarning.CODE_REPORT_GENERATION_FAILED)
+                .message("보고서 생성 실패")
+                .articleCount(0)
+                .occurredAt(FINISHED_AT)
+                .build());
+
+        run.finish(FINISHED_AT);
+
+        assertEquals(RunStatus.PARTIAL, run.getStatus());
+    }
+
     private CollectionRun run() {
         return CollectionRun.builder()
                 .status(RunStatus.RUNNING)

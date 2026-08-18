@@ -173,3 +173,48 @@ export interface ArticleFilters {
   page: number
   size: number
 }
+
+export interface ReportSummary {
+  id: number
+  runId: number
+  title: string
+  generatedAt: string
+  modelName: string
+  findingCount: number
+  highRiskCount: number
+  deliveryStatus: 'NOT_SENT' | 'SENT' | 'FAILED'
+}
+
+export interface ReportSummaryStats {
+  findingCount: number
+  newCount: number
+  updatedCount: number
+  byRiskLevel: Partial<Record<RiskLevel, number>>
+  byCategory: Record<string, number>
+}
+
+export interface ReportFinding {
+  id: number
+  articleId: number
+  articleTitle: string
+  canonicalUrl: string
+  changeType: ChangeType
+  summary: string
+  keyPoints: string[]
+  intent: string | null
+  sentiment: Sentiment
+  riskLevel: RiskLevel
+  relevance: Relevance
+  category: string
+}
+
+export interface ReportDetail {
+  id: number
+  runId: number
+  title: string
+  markdownBody: string
+  modelName: string
+  generatedAt: string
+  summaryStats: ReportSummaryStats
+  findings?: ReportFinding[]
+}

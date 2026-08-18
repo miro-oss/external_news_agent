@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useArticle } from '../../api/queries'
 import type { ArticleAnalysis } from '../../api/types'
+import { formatMediumDate } from '../../lib/datetime'
 
 interface Props {
   articleId: number | null
@@ -49,7 +50,7 @@ export function ArticleDetailModal({ articleId, onClose }: Props) {
               </div>
               <h2 id="article-modal-title">{article.data.title}</h2>
               <div className="modal-meta">
-                <span>{formatDate(article.data.publishedAt)}</span>
+                <span>{formatMediumDate(article.data.publishedAt)}</span>
                 <span>{(article.data.language ?? '—').toUpperCase()}</span>
                 <span>{article.data.fetchStatus === 'OK' ? '전문 확보' : '본문 제한'}</span>
               </div>
@@ -120,9 +121,4 @@ function AnalysisPanel({ analysis }: { analysis: ArticleAnalysis }) {
       </div>
     </section>
   )
-}
-
-function formatDate(value: string | null) {
-  if (!value) return '발행일 미상'
-  return new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
 }

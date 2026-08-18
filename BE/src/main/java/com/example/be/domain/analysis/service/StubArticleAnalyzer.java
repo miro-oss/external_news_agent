@@ -1,5 +1,6 @@
 package com.example.be.domain.analysis.service;
 
+import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
@@ -114,15 +115,15 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
 
     private String category(String text) {
         if (containsAny(text, "규제", "정책", "통제", "제재", "regulation", "policy", "control", "sanction")) {
-            return "정책";
+            return FindingCategory.POLICY;
         }
         if (containsAny(text, "공급망", "수급", "물류", "supply chain", "shortage")) {
-            return "공급망";
+            return FindingCategory.SUPPLY_CHAIN;
         }
         if (containsAny(text, "기업", "인수", "실적", "매출", "company", "acquisition", "revenue")) {
-            return "기업";
+            return FindingCategory.COMPANY;
         }
-        return "제품/공정";
+        return FindingCategory.PRODUCT_PROCESS;
     }
 
     private boolean isEnglish(String language) {

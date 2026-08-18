@@ -4,8 +4,11 @@ import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.RunStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+
+import jakarta.persistence.LockModeType;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -14,6 +17,10 @@ import java.util.Optional;
 
 public interface CollectionRunRepository
         extends JpaRepository<CollectionRun, Long>, JpaSpecificationExecutor<CollectionRun> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT run FROM CollectionRun run WHERE run.id = :runId")
+    Optional<CollectionRun> findByIdForUpdate(@Param("runId") Long runId);
 
     /**
      * 버튼 연타로 들어온 같은 키의 요청은 새 실행을 만들지 않고 진행 중인 실행을 돌려준다.

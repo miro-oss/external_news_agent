@@ -158,6 +158,15 @@ public class CollectionResultWriter {
                 .build());
     }
 
+    /** 보고서 생성 실패를 수집 거절과 구분해 실행 수준 경고로 남긴다. */
+    @Transactional
+    public void addReportGenerationFailedWarning(Long runId, String cause) {
+        CollectionRun run = runRepository.findById(runId).orElseThrow();
+        String detail = cause == null ? "원인 정보가 없습니다." : cause;
+        run.addWarning(warning(null, CollectionRunWarning.CODE_REPORT_GENERATION_FAILED,
+                "보고서 생성에 실패했습니다. " + detail));
+    }
+
     @Transactional
     public void finishRun(Long runId) {
         CollectionRun run = runRepository.findById(runId).orElseThrow();

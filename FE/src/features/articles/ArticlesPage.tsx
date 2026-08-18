@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useArticles } from '../../api/queries'
 import type { ArticleFilters, ArticleSummary } from '../../api/types'
+import { formatShortDate } from '../../lib/datetime'
 import { ArticleDetailModal } from './ArticleDetailModal'
 
 const PAGE_SIZE = 20
@@ -146,7 +147,7 @@ function ArticleCard({ article, onOpen }: { article: ArticleSummary; onOpen: () 
         <span>{article.category}</span>
         <span className="separator">·</span>
         <span>{article.topicName}</span>
-        <time dateTime={article.publishedAt ?? undefined}>{formatDate(article.publishedAt)}</time>
+        <time dateTime={article.publishedAt ?? undefined}>{formatShortDate(article.publishedAt)}</time>
       </div>
       <h2>{article.title}</h2>
       <p className="article-summary">{article.summary}</p>
@@ -177,10 +178,4 @@ function relevanceLabel(value: ArticleSummary['relevance']) {
 
 function sentimentLabel(value: ArticleSummary['sentiment']) {
   return { positive: '긍정', neutral: '중립', negative: '부정' }[value]
-}
-
-function formatDate(value: string | null) {
-  if (!value) return '발행일 미상'
-  return new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-    .format(new Date(value))
 }
