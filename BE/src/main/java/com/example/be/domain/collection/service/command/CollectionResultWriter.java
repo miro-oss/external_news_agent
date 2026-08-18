@@ -234,8 +234,10 @@ public class CollectionResultWriter {
         } else {
             articleVersionRepository.save(
                     ArticleVersion.snapshotOf(article, run, nextVersionNo(article.getId()), now));
-            article.applyUpdate(collected.title(), collected.summary(), article.getBody(), contentHash,
-                    article.getFetchStatus(), run, now);
+            // UPDATED인데 이전 본문을 그대로 두면 M4 분석이 새 제목·요약과 과거 전문을 섞어 읽는다.
+            // 버전에는 직전 본문을 이미 보존했으므로 현재 행은 전문 재수집 대상으로 되돌린다.
+            article.applyUpdate(collected.title(), collected.summary(), null, contentHash,
+                    FetchStatus.METADATA_ONLY, run, now);
             changeType = ChangeType.UPDATED;
         }
 

@@ -1,8 +1,37 @@
+import { useState } from 'react'
 import './App.css'
+import { ArticlesPage } from './features/articles/ArticlesPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 
 function App() {
-  return <SettingsPage />
+  const [page, setPage] = useState<'articles' | 'settings'>('articles')
+
+  return (
+    <div className="app-shell">
+      <nav className="app-nav" aria-label="주요 화면">
+        <strong>News Signal Desk</strong>
+        <div className="nav-links">
+          <button
+            type="button"
+            className={page === 'articles' ? 'nav-link active' : 'nav-link'}
+            aria-current={page === 'articles' ? 'page' : undefined}
+            onClick={() => setPage('articles')}
+          >
+            분석 기사
+          </button>
+          <button
+            type="button"
+            className={page === 'settings' ? 'nav-link active' : 'nav-link'}
+            aria-current={page === 'settings' ? 'page' : undefined}
+            onClick={() => setPage('settings')}
+          >
+            수집 설정
+          </button>
+        </div>
+      </nav>
+      {page === 'articles' ? <ArticlesPage /> : <SettingsPage />}
+    </div>
+  )
 }
 
 export default App

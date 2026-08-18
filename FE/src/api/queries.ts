@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { get, post } from './client'
 import type {
+  ArticleDetail,
+  ArticleFilters,
+  ArticleSummary,
   Combination,
   CombinationPage,
   PageResult,
@@ -13,6 +16,8 @@ import type {
 const keys = {
   combinations: ['topic-sources'] as const,
   sources: ['sources'] as const,
+  articles: (filters: ArticleFilters) => ['articles', filters] as const,
+  article: (id: number | null) => ['article', id] as const,
 }
 
 const PAGE_SIZE = 100
@@ -70,6 +75,29 @@ export function useCreateTopic() {
   return useMutation({
     mutationFn: (body: TopicCreateRequest) => post<Topic>('/topics', body),
     onSuccess: refresh,
+  })
+}
+
+export function useArticles(filters: ArticleFilters) {
+  return useQuery({
+    queryKey: keys.articles(filters),
+    queryFn: () => get<PageResult<ArticleSummary>>('/articles', {
+      riskLevel: filters.riskLevel,
+      relevance: filters.relevance,
+      category: filters.category,
+      language: filters.language,
+      sort: filters.sort,
+      page: filters.page,
+      size: filters.size,
+    }),
+  })
+}
+
+export function useArticle(articleId: number | null) {
+  return useQuery({
+    queryKey: keys.article(articleId),
+    queryFn: () => get<ArticleDetail>(`/articles/${articleId}`),
+    enabled: articleId !== null,
   })
 }
 

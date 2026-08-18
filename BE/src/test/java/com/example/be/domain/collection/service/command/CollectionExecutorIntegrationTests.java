@@ -46,6 +46,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
@@ -223,6 +224,8 @@ class CollectionExecutorIntegrationTests {
                 .orElseThrow();
 
         assertEquals("HBM4 양산 시작 (정정)", updated.getTitle());
+        assertEquals(FetchStatus.METADATA_ONLY, updated.getFetchStatus());
+        assertNull(updated.getBody());
         assertEquals(1, secondItem.getUpdatedCount());
         assertEquals(1, runArticleRepository.countByRunIdAndChangeType(secondRun.getId(), ChangeType.UPDATED));
 
