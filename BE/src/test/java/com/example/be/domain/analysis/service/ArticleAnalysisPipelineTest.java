@@ -33,11 +33,11 @@ class ArticleAnalysisPipelineTest {
                 observation(article, ChangeType.NEW),
                 observation(article, ChangeType.UPDATED)));
         AnalysisResult result = mock(AnalysisResult.class);
-        when(analyzer.analyze(article)).thenReturn(result);
+        when(analyzer.analyze(42L, article)).thenReturn(result);
 
         pipeline.analyze(42L);
 
-        verify(analyzer, times(1)).analyze(article);
+        verify(analyzer, times(1)).analyze(42L, article);
         verify(findingWriter).write(42L, 10L, ChangeType.UPDATED, result);
     }
 
@@ -48,9 +48,9 @@ class ArticleAnalysisPipelineTest {
         when(runArticleRepository.findAnalysisTargetsByRunId(42L)).thenReturn(List.of(
                 observation(failed, ChangeType.NEW),
                 observation(succeeded, ChangeType.NEW)));
-        when(analyzer.analyze(failed)).thenThrow(new IllegalStateException("stub failure"));
+        when(analyzer.analyze(42L, failed)).thenThrow(new IllegalStateException("stub failure"));
         AnalysisResult result = mock(AnalysisResult.class);
-        when(analyzer.analyze(succeeded)).thenReturn(result);
+        when(analyzer.analyze(42L, succeeded)).thenReturn(result);
 
         pipeline.analyze(42L);
 
@@ -71,7 +71,7 @@ class ArticleAnalysisPipelineTest {
         when(runArticleRepository.findAnalysisTargetsByRunIdAndArticleIdIn(42L, Set.of(10L)))
                 .thenReturn(List.of(observation(article, ChangeType.UNCHANGED)));
         AnalysisResult result = mock(AnalysisResult.class);
-        when(analyzer.analyze(article)).thenReturn(result);
+        when(analyzer.analyze(42L, article)).thenReturn(result);
 
         pipeline.analyze(42L, Set.of(10L));
 
@@ -91,7 +91,7 @@ class ArticleAnalysisPipelineTest {
 
         pipeline.analyze(42L);
 
-        verify(analyzer, never()).analyze(article);
+        verify(analyzer, never()).analyze(42L, article);
         verify(findingWriter, never()).write(eq(42L), eq(10L), any(), any());
     }
 

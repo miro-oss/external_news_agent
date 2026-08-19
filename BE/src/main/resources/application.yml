@@ -42,3 +42,12 @@ springdoc:
     path: /swagger-ui.html
   api-docs:
     path: /v3/api-docs
+
+news:
+  agent:
+    enabled: ${AGENT_ENABLED:true}
+    base-url: ${AGENT_BASE_URL:http://127.0.0.1:8088}
+    token: ${AGENT_SHARED_SECRET:}
+    connect-timeout: 5s
+    analyze-timeout: 30s
+    default-plan: FREE

@@ -32,7 +32,7 @@ public class ArticleAnalysisPipeline {
     public void analyze(Long runId, Set<Long> refreshedArticleIds) {
         for (Target target : targets(runId, refreshedArticleIds)) {
             try {
-                AnalysisResult result = analyzer.analyze(target.article());
+                AnalysisResult result = analyzer.analyze(runId, target.article());
                 findingWriter.write(runId, target.article().getId(), target.changeType(), result);
             } catch (RuntimeException exception) {
                 log.warn("기사 분석에 실패했다. runId={} articleId={} error={}",
