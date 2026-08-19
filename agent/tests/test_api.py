@@ -121,3 +121,23 @@ def test_unexpected_failure_uses_json_error_contract(monkeypatch: pytest.MonkeyP
         }
     }
     assert "sensitive internal failure" not in response.text
+
+
+def test_non_mock_mode_requires_selected_provider_configuration() -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        AGENT_SHARED_SECRET="local-dev-agent-token",
+        AGENT_MOCK=False,
+    )
+    try:
+        response = client.post(
+            "/v1/analyze",
+            headers={"X-Agent-Token": "local-dev-agent-token"},
+            json=request_body(),
+        )
+    finally:
+        app.dependency_overrides[get_settings] = lambda: Settings(
+            AGENT_SHARED_SECRET="local-dev-agent-token"
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "API_KEY_MISSING"

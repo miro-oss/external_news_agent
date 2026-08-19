@@ -1,6 +1,10 @@
 package com.example.be.domain.analysis.repository;
 
+import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.FindingAnalysisBullet;
+import com.example.be.domain.analysis.entity.FindingAnalysisSection;
+import com.example.be.domain.analysis.entity.FindingEntities;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
@@ -33,6 +37,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -139,6 +144,7 @@ class FindingRepositoryIntegrationTests {
                 """, String.class);
         assertTrue(versions.contains("5"));
         assertTrue(versions.contains("6"));
+        assertTrue(versions.contains("10"));
 
         Finding saved = findingRepository.save(finding());
         flushAndClear();
@@ -148,6 +154,14 @@ class FindingRepositoryIntegrationTests {
         assertEquals(List.of(0), found.getKeyPoints().get(0).evidence());
         assertEquals("The United States tightened export controls.", found.getSections().get(0).text());
         assertEquals(RiskLevel.HIGH, found.getRiskLevel());
+        assertEquals(AnalysisSource.LLM, found.getAnalysisSource());
+        assertEquals("핵심", found.getAnalysisSections().getFirst().heading());
+        assertEquals(BigDecimal.ONE,
+                found.getAnalysisSections().getFirst().bullets().getFirst().confidence());
+        assertEquals(List.of("HBM4"), found.getEntities().products());
+        assertEquals("gemini", found.getLlmProvider());
+        assertEquals(120L, found.getInputTokens());
+        assertTrue(found.isInputTruncated());
     }
 
     @Test
@@ -177,7 +191,7 @@ class FindingRepositoryIntegrationTests {
     }
 
     @Test
-    void buildsDetailSentencesFromCurrentBodyInsteadOfStaleFindingSections() {
+    void keepsAnalyzedSentenceSsotWhenArticleBodyChangesLater() {
         findingRepository.save(finding());
         flushAndClear();
 
@@ -188,8 +202,9 @@ class FindingRepositoryIntegrationTests {
 
         var detail = articleQueryService.getArticle(article.getId(), null);
 
-        assertEquals("Fresh full text first.", detail.getSentences().get(0).getText());
-        assertEquals(2, detail.getSentences().size());
+        assertEquals("The United States tightened export controls.",
+                detail.getSentences().getFirst().getText());
+        assertEquals(1, detail.getSentences().size());
     }
 
     @Test
@@ -256,7 +271,24 @@ class FindingRepositoryIntegrationTests {
                 .riskLevel(RiskLevel.HIGH)
                 .relevance(Relevance.IMPORTANT)
                 .category("정책")
+                .analysisSource(AnalysisSource.LLM)
                 .sections(List.of(new FindingSection(0, "The United States tightened export controls.")))
+                .analysisSections(List.of(new FindingAnalysisSection(
+                        "핵심",
+                        List.of(new FindingAnalysisBullet(
+                                "미국이 수출 통제를 강화했다.",
+                                List.of(0),
+                                "grounded",
+                                BigDecimal.ONE)))))
+                .entities(new FindingEntities(List.of("미국 정부"), List.of("HBM4"), List.of()))
+                .promptVersion("analyze.ko.v1")
+                .llmProvider("gemini")
+                .llmModel("gemini-2.5-flash")
+                .inputTokens(120L)
+                .outputTokens(30L)
+                .costUsd(new BigDecimal("0.001"))
+                .credits(BigDecimal.ZERO)
+                .inputTruncated(true)
                 .analyzedAt(LocalDateTime.now())
                 .build();
     }

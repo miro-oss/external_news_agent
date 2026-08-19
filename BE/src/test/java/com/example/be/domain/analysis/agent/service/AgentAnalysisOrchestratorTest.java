@@ -4,6 +4,7 @@ import com.example.be.domain.analysis.agent.client.AgentClient;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
@@ -20,6 +21,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -49,7 +51,27 @@ class AgentAnalysisOrchestratorTest {
         assertEquals(Sentiment.NEUTRAL, result.sentiment());
         assertEquals(RiskLevel.LOW, result.riskLevel());
         assertEquals(Relevance.REFERENCE, result.relevance());
+        assertEquals(AnalysisSource.STUB, result.analysisSource());
+        assertEquals(BigDecimal.ONE,
+                result.analysisSections().getFirst().bullets().getFirst().confidence());
+        assertEquals(List.of("HBM4"), result.entities().products());
         verify(recorder).recordSuccess(eq(42L), eq(10L), any(), any(), any(LocalDateTime.class));
+    }
+
+    @Test
+    void marksRealProviderAnalysisAsLlmAndKeepsMetadata() {
+        when(client.analyze(any())).thenReturn(response(List.of(1), "제품/공정", false));
+
+        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article()));
+
+        assertEquals(AnalysisSource.LLM, result.analysisSource());
+        assertEquals("gemini", result.metadata().provider());
+        assertEquals("gemini-2.5-flash", result.metadata().model());
+        assertEquals("analyze.ko.v1", result.metadata().promptVersion());
+        assertEquals(120L, result.metadata().inputTokens());
+        assertEquals(30L, result.metadata().outputTokens());
+        assertEquals(new BigDecimal("0.001"), result.metadata().costUsd());
+        assertFalse(result.metadata().truncated());
     }
 
     @Test
@@ -136,6 +158,12 @@ class AgentAnalysisOrchestratorTest {
     }
 
     private AgentAnalyzeResponse response(List<Integer> evidenceIds, String category) {
+        return response(evidenceIds, category, true);
+    }
+
+    private AgentAnalyzeResponse response(List<Integer> evidenceIds,
+                                          String category,
+                                          boolean mock) {
         return new AgentAnalyzeResponse(
                 List.of("근거 문장."),
                 List.of(new AgentAnalyzeResponse.Section(
@@ -145,9 +173,16 @@ class AgentAnalysisOrchestratorTest {
                 "한국어 요약",
                 new AgentAnalyzeResponse.Classification(
                         "산업 동향 보도", "neutral", "low", "reference", category),
-                new AgentAnalyzeResponse.Entities(List.of(), List.of(), List.of()),
+                new AgentAnalyzeResponse.Entities(List.of("SK하이닉스"), List.of("HBM4"), List.of()),
                 new AgentAnalyzeResponse.Meta(
-                        "mock", "mock", "analyze.mock.v1", 0L, 0L,
-                        BigDecimal.ZERO, BigDecimal.ZERO, true, false));
+                        mock ? "mock" : "gemini",
+                        mock ? "mock" : "gemini-2.5-flash",
+                        mock ? "analyze.mock.v1" : "analyze.ko.v1",
+                        mock ? 0L : 120L,
+                        mock ? 0L : 30L,
+                        mock ? BigDecimal.ZERO : new BigDecimal("0.001"),
+                        BigDecimal.ZERO,
+                        mock,
+                        false));
     }
 }

@@ -9,6 +9,7 @@ class AgentModel(BaseModel):
         alias_generator=to_camel,
         populate_by_name=True,
         extra="forbid",
+        str_strip_whitespace=True,
     )
 
 

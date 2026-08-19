@@ -1,5 +1,8 @@
 package com.example.be.domain.analysis.service;
 
+import com.example.be.domain.analysis.entity.AnalysisSource;
+import com.example.be.domain.analysis.entity.FindingAnalysisSection;
+import com.example.be.domain.analysis.entity.FindingEntities;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
@@ -16,6 +19,33 @@ public record AnalysisResult(
         RiskLevel riskLevel,
         Relevance relevance,
         String category,
-        List<FindingSection> sections
+        List<FindingSection> sections,
+        AnalysisSource analysisSource,
+        List<FindingAnalysisSection> analysisSections,
+        FindingEntities entities,
+        AnalysisMetadata metadata
 ) {
+
+    public AnalysisResult {
+        keyPoints = keyPoints == null ? List.of() : List.copyOf(keyPoints);
+        sections = sections == null ? List.of() : List.copyOf(sections);
+        analysisSource = analysisSource == null ? AnalysisSource.STUB : analysisSource;
+        analysisSections = analysisSections == null ? List.of() : List.copyOf(analysisSections);
+        entities = entities == null ? FindingEntities.empty() : entities;
+        metadata = metadata == null ? AnalysisMetadata.empty() : metadata;
+    }
+
+    public AnalysisResult(
+            String summary,
+            List<FindingKeyPoint> keyPoints,
+            String intent,
+            Sentiment sentiment,
+            RiskLevel riskLevel,
+            Relevance relevance,
+            String category,
+            List<FindingSection> sections
+    ) {
+        this(summary, keyPoints, intent, sentiment, riskLevel, relevance, category, sections,
+                AnalysisSource.STUB, List.of(), FindingEntities.empty(), AnalysisMetadata.empty());
+    }
 }

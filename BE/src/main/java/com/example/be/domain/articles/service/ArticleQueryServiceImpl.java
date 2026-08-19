@@ -85,10 +85,12 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                 ? findingRepository.findFirstByArticleIdOrderByIdDesc(articleId).orElse(null)
                 : findingRepository.findByRunIdAndArticleId(runId, articleId).orElse(null);
 
-        // sentences는 항상 현재 bodyText와 같은 원문을 분할해야 evidence 인덱스와 화면 본문이 어긋나지 않는다.
-        List<FindingSection> sections = StringUtils.hasText(article.getBody())
-                ? SentenceSplitter.split(article.getBody(), article.getLanguage())
-                : finding == null ? List.of() : finding.getSections();
+        // finding이 있으면 Agent가 분석할 때 확정한 sentence SSOT를 그대로 사용해야 evidence가 유지된다.
+        List<FindingSection> sections = finding != null
+                ? finding.getSections()
+                : StringUtils.hasText(article.getBody())
+                        ? SentenceSplitter.split(article.getBody(), article.getLanguage())
+                        : List.of();
 
         return ArticleResDTO.Detail.builder()
                 .id(article.getId())

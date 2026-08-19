@@ -5,12 +5,17 @@ import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.entity.AnalysisSource;
+import com.example.be.domain.analysis.entity.FindingAnalysisBullet;
+import com.example.be.domain.analysis.entity.FindingAnalysisSection;
 import com.example.be.domain.analysis.entity.FindingCategory;
+import com.example.be.domain.analysis.entity.FindingEntities;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
+import com.example.be.domain.analysis.service.AnalysisMetadata;
 import com.example.be.domain.analysis.service.AnalysisResult;
 import com.example.be.domain.analysis.service.AnalysisContext;
 import com.example.be.domain.analysis.service.ArticleAnalysisOrchestrator;
@@ -23,14 +28,19 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.IntStream;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
+
+    private static final Set<String> GROUNDEDNESS_VALUES =
+            Set.of("grounded", "weak", "ungrounded");
 
     private final AgentProperties properties;
     private final AgentClient client;
@@ -102,30 +112,117 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 .mapToObj(index -> new FindingSection(index, sentenceTexts.get(index)))
                 .toList();
 
-        List<FindingKeyPoint> keyPoints = response.sections().stream()
-                .flatMap(section -> listOrEmpty(section.bullets()).stream())
+        List<FindingAnalysisSection> analysisSections = response.sections().stream()
+                .map(section -> toAnalysisSection(section, sentences.size()))
+                .toList();
+        if (analysisSections.isEmpty()) {
+            throw schemaViolation("Agent 분석 응답에 analysis section이 없습니다.");
+        }
+        List<FindingKeyPoint> keyPoints = analysisSections.stream()
+                .flatMap(section -> section.bullets().stream())
                 .map(bullet -> new FindingKeyPoint(
-                        bullet.text(),
-                        toPublicEvidenceIndexes(bullet.evidenceSentenceIds(), sentences.size()),
-                        bullet.groundedness()))
+                        bullet.text(), bullet.evidence(), bullet.groundedness()))
                 .toList();
         AgentAnalyzeResponse.Classification classification = response.classification();
+        if (!StringUtils.hasText(classification.intent())) {
+            throw schemaViolation("Agent classification intent가 없습니다.");
+        }
         validateCategory(classification.category());
+        FindingEntities entities = toEntities(response.entities());
+        AnalysisMetadata metadata = toMetadata(response.meta());
         return new AnalysisResult(
-                response.summaryKo(),
+                response.summaryKo().trim(),
                 keyPoints,
-                classification.intent(),
+                classification.intent().trim(),
                 Sentiment.fromApiValue(classification.sentiment()),
                 RiskLevel.fromApiValue(classification.riskLevel()),
                 Relevance.fromApiValue(classification.relevance()),
                 classification.category(),
-                sentences);
+                sentences,
+                response.meta().mock() ? AnalysisSource.STUB : AnalysisSource.LLM,
+                analysisSections,
+                entities,
+                metadata);
+    }
+
+    private FindingAnalysisSection toAnalysisSection(AgentAnalyzeResponse.Section section,
+                                                       int sentenceCount) {
+        if (section == null || !StringUtils.hasText(section.heading())
+                || section.bullets() == null || section.bullets().isEmpty()) {
+            throw schemaViolation("Agent analysis section의 필수 필드가 없습니다.");
+        }
+        List<FindingAnalysisBullet> bullets = section.bullets().stream()
+                .map(bullet -> toAnalysisBullet(bullet, sentenceCount))
+                .toList();
+        return new FindingAnalysisSection(section.heading().trim(), bullets);
+    }
+
+    private FindingAnalysisBullet toAnalysisBullet(AgentAnalyzeResponse.Bullet bullet,
+                                                    int sentenceCount) {
+        if (bullet == null || !StringUtils.hasText(bullet.text())
+                || bullet.evidenceSentenceIds() == null || bullet.evidenceSentenceIds().isEmpty()
+                || !GROUNDEDNESS_VALUES.contains(bullet.groundedness())
+                || bullet.confidence() == null
+                || bullet.confidence().compareTo(BigDecimal.ZERO) < 0
+                || bullet.confidence().compareTo(BigDecimal.ONE) > 0) {
+            throw schemaViolation("Agent analysis bullet의 필수 필드가 올바르지 않습니다.");
+        }
+        return new FindingAnalysisBullet(
+                bullet.text().trim(),
+                toPublicEvidenceIndexes(bullet.evidenceSentenceIds(), sentenceCount),
+                bullet.groundedness(),
+                bullet.confidence());
+    }
+
+    private FindingEntities toEntities(AgentAnalyzeResponse.Entities entities) {
+        if (entities == null) {
+            throw schemaViolation("Agent entities가 없습니다.");
+        }
+        return new FindingEntities(
+                validatedEntityValues(entities.companies()),
+                validatedEntityValues(entities.products()),
+                validatedEntityValues(entities.technologies()));
+    }
+
+    private List<String> validatedEntityValues(List<String> values) {
+        if (values == null || values.stream().anyMatch(value -> !StringUtils.hasText(value))) {
+            throw schemaViolation("Agent entity 배열이 올바르지 않습니다.");
+        }
+        return values.stream().map(String::trim).toList();
+    }
+
+    private AnalysisMetadata toMetadata(AgentAnalyzeResponse.Meta meta) {
+        if (!StringUtils.hasText(meta.provider())
+                || !StringUtils.hasText(meta.model())
+                || !StringUtils.hasText(meta.promptVersion())
+                || isNegative(meta.inputTokens())
+                || isNegative(meta.outputTokens())
+                || isNegative(meta.costUsd())
+                || isNegative(meta.credits())) {
+            throw schemaViolation("Agent meta가 올바르지 않습니다.");
+        }
+        return new AnalysisMetadata(
+                meta.promptVersion(), meta.provider(), meta.model(),
+                meta.inputTokens(), meta.outputTokens(), meta.costUsd(), meta.credits(),
+                meta.truncated());
+    }
+
+    private boolean isNegative(Long value) {
+        return value == null || value < 0;
+    }
+
+    private boolean isNegative(BigDecimal value) {
+        return value == null || value.compareTo(BigDecimal.ZERO) < 0;
     }
 
     private void validateCategory(String category) {
         if (!FindingCategory.ALLOWED_VALUES.contains(category)) {
-            throw new AgentClientException("SCHEMA_VIOLATION", "지원하지 않는 finding category입니다.");
+            throw schemaViolation("지원하지 않는 finding category입니다.");
         }
+    }
+
+    private AgentClientException schemaViolation(String message) {
+        return new AgentClientException("SCHEMA_VIOLATION", message);
     }
 
     private void recordSuccessSafely(Long runId,

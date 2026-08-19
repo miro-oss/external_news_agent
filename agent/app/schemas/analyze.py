@@ -7,6 +7,7 @@ from app.schemas.common import AgentModel
 
 Plan = Literal["FREE", "PAID"]
 Groundedness = Literal["grounded", "weak", "ungrounded"]
+NonEmptyString = Annotated[str, Field(min_length=1)]
 
 
 class ArticleInput(AgentModel):
@@ -36,14 +37,14 @@ class AnalyzeRequest(AgentModel):
 
 class EvidenceBullet(AgentModel):
     text: str = Field(min_length=1)
-    evidence_sentence_ids: list[Annotated[int, Field(ge=1)]]
+    evidence_sentence_ids: list[Annotated[int, Field(ge=1)]] = Field(min_length=1)
     groundedness: Groundedness
     confidence: float = Field(ge=0, le=1)
 
 
 class Section(AgentModel):
     heading: str = Field(min_length=1)
-    bullets: list[EvidenceBullet]
+    bullets: list[EvidenceBullet] = Field(min_length=1)
 
 
 class Classification(AgentModel):
@@ -55,9 +56,9 @@ class Classification(AgentModel):
 
 
 class Entities(AgentModel):
-    companies: list[str]
-    products: list[str]
-    technologies: list[str]
+    companies: list[NonEmptyString]
+    products: list[NonEmptyString]
+    technologies: list[NonEmptyString]
 
 
 class ResponseMeta(AgentModel):
@@ -72,9 +73,16 @@ class ResponseMeta(AgentModel):
     truncated: bool
 
 
+class AnalyzeOutput(AgentModel):
+    sections: list[Section] = Field(min_length=1)
+    summary_ko: str = Field(min_length=1)
+    classification: Classification
+    entities: Entities
+
+
 class AnalyzeResponse(AgentModel):
     sentences: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
-    sections: list[Section]
+    sections: list[Section] = Field(min_length=1)
     summary_ko: str = Field(min_length=1)
     classification: Classification
     entities: Entities
@@ -84,10 +92,12 @@ class AnalyzeResponse(AgentModel):
     def validate_evidence_sentence_ids(self) -> "AnalyzeResponse":
         sentence_count = len(self.sentences)
         if any(
-            sentence_id > sentence_count
+            not bullet.evidence_sentence_ids
+            or any(sentence_id > sentence_count for sentence_id in bullet.evidence_sentence_ids)
             for section in self.sections
             for bullet in section.bullets
-            for sentence_id in bullet.evidence_sentence_ids
         ):
-            raise ValueError("evidenceSentenceIds는 sentences 범위를 벗어날 수 없습니다.")
+            raise ValueError(
+                "모든 bullet은 sentences 범위 안의 evidenceSentenceIds를 가져야 합니다."
+            )
         return self

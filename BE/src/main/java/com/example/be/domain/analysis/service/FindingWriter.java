@@ -45,7 +45,18 @@ public class FindingWriter {
                 .riskLevel(result.riskLevel())
                 .relevance(result.relevance())
                 .category(result.category())
+                .analysisSource(result.analysisSource())
                 .sections(result.sections())
+                .analysisSections(result.analysisSections())
+                .entities(result.entities())
+                .promptVersion(result.metadata().promptVersion())
+                .llmProvider(result.metadata().provider())
+                .llmModel(result.metadata().model())
+                .inputTokens(result.metadata().inputTokens())
+                .outputTokens(result.metadata().outputTokens())
+                .costUsd(result.metadata().costUsd())
+                .credits(result.metadata().credits())
+                .inputTruncated(result.metadata().truncated())
                 .analyzedAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build());
     }
