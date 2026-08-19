@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from app.schemas.common import AgentModel
 
@@ -36,7 +36,7 @@ class AnalyzeRequest(AgentModel):
 
 class EvidenceBullet(AgentModel):
     text: str = Field(min_length=1)
-    evidence_sentence_ids: list[int]
+    evidence_sentence_ids: list[Annotated[int, Field(ge=1)]]
     groundedness: Groundedness
     confidence: float = Field(ge=0, le=1)
 
@@ -79,3 +79,15 @@ class AnalyzeResponse(AgentModel):
     classification: Classification
     entities: Entities
     meta: ResponseMeta
+
+    @model_validator(mode="after")
+    def validate_evidence_sentence_ids(self) -> "AnalyzeResponse":
+        sentence_count = len(self.sentences)
+        if any(
+            sentence_id > sentence_count
+            for section in self.sections
+            for bullet in section.bullets
+            for sentence_id in bullet.evidence_sentence_ids
+        ):
+            raise ValueError("evidenceSentenceIds는 sentences 범위를 벗어날 수 없습니다.")
+        return self

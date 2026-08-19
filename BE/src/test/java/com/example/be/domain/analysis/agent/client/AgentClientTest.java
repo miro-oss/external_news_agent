@@ -1,5 +1,9 @@
-package com.example.be.news.agent;
+package com.example.be.domain.analysis.agent.client;
 
+import com.example.be.domain.analysis.agent.config.AgentProperties;
+import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
+import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -75,7 +79,7 @@ class AgentClientTest {
     private AgentAnalyzeRequest request() {
         return new AgentAnalyzeRequest(
                 "run:42:article:10",
-                "FREE",
+                AgentPlan.FREE,
                 new AgentAnalyzeRequest.ArticlePayload(
                         10L, "기사", "https://example.com/10", "ko", OffsetDateTime.now(), "기사 본문"),
                 new AgentAnalyzeRequest.TopicPayload("HBM", "HBM", List.of("HBM"), List.of(), List.of()),

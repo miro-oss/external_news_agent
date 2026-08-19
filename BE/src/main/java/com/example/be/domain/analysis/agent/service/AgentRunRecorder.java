@@ -1,11 +1,18 @@
-package com.example.be.news.agent;
+package com.example.be.domain.analysis.agent.service;
 
+import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
+import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.agent.entity.AgentRun;
+import com.example.be.domain.analysis.agent.entity.AgentRunStatus;
+import com.example.be.domain.analysis.agent.entity.AgentTargetType;
+import com.example.be.domain.analysis.agent.entity.AgentTask;
+import com.example.be.domain.analysis.agent.repository.AgentRunJdbcRepository;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
@@ -17,7 +24,8 @@ public class AgentRunRecorder {
 
     private static final int MAX_FAILURE_MESSAGE_LENGTH = 1000;
 
-    private final AgentRunRepository repository;
+    private final AgentRunJdbcRepository repository;
+    private final ObjectMapper objectMapper;
 
     @Transactional
     public void recordSuccess(Long runId,
@@ -25,11 +33,8 @@ public class AgentRunRecorder {
                               AgentAnalyzeRequest request,
                               AgentAnalyzeResponse response,
                               LocalDateTime startedAt) {
-        if (repository.existsByIdempotencyKey(request.idempotencyKey())) {
-            return;
-        }
         AgentAnalyzeResponse.Meta meta = response.meta();
-        repository.save(AgentRun.builder()
+        repository.insertIfAbsent(AgentRun.builder()
                 .collectionRunId(runId)
                 .idempotencyKey(request.idempotencyKey())
                 .agentTask(AgentTask.ANALYZE)
@@ -57,10 +62,7 @@ public class AgentRunRecorder {
                               String failureCode,
                               String failureMessage,
                               LocalDateTime startedAt) {
-        if (repository.existsByIdempotencyKey(request.idempotencyKey())) {
-            return;
-        }
-        repository.save(AgentRun.builder()
+        repository.insertIfAbsent(AgentRun.builder()
                 .collectionRunId(runId)
                 .idempotencyKey(request.idempotencyKey())
                 .agentTask(AgentTask.ANALYZE)
@@ -79,7 +81,7 @@ public class AgentRunRecorder {
     private String hash(AgentAnalyzeRequest request) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(request.toString().getBytes(StandardCharsets.UTF_8));
+                    .digest(objectMapper.writeValueAsBytes(request));
             return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256을 사용할 수 없습니다.", exception);
@@ -87,10 +89,11 @@ public class AgentRunRecorder {
     }
 
     private String truncate(String message) {
-        if (message == null || message.length() <= MAX_FAILURE_MESSAGE_LENGTH) {
+        if (message == null
+                || message.codePointCount(0, message.length()) <= MAX_FAILURE_MESSAGE_LENGTH) {
             return message;
         }
-        return message.substring(0, MAX_FAILURE_MESSAGE_LENGTH);
+        return message.substring(0, message.offsetByCodePoints(0, MAX_FAILURE_MESSAGE_LENGTH));
     }
 
     private LocalDateTime now() {

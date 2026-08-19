@@ -1,4 +1,4 @@
-package com.example.be.news.agent;
+package com.example.be.domain.analysis.agent.client;
 
 public class AgentClientException extends RuntimeException {
 

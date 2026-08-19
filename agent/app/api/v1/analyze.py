@@ -15,12 +15,6 @@ def analyze(
     request: AnalyzeRequest,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> AnalyzeResponse:
-    if len(request.article.body_text) > settings.max_body_chars:
-        raise AgentError(
-            status_code=413,
-            code="INPUT_TOO_LARGE",
-            message=f"article.bodyText는 {settings.max_body_chars}자를 넘을 수 없습니다.",
-        )
     if not settings.mock:
         raise AgentError(
             status_code=503,
@@ -28,4 +22,14 @@ def analyze(
             message="A0에서는 AGENT_MOCK=1 모드만 지원합니다.",
         )
 
-    return MockAnalyzeProvider(settings).analyze(request)
+    input_truncated = len(request.article.body_text) > settings.max_body_chars
+    if input_truncated:
+        request = request.model_copy(
+            update={
+                "article": request.article.model_copy(
+                    update={"body_text": request.article.body_text[: settings.max_body_chars]}
+                )
+            }
+        )
+
+    return MockAnalyzeProvider(settings).analyze(request, input_truncated=input_truncated)

@@ -1,15 +1,17 @@
-package com.example.be.news.agent;
+package com.example.be.domain.analysis.agent.client;
 
+import com.example.be.domain.analysis.agent.config.AgentProperties;
+import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
+import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.agent.dto.AgentErrorResponse;
+import com.example.be.global.config.RestClientFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
-
-import java.net.http.HttpClient;
 
 @Component
 public class AgentClient {
@@ -19,8 +21,9 @@ public class AgentClient {
     private final RestClient restClient;
 
     @Autowired
-    public AgentClient(AgentProperties properties) {
-        this(restClientBuilder(properties), properties);
+    public AgentClient(RestClientFactory restClientFactory, AgentProperties properties) {
+        this(restClientFactory.create(
+                properties.getConnectTimeout(), properties.getAnalyzeTimeout()), properties);
     }
 
     AgentClient(RestClient.Builder builder, AgentProperties properties) {
@@ -65,14 +68,5 @@ public class AgentClient {
         return exception.getStatusCode().value() == 401
                 ? "UNAUTHORIZED"
                 : "AGENT_HTTP_" + exception.getStatusCode().value();
-    }
-
-    private static RestClient.Builder restClientBuilder(AgentProperties properties) {
-        HttpClient httpClient = HttpClient.newBuilder()
-                .connectTimeout(properties.getConnectTimeout())
-                .build();
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(properties.getAnalyzeTimeout());
-        return RestClient.builder().requestFactory(requestFactory);
     }
 }

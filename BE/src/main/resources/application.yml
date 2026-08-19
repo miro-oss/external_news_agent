@@ -45,7 +45,7 @@ springdoc:
 
 news:
   agent:
-    enabled: ${AGENT_ENABLED:true}
+    enabled: ${AGENT_ENABLED:false}
     base-url: ${AGENT_BASE_URL:http://127.0.0.1:8088}
     token: ${AGENT_SHARED_SECRET:}
     connect-timeout: 5s

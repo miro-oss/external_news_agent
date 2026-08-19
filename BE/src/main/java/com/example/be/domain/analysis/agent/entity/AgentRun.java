@@ -1,4 +1,4 @@
-package com.example.be.news.agent;
+package com.example.be.domain.analysis.agent.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -65,8 +65,9 @@ public class AgentRun {
     @Column(name = "llm_model", length = 100)
     private String llmModel;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "llm_plan", length = 10)
-    private String llmPlan;
+    private AgentPlan llmPlan;
 
     @Column(name = "input_tokens")
     private Long inputTokens;

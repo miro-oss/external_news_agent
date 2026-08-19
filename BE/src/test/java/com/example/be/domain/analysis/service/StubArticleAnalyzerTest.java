@@ -24,7 +24,7 @@ class StubArticleAnalyzerTest {
                 .fetchStatus(FetchStatus.FULLTEXT)
                 .build();
 
-        AnalysisResult result = analyzer.analyze(42L, article);
+        AnalysisResult result = analyzer.analyze(article);
 
         assertEquals(2, result.sections().size());
         assertEquals(0, result.sections().get(0).index());
@@ -43,7 +43,7 @@ class StubArticleAnalyzerTest {
                 .language("en")
                 .build();
 
-        AnalysisResult result = analyzer.analyze(42L, article);
+        AnalysisResult result = analyzer.analyze(article);
 
         assertEquals("미국의 첨단 반도체 장비 수출 통제 강화와 관련된 소식이 보도됐다.", result.summary());
         assertEquals("정책", result.category());
@@ -63,6 +63,6 @@ class StubArticleAnalyzerTest {
                 .fetchStatus(FetchStatus.METADATA_ONLY)
                 .build();
 
-        assertEquals(Relevance.REFERENCE, analyzer.analyze(42L, article).relevance());
+        assertEquals(Relevance.REFERENCE, analyzer.analyze(article).relevance());
     }
 }

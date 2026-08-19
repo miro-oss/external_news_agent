@@ -1,5 +1,12 @@
-package com.example.be.news.agent;
+package com.example.be.domain.analysis.agent.service;
 
+import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
+import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.agent.entity.AgentRun;
+import com.example.be.domain.analysis.agent.entity.AgentRunStatus;
+import com.example.be.domain.analysis.agent.entity.AgentTask;
+import com.example.be.domain.analysis.agent.repository.AgentRunRepository;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
@@ -62,7 +69,7 @@ class AgentRunRecorderIntegrationTests {
         assertEquals(AgentRunStatus.MOCK, recorded.getStatus());
         assertEquals(AgentTask.ANALYZE, recorded.getAgentTask());
         assertEquals("mock", recorded.getLlmProvider());
-        assertEquals("FREE", recorded.getLlmPlan());
+        assertEquals(AgentPlan.FREE, recorded.getLlmPlan());
         assertEquals(64, recorded.getRequestHash().length());
         assertEquals(countBefore + 1, agentRunRepository.count());
     }
@@ -70,7 +77,7 @@ class AgentRunRecorderIntegrationTests {
     private AgentAnalyzeRequest request(Long runId) {
         return new AgentAnalyzeRequest(
                 "integration:run:" + runId + ":article:10",
-                "FREE",
+                AgentPlan.FREE,
                 new AgentAnalyzeRequest.ArticlePayload(
                         10L, "기사", "https://example.com/10", "ko", null, "기사 본문"),
                 new AgentAnalyzeRequest.TopicPayload("HBM", "HBM", List.of("HBM"), List.of(), List.of()),

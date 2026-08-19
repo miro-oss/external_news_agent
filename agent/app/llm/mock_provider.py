@@ -1,5 +1,5 @@
 from app.core.config import Settings
-from app.core.sentences import split_sentences
+from app.core.sentences import split_sentences_with_meta
 from app.schemas.analyze import (
     AnalyzeRequest,
     AnalyzeResponse,
@@ -15,10 +15,11 @@ class MockAnalyzeProvider:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
-    def analyze(self, request: AnalyzeRequest) -> AnalyzeResponse:
+    def analyze(self, request: AnalyzeRequest, *, input_truncated: bool = False) -> AnalyzeResponse:
         article = request.article
         material = article.body_text or article.title
-        sentences = split_sentences(material, self._settings.max_sentences) or [article.title]
+        split = split_sentences_with_meta(material, self._settings.max_sentences)
+        sentences = split.sentences or [article.title]
         groundedness = "grounded" if article.body_text.strip() else "weak"
 
         return AnalyzeResponse(
@@ -54,6 +55,6 @@ class MockAnalyzeProvider:
                 cost_usd=0,
                 credits=0,
                 mock=True,
-                truncated=False,
+                truncated=input_truncated or split.truncated,
             ),
         )

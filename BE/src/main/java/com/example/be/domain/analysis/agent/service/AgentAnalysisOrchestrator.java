@@ -1,19 +1,25 @@
-package com.example.be.news.agent;
+package com.example.be.domain.analysis.agent.service;
 
+import com.example.be.domain.analysis.agent.client.AgentClient;
+import com.example.be.domain.analysis.agent.client.AgentClientException;
+import com.example.be.domain.analysis.agent.config.AgentProperties;
+import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
+import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.service.AnalysisResult;
-import com.example.be.domain.analysis.service.ArticleAnalyzer;
+import com.example.be.domain.analysis.service.AnalysisContext;
+import com.example.be.domain.analysis.service.ArticleAnalysisOrchestrator;
 import com.example.be.domain.analysis.service.StubArticleAnalyzer;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -22,10 +28,9 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 @Slf4j
-@Primary
 @Component
 @RequiredArgsConstructor
-public class AgentArticleAnalyzer implements ArticleAnalyzer {
+public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
 
     private final AgentProperties properties;
     private final AgentClient client;
@@ -33,9 +38,11 @@ public class AgentArticleAnalyzer implements ArticleAnalyzer {
     private final StubArticleAnalyzer stubAnalyzer;
 
     @Override
-    public AnalysisResult analyze(Long runId, Article article) {
+    public AnalysisResult analyze(AnalysisContext context) {
+        Long runId = context.runId();
+        Article article = context.article();
         if (!properties.isEnabled()) {
-            return stubAnalyzer.analyze(runId, article);
+            return stubAnalyzer.analyze(article);
         }
 
         AgentAnalyzeRequest request = request(runId, article);
@@ -49,13 +56,13 @@ public class AgentArticleAnalyzer implements ArticleAnalyzer {
             String code = exception instanceof AgentClientException clientException
                     ? clientException.getCode()
                     : "SCHEMA_VIOLATION";
-            recorder.recordFailure(runId, article.getId(), request, code, exception.getMessage(), startedAt);
+            recordFailureSafely(runId, article.getId(), request, code, exception.getMessage(), startedAt);
             log.warn("Agent 분석에 실패해 Stub으로 대체한다. runId={} articleId={} code={} error={}",
                     runId, article.getId(), code, exception.getMessage());
-            return stubAnalyzer.analyze(runId, article);
+            return stubAnalyzer.analyze(article);
         }
 
-        recorder.recordSuccess(runId, article.getId(), request, response, startedAt);
+        recordSuccessSafely(runId, article.getId(), request, response, startedAt);
         return result;
     }
 
@@ -103,6 +110,7 @@ public class AgentArticleAnalyzer implements ArticleAnalyzer {
                         bullet.groundedness()))
                 .toList();
         AgentAnalyzeResponse.Classification classification = response.classification();
+        validateCategory(classification.category());
         return new AnalysisResult(
                 response.summaryKo(),
                 keyPoints,
@@ -112,6 +120,39 @@ public class AgentArticleAnalyzer implements ArticleAnalyzer {
                 Relevance.fromApiValue(classification.relevance()),
                 classification.category(),
                 sentences);
+    }
+
+    private void validateCategory(String category) {
+        if (!FindingCategory.ALLOWED_VALUES.contains(category)) {
+            throw new AgentClientException("SCHEMA_VIOLATION", "지원하지 않는 finding category입니다.");
+        }
+    }
+
+    private void recordSuccessSafely(Long runId,
+                                     Long articleId,
+                                     AgentAnalyzeRequest request,
+                                     AgentAnalyzeResponse response,
+                                     LocalDateTime startedAt) {
+        try {
+            recorder.recordSuccess(runId, articleId, request, response, startedAt);
+        } catch (RuntimeException exception) {
+            log.error("성공한 Agent 분석의 감사 로그를 기록하지 못했다. runId={} articleId={}",
+                    runId, articleId, exception);
+        }
+    }
+
+    private void recordFailureSafely(Long runId,
+                                     Long articleId,
+                                     AgentAnalyzeRequest request,
+                                     String code,
+                                     String message,
+                                     LocalDateTime startedAt) {
+        try {
+            recorder.recordFailure(runId, articleId, request, code, message, startedAt);
+        } catch (RuntimeException exception) {
+            log.error("실패한 Agent 분석의 감사 로그를 기록하지 못했다. runId={} articleId={} code={}",
+                    runId, articleId, code, exception);
+        }
     }
 
     private List<Integer> toPublicEvidenceIndexes(List<Integer> agentIds, int sentenceCount) {

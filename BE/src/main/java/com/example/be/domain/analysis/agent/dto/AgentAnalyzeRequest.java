@@ -1,11 +1,13 @@
-package com.example.be.news.agent;
+package com.example.be.domain.analysis.agent.dto;
+
+import com.example.be.domain.analysis.agent.entity.AgentPlan;
 
 import java.time.OffsetDateTime;
 import java.util.List;
 
 public record AgentAnalyzeRequest(
         String idempotencyKey,
-        String plan,
+        AgentPlan plan,
         ArticlePayload article,
         TopicPayload topic,
         Object previousFinding

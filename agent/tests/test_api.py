@@ -1,6 +1,8 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings, get_settings
+from app.llm.mock_provider import MockAnalyzeProvider
 from app.main import app
 
 app.dependency_overrides[get_settings] = lambda: Settings(
@@ -76,7 +78,7 @@ def test_validation_failure_uses_json_error_contract() -> None:
     assert response.json()["error"]["code"] == "SCHEMA_VIOLATION"
 
 
-def test_analyze_rejects_body_over_configured_limit() -> None:
+def test_analyze_truncates_body_over_configured_limit() -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(
         AGENT_SHARED_SECRET="local-dev-agent-token",
         AGENT_MAX_BODY_CHARS=3,
@@ -92,5 +94,30 @@ def test_analyze_rejects_body_over_configured_limit() -> None:
             AGENT_SHARED_SECRET="local-dev-agent-token"
         )
 
-    assert response.status_code == 413
-    assert response.json()["error"]["code"] == "INPUT_TOO_LARGE"
+    assert response.status_code == 200
+    assert response.json()["sentences"] == ["123"]
+    assert response.json()["meta"]["truncated"] is True
+
+
+def test_unexpected_failure_uses_json_error_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_: object, **__: object) -> None:
+        raise RuntimeError("sensitive internal failure")
+
+    monkeypatch.setattr(MockAnalyzeProvider, "analyze", fail)
+    non_raising_client = TestClient(app, raise_server_exceptions=False)
+
+    response = non_raising_client.post(
+        "/v1/analyze",
+        headers={"X-Agent-Token": "local-dev-agent-token"},
+        json=request_body(),
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": {
+            "code": "INTERNAL_ERROR",
+            "message": "Agent 내부 오류가 발생했습니다.",
+            "details": None,
+        }
+    }
+    assert "sensitive internal failure" not in response.text

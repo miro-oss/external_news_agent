@@ -26,7 +26,7 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
     private static final int MAX_KEY_POINTS = 3;
 
     @Override
-    public AnalysisResult analyze(Long runId, Article article) {
+    public AnalysisResult analyze(Article article) {
         String fullText = article.getFetchStatus() == FetchStatus.FULLTEXT ? article.getBody() : null;
         String material = firstText(fullText, article.getSummary(), article.getTitle());
         List<FindingSection> sections = SentenceSplitter.split(material, article.getLanguage());

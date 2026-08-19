@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -7,6 +9,8 @@ from app.api.v1.health import router as health_router
 from app.core.errors import AgentError
 from app.core.security import require_agent_token
 from app.schemas.common import ErrorDetail, ErrorResponse
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -29,6 +33,15 @@ def create_app() -> FastAPI:
             "SCHEMA_VIOLATION",
             "요청 스키마가 올바르지 않습니다.",
             exc.errors(),
+        )
+
+    @application.exception_handler(Exception)
+    async def handle_unexpected_error(_: Request, exc: Exception) -> JSONResponse:
+        logger.exception("처리되지 않은 Agent 오류가 발생했습니다.", exc_info=exc)
+        return _error_response(
+            500,
+            "INTERNAL_ERROR",
+            "Agent 내부 오류가 발생했습니다.",
         )
 
     return application

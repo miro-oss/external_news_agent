@@ -1,4 +1,4 @@
-package com.example.be.news.agent;
+package com.example.be.domain.analysis.agent.config;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
