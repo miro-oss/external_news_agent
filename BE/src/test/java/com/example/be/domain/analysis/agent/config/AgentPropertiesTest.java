@@ -1,0 +1,32 @@
+package com.example.be.domain.analysis.agent.config;
+
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+class AgentPropertiesTest {
+
+    @Test
+    void isDisabledByDefault() {
+        assertFalse(new AgentProperties().isEnabled());
+    }
+
+    @Test
+    void rejectsEnabledAgentWithoutSharedSecret() {
+        AgentProperties properties = new AgentProperties();
+        properties.setEnabled(true);
+
+        assertThrows(IllegalStateException.class, properties::afterPropertiesSet);
+    }
+
+    @Test
+    void acceptsEnabledAgentWithSharedSecret() {
+        AgentProperties properties = new AgentProperties();
+        properties.setEnabled(true);
+        properties.setToken("agent-secret");
+
+        assertDoesNotThrow(properties::afterPropertiesSet);
+    }
+}

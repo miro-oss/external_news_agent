@@ -22,7 +22,7 @@ import java.util.Set;
 public class ArticleAnalysisPipeline {
 
     private final CollectionRunArticleRepository runArticleRepository;
-    private final ArticleAnalyzer analyzer;
+    private final ArticleAnalysisOrchestrator orchestrator;
     private final FindingWriter findingWriter;
 
     public void analyze(Long runId) {
@@ -32,7 +32,7 @@ public class ArticleAnalysisPipeline {
     public void analyze(Long runId, Set<Long> refreshedArticleIds) {
         for (Target target : targets(runId, refreshedArticleIds)) {
             try {
-                AnalysisResult result = analyzer.analyze(target.article());
+                AnalysisResult result = orchestrator.analyze(new AnalysisContext(runId, target.article()));
                 findingWriter.write(runId, target.article().getId(), target.changeType(), result);
             } catch (RuntimeException exception) {
                 log.warn("기사 분석에 실패했다. runId={} articleId={} error={}",

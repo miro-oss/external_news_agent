@@ -21,10 +21,10 @@ import static org.mockito.Mockito.when;
 class ArticleAnalysisPipelineTest {
 
     private final CollectionRunArticleRepository runArticleRepository = mock(CollectionRunArticleRepository.class);
-    private final ArticleAnalyzer analyzer = mock(ArticleAnalyzer.class);
+    private final ArticleAnalysisOrchestrator orchestrator = mock(ArticleAnalysisOrchestrator.class);
     private final FindingWriter findingWriter = mock(FindingWriter.class);
     private final ArticleAnalysisPipeline pipeline =
-            new ArticleAnalysisPipeline(runArticleRepository, analyzer, findingWriter);
+            new ArticleAnalysisPipeline(runArticleRepository, orchestrator, findingWriter);
 
     @Test
     void analyzesSameArticleOnlyOnceAndPrefersUpdatedObservation() {
@@ -33,11 +33,12 @@ class ArticleAnalysisPipelineTest {
                 observation(article, ChangeType.NEW),
                 observation(article, ChangeType.UPDATED)));
         AnalysisResult result = mock(AnalysisResult.class);
-        when(analyzer.analyze(article)).thenReturn(result);
+        AnalysisContext context = new AnalysisContext(42L, article);
+        when(orchestrator.analyze(context)).thenReturn(result);
 
         pipeline.analyze(42L);
 
-        verify(analyzer, times(1)).analyze(article);
+        verify(orchestrator, times(1)).analyze(context);
         verify(findingWriter).write(42L, 10L, ChangeType.UPDATED, result);
     }
 
@@ -48,9 +49,10 @@ class ArticleAnalysisPipelineTest {
         when(runArticleRepository.findAnalysisTargetsByRunId(42L)).thenReturn(List.of(
                 observation(failed, ChangeType.NEW),
                 observation(succeeded, ChangeType.NEW)));
-        when(analyzer.analyze(failed)).thenThrow(new IllegalStateException("stub failure"));
+        when(orchestrator.analyze(new AnalysisContext(42L, failed)))
+                .thenThrow(new IllegalStateException("stub failure"));
         AnalysisResult result = mock(AnalysisResult.class);
-        when(analyzer.analyze(succeeded)).thenReturn(result);
+        when(orchestrator.analyze(new AnalysisContext(42L, succeeded))).thenReturn(result);
 
         pipeline.analyze(42L);
 
@@ -71,7 +73,7 @@ class ArticleAnalysisPipelineTest {
         when(runArticleRepository.findAnalysisTargetsByRunIdAndArticleIdIn(42L, Set.of(10L)))
                 .thenReturn(List.of(observation(article, ChangeType.UNCHANGED)));
         AnalysisResult result = mock(AnalysisResult.class);
-        when(analyzer.analyze(article)).thenReturn(result);
+        when(orchestrator.analyze(new AnalysisContext(42L, article))).thenReturn(result);
 
         pipeline.analyze(42L, Set.of(10L));
 
@@ -91,7 +93,7 @@ class ArticleAnalysisPipelineTest {
 
         pipeline.analyze(42L);
 
-        verify(analyzer, never()).analyze(article);
+        verify(orchestrator, never()).analyze(new AnalysisContext(42L, article));
         verify(findingWriter, never()).write(eq(42L), eq(10L), any(), any());
     }
 
