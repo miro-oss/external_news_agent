@@ -1,12 +1,18 @@
 package com.example.be.domain.reports.repository;
 
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import jakarta.persistence.LockModeType;
 
 import java.util.Optional;
 
@@ -20,10 +26,15 @@ public interface NewsReportRepository
     @EntityGraph(attributePaths = "run")
     Optional<NewsReport> findByRunId(Long runId);
 
-    @EntityGraph(attributePaths = "run")
-    Optional<NewsReport> findFirstByOrderByGeneratedAtDescIdDesc();
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT report FROM NewsReport report WHERE report.id = :reportId")
+    Optional<NewsReport> findByIdForUpdate(@Param("reportId") Long id);
 
-    @Override
     @EntityGraph(attributePaths = "run")
-    Optional<NewsReport> findById(Long id);
+    Optional<NewsReport> findFirstByReportStatusNotOrderByGeneratedAtDescIdDesc(
+            ReportStatus reportStatus);
+
+    @EntityGraph(attributePaths = "run")
+    Optional<NewsReport> findByIdAndReportStatusNot(
+            Long id, ReportStatus reportStatus);
 }

@@ -74,8 +74,32 @@ public class NewsReport {
     @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(name = "report_status", nullable = false, length = 30)
-    private ReportStatus reportStatus = ReportStatus.GENERATED;
+    private ReportStatus reportStatus = ReportStatus.FALLBACK;
 
     @Column(name = "generated_at", nullable = false)
     private LocalDateTime generatedAt;
+
+    public void complete(String title,
+                         String markdownBody,
+                         String modelName,
+                         String promptVersion,
+                         String llmProvider,
+                         Long inputTokens,
+                         Long outputTokens,
+                         BigDecimal costUsd,
+                         BigDecimal credits,
+                         ReportStatus reportStatus,
+                         LocalDateTime generatedAt) {
+        this.title = title;
+        this.markdownBody = markdownBody;
+        this.modelName = modelName;
+        this.promptVersion = promptVersion;
+        this.llmProvider = llmProvider;
+        this.inputTokens = inputTokens;
+        this.outputTokens = outputTokens;
+        this.costUsd = costUsd;
+        this.credits = credits;
+        this.reportStatus = reportStatus;
+        this.generatedAt = generatedAt;
+    }
 }

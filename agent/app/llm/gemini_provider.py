@@ -44,6 +44,8 @@ class GeminiAnalyzeProvider:
             if not isinstance(text, str) or not text.strip():
                 raise ValueError("Gemini 응답 본문이 비어 있습니다.")
             usage = getattr(response, "usage_metadata", None)
+            candidates = getattr(response, "candidates", None) or []
+            finish_reason = getattr(candidates[0], "finish_reason", None) if candidates else None
             return ProviderResponse(
                 text=text,
                 provider="gemini",
@@ -52,6 +54,7 @@ class GeminiAnalyzeProvider:
                     input_tokens=safe_int(getattr(usage, "prompt_token_count", 0), 0) or 0,
                     output_tokens=safe_int(getattr(usage, "candidates_token_count", 0), 0) or 0,
                 ),
+                truncated=str(finish_reason).upper().endswith("MAX_TOKENS"),
             )
         except AgentError:
             raise

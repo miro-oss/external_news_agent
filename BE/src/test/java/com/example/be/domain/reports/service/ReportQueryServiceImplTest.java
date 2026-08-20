@@ -11,6 +11,7 @@ import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.Test;
@@ -39,7 +40,8 @@ class ReportQueryServiceImplTest {
 
     @Test
     void latestReturnsNullWhenNoReportExists() {
-        when(reportRepository.findFirstByOrderByGeneratedAtDescIdDesc()).thenReturn(Optional.empty());
+        when(reportRepository.findFirstByReportStatusNotOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
+                .thenReturn(Optional.empty());
 
         assertNull(service.getLatest(true));
     }
@@ -109,7 +111,8 @@ class ReportQueryServiceImplTest {
         NewsReport report = NewsReport.builder().id(17L).run(run).title("보고서")
                 .generatedAt(LocalDateTime.of(2026, 8, 18, 10, 0)).build();
         FindingRepository.ReportStatsCount count = mock(FindingRepository.ReportStatsCount.class);
-        when(reportRepository.findById(17L)).thenReturn(Optional.of(report));
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING))
+                .thenReturn(Optional.of(report));
         when(count.getRiskLevel()).thenReturn(RiskLevel.HIGH);
         when(count.getCategory()).thenReturn("정책");
         when(count.getChangeType()).thenReturn(ChangeType.NEW);
@@ -132,7 +135,8 @@ class ReportQueryServiceImplTest {
                 .generatedAt(LocalDateTime.of(2026, 8, 18, 10, 0)).build();
         Finding low = finding(2L, RiskLevel.LOW, Relevance.REFERENCE);
         Finding high = finding(1L, RiskLevel.HIGH, Relevance.IMPORTANT);
-        when(reportRepository.findById(17L)).thenReturn(Optional.of(report));
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING))
+                .thenReturn(Optional.of(report));
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(low, high));
 
         ReportResDTO.Detail detail = service.getReport(17L, true);

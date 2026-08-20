@@ -72,7 +72,8 @@ class MindlogicAnalyzeProvider:
             )
             response.raise_for_status()
             body = response.json()
-            text = body["choices"][0]["message"]["content"]
+            choice = body["choices"][0]
+            text = choice["message"]["content"]
             if not isinstance(text, str) or not text.strip():
                 raise ValueError("Mindlogic 응답 본문이 비어 있습니다.")
             usage = body.get("usage") or {}
@@ -85,6 +86,7 @@ class MindlogicAnalyzeProvider:
                     output_tokens=safe_int(usage.get("completion_tokens"), 0) or 0,
                     credits=Decimal("1"),
                 ),
+                truncated=choice.get("finish_reason") == "length",
             )
         except AgentError:
             raise

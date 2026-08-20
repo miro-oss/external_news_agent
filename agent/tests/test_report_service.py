@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.errors import AgentError
@@ -60,6 +61,9 @@ def request() -> ReportRequest:
                 "paywalled": 1,
                 "stubExcluded": 3,
             },
+            "sourceNotes": [
+                "수집 제약: STUB 분석 3건 제외, 페이월 1건, 접근 제한 1건, 수집 실패 1건."
+            ],
             "perspective": "TECHNOLOGY",
         }
     )
@@ -106,7 +110,7 @@ def test_generates_structured_report_and_deterministic_markdown() -> None:
     assert "[HBM4 양산 일정 단축](<https://example.com/1024>)" in response.markdown_body
     assert "STUB 분석 3건" in response.markdown_body
     assert "페이월" in response.markdown_body
-    assert "본문 수집에 실패한 기사가 1건" in response.markdown_body
+    assert "수집 실패 1건" in response.markdown_body
     assert response.meta.prompt_version == "report.ko.v1"
     assert response.meta.mock is False
 
@@ -135,6 +139,15 @@ def test_fails_after_exactly_one_repair_for_invalid_output() -> None:
         ReportWriterService(Settings(AGENT_MOCK=False), provider).write(request())
 
     assert caught.value.code == "SCHEMA_VIOLATION"
+    assert caught.value.details == {
+        "usage": {
+            "inputTokens": 20,
+            "outputTokens": 10,
+            "costUsd": 0.0,
+            "credits": 0.0,
+        },
+        "truncated": False,
+    }
     assert len(provider.prompts) == 2
 
 
@@ -146,3 +159,70 @@ def test_mock_report_is_deterministic_and_keeps_structured_sections() -> None:
     assert response.important_events[0].source_finding_ids == [501]
     assert response.watch_items == []
     assert response.markdown_body.startswith("# 2026-08-10 HBM 뉴스 모니터링 보고서")
+
+
+@pytest.mark.parametrize(
+    "canonical_url",
+    [
+        "https://example.com/path\nnext",
+        "https://example.com/<unsafe>",
+        "https:///missing-host",
+    ],
+)
+def test_rejects_unsafe_canonical_url(canonical_url: str) -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["canonicalUrl"] = canonical_url
+
+    with pytest.raises(ValidationError):
+        ReportRequest.model_validate(payload)
+
+
+def test_rejects_more_than_fifty_findings() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"] = [
+        {**payload["findings"][0], "id": index, "articleId": index + 1000}
+        for index in range(1, 52)
+    ]
+
+    with pytest.raises(ValidationError):
+        ReportRequest.model_validate(payload)
+
+
+def test_mock_report_does_not_repeat_important_finding_in_watch_items() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["relevance"] = "watch"
+
+    response = ReportWriterService(Settings()).write(ReportRequest.model_validate(payload))
+
+    assert response.important_events[0].source_finding_ids == [501]
+    assert response.watch_items == []
+
+
+def test_markdown_escapes_markdown_metacharacters_without_html_entities() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["articleTitle"] = "TSMC & *삼성* [HBM]"
+    response = ReportWriterService(Settings()).write(ReportRequest.model_validate(payload))
+
+    assert "&amp;" not in response.markdown_body
+    assert "TSMC & \\*삼성\\* \\[HBM\\]" in response.markdown_body
+
+
+def test_uses_report_specific_provider_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, float | int] = {}
+    provider = FakeProvider(provider_response(valid_output()))
+
+    def provider_for_report(settings: Settings, _: str) -> FakeProvider:
+        captured["tokens"] = settings.max_output_tokens
+        captured["timeout"] = settings.provider_timeout_seconds
+        return provider
+
+    monkeypatch.setattr("app.llm.report_service.get_analyze_provider", provider_for_report)
+    settings = Settings(
+        AGENT_MOCK=False,
+        AGENT_REPORT_MAX_OUTPUT_TOKENS=12_000,
+        AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=90,
+    )
+
+    ReportWriterService(settings).write(request())
+
+    assert captured == {"tokens": 12_000, "timeout": 90.0}

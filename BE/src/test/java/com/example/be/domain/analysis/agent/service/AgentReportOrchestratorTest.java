@@ -16,6 +16,8 @@ import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.FetchStatus;
+import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.reports.service.AgentReportOrchestrator;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.service.ReportDocument;
 import com.example.be.domain.reports.service.ReportGenerator;
@@ -26,6 +28,7 @@ import org.mockito.ArgumentCaptor;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.LongStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -43,13 +46,22 @@ class AgentReportOrchestratorTest {
     private final AgentClient client = mock(AgentClient.class);
     private final AgentRunRecorder recorder = mock(AgentRunRecorder.class);
     private final ReportGenerator fallback = mock(ReportGenerator.class);
+    private final CollectionRunArticleRepository observationRepository = mock(CollectionRunArticleRepository.class);
     private final AgentReportOrchestrator orchestrator =
-            new AgentReportOrchestrator(properties, client, recorder, fallback);
+            new AgentReportOrchestrator(properties, client, recorder, fallback, observationRepository);
 
     @Test
     void excludesStubFromAgentRequestAndKeepsStructuredReportMetadata() {
         Finding llm = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "실제 LLM 요약");
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT_BLOCKED, "STUB 요약");
+        CollectionRunArticleRepository.ArticleFetchStatus paywalled =
+                observation(900L, FetchStatus.FULLTEXT_BLOCKED);
+        CollectionRunArticleRepository.ArticleFetchStatus robots =
+                observation(901L, FetchStatus.ROBOTS_DISALLOWED);
+        CollectionRunArticleRepository.ArticleFetchStatus failed =
+                observation(902L, FetchStatus.FETCH_FAILED);
+        when(observationRepository.findArticleFetchStatusesByRunId(42L)).thenReturn(List.of(
+                paywalled, paywalled, robots, failed));
         when(client.report(any())).thenReturn(response(List.of(501L)));
 
         ReportDocument document = orchestrator.generate(
@@ -69,9 +81,12 @@ class AgentReportOrchestratorTest {
                 .map(AgentReportRequest.FindingPayload::id)
                 .toList());
         assertEquals(1, request.sourceStats().stubExcluded());
-        assertEquals(1, request.sourceStats().blocked());
+        assertEquals(2, request.sourceStats().blocked());
         assertEquals(1, request.sourceStats().paywalled());
+        assertEquals(1, request.sourceStats().failed());
         assertEquals(3, request.sourceStats().collected());
+        assertEquals(List.of("수집 제약: STUB 분석 1건 제외, 페이월 1건, 접근 제한 1건, 수집 실패 1건."),
+                request.sourceNotes());
         verify(recorder).recordReportSuccess(
                 eq(42L), eq(request), any(), any(LocalDateTime.class));
         verify(fallback, never()).generate(anyList(), any(), any());
@@ -92,14 +107,14 @@ class AgentReportOrchestratorTest {
 
         assertEquals(fallbackDocument, document);
         verify(recorder).recordReportFailure(
-                eq(42L), any(), eq("SCHEMA_VIOLATION"), any(), any(LocalDateTime.class));
+                eq(42L), any(), eq("SCHEMA_VIOLATION"), any(), any(), any(LocalDateTime.class));
     }
 
     @Test
     void disabledAgentUsesFallbackWithoutCallingAgent() {
         AgentProperties disabled = new AgentProperties();
         AgentReportOrchestrator disabledOrchestrator =
-                new AgentReportOrchestrator(disabled, client, recorder, fallback);
+                new AgentReportOrchestrator(disabled, client, recorder, fallback, observationRepository);
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT, "STUB 요약");
         ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
         when(fallback.generate(eq(List.of(stub)), any(), any())).thenReturn(fallbackDocument);
@@ -112,7 +127,33 @@ class AgentReportOrchestratorTest {
         assertEquals(fallbackDocument, document);
         verify(client, never()).report(any());
         verify(recorder, never()).recordReportSuccess(any(), any(), any(), any());
-        verify(recorder, never()).recordReportFailure(any(), any(), any(), any(), any());
+        verify(recorder, never()).recordReportFailure(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void storesMockAgentReportWithMockStatus() {
+        Finding llm = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "실제 LLM 요약");
+        when(client.report(any())).thenReturn(response(List.of(501L), true));
+
+        ReportDocument document = orchestrator.generate(
+                run(), List.of(llm), LocalDateTime.of(2026, 8, 21, 9, 3));
+
+        assertEquals(ReportStatus.MOCK, document.status());
+    }
+
+    @Test
+    void sendsAtMostFiftyLlmFindingsInPriorityOrder() {
+        List<Finding> findings = LongStream.rangeClosed(1, 51)
+                .mapToObj(id -> finding(id, AnalysisSource.LLM, FetchStatus.FULLTEXT, "요약 " + id))
+                .toList();
+        when(client.report(any())).thenReturn(response(List.of(1L)));
+
+        orchestrator.generate(run(), findings, LocalDateTime.of(2026, 8, 21, 9, 3));
+
+        ArgumentCaptor<AgentReportRequest> captor = ArgumentCaptor.forClass(AgentReportRequest.class);
+        verify(client).report(captor.capture());
+        assertEquals(50, captor.getValue().findings().size());
+        assertEquals(1L, captor.getValue().findings().getFirst().id());
     }
 
     private AgentProperties enabledProperties() {
@@ -168,6 +209,10 @@ class AgentReportOrchestratorTest {
     }
 
     private AgentReportResponse response(List<Long> findingIds) {
+        return response(findingIds, false);
+    }
+
+    private AgentReportResponse response(List<Long> findingIds, boolean mockResponse) {
         return new AgentReportResponse(
                 "Agent 보고서",
                 List.of("짧은 속보"),
@@ -177,13 +222,22 @@ class AgentReportOrchestratorTest {
                 List.of("출처 참고"),
                 "# Agent 보고서",
                 new AgentReportResponse.Meta(
-                        "gemini",
-                        "configured-model",
+                        mockResponse ? "mock" : "gemini",
+                        mockResponse ? "deterministic-report" : "configured-model",
                         "report.ko.v1",
                         100L,
                         20L,
                         BigDecimal.ZERO,
                         BigDecimal.ZERO,
+                        mockResponse,
                         false));
+    }
+
+    private CollectionRunArticleRepository.ArticleFetchStatus observation(Long articleId, FetchStatus status) {
+        CollectionRunArticleRepository.ArticleFetchStatus observation =
+                mock(CollectionRunArticleRepository.ArticleFetchStatus.class);
+        when(observation.getArticleId()).thenReturn(articleId);
+        when(observation.getFetchStatus()).thenReturn(status);
+        return observation;
     }
 }

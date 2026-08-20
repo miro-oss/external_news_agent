@@ -39,6 +39,16 @@ class Settings(BaseSettings):
         gt=0,
         validation_alias="AGENT_PROVIDER_TIMEOUT_SECONDS",
     )
+    report_max_output_tokens: int = Field(
+        default=8_192,
+        ge=1,
+        validation_alias="AGENT_REPORT_MAX_OUTPUT_TOKENS",
+    )
+    report_provider_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        validation_alias="AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS",
+    )
     provider_retry_attempts: int = Field(
         default=1,
         ge=0,

@@ -36,7 +36,8 @@ public record AgentReportResponse(
             Long outputTokens,
             BigDecimal costUsd,
             BigDecimal credits,
-            boolean mock
+            boolean mock,
+            boolean truncated
     ) {
     }
 }

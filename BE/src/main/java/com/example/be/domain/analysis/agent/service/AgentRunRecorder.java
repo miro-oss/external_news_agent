@@ -4,6 +4,7 @@ import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.entity.AgentRun;
 import com.example.be.domain.analysis.agent.entity.AgentRunStatus;
 import com.example.be.domain.analysis.agent.entity.AgentTargetType;
@@ -112,6 +113,7 @@ public class AgentRunRecorder {
                                     AgentReportRequest request,
                                     String failureCode,
                                     String failureMessage,
+                                    AgentClientException.Usage usage,
                                     LocalDateTime startedAt) {
         repository.insertIfAbsent(AgentRun.builder()
                 .collectionRunId(runId)
@@ -123,6 +125,10 @@ public class AgentRunRecorder {
                 .failureCode(failureCode)
                 .failureMessage(truncate(failureMessage))
                 .llmPlan(request.plan())
+                .inputTokens(usage == null ? null : usage.inputTokens())
+                .outputTokens(usage == null ? null : usage.outputTokens())
+                .costUsd(usage == null ? null : usage.costUsd())
+                .credits(usage == null ? null : usage.credits())
                 .requestHash(hash(request))
                 .startedAt(startedAt)
                 .finishedAt(now())

@@ -77,6 +77,47 @@ class ReportGeneratorTest {
     }
 
     @Test
+    void excludesReusedFindingsFromFallbackContent() {
+        Finding reused = Finding.builder()
+                .id(2L)
+                .article(Article.builder()
+                        .id(102L)
+                        .topic(Topic.builder().name("반도체").build())
+                        .title("REUSED 기사")
+                        .canonicalUrl("https://example.com/reused")
+                        .build())
+                .changeType(ChangeType.UPDATED)
+                .summary("본문에 들어가면 안 되는 REUSED 요약")
+                .keyPoints(List.of())
+                .riskLevel(RiskLevel.HIGH)
+                .relevance(Relevance.IMPORTANT)
+                .category("기업")
+                .analysisSource(AnalysisSource.REUSED)
+                .build();
+
+        ReportDocument document = generator.generate(
+                List.of(reused),
+                LocalDateTime.of(2026, 8, 18, 9, 0),
+                new ReportSourceStats(1, 0, 0, 0, 0));
+
+        assertTrue(!document.markdownBody().contains("본문에 들어가면 안 되는 REUSED 요약"));
+        assertTrue(document.markdownBody().contains("기사 1건을 관측했지만 실제 LLM 분석 finding이 없어"));
+    }
+
+    @Test
+    void escapesMarkdownMetacharactersWithoutChangingAmpersands() {
+        Finding finding = finding(
+                1L, "TSMC & *삼성* [HBM]", "요약 _강조_", RiskLevel.HIGH, Relevance.IMPORTANT, "기업");
+
+        ReportDocument document = generator.generate(
+                List.of(finding), LocalDateTime.of(2026, 8, 18, 9, 0));
+
+        assertTrue(document.markdownBody().contains("TSMC & \\*삼성\\* \\[HBM\\]"));
+        assertTrue(document.markdownBody().contains("요약 \\_강조\\_"));
+        assertTrue(!document.markdownBody().contains("&amp;"));
+    }
+
+    @Test
     void truncatesMultibyteTitleWithinOracleByteLimit() {
         Finding finding = finding(1L, "기사", "요약", RiskLevel.LOW, Relevance.REFERENCE,
                 "기업", "가".repeat(200));

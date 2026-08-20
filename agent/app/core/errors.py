@@ -6,3 +6,4 @@ class AgentError(Exception):
     status_code: int
     code: str
     message: str
+    details: object | None = None

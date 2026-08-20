@@ -7,6 +7,8 @@ import com.example.be.domain.reports.entity.ReportStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -39,7 +41,7 @@ public class ReportGenerator {
                 sourceStats.paywalled(),
                 Math.max(sourceStats.stubExcluded(), actualStubCount));
         List<Finding> ordered = ReportFindingOrder.sort(findings.stream()
-                .filter(finding -> finding.getAnalysisSource() != AnalysisSource.STUB)
+                .filter(finding -> finding.getAnalysisSource() == AnalysisSource.LLM)
                 .toList());
         String title = title(ordered, generatedAt);
         return new ReportDocument(
@@ -66,13 +68,14 @@ public class ReportGenerator {
     }
 
     private String markdown(String title, List<Finding> findings, ReportSourceStats sourceStats) {
-        StringBuilder body = new StringBuilder("# ").append(singleLine(title)).append("\n\n");
+        StringBuilder body = new StringBuilder("# ").append(markdownText(title)).append("\n\n");
         body.append("## 오늘의 핵심\n\n");
         if (findings.isEmpty()) {
-            body.append("- 실제 LLM 분석 finding이 없어 포함할 핵심 요약이 없습니다.\n");
+            body.append("- 이번 실행에서 기사 ").append(sourceStats.collected())
+                    .append("건을 관측했지만 실제 LLM 분석 finding이 없어 기사 내용을 요약하지 않았습니다.\n");
         } else {
             findings.stream().limit(5).forEach(finding -> body
-                    .append("- ").append(singleLine(finding.getSummary())).append("\n"));
+                    .append("- ").append(markdownText(finding.getSummary())).append("\n"));
         }
 
         Map<String, Long> riskCounts = counts(findings, finding -> finding.getRiskLevel().toApiValue());
@@ -93,17 +96,17 @@ public class ReportGenerator {
 
         body.append("\n## 기사별 분석\n");
         if (findings.isEmpty()) {
-            body.append("\n분석할 기사가 없습니다.\n");
+            body.append("\nSTUB 또는 비LLM 분석 본문은 보고서 오염 방지를 위해 포함하지 않았습니다.\n");
         }
         for (Finding finding : findings) {
-            body.append("\n### ").append(singleLine(finding.getArticle().getTitle())).append("\n\n")
-                    .append(singleLine(finding.getSummary())).append("\n\n")
-                    .append("- 분류: ").append(singleLine(finding.getCategory()))
+            body.append("\n### ").append(markdownText(finding.getArticle().getTitle())).append("\n\n")
+                    .append(markdownText(finding.getSummary())).append("\n\n")
+                    .append("- 분류: ").append(markdownText(finding.getCategory()))
                     .append(" · 위험도: ").append(finding.getRiskLevel().toApiValue())
                     .append(" · 관련도: ").append(finding.getRelevance().toApiValue()).append("\n");
             finding.getEffectiveKeyPoints().forEach(point -> body
-                    .append("- 핵심: ").append(singleLine(point.text())).append("\n"));
-            if (StringUtils.hasText(finding.getArticle().getCanonicalUrl())) {
+                    .append("- 핵심: ").append(markdownText(point.text())).append("\n"));
+            if (safeHttpUrl(finding.getArticle().getCanonicalUrl())) {
                 body.append("- 원문: <").append(finding.getArticle().getCanonicalUrl().trim()).append(">\n");
             }
         }
@@ -113,30 +116,7 @@ public class ReportGenerator {
 
     private void appendSourceNotes(StringBuilder body, ReportSourceStats stats) {
         body.append("\n## 수집 및 출처 참고\n\n");
-        boolean hasNote = false;
-        if (stats.stubExcluded() > 0) {
-            body.append("- STUB 분석 ").append(stats.stubExcluded())
-                    .append("건은 실제 LLM 분석이 아니므로 보고서에서 제외했습니다.\n");
-            hasNote = true;
-        }
-        if (stats.paywalled() > 0) {
-            body.append("- 페이월로 전문을 확인하지 못한 기사가 ").append(stats.paywalled())
-                    .append("건 있습니다.\n");
-            hasNote = true;
-        }
-        int otherBlocked = Math.max(stats.blocked() - stats.paywalled(), 0);
-        if (otherBlocked > 0) {
-            body.append("- robots 또는 접근 제한으로 본문이 차단된 기사가 ")
-                    .append(otherBlocked).append("건 있습니다.\n");
-            hasNote = true;
-        }
-        if (stats.failed() > 0) {
-            body.append("- 본문 수집에 실패한 기사가 ").append(stats.failed()).append("건 있습니다.\n");
-            hasNote = true;
-        }
-        if (!hasNote) {
-            body.append("- 수집 또는 분석 제외 사항이 없습니다.\n");
-        }
+        ReportSourceNotes.from(stats).forEach(note -> body.append("- ").append(markdownText(note)).append("\n"));
     }
 
     private Map<String, Long> counts(List<Finding> findings,
@@ -148,6 +128,25 @@ public class ReportGenerator {
 
     private String singleLine(String value) {
         return value == null ? "" : value.replaceAll("\\s+", " ").trim();
+    }
+
+    private String markdownText(String value) {
+        return singleLine(value).replaceAll("([\\\\`*_{}\\[\\]<>()#+!|])", "\\\\$1");
+    }
+
+    private boolean safeHttpUrl(String value) {
+        if (!StringUtils.hasText(value)
+                || value.chars().anyMatch(character -> Character.isWhitespace(character)
+                || character == '<' || character == '>')) {
+            return false;
+        }
+        try {
+            URI uri = new URI(value);
+            return ("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                    && StringUtils.hasText(uri.getHost());
+        } catch (URISyntaxException ignored) {
+            return false;
+        }
     }
 
     private String truncateUtf8(String value, int maxBytes) {

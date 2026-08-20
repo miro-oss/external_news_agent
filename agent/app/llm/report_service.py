@@ -1,7 +1,6 @@
 import json
 import logging
 import re
-from html import escape
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -36,12 +35,18 @@ class ReportWriterService:
     ) -> None:
         self._settings = settings
         self._provider = provider
+        self._report_settings = settings.model_copy(
+            update={
+                "max_output_tokens": settings.report_max_output_tokens,
+                "provider_timeout_seconds": settings.report_provider_timeout_seconds,
+            }
+        )
 
     def write(self, request: ReportRequest) -> ReportResponse:
         if self._settings.mock or not request.findings:
             return _deterministic_response(request)
 
-        provider = self._provider or get_analyze_provider(self._settings, request.plan)
+        provider = self._provider or get_analyze_provider(self._report_settings, request.plan)
         response_schema = ReportOutput.model_json_schema(by_alias=True)
         prompt = _report_prompt(request)
         usage = ProviderUsage()
@@ -54,12 +59,14 @@ class ReportWriterService:
         usage += first.usage
         validation_error: JsonObjectParseError | ValidationError | None = None
         try:
-            return _validated_response(first, request, usage)
+            output = _validated_output(first, request)
         except (JsonObjectParseError, ValidationError) as first_error:
             _log_validation_failure(first, first_error, attempt=1)
             if self._settings.schema_repair_attempts == 0:
-                raise _schema_violation() from first_error
+                raise _schema_violation(usage, first.truncated) from first_error
             validation_error = first_error
+        else:
+            return _assembled_response(first, output, request, usage)
 
         repaired = provider.generate(
             system_instruction=SYSTEM_INSTRUCTION,
@@ -68,49 +75,62 @@ class ReportWriterService:
         )
         usage += repaired.usage
         try:
-            return _validated_response(repaired, request, usage)
+            output = _validated_output(repaired, request)
         except (JsonObjectParseError, ValidationError) as repair_error:
             _log_validation_failure(repaired, repair_error, attempt=2)
-            raise _schema_violation() from repair_error
+            raise _schema_violation(usage, first.truncated or repaired.truncated) from repair_error
+        return _assembled_response(repaired, output, request, usage)
 
 
-def _validated_response(
+def _validated_output(
     provider_response: ProviderResponse,
     request: ReportRequest,
-    usage: ProviderUsage,
-) -> ReportResponse:
+) -> ReportOutput:
     allowed_ids = frozenset(finding.id for finding in request.findings)
-    output = ReportOutput.model_validate(
+    return ReportOutput.model_validate(
         parse_json_object(provider_response.text),
         context={"allowed_finding_ids": allowed_ids},
     )
-    source_notes = _source_notes(request, output.source_notes)
-    title = _truncate_utf8(_single_line(output.title), 500)
-    return ReportResponse(
-        title=title,
-        executive_summary=output.executive_summary,
-        important_events=output.important_events,
-        watch_items=output.watch_items,
-        source_notes=source_notes,
-        markdown_body=_render_markdown(
-            request,
+
+
+def _assembled_response(
+    provider_response: ProviderResponse,
+    output: ReportOutput,
+    request: ReportRequest,
+    usage: ProviderUsage,
+) -> ReportResponse:
+    try:
+        source_notes = _source_notes(request)
+        title = _truncate_utf8(_single_line(output.title), 500)
+        return ReportResponse(
             title=title,
             executive_summary=output.executive_summary,
             important_events=output.important_events,
             watch_items=output.watch_items,
             source_notes=source_notes,
-        ),
-        meta=ReportResponseMeta(
-            provider=provider_response.provider,
-            model=provider_response.model,
-            prompt_version=PROMPT_VERSION,
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
-            cost_usd=float(usage.cost_usd),
-            credits=float(usage.credits),
-            mock=False,
-        ),
-    )
+            markdown_body=_render_markdown(
+                request,
+                title=title,
+                executive_summary=output.executive_summary,
+                important_events=output.important_events,
+                watch_items=output.watch_items,
+                source_notes=source_notes,
+            ),
+            meta=ReportResponseMeta(
+                provider=provider_response.provider,
+                model=provider_response.model,
+                prompt_version=PROMPT_VERSION,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cost_usd=float(usage.cost_usd),
+                credits=float(usage.credits),
+                mock=False,
+                truncated=provider_response.truncated,
+            ),
+        )
+    except (KeyError, TypeError, ValueError, ValidationError) as error:
+        logger.exception("검증된 provider 출력으로 보고서 응답을 조립하지 못했습니다.")
+        raise _assembly_error(usage, provider_response.truncated) from error
 
 
 def _deterministic_response(request: ReportRequest) -> ReportResponse:
@@ -124,7 +144,10 @@ def _deterministic_response(request: ReportRequest) -> ReportResponse:
     )
     executive_summary = [finding.summary_ko for finding in ordered[:3]]
     if not executive_summary:
-        executive_summary = ["실제 LLM 분석 finding이 없어 보고서에 포함할 핵심 요약이 없습니다."]
+        executive_summary = [
+            f"이번 실행에서 기사 {request.source_stats.collected}건을 관측했지만 "
+            "실제 LLM 분석 finding이 없어 기사 내용을 요약하지 않았습니다."
+        ]
 
     important_events = [
         ImportantEvent(
@@ -140,6 +163,11 @@ def _deterministic_response(request: ReportRequest) -> ReportResponse:
         for finding in ordered
         if finding.risk_level == "high" or finding.relevance == "important"
     ][:5]
+    important_ids = {
+        finding_id
+        for event in important_events
+        for finding_id in event.source_finding_ids
+    }
     watch_items = [
         WatchItem(
             topic=finding.article_title,
@@ -147,9 +175,10 @@ def _deterministic_response(request: ReportRequest) -> ReportResponse:
             source_finding_ids=[finding.id],
         )
         for finding in ordered
-        if finding.relevance == "watch" or finding.risk_level == "medium"
+        if (finding.relevance == "watch" or finding.risk_level == "medium")
+        and finding.id not in important_ids
     ][:5]
-    source_notes = _source_notes(request, [])
+    source_notes = _source_notes(request)
     title = _deterministic_title(request)
     return ReportResponse(
         title=title,
@@ -174,6 +203,7 @@ def _deterministic_response(request: ReportRequest) -> ReportResponse:
             cost_usd=0,
             credits=0,
             mock=True,
+            truncated=False,
         ),
     )
 
@@ -205,23 +235,8 @@ def _repair_prompt(original_prompt: str, raw: str, error: Exception | None) -> s
     )
 
 
-def _source_notes(request: ReportRequest, provider_notes: list[str]) -> list[str]:
-    notes = [_single_line(note) for note in provider_notes if _single_line(note)]
-    stats = request.source_stats
-    if stats.stub_excluded:
-        notes.append(
-            f"STUB 분석 {stats.stub_excluded}건은 실제 LLM 분석이 아니므로 보고서에서 제외했습니다."
-        )
-    if stats.paywalled:
-        notes.append(f"페이월로 전문을 확인하지 못한 기사가 {stats.paywalled}건 있습니다.")
-    other_blocked = max(stats.blocked - stats.paywalled, 0)
-    if other_blocked:
-        notes.append(f"robots 또는 접근 제한으로 본문이 차단된 기사가 {other_blocked}건 있습니다.")
-    if stats.failed:
-        notes.append(f"본문 수집에 실패한 기사가 {stats.failed}건 있습니다.")
-    if not notes:
-        notes.append("수집 또는 분석 제외 사항이 없습니다.")
-    return list(dict.fromkeys(notes))
+def _source_notes(request: ReportRequest) -> list[str]:
+    return list(dict.fromkeys(_single_line(note) for note in request.source_notes))
 
 
 def _render_markdown(
@@ -274,7 +289,7 @@ def _finding_references(ids: list[int], findings: dict[int, ReportFindingInput])
     for finding_id in ids:
         finding = findings[finding_id]
         title = _markdown_text(finding.article_title)
-        url = finding.canonical_url.replace(">", "%3E").strip()
+        url = finding.canonical_url
         references.append(f"[{title}](<{url}>)")
     return ", ".join(references)
 
@@ -284,8 +299,7 @@ def _single_line(value: str) -> str:
 
 
 def _markdown_text(value: str) -> str:
-    normalized = escape(_single_line(value), quote=False)
-    return re.sub(r"([\\\[\]])", r"\\\1", normalized)
+    return re.sub(r"([\\`*_{}\[\]<>()#+!|])", r"\\\1", _single_line(value))
 
 
 def _truncate_utf8(value: str, max_bytes: int) -> str:
@@ -311,9 +325,31 @@ def _log_validation_failure(
     )
 
 
-def _schema_violation() -> AgentError:
+def _schema_violation(usage: ProviderUsage, truncated: bool) -> AgentError:
     return AgentError(
         status_code=502,
         code="SCHEMA_VIOLATION",
         message="Provider 보고서 출력이 Agent 계약을 위반했습니다.",
+        details=_failure_details(usage, truncated),
     )
+
+
+def _assembly_error(usage: ProviderUsage, truncated: bool) -> AgentError:
+    return AgentError(
+        status_code=500,
+        code="INTERNAL_ERROR",
+        message="검증된 보고서 출력을 응답으로 조립하지 못했습니다.",
+        details=_failure_details(usage, truncated),
+    )
+
+
+def _failure_details(usage: ProviderUsage, truncated: bool) -> dict[str, object]:
+    return {
+        "usage": {
+            "inputTokens": usage.input_tokens,
+            "outputTokens": usage.output_tokens,
+            "costUsd": float(usage.cost_usd),
+            "credits": float(usage.credits),
+        },
+        "truncated": truncated,
+    }

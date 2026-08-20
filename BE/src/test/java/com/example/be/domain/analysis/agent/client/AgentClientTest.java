@@ -95,6 +95,29 @@ class AgentClientTest {
     }
 
     @Test
+    void preservesUsageFromFailedReportContract() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/report"))
+                .andRespond(withStatus(HttpStatus.BAD_GATEWAY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"error":{"code":"SCHEMA_VIOLATION","message":"출력 오류","details":{"usage":{"inputTokens":30,"outputTokens":15,"costUsd":0.25,"credits":2},"truncated":true}}}
+                                """));
+
+        AgentClientException exception = assertThrows(
+                AgentClientException.class,
+                () -> client.report(reportRequest()));
+
+        assertEquals(30L, exception.getUsage().inputTokens());
+        assertEquals(15L, exception.getUsage().outputTokens());
+        assertEquals(0, new java.math.BigDecimal("0.25").compareTo(exception.getUsage().costUsd()));
+        assertEquals(0, new java.math.BigDecimal("2").compareTo(exception.getUsage().credits()));
+        server.verify();
+    }
+
+    @Test
     void includesStatusAndBodyWhenAgentReturnsNonContractError() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -148,6 +171,7 @@ class AgentClientTest {
                         "FULLTEXT")),
                 List.of(),
                 new AgentReportRequest.SourceStatsPayload(3, 0, 0, 0, 2),
+                List.of("STUB 2건 제외"),
                 "TECHNOLOGY");
     }
 
@@ -220,7 +244,8 @@ class AgentClientTest {
                     "outputTokens": 20,
                     "costUsd": 0,
                     "credits": 0,
-                    "mock": false
+                    "mock": false,
+                    "truncated": false
                   }
                 }
                 """;

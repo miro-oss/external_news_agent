@@ -6,6 +6,7 @@ import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;
 import com.example.be.domain.reports.repository.NewsReportRepository;
@@ -53,7 +54,9 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         }
 
         Page<NewsReport> reports = reportRepository.findAll(
-                NewsReportSpecification.generatedBetween(parsedFrom, parsedTo),
+                NewsReportSpecification.generatedBetween(parsedFrom, parsedTo)
+                        .and((root, query, criteriaBuilder) ->
+                                criteriaBuilder.notEqual(root.get("reportStatus"), ReportStatus.PENDING)),
                 PageRequest.of(page, size, Sort.by(
                         Sort.Order.desc("generatedAt"), Sort.Order.desc("id"))));
         Map<Long, FindingRepository.ReportCount> counts = countsByRun(reports.getContent());
@@ -65,14 +68,14 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     @Override
     public ReportResDTO.Detail getLatest(boolean includeFindings) {
-        return reportRepository.findFirstByOrderByGeneratedAtDescIdDesc()
+        return reportRepository.findFirstByReportStatusNotOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING)
                 .map(report -> toDetail(report, includeFindings))
                 .orElse(null);
     }
 
     @Override
     public ReportResDTO.Detail getReport(Long reportId, boolean includeFindings) {
-        NewsReport report = reportRepository.findById(reportId)
+        NewsReport report = reportRepository.findByIdAndReportStatusNot(reportId, ReportStatus.PENDING)
                 .orElseThrow(() -> new ReportException(ReportErrorCode.REPORT_NOT_FOUND));
         return toDetail(report, includeFindings);
     }

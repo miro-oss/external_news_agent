@@ -42,7 +42,7 @@ def create_app() -> FastAPI:
 
     @application.exception_handler(AgentError)
     async def handle_agent_error(_: Request, exc: AgentError) -> JSONResponse:
-        return _error_response(exc.status_code, exc.code, exc.message)
+        return _error_response(exc.status_code, exc.code, exc.message, exc.details)
 
     @application.exception_handler(RequestValidationError)
     async def handle_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:

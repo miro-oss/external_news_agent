@@ -1,20 +1,19 @@
-package com.example.be.domain.analysis.agent.service;
+package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.agent.client.AgentClient;
 import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.service.AgentRunRecorder;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.FetchStatus;
+import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
-import com.example.be.domain.reports.service.ReportDocument;
-import com.example.be.domain.reports.service.ReportGenerator;
-import com.example.be.domain.reports.service.ReportSourceStats;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +25,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Slf4j
@@ -35,12 +36,14 @@ import java.util.Set;
 public class AgentReportOrchestrator {
 
     private static final String DEFAULT_PERSPECTIVE = "TECHNOLOGY";
+    private static final int MAX_REPORT_FINDINGS = 50;
     private static final Set<String> PROVIDER_VALUES = Set.of("gemini", "mindlogic-claude", "mock");
 
     private final AgentProperties properties;
     private final AgentClient client;
     private final AgentRunRecorder recorder;
     private final ReportGenerator fallbackGenerator;
+    private final CollectionRunArticleRepository observationRepository;
 
     public ReportDocument generate(CollectionRun run,
                                    List<Finding> findings,
@@ -62,8 +65,11 @@ public class AgentReportOrchestrator {
             String code = exception instanceof AgentClientException clientException
                     ? clientException.getCode()
                     : "SCHEMA_VIOLATION";
+            AgentClientException.Usage usage = exception instanceof AgentClientException clientException
+                    ? clientException.getUsage()
+                    : null;
             if (request != null) {
-                recordFailureSafely(run.getId(), request, code, exception.getMessage(), startedAt);
+                recordFailureSafely(run.getId(), request, code, exception.getMessage(), usage, startedAt);
             }
             log.warn("Agent 보고서 생성에 실패해 안전한 fallback을 사용한다. runId={} code={} error={}",
                     run.getId(), code, exception.getMessage());
@@ -75,8 +81,11 @@ public class AgentReportOrchestrator {
                                        List<Finding> findings,
                                        LocalDateTime generatedAt,
                                        ReportSourceStats sourceStats) {
-        List<Finding> eligible = findings.stream()
-                .filter(finding -> finding.getAnalysisSource() != AnalysisSource.STUB)
+        List<Finding> eligible = ReportFindingOrder.sort(findings.stream()
+                        .filter(finding -> finding.getAnalysisSource() == AnalysisSource.LLM)
+                        .toList())
+                .stream()
+                .limit(MAX_REPORT_FINDINGS)
                 .toList();
         LocalDateTime finishedAt = run.getFinishedAt() == null ? generatedAt : run.getFinishedAt();
         return new AgentReportRequest(
@@ -95,6 +104,7 @@ public class AgentReportOrchestrator {
                         sourceStats.failed(),
                         sourceStats.paywalled(),
                         sourceStats.stubExcluded()),
+                ReportSourceNotes.from(sourceStats),
                 DEFAULT_PERSPECTIVE);
     }
 
@@ -130,7 +140,7 @@ public class AgentReportOrchestrator {
                 meta.outputTokens(),
                 meta.costUsd(),
                 meta.credits(),
-                ReportStatus.GENERATED);
+                meta.mock() ? ReportStatus.MOCK : ReportStatus.GENERATED);
     }
 
     private void validate(AgentReportResponse response, AgentReportRequest request) {
@@ -193,9 +203,12 @@ public class AgentReportOrchestrator {
     }
 
     private ReportSourceStats sourceStats(CollectionRun run, List<Finding> findings) {
-        int paywalled = countStatus(findings, FetchStatus.FULLTEXT_BLOCKED);
-        int blocked = paywalled + countStatus(findings, FetchStatus.ROBOTS_DISALLOWED);
-        int failed = countStatus(findings, FetchStatus.FETCH_FAILED);
+        Map<Long, FetchStatus> statusesByArticle = new LinkedHashMap<>();
+        observationRepository.findArticleFetchStatusesByRunId(run.getId()).forEach(observation ->
+                statusesByArticle.put(observation.getArticleId(), observation.getFetchStatus()));
+        int paywalled = countStatus(statusesByArticle, FetchStatus.FULLTEXT_BLOCKED);
+        int blocked = paywalled + countStatus(statusesByArticle, FetchStatus.ROBOTS_DISALLOWED);
+        int failed = countStatus(statusesByArticle, FetchStatus.FETCH_FAILED);
         int stubExcluded = (int) findings.stream()
                 .filter(finding -> finding.getAnalysisSource() == AnalysisSource.STUB)
                 .count();
@@ -206,9 +219,9 @@ public class AgentReportOrchestrator {
         return new ReportSourceStats(collected, blocked, failed, paywalled, stubExcluded);
     }
 
-    private int countStatus(List<Finding> findings, FetchStatus status) {
-        return (int) findings.stream()
-                .filter(finding -> finding.getArticle().getFetchStatus() == status)
+    private int countStatus(Map<Long, FetchStatus> statusesByArticle, FetchStatus status) {
+        return (int) statusesByArticle.values().stream()
+                .filter(status::equals)
                 .count();
     }
 
@@ -268,9 +281,10 @@ public class AgentReportOrchestrator {
                                      AgentReportRequest request,
                                      String code,
                                      String message,
+                                     AgentClientException.Usage usage,
                                      LocalDateTime startedAt) {
         try {
-            recorder.recordReportFailure(runId, request, code, message, startedAt);
+            recorder.recordReportFailure(runId, request, code, message, usage, startedAt);
         } catch (RuntimeException exception) {
             log.error("실패한 Agent 보고서의 감사 로그를 기록하지 못했다. runId={} code={}",
                     runId, code, exception);

@@ -10,6 +10,10 @@ AGENT_SHARED_SECRET=local-dev-agent-token uv run uvicorn app.main:app \
   --host 127.0.0.1 --port 8088
 ```
 
+보고서는 기사 1건 분석과 별도로 `AGENT_REPORT_MAX_OUTPUT_TOKENS`(기본 8192)와
+`AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS`(기본 120초)를 사용합니다. 한 요청에는 우선순위가 높은
+LLM finding을 최대 50건까지 받습니다.
+
 검증 명령은 다음과 같습니다.
 
 ```bash

@@ -1,12 +1,14 @@
 from datetime import datetime
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, ValidationInfo, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from app.schemas.analyze import Plan
 from app.schemas.common import AgentModel
 
 NonEmptyString = Annotated[str, Field(min_length=1)]
+MAX_REPORT_FINDINGS = 50
 
 
 class ReportRunInput(AgentModel):
@@ -26,7 +28,7 @@ class ReportFindingInput(AgentModel):
     id: int = Field(gt=0)
     article_id: int = Field(gt=0)
     article_title: str = Field(min_length=1, max_length=1000)
-    canonical_url: str = Field(min_length=1, max_length=2000, pattern=r"^https?://")
+    canonical_url: str = Field(min_length=1, max_length=2000)
     source_name: str | None = Field(default=None, max_length=200)
     change_type: Literal["NEW", "UPDATED"]
     summary_ko: str = Field(min_length=1)
@@ -43,6 +45,16 @@ class ReportFindingInput(AgentModel):
         "ROBOTS_DISALLOWED",
         "FETCH_FAILED",
     ]
+
+    @field_validator("canonical_url")
+    @classmethod
+    def validate_canonical_url(cls, value: str) -> str:
+        if any(character.isspace() or character in "<>" for character in value):
+            raise ValueError("canonicalUrl에는 공백이나 꺾쇠괄호를 사용할 수 없습니다.")
+        parsed = urlsplit(value)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("canonicalUrl은 hostname이 있는 HTTP(S) URL이어야 합니다.")
+        return value
 
 
 class ReportEventInput(AgentModel):
@@ -70,9 +82,10 @@ class ReportRequest(AgentModel):
     idempotency_key: str = Field(min_length=1, max_length=200)
     plan: Plan
     run: ReportRunInput
-    findings: list[ReportFindingInput]
+    findings: list[ReportFindingInput] = Field(max_length=MAX_REPORT_FINDINGS)
     events: list[ReportEventInput] = Field(default_factory=list)
     source_stats: SourceStats
+    source_notes: list[NonEmptyString] = Field(min_length=1)
     perspective: Literal["TECHNOLOGY", "COMPANY", "POLICY", "SUPPLY_CHAIN"] = (
         "TECHNOLOGY"
     )
@@ -135,6 +148,7 @@ class ReportResponseMeta(AgentModel):
     cost_usd: float = Field(ge=0)
     credits: float = Field(ge=0)
     mock: bool
+    truncated: bool = False
 
 
 class ReportResponse(AgentModel):

@@ -75,7 +75,11 @@ public class AgentClient {
             return response;
         } catch (RestClientResponseException exception) {
             AgentErrorResponse error = errorResponse(exception);
-            throw new AgentClientException(errorCode(error, exception), errorMessage(error, exception), exception);
+            throw new AgentClientException(
+                    errorCode(error, exception),
+                    errorMessage(error, exception),
+                    exception,
+                    error == null ? null : error.usage());
         } catch (RestClientException exception) {
             throw new AgentClientException(
                     "PROVIDER_UNAVAILABLE", "Agent에 연결할 수 없습니다.", exception);
