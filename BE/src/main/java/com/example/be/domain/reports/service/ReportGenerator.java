@@ -72,7 +72,7 @@ public class ReportGenerator {
                     .append("- 분류: ").append(singleLine(finding.getCategory()))
                     .append(" · 위험도: ").append(finding.getRiskLevel().toApiValue())
                     .append(" · 관련도: ").append(finding.getRelevance().toApiValue()).append("\n");
-            finding.getKeyPoints().forEach(point -> body
+            finding.getEffectiveKeyPoints().forEach(point -> body
                     .append("- 핵심: ").append(singleLine(point.text())).append("\n"));
             if (StringUtils.hasText(finding.getArticle().getCanonicalUrl())) {
                 body.append("- 원문: <").append(finding.getArticle().getCanonicalUrl().trim()).append(">\n");

@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 from google import genai
@@ -8,12 +9,22 @@ from app.core.errors import AgentError
 from app.core.safecast import safe_int
 from app.llm.base import ProviderResponse, ProviderUsage
 
+logger = logging.getLogger(__name__)
+
+_UNSUPPORTED_SCHEMA_KEYS = frozenset({"maxLength", "minLength", "pattern"})
+
 
 class GeminiAnalyzeProvider:
     def __init__(self, settings: Settings, client: Any | None = None) -> None:
         self._model = settings.gemini_model
         self._max_output_tokens = settings.max_output_tokens
-        self._client = client or genai.Client(api_key=settings.gemini_api_key)
+        self._owns_client = client is None
+        self._client = client or genai.Client(
+            api_key=settings.gemini_api_key,
+            http_options=types.HttpOptions(
+                timeout=int(settings.provider_timeout_seconds * 1_000)
+            ),
+        )
 
     def generate(
         self,
@@ -31,7 +42,7 @@ class GeminiAnalyzeProvider:
                     temperature=0,
                     max_output_tokens=self._max_output_tokens,
                     response_mime_type="application/json",
-                    response_json_schema=response_schema,
+                    response_json_schema=_gemini_schema(response_schema),
                 ),
             )
             text = response.text
@@ -50,8 +61,29 @@ class GeminiAnalyzeProvider:
         except AgentError:
             raise
         except Exception as exc:
+            logger.warning(
+                "Gemini provider 호출에 실패했습니다. model=%s errorType=%s",
+                self._model,
+                type(exc).__name__,
+            )
             raise AgentError(
                 status_code=503,
                 code="PROVIDER_UNAVAILABLE",
                 message="Gemini provider를 호출할 수 없습니다.",
             ) from exc
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._client.close()
+
+
+def _gemini_schema(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _gemini_schema(child)
+            for key, child in value.items()
+            if key not in _UNSUPPORTED_SCHEMA_KEYS
+        }
+    if isinstance(value, list):
+        return [_gemini_schema(child) for child in value]
+    return value

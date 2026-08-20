@@ -129,9 +129,22 @@ public class Finding {
 
     @Builder.Default
     @Convert(converter = YnBooleanConverter.class)
-    @Column(name = "input_truncated", nullable = false, length = 1)
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "input_truncated_yn", nullable = false, length = 1)
     private boolean inputTruncated = false;
 
     @Column(name = "analyzed_at", nullable = false)
     private LocalDateTime analyzedAt;
+
+    /** A1 구조화 section이 있으면 여기서 기존 공개 key point 형태로 평탄화한다. */
+    public List<FindingKeyPoint> getEffectiveKeyPoints() {
+        if (analysisSections == null || analysisSections.isEmpty()) {
+            return keyPoints == null ? List.of() : keyPoints;
+        }
+        return analysisSections.stream()
+                .flatMap(section -> section.bullets().stream())
+                .map(bullet -> new FindingKeyPoint(
+                        bullet.text(), bullet.evidence(), bullet.groundedness()))
+                .toList();
+    }
 }

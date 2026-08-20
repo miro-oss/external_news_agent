@@ -30,7 +30,18 @@ def test_uses_gateway_strict_json_schema_contract() -> None:
     response = MindlogicAnalyzeProvider(settings, client).generate(
         system_instruction="system",
         prompt="prompt",
-        response_schema={"type": "object", "additionalProperties": False},
+        response_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {"type": "integer", "minimum": 1},
+                },
+                "name": {"type": "string", "minLength": 1},
+            },
+        },
     )
 
     body = captured["body"]
@@ -39,7 +50,28 @@ def test_uses_gateway_strict_json_schema_contract() -> None:
     assert captured["authorization"] == "Bearer gateway-key"
     assert body["model"] == "configured-claude"
     assert body["response_format"]["json_schema"]["strict"] is True
-    assert body["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
+    schema = body["response_format"]["json_schema"]["schema"]
+    assert schema["additionalProperties"] is False
+    assert "minItems" not in schema["properties"]["items"]
+    assert "minimum" not in schema["properties"]["items"]["items"]
+    assert "minLength" not in schema["properties"]["name"]
     assert response.usage.input_tokens == 12
     assert response.usage.output_tokens == 4
     assert float(response.usage.credits) == 1
+
+    MindlogicAnalyzeProvider(settings, client).close()
+    assert client.is_closed is False
+    client.close()
+
+
+def test_closes_owned_http_client() -> None:
+    settings = Settings(
+        MINDLOGIC_API_KEY="gateway-key",
+        MINDLOGIC_CLAUDE_MODEL="configured-claude",
+    )
+    provider = MindlogicAnalyzeProvider(settings)
+    client = provider._client
+
+    provider.close()
+
+    assert client.is_closed is True

@@ -158,7 +158,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .canonicalUrl(finding.getArticle().getCanonicalUrl())
                 .changeType(finding.getChangeType().name())
                 .summary(finding.getSummary())
-                .keyPoints(finding.getKeyPoints().stream().map(point -> point.text()).toList())
+                .keyPoints(finding.getEffectiveKeyPoints().stream().map(point -> point.text()).toList())
                 .intent(finding.getIntent())
                 .sentiment(finding.getSentiment().toApiValue())
                 .riskLevel(finding.getRiskLevel().toApiValue())

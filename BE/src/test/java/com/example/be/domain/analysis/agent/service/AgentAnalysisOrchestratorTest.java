@@ -15,10 +15,14 @@ import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -127,6 +131,24 @@ class AgentAnalysisOrchestratorTest {
                 eq(42L), eq(10L), any(), eq("SCHEMA_VIOLATION"), any(), any());
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidStructuredResponses")
+    void rejectsInvalidStructuredFieldsAndFallsBackToStub(
+            String caseName,
+            AgentAnalyzeResponse invalidResponse
+    ) {
+        Article article = article();
+        AnalysisResult stubResult = mock(AnalysisResult.class);
+        when(client.analyze(any())).thenReturn(invalidResponse);
+        when(stub.analyze(article)).thenReturn(stubResult);
+
+        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article));
+
+        assertSame(stubResult, result, caseName);
+        verify(recorder).recordFailure(
+                eq(42L), eq(10L), any(), eq("SCHEMA_VIOLATION"), any(), any());
+    }
+
     private AgentProperties enabledProperties() {
         AgentProperties properties = new AgentProperties();
         properties.setEnabled(true);
@@ -153,17 +175,17 @@ class AgentAnalysisOrchestratorTest {
                 .build();
     }
 
-    private AgentAnalyzeResponse response(List<Integer> evidenceIds) {
+    private static AgentAnalyzeResponse response(List<Integer> evidenceIds) {
         return response(evidenceIds, "제품/공정");
     }
 
-    private AgentAnalyzeResponse response(List<Integer> evidenceIds, String category) {
+    private static AgentAnalyzeResponse response(List<Integer> evidenceIds, String category) {
         return response(evidenceIds, category, true);
     }
 
-    private AgentAnalyzeResponse response(List<Integer> evidenceIds,
-                                          String category,
-                                          boolean mock) {
+    private static AgentAnalyzeResponse response(List<Integer> evidenceIds,
+                                                 String category,
+                                                 boolean mock) {
         return new AgentAnalyzeResponse(
                 List.of("근거 문장."),
                 List.of(new AgentAnalyzeResponse.Section(
@@ -184,5 +206,65 @@ class AgentAnalysisOrchestratorTest {
                         BigDecimal.ZERO,
                         mock,
                         false));
+    }
+
+    private static Stream<Arguments> invalidStructuredResponses() {
+        AgentAnalyzeResponse valid = response(List.of(1));
+        AgentAnalyzeResponse.Section validSection = valid.sections().getFirst();
+        AgentAnalyzeResponse.Bullet validBullet = validSection.bullets().getFirst();
+        return Stream.of(
+                Arguments.of("entities null", copy(valid, valid.sections(), null, valid.meta())),
+                Arguments.of("negative token", copy(
+                        valid,
+                        valid.sections(),
+                        valid.entities(),
+                        new AgentAnalyzeResponse.Meta(
+                                "mock", "mock", "analyze.mock.v1", -1L, 0L,
+                                BigDecimal.ZERO, BigDecimal.ZERO, true, false))),
+                Arguments.of("confidence out of range", copy(
+                        valid,
+                        List.of(new AgentAnalyzeResponse.Section(
+                                "핵심",
+                                List.of(new AgentAnalyzeResponse.Bullet(
+                                        validBullet.text(),
+                                        validBullet.evidenceSentenceIds(),
+                                        validBullet.groundedness(),
+                                        new BigDecimal("1.1"))))),
+                        valid.entities(),
+                        valid.meta())),
+                Arguments.of("blank heading", copy(
+                        valid,
+                        List.of(new AgentAnalyzeResponse.Section(" ", validSection.bullets())),
+                        valid.entities(),
+                        valid.meta())),
+                Arguments.of("unknown groundedness", copy(
+                        valid,
+                        List.of(new AgentAnalyzeResponse.Section(
+                                "핵심",
+                                List.of(new AgentAnalyzeResponse.Bullet(
+                                        validBullet.text(),
+                                        validBullet.evidenceSentenceIds(),
+                                        "unknown",
+                                        validBullet.confidence())))),
+                        valid.entities(),
+                        valid.meta())),
+                Arguments.of("empty sections", copy(
+                        valid, List.of(), valid.entities(), valid.meta()))
+        );
+    }
+
+    private static AgentAnalyzeResponse copy(
+            AgentAnalyzeResponse source,
+            List<AgentAnalyzeResponse.Section> sections,
+            AgentAnalyzeResponse.Entities entities,
+            AgentAnalyzeResponse.Meta meta
+    ) {
+        return new AgentAnalyzeResponse(
+                source.sentences(),
+                sections,
+                source.summaryKo(),
+                source.classification(),
+                entities,
+                meta);
     }
 }

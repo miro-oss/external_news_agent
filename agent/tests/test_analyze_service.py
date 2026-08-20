@@ -133,6 +133,8 @@ def test_fails_after_exactly_one_repair_when_evidence_is_out_of_range() -> None:
 
     assert caught.value.code == "SCHEMA_VIOLATION"
     assert len(provider.prompts) == 2
+    assert "<source-sentences>" in provider.prompts[1]
+    assert "Only one sentence." in provider.prompts[1]
 
 
 def test_prompt_treats_article_instruction_as_delimited_data() -> None:

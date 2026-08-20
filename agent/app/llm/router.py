@@ -1,3 +1,5 @@
+from threading import Lock
+
 from app.core.config import Settings
 from app.core.errors import AgentError
 from app.llm.base import AnalyzeProvider
@@ -5,19 +7,42 @@ from app.llm.gemini_provider import GeminiAnalyzeProvider
 from app.llm.mindlogic_provider import MindlogicAnalyzeProvider
 from app.schemas.analyze import Plan
 
+_PROVIDER_CACHE: dict[tuple[Settings, Plan], AnalyzeProvider] = {}
+_PROVIDER_LOCK = Lock()
 
-def create_analyze_provider(settings: Settings, plan: Plan) -> AnalyzeProvider:
+
+def get_analyze_provider(settings: Settings, plan: Plan) -> AnalyzeProvider:
     if plan == "FREE":
         _require(settings.gemini_api_key, settings.gemini_model, provider="Gemini")
-        return GeminiAnalyzeProvider(settings)
+    else:
+        _require(
+            settings.mindlogic_api_key,
+            settings.mindlogic_base_url,
+            settings.mindlogic_claude_model,
+            provider="Mindlogic",
+        )
 
-    _require(
-        settings.mindlogic_api_key,
-        settings.mindlogic_base_url,
-        settings.mindlogic_claude_model,
-        provider="Mindlogic",
-    )
-    return MindlogicAnalyzeProvider(settings)
+    key = (settings, plan)
+    with _PROVIDER_LOCK:
+        provider = _PROVIDER_CACHE.get(key)
+        if provider is None:
+            provider = (
+                GeminiAnalyzeProvider(settings)
+                if plan == "FREE"
+                else MindlogicAnalyzeProvider(settings)
+            )
+            _PROVIDER_CACHE[key] = provider
+        return provider
+
+
+def close_analyze_providers() -> None:
+    with _PROVIDER_LOCK:
+        providers = list(_PROVIDER_CACHE.values())
+        _PROVIDER_CACHE.clear()
+    for provider in providers:
+        close = getattr(provider, "close", None)
+        if callable(close):
+            close()
 
 
 def _require(*values: str, provider: str) -> None:

@@ -1,16 +1,23 @@
+import re
 from dataclasses import dataclass
 
 _TERMINATORS = frozenset(".!?。！？")
 _CLOSERS = frozenset("\"'”’)]}")
+_TERMINATORS_OR_CLOSERS = _TERMINATORS | _CLOSERS
+_DATE_SUFFIX = re.compile(r"(?:^|\s)\d{2,4}\.\s*\d{1,2}\.\s*\d{1,2}\.$")
 _NEVER_TERMINAL_ABBREVIATIONS = frozenset(
     {
         "dr.",
+        "e.u.",
         "e.g.",
         "i.e.",
         "mr.",
         "mrs.",
         "ms.",
         "prof.",
+        "u.k.",
+        "u.n.",
+        "u.s.",
         "vs.",
     }
 )
@@ -23,7 +30,7 @@ class SentenceSplit:
 
 
 def split_sentences(text: str, max_sentences: int) -> list[str]:
-    """기사 분석과 evidence id가 함께 사용하는 결정적인 sentence SSOT."""
+    """Agent 실제 분석과 evidence id가 함께 사용하는 결정적인 문장 배열."""
     return split_sentences_with_meta(text, max_sentences).sentences
 
 
@@ -48,7 +55,7 @@ def split_sentences_with_meta(text: str, max_sentences: int) -> SentenceSplit:
             continue
 
         end = index + 1
-        while end < len(normalized) and normalized[end] in _TERMINATORS | _CLOSERS:
+        while end < len(normalized) and normalized[end] in _TERMINATORS_OR_CLOSERS:
             end += 1
         _append(sentences, normalized[start:end])
         while end < len(normalized) and normalized[end] == " ":
@@ -80,6 +87,10 @@ def _is_boundary(text: str, index: int) -> bool:
         return _followed_by_space_or_end(text, index)
     if _is_decimal_point(text, index):
         return False
+    if _continues_numeric_notation(text, index):
+        return False
+    if _is_numbered_list_marker(text, index):
+        return False
 
     token = _period_token(text, index).lower()
     if token in _NEVER_TERMINAL_ABBREVIATIONS:
@@ -92,7 +103,7 @@ def _is_boundary(text: str, index: int) -> bool:
 
 def _followed_by_space_or_end(text: str, index: int) -> bool:
     cursor = index + 1
-    while cursor < len(text) and text[cursor] in _TERMINATORS | _CLOSERS:
+    while cursor < len(text) and text[cursor] in _TERMINATORS_OR_CLOSERS:
         cursor += 1
     return cursor == len(text) or text[cursor].isspace()
 
@@ -103,6 +114,29 @@ def _is_decimal_point(text: str, index: int) -> bool:
         and index + 1 < len(text)
         and text[index - 1].isdigit()
         and text[index + 1].isdigit()
+    )
+
+
+def _continues_numeric_notation(text: str, index: int) -> bool:
+    cursor = index + 1
+    while cursor < len(text) and text[cursor].isspace():
+        cursor += 1
+    if cursor < len(text) and text[cursor].isdigit():
+        return True
+
+    window_start = max(0, index - 30)
+    return _DATE_SUFFIX.search(text[window_start : index + 1]) is not None
+
+
+def _is_numbered_list_marker(text: str, index: int) -> bool:
+    start = index
+    while start > 0 and text[start - 1].isdigit():
+        start -= 1
+    number = text[start:index]
+    return (
+        len(number) == 1
+        and (start == 0 or text[start - 1].isspace())
+        and _next_content_char(text, index) is not None
     )
 
 

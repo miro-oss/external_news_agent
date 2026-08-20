@@ -127,6 +127,8 @@ def test_non_mock_mode_requires_selected_provider_configuration() -> None:
     app.dependency_overrides[get_settings] = lambda: Settings(
         AGENT_SHARED_SECRET="local-dev-agent-token",
         AGENT_MOCK=False,
+        GEMINI_API_KEY="",
+        GEMINI_MODEL="",
     )
     try:
         response = client.post(
@@ -136,7 +138,9 @@ def test_non_mock_mode_requires_selected_provider_configuration() -> None:
         )
     finally:
         app.dependency_overrides[get_settings] = lambda: Settings(
-            AGENT_SHARED_SECRET="local-dev-agent-token"
+            AGENT_SHARED_SECRET="local-dev-agent-token",
+            GEMINI_API_KEY="",
+            GEMINI_MODEL="",
         )
 
     assert response.status_code == 503

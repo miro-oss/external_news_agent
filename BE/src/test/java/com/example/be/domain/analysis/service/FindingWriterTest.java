@@ -2,7 +2,10 @@ package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.FindingAnalysisBullet;
+import com.example.be.domain.analysis.entity.FindingAnalysisSection;
 import com.example.be.domain.analysis.entity.FindingEntities;
+import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
@@ -59,10 +62,16 @@ class FindingWriterTest {
         AnalysisMetadata metadata = new AnalysisMetadata(
                 "analyze.ko.v1", "gemini", "gemini-2.5-flash",
                 120L, 30L, new BigDecimal("0.001"), BigDecimal.ZERO, true);
+        List<FindingAnalysisSection> analysisSections = List.of(new FindingAnalysisSection(
+                "핵심",
+                List.of(new FindingAnalysisBullet(
+                        "핵심 주장", List.of(0), "grounded", BigDecimal.ONE))));
         AnalysisResult result = new AnalysisResult(
-                "한국어 요약", List.of(), "산업 동향 보도",
+                "한국어 요약",
+                List.of(new FindingKeyPoint("핵심 주장", List.of(0), "grounded")),
+                "산업 동향 보도",
                 Sentiment.NEUTRAL, RiskLevel.LOW, Relevance.REFERENCE, "기업", List.of(),
-                AnalysisSource.LLM, List.of(), FindingEntities.empty(), metadata);
+                AnalysisSource.LLM, analysisSections, FindingEntities.empty(), metadata);
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
         when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
@@ -74,5 +83,7 @@ class FindingWriterTest {
         assertEquals(AnalysisSource.LLM, finding.getValue().getAnalysisSource());
         assertEquals("gemini", finding.getValue().getLlmProvider());
         assertTrue(finding.getValue().isInputTruncated());
+        assertTrue(finding.getValue().getKeyPoints().isEmpty());
+        assertEquals("핵심 주장", finding.getValue().getEffectiveKeyPoints().getFirst().text());
     }
 }

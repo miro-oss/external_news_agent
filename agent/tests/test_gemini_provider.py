@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app.core.config import Settings
+from app.llm import gemini_provider
 from app.llm.gemini_provider import GeminiAnalyzeProvider
 
 
@@ -30,11 +31,46 @@ def test_uses_gemini_json_schema_contract() -> None:
     response = GeminiAnalyzeProvider(settings, client).generate(
         system_instruction="system",
         prompt="prompt",
-        response_schema={"type": "object", "additionalProperties": False},
+        response_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"name": {"type": "string", "minLength": 1}},
+        },
     )
 
     assert models.model == "configured-gemini"
     assert models.config.response_mime_type == "application/json"
     assert models.config.response_json_schema["additionalProperties"] is False
+    assert "minLength" not in models.config.response_json_schema["properties"]["name"]
     assert response.usage.input_tokens == 12
     assert response.usage.output_tokens == 4
+
+
+def test_configures_timeout_and_closes_only_owned_client(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = FakeClient()
+
+    def client_factory(**kwargs):
+        captured.update(kwargs)
+        return client
+
+    monkeypatch.setattr(gemini_provider.genai, "Client", client_factory)
+    settings = Settings(
+        GEMINI_API_KEY="gemini-key",
+        GEMINI_MODEL="configured-gemini",
+        AGENT_PROVIDER_TIMEOUT_SECONDS=12.5,
+    )
+
+    provider = GeminiAnalyzeProvider(settings)
+    provider.close()
+
+    assert captured["http_options"].timeout == 12_500
+    assert client.closed is True

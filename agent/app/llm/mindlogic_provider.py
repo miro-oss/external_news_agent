@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 from typing import Any
 
@@ -7,6 +8,20 @@ from app.core.config import Settings
 from app.core.errors import AgentError
 from app.core.safecast import safe_int
 from app.llm.base import ProviderResponse, ProviderUsage
+
+logger = logging.getLogger(__name__)
+
+_UNSUPPORTED_STRICT_SCHEMA_KEYS = frozenset(
+    {
+        "maxItems",
+        "maxLength",
+        "maximum",
+        "minItems",
+        "minLength",
+        "minimum",
+        "pattern",
+    }
+)
 
 
 class MindlogicAnalyzeProvider:
@@ -20,6 +35,7 @@ class MindlogicAnalyzeProvider:
             "Authorization": f"Bearer {settings.mindlogic_api_key}",
             "Content-Type": "application/json",
         }
+        self._owns_client = client is None
         self._client = client or httpx.Client(
             timeout=settings.provider_timeout_seconds,
         )
@@ -48,7 +64,7 @@ class MindlogicAnalyzeProvider:
                         "json_schema": {
                             "name": "article_analysis",
                             "strict": True,
-                            "schema": response_schema,
+                            "schema": _strict_schema(response_schema),
                         },
                     },
                 },
@@ -72,8 +88,36 @@ class MindlogicAnalyzeProvider:
         except AgentError:
             raise
         except Exception as exc:
+            status_code = (
+                exc.response.status_code
+                if isinstance(exc, httpx.HTTPStatusError)
+                else None
+            )
+            logger.warning(
+                "Mindlogic provider 호출에 실패했습니다. model=%s status=%s errorType=%s",
+                self._model,
+                status_code,
+                type(exc).__name__,
+            )
             raise AgentError(
                 status_code=503,
                 code="PROVIDER_UNAVAILABLE",
                 message="Mindlogic provider를 호출할 수 없습니다.",
             ) from exc
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._client.close()
+
+
+def _strict_schema(value: Any) -> Any:
+    """OpenAI 호환 strict 모드가 거부하는 검증 키워드는 서버 검증에 맡긴다."""
+    if isinstance(value, dict):
+        return {
+            key: _strict_schema(child)
+            for key, child in value.items()
+            if key not in _UNSUPPORTED_STRICT_SCHEMA_KEYS
+        }
+    if isinstance(value, list):
+        return [_strict_schema(child) for child in value]
+    return value

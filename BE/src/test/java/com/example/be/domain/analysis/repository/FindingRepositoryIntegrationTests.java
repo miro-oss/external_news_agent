@@ -5,7 +5,6 @@ import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingAnalysisBullet;
 import com.example.be.domain.analysis.entity.FindingAnalysisSection;
 import com.example.be.domain.analysis.entity.FindingEntities;
-import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
@@ -44,6 +43,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -151,7 +151,8 @@ class FindingRepositoryIntegrationTests {
 
         Finding found = findingRepository.findById(saved.getId()).orElseThrow();
         assertEquals("미국의 첨단 반도체 장비 수출 통제 강화와 관련된 소식이 보도됐다.", found.getSummary());
-        assertEquals(List.of(0), found.getKeyPoints().get(0).evidence());
+        assertTrue(found.getKeyPoints().isEmpty());
+        assertEquals(List.of(0), found.getEffectiveKeyPoints().getFirst().evidence());
         assertEquals("The United States tightened export controls.", found.getSections().get(0).text());
         assertEquals(RiskLevel.HIGH, found.getRiskLevel());
         assertEquals(AnalysisSource.LLM, found.getAnalysisSource());
@@ -204,7 +205,19 @@ class FindingRepositoryIntegrationTests {
 
         assertEquals("The United States tightened export controls.",
                 detail.getSentences().getFirst().getText());
+        assertEquals("The United States tightened export controls.", detail.getBodyText());
         assertEquals(1, detail.getSentences().size());
+        assertEquals("미국이 수출 통제를 강화했다.",
+                detail.getAnalysis().getKeyPoints().getFirst().getText());
+    }
+
+    @Test
+    void returnsCurrentBodyWithoutSentenceIndexesBeforeAnalysis() {
+        var detail = articleQueryService.getArticle(article.getId(), null);
+
+        assertEquals(article.getBody(), detail.getBodyText());
+        assertTrue(detail.getSentences().isEmpty());
+        assertNull(detail.getAnalysis());
     }
 
     @Test
@@ -264,8 +277,7 @@ class FindingRepositoryIntegrationTests {
                 .article(article)
                 .changeType(ChangeType.NEW)
                 .summary("미국의 첨단 반도체 장비 수출 통제 강화와 관련된 소식이 보도됐다.")
-                .keyPoints(List.of(new FindingKeyPoint(
-                        "미국이 첨단 반도체 장비 수출 통제를 강화했다.", List.of(0), "grounded")))
+                .keyPoints(List.of())
                 .intent("정책 변화 보도")
                 .sentiment(Sentiment.NEGATIVE)
                 .riskLevel(RiskLevel.HIGH)
