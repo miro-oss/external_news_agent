@@ -1,5 +1,7 @@
 package com.example.be.domain.collection.service.command;
 
+import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
 import com.example.be.domain.collection.converter.CollectionRunConverter;
 import com.example.be.domain.collection.dto.req.CollectionRunReqDTO;
 import com.example.be.domain.collection.entity.CollectionRun;
@@ -10,6 +12,7 @@ import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
+import com.example.be.domain.settings.service.LlmPlanService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -32,15 +35,18 @@ public class CollectionRunCommandServiceImpl implements CollectionRunCommandServ
 
     private final CollectionRunRepository runRepository;
     private final CollectionRunCreator runCreator;
+    private final LlmPlanService planService;
+    private final AgentQuotaService quotaService;
 
     @Override
     public CollectionRunStartResult startManualRun(CollectionRunReqDTO.Create request) {
         CollectionRunReqDTO.Create safeRequest = request == null ? new CollectionRunReqDTO.Create() : request;
         validateTopicIds(safeRequest.getTopicIds());
         String idempotencyKey = normalizeIdempotencyKey(safeRequest.getIdempotencyKey());
+        AgentPlan plan = planService.resolveRunPlan(safeRequest.getPlan());
 
         return findInProgress(idempotencyKey)
-                .orElseGet(() -> create(safeRequest, idempotencyKey));
+                .orElseGet(() -> create(safeRequest, idempotencyKey, plan));
     }
 
     /**
@@ -50,20 +56,25 @@ public class CollectionRunCommandServiceImpl implements CollectionRunCommandServ
      * 비었다는 뜻이라 "이미 실행 중"은 거짓이다. 한 번 더 만들어 본다. 그 사이에 또 누가 같은 키를
      * 집었다면 그때는 정말로 실행 중이므로 RUN409가 맞다.
      */
-    private CollectionRunStartResult create(CollectionRunReqDTO.Create request, String idempotencyKey) {
+    private CollectionRunStartResult create(CollectionRunReqDTO.Create request,
+                                            String idempotencyKey,
+                                            AgentPlan plan) {
+        quotaService.assertRunCanStart(plan);
         try {
-            return runCreator.create(request, idempotencyKey);
+            return runCreator.create(request, idempotencyKey, plan);
         } catch (DuplicatedIdempotencyKeyException first) {
             return findInProgress(idempotencyKey)
-                    .orElseGet(() -> retryCreate(request, idempotencyKey));
+                    .orElseGet(() -> retryCreate(request, idempotencyKey, plan));
         }
     }
 
-    private CollectionRunStartResult retryCreate(CollectionRunReqDTO.Create request, String idempotencyKey) {
+    private CollectionRunStartResult retryCreate(CollectionRunReqDTO.Create request,
+                                                 String idempotencyKey,
+                                                 AgentPlan plan) {
         log.info("같은 키의 실행이 재조회 전에 끝났다. 새 실행으로 다시 만든다. idempotencyKey={}", idempotencyKey);
 
         try {
-            return runCreator.create(request, idempotencyKey);
+            return runCreator.create(request, idempotencyKey, plan);
         } catch (DuplicatedIdempotencyKeyException second) {
             return findInProgress(idempotencyKey)
                     .orElseThrow(() -> new RunException(RunErrorCode.RUN_IN_PROGRESS));

@@ -167,6 +167,13 @@ public class CollectionResultWriter {
                 "보고서 생성에 실패했습니다. " + detail));
     }
 
+    /** quota 소진과 자동 fallback을 실행 이력에서 설명할 수 있게 실행 수준 경고로 남긴다. */
+    @Transactional
+    public void addAgentQuotaWarning(Long runId, String code, String message) {
+        CollectionRun run = runRepository.findById(runId).orElseThrow();
+        run.addWarning(warning(null, code, message));
+    }
+
     @Transactional
     public void finishRun(Long runId) {
         CollectionRun run = runRepository.findById(runId).orElseThrow();

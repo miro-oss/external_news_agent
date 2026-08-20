@@ -5,6 +5,7 @@ import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.collection.repository.CollectionRunRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -22,6 +23,7 @@ import java.util.Set;
 public class ArticleAnalysisPipeline {
 
     private final CollectionRunArticleRepository runArticleRepository;
+    private final CollectionRunRepository runRepository;
     private final ArticleAnalysisOrchestrator orchestrator;
     private final FindingWriter findingWriter;
 
@@ -30,9 +32,12 @@ public class ArticleAnalysisPipeline {
     }
 
     public void analyze(Long runId, Set<Long> refreshedArticleIds) {
+        com.example.be.domain.analysis.agent.entity.AgentPlan plan = runRepository.findById(runId)
+                .orElseThrow(() -> new IllegalStateException("분석할 수집 실행이 없습니다. runId=" + runId))
+                .getLlmPlan();
         for (Target target : targets(runId, refreshedArticleIds)) {
             try {
-                AnalysisResult result = orchestrator.analyze(new AnalysisContext(runId, target.article()));
+                AnalysisResult result = orchestrator.analyze(new AnalysisContext(runId, target.article(), plan));
                 findingWriter.write(runId, target.article().getId(), target.changeType(), result);
             } catch (RuntimeException exception) {
                 log.warn("기사 분석에 실패했다. runId={} articleId={} error={}",

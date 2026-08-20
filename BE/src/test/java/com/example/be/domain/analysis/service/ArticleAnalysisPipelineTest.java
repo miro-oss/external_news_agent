@@ -1,10 +1,14 @@
 package com.example.be.domain.analysis.service;
 
+import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
+import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.collection.repository.CollectionRunRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -21,10 +25,17 @@ import static org.mockito.Mockito.when;
 class ArticleAnalysisPipelineTest {
 
     private final CollectionRunArticleRepository runArticleRepository = mock(CollectionRunArticleRepository.class);
+    private final CollectionRunRepository runRepository = mock(CollectionRunRepository.class);
     private final ArticleAnalysisOrchestrator orchestrator = mock(ArticleAnalysisOrchestrator.class);
     private final FindingWriter findingWriter = mock(FindingWriter.class);
     private final ArticleAnalysisPipeline pipeline =
-            new ArticleAnalysisPipeline(runArticleRepository, orchestrator, findingWriter);
+            new ArticleAnalysisPipeline(runArticleRepository, runRepository, orchestrator, findingWriter);
+
+    @BeforeEach
+    void loadRunPlan() {
+        when(runRepository.findById(42L)).thenReturn(java.util.Optional.of(
+                CollectionRun.builder().id(42L).llmPlan(AgentPlan.FREE).build()));
+    }
 
     @Test
     void analyzesSameArticleOnlyOnceAndPrefersUpdatedObservation() {

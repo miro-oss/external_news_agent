@@ -14,6 +14,9 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.ResourceAccessException;
+
+import java.net.SocketTimeoutException;
 
 @Component
 public class AgentClient {
@@ -82,8 +85,27 @@ public class AgentClient {
                     error == null ? null : error.usage());
         } catch (RestClientException exception) {
             throw new AgentClientException(
-                    "PROVIDER_UNAVAILABLE", "Agent에 연결할 수 없습니다.", exception);
+                    "PROVIDER_UNAVAILABLE",
+                    isTimeout(exception) ? "Agent 호출 시간이 초과되었습니다." : "Agent에 연결할 수 없습니다.",
+                    exception,
+                    null,
+                    isTimeout(exception));
         }
+    }
+
+    private boolean isTimeout(RestClientException exception) {
+        if (!(exception instanceof ResourceAccessException)) {
+            return false;
+        }
+        Throwable cause = exception;
+        while (cause != null) {
+            if (cause instanceof SocketTimeoutException
+                    || cause instanceof java.net.http.HttpTimeoutException) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
     }
 
     private AgentErrorResponse errorResponse(RestClientResponseException exception) {

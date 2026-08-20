@@ -55,6 +55,36 @@ class Settings(BaseSettings):
         le=3,
         validation_alias="AGENT_PROVIDER_RETRY_ATTEMPTS",
     )
+    provider_concurrency: int = Field(
+        default=4,
+        ge=1,
+        validation_alias="AGENT_PROVIDER_CONCURRENCY",
+    )
+    provider_acquire_timeout_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        validation_alias="AGENT_PROVIDER_ACQUIRE_TIMEOUT_SECONDS",
+    )
+    circuit_failure_threshold: int = Field(
+        default=3,
+        ge=1,
+        validation_alias="AGENT_CIRCUIT_FAILURE_THRESHOLD",
+    )
+    circuit_cooldown_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        validation_alias="AGENT_CIRCUIT_COOLDOWN_SECONDS",
+    )
+    hard_cap_credits_per_request: float = Field(
+        default=5.0,
+        gt=0,
+        validation_alias="AGENT_HARD_CAP_CREDITS_PER_REQUEST",
+    )
+    mindlogic_credits_per_request: float = Field(
+        default=1.0,
+        gt=0,
+        validation_alias="MINDLOGIC_CREDITS_PER_REQUEST",
+    )
     schema_repair_attempts: int = Field(
         default=1,
         ge=0,

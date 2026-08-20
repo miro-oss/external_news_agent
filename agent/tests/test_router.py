@@ -3,6 +3,7 @@ import pytest
 from app.core.config import Settings
 from app.core.errors import AgentError
 from app.llm.gemini_provider import GeminiAnalyzeProvider
+from app.llm.guarded_provider import GuardedAnalyzeProvider
 from app.llm.mindlogic_provider import MindlogicAnalyzeProvider
 from app.llm.router import close_analyze_providers, get_analyze_provider
 
@@ -29,8 +30,10 @@ def test_routes_free_and_paid_to_configured_provider() -> None:
         free = get_analyze_provider(settings, "FREE")
         paid = get_analyze_provider(settings, "PAID")
 
-        assert isinstance(free, GeminiAnalyzeProvider)
-        assert isinstance(paid, MindlogicAnalyzeProvider)
+        assert isinstance(free, GuardedAnalyzeProvider)
+        assert isinstance(paid, GuardedAnalyzeProvider)
+        assert isinstance(free.delegate, GeminiAnalyzeProvider)
+        assert isinstance(paid.delegate, MindlogicAnalyzeProvider)
         assert get_analyze_provider(settings, "FREE") is free
         assert get_analyze_provider(settings, "PAID") is paid
     finally:

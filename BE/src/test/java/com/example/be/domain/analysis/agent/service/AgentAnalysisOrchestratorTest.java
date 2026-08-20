@@ -2,8 +2,13 @@ package com.example.be.domain.analysis.agent.service;
 
 import com.example.be.domain.analysis.agent.client.AgentClient;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
+import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.agent.entity.AgentTask;
+import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
+import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
+import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
@@ -13,11 +18,16 @@ import com.example.be.domain.analysis.service.AnalysisContext;
 import com.example.be.domain.analysis.service.StubArticleAnalyzer;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.FetchStatus;
+import com.example.be.domain.collection.service.command.CollectionResultWriter;
+import com.example.be.domain.settings.service.LlmPlanService;
+import com.example.be.domain.settings.entity.PaidExhaustedAction;
 import com.example.be.domain.topics.entity.Topic;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -40,8 +50,20 @@ class AgentAnalysisOrchestratorTest {
     private final AgentClient client = mock(AgentClient.class);
     private final AgentRunRecorder recorder = mock(AgentRunRecorder.class);
     private final StubArticleAnalyzer stub = mock(StubArticleAnalyzer.class);
+    private final AgentQuotaService quotaService = mock(AgentQuotaService.class);
+    private final LlmPlanService planService = mock(LlmPlanService.class);
+    private final CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
+    private final QuotaReservation reservation = new QuotaReservation(
+            1L, 42L, "run:42:article:10", AgentTask.ANALYZE, AgentPlan.FREE, BigDecimal.ONE);
     private final AgentAnalysisOrchestrator orchestrator =
-            new AgentAnalysisOrchestrator(properties, client, recorder, stub);
+            new AgentAnalysisOrchestrator(
+                    properties, client, recorder, stub, quotaService, planService, resultWriter);
+
+    @BeforeEach
+    void reserveQuota() {
+        when(quotaService.reserve(42L, "run:42:article:10", AgentTask.ANALYZE, AgentPlan.FREE))
+                .thenReturn(reservation);
+    }
 
     @Test
     void mapsOneBasedAgentEvidenceToZeroBasedPublicContractAndRecordsMockRun() {
@@ -76,6 +98,27 @@ class AgentAnalysisOrchestratorTest {
         assertEquals(30L, result.metadata().outputTokens());
         assertEquals(new BigDecimal("0.001"), result.metadata().costUsd());
         assertFalse(result.metadata().truncated());
+    }
+
+    @Test
+    void usesFallbackReservationKeyAndFreePlanWhenPaidQuotaIsExhausted() {
+        QuotaReservation fallback = new QuotaReservation(
+                2L, 42L, "run:42:article:10:fallback-free",
+                AgentTask.ANALYZE, AgentPlan.FREE, BigDecimal.ONE);
+        when(quotaService.reserve(42L, "run:42:article:10", AgentTask.ANALYZE, AgentPlan.PAID))
+                .thenThrow(new QuotaExceededException(AgentPlan.PAID, "exhausted"));
+        when(planService.paidExhaustedAction()).thenReturn(PaidExhaustedAction.FALLBACK_FREE);
+        when(quotaService.reserve(
+                42L, "run:42:article:10:fallback-free", AgentTask.ANALYZE, AgentPlan.FREE))
+                .thenReturn(fallback);
+        when(client.analyze(any())).thenReturn(response(List.of(1), "제품/공정", false));
+
+        orchestrator.analyze(new AnalysisContext(42L, article(), AgentPlan.PAID));
+
+        ArgumentCaptor<AgentAnalyzeRequest> captor = ArgumentCaptor.forClass(AgentAnalyzeRequest.class);
+        verify(client).analyze(captor.capture());
+        assertEquals(AgentPlan.FREE, captor.getValue().plan());
+        assertEquals("run:42:article:10:fallback-free", captor.getValue().idempotencyKey());
     }
 
     @Test

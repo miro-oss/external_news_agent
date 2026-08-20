@@ -52,3 +52,13 @@ news:
     analyze-timeout: 30s
     report-timeout: 120s
     default-plan: FREE
+    allow-run-override: true
+    quota:
+      free-run-article-limit: 30
+      free-daily-calls: 1500
+      paid-monthly-credits: 3000
+      paid-daily-credits: 90
+      paid-daily-report-reserve: 20
+      paid-run-article-limit: 20
+      # Mindlogic gateway usage 실측 전에는 요청 1건을 1 credit으로 보수적으로 예약한다.
+      paid-credits-per-request: 1

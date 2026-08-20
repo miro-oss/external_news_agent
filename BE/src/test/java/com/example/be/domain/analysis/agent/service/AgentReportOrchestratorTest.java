@@ -5,6 +5,9 @@ import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.agent.entity.AgentTask;
+import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
+import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
@@ -17,11 +20,14 @@ import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.collection.service.command.CollectionResultWriter;
 import com.example.be.domain.reports.service.AgentReportOrchestrator;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.service.ReportDocument;
 import com.example.be.domain.reports.service.ReportGenerator;
 import com.example.be.domain.topics.entity.Topic;
+import com.example.be.domain.settings.service.LlmPlanService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -47,8 +53,21 @@ class AgentReportOrchestratorTest {
     private final AgentRunRecorder recorder = mock(AgentRunRecorder.class);
     private final ReportGenerator fallback = mock(ReportGenerator.class);
     private final CollectionRunArticleRepository observationRepository = mock(CollectionRunArticleRepository.class);
+    private final AgentQuotaService quotaService = mock(AgentQuotaService.class);
+    private final LlmPlanService planService = mock(LlmPlanService.class);
+    private final CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
+    private final QuotaReservation reservation = new QuotaReservation(
+            1L, 42L, "run:42:report", AgentTask.REPORT, AgentPlan.FREE, BigDecimal.ONE);
     private final AgentReportOrchestrator orchestrator =
-            new AgentReportOrchestrator(properties, client, recorder, fallback, observationRepository);
+            new AgentReportOrchestrator(
+                    properties, client, recorder, fallback, observationRepository,
+                    quotaService, planService, resultWriter);
+
+    @BeforeEach
+    void reserveQuota() {
+        when(quotaService.reserve(42L, "run:42:report", AgentTask.REPORT, AgentPlan.FREE))
+                .thenReturn(reservation);
+    }
 
     @Test
     void excludesStubFromAgentRequestAndKeepsStructuredReportMetadata() {
@@ -114,7 +133,9 @@ class AgentReportOrchestratorTest {
     void disabledAgentUsesFallbackWithoutCallingAgent() {
         AgentProperties disabled = new AgentProperties();
         AgentReportOrchestrator disabledOrchestrator =
-                new AgentReportOrchestrator(disabled, client, recorder, fallback, observationRepository);
+                new AgentReportOrchestrator(
+                        disabled, client, recorder, fallback, observationRepository,
+                        quotaService, planService, resultWriter);
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT, "STUB 요약");
         ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
         when(fallback.generate(eq(List.of(stub)), any(), any())).thenReturn(fallbackDocument);

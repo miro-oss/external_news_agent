@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 import httpx
 
@@ -76,3 +77,39 @@ def test_closes_owned_http_client() -> None:
     provider.close()
 
     assert client.is_closed is True
+
+
+def test_uses_gateway_usage_metrics_when_present() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": '{"ok":true}'}}],
+                "usage": {
+                    "prompt_tokens": 8,
+                    "completion_tokens": 2,
+                    "credits_used": "1.75",
+                    "cost_usd": "0.025",
+                },
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = MindlogicAnalyzeProvider(
+        Settings(
+            MINDLOGIC_API_KEY="gateway-key",
+            MINDLOGIC_CLAUDE_MODEL="configured-claude",
+            MINDLOGIC_CREDITS_PER_REQUEST=2,
+        ),
+        client,
+    )
+
+    response = provider.generate(
+        system_instruction="system",
+        prompt="prompt",
+        response_schema={"type": "object"},
+    )
+
+    assert response.usage.credits == Decimal("1.75")
+    assert response.usage.cost_usd == Decimal("0.025")
+    client.close()

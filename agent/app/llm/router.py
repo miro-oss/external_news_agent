@@ -1,9 +1,11 @@
+from decimal import Decimal
 from threading import Lock
 
 from app.core.config import Settings
 from app.core.errors import AgentError
 from app.llm.base import AnalyzeProvider
 from app.llm.gemini_provider import GeminiAnalyzeProvider
+from app.llm.guarded_provider import GuardedAnalyzeProvider
 from app.llm.mindlogic_provider import MindlogicAnalyzeProvider
 from app.schemas.analyze import Plan
 
@@ -26,10 +28,18 @@ def get_analyze_provider(settings: Settings, plan: Plan) -> AnalyzeProvider:
     with _PROVIDER_LOCK:
         provider = _PROVIDER_CACHE.get(key)
         if provider is None:
-            provider = (
+            delegate = (
                 GeminiAnalyzeProvider(settings)
                 if plan == "FREE"
                 else MindlogicAnalyzeProvider(settings)
+            )
+            provider = GuardedAnalyzeProvider(
+                delegate,
+                concurrency=settings.provider_concurrency,
+                acquire_timeout_seconds=settings.provider_acquire_timeout_seconds,
+                failure_threshold=settings.circuit_failure_threshold,
+                cooldown_seconds=settings.circuit_cooldown_seconds,
+                hard_cap_credits=Decimal(str(settings.hard_cap_credits_per_request)),
             )
             _PROVIDER_CACHE[key] = provider
         return provider

@@ -5,6 +5,11 @@ import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.agent.entity.AgentTask;
+import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
+import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
+import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.FindingAnalysisBullet;
 import com.example.be.domain.analysis.entity.FindingAnalysisSection;
@@ -21,6 +26,10 @@ import com.example.be.domain.analysis.service.AnalysisContext;
 import com.example.be.domain.analysis.service.ArticleAnalysisOrchestrator;
 import com.example.be.domain.analysis.service.StubArticleAnalyzer;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.CollectionRunWarning;
+import com.example.be.domain.collection.service.command.CollectionResultWriter;
+import com.example.be.domain.settings.entity.PaidExhaustedAction;
+import com.example.be.domain.settings.service.LlmPlanService;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
@@ -46,6 +55,9 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
     private final AgentClient client;
     private final AgentRunRecorder recorder;
     private final StubArticleAnalyzer stubAnalyzer;
+    private final AgentQuotaService quotaService;
+    private final LlmPlanService planService;
+    private final CollectionResultWriter resultWriter;
 
     @Override
     public AnalysisResult analyze(AnalysisContext context) {
@@ -55,7 +67,13 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             return stubAnalyzer.analyze(article);
         }
 
-        AgentAnalyzeRequest request = request(runId, article);
+        ReservationSelection selection = reserve(runId, article.getId(), context.plan());
+        if (selection == null) {
+            return stubAnalyzer.analyze(article);
+        }
+
+        AgentAnalyzeRequest request = request(
+                article, selection.plan(), selection.reservation().idempotencyKey());
         LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
         AgentAnalyzeResponse response;
         AnalysisResult result;
@@ -63,24 +81,31 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             response = client.analyze(request);
             result = toAnalysisResult(response);
         } catch (RuntimeException exception) {
-            String code = exception instanceof AgentClientException clientException
+            AgentClientException clientException = exception instanceof AgentClientException value
+                    ? value
+                    : null;
+            String code = clientException != null
                     ? clientException.getCode()
                     : "SCHEMA_VIOLATION";
             recordFailureSafely(runId, article.getId(), request, code, exception.getMessage(), startedAt);
+            completeFailureSafely(selection.reservation(), clientException, code);
             log.warn("Agent 분석에 실패해 Stub으로 대체한다. runId={} articleId={} code={} error={}",
                     runId, article.getId(), code, exception.getMessage());
             return stubAnalyzer.analyze(article);
         }
 
         recordSuccessSafely(runId, article.getId(), request, response, startedAt);
+        completeSuccessSafely(selection.reservation(), response.meta().credits());
         return result;
     }
 
-    private AgentAnalyzeRequest request(Long runId, Article article) {
+    private AgentAnalyzeRequest request(Article article,
+                                        AgentPlan plan,
+                                        String idempotencyKey) {
         Topic topic = article.getTopic();
         return new AgentAnalyzeRequest(
-                "run:" + runId + ":article:" + article.getId(),
-                properties.getDefaultPlan(),
+                idempotencyKey,
+                plan,
                 new AgentAnalyzeRequest.ArticlePayload(
                         article.getId(),
                         article.getTitle(),
@@ -95,6 +120,65 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                         listOrEmpty(topic.getOptionalKeywords()),
                         listOrEmpty(topic.getExcludedKeywords())),
                 null);
+    }
+
+    private ReservationSelection reserve(Long runId, Long articleId, AgentPlan requestedPlan) {
+        String idempotencyKey = "run:" + runId + ":article:" + articleId;
+        try {
+            return new ReservationSelection(
+                    requestedPlan,
+                    quotaService.reserve(runId, idempotencyKey, AgentTask.ANALYZE, requestedPlan));
+        } catch (QuotaExceededException exhausted) {
+            if (requestedPlan == AgentPlan.PAID
+                    && planService.paidExhaustedAction() == PaidExhaustedAction.FALLBACK_FREE) {
+                try {
+                    QuotaReservation reservation = quotaService.reserve(
+                            runId, idempotencyKey + ":fallback-free", AgentTask.ANALYZE, AgentPlan.FREE);
+                    addQuotaWarning(runId,
+                            CollectionRunWarning.CODE_LLM_FALLBACK_FREE,
+                            "PAID quota가 소진되어 기사 " + articleId + "를 FREE 플랜으로 분석합니다.");
+                    return new ReservationSelection(AgentPlan.FREE, reservation);
+                } catch (QuotaExceededException freeExhausted) {
+                    log.warn("FREE fallback quota도 소진됐다. runId={} articleId={}", runId, articleId);
+                }
+            }
+            addQuotaWarning(runId,
+                    CollectionRunWarning.CODE_LLM_QUOTA_EXHAUSTED,
+                    "LLM quota가 소진되어 기사 " + articleId + "를 Stub으로 분석합니다.");
+            return null;
+        }
+    }
+
+    private void addQuotaWarning(Long runId, String code, String message) {
+        try {
+            resultWriter.addAgentQuotaWarning(runId, code, message);
+        } catch (RuntimeException exception) {
+            log.error("LLM quota 경고를 기록하지 못했다. runId={} code={}", runId, code, exception);
+        }
+    }
+
+    private void completeSuccessSafely(QuotaReservation reservation, BigDecimal credits) {
+        try {
+            quotaService.completeSuccess(reservation, credits);
+        } catch (RuntimeException exception) {
+            log.error("Agent 성공 quota 예약을 정산하지 못했다. reservationId={}",
+                    reservation.id(), exception);
+        }
+    }
+
+    private void completeFailureSafely(QuotaReservation reservation,
+                                       AgentClientException exception,
+                                       String code) {
+        try {
+            if (exception == null) {
+                quotaService.completeFailure(reservation, code);
+            } else {
+                quotaService.completeFailure(reservation, exception);
+            }
+        } catch (RuntimeException completionError) {
+            log.error("Agent 실패 quota 예약을 정산하지 못했다. reservationId={}",
+                    reservation.id(), completionError);
+        }
     }
 
     private AnalysisResult toAnalysisResult(AgentAnalyzeResponse response) {
@@ -274,5 +358,8 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
 
     private <T> List<T> listOrEmpty(List<T> values) {
         return values == null ? List.of() : List.copyOf(values);
+    }
+
+    private record ReservationSelection(AgentPlan plan, QuotaReservation reservation) {
     }
 }
