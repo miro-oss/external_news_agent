@@ -6,7 +6,6 @@ import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.repository.FindingRepository;
-import com.example.be.domain.analysis.service.SentenceSplitter;
 import com.example.be.domain.articles.dto.res.ArticleResDTO;
 import com.example.be.domain.articles.exception.ArticleException;
 import com.example.be.domain.articles.exception.code.ArticleErrorCode;
@@ -30,6 +29,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -85,10 +85,11 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                 ? findingRepository.findFirstByArticleIdOrderByIdDesc(articleId).orElse(null)
                 : findingRepository.findByRunIdAndArticleId(runId, articleId).orElse(null);
 
-        // sentences는 항상 현재 bodyText와 같은 원문을 분할해야 evidence 인덱스와 화면 본문이 어긋나지 않는다.
-        List<FindingSection> sections = StringUtils.hasText(article.getBody())
-                ? SentenceSplitter.split(article.getBody(), article.getLanguage())
-                : finding == null ? List.of() : finding.getSections();
+        boolean hasAnalyzedBody = finding != null && StringUtils.hasText(article.getBody());
+        List<FindingSection> sections = hasAnalyzedBody ? finding.getSections() : List.of();
+        String bodyText = hasAnalyzedBody
+                ? sections.stream().map(FindingSection::text).collect(Collectors.joining(" "))
+                : article.getBody();
 
         return ArticleResDTO.Detail.builder()
                 .id(article.getId())
@@ -103,7 +104,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                 .topicName(article.getTopic().getName())
                 .sourceId(article.getSource().getId())
                 .sourceName(article.getSource().getName())
-                .bodyText(article.getBody())
+                .bodyText(bodyText)
                 .sentences(sections.stream().map(section -> ArticleResDTO.Sentence.builder()
                         .index(section.index())
                         .text(section.text())
@@ -146,7 +147,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
         return ArticleResDTO.Analysis.builder()
                 .changeType(finding.getChangeType().name())
                 .summary(finding.getSummary())
-                .keyPoints(finding.getKeyPoints().stream().map(point -> ArticleResDTO.KeyPoint.builder()
+                .keyPoints(finding.getEffectiveKeyPoints().stream().map(point -> ArticleResDTO.KeyPoint.builder()
                         .text(point.text())
                         .evidence(point.evidence())
                         .groundedness(point.groundedness())

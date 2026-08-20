@@ -17,6 +17,7 @@ import org.springframework.web.client.RestClientResponseException;
 public class AgentClient {
 
     static final String AGENT_TOKEN_HEADER = "X-Agent-Token";
+    private static final int MAX_ERROR_BODY_LENGTH = 500;
 
     private final RestClient restClient;
 
@@ -47,26 +48,57 @@ public class AgentClient {
             }
             return response;
         } catch (RestClientResponseException exception) {
-            String code = errorCode(exception);
-            throw new AgentClientException(code, "Agent가 오류 응답을 반환했습니다.", exception);
+            AgentErrorResponse error = errorResponse(exception);
+            throw new AgentClientException(errorCode(error, exception), errorMessage(error, exception), exception);
         } catch (RestClientException exception) {
             throw new AgentClientException(
                     "PROVIDER_UNAVAILABLE", "Agent에 연결할 수 없습니다.", exception);
         }
     }
 
-    private String errorCode(RestClientResponseException exception) {
+    private AgentErrorResponse errorResponse(RestClientResponseException exception) {
         try {
-            AgentErrorResponse response = exception.getResponseBodyAs(AgentErrorResponse.class);
-            if (response != null && response.error() != null
-                    && StringUtils.hasText(response.error().code())) {
-                return response.error().code();
-            }
+            return exception.getResponseBodyAs(AgentErrorResponse.class);
         } catch (RuntimeException ignored) {
             // 오류 본문 자체가 계약을 어겼으면 HTTP status 기반 코드로 기록한다.
+            return null;
+        }
+    }
+
+    private String errorCode(AgentErrorResponse response, RestClientResponseException exception) {
+        if (response != null && response.error() != null
+                && StringUtils.hasText(response.error().code())) {
+            return response.error().code();
         }
         return exception.getStatusCode().value() == 401
                 ? "UNAUTHORIZED"
                 : "AGENT_HTTP_" + exception.getStatusCode().value();
+    }
+
+    private String errorMessage(AgentErrorResponse response, RestClientResponseException exception) {
+        if (response == null || response.error() == null) {
+            return "Agent가 오류 응답을 반환했습니다. status="
+                    + exception.getStatusCode().value()
+                    + " body="
+                    + truncateBody(exception.getResponseBodyAsString());
+        }
+        String message = StringUtils.hasText(response.error().message())
+                ? response.error().message()
+                : "Agent가 오류 응답을 반환했습니다.";
+        if (response.error().details() == null) {
+            return message;
+        }
+        return message + " details=" + response.error().details();
+    }
+
+    private String truncateBody(String body) {
+        if (!StringUtils.hasText(body)) {
+            return "";
+        }
+        String normalized = body.replaceAll("\\s+", " ").trim();
+        if (normalized.length() <= MAX_ERROR_BODY_LENGTH) {
+            return normalized;
+        }
+        return normalized.substring(0, MAX_ERROR_BODY_LENGTH);
     }
 }

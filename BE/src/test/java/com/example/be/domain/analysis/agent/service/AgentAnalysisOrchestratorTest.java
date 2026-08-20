@@ -4,6 +4,7 @@ import com.example.be.domain.analysis.agent.client.AgentClient;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
@@ -14,12 +15,17 @@ import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -49,7 +55,27 @@ class AgentAnalysisOrchestratorTest {
         assertEquals(Sentiment.NEUTRAL, result.sentiment());
         assertEquals(RiskLevel.LOW, result.riskLevel());
         assertEquals(Relevance.REFERENCE, result.relevance());
+        assertEquals(AnalysisSource.STUB, result.analysisSource());
+        assertEquals(BigDecimal.ONE,
+                result.analysisSections().getFirst().bullets().getFirst().confidence());
+        assertEquals(List.of("HBM4"), result.entities().products());
         verify(recorder).recordSuccess(eq(42L), eq(10L), any(), any(), any(LocalDateTime.class));
+    }
+
+    @Test
+    void marksRealProviderAnalysisAsLlmAndKeepsMetadata() {
+        when(client.analyze(any())).thenReturn(response(List.of(1), "제품/공정", false));
+
+        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article()));
+
+        assertEquals(AnalysisSource.LLM, result.analysisSource());
+        assertEquals("gemini", result.metadata().provider());
+        assertEquals("gemini-2.5-flash", result.metadata().model());
+        assertEquals("analyze.ko.v1", result.metadata().promptVersion());
+        assertEquals(120L, result.metadata().inputTokens());
+        assertEquals(30L, result.metadata().outputTokens());
+        assertEquals(new BigDecimal("0.001"), result.metadata().costUsd());
+        assertFalse(result.metadata().truncated());
     }
 
     @Test
@@ -105,6 +131,24 @@ class AgentAnalysisOrchestratorTest {
                 eq(42L), eq(10L), any(), eq("SCHEMA_VIOLATION"), any(), any());
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidStructuredResponses")
+    void rejectsInvalidStructuredFieldsAndFallsBackToStub(
+            String caseName,
+            AgentAnalyzeResponse invalidResponse
+    ) {
+        Article article = article();
+        AnalysisResult stubResult = mock(AnalysisResult.class);
+        when(client.analyze(any())).thenReturn(invalidResponse);
+        when(stub.analyze(article)).thenReturn(stubResult);
+
+        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article));
+
+        assertSame(stubResult, result, caseName);
+        verify(recorder).recordFailure(
+                eq(42L), eq(10L), any(), eq("SCHEMA_VIOLATION"), any(), any());
+    }
+
     private AgentProperties enabledProperties() {
         AgentProperties properties = new AgentProperties();
         properties.setEnabled(true);
@@ -131,11 +175,17 @@ class AgentAnalysisOrchestratorTest {
                 .build();
     }
 
-    private AgentAnalyzeResponse response(List<Integer> evidenceIds) {
+    private static AgentAnalyzeResponse response(List<Integer> evidenceIds) {
         return response(evidenceIds, "제품/공정");
     }
 
-    private AgentAnalyzeResponse response(List<Integer> evidenceIds, String category) {
+    private static AgentAnalyzeResponse response(List<Integer> evidenceIds, String category) {
+        return response(evidenceIds, category, true);
+    }
+
+    private static AgentAnalyzeResponse response(List<Integer> evidenceIds,
+                                                 String category,
+                                                 boolean mock) {
         return new AgentAnalyzeResponse(
                 List.of("근거 문장."),
                 List.of(new AgentAnalyzeResponse.Section(
@@ -145,9 +195,76 @@ class AgentAnalysisOrchestratorTest {
                 "한국어 요약",
                 new AgentAnalyzeResponse.Classification(
                         "산업 동향 보도", "neutral", "low", "reference", category),
-                new AgentAnalyzeResponse.Entities(List.of(), List.of(), List.of()),
+                new AgentAnalyzeResponse.Entities(List.of("SK하이닉스"), List.of("HBM4"), List.of()),
                 new AgentAnalyzeResponse.Meta(
-                        "mock", "mock", "analyze.mock.v1", 0L, 0L,
-                        BigDecimal.ZERO, BigDecimal.ZERO, true, false));
+                        mock ? "mock" : "gemini",
+                        mock ? "mock" : "gemini-2.5-flash",
+                        mock ? "analyze.mock.v1" : "analyze.ko.v1",
+                        mock ? 0L : 120L,
+                        mock ? 0L : 30L,
+                        mock ? BigDecimal.ZERO : new BigDecimal("0.001"),
+                        BigDecimal.ZERO,
+                        mock,
+                        false));
+    }
+
+    private static Stream<Arguments> invalidStructuredResponses() {
+        AgentAnalyzeResponse valid = response(List.of(1));
+        AgentAnalyzeResponse.Section validSection = valid.sections().getFirst();
+        AgentAnalyzeResponse.Bullet validBullet = validSection.bullets().getFirst();
+        return Stream.of(
+                Arguments.of("entities null", copy(valid, valid.sections(), null, valid.meta())),
+                Arguments.of("negative token", copy(
+                        valid,
+                        valid.sections(),
+                        valid.entities(),
+                        new AgentAnalyzeResponse.Meta(
+                                "mock", "mock", "analyze.mock.v1", -1L, 0L,
+                                BigDecimal.ZERO, BigDecimal.ZERO, true, false))),
+                Arguments.of("confidence out of range", copy(
+                        valid,
+                        List.of(new AgentAnalyzeResponse.Section(
+                                "핵심",
+                                List.of(new AgentAnalyzeResponse.Bullet(
+                                        validBullet.text(),
+                                        validBullet.evidenceSentenceIds(),
+                                        validBullet.groundedness(),
+                                        new BigDecimal("1.1"))))),
+                        valid.entities(),
+                        valid.meta())),
+                Arguments.of("blank heading", copy(
+                        valid,
+                        List.of(new AgentAnalyzeResponse.Section(" ", validSection.bullets())),
+                        valid.entities(),
+                        valid.meta())),
+                Arguments.of("unknown groundedness", copy(
+                        valid,
+                        List.of(new AgentAnalyzeResponse.Section(
+                                "핵심",
+                                List.of(new AgentAnalyzeResponse.Bullet(
+                                        validBullet.text(),
+                                        validBullet.evidenceSentenceIds(),
+                                        "unknown",
+                                        validBullet.confidence())))),
+                        valid.entities(),
+                        valid.meta())),
+                Arguments.of("empty sections", copy(
+                        valid, List.of(), valid.entities(), valid.meta()))
+        );
+    }
+
+    private static AgentAnalyzeResponse copy(
+            AgentAnalyzeResponse source,
+            List<AgentAnalyzeResponse.Section> sections,
+            AgentAnalyzeResponse.Entities entities,
+            AgentAnalyzeResponse.Meta meta
+    ) {
+        return new AgentAnalyzeResponse(
+                source.sentences(),
+                sections,
+                source.summaryKo(),
+                source.classification(),
+                entities,
+                meta);
     }
 }

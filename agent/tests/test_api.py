@@ -75,7 +75,10 @@ def test_validation_failure_uses_json_error_contract() -> None:
     )
 
     assert response.status_code == 422
-    assert response.json()["error"]["code"] == "SCHEMA_VIOLATION"
+    payload = response.json()
+    assert payload["error"]["code"] == "SCHEMA_VIOLATION"
+    assert payload["error"]["details"][0]["loc"] == ["body", "plan"]
+    assert "input" not in payload["error"]["details"][0]
 
 
 def test_analyze_truncates_body_over_configured_limit() -> None:
@@ -121,3 +124,27 @@ def test_unexpected_failure_uses_json_error_contract(monkeypatch: pytest.MonkeyP
         }
     }
     assert "sensitive internal failure" not in response.text
+
+
+def test_non_mock_mode_requires_selected_provider_configuration() -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        AGENT_SHARED_SECRET="local-dev-agent-token",
+        AGENT_MOCK=False,
+        GEMINI_API_KEY="",
+        GEMINI_MODEL="",
+    )
+    try:
+        response = client.post(
+            "/v1/analyze",
+            headers={"X-Agent-Token": "local-dev-agent-token"},
+            json=request_body(),
+        )
+    finally:
+        app.dependency_overrides[get_settings] = lambda: Settings(
+            AGENT_SHARED_SECRET="local-dev-agent-token",
+            GEMINI_API_KEY="",
+            GEMINI_MODEL="",
+        )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "API_KEY_MISSING"

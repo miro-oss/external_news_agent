@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -39,13 +40,25 @@ public class FindingWriter {
                 .article(article)
                 .changeType(changeType)
                 .summary(result.summary())
-                .keyPoints(result.keyPoints())
+                // 구조화 section이 없는 Stub/레거시 결과만 기존 key_points 컬럼을 사용한다.
+                .keyPoints(result.analysisSections().isEmpty() ? result.keyPoints() : List.of())
                 .intent(result.intent())
                 .sentiment(result.sentiment())
                 .riskLevel(result.riskLevel())
                 .relevance(result.relevance())
                 .category(result.category())
+                .analysisSource(result.analysisSource())
                 .sections(result.sections())
+                .analysisSections(result.analysisSections())
+                .entities(result.entities())
+                .promptVersion(result.metadata().promptVersion())
+                .llmProvider(result.metadata().provider())
+                .llmModel(result.metadata().model())
+                .inputTokens(result.metadata().inputTokens())
+                .outputTokens(result.metadata().outputTokens())
+                .costUsd(result.metadata().costUsd())
+                .credits(result.metadata().credits())
+                .inputTruncated(result.metadata().truncated())
                 .analyzedAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build());
     }

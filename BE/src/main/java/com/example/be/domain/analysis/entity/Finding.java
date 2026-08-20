@@ -1,10 +1,13 @@
 package com.example.be.domain.analysis.entity;
 
+import com.example.be.domain.analysis.converter.FindingAnalysisSectionListConverter;
+import com.example.be.domain.analysis.converter.FindingEntitiesConverter;
 import com.example.be.domain.analysis.converter.FindingKeyPointListConverter;
 import com.example.be.domain.analysis.converter.FindingSectionListConverter;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.global.converter.YnBooleanConverter;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
@@ -25,6 +28,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -80,11 +84,67 @@ public class Finding {
     @Column(name = "category", nullable = false, length = 50)
     private String category;
 
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(name = "analysis_source", nullable = false, length = 20)
+    private AnalysisSource analysisSource = AnalysisSource.STUB;
+
     @Convert(converter = FindingSectionListConverter.class)
     @JdbcTypeCode(SqlTypes.CLOB)
     @Column(name = "sections", nullable = false)
     private List<FindingSection> sections;
 
+    @Builder.Default
+    @Convert(converter = FindingAnalysisSectionListConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "analysis_sections", nullable = false)
+    private List<FindingAnalysisSection> analysisSections = List.of();
+
+    @Builder.Default
+    @Convert(converter = FindingEntitiesConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "entities", nullable = false)
+    private FindingEntities entities = FindingEntities.empty();
+
+    @Column(name = "prompt_version", length = 50)
+    private String promptVersion;
+
+    @Column(name = "llm_provider", length = 30)
+    private String llmProvider;
+
+    @Column(name = "llm_model", length = 100)
+    private String llmModel;
+
+    @Column(name = "input_tokens")
+    private Long inputTokens;
+
+    @Column(name = "output_tokens")
+    private Long outputTokens;
+
+    @Column(name = "cost_usd", precision = 12, scale = 6)
+    private BigDecimal costUsd;
+
+    @Column(name = "credits", precision = 10, scale = 3)
+    private BigDecimal credits;
+
+    @Builder.Default
+    @Convert(converter = YnBooleanConverter.class)
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "input_truncated_yn", nullable = false, length = 1)
+    private boolean inputTruncated = false;
+
     @Column(name = "analyzed_at", nullable = false)
     private LocalDateTime analyzedAt;
+
+    /** A1 구조화 section이 있으면 여기서 기존 공개 key point 형태로 평탄화한다. */
+    public List<FindingKeyPoint> getEffectiveKeyPoints() {
+        if (analysisSections == null || analysisSections.isEmpty()) {
+            return keyPoints == null ? List.of() : keyPoints;
+        }
+        return analysisSections.stream()
+                .flatMap(section -> section.bullets().stream())
+                .map(bullet -> new FindingKeyPoint(
+                        bullet.text(), bullet.evidence(), bullet.groundedness()))
+                .toList();
+    }
 }

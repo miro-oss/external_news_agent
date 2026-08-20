@@ -43,7 +43,7 @@ def response(evidence_sentence_ids: list[int]) -> dict[str, object]:
     }
 
 
-@pytest.mark.parametrize("evidence_ids", [[0], [2]])
+@pytest.mark.parametrize("evidence_ids", [[], [0], [2]])
 def test_rejects_evidence_ids_outside_one_based_sentence_range(
     evidence_ids: list[int],
 ) -> None:

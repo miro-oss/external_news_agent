@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -8,13 +9,24 @@ from app.api.v1.analyze import router as analyze_router
 from app.api.v1.health import router as health_router
 from app.core.errors import AgentError
 from app.core.security import require_agent_token
+from app.llm.router import close_analyze_providers
 from app.schemas.common import ErrorDetail, ErrorResponse
 
 logger = logging.getLogger(__name__)
 
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    yield
+    close_analyze_providers()
+
+
 def create_app() -> FastAPI:
-    application = FastAPI(title="External News Agent", version="0.1.0")
+    application = FastAPI(
+        title="External News Agent",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
     application.include_router(health_router, prefix="/v1")
     application.include_router(
         analyze_router,
@@ -32,7 +44,7 @@ def create_app() -> FastAPI:
             422,
             "SCHEMA_VIOLATION",
             "요청 스키마가 올바르지 않습니다.",
-            exc.errors(),
+            _validation_details(exc),
         )
 
     @application.exception_handler(Exception)
@@ -55,6 +67,17 @@ def _error_response(
 ) -> JSONResponse:
     body = ErrorResponse(error=ErrorDetail(code=code, message=message, details=details))
     return JSONResponse(status_code=status, content=body.model_dump(by_alias=True, mode="json"))
+
+
+def _validation_details(exc: RequestValidationError) -> list[dict[str, object]]:
+    return [
+        {
+            "loc": list(error.get("loc", ())),
+            "msg": error.get("msg", ""),
+            "type": error.get("type", ""),
+        }
+        for error in exc.errors()
+    ]
 
 
 app = create_app()

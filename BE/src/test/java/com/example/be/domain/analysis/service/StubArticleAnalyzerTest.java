@@ -1,5 +1,6 @@
 package com.example.be.domain.analysis.service;
 
+import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
@@ -33,6 +34,7 @@ class StubArticleAnalyzerTest {
         assertEquals("grounded", result.keyPoints().get(0).groundedness());
         assertEquals(Relevance.IMPORTANT, result.relevance());
         assertEquals(Sentiment.POSITIVE, result.sentiment());
+        assertEquals(AnalysisSource.STUB, result.analysisSource());
     }
 
     @Test
