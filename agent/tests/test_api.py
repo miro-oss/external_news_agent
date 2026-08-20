@@ -75,7 +75,10 @@ def test_validation_failure_uses_json_error_contract() -> None:
     )
 
     assert response.status_code == 422
-    assert response.json()["error"]["code"] == "SCHEMA_VIOLATION"
+    payload = response.json()
+    assert payload["error"]["code"] == "SCHEMA_VIOLATION"
+    assert payload["error"]["details"][0]["loc"] == ["body", "plan"]
+    assert "input" not in payload["error"]["details"][0]
 
 
 def test_analyze_truncates_body_over_configured_limit() -> None:

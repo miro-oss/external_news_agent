@@ -17,6 +17,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -56,7 +57,7 @@ class AgentClientTest {
                 .andRespond(withStatus(HttpStatus.CONTENT_TOO_LARGE)
                         .contentType(MediaType.APPLICATION_JSON)
                         .body("""
-                                {"error":{"code":"INPUT_TOO_LARGE","message":"입력이 너무 큽니다."}}
+                                {"error":{"code":"INPUT_TOO_LARGE","message":"입력이 너무 큽니다.","details":[{"loc":["body","article","title"],"msg":"Field required","type":"missing"}]}}
                                 """));
 
         AgentClientException exception = assertThrows(
@@ -64,6 +65,29 @@ class AgentClientTest {
                 () -> client.analyze(request()));
 
         assertEquals("INPUT_TOO_LARGE", exception.getCode());
+        assertTrue(exception.getMessage().contains("입력이 너무 큽니다."));
+        assertTrue(exception.getMessage().contains("article"));
+        assertTrue(exception.getMessage().contains("Field required"));
+        server.verify();
+    }
+
+    @Test
+    void includesStatusAndBodyWhenAgentReturnsNonContractError() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/analyze"))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .body("Invalid HTTP request received."));
+
+        AgentClientException exception = assertThrows(
+                AgentClientException.class,
+                () -> client.analyze(request()));
+
+        assertEquals("AGENT_HTTP_400", exception.getCode());
+        assertTrue(exception.getMessage().contains("status=400"));
+        assertTrue(exception.getMessage().contains("Invalid HTTP request received."));
         server.verify();
     }
 

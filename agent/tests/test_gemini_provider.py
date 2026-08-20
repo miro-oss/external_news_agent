@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+from google.genai import errors
+
 from app.core.config import Settings
 from app.llm import gemini_provider
 from app.llm.gemini_provider import GeminiAnalyzeProvider
@@ -74,3 +76,33 @@ def test_configures_timeout_and_closes_only_owned_client(monkeypatch) -> None:
 
     assert captured["http_options"].timeout == 12_500
     assert client.closed is True
+
+
+def test_retries_transient_gemini_server_error_once() -> None:
+    class FlakyModels(FakeModels):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def generate_content(self, *, model: str, contents: str, config):
+            self.calls += 1
+            if self.calls == 1:
+                raise errors.ServerError(503, {"error": {"message": "temporary"}})
+            return super().generate_content(model=model, contents=contents, config=config)
+
+    models = FlakyModels()
+    client = SimpleNamespace(models=models)
+    settings = Settings(
+        GEMINI_API_KEY="gemini-key",
+        GEMINI_MODEL="configured-gemini",
+        AGENT_PROVIDER_RETRY_ATTEMPTS=1,
+    )
+
+    response = GeminiAnalyzeProvider(settings, client).generate(
+        system_instruction="system",
+        prompt="prompt",
+        response_schema={"type": "object", "additionalProperties": False},
+    )
+
+    assert response.text == '{"ok":true}'
+    assert models.calls == 2

@@ -39,6 +39,12 @@ class Settings(BaseSettings):
         gt=0,
         validation_alias="AGENT_PROVIDER_TIMEOUT_SECONDS",
     )
+    provider_retry_attempts: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        validation_alias="AGENT_PROVIDER_RETRY_ATTEMPTS",
+    )
     schema_repair_attempts: int = Field(
         default=1,
         ge=0,

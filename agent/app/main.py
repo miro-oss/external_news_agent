@@ -44,7 +44,7 @@ def create_app() -> FastAPI:
             422,
             "SCHEMA_VIOLATION",
             "요청 스키마가 올바르지 않습니다.",
-            exc.errors(),
+            _validation_details(exc),
         )
 
     @application.exception_handler(Exception)
@@ -67,6 +67,17 @@ def _error_response(
 ) -> JSONResponse:
     body = ErrorResponse(error=ErrorDetail(code=code, message=message, details=details))
     return JSONResponse(status_code=status, content=body.model_dump(by_alias=True, mode="json"))
+
+
+def _validation_details(exc: RequestValidationError) -> list[dict[str, object]]:
+    return [
+        {
+            "loc": list(error.get("loc", ())),
+            "msg": error.get("msg", ""),
+            "type": error.get("type", ""),
+        }
+        for error in exc.errors()
+    ]
 
 
 app = create_app()

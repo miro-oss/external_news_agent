@@ -11,7 +11,7 @@ ALTER TABLE news_findings ADD (
     output_tokens     NUMBER,
     cost_usd          NUMBER(12, 6),
     credits           NUMBER(10, 3),
-    input_truncated_yn CHAR(1) DEFAULT 'N' NOT NULL
+    input_truncated   VARCHAR2(1) DEFAULT 'N' NOT NULL
 );
 
 ALTER TABLE news_findings ADD CONSTRAINT ck_finding_analysis_source
@@ -20,5 +20,5 @@ ALTER TABLE news_findings ADD CONSTRAINT ck_finding_analysis_sections_json
     CHECK (analysis_sections IS JSON);
 ALTER TABLE news_findings ADD CONSTRAINT ck_finding_entities_json
     CHECK (entities IS JSON);
-ALTER TABLE news_findings ADD CONSTRAINT ck_finding_input_truncated_yn
-    CHECK (input_truncated_yn IN ('Y', 'N'));
+ALTER TABLE news_findings ADD CONSTRAINT ck_finding_input_truncated
+    CHECK (input_truncated IN ('Y', 'N'));
