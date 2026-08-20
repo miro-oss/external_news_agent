@@ -1,7 +1,8 @@
 # External News Agent
 
-Spring Boot가 내부 HTTP로 호출하는 stateless FastAPI 에이전트입니다. A0에서는 외부 LLM 없이
-결정적인 Mock 분석 결과를 반환합니다.
+Spring Boot가 내부 HTTP로 호출하는 stateless FastAPI 에이전트입니다. 기사 분석(`/v1/analyze`)과
+run 보고서 작성(`/v1/report`)을 제공하며, 기본 Mock 모드에서는 외부 LLM 없이 결정적인 결과를
+반환합니다.
 
 ```bash
 uv sync --frozen

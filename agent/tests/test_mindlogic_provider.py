@@ -49,6 +49,7 @@ def test_uses_gateway_strict_json_schema_contract() -> None:
     assert captured["url"].endswith("/v1/gateway/chat/completions/")
     assert captured["authorization"] == "Bearer gateway-key"
     assert body["model"] == "configured-claude"
+    assert body["response_format"]["json_schema"]["name"] == "structured_output"
     assert body["response_format"]["json_schema"]["strict"] is True
     schema = body["response_format"]["json_schema"]["schema"]
     assert schema["additionalProperties"] is False

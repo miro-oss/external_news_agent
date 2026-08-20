@@ -1,7 +1,9 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -12,18 +14,45 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** M5에서는 외부 모델 없이 같은 findings가 언제나 같은 본문을 만들도록 한다. */
+/** Agent 비활성·장애 시에도 STUB finding을 오염시키지 않는 결정적 fallback 보고서를 만든다. */
 @Component
 public class ReportGenerator {
 
-    public static final String MODEL_NAME = "stub-report-v1";
+    public static final String MODEL_NAME = "safe-fallback-report-v1";
 
     private static final DateTimeFormatter TITLE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     public ReportDocument generate(List<Finding> findings, LocalDateTime generatedAt) {
-        List<Finding> ordered = ReportFindingOrder.sort(findings);
+        return generate(findings, generatedAt, ReportSourceStats.empty());
+    }
+
+    public ReportDocument generate(List<Finding> findings,
+                                   LocalDateTime generatedAt,
+                                   ReportSourceStats sourceStats) {
+        int actualStubCount = (int) findings.stream()
+                .filter(finding -> finding.getAnalysisSource() == AnalysisSource.STUB)
+                .count();
+        ReportSourceStats effectiveStats = new ReportSourceStats(
+                sourceStats.collected(),
+                sourceStats.blocked(),
+                sourceStats.failed(),
+                sourceStats.paywalled(),
+                Math.max(sourceStats.stubExcluded(), actualStubCount));
+        List<Finding> ordered = ReportFindingOrder.sort(findings.stream()
+                .filter(finding -> finding.getAnalysisSource() != AnalysisSource.STUB)
+                .toList());
         String title = title(ordered, generatedAt);
-        return new ReportDocument(title, markdown(title, ordered), MODEL_NAME);
+        return new ReportDocument(
+                title,
+                markdown(title, ordered, effectiveStats),
+                MODEL_NAME,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                ReportStatus.FALLBACK);
     }
 
     private String title(List<Finding> findings, LocalDateTime generatedAt) {
@@ -36,11 +65,11 @@ public class ReportGenerator {
         return truncateUtf8(prefix + " 보고서 " + generatedAt.format(TITLE_TIME), NewsReport.MAX_TITLE_LENGTH);
     }
 
-    private String markdown(String title, List<Finding> findings) {
+    private String markdown(String title, List<Finding> findings, ReportSourceStats sourceStats) {
         StringBuilder body = new StringBuilder("# ").append(singleLine(title)).append("\n\n");
         body.append("## 오늘의 핵심\n\n");
         if (findings.isEmpty()) {
-            body.append("- 이번 실행에서 새로 분석된 기사가 없습니다.\n");
+            body.append("- 실제 LLM 분석 finding이 없어 포함할 핵심 요약이 없습니다.\n");
         } else {
             findings.stream().limit(5).forEach(finding -> body
                     .append("- ").append(singleLine(finding.getSummary())).append("\n"));
@@ -78,7 +107,36 @@ public class ReportGenerator {
                 body.append("- 원문: <").append(finding.getArticle().getCanonicalUrl().trim()).append(">\n");
             }
         }
+        appendSourceNotes(body, sourceStats);
         return body.toString();
+    }
+
+    private void appendSourceNotes(StringBuilder body, ReportSourceStats stats) {
+        body.append("\n## 수집 및 출처 참고\n\n");
+        boolean hasNote = false;
+        if (stats.stubExcluded() > 0) {
+            body.append("- STUB 분석 ").append(stats.stubExcluded())
+                    .append("건은 실제 LLM 분석이 아니므로 보고서에서 제외했습니다.\n");
+            hasNote = true;
+        }
+        if (stats.paywalled() > 0) {
+            body.append("- 페이월로 전문을 확인하지 못한 기사가 ").append(stats.paywalled())
+                    .append("건 있습니다.\n");
+            hasNote = true;
+        }
+        int otherBlocked = Math.max(stats.blocked() - stats.paywalled(), 0);
+        if (otherBlocked > 0) {
+            body.append("- robots 또는 접근 제한으로 본문이 차단된 기사가 ")
+                    .append(otherBlocked).append("건 있습니다.\n");
+            hasNote = true;
+        }
+        if (stats.failed() > 0) {
+            body.append("- 본문 수집에 실패한 기사가 ").append(stats.failed()).append("건 있습니다.\n");
+            hasNote = true;
+        }
+        if (!hasNote) {
+            body.append("- 수집 또는 분석 제외 사항이 없습니다.\n");
+        }
     }
 
     private Map<String, Long> counts(List<Finding> findings,

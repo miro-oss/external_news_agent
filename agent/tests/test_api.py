@@ -34,6 +34,29 @@ def request_body(body_text: str = "첫 문장입니다. 두 번째 문장입니�
     }
 
 
+def report_request_body() -> dict[str, object]:
+    return {
+        "idempotencyKey": "run:42:report",
+        "plan": "FREE",
+        "run": {
+            "id": 42,
+            "startedAt": "2026-08-10T09:00:00+09:00",
+            "finishedAt": "2026-08-10T09:03:00+09:00",
+            "topics": ["HBM"],
+        },
+        "findings": [],
+        "events": [],
+        "sourceStats": {
+            "collected": 2,
+            "blocked": 1,
+            "failed": 0,
+            "paywalled": 1,
+            "stubExcluded": 2,
+        },
+        "perspective": "TECHNOLOGY",
+    }
+
+
 def test_health_does_not_require_agent_token() -> None:
     response = client.get("/v1/health")
 
@@ -43,6 +66,13 @@ def test_health_does_not_require_agent_token() -> None:
 
 def test_analyze_requires_agent_token() -> None:
     response = client.post("/v1/analyze", json=request_body())
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_report_requires_agent_token() -> None:
+    response = client.post("/v1/report", json=report_request_body())
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "UNAUTHORIZED"
@@ -62,6 +92,23 @@ def test_analyze_returns_deterministic_mock_contract() -> None:
     assert payload["classification"]["riskLevel"] == "low"
     assert payload["meta"]["provider"] == "mock"
     assert payload["meta"]["mock"] is True
+
+
+def test_report_returns_deterministic_mock_contract() -> None:
+    response = client.post(
+        "/v1/report",
+        headers={"X-Agent-Token": "local-dev-agent-token"},
+        json=report_request_body(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["title"] == "2026-08-10 HBM 뉴스 모니터링 보고서"
+    assert payload["importantEvents"] == []
+    assert payload["watchItems"] == []
+    assert "STUB 분석 2건" in payload["sourceNotes"][0]
+    assert "## 수집 및 출처 참고" in payload["markdownBody"]
+    assert payload["meta"]["provider"] == "mock"
 
 
 def test_validation_failure_uses_json_error_contract() -> None:

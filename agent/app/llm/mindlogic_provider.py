@@ -1,4 +1,5 @@
 import logging
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -62,7 +63,7 @@ class MindlogicAnalyzeProvider:
                     "response_format": {
                         "type": "json_schema",
                         "json_schema": {
-                            "name": "article_analysis",
+                            "name": _schema_name(response_schema),
                             "strict": True,
                             "schema": _strict_schema(response_schema),
                         },
@@ -121,3 +122,9 @@ def _strict_schema(value: Any) -> Any:
     if isinstance(value, list):
         return [_strict_schema(child) for child in value]
     return value
+
+
+def _schema_name(schema: dict[str, Any]) -> str:
+    title = str(schema.get("title") or "structured_output")
+    normalized = re.sub(r"[^a-zA-Z0-9_-]", "_", title)
+    return normalized[:64] or "structured_output"

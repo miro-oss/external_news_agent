@@ -3,6 +3,8 @@ package com.example.be.domain.analysis.agent.client;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
+import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -72,6 +74,27 @@ class AgentClientTest {
     }
 
     @Test
+    void sendsReportContractAndReadsStructuredChannelInputs() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/report"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
+                .andExpect(jsonPath("$.idempotencyKey").value("run:42:report"))
+                .andExpect(jsonPath("$.sourceStats.stubExcluded").value(2))
+                .andRespond(withSuccess(reportResponseJson(), MediaType.APPLICATION_JSON));
+
+        AgentReportResponse response = client.report(reportRequest());
+
+        assertEquals("보고서", response.title());
+        assertEquals(List.of("짧은 속보"), response.executiveSummary());
+        assertEquals(List.of(501L), response.importantEvents().getFirst().sourceFindingIds());
+        assertEquals("report.ko.v1", response.meta().promptVersion());
+        server.verify();
+    }
+
+    @Test
     void includesStatusAndBodyWhenAgentReturnsNonContractError() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -97,7 +120,35 @@ class AgentClientTest {
         properties.setToken("test-agent-token");
         properties.setConnectTimeout(Duration.ofSeconds(1));
         properties.setAnalyzeTimeout(Duration.ofSeconds(1));
+        properties.setReportTimeout(Duration.ofSeconds(2));
         return properties;
+    }
+
+    private AgentReportRequest reportRequest() {
+        OffsetDateTime startedAt = OffsetDateTime.parse("2026-08-10T09:00:00+09:00");
+        return new AgentReportRequest(
+                "run:42:report",
+                AgentPlan.FREE,
+                new AgentReportRequest.RunPayload(
+                        42L, startedAt, startedAt.plusMinutes(3), List.of("HBM")),
+                List.of(new AgentReportRequest.FindingPayload(
+                        501L,
+                        10L,
+                        "기사",
+                        "https://example.com/10",
+                        "Example",
+                        "NEW",
+                        "한국어 요약",
+                        List.of("핵심"),
+                        "발표",
+                        "neutral",
+                        "low",
+                        "important",
+                        "제품/공정",
+                        "FULLTEXT")),
+                List.of(),
+                new AgentReportRequest.SourceStatsPayload(3, 0, 0, 0, 2),
+                "TECHNOLOGY");
     }
 
     private AgentAnalyzeRequest request() {
@@ -142,6 +193,34 @@ class AgentClientTest {
                     "credits": 0,
                     "mock": true,
                     "truncated": false
+                  }
+                }
+                """;
+    }
+
+    private String reportResponseJson() {
+        return """
+                {
+                  "title": "보고서",
+                  "executiveSummary": ["짧은 속보"],
+                  "importantEvents": [{
+                    "title": "중요 기사",
+                    "summaryKo": "한국어 요약",
+                    "significance": "즉시 확인 필요",
+                    "sourceFindingIds": [501]
+                  }],
+                  "watchItems": [],
+                  "sourceNotes": ["제외 사항 없음"],
+                  "markdownBody": "# 보고서",
+                  "meta": {
+                    "provider": "gemini",
+                    "model": "configured-model",
+                    "promptVersion": "report.ko.v1",
+                    "inputTokens": 100,
+                    "outputTokens": 20,
+                    "costUsd": 0,
+                    "credits": 0,
+                    "mock": false
                   }
                 }
                 """;
