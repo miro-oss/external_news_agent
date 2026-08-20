@@ -146,6 +146,7 @@ class FindingRepositoryIntegrationTests {
         assertTrue(versions.contains("6"));
         assertTrue(versions.contains("10"));
         assertTrue(versions.contains("11"));
+        assertTrue(versions.contains("12"));
 
         Finding saved = findingRepository.save(finding());
         flushAndClear();

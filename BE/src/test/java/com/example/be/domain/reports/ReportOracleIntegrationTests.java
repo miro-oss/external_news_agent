@@ -1,6 +1,7 @@
 package com.example.be.domain.reports;
 
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
@@ -16,6 +17,7 @@ import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
+import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.reports.service.ReportCreationService;
 import com.example.be.domain.reports.service.ReportQueryService;
@@ -126,6 +128,7 @@ class ReportOracleIntegrationTests {
                 .riskLevel(RiskLevel.HIGH)
                 .relevance(Relevance.IMPORTANT)
                 .category("정책")
+                .analysisSource(AnalysisSource.LLM)
                 .sections(List.of(new FindingSection(0, "Oracle 통합 테스트 본문")))
                 .analyzedAt(now)
                 .build());
@@ -139,6 +142,8 @@ class ReportOracleIntegrationTests {
         assertEquals(firstId, secondId);
         assertEquals(reportCountBefore + 1, reportRepository.count());
         assertEquals(firstId, runRepository.findById(run.getId()).orElseThrow().getReportId());
+        assertEquals(ReportStatus.FALLBACK,
+                reportRepository.findById(firstId).orElseThrow().getReportStatus());
 
         ReportResDTO.Detail detail = queryService.getReport(firstId, true);
         assertEquals(run.getId(), detail.getRunId());

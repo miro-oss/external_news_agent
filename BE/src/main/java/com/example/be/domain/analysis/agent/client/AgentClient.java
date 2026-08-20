@@ -4,6 +4,8 @@ import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.dto.AgentErrorResponse;
+import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
+import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.global.config.RestClientFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -19,37 +21,65 @@ public class AgentClient {
     static final String AGENT_TOKEN_HEADER = "X-Agent-Token";
     private static final int MAX_ERROR_BODY_LENGTH = 500;
 
-    private final RestClient restClient;
+    private final RestClient analyzeClient;
+    private final RestClient reportClient;
 
     @Autowired
     public AgentClient(RestClientFactory restClientFactory, AgentProperties properties) {
-        this(restClientFactory.create(
-                properties.getConnectTimeout(), properties.getAnalyzeTimeout()), properties);
+        this(
+                restClientFactory.create(
+                        properties.getConnectTimeout(), properties.getAnalyzeTimeout()),
+                restClientFactory.create(
+                        properties.getConnectTimeout(), properties.getReportTimeout()),
+                properties);
     }
 
     AgentClient(RestClient.Builder builder, AgentProperties properties) {
+        this(builder, builder, properties);
+    }
+
+    AgentClient(RestClient.Builder analyzeBuilder,
+                RestClient.Builder reportBuilder,
+                AgentProperties properties) {
+        this.analyzeClient = configured(analyzeBuilder, properties).build();
+        this.reportClient = configured(reportBuilder, properties).build();
+    }
+
+    private RestClient.Builder configured(RestClient.Builder builder, AgentProperties properties) {
         RestClient.Builder configured = builder.baseUrl(properties.getBaseUrl());
         if (StringUtils.hasText(properties.getToken())) {
             configured.defaultHeader(AGENT_TOKEN_HEADER, properties.getToken());
         }
-        this.restClient = configured.build();
+        return configured;
     }
 
     public AgentAnalyzeResponse analyze(AgentAnalyzeRequest request) {
+        return post(analyzeClient, "/v1/analyze", request, AgentAnalyzeResponse.class);
+    }
+
+    public AgentReportResponse report(AgentReportRequest request) {
+        return post(reportClient, "/v1/report", request, AgentReportResponse.class);
+    }
+
+    private <T> T post(RestClient client, String uri, Object request, Class<T> responseType) {
         try {
-            AgentAnalyzeResponse response = restClient.post()
-                    .uri("/v1/analyze")
+            T response = client.post()
+                    .uri(uri)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()
-                    .body(AgentAnalyzeResponse.class);
+                    .body(responseType);
             if (response == null) {
                 throw new AgentClientException("SCHEMA_VIOLATION", "Agent 응답 본문이 비어 있습니다.");
             }
             return response;
         } catch (RestClientResponseException exception) {
             AgentErrorResponse error = errorResponse(exception);
-            throw new AgentClientException(errorCode(error, exception), errorMessage(error, exception), exception);
+            throw new AgentClientException(
+                    errorCode(error, exception),
+                    errorMessage(error, exception),
+                    exception,
+                    error == null ? null : error.usage());
         } catch (RestClientException exception) {
             throw new AgentClientException(
                     "PROVIDER_UNAVAILABLE", "Agent에 연결할 수 없습니다.", exception);

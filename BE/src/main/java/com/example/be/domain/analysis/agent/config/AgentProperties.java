@@ -15,6 +15,7 @@ public class AgentProperties implements InitializingBean {
     private String token = "";
     private Duration connectTimeout = Duration.ofSeconds(5);
     private Duration analyzeTimeout = Duration.ofSeconds(30);
+    private Duration reportTimeout = Duration.ofSeconds(120);
     private AgentPlan defaultPlan = AgentPlan.FREE;
 
     @Override
@@ -63,6 +64,14 @@ public class AgentProperties implements InitializingBean {
 
     public void setAnalyzeTimeout(Duration analyzeTimeout) {
         this.analyzeTimeout = analyzeTimeout;
+    }
+
+    public Duration getReportTimeout() {
+        return reportTimeout;
+    }
+
+    public void setReportTimeout(Duration reportTimeout) {
+        this.reportTimeout = reportTimeout;
     }
 
     public AgentPlan getDefaultPlan() {

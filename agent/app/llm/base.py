@@ -27,6 +27,7 @@ class ProviderResponse:
     provider: ProviderName
     model: str
     usage: ProviderUsage
+    truncated: bool = False
 
 
 class AnalyzeProvider(Protocol):

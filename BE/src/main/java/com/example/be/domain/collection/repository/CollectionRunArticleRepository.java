@@ -2,6 +2,7 @@ package com.example.be.domain.collection.repository;
 
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
+import com.example.be.domain.collection.entity.FetchStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
@@ -27,6 +28,16 @@ public interface CollectionRunArticleRepository
     List<CollectionRunArticle> findByArticleIdOrderByObservedAtAsc(Long articleId);
 
     long countByRunIdAndChangeType(Long runId, ChangeType changeType);
+
+    /** 이번 실행에서 관측한 고유 기사별 최신 수집 상태를 보고서 통계에 제공한다. */
+    @Query("""
+            SELECT observation.article.id AS articleId,
+                   observation.article.fetchStatus AS fetchStatus
+            FROM CollectionRunArticle observation
+            WHERE observation.run.id = :runId
+            ORDER BY observation.id ASC
+            """)
+    List<ArticleFetchStatus> findArticleFetchStatusesByRunId(@Param("runId") Long runId);
 
     /** 분석은 NEW/UPDATED만 한다. 본문과 주제·소스까지 이 조회에서 붙여 트랜잭션 밖에서도 안전하게 읽는다. */
     @Query("""
@@ -58,5 +69,12 @@ public interface CollectionRunArticleRepository
     List<CollectionRunArticle> findAnalysisTargetsByRunIdAndArticleIdIn(
             @Param("runId") Long runId,
             @Param("articleIds") Set<Long> articleIds);
+
+    interface ArticleFetchStatus {
+
+        Long getArticleId();
+
+        FetchStatus getFetchStatus();
+    }
 
 }

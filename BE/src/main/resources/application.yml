@@ -50,4 +50,5 @@ news:
     token: ${AGENT_SHARED_SECRET:}
     connect-timeout: 5s
     analyze-timeout: 30s
+    report-timeout: 120s
     default-plan: FREE

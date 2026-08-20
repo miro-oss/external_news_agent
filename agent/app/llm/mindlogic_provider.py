@@ -1,4 +1,5 @@
 import logging
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -62,7 +63,7 @@ class MindlogicAnalyzeProvider:
                     "response_format": {
                         "type": "json_schema",
                         "json_schema": {
-                            "name": "article_analysis",
+                            "name": _schema_name(response_schema),
                             "strict": True,
                             "schema": _strict_schema(response_schema),
                         },
@@ -71,7 +72,8 @@ class MindlogicAnalyzeProvider:
             )
             response.raise_for_status()
             body = response.json()
-            text = body["choices"][0]["message"]["content"]
+            choice = body["choices"][0]
+            text = choice["message"]["content"]
             if not isinstance(text, str) or not text.strip():
                 raise ValueError("Mindlogic 응답 본문이 비어 있습니다.")
             usage = body.get("usage") or {}
@@ -84,6 +86,7 @@ class MindlogicAnalyzeProvider:
                     output_tokens=safe_int(usage.get("completion_tokens"), 0) or 0,
                     credits=Decimal("1"),
                 ),
+                truncated=choice.get("finish_reason") == "length",
             )
         except AgentError:
             raise
@@ -121,3 +124,9 @@ def _strict_schema(value: Any) -> Any:
     if isinstance(value, list):
         return [_strict_schema(child) for child in value]
     return value
+
+
+def _schema_name(schema: dict[str, Any]) -> str:
+    title = str(schema.get("title") or "structured_output")
+    normalized = re.sub(r"[^a-zA-Z0-9_-]", "_", title)
+    return normalized[:64] or "structured_output"

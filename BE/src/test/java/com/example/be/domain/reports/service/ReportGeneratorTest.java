@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
@@ -44,7 +45,76 @@ class ReportGeneratorTest {
         ReportDocument document = generator.generate(List.of(), LocalDateTime.of(2026, 8, 18, 9, 0));
 
         assertEquals("뉴스 보고서 2026-08-18 09:00", document.title());
-        assertTrue(document.markdownBody().contains("새로 분석된 기사가 없습니다"));
+        assertTrue(document.markdownBody().contains("실제 LLM 분석 finding이 없어"));
+    }
+
+    @Test
+    void excludesStubFindingsAndLeavesSourceNote() {
+        Finding stub = Finding.builder()
+                .id(1L)
+                .article(Article.builder()
+                        .id(101L)
+                        .topic(Topic.builder().name("반도체").build())
+                        .title("STUB 기사")
+                        .canonicalUrl("https://example.com/stub")
+                        .build())
+                .changeType(ChangeType.NEW)
+                .summary("본문에 들어가면 안 되는 STUB 요약")
+                .keyPoints(List.of())
+                .riskLevel(RiskLevel.HIGH)
+                .relevance(Relevance.IMPORTANT)
+                .category("정책")
+                .analysisSource(AnalysisSource.STUB)
+                .build();
+
+        ReportDocument document = generator.generate(
+                List.of(stub),
+                LocalDateTime.of(2026, 8, 18, 9, 0),
+                new ReportSourceStats(1, 0, 0, 0, 1));
+
+        assertTrue(!document.markdownBody().contains("본문에 들어가면 안 되는 STUB 요약"));
+        assertTrue(document.markdownBody().contains("STUB 분석 1건"));
+    }
+
+    @Test
+    void excludesReusedFindingsFromFallbackContent() {
+        Finding reused = Finding.builder()
+                .id(2L)
+                .article(Article.builder()
+                        .id(102L)
+                        .topic(Topic.builder().name("반도체").build())
+                        .title("REUSED 기사")
+                        .canonicalUrl("https://example.com/reused")
+                        .build())
+                .changeType(ChangeType.UPDATED)
+                .summary("본문에 들어가면 안 되는 REUSED 요약")
+                .keyPoints(List.of())
+                .riskLevel(RiskLevel.HIGH)
+                .relevance(Relevance.IMPORTANT)
+                .category("기업")
+                .analysisSource(AnalysisSource.REUSED)
+                .build();
+
+        ReportDocument document = generator.generate(
+                List.of(reused),
+                LocalDateTime.of(2026, 8, 18, 9, 0),
+                new ReportSourceStats(1, 0, 0, 0, 0));
+
+        assertTrue(!document.markdownBody().contains("본문에 들어가면 안 되는 REUSED 요약"));
+        assertTrue(document.markdownBody().contains("기사 1건을 관측했지만 실제 LLM 분석 finding이 없어"));
+    }
+
+    @Test
+    void escapesMarkdownMetacharactersWithoutChangingAmpersands() {
+        Finding finding = finding(
+                1L, "TSMC & *삼성* [HBM]", "요약 _강조_", RiskLevel.HIGH, Relevance.IMPORTANT, "기업");
+
+        ReportDocument document = generator.generate(
+                List.of(finding), LocalDateTime.of(2026, 8, 18, 9, 0));
+
+        assertTrue(document.markdownBody().contains("TSMC & \\*삼성\\* \\[HBM\\]"));
+        assertTrue(document.markdownBody().contains("요약 \\_강조\\_"));
+        assertTrue(!document.markdownBody().contains("&amp;"));
     }
 
     @Test
@@ -90,6 +160,7 @@ class ReportGeneratorTest {
                 .riskLevel(riskLevel)
                 .relevance(relevance)
                 .category(category)
+                .analysisSource(AnalysisSource.LLM)
                 .build();
     }
 }
