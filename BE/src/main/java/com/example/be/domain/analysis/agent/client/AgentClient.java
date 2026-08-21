@@ -3,6 +3,8 @@ package com.example.be.domain.analysis.agent.client;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
+import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
 import com.example.be.domain.analysis.agent.dto.AgentErrorResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
@@ -65,6 +67,10 @@ public class AgentClient {
 
     public AgentReportResponse report(AgentReportRequest request) {
         return post(reportClient, "/v1/report", request, AgentReportResponse.class);
+    }
+
+    public AgentEvidenceResponse verifyEvidence(AgentEvidenceRequest request) {
+        return post(analyzeClient, "/v1/verify-evidence", request, AgentEvidenceResponse.class);
     }
 
     private <T> T post(RestClient client, String uri, Object request, Class<T> responseType) {

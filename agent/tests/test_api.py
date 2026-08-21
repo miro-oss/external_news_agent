@@ -58,6 +58,16 @@ def report_request_body() -> dict[str, object]:
     }
 
 
+def evidence_request_body() -> dict[str, object]:
+    return {
+        "idempotencyKey": "finding:999:verify",
+        "claim": "HBM4 양산 일정이 앞당겨졌다.",
+        "sentences": [
+            {"id": 1, "text": "HBM4 양산 일정이 앞당겨졌다."},
+        ],
+    }
+
+
 def test_health_does_not_require_agent_token() -> None:
     response = client.get("/v1/health")
 
@@ -74,6 +84,13 @@ def test_analyze_requires_agent_token() -> None:
 
 def test_report_requires_agent_token() -> None:
     response = client.post("/v1/report", json=report_request_body())
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_verify_evidence_requires_agent_token() -> None:
+    response = client.post("/v1/verify-evidence", json=evidence_request_body())
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "UNAUTHORIZED"
@@ -110,6 +127,20 @@ def test_report_returns_deterministic_mock_contract() -> None:
     assert "STUB 분석 2건" in payload["sourceNotes"][0]
     assert "## 수집 및 출처 참고" in payload["markdownBody"]
     assert payload["meta"]["provider"] == "mock"
+
+
+def test_verify_evidence_returns_deterministic_mock_contract() -> None:
+    response = client.post(
+        "/v1/verify-evidence",
+        headers={"X-Agent-Token": "local-dev-agent-token"},
+        json=evidence_request_body(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "grounded"
+    assert payload["acceptedSentenceIds"] == [1]
+    assert payload["meta"]["promptVersion"] == "evidence.rules.v1"
 
 
 def test_validation_failure_uses_json_error_contract() -> None:

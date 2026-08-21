@@ -5,6 +5,8 @@ import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
+import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
 import com.example.be.domain.analysis.agent.entity.AgentTimeoutPhase;
@@ -40,8 +42,10 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 @Slf4j
@@ -81,6 +85,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
         try {
             response = client.analyze(request);
             result = toAnalysisResult(response);
+            result = verifyEvidence(runId, article.getId(), selection.plan(), result);
         } catch (RuntimeException exception) {
             AgentClientException clientException = exception instanceof AgentClientException value
                     ? value
@@ -256,6 +261,161 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 analysisSections,
                 entities,
                 metadata);
+    }
+
+    private AnalysisResult verifyEvidence(Long runId,
+                                          Long articleId,
+                                          AgentPlan plan,
+                                          AnalysisResult result) {
+        if (result.analysisSource() != AnalysisSource.LLM) {
+            return result;
+        }
+        List<FindingAnalysisSection> verifiedSections = IntStream.range(
+                        0, result.analysisSections().size())
+                .mapToObj(sectionIndex -> {
+                    FindingAnalysisSection section = result.analysisSections().get(sectionIndex);
+                    List<FindingAnalysisBullet> bullets = IntStream.range(0, section.bullets().size())
+                            .mapToObj(bulletIndex -> verifyBullet(
+                                    runId,
+                                    articleId,
+                                    plan,
+                                    result.sections(),
+                                    section.bullets().get(bulletIndex),
+                                    sectionIndex,
+                                    bulletIndex))
+                            .toList();
+                    return new FindingAnalysisSection(section.heading(), bullets);
+                })
+                .toList();
+        List<FindingKeyPoint> keyPoints = verifiedSections.stream()
+                .flatMap(section -> section.bullets().stream())
+                .map(bullet -> new FindingKeyPoint(
+                        bullet.text(), bullet.evidence(), bullet.groundedness()))
+                .toList();
+        return new AnalysisResult(
+                result.summary(),
+                keyPoints,
+                result.intent(),
+                result.sentiment(),
+                result.riskLevel(),
+                result.relevance(),
+                result.category(),
+                result.sections(),
+                result.analysisSource(),
+                verifiedSections,
+                result.entities(),
+                result.metadata());
+    }
+
+    private FindingAnalysisBullet verifyBullet(Long runId,
+                                                Long articleId,
+                                                AgentPlan plan,
+                                                List<FindingSection> sentences,
+                                                FindingAnalysisBullet bullet,
+                                                int sectionIndex,
+                                                int bulletIndex) {
+        if ("ungrounded".equals(bullet.groundedness())) {
+            return unsupportedBullet(bullet);
+        }
+        String idempotencyKey = "run:" + runId + ":article:" + articleId
+                + ":evidence:" + sectionIndex + ":" + bulletIndex;
+        QuotaReservation evidenceReservation;
+        try {
+            evidenceReservation = quotaService.reserve(
+                    runId, idempotencyKey, AgentTask.VERIFY_EVIDENCE, plan);
+        } catch (QuotaExceededException exception) {
+            addAgentWarning(
+                    runId,
+                    CollectionRunWarning.CODE_LLM_EVIDENCE_VERIFICATION_FAILED,
+                    "근거 검증 quota가 부족해 일부 주장을 보고서 근거에서 제외했습니다.");
+            log.warn("근거 검증 quota가 부족해 주장을 제외한다. runId={} articleId={} section={} bullet={}",
+                    runId, articleId, sectionIndex, bulletIndex);
+            return unsupportedBullet(bullet);
+        }
+
+        AgentEvidenceRequest request = evidenceRequest(
+                idempotencyKey, plan, bullet, sentences);
+        try {
+            AgentEvidenceResponse response = client.verifyEvidence(request);
+            FindingAnalysisBullet verified = verifiedBullet(
+                    bullet, response, sentences.size(), request);
+            completeSuccessSafely(evidenceReservation, response.meta().credits());
+            return verified;
+        } catch (RuntimeException exception) {
+            AgentClientException clientException = exception instanceof AgentClientException value
+                    ? value
+                    : null;
+            String code = clientException == null ? "SCHEMA_VIOLATION" : clientException.getCode();
+            completeFailureSafely(evidenceReservation, clientException, code);
+            addAgentWarning(
+                    runId,
+                    CollectionRunWarning.CODE_LLM_EVIDENCE_VERIFICATION_FAILED,
+                    "Agent 근거 검증 실패로 일부 주장을 보고서 근거에서 제외했습니다. code=" + code);
+            log.warn("Agent 근거 검증 실패로 주장을 제외한다. runId={} articleId={} code={} error={}",
+                    runId, articleId, code, exception.getMessage());
+            return unsupportedBullet(bullet);
+        }
+    }
+
+    private AgentEvidenceRequest evidenceRequest(String idempotencyKey,
+                                                 AgentPlan plan,
+                                                 FindingAnalysisBullet bullet,
+                                                 List<FindingSection> sentences) {
+        return new AgentEvidenceRequest(
+                idempotencyKey,
+                plan,
+                bullet.text(),
+                bullet.evidence().stream()
+                        .map(index -> new AgentEvidenceRequest.SentencePayload(
+                                index + 1, sentences.get(index).text()))
+                        .toList());
+    }
+
+    private FindingAnalysisBullet verifiedBullet(FindingAnalysisBullet bullet,
+                                                  AgentEvidenceResponse response,
+                                                  int sentenceCount,
+                                                  AgentEvidenceRequest request) {
+        if (response == null
+                || !GROUNDEDNESS_VALUES.contains(response.status())
+                || !StringUtils.hasText(response.reason())
+                || response.acceptedSentenceIds() == null
+                || response.meta() == null) {
+            throw schemaViolation("Agent 근거 검증 응답의 필수 필드가 없습니다.");
+        }
+        Set<Integer> acceptedIds = new HashSet<>(response.acceptedSentenceIds());
+        Set<Integer> requestedIds = request.sentences().stream()
+                .map(AgentEvidenceRequest.SentencePayload::id)
+                .collect(Collectors.toSet());
+        boolean unsupported = "ungrounded".equals(response.status());
+        if (acceptedIds.size() != response.acceptedSentenceIds().size()
+                || !requestedIds.containsAll(acceptedIds)
+                || (unsupported && !acceptedIds.isEmpty())
+                || (!unsupported && acceptedIds.isEmpty())) {
+            throw schemaViolation("Agent 근거 검증 응답의 sentence id 계약이 올바르지 않습니다.");
+        }
+        validateEvidenceMeta(response.meta());
+        return new FindingAnalysisBullet(
+                bullet.text(),
+                toPublicEvidenceIndexes(response.acceptedSentenceIds(), sentenceCount),
+                response.status(),
+                unsupported ? BigDecimal.ZERO : bullet.confidence());
+    }
+
+    private void validateEvidenceMeta(AgentEvidenceResponse.Meta meta) {
+        if (!StringUtils.hasText(meta.provider())
+                || !StringUtils.hasText(meta.model())
+                || !StringUtils.hasText(meta.promptVersion())
+                || isNegative(meta.inputTokens())
+                || isNegative(meta.outputTokens())
+                || isNegative(meta.costUsd())
+                || isNegative(meta.credits())) {
+            throw schemaViolation("Agent 근거 검증 meta가 올바르지 않습니다.");
+        }
+    }
+
+    private FindingAnalysisBullet unsupportedBullet(FindingAnalysisBullet bullet) {
+        return new FindingAnalysisBullet(
+                bullet.text(), List.of(), "ungrounded", BigDecimal.ZERO);
     }
 
     private FindingAnalysisSection toAnalysisSection(AgentAnalyzeResponse.Section section,

@@ -4,6 +4,8 @@ import com.example.be.domain.analysis.agent.client.AgentClient;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
+import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
 import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
@@ -55,6 +57,9 @@ class AgentAnalysisOrchestratorTest {
     private final CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
     private final QuotaReservation reservation = new QuotaReservation(
             1L, 42L, "run:42:article:10", AgentTask.ANALYZE, AgentPlan.FREE, BigDecimal.ONE);
+    private final QuotaReservation evidenceReservation = new QuotaReservation(
+            2L, 42L, "run:42:article:10:evidence:0:0",
+            AgentTask.VERIFY_EVIDENCE, AgentPlan.FREE, BigDecimal.ONE);
     private final AgentAnalysisOrchestrator orchestrator =
             new AgentAnalysisOrchestrator(
                     properties, client, recorder, stub, quotaService, planService, resultWriter);
@@ -63,6 +68,13 @@ class AgentAnalysisOrchestratorTest {
     void reserveQuota() {
         when(quotaService.reserve(42L, "run:42:article:10", AgentTask.ANALYZE, AgentPlan.FREE))
                 .thenReturn(reservation);
+        when(quotaService.reserve(
+                eq(42L),
+                eq("run:42:article:10:evidence:0:0"),
+                eq(AgentTask.VERIFY_EVIDENCE),
+                eq(AgentPlan.FREE)))
+                .thenReturn(evidenceReservation);
+        when(client.verifyEvidence(any())).thenReturn(evidenceResponse("grounded", List.of(1)));
     }
 
     @Test
@@ -98,6 +110,25 @@ class AgentAnalysisOrchestratorTest {
         assertEquals(30L, result.metadata().outputTokens());
         assertEquals(new BigDecimal("0.001"), result.metadata().costUsd());
         assertFalse(result.metadata().truncated());
+        ArgumentCaptor<AgentEvidenceRequest> captor =
+                ArgumentCaptor.forClass(AgentEvidenceRequest.class);
+        verify(client).verifyEvidence(captor.capture());
+        assertEquals("핵심 주장", captor.getValue().claim());
+        assertEquals("근거 문장.", captor.getValue().sentences().getFirst().text());
+    }
+
+    @Test
+    void removesEvidenceWhenVerifierRejectsRealProviderBullet() {
+        when(client.analyze(any())).thenReturn(response(List.of(1), "제품/공정", false));
+        when(client.verifyEvidence(any())).thenReturn(evidenceResponse("ungrounded", List.of()));
+
+        AnalysisResult result = orchestrator.analyze(
+                new AnalysisContext(42L, article(), AgentPlan.FREE));
+
+        assertEquals("ungrounded", result.keyPoints().getFirst().groundedness());
+        assertEquals(List.of(), result.keyPoints().getFirst().evidence());
+        assertEquals(BigDecimal.ZERO,
+                result.analysisSections().getFirst().bullets().getFirst().confidence());
     }
 
     @Test
@@ -250,6 +281,23 @@ class AgentAnalysisOrchestratorTest {
                         mock ? BigDecimal.ZERO : new BigDecimal("0.001"),
                         BigDecimal.ZERO,
                         mock,
+                        false));
+    }
+
+    private static AgentEvidenceResponse evidenceResponse(String status, List<Integer> acceptedIds) {
+        return new AgentEvidenceResponse(
+                status,
+                acceptedIds,
+                "검증 결과",
+                new AgentEvidenceResponse.Meta(
+                        "gemini",
+                        "gemini-2.5-flash",
+                        "evidence.ko.v1",
+                        10L,
+                        5L,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        false,
                         false));
     }
 

@@ -50,6 +50,9 @@ public class CollectionRunWarning {
     public static final String CODE_LLM_FALLBACK_FREE = "LLM_FALLBACK_FREE";
     /** Agent 호출 또는 응답 검증 실패로 기사 분석을 Stub으로 대체했다. */
     public static final String CODE_LLM_ANALYSIS_FALLBACK = "LLM_ANALYSIS_FALLBACK";
+    /** 근거 검증 호출·quota·응답 실패로 해당 주장을 보고서 근거에서 제외했다. */
+    public static final String CODE_LLM_EVIDENCE_VERIFICATION_FAILED =
+            "LLM_EVIDENCE_VERIFICATION_FAILED";
 
     public static final int MAX_CODE_LENGTH = 50;
     public static final int MAX_MESSAGE_LENGTH = 1000;

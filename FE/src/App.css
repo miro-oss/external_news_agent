@@ -815,7 +815,38 @@ body.modal-open {
   font-size: 0.75rem;
 }
 
-.key-point p {
+.key-point-content {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.key-point-content:not(:disabled) {
+  cursor: pointer;
+}
+
+.key-point-content:disabled {
+  opacity: 0.55;
+}
+
+.key-point-content:not(:disabled):hover .key-point-text,
+.key-point-content:not(:disabled):focus-visible .key-point-text {
+  color: #fff;
+  text-decoration: underline;
+  text-decoration-color: var(--warm);
+  text-underline-offset: 0.22rem;
+}
+
+.key-point-content:focus-visible {
+  outline: 2px solid var(--warm);
+  outline-offset: 0.3rem;
+}
+
+.key-point-text {
+  display: block;
   margin: 0 0 0.3rem;
   color: #e7eae5;
   font-size: 0.82rem;
@@ -856,6 +887,14 @@ body.modal-open {
   color: #30342f;
   font-size: 0.91rem;
   line-height: 1.75;
+}
+
+.sentence-list p.highlighted {
+  margin-inline: -0.7rem;
+  padding-inline: 0.7rem;
+  border-radius: 6px;
+  background: #fff2cc;
+  box-shadow: inset 3px 0 0 var(--warm);
 }
 
 .sentence-index {

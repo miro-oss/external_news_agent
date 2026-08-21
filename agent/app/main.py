@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.api.v1.analyze import router as analyze_router
+from app.api.v1.evidence import router as evidence_router
 from app.api.v1.health import router as health_router
 from app.api.v1.report import router as report_router
 from app.core.errors import AgentError
@@ -31,6 +32,11 @@ def create_app() -> FastAPI:
     application.include_router(health_router, prefix="/v1")
     application.include_router(
         analyze_router,
+        prefix="/v1",
+        dependencies=[Depends(require_agent_token)],
+    )
+    application.include_router(
+        evidence_router,
         prefix="/v1",
         dependencies=[Depends(require_agent_token)],
     )

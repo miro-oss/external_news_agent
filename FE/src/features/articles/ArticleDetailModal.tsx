@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useArticle } from '../../api/queries'
 import type { ArticleAnalysis } from '../../api/types'
 import { formatMediumDate } from '../../lib/datetime'
@@ -11,6 +11,10 @@ interface Props {
 export function ArticleDetailModal({ articleId, onClose }: Props) {
   const article = useArticle(articleId)
   const closeButton = useRef<HTMLButtonElement>(null)
+  const [evidenceSelection, setEvidenceSelection] = useState<{
+    articleId: number | null
+    sentences: number[]
+  }>({ articleId: null, sentences: [] })
 
   useEffect(() => {
     if (articleId === null) return undefined
@@ -27,6 +31,22 @@ export function ArticleDetailModal({ articleId, onClose }: Props) {
   }, [articleId, onClose])
 
   if (articleId === null) return null
+
+  const highlightedSentences = evidenceSelection.articleId === articleId
+    ? evidenceSelection.sentences
+    : []
+
+  const highlightEvidence = (evidence: number[]) => {
+    setEvidenceSelection({ articleId, sentences: evidence })
+    const firstSentence = evidence[0]
+    if (firstSentence === undefined) return
+    requestAnimationFrame(() => {
+      document.getElementById(`article-${articleId}-sentence-${firstSentence}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      })
+    })
+  }
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -59,7 +79,9 @@ export function ArticleDetailModal({ articleId, onClose }: Props) {
               </a>
             </header>
 
-            {article.data.analysis ? <AnalysisPanel analysis={article.data.analysis} /> : (
+            {article.data.analysis ? (
+              <AnalysisPanel analysis={article.data.analysis} onEvidenceSelect={highlightEvidence} />
+            ) : (
               <div className="analysis-empty">이 실행의 분석 결과가 아직 없습니다.</div>
             )}
 
@@ -71,7 +93,11 @@ export function ArticleDetailModal({ articleId, onClose }: Props) {
               {article.data.bodyText && article.data.sentences.length > 0 ? (
                 <div className="sentence-list">
                   {article.data.sentences.map((sentence) => (
-                    <p id={`sentence-${sentence.index}`} key={sentence.index}>
+                    <p
+                      id={`article-${articleId}-sentence-${sentence.index}`}
+                      className={highlightedSentences.includes(sentence.index) ? 'highlighted' : undefined}
+                      key={sentence.index}
+                    >
                       <span className="sentence-index">{String(sentence.index + 1).padStart(2, '0')}</span>
                       <span>{sentence.text}</span>
                     </p>
@@ -91,12 +117,18 @@ export function ArticleDetailModal({ articleId, onClose }: Props) {
   )
 }
 
-function AnalysisPanel({ analysis }: { analysis: ArticleAnalysis }) {
+function AnalysisPanel({
+  analysis,
+  onEvidenceSelect,
+}: {
+  analysis: ArticleAnalysis
+  onEvidenceSelect: (evidence: number[]) => void
+}) {
   return (
     <section className="analysis-panel">
       <div className="analysis-title-row">
         <div>
-          <p className="eyebrow">STUB ANALYSIS</p>
+          <p className="eyebrow">EVIDENCE ANALYSIS</p>
           <h3>한국어 요약</h3>
         </div>
         <div className="analysis-labels">
@@ -111,11 +143,16 @@ function AnalysisPanel({ analysis }: { analysis: ArticleAnalysis }) {
         {analysis.keyPoints.map((point, index) => (
           <div className="key-point" key={`${point.text}-${index}`}>
             <span className="key-point-number">{index + 1}</span>
-            <div>
-              <p>{point.text}</p>
+            <button
+              type="button"
+              className="key-point-content"
+              disabled={point.evidence.length === 0}
+              onClick={() => onEvidenceSelect(point.evidence)}
+            >
+              <span className="key-point-text">{point.text}</span>
               <span className={`groundedness ${point.groundedness}`}>{point.groundedness}</span>
               {point.evidence.map((evidence) => <span className="evidence" key={evidence}>근거 {evidence + 1}</span>)}
-            </div>
+            </button>
           </div>
         ))}
       </div>
