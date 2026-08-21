@@ -77,7 +77,7 @@ class ReportGeneratorTest {
     }
 
     @Test
-    void excludesReusedFindingsFromFallbackContent() {
+    void includesReusedLlmFindingInFallbackContent() {
         Finding reused = Finding.builder()
                 .id(2L)
                 .article(Article.builder()
@@ -87,8 +87,8 @@ class ReportGeneratorTest {
                         .canonicalUrl("https://example.com/reused")
                         .build())
                 .changeType(ChangeType.UPDATED)
-                .summary("본문에 들어가면 안 되는 REUSED 요약")
-                .keyPoints(List.of())
+                .summary("재사용된 REUSED 요약")
+                .keyPoints(List.of(new FindingKeyPoint("재사용된 근거 주장", List.of(0), "grounded")))
                 .riskLevel(RiskLevel.HIGH)
                 .relevance(Relevance.IMPORTANT)
                 .category("기업")
@@ -100,8 +100,33 @@ class ReportGeneratorTest {
                 LocalDateTime.of(2026, 8, 18, 9, 0),
                 new ReportSourceStats(1, 0, 0, 0, 0, 0));
 
-        assertTrue(!document.markdownBody().contains("본문에 들어가면 안 되는 REUSED 요약"));
-        assertTrue(document.markdownBody().contains("기사 1건을 관측했지만 실제 LLM 분석 finding이 없어"));
+        assertTrue(document.markdownBody().contains("재사용된 REUSED 요약"));
+        assertTrue(document.markdownBody().contains("재사용된 근거 주장"));
+    }
+
+    @Test
+    void treatsMissingAnalysisSourceAsUntrustedAtPublicBoundary() {
+        Finding missingSource = Finding.builder()
+                .id(3L)
+                .article(Article.builder()
+                        .id(103L)
+                        .topic(Topic.builder().name("반도체").build())
+                        .title("출처 없는 기사")
+                        .canonicalUrl("https://example.com/missing-source")
+                        .build())
+                .changeType(ChangeType.NEW)
+                .summary("포함되면 안 되는 요약")
+                .keyPoints(List.of(new FindingKeyPoint("주장", List.of(0), "grounded")))
+                .riskLevel(RiskLevel.HIGH)
+                .relevance(Relevance.IMPORTANT)
+                .category("기업")
+                .analysisSource(null)
+                .build();
+
+        ReportDocument document = generator.generate(
+                List.of(missingSource), LocalDateTime.of(2026, 8, 18, 9, 0));
+
+        assertTrue(!document.markdownBody().contains("포함되면 안 되는 요약"));
     }
 
     @Test

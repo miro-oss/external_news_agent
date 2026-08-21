@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -12,7 +13,10 @@ class AgentPropertiesTest {
 
     @Test
     void isDisabledByDefault() {
-        assertFalse(new AgentProperties().isEnabled());
+        AgentProperties properties = new AgentProperties();
+
+        assertFalse(properties.isEnabled());
+        assertEquals("analyze.ko.v1", properties.getAnalysisPromptVersion());
     }
 
     @Test

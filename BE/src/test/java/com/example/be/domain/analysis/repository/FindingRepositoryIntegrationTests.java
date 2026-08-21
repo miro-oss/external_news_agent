@@ -147,6 +147,7 @@ class FindingRepositoryIntegrationTests {
         assertTrue(versions.contains("10"));
         assertTrue(versions.contains("11"));
         assertTrue(versions.contains("12"));
+        assertTrue(versions.contains("16"));
 
         Finding saved = findingRepository.save(finding());
         flushAndClear();
@@ -163,6 +164,7 @@ class FindingRepositoryIntegrationTests {
                 found.getAnalysisSections().getFirst().bullets().getFirst().confidence());
         assertEquals(List.of("HBM4"), found.getEntities().products());
         assertEquals("gemini", found.getLlmProvider());
+        assertEquals("c".repeat(64), found.getAnalysisInputHash());
         assertEquals(120L, found.getInputTokens());
         assertTrue(found.isInputTruncated());
     }
@@ -176,6 +178,31 @@ class FindingRepositoryIntegrationTests {
             findingRepository.save(finding());
             entityManager.flush();
         });
+    }
+
+    @Test
+    void findsLlmCacheSourceOnlyForMatchingAnalysisInputHash() {
+        Finding saved = findingRepository.save(finding());
+        flushAndClear();
+
+        List<Finding> cached = findingRepository.findReusableSources(
+                List.of(article.getId()),
+                AnalysisSource.LLM,
+                List.of("c".repeat(64)),
+                "analyze.ko.v1",
+                "gemini",
+                "gemini-2.5-flash");
+
+        assertEquals(List.of(saved.getId()), cached.stream().map(Finding::getId).toList());
+        assertTrue(findingRepository.findReusableSources(
+                List.of(article.getId()), AnalysisSource.LLM, List.of("d".repeat(64)),
+                "analyze.ko.v1", "gemini", "gemini-2.5-flash").isEmpty());
+        assertTrue(findingRepository.findReusableSources(
+                List.of(article.getId()), AnalysisSource.STUB, List.of("c".repeat(64)),
+                "analyze.ko.v1", "gemini", "gemini-2.5-flash").isEmpty());
+        assertTrue(findingRepository.findReusableSources(
+                List.of(article.getId()), AnalysisSource.LLM, List.of("c".repeat(64)),
+                "analyze.ko.v2", "gemini", "gemini-2.5-flash").isEmpty());
     }
 
     @Test
@@ -302,6 +329,7 @@ class FindingRepositoryIntegrationTests {
                 .outputTokens(30L)
                 .costUsd(new BigDecimal("0.001"))
                 .credits(BigDecimal.ZERO)
+                .analysisInputHash("c".repeat(64))
                 .inputTruncated(true)
                 .analyzedAt(LocalDateTime.now())
                 .build();

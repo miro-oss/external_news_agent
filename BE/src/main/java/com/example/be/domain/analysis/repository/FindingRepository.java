@@ -1,5 +1,6 @@
 package com.example.be.domain.analysis.repository;
 
+import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -25,6 +26,26 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
     boolean existsByRunIdAndArticleId(Long runId, Long articleId);
 
     Optional<Finding> findFirstByArticleIdOrderByIdDesc(Long articleId);
+
+    @Query("""
+            SELECT finding
+            FROM Finding finding
+            JOIN FETCH finding.article article
+            WHERE article.id IN :articleIds
+              AND finding.analysisSource = :analysisSource
+              AND finding.analysisInputHash IN :analysisInputHashes
+              AND finding.promptVersion = :promptVersion
+              AND finding.llmProvider = :provider
+              AND finding.llmModel = :model
+            ORDER BY finding.id DESC
+            """)
+    List<Finding> findReusableSources(
+            @Param("articleIds") Collection<Long> articleIds,
+            @Param("analysisSource") AnalysisSource analysisSource,
+            @Param("analysisInputHashes") Collection<String> analysisInputHashes,
+            @Param("promptVersion") String promptVersion,
+            @Param("provider") String provider,
+            @Param("model") String model);
 
     Optional<Finding> findByRunIdAndArticleId(Long runId, Long articleId);
 

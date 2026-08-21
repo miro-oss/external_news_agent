@@ -66,4 +66,23 @@ class ArticleHasherTest {
     void treatsMissingTitleAndSummaryAsEmpty() {
         assertEquals(ArticleHasher.contentHash(null, null, null), ArticleHasher.contentHash("", "", null));
     }
+
+    @Test
+    void analysisInputHashChangesWhenTitleSummaryOrBodyChanges() {
+        String original = ArticleHasher.analysisInputHash("제목", "요약", "본문");
+
+        assertNotEquals(original, ArticleHasher.analysisInputHash("바뀐 제목", "요약", "본문"));
+        assertNotEquals(original, ArticleHasher.analysisInputHash("제목", "바뀐 요약", "본문"));
+        assertNotEquals(original, ArticleHasher.analysisInputHash("제목", "요약", "바뀐 본문"));
+        assertEquals(original, ArticleHasher.analysisInputHash(" 제목 ", " 요약 ", " 본문 "));
+    }
+
+    @Test
+    void analysisInputHashDoesNotCollideWhenFieldContainsOldSeparator() {
+        String separator = "\u001f";
+
+        assertNotEquals(
+                ArticleHasher.analysisInputHash("a" + separator + "b", "c", ""),
+                ArticleHasher.analysisInputHash("a", "b", "c" + separator));
+    }
 }

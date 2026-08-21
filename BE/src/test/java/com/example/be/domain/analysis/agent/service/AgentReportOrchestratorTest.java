@@ -72,9 +72,10 @@ class AgentReportOrchestratorTest {
     }
 
     @Test
-    void excludesStubFromAgentRequestAndKeepsStructuredReportMetadata() {
+    void excludesStubAndIncludesReusedFindingInAgentRequest() {
         Finding llm = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "실제 LLM 요약");
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT_BLOCKED, "STUB 요약");
+        Finding reused = finding(503L, AnalysisSource.REUSED, FetchStatus.FULLTEXT, "재사용 요약");
         CollectionRunArticleRepository.ArticleFetchStatus paywalled =
                 observation(900L, FetchStatus.FULLTEXT_BLOCKED);
         CollectionRunArticleRepository.ArticleFetchStatus robots =
@@ -83,11 +84,11 @@ class AgentReportOrchestratorTest {
                 observation(902L, FetchStatus.FETCH_FAILED);
         when(observationRepository.findArticleFetchStatusesByRunId(42L)).thenReturn(List.of(
                 paywalled, paywalled, robots, failed));
-        when(client.report(any())).thenReturn(response(List.of(501L)));
+        when(client.report(any())).thenReturn(response(List.of(501L, 503L)));
 
         ReportDocument document = orchestrator.generate(
                 run(),
-                List.of(llm, stub),
+                List.of(llm, stub, reused),
                 LocalDateTime.of(2026, 8, 21, 9, 3));
 
         assertEquals("# Agent 보고서", document.markdownBody());
@@ -98,7 +99,7 @@ class AgentReportOrchestratorTest {
         ArgumentCaptor<AgentReportRequest> captor = ArgumentCaptor.forClass(AgentReportRequest.class);
         verify(client).report(captor.capture());
         AgentReportRequest request = captor.getValue();
-        assertEquals(List.of(501L), request.findings().stream()
+        assertEquals(List.of(501L, 503L), request.findings().stream()
                 .map(AgentReportRequest.FindingPayload::id)
                 .toList());
         assertEquals(1, request.sourceStats().stubExcluded());
