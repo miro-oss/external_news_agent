@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -91,6 +91,33 @@ class Settings(BaseSettings):
         le=1,
         validation_alias="AGENT_SCHEMA_REPAIR_ATTEMPTS",
     )
+    evidence_grounded_overlap: float = Field(
+        default=0.6,
+        ge=0,
+        le=1,
+        validation_alias="AGENT_EVIDENCE_GROUNDED_OVERLAP",
+    )
+    evidence_weak_overlap: float = Field(
+        default=0.2,
+        ge=0,
+        le=1,
+        validation_alias="AGENT_EVIDENCE_WEAK_OVERLAP",
+    )
+    evidence_max_claim_chars: int = Field(
+        default=2_000,
+        ge=1,
+        validation_alias="AGENT_EVIDENCE_MAX_CLAIM_CHARS",
+    )
+    evidence_max_sentences: int = Field(
+        default=50,
+        ge=1,
+        validation_alias="AGENT_EVIDENCE_MAX_SENTENCES",
+    )
+    evidence_max_total_chars: int = Field(
+        default=40_000,
+        ge=1,
+        validation_alias="AGENT_EVIDENCE_MAX_TOTAL_CHARS",
+    )
     gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="", validation_alias="GEMINI_MODEL")
     mindlogic_api_key: str = Field(default="", validation_alias="MINDLOGIC_API_KEY")
@@ -102,6 +129,14 @@ class Settings(BaseSettings):
         default="",
         validation_alias="MINDLOGIC_CLAUDE_MODEL",
     )
+
+    @model_validator(mode="after")
+    def validate_evidence_thresholds(self) -> "Settings":
+        if self.evidence_weak_overlap > self.evidence_grounded_overlap:
+            raise ValueError(
+                "AGENT_EVIDENCE_WEAK_OVERLAP은 GROUNDED_OVERLAP보다 클 수 없습니다."
+            )
+        return self
 
 
 @lru_cache

@@ -222,8 +222,10 @@ public class AgentReportOrchestrator {
                 finding.getArticle().getCanonicalUrl(),
                 finding.getArticle().getSourceName(),
                 finding.getChangeType().name(),
-                finding.getSummary(),
-                finding.getEffectiveKeyPoints().stream().map(point -> point.text()).toList(),
+                ReportEvidencePolicy.supportedSummary(finding),
+                ReportEvidencePolicy.supportedKeyPoints(finding).stream()
+                        .map(point -> point.text())
+                        .toList(),
                 finding.getIntent(),
                 finding.getSentiment().toApiValue(),
                 finding.getRiskLevel().toApiValue(),
@@ -235,6 +237,7 @@ public class AgentReportOrchestrator {
     private List<Finding> eligibleFindings(List<Finding> findings) {
         return ReportFindingOrder.sort(findings.stream()
                         .filter(finding -> finding.getAnalysisSource() == AnalysisSource.LLM)
+                        .filter(ReportEvidencePolicy::hasSupportedEvidence)
                         .toList())
                 .stream()
                 .limit(MAX_REPORT_FINDINGS)

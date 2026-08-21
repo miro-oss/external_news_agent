@@ -3,6 +3,8 @@ package com.example.be.domain.analysis.agent.client;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
+import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
@@ -94,6 +96,26 @@ class AgentClientTest {
         assertEquals(List.of("짧은 속보"), response.executiveSummary());
         assertEquals(List.of(501L), response.importantEvents().getFirst().sourceFindingIds());
         assertEquals("report.ko.v1", response.meta().promptVersion());
+        server.verify();
+    }
+
+    @Test
+    void sendsEvidenceContractAndReadsGroundedness() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/verify-evidence"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
+                .andExpect(jsonPath("$.idempotencyKey").value("finding:501:verify"))
+                .andExpect(jsonPath("$.sentences[0].id").value(1))
+                .andRespond(withSuccess(evidenceResponseJson(), MediaType.APPLICATION_JSON));
+
+        AgentEvidenceResponse response = client.verifyEvidence(evidenceRequest());
+
+        assertEquals("grounded", response.status());
+        assertEquals(List.of(1), response.acceptedSentenceIds());
+        assertEquals("evidence.rules.v1", response.meta().promptVersion());
         server.verify();
     }
 
@@ -202,6 +224,15 @@ class AgentClientTest {
                 null);
     }
 
+    private AgentEvidenceRequest evidenceRequest() {
+        return new AgentEvidenceRequest(
+                "finding:501:verify",
+                AgentPlan.FREE,
+                "HBM4 양산 일정이 앞당겨졌다.",
+                List.of(new AgentEvidenceRequest.SentencePayload(
+                        1, "HBM4 양산 일정이 앞당겨졌다.")));
+    }
+
     private String responseJson() {
         return """
                 {
@@ -262,6 +293,27 @@ class AgentClientTest {
                     "costUsd": 0,
                     "credits": 0,
                     "mock": false,
+                    "truncated": false
+                  }
+                }
+                """;
+    }
+
+    private String evidenceResponseJson() {
+        return """
+                {
+                  "status": "grounded",
+                  "acceptedSentenceIds": [1],
+                  "reason": "주장이 근거 문장에 직접 나타납니다.",
+                  "meta": {
+                    "provider": "mock",
+                    "model": "evidence-rules-v1",
+                    "promptVersion": "evidence.rules.v1",
+                    "inputTokens": 0,
+                    "outputTokens": 0,
+                    "costUsd": 0,
+                    "credits": 0,
+                    "mock": true,
                     "truncated": false
                   }
                 }

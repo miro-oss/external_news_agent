@@ -218,6 +218,51 @@ class AgentReportOrchestratorTest {
         assertEquals(1L, captor.getValue().findings().getFirst().id());
     }
 
+    @Test
+    void excludesUngroundedFindingFromReportCandidates() {
+        Finding supported = finding(
+                501L,
+                AnalysisSource.LLM,
+                FetchStatus.FULLTEXT,
+                "지원되는 요약",
+                List.of(new FindingKeyPoint("지원되는 주장", List.of(0), "grounded")));
+        Finding unsupported = finding(
+                502L,
+                AnalysisSource.LLM,
+                FetchStatus.FULLTEXT,
+                "제외할 요약",
+                List.of(new FindingKeyPoint("근거 없는 주장", List.of(0), "ungrounded")));
+        when(client.report(any())).thenReturn(response(List.of(501L)));
+
+        orchestrator.generate(
+                run(), List.of(unsupported, supported), LocalDateTime.of(2026, 8, 21, 9, 3));
+
+        ArgumentCaptor<AgentReportRequest> captor = ArgumentCaptor.forClass(AgentReportRequest.class);
+        verify(client).report(captor.capture());
+        assertEquals(List.of(501L), captor.getValue().findings().stream()
+                .map(AgentReportRequest.FindingPayload::id)
+                .toList());
+    }
+
+    @Test
+    void stripsUngroundedKeyPointFromMixedFindingPayload() {
+        Finding mixed = finding(
+                501L,
+                AnalysisSource.LLM,
+                FetchStatus.FULLTEXT,
+                "혼합 요약",
+                List.of(
+                        new FindingKeyPoint("지원되는 주장", List.of(0), "grounded"),
+                        new FindingKeyPoint("근거 없는 주장", List.of(1), "ungrounded")));
+        when(client.report(any())).thenReturn(response(List.of(501L)));
+
+        orchestrator.generate(run(), List.of(mixed), LocalDateTime.of(2026, 8, 21, 9, 3));
+
+        ArgumentCaptor<AgentReportRequest> captor = ArgumentCaptor.forClass(AgentReportRequest.class);
+        verify(client).report(captor.capture());
+        assertEquals(List.of("지원되는 주장"), captor.getValue().findings().getFirst().keyPoints());
+    }
+
     private AgentProperties enabledProperties() {
         AgentProperties value = new AgentProperties();
         value.setEnabled(true);
@@ -251,6 +296,15 @@ class AgentReportOrchestratorTest {
                             AnalysisSource source,
                             FetchStatus fetchStatus,
                             String summary) {
+        return finding(id, source, fetchStatus, summary,
+                List.of(new FindingKeyPoint("핵심", List.of(0), "grounded")));
+    }
+
+    private Finding finding(Long id,
+                            AnalysisSource source,
+                            FetchStatus fetchStatus,
+                            String summary,
+                            List<FindingKeyPoint> keyPoints) {
         Topic topic = Topic.builder().id(3L).name("HBM").build();
         Article article = Article.builder()
                 .id(id + 1000)
@@ -265,7 +319,7 @@ class AgentReportOrchestratorTest {
                 .article(article)
                 .changeType(ChangeType.NEW)
                 .summary(summary)
-                .keyPoints(List.of(new FindingKeyPoint("핵심", List.of(0), "grounded")))
+                .keyPoints(keyPoints)
                 .intent("산업 동향 보도")
                 .sentiment(Sentiment.NEUTRAL)
                 .riskLevel(RiskLevel.HIGH)

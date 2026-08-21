@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.errors import AgentError
+from app.core.evidence import factual_mismatches
 from app.core.parser import JsonObjectParseError, parse_json_object
 from app.core.sentences import split_sentences_with_meta
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
@@ -15,6 +16,7 @@ from app.schemas.analyze import (
     AnalyzeRequest,
     AnalyzeResponse,
     ResponseMeta,
+    Section,
 )
 
 PROMPT_VERSION = "analyze.ko.v1"
@@ -93,7 +95,7 @@ def _validated_response(
     truncated: bool,
 ) -> AnalyzeResponse:
     output = AnalyzeOutput.model_validate(parse_json_object(provider_response.text))
-    return AnalyzeResponse(
+    response = AnalyzeResponse(
         sentences=sentences,
         sections=output.sections,
         summary_ko=output.summary_ko,
@@ -111,6 +113,26 @@ def _validated_response(
             truncated=truncated,
         ),
     )
+    return response.model_copy(update={"sections": _verified_sections(response)})
+
+
+def _verified_sections(response: AnalyzeResponse) -> list[Section]:
+    sections = []
+    for section in response.sections:
+        bullets = []
+        for bullet in section.bullets:
+            evidence_text = " ".join(
+                response.sentences[sentence_id - 1]
+                for sentence_id in bullet.evidence_sentence_ids
+            )
+            mismatches = factual_mismatches(bullet.text, evidence_text)
+            if mismatches and bullet.groundedness != "ungrounded":
+                bullet = bullet.model_copy(
+                    update={"groundedness": "ungrounded", "confidence": 0.0}
+                )
+            bullets.append(bullet)
+        sections.append(section.model_copy(update={"bullets": bullets}))
+    return sections
 
 
 def _analysis_prompt(request: AnalyzeRequest, sentences: list[str]) -> str:

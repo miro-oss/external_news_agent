@@ -42,6 +42,7 @@ public class ReportGenerator {
                 Math.max(sourceStats.stubExcluded(), actualStubCount));
         List<Finding> ordered = ReportFindingOrder.sort(findings.stream()
                 .filter(finding -> finding.getAnalysisSource() == AnalysisSource.LLM)
+                .filter(ReportEvidencePolicy::hasSupportedEvidence)
                 .toList());
         String title = title(ordered, generatedAt);
         return new ReportDocument(
@@ -75,7 +76,8 @@ public class ReportGenerator {
                     .append("건을 관측했지만 실제 LLM 분석 finding이 없어 기사 내용을 요약하지 않았습니다.\n");
         } else {
             findings.stream().limit(5).forEach(finding -> body
-                    .append("- ").append(markdownText(finding.getSummary())).append("\n"));
+                    .append("- ").append(markdownText(
+                            ReportEvidencePolicy.supportedSummary(finding))).append("\n"));
         }
 
         Map<String, Long> riskCounts = counts(findings, finding -> finding.getRiskLevel().toApiValue());
@@ -100,11 +102,11 @@ public class ReportGenerator {
         }
         for (Finding finding : findings) {
             body.append("\n### ").append(markdownText(finding.getArticle().getTitle())).append("\n\n")
-                    .append(markdownText(finding.getSummary())).append("\n\n")
+                    .append(markdownText(ReportEvidencePolicy.supportedSummary(finding))).append("\n\n")
                     .append("- 분류: ").append(markdownText(finding.getCategory()))
                     .append(" · 위험도: ").append(finding.getRiskLevel().toApiValue())
                     .append(" · 관련도: ").append(finding.getRelevance().toApiValue()).append("\n");
-            finding.getEffectiveKeyPoints().forEach(point -> body
+            ReportEvidencePolicy.supportedKeyPoints(finding).forEach(point -> body
                     .append("- 핵심: ").append(markdownText(point.text())).append("\n"));
             if (safeHttpUrl(finding.getArticle().getCanonicalUrl())) {
                 body.append("- 원문: <").append(finding.getArticle().getCanonicalUrl().trim()).append(">\n");

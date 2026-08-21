@@ -105,6 +105,36 @@ class ReportGeneratorTest {
     }
 
     @Test
+    void excludesUngroundedFindingsAndKeyPointsFromFallbackContent() {
+        Finding unsupported = finding(
+                1L,
+                "왜곡 기사",
+                "보고서에 들어가면 안 되는 요약",
+                RiskLevel.HIGH,
+                Relevance.IMPORTANT,
+                "기업",
+                List.of(new FindingKeyPoint("근거 없는 주장", List.of(0), "ungrounded")));
+        Finding mixed = finding(
+                2L,
+                "검증 기사",
+                "검증된 기사 요약",
+                RiskLevel.MEDIUM,
+                Relevance.WATCH,
+                "기업",
+                List.of(
+                        new FindingKeyPoint("검증된 주장", List.of(0), "grounded"),
+                        new FindingKeyPoint("제외할 주장", List.of(1), "ungrounded")));
+
+        ReportDocument document = generator.generate(
+                List.of(unsupported, mixed), LocalDateTime.of(2026, 8, 18, 9, 0));
+
+        assertTrue(!document.markdownBody().contains("보고서에 들어가면 안 되는 요약"));
+        assertTrue(!document.markdownBody().contains("근거 없는 주장"));
+        assertTrue(!document.markdownBody().contains("제외할 주장"));
+        assertTrue(document.markdownBody().contains("검증된 주장"));
+    }
+
+    @Test
     void escapesMarkdownMetacharactersWithoutChangingAmpersands() {
         Finding finding = finding(
                 1L, "TSMC & *삼성* [HBM]", "요약 _강조_", RiskLevel.HIGH, Relevance.IMPORTANT, "기업");
@@ -144,6 +174,28 @@ class ReportGeneratorTest {
                             Relevance relevance,
                             String category,
                             String topicName) {
+        return finding(id, title, summary, riskLevel, relevance, category,
+                List.of(new FindingKeyPoint("핵심 포인트", List.of(0), "grounded")), topicName);
+    }
+
+    private Finding finding(Long id,
+                            String title,
+                            String summary,
+                            RiskLevel riskLevel,
+                            Relevance relevance,
+                            String category,
+                            List<FindingKeyPoint> keyPoints) {
+        return finding(id, title, summary, riskLevel, relevance, category, keyPoints, "반도체");
+    }
+
+    private Finding finding(Long id,
+                            String title,
+                            String summary,
+                            RiskLevel riskLevel,
+                            Relevance relevance,
+                            String category,
+                            List<FindingKeyPoint> keyPoints,
+                            String topicName) {
         Topic topic = Topic.builder().id(3L).name(topicName).build();
         Article article = Article.builder()
                 .id(id + 100)
@@ -156,7 +208,7 @@ class ReportGeneratorTest {
                 .article(article)
                 .changeType(ChangeType.NEW)
                 .summary(summary)
-                .keyPoints(List.of(new FindingKeyPoint("핵심 포인트", List.of(0), "grounded")))
+                .keyPoints(keyPoints)
                 .riskLevel(riskLevel)
                 .relevance(relevance)
                 .category(category)
