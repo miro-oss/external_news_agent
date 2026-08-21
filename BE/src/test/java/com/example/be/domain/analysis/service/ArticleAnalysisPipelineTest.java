@@ -2,7 +2,6 @@ package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.entity.AnalysisSource;
-import com.example.be.domain.collection.converter.ArticleHasher;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
@@ -14,12 +13,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -42,9 +44,12 @@ class ArticleAnalysisPipelineTest {
     void loadRunPlan() {
         when(runRepository.findById(42L)).thenReturn(java.util.Optional.of(
                 CollectionRun.builder().id(42L).llmPlan(AgentPlan.FREE).build()));
-        when(reuseCache.lookup(any(Article.class))).thenAnswer(invocation -> {
-            Article article = invocation.getArgument(0);
-            return new FindingReuseCache.Lookup(inputHash(article), Optional.empty(), Optional.empty());
+        when(reuseCache.lookupAll(anyList(), any(AgentPlan.class))).thenAnswer(invocation -> {
+            List<Article> articles = invocation.getArgument(0);
+            Map<Long, FindingReuseCache.Lookup> lookups = new LinkedHashMap<>();
+            articles.forEach(article -> lookups.put(
+                    article.getId(), new FindingReuseCache.Lookup(inputHash(article), Optional.empty())));
+            return Map.copyOf(lookups);
         });
     }
 
@@ -97,6 +102,7 @@ class ArticleAnalysisPipelineTest {
         verify(findingWriter).addFailureWarning(42L, 10L, "stub failure");
         verify(findingWriter, never()).write(eq(42L), eq(10L), any(), any(), any());
         verify(findingWriter).write(42L, 11L, ChangeType.NEW, inputHash(succeeded), result);
+        verify(reuseCache).lookupAll(List.of(failed, succeeded), AgentPlan.FREE);
     }
 
     @Test
@@ -136,7 +142,7 @@ class ArticleAnalysisPipelineTest {
     }
 
     @Test
-    void reusesMatchingLlmFindingWithoutCallingAgent() {
+    void keepsCurrentUpdatedChangeTypeWhenCacheHits() {
         Article article = Article.builder()
                 .id(10L)
                 .title("동일 기사")
@@ -145,46 +151,16 @@ class ArticleAnalysisPipelineTest {
                 .fetchStatus(FetchStatus.FULLTEXT)
                 .build();
         when(runArticleRepository.findAnalysisTargetsByRunId(42L))
-                .thenReturn(List.of(observation(article, ChangeType.UNCHANGED)));
+                .thenReturn(List.of(observation(article, ChangeType.UPDATED)));
         AnalysisResult reused = mock(AnalysisResult.class);
         when(reused.analysisSource()).thenReturn(AnalysisSource.REUSED);
-        when(reuseCache.lookup(article)).thenReturn(new FindingReuseCache.Lookup(
-                inputHash(article),
-                Optional.of(new FindingReuseCache.CachedAnalysis(ChangeType.NEW, reused)),
-                Optional.of(ChangeType.NEW)));
+        when(reuseCache.lookupAll(List.of(article), AgentPlan.FREE)).thenReturn(Map.of(
+                10L, new FindingReuseCache.Lookup(inputHash(article), Optional.of(reused))));
 
         pipeline.analyze(42L);
 
         verify(orchestrator, never()).analyze(any());
-        verify(findingWriter).write(42L, 10L, ChangeType.NEW, inputHash(article), reused);
-    }
-
-    @Test
-    void skipsUnchangedArticleWhenThereIsNoPreviousFinding() {
-        Article article = Article.builder().id(10L).title("분석 이력이 없는 기사").build();
-        when(runArticleRepository.findAnalysisTargetsByRunId(42L))
-                .thenReturn(List.of(observation(article, ChangeType.UNCHANGED)));
-
-        pipeline.analyze(42L);
-
-        verify(orchestrator, never()).analyze(any());
-        verify(findingWriter, never()).write(any(), any(), any(), any(), any());
-    }
-
-    @Test
-    void reanalyzesUnchangedArticleWhenPreviousFindingWasNotReusable() {
-        Article article = Article.builder().id(10L).title("STUB만 있는 기사").build();
-        when(runArticleRepository.findAnalysisTargetsByRunId(42L))
-                .thenReturn(List.of(observation(article, ChangeType.UNCHANGED)));
-        when(reuseCache.lookup(article)).thenReturn(new FindingReuseCache.Lookup(
-                inputHash(article), Optional.empty(), Optional.of(ChangeType.NEW)));
-        AnalysisResult result = mock(AnalysisResult.class);
-        when(orchestrator.analyze(new AnalysisContext(42L, article, AgentPlan.FREE))).thenReturn(result);
-
-        pipeline.analyze(42L);
-
-        verify(orchestrator).analyze(new AnalysisContext(42L, article, AgentPlan.FREE));
-        verify(findingWriter).write(42L, 10L, ChangeType.NEW, inputHash(article), result);
+        verify(findingWriter).write(42L, 10L, ChangeType.UPDATED, inputHash(article), reused);
     }
 
     private CollectionRunArticle observation(Article article, ChangeType changeType) {
@@ -195,6 +171,6 @@ class ArticleAnalysisPipelineTest {
     }
 
     private String inputHash(Article article) {
-        return ArticleHasher.analysisInputHash(article.getTitle(), article.getSummary(), article.getBody());
+        return FindingReuseCache.inputHash(article);
     }
 }

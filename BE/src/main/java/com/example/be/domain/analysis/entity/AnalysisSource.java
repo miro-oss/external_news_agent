@@ -10,4 +10,9 @@ public enum AnalysisSource {
     public boolean isLlmDerived() {
         return this == LLM || this == REUSED;
     }
+
+    /** 호출자가 만든 finding처럼 source가 null일 수 있는 경계에서 쓰는 null-safe 판정이다. */
+    public static boolean isLlmDerived(AnalysisSource source) {
+        return source != null && source.isLlmDerived();
+    }
 }

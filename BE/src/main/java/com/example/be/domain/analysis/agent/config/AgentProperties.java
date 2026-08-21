@@ -19,6 +19,9 @@ public class AgentProperties implements InitializingBean {
     private Duration reportTimeout = Duration.ofSeconds(120);
     private AgentPlan defaultPlan = AgentPlan.FREE;
     private boolean allowRunOverride = true;
+    private String analysisPromptVersion = "analyze.ko.v1";
+    private String freeModel = "";
+    private String paidModel = "";
     private final Quota quota = new Quota();
 
     @Override
@@ -110,6 +113,30 @@ public class AgentProperties implements InitializingBean {
 
     public void setAllowRunOverride(boolean allowRunOverride) {
         this.allowRunOverride = allowRunOverride;
+    }
+
+    public String getAnalysisPromptVersion() {
+        return analysisPromptVersion;
+    }
+
+    public void setAnalysisPromptVersion(String analysisPromptVersion) {
+        this.analysisPromptVersion = analysisPromptVersion;
+    }
+
+    public String getFreeModel() {
+        return freeModel;
+    }
+
+    public void setFreeModel(String freeModel) {
+        this.freeModel = freeModel;
+    }
+
+    public String getPaidModel() {
+        return paidModel;
+    }
+
+    public void setPaidModel(String paidModel) {
+        this.paidModel = paidModel;
     }
 
     public Quota getQuota() {

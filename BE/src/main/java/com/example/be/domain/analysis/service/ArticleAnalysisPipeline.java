@@ -15,6 +15,7 @@ import org.springframework.util.StringUtils;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /** 외부 모델 호출 자리가 생겨도 DB 트랜잭션을 잡지 않도록 분석과 저장을 분리한다. */
@@ -37,32 +38,38 @@ public class ArticleAnalysisPipeline {
         AgentPlan plan = runRepository.findById(runId)
                 .orElseThrow(() -> new IllegalStateException("분석할 수집 실행이 없습니다. runId=" + runId))
                 .getLlmPlan();
-        for (Target target : targets(runId, refreshedArticleIds)) {
+        List<Target> targets = targets(runId, refreshedArticleIds);
+        Map<Long, FindingReuseCache.Lookup> lookups = cacheLookups(targets, plan);
+        for (Target target : targets) {
             try {
-                FindingReuseCache.Lookup lookup = reuseCache.lookup(target.article());
+                FindingReuseCache.Lookup lookup = lookups.get(target.article().getId());
                 if (lookup.cached().isPresent()) {
-                    FindingReuseCache.CachedAnalysis cached = lookup.cached().orElseThrow();
-                    // 공개 API의 changeType 계약은 NEW/UPDATED라 원본 분석 버전의 값을 유지한다.
-                    findingWriter.write(runId, target.article().getId(), cached.changeType(),
-                            lookup.analysisInputHash(), cached.result());
+                    findingWriter.write(runId, target.article().getId(), target.changeType(),
+                            lookup.analysisInputHash(), lookup.cached().orElseThrow());
                     continue;
                 }
-                ChangeType findingChangeType = target.changeType();
-                if (target.changeType() == ChangeType.UNCHANGED) {
-                    // STUB/레거시 결과는 재사용하지 않고 다시 분석하되 공개 API의 변경 유형은 유지한다.
-                    findingChangeType = lookup.previousChangeType().orElse(null);
-                    if (findingChangeType == null) {
-                        continue;
-                    }
-                }
                 AnalysisResult result = orchestrator.analyze(new AnalysisContext(runId, target.article(), plan));
-                findingWriter.write(runId, target.article().getId(), findingChangeType,
+                findingWriter.write(runId, target.article().getId(), target.changeType(),
                         lookup.analysisInputHash(), result);
             } catch (RuntimeException exception) {
                 log.warn("기사 분석에 실패했다. runId={} articleId={} error={}",
                         runId, target.article().getId(), exception.getMessage(), exception);
                 findingWriter.addFailureWarning(runId, target.article().getId(), messageOf(exception));
             }
+        }
+    }
+
+    private Map<Long, FindingReuseCache.Lookup> cacheLookups(List<Target> targets, AgentPlan plan) {
+        try {
+            return reuseCache.lookupAll(targets.stream().map(Target::article).toList(), plan);
+        } catch (RuntimeException exception) {
+            log.warn("finding 재사용 캐시 조회에 실패해 새로 분석한다. error={}", exception.getMessage());
+            Map<Long, FindingReuseCache.Lookup> misses = new LinkedHashMap<>();
+            targets.forEach(target -> misses.put(
+                    target.article().getId(),
+                    new FindingReuseCache.Lookup(
+                            FindingReuseCache.inputHash(target.article()), Optional.empty())));
+            return Map.copyOf(misses);
         }
     }
 

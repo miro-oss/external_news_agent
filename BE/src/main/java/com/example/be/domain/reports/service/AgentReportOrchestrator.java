@@ -236,7 +236,7 @@ public class AgentReportOrchestrator {
 
     private List<Finding> eligibleFindings(List<Finding> findings) {
         return ReportFindingOrder.sort(findings.stream()
-                        .filter(finding -> finding.getAnalysisSource().isLlmDerived())
+                        .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
                         .filter(ReportEvidencePolicy::hasSupportedEvidence)
                         .toList())
                 .stream()
@@ -330,7 +330,7 @@ public class AgentReportOrchestrator {
                 .filter(finding -> finding.getAnalysisSource() == AnalysisSource.STUB)
                 .count();
         int evidenceExcluded = (int) findings.stream()
-                .filter(finding -> finding.getAnalysisSource().isLlmDerived())
+                .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
                 .filter(finding -> !ReportEvidencePolicy.hasSupportedEvidence(finding))
                 .count();
         List<CollectionRunItem> items = run.getItems();

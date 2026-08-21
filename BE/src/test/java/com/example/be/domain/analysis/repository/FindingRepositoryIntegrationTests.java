@@ -185,20 +185,24 @@ class FindingRepositoryIntegrationTests {
         Finding saved = findingRepository.save(finding());
         flushAndClear();
 
-        Finding cached = findingRepository
-                .findFirstByArticleIdAndAnalysisSourceAndAnalysisInputHashOrderByIdDesc(
-                        article.getId(), AnalysisSource.LLM, "c".repeat(64))
-                .orElseThrow();
+        List<Finding> cached = findingRepository.findReusableSources(
+                List.of(article.getId()),
+                AnalysisSource.LLM,
+                List.of("c".repeat(64)),
+                "analyze.ko.v1",
+                "gemini",
+                "gemini-2.5-flash");
 
-        assertEquals(saved.getId(), cached.getId());
-        assertTrue(findingRepository
-                .findFirstByArticleIdAndAnalysisSourceAndAnalysisInputHashOrderByIdDesc(
-                        article.getId(), AnalysisSource.LLM, "d".repeat(64))
-                .isEmpty());
-        assertTrue(findingRepository
-                .findFirstByArticleIdAndAnalysisSourceAndAnalysisInputHashOrderByIdDesc(
-                        article.getId(), AnalysisSource.STUB, "c".repeat(64))
-                .isEmpty());
+        assertEquals(List.of(saved.getId()), cached.stream().map(Finding::getId).toList());
+        assertTrue(findingRepository.findReusableSources(
+                List.of(article.getId()), AnalysisSource.LLM, List.of("d".repeat(64)),
+                "analyze.ko.v1", "gemini", "gemini-2.5-flash").isEmpty());
+        assertTrue(findingRepository.findReusableSources(
+                List.of(article.getId()), AnalysisSource.STUB, List.of("c".repeat(64)),
+                "analyze.ko.v1", "gemini", "gemini-2.5-flash").isEmpty());
+        assertTrue(findingRepository.findReusableSources(
+                List.of(article.getId()), AnalysisSource.LLM, List.of("c".repeat(64)),
+                "analyze.ko.v2", "gemini", "gemini-2.5-flash").isEmpty());
     }
 
     @Test

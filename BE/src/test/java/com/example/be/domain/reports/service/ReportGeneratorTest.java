@@ -105,6 +105,31 @@ class ReportGeneratorTest {
     }
 
     @Test
+    void treatsMissingAnalysisSourceAsUntrustedAtPublicBoundary() {
+        Finding missingSource = Finding.builder()
+                .id(3L)
+                .article(Article.builder()
+                        .id(103L)
+                        .topic(Topic.builder().name("반도체").build())
+                        .title("출처 없는 기사")
+                        .canonicalUrl("https://example.com/missing-source")
+                        .build())
+                .changeType(ChangeType.NEW)
+                .summary("포함되면 안 되는 요약")
+                .keyPoints(List.of(new FindingKeyPoint("주장", List.of(0), "grounded")))
+                .riskLevel(RiskLevel.HIGH)
+                .relevance(Relevance.IMPORTANT)
+                .category("기업")
+                .analysisSource(null)
+                .build();
+
+        ReportDocument document = generator.generate(
+                List.of(missingSource), LocalDateTime.of(2026, 8, 18, 9, 0));
+
+        assertTrue(!document.markdownBody().contains("포함되면 안 되는 요약"));
+    }
+
+    @Test
     void excludesUngroundedFindingsAndKeyPointsFromFallbackContent() {
         Finding unsupported = finding(
                 1L,

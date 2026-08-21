@@ -35,7 +35,7 @@ public class ReportGenerator {
                 .filter(finding -> finding.getAnalysisSource() == AnalysisSource.STUB)
                 .count();
         int actualEvidenceExcluded = (int) findings.stream()
-                .filter(finding -> finding.getAnalysisSource().isLlmDerived())
+                .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
                 .filter(finding -> !ReportEvidencePolicy.hasSupportedEvidence(finding))
                 .count();
         ReportSourceStats effectiveStats = new ReportSourceStats(
@@ -46,7 +46,7 @@ public class ReportGenerator {
                 Math.max(sourceStats.stubExcluded(), actualStubCount),
                 Math.max(sourceStats.evidenceExcluded(), actualEvidenceExcluded));
         List<Finding> ordered = ReportFindingOrder.sort(findings.stream()
-                .filter(finding -> finding.getAnalysisSource().isLlmDerived())
+                .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
                 .filter(ReportEvidencePolicy::hasSupportedEvidence)
                 .toList());
         String title = title(ordered, generatedAt);

@@ -27,10 +27,25 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
 
     Optional<Finding> findFirstByArticleIdOrderByIdDesc(Long articleId);
 
-    Optional<Finding> findFirstByArticleIdAndAnalysisSourceAndAnalysisInputHashOrderByIdDesc(
-            Long articleId,
-            AnalysisSource analysisSource,
-            String analysisInputHash);
+    @Query("""
+            SELECT finding
+            FROM Finding finding
+            JOIN FETCH finding.article article
+            WHERE article.id IN :articleIds
+              AND finding.analysisSource = :analysisSource
+              AND finding.analysisInputHash IN :analysisInputHashes
+              AND finding.promptVersion = :promptVersion
+              AND finding.llmProvider = :provider
+              AND finding.llmModel = :model
+            ORDER BY finding.id DESC
+            """)
+    List<Finding> findReusableSources(
+            @Param("articleIds") Collection<Long> articleIds,
+            @Param("analysisSource") AnalysisSource analysisSource,
+            @Param("analysisInputHashes") Collection<String> analysisInputHashes,
+            @Param("promptVersion") String promptVersion,
+            @Param("provider") String provider,
+            @Param("model") String model);
 
     Optional<Finding> findByRunIdAndArticleId(Long runId, Long articleId);
 
