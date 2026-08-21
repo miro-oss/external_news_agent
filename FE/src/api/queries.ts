@@ -1,11 +1,16 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { get, post } from './client'
+import { apiGet, apiPut, get, post } from './client'
 import type {
   ArticleDetail,
   ArticleFilters,
   ArticleSummary,
   Combination,
   CombinationPage,
+  CollectionRunCreated,
+  LlmPlan,
+  LlmPlanSetting,
+  LlmUsage,
+  PaidExhaustedAction,
   PageResult,
   ReportDetail,
   ReportSummary,
@@ -23,6 +28,8 @@ const keys = {
   reports: ['reports', 'list'] as const,
   latestReport: ['reports', 'latest'] as const,
   report: (id: number | null) => ['reports', id] as const,
+  llmPlan: ['settings', 'llm-plan'] as const,
+  llmUsage: ['usage', 'llm'] as const,
 }
 
 const PAGE_SIZE = 100
@@ -126,6 +133,46 @@ export function useReport(reportId: number | null) {
     queryKey: keys.report(reportId),
     queryFn: () => get<ReportDetail>(`/reports/${reportId}`, { includeFindings: true }),
     enabled: reportId !== null,
+  })
+}
+
+export function useLlmPlan() {
+  return useQuery({
+    queryKey: keys.llmPlan,
+    queryFn: () => apiGet<LlmPlanSetting>('/settings/llm-plan'),
+  })
+}
+
+export function useLlmUsage() {
+  return useQuery({
+    queryKey: keys.llmUsage,
+    queryFn: () => apiGet<LlmUsage>('/usage/llm'),
+  })
+}
+
+export function useUpdateLlmPlan() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { plan: LlmPlan; paidExhaustedAction: PaidExhaustedAction }) =>
+      apiPut<LlmPlanSetting>('/settings/llm-plan', body),
+    onSuccess: (setting) => {
+      queryClient.setQueryData(keys.llmPlan, setting)
+      void queryClient.invalidateQueries({ queryKey: keys.llmUsage })
+    },
+  })
+}
+
+export function useStartCollectionRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (request: { idempotencyKey: string; plan?: LlmPlan }) =>
+      post<CollectionRunCreated>('/runs', {
+        idempotencyKey: request.idempotencyKey,
+        ...(request.plan ? { plan: request.plan } : {}),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.llmUsage })
+    },
   })
 }
 

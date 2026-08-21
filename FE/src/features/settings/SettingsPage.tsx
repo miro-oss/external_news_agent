@@ -1,6 +1,7 @@
 import { CombinationTable } from './CombinationTable'
 import { SourceForm } from './SourceForm'
 import { TopicForm } from './TopicForm'
+import { LlmControlPanel } from './LlmControlPanel'
 
 /**
  * M2 설정 화면. 영상 1~3의 흐름을 재현한다 — 소스를 등록하고, 주제를 만들며 그 소스를 연결하면,
@@ -15,6 +16,10 @@ export function SettingsPage() {
         <h1>수집 설정</h1>
         <p className="muted">수집할 주제와 소스를 등록하고, 등록된 조합을 확인합니다.</p>
       </header>
+
+      <section>
+        <LlmControlPanel />
+      </section>
 
       <section>
         <h2>등록된 수집 조합</h2>

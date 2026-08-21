@@ -1,5 +1,7 @@
 package com.example.be.domain.collection.service.command;
 
+import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
 import com.example.be.domain.collection.dto.req.CollectionRunReqDTO;
 import com.example.be.domain.collection.dto.res.CollectionRunResDTO;
 import com.example.be.domain.collection.entity.CollectionRun;
@@ -8,8 +10,10 @@ import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.exception.RunException;
 import com.example.be.domain.collection.exception.code.RunErrorCode;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.settings.service.LlmPlanService;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -28,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -44,15 +49,26 @@ class CollectionRunCommandServiceImplTest {
     @Mock
     private CollectionRunCreator runCreator;
 
+    @Mock
+    private LlmPlanService planService;
+
+    @Mock
+    private AgentQuotaService quotaService;
+
     @InjectMocks
     private CollectionRunCommandServiceImpl runCommandService;
+
+    @BeforeEach
+    void setUpPlan() {
+        lenient().when(planService.resolveRunPlan(any())).thenReturn(AgentPlan.FREE);
+    }
 
     @Test
     void startManualRunDelegatesToCreatorWhenNoRunIsInProgress() {
         CollectionRunReqDTO.Create request = request(List.of(1L), " manual-key ");
         when(runRepository.findInProgressByOptionalIdempotencyKey("manual-key", RunStatus.IN_PROGRESS_STATUSES))
                 .thenReturn(Optional.empty());
-        when(runCreator.create(request, "manual-key")).thenReturn(created(42L));
+        when(runCreator.create(request, "manual-key", AgentPlan.FREE)).thenReturn(created(42L));
 
         CollectionRunStartResult result = runCommandService.startManualRun(request);
 
@@ -71,7 +87,20 @@ class CollectionRunCommandServiceImplTest {
         assertEquals(42L, result.response().getRunId());
         assertNull(result.response().getTargetTopicIds());
         assertNull(result.response().getTargetCombinationCount());
-        verify(runCreator, never()).create(any(), any());
+        verify(runCreator, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void existingIdempotentRunIsReturnedBeforePlanValidation() {
+        CollectionRunReqDTO.Create request = request(List.of(1L), "same-key");
+        request.setPlan("INVALID");
+        when(runRepository.findInProgressByOptionalIdempotencyKey("same-key", RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(Optional.of(running(42L, "same-key")));
+
+        CollectionRunStartResult result = runCommandService.startManualRun(request);
+
+        assertEquals(GeneralSuccessCode.COLLECTION_ALREADY_RUNNING, result.successCode());
+        verify(planService, never()).resolveRunPlan(any());
     }
 
     /**
@@ -87,14 +116,15 @@ class CollectionRunCommandServiceImplTest {
         when(runRepository.findInProgressByOptionalIdempotencyKey("manual-key", RunStatus.IN_PROGRESS_STATUSES))
                 .thenReturn(Optional.empty())
                 .thenReturn(Optional.of(running(41L, "manual-key")));
-        when(runCreator.create(request, "manual-key")).thenThrow(new DuplicatedIdempotencyKeyException());
+        when(runCreator.create(request, "manual-key", AgentPlan.FREE))
+                .thenThrow(new DuplicatedIdempotencyKeyException());
 
         CollectionRunStartResult result = runCommandService.startManualRun(request);
 
         assertEquals(GeneralSuccessCode.COLLECTION_ALREADY_RUNNING, result.successCode());
         assertEquals(41L, result.response().getRunId());
         assertEquals("RUNNING", result.response().getStatus());
-        verify(runCreator, times(1)).create(request, "manual-key");
+        verify(runCreator, times(1)).create(request, "manual-key", AgentPlan.FREE);
     }
 
     /**
@@ -106,7 +136,7 @@ class CollectionRunCommandServiceImplTest {
         CollectionRunReqDTO.Create request = request(List.of(2L), "manual-key");
         when(runRepository.findInProgressByOptionalIdempotencyKey("manual-key", RunStatus.IN_PROGRESS_STATUSES))
                 .thenReturn(Optional.empty());
-        when(runCreator.create(request, "manual-key"))
+        when(runCreator.create(request, "manual-key", AgentPlan.FREE))
                 .thenThrow(new DuplicatedIdempotencyKeyException())
                 .thenReturn(created(43L));
 
@@ -114,7 +144,7 @@ class CollectionRunCommandServiceImplTest {
 
         assertEquals(GeneralSuccessCode.COLLECTION_STARTED, result.successCode());
         assertEquals(43L, result.response().getRunId());
-        verify(runCreator, times(2)).create(request, "manual-key");
+        verify(runCreator, times(2)).create(request, "manual-key", AgentPlan.FREE);
     }
 
     /**
@@ -126,13 +156,14 @@ class CollectionRunCommandServiceImplTest {
         CollectionRunReqDTO.Create request = request(List.of(2L), "manual-key");
         when(runRepository.findInProgressByOptionalIdempotencyKey("manual-key", RunStatus.IN_PROGRESS_STATUSES))
                 .thenReturn(Optional.empty());
-        when(runCreator.create(request, "manual-key")).thenThrow(new DuplicatedIdempotencyKeyException());
+        when(runCreator.create(request, "manual-key", AgentPlan.FREE))
+                .thenThrow(new DuplicatedIdempotencyKeyException());
 
         RunException exception = assertThrows(RunException.class,
                 () -> runCommandService.startManualRun(request));
 
         assertEquals(RunErrorCode.RUN_IN_PROGRESS, exception.getCode());
-        verify(runCreator, times(2)).create(request, "manual-key");
+        verify(runCreator, times(2)).create(request, "manual-key", AgentPlan.FREE);
     }
 
     @Test
@@ -159,7 +190,7 @@ class CollectionRunCommandServiceImplTest {
 
         assertEquals("COMMON400", exception.getCode().getCode());
         assertEquals("topicIds에는 null을 넣을 수 없습니다.", exception.getMessage());
-        verify(runCreator, never()).create(any(), any());
+        verify(runCreator, never()).create(any(), any(), any());
     }
 
     /**
@@ -168,7 +199,7 @@ class CollectionRunCommandServiceImplTest {
     @Test
     void startManualRunAcceptsNullRequestBody() {
         when(runRepository.findInProgressByOptionalIdempotencyKey(eq(null), any())).thenReturn(Optional.empty());
-        when(runCreator.create(any(), eq(null))).thenReturn(created(44L));
+        when(runCreator.create(any(), eq(null), eq(AgentPlan.FREE))).thenReturn(created(44L));
 
         CollectionRunStartResult result = runCommandService.startManualRun(null);
 

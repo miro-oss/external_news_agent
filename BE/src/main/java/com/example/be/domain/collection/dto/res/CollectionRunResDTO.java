@@ -22,7 +22,7 @@ public class CollectionRunResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
             "runId", "status", "triggerType", "idempotencyKey",
-            "targetTopicIds", "targetCombinationCount", "startedAt"
+            "llmPlan", "targetTopicIds", "targetCombinationCount", "startedAt"
     })
     @Schema(name = "CollectionRunCreateResponse", description = "수동 수집 실행 시작 결과")
     public static class Created {
@@ -39,6 +39,9 @@ public class CollectionRunResDTO {
         @Schema(description = "중복 실행 방지 키", example = "2026-08-10-manual-001")
         private final String idempotencyKey;
 
+        @Schema(description = "실행에 확정 적용된 LLM 플랜", example = "FREE")
+        private final String llmPlan;
+
         @Schema(description = "대상 주제 ID 목록", example = "[1, 2]")
         private final List<Long> targetTopicIds;
 
@@ -54,7 +57,7 @@ public class CollectionRunResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
             "runId", "status", "triggerType", "startedAt", "finishedAt",
-            "scannedCount", "newCount", "updatedCount", "skippedCount", "warningCount", "reportId"
+            "scannedCount", "newCount", "updatedCount", "skippedCount", "warningCount", "reportId", "llmPlan"
     })
     @Schema(name = "CollectionRunSummaryResponse", description = "수집 실행 내역 목록 항목")
     public static class Summary {
@@ -91,6 +94,9 @@ public class CollectionRunResDTO {
 
         @Schema(description = "보고서 ID. 보고서 생성 전이면 null", example = "17")
         private final Long reportId;
+
+        @Schema(description = "실행에 확정 적용된 LLM 플랜", example = "PAID")
+        private final String llmPlan;
     }
 
     @Getter
@@ -98,7 +104,7 @@ public class CollectionRunResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
             "runId", "status", "triggerType", "idempotencyKey", "startedAt", "finishedAt",
-            "scannedCount", "newCount", "updatedCount", "skippedCount", "reportId", "breakdown", "warnings"
+            "scannedCount", "newCount", "updatedCount", "skippedCount", "reportId", "llmPlan", "breakdown", "warnings"
     })
     @Schema(name = "CollectionRunDetailResponse", description = "수집 실행 상세")
     public static class Detail {
@@ -135,6 +141,9 @@ public class CollectionRunResDTO {
 
         @Schema(description = "보고서 ID. 보고서 생성 전이면 null", example = "17")
         private final Long reportId;
+
+        @Schema(description = "실행에 확정 적용된 LLM 플랜", example = "PAID")
+        private final String llmPlan;
 
         @Schema(description = "조합별 수집 결과")
         private final List<Breakdown> breakdown;

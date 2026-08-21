@@ -44,6 +44,12 @@ public class CollectionRunWarning {
     public static final String CODE_RUN_INTERRUPTED = "RUN_INTERRUPTED";
     /** 스레드풀이 작업을 거절해 시작조차 못 한 실행. */
     public static final String CODE_RUN_REJECTED = "RUN_REJECTED";
+    /** 실행 중 LLM 일·월/run quota가 소진돼 Stub 또는 FREE fallback을 사용했다. */
+    public static final String CODE_LLM_QUOTA_EXHAUSTED = "LLM_QUOTA_EXHAUSTED";
+    /** PAID 실행이 사용자 설정에 따라 FREE provider로 계속됐다. */
+    public static final String CODE_LLM_FALLBACK_FREE = "LLM_FALLBACK_FREE";
+    /** Agent 호출 또는 응답 검증 실패로 기사 분석을 Stub으로 대체했다. */
+    public static final String CODE_LLM_ANALYSIS_FALLBACK = "LLM_ANALYSIS_FALLBACK";
 
     public static final int MAX_CODE_LENGTH = 50;
     public static final int MAX_MESSAGE_LENGTH = 1000;
@@ -83,5 +89,12 @@ public class CollectionRunWarning {
 
     void assignRun(CollectionRun run) {
         this.run = run;
+    }
+
+    public void addOccurrences(int count) {
+        if (count <= 0) {
+            throw new IllegalArgumentException("경고 발생 횟수는 양수여야 합니다.");
+        }
+        this.articleCount += count;
     }
 }

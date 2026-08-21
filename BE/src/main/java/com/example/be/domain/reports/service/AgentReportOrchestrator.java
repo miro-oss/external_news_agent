@@ -5,16 +5,26 @@ import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.agent.entity.AgentTask;
+import com.example.be.domain.analysis.agent.entity.AgentTimeoutPhase;
+import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
+import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
+import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.agent.service.AgentRunRecorder;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
+import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.collection.service.command.CollectionResultWriter;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.global.config.ApiTimeZone;
+import com.example.be.domain.settings.entity.PaidExhaustedAction;
+import com.example.be.domain.settings.service.LlmPlanService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -44,6 +54,9 @@ public class AgentReportOrchestrator {
     private final AgentRunRecorder recorder;
     private final ReportGenerator fallbackGenerator;
     private final CollectionRunArticleRepository observationRepository;
+    private final AgentQuotaService quotaService;
+    private final LlmPlanService planService;
+    private final CollectionResultWriter resultWriter;
 
     public ReportDocument generate(CollectionRun run,
                                    List<Finding> findings,
@@ -52,25 +65,45 @@ public class AgentReportOrchestrator {
         if (!properties.isEnabled()) {
             return fallbackGenerator.generate(findings, generatedAt, sourceStats);
         }
+        List<Finding> eligible = eligibleFindings(findings);
+        if (eligible.isEmpty()) {
+            return fallbackGenerator.generate(findings, generatedAt, sourceStats);
+        }
+
+        ReservationSelection selection = reserve(run);
+        if (selection == null) {
+            return fallbackGenerator.generate(findings, generatedAt, sourceStats);
+        }
 
         LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
         AgentReportRequest request = null;
         try {
-            request = request(run, findings, generatedAt, sourceStats);
+            request = request(
+                    run,
+                    eligible,
+                    generatedAt,
+                    sourceStats,
+                    selection.plan(),
+                    selection.reservation().idempotencyKey());
             AgentReportResponse response = client.report(request);
             ReportDocument document = toDocument(response, request);
             recordSuccessSafely(run.getId(), request, response, startedAt);
+            completeSuccessSafely(selection.reservation(), response.meta().credits());
             return document;
         } catch (RuntimeException exception) {
-            String code = exception instanceof AgentClientException clientException
+            AgentClientException clientException = exception instanceof AgentClientException value
+                    ? value
+                    : null;
+            String code = clientException != null
                     ? clientException.getCode()
                     : "SCHEMA_VIOLATION";
-            AgentClientException.Usage usage = exception instanceof AgentClientException clientException
-                    ? clientException.getUsage()
-                    : null;
+            AgentClientException.Usage usage = failureUsage(clientException, selection.reservation());
             if (request != null) {
-                recordFailureSafely(run.getId(), request, code, exception.getMessage(), usage, startedAt);
+                recordFailureSafely(
+                        run.getId(), request, code, exception.getMessage(), usage,
+                        timeoutPhase(clientException), startedAt);
             }
+            completeFailureSafely(selection.reservation(), exception, code);
             log.warn("Agent 보고서 생성에 실패해 안전한 fallback을 사용한다. runId={} code={} error={}",
                     run.getId(), code, exception.getMessage());
             return fallbackGenerator.generate(findings, generatedAt, sourceStats);
@@ -80,23 +113,19 @@ public class AgentReportOrchestrator {
     private AgentReportRequest request(CollectionRun run,
                                        List<Finding> findings,
                                        LocalDateTime generatedAt,
-                                       ReportSourceStats sourceStats) {
-        List<Finding> eligible = ReportFindingOrder.sort(findings.stream()
-                        .filter(finding -> finding.getAnalysisSource() == AnalysisSource.LLM)
-                        .toList())
-                .stream()
-                .limit(MAX_REPORT_FINDINGS)
-                .toList();
+                                       ReportSourceStats sourceStats,
+                                       AgentPlan plan,
+                                       String idempotencyKey) {
         LocalDateTime finishedAt = run.getFinishedAt() == null ? generatedAt : run.getFinishedAt();
         return new AgentReportRequest(
-                "run:" + run.getId() + ":report",
-                properties.getDefaultPlan(),
+                idempotencyKey,
+                plan,
                 new AgentReportRequest.RunPayload(
                         run.getId(),
                         toOffset(run.getStartedAt()),
                         toOffset(finishedAt),
                         topics(run, findings)),
-                eligible.stream().map(this::findingPayload).toList(),
+                findings.stream().map(this::findingPayload).toList(),
                 List.of(),
                 new AgentReportRequest.SourceStatsPayload(
                         sourceStats.collected(),
@@ -106,6 +135,82 @@ public class AgentReportOrchestrator {
                         sourceStats.stubExcluded()),
                 ReportSourceNotes.from(sourceStats),
                 DEFAULT_PERSPECTIVE);
+    }
+
+    private ReservationSelection reserve(CollectionRun run) {
+        AgentPlan requestedPlan = run.getLlmPlan();
+        String idempotencyKey = "run:" + run.getId() + ":report";
+        try {
+            return new ReservationSelection(
+                    requestedPlan,
+                    quotaService.reserve(run.getId(), idempotencyKey, AgentTask.REPORT, requestedPlan));
+        } catch (QuotaExceededException exhausted) {
+            if (requestedPlan == AgentPlan.PAID
+                    && planService.paidExhaustedAction() == PaidExhaustedAction.FALLBACK_FREE) {
+                try {
+                    QuotaReservation reservation = quotaService.reserve(
+                            run.getId(), idempotencyKey + ":fallback-free", AgentTask.REPORT, AgentPlan.FREE);
+                    addAgentWarning(run.getId(),
+                            CollectionRunWarning.CODE_LLM_FALLBACK_FREE,
+                            "PAID quota가 소진되어 보고서를 FREE 플랜으로 생성합니다.");
+                    return new ReservationSelection(AgentPlan.FREE, reservation);
+                } catch (QuotaExceededException freeExhausted) {
+                    log.warn("보고서 FREE fallback quota도 소진됐다. runId={}", run.getId());
+                }
+            }
+            addAgentWarning(run.getId(),
+                    CollectionRunWarning.CODE_LLM_QUOTA_EXHAUSTED,
+                    "LLM quota가 소진되어 안전한 fallback 보고서를 생성합니다.");
+            return null;
+        }
+    }
+
+    private void addAgentWarning(Long runId, String code, String message) {
+        try {
+            resultWriter.addAgentWarning(runId, code, message);
+        } catch (RuntimeException exception) {
+            log.error("보고서 LLM quota 경고를 기록하지 못했다. runId={} code={}",
+                    runId, code, exception);
+        }
+    }
+
+    private void completeSuccessSafely(QuotaReservation reservation, BigDecimal credits) {
+        try {
+            quotaService.completeSuccess(reservation, credits);
+        } catch (RuntimeException exception) {
+            log.error("보고서 Agent 성공 quota 예약을 정산하지 못했다. reservationId={}",
+                    reservation.id(), exception);
+        }
+    }
+
+    private void completeFailureSafely(QuotaReservation reservation,
+                                       RuntimeException exception,
+                                       String code) {
+        try {
+            if (exception instanceof AgentClientException clientException) {
+                quotaService.completeFailure(reservation, clientException);
+            } else {
+                quotaService.completeFailure(reservation, code);
+            }
+        } catch (RuntimeException completionError) {
+            log.error("보고서 Agent 실패 quota 예약을 정산하지 못했다. reservationId={}",
+                    reservation.id(), completionError);
+        }
+    }
+
+    private AgentClientException.Usage failureUsage(AgentClientException exception,
+                                                     QuotaReservation reservation) {
+        if (exception == null || exception.getUsage() != null || !exception.isReadTimeout()) {
+            return exception == null ? null : exception.getUsage();
+        }
+        return new AgentClientException.Usage(null, null, null, reservation.reservedUnits());
+    }
+
+    private AgentTimeoutPhase timeoutPhase(AgentClientException exception) {
+        if (exception == null || exception.getTimeoutPhase() == AgentClientException.TimeoutPhase.NONE) {
+            return null;
+        }
+        return AgentTimeoutPhase.valueOf(exception.getTimeoutPhase().name());
     }
 
     private AgentReportRequest.FindingPayload findingPayload(Finding finding) {
@@ -125,6 +230,15 @@ public class AgentReportOrchestrator {
                 finding.getRelevance().toApiValue(),
                 finding.getCategory(),
                 fetchStatus == null ? FetchStatus.METADATA_ONLY.name() : fetchStatus.name());
+    }
+
+    private List<Finding> eligibleFindings(List<Finding> findings) {
+        return ReportFindingOrder.sort(findings.stream()
+                        .filter(finding -> finding.getAnalysisSource() == AnalysisSource.LLM)
+                        .toList())
+                .stream()
+                .limit(MAX_REPORT_FINDINGS)
+                .toList();
     }
 
     private ReportDocument toDocument(AgentReportResponse response, AgentReportRequest request) {
@@ -282,12 +396,17 @@ public class AgentReportOrchestrator {
                                      String code,
                                      String message,
                                      AgentClientException.Usage usage,
+                                     AgentTimeoutPhase timeoutPhase,
                                      LocalDateTime startedAt) {
         try {
-            recorder.recordReportFailure(runId, request, code, message, usage, startedAt);
+            recorder.recordReportFailure(
+                    runId, request, code, message, usage, timeoutPhase, startedAt);
         } catch (RuntimeException exception) {
             log.error("실패한 Agent 보고서의 감사 로그를 기록하지 못했다. runId={} code={}",
                     runId, code, exception);
         }
+    }
+
+    private record ReservationSelection(AgentPlan plan, QuotaReservation reservation) {
     }
 }

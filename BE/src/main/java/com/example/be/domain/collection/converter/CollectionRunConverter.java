@@ -27,6 +27,7 @@ public class CollectionRunConverter {
                 .idempotencyKey(run.getIdempotencyKey())
                 .targetTopicIds(targetTopicIds)
                 .targetCombinationCount(targetCombinationCount)
+                .llmPlan(run.getLlmPlan().name())
                 .startedAt(toOffset(run.getStartedAt()))
                 .build();
     }
@@ -37,6 +38,7 @@ public class CollectionRunConverter {
                 .status(run.getStatus().name())
                 .triggerType(run.getTriggerType().name())
                 .idempotencyKey(run.getIdempotencyKey())
+                .llmPlan(run.getLlmPlan().name())
                 .startedAt(toOffset(run.getStartedAt()))
                 .build();
     }
@@ -54,6 +56,7 @@ public class CollectionRunConverter {
                 .skippedCount(run.getSkippedCount())
                 .warningCount(warningCount)
                 .reportId(run.getReportId())
+                .llmPlan(run.getLlmPlan().name())
                 .build();
     }
 
@@ -72,6 +75,7 @@ public class CollectionRunConverter {
                 .updatedCount(run.getUpdatedCount())
                 .skippedCount(run.getSkippedCount())
                 .reportId(run.getReportId())
+                .llmPlan(run.getLlmPlan().name())
                 .breakdown(toBreakdown(items))
                 .warnings(toWarnings(warnings))
                 .build();

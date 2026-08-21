@@ -218,3 +218,45 @@ export interface ReportDetail {
   summaryStats: ReportSummaryStats
   findings?: ReportFinding[]
 }
+
+export type LlmPlan = 'FREE' | 'PAID'
+export type PaidExhaustedAction = 'STUB' | 'FALLBACK_FREE'
+
+export interface LlmPlanSetting {
+  plan: LlmPlan
+  allowRunOverride: boolean
+  paidExhaustedAction: PaidExhaustedAction
+}
+
+export interface LlmUsage {
+  currentPlan: LlmPlan
+  free: {
+    dailyCallsUsed: number
+    dailyCallsLimit: number
+    dailyCallsRemaining: number
+    resetAt: string
+  }
+  paid: {
+    dailyCreditsUsed: number
+    dailyCreditsLimit: number
+    dailyCreditsRemaining: number
+    analysisCreditsRemaining: number
+    reportReserve: number
+    monthlyCreditsUsed: number
+    monthlyCreditsLimit: number
+    monthlyCreditsRemaining: number
+    dailyResetAt: string
+    monthlyResetAt: string
+  }
+}
+
+export interface CollectionRunCreated {
+  runId: number
+  status: string
+  triggerType: string
+  idempotencyKey: string | null
+  llmPlan: LlmPlan
+  targetTopicIds?: number[]
+  targetCombinationCount?: number
+  startedAt: string
+}

@@ -9,12 +9,14 @@ import type { ApiEnvelope } from './types'
 export class ApiError extends Error {
   readonly code: string
   readonly status: number | null
+  readonly details: unknown
 
-  constructor(code: string, message: string, status?: number) {
+  constructor(code: string, message: string, status?: number, details?: unknown) {
     super(message)
     this.name = 'ApiError'
     this.code = code
     this.status = status ?? null
+    this.details = details ?? null
   }
 }
 
@@ -31,8 +33,8 @@ const BASE = '/api/news'
  * `isSuccess`가 false면 HTTP는 4xx여도 바디에 사유가 들어 있다. 상태 코드만 보고 던지면
  * 그 사유를 잃어버리므로, 바디를 먼저 읽고 코드·메시지를 살려서 던진다.
  */
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
+async function request<T>(path: string, init?: RequestInit, base = BASE): Promise<T> {
+  const response = await fetch(`${base}${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
@@ -46,7 +48,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!envelope.isSuccess) {
-    throw new ApiError(envelope.code, envelope.message, response.status)
+    throw new ApiError(envelope.code, envelope.message, response.status, envelope.result)
   }
   return envelope.result
 }
@@ -64,4 +66,13 @@ export function get<T>(path: string, params?: Record<string, string | number | b
 
 export function post<T>(path: string, body: unknown) {
   return request<T>(path, { method: 'POST', body: JSON.stringify(body) })
+}
+
+/** `/api/settings`, `/api/usage`처럼 news 도메인 밖의 제품 API를 호출한다. */
+export function apiGet<T>(path: string) {
+  return request<T>(path, undefined, '/api')
+}
+
+export function apiPut<T>(path: string, body: unknown) {
+  return request<T>(path, { method: 'PUT', body: JSON.stringify(body) }, '/api')
 }

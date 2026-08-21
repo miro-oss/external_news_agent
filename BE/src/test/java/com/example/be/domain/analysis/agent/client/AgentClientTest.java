@@ -12,7 +12,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.ResourceAccessException;
 
+import java.net.SocketTimeoutException;
+import java.net.http.HttpConnectTimeoutException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -135,6 +138,20 @@ class AgentClientTest {
         assertTrue(exception.getMessage().contains("status=400"));
         assertTrue(exception.getMessage().contains("Invalid HTTP request received."));
         server.verify();
+    }
+
+    @Test
+    void distinguishesConnectTimeoutFromReadTimeout() {
+        AgentClient client = new AgentClient(RestClient.builder(), properties());
+
+        assertEquals(
+                AgentClientException.TimeoutPhase.CONNECT,
+                client.timeoutPhase(new ResourceAccessException(
+                        "connect", new HttpConnectTimeoutException("connect timed out"))));
+        assertEquals(
+                AgentClientException.TimeoutPhase.READ,
+                client.timeoutPhase(new ResourceAccessException(
+                        "read", new SocketTimeoutException("Read timed out"))));
     }
 
     private AgentProperties properties() {

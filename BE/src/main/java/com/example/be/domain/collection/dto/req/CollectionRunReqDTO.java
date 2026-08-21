@@ -27,5 +27,8 @@ public class CollectionRunReqDTO {
         @Schema(description = "true면 Conditional GET(ETag/304)을 무시하고 전체 재수집. 기본값 false",
                 example = "false")
         private Boolean forceRefresh;
+
+        @Schema(description = "이번 실행에만 적용할 LLM 플랜. FREE / PAID. 생략 시 저장된 기본 플랜")
+        private String plan;
     }
 }

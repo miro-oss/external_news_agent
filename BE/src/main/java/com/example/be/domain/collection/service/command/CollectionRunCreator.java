@@ -1,5 +1,6 @@
 package com.example.be.domain.collection.service.command;
 
+import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.collection.converter.CollectionRunConverter;
 import com.example.be.domain.collection.dto.req.CollectionRunReqDTO;
 import com.example.be.domain.collection.entity.CollectionRun;
@@ -53,12 +54,10 @@ public class CollectionRunCreator {
     private final CollectionRunAsyncService runAsyncService;
     private final CollectionResultWriter resultWriter;
 
-    /**
-     * @throws DuplicatedIdempotencyKeyException 같은 키의 실행이 거의 동시에 먼저 커밋된 경우.
-     *         호출자가 새 트랜잭션에서 그 실행을 조회해 200으로 돌려준다.
-     */
     @Transactional
-    public CollectionRunStartResult create(CollectionRunReqDTO.Create request, String idempotencyKey) {
+    public CollectionRunStartResult create(CollectionRunReqDTO.Create request,
+                                           String idempotencyKey,
+                                           AgentPlan llmPlan) {
         List<Long> requestedTopicIds = normalizeTopicIds(request.getTopicIds());
         List<TopicRepository.CollectionTarget> targets = requestedTopicIds.isEmpty()
                 ? topicRepository.findActiveCollectionTargets()
@@ -89,6 +88,7 @@ public class CollectionRunCreator {
                 .triggerType(TriggerType.MANUAL)
                 .idempotencyKey(idempotencyKey)
                 .forceRefresh(Boolean.TRUE.equals(request.getForceRefresh()))
+                .llmPlan(llmPlan)
                 .startedAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build();
 

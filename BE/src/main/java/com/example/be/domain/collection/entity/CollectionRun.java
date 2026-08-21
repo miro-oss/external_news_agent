@@ -1,5 +1,6 @@
 package com.example.be.domain.collection.entity;
 
+import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.global.converter.YnBooleanConverter;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
@@ -82,6 +83,11 @@ public class CollectionRun {
     /** 실행 종료 시 생성된 보고서의 역참조. 보고서 쪽 run_id와 함께 애플리케이션이 같은 쌍으로 연결한다. */
     @Column(name = "report_id")
     private Long reportId;
+
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(name = "llm_plan", nullable = false, length = 10)
+    private AgentPlan llmPlan = AgentPlan.FREE;
 
     @Builder.Default
     @OneToMany(mappedBy = "run", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)

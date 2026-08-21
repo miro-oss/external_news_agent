@@ -52,3 +52,15 @@ news:
     analyze-timeout: 30s
     report-timeout: 120s
     default-plan: FREE
+    allow-run-override: true
+    quota:
+      free-run-article-limit: 30
+      free-daily-calls: 1500
+      paid-monthly-credits: 3000
+      paid-daily-credits: 90
+      paid-daily-report-reserve: 20
+      paid-run-article-limit: 20
+      # 실사용량이 없을 때 적용할 요청당 환산값과 Agent hard cap. 호출 전에는 hard cap을 예약한다.
+      paid-credits-per-request: 1
+      paid-max-credits-per-request: ${AGENT_HARD_CAP_CREDITS_PER_REQUEST:5}
+      reservation-ttl: 15m

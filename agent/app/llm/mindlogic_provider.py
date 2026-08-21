@@ -29,6 +29,7 @@ class MindlogicAnalyzeProvider:
     def __init__(self, settings: Settings, client: httpx.Client | None = None) -> None:
         self._model = settings.mindlogic_claude_model
         self._max_output_tokens = settings.max_output_tokens
+        self._credits_per_request = Decimal(str(settings.mindlogic_credits_per_request))
         self._endpoint = (
             settings.mindlogic_base_url.rstrip("/") + "/chat/completions/"
         )
@@ -77,6 +78,21 @@ class MindlogicAnalyzeProvider:
             if not isinstance(text, str) or not text.strip():
                 raise ValueError("Mindlogic 응답 본문이 비어 있습니다.")
             usage = body.get("usage") or {}
+            credits = _usage_decimal(
+                usage,
+                "credits",
+                "credits_used",
+                "credit_usage",
+                "total_credits",
+                default=self._credits_per_request,
+            )
+            cost_usd = _usage_decimal(
+                usage,
+                "cost_usd",
+                "costUsd",
+                "total_cost",
+                default=Decimal("0"),
+            )
             return ProviderResponse(
                 text=text,
                 provider="mindlogic-claude",
@@ -84,7 +100,8 @@ class MindlogicAnalyzeProvider:
                 usage=ProviderUsage(
                     input_tokens=safe_int(usage.get("prompt_tokens"), 0) or 0,
                     output_tokens=safe_int(usage.get("completion_tokens"), 0) or 0,
-                    credits=Decimal("1"),
+                    cost_usd=cost_usd,
+                    credits=credits,
                 ),
                 truncated=choice.get("finish_reason") == "length",
             )
@@ -130,3 +147,21 @@ def _schema_name(schema: dict[str, Any]) -> str:
     title = str(schema.get("title") or "structured_output")
     normalized = re.sub(r"[^a-zA-Z0-9_-]", "_", title)
     return normalized[:64] or "structured_output"
+
+
+def _usage_decimal(
+    usage: dict[str, Any],
+    *keys: str,
+    default: Decimal,
+) -> Decimal:
+    for key in keys:
+        raw = usage.get(key)
+        if raw is None or isinstance(raw, bool):
+            continue
+        try:
+            converted = raw if isinstance(raw, Decimal) else Decimal(str(raw))
+        except (ValueError, TypeError, ArithmeticError):
+            continue
+        if converted.is_finite() and converted >= 0:
+            return converted
+    return default

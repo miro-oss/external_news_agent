@@ -5,6 +5,10 @@ import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.agent.entity.AgentTask;
+import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
+import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
+import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
@@ -17,11 +21,15 @@ import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.collection.service.command.CollectionResultWriter;
 import com.example.be.domain.reports.service.AgentReportOrchestrator;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.service.ReportDocument;
 import com.example.be.domain.reports.service.ReportGenerator;
 import com.example.be.domain.topics.entity.Topic;
+import com.example.be.domain.settings.service.LlmPlanService;
+import com.example.be.domain.settings.entity.PaidExhaustedAction;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -47,8 +55,21 @@ class AgentReportOrchestratorTest {
     private final AgentRunRecorder recorder = mock(AgentRunRecorder.class);
     private final ReportGenerator fallback = mock(ReportGenerator.class);
     private final CollectionRunArticleRepository observationRepository = mock(CollectionRunArticleRepository.class);
+    private final AgentQuotaService quotaService = mock(AgentQuotaService.class);
+    private final LlmPlanService planService = mock(LlmPlanService.class);
+    private final CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
+    private final QuotaReservation reservation = new QuotaReservation(
+            1L, 42L, "run:42:report", AgentTask.REPORT, AgentPlan.FREE, BigDecimal.ONE);
     private final AgentReportOrchestrator orchestrator =
-            new AgentReportOrchestrator(properties, client, recorder, fallback, observationRepository);
+            new AgentReportOrchestrator(
+                    properties, client, recorder, fallback, observationRepository,
+                    quotaService, planService, resultWriter);
+
+    @BeforeEach
+    void reserveQuota() {
+        when(quotaService.reserve(42L, "run:42:report", AgentTask.REPORT, AgentPlan.FREE))
+                .thenReturn(reservation);
+    }
 
     @Test
     void excludesStubFromAgentRequestAndKeepsStructuredReportMetadata() {
@@ -107,14 +128,17 @@ class AgentReportOrchestratorTest {
 
         assertEquals(fallbackDocument, document);
         verify(recorder).recordReportFailure(
-                eq(42L), any(), eq("SCHEMA_VIOLATION"), any(), any(), any(LocalDateTime.class));
+                eq(42L), any(), eq("SCHEMA_VIOLATION"), any(), any(), any(),
+                any(LocalDateTime.class));
     }
 
     @Test
     void disabledAgentUsesFallbackWithoutCallingAgent() {
         AgentProperties disabled = new AgentProperties();
         AgentReportOrchestrator disabledOrchestrator =
-                new AgentReportOrchestrator(disabled, client, recorder, fallback, observationRepository);
+                new AgentReportOrchestrator(
+                        disabled, client, recorder, fallback, observationRepository,
+                        quotaService, planService, resultWriter);
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT, "STUB 요약");
         ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
         when(fallback.generate(eq(List.of(stub)), any(), any())).thenReturn(fallbackDocument);
@@ -127,7 +151,45 @@ class AgentReportOrchestratorTest {
         assertEquals(fallbackDocument, document);
         verify(client, never()).report(any());
         verify(recorder, never()).recordReportSuccess(any(), any(), any(), any());
-        verify(recorder, never()).recordReportFailure(any(), any(), any(), any(), any(), any());
+        verify(recorder, never()).recordReportFailure(any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void skipsQuotaReservationWhenNoLlmFindingIsEligible() {
+        Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT, "STUB 요약");
+        ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
+        when(fallback.generate(eq(List.of(stub)), any(), any())).thenReturn(fallbackDocument);
+
+        ReportDocument document = orchestrator.generate(
+                run(), List.of(stub), LocalDateTime.of(2026, 8, 21, 9, 3));
+
+        assertEquals(fallbackDocument, document);
+        verify(quotaService, never()).reserve(any(), any(), any(), any());
+        verify(client, never()).report(any());
+    }
+
+    @Test
+    void fallsBackToFreePlanAndSettlesFallbackReservationWhenPaidQuotaIsExhausted() {
+        Finding llm = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "실제 LLM 요약");
+        QuotaReservation fallbackReservation = new QuotaReservation(
+                2L, 42L, "run:42:report:fallback-free",
+                AgentTask.REPORT, AgentPlan.FREE, BigDecimal.ONE);
+        when(quotaService.reserve(42L, "run:42:report", AgentTask.REPORT, AgentPlan.PAID))
+                .thenThrow(new QuotaExceededException(AgentPlan.PAID, "exhausted"));
+        when(planService.paidExhaustedAction()).thenReturn(PaidExhaustedAction.FALLBACK_FREE);
+        when(quotaService.reserve(
+                42L, "run:42:report:fallback-free", AgentTask.REPORT, AgentPlan.FREE))
+                .thenReturn(fallbackReservation);
+        when(client.report(any())).thenReturn(response(List.of(501L)));
+
+        orchestrator.generate(
+                run(AgentPlan.PAID), List.of(llm), LocalDateTime.of(2026, 8, 21, 9, 3));
+
+        ArgumentCaptor<AgentReportRequest> captor = ArgumentCaptor.forClass(AgentReportRequest.class);
+        verify(client).report(captor.capture());
+        assertEquals(AgentPlan.FREE, captor.getValue().plan());
+        assertEquals("run:42:report:fallback-free", captor.getValue().idempotencyKey());
+        verify(quotaService).completeSuccess(fallbackReservation, BigDecimal.ZERO);
     }
 
     @Test
@@ -165,6 +227,10 @@ class AgentReportOrchestratorTest {
     }
 
     private CollectionRun run() {
+        return run(AgentPlan.FREE);
+    }
+
+    private CollectionRun run(AgentPlan plan) {
         Topic topic = Topic.builder().id(3L).name("HBM").build();
         CollectionRunItem item = CollectionRunItem.builder()
                 .topic(topic)
@@ -175,6 +241,7 @@ class AgentReportOrchestratorTest {
         return CollectionRun.builder()
                 .id(42L)
                 .startedAt(LocalDateTime.of(2026, 8, 21, 9, 0))
+                .llmPlan(plan)
                 .scannedCount(0)
                 .items(List.of(item))
                 .build();

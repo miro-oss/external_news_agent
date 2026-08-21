@@ -1,13 +1,16 @@
+from decimal import Decimal
 from threading import Lock
 
 from app.core.config import Settings
 from app.core.errors import AgentError
 from app.llm.base import AnalyzeProvider
 from app.llm.gemini_provider import GeminiAnalyzeProvider
+from app.llm.guarded_provider import GuardedAnalyzeProvider, ProviderGuard
 from app.llm.mindlogic_provider import MindlogicAnalyzeProvider
 from app.schemas.analyze import Plan
 
 _PROVIDER_CACHE: dict[tuple[Settings, Plan], AnalyzeProvider] = {}
+_GUARD_CACHE: dict[Plan, ProviderGuard] = {}
 _PROVIDER_LOCK = Lock()
 
 
@@ -26,10 +29,31 @@ def get_analyze_provider(settings: Settings, plan: Plan) -> AnalyzeProvider:
     with _PROVIDER_LOCK:
         provider = _PROVIDER_CACHE.get(key)
         if provider is None:
-            provider = (
+            delegate = (
                 GeminiAnalyzeProvider(settings)
                 if plan == "FREE"
                 else MindlogicAnalyzeProvider(settings)
+            )
+            guard = _GUARD_CACHE.get(plan)
+            if guard is None:
+                guard = ProviderGuard(
+                    concurrency=settings.provider_concurrency,
+                    acquire_timeout_seconds=settings.provider_acquire_timeout_seconds,
+                    failure_threshold=settings.circuit_failure_threshold,
+                    cooldown_seconds=settings.circuit_cooldown_seconds,
+                    hard_cap_credits=Decimal(
+                        str(settings.hard_cap_credits_per_request)
+                    ),
+                )
+                _GUARD_CACHE[plan] = guard
+            provider = GuardedAnalyzeProvider(
+                delegate,
+                concurrency=settings.provider_concurrency,
+                acquire_timeout_seconds=settings.provider_acquire_timeout_seconds,
+                failure_threshold=settings.circuit_failure_threshold,
+                cooldown_seconds=settings.circuit_cooldown_seconds,
+                hard_cap_credits=Decimal(str(settings.hard_cap_credits_per_request)),
+                guard=guard,
             )
             _PROVIDER_CACHE[key] = provider
         return provider
@@ -39,6 +63,7 @@ def close_analyze_providers() -> None:
     with _PROVIDER_LOCK:
         providers = list(_PROVIDER_CACHE.values())
         _PROVIDER_CACHE.clear()
+        _GUARD_CACHE.clear()
     for provider in providers:
         close = getattr(provider, "close", None)
         if callable(close):

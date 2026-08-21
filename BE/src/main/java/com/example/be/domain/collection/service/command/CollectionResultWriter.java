@@ -167,6 +167,23 @@ public class CollectionResultWriter {
                 "보고서 생성에 실패했습니다. " + detail));
     }
 
+    /** 같은 Agent 경고는 실행당 한 행으로 묶고 발생 건수만 올린다. */
+    @Transactional
+    public void addAgentWarning(Long runId, String code, String message) {
+        CollectionRun run = runRepository.findById(runId).orElseThrow();
+        CollectionRunWarning existing = run.getWarnings().stream()
+                .filter(value -> value.getSource() == null && code.equals(value.getCode()))
+                .findFirst()
+                .orElse(null);
+        if (existing != null) {
+            existing.addOccurrences(1);
+            return;
+        }
+        CollectionRunWarning warning = warning(null, code, message);
+        warning.addOccurrences(1);
+        run.addWarning(warning);
+    }
+
     @Transactional
     public void finishRun(Long runId) {
         CollectionRun run = runRepository.findById(runId).orElseThrow();

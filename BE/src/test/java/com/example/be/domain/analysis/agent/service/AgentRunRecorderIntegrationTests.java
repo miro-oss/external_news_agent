@@ -168,6 +168,7 @@ class AgentRunRecorderIntegrationTests {
                 "출력 검증 실패",
                 new AgentClientException.Usage(
                         30L, 15L, new BigDecimal("0.25"), new BigDecimal("2")),
+                null,
                 startedAt);
         entityManager.flush();
         entityManager.clear();

@@ -14,6 +14,12 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.ResourceAccessException;
+
+import java.net.SocketTimeoutException;
+import java.net.http.HttpConnectTimeoutException;
+import java.net.http.HttpTimeoutException;
+import java.util.Locale;
 
 @Component
 public class AgentClient {
@@ -81,9 +87,39 @@ public class AgentClient {
                     exception,
                     error == null ? null : error.usage());
         } catch (RestClientException exception) {
+            AgentClientException.TimeoutPhase timeoutPhase = timeoutPhase(exception);
             throw new AgentClientException(
-                    "PROVIDER_UNAVAILABLE", "Agent에 연결할 수 없습니다.", exception);
+                    "PROVIDER_UNAVAILABLE",
+                    timeoutPhase == AgentClientException.TimeoutPhase.READ
+                            ? "Agent 응답 대기 시간이 초과되었습니다."
+                            : "Agent에 연결할 수 없습니다.",
+                    exception,
+                    null,
+                    timeoutPhase);
         }
+    }
+
+    AgentClientException.TimeoutPhase timeoutPhase(RestClientException exception) {
+        if (!(exception instanceof ResourceAccessException)) {
+            return AgentClientException.TimeoutPhase.NONE;
+        }
+        Throwable cause = exception;
+        while (cause != null) {
+            if (cause instanceof HttpConnectTimeoutException) {
+                return AgentClientException.TimeoutPhase.CONNECT;
+            }
+            if (cause instanceof HttpTimeoutException) {
+                return AgentClientException.TimeoutPhase.READ;
+            }
+            if (cause instanceof SocketTimeoutException) {
+                String message = cause.getMessage();
+                return message != null && message.toLowerCase(Locale.ROOT).contains("connect")
+                        ? AgentClientException.TimeoutPhase.CONNECT
+                        : AgentClientException.TimeoutPhase.READ;
+            }
+            cause = cause.getCause();
+        }
+        return AgentClientException.TimeoutPhase.NONE;
     }
 
     private AgentErrorResponse errorResponse(RestClientResponseException exception) {
