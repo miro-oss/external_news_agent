@@ -108,7 +108,10 @@ class AgentClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
                 .andExpect(jsonPath("$.idempotencyKey").value("finding:501:verify"))
+                .andExpect(jsonPath("$.plan").value("FREE"))
+                .andExpect(jsonPath("$.claim").value("HBM4 양산 일정이 앞당겨졌다."))
                 .andExpect(jsonPath("$.sentences[0].id").value(1))
+                .andExpect(jsonPath("$.sentences[0].text").value("HBM4 양산 일정이 앞당겨졌다."))
                 .andRespond(withSuccess(evidenceResponseJson(), MediaType.APPLICATION_JSON));
 
         AgentEvidenceResponse response = client.verifyEvidence(evidenceRequest());

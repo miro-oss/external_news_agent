@@ -70,7 +70,7 @@ class ReportGeneratorTest {
         ReportDocument document = generator.generate(
                 List.of(stub),
                 LocalDateTime.of(2026, 8, 18, 9, 0),
-                new ReportSourceStats(1, 0, 0, 0, 1));
+                new ReportSourceStats(1, 0, 0, 0, 1, 0));
 
         assertTrue(!document.markdownBody().contains("본문에 들어가면 안 되는 STUB 요약"));
         assertTrue(document.markdownBody().contains("STUB 분석 1건"));
@@ -98,7 +98,7 @@ class ReportGeneratorTest {
         ReportDocument document = generator.generate(
                 List.of(reused),
                 LocalDateTime.of(2026, 8, 18, 9, 0),
-                new ReportSourceStats(1, 0, 0, 0, 0));
+                new ReportSourceStats(1, 0, 0, 0, 0, 0));
 
         assertTrue(!document.markdownBody().contains("본문에 들어가면 안 되는 REUSED 요약"));
         assertTrue(document.markdownBody().contains("기사 1건을 관측했지만 실제 LLM 분석 finding이 없어"));
@@ -132,6 +132,25 @@ class ReportGeneratorTest {
         assertTrue(!document.markdownBody().contains("근거 없는 주장"));
         assertTrue(!document.markdownBody().contains("제외할 주장"));
         assertTrue(document.markdownBody().contains("검증된 주장"));
+        assertTrue(document.markdownBody().contains("근거 부족 LLM 분석 1건 제외"));
+    }
+
+    @Test
+    void explainsWhenEvidenceFilteringRemovesEveryLlmFinding() {
+        Finding unsupported = finding(
+                1L,
+                "왜곡 기사",
+                "보고서에 들어가면 안 되는 요약",
+                RiskLevel.HIGH,
+                Relevance.IMPORTANT,
+                "기업",
+                List.of(new FindingKeyPoint("근거 없는 주장", List.of(0), "ungrounded")));
+
+        ReportDocument document = generator.generate(
+                List.of(unsupported), LocalDateTime.of(2026, 8, 18, 9, 0));
+
+        assertTrue(document.markdownBody().contains("근거가 확인된 LLM finding이 없어"));
+        assertTrue(document.markdownBody().contains("근거 부족 LLM 분석 1건 제외"));
     }
 
     @Test

@@ -148,9 +148,8 @@ function AnalysisPanel({
               className="key-point-content"
               disabled={point.evidence.length === 0}
               onClick={() => onEvidenceSelect(point.evidence)}
-              aria-label={`${point.text}의 근거 문장 보기`}
             >
-              <p>{point.text}</p>
+              <span className="key-point-text">{point.text}</span>
               <span className={`groundedness ${point.groundedness}`}>{point.groundedness}</span>
               {point.evidence.map((evidence) => <span className="evidence" key={evidence}>근거 {evidence + 1}</span>)}
             </button>

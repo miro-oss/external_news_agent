@@ -34,12 +34,17 @@ public class ReportGenerator {
         int actualStubCount = (int) findings.stream()
                 .filter(finding -> finding.getAnalysisSource() == AnalysisSource.STUB)
                 .count();
+        int actualEvidenceExcluded = (int) findings.stream()
+                .filter(finding -> finding.getAnalysisSource() == AnalysisSource.LLM)
+                .filter(finding -> !ReportEvidencePolicy.hasSupportedEvidence(finding))
+                .count();
         ReportSourceStats effectiveStats = new ReportSourceStats(
                 sourceStats.collected(),
                 sourceStats.blocked(),
                 sourceStats.failed(),
                 sourceStats.paywalled(),
-                Math.max(sourceStats.stubExcluded(), actualStubCount));
+                Math.max(sourceStats.stubExcluded(), actualStubCount),
+                Math.max(sourceStats.evidenceExcluded(), actualEvidenceExcluded));
         List<Finding> ordered = ReportFindingOrder.sort(findings.stream()
                 .filter(finding -> finding.getAnalysisSource() == AnalysisSource.LLM)
                 .filter(ReportEvidencePolicy::hasSupportedEvidence)
@@ -73,11 +78,13 @@ public class ReportGenerator {
         body.append("## 오늘의 핵심\n\n");
         if (findings.isEmpty()) {
             body.append("- 이번 실행에서 기사 ").append(sourceStats.collected())
-                    .append("건을 관측했지만 실제 LLM 분석 finding이 없어 기사 내용을 요약하지 않았습니다.\n");
+                    .append(sourceStats.evidenceExcluded() > 0
+                            ? "건을 관측했지만 근거가 확인된 LLM finding이 없어 기사 내용을 요약하지 않았습니다.\n"
+                            : "건을 관측했지만 실제 LLM 분석 finding이 없어 기사 내용을 요약하지 않았습니다.\n");
         } else {
             findings.stream().limit(5).forEach(finding -> body
                     .append("- ").append(markdownText(
-                            ReportEvidencePolicy.supportedSummary(finding))).append("\n"));
+                            ReportEvidencePolicy.reportSummary(finding))).append("\n"));
         }
 
         Map<String, Long> riskCounts = counts(findings, finding -> finding.getRiskLevel().toApiValue());
@@ -98,11 +105,11 @@ public class ReportGenerator {
 
         body.append("\n## 기사별 분석\n");
         if (findings.isEmpty()) {
-            body.append("\nSTUB 또는 비LLM 분석 본문은 보고서 오염 방지를 위해 포함하지 않았습니다.\n");
+            body.append("\nSTUB, 비LLM 또는 근거 미확인 분석 본문은 보고서 오염 방지를 위해 포함하지 않았습니다.\n");
         }
         for (Finding finding : findings) {
             body.append("\n### ").append(markdownText(finding.getArticle().getTitle())).append("\n\n")
-                    .append(markdownText(ReportEvidencePolicy.supportedSummary(finding))).append("\n\n")
+                    .append(markdownText(ReportEvidencePolicy.reportSummary(finding))).append("\n\n")
                     .append("- 분류: ").append(markdownText(finding.getCategory()))
                     .append(" · 위험도: ").append(finding.getRiskLevel().toApiValue())
                     .append(" · 관련도: ").append(finding.getRelevance().toApiValue()).append("\n");

@@ -22,7 +22,8 @@ final class ReportEvidencePolicy {
         return !supportedKeyPoints(finding).isEmpty();
     }
 
-    static String supportedSummary(Finding finding) {
+    /** 요약은 별도 claim 단위 근거 계약이 없어 지원 여부를 뜻하지 않으며, 보고서 표시용으로만 정규화한다. */
+    static String reportSummary(Finding finding) {
         return StringUtils.hasText(finding.getSummary()) ? finding.getSummary().trim() : "";
     }
 

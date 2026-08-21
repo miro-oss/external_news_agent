@@ -8,6 +8,18 @@ from app.schemas.evidence import EvidenceSentence
 _NUMBER = re.compile(
     r"(?<![A-Za-z0-9])[-+]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])"
 )
+_DATE_NUMBER_UNIT = re.compile(r"\s*(년|월|일|분기)")
+_QUANTITY_UNIT = re.compile(
+    r"\s*(퍼센트|억원|만원|달러|조원|%|억|만|조|원|usd|배|개|건|명|톤|gb|tb)",
+    re.IGNORECASE,
+)
+_CLAUSE_SEPARATOR = re.compile(
+    r"(?:[.!?。！？;；\n]+|,\s*|(?:이고|이며|였고|했고|됐고)\s+)"
+)
+_NEGATION = re.compile(
+    r"(?:\b(?:not|no|never|without)\b|않|아니|없|무산|취소|중단)",
+    re.IGNORECASE,
+)
 _KOREAN_ORGANIZATION = re.compile(
     r"[A-Za-z가-힣][A-Za-z0-9가-힣&.-]{1,30}"
     r"(?:전자|하이닉스|반도체|디스플레이|테크놀로지|테크|그룹|홀딩스|은행|증권|공사|협회|위원회|연구원)"
@@ -90,6 +102,11 @@ _KOREAN_SUFFIXES = (
     "도",
     "만",
 )
+_KNOWN_COMPANY_ALIASES = frozenset(
+    re.sub(r"\s+", " ", unicodedata.normalize("NFKC", alias).casefold()).strip()
+    for aliases in _COMPANY_ALIASES.values()
+    for alias in aliases
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +126,14 @@ def factual_mismatches(claim: str, evidence_text: str) -> list[str]:
     if missing_numbers:
         mismatches.append("근거에서 확인되지 않는 숫자: " + ", ".join(sorted(missing_numbers)))
 
+    contextual_numbers = _contextual_number_mismatches(
+        normalized_claim, normalized_evidence
+    )
+    if contextual_numbers:
+        mismatches.append(
+            "근거와 연결이 다른 숫자: " + ", ".join(contextual_numbers)
+        )
+
     missing_dates = _date_terms(normalized_claim) - _date_terms(normalized_evidence)
     if missing_dates:
         mismatches.append("근거와 일치하지 않는 날짜 표현: " + ", ".join(sorted(missing_dates)))
@@ -118,6 +143,9 @@ def factual_mismatches(claim: str, evidence_text: str) -> list[str]:
     missing_companies = claim_companies - evidence_companies
     if missing_companies:
         mismatches.append("근거에서 확인되지 않는 기업명: " + ", ".join(sorted(missing_companies)))
+
+    if _polarity_mismatch(normalized_claim, normalized_evidence):
+        mismatches.append("근거와 반대되는 부정 표현이 포함되어 있습니다.")
     return mismatches
 
 
@@ -128,7 +156,7 @@ def assess_with_rules(
     grounded_overlap: float,
     weak_overlap: float,
 ) -> RuleAssessment:
-    evidence_text = " ".join(sentence.text for sentence in sentences)
+    evidence_text = "\n".join(sentence.text for sentence in sentences)
     mismatches = factual_mismatches(claim, evidence_text)
     if mismatches:
         return RuleAssessment("ungrounded", [], "; ".join(mismatches))
@@ -137,15 +165,26 @@ def assess_with_rules(
     if not claim_tokens:
         return RuleAssessment("ungrounded", [], "검증할 수 있는 주장 토큰이 없습니다.")
 
-    accepted: list[EvidenceSentence] = []
+    candidates: list[tuple[EvidenceSentence, set[str], float]] = []
     for sentence in sentences:
-        overlap = len(claim_tokens & _tokens(sentence.text)) / len(claim_tokens)
+        shared = claim_tokens & _tokens(sentence.text)
+        overlap = len(shared) / len(claim_tokens)
         if overlap >= weak_overlap:
+            candidates.append((sentence, shared, overlap))
+
+    accepted: list[EvidenceSentence] = []
+    covered_tokens: set[str] = set()
+    for sentence, shared, _ in sorted(
+        candidates, key=lambda candidate: candidate[2], reverse=True
+    ):
+        if shared - covered_tokens:
             accepted.append(sentence)
+            covered_tokens.update(shared)
+    accepted.sort(key=lambda sentence: sentences.index(sentence))
     if not accepted:
         return RuleAssessment("ungrounded", [], "주장과 직접 연결되는 근거 문장이 없습니다.")
 
-    combined_tokens = _tokens(" ".join(sentence.text for sentence in accepted))
+    combined_tokens = _tokens("\n".join(sentence.text for sentence in accepted))
     coverage = len(claim_tokens & combined_tokens) / len(claim_tokens)
     status = "grounded" if coverage >= grounded_overlap else "weak"
     reason = (
@@ -157,7 +196,8 @@ def assess_with_rules(
 
 
 def _normalize(value: str) -> str:
-    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value).casefold()).strip()
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return re.sub(r"[^\S\n]+", " ", normalized).strip()
 
 
 def _numbers(value: str) -> set[str]:
@@ -186,23 +226,128 @@ def _companies(value: str) -> set[str]:
         for canonical, aliases in _COMPANY_ALIASES.items()
         if any(_contains_alias(value, alias.casefold()) for alias in aliases)
     }
-    known_aliases = {
-        _normalize(alias)
-        for aliases in _COMPANY_ALIASES.values()
-        for alias in aliases
-    }
     companies.update(
         match.group()
         for match in _KOREAN_ORGANIZATION.finditer(value)
-        if _normalize(match.group()) not in known_aliases
+        if _normalize(match.group()) not in _KNOWN_COMPANY_ALIASES
     )
     return companies
 
 
 def _contains_alias(value: str, alias: str) -> bool:
-    if re.fullmatch(r"[a-z0-9 ]+", alias):
-        return re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", value) is not None
-    return alias in value
+    for match in re.finditer(re.escape(alias), value):
+        if match.start() > 0 and value[match.start() - 1].isalnum():
+            continue
+        token_end = match.end()
+        while token_end < len(value) and value[token_end].isalnum():
+            token_end += 1
+        suffix = value[match.end():token_end]
+        if not suffix or _is_korean_suffix_chain(suffix):
+            return True
+    return False
+
+
+def _is_korean_suffix_chain(value: str) -> bool:
+    remaining = value
+    while remaining:
+        suffix = next(
+            (candidate for candidate in _KOREAN_SUFFIXES if remaining.startswith(candidate)),
+            None,
+        )
+        if suffix is None:
+            return False
+        remaining = remaining[len(suffix):]
+    return True
+
+
+def _contextual_number_mismatches(claim: str, evidence: str) -> list[str]:
+    claim_facts = _numeric_facts(claim)
+    evidence_facts = _numeric_facts(evidence)
+    mismatches: list[str] = []
+    for anchors, values in claim_facts:
+        matching_contexts = [
+            evidence_values
+            for evidence_anchors, evidence_values in evidence_facts
+            if anchors <= evidence_anchors
+        ]
+        if matching_contexts and any(values <= candidate for candidate in matching_contexts):
+            continue
+        if matching_contexts:
+            mismatches.append(
+                f"{'/'.join(sorted(anchors))}→{'/'.join(sorted(values))}"
+            )
+    return list(dict.fromkeys(mismatches))
+
+
+def _numeric_facts(value: str) -> list[tuple[frozenset[str], frozenset[str]]]:
+    facts: list[tuple[frozenset[str], frozenset[str]]] = []
+    for clause in _clauses(value):
+        anchors = frozenset(_date_number_anchors(clause) | _date_terms(clause) | _companies(clause))
+        values = frozenset(_quantity_values(clause))
+        if anchors and values:
+            facts.append((anchors, values))
+    return facts
+
+
+def _date_number_anchors(value: str) -> set[str]:
+    anchors: set[str] = set()
+    for match in _NUMBER.finditer(value):
+        unit_match = _DATE_NUMBER_UNIT.match(value, match.end())
+        if unit_match is None:
+            continue
+        number = _normalized_number(match.group())
+        if number is not None:
+            anchors.add(number + unit_match.group(1))
+    return anchors
+
+
+def _quantity_values(value: str) -> set[str]:
+    quantities: set[str] = set()
+    for match in _NUMBER.finditer(value):
+        if _DATE_NUMBER_UNIT.match(value, match.end()) is not None:
+            continue
+        number = _normalized_number(match.group())
+        if number is None:
+            continue
+        unit_match = _QUANTITY_UNIT.match(value, match.end())
+        unit = unit_match.group(1).casefold() if unit_match is not None else ""
+        quantities.add(number + unit)
+    return quantities
+
+
+def _normalized_number(raw: str) -> str | None:
+    try:
+        number = Decimal(raw.replace(",", ""))
+    except InvalidOperation:
+        return None
+    return format(number.normalize(), "f")
+
+
+def _polarity_mismatch(claim: str, evidence: str) -> bool:
+    evidence_clauses = _clauses(evidence)
+    if not evidence_clauses:
+        return False
+    for claim_clause in _clauses(claim):
+        claim_tokens = _tokens(claim_clause)
+        candidates = [
+            evidence_clause
+            for evidence_clause in evidence_clauses
+            if not claim_tokens or claim_tokens & _tokens(evidence_clause)
+        ]
+        if candidates and not any(
+            _has_negation(claim_clause) == _has_negation(candidate)
+            for candidate in candidates
+        ):
+            return True
+    return False
+
+
+def _has_negation(value: str) -> bool:
+    return _NEGATION.search(value) is not None
+
+
+def _clauses(value: str) -> list[str]:
+    return [clause.strip() for clause in _CLAUSE_SEPARATOR.split(value) if clause.strip()]
 
 
 def _tokens(value: str) -> set[str]:

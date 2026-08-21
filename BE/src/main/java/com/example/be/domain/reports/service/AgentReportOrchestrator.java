@@ -222,7 +222,7 @@ public class AgentReportOrchestrator {
                 finding.getArticle().getCanonicalUrl(),
                 finding.getArticle().getSourceName(),
                 finding.getChangeType().name(),
-                ReportEvidencePolicy.supportedSummary(finding),
+                ReportEvidencePolicy.reportSummary(finding),
                 ReportEvidencePolicy.supportedKeyPoints(finding).stream()
                         .map(point -> point.text())
                         .toList(),
@@ -329,11 +329,16 @@ public class AgentReportOrchestrator {
         int stubExcluded = (int) findings.stream()
                 .filter(finding -> finding.getAnalysisSource() == AnalysisSource.STUB)
                 .count();
+        int evidenceExcluded = (int) findings.stream()
+                .filter(finding -> finding.getAnalysisSource() == AnalysisSource.LLM)
+                .filter(finding -> !ReportEvidencePolicy.hasSupportedEvidence(finding))
+                .count();
         List<CollectionRunItem> items = run.getItems();
         int collected = items == null || items.isEmpty()
                 ? run.getScannedCount()
                 : items.stream().mapToInt(CollectionRunItem::getScannedCount).sum();
-        return new ReportSourceStats(collected, blocked, failed, paywalled, stubExcluded);
+        return new ReportSourceStats(
+                collected, blocked, failed, paywalled, stubExcluded, evidenceExcluded);
     }
 
     private int countStatus(Map<Long, FetchStatus> statusesByArticle, FetchStatus status) {

@@ -14,6 +14,9 @@ final class ReportSourceNotes {
         if (stats.stubExcluded() > 0) {
             limitations.add("STUB 분석 " + stats.stubExcluded() + "건 제외");
         }
+        if (stats.evidenceExcluded() > 0) {
+            limitations.add("근거 부족 LLM 분석 " + stats.evidenceExcluded() + "건 제외");
+        }
         if (stats.paywalled() > 0) {
             limitations.add("페이월 " + stats.paywalled() + "건");
         }

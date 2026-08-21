@@ -5,10 +5,11 @@ public record ReportSourceStats(
         int blocked,
         int failed,
         int paywalled,
-        int stubExcluded
+        int stubExcluded,
+        int evidenceExcluded
 ) {
 
     public static ReportSourceStats empty() {
-        return new ReportSourceStats(0, 0, 0, 0, 0);
+        return new ReportSourceStats(0, 0, 0, 0, 0, 0);
     }
 }

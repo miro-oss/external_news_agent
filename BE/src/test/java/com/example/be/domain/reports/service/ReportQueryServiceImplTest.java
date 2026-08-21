@@ -142,6 +142,7 @@ class ReportQueryServiceImplTest {
         ReportResDTO.Detail detail = service.getReport(17L, true);
 
         assertEquals(List.of(1L, 2L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
+        assertEquals(List.of("핵심"), detail.getFindings().getFirst().getKeyPoints());
     }
 
     private Finding finding(Long id, RiskLevel riskLevel, Relevance relevance) {
@@ -155,7 +156,9 @@ class ReportQueryServiceImplTest {
                 .article(article)
                 .changeType(ChangeType.NEW)
                 .summary("요약 " + id)
-                .keyPoints(List.of(new FindingKeyPoint("핵심", List.of(0), "grounded")))
+                .keyPoints(List.of(
+                        new FindingKeyPoint("핵심", List.of(0), "grounded"),
+                        new FindingKeyPoint("비근거 주장", List.of(1), "ungrounded")))
                 .sentiment(Sentiment.NEUTRAL)
                 .riskLevel(riskLevel)
                 .relevance(relevance)

@@ -828,8 +828,12 @@ body.modal-open {
   cursor: pointer;
 }
 
-.key-point-content:not(:disabled):hover p,
-.key-point-content:not(:disabled):focus-visible p {
+.key-point-content:disabled {
+  opacity: 0.55;
+}
+
+.key-point-content:not(:disabled):hover .key-point-text,
+.key-point-content:not(:disabled):focus-visible .key-point-text {
   color: #fff;
   text-decoration: underline;
   text-decoration-color: var(--warm);
@@ -841,7 +845,8 @@ body.modal-open {
   outline-offset: 0.3rem;
 }
 
-.key-point p {
+.key-point-text {
+  display: block;
   margin: 0 0 0.3rem;
   color: #e7eae5;
   font-size: 0.82rem;
