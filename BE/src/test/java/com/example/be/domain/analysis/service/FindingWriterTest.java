@@ -47,7 +47,7 @@ class FindingWriterTest {
         when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
         when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(true);
 
-        writer.write(42L, 10L, ChangeType.UPDATED, result);
+        writer.write(42L, 10L, ChangeType.UPDATED, "a".repeat(64), result);
 
         InOrder order = inOrder(articleRepository, findingRepository);
         order.verify(articleRepository).findByIdForUpdate(10L);
@@ -76,12 +76,13 @@ class FindingWriterTest {
         when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
         when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
 
-        writer.write(42L, 10L, ChangeType.NEW, result);
+        writer.write(42L, 10L, ChangeType.NEW, "a".repeat(64), result);
 
         ArgumentCaptor<Finding> finding = ArgumentCaptor.forClass(Finding.class);
         verify(findingRepository).save(finding.capture());
         assertEquals(AnalysisSource.LLM, finding.getValue().getAnalysisSource());
         assertEquals("gemini", finding.getValue().getLlmProvider());
+        assertEquals("a".repeat(64), finding.getValue().getAnalysisInputHash());
         assertTrue(finding.getValue().isInputTruncated());
         assertTrue(finding.getValue().getKeyPoints().isEmpty());
         assertEquals("핵심 주장", finding.getValue().getEffectiveKeyPoints().getFirst().text());

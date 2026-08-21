@@ -26,6 +26,7 @@ public class ArticleAnalysisPipeline {
     private final CollectionRunArticleRepository runArticleRepository;
     private final CollectionRunRepository runRepository;
     private final ArticleAnalysisOrchestrator orchestrator;
+    private final FindingReuseCache reuseCache;
     private final FindingWriter findingWriter;
 
     public void analyze(Long runId) {
@@ -38,8 +39,25 @@ public class ArticleAnalysisPipeline {
                 .getLlmPlan();
         for (Target target : targets(runId, refreshedArticleIds)) {
             try {
+                FindingReuseCache.Lookup lookup = reuseCache.lookup(target.article());
+                if (lookup.cached().isPresent()) {
+                    FindingReuseCache.CachedAnalysis cached = lookup.cached().orElseThrow();
+                    // 공개 API의 changeType 계약은 NEW/UPDATED라 원본 분석 버전의 값을 유지한다.
+                    findingWriter.write(runId, target.article().getId(), cached.changeType(),
+                            lookup.analysisInputHash(), cached.result());
+                    continue;
+                }
+                ChangeType findingChangeType = target.changeType();
+                if (target.changeType() == ChangeType.UNCHANGED) {
+                    // STUB/레거시 결과는 재사용하지 않고 다시 분석하되 공개 API의 변경 유형은 유지한다.
+                    findingChangeType = lookup.previousChangeType().orElse(null);
+                    if (findingChangeType == null) {
+                        continue;
+                    }
+                }
                 AnalysisResult result = orchestrator.analyze(new AnalysisContext(runId, target.article(), plan));
-                findingWriter.write(runId, target.article().getId(), target.changeType(), result);
+                findingWriter.write(runId, target.article().getId(), findingChangeType,
+                        lookup.analysisInputHash(), result);
             } catch (RuntimeException exception) {
                 log.warn("기사 분석에 실패했다. runId={} articleId={} error={}",
                         runId, target.article().getId(), exception.getMessage(), exception);

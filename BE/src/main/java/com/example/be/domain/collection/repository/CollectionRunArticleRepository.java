@@ -39,7 +39,10 @@ public interface CollectionRunArticleRepository
             """)
     List<ArticleFetchStatus> findArticleFetchStatusesByRunId(@Param("runId") Long runId);
 
-    /** 분석은 NEW/UPDATED만 한다. 본문과 주제·소스까지 이 조회에서 붙여 트랜잭션 밖에서도 안전하게 읽는다. */
+    /**
+     * 이번 실행의 모든 관측을 분석 후보로 읽는다. UNCHANGED는 이전 LLM finding이 있을 때만 재사용한다.
+     * 본문과 주제·소스까지 이 조회에서 붙여 트랜잭션 밖에서도 안전하게 읽는다.
+     */
     @Query("""
             SELECT observation
             FROM CollectionRunArticle observation
@@ -47,10 +50,6 @@ public interface CollectionRunArticleRepository
             JOIN FETCH article.topic
             JOIN FETCH article.source
             WHERE observation.run.id = :runId
-              AND observation.changeType IN (
-                  com.example.be.domain.collection.entity.ChangeType.NEW,
-                  com.example.be.domain.collection.entity.ChangeType.UPDATED
-              )
             ORDER BY observation.id ASC
             """)
     List<CollectionRunArticle> findAnalysisTargetsByRunId(@Param("runId") Long runId);

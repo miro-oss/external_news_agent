@@ -127,6 +127,10 @@ public class Finding {
     @Column(name = "credits", precision = 10, scale = 3)
     private BigDecimal credits;
 
+    /** 제목·요약·본문을 함께 해시한 분석 입력 버전. 동일 값의 LLM finding만 재사용한다. */
+    @Column(name = "analysis_input_hash", length = Article.URL_HASH_LENGTH)
+    private String analysisInputHash;
+
     @Builder.Default
     @Convert(converter = YnBooleanConverter.class)
     @JdbcTypeCode(SqlTypes.CHAR)

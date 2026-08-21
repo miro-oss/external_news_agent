@@ -45,6 +45,18 @@ public final class ArticleHasher {
         return sha256(nullToEmpty(title).strip() + "" + nullToEmpty(summary).strip());
     }
 
+    /**
+     * LLM 분석 입력의 버전을 식별하는 지문.
+     *
+     * <p>수집 변경 판정용 {@link #contentHash(String, String, String)}은 전문이 있으면 제목과 요약을
+     * 의도적으로 제외한다. 분석 결과 재사용은 제목 변경도 놓치면 안 되므로 세 값을 모두 포함한다.
+     */
+    public static String analysisInputHash(String title, String summary, String body) {
+        return sha256(nullToEmpty(title).strip()
+                + "" + nullToEmpty(summary).strip()
+                + "" + nullToEmpty(body).strip());
+    }
+
     private static String nullToEmpty(String value) {
         return value == null ? "" : value;
     }

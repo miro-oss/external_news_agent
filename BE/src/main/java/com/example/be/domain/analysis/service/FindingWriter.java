@@ -27,7 +27,11 @@ public class FindingWriter {
     private final ArticleRepository articleRepository;
 
     @Transactional
-    public void write(Long runId, Long articleId, ChangeType changeType, AnalysisResult result) {
+    public void write(Long runId,
+                      Long articleId,
+                      ChangeType changeType,
+                      String analysisInputHash,
+                      AnalysisResult result) {
         CollectionRun run = runRepository.findById(runId).orElseThrow();
         // 동일 기사 행을 잠근 뒤 존재 여부를 확인해 동시 호출도 하나의 finding만 남긴다.
         Article article = articleRepository.findByIdForUpdate(articleId).orElseThrow();
@@ -58,6 +62,7 @@ public class FindingWriter {
                 .outputTokens(result.metadata().outputTokens())
                 .costUsd(result.metadata().costUsd())
                 .credits(result.metadata().credits())
+                .analysisInputHash(analysisInputHash)
                 .inputTruncated(result.metadata().truncated())
                 .analyzedAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build());

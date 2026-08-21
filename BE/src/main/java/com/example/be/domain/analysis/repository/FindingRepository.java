@@ -1,5 +1,6 @@
 package com.example.be.domain.analysis.repository;
 
+import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -25,6 +26,11 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
     boolean existsByRunIdAndArticleId(Long runId, Long articleId);
 
     Optional<Finding> findFirstByArticleIdOrderByIdDesc(Long articleId);
+
+    Optional<Finding> findFirstByArticleIdAndAnalysisSourceAndAnalysisInputHashOrderByIdDesc(
+            Long articleId,
+            AnalysisSource analysisSource,
+            String analysisInputHash);
 
     Optional<Finding> findByRunIdAndArticleId(Long runId, Long articleId);
 
