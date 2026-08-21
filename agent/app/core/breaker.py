@@ -73,6 +73,14 @@ class CircuitBreaker:
                 self._state = CircuitState.OPEN
                 self._opened_at = self._clock()
 
+    def record_rejected(self) -> None:
+        """가용성 실패가 아닌 거절은 기존 연속 실패를 성공으로 지우지 않는다."""
+        with self._lock:
+            self._half_open_in_flight = False
+            if self._state is CircuitState.HALF_OPEN:
+                self._state = CircuitState.OPEN
+                self._opened_at = self._clock()
+
     def _refresh_state(self) -> None:
         if (
             self._state is CircuitState.OPEN

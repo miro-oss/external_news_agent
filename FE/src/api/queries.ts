@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiGet, apiPost, apiPut, get, post } from './client'
+import { apiGet, apiPut, get, post } from './client'
 import type {
   ArticleDetail,
   ArticleFilters,
@@ -165,10 +165,10 @@ export function useUpdateLlmPlan() {
 export function useStartCollectionRun() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (plan?: LlmPlan) =>
-      apiPost<CollectionRunCreated>('/news/runs', {
-        idempotencyKey: `manual-${Date.now()}`,
-        ...(plan ? { plan } : {}),
+    mutationFn: (request: { idempotencyKey: string; plan?: LlmPlan }) =>
+      post<CollectionRunCreated>('/runs', {
+        idempotencyKey: request.idempotencyKey,
+        ...(request.plan ? { plan: request.plan } : {}),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.llmUsage })

@@ -10,6 +10,7 @@ import com.example.be.domain.settings.exception.code.LlmErrorCode;
 import com.example.be.domain.settings.service.LlmPlanService;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,8 +19,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.Map;
+import java.util.Optional;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class AgentQuotaService {
 
@@ -33,8 +36,14 @@ public class AgentQuotaService {
                                     AgentTask task,
                                     AgentPlan plan) {
         repository.lockSingletonSettings();
-        return repository.findByIdempotencyKey(idempotencyKey)
-                .orElseGet(() -> createReservation(runId, idempotencyKey, task, plan));
+        releaseExpiredReservations();
+        Optional<String> existingStatus = repository.findStatusByIdempotencyKey(idempotencyKey);
+        if (existingStatus.isPresent()) {
+            throw new IllegalStateException(
+                    "이미 사용된 quota idempotencyKey는 재사용할 수 없습니다. key="
+                            + idempotencyKey + " status=" + existingStatus.get());
+        }
+        return createReservation(runId, idempotencyKey, task, plan);
     }
 
     @Transactional
@@ -43,8 +52,9 @@ public class AgentQuotaService {
             return;
         }
         repository.lockSingletonSettings();
+        releaseExpiredReservations();
         UsageWindow usage = usageWindow();
-        BigDecimal units = paidUnits();
+        BigDecimal units = paidMaxUnits();
         BigDecimal dailyAnalysisLimit = paidDailyLimit().subtract(reportReserve());
         if (usage.paidMonthlyUsed().add(units).compareTo(paidMonthlyLimit()) > 0
                 || usage.paidDailyUsed().add(units).compareTo(paidDailyLimit()) > 0
@@ -61,13 +71,26 @@ public class AgentQuotaService {
     public void completeSuccess(QuotaReservation reservation, BigDecimal actualCredits) {
         BigDecimal units = reservation.plan() == AgentPlan.FREE
                 ? BigDecimal.ONE
-                : nonNegative(actualCredits);
+                : actualCredits == null ? paidUnits() : nonNegative(actualCredits);
+        if (units.compareTo(reservation.reservedUnits()) > 0) {
+            repository.release(reservation, now());
+            throw new IllegalStateException(
+                    "실제 LLM 사용량이 요청당 예약 상한을 초과했습니다. actual=" + units
+                            + " reserved=" + reservation.reservedUnits());
+        }
         repository.consume(reservation, units, now());
     }
 
     @Transactional
     public void completeFailure(QuotaReservation reservation, AgentClientException exception) {
-        if (!exception.isTimeout()
+        BigDecimal observedCredits = exception.getUsage() == null
+                ? null
+                : exception.getUsage().credits();
+        if ("BUDGET_EXCEEDED".equals(exception.getCode()) && observedCredits != null) {
+            settleObservedFailure(reservation, nonNegative(observedCredits));
+            return;
+        }
+        if (!exception.isReadTimeout()
                 && ("PROVIDER_UNAVAILABLE".equals(exception.getCode())
                 || "SCHEMA_VIOLATION".equals(exception.getCode()))) {
             repository.release(reservation, now());
@@ -86,8 +109,10 @@ public class AgentQuotaService {
         repository.consume(reservation, reservation.reservedUnits(), now());
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public LlmSettingDTO.UsageResponse usage() {
+        repository.lockSingletonSettings();
+        releaseExpiredReservations();
         UsageWindow usage = usageWindow();
         BigDecimal paidDailyRemaining = remaining(paidDailyLimit(), usage.paidDailyUsed());
         BigDecimal analysisLimit = paidDailyLimit().subtract(reportReserve());
@@ -116,7 +141,7 @@ public class AgentQuotaService {
                                                AgentTask task,
                                                AgentPlan plan) {
         UsageWindow usage = usageWindow();
-        BigDecimal units = plan == AgentPlan.FREE ? BigDecimal.ONE : paidUnits();
+        BigDecimal units = plan == AgentPlan.FREE ? BigDecimal.ONE : paidMaxUnits();
         validateRunLimit(runId, task, plan);
         validateDailyAndMonthly(task, plan, units, usage);
         repository.insert(runId, idempotencyKey, task, plan, units, now());
@@ -201,6 +226,28 @@ public class AgentQuotaService {
 
     private BigDecimal paidUnits() {
         return properties.getQuota().getPaidCreditsPerRequest();
+    }
+
+    private BigDecimal paidMaxUnits() {
+        return properties.getQuota().getPaidMaxCreditsPerRequest();
+    }
+
+    private void settleObservedFailure(QuotaReservation reservation, BigDecimal observedCredits) {
+        if (observedCredits.compareTo(reservation.reservedUnits()) > 0) {
+            // agent_runs가 실제 credits를 보유한다. RELEASED 예약은 legacy usage 집계에서 제외하지 않는다.
+            repository.release(reservation, now());
+            return;
+        }
+        repository.consume(reservation, observedCredits, now());
+    }
+
+    private void releaseExpiredReservations() {
+        LocalDateTime finishedAt = now();
+        LocalDateTime reservedBefore = finishedAt.minus(properties.getQuota().getReservationTtl());
+        int released = repository.releaseExpired(reservedBefore, finishedAt);
+        if (released > 0) {
+            log.warn("정산되지 않은 만료 quota 예약을 해제했다. count={}", released);
+        }
     }
 
     private BigDecimal remaining(BigDecimal limit, BigDecimal used) {

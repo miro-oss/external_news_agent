@@ -9,6 +9,7 @@ import com.example.be.domain.analysis.agent.entity.AgentRun;
 import com.example.be.domain.analysis.agent.entity.AgentRunStatus;
 import com.example.be.domain.analysis.agent.entity.AgentTargetType;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
+import com.example.be.domain.analysis.agent.entity.AgentTimeoutPhase;
 import com.example.be.domain.analysis.agent.repository.AgentRunJdbcRepository;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
@@ -64,6 +65,8 @@ public class AgentRunRecorder {
                               AgentAnalyzeRequest request,
                               String failureCode,
                               String failureMessage,
+                              AgentClientException.Usage usage,
+                              AgentTimeoutPhase timeoutPhase,
                               LocalDateTime startedAt) {
         repository.insertIfAbsent(AgentRun.builder()
                 .collectionRunId(runId)
@@ -74,7 +77,12 @@ public class AgentRunRecorder {
                 .status(AgentRunStatus.FAILED)
                 .failureCode(failureCode)
                 .failureMessage(truncate(failureMessage))
+                .timeoutPhase(timeoutPhase)
                 .llmPlan(request.plan())
+                .inputTokens(usage == null ? null : usage.inputTokens())
+                .outputTokens(usage == null ? null : usage.outputTokens())
+                .costUsd(usage == null ? null : usage.costUsd())
+                .credits(usage == null ? null : usage.credits())
                 .requestHash(hash(request))
                 .startedAt(startedAt)
                 .finishedAt(now())
@@ -114,6 +122,7 @@ public class AgentRunRecorder {
                                     String failureCode,
                                     String failureMessage,
                                     AgentClientException.Usage usage,
+                                    AgentTimeoutPhase timeoutPhase,
                                     LocalDateTime startedAt) {
         repository.insertIfAbsent(AgentRun.builder()
                 .collectionRunId(runId)
@@ -124,6 +133,7 @@ public class AgentRunRecorder {
                 .status(AgentRunStatus.FAILED)
                 .failureCode(failureCode)
                 .failureMessage(truncate(failureMessage))
+                .timeoutPhase(timeoutPhase)
                 .llmPlan(request.plan())
                 .inputTokens(usage == null ? null : usage.inputTokens())
                 .outputTokens(usage == null ? null : usage.outputTokens())

@@ -88,8 +88,8 @@ def test_uses_gateway_usage_metrics_when_present() -> None:
                 "usage": {
                     "prompt_tokens": 8,
                     "completion_tokens": 2,
-                    "credits_used": "1.75",
-                    "cost_usd": "0.025",
+                    "credits_used": "1.750000000000000000123",
+                    "cost_usd": "0.025000000000000000456",
                 },
             },
         )
@@ -110,6 +110,6 @@ def test_uses_gateway_usage_metrics_when_present() -> None:
         response_schema={"type": "object"},
     )
 
-    assert response.usage.credits == Decimal("1.75")
-    assert response.usage.cost_usd == Decimal("0.025")
+    assert response.usage.credits == Decimal("1.750000000000000000123")
+    assert response.usage.cost_usd == Decimal("0.025000000000000000456")
     client.close()

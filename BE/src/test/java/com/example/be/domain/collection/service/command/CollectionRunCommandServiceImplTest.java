@@ -10,9 +10,9 @@ import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.exception.RunException;
 import com.example.be.domain.collection.exception.code.RunErrorCode;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.settings.service.LlmPlanService;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
-import com.example.be.domain.settings.service.LlmPlanService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -88,6 +88,19 @@ class CollectionRunCommandServiceImplTest {
         assertNull(result.response().getTargetTopicIds());
         assertNull(result.response().getTargetCombinationCount());
         verify(runCreator, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void existingIdempotentRunIsReturnedBeforePlanValidation() {
+        CollectionRunReqDTO.Create request = request(List.of(1L), "same-key");
+        request.setPlan("INVALID");
+        when(runRepository.findInProgressByOptionalIdempotencyKey("same-key", RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(Optional.of(running(42L, "same-key")));
+
+        CollectionRunStartResult result = runCommandService.startManualRun(request);
+
+        assertEquals(GeneralSuccessCode.COLLECTION_ALREADY_RUNNING, result.successCode());
+        verify(planService, never()).resolveRunPlan(any());
     }
 
     /**

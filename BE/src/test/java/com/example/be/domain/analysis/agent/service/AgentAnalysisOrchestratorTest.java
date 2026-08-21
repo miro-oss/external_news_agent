@@ -69,7 +69,7 @@ class AgentAnalysisOrchestratorTest {
     void mapsOneBasedAgentEvidenceToZeroBasedPublicContractAndRecordsMockRun() {
         when(client.analyze(any())).thenReturn(response(List.of(1)));
 
-        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article()));
+        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article(), AgentPlan.FREE));
 
         assertEquals("한국어 요약", result.summary());
         assertEquals(List.of(0), result.keyPoints().getFirst().evidence());
@@ -88,7 +88,7 @@ class AgentAnalysisOrchestratorTest {
     void marksRealProviderAnalysisAsLlmAndKeepsMetadata() {
         when(client.analyze(any())).thenReturn(response(List.of(1), "제품/공정", false));
 
-        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article()));
+        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article(), AgentPlan.FREE));
 
         assertEquals(AnalysisSource.LLM, result.analysisSource());
         assertEquals("gemini", result.metadata().provider());
@@ -128,11 +128,12 @@ class AgentAnalysisOrchestratorTest {
         when(client.analyze(any())).thenReturn(response(List.of(2)));
         when(stub.analyze(article)).thenReturn(stubResult);
 
-        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article));
+        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article, AgentPlan.FREE));
 
         assertSame(stubResult, result);
         verify(recorder).recordFailure(
-                eq(42L), eq(10L), any(), eq("EVIDENCE_MISSING"), any(), any(LocalDateTime.class));
+                eq(42L), eq(10L), any(), eq("EVIDENCE_MISSING"), any(), any(), any(),
+                any(LocalDateTime.class));
     }
 
     @Test
@@ -141,7 +142,7 @@ class AgentAnalysisOrchestratorTest {
         doThrow(new IllegalStateException("audit unavailable"))
                 .when(recorder).recordSuccess(eq(42L), eq(10L), any(), any(), any());
 
-        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article()));
+        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article(), AgentPlan.FREE));
 
         assertEquals("한국어 요약", result.summary());
     }
@@ -152,10 +153,11 @@ class AgentAnalysisOrchestratorTest {
         AnalysisResult stubResult = mock(AnalysisResult.class);
         when(client.analyze(any())).thenThrow(new IllegalStateException("invalid response"));
         doThrow(new IllegalStateException("audit unavailable"))
-                .when(recorder).recordFailure(eq(42L), eq(10L), any(), any(), any(), any());
+                .when(recorder).recordFailure(
+                        eq(42L), eq(10L), any(), any(), any(), any(), any(), any());
         when(stub.analyze(article)).thenReturn(stubResult);
 
-        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article));
+        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article, AgentPlan.FREE));
 
         assertSame(stubResult, result);
     }
@@ -167,11 +169,11 @@ class AgentAnalysisOrchestratorTest {
         when(client.analyze(any())).thenReturn(response(List.of(1), "반도체"));
         when(stub.analyze(article)).thenReturn(stubResult);
 
-        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article));
+        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article, AgentPlan.FREE));
 
         assertSame(stubResult, result);
         verify(recorder).recordFailure(
-                eq(42L), eq(10L), any(), eq("SCHEMA_VIOLATION"), any(), any());
+                eq(42L), eq(10L), any(), eq("SCHEMA_VIOLATION"), any(), any(), any(), any());
     }
 
     @ParameterizedTest(name = "{0}")
@@ -185,11 +187,11 @@ class AgentAnalysisOrchestratorTest {
         when(client.analyze(any())).thenReturn(invalidResponse);
         when(stub.analyze(article)).thenReturn(stubResult);
 
-        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article));
+        AnalysisResult result = orchestrator.analyze(new AnalysisContext(42L, article, AgentPlan.FREE));
 
         assertSame(stubResult, result, caseName);
         verify(recorder).recordFailure(
-                eq(42L), eq(10L), any(), eq("SCHEMA_VIOLATION"), any(), any());
+                eq(42L), eq(10L), any(), eq("SCHEMA_VIOLATION"), any(), any(), any(), any());
     }
 
     private AgentProperties enabledProperties() {

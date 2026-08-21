@@ -10,10 +10,12 @@ import com.example.be.domain.collection.repository.CollectionRunArticleRepositor
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -44,7 +46,7 @@ class ArticleAnalysisPipelineTest {
                 observation(article, ChangeType.NEW),
                 observation(article, ChangeType.UPDATED)));
         AnalysisResult result = mock(AnalysisResult.class);
-        AnalysisContext context = new AnalysisContext(42L, article);
+        AnalysisContext context = new AnalysisContext(42L, article, AgentPlan.FREE);
         when(orchestrator.analyze(context)).thenReturn(result);
 
         pipeline.analyze(42L);
@@ -54,16 +56,32 @@ class ArticleAnalysisPipelineTest {
     }
 
     @Test
+    void propagatesPaidPlanFromCollectionRun() {
+        Article article = Article.builder().id(10L).title("기사").build();
+        when(runRepository.findById(42L)).thenReturn(java.util.Optional.of(
+                CollectionRun.builder().id(42L).llmPlan(AgentPlan.PAID).build()));
+        when(runArticleRepository.findAnalysisTargetsByRunId(42L))
+                .thenReturn(List.of(observation(article, ChangeType.NEW)));
+        when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
+
+        pipeline.analyze(42L);
+
+        ArgumentCaptor<AnalysisContext> captor = ArgumentCaptor.forClass(AnalysisContext.class);
+        verify(orchestrator).analyze(captor.capture());
+        assertEquals(AgentPlan.PAID, captor.getValue().plan());
+    }
+
+    @Test
     void recordsWarningAndContinuesWhenOneArticleFails() {
         Article failed = Article.builder().id(10L).title("실패").build();
         Article succeeded = Article.builder().id(11L).title("성공").build();
         when(runArticleRepository.findAnalysisTargetsByRunId(42L)).thenReturn(List.of(
                 observation(failed, ChangeType.NEW),
                 observation(succeeded, ChangeType.NEW)));
-        when(orchestrator.analyze(new AnalysisContext(42L, failed)))
+        when(orchestrator.analyze(new AnalysisContext(42L, failed, AgentPlan.FREE)))
                 .thenThrow(new IllegalStateException("stub failure"));
         AnalysisResult result = mock(AnalysisResult.class);
-        when(orchestrator.analyze(new AnalysisContext(42L, succeeded))).thenReturn(result);
+        when(orchestrator.analyze(new AnalysisContext(42L, succeeded, AgentPlan.FREE))).thenReturn(result);
 
         pipeline.analyze(42L);
 
@@ -84,7 +102,7 @@ class ArticleAnalysisPipelineTest {
         when(runArticleRepository.findAnalysisTargetsByRunIdAndArticleIdIn(42L, Set.of(10L)))
                 .thenReturn(List.of(observation(article, ChangeType.UNCHANGED)));
         AnalysisResult result = mock(AnalysisResult.class);
-        when(orchestrator.analyze(new AnalysisContext(42L, article))).thenReturn(result);
+        when(orchestrator.analyze(new AnalysisContext(42L, article, AgentPlan.FREE))).thenReturn(result);
 
         pipeline.analyze(42L, Set.of(10L));
 
@@ -104,7 +122,7 @@ class ArticleAnalysisPipelineTest {
 
         pipeline.analyze(42L);
 
-        verify(orchestrator, never()).analyze(new AnalysisContext(42L, article));
+        verify(orchestrator, never()).analyze(new AnalysisContext(42L, article, AgentPlan.FREE));
         verify(findingWriter, never()).write(eq(42L), eq(10L), any(), any());
     }
 

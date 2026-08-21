@@ -7,6 +7,7 @@ import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
+import com.example.be.domain.analysis.agent.entity.AgentTimeoutPhase;
 import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
 import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
 import com.example.be.domain.analysis.agent.quota.QuotaReservation;
@@ -87,8 +88,21 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             String code = clientException != null
                     ? clientException.getCode()
                     : "SCHEMA_VIOLATION";
-            recordFailureSafely(runId, article.getId(), request, code, exception.getMessage(), startedAt);
+            AgentClientException.Usage usage = failureUsage(clientException, selection.reservation());
+            recordFailureSafely(
+                    runId,
+                    article.getId(),
+                    request,
+                    code,
+                    exception.getMessage(),
+                    usage,
+                    timeoutPhase(clientException),
+                    startedAt);
             completeFailureSafely(selection.reservation(), clientException, code);
+            addAgentWarning(
+                    runId,
+                    CollectionRunWarning.CODE_LLM_ANALYSIS_FALLBACK,
+                    "Agent 분석 실패로 일부 기사를 Stub 분석으로 대체했습니다. code=" + code);
             log.warn("Agent 분석에 실패해 Stub으로 대체한다. runId={} articleId={} code={} error={}",
                     runId, article.getId(), code, exception.getMessage());
             return stubAnalyzer.analyze(article);
@@ -134,24 +148,24 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 try {
                     QuotaReservation reservation = quotaService.reserve(
                             runId, idempotencyKey + ":fallback-free", AgentTask.ANALYZE, AgentPlan.FREE);
-                    addQuotaWarning(runId,
+                    addAgentWarning(runId,
                             CollectionRunWarning.CODE_LLM_FALLBACK_FREE,
-                            "PAID quota가 소진되어 기사 " + articleId + "를 FREE 플랜으로 분석합니다.");
+                            "PAID quota가 소진되어 일부 기사를 FREE 플랜으로 분석했습니다.");
                     return new ReservationSelection(AgentPlan.FREE, reservation);
                 } catch (QuotaExceededException freeExhausted) {
                     log.warn("FREE fallback quota도 소진됐다. runId={} articleId={}", runId, articleId);
                 }
             }
-            addQuotaWarning(runId,
+            addAgentWarning(runId,
                     CollectionRunWarning.CODE_LLM_QUOTA_EXHAUSTED,
-                    "LLM quota가 소진되어 기사 " + articleId + "를 Stub으로 분석합니다.");
+                    "LLM quota가 소진되어 일부 기사를 Stub으로 분석했습니다.");
             return null;
         }
     }
 
-    private void addQuotaWarning(Long runId, String code, String message) {
+    private void addAgentWarning(Long runId, String code, String message) {
         try {
-            resultWriter.addAgentQuotaWarning(runId, code, message);
+            resultWriter.addAgentWarning(runId, code, message);
         } catch (RuntimeException exception) {
             log.error("LLM quota 경고를 기록하지 못했다. runId={} code={}", runId, code, exception);
         }
@@ -179,6 +193,21 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             log.error("Agent 실패 quota 예약을 정산하지 못했다. reservationId={}",
                     reservation.id(), completionError);
         }
+    }
+
+    private AgentClientException.Usage failureUsage(AgentClientException exception,
+                                                     QuotaReservation reservation) {
+        if (exception == null || exception.getUsage() != null || !exception.isReadTimeout()) {
+            return exception == null ? null : exception.getUsage();
+        }
+        return new AgentClientException.Usage(null, null, null, reservation.reservedUnits());
+    }
+
+    private AgentTimeoutPhase timeoutPhase(AgentClientException exception) {
+        if (exception == null || exception.getTimeoutPhase() == AgentClientException.TimeoutPhase.NONE) {
+            return null;
+        }
+        return AgentTimeoutPhase.valueOf(exception.getTimeoutPhase().name());
     }
 
     private AnalysisResult toAnalysisResult(AgentAnalyzeResponse response) {
@@ -327,9 +356,12 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                                      AgentAnalyzeRequest request,
                                      String code,
                                      String message,
+                                     AgentClientException.Usage usage,
+                                     AgentTimeoutPhase timeoutPhase,
                                      LocalDateTime startedAt) {
         try {
-            recorder.recordFailure(runId, articleId, request, code, message, startedAt);
+            recorder.recordFailure(
+                    runId, articleId, request, code, message, usage, timeoutPhase, startedAt);
         } catch (RuntimeException exception) {
             log.error("실패한 Agent 분석의 감사 로그를 기록하지 못했다. runId={} articleId={} code={}",
                     runId, articleId, code, exception);

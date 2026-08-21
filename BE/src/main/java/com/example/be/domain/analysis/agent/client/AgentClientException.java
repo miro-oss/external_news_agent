@@ -6,29 +6,29 @@ public class AgentClientException extends RuntimeException {
 
     private final String code;
     private final Usage usage;
-    private final boolean timeout;
+    private final TimeoutPhase timeoutPhase;
 
     public AgentClientException(String code, String message) {
-        this(code, message, null, null, false);
+        this(code, message, null, null, TimeoutPhase.NONE);
     }
 
     public AgentClientException(String code, String message, Throwable cause) {
-        this(code, message, cause, null, false);
+        this(code, message, cause, null, TimeoutPhase.NONE);
     }
 
     public AgentClientException(String code, String message, Throwable cause, Usage usage) {
-        this(code, message, cause, usage, false);
+        this(code, message, cause, usage, TimeoutPhase.NONE);
     }
 
     public AgentClientException(String code,
                                 String message,
                                 Throwable cause,
                                 Usage usage,
-                                boolean timeout) {
+                                TimeoutPhase timeoutPhase) {
         super(message, cause);
         this.code = code;
         this.usage = usage;
-        this.timeout = timeout;
+        this.timeoutPhase = timeoutPhase;
     }
 
     public String getCode() {
@@ -39,8 +39,22 @@ public class AgentClientException extends RuntimeException {
         return usage;
     }
 
-    public boolean isTimeout() {
-        return timeout;
+    public boolean isConnectTimeout() {
+        return timeoutPhase == TimeoutPhase.CONNECT;
+    }
+
+    public boolean isReadTimeout() {
+        return timeoutPhase == TimeoutPhase.READ;
+    }
+
+    public TimeoutPhase getTimeoutPhase() {
+        return timeoutPhase;
+    }
+
+    public enum TimeoutPhase {
+        NONE,
+        CONNECT,
+        READ
     }
 
     public record Usage(Long inputTokens,

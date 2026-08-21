@@ -54,14 +54,6 @@ public class CollectionRunCreator {
     private final CollectionRunAsyncService runAsyncService;
     private final CollectionResultWriter resultWriter;
 
-    /**
-     * @throws DuplicatedIdempotencyKeyException 같은 키의 실행이 거의 동시에 먼저 커밋된 경우.
-     *         호출자가 새 트랜잭션에서 그 실행을 조회해 200으로 돌려준다.
-     */
-    CollectionRunStartResult create(CollectionRunReqDTO.Create request, String idempotencyKey) {
-        return create(request, idempotencyKey, AgentPlan.FREE);
-    }
-
     @Transactional
     public CollectionRunStartResult create(CollectionRunReqDTO.Create request,
                                            String idempotencyKey,

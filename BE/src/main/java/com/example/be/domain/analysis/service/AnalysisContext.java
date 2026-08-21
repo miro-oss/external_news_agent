@@ -13,8 +13,4 @@ public record AnalysisContext(Long runId, Article article, AgentPlan plan) {
         Objects.requireNonNull(article, "article은 필수입니다.");
         Objects.requireNonNull(plan, "plan은 필수입니다.");
     }
-
-    public AnalysisContext(Long runId, Article article) {
-        this(runId, article, AgentPlan.FREE);
-    }
 }

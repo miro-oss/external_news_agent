@@ -38,3 +38,27 @@ def test_routes_free_and_paid_to_configured_provider() -> None:
         assert get_analyze_provider(settings, "PAID") is paid
     finally:
         close_analyze_providers()
+
+
+def test_analyze_and_report_settings_share_plan_guard() -> None:
+    settings = Settings(
+        GEMINI_API_KEY="gemini-key",
+        GEMINI_MODEL="gemini-model",
+    )
+    report_settings = settings.model_copy(
+        update={
+            "max_output_tokens": settings.report_max_output_tokens,
+            "provider_timeout_seconds": settings.report_provider_timeout_seconds,
+        }
+    )
+
+    try:
+        analyze = get_analyze_provider(settings, "FREE")
+        report = get_analyze_provider(report_settings, "FREE")
+
+        assert isinstance(analyze, GuardedAnalyzeProvider)
+        assert isinstance(report, GuardedAnalyzeProvider)
+        assert analyze is not report
+        assert analyze.guard is report.guard
+    finally:
+        close_analyze_providers()

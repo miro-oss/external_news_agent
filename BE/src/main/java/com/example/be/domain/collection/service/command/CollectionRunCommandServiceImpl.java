@@ -9,10 +9,10 @@ import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.exception.RunException;
 import com.example.be.domain.collection.exception.code.RunErrorCode;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.settings.service.LlmPlanService;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
-import com.example.be.domain.settings.service.LlmPlanService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -43,10 +43,9 @@ public class CollectionRunCommandServiceImpl implements CollectionRunCommandServ
         CollectionRunReqDTO.Create safeRequest = request == null ? new CollectionRunReqDTO.Create() : request;
         validateTopicIds(safeRequest.getTopicIds());
         String idempotencyKey = normalizeIdempotencyKey(safeRequest.getIdempotencyKey());
-        AgentPlan plan = planService.resolveRunPlan(safeRequest.getPlan());
 
         return findInProgress(idempotencyKey)
-                .orElseGet(() -> create(safeRequest, idempotencyKey, plan));
+                .orElseGet(() -> create(safeRequest, idempotencyKey));
     }
 
     /**
@@ -57,8 +56,8 @@ public class CollectionRunCommandServiceImpl implements CollectionRunCommandServ
      * 집었다면 그때는 정말로 실행 중이므로 RUN409가 맞다.
      */
     private CollectionRunStartResult create(CollectionRunReqDTO.Create request,
-                                            String idempotencyKey,
-                                            AgentPlan plan) {
+                                            String idempotencyKey) {
+        AgentPlan plan = planService.resolveRunPlan(request.getPlan());
         quotaService.assertRunCanStart(plan);
         try {
             return runCreator.create(request, idempotencyKey, plan);

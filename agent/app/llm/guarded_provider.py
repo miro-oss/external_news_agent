@@ -6,6 +6,24 @@ from app.core.errors import AgentError
 from app.llm.base import AnalyzeProvider, ProviderResponse
 
 
+class ProviderGuard:
+    """같은 provider plan의 호출 경로가 공유하는 보호 상태."""
+
+    def __init__(
+        self,
+        *,
+        concurrency: int,
+        acquire_timeout_seconds: float,
+        failure_threshold: int,
+        cooldown_seconds: float,
+        hard_cap_credits: Decimal,
+    ) -> None:
+        self.semaphore = BoundedSemaphore(concurrency)
+        self.acquire_timeout_seconds = acquire_timeout_seconds
+        self.breaker = CircuitBreaker(failure_threshold, cooldown_seconds)
+        self.hard_cap_credits = hard_cap_credits
+
+
 class GuardedAnalyzeProvider:
     """모든 provider 호출에 circuit, concurrency, 요청별 hard cap을 적용한다."""
 
@@ -18,16 +36,24 @@ class GuardedAnalyzeProvider:
         failure_threshold: int,
         cooldown_seconds: float,
         hard_cap_credits: Decimal,
+        guard: ProviderGuard | None = None,
     ) -> None:
         self.delegate = delegate
-        self._semaphore = BoundedSemaphore(concurrency)
-        self._acquire_timeout_seconds = acquire_timeout_seconds
-        self._breaker = CircuitBreaker(failure_threshold, cooldown_seconds)
-        self._hard_cap_credits = hard_cap_credits
+        self._guard = guard or ProviderGuard(
+            concurrency=concurrency,
+            acquire_timeout_seconds=acquire_timeout_seconds,
+            failure_threshold=failure_threshold,
+            cooldown_seconds=cooldown_seconds,
+            hard_cap_credits=hard_cap_credits,
+        )
 
     @property
     def circuit_breaker(self) -> CircuitBreaker:
-        return self._breaker
+        return self._guard.breaker
+
+    @property
+    def guard(self) -> ProviderGuard:
+        return self._guard
 
     def generate(
         self,
@@ -36,10 +62,12 @@ class GuardedAnalyzeProvider:
         prompt: str,
         response_schema: dict[str, object],
     ) -> ProviderResponse:
-        self._breaker.before_call()
-        acquired = self._semaphore.acquire(timeout=self._acquire_timeout_seconds)
+        self._guard.breaker.before_call()
+        acquired = self._guard.semaphore.acquire(
+            timeout=self._guard.acquire_timeout_seconds
+        )
         if not acquired:
-            self._breaker.cancel_call()
+            self._guard.breaker.cancel_call()
             raise AgentError(
                 status_code=503,
                 code="PROVIDER_UNAVAILABLE",
@@ -55,16 +83,16 @@ class GuardedAnalyzeProvider:
             )
         except AgentError as error:
             if error.code == "PROVIDER_UNAVAILABLE":
-                self._breaker.record_failure()
+                self._guard.breaker.record_failure()
             else:
-                self._breaker.record_success()
+                self._guard.breaker.record_rejected()
             raise
         except Exception:
-            self._breaker.record_failure()
+            self._guard.breaker.record_failure()
             raise
         else:
-            self._breaker.record_success()
-            if response.usage.credits > self._hard_cap_credits:
+            self._guard.breaker.record_success()
+            if response.usage.credits > self._guard.hard_cap_credits:
                 raise AgentError(
                     status_code=429,
                     code="BUDGET_EXCEEDED",
@@ -76,12 +104,12 @@ class GuardedAnalyzeProvider:
                             "costUsd": float(response.usage.cost_usd),
                             "credits": float(response.usage.credits),
                         },
-                        "hardCapCredits": float(self._hard_cap_credits),
+                        "hardCapCredits": float(self._guard.hard_cap_credits),
                     },
                 )
             return response
         finally:
-            self._semaphore.release()
+            self._guard.semaphore.release()
 
     def close(self) -> None:
         close = getattr(self.delegate, "close", None)

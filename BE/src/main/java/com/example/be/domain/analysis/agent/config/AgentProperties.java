@@ -5,6 +5,7 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 
 @ConfigurationProperties(prefix = "news.agent")
@@ -34,7 +35,15 @@ public class AgentProperties implements InitializingBean {
                 || quota.paidDailyReportReserve < 0
                 || quota.paidDailyReportReserve >= quota.paidDailyCredits
                 || quota.paidCreditsPerRequest == null
-                || quota.paidCreditsPerRequest.signum() <= 0) {
+                || quota.paidCreditsPerRequest.signum() <= 0
+                || quota.paidMaxCreditsPerRequest == null
+                || quota.paidMaxCreditsPerRequest.signum() <= 0
+                || quota.paidCreditsPerRequest.compareTo(quota.paidMaxCreditsPerRequest) > 0
+                || quota.paidMaxCreditsPerRequest.compareTo(BigDecimal.valueOf(quota.paidDailyCredits)) > 0
+                || quota.paidMaxCreditsPerRequest.compareTo(BigDecimal.valueOf(quota.paidMonthlyCredits)) > 0
+                || quota.reservationTtl == null
+                || quota.reservationTtl.isNegative()
+                || quota.reservationTtl.isZero()) {
             throw new IllegalStateException("news.agent.quota 설정값이 올바르지 않습니다.");
         }
     }
@@ -115,7 +124,9 @@ public class AgentProperties implements InitializingBean {
         private int paidDailyCredits = 90;
         private int paidDailyReportReserve = 20;
         private int paidRunArticleLimit = 20;
-        private java.math.BigDecimal paidCreditsPerRequest = java.math.BigDecimal.ONE;
+        private BigDecimal paidCreditsPerRequest = BigDecimal.ONE;
+        private BigDecimal paidMaxCreditsPerRequest = BigDecimal.valueOf(5);
+        private Duration reservationTtl = Duration.ofMinutes(15);
 
         public int getFreeRunArticleLimit() {
             return freeRunArticleLimit;
@@ -165,12 +176,28 @@ public class AgentProperties implements InitializingBean {
             this.paidRunArticleLimit = paidRunArticleLimit;
         }
 
-        public java.math.BigDecimal getPaidCreditsPerRequest() {
+        public BigDecimal getPaidCreditsPerRequest() {
             return paidCreditsPerRequest;
         }
 
-        public void setPaidCreditsPerRequest(java.math.BigDecimal paidCreditsPerRequest) {
+        public void setPaidCreditsPerRequest(BigDecimal paidCreditsPerRequest) {
             this.paidCreditsPerRequest = paidCreditsPerRequest;
+        }
+
+        public BigDecimal getPaidMaxCreditsPerRequest() {
+            return paidMaxCreditsPerRequest;
+        }
+
+        public void setPaidMaxCreditsPerRequest(BigDecimal paidMaxCreditsPerRequest) {
+            this.paidMaxCreditsPerRequest = paidMaxCreditsPerRequest;
+        }
+
+        public Duration getReservationTtl() {
+            return reservationTtl;
+        }
+
+        public void setReservationTtl(Duration reservationTtl) {
+            this.reservationTtl = reservationTtl;
         }
     }
 }

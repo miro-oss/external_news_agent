@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -54,12 +55,19 @@ class LlmPlanServiceTest {
     @Test
     void updatesPlanAndExhaustedActionTogether() {
         when(repository.findByIdForUpdate(AppSetting.SINGLETON_ID)).thenReturn(Optional.of(setting));
+        doAnswer(invocation -> {
+            when(setting.getLlmPlan()).thenReturn(invocation.getArgument(0, AgentPlan.class));
+            when(setting.getPaidExhaustedAction()).thenReturn(
+                    invocation.getArgument(1, PaidExhaustedAction.class));
+            return null;
+        }).when(setting).update(any(), any(), any());
 
         LlmSettingDTO.PlanResponse response = service.update(
                 new LlmSettingDTO.UpdateRequest("PAID", "FALLBACK_FREE"));
 
         verify(setting).update(eq(AgentPlan.PAID), eq(PaidExhaustedAction.FALLBACK_FREE), any());
-        assertEquals(AgentPlan.FREE, response.plan());
+        assertEquals(AgentPlan.PAID, response.plan());
+        assertEquals(PaidExhaustedAction.FALLBACK_FREE, response.paidExhaustedAction());
     }
 
     @Test

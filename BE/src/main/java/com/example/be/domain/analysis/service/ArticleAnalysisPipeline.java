@@ -1,5 +1,6 @@
 package com.example.be.domain.analysis.service;
 
+import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
@@ -32,7 +33,7 @@ public class ArticleAnalysisPipeline {
     }
 
     public void analyze(Long runId, Set<Long> refreshedArticleIds) {
-        com.example.be.domain.analysis.agent.entity.AgentPlan plan = runRepository.findById(runId)
+        AgentPlan plan = runRepository.findById(runId)
                 .orElseThrow(() -> new IllegalStateException("분석할 수집 실행이 없습니다. runId=" + runId))
                 .getLlmPlan();
         for (Target target : targets(runId, refreshedArticleIds)) {

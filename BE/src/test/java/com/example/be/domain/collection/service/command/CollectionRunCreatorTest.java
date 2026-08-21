@@ -1,5 +1,6 @@
 package com.example.be.domain.collection.service.command;
 
+import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.collection.dto.req.CollectionRunReqDTO;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.RunItemStatus;
@@ -87,7 +88,7 @@ class CollectionRunCreatorTest {
                     .build();
         });
 
-        CollectionRunStartResult result = runCreator.create(request, "manual-key");
+        CollectionRunStartResult result = runCreator.create(request, "manual-key", AgentPlan.FREE);
 
         assertEquals(GeneralSuccessCode.COLLECTION_STARTED, result.successCode());
         assertEquals(42L, result.response().getRunId());
@@ -112,7 +113,7 @@ class CollectionRunCreatorTest {
         when(topicRepository.findActiveCollectionTargets()).thenReturn(List.of());
 
         RunException exception = assertThrows(RunException.class,
-                () -> runCreator.create(request(null, false), null));
+                () -> runCreator.create(request(null, false), null, AgentPlan.FREE));
 
         assertEquals(RunErrorCode.NO_TARGET_COMBINATION, exception.getCode());
         verify(runRepository, never()).saveAndFlush(any());
@@ -129,7 +130,7 @@ class CollectionRunCreatorTest {
                 .thenReturn(List.of(1L));
 
         RunException exception = assertThrows(RunException.class,
-                () -> runCreator.create(request(List.of(1L), false), null));
+                () -> runCreator.create(request(List.of(1L), false), null, AgentPlan.FREE));
 
         assertEquals(RunErrorCode.RUN_IN_PROGRESS, exception.getCode());
         assertEquals(41L, exception.getResult().get("conflictRunId"));
@@ -155,7 +156,7 @@ class CollectionRunCreatorTest {
                 .thenReturn(List.of(1L, 2L));
 
         RunException exception = assertThrows(RunException.class,
-                () -> runCreator.create(request(List.of(1L, 2L), false), null));
+                () -> runCreator.create(request(List.of(1L, 2L), false), null, AgentPlan.FREE));
 
         // conflictRunId는 단수라 가장 먼저 시작한 실행이 대표다.
         assertEquals(41L, exception.getResult().get("conflictRunId"));
@@ -177,7 +178,7 @@ class CollectionRunCreatorTest {
         when(runRepository.saveAndFlush(any(CollectionRun.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        runCreator.create(request(List.of(1L), false), "manual-key");
+        runCreator.create(request(List.of(1L), false), "manual-key", AgentPlan.FREE);
 
         InOrder order = inOrder(topicRepository, runRepository);
         order.verify(topicRepository).lockByIds(List.of(1L));
@@ -202,7 +203,8 @@ class CollectionRunCreatorTest {
         when(runRepository.findInProgressByOptionalIdempotencyKey("manual-key", RunStatus.IN_PROGRESS_STATUSES))
                 .thenReturn(Optional.of(running));
 
-        CollectionRunStartResult result = runCreator.create(request(List.of(1L), false), "manual-key");
+        CollectionRunStartResult result =
+                runCreator.create(request(List.of(1L), false), "manual-key", AgentPlan.FREE);
 
         assertEquals(GeneralSuccessCode.COLLECTION_ALREADY_RUNNING, result.successCode());
         assertEquals(41L, result.response().getRunId());
@@ -227,7 +229,7 @@ class CollectionRunCreatorTest {
                         "could not execute statement [ORA-00001: UQ_RUN_ACTIVE_IDEMPOTENCY_KEY]"));
 
         assertThrows(DuplicatedIdempotencyKeyException.class,
-                () -> runCreator.create(request(List.of(1L), false), "manual-key"));
+                () -> runCreator.create(request(List.of(1L), false), "manual-key", AgentPlan.FREE));
 
         verify(runAsyncService, never()).execute(any());
     }
@@ -247,7 +249,7 @@ class CollectionRunCreatorTest {
                 .thenThrow(new DataIntegrityViolationException("ORA-00001: UQ_RUN_ITEM"));
 
         assertThrows(DataIntegrityViolationException.class,
-                () -> runCreator.create(request(List.of(1L), false), "manual-key"));
+                () -> runCreator.create(request(List.of(1L), false), "manual-key", AgentPlan.FREE));
     }
 
     /**
@@ -266,7 +268,7 @@ class CollectionRunCreatorTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
         doThrow(new TaskRejectedException("queue full")).when(runAsyncService).execute(any());
 
-        runCreator.create(request(List.of(1L), false), "manual-key");
+        runCreator.create(request(List.of(1L), false), "manual-key", AgentPlan.FREE);
 
         verify(resultWriter).failRun(any());
     }

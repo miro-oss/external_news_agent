@@ -18,6 +18,11 @@ public class AgentQuotaJdbcRepository {
     private static final String FIND_SQL = """
             SELECT id, collection_run_id, idempotency_key, agent_task, llm_plan, reserved_units
             FROM agent_quota_reservations
+            WHERE idempotency_key = ? AND status = 'RESERVED'
+            """;
+    private static final String FIND_STATUS_SQL = """
+            SELECT status
+            FROM agent_quota_reservations
             WHERE idempotency_key = ?
             """;
     private static final String INSERT_SQL = """
@@ -44,9 +49,15 @@ public class AgentQuotaJdbcRepository {
             FROM agent_runs run
             WHERE run.llm_plan = 'PAID'
               AND run.started_at >= ? AND run.started_at < ?
+              AND NOT (
+                  run.status = 'FAILED'
+                  AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
+                  AND (run.timeout_phase IS NULL OR run.timeout_phase <> 'READ')
+              )
               AND NOT EXISTS (
                   SELECT 1 FROM agent_quota_reservations reservation
                   WHERE reservation.idempotency_key = run.idempotency_key
+                    AND reservation.status IN ('RESERVED', 'CONSUMED')
               )
             """;
     private static final String LEGACY_FREE_USAGE_SQL = """
@@ -54,9 +65,15 @@ public class AgentQuotaJdbcRepository {
             FROM agent_runs run
             WHERE run.llm_plan = 'FREE'
               AND run.started_at >= ? AND run.started_at < ?
+              AND NOT (
+                  run.status = 'FAILED'
+                  AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
+                  AND (run.timeout_phase IS NULL OR run.timeout_phase <> 'READ')
+              )
               AND NOT EXISTS (
                   SELECT 1 FROM agent_quota_reservations reservation
                   WHERE reservation.idempotency_key = run.idempotency_key
+                    AND reservation.status IN ('RESERVED', 'CONSUMED')
               )
             """;
     private static final String LEGACY_PAID_TASK_USAGE_SQL = """
@@ -65,9 +82,15 @@ public class AgentQuotaJdbcRepository {
             WHERE run.llm_plan = 'PAID'
               AND run.started_at >= ? AND run.started_at < ?
               AND run.agent_task = ?
+              AND NOT (
+                  run.status = 'FAILED'
+                  AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
+                  AND (run.timeout_phase IS NULL OR run.timeout_phase <> 'READ')
+              )
               AND NOT EXISTS (
                   SELECT 1 FROM agent_quota_reservations reservation
                   WHERE reservation.idempotency_key = run.idempotency_key
+                    AND reservation.status IN ('RESERVED', 'CONSUMED')
               )
             """;
 
@@ -89,6 +112,13 @@ public class AgentQuotaJdbcRepository {
                 AgentTask.valueOf(rs.getString("agent_task")),
                 AgentPlan.valueOf(rs.getString("llm_plan")),
                 rs.getBigDecimal("reserved_units")), idempotencyKey).stream().findFirst();
+    }
+
+    public Optional<String> findStatusByIdempotencyKey(String idempotencyKey) {
+        return jdbcTemplate.query(
+                FIND_STATUS_SQL,
+                (rs, rowNum) -> rs.getString("status"),
+                idempotencyKey).stream().findFirst();
     }
 
     public void insert(Long collectionRunId,
@@ -178,6 +208,14 @@ public class AgentQuotaJdbcRepository {
                 WHERE id = ? AND status = 'RESERVED'
                 """, Timestamp.valueOf(finishedAt), reservation.id());
         requireUpdated(updated, reservation);
+    }
+
+    public int releaseExpired(LocalDateTime reservedBefore, LocalDateTime finishedAt) {
+        return jdbcTemplate.update("""
+                UPDATE agent_quota_reservations
+                SET status = 'RELEASED', consumed_units = 0, finished_at = ?
+                WHERE status = 'RESERVED' AND reserved_at < ?
+                """, Timestamp.valueOf(finishedAt), Timestamp.valueOf(reservedBefore));
     }
 
     private void requireUpdated(int updated, QuotaReservation reservation) {

@@ -42,3 +42,21 @@ def test_failed_half_open_probe_reopens_for_full_cooldown() -> None:
     assert breaker.state is CircuitState.OPEN
     now[0] = 20.0
     assert breaker.state is CircuitState.HALF_OPEN
+
+
+def test_rejected_half_open_probe_reopens_without_clearing_failure_history() -> None:
+    now = [0.0]
+    breaker = CircuitBreaker(2, 10.0, clock=lambda: now[0])
+
+    breaker.before_call()
+    breaker.record_failure()
+    breaker.before_call()
+    breaker.record_rejected()
+    breaker.before_call()
+    breaker.record_failure()
+
+    assert breaker.state is CircuitState.OPEN
+    now[0] = 10.0
+    breaker.before_call()
+    breaker.record_rejected()
+    assert breaker.state is CircuitState.OPEN

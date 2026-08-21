@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
 import {
   useLlmPlan,
@@ -15,6 +15,7 @@ export function LlmControlPanel() {
   const startRun = useStartCollectionRun()
   const [runOverride, setRunOverride] = useState<'DEFAULT' | LlmPlan>('DEFAULT')
   const [saved, setSaved] = useState(false)
+  const pendingRunKey = useRef<string | null>(null)
 
   if (planQuery.isPending || usageQuery.isPending) {
     return <div className="llm-panel state-panel">LLM 설정과 사용량을 불러오는 중입니다.</div>
@@ -44,7 +45,21 @@ export function LlmControlPanel() {
   }
 
   function runNow() {
-    startRun.mutate(runOverride === 'DEFAULT' ? undefined : runOverride)
+    const idempotencyKey = pendingRunKey.current ?? `manual-${crypto.randomUUID()}`
+    pendingRunKey.current = idempotencyKey
+    startRun.mutate(
+      {
+        idempotencyKey,
+        ...(runOverride === 'DEFAULT' ? {} : { plan: runOverride }),
+      },
+      { onSuccess: () => { pendingRunKey.current = null } },
+    )
+  }
+
+  function changeRunOverride(value: 'DEFAULT' | LlmPlan) {
+    pendingRunKey.current = null
+    startRun.reset()
+    setRunOverride(value)
   }
 
   return (
@@ -122,7 +137,7 @@ export function LlmControlPanel() {
               <select
                 id="run-plan"
                 value={runOverride}
-                onChange={(event) => setRunOverride(event.target.value as 'DEFAULT' | LlmPlan)}
+                onChange={(event) => changeRunOverride(event.target.value as 'DEFAULT' | LlmPlan)}
               >
                 <option value="DEFAULT">기본 설정 사용 ({setting.plan})</option>
                 <option value="FREE">이번 실행만 FREE</option>

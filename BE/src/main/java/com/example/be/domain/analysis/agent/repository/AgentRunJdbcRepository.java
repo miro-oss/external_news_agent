@@ -14,10 +14,10 @@ public class AgentRunJdbcRepository {
     private static final String INSERT_SQL = """
             INSERT INTO agent_runs (
                 collection_run_id, idempotency_key, agent_task, target_type, target_id,
-                status, failure_code, failure_message, prompt_version, llm_provider,
+                status, failure_code, failure_message, timeout_phase, prompt_version, llm_provider,
                 llm_model, llm_plan, input_tokens, output_tokens, cost_usd, credits,
                 request_hash, started_at, finished_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -34,6 +34,7 @@ public class AgentRunJdbcRepository {
                     run.getStatus().name(),
                     run.getFailureCode(),
                     run.getFailureMessage(),
+                    run.getTimeoutPhase() == null ? null : run.getTimeoutPhase().name(),
                     run.getPromptVersion(),
                     run.getLlmProvider(),
                     run.getLlmModel(),

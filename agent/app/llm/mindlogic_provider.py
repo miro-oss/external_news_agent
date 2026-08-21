@@ -7,7 +7,7 @@ import httpx
 
 from app.core.config import Settings
 from app.core.errors import AgentError
-from app.core.safecast import safe_float, safe_int
+from app.core.safecast import safe_int
 from app.llm.base import ProviderResponse, ProviderUsage
 
 logger = logging.getLogger(__name__)
@@ -155,7 +155,13 @@ def _usage_decimal(
     default: Decimal,
 ) -> Decimal:
     for key in keys:
-        converted = safe_float(usage.get(key))
-        if converted is not None and converted >= 0:
-            return Decimal(str(converted))
+        raw = usage.get(key)
+        if raw is None or isinstance(raw, bool):
+            continue
+        try:
+            converted = raw if isinstance(raw, Decimal) else Decimal(str(raw))
+        except (ValueError, TypeError, ArithmeticError):
+            continue
+        if converted.is_finite() and converted >= 0:
+            return converted
     return default

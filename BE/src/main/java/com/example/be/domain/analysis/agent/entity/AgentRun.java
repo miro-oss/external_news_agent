@@ -56,6 +56,10 @@ public class AgentRun {
     @Column(name = "failure_message", length = 1000)
     private String failureMessage;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "timeout_phase", length = 10)
+    private AgentTimeoutPhase timeoutPhase;
+
     @Column(name = "prompt_version", length = 50)
     private String promptVersion;
 
