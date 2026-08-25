@@ -32,7 +32,7 @@ from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, Plan
 from app.schemas.report import ReportRequest, ReportResponse
 
 EvalProfile = Literal["replay", "live"]
-_DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.json"
+_DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.1.json"
 
 
 @dataclass(frozen=True, slots=True)

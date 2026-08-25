@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from app.core.config import Settings
 from app.core.errors import AgentError
 from app.core.parser import parse_json_object
+from app.core.report_grounding import assess_finding_claim
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.router import get_analyze_provider
 from app.llm.structured_call import structured_call
@@ -21,7 +22,7 @@ from app.schemas.report import (
     WatchItem,
 )
 
-PROMPT_VERSION = "report.ko.v1"
+PROMPT_VERSION = "report.ko.v1.1"
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md"
 SYSTEM_INSTRUCTION = _PROMPT_PATH.read_text(encoding="utf-8").strip()
 
@@ -62,9 +63,13 @@ class ReportWriterService:
             schema_violation_message="Provider 보고서 출력이 Agent 계약을 위반했습니다.",
             logger=logger,
         )
-        return _assembled_response(
-            result.response, result.output, request, result.usage
+        output = _limit_unsupported_significance(
+            result.output,
+            request,
+            grounded_overlap=self._settings.evidence_grounded_overlap,
+            weak_overlap=self._settings.evidence_weak_overlap,
         )
+        return _assembled_response(result.response, output, request, result.usage)
 
 
 def _validated_output(
@@ -76,6 +81,48 @@ def _validated_output(
         parse_json_object(provider_response.text),
         context={"allowed_finding_ids": allowed_ids},
     )
+
+
+def _limit_unsupported_significance(
+    output: ReportOutput,
+    request: ReportRequest,
+    *,
+    grounded_overlap: float,
+    weak_overlap: float,
+) -> ReportOutput:
+    finding_by_id = {finding.id: finding for finding in request.findings}
+    important_events = []
+    for event in output.important_events:
+        findings = [finding_by_id[finding_id] for finding_id in event.source_finding_ids]
+        assessment = assess_finding_claim(
+            event.significance,
+            findings,
+            grounded_overlap=grounded_overlap,
+            weak_overlap=weak_overlap,
+        )
+        if assessment.status != "ungrounded":
+            important_events.append(event)
+            continue
+
+        summary_assessment = assess_finding_claim(
+            event.summary_ko,
+            findings,
+            grounded_overlap=grounded_overlap,
+            weak_overlap=weak_overlap,
+        )
+        fallback = (
+            event.summary_ko
+            if summary_assessment.status == "grounded"
+            else findings[0].summary_ko
+        )
+        logger.warning(
+            "보고서 significance가 연결 finding에서 확인되지 않아 근거 문장으로 대체합니다. "
+            "sourceFindingIds=%s reason=%s",
+            event.source_finding_ids,
+            assessment.reason[:500],
+        )
+        important_events.append(event.model_copy(update={"significance": fallback}))
+    return output.model_copy(update={"important_events": important_events})
 
 
 def _assembled_response(
@@ -138,11 +185,7 @@ def _deterministic_response(request: ReportRequest) -> ReportResponse:
         ImportantEvent(
             title=finding.article_title,
             summary_ko=finding.summary_ko,
-            significance=(
-                "위험도가 높아 즉시 확인이 필요합니다."
-                if finding.risk_level == "high"
-                else "중요 관련 기사로 분류되었습니다."
-            ),
+            significance=finding.summary_ko,
             source_finding_ids=[finding.id],
         )
         for finding in ordered

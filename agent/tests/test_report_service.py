@@ -19,6 +19,7 @@ class FakeProvider:
         self, *, system_instruction: str, prompt: str, response_schema: dict
     ) -> ProviderResponse:
         assert "sourceFindingIds" in system_instruction
+        assert "각 절이 서로 다른 finding 하나만으로도 독립적으로 확인" in system_instruction
         assert response_schema["additionalProperties"] is False
         self.prompts.append(prompt)
         return self.responses.pop(0)
@@ -78,7 +79,11 @@ def provider_response(raw: str, input_tokens: int = 10, output_tokens: int = 5):
     )
 
 
-def valid_output(source_finding_ids: list[int] | None = None) -> str:
+def valid_output(
+    source_finding_ids: list[int] | None = None,
+    *,
+    significance: str = "HBM4 양산 일정이 앞당겨졌다.",
+) -> str:
     return json.dumps(
         {
             "title": "2026-08-10 HBM 뉴스 모니터링 보고서",
@@ -87,7 +92,7 @@ def valid_output(source_finding_ids: list[int] | None = None) -> str:
                 {
                     "title": "HBM4 양산 일정 단축",
                     "summaryKo": "HBM4 양산 일정이 앞당겨졌다.",
-                    "significance": "공급 일정에 영향을 줄 수 있다.",
+                    "significance": significance,
                     "sourceFindingIds": source_finding_ids or [501],
                 }
             ],
@@ -111,8 +116,19 @@ def test_generates_structured_report_and_deterministic_markdown() -> None:
     assert "STUB 분석 3건" in response.markdown_body
     assert "페이월" in response.markdown_body
     assert "수집 실패 1건" in response.markdown_body
-    assert response.meta.prompt_version == "report.ko.v1"
+    assert response.meta.prompt_version == "report.ko.v1.1"
     assert response.meta.mock is False
+
+
+def test_replaces_unsupported_significance_without_another_provider_call() -> None:
+    provider = FakeProvider(
+        provider_response(valid_output(significance="공급망 병목이 완전히 해결된다."))
+    )
+
+    response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(request())
+
+    assert len(provider.prompts) == 1
+    assert response.important_events[0].significance == "HBM4 양산 일정이 앞당겨졌다."
 
 
 def test_repairs_unknown_finding_reference_once_and_accumulates_usage() -> None:
@@ -157,6 +173,7 @@ def test_mock_report_is_deterministic_and_keeps_structured_sections() -> None:
     assert response.meta.provider == "mock"
     assert response.executive_summary == ["HBM4 양산 일정이 앞당겨졌다."]
     assert response.important_events[0].source_finding_ids == [501]
+    assert response.important_events[0].significance == "HBM4 양산 일정이 앞당겨졌다."
     assert response.watch_items == []
     assert response.markdown_body.startswith("# 2026-08-10 HBM 뉴스 모니터링 보고서")
 
