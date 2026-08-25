@@ -107,7 +107,7 @@ class AgentReportOrchestratorTest {
         assertEquals(1, request.sourceStats().paywalled());
         assertEquals(1, request.sourceStats().failed());
         assertEquals(3, request.sourceStats().collected());
-        assertEquals(List.of("수집 제약: STUB 분석 1건 제외, 페이월 1건, 접근 제한 1건, 수집 실패 1건."),
+        assertEquals(List.of("수집 제약: 임시 응답 분석 1건 제외, 페이월 1건, 접근 제한 1건, 수집 실패 1건."),
                 request.sourceNotes());
         verify(recorder).recordReportSuccess(
                 eq(42L), eq(request), any(), any(LocalDateTime.class));

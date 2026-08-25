@@ -11,11 +11,12 @@ final class ReportSourceNotes {
 
     static List<String> from(ReportSourceStats stats) {
         List<String> limitations = new ArrayList<>();
+        // 이 문구는 보고서 본문에 그대로 실린다. STUB·LLM 같은 구현 용어는 읽는 사람에게 뜻이 없다.
         if (stats.stubExcluded() > 0) {
-            limitations.add("STUB 분석 " + stats.stubExcluded() + "건 제외");
+            limitations.add("임시 응답 분석 " + stats.stubExcluded() + "건 제외");
         }
         if (stats.evidenceExcluded() > 0) {
-            limitations.add("근거 부족 LLM 분석 " + stats.evidenceExcluded() + "건 제외");
+            limitations.add("근거 부족 분석 " + stats.evidenceExcluded() + "건 제외");
         }
         if (stats.paywalled() > 0) {
             limitations.add("페이월 " + stats.paywalled() + "건");
