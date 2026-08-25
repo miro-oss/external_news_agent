@@ -146,16 +146,18 @@ def _provider_error_details(error: errors.APIError) -> dict[str, object]:
     code = error.code if isinstance(error.code, int) and not isinstance(error.code, bool) else 0
     status = _safe_status(error.status)
     retry_after = _retry_after_seconds(error)
+    quota_violations = _quota_violations(error)
+    daily_quota_exhausted = code == 429 and _has_daily_quota(quota_violations)
     details: dict[str, object] = {
         "provider": "gemini",
         "providerStatusCode": code,
         "providerStatus": status,
         "rateLimited": code == 429,
-        "retryable": code == 429 or code == 408 or code >= 500,
+        "retryable": (code == 429 or code == 408 or code >= 500)
+        and not daily_quota_exhausted,
     }
     if retry_after is not None:
         details["retryAfterSeconds"] = retry_after
-    quota_violations = _quota_violations(error)
     if quota_violations:
         details["quotaViolations"] = quota_violations
     return details
@@ -207,6 +209,10 @@ def _quota_violations(error: errors.APIError) -> list[dict[str, str]]:
             if len(result) >= 5:
                 return result
     return result
+
+
+def _has_daily_quota(violations: list[dict[str, str]]) -> bool:
+    return any("perday" in violation.get("quotaId", "").casefold() for violation in violations)
 
 
 def _rpc_details(error: errors.APIError) -> list[dict[str, object]]:

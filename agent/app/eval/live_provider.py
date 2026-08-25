@@ -129,7 +129,11 @@ class PacedRetryProvider:
                     response_schema=response_schema,
                 )
             except AgentError as error:
-                if not _is_rate_limited(error) or attempt >= policy.rate_limit_retry_attempts:
+                if (
+                    not _is_rate_limited(error)
+                    or not _is_retryable(error)
+                    or attempt >= policy.rate_limit_retry_attempts
+                ):
                     raise
                 retry_number = attempt + 1
                 delay = self._coordinator.wait_after_rate_limit(error, retry_number)
@@ -150,6 +154,10 @@ class PacedRetryProvider:
 
 def _is_rate_limited(error: AgentError) -> bool:
     return isinstance(error.details, dict) and error.details.get("rateLimited") is True
+
+
+def _is_retryable(error: AgentError) -> bool:
+    return not isinstance(error.details, dict) or error.details.get("retryable") is not False
 
 
 def _retry_after_seconds(error: AgentError) -> float | None:

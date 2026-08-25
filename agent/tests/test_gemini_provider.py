@@ -162,7 +162,7 @@ def test_exposes_sanitized_rate_limit_details_without_api_response_body() -> Non
         "providerStatusCode": 429,
         "providerStatus": "RESOURCE_EXHAUSTED",
         "rateLimited": True,
-        "retryable": True,
+        "retryable": False,
         "retryAfterSeconds": 7.0,
         "quotaViolations": [
             {

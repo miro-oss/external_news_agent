@@ -134,6 +134,43 @@ def test_zero_retry_after_uses_exponential_backoff() -> None:
     assert clock.sleeps == [10.0]
 
 
+def test_does_not_retry_non_retryable_daily_rate_limit() -> None:
+    clock = FakeClock()
+    coordinator = LiveRequestCoordinator(
+        LiveProviderPolicy(request_interval_seconds=0),
+        clock=clock,
+        sleeper=clock.sleep,
+    )
+
+    def daily_quota_exhausted() -> ProviderResponse:
+        raise AgentError(
+            status_code=503,
+            code="PROVIDER_UNAVAILABLE",
+            message="daily quota exhausted",
+            details={
+                "rateLimited": True,
+                "retryable": False,
+                "providerStatusCode": 429,
+                "quotaViolations": [
+                    {"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}
+                ],
+            },
+        )
+
+    delegate = SequenceProvider([daily_quota_exhausted])
+
+    with pytest.raises(AgentError) as error:
+        PacedRetryProvider(delegate, coordinator).generate(
+            system_instruction="system",
+            prompt="prompt",
+            response_schema={},
+        )
+
+    assert error.value.details["retryable"] is False
+    assert delegate.call_count == 1
+    assert clock.sleeps == []
+
+
 @pytest.mark.parametrize("attempts", [True, 1.5])
 def test_policy_rejects_non_integer_retry_attempts(attempts: object) -> None:
     with pytest.raises(ValueError, match="재시도 횟수"):
