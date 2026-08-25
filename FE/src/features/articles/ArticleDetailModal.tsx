@@ -105,7 +105,6 @@ export function ArticleDetailModal({ articleId, defaultAudience = 'CHIP_MAKER', 
 
             <section className="article-body-section">
               <div className="section-heading">
-                <p className="eyebrow">SOURCE TEXT</p>
                 <h3>기사 본문</h3>
               </div>
               {article.data.bodyText && article.data.sentences.length > 0 ? (
@@ -155,7 +154,6 @@ function AnalysisPanel({
     <section className="analysis-panel">
       <div className="analysis-title-row">
         <div>
-          <p className="eyebrow">EVIDENCE ANALYSIS</p>
           <h3>한국어 요약</h3>
         </div>
         <div className="analysis-labels">
@@ -214,7 +212,7 @@ function AnalysisPanel({
               onClick={() => onEvidenceSelect(point.evidence)}
             >
               <span className="key-point-text">{point.text}</span>
-              <span className={`groundedness ${point.groundedness}`}>{point.groundedness}</span>
+              <span className={`groundedness ${point.groundedness}`}>{groundednessLabel(point.groundedness)}</span>
               {point.evidence.map((evidence) => <span className="evidence" key={evidence}>근거 {evidence + 1}</span>)}
             </button>
           </div>
@@ -226,4 +224,8 @@ function AnalysisPanel({
 
 function perspectiveRelevanceLabel(value: 'none' | 'low' | 'medium' | 'high') {
   return { none: '해당 없음', low: '낮음', medium: '보통', high: '높음' }[value]
+}
+
+function groundednessLabel(value: ArticleAnalysis['keyPoints'][number]['groundedness']) {
+  return { grounded: '근거 확인', weak: '근거 약함', ungrounded: '근거 없음' }[value]
 }

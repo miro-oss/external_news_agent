@@ -46,7 +46,6 @@ export function ArticlesPage() {
     <main>
       <header className="page-header article-header">
         <div>
-          <p className="eyebrow">PHASE 2 · M4</p>
           <h1>분석 기사</h1>
           <p className="muted">수집된 신호의 한국어 요약과 분류를 확인하고, 원문 근거를 펼쳐봅니다.</p>
         </div>
@@ -59,8 +58,7 @@ export function ArticlesPage() {
       <section className="audience-filter" aria-label="독자 관점 필터">
         <div className="audience-filter-heading">
           <div>
-            <p className="eyebrow">AUDIENCE VIEW</p>
-            <strong>누구의 관점으로 볼까요?</strong>
+            <h2>누구의 관점으로 볼까요?</h2>
           </div>
           <label>
             최소 관련도

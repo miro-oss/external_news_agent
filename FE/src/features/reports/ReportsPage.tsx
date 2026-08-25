@@ -17,7 +17,6 @@ export function ReportsPage() {
     <main className="reports-page">
       <header className="page-header report-header">
         <div>
-          <p className="eyebrow">PHASE 2 · M5</p>
           <h1>뉴스 리포트</h1>
           <p className="muted">한 번의 수집 실행에서 발견한 신호를 보고서 한 장으로 읽습니다.</p>
         </div>
@@ -47,7 +46,7 @@ export function ReportsPage() {
         <div className="report-workspace">
           <aside className="report-list" aria-label="생성된 보고서">
             <div className="report-list-heading">
-              <span>REPORT ARCHIVE</span>
+              <span>생성된 보고서</span>
               <strong>{reports.data.content.length}</strong>
             </div>
             {reports.data.content.map((report) => (
@@ -88,8 +87,8 @@ function ReportListItem({ report, active, onSelect }: {
       <span className="report-list-date">{formatShortDate(report.generatedAt)}</span>
       <strong>{report.title}</strong>
       <span className="report-list-meta">
-        finding {report.findingCount}
-        {report.highRiskCount > 0 && <em>high {report.highRiskCount}</em>}
+        근거 {report.findingCount}건
+        {report.highRiskCount > 0 && <em>높은 위험 {report.highRiskCount}</em>}
       </span>
     </button>
   )
@@ -100,14 +99,14 @@ function ReportView({ report }: { report: ReportDetail }) {
   return (
     <article className="report-document">
       <header className="report-document-header">
-        <p className="eyebrow">RUN #{report.runId} · {report.modelName}</p>
+        {/* 실행 번호와 모델명은 운영자가 로그를 찾을 때 쓰는 값이지 보고서를 읽는 사람에게 줄 정보가 아니다. */}
         <h2>{report.title}</h2>
         <time dateTime={report.generatedAt}>{formatFullDate(report.generatedAt)}</time>
         <div className="report-stat-row" aria-label="보고서 요약 통계">
-          <ReportStat value={stats.findingCount} label="findings" />
-          <ReportStat value={stats.newCount} label="new" />
-          <ReportStat value={stats.updatedCount} label="updated" />
-          <ReportStat value={stats.byRiskLevel.high ?? 0} label="high risk" tone="danger" />
+          <ReportStat value={stats.findingCount} label="전체 근거" />
+          <ReportStat value={stats.newCount} label="신규" />
+          <ReportStat value={stats.updatedCount} label="후속" />
+          <ReportStat value={stats.byRiskLevel.high ?? 0} label="높은 위험" tone="danger" />
         </div>
       </header>
 
@@ -117,17 +116,14 @@ function ReportView({ report }: { report: ReportDetail }) {
 
       <section className="report-findings">
         <div className="section-heading report-section-heading">
-          <div>
-            <p className="eyebrow">EVIDENCE</p>
-            <h3>근거 findings</h3>
-          </div>
+          <h3>근거</h3>
           <span>{report.findings?.length ?? 0}건</span>
         </div>
         {report.findings && report.findings.length > 0 ? (
           <div className="finding-list">
             {report.findings.map((finding) => <FindingCard finding={finding} key={finding.id} />)}
           </div>
-        ) : <p className="muted">이 보고서에 포함된 finding이 없습니다.</p>}
+        ) : <p className="muted">이 보고서에 포함된 근거가 없습니다.</p>}
       </section>
     </article>
   )
@@ -148,7 +144,7 @@ function FindingCard({ finding }: { finding: ReportFinding }) {
       <div className="finding-card-meta">
         <span>{finding.category}</span>
         <span className={`status-pill risk-label-${finding.riskLevel}`}>{riskLabel(finding.riskLevel)}</span>
-        <span>{finding.changeType}</span>
+        <span>{changeTypeLabel(finding.changeType)}</span>
       </div>
       <h4>{finding.articleTitle}</h4>
       <p>{finding.summary}</p>
@@ -211,4 +207,8 @@ function linkify(text: string): ReactNode {
 
 function riskLabel(value: ReportFinding['riskLevel']) {
   return { high: '높은 위험', medium: '중간 위험', low: '낮은 위험' }[value]
+}
+
+function changeTypeLabel(value: ReportFinding['changeType']) {
+  return { NEW: '신규', UPDATED: '후속' }[value]
 }

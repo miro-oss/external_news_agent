@@ -95,7 +95,6 @@ export function LlmControlPanel() {
     <div className="llm-panel">
       <div className="llm-panel-heading">
         <div>
-          <p className="eyebrow">AGENT BUDGET</p>
           <h2>LLM 플랜과 사용량</h2>
           <p className="muted">기본 플랜을 고르고, 일·월별 한도와 보고서 예약분을 확인합니다.</p>
         </div>
@@ -107,20 +106,20 @@ export function LlmControlPanel() {
           label="FREE · 오늘 호출"
           used={usage.free.dailyCallsUsed}
           limit={usage.free.dailyCallsLimit}
-          unit="calls"
+          unit="회"
         />
         <UsageCard
           label="PAID · 오늘"
           used={usage.paid.dailyCreditsUsed}
           limit={usage.paid.dailyCreditsLimit}
-          unit="credits"
+          unit="크레딧"
           note={`분석 잔량 ${usage.paid.analysisCreditsRemaining} · 보고서 예약 ${usage.paid.reportReserve}`}
         />
         <UsageCard
           label="PAID · 이번 달"
           used={usage.paid.monthlyCreditsUsed}
           limit={usage.paid.monthlyCreditsLimit}
-          unit="credits"
+          unit="크레딧"
         />
       </div>
 
@@ -144,7 +143,7 @@ export function LlmControlPanel() {
               name="paidExhaustedAction"
               defaultValue={setting.paidExhaustedAction}
             >
-              <option value="STUB">Stub으로 계속 — 기본</option>
+              <option value="STUB">임시 응답으로 계속 — 기본</option>
               <option value="FALLBACK_FREE">FREE Gemini로 계속</option>
             </select>
           </div>
@@ -163,8 +162,7 @@ export function LlmControlPanel() {
           onSubmit={saveAudience}
         >
           <div>
-            <p className="eyebrow">DEFAULT AUDIENCE</p>
-            <h3>내 기본 관점</h3>
+            <h3 className="card-title">내 기본 관점</h3>
             <p className="muted">기사 목록과 상세 화면에서 처음 선택할 독자 관점입니다.</p>
           </div>
           <div className="field">
@@ -185,7 +183,7 @@ export function LlmControlPanel() {
         </form>
 
         <div className="run-now-card">
-          <h3>활성 주제 전체 수집</h3>
+          <h3 className="card-title">활성 주제 전체 수집</h3>
           <p className="muted">현재 활성화된 모든 주제·소스 조합을 비동기로 실행합니다.</p>
           {setting.allowRunOverride && (
             <div className="field">
