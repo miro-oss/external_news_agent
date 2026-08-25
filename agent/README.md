@@ -3,7 +3,8 @@
 Spring Boot가 내부 HTTP로 호출하는 stateless FastAPI 에이전트입니다. 기사 분석(`/v1/analyze`)과
 run 보고서 작성(`/v1/report`)을 제공하며, 기본 Mock 모드에서는 외부 LLM 없이 결정적인 결과를
 반환합니다. 근거 검증(`/v1/verify-evidence`)은 숫자·날짜·기업명 왜곡을 먼저 차단하고,
-근거 연결 상태를 `grounded` / `weak` / `ungrounded`로 반환합니다.
+단일 문장에서 직접 확인되는 주장은 rule-only로 확정합니다. 복합 주장, 인과·전망 및 의미상
+애매한 표현만 provider에 위임하고 근거 연결 상태를 `grounded` / `weak` / `ungrounded`로 반환합니다.
 
 ```bash
 uv sync --frozen
@@ -17,6 +18,9 @@ LLM finding을 최대 50건까지 받습니다.
 
 Mock 근거 검증의 어휘 겹침 임계값은 `AGENT_EVIDENCE_GROUNDED_OVERLAP`(기본 0.6)과
 `AGENT_EVIDENCE_WEAK_OVERLAP`(기본 0.2)로 조정할 수 있습니다.
+실제 모드의 rule-only `grounded` 판정은 단일 문장 기준으로 최소 0.8 overlap을 요구하며,
+설정된 grounded 임계값이 더 높으면 그 값을 따릅니다. 명시적인 한영 동치 관계는 기업·수치·기술
+앵커가 함께 일치할 때만 rule-only로 확정합니다.
 근거 검증 입력 상한은 `AGENT_EVIDENCE_MAX_CLAIM_CHARS`(기본 2,000),
 `AGENT_EVIDENCE_MAX_SENTENCES`(기본 50), `AGENT_EVIDENCE_MAX_TOTAL_CHARS`(기본 40,000)입니다.
 
@@ -56,6 +60,9 @@ replay는 외부 API 없이 실제 스키마·문장 분할·사실값 검증·�
   규칙으로 검증했을 때 각각 `weak`/`ungrounded`인 개수. executive summary는 전체 finding을 합치지
   않고 가장 잘 맞는 단일 finding으로 판정
 - Korean summary pass rate: 한글 5자 이상이며 한글·영문 문자 중 한글 비율이 50% 이상인 요약 비율
+- evidence provider call reduction rate: `ungrounded`로 선차단된 bullet을 제외하고 근거 검증이 필요한
+  bullet 중 rule-only로 확정돼 provider 호출을 생략할 수 있는 비율. replay 기준선은 21건 중 11건을
+  rule-only로 처리해 예상 provider 호출을 10건으로 줄임
 
 실제 프롬프트 품질은 provider 환경변수를 설정한 뒤 live 프로필로 수동 평가합니다. 결과에는 모델 id,
 근거 임계값, 문장 상한, schema repair 횟수와 출력 토큰 상한이 기록됩니다. 전체 골든셋 분석 24회와

@@ -22,10 +22,13 @@ _HIGHER_IS_BETTER = (
     "koreanSummaryPassRate",
     "reportClaimCount",
     "reportGroundedClaimCount",
+    "evidenceRuleDecisionCount",
+    "evidenceProviderCallReductionRate",
 )
 _LOWER_IS_BETTER = (
     "reportWeakClaimCount",
     "unsupportedReportClaimCount",
+    "evidenceProviderCallCount",
 )
 _METADATA_KEYS = (
     "datasetVersion",
@@ -58,6 +61,8 @@ class MetricCounts:
     report_grounded_claim_count: int
     report_weak_claim_count: int
     unsupported_report_claim_count: int
+    evidence_verification_count: int
+    evidence_rule_decision_count: int
 
     def to_dict(self) -> dict[str, int | float]:
         return {
@@ -74,6 +79,15 @@ class MetricCounts:
             "reportGroundedClaimCount": self.report_grounded_claim_count,
             "reportWeakClaimCount": self.report_weak_claim_count,
             "unsupportedReportClaimCount": self.unsupported_report_claim_count,
+            "evidenceVerificationCount": self.evidence_verification_count,
+            "evidenceRuleDecisionCount": self.evidence_rule_decision_count,
+            "evidenceProviderCallCount": (
+                self.evidence_verification_count - self.evidence_rule_decision_count
+            ),
+            "evidenceProviderCallReductionRate": _rate(
+                self.evidence_rule_decision_count,
+                self.evidence_verification_count,
+            ),
         }
 
 

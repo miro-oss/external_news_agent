@@ -140,7 +140,7 @@ def test_verify_evidence_returns_deterministic_mock_contract() -> None:
     payload = response.json()
     assert payload["status"] == "grounded"
     assert payload["acceptedSentenceIds"] == [1]
-    assert payload["meta"]["promptVersion"] == "evidence.rules.v1"
+    assert payload["meta"]["promptVersion"] == "evidence.rules.v2"
 
 
 def test_validation_failure_uses_json_error_contract() -> None:

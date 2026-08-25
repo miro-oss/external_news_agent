@@ -28,7 +28,11 @@
     "reportClaimCount": 9,
     "reportGroundedClaimCount": 6,
     "reportWeakClaimCount": 1,
-    "unsupportedReportClaimCount": 2
+    "unsupportedReportClaimCount": 2,
+    "evidenceVerificationCount": 21,
+    "evidenceRuleDecisionCount": 11,
+    "evidenceProviderCallCount": 10,
+    "evidenceProviderCallReductionRate": 0.52381
   },
   "errors": []
 }
