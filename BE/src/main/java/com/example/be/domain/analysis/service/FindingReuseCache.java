@@ -100,6 +100,7 @@ public class FindingReuseCache {
                 AnalysisSource.REUSED,
                 finding.getAnalysisSections(),
                 finding.getEntities(),
+                finding.getPerspectiveTags(),
                 metadata);
     }
 

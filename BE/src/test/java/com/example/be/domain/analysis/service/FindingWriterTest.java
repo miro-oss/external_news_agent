@@ -1,11 +1,14 @@
 package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.entity.AnalysisSource;
+import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.analysis.entity.AudienceRelevance;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingAnalysisBullet;
 import com.example.be.domain.analysis.entity.FindingAnalysisSection;
 import com.example.be.domain.analysis.entity.FindingEntities;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
+import com.example.be.domain.analysis.entity.FindingPerspectiveTag;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
@@ -71,7 +74,13 @@ class FindingWriterTest {
                 List.of(new FindingKeyPoint("핵심 주장", List.of(0), "grounded")),
                 "산업 동향 보도",
                 Sentiment.NEUTRAL, RiskLevel.LOW, Relevance.REFERENCE, "기업", List.of(),
-                AnalysisSource.LLM, analysisSections, FindingEntities.empty(), metadata);
+                AnalysisSource.LLM, analysisSections, FindingEntities.empty(),
+                List.of(new FindingPerspectiveTag(
+                        Audience.CHIP_MAKER,
+                        AudienceRelevance.HIGH,
+                        "핵심 주장",
+                        List.of(0))),
+                metadata);
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
         when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
@@ -86,5 +95,7 @@ class FindingWriterTest {
         assertTrue(finding.getValue().isInputTruncated());
         assertTrue(finding.getValue().getKeyPoints().isEmpty());
         assertEquals("핵심 주장", finding.getValue().getEffectiveKeyPoints().getFirst().text());
+        assertEquals(Audience.CHIP_MAKER,
+                finding.getValue().getPerspectiveTags().getFirst().audience());
     }
 }

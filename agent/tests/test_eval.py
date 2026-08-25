@@ -28,7 +28,7 @@ from app.llm.base import ProviderResponse, ProviderUsage
 _GOLDEN_DIR = Path(__file__).resolve().parents[1] / "app" / "eval" / "golden"
 _DATASET_PATH = _GOLDEN_DIR / "semiconductor.v1.json"
 _REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.1.json"
-_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v1.baseline.json"
+_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v2.baseline.json"
 
 
 def eval_settings() -> Settings:
@@ -51,12 +51,26 @@ def replay_result(dataset: GoldenDataset | None = None):
     )
 
 
-def test_replay_golden_eval_matches_v1_baseline() -> None:
+def test_replay_golden_eval_keeps_quality_and_validates_perspective_fixture() -> None:
     result = replay_result()
     baseline = json.loads(_BASELINE_PATH.read_text(encoding="utf-8"))
 
     assert result.errors == ()
-    assert result.metrics == baseline["metrics"]
+    legacy_metrics = {
+        key: value
+        for key, value in result.metrics.items()
+        if not key.startswith("perspectiveTag")
+    }
+    baseline_legacy_metrics = {
+        key: value
+        for key, value in baseline["metrics"].items()
+        if not key.startswith("perspectiveTag")
+    }
+
+    assert legacy_metrics == baseline_legacy_metrics
+    assert result.metrics["perspectiveTagChecks"] == 96
+    assert result.metrics["perspectiveTagCorrectCount"] == 96
+    assert result.metrics["perspectiveTagAccuracy"] == 1.0
     assert compare_results(result.to_dict(), baseline)["regressions"] == []
 
 
@@ -80,6 +94,7 @@ def test_adversarial_cases_have_expected_failure_labels() -> None:
     assert result.metrics["evidenceRuleDecisionCount"] == 11
     assert result.metrics["evidenceProviderCallCount"] == 10
     assert result.metrics["evidenceProviderCallReductionRate"] == 0.52381
+    assert result.metrics["perspectiveTagAccuracy"] == 1.0
     assert result.errors == ()
 
 
@@ -240,7 +255,7 @@ def test_result_comparison_rejects_incompatible_metadata() -> None:
         compare_results(changed_config, baseline)
 
     changed_prompt = deepcopy(baseline)
-    changed_prompt["analyzePromptVersion"] = "analyze.ko.v2"
+    changed_prompt["analyzePromptVersion"] = "analyze.ko.v3"
     with pytest.raises(ComparisonError, match="prompt version mismatch"):
         compare_results(changed_prompt, baseline)
     assert (
@@ -284,6 +299,16 @@ def test_main_returns_failure_for_regression_and_writes_result(
     assert json.loads(output.read_text(encoding="utf-8"))["comparison"]["regressions"] == [
         "groundedRate"
     ]
+
+
+def test_main_rejects_prompt_version_override_for_replay(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code = main(["--profile", "replay", "--allow-prompt-version-change"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "prompt version override is live-only" in captured.err
 
 
 def test_main_returns_clear_error_for_invalid_baseline(

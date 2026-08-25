@@ -1,10 +1,13 @@
 package com.example.be.domain.analysis.repository;
 
 import com.example.be.domain.analysis.entity.AnalysisSource;
+import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.analysis.entity.AudienceRelevance;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingAnalysisBullet;
 import com.example.be.domain.analysis.entity.FindingAnalysisSection;
 import com.example.be.domain.analysis.entity.FindingEntities;
+import com.example.be.domain.analysis.entity.FindingPerspectiveTag;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
@@ -148,6 +151,7 @@ class FindingRepositoryIntegrationTests {
         assertTrue(versions.contains("11"));
         assertTrue(versions.contains("12"));
         assertTrue(versions.contains("16"));
+        assertTrue(versions.contains("17"));
 
         Finding saved = findingRepository.save(finding());
         flushAndClear();
@@ -211,13 +215,31 @@ class FindingRepositoryIntegrationTests {
         flushAndClear();
 
         var response = articleQueryService.getArticles(
-                null, null, null, "NEW", "important", "high", "정책", "en",
-                null, null, "RISK_DESC", 0, 20);
+                run.getId(), null, null, "NEW", "important", "high", "정책", "en",
+                null, null, null, null, "RISK_DESC", 0, 20);
 
         assertEquals(1, response.getTotalElements());
         assertEquals("미국의 첨단 반도체 장비 수출 통제 강화와 관련된 소식이 보도됐다.",
                 response.getContent().get(0).getSummary());
         assertEquals("high", response.getContent().get(0).getRiskLevel());
+    }
+
+    @Test
+    void filtersByAudienceAndMinimumRelevanceThroughOracleJson() {
+        findingRepository.save(finding());
+        flushAndClear();
+
+        var matched = articleQueryService.getArticles(
+                run.getId(), null, null, null, null, null, null, null,
+                "EQUIPMENT_MAKER", "medium", null, null, "PUBLISHED_DESC", 0, 20);
+        var excluded = articleQueryService.getArticles(
+                run.getId(), null, null, null, null, null, null, null,
+                "IT_INFRA", "low", null, null, "PUBLISHED_DESC", 0, 20);
+
+        assertEquals(1, matched.getTotalElements());
+        assertEquals("EQUIPMENT_MAKER",
+                matched.getContent().getFirst().getPerspectiveTags().get(1).getAudience());
+        assertEquals(0, excluded.getTotalElements());
     }
 
     @Test
@@ -290,7 +312,7 @@ class FindingRepositoryIntegrationTests {
 
         var response = articleQueryService.getArticles(
                 null, topic.getId(), source.getId(), null, null, null, null, null,
-                null, null, "PUBLISHED_DESC", 0, 20);
+                null, null, null, null, "PUBLISHED_DESC", 0, 20);
 
         assertEquals(1, response.getTotalElements());
         assertEquals(article.getId(), response.getContent().get(0).getId());
@@ -322,6 +344,27 @@ class FindingRepositoryIntegrationTests {
                                 "grounded",
                                 BigDecimal.ONE)))))
                 .entities(new FindingEntities(List.of("미국 정부"), List.of("HBM4"), List.of()))
+                .perspectiveTags(List.of(
+                        new FindingPerspectiveTag(
+                                Audience.CHIP_MAKER,
+                                AudienceRelevance.HIGH,
+                                "반도체 제조사의 수출 통제 대응이 필요하다.",
+                                List.of(0)),
+                        new FindingPerspectiveTag(
+                                Audience.EQUIPMENT_MAKER,
+                                AudienceRelevance.MEDIUM,
+                                "장비 수출 허가 범위가 바뀐다.",
+                                List.of(0)),
+                        new FindingPerspectiveTag(
+                                Audience.MARKET_INVESTOR,
+                                AudienceRelevance.LOW,
+                                "정책 변수를 관찰해야 한다.",
+                                List.of(0)),
+                        new FindingPerspectiveTag(
+                                Audience.IT_INFRA,
+                                AudienceRelevance.NONE,
+                                null,
+                                List.of())))
                 .promptVersion("analyze.ko.v1")
                 .llmProvider("gemini")
                 .llmModel("gemini-2.5-flash")

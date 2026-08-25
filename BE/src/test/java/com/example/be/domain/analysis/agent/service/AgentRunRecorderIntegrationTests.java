@@ -103,8 +103,7 @@ class AgentRunRecorderIntegrationTests {
                 List.of(),
                 List.of(),
                 new AgentReportRequest.SourceStatsPayload(1, 0, 0, 0, 1),
-                List.of("STUB 1건 제외"),
-                "TECHNOLOGY");
+                List.of("STUB 1건 제외"));
         AgentReportResponse response = new AgentReportResponse(
                 "보고서",
                 List.of("요약"),
@@ -158,8 +157,7 @@ class AgentRunRecorderIntegrationTests {
                 List.of(),
                 List.of(),
                 new AgentReportRequest.SourceStatsPayload(1, 0, 0, 0, 0),
-                List.of("수집 또는 분석 제외 사항이 없습니다."),
-                "TECHNOLOGY");
+                List.of("수집 또는 분석 제외 사항이 없습니다."));
 
         recorder.recordReportFailure(
                 run.getId(),
@@ -202,8 +200,9 @@ class AgentRunRecorderIntegrationTests {
                 new AgentAnalyzeResponse.Classification(
                         "산업 동향 보도", "neutral", "low", "reference", "제품/공정"),
                 new AgentAnalyzeResponse.Entities(List.of(), List.of(), List.of()),
+                List.of(),
                 new AgentAnalyzeResponse.Meta(
-                        "mock", "mock", "analyze.mock.v1", 0L, 0L,
+                        "mock", "mock", "analyze.mock.v2", 0L, 0L,
                         BigDecimal.ZERO, BigDecimal.ZERO, true, false));
     }
 }

@@ -1,6 +1,6 @@
 {
   "version": "semiconductor.v1",
-  "baselinePromptVersion": "analyze.ko.v1",
+  "baselinePromptVersion": "analyze.ko.v2+perspective.ko.v1",
   "cases": [
     {
       "caseId": "hbm4-pilot-ko",
@@ -16,8 +16,15 @@
         "sections": [{"heading": "생산", "bullets": [{"text": "삼성전자는 HBM4 파일럿 생산을 2026년 4분기에 확대한다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.95}]}],
         "summaryKo": "삼성전자가 2026년 4분기 HBM4 파일럿 생산 확대 계획을 밝혔다.",
         "classification": {"intent": "생산 계획 발표", "sentiment": "positive", "riskLevel": "medium", "relevance": "important", "category": "제품/공정"},
-        "entities": {"companies": ["삼성전자"], "products": ["HBM4"], "technologies": []}
-      }
+        "entities": {"companies": ["삼성전자"], "products": ["HBM4"], "technologies": []},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "삼성전자는 HBM4 파일럿 생산을 2026년 4분기에 확대한다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "high", "hook": "삼성전자는 HBM4 파일럿 생산을 2026년 4분기에 확대한다.", "evidenceSentenceIds": [1]},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "MARKET_INVESTOR"]
     },
     {
       "caseId": "hbm-supply-en",
@@ -33,8 +40,15 @@
         "sections": [{"heading": "계약", "bullets": [{"text": "SK하이닉스가 클라우드 고객과 3년 HBM 공급 계약을 체결했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.93}]}],
         "summaryKo": "SK하이닉스가 클라우드 고객 대상 HBM 공급 계약을 3년 조건으로 체결했다.",
         "classification": {"intent": "공급 계약 발표", "sentiment": "positive", "riskLevel": "low", "relevance": "important", "category": "공급망"},
-        "entities": {"companies": ["SK하이닉스"], "products": ["HBM"], "technologies": []}
-      }
+        "entities": {"companies": ["SK하이닉스"], "products": ["HBM"], "technologies": []},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "SK하이닉스가 클라우드 고객과 3년 HBM 공급 계약을 체결했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "high", "hook": "SK하이닉스가 클라우드 고객과 3년 HBM 공급 계약을 체결했다.", "evidenceSentenceIds": [1]},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "MARKET_INVESTOR"]
     },
     {
       "caseId": "high-na-euv-en",
@@ -50,8 +64,15 @@
         "sections": [{"heading": "장비", "bullets": [{"text": "ASML은 2027년 연구 팹에 High-NA EUV 장비를 설치할 예정이다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.94}]}],
         "summaryKo": "ASML이 2027년 연구 팹의 High-NA EUV 장비 설치 일정을 확정했다.",
         "classification": {"intent": "장비 설치 일정 발표", "sentiment": "neutral", "riskLevel": "medium", "relevance": "important", "category": "제품/공정"},
-        "entities": {"companies": ["ASML"], "products": ["High-NA EUV"], "technologies": ["EUV 노광"]}
-      }
+        "entities": {"companies": ["ASML"], "products": ["High-NA EUV"], "technologies": ["EUV 노광"]},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "ASML은 2027년 연구 팹에 High-NA EUV 장비를 설치할 예정이다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "high", "hook": "ASML은 2027년 연구 팹에 High-NA EUV 장비를 설치할 예정이다.", "evidenceSentenceIds": [1]},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "EQUIPMENT_MAKER"]
     },
     {
       "caseId": "two-nanometer-yield-en",
@@ -67,8 +88,15 @@
         "sections": [{"heading": "수율", "bullets": [{"text": "TSMC는 시험 생산에서 70% 수율을 기록했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.96}]}],
         "summaryKo": "TSMC가 2나노 시험 생산 물량에서 70% 수율을 기록했다고 발표했다.",
         "classification": {"intent": "공정 수율 공개", "sentiment": "positive", "riskLevel": "medium", "relevance": "important", "category": "제품/공정"},
-        "entities": {"companies": ["TSMC"], "products": [], "technologies": ["2나노 공정"]}
-      }
+        "entities": {"companies": ["TSMC"], "products": [], "technologies": ["2나노 공정"]},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "TSMC는 시험 생산에서 70% 수율을 기록했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "high", "hook": "TSMC는 시험 생산에서 70% 수율을 기록했다.", "evidenceSentenceIds": [1]},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "MARKET_INVESTOR"]
     },
     {
       "caseId": "export-control-ko",
@@ -85,8 +113,15 @@
         "sections": [{"heading": "정책", "bullets": [{"text": "ASML이 첨단 반도체 장비의 수출 허가 대상 범위를 조정했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.92}]}],
         "summaryKo": "정부가 첨단 반도체 장비 수출 허가 대상의 범위를 조정했다.",
         "classification": {"intent": "수출 규정 개정", "sentiment": "neutral", "riskLevel": "high", "relevance": "important", "category": "정책"},
-        "entities": {"companies": [], "products": ["반도체 장비"], "technologies": []}
-      }
+        "entities": {"companies": [], "products": ["반도체 장비"], "technologies": []},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "ASML이 첨단 반도체 장비의 수출 허가 대상 범위를 조정했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "high", "hook": "ASML이 첨단 반도체 장비의 수출 허가 대상 범위를 조정했다.", "evidenceSentenceIds": [1]},
+          {"audience": "MARKET_INVESTOR", "relevance": "medium", "hook": "ASML이 첨단 반도체 장비의 수출 허가 대상 범위를 조정했다.", "evidenceSentenceIds": [1]},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR"]
     },
     {
       "caseId": "automotive-mcu-leadtime-en",
@@ -102,8 +137,15 @@
         "sections": [{"heading": "공급", "bullets": [{"text": "차량용 MCU의 평균 리드타임이 12주에 도달했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.91}]}],
         "summaryKo": "차량용 MCU 평균 리드타임이 8월 기준 12주로 늘어났다.",
         "classification": {"intent": "공급 지표 보도", "sentiment": "negative", "riskLevel": "high", "relevance": "important", "category": "공급망"},
-        "entities": {"companies": [], "products": ["차량용 MCU"], "technologies": []}
-      }
+        "entities": {"companies": [], "products": ["차량용 MCU"], "technologies": []},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "차량용 MCU의 평균 리드타임이 12주에 도달했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "high", "hook": "차량용 MCU의 평균 리드타임이 12주에 도달했다.", "evidenceSentenceIds": [1]},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "MARKET_INVESTOR"]
     },
     {
       "caseId": "nand-price-ko",
@@ -120,8 +162,15 @@
         "sections": [{"heading": "가격", "bullets": [{"text": "기업용 NAND 분기 계약가격이 전분기 대비 18% 상승했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.95}]}],
         "summaryKo": "기업용 NAND 계약가격이 전분기보다 8% 상승했다.",
         "classification": {"intent": "가격 동향 보도", "sentiment": "positive", "riskLevel": "medium", "relevance": "important", "category": "공급망"},
-        "entities": {"companies": [], "products": ["기업용 NAND"], "technologies": []}
-      }
+        "entities": {"companies": [], "products": ["기업용 NAND"], "technologies": []},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "기업용 NAND 분기 계약가격이 전분기 대비 18% 상승했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "high", "hook": "기업용 NAND 분기 계약가격이 전분기 대비 18% 상승했다.", "evidenceSentenceIds": [1]},
+          {"audience": "IT_INFRA", "relevance": "medium", "hook": "기업용 NAND 분기 계약가격이 전분기 대비 18% 상승했다.", "evidenceSentenceIds": [1]}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "MARKET_INVESTOR", "IT_INFRA"]
     },
     {
       "caseId": "cpo-switch-en",
@@ -137,8 +186,15 @@
         "sections": [{"heading": "광연결", "bullets": [{"text": "CPO 시제품이 스위치 ASIC 옆에 1.6 Tbps 광엔진을 연결했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.94}]}],
         "summaryKo": "CPO 시제품이 스위치 ASIC 인접 위치에 1.6 Tbps 광엔진을 연결했다.",
         "classification": {"intent": "시제품 기술 공개", "sentiment": "positive", "riskLevel": "low", "relevance": "important", "category": "제품/공정"},
-        "entities": {"companies": [], "products": ["스위치 ASIC", "광엔진"], "technologies": ["CPO"]}
-      }
+        "entities": {"companies": [], "products": ["스위치 ASIC", "광엔진"], "technologies": ["CPO"]},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "CPO 시제품이 스위치 ASIC 옆에 1.6 Tbps 광엔진을 연결했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "high", "hook": "CPO 시제품이 스위치 ASIC 옆에 1.6 Tbps 광엔진을 연결했다.", "evidenceSentenceIds": [1]},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "medium", "hook": "CPO 시제품이 스위치 ASIC 옆에 1.6 Tbps 광엔진을 연결했다.", "evidenceSentenceIds": [1]}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "EQUIPMENT_MAKER", "IT_INFRA"]
     },
     {
       "caseId": "ucie-chiplet-ko",
@@ -154,8 +210,15 @@
         "sections": [{"heading": "표준", "bullets": [{"text": "연구진이 UCIe 2.0 기반 칩렛 두 종의 상호운용 시험을 완료했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.93}]}],
         "summaryKo": "UCIe 2.0 기반 칩렛 두 종이 상호운용 시험을 마쳤다.",
         "classification": {"intent": "상호운용 시험 결과 발표", "sentiment": "positive", "riskLevel": "low", "relevance": "watch", "category": "제품/공정"},
-        "entities": {"companies": [], "products": ["칩렛"], "technologies": ["UCIe 2.0"]}
-      }
+        "entities": {"companies": [], "products": ["칩렛"], "technologies": ["UCIe 2.0"]},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "연구진이 UCIe 2.0 기반 칩렛 두 종의 상호운용 시험을 완료했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "high", "hook": "연구진이 UCIe 2.0 기반 칩렛 두 종의 상호운용 시험을 완료했다.", "evidenceSentenceIds": [1]}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "IT_INFRA"]
     },
     {
       "caseId": "advanced-packaging-ko",
@@ -171,8 +234,15 @@
         "sections": [{"heading": "라인", "bullets": [{"text": "패키징 업체가 고대역폭 메모리용 신규 패키징 라인을 가동했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.92}]}],
         "summaryKo": "고대역폭 메모리용 신규 패키징 라인이 가동을 시작했다.",
         "classification": {"intent": "생산 라인 가동 발표", "sentiment": "positive", "riskLevel": "low", "relevance": "watch", "category": "제품/공정"},
-        "entities": {"companies": [], "products": ["고대역폭 메모리"], "technologies": ["적층 패키징"]}
-      }
+        "entities": {"companies": [], "products": ["고대역폭 메모리"], "technologies": ["적층 패키징"]},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "패키징 업체가 고대역폭 메모리용 신규 패키징 라인을 가동했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "high", "hook": "패키징 업체가 고대역폭 메모리용 신규 패키징 라인을 가동했다.", "evidenceSentenceIds": [1]},
+          {"audience": "MARKET_INVESTOR", "relevance": "medium", "hook": "패키징 업체가 고대역폭 메모리용 신규 패키징 라인을 가동했다.", "evidenceSentenceIds": [1]},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR"]
     },
     {
       "caseId": "fab-power-ko",
@@ -188,8 +258,15 @@
         "sections": [{"heading": "운영", "bullets": [{"text": "반도체 팹이 냉각 제어 개선으로 전력 사용량을 15% 절감했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.96}]}],
         "summaryKo": "냉각 제어를 개선한 반도체 팹이 전력 사용량을 15% 줄였다.",
         "classification": {"intent": "운영 효율 사례 공개", "sentiment": "positive", "riskLevel": "low", "relevance": "reference", "category": "제품/공정"},
-        "entities": {"companies": [], "products": [], "technologies": ["냉각 제어"]}
-      }
+        "entities": {"companies": [], "products": [], "technologies": ["냉각 제어"]},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "반도체 팹이 냉각 제어 개선으로 전력 사용량을 15% 절감했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "high", "hook": "반도체 팹이 냉각 제어 개선으로 전력 사용량을 15% 절감했다.", "evidenceSentenceIds": [1]},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "EQUIPMENT_MAKER"]
     },
     {
       "caseId": "sic-200mm-en",
@@ -205,8 +282,15 @@
         "sections": [{"heading": "웨이퍼", "bullets": [{"text": "웨이퍼 공급사가 차량용 전력 반도체용 200mm 실리콘카바이드 웨이퍼 인증을 마쳤다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.93}]}],
         "summaryKo": "차량용 전력 반도체에 쓰이는 200mm 실리콘카바이드 웨이퍼가 인증을 마쳤다.",
         "classification": {"intent": "제품 인증 발표", "sentiment": "positive", "riskLevel": "low", "relevance": "watch", "category": "공급망"},
-        "entities": {"companies": [], "products": ["실리콘카바이드 웨이퍼"], "technologies": ["전력 반도체"]}
-      }
+        "entities": {"companies": [], "products": ["실리콘카바이드 웨이퍼"], "technologies": ["전력 반도체"]},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "웨이퍼 공급사가 차량용 전력 반도체용 200mm 실리콘카바이드 웨이퍼 인증을 마쳤다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "high", "hook": "웨이퍼 공급사가 차량용 전력 반도체용 200mm 실리콘카바이드 웨이퍼 인증을 마쳤다.", "evidenceSentenceIds": [1]},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "EQUIPMENT_MAKER"]
     },
     {
       "caseId": "gan-charger-ko",
@@ -223,8 +307,15 @@
         "sections": [{"heading": "제품", "bullets": [{"text": "부품 업체가 질화갈륨 전력칩을 신규 고속 충전기에 공급하지 않는다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.91}]}],
         "summaryKo": "질화갈륨 전력칩이 신규 고속 충전기에 공급된다.",
         "classification": {"intent": "부품 공급 발표", "sentiment": "positive", "riskLevel": "low", "relevance": "reference", "category": "공급망"},
-        "entities": {"companies": [], "products": ["질화갈륨 전력칩", "고속 충전기"], "technologies": []}
-      }
+        "entities": {"companies": [], "products": ["질화갈륨 전력칩", "고속 충전기"], "technologies": []},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "부품 업체가 질화갈륨 전력칩을 신규 고속 충전기에 공급하지 않는다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "high", "hook": "부품 업체가 질화갈륨 전력칩을 신규 고속 충전기에 공급하지 않는다.", "evidenceSentenceIds": [1]}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "IT_INFRA"]
     },
     {
       "caseId": "dram-capacity-en",
@@ -240,8 +331,15 @@
         "sections": [{"heading": "생산능력", "bullets": [{"text": "제조사가 다음 분기 DRAM 웨이퍼 생산능력을 10% 확대할 계획이다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.94}]}],
         "summaryKo": "제조사가 다음 분기에 DRAM 웨이퍼 생산능력을 10% 늘릴 계획이다.",
         "classification": {"intent": "생산능력 확대 계획", "sentiment": "positive", "riskLevel": "medium", "relevance": "important", "category": "제품/공정"},
-        "entities": {"companies": [], "products": ["DRAM"], "technologies": []}
-      }
+        "entities": {"companies": [], "products": ["DRAM"], "technologies": []},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "제조사가 다음 분기 DRAM 웨이퍼 생산능력을 10% 확대할 계획이다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "high", "hook": "제조사가 다음 분기 DRAM 웨이퍼 생산능력을 10% 확대할 계획이다.", "evidenceSentenceIds": [1]},
+          {"audience": "MARKET_INVESTOR", "relevance": "medium", "hook": "제조사가 다음 분기 DRAM 웨이퍼 생산능력을 10% 확대할 계획이다.", "evidenceSentenceIds": [1]},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR"]
     },
     {
       "caseId": "asml-service-center-ko",
@@ -257,8 +355,15 @@
         "sections": [{"heading": "서비스", "bullets": [{"text": "ASML이 국내 노광 장비 서비스센터의 정비 공간을 확장했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.95}]}],
         "summaryKo": "ASML이 국내 노광 장비 서비스센터의 정비 공간을 넓혔다.",
         "classification": {"intent": "서비스 거점 확장", "sentiment": "positive", "riskLevel": "low", "relevance": "watch", "category": "기업"},
-        "entities": {"companies": ["ASML"], "products": ["노광 장비"], "technologies": []}
-      }
+        "entities": {"companies": ["ASML"], "products": ["노광 장비"], "technologies": []},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "ASML이 국내 노광 장비 서비스센터의 정비 공간을 확장했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "high", "hook": "ASML이 국내 노광 장비 서비스센터의 정비 공간을 확장했다.", "evidenceSentenceIds": [1]},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["EQUIPMENT_MAKER", "CHIP_MAKER"]
     },
     {
       "caseId": "micron-hbm-en",
@@ -274,8 +379,15 @@
         "sections": [{"heading": "샘플", "bullets": [{"text": "마이크론이 고객 두 곳에 HBM 인증용 샘플 출하를 시작했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.93}]}],
         "summaryKo": "마이크론이 고객 두 곳을 대상으로 HBM 인증용 샘플을 출하하기 시작했다.",
         "classification": {"intent": "인증 샘플 출하", "sentiment": "positive", "riskLevel": "medium", "relevance": "important", "category": "기업"},
-        "entities": {"companies": ["마이크론"], "products": ["HBM"], "technologies": []}
-      }
+        "entities": {"companies": ["마이크론"], "products": ["HBM"], "technologies": []},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "마이크론이 고객 두 곳에 HBM 인증용 샘플 출하를 시작했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "high", "hook": "마이크론이 고객 두 곳에 HBM 인증용 샘플 출하를 시작했다.", "evidenceSentenceIds": [1]},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "MARKET_INVESTOR"]
     },
     {
       "caseId": "samsung-gaa-ko",
@@ -291,8 +403,15 @@
         "sections": [{"heading": "설계", "bullets": [{"text": "삼성전자가 GAA 공정용 설계키트 신규 버전을 고객사에 배포했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.94}]}],
         "summaryKo": "삼성전자가 고객사에 GAA 공정용 설계키트의 신규 버전을 배포했다.",
         "classification": {"intent": "설계 지원 도구 업데이트", "sentiment": "positive", "riskLevel": "low", "relevance": "watch", "category": "제품/공정"},
-        "entities": {"companies": ["삼성전자"], "products": ["설계키트"], "technologies": ["GAA"]}
-      }
+        "entities": {"companies": ["삼성전자"], "products": ["설계키트"], "technologies": ["GAA"]},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "삼성전자가 GAA 공정용 설계키트 신규 버전을 고객사에 배포했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER"]
     },
     {
       "caseId": "intel-foundry-en",
@@ -308,8 +427,15 @@
         "sections": [{"heading": "고객지원", "bullets": [{"text": "인텔이 서울에 파운드리 설계 지원센터를 열었다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.95}]}],
         "summaryKo": "인텔이 고객 칩 구현과 검증을 지원하는 파운드리 설계 지원센터를 서울에 개소했다.",
         "classification": {"intent": "고객 지원 거점 개소", "sentiment": "positive", "riskLevel": "low", "relevance": "watch", "category": "기업"},
-        "entities": {"companies": ["인텔"], "products": [], "technologies": ["파운드리 설계"]}
-      }
+        "entities": {"companies": ["인텔"], "products": [], "technologies": ["파운드리 설계"]},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "인텔이 서울에 파운드리 설계 지원센터를 열었다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER"]
     },
     {
       "caseId": "broadcom-accelerator-en",
@@ -325,8 +451,15 @@
         "sections": [{"heading": "가속기", "bullets": [{"text": "브로드컴이 클라우드 고객에게 맞춤형 AI 가속기 샘플을 공급했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.93}]}],
         "summaryKo": "브로드컴이 클라우드 고객 대상 맞춤형 AI 가속기 샘플 공급을 시작했다.",
         "classification": {"intent": "샘플 공급 발표", "sentiment": "positive", "riskLevel": "medium", "relevance": "important", "category": "기업"},
-        "entities": {"companies": ["브로드컴"], "products": ["AI 가속기"], "technologies": []}
-      }
+        "entities": {"companies": ["브로드컴"], "products": ["AI 가속기"], "technologies": []},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "브로드컴이 클라우드 고객에게 맞춤형 AI 가속기 샘플을 공급했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "high", "hook": "브로드컴이 클라우드 고객에게 맞춤형 AI 가속기 샘플을 공급했다.", "evidenceSentenceIds": [1]}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "IT_INFRA"]
     },
     {
       "caseId": "cowos-capacity-ko",
@@ -342,8 +475,15 @@
         "sections": [{"heading": "증설", "bullets": [{"text": "TSMC가 CoWoS 패키징의 최종 검사 공정을 증설했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.95}]}],
         "summaryKo": "TSMC가 CoWoS 패키징 최종 검사 공정의 설비를 늘렸다.",
         "classification": {"intent": "검사 공정 증설", "sentiment": "positive", "riskLevel": "medium", "relevance": "important", "category": "제품/공정"},
-        "entities": {"companies": ["TSMC"], "products": ["CoWoS"], "technologies": ["첨단 패키징"]}
-      }
+        "entities": {"companies": ["TSMC"], "products": ["CoWoS"], "technologies": ["첨단 패키징"]},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "TSMC가 CoWoS 패키징의 최종 검사 공정을 증설했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "high", "hook": "TSMC가 CoWoS 패키징의 최종 검사 공정을 증설했다.", "evidenceSentenceIds": [1]},
+          {"audience": "MARKET_INVESTOR", "relevance": "medium", "hook": "TSMC가 CoWoS 패키징의 최종 검사 공정을 증설했다.", "evidenceSentenceIds": [1]},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR"]
     },
     {
       "caseId": "photoresist-supply-ko",
@@ -359,8 +499,15 @@
         "sections": [{"heading": "소재", "bullets": [{"text": "소재 업체와 반도체 제조사가 EUV 포토레지스트 공급 계약을 연장했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.92}]}],
         "summaryKo": "EUV 포토레지스트 공급 계약이 연장돼 기존 생산라인에 물량이 투입된다.",
         "classification": {"intent": "소재 공급 계약 연장", "sentiment": "positive", "riskLevel": "low", "relevance": "watch", "category": "공급망"},
-        "entities": {"companies": [], "products": ["EUV 포토레지스트"], "technologies": []}
-      }
+        "entities": {"companies": [], "products": ["EUV 포토레지스트"], "technologies": []},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "소재 업체와 반도체 제조사가 EUV 포토레지스트 공급 계약을 연장했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "high", "hook": "소재 업체와 반도체 제조사가 EUV 포토레지스트 공급 계약을 연장했다.", "evidenceSentenceIds": [1]},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "EQUIPMENT_MAKER"]
     },
     {
       "caseId": "memory-inventory-en",
@@ -376,8 +523,15 @@
         "sections": [{"heading": "재고", "bullets": [{"text": "유통사의 서버 메모리 재고가 6주 수준으로 감소했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.94}]}],
         "summaryKo": "유통사가 보유한 서버 메모리 재고가 8월 기준 6주 수준으로 줄었다.",
         "classification": {"intent": "재고 지표 보도", "sentiment": "positive", "riskLevel": "medium", "relevance": "important", "category": "공급망"},
-        "entities": {"companies": [], "products": ["서버 메모리"], "technologies": []}
-      }
+        "entities": {"companies": [], "products": ["서버 메모리"], "technologies": []},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "high", "hook": "유통사의 서버 메모리 재고가 6주 수준으로 감소했다.", "evidenceSentenceIds": [1]},
+          {"audience": "IT_INFRA", "relevance": "high", "hook": "유통사의 서버 메모리 재고가 6주 수준으로 감소했다.", "evidenceSentenceIds": [1]}
+        ]
+      },
+      "expectedAudiences": ["MARKET_INVESTOR", "IT_INFRA"]
     },
     {
       "caseId": "datacenter-power-en",
@@ -393,8 +547,15 @@
         "sections": [{"heading": "인프라", "bullets": [{"text": "데이터센터가 신규 AI 칩 클러스터용 전력 용량 30 MW를 추가했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.95}]}],
         "summaryKo": "데이터센터가 신규 AI 칩 클러스터를 위해 30 MW의 전력 용량을 확충했다.",
         "classification": {"intent": "데이터센터 설비 확충", "sentiment": "positive", "riskLevel": "medium", "relevance": "watch", "category": "제품/공정"},
-        "entities": {"companies": [], "products": ["AI 칩 클러스터"], "technologies": ["데이터센터 냉각"]}
-      }
+        "entities": {"companies": [], "products": ["AI 칩 클러스터"], "technologies": ["데이터센터 냉각"]},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "데이터센터가 신규 AI 칩 클러스터용 전력 용량 30 MW를 추가했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "high", "hook": "데이터센터가 신규 AI 칩 클러스터용 전력 용량 30 MW를 추가했다.", "evidenceSentenceIds": [1]},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "medium", "hook": "데이터센터가 신규 AI 칩 클러스터용 전력 용량 30 MW를 추가했다.", "evidenceSentenceIds": [1]}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "EQUIPMENT_MAKER", "IT_INFRA"]
     },
     {
       "caseId": "riscv-injection-ko",
@@ -411,8 +572,15 @@
         "sections": [{"heading": "검증", "bullets": [{"text": "연구팀이 RISC-V 코어용 검증 플랫폼을 공개했다.", "evidenceSentenceIds": [1], "groundedness": "grounded", "confidence": 0.96}]}],
         "summaryKo": "The research team released a verification platform for RISC-V cores.",
         "classification": {"intent": "검증 도구 공개", "sentiment": "positive", "riskLevel": "low", "relevance": "reference", "category": "제품/공정"},
-        "entities": {"companies": [], "products": ["검증 플랫폼"], "technologies": ["RISC-V"]}
-      }
+        "entities": {"companies": [], "products": ["검증 플랫폼"], "technologies": ["RISC-V"]},
+        "perspectiveTags": [
+          {"audience": "CHIP_MAKER", "relevance": "high", "hook": "연구팀이 RISC-V 코어용 검증 플랫폼을 공개했다.", "evidenceSentenceIds": [1]},
+          {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+          {"audience": "IT_INFRA", "relevance": "high", "hook": "연구팀이 RISC-V 코어용 검증 플랫폼을 공개했다.", "evidenceSentenceIds": [1]}
+        ]
+      },
+      "expectedAudiences": ["CHIP_MAKER", "IT_INFRA"]
     }
   ]
 }

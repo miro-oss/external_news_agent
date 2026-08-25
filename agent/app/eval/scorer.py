@@ -20,6 +20,7 @@ _HIGHER_IS_BETTER = (
     "groundedRate",
     "koreanSummaryPasses",
     "koreanSummaryPassRate",
+    "perspectiveTagAccuracy",
     "reportClaimCount",
     "reportGroundedClaimCount",
     "evidenceRuleDecisionCount",
@@ -57,6 +58,8 @@ class MetricCounts:
     bullet_count: int
     grounded_bullet_count: int
     korean_summary_passes: int
+    perspective_tag_checks: int
+    perspective_tag_correct_count: int
     report_claim_count: int
     report_grounded_claim_count: int
     report_weak_claim_count: int
@@ -75,6 +78,12 @@ class MetricCounts:
             "groundedRate": _rate(self.grounded_bullet_count, self.bullet_count),
             "koreanSummaryPasses": self.korean_summary_passes,
             "koreanSummaryPassRate": _rate(self.korean_summary_passes, self.case_count),
+            "perspectiveTagChecks": self.perspective_tag_checks,
+            "perspectiveTagCorrectCount": self.perspective_tag_correct_count,
+            "perspectiveTagAccuracy": _rate(
+                self.perspective_tag_correct_count,
+                self.perspective_tag_checks,
+            ),
             "reportClaimCount": self.report_claim_count,
             "reportGroundedClaimCount": self.report_grounded_claim_count,
             "reportWeakClaimCount": self.report_weak_claim_count,

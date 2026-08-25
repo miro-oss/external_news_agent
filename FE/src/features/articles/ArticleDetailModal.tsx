@@ -1,20 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
 import { useArticle } from '../../api/queries'
-import type { ArticleAnalysis } from '../../api/types'
+import {
+  AUDIENCES,
+  AUDIENCE_LABELS,
+  type ArticleAnalysis,
+  type Audience,
+} from '../../api/types'
 import { formatMediumDate } from '../../lib/datetime'
 
 interface Props {
   articleId: number | null
+  defaultAudience?: Audience
   onClose: () => void
 }
 
-export function ArticleDetailModal({ articleId, onClose }: Props) {
+export function ArticleDetailModal({ articleId, defaultAudience = 'CHIP_MAKER', onClose }: Props) {
   const article = useArticle(articleId)
   const closeButton = useRef<HTMLButtonElement>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
     articleId: number | null
     sentences: number[]
   }>({ articleId: null, sentences: [] })
+  const [perspectiveSelection, setPerspectiveSelection] = useState<{
+    articleId: number | null
+    audience: Audience
+  }>({ articleId: null, audience: defaultAudience })
 
   useEffect(() => {
     if (articleId === null) return undefined
@@ -35,6 +45,9 @@ export function ArticleDetailModal({ articleId, onClose }: Props) {
   const highlightedSentences = evidenceSelection.articleId === articleId
     ? evidenceSelection.sentences
     : []
+  const selectedAudience = perspectiveSelection.articleId === articleId
+    ? perspectiveSelection.audience
+    : defaultAudience
 
   const highlightEvidence = (evidence: number[]) => {
     setEvidenceSelection({ articleId, sentences: evidence })
@@ -80,7 +93,12 @@ export function ArticleDetailModal({ articleId, onClose }: Props) {
             </header>
 
             {article.data.analysis ? (
-              <AnalysisPanel analysis={article.data.analysis} onEvidenceSelect={highlightEvidence} />
+              <AnalysisPanel
+                analysis={article.data.analysis}
+                selectedAudience={selectedAudience}
+                onAudienceSelect={(audience) => setPerspectiveSelection({ articleId, audience })}
+                onEvidenceSelect={highlightEvidence}
+              />
             ) : (
               <div className="analysis-empty">이 실행의 분석 결과가 아직 없습니다.</div>
             )}
@@ -119,11 +137,20 @@ export function ArticleDetailModal({ articleId, onClose }: Props) {
 
 function AnalysisPanel({
   analysis,
+  selectedAudience,
+  onAudienceSelect,
   onEvidenceSelect,
 }: {
   analysis: ArticleAnalysis
+  selectedAudience: Audience
+  onAudienceSelect: (audience: Audience) => void
   onEvidenceSelect: (evidence: number[]) => void
 }) {
+  const perspectiveTags = analysis.perspectiveTags ?? []
+  const selectedPerspective = perspectiveTags.find(
+    (tag) => tag.audience === selectedAudience,
+  )
+
   return (
     <section className="analysis-panel">
       <div className="analysis-title-row">
@@ -139,6 +166,43 @@ function AnalysisPanel({
       </div>
       <p className="analysis-summary">{analysis.summary}</p>
       {analysis.intent && <p className="intent">의도 · {analysis.intent}</p>}
+      <div className="perspective-tabs" role="tablist" aria-label="독자 관점별 분석">
+        {AUDIENCES.map((audience) => {
+          const tag = perspectiveTags.find((item) => item.audience === audience)
+          return (
+            <button
+              key={audience}
+              type="button"
+              role="tab"
+              aria-selected={selectedAudience === audience}
+              className={selectedAudience === audience ? 'perspective-tab active' : 'perspective-tab'}
+              onClick={() => onAudienceSelect(audience)}
+            >
+              {AUDIENCE_LABELS[audience]}
+              <small>{perspectiveRelevanceLabel(tag?.relevance ?? 'none')}</small>
+            </button>
+          )
+        })}
+      </div>
+      <div className="perspective-reason" role="tabpanel">
+        {selectedPerspective?.hook ? (
+          <>
+            <span className={`perspective-level level-${selectedPerspective.relevance}`}>
+              관련도 {perspectiveRelevanceLabel(selectedPerspective.relevance)}
+            </span>
+            <p>{selectedPerspective.hook}</p>
+            <button
+              type="button"
+              className="perspective-evidence-button"
+              onClick={() => onEvidenceSelect(selectedPerspective.evidenceSentenceIds)}
+            >
+              {selectedPerspective.evidenceSentenceIds.map((id) => `근거 ${id + 1}`).join(' · ')}
+            </button>
+          </>
+        ) : (
+          <p className="perspective-empty">이 관점과 직접 연결되는 근거가 없습니다.</p>
+        )}
+      </div>
       <div className="key-points">
         {analysis.keyPoints.map((point, index) => (
           <div className="key-point" key={`${point.text}-${index}`}>
@@ -158,4 +222,8 @@ function AnalysisPanel({
       </div>
     </section>
   )
+}
+
+function perspectiveRelevanceLabel(value: 'none' | 'low' | 'medium' | 'high') {
+  return { none: '해당 없음', low: '낮음', medium: '보통', high: '높음' }[value]
 }

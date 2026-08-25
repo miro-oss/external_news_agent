@@ -21,7 +21,7 @@ public class ArticleResDTO {
     @JsonPropertyOrder({
             "id", "title", "publisher", "canonicalUrl", "urlHash", "language", "publishedAt", "fetchedAt",
             "fetchStatus", "topicId", "topicName", "sourceId", "sourceName", "changeType", "summary",
-            "category", "relevance", "riskLevel", "sentiment"
+            "category", "relevance", "riskLevel", "sentiment", "perspectiveTags"
     })
     @Schema(name = "ArticleSummaryResponse", description = "수집 기사 목록 항목")
     public static class Summary {
@@ -45,6 +45,7 @@ public class ArticleResDTO {
         private final String relevance;
         private final String riskLevel;
         private final String sentiment;
+        private final List<PerspectiveTag> perspectiveTags;
     }
 
     @Getter
@@ -92,7 +93,7 @@ public class ArticleResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
             "changeType", "summary", "keyPoints", "intent", "sentiment", "riskLevel", "relevance",
-            "category", "analyzedAt", "runId"
+            "category", "perspectiveTags", "analyzedAt", "runId"
     })
     public static class Analysis {
 
@@ -104,6 +105,7 @@ public class ArticleResDTO {
         private final String riskLevel;
         private final String relevance;
         private final String category;
+        private final List<PerspectiveTag> perspectiveTags;
         private final OffsetDateTime analyzedAt;
         private final Long runId;
     }
@@ -117,6 +119,18 @@ public class ArticleResDTO {
         private final String text;
         private final List<Integer> evidence;
         private final String groundedness;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @JsonPropertyOrder({"audience", "relevance", "hook", "evidenceSentenceIds"})
+    public static class PerspectiveTag {
+
+        private final String audience;
+        private final String relevance;
+        private final String hook;
+        private final List<Integer> evidenceSentenceIds;
     }
 
     @Getter

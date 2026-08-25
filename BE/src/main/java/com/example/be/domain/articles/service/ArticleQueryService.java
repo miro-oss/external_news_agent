@@ -16,6 +16,8 @@ public interface ArticleQueryService {
             String riskLevel,
             String category,
             String language,
+            String audience,
+            String minAudienceRelevance,
             OffsetDateTime from,
             OffsetDateTime to,
             String sort,

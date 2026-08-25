@@ -122,8 +122,9 @@ class AgentRunRecorderConcurrencyIntegrationTests {
                 new AgentAnalyzeResponse.Classification(
                         "산업 동향 보도", "neutral", "low", "reference", "제품/공정"),
                 new AgentAnalyzeResponse.Entities(List.of(), List.of(), List.of()),
+                List.of(),
                 new AgentAnalyzeResponse.Meta(
-                        "mock", "mock", "analyze.mock.v1", 0L, 0L,
+                        "mock", "mock", "analyze.mock.v2", 0L, 0L,
                         BigDecimal.ZERO, BigDecimal.ZERO, true, false));
     }
 }

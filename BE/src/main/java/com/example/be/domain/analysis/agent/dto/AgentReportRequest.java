@@ -12,8 +12,7 @@ public record AgentReportRequest(
         List<FindingPayload> findings,
         List<EventPayload> events,
         SourceStatsPayload sourceStats,
-        List<String> sourceNotes,
-        String perspective
+        List<String> sourceNotes
 ) {
 
     public record RunPayload(

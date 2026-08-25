@@ -35,7 +35,8 @@ class ArticleControllerTest {
     @Test
     void getArticlesRespondsWithPagedAnalysis() throws Exception {
         when(articleQueryService.getArticles(eq(42L), eq(null), eq(null), eq("NEW"), eq(null), eq("high"),
-                eq(null), eq(null), eq(null), eq(null), eq("PUBLISHED_DESC"), eq(0), eq(20)))
+                eq(null), eq(null), eq(null), eq(null), eq(null), eq(null),
+                eq("PUBLISHED_DESC"), eq(0), eq(20)))
                 .thenReturn(PageResponse.of(List.of(summary()), 0, 20, 1));
 
         mockMvc.perform(get("/api/news/articles")
@@ -47,7 +48,9 @@ class ArticleControllerTest {
                 .andExpect(jsonPath("$.result.content[0].id").value(1025))
                 .andExpect(jsonPath("$.result.content[0].summary")
                         .value("미국의 첨단 반도체 장비 수출 통제 강화와 관련된 소식이 보도됐다."))
-                .andExpect(jsonPath("$.result.content[0].riskLevel").value("high"));
+                .andExpect(jsonPath("$.result.content[0].riskLevel").value("high"))
+                .andExpect(jsonPath("$.result.content[0].perspectiveTags[0].audience")
+                        .value("CHIP_MAKER"));
     }
 
     @Test
@@ -58,7 +61,19 @@ class ArticleControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.sentences[0].index").value(0))
                 .andExpect(jsonPath("$.result.analysis.keyPoints[0].evidence[0]").value(0))
+                .andExpect(jsonPath("$.result.analysis.perspectiveTags[0].evidenceSentenceIds[0]")
+                        .value(0))
                 .andExpect(jsonPath("$.result.analysis.runId").value(42));
+    }
+
+    @Test
+    void forwardsAudienceFilterWithDefaultMinimum() throws Exception {
+        when(articleQueryService.getArticles(any(), any(), any(), any(), any(), any(), any(), any(),
+                eq("IT_INFRA"), eq(null), any(), any(), eq("PUBLISHED_DESC"), eq(0), eq(20)))
+                .thenReturn(PageResponse.of(List.of(), 0, 20, 0));
+
+        mockMvc.perform(get("/api/news/articles").param("audience", "IT_INFRA"))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -75,7 +90,7 @@ class ArticleControllerTest {
     @Test
     void getArticlesKeepsSpecifiedBadRequestMessage() throws Exception {
         when(articleQueryService.getArticles(any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), eq("UNKNOWN"), eq(0), eq(20)))
+                any(), any(), any(), any(), eq("UNKNOWN"), eq(0), eq(20)))
                 .thenThrow(new GeneralException(GeneralErrorCode.BAD_REQUEST, "지원하지 않는 정렬 조건입니다."));
 
         mockMvc.perform(get("/api/news/articles").param("sort", "UNKNOWN"))
@@ -90,6 +105,7 @@ class ArticleControllerTest {
                 .title("US tightens export controls")
                 .summary("미국의 첨단 반도체 장비 수출 통제 강화와 관련된 소식이 보도됐다.")
                 .riskLevel("high")
+                .perspectiveTags(List.of(perspectiveTag()))
                 .build();
     }
 
@@ -110,9 +126,19 @@ class ArticleControllerTest {
                                 .evidence(List.of(0))
                                 .groundedness("grounded")
                                 .build()))
+                        .perspectiveTags(List.of(perspectiveTag()))
                         .runId(42L)
                         .build())
                 .relatedArticles(List.of())
+                .build();
+    }
+
+    private ArticleResDTO.PerspectiveTag perspectiveTag() {
+        return ArticleResDTO.PerspectiveTag.builder()
+                .audience("CHIP_MAKER")
+                .relevance("high")
+                .hook("HBM4 양산 일정이 앞당겨졌다.")
+                .evidenceSentenceIds(List.of(0))
                 .build();
     }
 }

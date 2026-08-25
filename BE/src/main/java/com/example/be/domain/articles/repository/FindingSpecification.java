@@ -1,5 +1,7 @@
 package com.example.be.domain.articles.repository;
 
+import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.analysis.entity.AudienceRelevance;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
@@ -13,8 +15,10 @@ import org.springframework.data.jpa.domain.Specification;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Collectors;
 
 public class FindingSpecification {
 
@@ -33,6 +37,8 @@ public class FindingSpecification {
                                                             RiskLevel riskLevel,
                                                             String category,
                                                             String language,
+                                                            Audience audience,
+                                                            AudienceRelevance minAudienceRelevance,
                                                             OffsetDateTime from,
                                                             OffsetDateTime to,
                                                             String sort) {
@@ -76,6 +82,14 @@ public class FindingSpecification {
                         builder.lower(root.get("article").get("language")),
                         language.toLowerCase(Locale.ROOT)));
             }
+            if (audience != null && minAudienceRelevance != null) {
+                Expression<Boolean> matchesAudience = builder.function(
+                        "json_exists",
+                        Boolean.class,
+                        root.get("perspectiveTags"),
+                        builder.literal(audiencePath(audience, minAudienceRelevance)));
+                predicates.add(builder.isTrue(matchesAudience));
+            }
             if (from != null) {
                 predicates.add(builder.greaterThanOrEqualTo(root.get("article").get("publishedAt"), from));
             }
@@ -86,6 +100,14 @@ public class FindingSpecification {
             applyOrder(query, builder, root, sort);
             return builder.and(predicates.toArray(Predicate[]::new));
         };
+    }
+
+    private static String audiencePath(Audience audience, AudienceRelevance minimum) {
+        String relevances = Arrays.stream(AudienceRelevance.values())
+                .filter(value -> value.isAtLeast(minimum))
+                .map(value -> "@.relevance == \"" + value.toApiValue() + "\"")
+                .collect(Collectors.joining(" || "));
+        return "$[*]?(@.audience == \"" + audience.name() + "\" && (" + relevances + "))";
     }
 
     private static void addEqual(List<Predicate> predicates,

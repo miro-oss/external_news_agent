@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import Field, model_validator
 
@@ -7,7 +7,15 @@ from app.schemas.common import AgentModel
 
 Plan = Literal["FREE", "PAID"]
 Groundedness = Literal["grounded", "weak", "ungrounded"]
+Audience = Literal[
+    "CHIP_MAKER",
+    "EQUIPMENT_MAKER",
+    "MARKET_INVESTOR",
+    "IT_INFRA",
+]
+AudienceRelevance = Literal["none", "low", "medium", "high"]
 NonEmptyString = Annotated[str, Field(min_length=1)]
+AUDIENCES = frozenset(get_args(Audience))
 
 
 class ArticleInput(AgentModel):
@@ -61,6 +69,26 @@ class Entities(AgentModel):
     technologies: list[NonEmptyString]
 
 
+class PerspectiveTag(AgentModel):
+    audience: Audience
+    relevance: AudienceRelevance
+    hook: str | None = Field(min_length=1)
+    evidence_sentence_ids: list[Annotated[int, Field(ge=1)]]
+
+    @model_validator(mode="after")
+    def validate_evidence_contract(self) -> "PerspectiveTag":
+        if self.relevance == "none":
+            if self.hook is not None or self.evidence_sentence_ids:
+                raise ValueError("relevance가 none이면 hook과 evidenceSentenceIds가 없어야 합니다.")
+        elif self.hook is None or not self.evidence_sentence_ids:
+            raise ValueError(
+                "relevance가 none이 아니면 hook과 evidenceSentenceIds가 필요합니다."
+            )
+        if len(self.evidence_sentence_ids) != len(set(self.evidence_sentence_ids)):
+            raise ValueError("perspective tag의 evidenceSentenceIds는 중복될 수 없습니다.")
+        return self
+
+
 class ResponseMeta(AgentModel):
     provider: Literal["gemini", "mindlogic-claude", "mock"]
     model: str = Field(min_length=1)
@@ -78,6 +106,12 @@ class AnalyzeOutput(AgentModel):
     summary_ko: str = Field(min_length=1)
     classification: Classification
     entities: Entities
+    perspective_tags: list[PerspectiveTag]
+
+    @model_validator(mode="after")
+    def validate_perspective_tags(self) -> "AnalyzeOutput":
+        _validate_perspective_tag_set(self.perspective_tags)
+        return self
 
 
 class AnalyzeResponse(AgentModel):
@@ -86,6 +120,7 @@ class AnalyzeResponse(AgentModel):
     summary_ko: str = Field(min_length=1)
     classification: Classification
     entities: Entities
+    perspective_tags: list[PerspectiveTag]
     meta: ResponseMeta
 
     @model_validator(mode="after")
@@ -100,4 +135,21 @@ class AnalyzeResponse(AgentModel):
             raise ValueError(
                 "모든 bullet은 sentences 범위 안의 evidenceSentenceIds를 가져야 합니다."
             )
+        _validate_perspective_tag_set(self.perspective_tags)
+        if any(
+            sentence_id > sentence_count
+            for tag in self.perspective_tags
+            for sentence_id in tag.evidence_sentence_ids
+        ):
+            raise ValueError(
+                "perspective tag의 evidenceSentenceIds는 sentences 범위 안이어야 합니다."
+            )
         return self
+
+
+def _validate_perspective_tag_set(tags: list[PerspectiveTag]) -> None:
+    audiences = [tag.audience for tag in tags]
+    if len(tags) != len(AUDIENCES) or set(audiences) != AUDIENCES:
+        raise ValueError("perspectiveTags는 4개 audience를 정확히 한 번씩 포함해야 합니다.")
+    if sum(tag.relevance == "high" for tag in tags) > 2:
+        raise ValueError("high relevance 관점은 최대 2개입니다.")

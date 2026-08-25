@@ -1,24 +1,42 @@
 import { useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
 import {
+  useAudienceSetting,
   useLlmPlan,
   useLlmUsage,
   useStartCollectionRun,
   useUpdateLlmPlan,
+  useUpdateAudienceSetting,
 } from '../../api/queries'
-import type { LlmPlan, PaidExhaustedAction } from '../../api/types'
+import {
+  AUDIENCES,
+  AUDIENCE_LABELS,
+  type Audience,
+  type LlmPlan,
+  type PaidExhaustedAction,
+} from '../../api/types'
 
 export function LlmControlPanel() {
   const planQuery = useLlmPlan()
   const usageQuery = useLlmUsage()
+  const audienceQuery = useAudienceSetting()
   const updatePlan = useUpdateLlmPlan()
+  const updateAudience = useUpdateAudienceSetting()
   const startRun = useStartCollectionRun()
   const [runOverride, setRunOverride] = useState<'DEFAULT' | LlmPlan>('DEFAULT')
   const [saved, setSaved] = useState(false)
+  const [audienceSaved, setAudienceSaved] = useState(false)
   const pendingRunKey = useRef<string | null>(null)
 
-  if (planQuery.isPending || usageQuery.isPending) {
+  if (planQuery.isPending || usageQuery.isPending || audienceQuery.isPending) {
     return <div className="llm-panel state-panel">LLM 설정과 사용량을 불러오는 중입니다.</div>
+  }
+  if (audienceQuery.error || !audienceQuery.data) {
+    return (
+      <div className="llm-panel state-panel error" role="alert">
+        기본 관점 설정을 불러오지 못했습니다.
+      </div>
+    )
   }
   if (planQuery.error || usageQuery.error || !planQuery.data || !usageQuery.data) {
     return (
@@ -30,6 +48,7 @@ export function LlmControlPanel() {
 
   const setting = planQuery.data
   const usage = usageQuery.data
+  const audience = audienceQuery.data.audience
 
   function save(event: React.FormEvent) {
     event.preventDefault()
@@ -53,6 +72,16 @@ export function LlmControlPanel() {
         ...(runOverride === 'DEFAULT' ? {} : { plan: runOverride }),
       },
       { onSuccess: () => { pendingRunKey.current = null } },
+    )
+  }
+
+  function saveAudience(event: React.FormEvent) {
+    event.preventDefault()
+    setAudienceSaved(false)
+    const values = new FormData(event.currentTarget as HTMLFormElement)
+    updateAudience.mutate(
+      values.get('audience') as Audience,
+      { onSuccess: () => setAudienceSaved(true) },
     )
   }
 
@@ -125,6 +154,33 @@ export function LlmControlPanel() {
           <MutationStatus
             error={updatePlan.error}
             success={saved ? 'LLM 플랜 설정을 저장했습니다.' : null}
+          />
+        </form>
+
+        <form
+          key={audience}
+          className="audience-setting-form"
+          onSubmit={saveAudience}
+        >
+          <div>
+            <p className="eyebrow">DEFAULT AUDIENCE</p>
+            <h3>내 기본 관점</h3>
+            <p className="muted">기사 목록과 상세 화면에서 처음 선택할 독자 관점입니다.</p>
+          </div>
+          <div className="field">
+            <label htmlFor="default-audience">기본 관점</label>
+            <select id="default-audience" name="audience" defaultValue={audience}>
+              {AUDIENCES.map((value) => (
+                <option value={value} key={value}>{AUDIENCE_LABELS[value]}</option>
+              ))}
+            </select>
+          </div>
+          <button type="submit" disabled={updateAudience.isPending}>
+            {updateAudience.isPending ? '저장 중…' : '기본 관점 저장'}
+          </button>
+          <MutationStatus
+            error={updateAudience.error}
+            success={audienceSaved ? '기본 관점을 저장했습니다.' : null}
           />
         </form>
 

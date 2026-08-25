@@ -3,6 +3,7 @@ package com.example.be.domain.analysis.entity;
 import com.example.be.domain.analysis.converter.FindingAnalysisSectionListConverter;
 import com.example.be.domain.analysis.converter.FindingEntitiesConverter;
 import com.example.be.domain.analysis.converter.FindingKeyPointListConverter;
+import com.example.be.domain.analysis.converter.FindingPerspectiveTagListConverter;
 import com.example.be.domain.analysis.converter.FindingSectionListConverter;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -105,6 +106,12 @@ public class Finding {
     @JdbcTypeCode(SqlTypes.CLOB)
     @Column(name = "entities", nullable = false)
     private FindingEntities entities = FindingEntities.empty();
+
+    @Builder.Default
+    @Convert(converter = FindingPerspectiveTagListConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "perspective_tags")
+    private List<FindingPerspectiveTag> perspectiveTags = List.of();
 
     @Column(name = "prompt_version", length = 50)
     private String promptVersion;

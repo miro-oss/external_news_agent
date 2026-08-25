@@ -29,7 +29,7 @@ from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.report_service import PROMPT_VERSION as REPORT_PROMPT_VERSION
 from app.llm.report_service import ReportWriterService
 from app.llm.router import get_analyze_provider
-from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, Plan
+from app.schemas.analyze import AUDIENCES, AnalyzeRequest, AnalyzeResponse, Plan
 from app.schemas.evidence import EvidenceSentence
 from app.schemas.report import ReportRequest, ReportResponse
 
@@ -290,6 +290,12 @@ def run_evaluation(
         korean_summary_passes=sum(
             korean_summary_pass(response.summary_ko) for _, response in responses
         ),
+        # replay에서는 fixture/라벨 일관성 가드이며, provider 품질은 live에서만 측정한다.
+        perspective_tag_checks=len(responses) * len(AUDIENCES),
+        perspective_tag_correct_count=sum(
+            _perspective_tag_correct_count(case, response)
+            for case, response in responses
+        ),
         report_claim_count=len(claim_statuses),
         report_grounded_claim_count=sum(score.status == "grounded" for score in claim_statuses),
         report_weak_claim_count=sum(score.status == "weak" for score in claim_statuses),
@@ -313,6 +319,17 @@ def run_evaluation(
         ),
         metrics=counts.to_dict(),
         errors=tuple(errors),
+    )
+
+
+def _perspective_tag_correct_count(
+    case: GoldenCase,
+    response: AnalyzeResponse,
+) -> int:
+    expected = set(case.expected_audiences)
+    return sum(
+        (tag.audience in expected) == (tag.relevance in {"medium", "high"})
+        for tag in response.perspective_tags
     )
 
 

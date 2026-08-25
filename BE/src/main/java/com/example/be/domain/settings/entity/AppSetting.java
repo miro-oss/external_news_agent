@@ -1,6 +1,7 @@
 package com.example.be.domain.settings.entity;
 
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.entity.Audience;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -34,6 +35,10 @@ public class AppSetting {
     @Column(name = "paid_exhausted_action", nullable = false, length = 20)
     private PaidExhaustedAction paidExhaustedAction;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "default_audience", nullable = false, length = 30)
+    private Audience defaultAudience;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -42,6 +47,11 @@ public class AppSetting {
                        LocalDateTime updatedAt) {
         this.llmPlan = plan;
         this.paidExhaustedAction = exhaustedAction;
+        this.updatedAt = updatedAt;
+    }
+
+    public void updateAudience(Audience audience, LocalDateTime updatedAt) {
+        this.defaultAudience = audience;
         this.updatedAt = updatedAt;
     }
 }

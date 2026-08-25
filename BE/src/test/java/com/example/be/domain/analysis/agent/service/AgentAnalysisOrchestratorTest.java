@@ -13,6 +13,7 @@ import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
 import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
 import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.entity.AnalysisSource;
+import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
@@ -40,11 +41,13 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class AgentAnalysisOrchestratorTest {
@@ -94,7 +97,59 @@ class AgentAnalysisOrchestratorTest {
         assertEquals(BigDecimal.ONE,
                 result.analysisSections().getFirst().bullets().getFirst().confidence());
         assertEquals(List.of("HBM4"), result.entities().products());
+        assertEquals(Audience.CHIP_MAKER, result.perspectiveTags().getFirst().audience());
+        assertEquals(List.of(0), result.perspectiveTags().getFirst().evidenceSentenceIds());
         verify(recorder).recordSuccess(eq(42L), eq(10L), any(), any(), any(LocalDateTime.class));
+    }
+
+    @Test
+    void rejectsIncompletePerspectiveTagsAndFallsBackToStub() {
+        Article article = article();
+        AnalysisResult stubResult = mock(AnalysisResult.class);
+        AgentAnalyzeResponse valid = response(List.of(1));
+        AgentAnalyzeResponse invalid = new AgentAnalyzeResponse(
+                valid.sentences(),
+                valid.sections(),
+                valid.summaryKo(),
+                valid.classification(),
+                valid.entities(),
+                valid.perspectiveTags().subList(0, 3),
+                valid.meta());
+        when(client.analyze(any())).thenReturn(invalid);
+        when(stub.analyze(article)).thenReturn(stubResult);
+
+        AnalysisResult result = orchestrator.analyze(
+                new AnalysisContext(42L, article, AgentPlan.FREE));
+
+        assertSame(stubResult, result);
+        verify(recorder).recordFailure(
+                eq(42L), eq(10L), any(), eq("SCHEMA_VIOLATION"), any(), any(), any(), any());
+    }
+
+    @Test
+    void keepsAnalysisAndDiscardsPerspectiveTagsWhenMoreThanTwoAreHigh() {
+        AgentAnalyzeResponse valid = response(List.of(1));
+        List<AgentAnalyzeResponse.PerspectiveTag> invalidTags = valid.perspectiveTags().stream()
+                .map(tag -> new AgentAnalyzeResponse.PerspectiveTag(
+                        tag.audience(), "high", "핵심 주장", List.of(1)))
+                .toList();
+        AgentAnalyzeResponse invalid = new AgentAnalyzeResponse(
+                valid.sentences(),
+                valid.sections(),
+                valid.summaryKo(),
+                valid.classification(),
+                valid.entities(),
+                invalidTags,
+                valid.meta());
+        when(client.analyze(any())).thenReturn(invalid);
+
+        AnalysisResult result = orchestrator.analyze(
+                new AnalysisContext(42L, article(), AgentPlan.FREE));
+
+        assertEquals("한국어 요약", result.summary());
+        assertTrue(result.perspectiveTags().isEmpty());
+        verify(recorder).recordSuccess(eq(42L), eq(10L), any(), any(), any(LocalDateTime.class));
+        verifyNoInteractions(stub);
     }
 
     @Test
@@ -106,7 +161,7 @@ class AgentAnalysisOrchestratorTest {
         assertEquals(AnalysisSource.LLM, result.analysisSource());
         assertEquals("gemini", result.metadata().provider());
         assertEquals("gemini-2.5-flash", result.metadata().model());
-        assertEquals("analyze.ko.v1", result.metadata().promptVersion());
+        assertEquals("analyze.ko.v2+perspective.ko.v1", result.metadata().promptVersion());
         assertEquals(120L, result.metadata().inputTokens());
         assertEquals(30L, result.metadata().outputTokens());
         assertEquals(new BigDecimal("0.001"), result.metadata().costUsd());
@@ -311,10 +366,11 @@ class AgentAnalysisOrchestratorTest {
                 new AgentAnalyzeResponse.Classification(
                         "산업 동향 보도", "neutral", "low", "reference", category),
                 new AgentAnalyzeResponse.Entities(List.of("SK하이닉스"), List.of("HBM4"), List.of()),
+                perspectiveTags(),
                 new AgentAnalyzeResponse.Meta(
                         mock ? "mock" : "gemini",
                         mock ? "mock" : "gemini-2.5-flash",
-                        mock ? "analyze.mock.v1" : "analyze.ko.v1",
+                        mock ? "analyze.mock.v2" : "analyze.ko.v2+perspective.ko.v1",
                         mock ? 0L : 120L,
                         mock ? 0L : 30L,
                         mock ? BigDecimal.ZERO : new BigDecimal("0.001"),
@@ -414,6 +470,19 @@ class AgentAnalysisOrchestratorTest {
                 source.summaryKo(),
                 source.classification(),
                 entities,
+                source.perspectiveTags(),
                 meta);
+    }
+
+    private static List<AgentAnalyzeResponse.PerspectiveTag> perspectiveTags() {
+        return List.of(
+                new AgentAnalyzeResponse.PerspectiveTag(
+                        Audience.CHIP_MAKER.name(), "high", "핵심 주장", List.of(1)),
+                new AgentAnalyzeResponse.PerspectiveTag(
+                        Audience.EQUIPMENT_MAKER.name(), "none", null, List.of()),
+                new AgentAnalyzeResponse.PerspectiveTag(
+                        Audience.MARKET_INVESTOR.name(), "none", null, List.of()),
+                new AgentAnalyzeResponse.PerspectiveTag(
+                        Audience.IT_INFRA.name(), "none", null, List.of()));
     }
 }

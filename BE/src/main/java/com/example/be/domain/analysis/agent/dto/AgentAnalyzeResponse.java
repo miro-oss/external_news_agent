@@ -9,6 +9,7 @@ public record AgentAnalyzeResponse(
         String summaryKo,
         Classification classification,
         Entities entities,
+        List<PerspectiveTag> perspectiveTags,
         Meta meta
 ) {
 
@@ -36,6 +37,14 @@ public record AgentAnalyzeResponse(
             List<String> companies,
             List<String> products,
             List<String> technologies
+    ) {
+    }
+
+    public record PerspectiveTag(
+            String audience,
+            String relevance,
+            String hook,
+            List<Integer> evidenceSentenceIds
     ) {
     }
 

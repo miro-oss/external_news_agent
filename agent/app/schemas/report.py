@@ -86,9 +86,6 @@ class ReportRequest(AgentModel):
     events: list[ReportEventInput] = Field(default_factory=list)
     source_stats: SourceStats
     source_notes: list[NonEmptyString] = Field(min_length=1)
-    perspective: Literal["TECHNOLOGY", "COMPANY", "POLICY", "SUPPLY_CHAIN"] = (
-        "TECHNOLOGY"
-    )
 
     @model_validator(mode="after")
     def validate_event_finding_ids(self) -> "ReportRequest":
