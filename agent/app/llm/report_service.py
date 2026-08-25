@@ -185,11 +185,7 @@ def _deterministic_response(request: ReportRequest) -> ReportResponse:
         ImportantEvent(
             title=finding.article_title,
             summary_ko=finding.summary_ko,
-            significance=(
-                "위험도가 높아 즉시 확인이 필요합니다."
-                if finding.risk_level == "high"
-                else "중요 관련 기사로 분류되었습니다."
-            ),
+            significance=finding.summary_ko,
             source_finding_ids=[finding.id],
         )
         for finding in ordered

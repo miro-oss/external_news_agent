@@ -173,6 +173,7 @@ def test_mock_report_is_deterministic_and_keeps_structured_sections() -> None:
     assert response.meta.provider == "mock"
     assert response.executive_summary == ["HBM4 양산 일정이 앞당겨졌다."]
     assert response.important_events[0].source_finding_ids == [501]
+    assert response.important_events[0].significance == "HBM4 양산 일정이 앞당겨졌다."
     assert response.watch_items == []
     assert response.markdown_body.startswith("# 2026-08-10 HBM 뉴스 모니터링 보고서")
 
