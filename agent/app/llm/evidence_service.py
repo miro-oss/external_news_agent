@@ -4,7 +4,12 @@ from pathlib import Path
 
 from app.core.config import Settings
 from app.core.errors import AgentError
-from app.core.evidence import RuleAssessment, assess_with_rules, factual_mismatches
+from app.core.evidence import (
+    RuleAssessment,
+    assess_with_decisive_rules,
+    assess_with_rules,
+    factual_mismatches,
+)
 from app.core.parser import parse_json_object
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.router import get_analyze_provider
@@ -17,7 +22,7 @@ from app.schemas.evidence import (
 )
 
 PROMPT_VERSION = "evidence.ko.v1"
-RULES_VERSION = "evidence.rules.v1"
+RULES_VERSION = "evidence.rules.v2"
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md"
 SYSTEM_INSTRUCTION = _PROMPT_PATH.read_text(encoding="utf-8").strip()
 
@@ -47,11 +52,14 @@ class EvidenceVerifierService:
                 mock=True,
             )
 
-        all_evidence = "\n".join(sentence.text for sentence in request.sentences)
-        mismatches = factual_mismatches(request.claim, all_evidence)
-        if mismatches:
+        rule_assessment = assess_with_decisive_rules(
+            request.claim,
+            request.sentences,
+            grounded_overlap=self._settings.evidence_grounded_overlap,
+        )
+        if rule_assessment is not None:
             return _rules_response(
-                RuleAssessment("ungrounded", [], "; ".join(mismatches)),
+                rule_assessment,
                 provider=_provider_name(request.plan),
                 mock=False,
             )
@@ -157,7 +165,7 @@ def _rules_response(
         reason=assessment.reason,
         meta=ResponseMeta(
             provider=provider,
-            model="evidence-rules-v1",
+            model="evidence-rules-v2",
             prompt_version=RULES_VERSION,
             input_tokens=0,
             output_tokens=0,

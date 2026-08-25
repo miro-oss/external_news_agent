@@ -145,6 +145,40 @@ class AgentQuotaServiceTest {
     }
 
     @Test
+    void settlesRuleOnlyEvidenceAtZeroWithoutConsumingFreeCall() {
+        QuotaReservation reservation = new QuotaReservation(
+                2L, 42L, "run:42:article:10:evidence:0:0",
+                AgentTask.VERIFY_EVIDENCE, AgentPlan.FREE, BigDecimal.ONE);
+
+        service.completeSuccess(reservation, BigDecimal.ZERO, false);
+
+        verify(repository).consume(
+                eq(reservation), eq(BigDecimal.ZERO), any(LocalDateTime.class));
+    }
+
+    @Test
+    void stillConsumesOneFreeUnitWhenEvidenceProviderWasInvoked() {
+        QuotaReservation reservation = new QuotaReservation(
+                2L, 42L, "run:42:article:10:evidence:0:0",
+                AgentTask.VERIFY_EVIDENCE, AgentPlan.FREE, BigDecimal.ONE);
+
+        service.completeSuccess(reservation, BigDecimal.ZERO, true);
+
+        verify(repository).consume(
+                eq(reservation), eq(BigDecimal.ONE), any(LocalDateTime.class));
+    }
+
+    @Test
+    void rejectsProviderFreeSettlementForNonEvidenceTask() {
+        QuotaReservation reservation = reservation(AgentTask.ANALYZE, AgentPlan.FREE);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.completeSuccess(reservation, BigDecimal.ZERO, false));
+
+        verify(repository, never()).consume(eq(reservation), any(), any());
+    }
+
+    @Test
     void rejectsReuseOfSettledIdempotencyKeyBeforeCallingProvider() {
         when(repository.findStatusByIdempotencyKey("run:42:article:10"))
                 .thenReturn(Optional.of("CONSUMED"));

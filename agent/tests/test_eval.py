@@ -76,6 +76,10 @@ def test_adversarial_cases_have_expected_failure_labels() -> None:
     }
     assert result.metrics["groundedBulletCount"] == 21
     assert result.metrics["koreanSummaryPasses"] == 23
+    assert result.metrics["evidenceVerificationCount"] == 21
+    assert result.metrics["evidenceRuleDecisionCount"] == 11
+    assert result.metrics["evidenceProviderCallCount"] == 10
+    assert result.metrics["evidenceProviderCallReductionRate"] == 0.52381
     assert result.errors == ()
 
 

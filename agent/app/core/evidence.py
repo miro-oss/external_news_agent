@@ -14,7 +14,8 @@ _QUANTITY_UNIT = re.compile(
     re.IGNORECASE,
 )
 _CLAUSE_SEPARATOR = re.compile(
-    r"(?:[.!?。！？;；\n]+|,\s*|(?:이고|이며|였고|했고|됐고)\s+)"
+    r"(?:(?<!\d)[.!?](?!\d)|[。！？;；\n]+|,\s*|"
+    r"(?:이고|이며|였고|했고|됐고)\s+)"
 )
 _NEGATION = re.compile(
     r"(?:\b(?:not|no|never|without)\b|않|아니|없|무산|취소|중단)",
@@ -25,6 +26,35 @@ _KOREAN_ORGANIZATION = re.compile(
     r"(?:전자|하이닉스|반도체|디스플레이|테크놀로지|테크|그룹|홀딩스|은행|증권|공사|협회|위원회|연구원)"
 )
 _WORD = re.compile(r"[A-Za-z0-9가-힣]+")
+_TECHNICAL_ANCHOR = re.compile(
+    r"\b(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)\b"
+)
+_AMBIGUOUS_RELATION = re.compile(
+    r"(?:때문|따라서|영향|기여|유발|결과|전망|예상|가능성|목적|위해|"
+    r"\b(?:because|therefore|due\s+to|lead(?:s|ing)?\s+to|caus(?:e|es|ed|ing)|"
+    r"expected|likely|may|might|could|should)\b)",
+    re.IGNORECASE,
+)
+_BILINGUAL_DIRECT_RELATIONS = (
+    (
+        re.compile(r"(?:계약.{0,20}체결|체결.{0,20}계약)"),
+        re.compile(
+            r"\b(?:signed|entered)\b.{0,80}\b(?:agreement|contract)\b|"
+            r"\b(?:agreement|contract)\b.{0,80}\b(?:signed|entered)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        re.compile(r"(?:설치.{0,15}예정|설치할)"),
+        re.compile(
+            r"\b(?:scheduled|plans?|planned|will)\b.{0,80}"
+            r"\b(?:install|installation)\b|"
+            r"\binstallation\b.{0,80}\b(?:scheduled|planned)\b",
+            re.IGNORECASE,
+        ),
+    ),
+)
+_DIRECT_RULE_GROUNDED_OVERLAP = 0.8
 
 _DATE_TERM_ALIASES = {
     "오늘": "오늘",
@@ -195,9 +225,81 @@ def assess_with_rules(
     return RuleAssessment(status, [sentence.id for sentence in accepted], reason)
 
 
+def assess_with_decisive_rules(
+    claim: str,
+    sentences: list[EvidenceSentence],
+    *,
+    grounded_overlap: float,
+) -> RuleAssessment | None:
+    """Provider 없이 확정해도 안전한 불일치 또는 직접 근거만 반환한다."""
+    evidence_text = "\n".join(sentence.text for sentence in sentences)
+    mismatches = factual_mismatches(claim, evidence_text)
+    if mismatches:
+        return RuleAssessment("ungrounded", [], "; ".join(mismatches))
+
+    claim_tokens = _tokens(claim)
+    if not claim_tokens:
+        return None
+
+    required_overlap = max(grounded_overlap, _DIRECT_RULE_GROUNDED_OVERLAP)
+    normalized_claim = _normalize(claim)
+    ambiguous = len(_clauses(claim)) > 1 or _AMBIGUOUS_RELATION.search(claim) is not None
+    candidates: list[tuple[EvidenceSentence, float, str]] = []
+    for sentence in sentences:
+        if factual_mismatches(claim, sentence.text):
+            continue
+        sentence_tokens = _tokens(sentence.text)
+        overlap = len(claim_tokens & sentence_tokens) / len(claim_tokens)
+        directly_contained = normalized_claim in _normalize(sentence.text)
+        if directly_contained or (overlap >= required_overlap and not ambiguous):
+            candidates.append((sentence, overlap, "direct"))
+            continue
+        if _bilingual_direct_match(claim, sentence.text):
+            candidates.append((sentence, 1.0, "bilingual"))
+
+    if not candidates:
+        return None
+    sentence, _, match_type = max(candidates, key=lambda candidate: candidate[1])
+    reason = (
+        "단일 근거 문장에서 주장의 핵심 표현과 사실값이 직접 확인됩니다."
+        if match_type == "direct"
+        else "단일 근거 문장에서 한영 동치 관계와 사실값이 직접 확인됩니다."
+    )
+    return RuleAssessment("grounded", [sentence.id], reason)
+
+
 def _normalize(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()
     return re.sub(r"[^\S\n]+", " ", normalized).strip()
+
+
+def _bilingual_direct_match(claim: str, evidence: str) -> bool:
+    if bool(re.search(r"[가-힣]", claim)) == bool(re.search(r"[가-힣]", evidence)):
+        return False
+    korean_text, english_text = (
+        (claim, evidence) if re.search(r"[가-힣]", claim) else (evidence, claim)
+    )
+    relation_matches = any(
+        korean.search(korean_text) is not None and english.search(english_text) is not None
+        for korean, english in _BILINGUAL_DIRECT_RELATIONS
+    )
+    if not relation_matches:
+        return False
+    claim_anchors = _stable_anchors(claim)
+    evidence_anchors = _stable_anchors(evidence)
+    distinct_claim_anchors = {
+        anchor.partition(":")[2] for anchor in claim_anchors
+    }
+    return len(distinct_claim_anchors) >= 2 and claim_anchors <= evidence_anchors
+
+
+def _stable_anchors(value: str) -> set[str]:
+    anchors = {f"number:{number}" for number in _numbers(_normalize(value))}
+    anchors.update(f"company:{company.casefold()}" for company in _companies(_normalize(value)))
+    anchors.update(
+        f"term:{match.group().casefold()}" for match in _TECHNICAL_ANCHOR.finditer(value)
+    )
+    return anchors
 
 
 def _numbers(value: str) -> set[str]:

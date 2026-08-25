@@ -69,9 +69,23 @@ public class AgentQuotaService {
 
     @Transactional
     public void completeSuccess(QuotaReservation reservation, BigDecimal actualCredits) {
-        BigDecimal units = reservation.plan() == AgentPlan.FREE
-                ? BigDecimal.ONE
-                : actualCredits == null ? paidUnits() : nonNegative(actualCredits);
+        completeSuccess(reservation, actualCredits, true);
+    }
+
+    @Transactional
+    public void completeSuccess(QuotaReservation reservation,
+                                BigDecimal actualCredits,
+                                boolean providerInvoked) {
+        if (!providerInvoked && reservation.task() != AgentTask.VERIFY_EVIDENCE) {
+            throw new IllegalArgumentException(
+                    "provider 미호출 정산은 근거 검증 task에서만 허용됩니다.");
+        }
+        BigDecimal units = BigDecimal.ZERO;
+        if (providerInvoked) {
+            units = reservation.plan() == AgentPlan.FREE
+                    ? BigDecimal.ONE
+                    : actualCredits == null ? paidUnits() : nonNegative(actualCredits);
+        }
         if (units.compareTo(reservation.reservedUnits()) > 0) {
             repository.release(reservation, now());
             throw new IllegalStateException(

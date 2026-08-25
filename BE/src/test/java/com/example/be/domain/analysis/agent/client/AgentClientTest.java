@@ -118,7 +118,7 @@ class AgentClientTest {
 
         assertEquals("grounded", response.status());
         assertEquals(List.of(1), response.acceptedSentenceIds());
-        assertEquals("evidence.rules.v1", response.meta().promptVersion());
+        assertEquals("evidence.rules.v2", response.meta().promptVersion());
         server.verify();
     }
 
@@ -310,8 +310,8 @@ class AgentClientTest {
                   "reason": "주장이 근거 문장에 직접 나타납니다.",
                   "meta": {
                     "provider": "mock",
-                    "model": "evidence-rules-v1",
-                    "promptVersion": "evidence.rules.v1",
+                    "model": "evidence-rules-v2",
+                    "promptVersion": "evidence.rules.v2",
                     "inputTokens": 0,
                     "outputTokens": 0,
                     "costUsd": 0,

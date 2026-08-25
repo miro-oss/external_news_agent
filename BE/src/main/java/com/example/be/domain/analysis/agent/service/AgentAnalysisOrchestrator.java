@@ -177,8 +177,14 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
     }
 
     private void completeSuccessSafely(QuotaReservation reservation, BigDecimal credits) {
+        completeSuccessSafely(reservation, credits, true);
+    }
+
+    private void completeSuccessSafely(QuotaReservation reservation,
+                                       BigDecimal credits,
+                                       boolean providerInvoked) {
         try {
-            quotaService.completeSuccess(reservation, credits);
+            quotaService.completeSuccess(reservation, credits, providerInvoked);
         } catch (RuntimeException exception) {
             log.error("Agent 성공 quota 예약을 정산하지 못했다. reservationId={}",
                     reservation.id(), exception);
@@ -339,7 +345,10 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             AgentEvidenceResponse response = client.verifyEvidence(request);
             FindingAnalysisBullet verified = verifiedBullet(
                     bullet, response, sentences.size(), request);
-            completeSuccessSafely(evidenceReservation, response.meta().credits());
+            completeSuccessSafely(
+                    evidenceReservation,
+                    response.meta().credits(),
+                    evidenceProviderInvoked(response.meta()));
             return verified;
         } catch (RuntimeException exception) {
             AgentClientException clientException = exception instanceof AgentClientException value
@@ -411,6 +420,20 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 || isNegative(meta.credits())) {
             throw schemaViolation("Agent 근거 검증 meta가 올바르지 않습니다.");
         }
+        if (!evidenceProviderInvoked(meta)
+                && (!meta.model().startsWith("evidence-rules-")
+                || meta.inputTokens() != 0L
+                || meta.outputTokens() != 0L
+                || meta.costUsd().compareTo(BigDecimal.ZERO) != 0
+                || meta.credits().compareTo(BigDecimal.ZERO) != 0
+                || meta.mock()
+                || meta.truncated())) {
+            throw schemaViolation("Agent rule-only 근거 검증 meta가 올바르지 않습니다.");
+        }
+    }
+
+    private boolean evidenceProviderInvoked(AgentEvidenceResponse.Meta meta) {
+        return !meta.promptVersion().startsWith("evidence.rules.");
     }
 
     private FindingAnalysisBullet unsupportedBullet(FindingAnalysisBullet bullet) {

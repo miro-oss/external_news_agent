@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.errors import AgentError
+from app.core.evidence import assess_with_decisive_rules
 from app.eval.checkpoint import LiveCheckpointStore
 from app.eval.dataset import (
     GoldenCase,
@@ -29,6 +30,7 @@ from app.llm.report_service import PROMPT_VERSION as REPORT_PROMPT_VERSION
 from app.llm.report_service import ReportWriterService
 from app.llm.router import get_analyze_provider
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, Plan
+from app.schemas.evidence import EvidenceSentence
 from app.schemas.report import ReportRequest, ReportResponse
 
 EvalProfile = Literal["replay", "live"]
@@ -254,6 +256,12 @@ def run_evaluation(
         for section in response.sections
         for bullet in section.bullets
     ]
+    evidence_verification_count, evidence_rule_decision_count = (
+        _estimated_evidence_routes(
+            responses,
+            grounded_overlap=execution_settings.evidence_grounded_overlap,
+        )
+    )
     claim_statuses = []
     if report_response is not None:
         claim_statuses = score_report_claims(
@@ -288,6 +296,8 @@ def run_evaluation(
         unsupported_report_claim_count=sum(
             score.status == "ungrounded" for score in claim_statuses
         ),
+        evidence_verification_count=evidence_verification_count,
+        evidence_rule_decision_count=evidence_rule_decision_count,
     )
     return EvalResult(
         dataset_version=dataset.version,
@@ -319,6 +329,36 @@ def _replay_fixture(
     if selected.prompt_version != REPORT_PROMPT_VERSION:
         raise ValueError("report replay fixture의 promptVersion이 일치하지 않습니다.")
     return selected
+
+
+def _estimated_evidence_routes(
+    responses: list[tuple[GoldenCase, AnalyzeResponse]],
+    *,
+    grounded_overlap: float,
+) -> tuple[int, int]:
+    verification_count = 0
+    rule_decision_count = 0
+    for _, response in responses:
+        for section in response.sections:
+            for bullet in section.bullets:
+                if bullet.groundedness == "ungrounded":
+                    continue
+                verification_count += 1
+                evidence = [
+                    EvidenceSentence(
+                        id=sentence_id,
+                        text=response.sentences[sentence_id - 1],
+                    )
+                    for sentence_id in bullet.evidence_sentence_ids
+                ]
+                decision = assess_with_decisive_rules(
+                    bullet.text,
+                    evidence,
+                    grounded_overlap=grounded_overlap,
+                )
+                if decision is not None:
+                    rule_decision_count += 1
+    return verification_count, rule_decision_count
 
 
 def _record_analysis_outcome(

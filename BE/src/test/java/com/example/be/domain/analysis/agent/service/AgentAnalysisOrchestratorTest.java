@@ -1,6 +1,7 @@
 package com.example.be.domain.analysis.agent.service;
 
 import com.example.be.domain.analysis.agent.client.AgentClient;
+import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
@@ -115,6 +116,44 @@ class AgentAnalysisOrchestratorTest {
         verify(client).verifyEvidence(captor.capture());
         assertEquals("핵심 주장", captor.getValue().claim());
         assertEquals("근거 문장.", captor.getValue().sentences().getFirst().text());
+        verify(quotaService).completeSuccess(evidenceReservation, BigDecimal.ZERO, true);
+    }
+
+    @Test
+    void settlesRuleOnlyEvidenceWithoutConsumingProviderQuota() {
+        when(client.analyze(any())).thenReturn(response(List.of(1), "제품/공정", false));
+        when(client.verifyEvidence(any())).thenReturn(ruleEvidenceResponse());
+
+        orchestrator.analyze(new AnalysisContext(42L, article(), AgentPlan.FREE));
+
+        verify(quotaService).completeSuccess(evidenceReservation, BigDecimal.ZERO, false);
+    }
+
+    @Test
+    void rejectsRuleOnlyMetaThatClaimsProviderUsage() {
+        when(client.analyze(any())).thenReturn(response(List.of(1), "제품/공정", false));
+        AgentEvidenceResponse valid = ruleEvidenceResponse();
+        when(client.verifyEvidence(any())).thenReturn(new AgentEvidenceResponse(
+                valid.status(),
+                valid.acceptedSentenceIds(),
+                valid.reason(),
+                new AgentEvidenceResponse.Meta(
+                        valid.meta().provider(),
+                        valid.meta().model(),
+                        valid.meta().promptVersion(),
+                        1L,
+                        valid.meta().outputTokens(),
+                        valid.meta().costUsd(),
+                        valid.meta().credits(),
+                        valid.meta().mock(),
+                        valid.meta().truncated())));
+
+        AnalysisResult result = orchestrator.analyze(
+                new AnalysisContext(42L, article(), AgentPlan.FREE));
+
+        assertEquals("ungrounded", result.keyPoints().getFirst().groundedness());
+        verify(quotaService).completeFailure(
+                eq(evidenceReservation), any(AgentClientException.class));
     }
 
     @Test
@@ -295,6 +334,23 @@ class AgentAnalysisOrchestratorTest {
                         "evidence.ko.v1",
                         10L,
                         5L,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        false,
+                        false));
+    }
+
+    private static AgentEvidenceResponse ruleEvidenceResponse() {
+        return new AgentEvidenceResponse(
+                "grounded",
+                List.of(1),
+                "규칙 검증 결과",
+                new AgentEvidenceResponse.Meta(
+                        "gemini",
+                        "evidence-rules-v2",
+                        "evidence.rules.v2",
+                        0L,
+                        0L,
                         BigDecimal.ZERO,
                         BigDecimal.ZERO,
                         false,
