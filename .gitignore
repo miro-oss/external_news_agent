@@ -14,6 +14,10 @@ FE/dist-ssr/
 BE/.gradle/
 BE/build/
 
+# Local live eval artifacts
+agent/live-*.json
+agent/*.checkpoint.json
+
 # IDE
 .idea/
 .vscode/

@@ -5,6 +5,7 @@
   "reportPromptVersion": "report.ko.v1",
   "profile": "replay",
   "plan": "FREE",
+  "complete": true,
   "config": {
     "providerModel": "golden-replay",
     "evidenceGroundedOverlap": 0.6,

@@ -61,15 +61,41 @@ replay는 외부 API 없이 실제 스키마·문장 분할·사실값 검증·�
 근거 임계값, 문장 상한, schema repair 횟수와 출력 토큰 상한이 기록됩니다. 전체 골든셋 분석 24회와
 보고서 1회 호출이 발생하므로 사용량을 확인한 뒤 실행해야 합니다.
 
+FREE profile은 기본 30초, PAID profile은 기본 1초의 provider 호출 간격을 둡니다. 분당 한도 등 즉시
+회복 가능한 429 응답은 provider 응답의 retry delay 또는 15~60초 exponential backoff를 사용해 최대
+5회 재시도합니다. `PerDay` 일일 quota 소진은 대기로 회복되지 않으므로 첫 실패에서 즉시 중단하며,
+429를 provider 장애 circuit에 누적하지 않습니다. 간격과 재시도 정책은 CLI 옵션으로 결과의
+`config.livePolicy`에 함께 기록됩니다.
+
+성공한 분석은 checkpoint에 즉시 저장할 수 있습니다. 중간 실패 결과는 `complete: false`와 exit 1로
+표시되며 보고서를 생성하지 않습니다. 429 재시도를 모두 소진하거나 인증·요청 오류가 확인되면 남은
+호출을 중단해 quota를 낭비하지 않고, 이후 `--resume`에서 미완료 case부터 다시 시작합니다.
+
 ```bash
-uv run python -m app.eval --profile live --plan FREE --output live-result.json
+uv run python -m app.eval --profile live --plan FREE \
+  --checkpoint live-v1-free.checkpoint.json \
+  --output live-v1-free.json
 ```
+
+중단된 동일 실행은 dataset, prompt, plan, model, 판정 설정이 같을 때만 이어서 실행됩니다. pacing과
+재시도 정책은 quota 상황에 맞춰 더 보수적으로 바꿀 수 있으며, 이미 성공한 분석은 provider를 다시
+호출하지 않습니다.
+
+```bash
+uv run python -m app.eval --profile live --plan FREE \
+  --checkpoint live-v1-free.checkpoint.json --resume \
+  --output live-v1-free.json
+```
+
+프로젝트의 실제 한도에 맞춰 간격을 바꿔야 한다면 `--request-interval-seconds`를 사용합니다. 재개 시에도
+pacing과 재시도 정책은 바꿀 수 있습니다.
 
 동일 데이터셋·모델·런타임 설정에서 프롬프트 버전만 의도적으로 바꿔 비교할 때는 live 프로필에 한해
 명시적 override를 사용합니다. 그 외 dataset/profile/plan/config 불일치는 비교 오류로 중단됩니다.
 
 ```bash
 uv run python -m app.eval --profile live --plan FREE \
+  --request-interval-seconds 30 \
   --compare live-v1-result.json --allow-prompt-version-change \
   --output live-v2-result.json
 ```

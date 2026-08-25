@@ -5,13 +5,17 @@ from pathlib import Path
 import pytest
 
 from app.core.config import Settings
+from app.core.errors import AgentError
+from app.eval import runner as eval_runner
 from app.eval.__main__ import main
+from app.eval.checkpoint import CheckpointError
 from app.eval.dataset import (
     GoldenDataset,
     GoldenReportFixture,
     load_dataset,
     load_report_fixture,
 )
+from app.eval.live_provider import LiveProviderPolicy
 from app.eval.runner import ReplayProvider, run_evaluation
 from app.eval.scorer import (
     ComparisonError,
@@ -19,6 +23,7 @@ from app.eval.scorer import (
     compare_results,
     korean_summary_pass,
 )
+from app.llm.base import ProviderResponse, ProviderUsage
 
 _GOLDEN_DIR = Path(__file__).resolve().parents[1] / "app" / "eval" / "golden"
 _DATASET_PATH = _GOLDEN_DIR / "semiconductor.v1.json"
@@ -98,6 +103,19 @@ def test_schema_violation_is_counted_without_stopping_remaining_cases() -> None:
     assert result.metrics["schemaPasses"] == 24
     assert result.metrics["schemaPassRate"] == 0.96
     assert any(error.check == "hbm4-pilot-ko" for error in result.errors)
+
+
+def test_expected_replay_schema_failure_can_complete() -> None:
+    payload = json.loads(load_dataset(_DATASET_PATH).model_dump_json(by_alias=True))
+    expected_failure = payload["cases"][-1]
+    expected_failure["expectedFailures"] = ["schema"]
+    del expected_failure["replay"]["classification"]["category"]
+
+    result = replay_result(GoldenDataset.model_validate(payload))
+
+    assert result.complete is True
+    assert result.metrics["schemaPasses"] == 24
+    assert result.errors == ()
 
 
 def test_report_check_is_not_counted_when_all_analyses_fail() -> None:
@@ -211,6 +229,11 @@ def test_result_comparison_rejects_incompatible_metadata() -> None:
         == []
     )
 
+    incomplete = deepcopy(baseline)
+    incomplete["complete"] = False
+    with pytest.raises(ComparisonError, match="incomplete"):
+        compare_results(incomplete, baseline)
+
 
 def test_main_returns_failure_for_regression_and_writes_result(
     tmp_path: Path,
@@ -247,7 +270,10 @@ def test_main_returns_clear_error_for_invalid_baseline(
 ) -> None:
     _set_eval_environment(monkeypatch)
     invalid = tmp_path / "invalid-baseline.json"
-    invalid.write_text('{"metrics": {}}', encoding="utf-8")
+    invalid.write_text(
+        '{"complete": true, "errors": [], "metrics": {}}',
+        encoding="utf-8",
+    )
 
     exit_code = main(["--profile", "replay", "--compare", str(invalid)])
 
@@ -255,6 +281,114 @@ def test_main_returns_clear_error_for_invalid_baseline(
     assert exit_code == 2
     assert "baseline comparison error" in captured.err
     assert "datasetVersion" in captured.err
+
+
+def test_main_rejects_normalized_output_checkpoint_collision(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    checkpoint = tmp_path / "live.checkpoint.json"
+    equivalent_output = tmp_path / "nested" / ".." / "live.checkpoint.json"
+
+    exit_code = main(
+        [
+            "--profile",
+            "live",
+            "--checkpoint",
+            str(checkpoint),
+            "--output",
+            str(equivalent_output),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "must use different paths" in capsys.readouterr().err
+
+
+def test_live_eval_resumes_successful_analyses_from_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset = load_dataset(_DATASET_PATH)
+    report_fixture = load_report_fixture(_REPORT_FIXTURE_PATH)
+    checkpoint = tmp_path / "live.checkpoint.json"
+    policy = LiveProviderPolicy(
+        request_interval_seconds=0,
+        rate_limit_retry_attempts=0,
+    )
+    settings = eval_settings().model_copy(
+        update={"gemini_api_key": "test-key", "gemini_model": "configured-gemini"}
+    )
+    first_analysis = JsonSequenceProvider(
+        [case.replay for case in dataset.cases],
+        fail_after=6,
+    )
+    unused_report = JsonSequenceProvider([report_fixture.output])
+    monkeypatch.setattr(
+        eval_runner,
+        "_live_providers",
+        lambda *_: (first_analysis, unused_report),
+    )
+
+    first = run_evaluation(
+        dataset,
+        profile="live",
+        settings=settings,
+        live_policy=policy,
+        checkpoint_path=checkpoint,
+    )
+
+    assert first.complete is False
+    assert first.metrics["schemaPasses"] == 6
+    assert first_analysis.call_count == 7
+    assert any(error.code == "INCOMPLETE_ANALYSIS" for error in first.errors)
+    saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+    assert len(saved["analyses"]) == 6
+    assert saved["report"] is None
+
+    incompatible_settings = settings.model_copy(update={"max_sentences": 199})
+    with pytest.raises(CheckpointError, match="config"):
+        run_evaluation(
+            dataset,
+            profile="live",
+            settings=incompatible_settings,
+            live_policy=policy,
+            checkpoint_path=checkpoint,
+            resume=True,
+        )
+
+    remaining_analysis = JsonSequenceProvider(
+        [case.replay for case in dataset.cases[6:]],
+    )
+    report_provider = JsonSequenceProvider([report_fixture.output])
+    monkeypatch.setattr(
+        eval_runner,
+        "_live_providers",
+        lambda *_: (remaining_analysis, report_provider),
+    )
+
+    resumed = run_evaluation(
+        dataset,
+        profile="live",
+        settings=settings,
+        live_policy=LiveProviderPolicy(
+            request_interval_seconds=30,
+            rate_limit_retry_attempts=0,
+        ),
+        checkpoint_path=checkpoint,
+        resume=True,
+    )
+
+    assert resumed.complete is True
+    assert resumed.errors == ()
+    assert resumed.metrics["schemaPasses"] == 25
+    assert remaining_analysis.call_count == 18
+    assert report_provider.call_count == 1
+    assert resumed.config.to_dict()["livePolicy"]["requestIntervalSeconds"] == 30
+    saved = json.loads(checkpoint.read_text(encoding="utf-8"))
+    assert len(saved["analyses"]) == 24
+    assert saved["report"] is not None
+    assert saved["config"]["livePolicy"]["requestIntervalSeconds"] == 30
 
 
 def test_dataset_requires_twenty_to_thirty_unique_articles() -> None:
@@ -277,3 +411,31 @@ def _set_eval_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)
+
+
+class JsonSequenceProvider:
+    def __init__(
+        self,
+        payloads: list[dict[str, object]],
+        *,
+        fail_after: int | None = None,
+    ) -> None:
+        self._payloads = iter(payloads)
+        self._fail_after = fail_after
+        self.call_count = 0
+
+    def generate(self, **_: object) -> ProviderResponse:
+        self.call_count += 1
+        if self._fail_after is not None and self.call_count > self._fail_after:
+            raise AgentError(
+                status_code=503,
+                code="PROVIDER_UNAVAILABLE",
+                message="rate limited",
+                details={"rateLimited": True, "providerStatusCode": 429},
+            )
+        return ProviderResponse(
+            text=json.dumps(next(self._payloads), ensure_ascii=False),
+            provider="gemini",
+            model="configured-gemini",
+            usage=ProviderUsage(),
+        )

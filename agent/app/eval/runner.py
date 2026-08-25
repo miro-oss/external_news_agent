@@ -8,18 +8,26 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.errors import AgentError
+from app.eval.checkpoint import LiveCheckpointStore
 from app.eval.dataset import (
     GoldenCase,
     GoldenDataset,
     GoldenReportFixture,
     load_report_fixture,
 )
+from app.eval.live_provider import (
+    LiveProviderPolicy,
+    LiveRequestCoordinator,
+    PacedRetryProvider,
+    default_live_policy,
+)
 from app.eval.scorer import MetricCounts, korean_summary_pass, score_report_claims
 from app.llm.analyze_service import PROMPT_VERSION as ANALYZE_PROMPT_VERSION
 from app.llm.analyze_service import ArticleAnalyzeService
-from app.llm.base import ProviderResponse, ProviderUsage
+from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.report_service import PROMPT_VERSION as REPORT_PROMPT_VERSION
 from app.llm.report_service import ReportWriterService
+from app.llm.router import get_analyze_provider
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, Plan
 from app.schemas.report import ReportRequest, ReportResponse
 
@@ -31,10 +39,10 @@ _DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.k
 class EvalError:
     check: str
     code: str
-    details: str | None = None
+    details: object | None = None
 
-    def to_dict(self) -> dict[str, str]:
-        payload = {"check": self.check, "code": self.code}
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {"check": self.check, "code": self.code}
         if self.details is not None:
             payload["details"] = self.details
         return payload
@@ -49,9 +57,10 @@ class EvalConfig:
     schema_repair_attempts: int
     max_output_tokens: int
     report_max_output_tokens: int
+    live_policy: LiveProviderPolicy | None = None
 
-    def to_dict(self) -> dict[str, str | int | float]:
-        return {
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
             "providerModel": self.provider_model,
             "evidenceGroundedOverlap": self.evidence_grounded_overlap,
             "evidenceWeakOverlap": self.evidence_weak_overlap,
@@ -60,6 +69,9 @@ class EvalConfig:
             "maxOutputTokens": self.max_output_tokens,
             "reportMaxOutputTokens": self.report_max_output_tokens,
         }
+        if self.live_policy is not None:
+            payload["livePolicy"] = self.live_policy.to_dict()
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +83,7 @@ class EvalResult:
     profile: EvalProfile
     plan: Plan
     config: EvalConfig
+    complete: bool
     metrics: dict[str, int | float]
     errors: tuple[EvalError, ...]
 
@@ -83,6 +96,7 @@ class EvalResult:
             "profile": self.profile,
             "plan": self.plan,
             "config": self.config.to_dict(),
+            "complete": self.complete,
             "metrics": self.metrics,
             "errors": [error.to_dict() for error in self.errors],
         }
@@ -115,16 +129,57 @@ def run_evaluation(
     plan: Plan = "FREE",
     settings: Settings | None = None,
     report_fixture: GoldenReportFixture | None = None,
+    live_policy: LiveProviderPolicy | None = None,
+    checkpoint_path: Path | None = None,
+    resume: bool = False,
 ) -> EvalResult:
+    if profile != "live" and (checkpoint_path is not None or resume):
+        raise ValueError("checkpoint와 resume은 live profile에서만 사용할 수 있습니다.")
+    if resume and checkpoint_path is None:
+        raise ValueError("--resume에는 --checkpoint 경로가 필요합니다.")
+
     source_settings = settings or Settings()
     execution_settings = source_settings.model_copy(update={"mock": False})
+    selected_live_policy = (
+        live_policy or default_live_policy(plan) if profile == "live" else None
+    )
+    config = _eval_config(source_settings, profile, plan, selected_live_policy)
     fixture = _replay_fixture(dataset, profile, report_fixture)
+    checkpoint = (
+        LiveCheckpointStore(
+            checkpoint_path,
+            dataset=dataset,
+            analyze_prompt_version=ANALYZE_PROMPT_VERSION,
+            report_prompt_version=REPORT_PROMPT_VERSION,
+            plan=plan,
+            config=config.to_dict(),
+            resume=resume,
+        )
+        if checkpoint_path is not None
+        else None
+    )
+    analysis_provider: AnalyzeProvider | None = None
+    live_report_provider: AnalyzeProvider | None = None
+    if profile == "live":
+        assert selected_live_policy is not None
+        analysis_provider, live_report_provider = _live_providers(
+            execution_settings,
+            plan,
+            selected_live_policy,
+        )
     responses: list[tuple[GoldenCase, AnalyzeResponse]] = []
     errors: list[EvalError] = []
     schema_passes = 0
 
     for case in dataset.cases:
-        provider = ReplayProvider(case.replay) if profile == "replay" else None
+        cached = checkpoint.analysis(case.case_id) if checkpoint is not None else None
+        if cached is not None:
+            responses.append((case, cached))
+            schema_passes += 1
+            continue
+
+        provider = ReplayProvider(case.replay) if profile == "replay" else analysis_provider
+        assert provider is not None
         try:
             response = ArticleAnalyzeService(execution_settings, provider).analyze(
                 _analyze_request(case, plan)
@@ -137,6 +192,8 @@ def run_evaluation(
                 errors=errors,
                 runtime_error=error,
             )
+            if profile == "live" and _should_abort_live(error):
+                break
             continue
 
         observed_failures = set()
@@ -156,18 +213,38 @@ def run_evaluation(
         )
         responses.append((case, response))
         schema_passes += 1
+        if checkpoint is not None:
+            checkpoint.record_analysis(case.case_id, response)
 
     report_request = _report_request(dataset, responses, plan)
     report_response: ReportResponse | None = None
-    if not report_request.findings:
+    if profile == "live" and len(responses) != len(dataset.cases):
+        errors.append(
+            EvalError(
+                check="report",
+                code="INCOMPLETE_ANALYSIS",
+                details={
+                    "completedCaseCount": len(responses),
+                    "requiredCaseCount": len(dataset.cases),
+                },
+            )
+        )
+    elif not report_request.findings:
         errors.append(EvalError(check="report", code="NO_REPORT_INPUT"))
+    elif checkpoint is not None and checkpoint.checkpoint.report is not None:
+        report_response = checkpoint.checkpoint.report
+        schema_passes += 1
     else:
         try:
-            report_provider = ReplayProvider(fixture.output) if fixture is not None else None
+            report_provider = (
+                ReplayProvider(fixture.output) if fixture is not None else live_report_provider
+            )
             report_response = ReportWriterService(execution_settings, report_provider).write(
                 report_request
             )
             schema_passes += 1
+            if checkpoint is not None:
+                checkpoint.record_report(report_response)
         except (AgentError, ValidationError, ValueError) as error:
             errors.append(_eval_error("report", error))
 
@@ -219,7 +296,11 @@ def run_evaluation(
         report_prompt_version=REPORT_PROMPT_VERSION,
         profile=profile,
         plan=plan,
-        config=_eval_config(source_settings, profile, plan),
+        config=config,
+        complete=(
+            report_response is not None
+            and (profile == "replay" or schema_passes == len(dataset.cases) + 1)
+        ),
         metrics=counts.to_dict(),
         errors=tuple(errors),
     )
@@ -333,7 +414,12 @@ def _report_request(
     )
 
 
-def _eval_config(settings: Settings, profile: EvalProfile, plan: Plan) -> EvalConfig:
+def _eval_config(
+    settings: Settings,
+    profile: EvalProfile,
+    plan: Plan,
+    live_policy: LiveProviderPolicy | None,
+) -> EvalConfig:
     if profile == "replay":
         provider_model = "golden-replay"
     elif plan == "FREE":
@@ -348,9 +434,41 @@ def _eval_config(settings: Settings, profile: EvalProfile, plan: Plan) -> EvalCo
         schema_repair_attempts=settings.schema_repair_attempts,
         max_output_tokens=settings.max_output_tokens,
         report_max_output_tokens=settings.report_max_output_tokens,
+        live_policy=live_policy,
     )
 
 
 def _eval_error(check: str, error: Exception) -> EvalError:
     code = error.code if isinstance(error, AgentError) else type(error).__name__
-    return EvalError(check=check, code=code)
+    details = error.details if isinstance(error, AgentError) else None
+    return EvalError(check=check, code=code, details=details)
+
+
+def _should_abort_live(error: Exception) -> bool:
+    if not isinstance(error, AgentError) or not isinstance(error.details, dict):
+        return False
+    return any(
+        (
+            error.details.get("rateLimited") is True,
+            error.details.get("retryable") is False,
+            error.details.get("circuitOpen") is True,
+        )
+    )
+
+
+def _live_providers(
+    settings: Settings,
+    plan: Plan,
+    policy: LiveProviderPolicy,
+) -> tuple[AnalyzeProvider, AnalyzeProvider]:
+    coordinator = LiveRequestCoordinator(policy)
+    report_settings = settings.model_copy(
+        update={
+            "max_output_tokens": settings.report_max_output_tokens,
+            "provider_timeout_seconds": settings.report_provider_timeout_seconds,
+        }
+    )
+    return (
+        PacedRetryProvider(get_analyze_provider(settings, plan), coordinator),
+        PacedRetryProvider(get_analyze_provider(report_settings, plan), coordinator),
+    )
