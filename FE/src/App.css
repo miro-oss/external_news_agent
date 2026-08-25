@@ -80,17 +80,21 @@ body {
 }
 
 .app-nav strong {
+  flex-shrink: 0;
   font-size: 1.06rem;
   font-weight: 800;
   letter-spacing: -0.035em;
+  white-space: nowrap;
 }
 
 .nav-links {
   display: flex;
+  min-width: 0;
   gap: 0.2rem;
 }
 
 .nav-link {
+  flex-shrink: 0;
   padding: 0.5rem 0.9rem;
   border: 0;
   border-radius: 10px;
@@ -99,6 +103,7 @@ body {
   font-size: 0.94rem;
   font-weight: 600;
   letter-spacing: -0.02em;
+  white-space: nowrap;
   transition: background 140ms ease, color 140ms ease;
 }
 
@@ -341,6 +346,13 @@ select:focus {
   outline: none;
   border-color: var(--primary);
   background-color: var(--surface);
+}
+
+input:disabled,
+select:disabled {
+  color: var(--fg-4);
+  cursor: default;
+  opacity: 1;
 }
 
 .checklist {
@@ -806,9 +818,10 @@ tbody tr:hover td {
   font-size: 0.86rem;
 }
 
+/* "전체"는 라벨이 짧다. 나머지와 같은 폭을 주면 그 칸만 비어 보인다. */
 .audience-chips {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 0.6fr) repeat(4, minmax(0, 1fr));
   gap: 0.45rem;
   margin-top: 1rem;
 }
@@ -1737,9 +1750,29 @@ body.modal-open {
     padding: 1.5rem 1rem 4rem;
   }
 
+  /* 375px에서는 로고와 링크 셋이 한 줄에 다 들어가지 않는다. 줄바꿈으로 내비게이션 높이가
+     늘어나는 대신 링크 줄만 가로로 밀리게 둔다. */
   .app-nav {
-    gap: 1rem;
+    gap: 0.75rem;
     padding: 0 1rem;
+  }
+
+  .app-nav strong {
+    font-size: 0.95rem;
+  }
+
+  .nav-links {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .nav-links::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-link {
+    padding: 0.45rem 0.7rem;
+    font-size: 0.88rem;
   }
 
   .page-header {
@@ -1764,6 +1797,11 @@ body.modal-open {
   .audience-chips,
   .perspective-tabs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* 두 칸 배치에서 관점 넷이 2+2로 떨어지도록 "전체"는 한 줄을 다 쓴다. */
+  .audience-chip-all {
+    grid-column: 1 / -1;
   }
 
   .article-grid {

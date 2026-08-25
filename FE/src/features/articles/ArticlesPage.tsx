@@ -62,8 +62,12 @@ export function ArticlesPage() {
           </div>
           <label>
             최소 관련도
+            {/* 관점이 없으면 질의에서 이 값을 아예 빼고 보낸다. 켜져 있는데 아무 일도 안 하는
+                컨트롤이 되지 않도록 같이 잠근다. */}
             <select
               value={filters.minAudienceRelevance ?? 'medium'}
+              disabled={!filters.audience}
+              title={filters.audience ? undefined : '관점을 하나 고르면 사용할 수 있습니다.'}
               onChange={(event) => changeFilter(
                 'minAudienceRelevance',
                 event.target.value as ArticleFilters['minAudienceRelevance'],
@@ -76,6 +80,19 @@ export function ArticlesPage() {
           </label>
         </div>
         <div className="audience-chips" role="group" aria-label="관점 선택">
+          {/*
+            관점을 하나 고른 다음 다시 전체로 돌아올 길이 있어야 한다. 활성 칩을 한 번 더 누르면
+            해제되기는 하지만 그 규칙은 화면에 드러나지 않아서, 고르고 나면 빠져나올 수 없는
+            필터처럼 보인다. 나가는 문을 칩으로 만들어 둔다.
+          */}
+          <button
+            type="button"
+            className={filters.audience ? 'audience-chip audience-chip-all' : 'audience-chip audience-chip-all active'}
+            aria-pressed={!filters.audience}
+            onClick={() => changeFilter('audience', undefined)}
+          >
+            전체
+          </button>
           {AUDIENCES.map((audience) => (
             <button
               key={audience}
