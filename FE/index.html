@@ -1,11 +1,22 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <!-- public/에는 favicon.svg만 있다. vite.svg를 가리키던 동안 파비콘 요청이 404였다. -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>코딩</title>
+  <!--
+    한글 본문이 대부분인 화면이라 system-ui(맑은 고딕·Apple SD Gothic Neo)로는 굵기 단계가 부족해
+    제목과 본문의 위계가 잡히지 않는다. Pretendard는 가변 폰트라 굵기를 연속으로 쓸 수 있고,
+    dynamic-subset이라 실제 쓰인 글자만 내려받는다. 실패하면 아래 폴백 스택으로 그대로 뜬다.
+  -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+  />
+  <title>News Signal Desk</title>
 </head>
 
 <body>

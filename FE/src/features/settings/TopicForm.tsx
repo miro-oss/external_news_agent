@@ -44,6 +44,7 @@ export function TopicForm() {
   const needsQueryText = options.some(
     (source) => selected.includes(source.id) && source.sourceKind === 'SEARCH',
   )
+  const allSelected = options.length > 0 && options.every((source) => selected.includes(source.id))
 
   function update<K extends keyof typeof EMPTY>(key: K, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -53,6 +54,23 @@ export function TopicForm() {
 
   function toggleSource(id: number) {
     setSelected((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
+    setDone(null)
+    reset()
+  }
+
+  /**
+   * 소스가 열 몇 개씩 쌓이면 하나씩 체크하는 게 일이다. 한 번에 다 켜고 끄는 길을 둔다.
+   *
+   * <p>개수가 아니라 목록에 든 소스가 전부 골라졌는지로 판단한다. 개수만 보면, 고른 소스가
+   * 지워지고 다른 소스가 대신 생겨 수가 같아졌을 때 버튼은 "전체 선택"인데 누르면 비워진다.
+   * 버튼 글자를 정하는 allSelected와 같은 기준을 써야 둘이 어긋나지 않는다.
+   */
+  function toggleAllSources() {
+    setSelected((prev) => (
+      options.length > 0 && options.every((source) => prev.includes(source.id))
+        ? []
+        : options.map((source) => source.id)
+    ))
     setDone(null)
     reset()
   }
@@ -115,7 +133,16 @@ export function TopicForm() {
       </div>
 
       <fieldset className="field">
-        <legend>연결할 소스</legend>
+        {/* legend는 fieldset의 첫 자식이어야 이름 역할을 한다. div로 감싸지 않고 안에서 배치한다. */}
+        <legend className="checklist-legend">
+          <span>연결할 소스</span>
+          {options.length > 0 && (
+            <button type="button" className="chip-button" onClick={toggleAllSources}>
+              {allSelected ? '전체 해제' : '전체 선택'}
+            </button>
+          )}
+          {selected.length > 0 && <em>{selected.length}개 선택</em>}
+        </legend>
         {sources.isPending && <p className="muted">소스를 불러오는 중…</p>}
         {sources.error && <p className="error">{sourceError}</p>}
         {!sources.isPending && options.length === 0 && (
@@ -171,6 +198,11 @@ export function TopicForm() {
       </div>
 
       <div className="field">
+        {/*
+          #70에서는 이 두 칸이 뜻을 알 수 없다는 말에 숫자 입력 옆에 설명을 붙였는데, #76이
+          아예 고를 것을 줄여 버렸다. 설명이 필요 없게 만든 쪽이 낫다 — 수집 건수는 화면에서
+          빠졌고 주기는 정해진 보기 중에서 고른다. #76 것을 그대로 쓴다.
+        */}
         <label htmlFor="topic-interval">수집 주기</label>
         <select
           id="topic-interval"

@@ -46,7 +46,6 @@ export function ArticlesPage() {
     <main>
       <header className="page-header article-header">
         <div>
-          <p className="eyebrow">PHASE 2 · M4</p>
           <h1>분석 기사</h1>
           <p className="muted">수집된 신호의 한국어 요약과 분류를 확인하고, 원문 근거를 펼쳐봅니다.</p>
         </div>
@@ -59,13 +58,16 @@ export function ArticlesPage() {
       <section className="audience-filter" aria-label="독자 관점 필터">
         <div className="audience-filter-heading">
           <div>
-            <p className="eyebrow">AUDIENCE VIEW</p>
-            <strong>누구의 관점으로 볼까요?</strong>
+            <h2>누구의 관점으로 볼까요?</h2>
           </div>
           <label>
             최소 관련도
+            {/* 관점이 없으면 질의에서 이 값을 아예 빼고 보낸다. 켜져 있는데 아무 일도 안 하는
+                컨트롤이 되지 않도록 같이 잠근다. */}
             <select
               value={filters.minAudienceRelevance ?? 'medium'}
+              disabled={!filters.audience}
+              title={filters.audience ? undefined : '관점을 하나 고르면 사용할 수 있습니다.'}
               onChange={(event) => changeFilter(
                 'minAudienceRelevance',
                 event.target.value as ArticleFilters['minAudienceRelevance'],
@@ -78,6 +80,19 @@ export function ArticlesPage() {
           </label>
         </div>
         <div className="audience-chips" role="group" aria-label="관점 선택">
+          {/*
+            관점을 하나 고른 다음 다시 전체로 돌아올 길이 있어야 한다. 활성 칩을 한 번 더 누르면
+            해제되기는 하지만 그 규칙은 화면에 드러나지 않아서, 고르고 나면 빠져나올 수 없는
+            필터처럼 보인다. 나가는 문을 칩으로 만들어 둔다.
+          */}
+          <button
+            type="button"
+            className={filters.audience ? 'audience-chip audience-chip-all' : 'audience-chip audience-chip-all active'}
+            aria-pressed={!filters.audience}
+            onClick={() => changeFilter('audience', undefined)}
+          >
+            전체
+          </button>
           {AUDIENCES.map((audience) => (
             <button
               key={audience}
@@ -207,7 +222,13 @@ export function ArticlesPage() {
 
 function ArticleCard({ article, onOpen }: { article: ArticleSummary; onOpen: () => void }) {
   return (
-    <article className="article-card">
+    /*
+      카드가 hover에 반응하는데 정작 누르면 아무 일도 없어서, 카드 어디를 눌러도 열리게 한다.
+      키보드와 화면 낭독기는 아래 "본문보기" 버튼으로 그대로 도달한다 — 그 버튼의 click은 여기까지
+      올라오므로 Enter로도 열린다. 버튼에도 핸들러가 남아 있어 한 번 누르면 onOpen이 두 번
+      불리지만, 같은 id로 상태를 덮어쓰는 일이라 결과가 달라지지 않는다.
+    */
+    <article className="article-card" onClick={onOpen}>
       <div className="article-card-topline">
         <span className={`signal-dot risk-${article.riskLevel}`} aria-hidden="true" />
         <span>{article.category}</span>
@@ -232,7 +253,13 @@ function ArticleCard({ article, onOpen }: { article: ArticleSummary; onOpen: () 
         <span className={`status-pill sentiment-${article.sentiment}`}>{sentimentLabel(article.sentiment)}</span>
         <span className="language-pill">{(article.language ?? '—').toUpperCase()}</span>
       </div>
-      <button type="button" className="detail-button" onClick={onOpen}>
+      {/* 목록에 "본문보기"만 스무 개 있으면 낭독기로는 어느 기사인지 구분되지 않는다. */}
+      <button
+        type="button"
+        className="detail-button"
+        aria-label={`${article.title} 본문보기`}
+        onClick={onOpen}
+      >
         본문보기 <span aria-hidden="true">↗</span>
       </button>
     </article>
