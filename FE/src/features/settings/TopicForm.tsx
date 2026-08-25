@@ -121,15 +121,13 @@ export function TopicForm() {
       <fieldset className="field">
         {/* legend는 fieldset의 첫 자식이어야 이름 역할을 한다. div로 감싸지 않고 안에서 배치한다. */}
         <legend className="checklist-legend">
-          <span>
-            연결할 소스
-            {selected.length > 0 && <em>{selected.length}개 선택</em>}
-          </span>
+          <span>연결할 소스</span>
           {options.length > 0 && (
-            <button type="button" className="link-button" onClick={toggleAllSources}>
+            <button type="button" className="chip-button" onClick={toggleAllSources}>
               {allSelected ? '전체 해제' : '전체 선택'}
             </button>
           )}
+          {selected.length > 0 && <em>{selected.length}개 선택</em>}
         </legend>
         {sources.isPending && <p className="muted">소스를 불러오는 중…</p>}
         {sources.error && <p className="error">{sourceError}</p>}
