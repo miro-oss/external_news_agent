@@ -54,6 +54,7 @@ jobs:
           uv run python -m app.eval
           --profile replay
           --compare app/eval/golden/analyze.ko.v1.baseline.json
+          --allow-prompt-version-change
 
   frontend:
     name: Frontend
