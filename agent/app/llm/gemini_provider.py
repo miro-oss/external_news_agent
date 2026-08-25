@@ -1,6 +1,8 @@
 import logging
 import math
 import re
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 from google import genai
@@ -171,7 +173,7 @@ def _retry_after_seconds(error: errors.APIError) -> float | None:
     headers = getattr(response, "headers", None)
     if headers is not None:
         value = headers.get("retry-after")
-        parsed = _seconds(value)
+        parsed = _retry_after_header_seconds(value)
         if parsed is not None:
             return parsed
 
@@ -238,3 +240,23 @@ def _seconds(value: object) -> float | None:
         return float(value)
     match = _RETRY_DELAY.fullmatch(value)
     return float(match.group(1)) if match else None
+
+
+def _retry_after_header_seconds(
+    value: object,
+    *,
+    now: datetime | None = None,
+) -> float | None:
+    parsed_seconds = _seconds(value)
+    if parsed_seconds is not None:
+        return parsed_seconds
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed_date = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed_date.tzinfo is None:
+        parsed_date = parsed_date.replace(tzinfo=UTC)
+    current = now or datetime.now(UTC)
+    return max(0.0, (parsed_date.astimezone(UTC) - current.astimezone(UTC)).total_seconds())

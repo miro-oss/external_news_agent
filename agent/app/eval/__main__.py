@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     if args.output is not None and args.checkpoint is not None:
-        if args.output.absolute() == args.checkpoint.absolute():
+        if args.output.resolve() == args.checkpoint.resolve():
             print(
                 "eval configuration error: output and checkpoint must use different paths",
                 file=sys.stderr,

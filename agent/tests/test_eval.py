@@ -105,6 +105,19 @@ def test_schema_violation_is_counted_without_stopping_remaining_cases() -> None:
     assert any(error.check == "hbm4-pilot-ko" for error in result.errors)
 
 
+def test_expected_replay_schema_failure_can_complete() -> None:
+    payload = json.loads(load_dataset(_DATASET_PATH).model_dump_json(by_alias=True))
+    expected_failure = payload["cases"][-1]
+    expected_failure["expectedFailures"] = ["schema"]
+    del expected_failure["replay"]["classification"]["category"]
+
+    result = replay_result(GoldenDataset.model_validate(payload))
+
+    assert result.complete is True
+    assert result.metrics["schemaPasses"] == 24
+    assert result.errors == ()
+
+
 def test_report_check_is_not_counted_when_all_analyses_fail() -> None:
     payload = json.loads(load_dataset(_DATASET_PATH).model_dump_json(by_alias=True))
     for case in payload["cases"]:
@@ -268,6 +281,28 @@ def test_main_returns_clear_error_for_invalid_baseline(
     assert exit_code == 2
     assert "baseline comparison error" in captured.err
     assert "datasetVersion" in captured.err
+
+
+def test_main_rejects_normalized_output_checkpoint_collision(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    checkpoint = tmp_path / "live.checkpoint.json"
+    equivalent_output = tmp_path / "nested" / ".." / "live.checkpoint.json"
+
+    exit_code = main(
+        [
+            "--profile",
+            "live",
+            "--checkpoint",
+            str(checkpoint),
+            "--output",
+            str(equivalent_output),
+        ]
+    )
+
+    assert exit_code == 2
+    assert "must use different paths" in capsys.readouterr().err
 
 
 def test_live_eval_resumes_successful_analyses_from_checkpoint(

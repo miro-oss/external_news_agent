@@ -99,3 +99,39 @@ def test_rate_limit_does_not_open_provider_circuit() -> None:
             provider.generate(system_instruction="system", prompt="prompt", response_schema={})
 
     assert provider.circuit_breaker.state is CircuitState.CLOSED
+
+
+def test_rate_limit_releases_half_open_probe_without_reopening_circuit() -> None:
+    class FailureThenRateLimit(Provider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def generate(self, **_: object) -> ProviderResponse:
+            self.calls += 1
+            if self.calls == 1:
+                raise AgentError(
+                    status_code=503,
+                    code="PROVIDER_UNAVAILABLE",
+                    message="temporary unavailable",
+                )
+            raise AgentError(
+                status_code=503,
+                code="PROVIDER_UNAVAILABLE",
+                message="rate limited",
+                details={"rateLimited": True, "providerStatusCode": 429},
+            )
+
+    provider = guarded(
+        FailureThenRateLimit(),
+        failure_threshold=1,
+        cooldown_seconds=0.0,
+    )
+    with pytest.raises(AgentError):
+        provider.generate(system_instruction="system", prompt="first", response_schema={})
+    assert provider.circuit_breaker.state is CircuitState.HALF_OPEN
+
+    with pytest.raises(AgentError):
+        provider.generate(system_instruction="system", prompt="probe", response_schema={})
+
+    assert provider.circuit_breaker.state is CircuitState.HALF_OPEN

@@ -22,7 +22,11 @@ class LiveProviderPolicy:
     def __post_init__(self) -> None:
         if not math.isfinite(self.request_interval_seconds) or self.request_interval_seconds < 0:
             raise ValueError("live 요청 간격은 0 이상이어야 합니다.")
-        if self.rate_limit_retry_attempts < 0:
+        if (
+            isinstance(self.rate_limit_retry_attempts, bool)
+            or not isinstance(self.rate_limit_retry_attempts, int)
+            or self.rate_limit_retry_attempts < 0
+        ):
             raise ValueError("rate limit 재시도 횟수는 0 이상이어야 합니다.")
         if (
             not math.isfinite(self.rate_limit_backoff_seconds)

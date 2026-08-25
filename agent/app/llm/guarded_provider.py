@@ -82,7 +82,9 @@ class GuardedAnalyzeProvider:
                 response_schema=response_schema,
             )
         except AgentError as error:
-            if error.code == "PROVIDER_UNAVAILABLE" and not _is_rate_limited(error):
+            if _is_rate_limited(error):
+                self._guard.breaker.cancel_call()
+            elif error.code == "PROVIDER_UNAVAILABLE":
                 self._guard.breaker.record_failure()
             else:
                 self._guard.breaker.record_rejected()

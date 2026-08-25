@@ -132,3 +132,12 @@ def test_zero_retry_after_uses_exponential_backoff() -> None:
     )
 
     assert clock.sleeps == [10.0]
+
+
+@pytest.mark.parametrize("attempts", [True, 1.5])
+def test_policy_rejects_non_integer_retry_attempts(attempts: object) -> None:
+    with pytest.raises(ValueError, match="재시도 횟수"):
+        LiveProviderPolicy(
+            request_interval_seconds=0,
+            rate_limit_retry_attempts=attempts,  # type: ignore[arg-type]
+        )

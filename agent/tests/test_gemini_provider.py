@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from types import SimpleNamespace
 
 import pytest
@@ -6,7 +8,7 @@ from google.genai import errors
 from app.core.config import Settings
 from app.core.errors import AgentError
 from app.llm import gemini_provider
-from app.llm.gemini_provider import GeminiAnalyzeProvider
+from app.llm.gemini_provider import GeminiAnalyzeProvider, _retry_after_header_seconds
 
 
 class FakeModels:
@@ -170,3 +172,10 @@ def test_exposes_sanitized_rate_limit_details_without_api_response_body() -> Non
             }
         ],
     }
+
+
+def test_parses_http_date_retry_after_header() -> None:
+    now = datetime(2026, 8, 25, 1, 0, 0, tzinfo=UTC)
+    header = format_datetime(now + timedelta(seconds=90), usegmt=True)
+
+    assert _retry_after_header_seconds(header, now=now) == 90.0

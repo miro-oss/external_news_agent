@@ -297,7 +297,10 @@ def run_evaluation(
         profile=profile,
         plan=plan,
         config=config,
-        complete=schema_passes == len(dataset.cases) + 1 and report_response is not None,
+        complete=(
+            report_response is not None
+            and (profile == "replay" or schema_passes == len(dataset.cases) + 1)
+        ),
         metrics=counts.to_dict(),
         errors=tuple(errors),
     )
