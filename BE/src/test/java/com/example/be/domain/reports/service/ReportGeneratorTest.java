@@ -16,6 +16,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReportGeneratorTest {
@@ -36,8 +37,26 @@ class ReportGeneratorTest {
         int lowIndex = document.markdownBody().indexOf("일반 요약");
         assertTrue(highIndex >= 0 && lowIndex >= 0, "두 finding 요약이 모두 본문에 있어야 한다.");
         assertTrue(highIndex < lowIndex);
-        assertTrue(document.markdownBody().contains("위험도: high 1 · medium 0 · low 1"));
+        assertTrue(document.markdownBody().contains("위험도: 높음 1 · 보통 0 · 낮음 1"));
         assertTrue(document.markdownBody().contains("원문: <https://example.com/1>"));
+    }
+
+    /**
+     * 본문은 보고서를 읽는 사람이 그대로 읽는 글이다. enum의 apiValue(high, important)나 finding 같은
+     * 구현 용어가 새어 나가면 화면에서 고칠 방법이 없으므로 여기서 막는다.
+     */
+    @Test
+    void writesReaderFacingKoreanLabelsInsteadOfApiValues() {
+        Finding finding = finding(1L, "중요 기사", "중요 요약", RiskLevel.HIGH, Relevance.IMPORTANT, "정책");
+
+        String body = generator.generate(List.of(finding), LocalDateTime.of(2026, 8, 18, 10, 30))
+                .markdownBody();
+
+        assertTrue(body.contains("- 전체 근거: 1건"));
+        assertTrue(body.contains("- 분류: 정책 · 위험도: 높음 · 관련도: 중요"));
+        assertFalse(body.contains("finding"));
+        assertFalse(body.contains("high"));
+        assertFalse(body.contains("important"));
     }
 
     @Test
@@ -45,7 +64,7 @@ class ReportGeneratorTest {
         ReportDocument document = generator.generate(List.of(), LocalDateTime.of(2026, 8, 18, 9, 0));
 
         assertEquals("뉴스 보고서 2026-08-18 09:00", document.title());
-        assertTrue(document.markdownBody().contains("실제 LLM 분석 finding이 없어"));
+        assertTrue(document.markdownBody().contains("분석 결과가 없어"));
     }
 
     @Test
@@ -73,7 +92,7 @@ class ReportGeneratorTest {
                 new ReportSourceStats(1, 0, 0, 0, 1, 0));
 
         assertTrue(!document.markdownBody().contains("본문에 들어가면 안 되는 STUB 요약"));
-        assertTrue(document.markdownBody().contains("STUB 분석 1건"));
+        assertTrue(document.markdownBody().contains("임시 응답 분석 1건"));
     }
 
     @Test
@@ -157,7 +176,7 @@ class ReportGeneratorTest {
         assertTrue(!document.markdownBody().contains("근거 없는 주장"));
         assertTrue(!document.markdownBody().contains("제외할 주장"));
         assertTrue(document.markdownBody().contains("검증된 주장"));
-        assertTrue(document.markdownBody().contains("근거 부족 LLM 분석 1건 제외"));
+        assertTrue(document.markdownBody().contains("근거 부족 분석 1건 제외"));
     }
 
     @Test
@@ -174,8 +193,8 @@ class ReportGeneratorTest {
         ReportDocument document = generator.generate(
                 List.of(unsupported), LocalDateTime.of(2026, 8, 18, 9, 0));
 
-        assertTrue(document.markdownBody().contains("근거가 확인된 LLM finding이 없어"));
-        assertTrue(document.markdownBody().contains("근거 부족 LLM 분석 1건 제외"));
+        assertTrue(document.markdownBody().contains("근거가 확인된 분석 결과가 없어"));
+        assertTrue(document.markdownBody().contains("근거 부족 분석 1건 제외"));
     }
 
     @Test
