@@ -32,4 +32,46 @@ uv run ruff check .
 uv run pytest
 ```
 
+## Golden eval
+
+`app/eval/golden/semiconductor.v1.json`은 한국어·영어 반도체 기사 24건과
+`analyze.ko.v1` replay 출력을 담습니다. 수치 오기, 기업명 바꿔치기, 부정 반전, 영문 요약은
+`expectedFailures`로 명시해 규칙이 지나치게 엄격해지거나 느슨해지는 회귀를 함께 잡습니다.
+`report.ko.v1.json`은 finding과 독립된 버전 보고서 fixture이며 grounded·weak·ungrounded 주장 기대값을
+각각 가집니다.
+
+```bash
+uv run python -m app.eval --profile replay \
+  --compare app/eval/golden/analyze.ko.v1.baseline.json
+```
+
+replay는 외부 API 없이 실제 스키마·문장 분할·사실값 검증·보고서 claim scorer를 실행하는
+**계약/규칙 회귀 하네스**입니다. 저장된 출력을 재생하므로 프롬프트 생성 품질을 측정하지는 않습니다.
+기본 CI는 replay 기준선만 사용하며 메타데이터, 런타임 설정, 지표 또는 평가 커버리지가 회귀하면
+실패합니다.
+
+- schema pass rate: 분석 24건과 보고서 1건의 계약 검증 통과율
+- grounded rate: 분석 bullet 중 `grounded` 판정 비율 (`weak`은 포함하지 않음)
+- report weak/unsupported claim count: 보고서 주장을 연결된 finding 요약·핵심 포인트와 기존 A4
+  규칙으로 검증했을 때 각각 `weak`/`ungrounded`인 개수. executive summary는 전체 finding을 합치지
+  않고 가장 잘 맞는 단일 finding으로 판정
+- Korean summary pass rate: 한글 5자 이상이며 한글·영문 문자 중 한글 비율이 50% 이상인 요약 비율
+
+실제 프롬프트 품질은 provider 환경변수를 설정한 뒤 live 프로필로 수동 평가합니다. 결과에는 모델 id,
+근거 임계값, 문장 상한, schema repair 횟수와 출력 토큰 상한이 기록됩니다. 전체 골든셋 분석 24회와
+보고서 1회 호출이 발생하므로 사용량을 확인한 뒤 실행해야 합니다.
+
+```bash
+uv run python -m app.eval --profile live --plan FREE --output live-result.json
+```
+
+동일 데이터셋·모델·런타임 설정에서 프롬프트 버전만 의도적으로 바꿔 비교할 때는 live 프로필에 한해
+명시적 override를 사용합니다. 그 외 dataset/profile/plan/config 불일치는 비교 오류로 중단됩니다.
+
+```bash
+uv run python -m app.eval --profile live --plan FREE \
+  --compare live-v1-result.json --allow-prompt-version-change \
+  --output live-v2-result.json
+```
+
 실제 시크릿이나 provider API 키는 파일에 저장하지 않고 환경변수로만 전달합니다.

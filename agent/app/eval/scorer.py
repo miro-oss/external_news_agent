@@ -1,0 +1,288 @@
+import re
+from dataclasses import dataclass
+
+from app.core.evidence import assess_with_rules
+from app.schemas.analyze import Groundedness
+from app.schemas.evidence import EvidenceSentence
+from app.schemas.report import ReportFindingInput, ReportRequest, ReportResponse
+
+_HANGUL = re.compile(r"[가-힣]")
+_LATIN = re.compile(r"[A-Za-z]")
+_HIGHER_IS_BETTER = (
+    "caseCount",
+    "schemaChecks",
+    "schemaPasses",
+    "schemaPassRate",
+    "bulletCount",
+    "groundedBulletCount",
+    "groundedRate",
+    "koreanSummaryPasses",
+    "koreanSummaryPassRate",
+    "reportClaimCount",
+    "reportGroundedClaimCount",
+)
+_LOWER_IS_BETTER = (
+    "reportWeakClaimCount",
+    "unsupportedReportClaimCount",
+)
+_METADATA_KEYS = (
+    "datasetVersion",
+    "baselinePromptVersion",
+    "profile",
+    "plan",
+)
+_PROMPT_KEYS = ("analyzePromptVersion", "reportPromptVersion")
+
+
+class ComparisonError(ValueError):
+    """Raised when two evaluation results are not safely comparable."""
+
+
+@dataclass(frozen=True, slots=True)
+class ReportClaimScore:
+    key: str
+    status: Groundedness
+
+
+@dataclass(frozen=True, slots=True)
+class MetricCounts:
+    case_count: int
+    schema_checks: int
+    schema_passes: int
+    bullet_count: int
+    grounded_bullet_count: int
+    korean_summary_passes: int
+    report_claim_count: int
+    report_grounded_claim_count: int
+    report_weak_claim_count: int
+    unsupported_report_claim_count: int
+
+    def to_dict(self) -> dict[str, int | float]:
+        return {
+            "caseCount": self.case_count,
+            "schemaChecks": self.schema_checks,
+            "schemaPasses": self.schema_passes,
+            "schemaPassRate": _rate(self.schema_passes, self.schema_checks),
+            "bulletCount": self.bullet_count,
+            "groundedBulletCount": self.grounded_bullet_count,
+            "groundedRate": _rate(self.grounded_bullet_count, self.bullet_count),
+            "koreanSummaryPasses": self.korean_summary_passes,
+            "koreanSummaryPassRate": _rate(self.korean_summary_passes, self.case_count),
+            "reportClaimCount": self.report_claim_count,
+            "reportGroundedClaimCount": self.report_grounded_claim_count,
+            "reportWeakClaimCount": self.report_weak_claim_count,
+            "unsupportedReportClaimCount": self.unsupported_report_claim_count,
+        }
+
+
+def korean_summary_pass(summary: str) -> bool:
+    hangul_count = len(_HANGUL.findall(summary))
+    linguistic_count = hangul_count + len(_LATIN.findall(summary))
+    return hangul_count >= 5 and hangul_count / linguistic_count >= 0.5
+
+
+def score_report_claims(
+    response: ReportResponse,
+    request: ReportRequest,
+    *,
+    grounded_overlap: float,
+    weak_overlap: float,
+) -> list[ReportClaimScore]:
+    finding_by_id = {finding.id: finding for finding in request.findings}
+    scores = [
+        ReportClaimScore(
+            key=f"executiveSummary:{index}",
+            status=_best_single_finding_status(
+                summary,
+                request.findings,
+                grounded_overlap=grounded_overlap,
+                weak_overlap=weak_overlap,
+            ),
+        )
+        for index, summary in enumerate(response.executive_summary)
+    ]
+    for index, event in enumerate(response.important_events):
+        findings = _referenced_findings(event.source_finding_ids, finding_by_id)
+        scores.extend(
+            [
+                ReportClaimScore(
+                    key=f"importantEvents:{index}:summaryKo",
+                    status=_combined_finding_status(
+                        event.summary_ko,
+                        findings,
+                        grounded_overlap=grounded_overlap,
+                        weak_overlap=weak_overlap,
+                    ),
+                ),
+                ReportClaimScore(
+                    key=f"importantEvents:{index}:significance",
+                    status=_combined_finding_status(
+                        event.significance,
+                        findings,
+                        grounded_overlap=grounded_overlap,
+                        weak_overlap=weak_overlap,
+                    ),
+                ),
+            ]
+        )
+    for index, item in enumerate(response.watch_items):
+        scores.append(
+            ReportClaimScore(
+                key=f"watchItems:{index}:reason",
+                status=_combined_finding_status(
+                    item.reason,
+                    _referenced_findings(item.source_finding_ids, finding_by_id),
+                    grounded_overlap=grounded_overlap,
+                    weak_overlap=weak_overlap,
+                ),
+            )
+        )
+    return scores
+
+
+def compare_results(
+    current: dict[str, object],
+    baseline: dict[str, object],
+    *,
+    allow_prompt_version_change: bool = False,
+) -> dict[str, object]:
+    for key in _METADATA_KEYS:
+        _require_key(current, key, "current result")
+        _require_key(baseline, key, "baseline")
+        if current[key] != baseline[key]:
+            raise ComparisonError(
+                f"metadata mismatch for {key}: current={current[key]!r}, baseline={baseline[key]!r}"
+            )
+    for key in _PROMPT_KEYS:
+        _require_key(current, key, "current result")
+        _require_key(baseline, key, "baseline")
+        if not allow_prompt_version_change and current[key] != baseline[key]:
+            raise ComparisonError(
+                f"prompt version mismatch for {key}: "
+                f"current={current[key]!r}, baseline={baseline[key]!r}"
+            )
+
+    _require_key(current, "config", "current result")
+    _require_key(baseline, "config", "baseline")
+    if current["config"] != baseline["config"]:
+        raise ComparisonError("runtime config differs from the baseline")
+
+    current_metrics = _metrics(current, "current result")
+    baseline_metrics = _metrics(baseline, "baseline")
+    return compare_metrics(current_metrics, baseline_metrics)
+
+
+def compare_metrics(
+    current: dict[str, object],
+    baseline: dict[str, object],
+) -> dict[str, object]:
+    required = (*_HIGHER_IS_BETTER, *_LOWER_IS_BETTER)
+    missing_current = [metric for metric in required if metric not in current]
+    missing_baseline = [metric for metric in required if metric not in baseline]
+    if missing_current or missing_baseline:
+        parts = []
+        if missing_current:
+            parts.append("current metrics missing: " + ", ".join(missing_current))
+        if missing_baseline:
+            parts.append("baseline metrics missing: " + ", ".join(missing_baseline))
+        raise ComparisonError("; ".join(parts))
+
+    deltas = {
+        metric: round(
+            _number(current, metric, "current metrics")
+            - _number(baseline, metric, "baseline metrics"),
+            6,
+        )
+        for metric in required
+    }
+    regressions = [
+        metric
+        for metric in _HIGHER_IS_BETTER
+        if _number(current, metric, "current metrics")
+        < _number(baseline, metric, "baseline metrics")
+    ]
+    regressions.extend(
+        metric
+        for metric in _LOWER_IS_BETTER
+        if _number(current, metric, "current metrics")
+        > _number(baseline, metric, "baseline metrics")
+    )
+    return {"deltas": deltas, "regressions": regressions}
+
+
+def _best_single_finding_status(
+    claim: str,
+    findings: list[ReportFindingInput],
+    *,
+    grounded_overlap: float,
+    weak_overlap: float,
+) -> Groundedness:
+    statuses = [
+        _combined_finding_status(
+            claim,
+            [finding],
+            grounded_overlap=grounded_overlap,
+            weak_overlap=weak_overlap,
+        )
+        for finding in findings
+    ]
+    for status in ("grounded", "weak", "ungrounded"):
+        if status in statuses:
+            return status
+    return "ungrounded"
+
+
+def _combined_finding_status(
+    claim: str,
+    findings: list[ReportFindingInput],
+    *,
+    grounded_overlap: float,
+    weak_overlap: float,
+) -> Groundedness:
+    evidence_texts = [
+        text for finding in findings for text in [finding.summary_ko, *finding.key_points]
+    ]
+    if not evidence_texts:
+        return "ungrounded"
+    assessment = assess_with_rules(
+        claim,
+        [EvidenceSentence(id=index, text=text) for index, text in enumerate(evidence_texts, 1)],
+        grounded_overlap=grounded_overlap,
+        weak_overlap=weak_overlap,
+    )
+    if assessment.status == "grounded":
+        return "grounded"
+    if assessment.status == "weak":
+        return "weak"
+    return "ungrounded"
+
+
+def _referenced_findings(
+    finding_ids: list[int],
+    finding_by_id: dict[int, ReportFindingInput],
+) -> list[ReportFindingInput]:
+    return [finding_by_id[finding_id] for finding_id in finding_ids]
+
+
+def _metrics(payload: dict[str, object], source: str) -> dict[str, object]:
+    _require_key(payload, "metrics", source)
+    metrics = payload["metrics"]
+    if not isinstance(metrics, dict):
+        raise ComparisonError(f"{source} metrics must be an object")
+    return metrics
+
+
+def _number(payload: dict[str, object], key: str, source: str) -> float:
+    value = payload[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ComparisonError(f"{source} {key} must be numeric")
+    return float(value)
+
+
+def _require_key(payload: dict[str, object], key: str, source: str) -> None:
+    if key not in payload:
+        raise ComparisonError(f"{source} missing required key: {key}")
+
+
+def _rate(numerator: int, denominator: int) -> float:
+    return round(numerator / denominator, 6) if denominator else 0.0

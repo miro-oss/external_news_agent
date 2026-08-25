@@ -49,6 +49,12 @@ jobs:
           AGENT_SHARED_SECRET: local-dev-agent-token
         run: uv run pytest
 
+      - name: Golden eval (replay)
+        run: >-
+          uv run python -m app.eval
+          --profile replay
+          --compare app/eval/golden/analyze.ko.v1.baseline.json
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
