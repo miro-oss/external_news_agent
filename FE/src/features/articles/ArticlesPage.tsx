@@ -222,7 +222,13 @@ export function ArticlesPage() {
 
 function ArticleCard({ article, onOpen }: { article: ArticleSummary; onOpen: () => void }) {
   return (
-    <article className="article-card">
+    /*
+      카드가 hover에 반응하는데 정작 누르면 아무 일도 없어서, 카드 어디를 눌러도 열리게 한다.
+      키보드와 화면 낭독기는 아래 "본문보기" 버튼으로 그대로 도달한다 — 그 버튼의 click은 여기까지
+      올라오므로 Enter로도 열린다. 버튼에도 핸들러가 남아 있어 한 번 누르면 onOpen이 두 번
+      불리지만, 같은 id로 상태를 덮어쓰는 일이라 결과가 달라지지 않는다.
+    */
+    <article className="article-card" onClick={onOpen}>
       <div className="article-card-topline">
         <span className={`signal-dot risk-${article.riskLevel}`} aria-hidden="true" />
         <span>{article.category}</span>
@@ -247,7 +253,13 @@ function ArticleCard({ article, onOpen }: { article: ArticleSummary; onOpen: () 
         <span className={`status-pill sentiment-${article.sentiment}`}>{sentimentLabel(article.sentiment)}</span>
         <span className="language-pill">{(article.language ?? '—').toUpperCase()}</span>
       </div>
-      <button type="button" className="detail-button" onClick={onOpen}>
+      {/* 목록에 "본문보기"만 스무 개 있으면 낭독기로는 어느 기사인지 구분되지 않는다. */}
+      <button
+        type="button"
+        className="detail-button"
+        aria-label={`${article.title} 본문보기`}
+        onClick={onOpen}
+      >
         본문보기 <span aria-hidden="true">↗</span>
       </button>
     </article>

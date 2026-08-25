@@ -38,6 +38,7 @@ export function TopicForm() {
   const needsQueryText = options.some(
     (source) => selected.includes(source.id) && source.sourceKind === 'SEARCH',
   )
+  const allSelected = options.length > 0 && options.every((source) => selected.includes(source.id))
 
   function update<K extends keyof typeof EMPTY>(key: K, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -47,6 +48,13 @@ export function TopicForm() {
 
   function toggleSource(id: number) {
     setSelected((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
+    setDone(null)
+    reset()
+  }
+
+  /** 소스가 열 몇 개씩 쌓이면 하나씩 체크하는 게 일이다. 한 번에 다 켜고 끄는 길을 둔다. */
+  function toggleAllSources() {
+    setSelected((prev) => (prev.length === options.length ? [] : options.map((source) => source.id)))
     setDone(null)
     reset()
   }
@@ -111,7 +119,18 @@ export function TopicForm() {
       </div>
 
       <fieldset className="field">
-        <legend>연결할 소스</legend>
+        {/* legend는 fieldset의 첫 자식이어야 이름 역할을 한다. div로 감싸지 않고 안에서 배치한다. */}
+        <legend className="checklist-legend">
+          <span>
+            연결할 소스
+            {selected.length > 0 && <em>{selected.length}개 선택</em>}
+          </span>
+          {options.length > 0 && (
+            <button type="button" className="link-button" onClick={toggleAllSources}>
+              {allSelected ? '전체 해제' : '전체 선택'}
+            </button>
+          )}
+        </legend>
         {sources.isPending && <p className="muted">소스를 불러오는 중…</p>}
         {sources.error && <p className="error">{sourceError}</p>}
         {!sources.isPending && options.length === 0 && (
@@ -166,28 +185,35 @@ export function TopicForm() {
         <p className="hint">하나라도 포함되면 제외합니다(NOT).</p>
       </div>
 
-      <div className="field-row">
-        <div className="field">
-          <label htmlFor="topic-batch">1회 수집 건수</label>
-          <input
-            id="topic-batch"
-            type="number"
-            min={1}
-            max={100}
-            value={form.batchSize}
-            onChange={(event) => update('batchSize', event.target.value)}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="topic-interval">수집 주기(분)</label>
-          <input
-            id="topic-interval"
-            type="number"
-            min={10}
-            value={form.intervalMinutes}
-            onChange={(event) => update('intervalMinutes', event.target.value)}
-          />
-        </div>
+      <div className="field">
+        <label htmlFor="topic-batch">1회 수집 건수</label>
+        <input
+          id="topic-batch"
+          type="number"
+          min={1}
+          max={100}
+          value={form.batchSize}
+          onChange={(event) => update('batchSize', event.target.value)}
+        />
+        <p className="hint">
+          한 번 수집할 때 소스 하나에서 가져올 기사 수입니다. 소스 3개에 10이면 최대 30건입니다.
+          검색 소스에만 적용되고, 피드 소스는 피드에 올라온 만큼 가져옵니다. 1~100.
+        </p>
+      </div>
+
+      <div className="field">
+        <label htmlFor="topic-interval">수집 주기(분)</label>
+        <input
+          id="topic-interval"
+          type="number"
+          min={10}
+          value={form.intervalMinutes}
+          onChange={(event) => update('intervalMinutes', event.target.value)}
+        />
+        <p className="hint">
+          이 주제를 다시 수집하기까지 기다릴 시간입니다. 60이면 한 시간에 한 번입니다. 최소 10분.
+          지금은 자동 반복 없이, 위 <strong>지금 실행</strong>을 눌렀을 때만 수집합니다.
+        </p>
       </div>
 
       <button type="submit" disabled={isPending}>

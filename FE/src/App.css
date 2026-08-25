@@ -355,6 +355,36 @@ select:disabled {
   opacity: 1;
 }
 
+.checklist-legend {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.checklist-legend em {
+  margin-left: 0.4rem;
+  color: var(--primary);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.link-button {
+  padding: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.link-button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--primary-strong);
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+
 .checklist {
   display: flex;
   max-height: 210px;
@@ -900,7 +930,14 @@ tbody tr:hover td {
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
+  cursor: pointer;
   transition: transform 180ms cubic-bezier(0.32, 0.72, 0, 1), box-shadow 180ms ease;
+}
+
+/* 카드가 hover에 반응하니 누를 수 있어 보인다. 실제로 눌리게 만든다. */
+.article-card:has(.detail-button:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .article-card:hover {
@@ -1040,9 +1077,16 @@ tbody tr:hover td {
   font-size: 0.86rem;
 }
 
-.detail-button:hover:not(:disabled) {
+.article-card:hover .detail-button,
+.detail-button:hover:not(:disabled),
+.detail-button:focus-visible {
   background: transparent;
   color: var(--primary-strong);
+}
+
+/* 초점 링은 카드가 그린다. 실제로 눌리는 범위가 카드 전체이므로 버튼만 감싸면 범위를 속인다. */
+.detail-button:focus-visible {
+  outline: none;
 }
 
 .state-panel {

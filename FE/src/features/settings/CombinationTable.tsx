@@ -48,8 +48,12 @@ export function CombinationTable() {
             <th>소스</th>
             <th>종류</th>
             <th>검색어</th>
-            <th className="numeric">수집 건수</th>
-            <th className="numeric">주기(분)</th>
+            <th className="numeric" title="한 번 수집할 때 이 소스에서 가져올 기사 수입니다. 검색 소스에만 적용됩니다.">
+              수집 건수
+            </th>
+            <th className="numeric" title="이 주제를 다시 수집하기까지 기다릴 시간(분)입니다.">
+              주기(분)
+            </th>
             <th>활성</th>
             <th>마지막 수집</th>
           </tr>
