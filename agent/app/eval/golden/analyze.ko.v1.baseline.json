@@ -1,19 +1,33 @@
 {
   "datasetVersion": "semiconductor.v1",
+  "baselinePromptVersion": "analyze.ko.v1",
   "analyzePromptVersion": "analyze.ko.v1",
   "reportPromptVersion": "report.ko.v1",
   "profile": "replay",
+  "plan": "FREE",
+  "config": {
+    "providerModel": "golden-replay",
+    "evidenceGroundedOverlap": 0.6,
+    "evidenceWeakOverlap": 0.2,
+    "maxSentences": 200,
+    "schemaRepairAttempts": 1,
+    "maxOutputTokens": 4096,
+    "reportMaxOutputTokens": 8192
+  },
   "metrics": {
     "caseCount": 24,
     "schemaChecks": 25,
     "schemaPasses": 25,
     "schemaPassRate": 1.0,
     "bulletCount": 24,
-    "groundedBulletCount": 24,
-    "groundedRate": 1.0,
-    "koreanSummaryPasses": 24,
-    "koreanSummaryPassRate": 1.0,
-    "reportClaimCount": 40,
-    "unsupportedReportClaimCount": 0
-  }
+    "groundedBulletCount": 21,
+    "groundedRate": 0.875,
+    "koreanSummaryPasses": 23,
+    "koreanSummaryPassRate": 0.958333,
+    "reportClaimCount": 9,
+    "reportGroundedClaimCount": 6,
+    "reportWeakClaimCount": 1,
+    "unsupportedReportClaimCount": 2
+  },
+  "errors": []
 }

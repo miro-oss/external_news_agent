@@ -1,17 +1,29 @@
-import json
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
-from app.schemas.analyze import AnalyzeOutput, ArticleInput, TopicInput
+from app.schemas.analyze import ArticleInput, Groundedness, TopicInput
 from app.schemas.common import AgentModel
+
+ExpectedFailure = Literal["schema", "grounding", "korean-summary"]
 
 
 class GoldenCase(AgentModel):
     case_id: str = Field(min_length=1, max_length=100)
     article: ArticleInput
     topic: TopicInput
-    replay: AnalyzeOutput
+    replay: dict[str, object] = Field(min_length=1)
+    expected_failures: list[ExpectedFailure] = Field(default_factory=list)
+
+    @field_validator("expected_failures")
+    @classmethod
+    def validate_unique_expected_failures(
+        cls, value: list[ExpectedFailure]
+    ) -> list[ExpectedFailure]:
+        if len(value) != len(set(value)):
+            raise ValueError("expectedFailures는 중복될 수 없습니다.")
+        return value
 
 
 class GoldenDataset(AgentModel):
@@ -31,14 +43,16 @@ class GoldenDataset(AgentModel):
         return self
 
 
+class GoldenReportFixture(AgentModel):
+    dataset_version: str = Field(min_length=1, max_length=100)
+    prompt_version: str = Field(min_length=1, max_length=50)
+    output: dict[str, object] = Field(min_length=1)
+    expected_claim_statuses: dict[str, Groundedness] = Field(min_length=1)
+
+
 def load_dataset(path: Path) -> GoldenDataset:
     return GoldenDataset.model_validate_json(path.read_text(encoding="utf-8"))
 
 
-def dump_dataset(dataset: GoldenDataset) -> str:
-    """테스트와 리뷰에서 안정적인 JSON 표현을 사용할 수 있게 한다."""
-    return json.dumps(
-        dataset.model_dump(by_alias=True, mode="json"),
-        ensure_ascii=False,
-        indent=2,
-    )
+def load_report_fixture(path: Path) -> GoldenReportFixture:
+    return GoldenReportFixture.model_validate_json(path.read_text(encoding="utf-8"))

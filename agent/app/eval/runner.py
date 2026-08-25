@@ -1,36 +1,65 @@
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
 from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.errors import AgentError
-from app.eval.dataset import GoldenCase, GoldenDataset
-from app.eval.scorer import (
-    MetricCounts,
-    korean_summary_pass,
-    unsupported_report_claim_count,
+from app.eval.dataset import (
+    GoldenCase,
+    GoldenDataset,
+    GoldenReportFixture,
+    load_report_fixture,
 )
+from app.eval.scorer import MetricCounts, korean_summary_pass, score_report_claims
 from app.llm.analyze_service import PROMPT_VERSION as ANALYZE_PROMPT_VERSION
 from app.llm.analyze_service import ArticleAnalyzeService
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.report_service import PROMPT_VERSION as REPORT_PROMPT_VERSION
 from app.llm.report_service import ReportWriterService
 from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, Plan
-from app.schemas.report import ReportFindingInput, ReportRequest, ReportResponse
+from app.schemas.report import ReportRequest, ReportResponse
 
 EvalProfile = Literal["replay", "live"]
+_DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.json"
 
 
 @dataclass(frozen=True, slots=True)
 class EvalError:
     check: str
     code: str
+    details: str | None = None
 
     def to_dict(self) -> dict[str, str]:
-        return {"check": self.check, "code": self.code}
+        payload = {"check": self.check, "code": self.code}
+        if self.details is not None:
+            payload["details"] = self.details
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class EvalConfig:
+    provider_model: str
+    evidence_grounded_overlap: float
+    evidence_weak_overlap: float
+    max_sentences: int
+    schema_repair_attempts: int
+    max_output_tokens: int
+    report_max_output_tokens: int
+
+    def to_dict(self) -> dict[str, str | int | float]:
+        return {
+            "providerModel": self.provider_model,
+            "evidenceGroundedOverlap": self.evidence_grounded_overlap,
+            "evidenceWeakOverlap": self.evidence_weak_overlap,
+            "maxSentences": self.max_sentences,
+            "schemaRepairAttempts": self.schema_repair_attempts,
+            "maxOutputTokens": self.max_output_tokens,
+            "reportMaxOutputTokens": self.report_max_output_tokens,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +70,7 @@ class EvalResult:
     report_prompt_version: str
     profile: EvalProfile
     plan: Plan
+    config: EvalConfig
     metrics: dict[str, int | float]
     errors: tuple[EvalError, ...]
 
@@ -52,6 +82,7 @@ class EvalResult:
             "reportPromptVersion": self.report_prompt_version,
             "profile": self.profile,
             "plan": self.plan,
+            "config": self.config.to_dict(),
             "metrics": self.metrics,
             "errors": [error.to_dict() for error in self.errors],
         }
@@ -71,7 +102,7 @@ class ReplayProvider:
         del system_instruction, prompt, response_schema
         return ProviderResponse(
             text=self._text,
-            provider="gemini",
+            provider="mock",
             model="golden-replay",
             usage=ProviderUsage(),
         )
@@ -83,40 +114,62 @@ def run_evaluation(
     profile: EvalProfile = "replay",
     plan: Plan = "FREE",
     settings: Settings | None = None,
+    report_fixture: GoldenReportFixture | None = None,
 ) -> EvalResult:
-    execution_settings = (settings or Settings()).model_copy(update={"mock": False})
+    source_settings = settings or Settings()
+    execution_settings = source_settings.model_copy(update={"mock": False})
+    fixture = _replay_fixture(dataset, profile, report_fixture)
     responses: list[tuple[GoldenCase, AnalyzeResponse]] = []
     errors: list[EvalError] = []
     schema_passes = 0
 
     for case in dataset.cases:
-        provider = (
-            ReplayProvider(case.replay.model_dump(by_alias=True, mode="json"))
-            if profile == "replay"
-            else None
-        )
+        provider = ReplayProvider(case.replay) if profile == "replay" else None
         try:
             response = ArticleAnalyzeService(execution_settings, provider).analyze(
                 _analyze_request(case, plan)
             )
         except (AgentError, ValidationError, ValueError) as error:
-            errors.append(_eval_error(case.case_id, error))
+            _record_analysis_outcome(
+                case,
+                profile=profile,
+                observed_failures={"schema"},
+                errors=errors,
+                runtime_error=error,
+            )
             continue
+
+        observed_failures = set()
+        if any(
+            bullet.groundedness != "grounded"
+            for section in response.sections
+            for bullet in section.bullets
+        ):
+            observed_failures.add("grounding")
+        if not korean_summary_pass(response.summary_ko):
+            observed_failures.add("korean-summary")
+        _record_analysis_outcome(
+            case,
+            profile=profile,
+            observed_failures=observed_failures,
+            errors=errors,
+        )
         responses.append((case, response))
         schema_passes += 1
 
     report_request = _report_request(dataset, responses, plan)
     report_response: ReportResponse | None = None
-    try:
-        report_provider = (
-            ReplayProvider(_replay_report_output(report_request)) if profile == "replay" else None
-        )
-        report_response = ReportWriterService(execution_settings, report_provider).write(
-            report_request
-        )
-        schema_passes += 1
-    except (AgentError, ValidationError, ValueError) as error:
-        errors.append(_eval_error("report", error))
+    if not report_request.findings:
+        errors.append(EvalError(check="report", code="NO_REPORT_INPUT"))
+    else:
+        try:
+            report_provider = ReplayProvider(fixture.output) if fixture is not None else None
+            report_response = ReportWriterService(execution_settings, report_provider).write(
+                report_request
+            )
+            schema_passes += 1
+        except (AgentError, ValidationError, ValueError) as error:
+            errors.append(_eval_error("report", error))
 
     bullets = [
         bullet
@@ -124,15 +177,24 @@ def run_evaluation(
         for section in response.sections
         for bullet in section.bullets
     ]
-    report_claim_count = 0
-    unsupported_count = 0
+    claim_statuses = []
     if report_response is not None:
-        report_claim_count, unsupported_count = unsupported_report_claim_count(
+        claim_statuses = score_report_claims(
             report_response,
             report_request,
             grounded_overlap=execution_settings.evidence_grounded_overlap,
             weak_overlap=execution_settings.evidence_weak_overlap,
         )
+        if fixture is not None:
+            actual = {score.key: score.status for score in claim_statuses}
+            if actual != fixture.expected_claim_statuses:
+                errors.append(
+                    EvalError(
+                        check="report",
+                        code="EXPECTED_OUTCOME_MISMATCH",
+                        details=_expectation_difference(fixture.expected_claim_statuses, actual),
+                    )
+                )
 
     counts = MetricCounts(
         case_count=len(dataset.cases),
@@ -143,8 +205,12 @@ def run_evaluation(
         korean_summary_passes=sum(
             korean_summary_pass(response.summary_ko) for _, response in responses
         ),
-        report_claim_count=report_claim_count,
-        unsupported_report_claim_count=unsupported_count,
+        report_claim_count=len(claim_statuses),
+        report_grounded_claim_count=sum(score.status == "grounded" for score in claim_statuses),
+        report_weak_claim_count=sum(score.status == "weak" for score in claim_statuses),
+        unsupported_report_claim_count=sum(
+            score.status == "ungrounded" for score in claim_statuses
+        ),
     )
     return EvalResult(
         dataset_version=dataset.version,
@@ -153,9 +219,54 @@ def run_evaluation(
         report_prompt_version=REPORT_PROMPT_VERSION,
         profile=profile,
         plan=plan,
+        config=_eval_config(source_settings, profile, plan),
         metrics=counts.to_dict(),
         errors=tuple(errors),
     )
+
+
+def _replay_fixture(
+    dataset: GoldenDataset,
+    profile: EvalProfile,
+    fixture: GoldenReportFixture | None,
+) -> GoldenReportFixture | None:
+    if profile != "replay":
+        return None
+    selected = fixture or load_report_fixture(_DEFAULT_REPORT_FIXTURE)
+    if selected.dataset_version != dataset.version:
+        raise ValueError("report replay fixture의 datasetVersion이 일치하지 않습니다.")
+    if selected.prompt_version != REPORT_PROMPT_VERSION:
+        raise ValueError("report replay fixture의 promptVersion이 일치하지 않습니다.")
+    return selected
+
+
+def _record_analysis_outcome(
+    case: GoldenCase,
+    *,
+    profile: EvalProfile,
+    observed_failures: set[str],
+    errors: list[EvalError],
+    runtime_error: Exception | None = None,
+) -> None:
+    if profile == "replay":
+        expected = set(case.expected_failures)
+        if observed_failures != expected:
+            errors.append(
+                EvalError(
+                    check=case.case_id,
+                    code="EXPECTED_OUTCOME_MISMATCH",
+                    details=_expectation_difference(expected, observed_failures),
+                )
+            )
+            return
+        if runtime_error is None or "schema" in expected:
+            return
+    if runtime_error is not None:
+        errors.append(_eval_error(case.case_id, runtime_error))
+
+
+def _expectation_difference(expected: object, actual: object) -> str:
+    return f"expected={expected!r}, actual={actual!r}"
 
 
 def _analyze_request(case: GoldenCase, plan: Plan) -> AnalyzeRequest:
@@ -222,39 +333,22 @@ def _report_request(
     )
 
 
-def _replay_report_output(request: ReportRequest) -> dict[str, object]:
-    important = [
-        {
-            "title": finding.article_title,
-            "summaryKo": finding.summary_ko,
-            "significance": _first_key_point(finding),
-            "sourceFindingIds": [finding.id],
-        }
-        for finding in request.findings
-        if finding.relevance == "important"
-    ]
-    important_ids = {finding_id for event in important for finding_id in event["sourceFindingIds"]}
-    watch = [
-        {
-            "topic": finding.article_title,
-            "reason": _first_key_point(finding),
-            "sourceFindingIds": [finding.id],
-        }
-        for finding in request.findings
-        if finding.id not in important_ids
-    ]
-    return {
-        "title": "Golden eval 반도체 뉴스 보고서",
-        "executiveSummary": [finding.summary_ko for finding in request.findings[:3]]
-        or ["분석에 성공한 finding이 없습니다."],
-        "importantEvents": important,
-        "watchItems": watch,
-        "sourceNotes": request.source_notes,
-    }
-
-
-def _first_key_point(finding: ReportFindingInput) -> str:
-    return finding.key_points[0] if finding.key_points else finding.summary_ko
+def _eval_config(settings: Settings, profile: EvalProfile, plan: Plan) -> EvalConfig:
+    if profile == "replay":
+        provider_model = "golden-replay"
+    elif plan == "FREE":
+        provider_model = settings.gemini_model
+    else:
+        provider_model = settings.mindlogic_claude_model
+    return EvalConfig(
+        provider_model=provider_model,
+        evidence_grounded_overlap=settings.evidence_grounded_overlap,
+        evidence_weak_overlap=settings.evidence_weak_overlap,
+        max_sentences=settings.max_sentences,
+        schema_repair_attempts=settings.schema_repair_attempts,
+        max_output_tokens=settings.max_output_tokens,
+        report_max_output_tokens=settings.report_max_output_tokens,
+    )
 
 
 def _eval_error(check: str, error: Exception) -> EvalError:

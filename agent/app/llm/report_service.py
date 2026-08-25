@@ -109,7 +109,7 @@ def _assembled_response(
                 output_tokens=usage.output_tokens,
                 cost_usd=float(usage.cost_usd),
                 credits=float(usage.credits),
-                mock=False,
+                mock=provider_response.provider == "mock",
                 truncated=provider_response.truncated,
             ),
         )
