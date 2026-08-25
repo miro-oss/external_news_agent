@@ -9,9 +9,15 @@ const EMPTY = {
   requiredKeywords: '',
   optionalKeywords: '',
   excludedKeywords: '',
-  batchSize: '10',
-  intervalMinutes: '60',
+  intervalMinutes: '1440',
 }
+
+const COLLECTION_INTERVALS = [
+  { value: '60', label: '1시간마다' },
+  { value: '360', label: '6시간마다' },
+  { value: '720', label: '12시간마다' },
+  { value: '1440', label: '매일 한 번 (권장)' },
+] as const
 
 /** 쉼표로 나눠 받는다. 빈 칸은 필터 없음이고, 빈 문자열은 필터에 넣지 않는다. */
 function toKeywords(value: string): string[] | undefined {
@@ -53,8 +59,7 @@ export function TopicForm() {
 
   function submit(event: React.FormEvent) {
     event.preventDefault()
-    const batchSize = form.batchSize.trim() ? Number(form.batchSize) : undefined
-    const intervalMinutes = form.intervalMinutes.trim() ? Number(form.intervalMinutes) : undefined
+    const intervalMinutes = Number(form.intervalMinutes)
 
     mutate(
       {
@@ -63,7 +68,6 @@ export function TopicForm() {
         requiredKeywords: toKeywords(form.requiredKeywords),
         optionalKeywords: toKeywords(form.optionalKeywords),
         excludedKeywords: toKeywords(form.excludedKeywords),
-        batchSize,
         intervalMinutes,
         // 아무것도 고르지 않았으면 필드를 아예 빼서 보낸다. 명세가 "누락"과 "빈 배열"을 다르게 보므로
         // 빈 배열을 보내면 "연결 없음"이 아니라 "전체 해제"라는 다른 뜻이 된다.
@@ -166,28 +170,23 @@ export function TopicForm() {
         <p className="hint">하나라도 포함되면 제외합니다(NOT).</p>
       </div>
 
-      <div className="field-row">
-        <div className="field">
-          <label htmlFor="topic-batch">1회 수집 건수</label>
-          <input
-            id="topic-batch"
-            type="number"
-            min={1}
-            max={100}
-            value={form.batchSize}
-            onChange={(event) => update('batchSize', event.target.value)}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="topic-interval">수집 주기(분)</label>
-          <input
-            id="topic-interval"
-            type="number"
-            min={10}
-            value={form.intervalMinutes}
-            onChange={(event) => update('intervalMinutes', event.target.value)}
-          />
-        </div>
+      <div className="field">
+        <label htmlFor="topic-interval">수집 주기</label>
+        <select
+          id="topic-interval"
+          value={form.intervalMinutes}
+          onChange={(event) => update('intervalMinutes', event.target.value)}
+        >
+          {COLLECTION_INTERVALS.map((interval) => (
+            <option key={interval.value} value={interval.value}>
+              {interval.label}
+            </option>
+          ))}
+        </select>
+        <p className="hint">
+          새로운 기사를 확인할 주기입니다. 수집 건수는 검색 결과와 중복 여부에 맞춰 시스템이 관리합니다.
+          현재는 자동 반복 없이 <strong>지금 실행</strong>을 눌렀을 때만 수집합니다.
+        </p>
       </div>
 
       <button type="submit" disabled={isPending}>
