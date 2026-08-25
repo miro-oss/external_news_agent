@@ -132,8 +132,7 @@ public class AgentReportOrchestrator {
                         sourceStats.failed(),
                         sourceStats.paywalled(),
                         sourceStats.stubExcluded()),
-                ReportSourceNotes.from(sourceStats),
-                null);
+                ReportSourceNotes.from(sourceStats));
     }
 
     private ReservationSelection reserve(CollectionRun run) {

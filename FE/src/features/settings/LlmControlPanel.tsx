@@ -31,8 +31,14 @@ export function LlmControlPanel() {
   if (planQuery.isPending || usageQuery.isPending || audienceQuery.isPending) {
     return <div className="llm-panel state-panel">LLM 설정과 사용량을 불러오는 중입니다.</div>
   }
-  if (planQuery.error || usageQuery.error || audienceQuery.error
-    || !planQuery.data || !usageQuery.data || !audienceQuery.data) {
+  if (audienceQuery.error || !audienceQuery.data) {
+    return (
+      <div className="llm-panel state-panel error" role="alert">
+        기본 관점 설정을 불러오지 못했습니다.
+      </div>
+    )
+  }
+  if (planQuery.error || usageQuery.error || !planQuery.data || !usageQuery.data) {
     return (
       <div className="llm-panel state-panel error" role="alert">
         LLM 설정을 불러오지 못했습니다.

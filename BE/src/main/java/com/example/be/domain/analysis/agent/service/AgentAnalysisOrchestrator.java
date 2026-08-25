@@ -534,8 +534,9 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                     hook,
                     toPublicEvidenceIndexes(agentEvidence, sentenceCount)));
         }
-        if (highCount > 2 || audiences.size() != AUDIENCE_COUNT) {
-            throw schemaViolation("Agent perspectiveTags의 high는 최대 2개입니다.");
+        if (highCount > 2) {
+            log.warn("Agent perspectiveTags의 high가 2개를 초과해 관점 태그만 제외한다.");
+            return List.of();
         }
         return List.copyOf(mapped);
     }

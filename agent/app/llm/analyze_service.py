@@ -17,9 +17,19 @@ from app.schemas.analyze import (
     Section,
 )
 
-PROMPT_VERSION = "analyze.ko.v2"
-_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md"
-_PERSPECTIVE_PATH = Path(__file__).resolve().parents[1] / "prompts" / "perspective.ko.v1.md"
+_ANALYZE_PROMPT_VERSION = "analyze.ko.v2"
+_PERSPECTIVE_PROMPT_VERSION = "perspective.ko.v1"
+PROMPT_VERSION = f"{_ANALYZE_PROMPT_VERSION}+{_PERSPECTIVE_PROMPT_VERSION}"
+_PROMPT_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "prompts"
+    / f"{_ANALYZE_PROMPT_VERSION}.md"
+)
+_PERSPECTIVE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "prompts"
+    / f"{_PERSPECTIVE_PROMPT_VERSION}.md"
+)
 SYSTEM_INSTRUCTION = "\n\n".join(
     (
         _PROMPT_PATH.read_text(encoding="utf-8").strip(),

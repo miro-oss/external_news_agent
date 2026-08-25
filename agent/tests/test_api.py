@@ -54,7 +54,6 @@ def report_request_body() -> dict[str, object]:
             "stubExcluded": 2,
         },
         "sourceNotes": ["수집 제약: STUB 분석 2건 제외, 페이월 1건."],
-        "audience": None,
     }
 
 

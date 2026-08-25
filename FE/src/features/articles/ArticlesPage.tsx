@@ -20,21 +20,25 @@ export function ArticlesPage() {
   })
   const audienceSetting = useAudienceSetting()
   const initializedAudience = useRef(false)
+  const audienceFilterTouched = useRef(false)
   const articles = useArticles(filters)
   const closeArticle = useCallback(() => setSelectedId(null), [])
 
   useEffect(() => {
-    if (initializedAudience.current || !audienceSetting.data) return
+    if (initializedAudience.current || audienceFilterTouched.current || !audienceSetting.data) return
     initializedAudience.current = true
-    setFilters((current) => ({
+    setFilters((current) => (current.audience ? current : {
       ...current,
       audience: audienceSetting.data.audience,
-      minAudienceRelevance: 'medium',
+      minAudienceRelevance: current.minAudienceRelevance ?? 'medium',
       page: 0,
     }))
   }, [audienceSetting.data])
 
   function changeFilter<K extends keyof ArticleFilters>(key: K, value: ArticleFilters[K]) {
+    if (key === 'audience' || key === 'minAudienceRelevance') {
+      audienceFilterTouched.current = true
+    }
     setFilters((current) => ({ ...current, [key]: value || undefined, page: 0 }))
   }
 
@@ -80,7 +84,10 @@ export function ArticlesPage() {
               type="button"
               className={filters.audience === audience ? 'audience-chip active' : 'audience-chip'}
               aria-pressed={filters.audience === audience}
-              onClick={() => changeFilter('audience', audience)}
+              onClick={() => changeFilter(
+                'audience',
+                filters.audience === audience ? undefined : audience,
+              )}
             >
               {AUDIENCE_LABELS[audience]}
               {audienceSetting.data?.audience === audience && <small>내 관점</small>}

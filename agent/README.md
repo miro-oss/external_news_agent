@@ -39,16 +39,19 @@ uv run pytest
 ## Golden eval
 
 `app/eval/golden/semiconductor.v1.json`은 한국어·영어 반도체 기사 24건과
-`analyze.ko.v2` replay 출력 및 관점 정답을 담습니다. 수치 오기, 기업명 바꿔치기, 부정 반전, 영문 요약은
+`analyze.ko.v2+perspective.ko.v1` replay 출력 및 관점 정답을 담습니다. 수치 오기, 기업명 바꿔치기, 부정 반전, 영문 요약은
 `expectedFailures`로 명시해 규칙이 지나치게 엄격해지거나 느슨해지는 회귀를 함께 잡습니다.
 `report.ko.v1.1.json`은 finding과 독립된 버전 보고서 fixture이며 grounded·weak·ungrounded 주장 기대값을
 각각 가집니다.
 
 ```bash
 uv run python -m app.eval --profile replay \
-  --compare app/eval/golden/analyze.ko.v1.baseline.json \
-  --allow-prompt-version-change
+  --compare app/eval/golden/analyze.ko.v2.baseline.json
 ```
+
+replay의 `perspectiveTagAccuracy` 96/96은 모델 품질이 아니라 fixture 출력과
+`expectedAudiences` 라벨의 일관성을 확인하는 가드입니다. 실제 provider의 관점 태깅 품질은 live
+프로필 결과에서 판단합니다.
 
 replay는 외부 API 없이 실제 스키마·문장 분할·사실값 검증·보고서 claim scorer를 실행하는
 **계약/규칙 회귀 하네스**입니다. 저장된 출력을 재생하므로 프롬프트 생성 품질을 측정하지는 않습니다.

@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.analyze import AnalyzeResponse
+from app.schemas.analyze import AnalyzeOutput, AnalyzeResponse
 
 
 def response(evidence_sentence_ids: list[int]) -> dict[str, object]:
@@ -87,3 +87,14 @@ def test_rejects_invalid_perspective_tag_contract(mutate) -> None:
 
     with pytest.raises(ValidationError):
         AnalyzeResponse.model_validate(payload)
+
+
+def test_provider_schema_requires_nullable_perspective_hook() -> None:
+    schema = AnalyzeOutput.model_json_schema(by_alias=True)
+    perspective_tag = schema["$defs"]["PerspectiveTag"]
+
+    assert "hook" in perspective_tag["required"]
+    assert {option.get("type") for option in perspective_tag["properties"]["hook"]["anyOf"]} == {
+        "string",
+        "null",
+    }

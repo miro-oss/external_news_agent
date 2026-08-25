@@ -29,7 +29,7 @@ from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.report_service import PROMPT_VERSION as REPORT_PROMPT_VERSION
 from app.llm.report_service import ReportWriterService
 from app.llm.router import get_analyze_provider
-from app.schemas.analyze import AnalyzeRequest, AnalyzeResponse, Plan
+from app.schemas.analyze import AUDIENCES, AnalyzeRequest, AnalyzeResponse, Plan
 from app.schemas.evidence import EvidenceSentence
 from app.schemas.report import ReportRequest, ReportResponse
 
@@ -290,7 +290,8 @@ def run_evaluation(
         korean_summary_passes=sum(
             korean_summary_pass(response.summary_ko) for _, response in responses
         ),
-        perspective_tag_checks=len(responses) * 4,
+        # replay에서는 fixture/라벨 일관성 가드이며, provider 품질은 live에서만 측정한다.
+        perspective_tag_checks=len(responses) * len(AUDIENCES),
         perspective_tag_correct_count=sum(
             _perspective_tag_correct_count(case, response)
             for case, response in responses

@@ -213,8 +213,7 @@ class AgentClientTest {
                         "FULLTEXT")),
                 List.of(),
                 new AgentReportRequest.SourceStatsPayload(3, 0, 0, 0, 2),
-                List.of("STUB 2건 제외"),
-                "TECHNOLOGY");
+                List.of("STUB 2건 제외"));
     }
 
     private AgentAnalyzeRequest request() {

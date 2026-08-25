@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import Field, model_validator
 
@@ -15,9 +15,7 @@ Audience = Literal[
 ]
 AudienceRelevance = Literal["none", "low", "medium", "high"]
 NonEmptyString = Annotated[str, Field(min_length=1)]
-AUDIENCES = frozenset(
-    {"CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR", "IT_INFRA"}
-)
+AUDIENCES = frozenset(get_args(Audience))
 
 
 class ArticleInput(AgentModel):
@@ -74,7 +72,7 @@ class Entities(AgentModel):
 class PerspectiveTag(AgentModel):
     audience: Audience
     relevance: AudienceRelevance
-    hook: str | None = Field(default=None, min_length=1)
+    hook: str | None = Field(min_length=1)
     evidence_sentence_ids: list[Annotated[int, Field(ge=1)]]
 
     @model_validator(mode="after")
@@ -153,7 +151,5 @@ def _validate_perspective_tag_set(tags: list[PerspectiveTag]) -> None:
     audiences = [tag.audience for tag in tags]
     if len(tags) != len(AUDIENCES) or set(audiences) != AUDIENCES:
         raise ValueError("perspectiveTags는 4개 audience를 정확히 한 번씩 포함해야 합니다.")
-    if len(audiences) != len(set(audiences)):
-        raise ValueError("perspectiveTags의 audience는 중복될 수 없습니다.")
     if sum(tag.relevance == "high" for tag in tags) > 2:
         raise ValueError("high relevance 관점은 최대 2개입니다.")

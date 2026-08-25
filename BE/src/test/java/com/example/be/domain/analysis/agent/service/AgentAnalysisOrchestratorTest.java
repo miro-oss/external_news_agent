@@ -41,11 +41,13 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class AgentAnalysisOrchestratorTest {
@@ -125,6 +127,32 @@ class AgentAnalysisOrchestratorTest {
     }
 
     @Test
+    void keepsAnalysisAndDiscardsPerspectiveTagsWhenMoreThanTwoAreHigh() {
+        AgentAnalyzeResponse valid = response(List.of(1));
+        List<AgentAnalyzeResponse.PerspectiveTag> invalidTags = valid.perspectiveTags().stream()
+                .map(tag -> new AgentAnalyzeResponse.PerspectiveTag(
+                        tag.audience(), "high", "핵심 주장", List.of(1)))
+                .toList();
+        AgentAnalyzeResponse invalid = new AgentAnalyzeResponse(
+                valid.sentences(),
+                valid.sections(),
+                valid.summaryKo(),
+                valid.classification(),
+                valid.entities(),
+                invalidTags,
+                valid.meta());
+        when(client.analyze(any())).thenReturn(invalid);
+
+        AnalysisResult result = orchestrator.analyze(
+                new AnalysisContext(42L, article(), AgentPlan.FREE));
+
+        assertEquals("한국어 요약", result.summary());
+        assertTrue(result.perspectiveTags().isEmpty());
+        verify(recorder).recordSuccess(eq(42L), eq(10L), any(), any(), any(LocalDateTime.class));
+        verifyNoInteractions(stub);
+    }
+
+    @Test
     void marksRealProviderAnalysisAsLlmAndKeepsMetadata() {
         when(client.analyze(any())).thenReturn(response(List.of(1), "제품/공정", false));
 
@@ -133,7 +161,7 @@ class AgentAnalysisOrchestratorTest {
         assertEquals(AnalysisSource.LLM, result.analysisSource());
         assertEquals("gemini", result.metadata().provider());
         assertEquals("gemini-2.5-flash", result.metadata().model());
-        assertEquals("analyze.ko.v2", result.metadata().promptVersion());
+        assertEquals("analyze.ko.v2+perspective.ko.v1", result.metadata().promptVersion());
         assertEquals(120L, result.metadata().inputTokens());
         assertEquals(30L, result.metadata().outputTokens());
         assertEquals(new BigDecimal("0.001"), result.metadata().costUsd());
@@ -342,7 +370,7 @@ class AgentAnalysisOrchestratorTest {
                 new AgentAnalyzeResponse.Meta(
                         mock ? "mock" : "gemini",
                         mock ? "mock" : "gemini-2.5-flash",
-                        mock ? "analyze.mock.v2" : "analyze.ko.v2",
+                        mock ? "analyze.mock.v2" : "analyze.ko.v2+perspective.ko.v1",
                         mock ? 0L : 120L,
                         mock ? 0L : 30L,
                         mock ? BigDecimal.ZERO : new BigDecimal("0.001"),

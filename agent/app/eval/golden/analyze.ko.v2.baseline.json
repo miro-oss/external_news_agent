@@ -1,11 +1,10 @@
 {
   "datasetVersion": "semiconductor.v1",
-  "baselinePromptVersion": "analyze.ko.v1",
-  "analyzePromptVersion": "analyze.ko.v1",
+  "baselinePromptVersion": "analyze.ko.v2+perspective.ko.v1",
+  "analyzePromptVersion": "analyze.ko.v2+perspective.ko.v1",
   "reportPromptVersion": "report.ko.v1.1",
   "profile": "replay",
   "plan": "FREE",
-  "complete": true,
   "config": {
     "providerModel": "golden-replay",
     "evidenceGroundedOverlap": 0.6,
@@ -15,6 +14,7 @@
     "maxOutputTokens": 4096,
     "reportMaxOutputTokens": 8192
   },
+  "complete": true,
   "metrics": {
     "caseCount": 24,
     "schemaChecks": 25,
@@ -25,9 +25,9 @@
     "groundedRate": 0.875,
     "koreanSummaryPasses": 23,
     "koreanSummaryPassRate": 0.958333,
-    "perspectiveTagChecks": 0,
-    "perspectiveTagCorrectCount": 0,
-    "perspectiveTagAccuracy": 0.0,
+    "perspectiveTagChecks": 96,
+    "perspectiveTagCorrectCount": 96,
+    "perspectiveTagAccuracy": 1.0,
     "reportClaimCount": 9,
     "reportGroundedClaimCount": 6,
     "reportWeakClaimCount": 1,

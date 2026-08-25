@@ -16,7 +16,9 @@ class AgentPropertiesTest {
         AgentProperties properties = new AgentProperties();
 
         assertFalse(properties.isEnabled());
-        assertEquals("analyze.ko.v1", properties.getAnalysisPromptVersion());
+        assertEquals(
+                "analyze.ko.v2+perspective.ko.v1",
+                properties.getAnalysisPromptVersion());
     }
 
     @Test
