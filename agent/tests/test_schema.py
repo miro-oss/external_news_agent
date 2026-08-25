@@ -29,6 +29,27 @@ def response(evidence_sentence_ids: list[int]) -> dict[str, object]:
             "category": "제품/공정",
         },
         "entities": {"companies": [], "products": [], "technologies": []},
+        "perspectiveTags": [
+            {
+                "audience": "CHIP_MAKER",
+                "relevance": "low",
+                "hook": "핵심 주장",
+                "evidenceSentenceIds": [1],
+            },
+            {
+                "audience": "EQUIPMENT_MAKER",
+                "relevance": "none",
+                "hook": None,
+                "evidenceSentenceIds": [],
+            },
+            {
+                "audience": "MARKET_INVESTOR",
+                "relevance": "none",
+                "hook": None,
+                "evidenceSentenceIds": [],
+            },
+            {"audience": "IT_INFRA", "relevance": "none", "hook": None, "evidenceSentenceIds": []},
+        ],
         "meta": {
             "provider": "mock",
             "model": "mock",
@@ -49,3 +70,20 @@ def test_rejects_evidence_ids_outside_one_based_sentence_range(
 ) -> None:
     with pytest.raises(ValidationError):
         AnalyzeResponse.model_validate(response(evidence_ids))
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda tags: tags.pop(),
+        lambda tags: tags.__setitem__(1, tags[0].copy()),
+        lambda tags: tags[0].update({"relevance": "none"}),
+        lambda tags: tags[0].update({"evidenceSentenceIds": [2]}),
+    ],
+)
+def test_rejects_invalid_perspective_tag_contract(mutate) -> None:
+    payload = response([1])
+    mutate(payload["perspectiveTags"])
+
+    with pytest.raises(ValidationError):
+        AnalyzeResponse.model_validate(payload)

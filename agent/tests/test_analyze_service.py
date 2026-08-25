@@ -88,6 +88,32 @@ def valid_output(evidence_ids: list[int] | None = None) -> str:
                 "products": ["HBM4"],
                 "technologies": [],
             },
+            "perspectiveTags": [
+                {
+                    "audience": "CHIP_MAKER",
+                    "relevance": "high",
+                    "hook": "HBM4 양산 일정이 앞당겨졌다.",
+                    "evidenceSentenceIds": [1],
+                },
+                {
+                    "audience": "EQUIPMENT_MAKER",
+                    "relevance": "none",
+                    "hook": None,
+                    "evidenceSentenceIds": [],
+                },
+                {
+                    "audience": "MARKET_INVESTOR",
+                    "relevance": "none",
+                    "hook": None,
+                    "evidenceSentenceIds": [],
+                },
+                {
+                    "audience": "IT_INFRA",
+                    "relevance": "none",
+                    "hook": None,
+                    "evidenceSentenceIds": [],
+                },
+            ],
         },
         ensure_ascii=False,
     )
@@ -104,7 +130,7 @@ def test_generates_korean_analysis_from_english_article_with_sentence_ssot() -> 
         "Yield improved.",
     ]
     assert response.sections[0].bullets[0].evidence_sentence_ids == [1]
-    assert response.meta.prompt_version == "analyze.ko.v1"
+    assert response.meta.prompt_version == "analyze.ko.v2"
     assert len(provider.prompts) == 1
 
 
@@ -135,6 +161,38 @@ def test_fails_after_exactly_one_repair_when_evidence_is_out_of_range() -> None:
     assert len(provider.prompts) == 2
     assert "<source-sentences>" in provider.prompts[1]
     assert "Only one sentence." in provider.prompts[1]
+
+
+def test_repairs_when_more_than_two_audiences_are_high() -> None:
+    invalid = json.loads(valid_output())
+    for tag in invalid["perspectiveTags"][:3]:
+        tag["relevance"] = "high"
+        tag["hook"] = "근거가 있는 관점이다."
+        tag["evidenceSentenceIds"] = [1]
+    provider = FakeProvider(
+        provider_response(json.dumps(invalid, ensure_ascii=False)),
+        provider_response(valid_output()),
+    )
+
+    response = ArticleAnalyzeService(Settings(), provider).analyze(request())
+
+    assert len(provider.prompts) == 2
+    assert sum(tag.relevance == "high" for tag in response.perspective_tags) == 1
+
+
+def test_rejects_perspective_evidence_outside_sentence_range_after_repair() -> None:
+    invalid = json.loads(valid_output())
+    invalid["perspectiveTags"][0]["evidenceSentenceIds"] = [3]
+    provider = FakeProvider(
+        provider_response(json.dumps(invalid, ensure_ascii=False)),
+        provider_response(json.dumps(invalid, ensure_ascii=False)),
+    )
+
+    with pytest.raises(AgentError) as caught:
+        ArticleAnalyzeService(Settings(), provider).analyze(request("Only one sentence."))
+
+    assert caught.value.code == "SCHEMA_VIOLATION"
+    assert len(provider.prompts) == 2
 
 
 def test_prompt_treats_article_instruction_as_delimited_data() -> None:

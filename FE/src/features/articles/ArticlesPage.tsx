@@ -1,6 +1,11 @@
-import { useCallback, useState } from 'react'
-import { useArticles } from '../../api/queries'
-import type { ArticleFilters, ArticleSummary } from '../../api/types'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useArticles, useAudienceSetting } from '../../api/queries'
+import {
+  AUDIENCES,
+  AUDIENCE_LABELS,
+  type ArticleFilters,
+  type ArticleSummary,
+} from '../../api/types'
 import { formatShortDate } from '../../lib/datetime'
 import { ArticleDetailModal } from './ArticleDetailModal'
 
@@ -13,8 +18,21 @@ export function ArticlesPage() {
     size: PAGE_SIZE,
     sort: 'PUBLISHED_DESC',
   })
+  const audienceSetting = useAudienceSetting()
+  const initializedAudience = useRef(false)
   const articles = useArticles(filters)
   const closeArticle = useCallback(() => setSelectedId(null), [])
+
+  useEffect(() => {
+    if (initializedAudience.current || !audienceSetting.data) return
+    initializedAudience.current = true
+    setFilters((current) => ({
+      ...current,
+      audience: audienceSetting.data.audience,
+      minAudienceRelevance: 'medium',
+      page: 0,
+    }))
+  }, [audienceSetting.data])
 
   function changeFilter<K extends keyof ArticleFilters>(key: K, value: ArticleFilters[K]) {
     setFilters((current) => ({ ...current, [key]: value || undefined, page: 0 }))
@@ -33,6 +51,43 @@ export function ArticlesPage() {
           <span>분석 완료</span>
         </div>
       </header>
+
+      <section className="audience-filter" aria-label="독자 관점 필터">
+        <div className="audience-filter-heading">
+          <div>
+            <p className="eyebrow">AUDIENCE VIEW</p>
+            <strong>누구의 관점으로 볼까요?</strong>
+          </div>
+          <label>
+            최소 관련도
+            <select
+              value={filters.minAudienceRelevance ?? 'medium'}
+              onChange={(event) => changeFilter(
+                'minAudienceRelevance',
+                event.target.value as ArticleFilters['minAudienceRelevance'],
+              )}
+            >
+              <option value="high">높음</option>
+              <option value="medium">보통 이상</option>
+              <option value="low">낮음 이상</option>
+            </select>
+          </label>
+        </div>
+        <div className="audience-chips" role="group" aria-label="관점 선택">
+          {AUDIENCES.map((audience) => (
+            <button
+              key={audience}
+              type="button"
+              className={filters.audience === audience ? 'audience-chip active' : 'audience-chip'}
+              aria-pressed={filters.audience === audience}
+              onClick={() => changeFilter('audience', audience)}
+            >
+              {AUDIENCE_LABELS[audience]}
+              {audienceSetting.data?.audience === audience && <small>내 관점</small>}
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section className="filter-bar" aria-label="기사 필터">
         <label>
@@ -134,7 +189,11 @@ export function ArticlesPage() {
         </>
       )}
 
-      <ArticleDetailModal articleId={selectedId} onClose={closeArticle} />
+      <ArticleDetailModal
+        articleId={selectedId}
+        defaultAudience={filters.audience ?? audienceSetting.data?.audience}
+        onClose={closeArticle}
+      />
     </main>
   )
 }
@@ -151,6 +210,15 @@ function ArticleCard({ article, onOpen }: { article: ArticleSummary; onOpen: () 
       </div>
       <h2>{article.title}</h2>
       <p className="article-summary">{article.summary}</p>
+      <div className="perspective-badges" aria-label="관련 독자 관점">
+        {(article.perspectiveTags ?? [])
+          .filter((tag) => tag.relevance !== 'none')
+          .map((tag) => (
+            <span className={`perspective-badge perspective-${tag.relevance}`} key={tag.audience}>
+              {AUDIENCE_LABELS[tag.audience]}
+            </span>
+          ))}
+      </div>
       <div className="article-meta">
         <span>{article.publisher || article.sourceName}</span>
         <span className={`status-pill relevance-${article.relevance}`}>{relevanceLabel(article.relevance)}</span>

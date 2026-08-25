@@ -17,9 +17,15 @@ from app.schemas.analyze import (
     Section,
 )
 
-PROMPT_VERSION = "analyze.ko.v1"
+PROMPT_VERSION = "analyze.ko.v2"
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md"
-SYSTEM_INSTRUCTION = _PROMPT_PATH.read_text(encoding="utf-8").strip()
+_PERSPECTIVE_PATH = Path(__file__).resolve().parents[1] / "prompts" / "perspective.ko.v1.md"
+SYSTEM_INSTRUCTION = "\n\n".join(
+    (
+        _PROMPT_PATH.read_text(encoding="utf-8").strip(),
+        _PERSPECTIVE_PATH.read_text(encoding="utf-8").strip(),
+    )
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +85,14 @@ def _validated_output(
         for sentence_id in bullet.evidence_sentence_ids
     ):
         raise ValueError("evidenceSentenceIds는 요청 sentences 범위 안에 있어야 합니다.")
+    if any(
+        sentence_id > sentence_count
+        for tag in output.perspective_tags
+        for sentence_id in tag.evidence_sentence_ids
+    ):
+        raise ValueError(
+            "perspective tag의 evidenceSentenceIds는 요청 sentences 범위 안에 있어야 합니다."
+        )
     return output
 
 
@@ -96,6 +110,7 @@ def _assembled_response(
         summary_ko=output.summary_ko,
         classification=output.classification,
         entities=output.entities,
+        perspective_tags=output.perspective_tags,
         meta=ResponseMeta(
             provider=provider_response.provider,
             model=provider_response.model,

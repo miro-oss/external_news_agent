@@ -4,6 +4,8 @@ import type {
   ArticleDetail,
   ArticleFilters,
   ArticleSummary,
+  Audience,
+  AudienceSetting,
   Combination,
   CombinationPage,
   CollectionRunCreated,
@@ -30,6 +32,7 @@ const keys = {
   report: (id: number | null) => ['reports', id] as const,
   llmPlan: ['settings', 'llm-plan'] as const,
   llmUsage: ['usage', 'llm'] as const,
+  audience: ['settings', 'audience'] as const,
 }
 
 const PAGE_SIZE = 100
@@ -98,6 +101,8 @@ export function useArticles(filters: ArticleFilters) {
       relevance: filters.relevance,
       category: filters.category,
       language: filters.language,
+      audience: filters.audience,
+      minAudienceRelevance: filters.audience ? (filters.minAudienceRelevance ?? 'medium') : undefined,
       sort: filters.sort,
       page: filters.page,
       size: filters.size,
@@ -159,6 +164,22 @@ export function useUpdateLlmPlan() {
       queryClient.setQueryData(keys.llmPlan, setting)
       void queryClient.invalidateQueries({ queryKey: keys.llmUsage })
     },
+  })
+}
+
+export function useAudienceSetting() {
+  return useQuery({
+    queryKey: keys.audience,
+    queryFn: () => apiGet<AudienceSetting>('/settings/audience'),
+  })
+}
+
+export function useUpdateAudienceSetting() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (audience: Audience) =>
+      apiPut<AudienceSetting>('/settings/audience', { audience }),
+    onSuccess: (setting) => queryClient.setQueryData(keys.audience, setting),
   })
 }
 

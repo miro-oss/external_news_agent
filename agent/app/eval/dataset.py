@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from app.schemas.analyze import ArticleInput, Groundedness, TopicInput
+from app.schemas.analyze import ArticleInput, Audience, Groundedness, TopicInput
 from app.schemas.common import AgentModel
 
 ExpectedFailure = Literal["schema", "grounding", "korean-summary"]
@@ -14,6 +14,7 @@ class GoldenCase(AgentModel):
     article: ArticleInput
     topic: TopicInput
     replay: dict[str, object] = Field(min_length=1)
+    expected_audiences: list[Audience]
     expected_failures: list[ExpectedFailure] = Field(default_factory=list)
 
     @field_validator("expected_failures")
@@ -23,6 +24,15 @@ class GoldenCase(AgentModel):
     ) -> list[ExpectedFailure]:
         if len(value) != len(set(value)):
             raise ValueError("expectedFailures는 중복될 수 없습니다.")
+        return value
+
+    @field_validator("expected_audiences")
+    @classmethod
+    def validate_unique_expected_audiences(
+        cls, value: list[Audience]
+    ) -> list[Audience]:
+        if len(value) != len(set(value)):
+            raise ValueError("expectedAudiences는 중복될 수 없습니다.")
         return value
 
 

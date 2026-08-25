@@ -45,7 +45,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class AgentReportOrchestrator {
 
-    private static final String DEFAULT_PERSPECTIVE = "TECHNOLOGY";
     private static final int MAX_REPORT_FINDINGS = 50;
     private static final Set<String> PROVIDER_VALUES = Set.of("gemini", "mindlogic-claude", "mock");
 
@@ -134,7 +133,7 @@ public class AgentReportOrchestrator {
                         sourceStats.paywalled(),
                         sourceStats.stubExcluded()),
                 ReportSourceNotes.from(sourceStats),
-                DEFAULT_PERSPECTIVE);
+                null);
     }
 
     private ReservationSelection reserve(CollectionRun run) {

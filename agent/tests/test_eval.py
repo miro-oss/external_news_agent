@@ -51,13 +51,29 @@ def replay_result(dataset: GoldenDataset | None = None):
     )
 
 
-def test_replay_golden_eval_matches_v1_baseline() -> None:
+def test_replay_golden_eval_keeps_v1_quality_and_adds_perspective_accuracy() -> None:
     result = replay_result()
     baseline = json.loads(_BASELINE_PATH.read_text(encoding="utf-8"))
 
     assert result.errors == ()
-    assert result.metrics == baseline["metrics"]
-    assert compare_results(result.to_dict(), baseline)["regressions"] == []
+    legacy_metrics = {
+        key: value
+        for key, value in result.metrics.items()
+        if not key.startswith("perspectiveTag")
+    }
+    baseline_legacy_metrics = {
+        key: value
+        for key, value in baseline["metrics"].items()
+        if not key.startswith("perspectiveTag")
+    }
+
+    assert legacy_metrics == baseline_legacy_metrics
+    assert result.metrics["perspectiveTagChecks"] == 96
+    assert result.metrics["perspectiveTagCorrectCount"] == 96
+    assert result.metrics["perspectiveTagAccuracy"] == 1.0
+    assert compare_results(
+        result.to_dict(), baseline, allow_prompt_version_change=True
+    )["regressions"] == []
 
 
 def test_adversarial_cases_have_expected_failure_labels() -> None:
@@ -80,6 +96,7 @@ def test_adversarial_cases_have_expected_failure_labels() -> None:
     assert result.metrics["evidenceRuleDecisionCount"] == 11
     assert result.metrics["evidenceProviderCallCount"] == 10
     assert result.metrics["evidenceProviderCallReductionRate"] == 0.52381
+    assert result.metrics["perspectiveTagAccuracy"] == 1.0
     assert result.errors == ()
 
 
@@ -275,6 +292,7 @@ def test_main_returns_failure_for_regression_and_writes_result(
             "replay",
             "--compare",
             str(regressed_baseline),
+            "--allow-prompt-version-change",
             "--output",
             str(output),
         ]

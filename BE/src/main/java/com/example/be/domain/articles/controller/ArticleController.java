@@ -50,6 +50,10 @@ public class ArticleController {
             @RequestParam(required = false) String riskLevel,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String language,
+            @Parameter(description = "CHIP_MAKER / EQUIPMENT_MAKER / MARKET_INVESTOR / IT_INFRA")
+            @RequestParam(required = false) String audience,
+            @Parameter(description = "none / low / medium / high. audience 지정 시 기본 medium")
+            @RequestParam(required = false) String minAudienceRelevance,
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) @RequestParam(required = false) OffsetDateTime from,
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) @RequestParam(required = false) OffsetDateTime to,
             @RequestParam(defaultValue = "PUBLISHED_DESC") String sort,
@@ -58,7 +62,8 @@ public class ArticleController {
     ) {
         return ApiResponse.of(GeneralSuccessCode.OK,
                 articleQueryService.getArticles(runId, topicId, sourceId, changeType, relevance, riskLevel,
-                        category, language, from, to, sort, page, size));
+                        category, language, audience, minAudienceRelevance,
+                        from, to, sort, page, size));
     }
 
     @GetMapping("/{articleId}")

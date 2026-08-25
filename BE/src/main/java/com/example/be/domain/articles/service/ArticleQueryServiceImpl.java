@@ -1,5 +1,7 @@
 package com.example.be.domain.articles.service;
 
+import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.analysis.entity.AudienceRelevance;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.entity.FindingSection;
@@ -13,6 +15,7 @@ import com.example.be.domain.articles.repository.FindingSpecification;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.repository.ArticleRepository;
+import com.example.be.domain.settings.exception.AudienceException;
 import com.example.be.global.apiPayload.PageResponse;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
@@ -48,6 +51,8 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                                                             String riskLevel,
                                                             String category,
                                                             String language,
+                                                            String audience,
+                                                            String minAudienceRelevance,
                                                             OffsetDateTime from,
                                                             OffsetDateTime to,
                                                             String sort,
@@ -57,6 +62,9 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
         validatePeriod(from, to);
         String normalizedSort = normalizeSort(sort);
         String normalizedCategory = normalizeCategory(category);
+        Audience parsedAudience = parseAudience(audience);
+        AudienceRelevance parsedAudienceRelevance = parseAudienceRelevance(
+                parsedAudience, minAudienceRelevance);
 
         Page<Finding> findings = findingRepository.findAll(
                 FindingSpecification.latestWithFilters(
@@ -68,6 +76,8 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                         parseRiskLevel(riskLevel),
                         normalizedCategory,
                         normalize(language),
+                        parsedAudience,
+                        parsedAudienceRelevance,
                         from,
                         to,
                         normalizedSort),
@@ -137,6 +147,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                 .relevance(finding.getRelevance().toApiValue())
                 .riskLevel(finding.getRiskLevel().toApiValue())
                 .sentiment(finding.getSentiment().toApiValue())
+                .perspectiveTags(toPerspectiveTags(finding))
                 .build();
     }
 
@@ -157,9 +168,21 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                 .riskLevel(finding.getRiskLevel().toApiValue())
                 .relevance(finding.getRelevance().toApiValue())
                 .category(finding.getCategory())
+                .perspectiveTags(toPerspectiveTags(finding))
                 .analyzedAt(toOffset(finding.getAnalyzedAt()))
                 .runId(finding.getRun().getId())
                 .build();
+    }
+
+    private List<ArticleResDTO.PerspectiveTag> toPerspectiveTags(Finding finding) {
+        return finding.getPerspectiveTags() == null ? List.of() : finding.getPerspectiveTags().stream()
+                .map(tag -> ArticleResDTO.PerspectiveTag.builder()
+                        .audience(tag.audience().name())
+                        .relevance(tag.relevance().toApiValue())
+                        .hook(tag.hook())
+                        .evidenceSentenceIds(tag.evidenceSentenceIds())
+                        .build())
+                .toList();
     }
 
     private String publisher(Article article) {
@@ -230,6 +253,34 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
             throw badRequest("지원하지 않는 정렬 조건입니다.");
         }
         return normalized;
+    }
+
+    private Audience parseAudience(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return Audience.fromApiValue(value);
+        } catch (IllegalArgumentException exception) {
+            throw new AudienceException();
+        }
+    }
+
+    private AudienceRelevance parseAudienceRelevance(Audience audience, String value) {
+        if (audience == null) {
+            if (StringUtils.hasText(value)) {
+                throw new AudienceException();
+            }
+            return null;
+        }
+        if (!StringUtils.hasText(value)) {
+            return AudienceRelevance.MEDIUM;
+        }
+        try {
+            return AudienceRelevance.fromApiValue(value);
+        } catch (IllegalArgumentException exception) {
+            throw new AudienceException();
+        }
     }
 
     private String normalize(String value) {

@@ -55,6 +55,7 @@ public class FindingWriter {
                 .sections(result.sections())
                 .analysisSections(result.analysisSections())
                 .entities(result.entities())
+                .perspectiveTags(result.perspectiveTags())
                 .promptVersion(result.metadata().promptVersion())
                 .llmProvider(result.metadata().provider())
                 .llmModel(result.metadata().model())

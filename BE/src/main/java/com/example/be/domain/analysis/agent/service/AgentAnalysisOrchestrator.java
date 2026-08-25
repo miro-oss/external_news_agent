@@ -14,11 +14,14 @@ import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
 import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
 import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.entity.AnalysisSource;
+import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.analysis.entity.AudienceRelevance;
 import com.example.be.domain.analysis.entity.FindingAnalysisBullet;
 import com.example.be.domain.analysis.entity.FindingAnalysisSection;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.entity.FindingEntities;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
+import com.example.be.domain.analysis.entity.FindingPerspectiveTag;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
@@ -42,6 +45,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -55,6 +59,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
 
     private static final Set<String> GROUNDEDNESS_VALUES =
             Set.of("grounded", "weak", "ungrounded");
+    private static final int AUDIENCE_COUNT = Audience.values().length;
 
     private final AgentProperties properties;
     private final AgentClient client;
@@ -253,6 +258,8 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
         }
         validateCategory(classification.category());
         FindingEntities entities = toEntities(response.entities());
+        List<FindingPerspectiveTag> perspectiveTags = toPerspectiveTags(
+                response.perspectiveTags(), sentences.size());
         AnalysisMetadata metadata = toMetadata(response.meta());
         return new AnalysisResult(
                 response.summaryKo().trim(),
@@ -266,6 +273,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 response.meta().mock() ? AnalysisSource.STUB : AnalysisSource.LLM,
                 analysisSections,
                 entities,
+                perspectiveTags,
                 metadata);
     }
 
@@ -310,6 +318,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 result.analysisSource(),
                 verifiedSections,
                 result.entities(),
+                result.perspectiveTags(),
                 result.metadata());
     }
 
@@ -478,6 +487,57 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 validatedEntityValues(entities.companies()),
                 validatedEntityValues(entities.products()),
                 validatedEntityValues(entities.technologies()));
+    }
+
+    private List<FindingPerspectiveTag> toPerspectiveTags(
+            List<AgentAnalyzeResponse.PerspectiveTag> tags,
+            int sentenceCount) {
+        if (tags == null || tags.size() != AUDIENCE_COUNT) {
+            throw schemaViolation("Agent perspectiveTags는 4개 관점을 모두 포함해야 합니다.");
+        }
+        Set<Audience> audiences = new HashSet<>();
+        int highCount = 0;
+        List<FindingPerspectiveTag> mapped = new ArrayList<>();
+        for (AgentAnalyzeResponse.PerspectiveTag tag : tags) {
+            if (tag == null) {
+                throw schemaViolation("Agent perspectiveTag가 없습니다.");
+            }
+            Audience audience;
+            AudienceRelevance relevance;
+            try {
+                audience = Audience.fromApiValue(tag.audience());
+                relevance = AudienceRelevance.fromApiValue(tag.relevance());
+            } catch (IllegalArgumentException exception) {
+                throw schemaViolation("Agent perspectiveTag 값이 올바르지 않습니다.");
+            }
+            if (!audiences.add(audience)) {
+                throw schemaViolation("Agent perspectiveTag audience가 중복되었습니다.");
+            }
+            List<Integer> agentEvidence = listOrEmpty(tag.evidenceSentenceIds());
+            String hook = StringUtils.hasText(tag.hook()) ? tag.hook().trim() : null;
+            if (relevance == AudienceRelevance.NONE) {
+                if (hook != null || !agentEvidence.isEmpty()) {
+                    throw schemaViolation("none 관점에는 hook과 evidence가 없어야 합니다.");
+                }
+            } else if (hook == null || agentEvidence.isEmpty()) {
+                throw schemaViolation("관련 관점에는 hook과 evidence가 필요합니다.");
+            }
+            if (agentEvidence.size() != new HashSet<>(agentEvidence).size()) {
+                throw schemaViolation("관점 evidence sentence id가 중복되었습니다.");
+            }
+            if (relevance == AudienceRelevance.HIGH) {
+                highCount++;
+            }
+            mapped.add(new FindingPerspectiveTag(
+                    audience,
+                    relevance,
+                    hook,
+                    toPublicEvidenceIndexes(agentEvidence, sentenceCount)));
+        }
+        if (highCount > 2 || audiences.size() != AUDIENCE_COUNT) {
+            throw schemaViolation("Agent perspectiveTags의 high는 최대 2개입니다.");
+        }
+        return List.copyOf(mapped);
     }
 
     private List<String> validatedEntityValues(List<String> values) {

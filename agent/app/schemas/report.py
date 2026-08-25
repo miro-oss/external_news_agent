@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 
-from app.schemas.analyze import Plan
+from app.schemas.analyze import Audience, Plan
 from app.schemas.common import AgentModel
 
 NonEmptyString = Annotated[str, Field(min_length=1)]
@@ -86,9 +86,7 @@ class ReportRequest(AgentModel):
     events: list[ReportEventInput] = Field(default_factory=list)
     source_stats: SourceStats
     source_notes: list[NonEmptyString] = Field(min_length=1)
-    perspective: Literal["TECHNOLOGY", "COMPANY", "POLICY", "SUPPLY_CHAIN"] = (
-        "TECHNOLOGY"
-    )
+    audience: Audience | None = None
 
     @model_validator(mode="after")
     def validate_event_finding_ids(self) -> "ReportRequest":

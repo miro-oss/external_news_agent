@@ -21,12 +21,6 @@ _DEFAULT_REPORT_FIXTURE = _GOLDEN_DIR / "report.ko.v1.1.json"
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
-    if args.allow_prompt_version_change and args.profile != "live":
-        print(
-            "eval configuration error: prompt version override is live-only",
-            file=sys.stderr,
-        )
-        return 2
     if args.profile != "live" and (args.checkpoint is not None or args.resume):
         print(
             "eval configuration error: checkpoint and resume are live-only",

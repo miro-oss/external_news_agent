@@ -290,6 +290,11 @@ def run_evaluation(
         korean_summary_passes=sum(
             korean_summary_pass(response.summary_ko) for _, response in responses
         ),
+        perspective_tag_checks=len(responses) * 4,
+        perspective_tag_correct_count=sum(
+            _perspective_tag_correct_count(case, response)
+            for case, response in responses
+        ),
         report_claim_count=len(claim_statuses),
         report_grounded_claim_count=sum(score.status == "grounded" for score in claim_statuses),
         report_weak_claim_count=sum(score.status == "weak" for score in claim_statuses),
@@ -313,6 +318,17 @@ def run_evaluation(
         ),
         metrics=counts.to_dict(),
         errors=tuple(errors),
+    )
+
+
+def _perspective_tag_correct_count(
+    case: GoldenCase,
+    response: AnalyzeResponse,
+) -> int:
+    expected = set(case.expected_audiences)
+    return sum(
+        (tag.audience in expected) == (tag.relevance in {"medium", "high"})
+        for tag in response.perspective_tags
     )
 
 

@@ -6,6 +6,7 @@ from app.schemas.analyze import (
     Classification,
     Entities,
     EvidenceBullet,
+    PerspectiveTag,
     ResponseMeta,
     Section,
 )
@@ -46,10 +47,36 @@ class MockAnalyzeProvider:
                 category="제품/공정",
             ),
             entities=Entities(companies=[], products=[], technologies=[]),
+            perspective_tags=[
+                PerspectiveTag(
+                    audience="CHIP_MAKER",
+                    relevance="low",
+                    hook=article.title,
+                    evidence_sentence_ids=[1],
+                ),
+                PerspectiveTag(
+                    audience="EQUIPMENT_MAKER",
+                    relevance="none",
+                    hook=None,
+                    evidence_sentence_ids=[],
+                ),
+                PerspectiveTag(
+                    audience="MARKET_INVESTOR",
+                    relevance="none",
+                    hook=None,
+                    evidence_sentence_ids=[],
+                ),
+                PerspectiveTag(
+                    audience="IT_INFRA",
+                    relevance="none",
+                    hook=None,
+                    evidence_sentence_ids=[],
+                ),
+            ],
             meta=ResponseMeta(
                 provider="mock",
                 model="mock",
-                prompt_version="analyze.mock.v1",
+                prompt_version="analyze.mock.v2",
                 input_tokens=0,
                 output_tokens=0,
                 cost_usd=0,

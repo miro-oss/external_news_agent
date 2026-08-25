@@ -97,6 +97,23 @@ export type ChangeType = 'NEW' | 'UPDATED'
 export type Relevance = 'important' | 'watch' | 'reference'
 export type RiskLevel = 'low' | 'medium' | 'high'
 export type Sentiment = 'positive' | 'neutral' | 'negative'
+export const AUDIENCES = ['CHIP_MAKER', 'EQUIPMENT_MAKER', 'MARKET_INVESTOR', 'IT_INFRA'] as const
+export type Audience = (typeof AUDIENCES)[number]
+export type AudienceRelevance = 'none' | 'low' | 'medium' | 'high'
+
+export const AUDIENCE_LABELS: Record<Audience, string> = {
+  CHIP_MAKER: '반도체 제조사',
+  EQUIPMENT_MAKER: '장비·소재사',
+  MARKET_INVESTOR: '시장·투자',
+  IT_INFRA: 'IT 인프라',
+}
+
+export interface PerspectiveTag {
+  audience: Audience
+  relevance: AudienceRelevance
+  hook: string | null
+  evidenceSentenceIds: number[]
+}
 
 export interface ArticleSummary {
   id: number
@@ -118,6 +135,7 @@ export interface ArticleSummary {
   relevance: Relevance
   riskLevel: RiskLevel
   sentiment: Sentiment
+  perspectiveTags: PerspectiveTag[]
 }
 
 export interface ArticleSentence {
@@ -140,6 +158,7 @@ export interface ArticleAnalysis {
   riskLevel: RiskLevel
   relevance: Relevance
   category: string
+  perspectiveTags: PerspectiveTag[]
   analyzedAt: string
   runId: number
 }
@@ -169,6 +188,8 @@ export interface ArticleFilters {
   relevance?: Relevance
   category?: ArticleSummary['category']
   language?: string
+  audience?: Audience
+  minAudienceRelevance?: AudienceRelevance
   sort?: 'PUBLISHED_DESC' | 'PUBLISHED_ASC' | 'RISK_DESC'
   page: number
   size: number
@@ -226,6 +247,10 @@ export interface LlmPlanSetting {
   plan: LlmPlan
   allowRunOverride: boolean
   paidExhaustedAction: PaidExhaustedAction
+}
+
+export interface AudienceSetting {
+  audience: Audience
 }
 
 export interface LlmUsage {

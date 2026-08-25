@@ -54,7 +54,7 @@ def report_request_body() -> dict[str, object]:
             "stubExcluded": 2,
         },
         "sourceNotes": ["수집 제약: STUB 분석 2건 제외, 페이월 1건."],
-        "perspective": "TECHNOLOGY",
+        "audience": None,
     }
 
 
@@ -110,6 +110,12 @@ def test_analyze_returns_deterministic_mock_contract() -> None:
     assert payload["classification"]["riskLevel"] == "low"
     assert payload["meta"]["provider"] == "mock"
     assert payload["meta"]["mock"] is True
+    assert [tag["audience"] for tag in payload["perspectiveTags"]] == [
+        "CHIP_MAKER",
+        "EQUIPMENT_MAKER",
+        "MARKET_INVESTOR",
+        "IT_INFRA",
+    ]
 
 
 def test_report_returns_deterministic_mock_contract() -> None:

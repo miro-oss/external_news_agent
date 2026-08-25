@@ -65,7 +65,7 @@ def request() -> ReportRequest:
             "sourceNotes": [
                 "수집 제약: STUB 분석 3건 제외, 페이월 1건, 접근 제한 1건, 수집 실패 1건."
             ],
-            "perspective": "TECHNOLOGY",
+            "audience": None,
         }
     )
 

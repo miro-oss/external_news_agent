@@ -13,7 +13,7 @@ public record AgentReportRequest(
         List<EventPayload> events,
         SourceStatsPayload sourceStats,
         List<String> sourceNotes,
-        String perspective
+        String audience
 ) {
 
     public record RunPayload(
