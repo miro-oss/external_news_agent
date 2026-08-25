@@ -58,9 +58,19 @@ export function TopicForm() {
     reset()
   }
 
-  /** 소스가 열 몇 개씩 쌓이면 하나씩 체크하는 게 일이다. 한 번에 다 켜고 끄는 길을 둔다. */
+  /**
+   * 소스가 열 몇 개씩 쌓이면 하나씩 체크하는 게 일이다. 한 번에 다 켜고 끄는 길을 둔다.
+   *
+   * <p>개수가 아니라 목록에 든 소스가 전부 골라졌는지로 판단한다. 개수만 보면, 고른 소스가
+   * 지워지고 다른 소스가 대신 생겨 수가 같아졌을 때 버튼은 "전체 선택"인데 누르면 비워진다.
+   * 버튼 글자를 정하는 allSelected와 같은 기준을 써야 둘이 어긋나지 않는다.
+   */
   function toggleAllSources() {
-    setSelected((prev) => (prev.length === options.length ? [] : options.map((source) => source.id)))
+    setSelected((prev) => (
+      options.length > 0 && options.every((source) => prev.includes(source.id))
+        ? []
+        : options.map((source) => source.id)
+    ))
     setDone(null)
     reset()
   }
