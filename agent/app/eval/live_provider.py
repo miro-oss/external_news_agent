@@ -45,7 +45,7 @@ class LiveProviderPolicy:
 
 
 def default_live_policy(plan: str) -> LiveProviderPolicy:
-    return LiveProviderPolicy(request_interval_seconds=13.0 if plan == "FREE" else 1.0)
+    return LiveProviderPolicy(request_interval_seconds=30.0 if plan == "FREE" else 1.0)
 
 
 class LiveRequestCoordinator:
@@ -156,7 +156,7 @@ def _retry_after_seconds(error: AgentError) -> float | None:
         isinstance(value, bool)
         or not isinstance(value, (int, float))
         or not math.isfinite(value)
-        or value < 0
+        or value <= 0
     ):
         return None
     return float(value)

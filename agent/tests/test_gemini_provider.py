@@ -116,13 +116,29 @@ def test_exposes_sanitized_rate_limit_details_without_api_response_body() -> Non
     class RateLimitedModels(FakeModels):
         def generate_content(self, *, model: str, contents: str, config):
             del model, contents, config
-            response = SimpleNamespace(headers={"retry-after": "7"})
+            response = SimpleNamespace(headers={})
             raise errors.ClientError(
                 429,
                 {
                     "error": {
                         "status": "RESOURCE_EXHAUSTED",
                         "message": "sensitive provider response must not be copied",
+                        "details": [
+                            {
+                                "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                                "violations": [
+                                    {
+                                        "quotaMetric": "generativelanguage.googleapis.com/requests",
+                                        "quotaId": "GenerateRequestsPerDayPerProject-FreeTier",
+                                        "quotaValue": "20",
+                                    }
+                                ],
+                            },
+                            {
+                                "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                                "retryDelay": "7s",
+                            },
+                        ],
                     }
                 },
                 response,
@@ -146,4 +162,11 @@ def test_exposes_sanitized_rate_limit_details_without_api_response_body() -> Non
         "rateLimited": True,
         "retryable": True,
         "retryAfterSeconds": 7.0,
+        "quotaViolations": [
+            {
+                "quotaMetric": "generativelanguage.googleapis.com/requests",
+                "quotaId": "GenerateRequestsPerDayPerProject-FreeTier",
+                "quotaValue": "20",
+            }
+        ],
     }

@@ -311,15 +311,13 @@ def test_live_eval_resumes_successful_analyses_from_checkpoint(
     assert len(saved["analyses"]) == 6
     assert saved["report"] is None
 
+    incompatible_settings = settings.model_copy(update={"max_sentences": 199})
     with pytest.raises(CheckpointError, match="config"):
         run_evaluation(
             dataset,
             profile="live",
-            settings=settings,
-            live_policy=LiveProviderPolicy(
-                request_interval_seconds=1,
-                rate_limit_retry_attempts=0,
-            ),
+            settings=incompatible_settings,
+            live_policy=policy,
             checkpoint_path=checkpoint,
             resume=True,
         )
@@ -338,7 +336,10 @@ def test_live_eval_resumes_successful_analyses_from_checkpoint(
         dataset,
         profile="live",
         settings=settings,
-        live_policy=policy,
+        live_policy=LiveProviderPolicy(
+            request_interval_seconds=30,
+            rate_limit_retry_attempts=0,
+        ),
         checkpoint_path=checkpoint,
         resume=True,
     )
@@ -348,9 +349,11 @@ def test_live_eval_resumes_successful_analyses_from_checkpoint(
     assert resumed.metrics["schemaPasses"] == 25
     assert remaining_analysis.call_count == 18
     assert report_provider.call_count == 1
+    assert resumed.config.to_dict()["livePolicy"]["requestIntervalSeconds"] == 30
     saved = json.loads(checkpoint.read_text(encoding="utf-8"))
     assert len(saved["analyses"]) == 24
     assert saved["report"] is not None
+    assert saved["config"]["livePolicy"]["requestIntervalSeconds"] == 30
 
 
 def test_dataset_requires_twenty_to_thirty_unique_articles() -> None:

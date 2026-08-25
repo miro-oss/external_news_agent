@@ -107,3 +107,28 @@ def test_does_not_retry_non_rate_limit_provider_error() -> None:
 
     assert delegate.call_count == 1
     assert clock.sleeps == []
+
+
+def test_zero_retry_after_uses_exponential_backoff() -> None:
+    clock = FakeClock()
+    policy = LiveProviderPolicy(
+        request_interval_seconds=0,
+        rate_limit_retry_attempts=1,
+        rate_limit_backoff_seconds=10,
+        rate_limit_max_backoff_seconds=60,
+    )
+    coordinator = LiveRequestCoordinator(
+        policy,
+        clock=clock,
+        sleeper=clock.sleep,
+        jitter=lambda _: 0,
+    )
+    delegate = SequenceProvider([lambda: rate_limit(0), response])
+
+    PacedRetryProvider(delegate, coordinator).generate(
+        system_instruction="system",
+        prompt="prompt",
+        response_schema={},
+    )
+
+    assert clock.sleeps == [10.0]

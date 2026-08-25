@@ -61,7 +61,7 @@ replay는 외부 API 없이 실제 스키마·문장 분할·사실값 검증·�
 근거 임계값, 문장 상한, schema repair 횟수와 출력 토큰 상한이 기록됩니다. 전체 골든셋 분석 24회와
 보고서 1회 호출이 발생하므로 사용량을 확인한 뒤 실행해야 합니다.
 
-FREE profile은 기본 13초, PAID profile은 기본 1초의 provider 호출 간격을 둡니다. 429 응답은 provider
+FREE profile은 기본 30초, PAID profile은 기본 1초의 provider 호출 간격을 둡니다. 429 응답은 provider
 응답의 retry delay 또는 15~60초 exponential backoff를 사용해 최대 5회 재시도하며, 429를 provider
 장애 circuit에 누적하지 않습니다. 간격과 재시도 정책은 CLI 옵션으로 결과의 `config.livePolicy`에
 함께 기록됩니다.
@@ -76,8 +76,9 @@ uv run python -m app.eval --profile live --plan FREE \
   --output live-v1-free.json
 ```
 
-중단된 동일 실행은 dataset, prompt, plan, model, 판정 설정, 호출 정책이 모두 같을 때만 이어서
-실행됩니다. 이미 성공한 분석은 provider를 다시 호출하지 않습니다.
+중단된 동일 실행은 dataset, prompt, plan, model, 판정 설정이 같을 때만 이어서 실행됩니다. pacing과
+재시도 정책은 quota 상황에 맞춰 더 보수적으로 바꿀 수 있으며, 이미 성공한 분석은 provider를 다시
+호출하지 않습니다.
 
 ```bash
 uv run python -m app.eval --profile live --plan FREE \
@@ -93,7 +94,7 @@ checkpoint에 기록된 값과 동일해야 합니다.
 
 ```bash
 uv run python -m app.eval --profile live --plan FREE \
-  --request-interval-seconds 13 \
+  --request-interval-seconds 30 \
   --compare live-v1-result.json --allow-prompt-version-change \
   --output live-v2-result.json
 ```

@@ -153,6 +153,9 @@ def _provider_error_details(error: errors.APIError) -> dict[str, object]:
     }
     if retry_after is not None:
         details["retryAfterSeconds"] = retry_after
+    quota_violations = _quota_violations(error)
+    if quota_violations:
+        details["quotaViolations"] = quota_violations
     return details
 
 
@@ -172,22 +175,56 @@ def _retry_after_seconds(error: errors.APIError) -> float | None:
         if parsed is not None:
             return parsed
 
-    payload = error.details
-    if not isinstance(payload, dict):
-        return None
-    error_payload = payload.get("error", payload)
-    if not isinstance(error_payload, dict):
-        return None
-    rpc_details = error_payload.get("details", [])
-    if not isinstance(rpc_details, list):
-        return None
-    for detail in rpc_details:
-        if not isinstance(detail, dict):
-            continue
+    for detail in _rpc_details(error):
         parsed = _seconds(detail.get("retryDelay"))
         if parsed is not None:
             return parsed
     return None
+
+
+def _quota_violations(error: errors.APIError) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    for detail in _rpc_details(error):
+        violations = detail.get("violations")
+        if not isinstance(violations, list):
+            continue
+        for violation in violations:
+            if not isinstance(violation, dict):
+                continue
+            sanitized = {
+                output_key: safe
+                for source_key, output_key in (
+                    ("quotaMetric", "quotaMetric"),
+                    ("quotaId", "quotaId"),
+                    ("quotaValue", "quotaValue"),
+                )
+                if (safe := _safe_quota_text(violation.get(source_key))) is not None
+            }
+            if sanitized:
+                result.append(sanitized)
+            if len(result) >= 5:
+                return result
+    return result
+
+
+def _rpc_details(error: errors.APIError) -> list[dict[str, object]]:
+    payload = error.details
+    if not isinstance(payload, dict):
+        return []
+    error_payload = payload.get("error", payload)
+    if not isinstance(error_payload, dict):
+        return []
+    details = error_payload.get("details", [])
+    if not isinstance(details, list):
+        return []
+    return [detail for detail in details if isinstance(detail, dict)]
+
+
+def _safe_quota_text(value: object) -> str | None:
+    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+        return None
+    normalized = re.sub(r"[^A-Za-z0-9_./:-]", "_", str(value).strip())[:200]
+    return normalized or None
 
 
 def _seconds(value: object) -> float | None:

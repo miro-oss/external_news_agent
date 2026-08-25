@@ -63,6 +63,9 @@ class LiveCheckpointStore:
                     "checkpoint에 현재 dataset에 없는 case가 있습니다: "
                     + ", ".join(sorted(unknown))
                 )
+            if self.checkpoint.config != expected.config:
+                self.checkpoint.config = expected.config
+                self._write()
         else:
             if path.exists():
                 raise CheckpointError(
@@ -134,10 +137,15 @@ def _validate_identity(current: LiveCheckpoint, expected: LiveCheckpoint) -> Non
         "analyze_prompt_version",
         "report_prompt_version",
         "plan",
-        "config",
     )
     mismatches = [field for field in fields if getattr(current, field) != getattr(expected, field)]
+    if _semantic_config(current.config) != _semantic_config(expected.config):
+        mismatches.append("config")
     if mismatches:
         raise CheckpointError(
             "checkpoint가 현재 live 실행과 호환되지 않습니다: " + ", ".join(mismatches)
         )
+
+
+def _semantic_config(config: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in config.items() if key != "livePolicy"}
