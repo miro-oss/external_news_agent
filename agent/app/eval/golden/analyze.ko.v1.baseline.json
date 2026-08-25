@@ -1,0 +1,19 @@
+{
+  "datasetVersion": "semiconductor.v1",
+  "analyzePromptVersion": "analyze.ko.v1",
+  "reportPromptVersion": "report.ko.v1",
+  "profile": "replay",
+  "metrics": {
+    "caseCount": 24,
+    "schemaChecks": 25,
+    "schemaPasses": 25,
+    "schemaPassRate": 1.0,
+    "bulletCount": 24,
+    "groundedBulletCount": 24,
+    "groundedRate": 1.0,
+    "koreanSummaryPasses": 24,
+    "koreanSummaryPassRate": 1.0,
+    "reportClaimCount": 40,
+    "unsupportedReportClaimCount": 0
+  }
+}

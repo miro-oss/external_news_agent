@@ -32,4 +32,32 @@ uv run ruff check .
 uv run pytest
 ```
 
+## Golden eval
+
+`app/eval/golden/semiconductor.v1.json`은 한국어·영어 반도체 기사 24건과
+`analyze.ko.v1` replay 출력을 담습니다. 기본 평가는 외부 API를 호출하지 않고 분석과 보고서의 실제
+스키마 검증 경로를 실행합니다.
+
+```bash
+uv run python -m app.eval --profile replay \
+  --compare app/eval/golden/analyze.ko.v1.baseline.json
+```
+
+평가 결과에는 schema pass rate, grounded rate, unsupported report claim count,
+Korean summary pass rate가 포함됩니다. `--output result.json`으로 결과를 남긴 뒤 다른 프롬프트 버전의
+결과와 비교할 수 있습니다. 기본 CI도 replay 기준선만 사용하며 회귀가 있으면 실패합니다.
+
+- schema pass rate: 분석 24건과 보고서 1건의 계약 검증 통과율
+- grounded rate: 분석 bullet 중 `grounded` 판정 비율 (`weak`은 포함하지 않음)
+- unsupported report claim count: 보고서 주장을 연결된 finding 요약·핵심 포인트와 기존 A4 규칙으로
+  검증했을 때 `ungrounded`인 개수
+- Korean summary pass rate: 한글 5자 이상이며 한글·영문 문자 중 한글 비율이 50% 이상인 요약 비율
+
+실제 LLM 평가는 provider 환경변수를 설정한 뒤 수동으로만 실행합니다. 전체 골든셋 분석 24회와
+보고서 1회 호출이 발생하므로 사용량을 확인한 뒤 실행해야 합니다.
+
+```bash
+uv run python -m app.eval --profile live --plan FREE --output live-result.json
+```
+
 실제 시크릿이나 provider API 키는 파일에 저장하지 않고 환경변수로만 전달합니다.
