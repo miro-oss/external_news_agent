@@ -1,13 +1,15 @@
 import re
 from dataclasses import dataclass
 
-from app.core.evidence import assess_with_rules
+from app.core.report_grounding import assess_finding_claim
 from app.schemas.analyze import Groundedness
-from app.schemas.evidence import EvidenceSentence
 from app.schemas.report import ReportFindingInput, ReportRequest, ReportResponse
 
 _HANGUL = re.compile(r"[가-힣]")
 _LATIN = re.compile(r"[A-Za-z]")
+_EXECUTIVE_CLAUSE_SEPARATOR = re.compile(
+    r"(?:[.!?。！？;；\n]+|,\s+|\s+(?:및|그리고)\s+|(?:하고|했고|이며|이고|였고|됐고),?\s+)"
+)
 _HIGHER_IS_BETTER = (
     "caseCount",
     "schemaChecks",
@@ -92,7 +94,7 @@ def score_report_claims(
     scores = [
         ReportClaimScore(
             key=f"executiveSummary:{index}",
-            status=_best_single_finding_status(
+            status=_executive_summary_status(
                 summary,
                 request.findings,
                 grounded_overlap=grounded_overlap,
@@ -234,6 +236,32 @@ def _best_single_finding_status(
     return "ungrounded"
 
 
+def _executive_summary_status(
+    claim: str,
+    findings: list[ReportFindingInput],
+    *,
+    grounded_overlap: float,
+    weak_overlap: float,
+) -> Groundedness:
+    clauses = [
+        clause.strip()
+        for clause in _EXECUTIVE_CLAUSE_SEPARATOR.split(claim)
+        if clause.strip()
+    ]
+    statuses = [
+        _best_single_finding_status(
+            clause,
+            findings,
+            grounded_overlap=grounded_overlap,
+            weak_overlap=weak_overlap,
+        )
+        for clause in clauses
+    ]
+    if not statuses or "ungrounded" in statuses:
+        return "ungrounded"
+    return "weak" if "weak" in statuses else "grounded"
+
+
 def _combined_finding_status(
     claim: str,
     findings: list[ReportFindingInput],
@@ -241,14 +269,9 @@ def _combined_finding_status(
     grounded_overlap: float,
     weak_overlap: float,
 ) -> Groundedness:
-    evidence_texts = [
-        text for finding in findings for text in [finding.summary_ko, *finding.key_points]
-    ]
-    if not evidence_texts:
-        return "ungrounded"
-    assessment = assess_with_rules(
+    assessment = assess_finding_claim(
         claim,
-        [EvidenceSentence(id=index, text=text) for index, text in enumerate(evidence_texts, 1)],
+        findings,
         grounded_overlap=grounded_overlap,
         weak_overlap=weak_overlap,
     )

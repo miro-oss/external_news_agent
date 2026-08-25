@@ -27,7 +27,7 @@ from app.llm.base import ProviderResponse, ProviderUsage
 
 _GOLDEN_DIR = Path(__file__).resolve().parents[1] / "app" / "eval" / "golden"
 _DATASET_PATH = _GOLDEN_DIR / "semiconductor.v1.json"
-_REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.json"
+_REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.1.json"
 _BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v1.baseline.json"
 
 
@@ -155,6 +155,25 @@ def test_report_fixture_exercises_all_grounding_outcomes() -> None:
     assert result.metrics["reportClaimCount"] == 9
     assert result.metrics["reportGroundedClaimCount"] == 6
     assert result.metrics["reportWeakClaimCount"] == 1
+    assert result.metrics["unsupportedReportClaimCount"] == 2
+
+
+def test_executive_summary_supports_independent_clauses_without_fact_laundering() -> None:
+    fixture = load_report_fixture(_REPORT_FIXTURE_PATH)
+    payload = json.loads(fixture.model_dump_json(by_alias=True))
+    payload["output"]["executiveSummary"][0] = (
+        "삼성전자는 2026년 4분기에 HBM4 파일럿 생산을 확대하고, "
+        "SK하이닉스는 클라우드 고객과 3년 HBM 공급 계약을 맺었다."
+    )
+
+    result = run_evaluation(
+        load_dataset(_DATASET_PATH),
+        settings=eval_settings(),
+        report_fixture=GoldenReportFixture.model_validate(payload),
+    )
+
+    assert result.errors == ()
+    assert result.metrics["reportGroundedClaimCount"] == 6
     assert result.metrics["unsupportedReportClaimCount"] == 2
 
 
