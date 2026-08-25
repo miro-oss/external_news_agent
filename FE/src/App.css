@@ -583,11 +583,6 @@ tbody tr:hover td {
   background: var(--surface-sunken);
 }
 
-.numeric {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
 .badge {
   display: inline-block;
   padding: 0.1rem 0.45rem;
