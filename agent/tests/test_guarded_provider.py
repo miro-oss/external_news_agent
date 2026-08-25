@@ -3,6 +3,7 @@ from threading import Event, Thread
 
 import pytest
 
+from app.core.breaker import CircuitState
 from app.core.errors import AgentError
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.guarded_provider import GuardedAnalyzeProvider
@@ -79,3 +80,22 @@ def test_concurrency_limit_rejects_second_call_without_calling_delegate() -> Non
     finally:
         release.set()
         thread.join(timeout=1)
+
+
+def test_rate_limit_does_not_open_provider_circuit() -> None:
+    class RateLimitedProvider(Provider):
+        def generate(self, **_: object) -> ProviderResponse:
+            raise AgentError(
+                status_code=503,
+                code="PROVIDER_UNAVAILABLE",
+                message="rate limited",
+                details={"rateLimited": True, "providerStatusCode": 429},
+            )
+
+    provider = guarded(RateLimitedProvider(), failure_threshold=2)
+
+    for _ in range(3):
+        with pytest.raises(AgentError):
+            provider.generate(system_instruction="system", prompt="prompt", response_schema={})
+
+    assert provider.circuit_breaker.state is CircuitState.CLOSED

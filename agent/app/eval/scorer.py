@@ -146,6 +146,8 @@ def compare_results(
     *,
     allow_prompt_version_change: bool = False,
 ) -> dict[str, object]:
+    _require_complete_result(current, "current result")
+    _require_complete_result(baseline, "baseline")
     for key in _METADATA_KEYS:
         _require_key(current, key, "current result")
         _require_key(baseline, key, "baseline")
@@ -270,6 +272,18 @@ def _metrics(payload: dict[str, object], source: str) -> dict[str, object]:
     if not isinstance(metrics, dict):
         raise ComparisonError(f"{source} metrics must be an object")
     return metrics
+
+
+def _require_complete_result(payload: dict[str, object], source: str) -> None:
+    _require_key(payload, "complete", source)
+    if payload["complete"] is not True:
+        raise ComparisonError(f"{source} is incomplete and cannot be used for comparison")
+    _require_key(payload, "errors", source)
+    errors = payload["errors"]
+    if not isinstance(errors, list):
+        raise ComparisonError(f"{source} errors must be an array")
+    if errors:
+        raise ComparisonError(f"{source} contains evaluation errors")
 
 
 def _number(payload: dict[str, object], key: str, source: str) -> float:

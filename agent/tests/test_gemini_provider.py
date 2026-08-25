@@ -1,8 +1,10 @@
 from types import SimpleNamespace
 
+import pytest
 from google.genai import errors
 
 from app.core.config import Settings
+from app.core.errors import AgentError
 from app.llm import gemini_provider
 from app.llm.gemini_provider import GeminiAnalyzeProvider
 
@@ -44,6 +46,8 @@ def test_uses_gemini_json_schema_contract() -> None:
     assert models.config.response_mime_type == "application/json"
     assert models.config.response_json_schema["additionalProperties"] is False
     assert "minLength" not in models.config.response_json_schema["properties"]["name"]
+    assert models.config.automatic_function_calling.disable is True
+    assert models.config.temperature == 0
     assert response.usage.input_tokens == 12
     assert response.usage.output_tokens == 4
 
@@ -106,3 +110,40 @@ def test_retries_transient_gemini_server_error_once() -> None:
 
     assert response.text == '{"ok":true}'
     assert models.calls == 2
+
+
+def test_exposes_sanitized_rate_limit_details_without_api_response_body() -> None:
+    class RateLimitedModels(FakeModels):
+        def generate_content(self, *, model: str, contents: str, config):
+            del model, contents, config
+            response = SimpleNamespace(headers={"retry-after": "7"})
+            raise errors.ClientError(
+                429,
+                {
+                    "error": {
+                        "status": "RESOURCE_EXHAUSTED",
+                        "message": "sensitive provider response must not be copied",
+                    }
+                },
+                response,
+            )
+
+    settings = Settings(GEMINI_API_KEY="gemini-key", GEMINI_MODEL="configured-gemini")
+    provider = GeminiAnalyzeProvider(settings, SimpleNamespace(models=RateLimitedModels()))
+
+    with pytest.raises(AgentError) as error:
+        provider.generate(
+            system_instruction="system",
+            prompt="prompt",
+            response_schema={"type": "object"},
+        )
+
+    assert error.value.code == "PROVIDER_UNAVAILABLE"
+    assert error.value.details == {
+        "provider": "gemini",
+        "providerStatusCode": 429,
+        "providerStatus": "RESOURCE_EXHAUSTED",
+        "rateLimited": True,
+        "retryable": True,
+        "retryAfterSeconds": 7.0,
+    }
