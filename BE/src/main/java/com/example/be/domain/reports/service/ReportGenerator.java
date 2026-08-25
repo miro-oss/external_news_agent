@@ -79,8 +79,8 @@ public class ReportGenerator {
         if (findings.isEmpty()) {
             body.append("- 이번 실행에서 기사 ").append(sourceStats.collected())
                     .append(sourceStats.evidenceExcluded() > 0
-                            ? "건을 관측했지만 근거가 확인된 LLM finding이 없어 기사 내용을 요약하지 않았습니다.\n"
-                            : "건을 관측했지만 실제 LLM 분석 finding이 없어 기사 내용을 요약하지 않았습니다.\n");
+                            ? "건을 관측했지만 근거가 확인된 분석 결과가 없어 기사 내용을 요약하지 않았습니다.\n"
+                            : "건을 관측했지만 분석 결과가 없어 기사 내용을 요약하지 않았습니다.\n");
         } else {
             findings.stream().limit(5).forEach(finding -> body
                     .append("- ").append(markdownText(
@@ -89,13 +89,15 @@ public class ReportGenerator {
 
         Map<String, Long> riskCounts = counts(findings, finding -> finding.getRiskLevel().toApiValue());
         Map<String, Long> categoryCounts = counts(findings, Finding::getCategory);
+        // 집계 키는 apiValue 그대로 두고 찍을 때만 한글로 바꾼다. 키까지 한글로 만들면
+        // 같은 값이 코드 안에서 두 이름을 갖게 된다.
         body.append("\n## 요약 통계\n\n")
-                .append("- 전체 finding: ").append(findings.size()).append("건\n")
-                .append("- 위험도: high ").append(riskCounts.getOrDefault("high", 0L))
-                .append(" · medium ").append(riskCounts.getOrDefault("medium", 0L))
-                .append(" · low ").append(riskCounts.getOrDefault("low", 0L)).append("\n");
+                .append("- 전체 근거: ").append(findings.size()).append("건\n")
+                .append("- 위험도: 높음 ").append(riskCounts.getOrDefault("high", 0L))
+                .append(" · 보통 ").append(riskCounts.getOrDefault("medium", 0L))
+                .append(" · 낮음 ").append(riskCounts.getOrDefault("low", 0L)).append("\n");
         if (!categoryCounts.isEmpty()) {
-            body.append("- 카테고리: ");
+            body.append("- 분류: ");
             body.append(categoryCounts.entrySet().stream()
                     .map(entry -> entry.getKey() + " " + entry.getValue())
                     .reduce((left, right) -> left + " · " + right)
@@ -105,14 +107,14 @@ public class ReportGenerator {
 
         body.append("\n## 기사별 분석\n");
         if (findings.isEmpty()) {
-            body.append("\nSTUB, 비LLM 또는 근거 미확인 분석 본문은 보고서 오염 방지를 위해 포함하지 않았습니다.\n");
+            body.append("\n원문에서 근거를 확인하지 못한 분석은 보고서에 담지 않았습니다.\n");
         }
         for (Finding finding : findings) {
             body.append("\n### ").append(markdownText(finding.getArticle().getTitle())).append("\n\n")
                     .append(markdownText(ReportEvidencePolicy.reportSummary(finding))).append("\n\n")
                     .append("- 분류: ").append(markdownText(finding.getCategory()))
-                    .append(" · 위험도: ").append(finding.getRiskLevel().toApiValue())
-                    .append(" · 관련도: ").append(finding.getRelevance().toApiValue()).append("\n");
+                    .append(" · 위험도: ").append(ReportLabels.risk(finding.getRiskLevel()))
+                    .append(" · 관련도: ").append(ReportLabels.relevance(finding.getRelevance())).append("\n");
             ReportEvidencePolicy.supportedKeyPoints(finding).forEach(point -> body
                     .append("- 핵심: ").append(markdownText(point.text())).append("\n"));
             if (safeHttpUrl(finding.getArticle().getCanonicalUrl())) {

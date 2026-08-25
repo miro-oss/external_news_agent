@@ -14,6 +14,11 @@ FE/dist-ssr/
 BE/.gradle/
 BE/build/
 
+# 루트에 떨어지는 실행 jar. 70MB짜리라 git add . 한 번이면 히스토리에 박히고,
+# 그때는 되돌리는 값이 저장소 전체 재작성이다. 앞에 슬래시를 붙여 루트에만 걸리게 해
+# 추적 대상인 BE/gradle/wrapper/gradle-wrapper.jar는 건드리지 않는다.
+/*.jar
+
 # Local live eval artifacts
 agent/live-*.json
 agent/*.checkpoint.json
