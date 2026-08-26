@@ -669,8 +669,16 @@ tbody tr:hover td {
   margin-bottom: 0.7rem;
 }
 
-.settings-top-row > * {
+.settings-top-row > *,
+.settings-side-stack > * {
   margin-bottom: 0;
+}
+
+/* align-content로 카드를 위로 모은다. 안 그러면 남는 높이를 셋이 나눠 가져 사이가 벌어진다. */
+.settings-side-stack {
+  display: grid;
+  align-content: start;
+  gap: 0.7rem;
 }
 
 /* =============================================================================
@@ -797,9 +805,10 @@ tbody tr:hover td {
   color: var(--primary-strong);
 }
 
+/* 실행 컨트롤과 같은 이유로 auto-fit이다. 이 패널도 이제 뷰포트가 아니라 열 폭이 결정한다. */
 .usage-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 0.6rem;
   margin: 1.35rem 0;
 }
@@ -858,9 +867,10 @@ tbody tr:hover td {
   background: var(--primary);
 }
 
+/* 폼 둘이 나란히 서려면 각각 260px는 있어야 한다. 절반 폭 열에서는 못 서므로 위아래로 눕는다. */
 .llm-actions-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 0.6rem;
 }
 
