@@ -233,7 +233,8 @@ function ArticleCard({ article, onOpen }: { article: ArticleSummary; onOpen: () 
         <span className={`signal-dot risk-${article.riskLevel}`} aria-hidden="true" />
         <span>{article.category}</span>
         <span className="separator">·</span>
-        <span>{article.topicName}</span>
+        {/* 이 줄에서 길이를 예측할 수 없는 값은 주제명뿐이다. 자리가 모자라면 여기가 줄어든다. */}
+        <span className="article-card-topic">{article.topicName}</span>
         <time dateTime={article.publishedAt ?? undefined}>{formatShortDate(article.publishedAt)}</time>
       </div>
       <h2>{article.title}</h2>
@@ -266,10 +267,37 @@ function ArticleCard({ article, onOpen }: { article: ArticleSummary; onOpen: () 
   )
 }
 
+/**
+ * 도착할 카드의 골격을 같은 자리에 미리 세운다.
+ *
+ * <p>전에는 회색 판 세 장이었다. 판과 실제 카드의 높이가 달라서, 기사가 도착하는 순간 목록 전체가
+ * 아래로 밀렸다. 카드와 같은 구성(꼬리표 · 제목 · 요약 · 배지)을 같은 높이로 그려 두면 그 밀림이
+ * 사라지고, 기다리는 동안에도 무엇이 오는지가 읽힌다.
+ *
+ * <p>한 화면에 보이는 만큼인 넷을 그린다. 셋만 그리면 두 열에서 마지막 줄이 반만 차 있어서,
+ * 목록이 여기서 끝나는 것처럼 보인다.
+ *
+ * <p>내용이 없는 장식이므로 화면 낭독기에서는 통째로 감춘다. 불러오는 중이라는 사실은 바깥
+ * 컨테이너의 aria-busy와 aria-label이 이미 말한다.
+ */
 function ArticleListSkeleton() {
   return (
     <div className="article-grid" aria-label="기사 목록을 불러오는 중" aria-busy="true">
-      {[0, 1, 2].map((index) => <div className="article-card skeleton" key={index} />)}
+      {[0, 1, 2, 3].map((index) => (
+        <div className="article-card article-card-skeleton" key={index} aria-hidden="true">
+          <span className="skeleton-line skeleton-line-kicker" />
+          <span className="skeleton-line skeleton-line-title" />
+          <span className="skeleton-line skeleton-line-title skeleton-line-title-short" />
+          <span className="skeleton-line" />
+          <span className="skeleton-line" />
+          <span className="skeleton-line skeleton-line-body-short" />
+          <div className="skeleton-badges">
+            <span />
+            <span />
+            <span />
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

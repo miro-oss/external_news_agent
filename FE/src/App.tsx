@@ -53,12 +53,43 @@ function usePageRoute() {
   return { page, go }
 }
 
+/**
+ * 페이지가 조금이라도 내려갔는지만 알려 준다.
+ *
+ * <p>내비게이션은 반투명 유리판이라 아래 내용이 비쳐 지나간다. 맨 위에서는 내비게이션과 본문이
+ * 이어진 한 장이라 경계선을 그을 자리가 없지만, 내용이 그 아래로 들어가기 시작하면 어디까지가
+ * 떠 있는 판인지가 흐려진다. 그때만 선을 올려 두면 선이 장식이 아니라 "위에 더 있다"는 뜻이 된다.
+ *
+ * <p>스크롤은 손가락을 굴리는 동안 초당 수십 번 들어온다. 매번 setState를 하면 그때마다 화면
+ * 전체가 다시 그려지므로, 넘었는지 여부만 boolean으로 바꾸고 값이 실제로 달라질 때만 상태를
+ * 갱신한다. React는 같은 값으로 set하면 리렌더를 건너뛴다.
+ *
+ * <p>passive: true — 이 리스너가 스크롤을 막지 않는다고 미리 알려서, 브라우저가 리스너를 기다리지
+ * 않고 바로 스크롤을 진행한다.
+ */
+function useScrolled(threshold = 8) {
+  const [scrolled, setScrolled] = useState(() => window.scrollY > threshold)
+
+  useEffect(() => {
+    function sync() {
+      setScrolled(window.scrollY > threshold)
+    }
+    // 뒤로 가기로 스크롤 위치가 복원된 채 들어올 수 있다. 처음 한 번은 직접 맞춘다.
+    sync()
+    window.addEventListener('scroll', sync, { passive: true })
+    return () => window.removeEventListener('scroll', sync)
+  }, [threshold])
+
+  return scrolled
+}
+
 function App() {
   const { page, go } = usePageRoute()
+  const scrolled = useScrolled()
 
   return (
     <div className="app-shell">
-      <nav className="app-nav" aria-label="주요 화면">
+      <nav className="app-nav" aria-label="주요 화면" data-scrolled={scrolled}>
         {/* 로고는 홈으로 가는 길이다. 어디서든 분석 기사로 돌아올 수 있게 누를 수 있게 둔다. */}
         <button type="button" className="app-logo" onClick={() => go('articles')}>
           <strong>News Signal Desk</strong>

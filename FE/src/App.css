@@ -47,9 +47,37 @@
   --radius-sm: 12px;
   --radius-xs: 8px;
 
-  --shadow-sm: 0 1px 2px rgba(25, 31, 40, 0.04), 0 2px 8px rgba(25, 31, 40, 0.03);
-  --shadow: 0 2px 4px rgba(25, 31, 40, 0.03), 0 8px 24px rgba(25, 31, 40, 0.06);
-  --shadow-lg: 0 8px 16px rgba(25, 31, 40, 0.08), 0 24px 64px rgba(25, 31, 40, 0.16);
+  /*
+    카드는 배경보다 밝다는 것만으로 서 있었다. 흰 카드와 #f2f4f6은 밝기 차가 작아서, 화면을
+    비스듬히 보거나 밝기를 낮춘 노트북에서는 카드 경계가 배경에 녹는다. 헤어라인 한 겹을 그림자
+    맨 앞에 세워 면의 끝을 확정하고, 나머지 층이 높이를 만든다. 테두리가 아니라 그림자라서 레이아웃
+    크기를 건드리지 않는다.
+  */
+  --hairline: 0 0 0 1px rgba(25, 31, 40, 0.05);
+  --shadow-sm: var(--hairline), 0 1px 2px rgba(25, 31, 40, 0.04), 0 2px 8px rgba(25, 31, 40, 0.03);
+  --shadow: var(--hairline), 0 2px 4px rgba(25, 31, 40, 0.04), 0 12px 28px rgba(25, 31, 40, 0.08);
+  --shadow-lg: 0 8px 16px rgba(25, 31, 40, 0.08), 0 32px 80px rgba(25, 31, 40, 0.18);
+
+  /*
+    모션 토큰. 전에는 140ms·180ms·220ms·240ms가 규칙 없이 흩어져 있어서, 같은 화면 안에서도
+    반응 속도가 요소마다 달랐다. 세 단계로 줄인다 — 색이 바뀌는 정도는 1단, 자리가 움직이면 2단,
+    화면을 덮는 것이 들어오면 3단.
+
+    --ease-out은 처음에 빠르고 끝에서 길게 눕는 곡선이다. 손을 뗀 물체가 미끄러지다 멈추는 모양이라
+    ease보다 "멈춘다"는 느낌이 분명하다.
+  */
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-1: 130ms;
+  --dur-2: 220ms;
+  --dur-3: 320ms;
+
+  /*
+    본문 폭과 좌우 여백. 여백을 vw에 걸어 두면 1024px와 1920px가 같은 여백을 쓰는 일이 없어진다.
+    clamp의 가운데 항이 vw를 품고 있어도 양 끝값이 있어서 좁은 화면에서 여백이 사라지거나 넓은
+    화면에서 과하게 벌어지지 않는다.
+  */
+  --content-max: 1280px;
+  --gutter: clamp(1rem, 3.2vw, 1.5rem);
 
   color-scheme: light;
   background: var(--bg);
@@ -72,6 +100,63 @@ body {
   outline-offset: 2px;
 }
 
+::selection {
+  background: var(--primary-weak);
+  color: var(--primary-strong);
+}
+
+/*
+  스크롤이 생기는 곳(표, 보고서 목록, 소스 체크리스트)은 전부 카드 안이다. 브라우저 기본 스크롤바는
+  카드보다 굵고 진해서, 카드 안에 회색 기둥이 하나 서 있는 것처럼 보인다. 얇게 줄이고 손이 올라갈
+  때만 진해지게 한다. Firefox는 scrollbar-width로, 나머지는 아래 -webkit- 규칙으로 간다.
+*/
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--fg-4) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/*
+  배경을 content-box에만 칠하고 투명한 테두리를 두르면, 실제 막대는 6px인데 잡을 수 있는 폭은
+  10px가 된다 — 얇아 보이되 집기는 어렵지 않다.
+*/
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--fg-4);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-3);
+  background-clip: content-box;
+}
+
+/*
+  움직임을 줄여 달라고 설정한 사람에게는 이동과 확대를 없앤다. 지속 시간을 0이 아니라 1ms로 두는
+  이유는, 0으로 만들면 transitionend·animationend를 기다리는 코드가 영영 깨어나지 않기 때문이다.
+  색이 바뀌는 것 자체는 어지럼증을 만들지 않지만, 여기서 구분해 남기려면 규칙이 몇 배로 늘어난다.
+  1ms면 이동도 페이드도 눈에 걸리지 않으므로 전부 같이 끈다.
+*/
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* =============================================================================
    셸 · 내비게이션
    ============================================================================= */
@@ -79,6 +164,11 @@ body {
   min-height: 100vh;
 }
 
+/*
+  스크롤하지 않은 화면에서는 내비게이션과 본문이 이어진 한 장이다. 그때 경계선을 그으면 아무것도
+  가리지 않는 선이 하나 남는다. 내용이 내비게이션 아래로 들어가기 시작할 때만 선이 올라오게 해서,
+  선이 "지금 위에 더 있다"는 뜻을 갖게 한다. data-scrolled는 App이 스크롤 위치를 보고 붙인다.
+*/
 .app-nav {
   position: sticky;
   top: 0;
@@ -87,10 +177,17 @@ body {
   align-items: center;
   gap: 2rem;
   height: 64px;
-  padding: 0 1.5rem;
+  padding: 0 var(--gutter);
+  box-shadow: 0 1px 0 transparent;
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
+  transition: box-shadow var(--dur-2) var(--ease-out), background var(--dur-2) var(--ease-out);
+}
+
+.app-nav[data-scrolled='true'] {
+  box-shadow: 0 1px 0 var(--line);
+  background: rgba(255, 255, 255, 0.86);
 }
 
 /* 로고는 홈으로 가는 버튼이다. 글자 모양은 안쪽 strong이 그대로 정하고, 여기서는 button이
@@ -101,7 +198,7 @@ body {
   border-radius: 8px;
   background: transparent;
   color: inherit;
-  transition: opacity 140ms ease;
+  transition: opacity var(--dur-1) var(--ease-out);
 }
 
 .app-logo:hover {
@@ -134,7 +231,7 @@ body {
   font-weight: 600;
   letter-spacing: -0.02em;
   white-space: nowrap;
-  transition: background 140ms ease, color 140ms ease;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
 
 .nav-link:hover {
@@ -147,18 +244,29 @@ body {
   color: #fff;
 }
 
+/*
+  본문 폭을 1120px에서 1280px로 넓혔다. 1440px 화면에서 기사 카드가 두 장뿐이라 한 장이 545px까지
+  늘어났는데, 세 줄로 자르는 요약문이 그 폭에서는 한 줄 반이면 끝나서 카드 아래가 비었다. 폭을
+  넓히고 아래에서 열을 셋으로 늘리면 카드가 제 크기를 찾는다.
+*/
 main {
-  max-width: 1120px;
+  width: 100%;
+  max-width: var(--content-max);
+  box-sizing: border-box;
   margin: 0 auto;
-  padding: 2.25rem 1.5rem 6rem;
+  padding: clamp(1.5rem, 3.2vw, 2.25rem) var(--gutter) 6rem;
 }
 
 /* =============================================================================
    타이포그래피 · 공통 텍스트
    ============================================================================= */
+/*
+  화면 제목만 유동값이다. 모바일 1.55rem에서 와이드 2.1rem까지 연속으로 걷는다. 본문·라벨까지
+  vw에 걸면 글자 크기가 화면마다 달라져 읽는 리듬이 흔들리므로, 위계의 꼭대기 하나만 움직인다.
+*/
 h1 {
   margin: 0;
-  font-size: 1.75rem;
+  font-size: clamp(1.55rem, 1.2rem + 1.1vw, 2.1rem);
   font-weight: 800;
   letter-spacing: -0.04em;
 }
@@ -189,7 +297,7 @@ h4 {
   align-items: flex-end;
   justify-content: space-between;
   gap: 2rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: clamp(1.15rem, 2vw, 1.6rem);
 }
 
 .page-header h1 + .muted {
@@ -265,7 +373,8 @@ button {
   font-weight: 700;
   letter-spacing: -0.02em;
   cursor: pointer;
-  transition: background 140ms ease, transform 90ms ease, color 140ms ease;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
 }
 
 /*
@@ -277,8 +386,13 @@ button:hover {
   background: var(--primary-strong);
 }
 
+/*
+  누르는 순간은 되돌아오는 순간보다 짧아야 손끝에 붙는다. 손을 대면 즉시 들어가고(60ms), 떼면
+  위 규칙의 130ms로 천천히 올라온다. 같은 속도로 오가면 버튼이 눌린 게 아니라 흔들린 것처럼 보인다.
+*/
 button:active:not(:disabled) {
-  transform: scale(0.985);
+  transform: scale(0.975);
+  transition-duration: 60ms;
 }
 
 button:disabled {
@@ -357,7 +471,7 @@ select {
   color: var(--fg);
   font: inherit;
   font-size: 0.94rem;
-  transition: border-color 140ms ease, background-color 140ms ease;
+  transition: border-color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out);
 }
 
 input::placeholder {
@@ -427,6 +541,7 @@ select:disabled {
   flex-direction: column;
   gap: 0.15rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.35rem;
   border-radius: var(--radius-sm);
   background: var(--bg);
@@ -443,6 +558,7 @@ select:disabled {
   font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out);
 }
 
 .check:hover {
@@ -493,7 +609,7 @@ section {
   color: var(--fg);
   font-size: 1rem;
   text-align: left;
-  transition: background 140ms ease;
+  transition: background var(--dur-1) var(--ease-out);
 }
 
 .collapsible-trigger:hover:not(:disabled) {
@@ -537,7 +653,11 @@ section {
   flex-shrink: 0;
   margin-left: auto;
   color: var(--fg-4);
-  transition: transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+  transition: transform var(--dur-2) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+
+.collapsible-trigger:hover .collapsible-chevron {
+  color: var(--fg-3);
 }
 
 .collapsible.open .collapsible-chevron {
@@ -546,7 +666,7 @@ section {
 
 .collapsible-body {
   padding: 0.15rem 1.35rem 1.35rem;
-  animation: collapsible-in 200ms cubic-bezier(0.32, 0.72, 0, 1);
+  animation: collapsible-in var(--dur-2) var(--ease-out);
 }
 
 /* 폼 하나가 카드 전체를 차지하므로 제출 버튼도 카드 폭을 그대로 쓴다. */
@@ -573,9 +693,14 @@ section {
 /* =============================================================================
    표 · 배지
    ============================================================================= */
+/*
+  overscroll-behavior: contain — 표 끝까지 내린 뒤에도 계속 굴리면 스크롤이 페이지로 넘어가서,
+  표를 훑어보려던 사람이 화면 밖으로 밀려났다. 여기서 끊는다. 아래 스크롤 영역도 같은 이유다.
+*/
 .table-scroll {
   max-height: 420px;
   overflow: auto;
+  overscroll-behavior: contain;
   border-radius: var(--radius-sm);
   background: var(--bg);
 }
@@ -933,7 +1058,7 @@ tbody tr:hover td {
   border-radius: var(--radius-sm);
   background: var(--surface);
   cursor: pointer;
-  transition: border-color 140ms ease;
+  transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
 }
 
 .plan-option:has(input:checked) {
@@ -1010,6 +1135,8 @@ tbody tr:hover td {
   color: var(--fg-2);
   font-size: 0.86rem;
   font-weight: 600;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out),
+    transform var(--dur-1) var(--ease-out);
 }
 
 .audience-chip:hover:not(.active) {
@@ -1074,7 +1201,45 @@ tbody tr:hover td {
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   cursor: pointer;
-  transition: transform 180ms cubic-bezier(0.32, 0.72, 0, 1), box-shadow 180ms ease;
+  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+  /*
+    backwards만 쓴다. forwards까지 주면 애니메이션이 끝난 뒤에도 마지막 프레임이 남아서, 아래
+    :hover의 translateY(-2px)가 적용되지 않는다. backwards는 시작 전 상태만 당겨 쓰고 끝나면
+    평소 스타일로 완전히 돌아온다.
+  */
+  animation: card-in var(--dur-3) var(--ease-out) backwards;
+}
+
+/*
+  스무 장이 한꺼번에 나타나면 목록이 아니라 화면 전체가 깜빡인 것처럼 보인다. 앞 다섯 장만 45ms씩
+  늦춰 위에서 아래로 흐르게 하고, 나머지는 같은 시점에 붙인다 — 스무 번째 카드까지 계단을 이으면
+  마지막 카드가 900ms 뒤에 도착해서 로딩이 끝났는데도 끝나지 않은 것처럼 느껴진다.
+*/
+.article-card:nth-child(2) {
+  animation-delay: 45ms;
+}
+
+.article-card:nth-child(3) {
+  animation-delay: 90ms;
+}
+
+.article-card:nth-child(4) {
+  animation-delay: 135ms;
+}
+
+.article-card:nth-child(5) {
+  animation-delay: 180ms;
+}
+
+.article-card:nth-child(n + 6) {
+  animation-delay: 225ms;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
 }
 
 /* 카드가 hover에 반응하니 누를 수 있어 보인다. 실제로 눌리게 만든다. */
@@ -1084,10 +1249,23 @@ tbody tr:hover td {
 }
 
 .article-card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
   box-shadow: var(--shadow);
 }
 
+/* 카드 전체가 눌리는 버튼이므로 버튼과 같은 반응을 준다. 들렸다가 그 자리에서 눌린다. */
+.article-card:active {
+  transform: translateY(-1px) scale(0.995);
+  transition-duration: 60ms;
+}
+
+/*
+  분류 · 주제명 · 날짜가 한 줄에 선다. 카드가 세 열로 좁아지자 이 줄이 먼저 무너졌다 — flex 항목이
+  기본값대로 줄어들면서 "기업"이 "기 / 업"으로 쪼개지고 날짜까지 두 줄로 접혔다.
+
+  줄어들 자리를 하나로 정한다. 분류와 날짜는 길이가 정해져 있으니 줄어들지 않게 못 박고, 길이를
+  예측할 수 없는 주제명만 남는 폭을 받아 말줄임표로 잘린다. 잘려도 뜻이 남는 값이 그것뿐이다.
+*/
 .article-card-topline {
   display: flex;
   align-items: center;
@@ -1095,10 +1273,24 @@ tbody tr:hover td {
   color: var(--fg-3);
   font-size: 0.78rem;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.article-card-topline > * {
+  flex-shrink: 0;
+}
+
+/* flex 항목은 min-width가 auto라 내용보다 작아지지 않는다. 0으로 풀어야 말줄임표가 걸린다. */
+.article-card-topic {
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .article-card-topline time {
   margin-left: auto;
+  padding-left: 0.2rem;
   font-weight: 500;
 }
 
@@ -1259,10 +1451,69 @@ tbody tr:hover td {
   color: var(--danger);
 }
 
-.skeleton {
+/*
+  전에는 카드 한 장을 통째로 회색 덩어리로 칠했다. 그러면 기다리는 동안 화면이 "무엇이 오는지"를
+  알려 주지 못하고, 내용이 도착하는 순간 회색 판이 글자 뭉치로 갑자기 바뀌어 레이아웃이 튄다.
+  진짜 카드의 골격(꼬리표 · 제목 두 줄 · 요약 세 줄 · 배지)을 같은 자리에 같은 높이로 세워 두면,
+  도착이 교체가 아니라 채워짐이 된다.
+
+  뼈대에는 hover·press가 없어야 한다 — 아직 누를 것이 없다.
+*/
+.article-card-skeleton {
+  gap: 0.55rem;
+  cursor: default;
+}
+
+.article-card-skeleton:hover,
+.article-card-skeleton:active {
+  transform: none;
+  box-shadow: var(--shadow-sm);
+}
+
+/* 카드가 세로 flex라 뼈대 줄도 flex item이다. 기본 flex-shrink에 맡기면 높이가 눌린다. */
+.skeleton-line {
+  height: 0.72rem;
+  flex: none;
+  border-radius: 999px;
+}
+
+.skeleton-line-kicker {
+  width: 42%;
+  height: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.skeleton-line-title {
+  height: 1.05rem;
+}
+
+.skeleton-line-title-short {
+  width: 62%;
+  margin-bottom: 0.5rem;
+}
+
+.skeleton-line-body-short {
+  width: 78%;
+}
+
+/* 배지 줄은 카드 바닥에 붙는다. 실제 카드의 .article-meta가 margin-top: auto로 앉는 자리다. */
+.skeleton-badges {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: auto;
+  padding-top: 1.1rem;
+}
+
+.skeleton-badges span {
+  width: 3.4rem;
+  height: 1.1rem;
+  border-radius: 6px;
+}
+
+.skeleton-line,
+.skeleton-badges span {
   background: linear-gradient(100deg, #eef0f3 20%, #f7f8fa 40%, #eef0f3 60%);
   background-size: 200% 100%;
-  box-shadow: none;
   animation: shimmer 1.3s infinite linear;
 }
 
@@ -1290,6 +1541,10 @@ body.modal-open {
   overflow: hidden;
 }
 
+/*
+  배경은 그대로 나타나고 패널만 미끄러졌다. 화면을 덮는 어둠이 한 프레임 만에 켜지니, 부드럽게
+  들어오는 패널과 속도가 맞지 않아 패널이 뒤늦게 따라붙는 것처럼 보였다. 둘을 같이 출발시킨다.
+*/
 .modal-backdrop {
   position: fixed;
   z-index: 100;
@@ -1298,6 +1553,14 @@ body.modal-open {
   justify-content: flex-end;
   background: rgba(25, 31, 40, 0.4);
   backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: backdrop-in var(--dur-3) var(--ease-out);
+}
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .article-modal {
@@ -1305,15 +1568,24 @@ body.modal-open {
   width: min(780px, 96vw);
   height: 100%;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface);
   box-shadow: var(--shadow-lg);
-  animation: modal-in 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  animation: modal-in var(--dur-3) var(--ease-out);
 }
 
 @keyframes modal-in {
   from {
-    transform: translateX(24px);
+    transform: translateX(32px);
     opacity: 0;
+  }
+}
+
+/* 모바일 하단 시트용. 아래에서 완전히 올라오므로 opacity를 같이 건드리지 않는다 — 반투명하게
+   떠오르면 뒤 배경이 비쳐서 종이 한 장이 올라온 느낌이 깨진다. */
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
   }
 }
 
@@ -1437,6 +1709,7 @@ body.modal-open {
   color: #c2c9d1;
   font-size: 0.78rem;
   font-weight: 600;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
 
 .perspective-tab:hover:not(.active) {
@@ -1459,12 +1732,24 @@ body.modal-open {
   color: #cfe3ff;
 }
 
+/*
+  탭을 바꾸면 이 칸의 글자만 소리 없이 갈린다. 어느 탭이 켜졌는지는 위에서 색으로 보이지만, 아래
+  내용이 바뀌었다는 신호는 없어서 같은 글이 그대로인지 헷갈렸다. 짧은 페이드로 "여기가 갈렸다"고
+  말한다. 애니메이션을 다시 재생시키는 건 React 쪽 key다 — 관점이 바뀌면 이 노드가 새로 붙는다.
+*/
 .perspective-reason {
   min-height: 84px;
   margin-top: 0.5rem;
   padding: 0.9rem 1rem;
   border-radius: var(--radius-xs);
   background: rgba(255, 255, 255, 0.06);
+  animation: fade-in var(--dur-2) var(--ease-out);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .perspective-level {
@@ -1584,6 +1869,11 @@ body.modal-open {
   gap: 0.1rem;
 }
 
+/*
+  근거 버튼을 누르면 본문의 해당 문장으로 스크롤하면서 배경이 파랗게 바뀐다. 전에는 그 색이 즉시
+  켜져서, 스크롤이 도착하기 전에 이미 칠해져 있었다. 색을 스크롤보다 느리게 올리면 눈이 문장에
+  도착한 다음에 강조가 따라와, 어디를 보라는 것인지가 분명해진다.
+*/
 .sentence-list p {
   margin: 0;
   padding: 0.6rem 0;
@@ -1591,6 +1881,7 @@ body.modal-open {
   color: var(--fg-2);
   font-size: 0.92rem;
   line-height: 1.75;
+  transition: background var(--dur-3) var(--ease-out), color var(--dur-3) var(--ease-out);
 }
 
 .sentence-list p.highlighted {
@@ -1654,6 +1945,7 @@ body.modal-open {
 .report-list {
   max-height: calc(100vh - 180px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.6rem;
   background: var(--surface-sunken);
 }
@@ -1683,6 +1975,12 @@ body.modal-open {
   background: transparent;
   color: var(--fg);
   text-align: left;
+  transition: background var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+}
+
+/* 목록 항목은 자리를 지키는 줄이다. 눌러서 크기가 변하면 옆줄까지 흔들려 보인다. */
+.report-list-item:active:not(:disabled) {
+  transform: none;
 }
 
 .report-list-item + .report-list-item {
@@ -1912,7 +2210,22 @@ body.modal-open {
 
 /* =============================================================================
    반응형
+   위에서부터 넓은 화면 → 좁은 화면 순서다. 좁은 쪽 규칙이 뒤에 와야 같은 우선순위끼리
+   부딪혔을 때 좁은 쪽이 이긴다.
    ============================================================================= */
+/*
+  1280px부터 기사 카드가 세 열이다. 두 열로는 카드 한 장이 545px까지 늘어나는데, 요약을 세 줄로
+  자르고 나면 그 폭에서 두 줄이 남아 카드 아래가 비었다. 셋으로 나누면 한 장이 400px 안팎이 되어
+  세 줄이 실제로 세 줄로 차고, 한 화면에 담기는 기사도 늘어난다.
+
+  min-width로 쓴다. 좁은 화면이 기본이고 넓은 화면이 예외다.
+*/
+@media (min-width: 1280px) {
+  .article-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 /* 열 하나가 400px 아래로 내려가면 주제 폼의 소스 체크리스트부터 눌린다. 그 전에 한 단으로 편다. */
 @media (max-width: 900px) {
   .settings-top-row {
@@ -1930,27 +2243,16 @@ body.modal-open {
 
 @media (max-width: 760px) {
   main {
-    padding: 1.5rem 1rem 4rem;
+    /* 좌우 여백은 --gutter가 이미 화면 폭을 따라 줄인다. 여기서는 바닥만 걷어낸다. */
+    padding-bottom: 4rem;
   }
 
-  /* 375px에서는 로고와 링크 셋이 한 줄에 다 들어가지 않는다. 줄바꿈으로 내비게이션 높이가
-     늘어나는 대신 링크 줄만 가로로 밀리게 둔다. */
   .app-nav {
     gap: 0.75rem;
-    padding: 0 1rem;
   }
 
   .app-nav strong {
     font-size: 0.95rem;
-  }
-
-  .nav-links {
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .nav-links::-webkit-scrollbar {
-    display: none;
   }
 
   .nav-link {
@@ -1991,8 +2293,24 @@ body.modal-open {
     grid-template-columns: 1fr;
   }
 
+  /*
+    데스크톱에서는 오른쪽에서 들어오는 패널이다. 화면 폭이 좁아지면 그 패널이 화면을 꽉 채우는데,
+    그러면 옆에서 들어올 자리가 없어서 "어디서 왔는지"가 사라진다 — 화면이 그냥 다른 화면으로
+    바뀐 것처럼 보이고, 닫으려면 어디를 밀어야 할지도 알기 어렵다.
+
+    모바일에서는 아래에서 올라오는 시트로 바꾼다. 위쪽에 배경을 남겨 두면 그 틈이 곧 "여기를
+    누르면 닫힌다"는 표시가 되고(백드롭 클릭은 이미 닫는다), 올라온 방향이 내려가는 방향을 알려 준다.
+  */
+  .modal-backdrop {
+    align-items: flex-end;
+    justify-content: center;
+  }
+
   .article-modal {
     width: 100%;
+    height: 92%;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    animation-name: sheet-in;
   }
 
   .modal-header,
@@ -2022,10 +2340,17 @@ body.modal-open {
     grid-template-columns: 1fr;
   }
 
+  /*
+    세로 목록이 가로 레일이 된다. proximity 스냅은 가까이 멈췄을 때만 붙잡아서, 훑어 넘길 때는
+    손을 따라가고 고르려고 멈출 때만 카드를 화면 왼쪽에 맞춰 준다. mandatory로 하면 목록을 길게
+    넘길 때마다 매번 걸려서 오히려 답답하다.
+  */
   .report-list {
     display: flex;
     max-height: none;
     overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scroll-padding-left: 0.6rem;
   }
 
   .report-list-heading {
@@ -2034,6 +2359,7 @@ body.modal-open {
 
   .report-list-item {
     min-width: 210px;
+    scroll-snap-align: start;
   }
 
   .report-list-item + .report-list-item {
@@ -2048,5 +2374,51 @@ body.modal-open {
 
   .report-stat-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/*
+  600px 아래에서는 로고와 링크 셋이 한 줄에 서지 못한다. 전에는 링크 줄을 가로로 스크롤되게 두었는데,
+  375px에서 "수집 설정"이 화면 끝에서 잘린 채로 걸렸다. 잘렸다는 신호가 없어서 그 화면이 있는 줄도
+  모르고 지나갈 수 있었다 — 세 개짜리 메뉴를 숨겨 둘 이유는 없다.
+
+  로고를 윗줄로 올리고 링크 셋을 아랫줄에 세그먼트 컨트롤로 편다. 회색 홈 위에 지금 화면만 짙은
+  알약으로 올라오는 형태라, 셋이 한 묶음이고 그중 하나에 있다는 것이 한눈에 읽힌다.
+*/
+@media (max-width: 600px) {
+  .app-nav {
+    height: auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+    padding-top: 0.7rem;
+    padding-bottom: 0.7rem;
+  }
+
+  /*
+    stretch를 상속하면 로고 버튼이 줄 전체로 늘어난다. 글자는 버튼 기본값대로 가운데에 놓여
+    아래 내용과 왼쪽 선이 어긋나고, 제목에서 한참 떨어진 빈 곳까지 눌리는 영역이 된다.
+    글자만큼만 차지하게 되돌린다.
+  */
+  .app-logo {
+    align-self: flex-start;
+  }
+
+  .nav-links {
+    gap: 0.25rem;
+    padding: 0.25rem;
+    border-radius: 13px;
+    background: var(--bg);
+  }
+
+  /* 링크마다 글자 수가 달라도(분석 기사 · 리포트 · 수집 설정) 칸은 같아야 묶음으로 읽힌다. */
+  .nav-link {
+    flex: 1;
+    border-radius: 10px;
+    text-align: center;
+  }
+
+  .nav-link:hover:not(.active) {
+    background: var(--line);
   }
 }

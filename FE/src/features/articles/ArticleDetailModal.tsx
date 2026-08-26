@@ -7,6 +7,7 @@ import {
   type Audience,
 } from '../../api/types'
 import { formatMediumDate } from '../../lib/datetime'
+import { scrollIntoViewGently } from '../../lib/motion'
 
 interface Props {
   articleId: number | null
@@ -54,10 +55,8 @@ export function ArticleDetailModal({ articleId, defaultAudience = 'CHIP_MAKER', 
     const firstSentence = evidence[0]
     if (firstSentence === undefined) return
     requestAnimationFrame(() => {
-      document.getElementById(`article-${articleId}-sentence-${firstSentence}`)?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      })
+      const target = document.getElementById(`article-${articleId}-sentence-${firstSentence}`)
+      if (target) scrollIntoViewGently(target)
     })
   }
 
@@ -181,7 +180,11 @@ function AnalysisPanel({
           )
         })}
       </div>
-      <div className="perspective-reason" role="tabpanel">
+      {/*
+        key에 관점을 건다. 관점을 바꾸면 이 노드가 새로 붙어서 CSS의 페이드가 다시 재생된다 —
+        같은 노드의 글자만 갈리면 애니메이션은 처음 한 번만 돌고 그다음부터는 소리 없이 바뀐다.
+      */}
+      <div className="perspective-reason" role="tabpanel" key={selectedAudience}>
         {selectedPerspective?.hook ? (
           <>
             <span className={`perspective-level level-${selectedPerspective.relevance}`}>
