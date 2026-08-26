@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ApiError } from '../../api/client'
 import { useCreateTopic, useSources } from '../../api/queries'
+import type { Source } from '../../api/types'
 import { FormStatus } from './FormStatus'
 
 const EMPTY = {
@@ -19,6 +20,19 @@ const COLLECTION_INTERVALS = [
   { value: '1440', label: '매일 한 번 (권장)' },
 ] as const
 
+/**
+ * 목록에서 소스가 설 자리. 작을수록 위다.
+ *
+ * <p>검색 provider는 기본으로 깔려 있어서 주제를 만들 때 거의 항상 고르는 소스이고, RSS 피드는
+ * 필요한 사람이 하나씩 더해 가는 목록이다. 서버가 주는 순서(등록순)를 그대로 쓰면 기본 제공인
+ * 검색 provider가 나중에 등록된 피드에 밀려 목록 아래로 내려간다. 스크롤해야 보이는 자리에 제일
+ * 자주 고르는 것이 있는 셈이다.
+ */
+const SOURCE_KIND_ORDER: Record<Source['sourceKind'], number> = {
+  SEARCH: 0,
+  FEED: 1,
+}
+
 /** 쉼표로 나눠 받는다. 빈 칸은 필터 없음이고, 빈 문자열은 필터에 넣지 않는다. */
 function toKeywords(value: string): string[] | undefined {
   const items = value
@@ -35,7 +49,20 @@ export function TopicForm() {
   const sources = useSources()
   const { mutate, isPending, error, reset } = useCreateTopic()
 
-  const options = sources.data?.content ?? []
+  /*
+    검색 provider를 위로 올린다. 종류만 비교하고 그 안은 건드리지 않는다 — Array.prototype.sort는
+    안정 정렬이라 같은 종류끼리는 서버가 준 순서(등록순)가 그대로 남는다. 이름순으로 다시 세우면
+    같은 종류 안에서 자리가 바뀌어, 어제 본 위치를 기억하고 찾는 사람이 헤맨다.
+
+    화면에 그릴 때만 바꾸는 순서다. 서버로 보내는 sourceIds는 사용자가 고른 순서(selected)를
+    그대로 쓰므로 이 정렬에 영향을 받지 않는다.
+  */
+  const options = useMemo(
+    () => [...(sources.data?.content ?? [])].sort(
+      (left, right) => SOURCE_KIND_ORDER[left.sourceKind] - SOURCE_KIND_ORDER[right.sourceKind],
+    ),
+    [sources.data],
+  )
   const sourceError =
     sources.error instanceof ApiError
       ? `${sources.error.message} (${sources.error.code})`
