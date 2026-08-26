@@ -22,6 +22,10 @@ type PanelKey = 'llm' | 'source' | 'topic' | 'combinations'
  * <p>주제가 소스보다 위에 있다. 소스는 관리자가 한 번 깔아 두면 오래 가는 값이고, 주제는
  * 쓰는 사람이 계속 더한다. 의존 순서(소스가 있어야 연결한다)는 주제 폼 안에서 "등록된 소스가
  * 없습니다"로 이미 드러나므로, 화면 순서는 의존 순서 대신 손이 가는 빈도를 따른다.
+ *
+ * <p>실행과 주제 등록이 상단에 좌우로 나란히 있다. 이 둘이 여기서 제일 자주 하는 일인데 사이에
+ * 사용량 패널이 끼어 있어서, 주제를 하나 만들고 바로 돌려 보려면 매번 그걸 지나 스크롤해야 했다.
+ * 같은 줄에 두면 등록하고 실행하는 왕복이 한 화면 안에서 끝난다.
  */
 export function SettingsPage() {
   const combinations = useCombinations()
@@ -45,7 +49,23 @@ export function SettingsPage() {
         </div>
       </header>
 
-      <CollectionRunPanel />
+      {/*
+        주제 등록은 접이식을 유지하고 기본은 접어 둔다. 폼이 세로로 길어서 펼친 채 두면 상단
+        한 줄이 화면을 다 먹는다. 접혀 있으면 두 카드가 나란히 짧고, 펼치면 오른쪽 열만 자란다.
+      */}
+      <div className="settings-top-row">
+        <CollectionRunPanel />
+
+        <CollapsibleSection
+          id="topic"
+          title="수집 주제 등록"
+          description="무엇을 모을지 정하고, 등록된 소스 중에서 골라 연결합니다."
+          open={open.topic}
+          onToggle={() => toggle('topic')}
+        >
+          <TopicForm />
+        </CollapsibleSection>
+      </div>
 
       <CollapsibleSection
         id="llm"
@@ -55,16 +75,6 @@ export function SettingsPage() {
         onToggle={() => toggle('llm')}
       >
         <LlmControlPanel />
-      </CollapsibleSection>
-
-      <CollapsibleSection
-        id="topic"
-        title="수집 주제 등록"
-        description="무엇을 모을지 정하고, 아래 등록된 소스 중에서 골라 연결합니다."
-        open={open.topic}
-        onToggle={() => toggle('topic')}
-      >
-        <TopicForm />
       </CollapsibleSection>
 
       <CollapsibleSection

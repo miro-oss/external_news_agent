@@ -652,6 +652,28 @@ tbody tr:hover td {
 }
 
 /* =============================================================================
+   수집 설정 상단 2단 배치
+   ============================================================================= */
+/*
+  두 열의 높이를 묶지 않는다(align-items: start). 주제 폼은 펼치면 세로로 길고 실행 패널은
+  짧아서, 늘어난 쪽에 맞추면 짧은 카드가 빈 공간을 끌고 늘어난다.
+
+  카드가 각자 들고 있던 아래 여백은 지우고 간격을 gap 하나로 모은다. 둘을 같이 쓰면 열 사이는
+  gap, 줄 사이는 gap + margin이 되어 리듬이 어긋난다.
+*/
+.settings-top-row {
+  display: grid;
+  align-items: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 0.7rem;
+}
+
+.settings-top-row > * {
+  margin-bottom: 0;
+}
+
+/* =============================================================================
    LLM 플랜 · 사용량 패널
    ============================================================================= */
 .collection-run-panel {
@@ -684,16 +706,21 @@ tbody tr:hover td {
   font-weight: 800;
 }
 
+/*
+  2단 배치로 패널 폭이 절반이 되면서 열 수를 뷰포트로 정할 수 없게 됐다 — 뷰포트가 넓어도
+  이 패널은 좁다. auto-fit으로 남은 폭이 감당할 만큼만 열을 만들게 두면, 상단 2단에서는 두 개씩
+  접히고 한 단으로 떨어진 좁은 화면에서는 셋이 그대로 한 줄에 선다.
+*/
 .collection-run-controls {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 0.7rem;
   margin-top: 1.25rem;
 }
 
 .collection-run-preview {
   display: grid;
-  grid-template-columns: minmax(120px, 0.35fr) minmax(120px, 0.35fr) minmax(220px, 1fr);
+  grid-template-columns: minmax(110px, 0.3fr) minmax(0, 1fr);
   gap: 0.6rem;
   margin: 0.85rem 0;
 }
@@ -1860,8 +1887,14 @@ body.modal-open {
 /* =============================================================================
    반응형
    ============================================================================= */
+/* 열 하나가 400px 아래로 내려가면 주제 폼의 소스 체크리스트부터 눌린다. 그 전에 한 단으로 편다. */
+@media (max-width: 900px) {
+  .settings-top-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 860px) {
-  .collection-run-controls,
   .collection-run-preview,
   .llm-actions-grid,
   .usage-grid {

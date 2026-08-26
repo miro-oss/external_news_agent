@@ -34,7 +34,20 @@ import java.util.List;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Topic {
 
-    public static final int DEFAULT_BATCH_SIZE = 10;
+    /**
+     * SEARCH 소스 <b>한 곳당</b> 요청할 건수다. FEED 소스는 발행된 만큼 들어오므로 이 값과 무관하다.
+     *
+     * <p>10이었다. 뉴스 검색은 중복과 광고성 기사 비중이 높아 dedup과 키워드 필터를 거치면 3~5건만
+     * 남았고, 보고서 한 편의 근거로 삼기 얇았다.
+     *
+     * <p>올려도 LLM 비용은 늘지 않는다. 검색 API는 건수 파라미터만 바뀌는 같은 1회 호출이고, 분석
+     * 건수에는 실행당 상한이 따로 걸려 있다(agent.quota.free-run-article-limit /
+     * paid-run-article-limit). 천장은 그대로인 채 프리필터가 고를 후보만 넓어진다.
+     *
+     * <p>하필 20인 이유는 커넥터 중 천장이 가장 낮은 Tavily(max_results 20)에 맞췄기 때문이다.
+     * 더 올려도 거기서 잘리므로 "요청한 만큼 온다"가 깨진다.
+     */
+    public static final int DEFAULT_BATCH_SIZE = 20;
     public static final int DEFAULT_INTERVAL_MINUTES = 60;
     public static final int MIN_BATCH_SIZE = 1;
     public static final int MAX_BATCH_SIZE = 100;
