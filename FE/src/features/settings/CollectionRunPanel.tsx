@@ -36,16 +36,10 @@ export function CollectionRunPanel() {
   const targetCombinations = scope === 'ALL'
     ? activeCombinations
     : activeCombinations.filter((combination) => combination.topicId === effectiveTopic?.id)
-  // batchSize는 검색 소스에 몇 건을 요청할지에만 쓰인다. 피드 소스는 발행된 만큼 들어오므로
-  // 이 숫자에 더하면 상한도 추정치도 아닌 값이 된다.
-  const searchCombinations = targetCombinations.filter(
-    (combination) => combination.sourceKind === 'SEARCH',
-  )
-  const feedCount = targetCombinations.length - searchCombinations.length
-  const maxArticleCount = searchCombinations.reduce(
-    (total, combination) => total + combination.batchSize,
-    0,
-  )
+  // 피드 소스는 발행된 만큼 들어와 실행 전에 규모를 셀 수 없다. 몇 곳이 그런지만 문장으로 알린다.
+  const feedCount = targetCombinations.filter(
+    (combination) => combination.sourceKind === 'FEED',
+  ).length
   const setting = planQuery.data
 
   function resetRequestState() {
@@ -140,14 +134,14 @@ export function CollectionRunPanel() {
         )}
       </div>
 
+      {/*
+        기사 수 상한은 빼 둔다. 주제의 batchSize 합계라 사용자가 화면에서 바꿀 수 없고, 보고 나서
+        할 수 있는 일이 없다. 실행 전에 정말 알아야 하는 건 몇 개 조합이 도는지뿐이다.
+      */}
       <div className="collection-run-preview" aria-live="polite">
         <div>
           <span>실행 조합</span>
           <strong>{targetCombinations.length.toLocaleString()}개</strong>
-        </div>
-        <div>
-          <span>검색 최대 기사 수</span>
-          <strong>{maxArticleCount.toLocaleString()}건</strong>
         </div>
         <p>
           {scope === 'ALL'

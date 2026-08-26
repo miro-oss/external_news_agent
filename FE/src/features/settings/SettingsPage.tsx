@@ -22,6 +22,14 @@ type PanelKey = 'llm' | 'source' | 'topic' | 'combinations'
  * <p>주제가 소스보다 위에 있다. 소스는 관리자가 한 번 깔아 두면 오래 가는 값이고, 주제는
  * 쓰는 사람이 계속 더한다. 의존 순서(소스가 있어야 연결한다)는 주제 폼 안에서 "등록된 소스가
  * 없습니다"로 이미 드러나므로, 화면 순서는 의존 순서 대신 손이 가는 빈도를 따른다.
+ *
+ * <p>상단이 좌우 두 열이다. 왼쪽은 실행, 오른쪽은 실행하기 전에 준비하는 것들(주제·소스 등록,
+ * 플랜 확인)이다. 실행과 주제 등록이 여기서 제일 자주 하는 일인데 둘 사이에 사용량 패널이 끼어
+ * 있어서, 주제를 하나 만들고 바로 돌려 보려면 매번 그걸 지나 스크롤해야 했다. 같은 줄에 두면
+ * 등록하고 실행하는 왕복이 한 화면 안에서 끝난다.
+ *
+ * <p>조합 표만 두 열 아래 전체 폭을 쓴다. 한 행에 주제·소스·종류·주기가 다 들어가는 표라 절반
+ * 폭에서는 열이 서로를 밀어낸다.
  */
 export function SettingsPage() {
   const combinations = useCombinations()
@@ -45,37 +53,49 @@ export function SettingsPage() {
         </div>
       </header>
 
-      <CollectionRunPanel />
+      <div className="settings-top-row">
+        <CollectionRunPanel />
 
-      <CollapsibleSection
-        id="llm"
-        title="LLM 플랜과 사용량"
-        description="기본 플랜과 사용량, 보고서 예약분, 기본 독자 관점을 확인합니다."
-        open={open.llm}
-        onToggle={() => toggle('llm')}
-      >
-        <LlmControlPanel />
-      </CollapsibleSection>
+        {/*
+          오른쪽은 카드 하나가 아니라 준비 작업 묶음이다. 주제 등록만 두면 접혔을 때 84px짜리
+          띠가 491px 실행 패널 옆에 남아 덜 그려진 화면처럼 보인다. 셋을 쌓으면 열이 채워지고,
+          "왼쪽은 실행 · 오른쪽은 준비"라는 구분도 생긴다.
 
-      <CollapsibleSection
-        id="topic"
-        title="수집 주제 등록"
-        description="무엇을 모을지 정하고, 아래 등록된 소스 중에서 골라 연결합니다."
-        open={open.topic}
-        onToggle={() => toggle('topic')}
-      >
-        <TopicForm />
-      </CollapsibleSection>
+          셋 다 접이식이고 접힌 채로 시작한다. 주제 폼은 펼치면 1198px라, 펼친 것을 기본으로
+          삼으면 이번엔 반대쪽이 700px 비었다. 길이를 정하는 쪽은 화면이 아니라 사용자여야 한다.
+        */}
+        <div className="settings-side-stack">
+          <CollapsibleSection
+            id="topic"
+            title="수집 주제 등록"
+            description="무엇을 모을지 정하고, 등록된 소스 중에서 골라 연결합니다."
+            open={open.topic}
+            onToggle={() => toggle('topic')}
+          >
+            <TopicForm />
+          </CollapsibleSection>
 
-      <CollapsibleSection
-        id="source"
-        title="수집 소스 등록"
-        description="기사를 가져올 곳입니다. 한 번 등록해 두면 여러 주제에서 함께 씁니다."
-        open={open.source}
-        onToggle={() => toggle('source')}
-      >
-        <SourceForm />
-      </CollapsibleSection>
+          <CollapsibleSection
+            id="source"
+            title="수집 소스 등록"
+            description="기사를 가져올 곳입니다. 한 번 등록해 두면 여러 주제에서 함께 씁니다."
+            open={open.source}
+            onToggle={() => toggle('source')}
+          >
+            <SourceForm />
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            id="llm"
+            title="LLM 플랜과 사용량"
+            description="기본 플랜과 사용량, 보고서 예약분, 기본 독자 관점을 확인합니다."
+            open={open.llm}
+            onToggle={() => toggle('llm')}
+          >
+            <LlmControlPanel />
+          </CollapsibleSection>
+        </div>
+      </div>
 
       <CollapsibleSection
         id="combinations"

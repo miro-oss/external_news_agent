@@ -54,7 +54,7 @@ public class TopicSourceController {
                                     "sourceName": "Google News RSS",
                                     "sourceKind": "SEARCH",
                                     "queryText": "HBM 반도체",
-                                    "batchSize": 10,
+                                    "batchSize": 20,
                                     "intervalMinutes": 60,
                                     "active": true,
                                     "lastCollectedAt": "2026-08-10T08:00:00+09:00",
