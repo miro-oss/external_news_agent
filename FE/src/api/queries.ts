@@ -186,9 +186,10 @@ export function useUpdateAudienceSetting() {
 export function useStartCollectionRun() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (request: { idempotencyKey: string; plan?: LlmPlan }) =>
+    mutationFn: (request: { idempotencyKey: string; topicIds?: number[]; plan?: LlmPlan }) =>
       post<CollectionRunCreated>('/runs', {
         idempotencyKey: request.idempotencyKey,
+        ...(request.topicIds ? { topicIds: request.topicIds } : {}),
         ...(request.plan ? { plan: request.plan } : {}),
       }),
     onSuccess: () => {

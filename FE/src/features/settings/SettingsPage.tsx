@@ -5,8 +5,9 @@ import { CombinationTable } from './CombinationTable'
 import { SourceForm } from './SourceForm'
 import { TopicForm } from './TopicForm'
 import { LlmControlPanel } from './LlmControlPanel'
+import { CollectionRunPanel } from './CollectionRunPanel'
 
-type PanelKey = 'source' | 'topic' | 'combinations'
+type PanelKey = 'llm' | 'source' | 'topic' | 'combinations'
 
 /**
  * M2 설정 화면. 영상 1~3의 흐름을 재현한다 — 소스를 등록하고, 주제를 만들며 그 소스를 연결하면,
@@ -25,6 +26,7 @@ type PanelKey = 'source' | 'topic' | 'combinations'
 export function SettingsPage() {
   const combinations = useCombinations()
   const [open, setOpen] = useState<Record<PanelKey, boolean>>({
+    llm: false,
     source: false,
     topic: false,
     combinations: true,
@@ -43,9 +45,17 @@ export function SettingsPage() {
         </div>
       </header>
 
-      <section>
+      <CollectionRunPanel />
+
+      <CollapsibleSection
+        id="llm"
+        title="LLM 플랜과 사용량"
+        description="기본 플랜과 사용량, 보고서 예약분, 기본 독자 관점을 확인합니다."
+        open={open.llm}
+        onToggle={() => toggle('llm')}
+      >
         <LlmControlPanel />
-      </section>
+      </CollapsibleSection>
 
       <CollapsibleSection
         id="topic"

@@ -67,4 +67,40 @@ class StubArticleAnalyzerTest {
 
         assertEquals(Relevance.REFERENCE, analyzer.analyze(article).relevance());
     }
+
+    @Test
+    void skipsPunctuationAndPublisherBoilerplateWhenChoosingSummaryAndKeyPoints() {
+        Article article = Article.builder()
+                .title("북방화창, HBM·칩렛 장비로 사업 확대")
+                .body("! AI가 자동 생성한 요약으로 정확하지 않을 수 있어요. "
+                        + "이 기사는 회원 가입이 필요한 프리미엄 기사입니다. "
+                        + "북방화창이 반도체 장비 반기보고서를 발표했다. "
+                        + "식각과 박막 증착 장비의 시장점유율이 상승했다.")
+                .language("ko")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+
+        AnalysisResult result = analyzer.analyze(article);
+
+        assertEquals("북방화창이 반도체 장비 반기보고서를 발표했다.", result.summary());
+        assertEquals("북방화창이 반도체 장비 반기보고서를 발표했다.",
+                result.keyPoints().get(0).text());
+        assertTrue(result.keyPoints().get(0).evidence().get(0) > 0);
+        assertTrue(result.sections().stream().anyMatch(section -> section.text().equals("!")));
+    }
+
+    @Test
+    void fallsBackToArticleTitleWhenEveryBodySentenceIsBoilerplate() {
+        Article article = Article.builder()
+                .title("반도체 장비 공급 계약 체결")
+                .body("! AI가 자동 생성한 요약으로 정확하지 않을 수 있어요.")
+                .language("ko")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+
+        AnalysisResult result = analyzer.analyze(article);
+
+        assertEquals("반도체 장비 공급 계약 체결", result.summary());
+        assertTrue(result.keyPoints().isEmpty());
+    }
 }

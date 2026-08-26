@@ -654,11 +654,89 @@ tbody tr:hover td {
 /* =============================================================================
    LLM 플랜 · 사용량 패널
    ============================================================================= */
-.llm-panel {
+.collection-run-panel {
+  margin-bottom: 0.7rem;
   padding: 1.5rem;
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--line));
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
+}
+
+.collection-run-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.collection-run-heading h2 {
+  margin: 0 0 0.3rem;
+}
+
+.run-default-badge {
+  flex-shrink: 0;
+  padding: 0.32rem 0.65rem;
+  border-radius: 999px;
+  background: var(--primary-weak);
+  color: var(--primary-strong);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.collection-run-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-top: 1.25rem;
+}
+
+.collection-run-preview {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.35fr) minmax(120px, 0.35fr) minmax(220px, 1fr);
+  gap: 0.6rem;
+  margin: 0.85rem 0;
+}
+
+.collection-run-preview > div,
+.collection-run-preview > p {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.collection-run-preview > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.collection-run-preview span,
+.collection-run-preview p {
+  color: var(--fg-3);
+  font-size: 0.78rem;
+}
+
+.collection-run-preview strong {
+  font-size: 1.2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.collection-run-preview p {
+  display: flex;
+  align-items: center;
+  line-height: 1.5;
+}
+
+.collection-run-button {
+  width: 100%;
+  padding: 0.95rem;
+  font-size: 1rem;
+}
+
+.llm-panel {
+  padding: 0;
 }
 
 .llm-panel-heading {
@@ -668,8 +746,8 @@ tbody tr:hover td {
   gap: 1rem;
 }
 
-.llm-panel-heading h2 {
-  margin-bottom: 0.3rem;
+.llm-panel-heading .muted {
+  margin: 0;
 }
 
 .plan-badge {
@@ -755,13 +833,12 @@ tbody tr:hover td {
 
 .llm-actions-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr) minmax(220px, 0.8fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.8fr);
   gap: 0.6rem;
 }
 
 .llm-setting-form,
-.audience-setting-form,
-.run-now-card {
+.audience-setting-form {
   display: flex;
   flex-direction: column;
   margin: 0;
@@ -771,8 +848,7 @@ tbody tr:hover td {
 }
 
 .llm-setting-form button,
-.audience-setting-form button,
-.run-now-card button {
+.audience-setting-form button {
   margin-top: auto;
 }
 
@@ -783,7 +859,6 @@ tbody tr:hover td {
   letter-spacing: -0.03em;
 }
 
-.run-now-card .muted,
 .audience-setting-form .muted {
   margin-bottom: 1rem;
   font-size: 0.83rem;
@@ -1356,8 +1431,14 @@ body.modal-open {
   color: #8b95a1;
 }
 
-.perspective-evidence-button {
+.perspective-evidence-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
   margin-top: 0.6rem;
+}
+
+.perspective-evidence-button {
   padding: 0;
   background: transparent;
   color: #6ea8fe;
@@ -1392,34 +1473,8 @@ body.modal-open {
 }
 
 .key-point-content {
-  padding: 0;
-  border: 0;
-  background: transparent;
   color: inherit;
-  font: inherit;
   text-align: left;
-}
-
-.key-point-content:hover:not(:disabled) {
-  background: transparent;
-}
-
-.key-point-content:not(:disabled) {
-  cursor: pointer;
-}
-
-.key-point-content:disabled {
-  background: transparent;
-  color: inherit;
-  opacity: 0.5;
-}
-
-.key-point-content:not(:disabled):hover .key-point-text,
-.key-point-content:not(:disabled):focus-visible .key-point-text {
-  color: #fff;
-  text-decoration: underline;
-  text-decoration-color: var(--primary);
-  text-underline-offset: 0.22rem;
 }
 
 .key-point-text {
@@ -1440,6 +1495,21 @@ body.modal-open {
   text-transform: uppercase;
 }
 
+.evidence {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.evidence:hover:not(:disabled),
+.evidence:focus-visible {
+  background: transparent;
+  color: #a5c9fa;
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+
 .groundedness.grounded {
   color: #4cd08b;
 }
@@ -1458,9 +1528,6 @@ body.modal-open {
 }
 
 .sentence-list p {
-  display: grid;
-  grid-template-columns: 30px 1fr;
-  gap: 0.75rem;
   margin: 0;
   padding: 0.6rem 0;
   border-bottom: 1px solid var(--line-soft);
@@ -1476,14 +1543,6 @@ body.modal-open {
   border-radius: var(--radius-xs);
   background: var(--primary-weak);
   color: var(--fg);
-}
-
-.sentence-index {
-  padding-top: 0.15rem;
-  color: var(--fg-4);
-  font-size: 0.72rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
 }
 
 .blocked-body,
@@ -1798,6 +1857,8 @@ body.modal-open {
    반응형
    ============================================================================= */
 @media (max-width: 860px) {
+  .collection-run-controls,
+  .collection-run-preview,
   .llm-actions-grid,
   .usage-grid {
     grid-template-columns: 1fr;

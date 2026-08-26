@@ -7,10 +7,16 @@ from app.llm.base import AnalyzeProvider
 from app.llm.gemini_provider import GeminiAnalyzeProvider
 from app.llm.guarded_provider import GuardedAnalyzeProvider, ProviderGuard
 from app.llm.mindlogic_provider import MindlogicAnalyzeProvider
+from app.llm.rate_limit_provider import (
+    PacedRetryProvider,
+    ProviderRequestCoordinator,
+    ProviderRequestPolicy,
+)
 from app.schemas.analyze import Plan
 
 _PROVIDER_CACHE: dict[tuple[Settings, Plan], AnalyzeProvider] = {}
 _GUARD_CACHE: dict[Plan, ProviderGuard] = {}
+_COORDINATOR_CACHE: dict[Plan, ProviderRequestCoordinator] = {}
 _PROVIDER_LOCK = Lock()
 
 
@@ -46,7 +52,7 @@ def get_analyze_provider(settings: Settings, plan: Plan) -> AnalyzeProvider:
                     ),
                 )
                 _GUARD_CACHE[plan] = guard
-            provider = GuardedAnalyzeProvider(
+            guarded = GuardedAnalyzeProvider(
                 delegate,
                 concurrency=settings.provider_concurrency,
                 acquire_timeout_seconds=settings.provider_acquire_timeout_seconds,
@@ -55,6 +61,24 @@ def get_analyze_provider(settings: Settings, plan: Plan) -> AnalyzeProvider:
                 hard_cap_credits=Decimal(str(settings.hard_cap_credits_per_request)),
                 guard=guard,
             )
+            coordinator = _COORDINATOR_CACHE.get(plan)
+            if coordinator is None:
+                coordinator = ProviderRequestCoordinator(
+                    ProviderRequestPolicy(
+                        request_interval_seconds=(
+                            settings.gemini_request_interval_seconds
+                            if plan == "FREE"
+                            else 0.0
+                        ),
+                        rate_limit_retry_attempts=settings.rate_limit_retry_attempts,
+                        rate_limit_backoff_seconds=settings.rate_limit_backoff_seconds,
+                        rate_limit_max_backoff_seconds=(
+                            settings.rate_limit_max_backoff_seconds
+                        ),
+                    )
+                )
+                _COORDINATOR_CACHE[plan] = coordinator
+            provider = PacedRetryProvider(guarded, coordinator)
             _PROVIDER_CACHE[key] = provider
         return provider
 
@@ -64,6 +88,7 @@ def close_analyze_providers() -> None:
         providers = list(_PROVIDER_CACHE.values())
         _PROVIDER_CACHE.clear()
         _GUARD_CACHE.clear()
+        _COORDINATOR_CACHE.clear()
     for provider in providers:
         close = getattr(provider, "close", None)
         if callable(close):
