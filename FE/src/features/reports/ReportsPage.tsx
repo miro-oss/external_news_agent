@@ -1,4 +1,5 @@
-import { Fragment, useState, type ReactNode } from 'react'
+import { useState } from 'react'
+import Markdown from 'react-markdown'
 import { useLatestReport, useReport, useReports } from '../../api/queries'
 import type { ReportDetail, ReportFinding, ReportSummary } from '../../api/types'
 import { formatFullDate, formatShortDate } from '../../lib/datetime'
@@ -156,53 +157,28 @@ function FindingCard({ finding }: { finding: ReportFinding }) {
   )
 }
 
-/** 서버가 만든 제한된 마크다운(제목·문단·불릿·autolink)을 HTML 주입 없이 렌더링한다. */
+/** 서버가 만든 마크다운을 HTML 주입 없이 표준 문법으로 렌더링한다. */
 function MarkdownBody({ markdown }: { markdown: string }) {
-  const nodes: ReactNode[] = []
-  let bullets: string[] = []
   const lines = markdown.split(/\r?\n/)
   const firstContentLine = lines.findIndex((line) => line.trim().length > 0)
-  const flushBullets = () => {
-    if (bullets.length === 0) return
-    const current = bullets
-    bullets = []
-    nodes.push(<ul key={`list-${nodes.length}`}>{current.map((text, index) => (
-      <li key={`${text}-${index}`}>{linkify(text)}</li>
-    ))}</ul>)
+  if (firstContentLine >= 0 && lines[firstContentLine].trim().startsWith('# ')) {
+    lines.splice(firstContentLine, 1)
   }
-
-  lines.forEach((rawLine, index) => {
-    const line = rawLine.trim()
-    if (index === firstContentLine && line.startsWith('# ')) return
-    if (line.startsWith('- ')) {
-      bullets.push(line.slice(2))
-      return
-    }
-    flushBullets()
-    if (!line) return
-    if (line.startsWith('### ')) nodes.push(<h4 key={index}>{line.slice(4)}</h4>)
-    else if (line.startsWith('## ')) nodes.push(<h3 key={index}>{line.slice(3)}</h3>)
-    else if (line.startsWith('# ')) nodes.push(<h2 key={index}>{line.slice(2)}</h2>)
-    else nodes.push(<p key={index}>{linkify(line)}</p>)
-  })
-  flushBullets()
-  return <>{nodes.map((node, index) => <Fragment key={index}>{node}</Fragment>)}</>
-}
-
-function linkify(text: string): ReactNode {
-  const matches = [...text.matchAll(/<(https?:\/\/[^>]+)>/g)]
-  if (matches.length === 0) return text
-
-  const nodes: ReactNode[] = []
-  let cursor = 0
-  matches.forEach((match, index) => {
-    const start = match.index ?? cursor
-    if (start > cursor) nodes.push(text.slice(cursor, start))
-    nodes.push(<a key={`${index}-${match[1]}`} href={match[1]} target="_blank" rel="noreferrer">{match[1]}</a>)
-    cursor = start + match[0].length
-  })
-  if (cursor < text.length) nodes.push(text.slice(cursor))
-  return <>{nodes}</>
+  return (
+    <Markdown
+      components={{
+        // 문서 제목이 이미 페이지 헤더의 h2다. 본문 제목은 한 단계씩 낮춰야 바깥 구조와 어긋나지 않는다.
+        h1: ({ children }) => <h2>{children}</h2>,
+        h2: ({ children }) => <h3>{children}</h3>,
+        h3: ({ children }) => <h4>{children}</h4>,
+        a: ({ href, children }) => (
+          <a href={href} target="_blank" rel="noreferrer">{children}</a>
+        ),
+      }}
+    >
+      {lines.join('\n')}
+    </Markdown>
+  )
 }
 
 function riskLabel(value: ReportFinding['riskLevel']) {

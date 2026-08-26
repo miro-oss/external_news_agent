@@ -5,6 +5,7 @@ from app.core.errors import AgentError
 from app.llm.gemini_provider import GeminiAnalyzeProvider
 from app.llm.guarded_provider import GuardedAnalyzeProvider
 from app.llm.mindlogic_provider import MindlogicAnalyzeProvider
+from app.llm.rate_limit_provider import PacedRetryProvider
 from app.llm.router import close_analyze_providers, get_analyze_provider
 
 
@@ -30,10 +31,14 @@ def test_routes_free_and_paid_to_configured_provider() -> None:
         free = get_analyze_provider(settings, "FREE")
         paid = get_analyze_provider(settings, "PAID")
 
-        assert isinstance(free, GuardedAnalyzeProvider)
-        assert isinstance(paid, GuardedAnalyzeProvider)
-        assert isinstance(free.delegate, GeminiAnalyzeProvider)
-        assert isinstance(paid.delegate, MindlogicAnalyzeProvider)
+        assert isinstance(free, PacedRetryProvider)
+        assert isinstance(paid, PacedRetryProvider)
+        assert isinstance(free.delegate, GuardedAnalyzeProvider)
+        assert isinstance(paid.delegate, GuardedAnalyzeProvider)
+        assert isinstance(free.delegate.delegate, GeminiAnalyzeProvider)
+        assert isinstance(paid.delegate.delegate, MindlogicAnalyzeProvider)
+        assert free.coordinator.policy.request_interval_seconds == 2.0
+        assert paid.coordinator.policy.request_interval_seconds == 0.0
         assert get_analyze_provider(settings, "FREE") is free
         assert get_analyze_provider(settings, "PAID") is paid
     finally:
@@ -56,9 +61,32 @@ def test_analyze_and_report_settings_share_plan_guard() -> None:
         analyze = get_analyze_provider(settings, "FREE")
         report = get_analyze_provider(report_settings, "FREE")
 
-        assert isinstance(analyze, GuardedAnalyzeProvider)
-        assert isinstance(report, GuardedAnalyzeProvider)
+        assert isinstance(analyze, PacedRetryProvider)
+        assert isinstance(report, PacedRetryProvider)
         assert analyze is not report
-        assert analyze.guard is report.guard
+        assert isinstance(analyze.delegate, GuardedAnalyzeProvider)
+        assert isinstance(report.delegate, GuardedAnalyzeProvider)
+        assert analyze.delegate.guard is report.delegate.guard
+        assert analyze.coordinator is report.coordinator
+    finally:
+        close_analyze_providers()
+
+
+def test_can_skip_default_request_policy_for_live_eval() -> None:
+    settings = Settings(
+        GEMINI_API_KEY="gemini-key",
+        GEMINI_MODEL="gemini-model",
+    )
+
+    try:
+        provider = get_analyze_provider(
+            settings,
+            "FREE",
+            apply_request_policy=False,
+        )
+
+        assert isinstance(provider, GuardedAnalyzeProvider)
+        assert isinstance(provider.delegate, GeminiAnalyzeProvider)
+        assert get_analyze_provider(settings, "FREE") is not provider
     finally:
         close_analyze_providers()

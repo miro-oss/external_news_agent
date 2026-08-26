@@ -186,9 +186,11 @@ export function useUpdateAudienceSetting() {
 export function useStartCollectionRun() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (request: { idempotencyKey: string; plan?: LlmPlan }) =>
+    mutationFn: (request: { idempotencyKey: string; topicIds?: number[]; plan?: LlmPlan }) =>
       post<CollectionRunCreated>('/runs', {
         idempotencyKey: request.idempotencyKey,
+        // 빈 배열을 그대로 보내면 서버가 "전체 활성 주제"로 읽는다.
+        ...(request.topicIds?.length ? { topicIds: request.topicIds } : {}),
         ...(request.plan ? { plan: request.plan } : {}),
       }),
     onSuccess: () => {

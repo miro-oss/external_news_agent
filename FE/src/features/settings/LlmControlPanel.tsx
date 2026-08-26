@@ -1,10 +1,8 @@
-import { useRef, useState } from 'react'
-import { ApiError } from '../../api/client'
+import { useState } from 'react'
 import {
   useAudienceSetting,
   useLlmPlan,
   useLlmUsage,
-  useStartCollectionRun,
   useUpdateLlmPlan,
   useUpdateAudienceSetting,
 } from '../../api/queries'
@@ -15,6 +13,7 @@ import {
   type LlmPlan,
   type PaidExhaustedAction,
 } from '../../api/types'
+import { MutationStatus } from './MutationStatus'
 
 export function LlmControlPanel() {
   const planQuery = useLlmPlan()
@@ -22,11 +21,8 @@ export function LlmControlPanel() {
   const audienceQuery = useAudienceSetting()
   const updatePlan = useUpdateLlmPlan()
   const updateAudience = useUpdateAudienceSetting()
-  const startRun = useStartCollectionRun()
-  const [runOverride, setRunOverride] = useState<'DEFAULT' | LlmPlan>('DEFAULT')
   const [saved, setSaved] = useState(false)
   const [audienceSaved, setAudienceSaved] = useState(false)
-  const pendingRunKey = useRef<string | null>(null)
 
   if (planQuery.isPending || usageQuery.isPending || audienceQuery.isPending) {
     return <div className="llm-panel state-panel">LLM 설정과 사용량을 불러오는 중입니다.</div>
@@ -63,18 +59,6 @@ export function LlmControlPanel() {
     )
   }
 
-  function runNow() {
-    const idempotencyKey = pendingRunKey.current ?? `manual-${crypto.randomUUID()}`
-    pendingRunKey.current = idempotencyKey
-    startRun.mutate(
-      {
-        idempotencyKey,
-        ...(runOverride === 'DEFAULT' ? {} : { plan: runOverride }),
-      },
-      { onSuccess: () => { pendingRunKey.current = null } },
-    )
-  }
-
   function saveAudience(event: React.FormEvent) {
     event.preventDefault()
     setAudienceSaved(false)
@@ -85,19 +69,10 @@ export function LlmControlPanel() {
     )
   }
 
-  function changeRunOverride(value: 'DEFAULT' | LlmPlan) {
-    pendingRunKey.current = null
-    startRun.reset()
-    setRunOverride(value)
-  }
-
   return (
     <div className="llm-panel">
       <div className="llm-panel-heading">
-        <div>
-          <h2>LLM 플랜과 사용량</h2>
-          <p className="muted">기본 플랜을 고르고, 일·월별 한도와 보고서 예약분을 확인합니다.</p>
-        </div>
+        <span className="muted">현재 기본 플랜</span>
         <span className={`plan-badge plan-${setting.plan.toLowerCase()}`}>{setting.plan}</span>
       </div>
 
@@ -182,33 +157,6 @@ export function LlmControlPanel() {
           />
         </form>
 
-        <div className="run-now-card">
-          <h3 className="card-title">활성 주제 전체 수집</h3>
-          <p className="muted">현재 활성화된 모든 주제·소스 조합을 비동기로 실행합니다.</p>
-          {setting.allowRunOverride && (
-            <div className="field">
-              <label htmlFor="run-plan">이번 실행 플랜</label>
-              <select
-                id="run-plan"
-                value={runOverride}
-                onChange={(event) => changeRunOverride(event.target.value as 'DEFAULT' | LlmPlan)}
-              >
-                <option value="DEFAULT">기본 설정 사용 ({setting.plan})</option>
-                <option value="FREE">이번 실행만 FREE</option>
-                <option value="PAID">이번 실행만 PAID</option>
-              </select>
-            </div>
-          )}
-          <button type="button" onClick={runNow} disabled={startRun.isPending}>
-            {startRun.isPending ? '실행 요청 중…' : '지금 실행'}
-          </button>
-          <MutationStatus
-            error={startRun.error}
-            success={startRun.data
-              ? `실행 #${startRun.data.runId}을 ${startRun.data.llmPlan} 플랜으로 시작했습니다.`
-              : null}
-          />
-        </div>
       </div>
     </div>
   )
@@ -259,22 +207,4 @@ function UsageCard({
       {note && <em>{note}</em>}
     </article>
   )
-}
-
-function MutationStatus({ error, success }: { error: unknown; success: string | null }) {
-  if (error) {
-    let message = error instanceof ApiError ? `${error.message} (${error.code})` : '요청에 실패했습니다.'
-    if (error instanceof ApiError && error.code === 'QUOTA429' && isQuotaDetails(error.details)) {
-      message += ` · 일 잔량 ${error.details.dailyRemaining ?? '-'}, 월 잔량 ${error.details.monthlyRemaining ?? '-'}`
-    }
-    return <p className="error" role="alert">{message}</p>
-  }
-  return success ? <p className="success" role="status">{success}</p> : null
-}
-
-function isQuotaDetails(value: unknown): value is {
-  dailyRemaining?: number
-  monthlyRemaining?: number
-} {
-  return typeof value === 'object' && value !== null
 }

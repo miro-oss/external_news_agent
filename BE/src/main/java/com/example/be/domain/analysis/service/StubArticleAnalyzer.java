@@ -13,6 +13,8 @@ import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Collectors;
+import java.util.regex.Pattern;
 
 /**
  * 외부 모델 없이 같은 입력에 항상 같은 결과를 내는 M4 Stub.
@@ -24,18 +26,40 @@ import java.util.Locale;
 public class StubArticleAnalyzer implements ArticleAnalyzer {
 
     private static final int MAX_KEY_POINTS = 3;
+    private static final Pattern EMAIL_ONLY = Pattern.compile(
+            "^[\\p{Alnum}._%+-]+@[\\p{Alnum}.-]+\\.[A-Za-z]{2,}$");
+    private static final List<String> BOILERPLATE_MARKERS = List.of(
+            "ai가 자동 생성한 요약",
+            "자동 생성한 요약",
+            "정확하지 않을 수",
+            "이 기사는 회원 가입이 필요한 프리미엄 기사",
+            "회원가입이 필요한 프리미엄 콘텐츠",
+            "로그인 후 이용할 수 있습니다",
+            "구독 후 이용할 수 있습니다",
+            "무단 전재",
+            "재배포 금지",
+            "sign up to continue reading",
+            "log in to continue reading",
+            "subscribe to continue reading",
+            "all rights reserved");
 
     @Override
     public AnalysisResult analyze(Article article) {
         String fullText = article.getFetchStatus() == FetchStatus.FULLTEXT ? article.getBody() : null;
         String material = firstText(fullText, article.getSummary(), article.getTitle());
         List<FindingSection> sections = SentenceSplitter.split(material, article.getLanguage());
-        String searchable = (article.getTitle() + " " + material).toLowerCase(Locale.ROOT);
+        List<FindingSection> meaningfulSections = sections.stream()
+                .filter(section -> isMeaningful(section.text()))
+                .toList();
+        String meaningfulText = meaningfulSections.stream()
+                .map(FindingSection::text)
+                .collect(Collectors.joining(" "));
+        String searchable = (article.getTitle() + " " + meaningfulText).toLowerCase(Locale.ROOT);
         boolean hasFullText = StringUtils.hasText(fullText);
 
         return new AnalysisResult(
-                summary(article, sections, searchable),
-                keyPoints(sections, hasFullText),
+                summary(article, meaningfulSections, searchable),
+                keyPoints(meaningfulSections, hasFullText),
                 intent(searchable),
                 sentiment(searchable),
                 riskLevel(searchable),
@@ -58,7 +82,12 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
             return "해외 산업 동향과 관련된 새 기사가 수집됐다.";
         }
 
-        return sections.isEmpty() ? article.getTitle() : sections.get(0).text();
+        if (!sections.isEmpty()) {
+            return sections.get(0).text();
+        }
+        return isMeaningful(article.getTitle())
+                ? article.getTitle()
+                : "수집된 기사에서 요약할 수 있는 본문을 찾지 못했습니다.";
     }
 
     private List<FindingKeyPoint> keyPoints(List<FindingSection> sections, boolean fullText) {
@@ -146,5 +175,17 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
             }
         }
         return false;
+    }
+
+    private boolean isMeaningful(String text) {
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        String normalized = text.replaceAll("[^\\p{L}\\p{N}]", "");
+        if (normalized.length() < 4 || EMAIL_ONLY.matcher(text.trim()).matches()) {
+            return false;
+        }
+        String lowered = text.toLowerCase(Locale.ROOT);
+        return BOILERPLATE_MARKERS.stream().noneMatch(lowered::contains);
     }
 }

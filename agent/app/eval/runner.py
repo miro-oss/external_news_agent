@@ -526,6 +526,12 @@ def _live_providers(
         }
     )
     return (
-        PacedRetryProvider(get_analyze_provider(settings, plan), coordinator),
-        PacedRetryProvider(get_analyze_provider(report_settings, plan), coordinator),
+        PacedRetryProvider(
+            get_analyze_provider(settings, plan, apply_request_policy=False),
+            coordinator,
+        ),
+        PacedRetryProvider(
+            get_analyze_provider(report_settings, plan, apply_request_policy=False),
+            coordinator,
+        ),
     )

@@ -115,7 +115,6 @@ export function ArticleDetailModal({ articleId, defaultAudience = 'CHIP_MAKER', 
                       className={highlightedSentences.includes(sentence.index) ? 'highlighted' : undefined}
                       key={sentence.index}
                     >
-                      <span className="sentence-index">{String(sentence.index + 1).padStart(2, '0')}</span>
                       <span>{sentence.text}</span>
                     </p>
                   ))}
@@ -189,13 +188,19 @@ function AnalysisPanel({
               관련도 {perspectiveRelevanceLabel(selectedPerspective.relevance)}
             </span>
             <p>{selectedPerspective.hook}</p>
-            <button
-              type="button"
-              className="perspective-evidence-button"
-              onClick={() => onEvidenceSelect(selectedPerspective.evidenceSentenceIds)}
-            >
-              {selectedPerspective.evidenceSentenceIds.map((id) => `근거 ${id + 1}`).join(' · ')}
-            </button>
+            <div className="perspective-evidence-list" role="group" aria-label="관점 관련 근거">
+              {selectedPerspective.evidenceSentenceIds.map((sentenceId, localIndex) => (
+                <button
+                  type="button"
+                  className="perspective-evidence-button"
+                  key={`${sentenceId}-${localIndex}`}
+                  aria-label={`근거 ${localIndex + 1} · 본문 ${sentenceId + 1}번째 문장으로 이동`}
+                  onClick={() => onEvidenceSelect([sentenceId])}
+                >
+                  근거 {localIndex + 1}
+                </button>
+              ))}
+            </div>
           </>
         ) : (
           <p className="perspective-empty">이 관점과 직접 연결되는 근거가 없습니다.</p>
@@ -205,16 +210,21 @@ function AnalysisPanel({
         {analysis.keyPoints.map((point, index) => (
           <div className="key-point" key={`${point.text}-${index}`}>
             <span className="key-point-number">{index + 1}</span>
-            <button
-              type="button"
-              className="key-point-content"
-              disabled={point.evidence.length === 0}
-              onClick={() => onEvidenceSelect(point.evidence)}
-            >
+            <div className="key-point-content">
               <span className="key-point-text">{point.text}</span>
               <span className={`groundedness ${point.groundedness}`}>{groundednessLabel(point.groundedness)}</span>
-              {point.evidence.map((evidence) => <span className="evidence" key={evidence}>근거 {evidence + 1}</span>)}
-            </button>
+              {point.evidence.map((sentenceId, localIndex) => (
+                <button
+                  type="button"
+                  className="evidence"
+                  key={`${sentenceId}-${localIndex}`}
+                  aria-label={`핵심 ${index + 1}의 근거 ${localIndex + 1} · 본문 ${sentenceId + 1}번째 문장으로 이동`}
+                  onClick={() => onEvidenceSelect([sentenceId])}
+                >
+                  근거 {localIndex + 1}
+                </button>
+              ))}
+            </div>
           </div>
         ))}
       </div>

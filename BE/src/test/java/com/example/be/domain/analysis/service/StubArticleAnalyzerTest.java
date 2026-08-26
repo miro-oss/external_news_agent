@@ -67,4 +67,89 @@ class StubArticleAnalyzerTest {
 
         assertEquals(Relevance.REFERENCE, analyzer.analyze(article).relevance());
     }
+
+    @Test
+    void skipsPunctuationAndPublisherBoilerplateWhenChoosingSummaryAndKeyPoints() {
+        Article article = Article.builder()
+                .title("북방화창, HBM·칩렛 장비로 사업 확대")
+                .body("! AI가 자동 생성한 요약으로 정확하지 않을 수 있어요. "
+                        + "이 기사는 회원 가입이 필요한 프리미엄 기사입니다. "
+                        + "북방화창이 반도체 장비 반기보고서를 발표했다. "
+                        + "식각과 박막 증착 장비의 시장점유율이 상승했다.")
+                .language("ko")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+
+        AnalysisResult result = analyzer.analyze(article);
+
+        assertEquals("북방화창이 반도체 장비 반기보고서를 발표했다.", result.summary());
+        assertEquals("북방화창이 반도체 장비 반기보고서를 발표했다.",
+                result.keyPoints().get(0).text());
+        assertTrue(result.keyPoints().get(0).evidence().get(0) > 0);
+        assertTrue(result.sections().stream().anyMatch(section -> section.text().equals("!")));
+    }
+
+    @Test
+    void fallsBackToArticleTitleWhenEveryBodySentenceIsBoilerplate() {
+        Article article = Article.builder()
+                .title("반도체 장비 공급 계약 체결")
+                .body("! AI가 자동 생성한 요약으로 정확하지 않을 수 있어요.")
+                .language("ko")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+
+        AnalysisResult result = analyzer.analyze(article);
+
+        assertEquals("반도체 장비 공급 계약 체결", result.summary());
+        assertTrue(result.keyPoints().isEmpty());
+    }
+
+    @Test
+    void excludesBoilerplateFromClassificationKeywords() {
+        Article article = Article.builder()
+                .title("반도체 장비 공급 계약 체결")
+                .body("반도체 장비 공급 계약을 체결했다. 무단 전재 및 재배포 금지.")
+                .language("ko")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+
+        AnalysisResult result = analyzer.analyze(article);
+
+        assertEquals(RiskLevel.LOW, result.riskLevel());
+        assertEquals(Sentiment.NEUTRAL, result.sentiment());
+        assertEquals(1, result.keyPoints().size());
+    }
+
+    @Test
+    void skipsEnglishPublisherBoilerplate() {
+        Article article = Article.builder()
+                .title("Chipmaker expands HBM production")
+                .body("Sign up to continue reading. All rights reserved. "
+                        + "The chipmaker expands HBM production this year.")
+                .language("en")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+
+        AnalysisResult result = analyzer.analyze(article);
+
+        assertEquals(1, result.keyPoints().size());
+        assertEquals("The chipmaker expands HBM production this year.",
+                result.keyPoints().get(0).text());
+    }
+
+    @Test
+    void keepsSubstantiveMembershipSentence() {
+        Article article = Article.builder()
+                .title("플랫폼 회원 증가")
+                .body("유료 회원 가입 증가가 반도체 교육 플랫폼의 매출 성장을 이끌었다.")
+                .language("ko")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+
+        AnalysisResult result = analyzer.analyze(article);
+
+        assertEquals("유료 회원 가입 증가가 반도체 교육 플랫폼의 매출 성장을 이끌었다.",
+                result.summary());
+        assertEquals(1, result.keyPoints().size());
+    }
 }
