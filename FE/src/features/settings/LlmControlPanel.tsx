@@ -180,7 +180,9 @@ function PlanOption({
         defaultChecked={current === value}
       />
       <span>{label}</span>
-      <small>{value === 'FREE' ? '비용 없이 호출량만 보호' : '월 3,000 credits 한도'}</small>
+      <small>
+        {value === 'FREE' ? <>비용 없이<br />호출량 보호</> : '월 3,000 credits 한도'}
+      </small>
     </label>
   )
 }
