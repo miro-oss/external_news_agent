@@ -49,7 +49,7 @@ news:
     base-url: ${AGENT_BASE_URL:http://127.0.0.1:8088}
     token: ${AGENT_SHARED_SECRET:}
     connect-timeout: 5s
-    analyze-timeout: 30s
+    analyze-timeout: ${AGENT_ANALYZE_TIMEOUT:90s}
     report-timeout: 120s
     default-plan: FREE
     allow-run-override: true

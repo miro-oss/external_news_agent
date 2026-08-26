@@ -15,7 +15,7 @@ public class AgentProperties implements InitializingBean {
     private String baseUrl = "http://127.0.0.1:8088";
     private String token = "";
     private Duration connectTimeout = Duration.ofSeconds(5);
-    private Duration analyzeTimeout = Duration.ofSeconds(30);
+    private Duration analyzeTimeout = Duration.ofSeconds(90);
     private Duration reportTimeout = Duration.ofSeconds(120);
     private AgentPlan defaultPlan = AgentPlan.FREE;
     private boolean allowRunOverride = true;

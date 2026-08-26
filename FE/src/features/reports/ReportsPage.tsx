@@ -167,6 +167,10 @@ function MarkdownBody({ markdown }: { markdown: string }) {
   return (
     <Markdown
       components={{
+        // 문서 제목이 이미 페이지 헤더의 h2다. 본문 제목은 한 단계씩 낮춰야 바깥 구조와 어긋나지 않는다.
+        h1: ({ children }) => <h2>{children}</h2>,
+        h2: ({ children }) => <h3>{children}</h3>,
+        h3: ({ children }) => <h4>{children}</h4>,
         a: ({ href, children }) => (
           <a href={href} target="_blank" rel="noreferrer">{children}</a>
         ),

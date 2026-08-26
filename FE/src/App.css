@@ -1486,8 +1486,7 @@ body.modal-open {
   line-height: 1.6;
 }
 
-.groundedness,
-.evidence {
+.groundedness {
   margin-right: 0.3rem;
   color: #8b95a1;
   font-size: 0.68rem;
@@ -1496,9 +1495,14 @@ body.modal-open {
 }
 
 .evidence {
+  margin-right: 0.3rem;
   padding: 0;
   border: 0;
   background: transparent;
+  color: #8b95a1;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
   cursor: pointer;
 }
 

@@ -70,3 +70,23 @@ def test_analyze_and_report_settings_share_plan_guard() -> None:
         assert analyze.coordinator is report.coordinator
     finally:
         close_analyze_providers()
+
+
+def test_can_skip_default_request_policy_for_live_eval() -> None:
+    settings = Settings(
+        GEMINI_API_KEY="gemini-key",
+        GEMINI_MODEL="gemini-model",
+    )
+
+    try:
+        provider = get_analyze_provider(
+            settings,
+            "FREE",
+            apply_request_policy=False,
+        )
+
+        assert isinstance(provider, GuardedAnalyzeProvider)
+        assert isinstance(provider.delegate, GeminiAnalyzeProvider)
+        assert get_analyze_provider(settings, "FREE") is not provider
+    finally:
+        close_analyze_providers()

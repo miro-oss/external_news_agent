@@ -13,6 +13,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Collectors;
 import java.util.regex.Pattern;
 
 /**
@@ -31,14 +32,16 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
             "ai가 자동 생성한 요약",
             "자동 생성한 요약",
             "정확하지 않을 수",
-            "회원 가입",
-            "회원가입",
-            "프리미엄 기사",
-            "프리미엄 콘텐츠",
-            "로그인 후",
-            "구독 후",
+            "이 기사는 회원 가입이 필요한 프리미엄 기사",
+            "회원가입이 필요한 프리미엄 콘텐츠",
+            "로그인 후 이용할 수 있습니다",
+            "구독 후 이용할 수 있습니다",
             "무단 전재",
-            "재배포 금지");
+            "재배포 금지",
+            "sign up to continue reading",
+            "log in to continue reading",
+            "subscribe to continue reading",
+            "all rights reserved");
 
     @Override
     public AnalysisResult analyze(Article article) {
@@ -48,7 +51,10 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
         List<FindingSection> meaningfulSections = sections.stream()
                 .filter(section -> isMeaningful(section.text()))
                 .toList();
-        String searchable = (article.getTitle() + " " + material).toLowerCase(Locale.ROOT);
+        String meaningfulText = meaningfulSections.stream()
+                .map(FindingSection::text)
+                .collect(Collectors.joining(" "));
+        String searchable = (article.getTitle() + " " + meaningfulText).toLowerCase(Locale.ROOT);
         boolean hasFullText = StringUtils.hasText(fullText);
 
         return new AnalysisResult(

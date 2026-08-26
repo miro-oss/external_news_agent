@@ -14,10 +14,10 @@ export function CollectionRunPanel() {
   const [runOverride, setRunOverride] = useState<'DEFAULT' | LlmPlan>('DEFAULT')
   const pendingRunKey = useRef<string | null>(null)
 
-  if (combinations.isPending || planQuery.isPending) {
+  if (combinations.isPending) {
     return <section className="collection-run-panel state-panel">수집 실행 정보를 불러오는 중입니다.</section>
   }
-  if (combinations.error || planQuery.error || !combinations.data || !planQuery.data) {
+  if (combinations.error || !combinations.data) {
     return (
       <section className="collection-run-panel state-panel error" role="alert">
         수집 실행 정보를 불러오지 못했습니다.
@@ -36,7 +36,13 @@ export function CollectionRunPanel() {
   const targetCombinations = scope === 'ALL'
     ? activeCombinations
     : activeCombinations.filter((combination) => combination.topicId === effectiveTopic?.id)
-  const maxArticleCount = targetCombinations.reduce(
+  // batchSize는 검색 소스에 몇 건을 요청할지에만 쓰인다. 피드 소스는 발행된 만큼 들어오므로
+  // 이 숫자에 더하면 상한도 추정치도 아닌 값이 된다.
+  const searchCombinations = targetCombinations.filter(
+    (combination) => combination.sourceKind === 'SEARCH',
+  )
+  const feedCount = targetCombinations.length - searchCombinations.length
+  const maxArticleCount = searchCombinations.reduce(
     (total, combination) => total + combination.batchSize,
     0,
   )
@@ -94,6 +100,7 @@ export function CollectionRunPanel() {
           <select
             id="run-scope"
             value={scope}
+            disabled={startRun.isPending}
             onChange={(event) => changeScope(event.target.value as RunScope)}
           >
             <option value="SELECTED">선택 주제</option>
@@ -106,7 +113,7 @@ export function CollectionRunPanel() {
           <select
             id="run-topic"
             value={effectiveTopic?.id ?? ''}
-            disabled={scope === 'ALL' || activeTopics.length === 0}
+            disabled={scope === 'ALL' || activeTopics.length === 0 || startRun.isPending}
             onChange={(event) => changeTopic(Number(event.target.value))}
           >
             {activeTopics.length === 0 && <option value="">활성 주제 없음</option>}
@@ -116,12 +123,13 @@ export function CollectionRunPanel() {
           </select>
         </div>
 
-        {setting.allowRunOverride && (
+        {setting?.allowRunOverride && (
           <div className="field">
             <label htmlFor="run-plan">이번 실행 플랜</label>
             <select
               id="run-plan"
               value={runOverride}
+              disabled={startRun.isPending}
               onChange={(event) => changeRunOverride(event.target.value as 'DEFAULT' | LlmPlan)}
             >
               <option value="DEFAULT">기본 설정 사용 ({setting.plan})</option>
@@ -138,7 +146,7 @@ export function CollectionRunPanel() {
           <strong>{targetCombinations.length.toLocaleString()}개</strong>
         </div>
         <div>
-          <span>최대 기사 수</span>
+          <span>검색 최대 기사 수</span>
           <strong>{maxArticleCount.toLocaleString()}건</strong>
         </div>
         <p>
@@ -147,6 +155,7 @@ export function CollectionRunPanel() {
             : effectiveTopic
               ? `‘${effectiveTopic.name}’에 연결된 활성 소스만 실행합니다.`
               : '실행할 활성 주제를 먼저 등록해 주세요.'}
+          {feedCount > 0 && ` 피드 ${feedCount}곳은 새로 올라온 만큼 가져옵니다.`}
         </p>
       </div>
 

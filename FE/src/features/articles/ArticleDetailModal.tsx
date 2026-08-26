@@ -188,12 +188,13 @@ function AnalysisPanel({
               관련도 {perspectiveRelevanceLabel(selectedPerspective.relevance)}
             </span>
             <p>{selectedPerspective.hook}</p>
-            <div className="perspective-evidence-list" aria-label="관점 관련 근거">
+            <div className="perspective-evidence-list" role="group" aria-label="관점 관련 근거">
               {selectedPerspective.evidenceSentenceIds.map((sentenceId, localIndex) => (
                 <button
                   type="button"
                   className="perspective-evidence-button"
                   key={`${sentenceId}-${localIndex}`}
+                  aria-label={`근거 ${localIndex + 1} · 본문 ${sentenceId + 1}번째 문장으로 이동`}
                   onClick={() => onEvidenceSelect([sentenceId])}
                 >
                   근거 {localIndex + 1}
@@ -217,6 +218,7 @@ function AnalysisPanel({
                   type="button"
                   className="evidence"
                   key={`${sentenceId}-${localIndex}`}
+                  aria-label={`핵심 ${index + 1}의 근거 ${localIndex + 1} · 본문 ${sentenceId + 1}번째 문장으로 이동`}
                   onClick={() => onEvidenceSelect([sentenceId])}
                 >
                   근거 {localIndex + 1}

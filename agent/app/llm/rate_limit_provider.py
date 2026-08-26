@@ -65,19 +65,21 @@ class ProviderRequestCoordinator:
         self._jitter = jitter or (lambda upper: random.uniform(0, upper))
         self._lock = Lock()
         self._last_call_started_at: float | None = None
+        self._blocked_until = 0.0
 
     def wait_before_call(self) -> None:
         with self._lock:
             now = self._clock()
+            next_call_at = self._blocked_until
             if self._last_call_started_at is not None:
-                remaining = (
-                    self._last_call_started_at
-                    + self.policy.request_interval_seconds
-                    - now
+                next_call_at = max(
+                    next_call_at,
+                    self._last_call_started_at + self.policy.request_interval_seconds,
                 )
-                if remaining > 0:
-                    self._sleep(remaining)
-                    now = self._clock()
+            remaining = next_call_at - now
+            if remaining > 0:
+                self._sleep(remaining)
+                now = self._clock()
             self._last_call_started_at = now
 
     def wait_after_rate_limit(self, error: AgentError, retry_number: int) -> float:
@@ -93,7 +95,8 @@ class ProviderRequestCoordinator:
                 base + self._jitter(min(1.0, base * 0.1)),
                 self.policy.rate_limit_max_backoff_seconds,
             )
-        self._sleep(delay)
+        with self._lock:
+            self._blocked_until = max(self._blocked_until, self._clock() + delay)
         return delay
 
 
@@ -142,7 +145,7 @@ class PacedRetryProvider:
                 retry_number = attempt + 1
                 delay = self._coordinator.wait_after_rate_limit(error, retry_number)
                 logger.warning(
-                    "Provider rate limit으로 대기 후 재시도합니다. "
+                    "Provider rate limit 대기를 공유하고 재시도합니다. "
                     "retry=%d/%d delaySeconds=%.3f",
                     retry_number,
                     policy.rate_limit_retry_attempts,

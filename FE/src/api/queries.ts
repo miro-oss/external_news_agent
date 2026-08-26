@@ -189,7 +189,8 @@ export function useStartCollectionRun() {
     mutationFn: (request: { idempotencyKey: string; topicIds?: number[]; plan?: LlmPlan }) =>
       post<CollectionRunCreated>('/runs', {
         idempotencyKey: request.idempotencyKey,
-        ...(request.topicIds ? { topicIds: request.topicIds } : {}),
+        // 빈 배열을 그대로 보내면 서버가 "전체 활성 주제"로 읽는다.
+        ...(request.topicIds?.length ? { topicIds: request.topicIds } : {}),
         ...(request.plan ? { plan: request.plan } : {}),
       }),
     onSuccess: () => {
