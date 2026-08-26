@@ -59,9 +59,9 @@ class SourceRepositoryIntegrationTests {
     @Test
     void savesSourceWithoutCrawlPolicy() {
         Source source = Source.builder()
-                .sourceKind(Source.KIND_SEARCH)
+                .sourceKind(Source.KIND_FEED)
                 .name("정책 없는 소스 통합테스트")
-                .urlTemplate("TAVILY")
+                .urlTemplate("https://example.com/rss-without-crawl-policy")
                 .language("ko")
                 .active(true)
                 .build();

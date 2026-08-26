@@ -77,8 +77,8 @@ export function SettingsPage() {
 
           <CollapsibleSection
             id="source"
-            title="수집 소스 등록"
-            description="기사를 가져올 곳입니다. 한 번 등록해 두면 여러 주제에서 함께 씁니다."
+            title="RSS 피드 등록"
+            description="검색 provider는 기본 제공됩니다. 여기서는 추가 RSS 주소를 등록합니다."
             open={open.source}
             onToggle={() => toggle('source')}
           >
