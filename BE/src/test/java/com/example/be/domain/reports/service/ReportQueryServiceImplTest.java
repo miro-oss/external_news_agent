@@ -9,6 +9,7 @@ import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
@@ -36,7 +37,9 @@ class ReportQueryServiceImplTest {
 
     private final NewsReportRepository reportRepository = mock(NewsReportRepository.class);
     private final FindingRepository findingRepository = mock(FindingRepository.class);
-    private final ReportQueryServiceImpl service = new ReportQueryServiceImpl(reportRepository, findingRepository);
+    private final DeliveryLogRepository deliveryLogRepository = mock(DeliveryLogRepository.class);
+    private final ReportQueryServiceImpl service = new ReportQueryServiceImpl(
+            reportRepository, findingRepository, deliveryLogRepository);
 
     @Test
     void latestReturnsNullWhenNoReportExists() {

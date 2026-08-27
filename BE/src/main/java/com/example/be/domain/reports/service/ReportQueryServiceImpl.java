@@ -4,6 +4,8 @@ import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.ChangeType;
+import com.example.be.domain.notifications.entity.DeliveryStatus;
+import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
@@ -43,6 +45,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     private final NewsReportRepository reportRepository;
     private final FindingRepository findingRepository;
+    private final DeliveryLogRepository deliveryLogRepository;
 
     @Override
     public PageResponse<ReportResDTO.Summary> getReports(String from, String to, int page, int size) {
@@ -60,8 +63,10 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 PageRequest.of(page, size, Sort.by(
                         Sort.Order.desc("generatedAt"), Sort.Order.desc("id"))));
         Map<Long, FindingRepository.ReportCount> counts = countsByRun(reports.getContent());
+        Map<Long, String> deliveryStatuses = deliveryStatuses(reports.getContent());
         List<ReportResDTO.Summary> content = reports.getContent().stream()
-                .map(report -> toSummary(report, counts.get(report.getRun().getId())))
+                .map(report -> toSummary(report, counts.get(report.getRun().getId()),
+                        deliveryStatuses.getOrDefault(report.getId(), DELIVERY_STATUS_NOT_SENT)))
                 .toList();
         return PageResponse.of(content, page, size, reports.getTotalElements());
     }
@@ -80,7 +85,9 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         return toDetail(report, includeFindings);
     }
 
-    private ReportResDTO.Summary toSummary(NewsReport report, FindingRepository.ReportCount count) {
+    private ReportResDTO.Summary toSummary(NewsReport report,
+                                           FindingRepository.ReportCount count,
+                                           String deliveryStatus) {
         return ReportResDTO.Summary.builder()
                 .id(report.getId())
                 .runId(report.getRun().getId())
@@ -89,8 +96,24 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .modelName(report.getModelName())
                 .findingCount(count == null ? 0 : count.getFindingCount())
                 .highRiskCount(count == null ? 0 : count.getHighRiskCount())
-                .deliveryStatus(DELIVERY_STATUS_NOT_SENT)
+                .deliveryStatus(deliveryStatus)
                 .build();
+    }
+
+    private Map<Long, String> deliveryStatuses(List<NewsReport> reports) {
+        if (reports.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> reportIds = reports.stream().map(NewsReport::getId).toList();
+        Map<Long, String> statuses = new LinkedHashMap<>();
+        for (DeliveryLogRepository.ReportDeliveryStatusCount count
+                : deliveryLogRepository.countStatusesByReportIds(reportIds)) {
+            statuses.putIfAbsent(count.getReportId(), "FAILED");
+            if (count.getStatus() == DeliveryStatus.SENT) {
+                statuses.put(count.getReportId(), "SENT");
+            }
+        }
+        return statuses;
     }
 
     private ReportResDTO.Detail toDetail(NewsReport report, boolean includeFindings) {
