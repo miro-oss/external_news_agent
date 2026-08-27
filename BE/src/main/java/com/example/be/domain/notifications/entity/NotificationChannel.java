@@ -17,6 +17,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.type.SqlTypes;
 
 import java.util.LinkedHashMap;
@@ -24,6 +25,7 @@ import java.util.Map;
 
 @Entity
 @Table(name = "notification_channels")
+@BatchSize(size = 16)
 @Getter
 @Builder
 @AllArgsConstructor(access = AccessLevel.PRIVATE)

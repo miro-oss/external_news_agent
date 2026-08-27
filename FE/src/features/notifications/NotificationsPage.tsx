@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from 'react'
 import {
+  type DeliveryLogFilters,
   useCreateNotificationGroup,
   useCreateNotificationRecipient,
   useDeleteNotificationGroup,
@@ -25,9 +26,12 @@ export function NotificationsPage() {
   const channels = useNotificationChannels()
   const recipients = useNotificationRecipients()
   const groups = useNotificationGroups()
-  const [channelType, setChannelType] = useState<NotificationChannelType | ''>('')
-  const [deliveryStatus, setDeliveryStatus] = useState<DeliveryStatus | ''>('')
-  const logs = useDeliveryLogs({ channelType, status: deliveryStatus })
+  const [logFilters, setLogFilters] = useState<DeliveryLogFilters>({ page: 0 })
+  const logs = useDeliveryLogs(logFilters)
+
+  function changeLogFilter(key: Exclude<keyof DeliveryLogFilters, 'page'>, value: string) {
+    setLogFilters((current) => ({ ...current, [key]: value, page: 0 }))
+  }
 
   const pending = channels.isPending || recipients.isPending || groups.isPending
   const error = channels.error ?? recipients.error ?? groups.error
@@ -67,20 +71,63 @@ export function NotificationsPage() {
       <section className="notification-section">
         <div className="section-heading"><h2>발송 이력</h2><span>외부 메시지 식별자로 문제를 추적할 수 있습니다.</span></div>
         <div className="delivery-filter-bar">
+          <label>보고서 ID
+            <input type="number" min="1" value={logFilters.reportId ?? ''}
+              onChange={(event) => changeLogFilter('reportId', event.target.value)} />
+          </label>
+          <label>실행 ID
+            <input type="number" min="1" value={logFilters.runId ?? ''}
+              onChange={(event) => changeLogFilter('runId', event.target.value)} />
+          </label>
+          <label>발송 배치 ID
+            <input value={logFilters.deliveryBatchId ?? ''}
+              onChange={(event) => changeLogFilter('deliveryBatchId', event.target.value)} />
+          </label>
+          <label>수신자 ID
+            <input type="number" min="1" value={logFilters.recipientId ?? ''}
+              onChange={(event) => changeLogFilter('recipientId', event.target.value)} />
+          </label>
           <label>채널
-            <select value={channelType} onChange={(event) => setChannelType(event.target.value as NotificationChannelType | '')}>
+            <select value={logFilters.channelType ?? ''}
+              onChange={(event) => changeLogFilter('channelType', event.target.value as NotificationChannelType | '')}>
               <option value="">전체</option><option value="EMAIL">메일</option><option value="TELEGRAM">텔레그램</option>
             </select>
           </label>
           <label>상태
-            <select value={deliveryStatus} onChange={(event) => setDeliveryStatus(event.target.value as DeliveryStatus | '')}>
+            <select value={logFilters.status ?? ''}
+              onChange={(event) => changeLogFilter('status', event.target.value as DeliveryStatus | '')}>
               <option value="">전체</option><option value="SENT">성공</option><option value="FAILED">실패</option><option value="SKIPPED">건너뜀</option>
             </select>
+          </label>
+          <label>시작 시각
+            <input type="datetime-local" value={logFilters.from ?? ''}
+              onChange={(event) => changeLogFilter('from', event.target.value)} />
+          </label>
+          <label>종료 시각
+            <input type="datetime-local" value={logFilters.to ?? ''}
+              onChange={(event) => changeLogFilter('to', event.target.value)} />
           </label>
         </div>
         {logs.isPending && <div className="state-panel" aria-busy="true">발송 이력을 불러오는 중입니다.</div>}
         {logs.isError && <div className="state-panel error" role="alert">{logs.error.message}</div>}
-        {logs.data && <DeliveryLogTable logs={logs.data} />}
+        {logs.data && (
+          <>
+            <DeliveryLogTable logs={logs.data} />
+            <div className="pagination" aria-label="발송 이력 페이지 이동">
+              <button type="button" className="secondary-button"
+                disabled={(logFilters.page ?? 0) === 0 || logs.isFetching}
+                onClick={() => setLogFilters((current) => ({ ...current, page: (current.page ?? 0) - 1 }))}>
+                이전
+              </button>
+              <span>{(logFilters.page ?? 0) + 1} / {Math.max(logs.data.totalPages, 1)}</span>
+              <button type="button" className="secondary-button"
+                disabled={!logs.data.hasNext || logs.isFetching}
+                onClick={() => setLogFilters((current) => ({ ...current, page: (current.page ?? 0) + 1 }))}>
+                다음
+              </button>
+            </div>
+          </>
+        )}
       </section>
     </main>
   )

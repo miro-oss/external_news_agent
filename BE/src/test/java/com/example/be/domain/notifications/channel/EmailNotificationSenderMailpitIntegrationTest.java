@@ -27,7 +27,8 @@ class EmailNotificationSenderMailpitIntegrationTest {
         EmailNotificationSender sender = new EmailNotificationSender(properties);
         NotificationChannel channel = NotificationChannel.builder()
                 .id(2L).channelType(ChannelType.EMAIL).name("메일 보고서")
-                .config(Map.of("host", "localhost", "port", 1025, "from", "news-agent@local.test"))
+                .config(Map.of("host", "localhost", "port", "1025", "from", "news-agent@local.test",
+                        "ssl", "false", "startTls", "false"))
                 .maxLength(Integer.MAX_VALUE).active(true).build();
 
         String messageId = sender.send(channel, "m6-recipient@local.test",

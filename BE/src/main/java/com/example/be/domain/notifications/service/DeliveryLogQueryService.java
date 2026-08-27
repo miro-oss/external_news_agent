@@ -10,6 +10,8 @@ import com.example.be.global.apiPayload.PageResponse;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import com.example.be.global.config.ApiTimeZone;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Tuple;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -22,7 +24,9 @@ import java.time.DateTimeException;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.EnumMap;
 import java.util.Locale;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +34,7 @@ import java.util.Locale;
 public class DeliveryLogQueryService {
 
     private final DeliveryLogRepository logRepository;
+    private final EntityManager entityManager;
 
     public NotificationResDTO.DeliveryLogs getLogs(Long reportId,
                                                     Long runId,
@@ -53,21 +58,34 @@ public class DeliveryLogQueryService {
                 reportId, runId, batchId, parsedChannel, parsedStatus, recipientId, parsedFrom, parsedTo);
         var result = logRepository.findAll(specification,
                 PageRequest.of(page, size, Sort.by(Sort.Order.desc("sentAt"), Sort.Order.desc("id"))));
-        long sent = logRepository.count(specification.and(status(DeliveryStatus.SENT)));
-        long failed = logRepository.count(specification.and(status(DeliveryStatus.FAILED)));
-        long skipped = logRepository.count(specification.and(status(DeliveryStatus.SKIPPED)));
+        Map<DeliveryStatus, Long> statusCounts = countByStatus(specification);
         int totalPages = size == 0 ? 0 : (int) Math.ceil((double) result.getTotalElements() / size);
         return NotificationResDTO.DeliveryLogs.builder()
                 .content(result.getContent().stream().map(this::toLog).toList())
                 .page(page).size(size).totalElements(result.getTotalElements()).totalPages(totalPages)
                 .hasNext(page + 1 < totalPages)
                 .summary(NotificationResDTO.DeliverySummary.builder()
-                        .sentCount(sent).failedCount(failed).skippedCount(skipped).build())
+                        .sentCount(statusCounts.getOrDefault(DeliveryStatus.SENT, 0L))
+                        .failedCount(statusCounts.getOrDefault(DeliveryStatus.FAILED, 0L))
+                        .skippedCount(statusCounts.getOrDefault(DeliveryStatus.SKIPPED, 0L))
+                        .build())
                 .build();
     }
 
-    private Specification<DeliveryLog> status(DeliveryStatus status) {
-        return (root, query, cb) -> cb.equal(root.get("status"), status);
+    private Map<DeliveryStatus, Long> countByStatus(Specification<DeliveryLog> specification) {
+        var criteriaBuilder = entityManager.getCriteriaBuilder();
+        var query = criteriaBuilder.createTupleQuery();
+        var root = query.from(DeliveryLog.class);
+        var predicate = specification.toPredicate(root, query, criteriaBuilder);
+        query.multiselect(root.get("status").alias("status"), criteriaBuilder.count(root).alias("count"))
+                .where(predicate)
+                .groupBy(root.get("status"));
+
+        Map<DeliveryStatus, Long> counts = new EnumMap<>(DeliveryStatus.class);
+        for (Tuple tuple : entityManager.createQuery(query).getResultList()) {
+            counts.put(tuple.get("status", DeliveryStatus.class), tuple.get("count", Long.class));
+        }
+        return counts;
     }
 
     private NotificationResDTO.DeliveryLog toLog(DeliveryLog log) {

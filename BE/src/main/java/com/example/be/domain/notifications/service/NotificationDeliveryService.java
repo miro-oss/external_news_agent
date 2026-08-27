@@ -5,26 +5,21 @@ import com.example.be.domain.notifications.channel.NotificationSenderRegistry;
 import com.example.be.domain.notifications.dto.req.NotificationReqDTO;
 import com.example.be.domain.notifications.dto.res.NotificationResDTO;
 import com.example.be.domain.notifications.entity.ChannelType;
-import com.example.be.domain.notifications.entity.DeliveryBatch;
-import com.example.be.domain.notifications.entity.DeliveryLog;
 import com.example.be.domain.notifications.entity.DeliveryStatus;
 import com.example.be.domain.notifications.entity.NotificationChannel;
-import com.example.be.domain.notifications.entity.NotificationGroup;
-import com.example.be.domain.notifications.entity.NotificationRecipient;
-import com.example.be.domain.notifications.entity.RecipientDestination;
 import com.example.be.domain.notifications.exception.NotificationException;
 import com.example.be.domain.notifications.exception.NotificationTransportException;
 import com.example.be.domain.notifications.exception.code.NotificationErrorCode;
-import com.example.be.domain.notifications.repository.DeliveryBatchRepository;
-import com.example.be.domain.notifications.repository.DeliveryLogRepository;
-import com.example.be.domain.notifications.repository.NotificationChannelRepository;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;
 import com.example.be.domain.reports.repository.NewsReportRepository;
+import com.example.be.global.apiPayload.code.GeneralErrorCode;
+import com.example.be.global.apiPayload.exception.GeneralException;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -35,18 +30,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class NotificationDeliveryService {
 
     private final NewsReportRepository reportRepository;
-    private final NotificationChannelRepository channelRepository;
-    private final DeliveryBatchRepository batchRepository;
-    private final DeliveryLogRepository logRepository;
     private final NotificationManagementService managementService;
     private final NotificationRenderer renderer;
+    private final NotificationDeliveryPlanService planService;
+    private final NotificationDeliveryPersistenceService persistenceService;
     private final NotificationSenderRegistry senderRegistry;
 
     @Transactional(readOnly = true)
@@ -75,123 +68,190 @@ public class NotificationDeliveryService {
                 .build();
     }
 
-    @Transactional(noRollbackFor = NotificationException.class)
+    /** 배치를 먼저 커밋한 뒤 외부 I/O와 결과 기록을 각각 수행해 중복 발송과 장기 DB 점유를 막는다. */
     public NotificationResDTO.SendBatch send(Long reportId, NotificationReqDTO.Send request) {
-        NewsReport report = findReport(reportId);
-        if (request == null || request.getGroupIds() == null || request.getGroupIds().isEmpty()) {
-            throw new NotificationException(NotificationErrorCode.DELIVERY_NO_TARGET,
-                    Map.of("groupIds", List.of()));
-        }
+        validateSendRequest(request);
+        planService.requireReport(reportId);
         String idempotencyKey = normalizeIdempotencyKey(request.getIdempotencyKey());
         if (idempotencyKey != null) {
-            var existing = batchRepository.findByIdempotencyKey(idempotencyKey);
+            var existing = persistenceService.findByIdempotencyKey(idempotencyKey);
             if (existing.isPresent()) {
-                return summarizeLogs(existing.get(), logRepository.findAllByBatchIdOrderByIdAsc(existing.get().getId()));
+                return replay(reportId, existing.get());
             }
         }
 
-        List<NotificationChannel> channels = resolveChannels(request.getChannelIds());
-        List<NotificationGroup> groups = request.getGroupIds().stream().filter(Objects::nonNull).distinct()
-                .map(id -> managementService.findGroup(id, true)).toList();
-        List<Target> targets = resolveTargets(groups, channels);
-        if (targets.isEmpty()) {
-            throw new NotificationException(NotificationErrorCode.DELIVERY_NO_TARGET,
-                    Map.of("groupIds", request.getGroupIds()));
+        NotificationDeliveryPlanService.PreparedDelivery plan = planService.prepare(reportId, request);
+        NotificationDeliveryPersistenceService.BatchInfo batch;
+        try {
+            batch = persistenceService.reserve(reportId, idempotencyKey);
+        } catch (DataIntegrityViolationException exception) {
+            if (idempotencyKey == null) {
+                throw exception;
+            }
+            NotificationDeliveryPersistenceService.BatchSnapshot existing = persistenceService
+                    .findByIdempotencyKey(idempotencyKey)
+                    .orElseThrow(() -> exception);
+            return replay(reportId, existing);
         }
 
-        LocalDateTime requestedAt = LocalDateTime.now(ApiTimeZone.ZONE);
-        DeliveryBatch batch = batchRepository.save(DeliveryBatch.builder()
-                .id(UUID.randomUUID().toString())
-                .report(report)
-                .idempotencyKey(idempotencyKey)
-                .requestedAt(requestedAt)
-                .build());
-        Map<Long, RenderedNotification> renderedByChannel = new LinkedHashMap<>();
-        List<NotificationResDTO.SendResult> results = new ArrayList<>();
-        for (Target target : targets) {
-            RenderedNotification rendered = renderedByChannel.computeIfAbsent(target.channel().getId(),
-                    ignored -> renderer.render(report, target.channel()));
-            results.add(deliver(batch, report, target, rendered));
-        }
-
+        List<NotificationResDTO.SendResult> results = deliver(batch, plan);
+        persistenceService.complete(batch.id());
         NotificationResDTO.SendBatch response = summarize(batch, results);
         if (response.getFailedCount() == response.getTargetCount()) {
             throw new NotificationException(NotificationErrorCode.DELIVERY_FAILED,
-                    Map.of("deliveryBatchId", batch.getId(), "targetCount", response.getTargetCount(),
+                    Map.of("deliveryBatchId", batch.id(), "targetCount", response.getTargetCount(),
                             "failedCount", response.getFailedCount()));
         }
         return response;
     }
 
-    private NotificationResDTO.SendResult deliver(DeliveryBatch batch,
-                                                   NewsReport report,
-                                                   Target target,
-                                                   RenderedNotification rendered) {
-        RecipientDestination destination = target.destination();
-        NotificationSender sender = senderRegistry.get(target.channel().getChannelType());
-        LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
+    private List<NotificationResDTO.SendResult> deliver(
+            NotificationDeliveryPersistenceService.BatchInfo batch,
+            NotificationDeliveryPlanService.PreparedDelivery plan) {
+        Map<Long, List<NotificationDeliveryPlanService.PreparedTarget>> byChannel = plan.targets().stream()
+                .collect(java.util.stream.Collectors.groupingBy(
+                        target -> target.channel().getId(), LinkedHashMap::new,
+                        java.util.stream.Collectors.toList()));
+        List<NotificationResDTO.SendResult> results = new ArrayList<>();
+        for (List<NotificationDeliveryPlanService.PreparedTarget> targets : byChannel.values()) {
+            NotificationChannel channel = targets.getFirst().channel();
+            RenderedNotification rendered = plan.renderedByChannel().get(channel.getId());
+            NotificationSender sender;
+            try {
+                sender = senderRegistry.get(channel.getChannelType());
+            } catch (RuntimeException exception) {
+                results.addAll(failTargets(batch, plan.reportId(), targets, rendered,
+                        unexpectedFailureMessage()));
+                continue;
+            }
 
-        if (!sender.isConfigured(target.channel())) {
-            String reason = target.channel().getChannelType() == ChannelType.TELEGRAM
-                    ? "텔레그램 봇 토큰이 설정되지 않았습니다." : "메일 채널 설정이 완료되지 않았습니다.";
-            logRepository.save(log(batch, report, target, DeliveryStatus.FAILED, null,
-                    1, rendered.chunks().size(), reason, now));
-            return result(target, DeliveryStatus.FAILED, null, rendered.chunks().size(), now,
-                    null, reason);
+            final boolean configured;
+            try {
+                configured = sender.isConfigured(channel);
+            } catch (RuntimeException exception) {
+                results.addAll(failTargets(batch, plan.reportId(), targets, rendered,
+                        unexpectedFailureMessage()));
+                continue;
+            }
+            if (!configured) {
+                String message = channel.getChannelType() == ChannelType.TELEGRAM
+                        ? "텔레그램 봇 토큰이 설정되지 않았습니다." : "메일 채널 설정이 완료되지 않았습니다.";
+                results.addAll(failTargets(batch, plan.reportId(), targets, rendered, message));
+                continue;
+            }
+
+            NotificationSender.DeliverySession session;
+            try {
+                session = sender.openSession(channel);
+            } catch (RuntimeException exception) {
+                results.addAll(failTargets(batch, plan.reportId(), targets, rendered,
+                        transportFailureMessage(exception)));
+                continue;
+            }
+            try {
+                for (NotificationDeliveryPlanService.PreparedTarget target : targets) {
+                    results.add(deliverTarget(batch, plan.reportId(), target, rendered, sender, session));
+                }
+            } finally {
+                try {
+                    session.close();
+                } catch (RuntimeException ignored) {
+                    // 개별 발송 결과는 이미 영속화됐으므로 연결 종료 실패로 배치를 미완료 상태로 두지 않는다.
+                }
+            }
         }
+        return results;
+    }
 
-        if (target.channel().getChannelType() == ChannelType.TELEGRAM && !destination.isOnboarded()) {
-            if (!sender.isOnboarded(target.channel(), destination.getAddress())) {
-                logRepository.save(log(batch, report, target, DeliveryStatus.SKIPPED, null,
-                        null, null, "NOT_ONBOARDED", now));
+    private NotificationResDTO.SendResult deliverTarget(
+            NotificationDeliveryPersistenceService.BatchInfo batch,
+            Long reportId,
+            NotificationDeliveryPlanService.PreparedTarget target,
+            RenderedNotification rendered,
+            NotificationSender sender,
+            NotificationSender.DeliverySession session) {
+        LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
+        if (target.channelType() == ChannelType.TELEGRAM && !target.onboarded()) {
+            final boolean onboarded;
+            try {
+                onboarded = sender.isOnboarded(target.channel(), target.address());
+            } catch (RuntimeException exception) {
+                return recordFailure(batch, reportId, target, rendered, 1,
+                        transportFailureMessage(exception), now);
+            }
+            if (!onboarded) {
+                record(batch, reportId, target, DeliveryStatus.SKIPPED, null,
+                        null, null, "NOT_ONBOARDED", now);
                 return result(target, DeliveryStatus.SKIPPED, null, null, now,
                         "NOT_ONBOARDED", "수신자가 봇에게 /start를 보내지 않았습니다.");
             }
-            destination.markOnboarded();
+            persistenceService.markOnboarded(target.destinationId());
         }
 
         List<String> externalIds = new ArrayList<>();
         for (int index = 0; index < rendered.chunks().size(); index++) {
+            String externalId;
             try {
-                String externalId = sender.send(target.channel(), destination.getAddress(),
-                        rendered.subject(), rendered.chunks().get(index));
-                externalIds.add(externalId);
+                externalId = session.send(target.address(), rendered.subject(), rendered.chunks().get(index));
+            } catch (RuntimeException exception) {
                 now = LocalDateTime.now(ApiTimeZone.ZONE);
-                logRepository.save(log(batch, report, target, DeliveryStatus.SENT, externalId,
-                        index + 1, rendered.chunks().size(), null, now));
-            } catch (NotificationTransportException exception) {
-                now = LocalDateTime.now(ApiTimeZone.ZONE);
-                logRepository.save(log(batch, report, target, DeliveryStatus.FAILED, null,
-                        index + 1, rendered.chunks().size(), exception.getMessage(), now));
+                String message = transportFailureMessage(exception);
+                record(batch, reportId, target, DeliveryStatus.FAILED, null,
+                        index + 1, rendered.chunks().size(), message, now);
                 return result(target, DeliveryStatus.FAILED,
                         externalIds.isEmpty() ? null : String.join(",", externalIds),
-                        rendered.chunks().size(), now, null, exception.getMessage());
+                        rendered.chunks().size(), now, null, message);
             }
+            externalIds.add(externalId);
+            now = LocalDateTime.now(ApiTimeZone.ZONE);
+            record(batch, reportId, target, DeliveryStatus.SENT, externalId,
+                    index + 1, rendered.chunks().size(), null, now);
         }
         return result(target, DeliveryStatus.SENT,
                 externalIds.isEmpty() ? null : String.join(",", externalIds),
                 rendered.chunks().size(), now, null, null);
     }
 
-    private DeliveryLog log(DeliveryBatch batch,
-                            NewsReport report,
-                            Target target,
-                            DeliveryStatus status,
-                            String externalMessageId,
-                            Integer chunkSeq,
-                            Integer chunkCount,
-                            String error,
-                            LocalDateTime sentAt) {
-        return DeliveryLog.builder()
-                .batch(batch).report(report).recipient(target.recipient())
-                .recipientName(target.recipient().getName())
-                .channel(target.channel()).channelType(target.channel().getChannelType())
-                .address(target.destination().getAddress()).status(status)
-                .externalMessageId(externalMessageId).chunkSeq(chunkSeq).chunkCount(chunkCount)
-                .errorMessage(error).sentAt(sentAt).build();
+    private List<NotificationResDTO.SendResult> failTargets(
+            NotificationDeliveryPersistenceService.BatchInfo batch,
+            Long reportId,
+            List<NotificationDeliveryPlanService.PreparedTarget> targets,
+            RenderedNotification rendered,
+            String message) {
+        LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
+        return targets.stream().map(target -> recordFailure(
+                batch, reportId, target, rendered, 1, message, now)).toList();
     }
 
-    private NotificationResDTO.SendResult result(Target target,
+    private NotificationResDTO.SendResult recordFailure(
+            NotificationDeliveryPersistenceService.BatchInfo batch,
+            Long reportId,
+            NotificationDeliveryPlanService.PreparedTarget target,
+            RenderedNotification rendered,
+            int chunkSeq,
+            String message,
+            LocalDateTime sentAt) {
+        record(batch, reportId, target, DeliveryStatus.FAILED, null,
+                chunkSeq, rendered.chunks().size(), message, sentAt);
+        return result(target, DeliveryStatus.FAILED, null,
+                rendered.chunks().size(), sentAt, null, message);
+    }
+
+    private void record(NotificationDeliveryPersistenceService.BatchInfo batch,
+                        Long reportId,
+                        NotificationDeliveryPlanService.PreparedTarget target,
+                        DeliveryStatus status,
+                        String externalMessageId,
+                        Integer chunkSeq,
+                        Integer chunkCount,
+                        String error,
+                        LocalDateTime sentAt) {
+        persistenceService.record(new NotificationDeliveryPersistenceService.LogRecord(
+                batch.id(), reportId, target.recipientId(), target.recipientName(), target.channel().getId(),
+                target.channelType(), target.address(), status, externalMessageId, chunkSeq, chunkCount, error, sentAt));
+    }
+
+    private NotificationResDTO.SendResult result(NotificationDeliveryPlanService.PreparedTarget target,
                                                   DeliveryStatus status,
                                                   String externalId,
                                                   Integer chunkCount,
@@ -199,56 +259,54 @@ public class NotificationDeliveryService {
                                                   String reason,
                                                   String message) {
         return NotificationResDTO.SendResult.builder()
-                .recipientId(target.recipient().getId()).recipientName(target.recipient().getName())
-                .channelType(target.channel().getChannelType().name())
-                .address(target.destination().getAddress()).status(status.name())
+                .recipientId(target.recipientId()).recipientName(target.recipientName())
+                .channelType(target.channelType().name()).address(target.address()).status(status.name())
                 .externalMessageId(externalId).chunkCount(chunkCount)
                 .sentAt(sentAt.atZone(ApiTimeZone.ZONE).toOffsetDateTime())
                 .reason(reason).message(message).build();
     }
 
-    private List<Target> resolveTargets(List<NotificationGroup> groups, List<NotificationChannel> channels) {
-        Map<String, Target> targets = new LinkedHashMap<>();
-        for (NotificationGroup group : groups) {
-            for (NotificationRecipient recipient : group.getMembers()) {
-                if (!recipient.isActive()) {
-                    continue;
-                }
-                Map<Long, RecipientDestination> destinations = recipient.getDestinations().stream()
-                        .filter(RecipientDestination::isUse)
-                        .filter(destination -> StringUtils.hasText(destination.getAddress()))
-                        .collect(java.util.stream.Collectors.toMap(
-                                destination -> destination.getChannel().getId(), value -> value));
-                for (NotificationChannel channel : channels) {
-                    RecipientDestination destination = destinations.get(channel.getId());
-                    if (destination != null) {
-                        targets.putIfAbsent(recipient.getId() + ":" + channel.getId(),
-                                new Target(recipient, channel, destination));
-                    }
-                }
-            }
+    private NotificationResDTO.SendBatch replay(
+            Long reportId,
+            NotificationDeliveryPersistenceService.BatchSnapshot batch) {
+        if (!Objects.equals(reportId, batch.reportId())) {
+            throw new GeneralException(GeneralErrorCode.CONFLICT,
+                    "다른 보고서에서 이미 사용된 idempotencyKey입니다.");
         }
-        return List.copyOf(targets.values());
-    }
-
-    private List<NotificationChannel> resolveChannels(List<Long> channelIds) {
-        if (channelIds == null || channelIds.isEmpty()) {
-            return channelRepository.findAllByActiveOrderByIdAsc(true);
+        if (batch.completedAt() == null) {
+            throw new GeneralException(GeneralErrorCode.CONFLICT, "동일한 발송 요청이 진행 중입니다.");
         }
-        return channelIds.stream().filter(Objects::nonNull).distinct()
-                .map(id -> managementService.findChannel(id, true)).toList();
+        Map<String, List<NotificationDeliveryPersistenceService.LogSnapshot>> grouped = batch.logs().stream()
+                .collect(java.util.stream.Collectors.groupingBy(
+                        log -> log.recipientId() + ":" + log.channelType() + ":" + log.address(),
+                        LinkedHashMap::new, java.util.stream.Collectors.toList()));
+        List<NotificationResDTO.SendResult> results = grouped.values().stream().map(items -> {
+            var first = items.getFirst();
+            DeliveryStatus status = items.stream().anyMatch(item -> item.status() == DeliveryStatus.FAILED)
+                    ? DeliveryStatus.FAILED
+                    : items.stream().anyMatch(item -> item.status() == DeliveryStatus.SENT)
+                    ? DeliveryStatus.SENT : DeliveryStatus.SKIPPED;
+            String ids = items.stream().map(NotificationDeliveryPersistenceService.LogSnapshot::externalMessageId)
+                    .filter(Objects::nonNull).collect(java.util.stream.Collectors.joining(","));
+            String error = items.stream().map(NotificationDeliveryPersistenceService.LogSnapshot::errorMessage)
+                    .filter(Objects::nonNull).findFirst().orElse(null);
+            return NotificationResDTO.SendResult.builder()
+                    .recipientId(first.recipientId()).recipientName(first.recipientName())
+                    .channelType(first.channelType().name()).address(first.address()).status(status.name())
+                    .externalMessageId(ids.isBlank() ? null : ids).chunkCount(first.chunkCount())
+                    .sentAt(first.sentAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime())
+                    .reason(status == DeliveryStatus.SKIPPED ? error : null).message(error).build();
+        }).toList();
+        return summarize(new NotificationDeliveryPersistenceService.BatchInfo(
+                batch.id(), batch.reportId(), batch.requestedAt()), results);
     }
 
-    private NewsReport findReport(Long reportId) {
-        return reportRepository.findByIdAndReportStatusNot(reportId, ReportStatus.PENDING)
-                .orElseThrow(() -> new ReportException(ReportErrorCode.REPORT_NOT_FOUND));
-    }
-
-    private NotificationResDTO.SendBatch summarize(DeliveryBatch batch, List<NotificationResDTO.SendResult> results) {
+    private NotificationResDTO.SendBatch summarize(
+            NotificationDeliveryPersistenceService.BatchInfo batch,
+            List<NotificationResDTO.SendResult> results) {
         return NotificationResDTO.SendBatch.builder()
-                .deliveryBatchId(batch.getId())
-                .reportId(batch.getReport().getId())
-                .requestedAt(batch.getRequestedAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime())
+                .deliveryBatchId(batch.id()).reportId(batch.reportId())
+                .requestedAt(batch.requestedAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime())
                 .targetCount(results.size())
                 .sentCount((int) results.stream().filter(result -> "SENT".equals(result.getStatus())).count())
                 .failedCount((int) results.stream().filter(result -> "FAILED".equals(result.getStatus())).count())
@@ -257,27 +315,16 @@ public class NotificationDeliveryService {
                 .build();
     }
 
-    private NotificationResDTO.SendBatch summarizeLogs(DeliveryBatch batch, List<DeliveryLog> logs) {
-        Map<String, List<DeliveryLog>> grouped = logs.stream().collect(java.util.stream.Collectors.groupingBy(
-                log -> log.getRecipient().getId() + ":" + log.getChannelType() + ":" + log.getAddress(),
-                LinkedHashMap::new, java.util.stream.Collectors.toList()));
-        List<NotificationResDTO.SendResult> results = grouped.values().stream().map(items -> {
-            DeliveryLog first = items.getFirst();
-            DeliveryStatus status = items.stream().anyMatch(item -> item.getStatus() == DeliveryStatus.FAILED)
-                    ? DeliveryStatus.FAILED
-                    : items.stream().anyMatch(item -> item.getStatus() == DeliveryStatus.SENT)
-                    ? DeliveryStatus.SENT : DeliveryStatus.SKIPPED;
-            String ids = items.stream().map(DeliveryLog::getExternalMessageId).filter(Objects::nonNull)
-                    .collect(java.util.stream.Collectors.joining(","));
-            String error = items.stream().map(DeliveryLog::getErrorMessage).filter(Objects::nonNull).findFirst().orElse(null);
-            return NotificationResDTO.SendResult.builder()
-                    .recipientId(first.getRecipient().getId()).recipientName(first.getRecipientName())
-                    .channelType(first.getChannelType().name()).address(first.getAddress()).status(status.name())
-                    .externalMessageId(ids.isBlank() ? null : ids).chunkCount(first.getChunkCount())
-                    .sentAt(first.getSentAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime())
-                    .reason(status == DeliveryStatus.SKIPPED ? error : null).message(error).build();
-        }).toList();
-        return summarize(batch, results);
+    private void validateSendRequest(NotificationReqDTO.Send request) {
+        if (request == null || request.getGroupIds() == null || request.getGroupIds().isEmpty()) {
+            throw new NotificationException(NotificationErrorCode.DELIVERY_NO_TARGET,
+                    Map.of("groupIds", List.of()));
+        }
+    }
+
+    private NewsReport findReport(Long reportId) {
+        return reportRepository.findByIdAndReportStatusNot(reportId, ReportStatus.PENDING)
+                .orElseThrow(() -> new ReportException(ReportErrorCode.REPORT_NOT_FOUND));
     }
 
     private String normalizeIdempotencyKey(String value) {
@@ -286,14 +333,19 @@ public class NotificationDeliveryService {
         }
         String normalized = value.trim();
         if (normalized.length() > 100) {
-            throw new NotificationException(NotificationErrorCode.DELIVERY_NO_TARGET,
-                    "idempotencyKey는 100자 이하여야 합니다.");
+            throw new GeneralException(GeneralErrorCode.BAD_REQUEST, "idempotencyKey는 100자 이하여야 합니다.");
         }
         return normalized;
     }
 
-    private record Target(NotificationRecipient recipient,
-                          NotificationChannel channel,
-                          RecipientDestination destination) {
+    private String transportFailureMessage(RuntimeException exception) {
+        if (exception instanceof NotificationTransportException && StringUtils.hasText(exception.getMessage())) {
+            return exception.getMessage();
+        }
+        return unexpectedFailureMessage();
+    }
+
+    private String unexpectedFailureMessage() {
+        return "알림 전송 중 예상하지 못한 오류가 발생했습니다.";
     }
 }

@@ -330,6 +330,13 @@ h4 {
   font-weight: 500;
 }
 
+.warning-message {
+  margin: 0.75rem 0 0;
+  color: var(--warning-strong);
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
 .required {
   color: var(--primary);
   font-weight: 600;
@@ -2325,6 +2332,7 @@ body.modal-open {
 
 .notification-form input,
 .notification-form select,
+.delivery-filter-bar input,
 .delivery-filter-bar select,
 .report-delivery-controls select {
   width: 100%;
@@ -2416,12 +2424,13 @@ body.modal-open {
 }
 
 .delivery-filter-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 0.75rem;
   margin: 1rem 0;
 }
 
-.delivery-filter-bar label { min-width: 150px; }
+.delivery-filter-bar label { min-width: 0; }
 
 .delivery-summary {
   display: flex;

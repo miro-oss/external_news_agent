@@ -5,6 +5,7 @@ import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.service.ReportFindingOrder;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.HtmlUtils;
@@ -13,7 +14,6 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
 /** 외부 채널에는 보고서 원문 대신 요약과 원문 링크만 렌더링한다. */
@@ -29,11 +29,8 @@ public class NotificationRenderer {
     }
 
     public RenderedNotification render(NewsReport report, NotificationChannel channel) {
-        List<Finding> findings = findingRepository.findForReportByRunId(report.getRun().getId()).stream()
-                .sorted(Comparator.comparing(Finding::getRiskLevel).reversed()
-                        .thenComparing(Finding::getRelevance)
-                        .thenComparing(Finding::getId, Comparator.nullsLast(Comparator.naturalOrder())))
-                .toList();
+        List<Finding> findings = ReportFindingOrder.sort(
+                findingRepository.findForReportByRunId(report.getRun().getId()));
         return channel.getChannelType() == ChannelType.EMAIL
                 ? renderEmail(report, findings)
                 : renderTelegram(report, findings, channel.getMaxLength());

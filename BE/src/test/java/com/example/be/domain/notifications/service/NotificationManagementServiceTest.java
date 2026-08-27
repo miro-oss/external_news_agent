@@ -11,12 +11,17 @@ import com.example.be.domain.notifications.repository.NotificationRecipientRepos
 import com.example.be.domain.notifications.repository.RecipientDestinationRepository;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class NotificationManagementServiceTest {
@@ -86,5 +91,25 @@ class NotificationManagementServiceTest {
                 () -> service.updateChannel(2L, request));
 
         assertEquals("메일 port는 1 이상 65535 이하여야 합니다.", exception.getMessage());
+    }
+
+    @Test
+    void nullRecipientIdDoesNotClearExistingGroupMembers() {
+        var existing = com.example.be.domain.notifications.entity.NotificationRecipient.builder()
+                .id(7L).name("기존 멤버").active(true)
+                .destinations(new ArrayList<>()).groups(new ArrayList<>()).build();
+        var group = com.example.be.domain.notifications.entity.NotificationGroup.builder()
+                .id(3L).name("기술").active(true).createdAt(LocalDateTime.now())
+                .members(new ArrayList<>(List.of(existing))).build();
+        when(groupRepository.findById(3L)).thenReturn(Optional.of(group));
+        NotificationReqDTO.MembersUpdate request = new NotificationReqDTO.MembersUpdate();
+        request.setRecipientIds(java.util.Arrays.asList((Long) null));
+
+        NotificationException exception = assertThrows(NotificationException.class,
+                () -> service.replaceGroupMembers(3L, request));
+
+        assertEquals("RECIPIENT400", exception.getCode().getCode());
+        assertEquals(List.of(existing), group.getMembers());
+        verify(recipientRepository, never()).findAllById(org.mockito.ArgumentMatchers.any());
     }
 }

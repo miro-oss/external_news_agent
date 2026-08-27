@@ -53,7 +53,19 @@ const keys = {
   notificationChannels: ['notifications', 'channels'] as const,
   notificationRecipients: ['notifications', 'recipients'] as const,
   notificationGroups: ['notifications', 'groups'] as const,
-  deliveryLogs: (filters: { channelType?: string; status?: string }) => ['notifications', 'delivery-logs', filters] as const,
+  deliveryLogs: (filters: DeliveryLogFilters) => ['notifications', 'delivery-logs', filters] as const,
+}
+
+export type DeliveryLogFilters = {
+  reportId?: string
+  runId?: string
+  deliveryBatchId?: string
+  channelType?: string
+  status?: string
+  recipientId?: string
+  from?: string
+  to?: string
+  page?: number
 }
 
 const PAGE_SIZE = 100
@@ -193,15 +205,22 @@ export function useNotificationGroups() {
   })
 }
 
-export function useDeliveryLogs(filters: { channelType?: string; status?: string } = {}) {
+export function useDeliveryLogs(filters: DeliveryLogFilters = {}) {
   return useQuery({
     queryKey: keys.deliveryLogs(filters),
     queryFn: () => notificationGet<DeliveryLogPage>('/delivery-logs', {
+      reportId: filters.reportId,
+      runId: filters.runId,
+      deliveryBatchId: filters.deliveryBatchId,
       channelType: filters.channelType,
       status: filters.status,
-      page: 0,
+      recipientId: filters.recipientId,
+      from: filters.from,
+      to: filters.to,
+      page: filters.page ?? 0,
       size: 50,
     }),
+    placeholderData: keepPreviousData,
   })
 }
 
@@ -287,14 +306,15 @@ export function usePreviewNotification() {
 export function useSendNotification() {
   const refresh = useRefreshNotifications()
   return useMutation({
-    mutationFn: ({ reportId, groupIds, channelIds }: {
+    mutationFn: ({ reportId, groupIds, channelIds, idempotencyKey }: {
       reportId: number
       groupIds: number[]
       channelIds: number[]
+      idempotencyKey: string
     }) => notificationPost<NotificationSendBatch>(`/reports/${reportId}/send`, {
       groupIds,
       channelIds,
-      idempotencyKey: `report-${reportId}-${Date.now()}`,
+      idempotencyKey,
     }),
     onSuccess: refresh,
   })

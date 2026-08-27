@@ -37,4 +37,11 @@ public class DeliveryBatch {
 
     @Column(name = "requested_at", nullable = false)
     private LocalDateTime requestedAt;
+
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
+
+    public void complete(LocalDateTime completedAt) {
+        this.completedAt = completedAt;
+    }
 }

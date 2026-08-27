@@ -6,7 +6,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /** 보고서 본문과 상세 finding 카드가 공유하는 우선순위 정렬이다. */
-final class ReportFindingOrder {
+public final class ReportFindingOrder {
 
     private static final Comparator<Finding> PRIORITY = Comparator
             .comparing(Finding::getRiskLevel).reversed()
@@ -16,7 +16,7 @@ final class ReportFindingOrder {
     private ReportFindingOrder() {
     }
 
-    static List<Finding> sort(List<Finding> findings) {
+    public static List<Finding> sort(List<Finding> findings) {
         return findings.stream().sorted(PRIORITY).toList();
     }
 }

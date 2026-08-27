@@ -63,8 +63,10 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 PageRequest.of(page, size, Sort.by(
                         Sort.Order.desc("generatedAt"), Sort.Order.desc("id"))));
         Map<Long, FindingRepository.ReportCount> counts = countsByRun(reports.getContent());
+        Map<Long, String> deliveryStatuses = deliveryStatuses(reports.getContent());
         List<ReportResDTO.Summary> content = reports.getContent().stream()
-                .map(report -> toSummary(report, counts.get(report.getRun().getId())))
+                .map(report -> toSummary(report, counts.get(report.getRun().getId()),
+                        deliveryStatuses.getOrDefault(report.getId(), DELIVERY_STATUS_NOT_SENT)))
                 .toList();
         return PageResponse.of(content, page, size, reports.getTotalElements());
     }
@@ -83,7 +85,9 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         return toDetail(report, includeFindings);
     }
 
-    private ReportResDTO.Summary toSummary(NewsReport report, FindingRepository.ReportCount count) {
+    private ReportResDTO.Summary toSummary(NewsReport report,
+                                           FindingRepository.ReportCount count,
+                                           String deliveryStatus) {
         return ReportResDTO.Summary.builder()
                 .id(report.getId())
                 .runId(report.getRun().getId())
@@ -92,15 +96,24 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .modelName(report.getModelName())
                 .findingCount(count == null ? 0 : count.getFindingCount())
                 .highRiskCount(count == null ? 0 : count.getHighRiskCount())
-                .deliveryStatus(deliveryStatus(report.getId()))
+                .deliveryStatus(deliveryStatus)
                 .build();
     }
 
-    private String deliveryStatus(Long reportId) {
-        if (deliveryLogRepository.existsByReportIdAndStatus(reportId, DeliveryStatus.SENT)) {
-            return "SENT";
+    private Map<Long, String> deliveryStatuses(List<NewsReport> reports) {
+        if (reports.isEmpty()) {
+            return Map.of();
         }
-        return deliveryLogRepository.existsByReportId(reportId) ? "FAILED" : DELIVERY_STATUS_NOT_SENT;
+        List<Long> reportIds = reports.stream().map(NewsReport::getId).toList();
+        Map<Long, String> statuses = new LinkedHashMap<>();
+        for (DeliveryLogRepository.ReportDeliveryStatusCount count
+                : deliveryLogRepository.countStatusesByReportIds(reportIds)) {
+            statuses.putIfAbsent(count.getReportId(), "FAILED");
+            if (count.getStatus() == DeliveryStatus.SENT) {
+                statuses.put(count.getReportId(), "SENT");
+            }
+        }
+        return statuses;
     }
 
     private ReportResDTO.Detail toDetail(NewsReport report, boolean includeFindings) {

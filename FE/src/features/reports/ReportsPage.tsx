@@ -120,7 +120,7 @@ function ReportView({ report }: { report: ReportDetail }) {
         </div>
       </header>
 
-      <ReportDeliveryActions reportId={report.id} />
+      <ReportDeliveryActions key={report.id} reportId={report.id} />
 
       <section className="markdown-report" aria-label="마크다운 보고서 본문">
         <MarkdownBody markdown={report.markdownBody} />
@@ -152,6 +152,20 @@ function ReportDeliveryActions({ reportId }: { reportId: number }) {
   const [groupId, setGroupId] = useState<number | null>(null)
   const selectedChannelId = channelId ?? activeChannels[0]?.id ?? null
   const selectedGroupId = groupId ?? activeGroups[0]?.id ?? null
+  const [idempotencyKey, setIdempotencyKey] = useState(() => newDeliveryIdempotencyKey(reportId))
+
+  function changeGroup(nextGroupId: number) {
+    send.reset()
+    setIdempotencyKey(newDeliveryIdempotencyKey(reportId))
+    setGroupId(nextGroupId)
+  }
+
+  function changeChannel(nextChannelId: number) {
+    preview.reset()
+    send.reset()
+    setIdempotencyKey(newDeliveryIdempotencyKey(reportId))
+    setChannelId(nextChannelId)
+  }
 
   return (
     <section className="report-delivery-panel" aria-label="보고서 발송">
@@ -160,11 +174,11 @@ function ReportDeliveryActions({ reportId }: { reportId: number }) {
         <span>{activeGroups.length}개 그룹 · {activeChannels.length}개 채널</span>
       </div>
       <div className="report-delivery-controls">
-        <label>수신 그룹<select value={selectedGroupId ?? ''} onChange={(event) => setGroupId(Number(event.target.value))}>
+        <label>수신 그룹<select value={selectedGroupId ?? ''} onChange={(event) => changeGroup(Number(event.target.value))}>
           {activeGroups.length === 0 && <option value="">활성 그룹 없음</option>}
           {activeGroups.map((group) => <option value={group.id} key={group.id}>{group.name} · {group.activeMemberCount}명</option>)}
         </select></label>
-        <label>채널<select value={selectedChannelId ?? ''} onChange={(event) => setChannelId(Number(event.target.value))}>
+        <label>채널<select value={selectedChannelId ?? ''} onChange={(event) => changeChannel(Number(event.target.value))}>
           {activeChannels.length === 0 && <option value="">활성 채널 없음</option>}
           {activeChannels.map((channel) => <option value={channel.id} key={channel.id}>{channel.name}</option>)}
         </select></label>
@@ -174,12 +188,25 @@ function ReportDeliveryActions({ reportId }: { reportId: number }) {
             {preview.isPending ? '준비 중…' : '미리보기'}
           </button>
           <button type="button" className="primary-button" disabled={selectedChannelId === null || selectedGroupId === null || send.isPending}
-            onClick={() => selectedChannelId !== null && selectedGroupId !== null && send.mutate({ reportId, groupIds: [selectedGroupId], channelIds: [selectedChannelId] })}>
+            onClick={() => selectedChannelId !== null && selectedGroupId !== null && send.mutate({
+              reportId,
+              groupIds: [selectedGroupId],
+              channelIds: [selectedChannelId],
+              idempotencyKey,
+            })}>
             {send.isPending ? '발송 중…' : '발송하기'}
           </button>
         </div>
       </div>
-      <MutationStatus error={preview.error ?? send.error} success={send.data ? `발송 ${send.data.sentCount}건 성공 · ${send.data.skippedCount}건 건너뜀` : null} />
+      <MutationStatus
+        error={preview.error ?? send.error}
+        success={send.data && send.data.failedCount === 0
+          ? `발송 ${send.data.sentCount}건 성공 · ${send.data.skippedCount}건 건너뜀`
+          : null}
+        warning={send.data && send.data.failedCount > 0
+          ? `발송 ${send.data.sentCount}건 성공 · ${send.data.failedCount}건 실패 · ${send.data.skippedCount}건 건너뜀`
+          : null}
+      />
       {preview.data && (
         <div className="notification-preview">
           <div><strong>{preview.data.channelType === 'EMAIL' ? preview.data.subject : '텔레그램 메시지'}</strong><span>{preview.data.chunkCount}개 조각</span></div>
@@ -188,6 +215,10 @@ function ReportDeliveryActions({ reportId }: { reportId: number }) {
       )}
     </section>
   )
+}
+
+function newDeliveryIdempotencyKey(reportId: number) {
+  return `r${reportId}-${globalThis.crypto.randomUUID()}`
 }
 
 function ReportStat({ value, label, tone }: { value: number; label: string; tone?: 'danger' }) {

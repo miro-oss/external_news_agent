@@ -18,6 +18,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
@@ -57,10 +58,12 @@ public class NotificationRecipient {
     private LocalDateTime deletedAt;
 
     @Builder.Default
+    @BatchSize(size = 100)
     @OneToMany(mappedBy = "recipient", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private List<RecipientDestination> destinations = new ArrayList<>();
 
     @Builder.Default
+    @BatchSize(size = 100)
     @ManyToMany(mappedBy = "members", fetch = FetchType.LAZY)
     private List<NotificationGroup> groups = new ArrayList<>();
 

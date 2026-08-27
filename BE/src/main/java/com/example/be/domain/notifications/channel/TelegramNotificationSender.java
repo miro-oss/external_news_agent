@@ -76,7 +76,8 @@ public class TelegramNotificationSender implements NotificationSender {
             }
             return String.valueOf(response.result().messageId());
         } catch (RestClientException exception) {
-            throw new NotificationTransportException("텔레그램 전송에 실패했습니다.", exception);
+            // Spring transport 예외에는 bot token이 포함된 요청 URI가 들어갈 수 있어 cause를 노출하지 않는다.
+            throw new NotificationTransportException("텔레그램 전송에 실패했습니다.");
         }
     }
 

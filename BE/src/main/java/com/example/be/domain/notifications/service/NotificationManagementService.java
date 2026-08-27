@@ -308,7 +308,11 @@ public class NotificationManagementService {
         if (ids == null || ids.isEmpty()) {
             return List.of();
         }
-        List<Long> distinct = ids.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (ids.stream().anyMatch(java.util.Objects::isNull)) {
+            throw new NotificationException(NotificationErrorCode.RECIPIENT_INVALID,
+                    "recipientIds에는 null을 포함할 수 없습니다.");
+        }
+        List<Long> distinct = ids.stream().distinct().toList();
         List<NotificationRecipient> recipients = recipientRepository.findAllById(distinct);
         Set<Long> found = recipients.stream().map(NotificationRecipient::getId)
                 .collect(java.util.stream.Collectors.toSet());

@@ -20,6 +20,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
@@ -54,6 +55,7 @@ public class NotificationGroup {
     private LocalDateTime createdAt;
 
     @Builder.Default
+    @BatchSize(size = 100)
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(name = "notification_group_members",
             joinColumns = @JoinColumn(name = "group_id"),

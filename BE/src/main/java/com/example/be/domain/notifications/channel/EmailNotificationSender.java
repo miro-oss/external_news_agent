@@ -45,6 +45,13 @@ public class EmailNotificationSender implements NotificationSender {
 
     @Override
     public String send(NotificationChannel channel, String address, String subject, String body) {
+        try (DeliverySession deliverySession = openSession(channel)) {
+            return deliverySession.send(address, subject, body);
+        }
+    }
+
+    @Override
+    public DeliverySession openSession(NotificationChannel channel) {
         Map<String, Object> config = channel.getConfig();
         String host = text(config, "host");
         int port = integer(config, "port", 25);
@@ -73,24 +80,40 @@ public class EmailNotificationSender implements NotificationSender {
                 : null;
         Session session = Session.getInstance(mail, authenticator);
         try {
-            MimeMessage message = new MimeMessage(session);
-            message.setFrom(new InternetAddress(from));
-            message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(address, false));
-            message.setSubject(subject, "UTF-8");
-            message.setContent(body, "text/html; charset=UTF-8");
-            message.saveChanges();
-            String messageId = message.getMessageID();
-            try (Transport transport = session.getTransport("smtp")) {
-                if (StringUtils.hasText(username)) {
-                    transport.connect(host, port, username, password);
-                } else {
-                    transport.connect();
-                }
-                transport.sendMessage(message, message.getAllRecipients());
+            Transport transport = session.getTransport("smtp");
+            if (StringUtils.hasText(username)) {
+                transport.connect(host, port, username, password);
+            } else {
+                transport.connect();
             }
-            return messageId;
+            return new DeliverySession() {
+                @Override
+                public String send(String address, String subject, String body) {
+                    try {
+                        MimeMessage message = new MimeMessage(session);
+                        message.setFrom(new InternetAddress(from));
+                        message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(address, false));
+                        message.setSubject(subject, "UTF-8");
+                        message.setContent(body, "text/html; charset=UTF-8");
+                        message.saveChanges();
+                        transport.sendMessage(message, message.getAllRecipients());
+                        return message.getMessageID();
+                    } catch (MessagingException exception) {
+                        throw new NotificationTransportException("메일 전송에 실패했습니다.", exception);
+                    }
+                }
+
+                @Override
+                public void close() {
+                    try {
+                        transport.close();
+                    } catch (MessagingException ignored) {
+                        // 발송 결과는 이미 수신되었으므로 연결 종료 실패로 성공 기록을 되돌리지 않는다.
+                    }
+                }
+            };
         } catch (MessagingException exception) {
-            throw new NotificationTransportException("메일 전송에 실패했습니다.", exception);
+            throw new NotificationTransportException("메일 서버 연결에 실패했습니다.", exception);
         }
     }
 
@@ -101,11 +124,28 @@ public class EmailNotificationSender implements NotificationSender {
 
     private int integer(Map<String, Object> config, String key, int fallback) {
         Object value = config.get(key);
-        return value instanceof Number number ? number.intValue() : fallback;
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text) {
+            try {
+                return Integer.parseInt(text.trim());
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
     }
 
     private boolean bool(Map<String, Object> config, String key, boolean fallback) {
         Object value = config.get(key);
-        return value instanceof Boolean bool ? bool : fallback;
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value instanceof String text && ("true".equalsIgnoreCase(text.trim())
+                || "false".equalsIgnoreCase(text.trim()))) {
+            return Boolean.parseBoolean(text.trim());
+        }
+        return fallback;
     }
 }

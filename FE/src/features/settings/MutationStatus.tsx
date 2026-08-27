@@ -1,6 +1,10 @@
 import { ApiError } from '../../api/client'
 
-export function MutationStatus({ error, success }: { error: unknown; success: string | null }) {
+export function MutationStatus({ error, success, warning = null }: {
+  error: unknown
+  success: string | null
+  warning?: string | null
+}) {
   if (error) {
     let message = error instanceof ApiError ? `${error.message} (${error.code})` : '요청에 실패했습니다.'
     if (error instanceof ApiError && error.code === 'QUOTA429' && isQuotaDetails(error.details)) {
@@ -8,6 +12,7 @@ export function MutationStatus({ error, success }: { error: unknown; success: st
     }
     return <p className="error" role="alert">{message}</p>
   }
+  if (warning) return <p className="warning-message" role="status">{warning}</p>
   return success ? <p className="success" role="status">{success}</p> : null
 }
 
