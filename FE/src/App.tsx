@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import './App.css'
 import { ArticlesPage } from './features/articles/ArticlesPage'
 import { ReportsPage } from './features/reports/ReportsPage'
+import { NotificationsPage } from './features/notifications/NotificationsPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 
-const PAGES = ['articles', 'reports', 'settings'] as const
+const PAGES = ['articles', 'reports', 'notifications', 'settings'] as const
 
 type Page = (typeof PAGES)[number]
 
@@ -97,6 +98,14 @@ function App() {
         <div className="nav-links">
           <button
             type="button"
+            className={page === 'notifications' ? 'nav-link active' : 'nav-link'}
+            aria-current={page === 'notifications' ? 'page' : undefined}
+            onClick={() => go('notifications')}
+          >
+            알림 관리
+          </button>
+          <button
+            type="button"
             className={page === 'articles' ? 'nav-link active' : 'nav-link'}
             aria-current={page === 'articles' ? 'page' : undefined}
             onClick={() => go('articles')}
@@ -123,6 +132,7 @@ function App() {
       </nav>
       {page === 'articles' && <ArticlesPage />}
       {page === 'reports' && <ReportsPage />}
+      {page === 'notifications' && <NotificationsPage />}
       {page === 'settings' && <SettingsPage />}
     </div>
   )

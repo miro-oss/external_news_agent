@@ -2210,6 +2210,303 @@ body.modal-open {
 }
 
 /* =============================================================================
+   M6 알림 관리 · 보고서 발송
+   ============================================================================= */
+.notifications-page {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.notification-section,
+.notification-card-stack,
+.report-delivery-panel {
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.notification-section,
+.notification-card-stack {
+  padding: clamp(1.15rem, 2vw, 1.75rem);
+}
+
+.channel-grid,
+.notification-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.channel-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.channel-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.channel-card-title div,
+.compact-list article > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.channel-card-title span,
+.compact-list article > div:first-child span {
+  color: var(--fg-3);
+  font-size: 0.8rem;
+}
+
+.channel-mark {
+  display: grid;
+  width: 2.6rem;
+  height: 2.6rem;
+  place-items: center;
+  border-radius: 13px;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.channel-mark.email {
+  background: var(--primary-weak);
+  color: var(--primary);
+}
+
+.channel-mark.telegram {
+  background: #e8f7ff;
+  color: #129bd8;
+}
+
+.channel-card dl {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.channel-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.85rem;
+}
+
+.channel-card dt { color: var(--fg-3); }
+.channel-card dd { margin: 0; font-weight: 700; }
+
+.notification-card-stack {
+  align-content: start;
+}
+
+.notification-form {
+  display: grid;
+  gap: 0.8rem;
+  margin: 1rem 0 1.25rem;
+  padding: 1rem;
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.notification-form label,
+.delivery-filter-bar label,
+.report-delivery-controls label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--fg-2);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.notification-form input,
+.notification-form select,
+.delivery-filter-bar select,
+.report-delivery-controls select {
+  width: 100%;
+}
+
+.member-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.member-picker legend {
+  padding: 0 0.25rem;
+  color: var(--fg-2);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.member-picker label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 600;
+}
+
+.member-picker input { width: auto; }
+
+.compact-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.compact-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.8rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.group-list article { grid-template-columns: minmax(0, 1fr) auto; }
+
+.text-button {
+  padding: 0.45rem 0.55rem;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 0.78rem;
+}
+
+.text-button:hover:not(:disabled) { background: var(--bg); color: var(--fg); }
+.text-button.danger { color: var(--danger-strong); }
+
+.destination-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.destination-badges span,
+.delivery-status {
+  padding: 0.3rem 0.5rem;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg-2);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.destination-badges span[data-ready='true'],
+.delivery-status.sent {
+  background: var(--success-weak);
+  color: var(--success-strong);
+}
+
+.delivery-status.failed {
+  background: var(--danger-weak);
+  color: var(--danger-strong);
+}
+
+.delivery-status.skipped {
+  background: var(--warning-weak);
+  color: var(--warning-strong);
+}
+
+.delivery-filter-bar {
+  display: flex;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.delivery-filter-bar label { min-width: 150px; }
+
+.delivery-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.delivery-summary span {
+  padding: 0.55rem 0.75rem;
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--fg-2);
+  font-size: 0.82rem;
+}
+
+.delivery-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.delivery-table th,
+.delivery-table td {
+  padding: 0.75rem;
+  border-top: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.delivery-table th { color: var(--fg-3); font-size: 0.72rem; }
+.external-id { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+
+.report-delivery-panel {
+  margin: 1rem 0 2rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.report-delivery-heading,
+.notification-preview > div:first-child {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.report-delivery-heading h3 { margin: 0; font-size: 1rem; }
+.report-delivery-heading p { margin: 0.2rem 0 0; color: var(--fg-3); font-size: 0.8rem; }
+.report-delivery-heading > span,
+.notification-preview > div span { color: var(--fg-3); font-size: 0.75rem; white-space: nowrap; }
+
+.report-delivery-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
+.report-delivery-buttons { display: flex; gap: 0.45rem; }
+
+.notification-preview {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.8rem;
+  padding: 0.8rem;
+  border-radius: 12px;
+  background: var(--bg);
+}
+
+.notification-preview pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 0.75rem;
+  overflow: auto;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--fg-2);
+  font: 0.76rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+}
+
+/* =============================================================================
    반응형
    위에서부터 넓은 화면 → 좁은 화면 순서다. 좁은 쪽 규칙이 뒤에 와야 같은 우선순위끼리
    부딪혔을 때 좁은 쪽이 이긴다.
@@ -2230,6 +2527,11 @@ body.modal-open {
 /* 열 하나가 400px 아래로 내려가면 주제 폼의 소스 체크리스트부터 눌린다. 그 전에 한 단으로 편다. */
 @media (max-width: 900px) {
   .settings-top-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .notification-split,
+  .report-delivery-controls {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -2375,6 +2677,16 @@ body.modal-open {
 
   .report-stat-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .channel-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .delivery-filter-bar,
+  .report-delivery-buttons {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

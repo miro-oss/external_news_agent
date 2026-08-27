@@ -4,6 +4,8 @@ import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.ChangeType;
+import com.example.be.domain.notifications.entity.DeliveryStatus;
+import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
@@ -43,6 +45,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     private final NewsReportRepository reportRepository;
     private final FindingRepository findingRepository;
+    private final DeliveryLogRepository deliveryLogRepository;
 
     @Override
     public PageResponse<ReportResDTO.Summary> getReports(String from, String to, int page, int size) {
@@ -89,8 +92,15 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .modelName(report.getModelName())
                 .findingCount(count == null ? 0 : count.getFindingCount())
                 .highRiskCount(count == null ? 0 : count.getHighRiskCount())
-                .deliveryStatus(DELIVERY_STATUS_NOT_SENT)
+                .deliveryStatus(deliveryStatus(report.getId()))
                 .build();
+    }
+
+    private String deliveryStatus(Long reportId) {
+        if (deliveryLogRepository.existsByReportIdAndStatus(reportId, DeliveryStatus.SENT)) {
+            return "SENT";
+        }
+        return deliveryLogRepository.existsByReportId(reportId) ? "FAILED" : DELIVERY_STATUS_NOT_SENT;
     }
 
     private ReportResDTO.Detail toDetail(NewsReport report, boolean includeFindings) {

@@ -1,5 +1,15 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiGet, apiPut, get, post } from './client'
+import {
+  apiGet,
+  apiPut,
+  get,
+  notificationDelete,
+  notificationGet,
+  notificationPatch,
+  notificationPost,
+  notificationPut,
+  post,
+} from './client'
 import type {
   ArticleDetail,
   ArticleFilters,
@@ -12,6 +22,13 @@ import type {
   LlmPlan,
   LlmPlanSetting,
   LlmUsage,
+  DeliveryLogPage,
+  GroupPerspective,
+  NotificationChannel,
+  NotificationGroup,
+  NotificationPreview,
+  NotificationRecipient,
+  NotificationSendBatch,
   PaidExhaustedAction,
   PageResult,
   ReportDetail,
@@ -33,6 +50,10 @@ const keys = {
   llmPlan: ['settings', 'llm-plan'] as const,
   llmUsage: ['usage', 'llm'] as const,
   audience: ['settings', 'audience'] as const,
+  notificationChannels: ['notifications', 'channels'] as const,
+  notificationRecipients: ['notifications', 'recipients'] as const,
+  notificationGroups: ['notifications', 'groups'] as const,
+  deliveryLogs: (filters: { channelType?: string; status?: string }) => ['notifications', 'delivery-logs', filters] as const,
 }
 
 const PAGE_SIZE = 100
@@ -46,6 +67,16 @@ async function getAllPages<T, TPage extends PageResult<T> = PageResult<T>>(path:
     content.push(...next.content)
   }
 
+  return { ...first, content, hasNext: false }
+}
+
+async function getAllNotificationPages<T>(path: string): Promise<PageResult<T>> {
+  const first = await notificationGet<PageResult<T>>(path, { page: 0, size: PAGE_SIZE })
+  const content = [...first.content]
+  for (let page = first.page + 1; page < first.totalPages; page += 1) {
+    const next = await notificationGet<PageResult<T>>(path, { page, size: PAGE_SIZE })
+    content.push(...next.content)
+  }
   return { ...first, content, hasNext: false }
 }
 
@@ -138,6 +169,134 @@ export function useReport(reportId: number | null) {
     queryKey: keys.report(reportId),
     queryFn: () => get<ReportDetail>(`/reports/${reportId}`, { includeFindings: true }),
     enabled: reportId !== null,
+  })
+}
+
+export function useNotificationChannels() {
+  return useQuery({
+    queryKey: keys.notificationChannels,
+    queryFn: () => notificationGet<NotificationChannel[]>('/channels'),
+  })
+}
+
+export function useNotificationRecipients() {
+  return useQuery({
+    queryKey: keys.notificationRecipients,
+    queryFn: () => getAllNotificationPages<NotificationRecipient>('/recipients'),
+  })
+}
+
+export function useNotificationGroups() {
+  return useQuery({
+    queryKey: keys.notificationGroups,
+    queryFn: () => getAllNotificationPages<NotificationGroup>('/groups'),
+  })
+}
+
+export function useDeliveryLogs(filters: { channelType?: string; status?: string } = {}) {
+  return useQuery({
+    queryKey: keys.deliveryLogs(filters),
+    queryFn: () => notificationGet<DeliveryLogPage>('/delivery-logs', {
+      channelType: filters.channelType,
+      status: filters.status,
+      page: 0,
+      size: 50,
+    }),
+  })
+}
+
+function useRefreshNotifications() {
+  const queryClient = useQueryClient()
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: keys.notificationChannels })
+    void queryClient.invalidateQueries({ queryKey: keys.notificationRecipients })
+    void queryClient.invalidateQueries({ queryKey: keys.notificationGroups })
+    void queryClient.invalidateQueries({ queryKey: ['notifications', 'delivery-logs'] })
+    void queryClient.invalidateQueries({ queryKey: keys.reports })
+  }
+}
+
+export function useUpdateNotificationChannel() {
+  const refresh = useRefreshNotifications()
+  return useMutation({
+    mutationFn: ({ channelId, body }: { channelId: number; body: Partial<NotificationChannel> }) =>
+      notificationPatch<NotificationChannel>(`/channels/${channelId}`, body),
+    onSuccess: refresh,
+  })
+}
+
+export function useCreateNotificationRecipient() {
+  const refresh = useRefreshNotifications()
+  return useMutation({
+    mutationFn: (body: {
+      name: string
+      email?: string
+      memo?: string
+      destinations: Array<{ channelId: number; address: string; use: boolean }>
+    }) => notificationPost<NotificationRecipient>('/recipients', body),
+    onSuccess: refresh,
+  })
+}
+
+export function useDeleteNotificationRecipient() {
+  const refresh = useRefreshNotifications()
+  return useMutation({
+    mutationFn: (recipientId: number) => notificationDelete(`/recipients/${recipientId}`),
+    onSuccess: refresh,
+  })
+}
+
+export function useReplaceRecipientDestinations() {
+  const refresh = useRefreshNotifications()
+  return useMutation({
+    mutationFn: ({ recipientId, destinations }: {
+      recipientId: number
+      destinations: Array<{ channelId: number; address: string; use: boolean }>
+    }) => notificationPut(`/recipients/${recipientId}/destinations`, { destinations }),
+    onSuccess: refresh,
+  })
+}
+
+export function useCreateNotificationGroup() {
+  const refresh = useRefreshNotifications()
+  return useMutation({
+    mutationFn: (body: {
+      name: string
+      perspective?: GroupPerspective
+      recipientIds: number[]
+    }) => notificationPost<NotificationGroup>('/groups', body),
+    onSuccess: refresh,
+  })
+}
+
+export function useDeleteNotificationGroup() {
+  const refresh = useRefreshNotifications()
+  return useMutation({
+    mutationFn: (groupId: number) => notificationDelete(`/groups/${groupId}`),
+    onSuccess: refresh,
+  })
+}
+
+export function usePreviewNotification() {
+  return useMutation({
+    mutationFn: ({ reportId, channelId }: { reportId: number; channelId: number }) =>
+      notificationPost<NotificationPreview>(`/reports/${reportId}/preview`, { channelId }),
+  })
+}
+
+export function useSendNotification() {
+  const refresh = useRefreshNotifications()
+  return useMutation({
+    mutationFn: ({ reportId, groupIds, channelIds }: {
+      reportId: number
+      groupIds: number[]
+      channelIds: number[]
+    }) => notificationPost<NotificationSendBatch>(`/reports/${reportId}/send`, {
+      groupIds,
+      channelIds,
+      idempotencyKey: `report-${reportId}-${Date.now()}`,
+    }),
+    onSuccess: refresh,
   })
 }
 

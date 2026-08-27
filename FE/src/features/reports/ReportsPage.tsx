@@ -1,8 +1,17 @@
 import { useState } from 'react'
 import Markdown from 'react-markdown'
-import { useLatestReport, useReport, useReports } from '../../api/queries'
+import {
+  useLatestReport,
+  useNotificationChannels,
+  useNotificationGroups,
+  usePreviewNotification,
+  useReport,
+  useReports,
+  useSendNotification,
+} from '../../api/queries'
 import type { ReportDetail, ReportFinding, ReportSummary } from '../../api/types'
 import { formatFullDate, formatShortDate } from '../../lib/datetime'
+import { MutationStatus } from '../settings/MutationStatus'
 
 export function ReportsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -111,6 +120,8 @@ function ReportView({ report }: { report: ReportDetail }) {
         </div>
       </header>
 
+      <ReportDeliveryActions reportId={report.id} />
+
       <section className="markdown-report" aria-label="마크다운 보고서 본문">
         <MarkdownBody markdown={report.markdownBody} />
       </section>
@@ -127,6 +138,55 @@ function ReportView({ report }: { report: ReportDetail }) {
         ) : <p className="muted">이 보고서에 포함된 근거가 없습니다.</p>}
       </section>
     </article>
+  )
+}
+
+function ReportDeliveryActions({ reportId }: { reportId: number }) {
+  const channels = useNotificationChannels()
+  const groups = useNotificationGroups()
+  const preview = usePreviewNotification()
+  const send = useSendNotification()
+  const activeChannels = channels.data?.filter((channel) => channel.active) ?? []
+  const activeGroups = groups.data?.content.filter((group) => group.active) ?? []
+  const [channelId, setChannelId] = useState<number | null>(null)
+  const [groupId, setGroupId] = useState<number | null>(null)
+  const selectedChannelId = channelId ?? activeChannels[0]?.id ?? null
+  const selectedGroupId = groupId ?? activeGroups[0]?.id ?? null
+
+  return (
+    <section className="report-delivery-panel" aria-label="보고서 발송">
+      <div className="report-delivery-heading">
+        <div><h3>보고서 전달</h3><p>채널에 보일 내용을 먼저 확인한 뒤 수신 그룹으로 보냅니다.</p></div>
+        <span>{activeGroups.length}개 그룹 · {activeChannels.length}개 채널</span>
+      </div>
+      <div className="report-delivery-controls">
+        <label>수신 그룹<select value={selectedGroupId ?? ''} onChange={(event) => setGroupId(Number(event.target.value))}>
+          {activeGroups.length === 0 && <option value="">활성 그룹 없음</option>}
+          {activeGroups.map((group) => <option value={group.id} key={group.id}>{group.name} · {group.activeMemberCount}명</option>)}
+        </select></label>
+        <label>채널<select value={selectedChannelId ?? ''} onChange={(event) => setChannelId(Number(event.target.value))}>
+          {activeChannels.length === 0 && <option value="">활성 채널 없음</option>}
+          {activeChannels.map((channel) => <option value={channel.id} key={channel.id}>{channel.name}</option>)}
+        </select></label>
+        <div className="report-delivery-buttons">
+          <button type="button" className="secondary-button" disabled={selectedChannelId === null || preview.isPending}
+            onClick={() => selectedChannelId !== null && preview.mutate({ reportId, channelId: selectedChannelId })}>
+            {preview.isPending ? '준비 중…' : '미리보기'}
+          </button>
+          <button type="button" className="primary-button" disabled={selectedChannelId === null || selectedGroupId === null || send.isPending}
+            onClick={() => selectedChannelId !== null && selectedGroupId !== null && send.mutate({ reportId, groupIds: [selectedGroupId], channelIds: [selectedChannelId] })}>
+            {send.isPending ? '발송 중…' : '발송하기'}
+          </button>
+        </div>
+      </div>
+      <MutationStatus error={preview.error ?? send.error} success={send.data ? `발송 ${send.data.sentCount}건 성공 · ${send.data.skippedCount}건 건너뜀` : null} />
+      {preview.data && (
+        <div className="notification-preview">
+          <div><strong>{preview.data.channelType === 'EMAIL' ? preview.data.subject : '텔레그램 메시지'}</strong><span>{preview.data.chunkCount}개 조각</span></div>
+          {preview.data.chunks.map((chunk) => <pre key={chunk.seq}>{chunk.body}</pre>)}
+        </div>
+      )}
+    </section>
   )
 }
 

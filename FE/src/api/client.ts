@@ -68,6 +68,45 @@ export function post<T>(path: string, body: unknown) {
   return request<T>(path, { method: 'POST', body: JSON.stringify(body) })
 }
 
+export function patch<T>(path: string, body: unknown) {
+  return request<T>(path, { method: 'PATCH', body: JSON.stringify(body) })
+}
+
+export function put<T>(path: string, body: unknown) {
+  return request<T>(path, { method: 'PUT', body: JSON.stringify(body) })
+}
+
+export function remove<T>(path: string) {
+  return request<T>(path, { method: 'DELETE' })
+}
+
+const NOTIFICATIONS_BASE = '/api/notifications'
+
+export function notificationGet<T>(path: string, params?: Record<string, string | number | boolean | undefined>) {
+  const query = new URLSearchParams()
+  Object.entries(params ?? {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') query.set(key, String(value))
+  })
+  const suffix = query.toString()
+  return request<T>(suffix ? `${path}?${suffix}` : path, undefined, NOTIFICATIONS_BASE)
+}
+
+export function notificationPost<T>(path: string, body: unknown) {
+  return request<T>(path, { method: 'POST', body: JSON.stringify(body) }, NOTIFICATIONS_BASE)
+}
+
+export function notificationPatch<T>(path: string, body: unknown) {
+  return request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }, NOTIFICATIONS_BASE)
+}
+
+export function notificationPut<T>(path: string, body: unknown) {
+  return request<T>(path, { method: 'PUT', body: JSON.stringify(body) }, NOTIFICATIONS_BASE)
+}
+
+export function notificationDelete<T>(path: string) {
+  return request<T>(path, { method: 'DELETE' }, NOTIFICATIONS_BASE)
+}
+
 /** `/api/settings`, `/api/usage`처럼 news 도메인 밖의 제품 API를 호출한다. */
 export function apiGet<T>(path: string) {
   return request<T>(path, undefined, '/api')

@@ -240,6 +240,103 @@ export interface ReportDetail {
   findings?: ReportFinding[]
 }
 
+export type NotificationChannelType = 'TELEGRAM' | 'EMAIL'
+export type DeliveryStatus = 'SENT' | 'FAILED' | 'SKIPPED'
+export type GroupPerspective = 'EXECUTIVE' | 'PURCHASING' | 'TECHNOLOGY' | 'SALES'
+
+export interface NotificationChannel {
+  id: number
+  channelType: NotificationChannelType
+  name: string
+  config: Record<string, string | number | boolean>
+  maxLength: number
+  active: boolean
+  tokenConfigured: boolean
+}
+
+export interface RecipientDestination {
+  channelId: number
+  channelType: NotificationChannelType
+  address: string | null
+  use: boolean
+  onboarded: boolean
+}
+
+export interface NotificationRecipient {
+  id: number
+  name: string
+  phone: string | null
+  email: string | null
+  memo: string | null
+  active: boolean
+  destinations: RecipientDestination[]
+  groupNames?: string[]
+}
+
+export interface NotificationGroup {
+  id: number
+  name: string
+  perspective: GroupPerspective | null
+  active: boolean
+  memberCount: number
+  activeMemberCount: number
+  members?: Array<{ recipientId: number; name: string; active: boolean }>
+}
+
+export interface NotificationPreview {
+  reportId: number
+  channelId: number
+  channelType: NotificationChannelType
+  parseMode: string | null
+  maxLength: number
+  subject: string | null
+  chunks: Array<{ seq: number; length: number; body: string }>
+  chunkCount: number
+}
+
+export interface NotificationSendBatch {
+  deliveryBatchId: string
+  reportId: number
+  requestedAt: string
+  targetCount: number
+  sentCount: number
+  failedCount: number
+  skippedCount: number
+  results: Array<{
+    recipientId: number
+    recipientName: string
+    channelType: NotificationChannelType
+    address: string
+    status: DeliveryStatus
+    externalMessageId: string | null
+    chunkCount: number | null
+    sentAt: string
+    reason?: string
+    message?: string
+  }>
+}
+
+export interface DeliveryLog {
+  id: number
+  deliveryBatchId: string
+  reportId: number
+  runId: number
+  recipientId: number
+  recipientName: string
+  channelType: NotificationChannelType
+  address: string
+  status: DeliveryStatus
+  externalMessageId: string | null
+  chunkSeq: number | null
+  chunkCount: number | null
+  errorMessage: string | null
+  sentAt: string
+}
+
+export type DeliveryLogPage = PageResult<DeliveryLog> & {
+  summary: { sentCount: number; failedCount: number; skippedCount: number }
+}
+
 export type LlmPlan = 'FREE' | 'PAID'
 export type PaidExhaustedAction = 'STUB' | 'FALLBACK_FREE'
 
