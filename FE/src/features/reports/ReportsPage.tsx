@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import Markdown from 'react-markdown'
 import {
   useLatestReport,
@@ -17,7 +17,9 @@ import {
   type ReportFinding,
   type ReportSummary,
 } from '../../api/types'
+import { KeyPointList } from '../../components/KeyPointList'
 import { formatFullDate, formatShortDate } from '../../lib/datetime'
+import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { MutationStatus } from '../settings/MutationStatus'
 
@@ -280,6 +282,7 @@ function FindingCard({ finding, onEvidenceSelect }: {
   finding: ReportFinding
   onEvidenceSelect: (articleId: number, sentences: number[]) => void
 }) {
+  const keyPoints = useMemo(() => normalizeKeyPoints(finding.keyPoints), [finding.keyPoints])
   return (
     <article className="finding-card">
       <div className="finding-card-meta">
@@ -289,29 +292,11 @@ function FindingCard({ finding, onEvidenceSelect }: {
       </div>
       <h4>{finding.articleTitle}</h4>
       <p>{finding.summary}</p>
-      {finding.keyPoints.length > 0 && (
-        <ul>{finding.keyPoints.map((point, index) => (
-          <li key={`${index}-${point.text}`}>
-            <span>{point.text}</span>
-            {point.groundedness === 'weak' && (
-              <span className="finding-groundedness">근거 약함</span>
-            )}
-            <span className="finding-evidence-list" role="group" aria-label={`핵심 ${index + 1}의 근거`}>
-              {point.evidence.map((sentenceId, localIndex) => (
-                <button
-                  type="button"
-                  className="evidence"
-                  key={`${sentenceId}-${localIndex}`}
-                  aria-label={`핵심 ${index + 1}의 근거 ${localIndex + 1} · ${finding.articleTitle} 본문 ${sentenceId + 1}번째 문장으로 이동`}
-                  onClick={() => onEvidenceSelect(finding.articleId, [sentenceId])}
-                >
-                  근거 {localIndex + 1}
-                </button>
-              ))}
-            </span>
-          </li>
-        ))}</ul>
-      )}
+      <KeyPointList
+        points={keyPoints}
+        articleTitle={finding.articleTitle}
+        onEvidenceSelect={(sentenceId) => onEvidenceSelect(finding.articleId, [sentenceId])}
+      />
       <a href={finding.canonicalUrl} target="_blank" rel="noreferrer">원문 열기 <span aria-hidden="true">↗</span></a>
     </article>
   )

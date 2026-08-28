@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import './App.css'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { ArticlesPage } from './features/articles/ArticlesPage'
 import { ReportsPage } from './features/reports/ReportsPage'
 import { NotificationsPage } from './features/notifications/NotificationsPage'
@@ -130,10 +131,17 @@ function App() {
           </button>
         </div>
       </nav>
-      {page === 'articles' && <ArticlesPage />}
-      {page === 'reports' && <ReportsPage />}
-      {page === 'notifications' && <NotificationsPage />}
-      {page === 'settings' && <SettingsPage />}
+      {/*
+        key에 화면을 건다. 한 화면이 터진 뒤에도 다른 탭을 누르면 경계가 새로 붙어 상태가
+        초기화된다 — key가 없으면 한 번 실패한 경계가 계속 실패 화면을 들고 있어서, 탭을
+        옮겨도 같은 안내가 남는다.
+      */}
+      <ErrorBoundary key={page}>
+        {page === 'articles' && <ArticlesPage />}
+        {page === 'reports' && <ReportsPage />}
+        {page === 'notifications' && <NotificationsPage />}
+        {page === 'settings' && <SettingsPage />}
+      </ErrorBoundary>
     </div>
   )
 }
