@@ -47,6 +47,8 @@ class ArticleHasherTest {
         assertEquals(original, ArticleHasher.normalizeUrl(tracked));
         assertEquals(ArticleHasher.urlHash(original), ArticleHasher.urlHash(tracked));
         assertNotEquals(ArticleHasher.urlHash(URL), ArticleHasher.urlHash(original));
+        assertEquals(URL + "?articleId=7&&view=full",
+                ArticleHasher.normalizeUrl(URL + "?articleId=7&&view=full#top"));
     }
 
     @Test

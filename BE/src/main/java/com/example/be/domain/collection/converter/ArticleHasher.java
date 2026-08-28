@@ -166,11 +166,12 @@ public final class ArticleHasher {
 
         List<String> retained = new ArrayList<>();
         for (String parameter : rawQuery.split("&", -1)) {
-            if (!parameter.isEmpty() && !isTrackingParameter(parameter)) {
+            if (!isTrackingParameter(parameter)) {
                 retained.add(parameter);
             }
         }
-        return retained.isEmpty() ? null : String.join("&", retained);
+        boolean hasParameter = retained.stream().anyMatch(parameter -> !parameter.isEmpty());
+        return hasParameter ? String.join("&", retained) : null;
     }
 
     private static boolean isTrackingParameter(String parameter) {
