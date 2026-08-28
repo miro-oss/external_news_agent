@@ -217,12 +217,15 @@ function AnalysisPanel({
         같은 노드의 글자만 갈리면 애니메이션은 처음 한 번만 돌고 그다음부터는 소리 없이 바뀐다.
       */}
       <div className="perspective-reason" role="tabpanel" key={selectedAudience}>
+        {/*
+          여기 있던 "관련도 보통"을 이름으로 바꿨다. 그 값은 바로 위 탭이 관점 이름 아래에
+          이미 달고 있어서 같은 말이 한 줄 더 붙은 것으로만 읽혔는데, 정작 이 칸이 무엇인지는
+          아무 데도 없었다 — 위 요약은 기사 전체를 줄인 것이고 이 칸만 고른 관점에 따라
+          갈린다는 걸, 탭을 눌러 보기 전에는 알 수 없었다.
+        */}
+        <span className="perspective-reason-label">{AUDIENCE_LABELS[selectedAudience]} 관점</span>
         {selectedPerspective?.hook ? (
           <>
-            {/*
-              여기 있던 "관련도 보통"을 뺐다. 바로 위 탭이 관점 이름 아래에 같은 값을 이미
-              달고 있어서, 탭을 고른 사람에게는 같은 말이 한 줄 더 붙은 것으로만 읽혔다.
-            */}
             <p>{selectedPerspective.hook}</p>
             <div className="perspective-evidence-list" role="group" aria-label="관점 관련 근거">
               {selectedPerspective.evidenceSentenceIds.map((sentenceId, localIndex) => (

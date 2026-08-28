@@ -1746,7 +1746,7 @@ body.modal-open {
   말한다. 애니메이션을 다시 재생시키는 건 React 쪽 key다 — 관점이 바뀌면 이 노드가 새로 붙는다.
 */
 .perspective-reason {
-  min-height: 72px;
+  min-height: 84px;
   margin-top: 0.5rem;
   padding: 0.9rem 1rem;
   border-radius: var(--radius-xs);
@@ -1761,7 +1761,7 @@ body.modal-open {
 }
 
 .perspective-reason p {
-  margin: 0;
+  margin: 0.35rem 0 0;
   color: #eaedf0;
   font-size: 0.86rem;
   line-height: 1.6;
@@ -1800,17 +1800,29 @@ body.modal-open {
 }
 
 /*
-  요약 문단과 이 목록은 굵기만 다를 뿐 이름이 없어서, 위아래 글이 무슨 관계인지 읽는 사람이
-  알 수 없었다. 목록에 이름과 건수를 달아 두면 "요약 한 문단 다음에 핵심 N건"이라는 순서가
-  글을 읽기 전에 보인다.
+  패널 안의 글 덩어리마다 이름을 다는 라벨.
+
+  덩어리가 셋(기사 요약 · 고른 관점 · 핵심)인데 굵기만 다를 뿐 이름이 없어서, 무엇이 무엇인지
+  읽는 사람이 알 수 없었다. 특히 관점 칸은 탭에 따라 갈리고 나머지 둘은 기사 자체의 내용이라
+  성격이 아예 다른데, 그 사실이 화면 어디에도 없었다.
+
+  셋이 같은 층위로 읽혀야 하므로 크기와 굵기를 한곳에서 정한다.
 */
+.key-points-heading,
+.perspective-reason-label {
+  color: #8b95a1;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
 .key-points-heading {
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
-  color: #8b95a1;
-  font-size: 0.74rem;
-  font-weight: 700;
+}
+
+.perspective-reason-label {
+  display: block;
 }
 
 .key-points-heading span {
