@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import type { ArticleKeyPoint } from '../api/types'
 
 interface Props {
@@ -7,8 +7,6 @@ interface Props {
   onEvidenceSelect: (sentenceId: number) => void
   /** 근거 버튼의 스크린리더 문구에 붙일 기사 제목. 리포트는 카드마다 기사가 달라 필요하다. */
   articleTitle?: string
-  /** 이 개수를 넘는 항목은 접어 둔다. */
-  collapseAfter?: number
 }
 
 /**
@@ -26,59 +24,65 @@ const GROUNDEDNESS_WARNINGS: Partial<Record<ArticleKeyPoint['groundedness'], str
 /**
  * 문장 단위 근거가 달린 핵심 목록. 기사 상세와 리포트 근거 카드가 같은 것을 보여 준다.
  *
- * <p>기본으로 앞의 몇 건만 펴 둔다. 한 기사에 핵심이 네다섯 건이면 요약 바로 아래에 같은 굵기의
- * 글이 그만큼 쌓여서, 무엇을 먼저 읽어야 하는지가 사라진다.
+ * <p>기본으로 접어 둔다. 무슨 일이 있었는지는 위 요약 한 문단이 이미 말했고, 같은 내용을 번호를
+ * 붙여 네다섯 줄로 다시 늘어놓으면 읽을 글만 늘어난다.
+ *
+ * <p>그렇다고 지우지는 않는다. 요약에는 문장 단위 근거 계약이 없어서(BE `ReportEvidencePolicy`)
+ * 무엇을 보고 그렇게 썼는지 되짚을 방법이 없다. 주장을 본문 문장에 이어 주는 것도, 모델이
+ * 지어냈을 때 "근거 없음"으로 세워 주는 것도 여기뿐이다. 훑을 때는 접혀 있고, 믿어도 되는지
+ * 확인할 때 펴는 자리다 — 여는 단추에 "근거 보기"라고 적는 이유다.
  */
-export function KeyPointList({ points, onEvidenceSelect, articleTitle, collapseAfter = 2 }: Props) {
-  const [expanded, setExpanded] = useState(false)
+export function KeyPointList({ points, onEvidenceSelect, articleTitle }: Props) {
+  const [open, setOpen] = useState(false)
+  const panelId = `${useId()}-key-points`
 
   if (points.length === 0) return null
 
-  const hiddenCount = Math.max(points.length - collapseAfter, 0)
-  const visible = expanded || hiddenCount === 0 ? points : points.slice(0, collapseAfter)
-
   return (
     <div className="key-points">
-      <div className="key-points-heading">
-        <strong>핵심</strong>
-        <span>{points.length}</span>
-      </div>
-      {visible.map((point, index) => {
-        const warning = GROUNDEDNESS_WARNINGS[point.groundedness]
-        return (
-          <div className="key-point" key={`${index}-${point.text}`}>
-            <span className="key-point-number">{index + 1}</span>
-            <div className="key-point-content">
-              <span className="key-point-text">{point.text}</span>
-              {warning && <span className={`groundedness ${point.groundedness}`}>{warning}</span>}
-              {point.evidence.map((sentenceId, localIndex) => (
-                <button
-                  type="button"
-                  className="evidence"
-                  key={`${sentenceId}-${localIndex}`}
-                  aria-label={[
-                    `핵심 ${index + 1}의 근거 ${localIndex + 1}`,
-                    articleTitle,
-                    `본문 ${sentenceId + 1}번째 문장으로 이동`,
-                  ].filter(Boolean).join(' · ')}
-                  onClick={() => onEvidenceSelect(sentenceId)}
-                >
-                  근거 {localIndex + 1}
-                </button>
-              ))}
-            </div>
-          </div>
-        )
-      })}
-      {hiddenCount > 0 && (
-        <button
-          type="button"
-          className="key-points-toggle"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-        >
-          {expanded ? '접기' : `${hiddenCount}건 더 보기`}
-        </button>
+      <button
+        type="button"
+        className="key-points-toggle"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="key-points-heading">
+          <strong>핵심</strong>
+          <span>{points.length}</span>
+        </span>
+        <span className="key-points-action">{open ? '접기' : '근거 보기'}</span>
+      </button>
+      {open && (
+        <div className="key-point-list" id={panelId}>
+          {points.map((point, index) => {
+            const warning = GROUNDEDNESS_WARNINGS[point.groundedness]
+            return (
+              <div className="key-point" key={`${index}-${point.text}`}>
+                <span className="key-point-number">{index + 1}</span>
+                <div className="key-point-content">
+                  <span className="key-point-text">{point.text}</span>
+                  {warning && <span className={`groundedness ${point.groundedness}`}>{warning}</span>}
+                  {point.evidence.map((sentenceId, localIndex) => (
+                    <button
+                      type="button"
+                      className="evidence"
+                      key={`${sentenceId}-${localIndex}`}
+                      aria-label={[
+                        `핵심 ${index + 1}의 근거 ${localIndex + 1}`,
+                        articleTitle,
+                        `본문 ${sentenceId + 1}번째 문장으로 이동`,
+                      ].filter(Boolean).join(' · ')}
+                      onClick={() => onEvidenceSelect(sentenceId)}
+                    >
+                      근거 {localIndex + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )
