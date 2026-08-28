@@ -13,7 +13,7 @@ import {
   useUpdateNotificationChannel,
 } from '../../api/queries'
 import type { DeliveryStatus, GroupPerspective, NotificationChannelType } from '../../api/types'
-import { formatFullDate } from '../../lib/datetime'
+import { formatMediumDate } from '../../lib/datetime'
 import { MutationStatus } from '../settings/MutationStatus'
 
 const PERSPECTIVES: Array<{ value: GroupPerspective; label: string }> = [
@@ -33,6 +33,14 @@ export function NotificationsPage() {
   const reportTitles = useMemo(
     () => new Map((reports.data?.content ?? []).map((report) => [report.id, report.title])),
     [reports.data],
+  )
+  /**
+   * 발송 로그는 보낸 시점의 이름과 주소만 남기고 그룹은 남기지 않는다. 표에서는 지금 이 사람이
+   * 어느 그룹에 있는지를 붙여 준다 — 보낸 당시의 소속이 아니므로 열 이름도 "소속 그룹"이다.
+   */
+  const recipientGroups = useMemo(
+    () => new Map((recipients.data?.content ?? []).map((recipient) => [recipient.id, recipient.groupNames ?? []])),
+    [recipients.data],
   )
 
   function changeLogFilter(key: Exclude<keyof DeliveryLogFilters, 'page'>, value: string) {
@@ -106,7 +114,7 @@ export function NotificationsPage() {
         {logs.isError && <div className="state-panel error" role="alert">{logs.error.message}</div>}
         {logs.data && (
           <>
-            <DeliveryLogTable logs={logs.data} reportTitles={reportTitles} />
+            <DeliveryLogTable logs={logs.data} reportTitles={reportTitles} recipientGroups={recipientGroups} />
             <div className="pagination" aria-label="발송 이력 페이지 이동">
               <button type="button" className="secondary-button"
                 disabled={(logFilters.page ?? 0) === 0 || logs.isFetching}
@@ -256,9 +264,11 @@ function GroupPanel({ recipients, groups }: {
 function DeliveryLogTable({
   logs,
   reportTitles,
+  recipientGroups,
 }: {
   logs: NonNullable<ReturnType<typeof useDeliveryLogs>['data']>
   reportTitles: Map<number, string>
+  recipientGroups: Map<number, string[]>
 }) {
   return (
     <div className="delivery-log-shell">
@@ -269,18 +279,32 @@ function DeliveryLogTable({
       </div>
       {logs.content.length === 0 ? <div className="state-panel">조건에 맞는 발송 이력이 없습니다.</div> : (
         <div className="table-scroll"><table className="delivery-table"><thead><tr>
-          <th>보낸 시각</th><th>보고서</th><th>수신자</th><th>전달 방식</th><th>결과</th>
-        </tr></thead><tbody>{logs.content.map((log) => <tr key={log.id}>
-          <td className="delivery-time">{formatFullDate(log.sentAt)}</td>
-          <td className="delivery-report" title={reportTitles.get(log.reportId)}>
-            {reportTitles.get(log.reportId) ?? `보고서 #${log.reportId}`}
-          </td>
-          <td>{log.recipientName}</td>
-          <td>{log.channelType === 'EMAIL' ? '메일' : '텔레그램'}</td>
-          <td><div className="delivery-result"><span className={`delivery-status ${log.status.toLowerCase()}`}>{statusLabel(log.status)}</span>
-            {log.errorMessage && <span>{log.errorMessage}</span>}
-          </div></td>
-        </tr>)}</tbody></table></div>
+          <th>보낸 시각</th><th>보고서</th><th>수신자</th><th>소속 그룹</th><th>전달 방식</th><th>결과</th>
+        </tr></thead><tbody>{logs.content.map((log) => {
+          const groupNames = recipientGroups.get(log.recipientId) ?? []
+          return <tr key={log.id}>
+            {/*
+              여기만 요일까지 붙는 긴 형식이었다. 한 줄에 여섯 칸이 들어가는 표에서 "목요일"은
+              자리를 가장 많이 먹으면서 정작 이력을 훑는 데는 쓰이지 않는다.
+            */}
+            <td className="delivery-time">{formatMediumDate(log.sentAt)}</td>
+            <td className="delivery-report" title={reportTitles.get(log.reportId)}>
+              {reportTitles.get(log.reportId) ?? `보고서 #${log.reportId}`}
+            </td>
+            {/* 주소까지 같이 보여야 같은 이름이 여럿일 때 어디로 나갔는지가 갈린다. */}
+            <td className="delivery-recipient">
+              <strong>{log.recipientName}</strong>
+              <span title={log.address}>{log.address}</span>
+            </td>
+            <td className="delivery-group" title={groupNames.join(' · ') || undefined}>
+              {groupNames.length > 0 ? groupNames.join(' · ') : <span className="muted-cell">그룹 미지정</span>}
+            </td>
+            <td>{log.channelType === 'EMAIL' ? '메일' : '텔레그램'}</td>
+            <td><div className="delivery-result"><span className={`delivery-status ${log.status.toLowerCase()}`}>{statusLabel(log.status)}</span>
+              {log.errorMessage && <span>{log.errorMessage}</span>}
+            </div></td>
+          </tr>
+        })}</tbody></table></div>
       )}
     </div>
   )

@@ -30,12 +30,18 @@ function toKeywords(value: string): string[] | undefined {
 export function TopicForm() {
   const [form, setForm] = useState(EMPTY)
   const [done, setDone] = useState<string | null>(null)
+  const [queryTouched, setQueryTouched] = useState(false)
   const sources = useSources()
   const { mutate, isPending, error, reset } = useCreateTopic()
 
   const activeSources = sources.data?.content ?? []
   /** SEARCH 소스를 연결하면 검색어가 필수다(TOPIC400). 보내기 전에 화면에서 먼저 알려 준다. */
   const needsQueryText = activeSources.some((source) => source.sourceKind === 'SEARCH')
+  /**
+   * 필수라는 사실을 라벨에 길게 적어 두는 대신 한 번 만졌다가 비운 순간에만 말한다. 아직
+   * 손대지 않은 칸에 빨간 글씨를 띄우면 잘못한 것이 없는데 혼나는 것처럼 읽힌다.
+   */
+  const queryMissing = needsQueryText && queryTouched && form.queryText.trim().length === 0
 
   function update<K extends keyof typeof EMPTY>(key: K, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -60,6 +66,7 @@ export function TopicForm() {
       {
         onSuccess: (created) => {
           setForm(EMPTY)
+          setQueryTouched(false)
           setDone(`"${created.name}"을(를) 등록했습니다.`)
         },
       },
@@ -82,19 +89,24 @@ export function TopicForm() {
 
       <div className="field">
         <label htmlFor="topic-query">
-          검색어{needsQueryText && <span className="required"> — 활성 검색 소스가 있어 필수</span>}
+          검색어{needsQueryText && <span className="required"> 필수</span>}
         </label>
         <input
           id="topic-query"
           value={form.queryText}
           onChange={(event) => update('queryText', event.target.value)}
+          onBlur={() => setQueryTouched(true)}
           placeholder="HBM 반도체"
           maxLength={500}
           required={needsQueryText}
           pattern={needsQueryText ? '.*\\S.*' : undefined}
           title="검색어에는 공백이 아닌 문자를 입력하세요."
+          aria-invalid={queryMissing || undefined}
+          aria-describedby="topic-query-hint"
         />
-        <p className="hint">활성 검색 소스에 넘길 질의어입니다. 검색 소스가 없다면 비워 둘 수 있습니다.</p>
+        {queryMissing
+          ? <p className="error" id="topic-query-hint">검색어를 입력해 주세요.</p>
+          : <p className="hint" id="topic-query-hint">검색 소스에 넘길 질의어입니다.</p>}
       </div>
 
       <div className="field">

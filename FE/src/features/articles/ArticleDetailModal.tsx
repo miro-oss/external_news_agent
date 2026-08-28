@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useArticle } from '../../api/queries'
 import {
   AUDIENCES,
@@ -7,7 +7,9 @@ import {
   type ArticleAnalysis,
   type Audience,
 } from '../../api/types'
+import { KeyPointList } from '../../components/KeyPointList'
 import { formatMediumDate } from '../../lib/datetime'
+import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { scrollIntoViewGently } from '../../lib/motion'
 
 interface Props {
@@ -176,6 +178,7 @@ function AnalysisPanel({
   const selectedPerspective = perspectiveTags.find(
     (tag) => tag.audience === selectedAudience,
   )
+  const keyPoints = useMemo(() => normalizeKeyPoints(analysis.keyPoints), [analysis.keyPoints])
 
   return (
     <section className="analysis-panel">
@@ -214,11 +217,15 @@ function AnalysisPanel({
         같은 노드의 글자만 갈리면 애니메이션은 처음 한 번만 돌고 그다음부터는 소리 없이 바뀐다.
       */}
       <div className="perspective-reason" role="tabpanel" key={selectedAudience}>
+        {/*
+          여기 있던 "관련도 보통"을 이름으로 바꿨다. 그 값은 바로 위 탭이 관점 이름 아래에
+          이미 달고 있어서 같은 말이 한 줄 더 붙은 것으로만 읽혔는데, 정작 이 칸이 무엇인지는
+          아무 데도 없었다 — 위 요약은 기사 전체를 줄인 것이고 이 칸만 고른 관점에 따라
+          갈린다는 걸, 탭을 눌러 보기 전에는 알 수 없었다.
+        */}
+        <span className="perspective-reason-label">{AUDIENCE_LABELS[selectedAudience]} 관점</span>
         {selectedPerspective?.hook ? (
           <>
-            <span className={`perspective-level level-${selectedPerspective.relevance}`}>
-              관련도 {perspectiveRelevanceLabel(selectedPerspective.relevance)}
-            </span>
             <p>{selectedPerspective.hook}</p>
             <div className="perspective-evidence-list" role="group" aria-label="관점 관련 근거">
               {selectedPerspective.evidenceSentenceIds.map((sentenceId, localIndex) => (
@@ -238,36 +245,14 @@ function AnalysisPanel({
           <p className="perspective-empty">이 관점과 직접 연결되는 근거가 없습니다.</p>
         )}
       </div>
-      <div className="key-points">
-        {analysis.keyPoints.map((point, index) => (
-          <div className="key-point" key={`${point.text}-${index}`}>
-            <span className="key-point-number">{index + 1}</span>
-            <div className="key-point-content">
-              <span className="key-point-text">{point.text}</span>
-              <span className={`groundedness ${point.groundedness}`}>{groundednessLabel(point.groundedness)}</span>
-              {point.evidence.map((sentenceId, localIndex) => (
-                <button
-                  type="button"
-                  className="evidence"
-                  key={`${sentenceId}-${localIndex}`}
-                  aria-label={`핵심 ${index + 1}의 근거 ${localIndex + 1} · 본문 ${sentenceId + 1}번째 문장으로 이동`}
-                  onClick={() => onEvidenceSelect([sentenceId])}
-                >
-                  근거 {localIndex + 1}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      <KeyPointList
+        points={keyPoints}
+        onEvidenceSelect={(sentenceId) => onEvidenceSelect([sentenceId])}
+      />
     </section>
   )
 }
 
 function perspectiveRelevanceLabel(value: 'none' | 'low' | 'medium' | 'high') {
   return { none: '해당 없음', low: '낮음', medium: '보통', high: '높음' }[value]
-}
-
-function groundednessLabel(value: ArticleAnalysis['keyPoints'][number]['groundedness']) {
-  return { grounded: '근거 확인', weak: '근거 약함', ungrounded: '근거 없음' }[value]
 }

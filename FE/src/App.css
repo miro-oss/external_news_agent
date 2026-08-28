@@ -1760,12 +1760,6 @@ body.modal-open {
   }
 }
 
-.perspective-level {
-  color: #8b95a1;
-  font-size: 0.7rem;
-  font-weight: 700;
-}
-
 .perspective-reason p {
   margin: 0.35rem 0 0;
   color: #eaedf0;
@@ -1805,6 +1799,71 @@ body.modal-open {
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+/*
+  패널 안의 글 덩어리마다 이름을 다는 라벨.
+
+  덩어리가 셋(기사 요약 · 고른 관점 · 핵심)인데 굵기만 다를 뿐 이름이 없어서, 무엇이 무엇인지
+  읽는 사람이 알 수 없었다. 특히 관점 칸은 탭에 따라 갈리고 나머지 둘은 기사 자체의 내용이라
+  성격이 아예 다른데, 그 사실이 화면 어디에도 없었다.
+
+  셋이 같은 층위로 읽혀야 하므로 크기와 굵기를 한곳에서 정한다.
+*/
+.key-points-heading,
+.perspective-reason-label {
+  color: #8b95a1;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.key-points-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.perspective-reason-label {
+  display: block;
+}
+
+.key-points-heading span {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+  접힌 동안 이 줄이 목록의 전부다. 왼쪽은 안에 무엇이 몇 건 있는지, 오른쪽은 왜 열어 보는지.
+  줄 전체가 눌리는 자리라 글자만큼이 아니라 폭을 다 쓴다.
+*/
+.key-points-toggle {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.key-points-action {
+  color: #6ea8fe;
+  font-size: 0.76rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.key-points-toggle:hover:not(:disabled) {
+  background: transparent;
+}
+
+.key-points-toggle:hover:not(:disabled) .key-points-action {
+  color: #a5c9fa;
+}
+
+.key-point-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
 .key-point {
   display: grid;
   grid-template-columns: 24px 1fr;
@@ -1832,12 +1891,12 @@ body.modal-open {
   line-height: 1.6;
 }
 
+/* 근거가 약하거나 없을 때만 붙는 라벨이다. 정상은 근거 버튼이 이미 말해 준다. */
 .groundedness {
   margin-right: 0.3rem;
-  color: #8b95a1;
+  color: #e8b339;
   font-size: 0.68rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  font-weight: 700;
 }
 
 .evidence {
@@ -1858,10 +1917,6 @@ body.modal-open {
   color: #a5c9fa;
   text-decoration: underline;
   text-underline-offset: 0.2rem;
-}
-
-.groundedness.grounded {
-  color: #4cd08b;
 }
 
 .article-body-section {
@@ -2177,44 +2232,54 @@ body.modal-open {
   font-size: 0.98rem;
 }
 
-.finding-card p,
-.finding-card li {
+.finding-card p {
+  margin: 0;
   color: var(--fg-2);
   font-size: 0.87rem;
   line-height: 1.65;
 }
 
-.finding-card p {
-  margin: 0;
+/*
+  핵심 목록은 기사 상세의 어두운 패널과 같은 컴포넌트다. 거기 색은 검은 바탕에 맞춰 잡혀
+  있어서 흰 카드에 그대로 올리면 글자가 배경에 묻는다. 구조는 두고 색만 여기서 되돌린다.
+*/
+.finding-card .key-points {
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top-color: var(--line);
 }
 
-.finding-card ul {
-  margin: 0.65rem 0;
-  padding-left: 1.2rem;
+.finding-card .key-points-heading {
+  color: var(--fg-3);
 }
 
-.finding-evidence-list {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  margin-left: 0.45rem;
+.finding-card .key-point-text {
+  color: var(--fg-2);
+  font-size: 0.87rem;
 }
 
-.finding-groundedness {
-  margin-left: 0.45rem;
+.finding-card .key-point-number {
+  color: var(--primary);
+}
+
+.finding-card .groundedness {
   color: var(--warning-strong);
-  font-size: 0.72rem;
-  font-weight: 700;
 }
 
 .finding-card .evidence {
-  margin-right: 0;
+  margin-right: 0.3rem;
   color: var(--fg-3);
 }
 
 .finding-card .evidence:hover:not(:disabled),
-.finding-card .evidence:focus-visible {
+.finding-card .evidence:focus-visible,
+.finding-card .key-points-toggle:hover:not(:disabled) .key-points-action {
   color: var(--primary-strong);
+}
+
+.finding-card .key-points-action {
+  color: var(--primary);
 }
 
 .finding-card a {
@@ -2521,8 +2586,14 @@ body.modal-open {
   font-size: 0.82rem;
 }
 
+/*
+  칸에 준 width는 안쪽 여백을 빼고 세는 게 표의 기본값이라, 칸마다 좌우 여백 24px이 폭 위에
+  덧붙는다. 여섯 칸이면 144px이 넘쳐서 마지막 "결과" 칸이 0으로 짓눌렸다. 여백을 폭 안에서
+  세게 바꿔야 아래에서 정한 비율이 그대로 맞는다.
+*/
 .delivery-table th,
 .delivery-table td {
+  box-sizing: border-box;
   padding: 0.75rem;
   border-top: 1px solid var(--line);
   text-align: left;
@@ -2530,17 +2601,46 @@ body.modal-open {
 }
 
 .delivery-table th { color: var(--fg-3); font-size: 0.72rem; }
-.delivery-table th:first-child { width: 170px; }
-.delivery-table th:nth-child(2) { width: 32%; }
+/* 보낸 시각은 줄바꿈을 막아 두어서, 칸이 글자보다 좁으면 표 전체를 밀어 넓힌다. */
+.delivery-table th:first-child { width: 168px; }
+.delivery-table th:nth-child(2) { width: 24%; }
 .delivery-table th:nth-child(3) { width: 20%; }
-.delivery-table th:nth-child(4) { width: 100px; }
+.delivery-table th:nth-child(4) { width: 16%; }
+.delivery-table th:nth-child(5) { width: 92px; }
 .delivery-time { white-space: nowrap; }
 
-.delivery-report {
+.delivery-report,
+.delivery-group {
   overflow: hidden;
-  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.delivery-report {
+  font-weight: 600;
+}
+
+/* 이름 아래에 실제로 나간 주소를 한 줄 더 깐다. 줄바꿈은 막고 넘치면 잘라 표를 지킨다. */
+.delivery-recipient {
+  min-width: 0;
+}
+
+.delivery-recipient strong {
+  display: block;
+  font-weight: 600;
+}
+
+.delivery-recipient span {
+  display: block;
+  overflow: hidden;
+  color: var(--fg-3);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.muted-cell {
+  color: var(--fg-4);
 }
 
 .delivery-result {
@@ -2822,7 +2922,7 @@ body.modal-open {
   }
 
   .delivery-table {
-    min-width: 760px;
+    min-width: 940px;
   }
 
   /*
