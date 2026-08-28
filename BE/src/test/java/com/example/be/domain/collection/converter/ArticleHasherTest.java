@@ -1,5 +1,7 @@
 package com.example.be.domain.collection.converter;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -26,7 +28,70 @@ class ArticleHasherTest {
     void isStableForTheSameUrl() {
         assertEquals(ArticleHasher.urlHash(URL), ArticleHasher.urlHash(URL));
         assertEquals(ArticleHasher.urlHash(URL), ArticleHasher.urlHash("  " + URL + "  "));
-        assertNotEquals(ArticleHasher.urlHash(URL), ArticleHasher.urlHash(URL + "?utm_source=x"));
+    }
+
+    @Test
+    void removesTrackingParametersFragmentAndHostCase() {
+        String tracked = "HTTPS://WWW.HANKYUNG.COM/article/2026081200001"
+                + "?utm_source=newsletter&FBCLID=click-id#article";
+
+        assertEquals(URL, ArticleHasher.normalizeUrl(tracked));
+        assertEquals(ArticleHasher.urlHash(URL), ArticleHasher.urlHash(tracked));
+    }
+
+    @Test
+    void preservesMeaningfulQueryParametersInTheirOriginalOrder() {
+        String original = URL + "?articleId=7&view=full";
+        String tracked = URL + "?utm_medium=email&articleId=7&view=full&utm_campaign=daily#top";
+
+        assertEquals(original, ArticleHasher.normalizeUrl(tracked));
+        assertEquals(ArticleHasher.urlHash(original), ArticleHasher.urlHash(tracked));
+        assertNotEquals(ArticleHasher.urlHash(URL), ArticleHasher.urlHash(original));
+        assertEquals(URL + "?articleId=7&&view=full",
+                ArticleHasher.normalizeUrl(URL + "?articleId=7&&view=full#top"));
+    }
+
+    @Test
+    void removesTrackingNamesOnly() {
+        String meaningful = URL + "?ref=fbclid&campaign=utm_source";
+
+        assertEquals(meaningful, ArticleHasher.normalizeUrl(meaningful + "#section"));
+    }
+
+    @Test
+    void removesCommonExactTrackingParameterNames() {
+        for (String name : List.of(
+                "_ga",
+                "dclid",
+                "fbclid",
+                "gclid",
+                "igshid",
+                "mc_cid",
+                "mc_eid",
+                "msclkid",
+                "spm",
+                "yclid")) {
+            assertEquals(URL, ArticleHasher.normalizeUrl(URL + "?" + name + "=tracking-id"));
+        }
+    }
+
+    @Test
+    void lowercasesRegistryAuthorityHostWithoutChangingUserInfoOrPort() {
+        String url = "https://Reader@NEWS_FEED.EXAMPLE.COM:8443/A?utm_source=x";
+
+        assertEquals("https://Reader@news_feed.example.com:8443/A", ArticleHasher.normalizeUrl(url));
+    }
+
+    @Test
+    void keepsLegacyHashBehaviorForMalformedNonEmptyUrl() {
+        String malformed = "https://example.com/article with space";
+
+        assertEquals(malformed, ArticleHasher.normalizeUrl("  " + malformed + "  "));
+    }
+
+    @Test
+    void preservesOpaqueUriBecauseItIsNotAnHttpUrl() {
+        assertEquals("urn:article:42#section", ArticleHasher.normalizeUrl("urn:article:42#section"));
     }
 
     @Test
