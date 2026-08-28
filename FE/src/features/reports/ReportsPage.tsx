@@ -115,7 +115,7 @@ function ReportView({ report }: { report: ReportDetail }) {
         <div className="report-stat-row" aria-label="보고서 요약 통계">
           <ReportStat value={stats.findingCount} label="전체 근거" />
           <ReportStat value={stats.newCount} label="신규" />
-          <ReportStat value={stats.updatedCount} label="후속" />
+          <ReportStat value={stats.updatedCount} label={changeTypeLabel('UPDATED')} />
           <ReportStat value={stats.byRiskLevel.high ?? 0} label="높은 민감도" tone="danger" />
         </div>
       </header>
@@ -277,5 +277,5 @@ function riskLabel(value: ReportFinding['riskLevel']) {
 }
 
 function changeTypeLabel(value: ReportFinding['changeType']) {
-  return { NEW: '신규', UPDATED: '후속' }[value]
+  return { NEW: '신규', UPDATED: '내용 수정' }[value]
 }
