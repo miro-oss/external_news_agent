@@ -261,7 +261,11 @@ class AgentReportOrchestratorTest {
 
         ArgumentCaptor<AgentReportRequest> captor = ArgumentCaptor.forClass(AgentReportRequest.class);
         verify(client).report(captor.capture());
-        assertEquals(List.of("지원되는 주장"), captor.getValue().findings().getFirst().keyPoints());
+        AgentReportRequest.KeyPointPayload keyPoint =
+                captor.getValue().findings().getFirst().keyPoints().getFirst();
+        assertEquals("지원되는 주장", keyPoint.text());
+        assertEquals(List.of(0), keyPoint.evidence());
+        assertEquals("grounded", keyPoint.groundedness());
     }
 
     private AgentProperties enabledProperties() {

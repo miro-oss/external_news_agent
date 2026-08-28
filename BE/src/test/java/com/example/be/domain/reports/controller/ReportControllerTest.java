@@ -88,6 +88,43 @@ class ReportControllerTest {
     }
 
     @Test
+    void detailIncludesSentenceEvidenceForFindingKeyPoints() throws Exception {
+        ReportResDTO.Detail detail = ReportResDTO.Detail.builder()
+                .id(17L)
+                .runId(42L)
+                .title("반도체 뉴스 보고서")
+                .markdownBody("# 보고서")
+                .summaryStats(ReportResDTO.SummaryStats.builder()
+                        .findingCount(1)
+                        .newCount(1)
+                        .updatedCount(0)
+                        .byRiskLevel(Map.of("high", 1L))
+                        .byCategory(Map.of("정책", 1L))
+                        .build())
+                .findings(List.of(ReportResDTO.Finding.builder()
+                        .id(501L)
+                        .articleId(1024L)
+                        .articleTitle("HBM4 양산 일정 단축")
+                        .keyPoints(List.of(ReportResDTO.KeyPoint.builder()
+                                .text("양산 일정이 앞당겨졌다.")
+                                .evidence(List.of(0))
+                                .groundedness("grounded")
+                                .build()))
+                        .build()))
+                .build();
+        when(reportQueryService.getReport(17L, true)).thenReturn(detail);
+
+        mockMvc.perform(get("/api/news/reports/17"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.findings[0].articleId").value(1024))
+                .andExpect(jsonPath("$.result.findings[0].keyPoints[0].text")
+                        .value("양산 일정이 앞당겨졌다."))
+                .andExpect(jsonPath("$.result.findings[0].keyPoints[0].evidence[0]").value(0))
+                .andExpect(jsonPath("$.result.findings[0].keyPoints[0].groundedness")
+                        .value("grounded"));
+    }
+
+    @Test
     void detailReturnsReportNotFoundCode() throws Exception {
         when(reportQueryService.getReport(99L, true))
                 .thenThrow(new ReportException(ReportErrorCode.REPORT_NOT_FOUND));

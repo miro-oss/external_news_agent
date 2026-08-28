@@ -47,7 +47,13 @@ def request() -> ReportRequest:
                     "sourceName": "Example News",
                     "changeType": "NEW",
                     "summaryKo": "HBM4 양산 일정이 앞당겨졌다.",
-                    "keyPoints": ["양산 일정이 앞당겨졌다."],
+                    "keyPoints": [
+                        {
+                            "text": "양산 일정이 앞당겨졌다.",
+                            "evidence": [0],
+                            "groundedness": "grounded",
+                        }
+                    ],
                     "intent": "생산 계획 발표",
                     "sentiment": "positive",
                     "riskLevel": "high",
@@ -211,6 +217,15 @@ def test_rejects_more_than_fifty_findings() -> None:
         {**payload["findings"][0], "id": index, "articleId": index + 1000}
         for index in range(1, 52)
     ]
+
+    with pytest.raises(ValidationError):
+        ReportRequest.model_validate(payload)
+
+
+@pytest.mark.parametrize("evidence", [[-1], [0, 0], []])
+def test_rejects_invalid_report_key_point_evidence(evidence: list[int]) -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["keyPoints"][0]["evidence"] = evidence
 
     with pytest.raises(ValidationError):
         ReportRequest.model_validate(payload)

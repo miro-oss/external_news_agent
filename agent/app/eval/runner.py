@@ -461,7 +461,14 @@ def _report_request(
                 "changeType": "NEW",
                 "summaryKo": response.summary_ko,
                 "keyPoints": [
-                    bullet.text
+                    {
+                        "text": bullet.text,
+                        "evidence": [
+                            sentence_id - 1
+                            for sentence_id in bullet.evidence_sentence_ids
+                        ],
+                        "groundedness": bullet.groundedness,
+                    }
                     for section in response.sections
                     for bullet in section.bullets
                     if bullet.groundedness != "ungrounded"

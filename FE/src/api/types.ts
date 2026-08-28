@@ -253,7 +253,7 @@ export interface ReportFinding {
   canonicalUrl: string
   changeType: ChangeType
   summary: string
-  keyPoints: string[]
+  keyPoints: ArticleKeyPoint[]
   intent: string | null
   sentiment: Sentiment
   riskLevel: RiskLevel

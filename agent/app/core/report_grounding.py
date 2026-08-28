@@ -13,7 +13,9 @@ def assess_finding_claim(
     weak_overlap: float,
 ) -> RuleAssessment:
     evidence_texts = [
-        text for finding in findings for text in [finding.summary_ko, *finding.key_points]
+        text
+        for finding in findings
+        for text in [finding.summary_ko, *(point.text for point in finding.key_points)]
     ]
     return assess_with_rules(
         claim,

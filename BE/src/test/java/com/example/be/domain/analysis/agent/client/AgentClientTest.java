@@ -88,6 +88,9 @@ class AgentClientTest {
                 .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
                 .andExpect(jsonPath("$.idempotencyKey").value("run:42:report"))
                 .andExpect(jsonPath("$.sourceStats.stubExcluded").value(2))
+                .andExpect(jsonPath("$.findings[0].keyPoints[0].text").value("핵심"))
+                .andExpect(jsonPath("$.findings[0].keyPoints[0].evidence[0]").value(0))
+                .andExpect(jsonPath("$.findings[0].keyPoints[0].groundedness").value("grounded"))
                 .andRespond(withSuccess(reportResponseJson(), MediaType.APPLICATION_JSON));
 
         AgentReportResponse response = client.report(reportRequest());
@@ -204,7 +207,8 @@ class AgentClientTest {
                         "Example",
                         "NEW",
                         "한국어 요약",
-                        List.of("핵심"),
+                        List.of(new AgentReportRequest.KeyPointPayload(
+                                "핵심", List.of(0), "grounded")),
                         "발표",
                         "neutral",
                         "low",

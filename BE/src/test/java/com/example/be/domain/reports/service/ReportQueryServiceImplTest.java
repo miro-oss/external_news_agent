@@ -145,7 +145,10 @@ class ReportQueryServiceImplTest {
         ReportResDTO.Detail detail = service.getReport(17L, true);
 
         assertEquals(List.of(1L, 2L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
-        assertEquals(List.of("핵심"), detail.getFindings().getFirst().getKeyPoints());
+        ReportResDTO.KeyPoint keyPoint = detail.getFindings().getFirst().getKeyPoints().getFirst();
+        assertEquals("핵심", keyPoint.getText());
+        assertEquals(List.of(0), keyPoint.getEvidence());
+        assertEquals("grounded", keyPoint.getGroundedness());
     }
 
     private Finding finding(Long id, RiskLevel riskLevel, Relevance relevance) {
