@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 import org.springframework.util.StringUtils;
 
@@ -21,6 +22,18 @@ import org.springframework.util.StringUtils;
 public final class ArticleHasher {
 
     private static final String ALGORITHM = "SHA-256";
+    private static final String TRACKING_PARAMETER_PREFIX = "utm_";
+    private static final Set<String> TRACKING_PARAMETER_NAMES = Set.of(
+            "_ga",
+            "dclid",
+            "fbclid",
+            "gclid",
+            "igshid",
+            "mc_cid",
+            "mc_eid",
+            "msclkid",
+            "spm",
+            "yclid");
 
     private ArticleHasher() {
     }
@@ -34,6 +47,10 @@ public final class ArticleHasher {
      *
      * <p>경로와 일반 쿼리 파라미터는 기사 식별에 필요할 수 있으므로 순서와 인코딩을 그대로 둔다. 비어 있지
      * 않지만 URI로 파싱할 수 없는 값은 기존 수집 동작을 깨지 않도록 앞뒤 공백만 제거한다.
+     * HTTP(S) URL이 아닌 opaque URI도 프래그먼트를 포함한 원문을 보존한다.
+     *
+     * <p><b>이 규칙을 바꾸면 이미 저장된 {@code urlHash}와 호환되지 않는다.</b> 로컬 개발 DB는 초기화 후
+     * 재수집하고, 운영 데이터가 생긴 뒤에는 충돌 병합을 포함한 별도 백필이 선행돼야 한다.
      */
     public static String normalizeUrl(String canonicalUrl) {
         if (!StringUtils.hasText(canonicalUrl)) {
@@ -106,7 +123,7 @@ public final class ArticleHasher {
         String authority = uri.getRawAuthority();
         String host = uri.getHost();
         if (host == null) {
-            return authority;
+            return normalizeRegistryAuthority(authority);
         }
 
         int hostStart = authority.lastIndexOf(host);
@@ -116,6 +133,30 @@ public final class ArticleHasher {
         return authority.substring(0, hostStart)
                 + host.toLowerCase(Locale.ROOT)
                 + authority.substring(hostStart + host.length());
+    }
+
+    /** URI가 유효한 DNS host로 해석하지 못한 authority에서도 userinfo와 port는 건드리지 않는다. */
+    private static String normalizeRegistryAuthority(String authority) {
+        int hostStart = authority.lastIndexOf('@') + 1;
+        int hostEnd = authority.length();
+        if (hostStart < hostEnd && authority.charAt(hostStart) == '[') {
+            int bracketEnd = authority.indexOf(']', hostStart);
+            if (bracketEnd >= 0) {
+                hostEnd = bracketEnd + 1;
+            }
+        } else {
+            int firstColon = authority.indexOf(':', hostStart);
+            int lastColon = authority.lastIndexOf(':');
+            if (firstColon >= hostStart && firstColon == lastColon) {
+                hostEnd = firstColon;
+            }
+        }
+        if (hostStart >= hostEnd) {
+            return authority;
+        }
+        return authority.substring(0, hostStart)
+                + authority.substring(hostStart, hostEnd).toLowerCase(Locale.ROOT)
+                + authority.substring(hostEnd);
     }
 
     private static String removeTrackingParameters(String rawQuery) {
@@ -136,7 +177,7 @@ public final class ArticleHasher {
         int equals = parameter.indexOf('=');
         String name = (equals < 0 ? parameter : parameter.substring(0, equals))
                 .toLowerCase(Locale.ROOT);
-        return name.startsWith("utm_") || name.equals("fbclid");
+        return name.startsWith(TRACKING_PARAMETER_PREFIX) || TRACKING_PARAMETER_NAMES.contains(name);
     }
 
     private static String nullToEmpty(String value) {

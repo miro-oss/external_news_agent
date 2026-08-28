@@ -244,7 +244,8 @@ public class CollectionResultWriter {
      * 관측은 매번 남긴다 — 그래야 "이 실행에서 본 기사"를 나중에 복원할 수 있다.
      */
     private ChangeType save(CollectionRun run, Topic topic, Source source, CollectedArticle collected) {
-        String urlHash = ArticleHasher.urlHash(collected.canonicalUrl());
+        String canonicalUrl = ArticleHasher.normalizeUrl(collected.canonicalUrl());
+        String urlHash = ArticleHasher.urlHash(canonicalUrl);
         String contentHash = ArticleHasher.contentHash(collected.title(), collected.summary(), null);
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
 
@@ -252,7 +253,8 @@ public class CollectionResultWriter {
         ChangeType changeType;
 
         if (article == null) {
-            article = articleRepository.save(newArticle(run, topic, source, collected, urlHash, contentHash, now));
+            article = articleRepository.save(
+                    newArticle(run, topic, source, collected, canonicalUrl, urlHash, contentHash, now));
             changeType = ChangeType.NEW;
         } else if (article.hasSameContent(contentHash)) {
             article.markSeen(run);
@@ -275,6 +277,7 @@ public class CollectionResultWriter {
                                Topic topic,
                                Source source,
                                CollectedArticle collected,
+                               String canonicalUrl,
                                String urlHash,
                                String contentHash,
                                LocalDateTime now) {
@@ -282,7 +285,7 @@ public class CollectionResultWriter {
                 .topic(topic)
                 .source(source)
                 .urlHash(urlHash)
-                .canonicalUrl(collected.canonicalUrl())
+                .canonicalUrl(canonicalUrl)
                 .title(collected.title())
                 .summary(collected.summary())
                 .contentHash(contentHash)

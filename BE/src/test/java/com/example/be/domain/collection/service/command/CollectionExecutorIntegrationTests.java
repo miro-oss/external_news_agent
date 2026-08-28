@@ -201,6 +201,47 @@ class CollectionExecutorIntegrationTests {
                 .count());
     }
 
+    @Test
+    void deduplicatesTrackedUrlsAndStoresNormalizedCanonicalUrlAcrossRuns() {
+        String firstTrackedUrl = articleUrl + "?utm_source=newsletter#headline";
+        String duplicateTrackedUrl = articleUrl + "?fbclid=click-id";
+        givenFeed(
+                new CollectedArticle(
+                        "HBM4 양산 시작", firstTrackedUrl, "삼성전자가 HBM4를 양산한다", null,
+                        "www.hankyung.com", "ko"),
+                new CollectedArticle(
+                        "HBM4 양산 시작", duplicateTrackedUrl, "삼성전자가 HBM4를 양산한다", null,
+                        "www.hankyung.com", "ko"));
+        CollectionRun firstRun = newRun();
+        CollectionRunItem firstItem = newItem(firstRun);
+
+        execute(firstRun, firstItem, topic, source);
+        flushAndClear();
+
+        Article saved = articleRepository.findAll().stream()
+                .filter(candidate -> articleUrl.equals(candidate.getCanonicalUrl()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(2, firstItem.getScannedCount());
+        assertEquals(1, firstItem.getNewCount());
+        assertEquals(1, firstItem.getSkippedCount());
+        assertEquals(articleUrl, saved.getCanonicalUrl());
+        assertEquals(1, runArticleRepository.findByRunIdOrderByIdAsc(firstRun.getId()).size());
+
+        givenFeed(article("HBM4 양산 시작", "삼성전자가 HBM4를 양산한다"));
+        CollectionRun secondRun = newRun();
+        CollectionRunItem secondItem = newItem(secondRun);
+        execute(secondRun, secondItem, topic, source);
+        flushAndClear();
+
+        assertEquals(0, secondItem.getNewCount());
+        assertEquals(1,
+                runArticleRepository.countByRunIdAndChangeType(secondRun.getId(), ChangeType.UNCHANGED));
+        assertEquals(1, articleRepository.findAll().stream()
+                .filter(candidate -> articleUrl.equals(candidate.getCanonicalUrl()))
+                .count());
+    }
+
     /**
      * 기사 정정은 드물지 않다. 직전 상태를 버전으로 남기지 않으면 무엇이 바뀌었는지 추적할 수 없다(§2-8).
      */

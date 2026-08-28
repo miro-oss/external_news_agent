@@ -1,5 +1,7 @@
 package com.example.be.domain.collection.converter;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -55,10 +57,38 @@ class ArticleHasherTest {
     }
 
     @Test
+    void removesCommonExactTrackingParameterNames() {
+        for (String name : List.of(
+                "_ga",
+                "dclid",
+                "fbclid",
+                "gclid",
+                "igshid",
+                "mc_cid",
+                "mc_eid",
+                "msclkid",
+                "spm",
+                "yclid")) {
+            assertEquals(URL, ArticleHasher.normalizeUrl(URL + "?" + name + "=tracking-id"));
+        }
+    }
+
+    @Test
+    void lowercasesRegistryAuthorityHostWithoutChangingUserInfoOrPort() {
+        String url = "https://Reader@NEWS_FEED.EXAMPLE.COM:8443/A?utm_source=x";
+
+        assertEquals("https://Reader@news_feed.example.com:8443/A", ArticleHasher.normalizeUrl(url));
+    }
+
+    @Test
     void keepsLegacyHashBehaviorForMalformedNonEmptyUrl() {
         String malformed = "https://example.com/article with space";
 
         assertEquals(malformed, ArticleHasher.normalizeUrl("  " + malformed + "  "));
+    }
+
+    @Test
+    void preservesOpaqueUriBecauseItIsNotAnHttpUrl() {
         assertEquals("urn:article:42#section", ArticleHasher.normalizeUrl("urn:article:42#section"));
     }
 
