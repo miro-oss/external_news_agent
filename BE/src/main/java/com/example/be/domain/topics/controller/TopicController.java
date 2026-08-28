@@ -63,7 +63,7 @@ public class TopicController {
                                 "requiredKeywords": ["HBM"],
                                 "optionalKeywords": ["SK하이닉스", "삼성전자", "마이크론"],
                                 "excludedKeywords": ["광고", "채용"],
-                                "batchSize": 20,
+                                "batchSize": 100,
                                 "intervalMinutes": 60,
                                 "active": true,
                                 "sources": [
@@ -139,7 +139,7 @@ public class TopicController {
                                     "requiredKeywords": ["HBM"],
                                     "optionalKeywords": ["SK하이닉스", "삼성전자", "마이크론"],
                                     "excludedKeywords": ["광고", "채용"],
-                                    "batchSize": 20,
+                                    "batchSize": 100,
                                     "intervalMinutes": 60,
                                     "active": true,
                                     "linkedSourceCount": 4,
@@ -205,7 +205,7 @@ public class TopicController {
                                 "requiredKeywords": ["HBM"],
                                 "optionalKeywords": ["SK하이닉스", "삼성전자", "마이크론"],
                                 "excludedKeywords": ["광고", "채용"],
-                                "batchSize": 20,
+                                "batchSize": 100,
                                 "intervalMinutes": 60,
                                 "active": true,
                                 "lastCollectedAt": "2026-08-10T08:00:00+09:00",
@@ -266,7 +266,7 @@ public class TopicController {
                                 "requiredKeywords": ["HBM"],
                                 "optionalKeywords": ["SK하이닉스", "삼성전자", "마이크론"],
                                 "excludedKeywords": ["광고", "채용", "주가"],
-                                "batchSize": 30,
+                                "batchSize": 300,
                                 "intervalMinutes": 30,
                                 "active": true
                               }
@@ -279,7 +279,7 @@ public class TopicController {
                             {
                               "isSuccess": false,
                               "code": "TOPIC400",
-                              "message": "batchSize는 1 이상 100 이하, intervalMinutes는 10 이상이어야 합니다.",
+                              "message": "batchSize는 1 이상 300 이하, intervalMinutes는 10 이상이어야 합니다.",
                               "result": {}
                             }
                             """))),

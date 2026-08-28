@@ -5,13 +5,13 @@ import org.springframework.util.StringUtils;
 /**
  * 검색형 소스에 넘길 질의. 주제(news_topics)의 query_text / batch_size에서 만든다.
  *
- * <p>범위 검증을 여기서 하는 이유는 네이버가 400을 뱉기 전에 우리가 막기 위해서다. 상한 100은
- * 네이버 {@code display}의 최댓값이자 news_topics.batch_size CHECK 제약의 상한과 같다.
+ * <p>범위 검증을 여기서 하는 이유는 provider가 400을 뱉기 전에 우리가 막기 위해서다. NAVER 커넥터는
+ * 요청당 최대 100건씩 페이지를 나누며, 상한 300은 news_topics.batch_size CHECK 제약과 같다.
  */
 public record SearchQuery(String queryText, int batchSize, String language) {
 
     public static final int MIN_BATCH_SIZE = 1;
-    public static final int MAX_BATCH_SIZE = 100;
+    public static final int MAX_BATCH_SIZE = 300;
 
     public SearchQuery {
         if (!StringUtils.hasText(queryText)) {

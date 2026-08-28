@@ -16,6 +16,8 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -102,7 +104,7 @@ class NaverSearchConnectorTest {
 
     @Test
     void leavesPublishedAtEmptyWhenPubDateIsUnreadable() {
-        server.expect(requestTo(newsUri(5)))
+        server.expect(requestTo(newsUri(5, 1)))
                 .andRespond(withSuccess("""
                         {
                           "items": [
@@ -124,7 +126,7 @@ class NaverSearchConnectorTest {
 
     @Test
     void sendsApiHubCredentialsAndBatchSizeAsDisplay() {
-        server.expect(requestTo(newsUri(7)))
+        server.expect(requestTo(newsUri(7, 1)))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header("X-NCP-APIGW-API-KEY-ID", "test-id"))
                 .andExpect(header("X-NCP-APIGW-API-KEY", "test-secret"))
@@ -137,7 +139,7 @@ class NaverSearchConnectorTest {
 
     @Test
     void parsesJsonWhenApiHubRespondsWithTextPlainContentType() {
-        server.expect(requestTo(newsUri(5)))
+        server.expect(requestTo(newsUri(5, 1)))
                 .andRespond(withSuccess(
                         NEWS_JSON,
                         MediaType.parseMediaType("text/plain;charset=UTF-8")));
@@ -151,7 +153,7 @@ class NaverSearchConnectorTest {
 
     @Test
     void reportsFailureWhenApiHubReturnsMalformedJson() {
-        server.expect(requestTo(newsUri(5)))
+        server.expect(requestTo(newsUri(5, 1)))
                 .andRespond(withSuccess(
                         "not-json",
                         MediaType.parseMediaType("text/plain;charset=UTF-8")));
@@ -184,7 +186,7 @@ class NaverSearchConnectorTest {
      */
     @Test
     void reportsFailureWhenNaverRejectsTheRequest() {
-        server.expect(requestTo(newsUri(5)))
+        server.expect(requestTo(newsUri(5, 1)))
                 .andRespond(withStatus(HttpStatus.UNAUTHORIZED));
 
         FetchResult result = connector().search(new SearchQuery("HBM", 5, "ko"));
@@ -199,7 +201,7 @@ class NaverSearchConnectorTest {
      */
     @Test
     void marksServerFailureAsRetryable() {
-        server.expect(requestTo(newsUri(5)))
+        server.expect(requestTo(newsUri(5, 1)))
                 .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
 
         FetchResult result = connector().search(new SearchQuery("HBM", 5, "ko"));
@@ -211,11 +213,56 @@ class NaverSearchConnectorTest {
 
     @Test
     void marksRateLimitAsRetryable() {
-        server.expect(requestTo(newsUri(5)))
+        server.expect(requestTo(newsUri(5, 1)))
                 .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
 
         assertEquals(CollectionRunWarning.CODE_RATE_LIMITED,
                 connector().search(new SearchQuery("HBM", 5, "ko")).failureCode());
+    }
+
+    @Test
+    void collectsUpToThreePagesForRequestedBatchSize() {
+        server.expect(requestTo(newsUri(100, 1)))
+                .andRespond(withSuccess(newsJson(1, 100), MediaType.APPLICATION_JSON));
+        server.expect(requestTo(newsUri(100, 101)))
+                .andRespond(withSuccess(newsJson(101, 100), MediaType.APPLICATION_JSON));
+        server.expect(requestTo(newsUri(100, 201)))
+                .andRespond(withSuccess(newsJson(201, 100), MediaType.APPLICATION_JSON));
+
+        FetchResult result = connector().search(new SearchQuery("HBM", 300, "ko"));
+
+        assertTrue(result.success());
+        assertEquals(300, result.articles().size());
+        assertEquals("https://example.com/articles/1", result.articles().get(0).canonicalUrl());
+        assertEquals("https://example.com/articles/300", result.articles().get(299).canonicalUrl());
+        server.verify();
+    }
+
+    @Test
+    void stopsPagingWhenNaverReturnsFewerItemsThanRequested() {
+        server.expect(requestTo(newsUri(100, 1)))
+                .andRespond(withSuccess(newsJson(1, 12), MediaType.APPLICATION_JSON));
+
+        FetchResult result = connector().search(new SearchQuery("HBM", 150, "ko"));
+
+        assertTrue(result.success());
+        assertEquals(12, result.articles().size());
+        server.verify();
+    }
+
+    @Test
+    void discardsPartialArticlesWhenLaterPageFails() {
+        server.expect(requestTo(newsUri(100, 1)))
+                .andRespond(withSuccess(newsJson(1, 100), MediaType.APPLICATION_JSON));
+        server.expect(requestTo(newsUri(50, 101)))
+                .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+
+        FetchResult result = connector().search(new SearchQuery("HBM", 150, "ko"));
+
+        assertFalse(result.success());
+        assertTrue(result.articles().isEmpty());
+        assertEquals(CollectionRunWarning.CODE_RATE_LIMITED, result.failureCode());
+        server.verify();
     }
 
     private NaverSearchConnector connector() {
@@ -223,13 +270,34 @@ class NaverSearchConnectorTest {
     }
 
     private void expectNewsRequest() {
-        server.expect(requestTo(newsUri(5)))
+        server.expect(requestTo(newsUri(5, 1)))
                 .andRespond(withSuccess(NEWS_JSON, MediaType.APPLICATION_JSON));
     }
 
-    private String newsUri(int display) {
+    private String newsUri(int display, int start) {
         return "https://naverapihub.apigw.ntruss.com/search/v1/news?query=HBM&display="
                 + display
+                + "&start="
+                + start
                 + "&sort=date";
+    }
+
+    private String newsJson(int firstIndex, int count) {
+        String items = IntStream.range(firstIndex, firstIndex + count)
+                .mapToObj(this::newsItemJson)
+                .collect(Collectors.joining(","));
+        return "{\"items\":[" + items + "]}";
+    }
+
+    private String newsItemJson(int index) {
+        return """
+                {
+                  "title": "기사 %d",
+                  "originallink": "https://example.com/articles/%d",
+                  "link": "https://n.news.naver.com/articles/%d",
+                  "description": "설명 %d",
+                  "pubDate": "Mon, 10 Aug 2026 09:00:00 +0900"
+                }
+                """.formatted(index, index, index, index);
     }
 }

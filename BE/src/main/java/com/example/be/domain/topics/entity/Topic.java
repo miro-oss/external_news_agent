@@ -37,20 +37,17 @@ public class Topic {
     /**
      * SEARCH 소스 <b>한 곳당</b> 요청할 건수다. FEED 소스는 발행된 만큼 들어오므로 이 값과 무관하다.
      *
-     * <p>10이었다. 뉴스 검색은 중복과 광고성 기사 비중이 높아 dedup과 키워드 필터를 거치면 3~5건만
-     * 남았고, 보고서 한 편의 근거로 삼기 얇았다.
+     * <p>무료 기본 검색원인 NAVER는 요청당 100건까지 받을 수 있어 기본값을 100으로 둔다. 최대 300건은
+     * 커넥터가 {@code start}를 옮겨 세 페이지로 수집한다. 분석 건수에는 실행당 별도 상한이 있어 후보를
+     * 넓혀도 LLM 입력 상한은 그대로다.
      *
-     * <p>올려도 LLM 비용은 늘지 않는다. 검색 API는 건수 파라미터만 바뀌는 같은 1회 호출이고, 분석
-     * 건수에는 실행당 상한이 따로 걸려 있다(agent.quota.free-run-article-limit /
-     * paid-run-article-limit). 천장은 그대로인 채 프리필터가 고를 후보만 넓어진다.
-     *
-     * <p>하필 20인 이유는 커넥터 중 천장이 가장 낮은 Tavily(max_results 20)에 맞췄기 때문이다.
-     * 더 올려도 거기서 잘리므로 "요청한 만큼 온다"가 깨진다.
+     * <p>provider별 요청 상한은 각 커넥터가 적용한다. 따라서 운영자가 TAVILY나 SERPAPI를 다시 켜더라도
+     * provider 허용 범위를 넘는 요청을 보내지 않는다.
      */
-    public static final int DEFAULT_BATCH_SIZE = 20;
+    public static final int DEFAULT_BATCH_SIZE = 100;
     public static final int DEFAULT_INTERVAL_MINUTES = 60;
     public static final int MIN_BATCH_SIZE = 1;
-    public static final int MAX_BATCH_SIZE = 100;
+    public static final int MAX_BATCH_SIZE = 300;
     public static final int MIN_INTERVAL_MINUTES = 10;
     public static final int MAX_NAME_LENGTH = 200;
     public static final int MAX_QUERY_TEXT_LENGTH = 500;
