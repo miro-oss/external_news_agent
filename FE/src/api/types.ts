@@ -84,13 +84,33 @@ export interface TopicCreateRequest {
   sourceIds?: number[]
 }
 
+export interface TopicSourceBrief {
+  id: number
+  name: string
+  sourceKind: SourceKind
+}
+
 export interface Topic {
   id: number
   name: string
   queryText: string | null
+  requiredKeywords: string[]
+  optionalKeywords: string[]
+  excludedKeywords: string[]
   batchSize: number
   intervalMinutes: number
   active: boolean
+}
+
+/** GET /topics 목록의 주제 1건. */
+export interface TopicSummary extends Topic {
+  linkedSourceCount: number
+  lastCollectedAt: string | null
+}
+
+/** POST /topics 응답의 주제 1건. */
+export interface TopicCreated extends Topic {
+  sources: TopicSourceBrief[]
 }
 
 export type ChangeType = 'NEW' | 'UPDATED'

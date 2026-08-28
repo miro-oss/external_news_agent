@@ -44,7 +44,8 @@ function toKeywords(value: string): string[] | undefined {
 
 export function TopicForm() {
   const [form, setForm] = useState(EMPTY)
-  const [selected, setSelected] = useState<number[]>([])
+  // null은 아직 사용자가 선택을 바꾸지 않은 상태다. 소스가 비동기로 도착해도 전체가 기본 선택된다.
+  const [selected, setSelected] = useState<number[] | null>(null)
   const [done, setDone] = useState<string | null>(null)
   const sources = useSources()
   const { mutate, isPending, error, reset } = useCreateTopic()
@@ -54,8 +55,8 @@ export function TopicForm() {
     안정 정렬이라 같은 종류끼리는 서버가 준 순서(등록순)가 그대로 남는다. 이름순으로 다시 세우면
     같은 종류 안에서 자리가 바뀌어, 어제 본 위치를 기억하고 찾는 사람이 헤맨다.
 
-    화면에 그릴 때만 바꾸는 순서다. 서버로 보내는 sourceIds는 사용자가 고른 순서(selected)를
-    그대로 쓰므로 이 정렬에 영향을 받지 않는다.
+    화면과 기본 선택값에만 쓰는 순서다. 서버는 sourceIds를 ID 집합으로 처리하므로 전송 순서에는
+    별도 의미가 없다.
   */
   const options = useMemo(
     () => [...(sources.data?.content ?? [])].sort(
@@ -63,15 +64,16 @@ export function TopicForm() {
     ),
     [sources.data],
   )
+  const effectiveSelected = selected ?? options.map((source) => source.id)
   const sourceError =
     sources.error instanceof ApiError
       ? `${sources.error.message} (${sources.error.code})`
       : '소스 목록을 불러오지 못했습니다.'
   /** SEARCH 소스를 연결하면 검색어가 필수다(TOPIC400). 보내기 전에 화면에서 먼저 알려 준다. */
   const needsQueryText = options.some(
-    (source) => selected.includes(source.id) && source.sourceKind === 'SEARCH',
+    (source) => effectiveSelected.includes(source.id) && source.sourceKind === 'SEARCH',
   )
-  const allSelected = options.length > 0 && options.every((source) => selected.includes(source.id))
+  const allSelected = options.length > 0 && options.every((source) => effectiveSelected.includes(source.id))
 
   function update<K extends keyof typeof EMPTY>(key: K, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -80,7 +82,10 @@ export function TopicForm() {
   }
 
   function toggleSource(id: number) {
-    setSelected((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
+    setSelected((prev) => {
+      const current = prev ?? options.map((source) => source.id)
+      return current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    })
     setDone(null)
     reset()
   }
@@ -94,7 +99,7 @@ export function TopicForm() {
    */
   function toggleAllSources() {
     setSelected((prev) => (
-      options.length > 0 && options.every((source) => prev.includes(source.id))
+      options.length > 0 && options.every((source) => (prev ?? effectiveSelected).includes(source.id))
         ? []
         : options.map((source) => source.id)
     ))
@@ -116,12 +121,12 @@ export function TopicForm() {
         intervalMinutes,
         // 아무것도 고르지 않았으면 필드를 아예 빼서 보낸다. 명세가 "누락"과 "빈 배열"을 다르게 보므로
         // 빈 배열을 보내면 "연결 없음"이 아니라 "전체 해제"라는 다른 뜻이 된다.
-        sourceIds: selected.length > 0 ? selected : undefined,
+        sourceIds: effectiveSelected.length > 0 ? effectiveSelected : undefined,
       },
       {
         onSuccess: (created) => {
           setForm(EMPTY)
-          setSelected([])
+          setSelected(null)
           setDone(`"${created.name}"을(를) 등록했습니다.`)
         },
       },
@@ -168,7 +173,7 @@ export function TopicForm() {
               {allSelected ? '전체 해제' : '전체 선택'}
             </button>
           )}
-          {selected.length > 0 && <em>{selected.length}개 선택</em>}
+          {effectiveSelected.length > 0 && <em>{effectiveSelected.length}개 선택</em>}
         </legend>
         {sources.isPending && <p className="muted">소스를 불러오는 중…</p>}
         {sources.error && <p className="error">{sourceError}</p>}
@@ -180,7 +185,7 @@ export function TopicForm() {
             <label key={source.id} className="check">
               <input
                 type="checkbox"
-                checked={selected.includes(source.id)}
+                checked={effectiveSelected.includes(source.id)}
                 onChange={() => toggleSource(source.id)}
               />
               <span>{source.name}</span>
@@ -188,7 +193,7 @@ export function TopicForm() {
             </label>
           ))}
         </div>
-        <p className="hint">고르지 않으면 주제만 만들어지고, 나중에 소스를 연결할 수 있습니다.</p>
+        <p className="hint">기본은 전체 연결입니다. 모두 해제하면 주제만 만들고 나중에 소스를 연결할 수 있습니다.</p>
       </fieldset>
 
       <div className="field">
