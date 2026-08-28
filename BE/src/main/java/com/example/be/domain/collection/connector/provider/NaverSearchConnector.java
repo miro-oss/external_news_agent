@@ -18,6 +18,7 @@ import org.springframework.web.client.RestClientException;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -38,6 +39,9 @@ public class NaverSearchConnector implements SearchConnector {
 
     /** 네이버 뉴스 검색은 한국어 매체만 돌려준다. 주제에 어떤 언어가 적혀 있든 결과는 한국어다. */
     private static final String LANGUAGE = "ko";
+
+    /** NAVER 뉴스 검색 API의 display 요청 상한이다. */
+    private static final int MAX_PAGE_SIZE = 100;
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
@@ -66,23 +70,50 @@ public class NaverSearchConnector implements SearchConnector {
         }
 
         try {
-            String responseBody = restClient.get()
-                    .uri(uriBuilder -> uriBuilder.path(NEWS_PATH)
-                            .queryParam("query", query.queryText())
-                            .queryParam("display", query.batchSize())
-                            .queryParam("sort", SORT_BY_DATE)
-                            .build())
-                    .header(CLIENT_ID_HEADER, clientId)
-                    .header(CLIENT_SECRET_HEADER, clientSecret)
-                    .retrieve()
-                    .body(String.class);
-
-            return FetchResult.ok(toArticles(parseResponse(responseBody)));
+            return FetchResult.ok(fetchArticles(query));
         } catch (RestClientException e) {
             return failureOf(query, e);
         } catch (JacksonException e) {
             return failureOf(query, new RestClientException("NAVER 응답 JSON 파싱 실패", e));
         }
+    }
+
+    private List<CollectedArticle> fetchArticles(SearchQuery query) {
+        List<CollectedArticle> articles = new ArrayList<>();
+        int remaining = query.batchSize();
+        int start = 1;
+
+        while (remaining > 0) {
+            int display = Math.min(remaining, MAX_PAGE_SIZE);
+            NewsResponse response = requestPage(query, display, start);
+            List<NewsResponse.Item> items = itemsOf(response);
+
+            articles.addAll(toArticles(items));
+            if (items.size() < display) {
+                break;
+            }
+
+            start += display;
+            remaining -= display;
+        }
+
+        return articles;
+    }
+
+    private NewsResponse requestPage(SearchQuery query, int display, int start) {
+        String responseBody = restClient.get()
+                .uri(uriBuilder -> uriBuilder.path(NEWS_PATH)
+                        .queryParam("query", query.queryText())
+                        .queryParam("display", display)
+                        .queryParam("start", start)
+                        .queryParam("sort", SORT_BY_DATE)
+                        .build())
+                .header(CLIENT_ID_HEADER, clientId)
+                .header(CLIENT_SECRET_HEADER, clientSecret)
+                .retrieve()
+                .body(String.class);
+
+        return parseResponse(responseBody);
     }
 
     private boolean hasCredentials() {
@@ -96,12 +127,15 @@ public class NaverSearchConnector implements SearchConnector {
                 : null;
     }
 
-    private List<CollectedArticle> toArticles(NewsResponse response) {
+    private List<NewsResponse.Item> itemsOf(NewsResponse response) {
         if (response == null || response.items() == null) {
-            return List.of();
+            throw new RestClientException("NAVER 응답에 items가 없습니다.");
         }
+        return response.items();
+    }
 
-        return response.items().stream()
+    private List<CollectedArticle> toArticles(List<NewsResponse.Item> items) {
+        return items.stream()
                 .filter(this::hasOriginalLink)
                 .map(this::toArticle)
                 .toList();

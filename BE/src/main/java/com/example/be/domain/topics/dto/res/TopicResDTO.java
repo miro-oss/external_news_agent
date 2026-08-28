@@ -38,7 +38,7 @@ public class TopicResDTO {
         @Schema(description = "NOT 필터")
         private final List<String> excludedKeywords;
 
-        @Schema(description = "1회 수집 건수", example = "20")
+        @Schema(description = "1회 수집 건수", example = "100")
         private final int batchSize;
 
         @Schema(description = "자동 수집 주기(분)", example = "60")
@@ -75,7 +75,7 @@ public class TopicResDTO {
         @Schema(description = "NOT 필터")
         private final List<String> excludedKeywords;
 
-        @Schema(description = "1회 수집 건수", example = "20")
+        @Schema(description = "1회 수집 건수", example = "100")
         private final int batchSize;
 
         @Schema(description = "자동 수집 주기(분)", example = "60")
@@ -115,7 +115,7 @@ public class TopicResDTO {
         @Schema(description = "NOT 필터")
         private final List<String> excludedKeywords;
 
-        @Schema(description = "1회 수집 건수", example = "20")
+        @Schema(description = "1회 수집 건수", example = "100")
         private final int batchSize;
 
         @Schema(description = "자동 수집 주기(분)", example = "60")
@@ -155,7 +155,7 @@ public class TopicResDTO {
         @Schema(description = "NOT 필터")
         private final List<String> excludedKeywords;
 
-        @Schema(description = "1회 수집 건수", example = "30")
+        @Schema(description = "1회 수집 건수", example = "300")
         private final int batchSize;
 
         @Schema(description = "자동 수집 주기(분)", example = "30")

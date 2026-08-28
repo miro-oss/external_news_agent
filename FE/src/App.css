@@ -2250,11 +2250,12 @@ body.modal-open {
   padding: 1.2rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--surface-sunken);
 }
 
 .channel-card-title {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.8rem;
 }
@@ -2269,6 +2270,21 @@ body.modal-open {
 .compact-list article > div:first-child span {
   color: var(--fg-3);
   font-size: 0.8rem;
+}
+
+.channel-card-title .channel-state {
+  padding: 0.32rem 0.55rem;
+  border-radius: 999px;
+  background: var(--line);
+  color: var(--fg-3);
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.channel-card[data-active='true'] .channel-state {
+  background: var(--success-weak);
+  color: var(--success-strong);
 }
 
 .channel-mark {
@@ -2291,21 +2307,9 @@ body.modal-open {
   color: #129bd8;
 }
 
-.channel-card dl {
-  display: grid;
-  gap: 0.55rem;
-  margin: 0;
+.channel-card > button {
+  justify-self: start;
 }
-
-.channel-card dl div {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  font-size: 0.85rem;
-}
-
-.channel-card dt { color: var(--fg-3); }
-.channel-card dd { margin: 0; font-weight: 700; }
 
 .notification-card-stack {
   align-content: start;
@@ -2313,11 +2317,36 @@ body.modal-open {
 
 .notification-form {
   display: grid;
-  gap: 0.8rem;
+  gap: 1rem;
   margin: 1rem 0 1.25rem;
-  padding: 1rem;
+  padding: 1.1rem;
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--bg);
+  background: var(--surface-sunken);
+}
+
+.notification-form-heading {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.notification-form-heading strong {
+  font-size: 0.92rem;
+}
+
+.notification-form-heading span {
+  color: var(--fg-3);
+  font-size: 0.78rem;
+}
+
+.notification-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.form-field-wide {
+  grid-column: 1 / -1;
 }
 
 .notification-form label,
@@ -2332,10 +2361,21 @@ body.modal-open {
 
 .notification-form input,
 .notification-form select,
-.delivery-filter-bar input,
 .delivery-filter-bar select,
 .report-delivery-controls select {
   width: 100%;
+}
+
+.notification-form input,
+.notification-form select,
+.delivery-filter-bar select {
+  border-color: var(--line);
+  background-color: var(--surface);
+  box-shadow: 0 1px 2px rgba(25, 31, 40, 0.03);
+}
+
+.notification-form > button {
+  justify-self: start;
 }
 
 .member-picker {
@@ -2425,12 +2465,15 @@ body.modal-open {
 
 .delivery-filter-bar {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(3, minmax(160px, 220px)) auto;
+  align-items: end;
+  justify-content: start;
   gap: 0.75rem;
   margin: 1rem 0;
 }
 
 .delivery-filter-bar label { min-width: 0; }
+.delivery-filter-bar .text-button { margin-bottom: 0.15rem; }
 
 .delivery-summary {
   display: flex;
@@ -2449,6 +2492,7 @@ body.modal-open {
 
 .delivery-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.82rem;
 }
@@ -2458,11 +2502,37 @@ body.modal-open {
   padding: 0.75rem;
   border-top: 1px solid var(--line);
   text-align: left;
-  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .delivery-table th { color: var(--fg-3); font-size: 0.72rem; }
-.external-id { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.delivery-table th:first-child { width: 170px; }
+.delivery-table th:nth-child(2) { width: 32%; }
+.delivery-table th:nth-child(3) { width: 20%; }
+.delivery-table th:nth-child(4) { width: 100px; }
+.delivery-time { white-space: nowrap; }
+
+.delivery-report {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delivery-result {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.delivery-result > span:last-child:not(.delivery-status) {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .report-delivery-panel {
   margin: 1rem 0 2rem;
@@ -2692,7 +2762,6 @@ body.modal-open {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .delivery-filter-bar,
   .report-delivery-buttons {
     align-items: stretch;
     flex-direction: column;
@@ -2715,6 +2784,21 @@ body.modal-open {
     gap: 0.6rem;
     padding-top: 0.7rem;
     padding-bottom: 0.7rem;
+  }
+
+  .notification-form-grid,
+  .delivery-filter-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .delivery-filter-bar .text-button,
+  .notification-form > button,
+  .channel-card > button {
+    width: 100%;
+  }
+
+  .delivery-table {
+    min-width: 760px;
   }
 
   /*

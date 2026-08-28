@@ -10,7 +10,7 @@ import org.springframework.http.HttpStatus;
 public enum TopicErrorCode implements BaseErrorCode {
 
     INVALID_SCHEDULE(HttpStatus.BAD_REQUEST, "TOPIC400",
-            "batchSize는 1 이상 100 이하, intervalMinutes는 10 이상이어야 합니다."),
+            "batchSize는 1 이상 300 이하, intervalMinutes는 10 이상이어야 합니다."),
     QUERY_TEXT_REQUIRED(HttpStatus.BAD_REQUEST, "TOPIC400",
             "SEARCH 소스를 연결하려면 검색어가 필요합니다."),
     TOPIC_NOT_FOUND(HttpStatus.NOT_FOUND, "TOPIC404",

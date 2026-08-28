@@ -1,7 +1,5 @@
-import { useMemo, useState } from 'react'
-import { ApiError } from '../../api/client'
+import { useState } from 'react'
 import { useCreateTopic, useSources } from '../../api/queries'
-import type { Source } from '../../api/types'
 import { FormStatus } from './FormStatus'
 
 const EMPTY = {
@@ -20,19 +18,6 @@ const COLLECTION_INTERVALS = [
   { value: '1440', label: '매일 한 번 (권장)' },
 ] as const
 
-/**
- * 목록에서 소스가 설 자리. 작을수록 위다.
- *
- * <p>검색 provider는 기본으로 깔려 있어서 주제를 만들 때 거의 항상 고르는 소스이고, RSS 피드는
- * 필요한 사람이 하나씩 더해 가는 목록이다. 서버가 주는 순서(등록순)를 그대로 쓰면 기본 제공인
- * 검색 provider가 나중에 등록된 피드에 밀려 목록 아래로 내려간다. 스크롤해야 보이는 자리에 제일
- * 자주 고르는 것이 있는 셈이다.
- */
-const SOURCE_KIND_ORDER: Record<Source['sourceKind'], number> = {
-  SEARCH: 0,
-  FEED: 1,
-}
-
 /** 쉼표로 나눠 받는다. 빈 칸은 필터 없음이고, 빈 문자열은 필터에 넣지 않는다. */
 function toKeywords(value: string): string[] | undefined {
   const items = value
@@ -44,65 +29,16 @@ function toKeywords(value: string): string[] | undefined {
 
 export function TopicForm() {
   const [form, setForm] = useState(EMPTY)
-  // null은 아직 사용자가 선택을 바꾸지 않은 상태다. 소스가 비동기로 도착해도 전체가 기본 선택된다.
-  const [selected, setSelected] = useState<number[] | null>(null)
   const [done, setDone] = useState<string | null>(null)
   const sources = useSources()
   const { mutate, isPending, error, reset } = useCreateTopic()
 
-  /*
-    검색 provider를 위로 올린다. 종류만 비교하고 그 안은 건드리지 않는다 — Array.prototype.sort는
-    안정 정렬이라 같은 종류끼리는 서버가 준 순서(등록순)가 그대로 남는다. 이름순으로 다시 세우면
-    같은 종류 안에서 자리가 바뀌어, 어제 본 위치를 기억하고 찾는 사람이 헤맨다.
-
-    화면과 기본 선택값에만 쓰는 순서다. 서버는 sourceIds를 ID 집합으로 처리하므로 전송 순서에는
-    별도 의미가 없다.
-  */
-  const options = useMemo(
-    () => [...(sources.data?.content ?? [])].sort(
-      (left, right) => SOURCE_KIND_ORDER[left.sourceKind] - SOURCE_KIND_ORDER[right.sourceKind],
-    ),
-    [sources.data],
-  )
-  const effectiveSelected = selected ?? options.map((source) => source.id)
-  const sourceError =
-    sources.error instanceof ApiError
-      ? `${sources.error.message} (${sources.error.code})`
-      : '소스 목록을 불러오지 못했습니다.'
+  const activeSources = sources.data?.content ?? []
   /** SEARCH 소스를 연결하면 검색어가 필수다(TOPIC400). 보내기 전에 화면에서 먼저 알려 준다. */
-  const needsQueryText = options.some(
-    (source) => effectiveSelected.includes(source.id) && source.sourceKind === 'SEARCH',
-  )
-  const allSelected = options.length > 0 && options.every((source) => effectiveSelected.includes(source.id))
+  const needsQueryText = activeSources.some((source) => source.sourceKind === 'SEARCH')
 
   function update<K extends keyof typeof EMPTY>(key: K, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }))
-    setDone(null)
-    reset()
-  }
-
-  function toggleSource(id: number) {
-    setSelected((prev) => {
-      const current = prev ?? options.map((source) => source.id)
-      return current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
-    })
-    setDone(null)
-    reset()
-  }
-
-  /**
-   * 소스가 열 몇 개씩 쌓이면 하나씩 체크하는 게 일이다. 한 번에 다 켜고 끄는 길을 둔다.
-   *
-   * <p>개수가 아니라 목록에 든 소스가 전부 골라졌는지로 판단한다. 개수만 보면, 고른 소스가
-   * 지워지고 다른 소스가 대신 생겨 수가 같아졌을 때 버튼은 "전체 선택"인데 누르면 비워진다.
-   * 버튼 글자를 정하는 allSelected와 같은 기준을 써야 둘이 어긋나지 않는다.
-   */
-  function toggleAllSources() {
-    setSelected((prev) => (
-      options.length > 0 && options.every((source) => (prev ?? effectiveSelected).includes(source.id))
-        ? []
-        : options.map((source) => source.id)
-    ))
     setDone(null)
     reset()
   }
@@ -119,14 +55,11 @@ export function TopicForm() {
         optionalKeywords: toKeywords(form.optionalKeywords),
         excludedKeywords: toKeywords(form.excludedKeywords),
         intervalMinutes,
-        // 아무것도 고르지 않았으면 필드를 아예 빼서 보낸다. 명세가 "누락"과 "빈 배열"을 다르게 보므로
-        // 빈 배열을 보내면 "연결 없음"이 아니라 "전체 해제"라는 다른 뜻이 된다.
-        sourceIds: effectiveSelected.length > 0 ? effectiveSelected : undefined,
+        sourceIds: activeSources.map((source) => source.id),
       },
       {
         onSuccess: (created) => {
           setForm(EMPTY)
-          setSelected(null)
           setDone(`"${created.name}"을(를) 등록했습니다.`)
         },
       },
@@ -149,7 +82,7 @@ export function TopicForm() {
 
       <div className="field">
         <label htmlFor="topic-query">
-          검색어{needsQueryText && <span className="required"> — SEARCH 소스를 골랐으므로 필수</span>}
+          검색어{needsQueryText && <span className="required"> — 활성 검색 소스가 있어 필수</span>}
         </label>
         <input
           id="topic-query"
@@ -161,40 +94,8 @@ export function TopicForm() {
           pattern={needsQueryText ? '.*\\S.*' : undefined}
           title="검색어에는 공백이 아닌 문자를 입력하세요."
         />
-        <p className="hint">SEARCH 소스에 넘길 질의어입니다. FEED 소스만 연결한다면 비워 두어도 됩니다.</p>
+        <p className="hint">활성 검색 소스에 넘길 질의어입니다. 검색 소스가 없다면 비워 둘 수 있습니다.</p>
       </div>
-
-      <fieldset className="field">
-        {/* legend는 fieldset의 첫 자식이어야 이름 역할을 한다. div로 감싸지 않고 안에서 배치한다. */}
-        <legend className="checklist-legend">
-          <span>연결할 소스</span>
-          {options.length > 0 && (
-            <button type="button" className="chip-button" onClick={toggleAllSources}>
-              {allSelected ? '전체 해제' : '전체 선택'}
-            </button>
-          )}
-          {effectiveSelected.length > 0 && <em>{effectiveSelected.length}개 선택</em>}
-        </legend>
-        {sources.isPending && <p className="muted">소스를 불러오는 중…</p>}
-        {sources.error && <p className="error">{sourceError}</p>}
-        {!sources.isPending && options.length === 0 && (
-          <p className="muted">등록된 소스가 없습니다. 먼저 소스를 등록하세요.</p>
-        )}
-        <div className="checklist">
-          {options.map((source) => (
-            <label key={source.id} className="check">
-              <input
-                type="checkbox"
-                checked={effectiveSelected.includes(source.id)}
-                onChange={() => toggleSource(source.id)}
-              />
-              <span>{source.name}</span>
-              <span className={`badge badge-${source.sourceKind.toLowerCase()}`}>{source.sourceKind}</span>
-            </label>
-          ))}
-        </div>
-        <p className="hint">기본은 전체 연결입니다. 모두 해제하면 주제만 만들고 나중에 소스를 연결할 수 있습니다.</p>
-      </fieldset>
 
       <div className="field">
         <label htmlFor="topic-required">필수 키워드</label>
@@ -253,7 +154,16 @@ export function TopicForm() {
         </p>
       </div>
 
-      <button type="submit" disabled={isPending}>
+      {sources.isPending && <p className="muted">활성 수집 소스를 확인하는 중…</p>}
+      {sources.isError && <p className="error">활성 수집 소스를 불러오지 못했습니다.</p>}
+      {!sources.isPending && !sources.isError && activeSources.length > 0 && (
+        <p className="hint">현재 활성화된 수집 소스 {activeSources.length}개가 자동으로 연결됩니다.</p>
+      )}
+      {!sources.isPending && !sources.isError && activeSources.length === 0 && (
+        <p className="error">활성 수집 소스가 없습니다. 먼저 소스를 등록하거나 활성화하세요.</p>
+      )}
+
+      <button type="submit" disabled={isPending || sources.isPending || sources.isError || activeSources.length === 0}>
         {isPending ? '등록 중…' : '주제 등록'}
       </button>
       <FormStatus error={error} successMessage={done} />

@@ -84,7 +84,7 @@ public class TopicSourceResDTO {
         @Schema(description = "SEARCH 소스에 넘길 검색어. FEED 조합이면 null", example = "HBM 반도체")
         private final String queryText;
 
-        @Schema(description = "1회 수집 건수", example = "20")
+        @Schema(description = "1회 수집 건수", example = "100")
         private final int batchSize;
 
         @Schema(description = "자동 수집 주기(분)", example = "60")

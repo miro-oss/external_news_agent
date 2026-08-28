@@ -121,6 +121,30 @@ class TopicCommandServiceImplTest {
     }
 
     @Test
+    void createTopicAcceptsMaximumBatchSize() {
+        TopicReqDTO.Create request = createRequest();
+        request.setBatchSize(300);
+        when(topicRepository.existsByName("HBM")).thenReturn(false);
+        when(sourceRepository.findAllById(List.of(1L, 2L))).thenReturn(List.of(feedSource(), searchSource()));
+        when(topicRepository.saveAndFlush(any(Topic.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        TopicResDTO.Created result = topicCommandService.createTopic(request);
+
+        assertEquals(300, result.getBatchSize());
+    }
+
+    @Test
+    void createTopicRejectsBatchSizeAboveMaximum() {
+        TopicReqDTO.Create request = createRequest();
+        request.setBatchSize(301);
+
+        TopicException exception = assertThrows(TopicException.class,
+                () -> topicCommandService.createTopic(request));
+
+        assertEquals(TopicErrorCode.INVALID_SCHEDULE, exception.getCode());
+    }
+
+    @Test
     void createTopicRejectsUnknownSourceId() {
         TopicReqDTO.Create request = createRequest();
         request.setSourceIds(List.of(1L, 99L));

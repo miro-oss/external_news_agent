@@ -38,9 +38,9 @@ class SeedSearchSourcesMigrationIntegrationTests {
     private static final String SEED_SCRIPT = "db/migration/V19__seed_search_sources.sql";
 
     private static final List<SeededSearchSource> SEEDED_SOURCES = List.of(
-            new SeededSearchSource("NAVER", "Naver 뉴스 검색", "KR", "ko"),
-            new SeededSearchSource("TAVILY", "Tavily 뉴스 검색", null, "en"),
-            new SeededSearchSource("SERPAPI", "SerpAPI Google 뉴스 검색", null, "ko")
+            new SeededSearchSource("NAVER", "Naver 뉴스 검색", "KR", "ko", true),
+            new SeededSearchSource("TAVILY", "Tavily 뉴스 검색", null, "en", false),
+            new SeededSearchSource("SERPAPI", "SerpAPI Google 뉴스 검색", null, "ko", false)
     );
 
     private static final Set<String> SEEDED_PROVIDER_KEYS = SEEDED_SOURCES.stream()
@@ -76,15 +76,15 @@ class SeedSearchSourcesMigrationIntegrationTests {
             assertEquals(expected.name(), source.getName(), expected.providerKey());
             assertEquals(expected.country(), source.getCountry(), expected.providerKey());
             assertEquals(expected.language(), source.getLanguage(), expected.providerKey());
+            assertEquals(expected.active(), source.isActive(), expected.providerKey());
         });
     }
 
     @Test
-    void seedsProvidersAsActiveSearchSourcesWithoutSecrets() {
+    void seedsProvidersAsSearchSourcesWithoutSecrets() {
         seededSources().forEach((providerKey, source) -> {
             assertEquals(Source.KIND_SEARCH, source.getSourceKind(), providerKey);
             assertEquals(Source.ROBOTS_STATUS_UNKNOWN, source.getRobotsStatus(), providerKey);
-            assertTrue(source.isActive(), providerKey);
 
             assertNull(source.getCrawlPolicy(), providerKey);
             assertNull(source.getReliabilityScore(), providerKey);
@@ -113,6 +113,7 @@ class SeedSearchSourcesMigrationIntegrationTests {
         }
     }
 
-    private record SeededSearchSource(String providerKey, String name, String country, String language) {
+    private record SeededSearchSource(String providerKey, String name, String country, String language,
+                                      boolean active) {
     }
 }
