@@ -37,7 +37,7 @@ class ReportGeneratorTest {
         int lowIndex = document.markdownBody().indexOf("일반 요약");
         assertTrue(highIndex >= 0 && lowIndex >= 0, "두 finding 요약이 모두 본문에 있어야 한다.");
         assertTrue(highIndex < lowIndex);
-        assertTrue(document.markdownBody().contains("위험도: 높음 1 · 보통 0 · 낮음 1"));
+        assertTrue(document.markdownBody().contains("민감도: 높음 1 · 보통 0 · 낮음 1"));
         assertTrue(document.markdownBody().contains("원문: <https://example.com/1>"));
     }
 
@@ -53,7 +53,7 @@ class ReportGeneratorTest {
                 .markdownBody();
 
         assertTrue(body.contains("- 전체 근거: 1건"));
-        assertTrue(body.contains("- 분류: 정책 · 위험도: 높음 · 관련도: 중요"));
+        assertTrue(body.contains("- 분류: 정책 · 민감도: 높음 · 관련도: 중요"));
         assertFalse(body.contains("finding"));
         assertFalse(body.contains("high"));
         assertFalse(body.contains("important"));

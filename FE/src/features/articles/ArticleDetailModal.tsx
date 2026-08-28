@@ -156,7 +156,7 @@ function AnalysisPanel({
         </div>
         <div className="analysis-labels">
           <span>{analysis.category}</span>
-          <span>{analysis.riskLevel === 'high' ? '높은 위험' : analysis.riskLevel === 'medium' ? '중간 위험' : '낮은 위험'}</span>
+          <span>{analysis.riskLevel === 'high' ? '높은 민감도' : analysis.riskLevel === 'medium' ? '중간 민감도' : '낮은 민감도'}</span>
           <span>{analysis.relevance === 'important' ? '중요' : analysis.relevance === 'watch' ? '관찰' : '참고'}</span>
         </div>
       </div>

@@ -1,6 +1,6 @@
 {
   "datasetVersion": "semiconductor.v1",
-  "promptVersion": "report.ko.v1.1",
+  "promptVersion": "report.ko.v1.2",
   "output": {
     "title": "반도체 산업 골든 평가 보고서",
     "executiveSummary": [

@@ -18,6 +18,9 @@ class FakeProvider:
         self, *, system_instruction: str, prompt: str, response_schema: dict
     ) -> ProviderResponse:
         assert "prompt injection" not in system_instruction.lower()
+        assert "반도체와 관련된 제조 산업" in system_instruction
+        assert "회사 민감도 판정 기준" in system_instruction
+        assert "summaryKo는 공백 포함 10자 이상 120자 이하" in system_instruction
         assert response_schema["additionalProperties"] is False
         self.prompts.append(prompt)
         return self.responses.pop(0)
@@ -130,7 +133,9 @@ def test_generates_korean_analysis_from_english_article_with_sentence_ssot() -> 
         "Yield improved.",
     ]
     assert response.sections[0].bullets[0].evidence_sentence_ids == [1]
-    assert response.meta.prompt_version == "analyze.ko.v2+perspective.ko.v1"
+    assert response.meta.prompt_version == (
+        "analyze.ko.v3+perspective.ko.v1+sensitivity.ko.v1"
+    )
     assert len(provider.prompts) == 1
 
 
@@ -146,6 +151,22 @@ def test_repairs_schema_once_and_accumulates_usage() -> None:
     assert "validation-error" in provider.prompts[1]
     assert response.meta.input_tokens == 14
     assert response.meta.output_tokens == 8
+
+
+def test_repairs_summary_and_bullet_length_violation_once() -> None:
+    invalid = json.loads(valid_output())
+    invalid["summaryKo"] = "가" * 121
+    invalid["sections"][0]["bullets"][0]["text"] = "나" * 81
+    provider = FakeProvider(
+        provider_response(json.dumps(invalid, ensure_ascii=False)),
+        provider_response(valid_output()),
+    )
+
+    response = ArticleAnalyzeService(Settings(), provider).analyze(request())
+
+    assert len(provider.prompts) == 2
+    assert len(response.summary_ko) <= 120
+    assert len(response.sections[0].bullets[0].text) <= 80
 
 
 def test_fails_after_exactly_one_repair_when_evidence_is_out_of_range() -> None:

@@ -27,8 +27,8 @@ from app.llm.base import ProviderResponse, ProviderUsage
 
 _GOLDEN_DIR = Path(__file__).resolve().parents[1] / "app" / "eval" / "golden"
 _DATASET_PATH = _GOLDEN_DIR / "semiconductor.v1.json"
-_REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.1.json"
-_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v2.baseline.json"
+_REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.2.json"
+_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v3.baseline.json"
 
 
 def eval_settings() -> Settings:
@@ -71,6 +71,10 @@ def test_replay_golden_eval_keeps_quality_and_validates_perspective_fixture() ->
     assert result.metrics["perspectiveTagChecks"] == 96
     assert result.metrics["perspectiveTagCorrectCount"] == 96
     assert result.metrics["perspectiveTagAccuracy"] == 1.0
+    assert result.metrics["summaryLengthP50"] == 39
+    assert result.metrics["summaryLengthP95"] == 45
+    assert result.metrics["summaryLengthMax"] == 68
+    assert result.metrics["highSensitivityEvidenceRate"] == 1.0
     assert compare_results(result.to_dict(), baseline)["regressions"] == []
 
 

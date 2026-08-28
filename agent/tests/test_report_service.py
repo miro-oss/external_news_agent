@@ -7,7 +7,7 @@ from app.core.config import Settings
 from app.core.errors import AgentError
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.report_service import ReportWriterService
-from app.schemas.report import ReportRequest
+from app.schemas.report import ReportOutput, ReportRequest
 
 
 class FakeProvider:
@@ -20,6 +20,8 @@ class FakeProvider:
     ) -> ProviderResponse:
         assert "sourceFindingIds" in system_instruction
         assert "각 절이 서로 다른 finding 하나만으로도 독립적으로 확인" in system_instruction
+        assert "executiveSummary는 최대 3개 항목" in system_instruction
+        assert "summaryKo는 공백 포함 150자 이하" in system_instruction
         assert response_schema["additionalProperties"] is False
         self.prompts.append(prompt)
         return self.responses.pop(0)
@@ -115,7 +117,7 @@ def test_generates_structured_report_and_deterministic_markdown() -> None:
     assert "STUB 분석 3건" in response.markdown_body
     assert "페이월" in response.markdown_body
     assert "수집 실패 1건" in response.markdown_body
-    assert response.meta.prompt_version == "report.ko.v1.1"
+    assert response.meta.prompt_version == "report.ko.v1.2"
     assert response.meta.mock is False
 
 
@@ -202,6 +204,34 @@ def test_rejects_more_than_fifty_findings() -> None:
 
     with pytest.raises(ValidationError):
         ReportRequest.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda output: output["executiveSummary"].extend(
+            ["두 번째 요약", "세 번째 요약", "네 번째 요약"]
+        ),
+        lambda output: output["executiveSummary"].__setitem__(0, "가" * 101),
+        lambda output: output["importantEvents"][0].update({"summaryKo": "가" * 151}),
+    ],
+)
+def test_rejects_report_output_outside_readable_length(mutate) -> None:
+    output = json.loads(valid_output())
+    mutate(output)
+
+    with pytest.raises(ValidationError):
+        ReportOutput.model_validate(output)
+
+
+def test_mock_report_truncates_executive_summary_to_one_hundred_characters() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["summaryKo"] = "가" * 200
+
+    response = ReportWriterService(Settings()).write(ReportRequest.model_validate(payload))
+
+    assert len(response.executive_summary[0]) == 100
+    assert len(response.important_events[0].summary_ko) == 150
 
 
 def test_mock_report_does_not_repeat_important_finding_in_watch_items() -> None:

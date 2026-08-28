@@ -117,6 +117,22 @@ def test_analyze_returns_deterministic_mock_contract() -> None:
     ]
 
 
+def test_mock_analysis_respects_summary_and_bullet_length_limits() -> None:
+    body = request_body()
+    body["article"]["title"] = "가" * 200
+
+    response = client.post(
+        "/v1/analyze",
+        headers={"X-Agent-Token": "local-dev-agent-token"},
+        json=body,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["summaryKo"]) == 120
+    assert len(payload["sections"][0]["bullets"][0]["text"]) == 80
+
+
 def test_report_returns_deterministic_mock_contract() -> None:
     response = client.post(
         "/v1/report",

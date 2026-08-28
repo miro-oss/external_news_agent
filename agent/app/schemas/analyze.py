@@ -44,7 +44,7 @@ class AnalyzeRequest(AgentModel):
 
 
 class EvidenceBullet(AgentModel):
-    text: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=80)
     evidence_sentence_ids: list[Annotated[int, Field(ge=1)]] = Field(min_length=1)
     groundedness: Groundedness
     confidence: float = Field(ge=0, le=1)
@@ -52,7 +52,7 @@ class EvidenceBullet(AgentModel):
 
 class Section(AgentModel):
     heading: str = Field(min_length=1)
-    bullets: list[EvidenceBullet] = Field(min_length=1)
+    bullets: list[EvidenceBullet] = Field(min_length=1, max_length=3)
 
 
 class Classification(AgentModel):
@@ -103,7 +103,7 @@ class ResponseMeta(AgentModel):
 
 class AnalyzeOutput(AgentModel):
     sections: list[Section] = Field(min_length=1)
-    summary_ko: str = Field(min_length=1)
+    summary_ko: str = Field(min_length=10, max_length=120)
     classification: Classification
     entities: Entities
     perspective_tags: list[PerspectiveTag]
@@ -117,7 +117,7 @@ class AnalyzeOutput(AgentModel):
 class AnalyzeResponse(AgentModel):
     sentences: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
     sections: list[Section] = Field(min_length=1)
-    summary_ko: str = Field(min_length=1)
+    summary_ko: str = Field(min_length=10, max_length=120)
     classification: Classification
     entities: Entities
     perspective_tags: list[PerspectiveTag]

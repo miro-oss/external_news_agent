@@ -98,7 +98,7 @@ function ReportListItem({ report, active, onSelect }: {
       <strong>{report.title}</strong>
       <span className="report-list-meta">
         근거 {report.findingCount}건
-        {report.highRiskCount > 0 && <em>높은 위험 {report.highRiskCount}</em>}
+        {report.highRiskCount > 0 && <em>높은 민감도 {report.highRiskCount}</em>}
       </span>
     </button>
   )
@@ -116,7 +116,7 @@ function ReportView({ report }: { report: ReportDetail }) {
           <ReportStat value={stats.findingCount} label="전체 근거" />
           <ReportStat value={stats.newCount} label="신규" />
           <ReportStat value={stats.updatedCount} label="후속" />
-          <ReportStat value={stats.byRiskLevel.high ?? 0} label="높은 위험" tone="danger" />
+          <ReportStat value={stats.byRiskLevel.high ?? 0} label="높은 민감도" tone="danger" />
         </div>
       </header>
 
@@ -273,7 +273,7 @@ function MarkdownBody({ markdown }: { markdown: string }) {
 }
 
 function riskLabel(value: ReportFinding['riskLevel']) {
-  return { high: '높은 위험', medium: '중간 위험', low: '낮은 위험' }[value]
+  return { high: '높은 민감도', medium: '중간 민감도', low: '낮은 민감도' }[value]
 }
 
 function changeTypeLabel(value: ReportFinding['changeType']) {

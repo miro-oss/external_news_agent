@@ -39,14 +39,14 @@ uv run pytest
 ## Golden eval
 
 `app/eval/golden/semiconductor.v1.json`은 한국어·영어 반도체 기사 24건과
-`analyze.ko.v2+perspective.ko.v1` replay 출력 및 관점 정답을 담습니다. 수치 오기, 기업명 바꿔치기, 부정 반전, 영문 요약은
+`analyze.ko.v3+perspective.ko.v1+sensitivity.ko.v1` replay 출력 및 관점 정답을 담습니다. 수치 오기, 기업명 바꿔치기, 부정 반전, 영문 요약은
 `expectedFailures`로 명시해 규칙이 지나치게 엄격해지거나 느슨해지는 회귀를 함께 잡습니다.
-`report.ko.v1.1.json`은 finding과 독립된 버전 보고서 fixture이며 grounded·weak·ungrounded 주장 기대값을
+`report.ko.v1.2.json`은 finding과 독립된 버전 보고서 fixture이며 grounded·weak·ungrounded 주장 기대값을
 각각 가집니다.
 
 ```bash
 uv run python -m app.eval --profile replay \
-  --compare app/eval/golden/analyze.ko.v2.baseline.json
+  --compare app/eval/golden/analyze.ko.v3.baseline.json
 ```
 
 replay의 `perspectiveTagAccuracy` 96/96은 모델 품질이 아니라 fixture 출력과
@@ -64,6 +64,8 @@ replay는 외부 API 없이 실제 스키마·문장 분할·사실값 검증·�
   규칙으로 검증했을 때 각각 `weak`/`ungrounded`인 개수. executive summary는 전체 finding을 합치지
   않고 가장 잘 맞는 단일 finding으로 판정
 - Korean summary pass rate: 한글 5자 이상이며 한글·영문 문자 중 한글 비율이 50% 이상인 요약 비율
+- summary length P50/P95/max: 분석 요약의 글자 수 분포. P95는 120자 이하여야 함
+- high sensitivity evidence rate: high 민감도 판정 중 하나 이상의 근거 bullet이 연결된 비율
 - perspective tag accuracy: 기사별 정답 관점과 `medium`/`high`로 태깅된 관점의 4×24 일치율
 - evidence provider call reduction rate: `ungrounded`로 선차단된 bullet을 제외하고 근거 검증이 필요한
   bullet 중 rule-only로 확정돼 provider 호출을 생략할 수 있는 비율. replay 기준선은 21건 중 11건을

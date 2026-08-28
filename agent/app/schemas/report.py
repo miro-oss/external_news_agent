@@ -8,6 +8,7 @@ from app.schemas.analyze import Plan
 from app.schemas.common import AgentModel
 
 NonEmptyString = Annotated[str, Field(min_length=1)]
+ExecutiveSummaryString = Annotated[str, Field(min_length=1, max_length=100)]
 MAX_REPORT_FINDINGS = 50
 
 
@@ -104,7 +105,7 @@ class ReportRequest(AgentModel):
 
 class ImportantEvent(AgentModel):
     title: str = Field(min_length=1, max_length=500)
-    summary_ko: str = Field(min_length=1)
+    summary_ko: str = Field(min_length=1, max_length=150)
     significance: str = Field(min_length=1)
     source_finding_ids: list[Annotated[int, Field(gt=0)]] = Field(min_length=1)
 
@@ -117,7 +118,7 @@ class WatchItem(AgentModel):
 
 class ReportOutput(AgentModel):
     title: str = Field(min_length=1, max_length=500)
-    executive_summary: list[NonEmptyString] = Field(min_length=1)
+    executive_summary: list[ExecutiveSummaryString] = Field(min_length=1, max_length=3)
     important_events: list[ImportantEvent]
     watch_items: list[WatchItem]
     source_notes: list[NonEmptyString]
@@ -150,7 +151,7 @@ class ReportResponseMeta(AgentModel):
 
 class ReportResponse(AgentModel):
     title: str = Field(min_length=1, max_length=500)
-    executive_summary: list[NonEmptyString] = Field(min_length=1)
+    executive_summary: list[ExecutiveSummaryString] = Field(min_length=1, max_length=3)
     important_events: list[ImportantEvent]
     watch_items: list[WatchItem]
     source_notes: list[NonEmptyString]

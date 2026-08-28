@@ -20,7 +20,7 @@ def response(evidence_sentence_ids: list[int]) -> dict[str, object]:
                 ],
             }
         ],
-        "summaryKo": "요약",
+        "summaryKo": "핵심 내용을 정리한 요약입니다.",
         "classification": {
             "intent": "산업 동향 보도",
             "sentiment": "neutral",
@@ -98,3 +98,25 @@ def test_provider_schema_requires_nullable_perspective_hook() -> None:
         "string",
         "null",
     }
+
+
+@pytest.mark.parametrize("summary", ["짧은 요약", "가" * 121])
+def test_rejects_analysis_summary_outside_readable_length(summary: str) -> None:
+    payload = response([1])
+    payload["summaryKo"] = summary
+
+    with pytest.raises(ValidationError):
+        AnalyzeResponse.model_validate(payload)
+
+
+def test_rejects_more_than_three_bullets_or_eighty_character_bullet() -> None:
+    payload = response([1])
+    bullet = payload["sections"][0]["bullets"][0]
+    payload["sections"][0]["bullets"] = [bullet.copy() for _ in range(4)]
+    with pytest.raises(ValidationError):
+        AnalyzeResponse.model_validate(payload)
+
+    payload = response([1])
+    payload["sections"][0]["bullets"][0]["text"] = "가" * 81
+    with pytest.raises(ValidationError):
+        AnalyzeResponse.model_validate(payload)
