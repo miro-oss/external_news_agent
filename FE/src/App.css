@@ -2196,7 +2196,25 @@ body.modal-open {
 .finding-evidence-list {
   display: inline-flex;
   flex-wrap: wrap;
+  gap: 0.3rem;
   margin-left: 0.45rem;
+}
+
+.finding-groundedness {
+  margin-left: 0.45rem;
+  color: var(--warning-strong);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.finding-card .evidence {
+  margin-right: 0;
+  color: var(--fg-3);
+}
+
+.finding-card .evidence:hover:not(:disabled),
+.finding-card .evidence:focus-visible {
+  color: var(--primary-strong);
 }
 
 .finding-card a {

@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import Markdown from 'react-markdown'
 import {
   useLatestReport,
+  useAudienceSetting,
   useNotificationChannels,
   useNotificationGroups,
   usePreviewNotification,
@@ -24,17 +25,20 @@ export function ReportsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
     articleId: number | null
+    runId: number | null
     sentences: number[]
-  }>({ articleId: null, sentences: [] })
+  }>({ articleId: null, runId: null, sentences: [] })
   const reports = useReports()
+  const audienceSetting = useAudienceSetting()
   const latest = useLatestReport()
   const activeId = selectedId ?? latest.data?.id ?? null
   const selectedReport = useReport(selectedId)
   const activeReport = selectedId === null ? latest : selectedReport
+  const activeReportData = activeReport.data
   const isInitialLoading = latest.isPending || reports.isPending
   const initialError = latest.isError ? latest.error : reports.isError ? reports.error : null
   const closeArticle = useCallback(() => {
-    setEvidenceSelection({ articleId: null, sentences: [] })
+    setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
   }, [])
 
   return (
@@ -88,11 +92,15 @@ export function ReportsPage() {
             {activeReport.isError && (
               <div className="report-detail-state error" role="alert">{activeReport.error.message}</div>
             )}
-            {activeReport.data && (
+            {activeReportData && (
               <ReportView
-                report={activeReport.data}
+                report={activeReportData}
                 onEvidenceSelect={(articleId, sentences) => {
-                  setEvidenceSelection({ articleId, sentences })
+                  setEvidenceSelection({
+                    articleId,
+                    runId: activeReportData.runId,
+                    sentences,
+                  })
                 }}
               />
             )}
@@ -102,6 +110,8 @@ export function ReportsPage() {
 
       <ArticleDetailModal
         articleId={evidenceSelection.articleId}
+        runId={evidenceSelection.runId ?? undefined}
+        defaultAudience={audienceSetting.data?.audience}
         initialEvidence={evidenceSelection.sentences}
         onClose={closeArticle}
       />
@@ -283,6 +293,9 @@ function FindingCard({ finding, onEvidenceSelect }: {
         <ul>{finding.keyPoints.map((point, index) => (
           <li key={`${index}-${point.text}`}>
             <span>{point.text}</span>
+            {point.groundedness === 'weak' && (
+              <span className="finding-groundedness">근거 약함</span>
+            )}
             <span className="finding-evidence-list" role="group" aria-label={`핵심 ${index + 1}의 근거`}>
               {point.evidence.map((sentenceId, localIndex) => (
                 <button

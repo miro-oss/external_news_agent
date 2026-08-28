@@ -12,6 +12,7 @@ import { scrollIntoViewGently } from '../../lib/motion'
 
 interface Props {
   articleId: number | null
+  runId?: number
   defaultAudience?: Audience
   initialEvidence?: number[]
   onClose: () => void
@@ -19,11 +20,12 @@ interface Props {
 
 export function ArticleDetailModal({
   articleId,
+  runId,
   defaultAudience = 'CHIP_MAKER',
   initialEvidence,
   onClose,
 }: Props) {
-  const article = useArticle(articleId)
+  const article = useArticle(articleId, runId)
   const closeButton = useRef<HTMLButtonElement>(null)
   const appliedInitialEvidence = useRef<string | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
@@ -56,7 +58,7 @@ export function ArticleDetailModal({
     }
     if (!article.data || !initialEvidence || initialEvidence.length === 0) return
 
-    const selectionKey = `${articleId}:${initialEvidence.join(',')}`
+    const selectionKey = `${runId ?? 'latest'}:${articleId}:${initialEvidence.join(',')}`
     if (appliedInitialEvidence.current === selectionKey) return
     appliedInitialEvidence.current = selectionKey
     setEvidenceSelection({ articleId, sentences: initialEvidence })
@@ -66,7 +68,7 @@ export function ArticleDetailModal({
       const target = document.getElementById(`article-${articleId}-sentence-${firstSentence}`)
       if (target) scrollIntoViewGently(target)
     })
-  }, [article.data, articleId, initialEvidence])
+  }, [article.data, articleId, initialEvidence, runId])
 
   if (articleId === null) return null
 

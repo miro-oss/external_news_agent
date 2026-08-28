@@ -1,0 +1,50 @@
+{
+  "datasetVersion": "semiconductor.v1",
+  "promptVersion": "report.ko.v1.3",
+  "output": {
+    "title": "반도체 산업 골든 평가 보고서",
+    "executiveSummary": [
+      "삼성전자는 2026년 4분기에 HBM4 파일럿 생산을 확대한다.",
+      "ASML이 2027년 2나노 시험에서 70% 수율을 기록했다.",
+      "HBM4 관련 시장 변화를 관찰해야 한다."
+    ],
+    "importantEvents": [
+      {
+        "title": "SK하이닉스 HBM 공급 계약",
+        "summaryKo": "SK하이닉스가 클라우드 고객과 3년 HBM 공급 계약을 맺었다.",
+        "significance": "SK하이닉스의 3년 HBM 공급 계약이다.",
+        "sourceFindingIds": [1002]
+      },
+      {
+        "title": "TSMC 시험 생산 수율",
+        "summaryKo": "TSMC가 시험 생산에서 70% 수율을 기록했다.",
+        "significance": "TSMC의 시험 생산 수율은 70%다.",
+        "sourceFindingIds": [1004]
+      }
+    ],
+    "watchItems": [
+      {
+        "topic": "UCIe 칩렛 상호운용",
+        "reason": "UCIe 2.0 기반 칩렛 두 종의 상호운용 시험이 완료됐다.",
+        "sourceFindingIds": [1009]
+      },
+      {
+        "topic": "ASML 서비스센터",
+        "reason": "ASML은 서비스센터를 2028년에 폐쇄한다.",
+        "sourceFindingIds": [1015]
+      }
+    ],
+    "sourceNotes": ["Golden eval semiconductor.v1 replay fixture."]
+  },
+  "expectedClaimStatuses": {
+    "executiveSummary:0": "grounded",
+    "executiveSummary:1": "ungrounded",
+    "executiveSummary:2": "weak",
+    "importantEvents:0:summaryKo": "grounded",
+    "importantEvents:0:significance": "grounded",
+    "importantEvents:1:summaryKo": "grounded",
+    "importantEvents:1:significance": "grounded",
+    "watchItems:0:reason": "grounded",
+    "watchItems:1:reason": "ungrounded"
+  }
+}

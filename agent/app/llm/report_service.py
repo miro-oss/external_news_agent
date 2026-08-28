@@ -22,7 +22,7 @@ from app.schemas.report import (
     WatchItem,
 )
 
-PROMPT_VERSION = "report.ko.v1.2"
+PROMPT_VERSION = "report.ko.v1.3"
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md"
 SYSTEM_INSTRUCTION = _PROMPT_PATH.read_text(encoding="utf-8").strip()
 

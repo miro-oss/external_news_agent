@@ -15,7 +15,14 @@ def assess_finding_claim(
     evidence_texts = [
         text
         for finding in findings
-        for text in [finding.summary_ko, *(point.text for point in finding.key_points)]
+        for text in [
+            finding.summary_ko,
+            *(
+                point.text
+                for point in finding.key_points
+                if point.groundedness != "ungrounded"
+            ),
+        ]
     ]
     return assess_with_rules(
         claim,

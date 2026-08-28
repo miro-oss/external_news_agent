@@ -45,7 +45,7 @@ const keys = {
   sources: ['sources'] as const,
   topics: ['topics'] as const,
   articles: (filters: ArticleFilters) => ['articles', filters] as const,
-  article: (id: number | null) => ['article', id] as const,
+  article: (id: number | null, runId?: number) => ['article', id, runId ?? null] as const,
   reports: ['reports', 'list'] as const,
   latestReport: ['reports', 'latest'] as const,
   report: (id: number | null) => ['reports', id] as const,
@@ -163,10 +163,10 @@ export function useArticles(filters: ArticleFilters) {
   })
 }
 
-export function useArticle(articleId: number | null) {
+export function useArticle(articleId: number | null, runId?: number) {
   return useQuery({
-    queryKey: keys.article(articleId),
-    queryFn: () => get<ArticleDetail>(`/articles/${articleId}`),
+    queryKey: keys.article(articleId, runId),
+    queryFn: () => get<ArticleDetail>(`/articles/${articleId}`, { runId }),
     enabled: articleId !== null,
   })
 }

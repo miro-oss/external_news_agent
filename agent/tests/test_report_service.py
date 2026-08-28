@@ -22,6 +22,8 @@ class FakeProvider:
         assert "각 절이 서로 다른 finding 하나만으로도 독립적으로 확인" in system_instruction
         assert "executiveSummary는 최대 3개 항목" in system_instruction
         assert "summaryKo는 공백 포함 150자 이하" in system_instruction
+        assert "인덱스 숫자를 노출하지 않는다" in system_instruction
+        assert "ungrounded인 주장은 보고서 근거로 사용하지 않는다" in system_instruction
         assert response_schema["additionalProperties"] is False
         self.prompts.append(prompt)
         return self.responses.pop(0)
@@ -123,7 +125,7 @@ def test_generates_structured_report_and_deterministic_markdown() -> None:
     assert "STUB 분석 3건" in response.markdown_body
     assert "페이월" in response.markdown_body
     assert "수집 실패 1건" in response.markdown_body
-    assert response.meta.prompt_version == "report.ko.v1.2"
+    assert response.meta.prompt_version == "report.ko.v1.3"
     assert response.meta.mock is False
 
 
@@ -135,6 +137,26 @@ def test_replaces_unsupported_significance_without_another_provider_call() -> No
     response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(request())
 
     assert len(provider.prompts) == 1
+    assert response.important_events[0].significance == "HBM4 양산 일정이 앞당겨졌다."
+
+
+def test_ungrounded_key_point_cannot_support_report_significance() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["keyPoints"].append(
+        {
+            "text": "공급망 병목이 완전히 해결된다.",
+            "evidence": [1],
+            "groundedness": "ungrounded",
+        }
+    )
+    provider = FakeProvider(
+        provider_response(valid_output(significance="공급망 병목이 완전히 해결된다."))
+    )
+
+    response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(
+        ReportRequest.model_validate(payload)
+    )
+
     assert response.important_events[0].significance == "HBM4 양산 일정이 앞당겨졌다."
 
 

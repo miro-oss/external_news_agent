@@ -223,7 +223,9 @@ public class AgentReportOrchestrator {
                 ReportEvidencePolicy.reportSummary(finding),
                 ReportEvidencePolicy.supportedKeyPoints(finding).stream()
                         .map(point -> new AgentReportRequest.KeyPointPayload(
-                                point.text(), point.evidence(), point.groundedness()))
+                                point.text(),
+                                point.evidence().stream().distinct().toList(),
+                                point.groundedness()))
                         .toList(),
                 finding.getIntent(),
                 finding.getSentiment().toApiValue(),
