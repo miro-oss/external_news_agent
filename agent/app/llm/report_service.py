@@ -253,7 +253,7 @@ def _report_prompt(request: ReportRequest) -> str:
 
 
 def _source_notes(request: ReportRequest) -> list[str]:
-    return list(dict.fromkeys(_single_line(note) for note in request.source_notes))
+    return list(request.source_notes)
 
 
 def _render_markdown(

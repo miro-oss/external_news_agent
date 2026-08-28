@@ -179,6 +179,16 @@ def test_mock_report_is_deterministic_and_keeps_structured_sections() -> None:
     assert response.markdown_body.startswith("# 2026-08-10 HBM 뉴스 모니터링 보고서")
 
 
+def test_mock_report_preserves_source_notes_order_wording_and_duplicates() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["sourceNotes"] = ["첫 줄  두 칸\n유지", "중복 메모", "중복 메모"]
+    report_request = ReportRequest.model_validate(payload)
+
+    response = ReportWriterService(Settings()).write(report_request)
+
+    assert response.source_notes == report_request.source_notes
+
+
 @pytest.mark.parametrize(
     "canonical_url",
     [

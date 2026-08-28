@@ -28,6 +28,7 @@ _HIGHER_IS_BETTER = (
     "evidenceProviderCallReductionRate",
 )
 _LOWER_IS_BETTER = (
+    "summaryLengthP95",
     "reportWeakClaimCount",
     "unsupportedReportClaimCount",
     "evidenceProviderCallCount",

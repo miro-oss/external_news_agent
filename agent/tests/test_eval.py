@@ -228,12 +228,14 @@ def test_metric_comparison_gates_quality_and_coverage() -> None:
     current = deepcopy(baseline)
     current["groundedRate"] = float(baseline["groundedRate"]) + 0.01
     current["bulletCount"] = int(baseline["bulletCount"]) - 1
+    current["summaryLengthP95"] = int(baseline["summaryLengthP95"]) + 1
     current["unsupportedReportClaimCount"] = int(baseline["unsupportedReportClaimCount"]) + 1
 
     comparison = compare_metrics(current, baseline)
 
     assert comparison["regressions"] == [
         "bulletCount",
+        "summaryLengthP95",
         "unsupportedReportClaimCount",
     ]
 

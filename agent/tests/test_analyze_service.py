@@ -21,6 +21,7 @@ class FakeProvider:
         assert "반도체와 관련된 제조 산업" in system_instruction
         assert "회사 민감도 판정 기준" in system_instruction
         assert "summaryKo는 공백 포함 10자 이상 120자 이하" in system_instruction
+        assert "relevance가 none이면 해당 evidenceSentenceIds는 빈 배열" in system_instruction
         assert response_schema["additionalProperties"] is False
         self.prompts.append(prompt)
         return self.responses.pop(0)
