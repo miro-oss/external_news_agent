@@ -161,7 +161,9 @@ class AgentAnalysisOrchestratorTest {
         assertEquals(AnalysisSource.LLM, result.analysisSource());
         assertEquals("gemini", result.metadata().provider());
         assertEquals("gemini-2.5-flash", result.metadata().model());
-        assertEquals("analyze.ko.v2+perspective.ko.v1", result.metadata().promptVersion());
+        assertEquals(
+                "analyze.ko.v3+perspective.ko.v1+sensitivity.ko.v1",
+                result.metadata().promptVersion());
         assertEquals(120L, result.metadata().inputTokens());
         assertEquals(30L, result.metadata().outputTokens());
         assertEquals(new BigDecimal("0.001"), result.metadata().costUsd());
@@ -370,7 +372,9 @@ class AgentAnalysisOrchestratorTest {
                 new AgentAnalyzeResponse.Meta(
                         mock ? "mock" : "gemini",
                         mock ? "mock" : "gemini-2.5-flash",
-                        mock ? "analyze.mock.v2" : "analyze.ko.v2+perspective.ko.v1",
+                        mock
+                                ? "analyze.mock.v2"
+                                : "analyze.ko.v3+perspective.ko.v1+sensitivity.ko.v1",
                         mock ? 0L : 120L,
                         mock ? 0L : 30L,
                         mock ? BigDecimal.ZERO : new BigDecimal("0.001"),

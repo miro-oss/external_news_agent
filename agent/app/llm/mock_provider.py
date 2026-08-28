@@ -22,6 +22,7 @@ class MockAnalyzeProvider:
         split = split_sentences_with_meta(material, self._settings.max_sentences)
         sentences = split.sentences or [article.title]
         groundedness = "grounded" if article.body_text.strip() else "weak"
+        summary = _summary(article.title)
 
         return AnalyzeResponse(
             sentences=sentences,
@@ -30,7 +31,7 @@ class MockAnalyzeProvider:
                     heading="핵심",
                     bullets=[
                         EvidenceBullet(
-                            text=article.title,
+                            text=article.title[:80],
                             evidence_sentence_ids=[1],
                             groundedness=groundedness,
                             confidence=1.0 if groundedness == "grounded" else 0.5,
@@ -38,7 +39,7 @@ class MockAnalyzeProvider:
                     ],
                 )
             ],
-            summary_ko=article.title,
+            summary_ko=summary,
             classification=Classification(
                 intent="산업 동향 보도",
                 sentiment="neutral",
@@ -85,3 +86,10 @@ class MockAnalyzeProvider:
                 truncated=input_truncated or split.truncated,
             ),
         )
+
+
+def _summary(title: str) -> str:
+    summary = title[:120]
+    if len(summary) >= 10:
+        return summary
+    return f"{summary} 관련 기사입니다."

@@ -113,7 +113,7 @@ export function ArticlesPage() {
 
       <section className="filter-bar" aria-label="기사 필터">
         <label>
-          위험도
+          민감도
           <select
             value={filters.riskLevel ?? ''}
             onChange={(event) => changeFilter('riskLevel', event.target.value as ArticleFilters['riskLevel'])}
@@ -165,7 +165,7 @@ export function ArticlesPage() {
           >
             <option value="PUBLISHED_DESC">최신순</option>
             <option value="PUBLISHED_ASC">오래된순</option>
-            <option value="RISK_DESC">위험도순</option>
+            <option value="RISK_DESC">민감도순</option>
           </select>
         </label>
       </section>

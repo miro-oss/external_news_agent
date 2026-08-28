@@ -22,7 +22,7 @@ from app.schemas.report import (
     WatchItem,
 )
 
-PROMPT_VERSION = "report.ko.v1.1"
+PROMPT_VERSION = "report.ko.v1.2"
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md"
 SYSTEM_INSTRUCTION = _PROMPT_PATH.read_text(encoding="utf-8").strip()
 
@@ -174,7 +174,7 @@ def _deterministic_response(request: ReportRequest) -> ReportResponse:
             finding.id,
         ),
     )
-    executive_summary = [finding.summary_ko for finding in ordered[:3]]
+    executive_summary = [_truncate_chars(finding.summary_ko, 100) for finding in ordered[:3]]
     if not executive_summary:
         executive_summary = [
             f"이번 실행에서 기사 {request.source_stats.collected}건을 관측했지만 "
@@ -183,8 +183,8 @@ def _deterministic_response(request: ReportRequest) -> ReportResponse:
 
     important_events = [
         ImportantEvent(
-            title=finding.article_title,
-            summary_ko=finding.summary_ko,
+            title=_truncate_chars(finding.article_title, 500),
+            summary_ko=_truncate_chars(finding.summary_ko, 150),
             significance=finding.summary_ko,
             source_finding_ids=[finding.id],
         )
@@ -198,7 +198,7 @@ def _deterministic_response(request: ReportRequest) -> ReportResponse:
     }
     watch_items = [
         WatchItem(
-            topic=finding.article_title,
+            topic=_truncate_chars(finding.article_title, 500),
             reason="후속 변화와 추가 근거를 관찰해야 합니다.",
             source_finding_ids=[finding.id],
         )
@@ -253,7 +253,7 @@ def _report_prompt(request: ReportRequest) -> str:
 
 
 def _source_notes(request: ReportRequest) -> list[str]:
-    return list(dict.fromkeys(_single_line(note) for note in request.source_notes))
+    return list(request.source_notes)
 
 
 def _render_markdown(
@@ -324,6 +324,10 @@ def _truncate_utf8(value: str, max_bytes: int) -> str:
     if len(encoded) <= max_bytes:
         return value
     return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _truncate_chars(value: str, max_chars: int) -> str:
+    return value[:max_chars]
 
 
 def _assembly_error(usage: ProviderUsage, truncated: bool) -> AgentError:

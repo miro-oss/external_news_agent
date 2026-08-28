@@ -93,7 +93,7 @@ public class ReportGenerator {
         // 같은 값이 코드 안에서 두 이름을 갖게 된다.
         body.append("\n## 요약 통계\n\n")
                 .append("- 전체 근거: ").append(findings.size()).append("건\n")
-                .append("- 위험도: 높음 ").append(riskCounts.getOrDefault("high", 0L))
+                .append("- 민감도: 높음 ").append(riskCounts.getOrDefault("high", 0L))
                 .append(" · 보통 ").append(riskCounts.getOrDefault("medium", 0L))
                 .append(" · 낮음 ").append(riskCounts.getOrDefault("low", 0L)).append("\n");
         if (!categoryCounts.isEmpty()) {
@@ -113,7 +113,7 @@ public class ReportGenerator {
             body.append("\n### ").append(markdownText(finding.getArticle().getTitle())).append("\n\n")
                     .append(markdownText(ReportEvidencePolicy.reportSummary(finding))).append("\n\n")
                     .append("- 분류: ").append(markdownText(finding.getCategory()))
-                    .append(" · 위험도: ").append(ReportLabels.risk(finding.getRiskLevel()))
+                    .append(" · 민감도: ").append(ReportLabels.risk(finding.getRiskLevel()))
                     .append(" · 관련도: ").append(ReportLabels.relevance(finding.getRelevance())).append("\n");
             ReportEvidencePolicy.supportedKeyPoints(finding).forEach(point -> body
                     .append("- 핵심: ").append(markdownText(point.text())).append("\n"));

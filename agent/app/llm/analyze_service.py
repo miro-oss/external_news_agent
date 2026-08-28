@@ -17,9 +17,13 @@ from app.schemas.analyze import (
     Section,
 )
 
-_ANALYZE_PROMPT_VERSION = "analyze.ko.v2"
+_ANALYZE_PROMPT_VERSION = "analyze.ko.v3"
 _PERSPECTIVE_PROMPT_VERSION = "perspective.ko.v1"
-PROMPT_VERSION = f"{_ANALYZE_PROMPT_VERSION}+{_PERSPECTIVE_PROMPT_VERSION}"
+_SENSITIVITY_PROMPT_VERSION = "sensitivity.ko.v1"
+PROMPT_VERSION = (
+    f"{_ANALYZE_PROMPT_VERSION}+{_PERSPECTIVE_PROMPT_VERSION}"
+    f"+{_SENSITIVITY_PROMPT_VERSION}"
+)
 _PROMPT_PATH = (
     Path(__file__).resolve().parents[1]
     / "prompts"
@@ -30,10 +34,16 @@ _PERSPECTIVE_PATH = (
     / "prompts"
     / f"{_PERSPECTIVE_PROMPT_VERSION}.md"
 )
+_SENSITIVITY_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "prompts"
+    / f"{_SENSITIVITY_PROMPT_VERSION}.md"
+)
 SYSTEM_INSTRUCTION = "\n\n".join(
     (
         _PROMPT_PATH.read_text(encoding="utf-8").strip(),
         _PERSPECTIVE_PATH.read_text(encoding="utf-8").strip(),
+        _SENSITIVITY_PATH.read_text(encoding="utf-8").strip(),
     )
 )
 

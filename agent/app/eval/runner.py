@@ -1,4 +1,5 @@
 import json
+import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,7 +35,7 @@ from app.schemas.evidence import EvidenceSentence
 from app.schemas.report import ReportRequest, ReportResponse
 
 EvalProfile = Literal["replay", "live"]
-_DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.1.json"
+_DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.2.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +257,12 @@ def run_evaluation(
         for section in response.sections
         for bullet in section.bullets
     ]
+    summary_lengths = sorted(len(response.summary_ko) for _, response in responses)
+    high_sensitivity_responses = [
+        response
+        for _, response in responses
+        if response.classification.risk_level == "high"
+    ]
     evidence_verification_count, evidence_rule_decision_count = (
         _estimated_evidence_routes(
             responses,
@@ -290,6 +297,18 @@ def run_evaluation(
         korean_summary_passes=sum(
             korean_summary_pass(response.summary_ko) for _, response in responses
         ),
+        summary_length_p50=_nearest_rank(summary_lengths, 0.50),
+        summary_length_p95=_nearest_rank(summary_lengths, 0.95),
+        summary_length_max=max(summary_lengths, default=0),
+        high_sensitivity_count=len(high_sensitivity_responses),
+        high_sensitivity_evidence_count=sum(
+            any(
+                bullet.evidence_sentence_ids
+                for section in response.sections
+                for bullet in section.bullets
+            )
+            for response in high_sensitivity_responses
+        ),
         # replay에서는 fixture/라벨 일관성 가드이며, provider 품질은 live에서만 측정한다.
         perspective_tag_checks=len(responses) * len(AUDIENCES),
         perspective_tag_correct_count=sum(
@@ -320,6 +339,12 @@ def run_evaluation(
         metrics=counts.to_dict(),
         errors=tuple(errors),
     )
+
+
+def _nearest_rank(values: list[int], percentile: float) -> int:
+    if not values:
+        return 0
+    return values[max(0, math.ceil(len(values) * percentile) - 1)]
 
 
 def _perspective_tag_correct_count(

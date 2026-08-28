@@ -19,7 +19,8 @@ public class AgentProperties implements InitializingBean {
     private Duration reportTimeout = Duration.ofSeconds(120);
     private AgentPlan defaultPlan = AgentPlan.FREE;
     private boolean allowRunOverride = true;
-    private String analysisPromptVersion = "analyze.ko.v2+perspective.ko.v1";
+    private String analysisPromptVersion =
+            "analyze.ko.v3+perspective.ko.v1+sensitivity.ko.v1";
     private String freeModel = "";
     private String paidModel = "";
     private final Quota quota = new Quota();

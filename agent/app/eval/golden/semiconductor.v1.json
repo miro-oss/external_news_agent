@@ -1,6 +1,6 @@
 {
   "version": "semiconductor.v1",
-  "baselinePromptVersion": "analyze.ko.v2+perspective.ko.v1",
+  "baselinePromptVersion": "analyze.ko.v3+perspective.ko.v1+sensitivity.ko.v1",
   "cases": [
     {
       "caseId": "hbm4-pilot-ko",

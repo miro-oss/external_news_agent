@@ -20,6 +20,7 @@ _HIGHER_IS_BETTER = (
     "groundedRate",
     "koreanSummaryPasses",
     "koreanSummaryPassRate",
+    "highSensitivityEvidenceRate",
     "perspectiveTagAccuracy",
     "reportClaimCount",
     "reportGroundedClaimCount",
@@ -27,6 +28,7 @@ _HIGHER_IS_BETTER = (
     "evidenceProviderCallReductionRate",
 )
 _LOWER_IS_BETTER = (
+    "summaryLengthP95",
     "reportWeakClaimCount",
     "unsupportedReportClaimCount",
     "evidenceProviderCallCount",
@@ -58,6 +60,11 @@ class MetricCounts:
     bullet_count: int
     grounded_bullet_count: int
     korean_summary_passes: int
+    summary_length_p50: int
+    summary_length_p95: int
+    summary_length_max: int
+    high_sensitivity_count: int
+    high_sensitivity_evidence_count: int
     perspective_tag_checks: int
     perspective_tag_correct_count: int
     report_claim_count: int
@@ -78,6 +85,15 @@ class MetricCounts:
             "groundedRate": _rate(self.grounded_bullet_count, self.bullet_count),
             "koreanSummaryPasses": self.korean_summary_passes,
             "koreanSummaryPassRate": _rate(self.korean_summary_passes, self.case_count),
+            "summaryLengthP50": self.summary_length_p50,
+            "summaryLengthP95": self.summary_length_p95,
+            "summaryLengthMax": self.summary_length_max,
+            "highSensitivityCount": self.high_sensitivity_count,
+            "highSensitivityEvidenceCount": self.high_sensitivity_evidence_count,
+            "highSensitivityEvidenceRate": _rate(
+                self.high_sensitivity_evidence_count,
+                self.high_sensitivity_count,
+            ),
             "perspectiveTagChecks": self.perspective_tag_checks,
             "perspectiveTagCorrectCount": self.perspective_tag_correct_count,
             "perspectiveTagAccuracy": _rate(
