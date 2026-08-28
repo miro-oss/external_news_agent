@@ -9,7 +9,13 @@ import {
   useReports,
   useSendNotification,
 } from '../../api/queries'
-import type { ReportDetail, ReportFinding, ReportSummary } from '../../api/types'
+import {
+  CHANGE_TYPE_LABELS,
+  RISK_LEVEL_LABELS,
+  type ReportDetail,
+  type ReportFinding,
+  type ReportSummary,
+} from '../../api/types'
 import { formatFullDate, formatShortDate } from '../../lib/datetime'
 import { MutationStatus } from '../settings/MutationStatus'
 
@@ -98,7 +104,7 @@ function ReportListItem({ report, active, onSelect }: {
       <strong>{report.title}</strong>
       <span className="report-list-meta">
         근거 {report.findingCount}건
-        {report.highRiskCount > 0 && <em>높은 민감도 {report.highRiskCount}</em>}
+        {report.highRiskCount > 0 && <em>{RISK_LEVEL_LABELS.high} {report.highRiskCount}</em>}
       </span>
     </button>
   )
@@ -114,9 +120,9 @@ function ReportView({ report }: { report: ReportDetail }) {
         <time dateTime={report.generatedAt}>{formatFullDate(report.generatedAt)}</time>
         <div className="report-stat-row" aria-label="보고서 요약 통계">
           <ReportStat value={stats.findingCount} label="전체 근거" />
-          <ReportStat value={stats.newCount} label="신규" />
-          <ReportStat value={stats.updatedCount} label="후속" />
-          <ReportStat value={stats.byRiskLevel.high ?? 0} label="높은 민감도" tone="danger" />
+          <ReportStat value={stats.newCount} label={CHANGE_TYPE_LABELS.NEW} />
+          <ReportStat value={stats.updatedCount} label={CHANGE_TYPE_LABELS.UPDATED} />
+          <ReportStat value={stats.byRiskLevel.high ?? 0} label={RISK_LEVEL_LABELS.high} tone="danger" />
         </div>
       </header>
 
@@ -235,8 +241,8 @@ function FindingCard({ finding }: { finding: ReportFinding }) {
     <article className="finding-card">
       <div className="finding-card-meta">
         <span>{finding.category}</span>
-        <span className={`status-pill risk-label-${finding.riskLevel}`}>{riskLabel(finding.riskLevel)}</span>
-        <span>{changeTypeLabel(finding.changeType)}</span>
+        <span className={`status-pill risk-label-${finding.riskLevel}`}>{RISK_LEVEL_LABELS[finding.riskLevel]}</span>
+        <span>{CHANGE_TYPE_LABELS[finding.changeType]}</span>
       </div>
       <h4>{finding.articleTitle}</h4>
       <p>{finding.summary}</p>
@@ -270,12 +276,4 @@ function MarkdownBody({ markdown }: { markdown: string }) {
       {lines.join('\n')}
     </Markdown>
   )
-}
-
-function riskLabel(value: ReportFinding['riskLevel']) {
-  return { high: '높은 민감도', medium: '중간 민감도', low: '낮은 민감도' }[value]
-}
-
-function changeTypeLabel(value: ReportFinding['changeType']) {
-  return { NEW: '신규', UPDATED: '후속' }[value]
 }

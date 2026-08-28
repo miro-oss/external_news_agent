@@ -117,6 +117,18 @@ export type ChangeType = 'NEW' | 'UPDATED'
 export type Relevance = 'important' | 'watch' | 'reference'
 export type RiskLevel = 'low' | 'medium' | 'high'
 export type Sentiment = 'positive' | 'neutral' | 'negative'
+
+export const CHANGE_TYPE_LABELS: Record<ChangeType, string> = {
+  NEW: '신규',
+  UPDATED: '갱신',
+}
+
+export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
+  low: '낮은 민감도',
+  medium: '중간 민감도',
+  high: '높은 민감도',
+}
+
 export const AUDIENCES = ['CHIP_MAKER', 'EQUIPMENT_MAKER', 'MARKET_INVESTOR', 'IT_INFRA'] as const
 export type Audience = (typeof AUDIENCES)[number]
 export type AudienceRelevance = 'none' | 'low' | 'medium' | 'high'
