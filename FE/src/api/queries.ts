@@ -35,13 +35,15 @@ import type {
   ReportSummary,
   Source,
   SourceCreateRequest,
-  Topic,
+  TopicCreated,
   TopicCreateRequest,
+  TopicSummary,
 } from './types'
 
 const keys = {
   combinations: ['topic-sources'] as const,
   sources: ['sources'] as const,
+  topics: ['topics'] as const,
   articles: (filters: ArticleFilters) => ['articles', filters] as const,
   article: (id: number | null) => ['article', id] as const,
   reports: ['reports', 'list'] as const,
@@ -108,15 +110,24 @@ export function useSources() {
   })
 }
 
+/** 조합 표에 주제의 AND/OR/NOT 키워드를 보이기 위한 주제 목록. */
+export function useTopics() {
+  return useQuery({
+    queryKey: keys.topics,
+    queryFn: () => getAllPages<TopicSummary>('/topics'),
+  })
+}
+
 /**
- * 등록에 성공하면 조합 테이블을 다시 읽는다. 소스를 새로 만들면 주제 폼의 선택 후보도 늘어나므로
- * 둘 다 무효화한다 — 영상 1~3이 보여 주는 흐름(소스 등록 → 주제 등록 → 테이블에 나타남)이 이것이다.
+ * 등록에 성공하면 조합·소스·주제 목록을 다시 읽는다. 소스를 만들면 선택 후보가 늘고, 주제를
+ * 만들면 키워드 표가 늘어나므로 관련 캐시를 함께 무효화한다.
  */
 function useRefreshOnSuccess() {
   const queryClient = useQueryClient()
   return () => {
     void queryClient.invalidateQueries({ queryKey: keys.combinations })
     void queryClient.invalidateQueries({ queryKey: keys.sources })
+    void queryClient.invalidateQueries({ queryKey: keys.topics })
   }
 }
 
@@ -131,7 +142,7 @@ export function useCreateSource() {
 export function useCreateTopic() {
   const refresh = useRefreshOnSuccess()
   return useMutation({
-    mutationFn: (body: TopicCreateRequest) => post<Topic>('/topics', body),
+    mutationFn: (body: TopicCreateRequest) => post<TopicCreated>('/topics', body),
     onSuccess: refresh,
   })
 }
