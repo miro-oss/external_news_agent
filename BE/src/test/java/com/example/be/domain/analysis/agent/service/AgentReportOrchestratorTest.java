@@ -253,7 +253,7 @@ class AgentReportOrchestratorTest {
                 FetchStatus.FULLTEXT,
                 "혼합 요약",
                 List.of(
-                        new FindingKeyPoint("지원되는 주장", List.of(0), "grounded"),
+                        new FindingKeyPoint("지원되는 주장", List.of(0, 0), "grounded"),
                         new FindingKeyPoint("근거 없는 주장", List.of(1), "ungrounded")));
         when(client.report(any())).thenReturn(response(List.of(501L)));
 
@@ -261,7 +261,11 @@ class AgentReportOrchestratorTest {
 
         ArgumentCaptor<AgentReportRequest> captor = ArgumentCaptor.forClass(AgentReportRequest.class);
         verify(client).report(captor.capture());
-        assertEquals(List.of("지원되는 주장"), captor.getValue().findings().getFirst().keyPoints());
+        AgentReportRequest.KeyPointPayload keyPoint =
+                captor.getValue().findings().getFirst().keyPoints().getFirst();
+        assertEquals("지원되는 주장", keyPoint.text());
+        assertEquals(List.of(0), keyPoint.evidence());
+        assertEquals("grounded", keyPoint.groundedness());
     }
 
     private AgentProperties enabledProperties() {

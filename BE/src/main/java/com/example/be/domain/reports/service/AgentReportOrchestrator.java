@@ -222,7 +222,10 @@ public class AgentReportOrchestrator {
                 finding.getChangeType().name(),
                 ReportEvidencePolicy.reportSummary(finding),
                 ReportEvidencePolicy.supportedKeyPoints(finding).stream()
-                        .map(point -> point.text())
+                        .map(point -> new AgentReportRequest.KeyPointPayload(
+                                point.text(),
+                                point.evidence().stream().distinct().toList(),
+                                point.groundedness()))
                         .toList(),
                 finding.getIntent(),
                 finding.getSentiment().toApiValue(),

@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 
-from app.schemas.analyze import Plan
+from app.schemas.analyze import Groundedness, Plan
 from app.schemas.common import AgentModel
 
 NonEmptyString = Annotated[str, Field(min_length=1)]
@@ -25,6 +25,18 @@ class ReportRunInput(AgentModel):
         return self
 
 
+class ReportKeyPointInput(AgentModel):
+    text: NonEmptyString
+    evidence: list[Annotated[int, Field(ge=0)]] = Field(min_length=1)
+    groundedness: Groundedness
+
+    @model_validator(mode="after")
+    def validate_evidence_indexes(self) -> "ReportKeyPointInput":
+        if len(self.evidence) != len(set(self.evidence)):
+            raise ValueError("report key point의 evidence는 중복될 수 없습니다.")
+        return self
+
+
 class ReportFindingInput(AgentModel):
     id: int = Field(gt=0)
     article_id: int = Field(gt=0)
@@ -33,7 +45,7 @@ class ReportFindingInput(AgentModel):
     source_name: str | None = Field(default=None, max_length=200)
     change_type: Literal["NEW", "UPDATED"]
     summary_ko: str = Field(min_length=1)
-    key_points: list[NonEmptyString]
+    key_points: list[ReportKeyPointInput]
     intent: str | None = Field(default=None, max_length=200)
     sentiment: Literal["positive", "neutral", "negative"]
     risk_level: Literal["low", "medium", "high"]

@@ -35,7 +35,7 @@ from app.schemas.evidence import EvidenceSentence
 from app.schemas.report import ReportRequest, ReportResponse
 
 EvalProfile = Literal["replay", "live"]
-_DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.2.json"
+_DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.3.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -461,7 +461,14 @@ def _report_request(
                 "changeType": "NEW",
                 "summaryKo": response.summary_ko,
                 "keyPoints": [
-                    bullet.text
+                    {
+                        "text": bullet.text,
+                        "evidence": [
+                            sentence_id - 1
+                            for sentence_id in bullet.evidence_sentence_ids
+                        ],
+                        "groundedness": bullet.groundedness,
+                    }
                     for section in response.sections
                     for bullet in section.bullets
                     if bullet.groundedness != "ungrounded"

@@ -86,11 +86,27 @@ public class ReportResDTO {
         private final String canonicalUrl;
         private final String changeType;
         private final String summary;
-        private final List<String> keyPoints;
+        private final List<KeyPoint> keyPoints;
         private final String intent;
         private final String sentiment;
         private final String riskLevel;
         private final String relevance;
         private final String category;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @JsonPropertyOrder({"text", "evidence", "groundedness"})
+    @Schema(name = "ReportFindingKeyPoint", description = "보고서 핵심 주장과 기사 문장 근거")
+    public static class KeyPoint {
+
+        private final String text;
+
+        @Schema(description = "기사 상세 sentences.index를 참조하는 0-based 문장 인덱스")
+        private final List<Integer> evidence;
+
+        @Schema(description = "근거 검증 상태", allowableValues = {"grounded", "weak"})
+        private final String groundedness;
     }
 }

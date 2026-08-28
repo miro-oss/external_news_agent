@@ -31,13 +31,20 @@ public record AgentReportRequest(
             String sourceName,
             String changeType,
             String summaryKo,
-            List<String> keyPoints,
+            List<KeyPointPayload> keyPoints,
             String intent,
             String sentiment,
             String riskLevel,
             String relevance,
             String category,
             String fetchStatus
+    ) {
+    }
+
+    public record KeyPointPayload(
+            String text,
+            List<Integer> evidence,
+            String groundedness
     ) {
     }
 

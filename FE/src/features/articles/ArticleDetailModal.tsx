@@ -12,13 +12,22 @@ import { scrollIntoViewGently } from '../../lib/motion'
 
 interface Props {
   articleId: number | null
+  runId?: number
   defaultAudience?: Audience
+  initialEvidence?: number[]
   onClose: () => void
 }
 
-export function ArticleDetailModal({ articleId, defaultAudience = 'CHIP_MAKER', onClose }: Props) {
-  const article = useArticle(articleId)
+export function ArticleDetailModal({
+  articleId,
+  runId,
+  defaultAudience = 'CHIP_MAKER',
+  initialEvidence,
+  onClose,
+}: Props) {
+  const article = useArticle(articleId, runId)
   const closeButton = useRef<HTMLButtonElement>(null)
+  const appliedInitialEvidence = useRef<string | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
     articleId: number | null
     sentences: number[]
@@ -41,6 +50,25 @@ export function ArticleDetailModal({ articleId, defaultAudience = 'CHIP_MAKER', 
       document.body.classList.remove('modal-open')
     }
   }, [articleId, onClose])
+
+  useEffect(() => {
+    if (articleId === null) {
+      appliedInitialEvidence.current = null
+      return
+    }
+    if (!article.data || !initialEvidence || initialEvidence.length === 0) return
+
+    const selectionKey = `${runId ?? 'latest'}:${articleId}:${initialEvidence.join(',')}`
+    if (appliedInitialEvidence.current === selectionKey) return
+    appliedInitialEvidence.current = selectionKey
+    setEvidenceSelection({ articleId, sentences: initialEvidence })
+
+    const firstSentence = initialEvidence[0]
+    requestAnimationFrame(() => {
+      const target = document.getElementById(`article-${articleId}-sentence-${firstSentence}`)
+      if (target) scrollIntoViewGently(target)
+    })
+  }, [article.data, articleId, initialEvidence, runId])
 
   if (articleId === null) return null
 

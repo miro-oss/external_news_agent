@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import Markdown from 'react-markdown'
 import {
   useLatestReport,
+  useAudienceSetting,
   useNotificationChannels,
   useNotificationGroups,
   usePreviewNotification,
@@ -17,17 +18,28 @@ import {
   type ReportSummary,
 } from '../../api/types'
 import { formatFullDate, formatShortDate } from '../../lib/datetime'
+import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { MutationStatus } from '../settings/MutationStatus'
 
 export function ReportsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [evidenceSelection, setEvidenceSelection] = useState<{
+    articleId: number | null
+    runId: number | null
+    sentences: number[]
+  }>({ articleId: null, runId: null, sentences: [] })
   const reports = useReports()
+  const audienceSetting = useAudienceSetting()
   const latest = useLatestReport()
   const activeId = selectedId ?? latest.data?.id ?? null
   const selectedReport = useReport(selectedId)
   const activeReport = selectedId === null ? latest : selectedReport
+  const activeReportData = activeReport.data
   const isInitialLoading = latest.isPending || reports.isPending
   const initialError = latest.isError ? latest.error : reports.isError ? reports.error : null
+  const closeArticle = useCallback(() => {
+    setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
+  }, [])
 
   return (
     <main className="reports-page">
@@ -80,10 +92,29 @@ export function ReportsPage() {
             {activeReport.isError && (
               <div className="report-detail-state error" role="alert">{activeReport.error.message}</div>
             )}
-            {activeReport.data && <ReportView report={activeReport.data} />}
+            {activeReportData && (
+              <ReportView
+                report={activeReportData}
+                onEvidenceSelect={(articleId, sentences) => {
+                  setEvidenceSelection({
+                    articleId,
+                    runId: activeReportData.runId,
+                    sentences,
+                  })
+                }}
+              />
+            )}
           </section>
         </div>
       )}
+
+      <ArticleDetailModal
+        articleId={evidenceSelection.articleId}
+        runId={evidenceSelection.runId ?? undefined}
+        defaultAudience={audienceSetting.data?.audience}
+        initialEvidence={evidenceSelection.sentences}
+        onClose={closeArticle}
+      />
     </main>
   )
 }
@@ -110,7 +141,10 @@ function ReportListItem({ report, active, onSelect }: {
   )
 }
 
-function ReportView({ report }: { report: ReportDetail }) {
+function ReportView({ report, onEvidenceSelect }: {
+  report: ReportDetail
+  onEvidenceSelect: (articleId: number, sentences: number[]) => void
+}) {
   const stats = report.summaryStats
   return (
     <article className="report-document">
@@ -139,7 +173,13 @@ function ReportView({ report }: { report: ReportDetail }) {
         </div>
         {report.findings && report.findings.length > 0 ? (
           <div className="finding-list">
-            {report.findings.map((finding) => <FindingCard finding={finding} key={finding.id} />)}
+            {report.findings.map((finding) => (
+              <FindingCard
+                finding={finding}
+                key={finding.id}
+                onEvidenceSelect={onEvidenceSelect}
+              />
+            ))}
           </div>
         ) : <p className="muted">이 보고서에 포함된 근거가 없습니다.</p>}
       </section>
@@ -236,7 +276,10 @@ function ReportStat({ value, label, tone }: { value: number; label: string; tone
   )
 }
 
-function FindingCard({ finding }: { finding: ReportFinding }) {
+function FindingCard({ finding, onEvidenceSelect }: {
+  finding: ReportFinding
+  onEvidenceSelect: (articleId: number, sentences: number[]) => void
+}) {
   return (
     <article className="finding-card">
       <div className="finding-card-meta">
@@ -247,7 +290,27 @@ function FindingCard({ finding }: { finding: ReportFinding }) {
       <h4>{finding.articleTitle}</h4>
       <p>{finding.summary}</p>
       {finding.keyPoints.length > 0 && (
-        <ul>{finding.keyPoints.map((point, index) => <li key={`${index}-${point}`}>{point}</li>)}</ul>
+        <ul>{finding.keyPoints.map((point, index) => (
+          <li key={`${index}-${point.text}`}>
+            <span>{point.text}</span>
+            {point.groundedness === 'weak' && (
+              <span className="finding-groundedness">근거 약함</span>
+            )}
+            <span className="finding-evidence-list" role="group" aria-label={`핵심 ${index + 1}의 근거`}>
+              {point.evidence.map((sentenceId, localIndex) => (
+                <button
+                  type="button"
+                  className="evidence"
+                  key={`${sentenceId}-${localIndex}`}
+                  aria-label={`핵심 ${index + 1}의 근거 ${localIndex + 1} · ${finding.articleTitle} 본문 ${sentenceId + 1}번째 문장으로 이동`}
+                  onClick={() => onEvidenceSelect(finding.articleId, [sentenceId])}
+                >
+                  근거 {localIndex + 1}
+                </button>
+              ))}
+            </span>
+          </li>
+        ))}</ul>
       )}
       <a href={finding.canonicalUrl} target="_blank" rel="noreferrer">원문 열기 <span aria-hidden="true">↗</span></a>
     </article>

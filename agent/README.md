@@ -41,7 +41,7 @@ uv run pytest
 `app/eval/golden/semiconductor.v1.json`은 한국어·영어 반도체 기사 24건과
 `analyze.ko.v3+perspective.ko.v1+sensitivity.ko.v1` replay 출력 및 관점 정답을 담습니다. 수치 오기, 기업명 바꿔치기, 부정 반전, 영문 요약은
 `expectedFailures`로 명시해 규칙이 지나치게 엄격해지거나 느슨해지는 회귀를 함께 잡습니다.
-`report.ko.v1.2.json`은 finding과 독립된 버전 보고서 fixture이며 grounded·weak·ungrounded 주장 기대값을
+`report.ko.v1.3.json`은 finding과 독립된 버전 보고서 fixture이며 grounded·weak·ungrounded 주장 기대값을
 각각 가집니다.
 
 ```bash
