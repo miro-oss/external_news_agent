@@ -26,7 +26,40 @@ class ArticleHasherTest {
     void isStableForTheSameUrl() {
         assertEquals(ArticleHasher.urlHash(URL), ArticleHasher.urlHash(URL));
         assertEquals(ArticleHasher.urlHash(URL), ArticleHasher.urlHash("  " + URL + "  "));
-        assertNotEquals(ArticleHasher.urlHash(URL), ArticleHasher.urlHash(URL + "?utm_source=x"));
+    }
+
+    @Test
+    void removesTrackingParametersFragmentAndHostCase() {
+        String tracked = "HTTPS://WWW.HANKYUNG.COM/article/2026081200001"
+                + "?utm_source=newsletter&FBCLID=click-id#article";
+
+        assertEquals(URL, ArticleHasher.normalizeUrl(tracked));
+        assertEquals(ArticleHasher.urlHash(URL), ArticleHasher.urlHash(tracked));
+    }
+
+    @Test
+    void preservesMeaningfulQueryParametersInTheirOriginalOrder() {
+        String original = URL + "?articleId=7&view=full";
+        String tracked = URL + "?utm_medium=email&articleId=7&view=full&utm_campaign=daily#top";
+
+        assertEquals(original, ArticleHasher.normalizeUrl(tracked));
+        assertEquals(ArticleHasher.urlHash(original), ArticleHasher.urlHash(tracked));
+        assertNotEquals(ArticleHasher.urlHash(URL), ArticleHasher.urlHash(original));
+    }
+
+    @Test
+    void removesTrackingNamesOnly() {
+        String meaningful = URL + "?ref=fbclid&campaign=utm_source";
+
+        assertEquals(meaningful, ArticleHasher.normalizeUrl(meaningful + "#section"));
+    }
+
+    @Test
+    void keepsLegacyHashBehaviorForMalformedNonEmptyUrl() {
+        String malformed = "https://example.com/article with space";
+
+        assertEquals(malformed, ArticleHasher.normalizeUrl("  " + malformed + "  "));
+        assertEquals("urn:article:42#section", ArticleHasher.normalizeUrl("urn:article:42#section"));
     }
 
     @Test

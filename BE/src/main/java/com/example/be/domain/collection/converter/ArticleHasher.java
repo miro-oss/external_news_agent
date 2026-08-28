@@ -1,11 +1,16 @@
 package com.example.be.domain.collection.converter;
 
-import org.springframework.util.StringUtils;
-
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.List;
+import java.util.Locale;
+
+import org.springframework.util.StringUtils;
 
 /**
  * 중복 판정과 변경 판정에 쓰는 해시.
@@ -21,11 +26,45 @@ public final class ArticleHasher {
     }
 
     public static String urlHash(String canonicalUrl) {
+        return sha256(normalizeUrl(canonicalUrl));
+    }
+
+    /**
+     * 추적용 정보만 제거해 같은 기사의 URL을 하나로 맞춘다.
+     *
+     * <p>경로와 일반 쿼리 파라미터는 기사 식별에 필요할 수 있으므로 순서와 인코딩을 그대로 둔다. 비어 있지
+     * 않지만 URI로 파싱할 수 없는 값은 기존 수집 동작을 깨지 않도록 앞뒤 공백만 제거한다.
+     */
+    public static String normalizeUrl(String canonicalUrl) {
         if (!StringUtils.hasText(canonicalUrl)) {
             throw new IllegalArgumentException("canonicalUrl 없이 해시를 만들 수 없다.");
         }
 
-        return sha256(canonicalUrl.trim());
+        String trimmed = canonicalUrl.trim();
+        try {
+            URI uri = new URI(trimmed);
+            if (uri.isOpaque()) {
+                return trimmed;
+            }
+            StringBuilder normalized = new StringBuilder();
+            if (uri.getScheme() != null) {
+                normalized.append(uri.getScheme().toLowerCase(Locale.ROOT)).append(':');
+            }
+            if (uri.getRawAuthority() != null) {
+                normalized.append("//").append(normalizeAuthority(uri));
+            }
+            if (uri.getRawPath() != null) {
+                normalized.append(uri.getRawPath());
+            }
+
+            String query = removeTrackingParameters(uri.getRawQuery());
+            if (query != null) {
+                normalized.append('?').append(query);
+            }
+            return normalized.toString();
+        } catch (URISyntaxException ignored) {
+            return trimmed;
+        }
     }
 
     /**
@@ -61,6 +100,43 @@ public final class ArticleHasher {
 
     private static String lengthPrefixed(String value) {
         return value.length() + ":" + value;
+    }
+
+    private static String normalizeAuthority(URI uri) {
+        String authority = uri.getRawAuthority();
+        String host = uri.getHost();
+        if (host == null) {
+            return authority;
+        }
+
+        int hostStart = authority.lastIndexOf(host);
+        if (hostStart < 0) {
+            return authority;
+        }
+        return authority.substring(0, hostStart)
+                + host.toLowerCase(Locale.ROOT)
+                + authority.substring(hostStart + host.length());
+    }
+
+    private static String removeTrackingParameters(String rawQuery) {
+        if (rawQuery == null) {
+            return null;
+        }
+
+        List<String> retained = new ArrayList<>();
+        for (String parameter : rawQuery.split("&", -1)) {
+            if (!parameter.isEmpty() && !isTrackingParameter(parameter)) {
+                retained.add(parameter);
+            }
+        }
+        return retained.isEmpty() ? null : String.join("&", retained);
+    }
+
+    private static boolean isTrackingParameter(String parameter) {
+        int equals = parameter.indexOf('=');
+        String name = (equals < 0 ? parameter : parameter.substring(0, equals))
+                .toLowerCase(Locale.ROOT);
+        return name.startsWith("utm_") || name.equals("fbclid");
     }
 
     private static String nullToEmpty(String value) {
