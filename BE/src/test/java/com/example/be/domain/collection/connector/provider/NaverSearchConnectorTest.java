@@ -165,6 +165,44 @@ class NaverSearchConnectorTest {
         server.verify();
     }
 
+    @Test
+    void reportsFailureWhenApiHubReturnsEmptyBody() {
+        server.expect(requestTo(newsUri(5, 1)))
+                .andRespond(withSuccess("", MediaType.APPLICATION_JSON));
+
+        FetchResult result = connector().search(new SearchQuery("HBM", 5, "ko"));
+
+        assertFalse(result.success());
+        assertEquals(CollectionRunWarning.CODE_SEARCH_FAILED, result.failureCode());
+        assertTrue(result.articles().isEmpty());
+        server.verify();
+    }
+
+    @Test
+    void reportsFailureWhenItemsMemberIsMissing() {
+        server.expect(requestTo(newsUri(5, 1)))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        FetchResult result = connector().search(new SearchQuery("HBM", 5, "ko"));
+
+        assertFalse(result.success());
+        assertEquals(CollectionRunWarning.CODE_SEARCH_FAILED, result.failureCode());
+        assertTrue(result.articles().isEmpty());
+        server.verify();
+    }
+
+    @Test
+    void acceptsExplicitlyEmptyItemsArray() {
+        server.expect(requestTo(newsUri(5, 1)))
+                .andRespond(withSuccess("{\"items\":[]}", MediaType.APPLICATION_JSON));
+
+        FetchResult result = connector().search(new SearchQuery("HBM", 5, "ko"));
+
+        assertTrue(result.success());
+        assertTrue(result.articles().isEmpty());
+        server.verify();
+    }
+
     /**
      * 키가 없으면 예외를 던지지 않고 아예 호출하지 않는다. 새 팀원이 키 없이 bootRun 할 수 있어야 한다.
      * 다만 결과는 성공이 아니다 — 그 소스를 실제로 쓰는 실행에서는 경고로 드러나야 한다.

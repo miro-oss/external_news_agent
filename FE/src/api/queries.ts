@@ -60,13 +60,8 @@ const keys = {
 
 export type DeliveryLogFilters = {
   reportId?: string
-  runId?: string
-  deliveryBatchId?: string
   channelType?: string
   status?: string
-  recipientId?: string
-  from?: string
-  to?: string
   page?: number
 }
 
@@ -224,13 +219,8 @@ export function useDeliveryLogs(filters: DeliveryLogFilters = {}) {
     queryKey: keys.deliveryLogs(filters),
     queryFn: () => notificationGet<DeliveryLogPage>('/delivery-logs', {
       reportId: filters.reportId,
-      runId: filters.runId,
-      deliveryBatchId: filters.deliveryBatchId,
       channelType: filters.channelType,
       status: filters.status,
-      recipientId: filters.recipientId,
-      from: filters.from,
-      to: filters.to,
       page: filters.page ?? 0,
       size: 50,
     }),

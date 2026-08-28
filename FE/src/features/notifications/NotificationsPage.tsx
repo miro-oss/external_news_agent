@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useMemo, useState } from 'react'
 import {
   type DeliveryLogFilters,
   useCreateNotificationGroup,
@@ -9,6 +9,7 @@ import {
   useNotificationChannels,
   useNotificationGroups,
   useNotificationRecipients,
+  useReports,
   useUpdateNotificationChannel,
 } from '../../api/queries'
 import type { DeliveryStatus, GroupPerspective, NotificationChannelType } from '../../api/types'
@@ -26,8 +27,13 @@ export function NotificationsPage() {
   const channels = useNotificationChannels()
   const recipients = useNotificationRecipients()
   const groups = useNotificationGroups()
+  const reports = useReports()
   const [logFilters, setLogFilters] = useState<DeliveryLogFilters>({ page: 0 })
   const logs = useDeliveryLogs(logFilters)
+  const reportTitles = useMemo(
+    () => new Map((reports.data?.content ?? []).map((report) => [report.id, report.title])),
+    [reports.data],
+  )
 
   function changeLogFilter(key: Exclude<keyof DeliveryLogFilters, 'page'>, value: string) {
     setLogFilters((current) => ({ ...current, [key]: value, page: 0 }))
@@ -41,11 +47,11 @@ export function NotificationsPage() {
       <header className="page-header">
         <div>
           <h1>알림 관리</h1>
-          <p className="muted">보고서를 받을 사람과 채널을 준비하고, 실제 전달 결과까지 추적합니다.</p>
+          <p className="muted">알림을 받을 사람과 그룹, 전달 방식을 한곳에서 관리합니다.</p>
         </div>
         <div className="summary-count" aria-live="polite">
           <strong>{recipients.data?.totalElements ?? 0}</strong>
-          <span>등록 수신자</span>
+          <span>명 · 그룹 {groups.data?.totalElements ?? 0}개</span>
         </div>
       </header>
 
@@ -54,7 +60,7 @@ export function NotificationsPage() {
 
       {channels.data && (
         <section className="notification-section">
-          <div className="section-heading"><h2>전달 채널</h2><span>비밀값은 화면에 표시하지 않습니다.</span></div>
+          <div className="section-heading"><h2>전달 채널</h2><span>필요한 전달 방식만 켜 두세요.</span></div>
           <div className="channel-grid">
             {channels.data.map((channel) => <ChannelCard channel={channel} key={channel.id} />)}
           </div>
@@ -69,25 +75,18 @@ export function NotificationsPage() {
       )}
 
       <section className="notification-section">
-        <div className="section-heading"><h2>발송 이력</h2><span>외부 메시지 식별자로 문제를 추적할 수 있습니다.</span></div>
+        <div className="section-heading"><h2>발송 이력</h2><span>언제 누구에게 어떤 보고서를 보냈는지 확인합니다.</span></div>
         <div className="delivery-filter-bar">
-          <label>보고서 ID
-            <input type="number" min="1" value={logFilters.reportId ?? ''}
-              onChange={(event) => changeLogFilter('reportId', event.target.value)} />
+          <label>보고서
+            <select value={logFilters.reportId ?? ''}
+              onChange={(event) => changeLogFilter('reportId', event.target.value)}>
+              <option value="">전체 보고서</option>
+              {(reports.data?.content ?? []).map((report) => (
+                <option value={report.id} key={report.id}>{report.title}</option>
+              ))}
+            </select>
           </label>
-          <label>실행 ID
-            <input type="number" min="1" value={logFilters.runId ?? ''}
-              onChange={(event) => changeLogFilter('runId', event.target.value)} />
-          </label>
-          <label>발송 배치 ID
-            <input value={logFilters.deliveryBatchId ?? ''}
-              onChange={(event) => changeLogFilter('deliveryBatchId', event.target.value)} />
-          </label>
-          <label>수신자 ID
-            <input type="number" min="1" value={logFilters.recipientId ?? ''}
-              onChange={(event) => changeLogFilter('recipientId', event.target.value)} />
-          </label>
-          <label>채널
+          <label>전달 방식
             <select value={logFilters.channelType ?? ''}
               onChange={(event) => changeLogFilter('channelType', event.target.value as NotificationChannelType | '')}>
               <option value="">전체</option><option value="EMAIL">메일</option><option value="TELEGRAM">텔레그램</option>
@@ -99,20 +98,15 @@ export function NotificationsPage() {
               <option value="">전체</option><option value="SENT">성공</option><option value="FAILED">실패</option><option value="SKIPPED">건너뜀</option>
             </select>
           </label>
-          <label>시작 시각
-            <input type="datetime-local" value={logFilters.from ?? ''}
-              onChange={(event) => changeLogFilter('from', event.target.value)} />
-          </label>
-          <label>종료 시각
-            <input type="datetime-local" value={logFilters.to ?? ''}
-              onChange={(event) => changeLogFilter('to', event.target.value)} />
-          </label>
+          {(logFilters.reportId || logFilters.channelType || logFilters.status) && (
+            <button type="button" className="text-button" onClick={() => setLogFilters({ page: 0 })}>필터 초기화</button>
+          )}
         </div>
         {logs.isPending && <div className="state-panel" aria-busy="true">발송 이력을 불러오는 중입니다.</div>}
         {logs.isError && <div className="state-panel error" role="alert">{logs.error.message}</div>}
         {logs.data && (
           <>
-            <DeliveryLogTable logs={logs.data} />
+            <DeliveryLogTable logs={logs.data} reportTitles={reportTitles} />
             <div className="pagination" aria-label="발송 이력 페이지 이동">
               <button type="button" className="secondary-button"
                 disabled={(logFilters.page ?? 0) === 0 || logs.isFetching}
@@ -135,22 +129,20 @@ export function NotificationsPage() {
 
 function ChannelCard({ channel }: { channel: NonNullable<ReturnType<typeof useNotificationChannels>['data']>[number] }) {
   const update = useUpdateNotificationChannel()
+  const isEmail = channel.channelType === 'EMAIL'
   return (
-    <article className="channel-card">
+    <article className="channel-card" data-active={channel.active}>
       <div className="channel-card-title">
-        <span className={`channel-mark ${channel.channelType.toLowerCase()}`}>{channel.channelType === 'EMAIL' ? '✉' : '↗'}</span>
-        <div><strong>{channel.name}</strong><span>{channel.channelType === 'EMAIL' ? 'run 단위 HTML 보고서' : '짧은 이벤트 속보'}</span></div>
+        <span className={`channel-mark ${channel.channelType.toLowerCase()}`}>{isEmail ? '✉' : '↗'}</span>
+        <div><strong>{channel.name}</strong><span>{isEmail ? '완성된 분석 보고서를 메일로 전달합니다.' : '중요한 변화를 짧게 바로 알립니다.'}</span></div>
+        <span className="channel-state">{channel.active ? '사용 중' : '꺼짐'}</span>
       </div>
-      <dl>
-        <div><dt>연결 설정</dt><dd>{channel.tokenConfigured ? '준비됨' : '환경변수 필요'}</dd></div>
-        <div><dt>메시지 길이</dt><dd>{channel.maxLength.toLocaleString()}자</dd></div>
-      </dl>
       <button
         type="button"
         className={channel.active ? 'secondary-button' : 'primary-button'}
         disabled={update.isPending}
         onClick={() => update.mutate({ channelId: channel.id, body: { active: !channel.active } })}
-      >{channel.active ? '채널 끄기' : '채널 켜기'}</button>
+      >{channel.active ? '사용 중지' : '사용하기'}</button>
       <MutationStatus error={update.error} success={update.isSuccess ? '채널 상태를 바꿨습니다.' : null} />
     </article>
   )
@@ -181,10 +173,13 @@ function RecipientPanel({ channels, recipients }: {
     <section className="notification-card-stack">
       <div className="section-heading"><h2>수신자</h2><span>{recipients.length}명</span></div>
       <form className="notification-form" onSubmit={submit}>
-        <label>이름<input required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label>메일 주소<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="user@example.com" /></label>
-        <label>텔레그램 chat_id<input value={telegram} onChange={(event) => setTelegram(event.target.value)} placeholder="123456789" /></label>
-        <button className="primary-button" disabled={create.isPending || !name.trim()}>{create.isPending ? '등록 중…' : '수신자 등록'}</button>
+        <div className="notification-form-heading"><strong>새 수신자 등록</strong><span>메일이나 텔레그램 중 하나 이상 입력해 주세요.</span></div>
+        <div className="notification-form-grid">
+          <label className="form-field-wide">이름<input required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} placeholder="예: 홍길동" /></label>
+          <label>메일 주소<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="user@example.com" /></label>
+          <label>텔레그램 Chat ID<input value={telegram} onChange={(event) => setTelegram(event.target.value)} placeholder="예: 123456789" /></label>
+        </div>
+        <button className="primary-button" disabled={create.isPending || !name.trim() || (!email.trim() && !telegram.trim())}>{create.isPending ? '등록 중…' : '수신자 등록'}</button>
         <MutationStatus error={create.error} success={create.isSuccess ? '수신자를 등록했습니다.' : null} />
       </form>
       <div className="compact-list">
@@ -229,18 +224,21 @@ function GroupPanel({ recipients, groups }: {
     <section className="notification-card-stack">
       <div className="section-heading"><h2>수신 그룹</h2><span>{groups.length}개</span></div>
       <form className="notification-form" onSubmit={submit}>
-        <label>그룹명<input required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label>관점<select value={perspective} onChange={(event) => setPerspective(event.target.value as GroupPerspective)}>
-          {PERSPECTIVES.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}
-        </select></label>
-        <fieldset className="member-picker"><legend>멤버</legend>
+        <div className="notification-form-heading"><strong>새 그룹 등록</strong><span>같은 보고서를 받을 사람을 묶습니다.</span></div>
+        <div className="notification-form-grid">
+          <label>그룹명<input required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} placeholder="예: 경영진 브리핑" /></label>
+          <label>보고서 관점<select value={perspective} onChange={(event) => setPerspective(event.target.value as GroupPerspective)}>
+            {PERSPECTIVES.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}
+          </select></label>
+        </div>
+        <fieldset className="member-picker"><legend>수신자 선택</legend>
           {recipients.map((recipient) => <label key={recipient.id}>
             <input type="checkbox" checked={selected.includes(recipient.id)} onChange={() => setSelected((current) => current.includes(recipient.id) ? current.filter((id) => id !== recipient.id) : [...current, recipient.id])} />
             {recipient.name}
           </label>)}
           {recipients.length === 0 && <span className="muted">먼저 수신자를 등록해 주세요.</span>}
         </fieldset>
-        <button className="primary-button" disabled={create.isPending || !name.trim()}>{create.isPending ? '등록 중…' : '그룹 등록'}</button>
+        <button className="primary-button" disabled={create.isPending || !name.trim() || selected.length === 0}>{create.isPending ? '등록 중…' : '그룹 등록'}</button>
         <MutationStatus error={create.error} success={create.isSuccess ? '수신 그룹을 등록했습니다.' : null} />
       </form>
       <div className="compact-list group-list">
@@ -255,7 +253,13 @@ function GroupPanel({ recipients, groups }: {
   )
 }
 
-function DeliveryLogTable({ logs }: { logs: NonNullable<ReturnType<typeof useDeliveryLogs>['data']> }) {
+function DeliveryLogTable({
+  logs,
+  reportTitles,
+}: {
+  logs: NonNullable<ReturnType<typeof useDeliveryLogs>['data']>
+  reportTitles: Map<number, string>
+}) {
   return (
     <div className="delivery-log-shell">
       <div className="delivery-summary">
@@ -265,12 +269,17 @@ function DeliveryLogTable({ logs }: { logs: NonNullable<ReturnType<typeof useDel
       </div>
       {logs.content.length === 0 ? <div className="state-panel">조건에 맞는 발송 이력이 없습니다.</div> : (
         <div className="table-scroll"><table className="delivery-table"><thead><tr>
-          <th>발송 시각</th><th>수신자</th><th>채널</th><th>상태</th><th>외부 식별자</th>
+          <th>보낸 시각</th><th>보고서</th><th>수신자</th><th>전달 방식</th><th>결과</th>
         </tr></thead><tbody>{logs.content.map((log) => <tr key={log.id}>
-          <td>{formatFullDate(log.sentAt)}</td><td>{log.recipientName}</td>
+          <td className="delivery-time">{formatFullDate(log.sentAt)}</td>
+          <td className="delivery-report" title={reportTitles.get(log.reportId)}>
+            {reportTitles.get(log.reportId) ?? `보고서 #${log.reportId}`}
+          </td>
+          <td>{log.recipientName}</td>
           <td>{log.channelType === 'EMAIL' ? '메일' : '텔레그램'}</td>
-          <td><span className={`delivery-status ${log.status.toLowerCase()}`}>{statusLabel(log.status)}</span></td>
-          <td className="external-id">{log.externalMessageId ?? log.errorMessage ?? '-'}</td>
+          <td><div className="delivery-result"><span className={`delivery-status ${log.status.toLowerCase()}`}>{statusLabel(log.status)}</span>
+            {log.errorMessage && <span>{log.errorMessage}</span>}
+          </div></td>
         </tr>)}</tbody></table></div>
       )}
     </div>

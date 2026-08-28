@@ -68,7 +68,7 @@ export function SettingsPage() {
           <CollapsibleSection
             id="topic"
             title="수집 주제 등록"
-            description="무엇을 모을지 정하고, 등록된 소스 중에서 골라 연결합니다."
+            description="무엇을 모을지 정하면 활성 수집 소스가 자동으로 연결됩니다."
             open={open.topic}
             onToggle={() => toggle('topic')}
           >

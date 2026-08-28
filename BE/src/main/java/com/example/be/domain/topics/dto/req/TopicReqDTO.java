@@ -34,7 +34,7 @@ public class TopicReqDTO {
         @Schema(description = "NOT 필터. 하나라도 포함되면 제외", example = "[\"광고\", \"채용\"]")
         private List<String> excludedKeywords;
 
-        @Schema(description = "1회 수집 건수. SEARCH 소스 한 곳당 요청 건수이며 기본값은 100", example = "100")
+        @Schema(description = "1회 수집 건수. 1 이상 300 이하이며 SEARCH 소스 한 곳당 요청 건수. 기본값은 100", example = "100")
         private Integer batchSize;
 
         @Schema(description = "자동 수집 주기(분). 기본값 60", example = "60")

@@ -128,7 +128,10 @@ public class NaverSearchConnector implements SearchConnector {
     }
 
     private List<NewsResponse.Item> itemsOf(NewsResponse response) {
-        return response == null || response.items() == null ? List.of() : response.items();
+        if (response == null || response.items() == null) {
+            throw new RestClientException("NAVER 응답에 items가 없습니다.");
+        }
+        return response.items();
     }
 
     private List<CollectedArticle> toArticles(List<NewsResponse.Item> items) {
