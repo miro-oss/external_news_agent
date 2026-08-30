@@ -13,8 +13,10 @@ from app.core.evidence import assess_with_decisive_rules
 from app.eval.checkpoint import LiveCheckpointStore
 from app.eval.dataset import (
     GoldenCase,
+    GoldenClaimDataset,
     GoldenDataset,
     GoldenReportFixture,
+    load_claim_dataset,
     load_report_fixture,
 )
 from app.eval.live_provider import (
@@ -23,7 +25,13 @@ from app.eval.live_provider import (
     PacedRetryProvider,
     default_live_policy,
 )
-from app.eval.scorer import MetricCounts, korean_summary_pass, score_report_claims
+from app.eval.scorer import (
+    ClaimControlCounts,
+    MetricCounts,
+    korean_summary_pass,
+    score_claim_controls,
+    score_report_claims,
+)
 from app.llm.analyze_service import PROMPT_VERSION as ANALYZE_PROMPT_VERSION
 from app.llm.analyze_service import ArticleAnalyzeService
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
@@ -35,6 +43,7 @@ from app.schemas.evidence import EvidenceSentence
 from app.schemas.report import ReportRequest, ReportResponse
 
 EvalProfile = Literal["replay", "live"]
+_DEFAULT_CLAIM_DATASET = Path(__file__).resolve().parent / "golden" / "claims.ko.v1.json"
 _DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.3.json"
 
 
@@ -81,6 +90,7 @@ class EvalConfig:
 class EvalResult:
     dataset_version: str
     baseline_prompt_version: str
+    claim_labels_version: str
     analyze_prompt_version: str
     report_prompt_version: str
     profile: EvalProfile
@@ -88,12 +98,14 @@ class EvalResult:
     config: EvalConfig
     complete: bool
     metrics: dict[str, int | float]
+    claim_control_diagnostics: dict[str, list[str]]
     errors: tuple[EvalError, ...]
 
     def to_dict(self) -> dict[str, object]:
         return {
             "datasetVersion": self.dataset_version,
             "baselinePromptVersion": self.baseline_prompt_version,
+            "claimLabelsVersion": self.claim_labels_version,
             "analyzePromptVersion": self.analyze_prompt_version,
             "reportPromptVersion": self.report_prompt_version,
             "profile": self.profile,
@@ -101,6 +113,7 @@ class EvalResult:
             "config": self.config.to_dict(),
             "complete": self.complete,
             "metrics": self.metrics,
+            "claimControlDiagnostics": self.claim_control_diagnostics,
             "errors": [error.to_dict() for error in self.errors],
         }
 
@@ -131,6 +144,7 @@ def run_evaluation(
     profile: EvalProfile = "replay",
     plan: Plan = "FREE",
     settings: Settings | None = None,
+    claim_dataset: GoldenClaimDataset | None = None,
     report_fixture: GoldenReportFixture | None = None,
     live_policy: LiveProviderPolicy | None = None,
     checkpoint_path: Path | None = None,
@@ -146,6 +160,7 @@ def run_evaluation(
     selected_live_policy = (
         live_policy or default_live_policy(plan) if profile == "live" else None
     )
+    selected_claim_dataset = claim_dataset or load_claim_dataset(_DEFAULT_CLAIM_DATASET)
     config = _eval_config(source_settings, profile, plan, selected_live_policy)
     fixture = _replay_fixture(dataset, profile, report_fixture)
     checkpoint = (
@@ -269,6 +284,12 @@ def run_evaluation(
             grounded_overlap=execution_settings.evidence_grounded_overlap,
         )
     )
+    claim_control_counts = ClaimControlCounts.from_scores(
+        score_claim_controls(
+            selected_claim_dataset.controls,
+            grounded_overlap=execution_settings.evidence_grounded_overlap,
+        )
+    )
     claim_statuses = []
     if report_response is not None:
         claim_statuses = score_report_claims(
@@ -323,10 +344,12 @@ def run_evaluation(
         ),
         evidence_verification_count=evidence_verification_count,
         evidence_rule_decision_count=evidence_rule_decision_count,
+        claim_control_counts=claim_control_counts,
     )
     return EvalResult(
         dataset_version=dataset.version,
         baseline_prompt_version=dataset.baseline_prompt_version,
+        claim_labels_version=selected_claim_dataset.version,
         analyze_prompt_version=ANALYZE_PROMPT_VERSION,
         report_prompt_version=REPORT_PROMPT_VERSION,
         profile=profile,
@@ -337,6 +360,7 @@ def run_evaluation(
             and (profile == "replay" or schema_passes == len(dataset.cases) + 1)
         ),
         metrics=counts.to_dict(),
+        claim_control_diagnostics=claim_control_counts.to_diagnostics(),
         errors=tuple(errors),
     )
 

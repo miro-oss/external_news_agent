@@ -10,23 +10,29 @@ from app.eval import runner as eval_runner
 from app.eval.__main__ import main
 from app.eval.checkpoint import CheckpointError
 from app.eval.dataset import (
+    GoldenClaimDataset,
     GoldenDataset,
     GoldenReportFixture,
+    load_claim_dataset,
     load_dataset,
     load_report_fixture,
 )
 from app.eval.live_provider import LiveProviderPolicy
 from app.eval.runner import ReplayProvider, run_evaluation
 from app.eval.scorer import (
+    ClaimControlCounts,
+    ClaimControlScore,
     ComparisonError,
     compare_metrics,
     compare_results,
     korean_summary_pass,
+    score_claim_controls,
 )
 from app.llm.base import ProviderResponse, ProviderUsage
 
 _GOLDEN_DIR = Path(__file__).resolve().parents[1] / "app" / "eval" / "golden"
 _DATASET_PATH = _GOLDEN_DIR / "semiconductor.v1.json"
+_CLAIM_DATASET_PATH = _GOLDEN_DIR / "claims.ko.v1.json"
 _REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.3.json"
 _BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v3.baseline.json"
 
@@ -43,10 +49,14 @@ def eval_settings() -> Settings:
     )
 
 
-def replay_result(dataset: GoldenDataset | None = None):
+def replay_result(
+    dataset: GoldenDataset | None = None,
+    claim_dataset: GoldenClaimDataset | None = None,
+):
     return run_evaluation(
         dataset or load_dataset(_DATASET_PATH),
         settings=eval_settings(),
+        claim_dataset=claim_dataset or load_claim_dataset(_CLAIM_DATASET_PATH),
         report_fixture=load_report_fixture(_REPORT_FIXTURE_PATH),
     )
 
@@ -75,6 +85,7 @@ def test_replay_golden_eval_keeps_quality_and_validates_perspective_fixture() ->
     assert result.metrics["summaryLengthP95"] == 45
     assert result.metrics["summaryLengthMax"] == 68
     assert result.metrics["highSensitivityEvidenceRate"] == 1.0
+    assert result.claim_control_diagnostics == baseline["claimControlDiagnostics"]
     assert compare_results(result.to_dict(), baseline)["regressions"] == []
 
 
@@ -100,6 +111,133 @@ def test_adversarial_cases_have_expected_failure_labels() -> None:
     assert result.metrics["evidenceProviderCallReductionRate"] == 0.52381
     assert result.metrics["perspectiveTagAccuracy"] == 1.0
     assert result.errors == ()
+
+
+def test_claim_controls_exercise_decisive_rules_and_provider_routes() -> None:
+    dataset = load_claim_dataset(_CLAIM_DATASET_PATH)
+    scores = score_claim_controls(dataset.controls, grounded_overlap=0.6)
+    invalid_statuses = {
+        score.claim_id: score.status
+        for score in scores
+        if score.validity == "invalid"
+    }
+    positive_statuses = [
+        score.status for score in scores if score.validity == "valid"
+    ]
+
+    assert invalid_statuses == {
+        "number-percent-invalid": "ungrounded",
+        "number-year-invalid": "ungrounded",
+        "number-quarter-growth-invalid": "ungrounded",
+        "polarity-micron-supply-invalid": "ungrounded",
+        "polarity-samsung-fab-invalid": "ungrounded",
+        "polarity-intel-service-invalid": "ungrounded",
+        "company-hbm4-pilot-invalid": "ungrounded",
+        "company-euv-shipment-invalid": "ungrounded",
+        "company-two-nanometer-invalid": "ungrounded",
+        "modality-investment-decision-invalid": "provider-required",
+        "modality-expansion-start-invalid": "grounded",
+        "modality-center-completion-invalid": "grounded",
+        "unsupported-customer-cause-invalid": "provider-required",
+        "unsupported-yield-purpose-invalid": "provider-required",
+        "unsupported-order-cause-invalid": "provider-required",
+    }
+    assert set(positive_statuses) == {"grounded", "provider-required"}
+    assert "ungrounded" not in positive_statuses
+
+    multi_sentence_types = {
+        control.failure_type for control in dataset.controls if len(control.evidence) > 1
+    }
+    assert multi_sentence_types == {
+        "number-mismatch",
+        "polarity-inversion",
+        "company-substitution",
+        "modality-overreach",
+        "unsupported-claim",
+    }
+    for control in dataset.controls:
+        valid = next(label for label in control.labels if label.validity == "valid")
+        assert valid.claim not in {sentence.text for sentence in control.evidence}
+
+
+def test_claim_control_metrics_record_false_pass_baseline_without_false_rejects() -> None:
+    result = replay_result()
+
+    assert result.metrics["invalidClaimCount"] == 15
+    assert result.metrics["falsePassCount"] == 2
+    assert result.metrics["falsePassRate"] == 0.133333
+    assert result.metrics["positiveControlCount"] == 15
+    assert result.metrics["falseRejectCount"] == 0
+    assert result.metrics["claimControlProviderRequiredCount"] == 10
+    assert result.claim_control_diagnostics["falsePassClaimIds"] == [
+        "modality-expansion-start-invalid",
+        "modality-center-completion-invalid",
+    ]
+    assert result.claim_control_diagnostics["falseRejectClaimIds"] == []
+
+
+def test_claim_control_counts_reject_empty_denominators() -> None:
+    with pytest.raises(ValueError, match="invalid/valid 분모"):
+        ClaimControlCounts.from_scores([])
+
+
+def test_claim_control_counts_treat_weak_invalid_as_false_pass() -> None:
+    counts = ClaimControlCounts.from_scores(
+        [
+            ClaimControlScore(
+                claim_id="invalid-weak",
+                validity="invalid",
+                status="weak",
+            ),
+            ClaimControlScore(
+                claim_id="valid-provider",
+                validity="valid",
+                status="provider-required",
+            ),
+        ]
+    )
+
+    assert counts.to_dict()["falsePassCount"] == 1
+    assert counts.to_dict()["falseRejectCount"] == 0
+
+
+def test_claim_control_schema_requires_invalid_and_valid_pair() -> None:
+    payload = json.loads(
+        load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True)
+    )
+    payload["controls"][0]["labels"][1]["validity"] = "invalid"
+
+    with pytest.raises(ValueError, match="invalid/valid"):
+        GoldenClaimDataset.model_validate(payload)
+
+
+def test_claim_control_schema_requires_three_pairs_per_failure_type() -> None:
+    payload = json.loads(
+        load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True)
+    )
+    payload["controls"][0]["failureType"] = "unsupported-claim"
+
+    with pytest.raises(ValueError, match="유형별 3쌍"):
+        GoldenClaimDataset.model_validate(payload)
+
+
+def test_claim_control_schema_rejects_duplicate_claim_text() -> None:
+    payload = json.loads(
+        load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True)
+    )
+    payload["controls"][1]["labels"][1]["claim"] = payload["controls"][0][
+        "labels"
+    ][1]["claim"]
+
+    with pytest.raises(ValueError, match="claim 문장"):
+        GoldenClaimDataset.model_validate(payload)
+
+
+def test_claim_controls_are_separate_from_checkpointed_article_dataset() -> None:
+    article_payload = load_dataset(_DATASET_PATH).model_dump(by_alias=True)
+
+    assert "claimLabelsVersion" not in article_payload
+    assert "claimControls" not in article_payload
 
 
 def test_expected_failure_detects_rule_that_becomes_too_permissive() -> None:
@@ -254,6 +392,11 @@ def test_result_comparison_rejects_incompatible_metadata() -> None:
 
     with pytest.raises(ComparisonError, match="datasetVersion"):
         compare_results(baseline, incompatible)
+
+    changed_claim_labels = deepcopy(baseline)
+    changed_claim_labels["claimLabelsVersion"] = "claims.ko.v2"
+    with pytest.raises(ComparisonError, match="claimLabelsVersion"):
+        compare_results(changed_claim_labels, baseline)
 
     changed_config = deepcopy(baseline)
     changed_config["config"]["maxSentences"] = 50

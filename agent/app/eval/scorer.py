@@ -1,7 +1,10 @@
 import re
 from dataclasses import dataclass
+from typing import Literal, cast
 
+from app.core.evidence import assess_with_decisive_rules
 from app.core.report_grounding import assess_finding_claim
+from app.eval.dataset import ClaimValidity, GoldenClaimControl
 from app.schemas.analyze import Groundedness
 from app.schemas.report import ReportFindingInput, ReportRequest, ReportResponse
 
@@ -26,16 +29,22 @@ _HIGHER_IS_BETTER = (
     "reportGroundedClaimCount",
     "evidenceRuleDecisionCount",
     "evidenceProviderCallReductionRate",
+    "invalidClaimCount",
+    "positiveControlCount",
 )
 _LOWER_IS_BETTER = (
     "summaryLengthP95",
     "reportWeakClaimCount",
     "unsupportedReportClaimCount",
     "evidenceProviderCallCount",
+    "claimControlProviderRequiredCount",
+    "falsePassRate",
+    "falseRejectCount",
 )
 _METADATA_KEYS = (
     "datasetVersion",
     "baselinePromptVersion",
+    "claimLabelsVersion",
     "profile",
     "plan",
 )
@@ -50,6 +59,68 @@ class ComparisonError(ValueError):
 class ReportClaimScore:
     key: str
     status: Groundedness
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimControlScore:
+    claim_id: str
+    validity: ClaimValidity
+    status: Groundedness | Literal["provider-required"]
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimControlCounts:
+    invalid_claim_count: int
+    positive_control_count: int
+    false_pass_claim_ids: tuple[str, ...]
+    false_reject_claim_ids: tuple[str, ...]
+    provider_required_claim_ids: tuple[str, ...]
+
+    @classmethod
+    def from_scores(cls, scores: list[ClaimControlScore]) -> "ClaimControlCounts":
+        invalid = [score for score in scores if score.validity == "invalid"]
+        positive = [score for score in scores if score.validity == "valid"]
+        if not invalid or not positive:
+            raise ValueError("Claim control 지표에는 invalid/valid 분모가 모두 필요합니다.")
+        return cls(
+            invalid_claim_count=len(invalid),
+            positive_control_count=len(positive),
+            false_pass_claim_ids=tuple(
+                score.claim_id
+                for score in invalid
+                if score.status in {"grounded", "weak"}
+            ),
+            false_reject_claim_ids=tuple(
+                score.claim_id
+                for score in positive
+                if score.status == "ungrounded"
+            ),
+            provider_required_claim_ids=tuple(
+                score.claim_id
+                for score in scores
+                if score.status == "provider-required"
+            ),
+        )
+
+    def to_dict(self) -> dict[str, int | float]:
+        false_pass_count = len(self.false_pass_claim_ids)
+        return {
+            "invalidClaimCount": self.invalid_claim_count,
+            "falsePassCount": false_pass_count,
+            "falsePassRate": _rate(false_pass_count, self.invalid_claim_count),
+            "positiveControlCount": self.positive_control_count,
+            "falseRejectCount": len(self.false_reject_claim_ids),
+            "claimControlProviderRequiredCount": len(
+                self.provider_required_claim_ids
+            ),
+        }
+
+    def to_diagnostics(self) -> dict[str, list[str]]:
+        return {
+            "falsePassClaimIds": list(self.false_pass_claim_ids),
+            "falseRejectClaimIds": list(self.false_reject_claim_ids),
+            "providerRequiredClaimIds": list(self.provider_required_claim_ids),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,9 +144,10 @@ class MetricCounts:
     unsupported_report_claim_count: int
     evidence_verification_count: int
     evidence_rule_decision_count: int
+    claim_control_counts: ClaimControlCounts
 
     def to_dict(self) -> dict[str, int | float]:
-        return {
+        payload: dict[str, int | float] = {
             "caseCount": self.case_count,
             "schemaChecks": self.schema_checks,
             "schemaPasses": self.schema_passes,
@@ -114,12 +186,42 @@ class MetricCounts:
                 self.evidence_verification_count,
             ),
         }
+        payload.update(self.claim_control_counts.to_dict())
+        return payload
 
 
 def korean_summary_pass(summary: str) -> bool:
     hangul_count = len(_HANGUL.findall(summary))
     linguistic_count = hangul_count + len(_LATIN.findall(summary))
     return hangul_count >= 5 and hangul_count / linguistic_count >= 0.5
+
+
+def score_claim_controls(
+    controls: list[GoldenClaimControl],
+    *,
+    grounded_overlap: float,
+) -> list[ClaimControlScore]:
+    scores = []
+    for control in controls:
+        for label in control.labels:
+            assessment = assess_with_decisive_rules(
+                label.claim,
+                control.evidence,
+                grounded_overlap=grounded_overlap,
+            )
+            status = (
+                cast(Groundedness, assessment.status)
+                if assessment is not None
+                else "provider-required"
+            )
+            scores.append(
+                ClaimControlScore(
+                    claim_id=label.claim_id,
+                    validity=label.validity,
+                    status=status,
+                )
+            )
+    return scores
 
 
 def score_report_claims(

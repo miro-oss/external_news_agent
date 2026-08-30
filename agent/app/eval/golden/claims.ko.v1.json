@@ -1,0 +1,355 @@
+{
+  "version": "claims.ko.v1",
+  "controls": [
+    {
+      "controlId": "number-percent",
+      "failureType": "number-mismatch",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "삼성전자는 HBM4 생산능력을 20% 확대했다."
+        },
+        {
+          "id": 2,
+          "text": "확대 물량은 고객 인증에 쓰인다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "number-percent-invalid",
+          "validity": "invalid",
+          "claim": "삼성전자는 HBM4 생산능력을 30% 확대했다."
+        },
+        {
+          "claimId": "number-percent-valid",
+          "validity": "valid",
+          "claim": "삼성전자는 HBM4 생산능력을 20% 늘렸다."
+        }
+      ]
+    },
+    {
+      "controlId": "number-year",
+      "failureType": "number-mismatch",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "SK하이닉스는 2027년 HBM 생산라인을 가동한다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "number-year-invalid",
+          "validity": "invalid",
+          "claim": "SK하이닉스는 2028년 HBM 생산라인을 가동한다."
+        },
+        {
+          "claimId": "number-year-valid",
+          "validity": "valid",
+          "claim": "SK하이닉스의 HBM 생산라인은 2027년에 가동된다."
+        }
+      ]
+    },
+    {
+      "controlId": "number-quarter-growth",
+      "failureType": "number-mismatch",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "TSMC는 2분기 매출이 15% 증가했다고 밝혔다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "number-quarter-growth-invalid",
+          "validity": "invalid",
+          "claim": "TSMC는 2분기 매출이 25% 증가했다고 밝혔다."
+        },
+        {
+          "claimId": "number-quarter-growth-valid",
+          "validity": "valid",
+          "claim": "TSMC는 2분기 매출이 15% 늘었다고 밝혔다."
+        }
+      ]
+    },
+    {
+      "controlId": "polarity-micron-supply",
+      "failureType": "polarity-inversion",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "마이크론은 HBM 샘플 공급을 계속한다."
+        },
+        {
+          "id": 2,
+          "text": "회사는 공급 일정을 재확인했다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "polarity-micron-supply-invalid",
+          "validity": "invalid",
+          "claim": "마이크론은 HBM 샘플 공급을 계속하지 않는다."
+        },
+        {
+          "claimId": "polarity-micron-supply-valid",
+          "validity": "valid",
+          "claim": "마이크론의 HBM 샘플 공급은 계속된다."
+        }
+      ]
+    },
+    {
+      "controlId": "polarity-samsung-fab",
+      "failureType": "polarity-inversion",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "삼성전자는 신규 팹 건설을 추진했다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "polarity-samsung-fab-invalid",
+          "validity": "invalid",
+          "claim": "삼성전자는 신규 팹 건설을 추진하지 않았다."
+        },
+        {
+          "claimId": "polarity-samsung-fab-valid",
+          "validity": "valid",
+          "claim": "삼성전자는 신규 팹 건설 추진을 이어갔다."
+        }
+      ]
+    },
+    {
+      "controlId": "polarity-intel-service",
+      "failureType": "polarity-inversion",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "인텔은 파운드리 설계 지원 서비스를 제공한다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "polarity-intel-service-invalid",
+          "validity": "invalid",
+          "claim": "인텔은 파운드리 설계 지원 서비스를 제공하지 않는다."
+        },
+        {
+          "claimId": "polarity-intel-service-valid",
+          "validity": "valid",
+          "claim": "인텔은 파운드리 설계 지원 서비스를 계속 제공한다."
+        }
+      ]
+    },
+    {
+      "controlId": "company-hbm4-pilot",
+      "failureType": "company-substitution",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "삼성전자는 HBM4 파일럿 생산을 확대했다."
+        },
+        {
+          "id": 2,
+          "text": "신규 물량은 고객 인증에 활용된다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "company-hbm4-pilot-invalid",
+          "validity": "invalid",
+          "claim": "SK하이닉스는 HBM4 파일럿 생산을 확대했다."
+        },
+        {
+          "claimId": "company-hbm4-pilot-valid",
+          "validity": "valid",
+          "claim": "삼성전자는 HBM4 시범 생산 규모를 확대했다."
+        }
+      ]
+    },
+    {
+      "controlId": "company-euv-shipment",
+      "failureType": "company-substitution",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "ASML은 High-NA EUV 장비를 출하했다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "company-euv-shipment-invalid",
+          "validity": "invalid",
+          "claim": "도쿄일렉트론은 High-NA EUV 장비를 출하했다."
+        },
+        {
+          "claimId": "company-euv-shipment-valid",
+          "validity": "valid",
+          "claim": "ASML은 High-NA EUV 장비 출하를 마쳤다."
+        }
+      ]
+    },
+    {
+      "controlId": "company-two-nanometer",
+      "failureType": "company-substitution",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "TSMC는 2나노 시험 생산을 시작했다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "company-two-nanometer-invalid",
+          "validity": "invalid",
+          "claim": "인텔은 2나노 시험 생산을 시작했다."
+        },
+        {
+          "claimId": "company-two-nanometer-valid",
+          "validity": "valid",
+          "claim": "TSMC가 2나노 시험 생산에 들어갔다."
+        }
+      ]
+    },
+    {
+      "controlId": "modality-investment-decision",
+      "failureType": "modality-overreach",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "삼성전자는 평택 투자를 검토 중이다."
+        },
+        {
+          "id": 2,
+          "text": "구체적인 일정은 공개되지 않았다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "modality-investment-decision-invalid",
+          "validity": "invalid",
+          "claim": "삼성전자는 평택 투자를 결정했다."
+        },
+        {
+          "claimId": "modality-investment-decision-valid",
+          "validity": "valid",
+          "claim": "삼성전자는 평택 투자안을 검토하고 있다."
+        }
+      ]
+    },
+    {
+      "controlId": "modality-expansion-start",
+      "failureType": "modality-overreach",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "SK하이닉스는 청주 공장 증설을 논의하고 있다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "modality-expansion-start-invalid",
+          "validity": "invalid",
+          "claim": "SK하이닉스는 청주 공장 증설에 착수했다."
+        },
+        {
+          "claimId": "modality-expansion-start-valid",
+          "validity": "valid",
+          "claim": "SK하이닉스는 청주 공장 증설안을 논의 중이다."
+        }
+      ]
+    },
+    {
+      "controlId": "modality-center-completion",
+      "failureType": "modality-overreach",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "TSMC는 일본 패키징 센터 설립을 추진할 계획이다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "modality-center-completion-invalid",
+          "validity": "invalid",
+          "claim": "TSMC는 일본 패키징 센터 설립을 완료했다."
+        },
+        {
+          "claimId": "modality-center-completion-valid",
+          "validity": "valid",
+          "claim": "TSMC는 일본 패키징 센터를 세울 계획이다."
+        }
+      ]
+    },
+    {
+      "controlId": "unsupported-customer-cause",
+      "failureType": "unsupported-claim",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "삼성전자는 HBM4 생산 일정을 발표했다."
+        },
+        {
+          "id": 2,
+          "text": "발표 자료에는 양산 목표가 포함됐다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "unsupported-customer-cause-invalid",
+          "validity": "invalid",
+          "claim": "삼성전자는 고객 요청 때문에 HBM4 생산 일정을 발표했다."
+        },
+        {
+          "claimId": "unsupported-customer-cause-valid",
+          "validity": "valid",
+          "claim": "삼성전자가 HBM4 생산 일정을 공개했다."
+        }
+      ]
+    },
+    {
+      "controlId": "unsupported-yield-purpose",
+      "failureType": "unsupported-claim",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "ASML은 차세대 노광 시스템 테스트를 마쳤다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "unsupported-yield-purpose-invalid",
+          "validity": "invalid",
+          "claim": "ASML은 수율 개선을 위해 차세대 노광 시스템 테스트를 마쳤다."
+        },
+        {
+          "claimId": "unsupported-yield-purpose-valid",
+          "validity": "valid",
+          "claim": "ASML이 차세대 노광 시스템 시험을 완료했다."
+        }
+      ]
+    },
+    {
+      "controlId": "unsupported-order-cause",
+      "failureType": "unsupported-claim",
+      "evidence": [
+        {
+          "id": 1,
+          "text": "TSMC는 2나노 고객 인증 절차를 시작했다."
+        }
+      ],
+      "labels": [
+        {
+          "claimId": "unsupported-order-cause-invalid",
+          "validity": "invalid",
+          "claim": "TSMC는 고객 주문에 대응해 2나노 고객 인증 절차를 시작했다."
+        },
+        {
+          "claimId": "unsupported-order-cause-valid",
+          "validity": "valid",
+          "claim": "TSMC가 2나노 고객 인증을 개시했다."
+        }
+      ]
+    }
+  ]
+}
