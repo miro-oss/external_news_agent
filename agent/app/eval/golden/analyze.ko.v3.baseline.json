@@ -44,10 +44,30 @@
     "evidenceProviderCallCount": 10,
     "evidenceProviderCallReductionRate": 0.52381,
     "invalidClaimCount": 15,
-    "falsePassCount": 6,
-    "falsePassRate": 0.4,
+    "falsePassCount": 2,
+    "falsePassRate": 0.133333,
     "positiveControlCount": 15,
-    "falseRejectCount": 0
+    "falseRejectCount": 0,
+    "claimControlProviderRequiredCount": 10
+  },
+  "claimControlDiagnostics": {
+    "falsePassClaimIds": [
+      "modality-expansion-start-invalid",
+      "modality-center-completion-invalid"
+    ],
+    "falseRejectClaimIds": [],
+    "providerRequiredClaimIds": [
+      "polarity-samsung-fab-valid",
+      "company-hbm4-pilot-valid",
+      "company-euv-shipment-valid",
+      "modality-investment-decision-invalid",
+      "modality-investment-decision-valid",
+      "modality-expansion-start-valid",
+      "unsupported-customer-cause-invalid",
+      "unsupported-yield-purpose-invalid",
+      "unsupported-yield-purpose-valid",
+      "unsupported-order-cause-invalid"
+    ]
   },
   "errors": []
 }

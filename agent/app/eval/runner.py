@@ -13,8 +13,10 @@ from app.core.evidence import assess_with_decisive_rules
 from app.eval.checkpoint import LiveCheckpointStore
 from app.eval.dataset import (
     GoldenCase,
+    GoldenClaimDataset,
     GoldenDataset,
     GoldenReportFixture,
+    load_claim_dataset,
     load_report_fixture,
 )
 from app.eval.live_provider import (
@@ -41,6 +43,7 @@ from app.schemas.evidence import EvidenceSentence
 from app.schemas.report import ReportRequest, ReportResponse
 
 EvalProfile = Literal["replay", "live"]
+_DEFAULT_CLAIM_DATASET = Path(__file__).resolve().parent / "golden" / "claims.ko.v1.json"
 _DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.3.json"
 
 
@@ -95,6 +98,7 @@ class EvalResult:
     config: EvalConfig
     complete: bool
     metrics: dict[str, int | float]
+    claim_control_diagnostics: dict[str, list[str]]
     errors: tuple[EvalError, ...]
 
     def to_dict(self) -> dict[str, object]:
@@ -109,6 +113,7 @@ class EvalResult:
             "config": self.config.to_dict(),
             "complete": self.complete,
             "metrics": self.metrics,
+            "claimControlDiagnostics": self.claim_control_diagnostics,
             "errors": [error.to_dict() for error in self.errors],
         }
 
@@ -139,6 +144,7 @@ def run_evaluation(
     profile: EvalProfile = "replay",
     plan: Plan = "FREE",
     settings: Settings | None = None,
+    claim_dataset: GoldenClaimDataset | None = None,
     report_fixture: GoldenReportFixture | None = None,
     live_policy: LiveProviderPolicy | None = None,
     checkpoint_path: Path | None = None,
@@ -154,6 +160,7 @@ def run_evaluation(
     selected_live_policy = (
         live_policy or default_live_policy(plan) if profile == "live" else None
     )
+    selected_claim_dataset = claim_dataset or load_claim_dataset(_DEFAULT_CLAIM_DATASET)
     config = _eval_config(source_settings, profile, plan, selected_live_policy)
     fixture = _replay_fixture(dataset, profile, report_fixture)
     checkpoint = (
@@ -279,9 +286,8 @@ def run_evaluation(
     )
     claim_control_counts = ClaimControlCounts.from_scores(
         score_claim_controls(
-            dataset.claim_controls,
+            selected_claim_dataset.controls,
             grounded_overlap=execution_settings.evidence_grounded_overlap,
-            weak_overlap=execution_settings.evidence_weak_overlap,
         )
     )
     claim_statuses = []
@@ -343,7 +349,7 @@ def run_evaluation(
     return EvalResult(
         dataset_version=dataset.version,
         baseline_prompt_version=dataset.baseline_prompt_version,
-        claim_labels_version=dataset.claim_labels_version,
+        claim_labels_version=selected_claim_dataset.version,
         analyze_prompt_version=ANALYZE_PROMPT_VERSION,
         report_prompt_version=REPORT_PROMPT_VERSION,
         profile=profile,
@@ -354,6 +360,7 @@ def run_evaluation(
             and (profile == "replay" or schema_passes == len(dataset.cases) + 1)
         ),
         metrics=counts.to_dict(),
+        claim_control_diagnostics=claim_control_counts.to_diagnostics(),
         errors=tuple(errors),
     )
 

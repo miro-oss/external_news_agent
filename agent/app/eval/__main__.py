@@ -8,13 +8,14 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from app.core.errors import AgentError
-from app.eval.dataset import load_dataset, load_report_fixture
+from app.eval.dataset import load_claim_dataset, load_dataset, load_report_fixture
 from app.eval.live_provider import LiveProviderPolicy, default_live_policy
 from app.eval.runner import run_evaluation
 from app.eval.scorer import ComparisonError, compare_results
 
 _GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 _DEFAULT_DATASET = _GOLDEN_DIR / "semiconductor.v1.json"
+_DEFAULT_CLAIM_DATASET = _GOLDEN_DIR / "claims.ko.v1.json"
 _DEFAULT_REPORT_FIXTURE = _GOLDEN_DIR / "report.ko.v1.3.json"
 
 
@@ -64,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
             load_dataset(args.dataset),
             profile=args.profile,
             plan=args.plan,
+            claim_dataset=load_claim_dataset(args.claim_dataset),
             report_fixture=(
                 load_report_fixture(args.report_fixture) if args.profile == "replay" else None
             ),
@@ -108,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Agent Golden eval 실행기")
     parser.add_argument("--dataset", type=Path, default=_DEFAULT_DATASET)
+    parser.add_argument("--claim-dataset", type=Path, default=_DEFAULT_CLAIM_DATASET)
     parser.add_argument("--report-fixture", type=Path, default=_DEFAULT_REPORT_FIXTURE)
     parser.add_argument("--profile", choices=("replay", "live"), default="replay")
     parser.add_argument("--plan", choices=("FREE", "PAID"), default="FREE")

@@ -39,6 +39,10 @@ class GoldenClaimControl(AgentModel):
         validity_counts = Counter(label.validity for label in self.labels)
         if validity_counts != {"invalid": 1, "valid": 1}:
             raise ValueError("Claim control은 invalid/valid 라벨을 하나씩 가져야 합니다.")
+        return self
+
+    @model_validator(mode="after")
+    def validate_unique_evidence_ids(self) -> "GoldenClaimControl":
         sentence_ids = [sentence.id for sentence in self.evidence]
         if len(sentence_ids) != len(set(sentence_ids)):
             raise ValueError("Claim control의 evidence id는 중복될 수 없습니다.")
@@ -75,8 +79,6 @@ class GoldenCase(AgentModel):
 class GoldenDataset(AgentModel):
     version: str = Field(min_length=1, max_length=100)
     baseline_prompt_version: str = Field(min_length=1, max_length=50)
-    claim_labels_version: str = Field(min_length=1, max_length=50)
-    claim_controls: list[GoldenClaimControl] = Field(min_length=15, max_length=50)
     cases: list[GoldenCase] = Field(min_length=20, max_length=30)
 
     @model_validator(mode="after")
@@ -88,20 +90,41 @@ class GoldenDataset(AgentModel):
         article_ids = [case.article.id for case in self.cases]
         if len(article_ids) != len(set(article_ids)):
             raise ValueError("Golden article id는 데이터셋 안에서 유일해야 합니다.")
+        return self
 
-        control_ids = [control.control_id for control in self.claim_controls]
+
+class GoldenClaimDataset(AgentModel):
+    version: str = Field(min_length=1, max_length=50)
+    controls: list[GoldenClaimControl] = Field(min_length=15, max_length=50)
+
+    @model_validator(mode="after")
+    def validate_unique_control_ids(self) -> "GoldenClaimDataset":
+        control_ids = [control.control_id for control in self.controls]
         if len(control_ids) != len(set(control_ids)):
             raise ValueError("Golden claim controlId는 데이터셋 안에서 유일해야 합니다.")
+        return self
 
+    @model_validator(mode="after")
+    def validate_unique_claims(self) -> "GoldenClaimDataset":
         claim_ids = [
             label.claim_id
-            for control in self.claim_controls
+            for control in self.controls
             for label in control.labels
         ]
         if len(claim_ids) != len(set(claim_ids)):
             raise ValueError("Golden claimId는 데이터셋 안에서 유일해야 합니다.")
+        claim_texts = [
+            label.claim
+            for control in self.controls
+            for label in control.labels
+        ]
+        if len(claim_texts) != len(set(claim_texts)):
+            raise ValueError("Golden claim 문장은 데이터셋 안에서 유일해야 합니다.")
+        return self
 
-        type_counts = Counter(control.failure_type for control in self.claim_controls)
+    @model_validator(mode="after")
+    def validate_failure_type_coverage(self) -> "GoldenClaimDataset":
+        type_counts = Counter(control.failure_type for control in self.controls)
         underfilled = {
             failure_type: type_counts[failure_type]
             for failure_type in get_args(ClaimFailureType)
@@ -127,6 +150,10 @@ class GoldenReportFixture(AgentModel):
 
 def load_dataset(path: Path) -> GoldenDataset:
     return GoldenDataset.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def load_claim_dataset(path: Path) -> GoldenClaimDataset:
+    return GoldenClaimDataset.model_validate_json(path.read_text(encoding="utf-8"))
 
 
 def load_report_fixture(path: Path) -> GoldenReportFixture:

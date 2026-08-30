@@ -40,9 +40,10 @@ uv run pytest
 
 `app/eval/golden/semiconductor.v1.json`은 한국어·영어 반도체 기사 24건과
 `analyze.ko.v3+perspective.ko.v1+sensitivity.ko.v1` replay 출력 및 관점 정답을 담습니다. 수치 오기,
-기업명 바꿔치기, 부정 반전, 영문 요약은 기존 `expectedFailures` 4건으로 보존합니다. 별도의
-`claimControls`는 숫자 불일치·부정 반전·기업명 바꿔치기·강도 과장·원문에 없는 주장 5유형을
-각 3쌍씩 담으며, 같은 근거에 invalid claim과 valid positive control을 함께 둡니다.
+기업명 바꿔치기, 부정 반전, 영문 요약은 기존 `expectedFailures` 4건으로 보존합니다.
+`claims.ko.v1.json`은 숫자 불일치·부정 반전·기업명 바꿔치기·강도 과장·원문에 없는 주장 5유형을
+각 3쌍씩 담으며, 같은 근거에 invalid claim과 패러프레이즈한 valid positive control을 함께 둡니다.
+규칙 대조군은 분석 데이터셋과 분리되어 live checkpoint의 기사 fixture 지문에 영향을 주지 않습니다.
 `report.ko.v1.3.json`은 finding과 독립된 버전 보고서 fixture이며 grounded·weak·ungrounded 주장 기대값을
 각각 가집니다.
 
@@ -72,10 +73,13 @@ replay는 외부 API 없이 실제 스키마·문장 분할·사실값 검증·�
 - evidence provider call reduction rate: `ungrounded`로 선차단된 bullet을 제외하고 근거 검증이 필요한
   bullet 중 rule-only로 확정돼 provider 호출을 생략할 수 있는 비율. replay 기준선은 21건 중 11건을
   rule-only로 처리해 예상 provider 호출을 10건으로 줄임
-- false pass rate: invalid claim 15건 중 현재 규칙이 `grounded`로 통과시킨 비율. P1-0 기준선은
-  강도 과장 3건과 원문에 없는 주장 3건이 통과해 6/15(0.4)
-- false reject count: 같은 유형의 valid positive control 15건 중 `weak` 또는 `ungrounded`로 강등된
-  건수. P1-0 기준선은 0건
+- false pass rate: invalid claim 15건 중 실서비스의 결정 규칙
+  (`assess_with_decisive_rules`)이 `grounded`/`weak`로 수용한 비율. provider 위임은 판정 전이므로
+  통과로 세지 않습니다. P1-0 기준선은 강도 과장 2건이 통과해 2/15(0.133333)
+- false reject count: 패러프레이즈한 valid positive control 15건 중 결정 규칙이 `ungrounded`로
+  선차단한 건수. provider 위임은 오탈락이 아니며 P1-0 기준선은 0건
+- claim control provider required count: 결정 규칙이 확정하지 않아 provider 판정이 필요한 대조군
+  개수. P1-0 기준선은 invalid 4건과 valid 6건을 합친 10건
 
 실제 프롬프트 품질은 provider 환경변수를 설정한 뒤 live 프로필로 수동 평가합니다. 결과에는 모델 id,
 근거 임계값, 문장 상한, schema repair 횟수와 출력 토큰 상한이 기록됩니다. 전체 골든셋 분석 24회와

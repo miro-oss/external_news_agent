@@ -1,7 +1,8 @@
 import re
 from dataclasses import dataclass
+from typing import Literal, cast
 
-from app.core.evidence import assess_with_rules
+from app.core.evidence import assess_with_decisive_rules
 from app.core.report_grounding import assess_finding_claim
 from app.eval.dataset import ClaimValidity, GoldenClaimControl
 from app.schemas.analyze import Groundedness
@@ -36,6 +37,7 @@ _LOWER_IS_BETTER = (
     "reportWeakClaimCount",
     "unsupportedReportClaimCount",
     "evidenceProviderCallCount",
+    "claimControlProviderRequiredCount",
     "falsePassRate",
     "falseRejectCount",
 )
@@ -63,34 +65,61 @@ class ReportClaimScore:
 class ClaimControlScore:
     claim_id: str
     validity: ClaimValidity
-    status: Groundedness
+    status: Groundedness | Literal["provider-required"]
 
 
 @dataclass(frozen=True, slots=True)
 class ClaimControlCounts:
     invalid_claim_count: int
-    false_pass_count: int
     positive_control_count: int
-    false_reject_count: int
+    false_pass_claim_ids: tuple[str, ...]
+    false_reject_claim_ids: tuple[str, ...]
+    provider_required_claim_ids: tuple[str, ...]
 
     @classmethod
     def from_scores(cls, scores: list[ClaimControlScore]) -> "ClaimControlCounts":
         invalid = [score for score in scores if score.validity == "invalid"]
         positive = [score for score in scores if score.validity == "valid"]
+        if not invalid or not positive:
+            raise ValueError("Claim control 지표에는 invalid/valid 분모가 모두 필요합니다.")
         return cls(
             invalid_claim_count=len(invalid),
-            false_pass_count=sum(score.status == "grounded" for score in invalid),
             positive_control_count=len(positive),
-            false_reject_count=sum(score.status != "grounded" for score in positive),
+            false_pass_claim_ids=tuple(
+                score.claim_id
+                for score in invalid
+                if score.status in {"grounded", "weak"}
+            ),
+            false_reject_claim_ids=tuple(
+                score.claim_id
+                for score in positive
+                if score.status == "ungrounded"
+            ),
+            provider_required_claim_ids=tuple(
+                score.claim_id
+                for score in scores
+                if score.status == "provider-required"
+            ),
         )
 
     def to_dict(self) -> dict[str, int | float]:
+        false_pass_count = len(self.false_pass_claim_ids)
         return {
             "invalidClaimCount": self.invalid_claim_count,
-            "falsePassCount": self.false_pass_count,
-            "falsePassRate": _rate(self.false_pass_count, self.invalid_claim_count),
+            "falsePassCount": false_pass_count,
+            "falsePassRate": _rate(false_pass_count, self.invalid_claim_count),
             "positiveControlCount": self.positive_control_count,
-            "falseRejectCount": self.false_reject_count,
+            "falseRejectCount": len(self.false_reject_claim_ids),
+            "claimControlProviderRequiredCount": len(
+                self.provider_required_claim_ids
+            ),
+        }
+
+    def to_diagnostics(self) -> dict[str, list[str]]:
+        return {
+            "falsePassClaimIds": list(self.false_pass_claim_ids),
+            "falseRejectClaimIds": list(self.false_reject_claim_ids),
+            "providerRequiredClaimIds": list(self.provider_required_claim_ids),
         }
 
 
@@ -171,22 +200,25 @@ def score_claim_controls(
     controls: list[GoldenClaimControl],
     *,
     grounded_overlap: float,
-    weak_overlap: float,
 ) -> list[ClaimControlScore]:
     scores = []
     for control in controls:
         for label in control.labels:
-            assessment = assess_with_rules(
+            assessment = assess_with_decisive_rules(
                 label.claim,
                 control.evidence,
                 grounded_overlap=grounded_overlap,
-                weak_overlap=weak_overlap,
+            )
+            status = (
+                cast(Groundedness, assessment.status)
+                if assessment is not None
+                else "provider-required"
             )
             scores.append(
                 ClaimControlScore(
                     claim_id=label.claim_id,
                     validity=label.validity,
-                    status=assessment.status,
+                    status=status,
                 )
             )
     return scores
