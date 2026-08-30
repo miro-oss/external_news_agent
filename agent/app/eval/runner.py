@@ -23,7 +23,13 @@ from app.eval.live_provider import (
     PacedRetryProvider,
     default_live_policy,
 )
-from app.eval.scorer import MetricCounts, korean_summary_pass, score_report_claims
+from app.eval.scorer import (
+    ClaimControlCounts,
+    MetricCounts,
+    korean_summary_pass,
+    score_claim_controls,
+    score_report_claims,
+)
 from app.llm.analyze_service import PROMPT_VERSION as ANALYZE_PROMPT_VERSION
 from app.llm.analyze_service import ArticleAnalyzeService
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
@@ -81,6 +87,7 @@ class EvalConfig:
 class EvalResult:
     dataset_version: str
     baseline_prompt_version: str
+    claim_labels_version: str
     analyze_prompt_version: str
     report_prompt_version: str
     profile: EvalProfile
@@ -94,6 +101,7 @@ class EvalResult:
         return {
             "datasetVersion": self.dataset_version,
             "baselinePromptVersion": self.baseline_prompt_version,
+            "claimLabelsVersion": self.claim_labels_version,
             "analyzePromptVersion": self.analyze_prompt_version,
             "reportPromptVersion": self.report_prompt_version,
             "profile": self.profile,
@@ -269,6 +277,13 @@ def run_evaluation(
             grounded_overlap=execution_settings.evidence_grounded_overlap,
         )
     )
+    claim_control_counts = ClaimControlCounts.from_scores(
+        score_claim_controls(
+            dataset.claim_controls,
+            grounded_overlap=execution_settings.evidence_grounded_overlap,
+            weak_overlap=execution_settings.evidence_weak_overlap,
+        )
+    )
     claim_statuses = []
     if report_response is not None:
         claim_statuses = score_report_claims(
@@ -323,10 +338,12 @@ def run_evaluation(
         ),
         evidence_verification_count=evidence_verification_count,
         evidence_rule_decision_count=evidence_rule_decision_count,
+        claim_control_counts=claim_control_counts,
     )
     return EvalResult(
         dataset_version=dataset.version,
         baseline_prompt_version=dataset.baseline_prompt_version,
+        claim_labels_version=dataset.claim_labels_version,
         analyze_prompt_version=ANALYZE_PROMPT_VERSION,
         report_prompt_version=REPORT_PROMPT_VERSION,
         profile=profile,

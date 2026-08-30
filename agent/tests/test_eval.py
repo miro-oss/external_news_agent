@@ -18,6 +18,7 @@ from app.eval.dataset import (
 from app.eval.live_provider import LiveProviderPolicy
 from app.eval.runner import ReplayProvider, run_evaluation
 from app.eval.scorer import (
+    ClaimControlCounts,
     ComparisonError,
     compare_metrics,
     compare_results,
@@ -100,6 +101,66 @@ def test_adversarial_cases_have_expected_failure_labels() -> None:
     assert result.metrics["evidenceProviderCallReductionRate"] == 0.52381
     assert result.metrics["perspectiveTagAccuracy"] == 1.0
     assert result.errors == ()
+
+
+def test_claim_controls_cover_negative_labels_and_positive_controls() -> None:
+    dataset = load_dataset(_DATASET_PATH)
+    failure_type_counts: dict[str, int] = {}
+    validity_counts = {"invalid": 0, "valid": 0}
+
+    for control in dataset.claim_controls:
+        failure_type_counts[control.failure_type] = (
+            failure_type_counts.get(control.failure_type, 0) + 1
+        )
+        assert {label.validity for label in control.labels} == {"invalid", "valid"}
+        for label in control.labels:
+            validity_counts[label.validity] += 1
+
+    assert dataset.claim_labels_version == "claims.ko.v1"
+    assert failure_type_counts == {
+        "number-mismatch": 3,
+        "polarity-inversion": 3,
+        "company-substitution": 3,
+        "modality-overreach": 3,
+        "unsupported-claim": 3,
+    }
+    assert validity_counts == {"invalid": 15, "valid": 15}
+
+
+def test_claim_control_metrics_record_false_pass_baseline_without_false_rejects() -> None:
+    result = replay_result()
+
+    assert result.metrics["invalidClaimCount"] == 15
+    assert result.metrics["falsePassCount"] == 6
+    assert result.metrics["falsePassRate"] == 0.4
+    assert result.metrics["positiveControlCount"] == 15
+    assert result.metrics["falseRejectCount"] == 0
+
+
+def test_claim_control_counts_handle_empty_denominators() -> None:
+    assert ClaimControlCounts.from_scores([]).to_dict() == {
+        "invalidClaimCount": 0,
+        "falsePassCount": 0,
+        "falsePassRate": 0.0,
+        "positiveControlCount": 0,
+        "falseRejectCount": 0,
+    }
+
+
+def test_claim_control_schema_requires_invalid_and_valid_pair() -> None:
+    payload = json.loads(load_dataset(_DATASET_PATH).model_dump_json(by_alias=True))
+    payload["claimControls"][0]["labels"][1]["validity"] = "invalid"
+
+    with pytest.raises(ValueError, match="invalid/valid"):
+        GoldenDataset.model_validate(payload)
+
+
+def test_claim_control_schema_requires_three_pairs_per_failure_type() -> None:
+    payload = json.loads(load_dataset(_DATASET_PATH).model_dump_json(by_alias=True))
+    payload["claimControls"][0]["failureType"] = "unsupported-claim"
+
+    with pytest.raises(ValueError, match="유형별 3쌍"):
+        GoldenDataset.model_validate(payload)
 
 
 def test_expected_failure_detects_rule_that_becomes_too_permissive() -> None:
@@ -254,6 +315,11 @@ def test_result_comparison_rejects_incompatible_metadata() -> None:
 
     with pytest.raises(ComparisonError, match="datasetVersion"):
         compare_results(baseline, incompatible)
+
+    changed_claim_labels = deepcopy(baseline)
+    changed_claim_labels["claimLabelsVersion"] = "claims.ko.v2"
+    with pytest.raises(ComparisonError, match="claimLabelsVersion"):
+        compare_results(changed_claim_labels, baseline)
 
     changed_config = deepcopy(baseline)
     changed_config["config"]["maxSentences"] = 50

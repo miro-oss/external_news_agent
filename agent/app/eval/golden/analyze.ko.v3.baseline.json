@@ -1,6 +1,7 @@
 {
   "datasetVersion": "semiconductor.v1",
   "baselinePromptVersion": "analyze.ko.v3+perspective.ko.v1+sensitivity.ko.v1",
+  "claimLabelsVersion": "claims.ko.v1",
   "analyzePromptVersion": "analyze.ko.v3+perspective.ko.v1+sensitivity.ko.v1",
   "reportPromptVersion": "report.ko.v1.3",
   "profile": "replay",
@@ -41,7 +42,12 @@
     "evidenceVerificationCount": 21,
     "evidenceRuleDecisionCount": 11,
     "evidenceProviderCallCount": 10,
-    "evidenceProviderCallReductionRate": 0.52381
+    "evidenceProviderCallReductionRate": 0.52381,
+    "invalidClaimCount": 15,
+    "falsePassCount": 6,
+    "falsePassRate": 0.4,
+    "positiveControlCount": 15,
+    "falseRejectCount": 0
   },
   "errors": []
 }
