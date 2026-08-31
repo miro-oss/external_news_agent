@@ -1,23 +1,28 @@
 import { useCallback, useEffect, useState } from 'react'
 import './App.css'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { ArticlesPage } from './features/articles/ArticlesPage'
 import { ReportsPage } from './features/reports/ReportsPage'
 import { NotificationsPage } from './features/notifications/NotificationsPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 
-const PAGES = ['articles', 'reports', 'notifications', 'settings'] as const
+const PAGES = ['reports', 'notifications', 'settings'] as const
 
 type Page = (typeof PAGES)[number]
 
-const DEFAULT_PAGE: Page = 'articles'
+const DEFAULT_PAGE: Page = 'reports'
+
+function hashValue() {
+  return window.location.hash.replace(/^#\/?/, '')
+}
 
 /**
  * 주소의 해시에서 화면을 읽는다. 모르는 값이면 기본 화면으로 떨어뜨린다 — 사람이 주소를 손으로
  * 고칠 수 있고, 그때 빈 화면을 보여 주는 것보다 낫다.
  */
 function pageFromHash(): Page {
-  const value = window.location.hash.replace(/^#\/?/, '')
+  const value = hashValue()
+  // P1-3 이전 북마크는 기사 화면을 가리킨다. 화면을 없애더라도 리포트로 이어 줘야 한다.
+  if (value === 'articles') return DEFAULT_PAGE
   return PAGES.includes(value as Page) ? (value as Page) : DEFAULT_PAGE
 }
 
@@ -25,7 +30,7 @@ function pageFromHash(): Page {
  * 화면 전환을 주소의 해시에 적어 둔다.
  *
  * <p>화면을 useState로만 들고 있었다. 주소가 그대로라 새로 고치면 무조건 첫 화면으로 돌아갔다 —
- * 수집 설정에서 폼을 채우다 새로 고침 한 번이면 분석 기사로 튕겼다.
+ * 수집 설정에서 폼을 채우다 새로 고침 한 번이면 기본 화면으로 튕겼다.
  *
  * <p>경로(/settings)가 아니라 해시(#/settings)를 쓴다. 경로로 하면 서버가 모르는 주소를
  * index.html로 되돌려 줘야 한다. Vite 개발 서버는 그렇게 해 주지만 지금 BE에는 그 설정이 없어서,
@@ -39,8 +44,13 @@ function usePageRoute() {
 
   useEffect(() => {
     function sync() {
+      if (hashValue() === 'articles') {
+        // 뒤로 가기 기록에 사라진 화면을 한 칸 더 남기지 않도록 현재 항목을 교체한다.
+        window.history.replaceState(null, '', '#/reports')
+      }
       setPage(pageFromHash())
     }
+    sync()
     window.addEventListener('hashchange', sync)
     return () => window.removeEventListener('hashchange', sync)
   }, [])
@@ -92,8 +102,8 @@ function App() {
   return (
     <div className="app-shell">
       <nav className="app-nav" aria-label="주요 화면" data-scrolled={scrolled}>
-        {/* 로고는 홈으로 가는 길이다. 어디서든 분석 기사로 돌아올 수 있게 누를 수 있게 둔다. */}
-        <button type="button" className="app-logo" onClick={() => go('articles')}>
+        {/* 로고는 홈으로 가는 길이다. 통합된 리포트를 제품의 첫 화면으로 쓴다. */}
+        <button type="button" className="app-logo" onClick={() => go('reports')}>
           <strong>News Signal Desk</strong>
         </button>
         <div className="nav-links">
@@ -104,14 +114,6 @@ function App() {
             onClick={() => go('notifications')}
           >
             알림 관리
-          </button>
-          <button
-            type="button"
-            className={page === 'articles' ? 'nav-link active' : 'nav-link'}
-            aria-current={page === 'articles' ? 'page' : undefined}
-            onClick={() => go('articles')}
-          >
-            분석 기사
           </button>
           <button
             type="button"
@@ -137,7 +139,6 @@ function App() {
         옮겨도 같은 안내가 남는다.
       */}
       <ErrorBoundary key={page}>
-        {page === 'articles' && <ArticlesPage />}
         {page === 'reports' && <ReportsPage />}
         {page === 'notifications' && <NotificationsPage />}
         {page === 'settings' && <SettingsPage />}

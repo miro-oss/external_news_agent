@@ -1,7 +1,10 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.analysis.entity.AudienceRelevance;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
+import com.example.be.domain.analysis.entity.FindingPerspectiveTag;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
@@ -9,27 +12,37 @@ import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.domain.issues.entity.NewsIssue;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.repository.NewsReportRepository;
+import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.LongStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,9 +50,12 @@ class ReportQueryServiceImplTest {
 
     private final NewsReportRepository reportRepository = mock(NewsReportRepository.class);
     private final FindingRepository findingRepository = mock(FindingRepository.class);
+    private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
+    private final NewsIssueRepository newsIssueRepository = mock(NewsIssueRepository.class);
     private final DeliveryLogRepository deliveryLogRepository = mock(DeliveryLogRepository.class);
     private final ReportQueryServiceImpl service = new ReportQueryServiceImpl(
-            reportRepository, findingRepository, deliveryLogRepository);
+            reportRepository, findingRepository, issueArticleRepository,
+            newsIssueRepository, deliveryLogRepository);
 
     @Test
     void latestReturnsNullWhenNoReportExists() {
@@ -135,25 +151,76 @@ class ReportQueryServiceImplTest {
     void detailFindingsUseSamePriorityOrderAsGeneratedMarkdown() {
         CollectionRun run = CollectionRun.builder().id(42L).build();
         NewsReport report = NewsReport.builder().id(17L).run(run).title("보고서")
+                .modelName("claude-sonnet-5")
+                .promptVersion("report.ko.v1.3")
+                .llmProvider("anthropic")
                 .generatedAt(LocalDateTime.of(2026, 8, 18, 10, 0)).build();
         Finding low = finding(2L, RiskLevel.LOW, Relevance.REFERENCE);
         Finding high = finding(1L, RiskLevel.HIGH, Relevance.IMPORTANT);
+        IssueArticleRepository.CoverageMembership matchingMembership = membership(101L, 88L, 7L);
+        IssueArticleRepository.CoverageMembership wrongTopicMembership = membership(102L, 99L, 8L);
+        NewsIssue issue = NewsIssue.builder()
+                .id(88L)
+                .title("HBM4 양산 일정 이슈")
+                .summary("양산 일정이 앞당겨졌다.")
+                .lastSeenAt(OffsetDateTime.parse("2026-08-18T09:00:00+09:00"))
+                .articleCount(3)
+                .publisherCount(2)
+                .independentContentCount(2)
+                .topic(topic(7L))
+                .entities(List.of("SK하이닉스", "HBM4"))
+                .build();
         when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING))
                 .thenReturn(Optional.of(report));
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(low, high));
+        when(issueArticleRepository.findCoverageMembershipsByArticleIds(List.of(101L, 102L)))
+                .thenReturn(List.of(matchingMembership, wrongTopicMembership));
+        when(newsIssueRepository.findAllById(List.of(88L))).thenReturn(List.of(issue));
 
         ReportResDTO.Detail detail = service.getReport(17L, true);
 
         assertEquals(List.of(1L, 2L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
+        assertEquals("report.ko.v1.3", detail.getPromptVersion());
+        assertEquals("anthropic", detail.getLlmProvider());
+        assertEquals(88L, detail.getFindings().getFirst().getIssueId());
+        assertEquals("HBM4 양산 일정 이슈", detail.getFindings().getFirst().getIssue().getTitle());
+        assertEquals(3, detail.getFindings().getFirst().getIssue().getArticleCount());
+        assertNull(detail.getFindings().get(1).getIssueId());
+        assertEquals("CHIP_MAKER", detail.getFindings().getFirst()
+                .getPerspectiveTags().getFirst().getAudience());
         ReportResDTO.KeyPoint keyPoint = detail.getFindings().getFirst().getKeyPoints().getFirst();
         assertEquals("핵심", keyPoint.getText());
         assertEquals(List.of(0), keyPoint.getEvidence());
         assertEquals("grounded", keyPoint.getGroundedness());
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void detailChunksIssueMembershipQueriesBelowOracleLimit() {
+        CollectionRun run = CollectionRun.builder().id(42L).build();
+        NewsReport report = NewsReport.builder().id(17L).run(run).title("보고서")
+                .generatedAt(LocalDateTime.of(2026, 8, 18, 10, 0)).build();
+        List<Finding> findings = LongStream.rangeClosed(1, 1_001)
+                .mapToObj(id -> finding(id, RiskLevel.LOW, Relevance.REFERENCE))
+                .toList();
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING))
+                .thenReturn(Optional.of(report));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(findings);
+        when(issueArticleRepository.findCoverageMembershipsByArticleIds(anyCollection()))
+                .thenReturn(List.of());
+
+        service.getReport(17L, true);
+
+        ArgumentCaptor<Collection<Long>> ids = ArgumentCaptor.forClass(Collection.class);
+        verify(issueArticleRepository, times(2))
+                .findCoverageMembershipsByArticleIds(ids.capture());
+        assertEquals(List.of(900, 101), ids.getAllValues().stream().map(Collection::size).toList());
+    }
+
     private Finding finding(Long id, RiskLevel riskLevel, Relevance relevance) {
         Article article = Article.builder()
                 .id(id + 100)
+                .topic(topic(7L))
                 .title("기사 " + id)
                 .canonicalUrl("https://example.com/" + id)
                 .build();
@@ -169,6 +236,26 @@ class ReportQueryServiceImplTest {
                 .riskLevel(riskLevel)
                 .relevance(relevance)
                 .category("정책")
+                .perspectiveTags(List.of(new FindingPerspectiveTag(
+                        Audience.CHIP_MAKER,
+                        AudienceRelevance.HIGH,
+                        "생산 계획에 직접 영향을 줍니다.",
+                        List.of(0))))
                 .build();
+    }
+
+    private IssueArticleRepository.CoverageMembership membership(Long articleId,
+                                                                  Long issueId,
+                                                                  Long topicId) {
+        IssueArticleRepository.CoverageMembership value =
+                mock(IssueArticleRepository.CoverageMembership.class);
+        when(value.getArticleId()).thenReturn(articleId);
+        when(value.getIssueId()).thenReturn(issueId);
+        when(value.getTopicId()).thenReturn(topicId);
+        return value;
+    }
+
+    private Topic topic(Long id) {
+        return Topic.builder().id(id).name("HBM").build();
     }
 }

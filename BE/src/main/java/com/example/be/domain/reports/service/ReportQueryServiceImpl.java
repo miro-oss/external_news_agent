@@ -1,10 +1,13 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.entity.Finding;
-import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.repository.FindingRepository;
+import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.collection.entity.ChangeType;
+import com.example.be.domain.issues.entity.NewsIssue;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.notifications.entity.DeliveryStatus;
 import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
@@ -18,6 +21,7 @@ import com.example.be.global.apiPayload.PageResponse;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import com.example.be.global.config.ApiTimeZone;
+import com.example.be.global.database.OracleInClause;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -31,9 +35,12 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -46,6 +53,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     private final NewsReportRepository reportRepository;
     private final FindingRepository findingRepository;
+    private final IssueArticleRepository issueArticleRepository;
+    private final NewsIssueRepository newsIssueRepository;
     private final DeliveryLogRepository deliveryLogRepository;
 
     @Override
@@ -122,6 +131,12 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         List<Finding> findings = includeFindings
                 ? ReportFindingOrder.sort(findingRepository.findForReportByRunId(runId))
                 : null;
+        Map<Long, Long> issueIdsByArticle = includeFindings
+                ? issueIdsByArticle(findings)
+                : Map.of();
+        Map<Long, NewsIssue> issuesById = includeFindings
+                ? issuesById(issueIdsByArticle.values())
+                : Map.of();
         ReportResDTO.SummaryStats summaryStats = includeFindings
                 ? toStats(findings)
                 : toStatsFromCounts(findingRepository.countStatsByRunId(runId));
@@ -131,10 +146,53 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .title(report.getTitle())
                 .markdownBody(report.getMarkdownBody())
                 .modelName(report.getModelName())
+                .promptVersion(report.getPromptVersion())
+                .llmProvider(report.getLlmProvider())
                 .generatedAt(toOffset(report.getGeneratedAt()))
                 .summaryStats(summaryStats)
-                .findings(includeFindings ? findings.stream().map(this::toFinding).toList() : null)
+                .findings(includeFindings ? findings.stream()
+                        .map(finding -> {
+                            Long issueId = issueIdsByArticle.get(finding.getArticle().getId());
+                            NewsIssue issue = issueId == null ? null : issuesById.get(issueId);
+                            return toFinding(finding, issueId, issue);
+                        })
+                        .toList() : null)
                 .build();
+    }
+
+    private Map<Long, Long> issueIdsByArticle(List<Finding> findings) {
+        if (findings.isEmpty()) {
+            return Map.of();
+        }
+        Set<Long> articleIds = findings.stream()
+                .map(finding -> finding.getArticle().getId())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<Long, Long> topicIdsByArticle = findings.stream()
+                .collect(Collectors.toMap(
+                        finding -> finding.getArticle().getId(),
+                        finding -> finding.getArticle().getTopic().getId(),
+                        (first, ignored) -> first,
+                        LinkedHashMap::new));
+        Map<Long, Long> result = new LinkedHashMap<>();
+        OracleInClause.batches(articleIds).stream()
+                .flatMap(ids -> issueArticleRepository.findCoverageMembershipsByArticleIds(ids).stream())
+                .filter(membership -> membership.getTopicId()
+                        .equals(topicIdsByArticle.get(membership.getArticleId())))
+                .forEach(membership -> result.putIfAbsent(
+                        membership.getArticleId(), membership.getIssueId()));
+        return result;
+    }
+
+    private Map<Long, NewsIssue> issuesById(Collection<Long> issueIds) {
+        Set<Long> uniqueIssueIds = new LinkedHashSet<>(issueIds);
+        if (uniqueIssueIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, NewsIssue> result = new LinkedHashMap<>();
+        OracleInClause.batches(uniqueIssueIds).stream()
+                .flatMap(ids -> newsIssueRepository.findAllById(ids).stream())
+                .forEach(issue -> result.put(issue.getId(), issue));
+        return result;
     }
 
     private ReportResDTO.SummaryStats toStats(List<Finding> findings) {
@@ -177,10 +235,12 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .build();
     }
 
-    private ReportResDTO.Finding toFinding(Finding finding) {
+    private ReportResDTO.Finding toFinding(Finding finding, Long issueId, NewsIssue issue) {
         return ReportResDTO.Finding.builder()
                 .id(finding.getId())
                 .articleId(finding.getArticle().getId())
+                .issueId(issueId)
+                .issue(toIssueSummary(issue))
                 .articleTitle(finding.getArticle().getTitle())
                 .canonicalUrl(finding.getArticle().getCanonicalUrl())
                 .changeType(finding.getChangeType().name())
@@ -197,6 +257,32 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .riskLevel(finding.getRiskLevel().toApiValue())
                 .relevance(finding.getRelevance().toApiValue())
                 .category(finding.getCategory())
+                .perspectiveTags(finding.getPerspectiveTags() == null ? List.of()
+                        : finding.getPerspectiveTags().stream()
+                        .map(tag -> ReportResDTO.PerspectiveTag.builder()
+                                .audience(tag.audience().name())
+                                .relevance(tag.relevance().toApiValue())
+                                .hook(tag.hook())
+                                .evidenceSentenceIds(tag.evidenceSentenceIds())
+                                .build())
+                        .toList())
+                .build();
+    }
+
+    private ReportResDTO.IssueSummary toIssueSummary(NewsIssue issue) {
+        if (issue == null) {
+            return null;
+        }
+        return ReportResDTO.IssueSummary.builder()
+                .id(issue.getId())
+                .title(issue.getTitle())
+                .summary(issue.getSummary())
+                .lastSeenAt(issue.getLastSeenAt())
+                .articleCount(issue.getArticleCount())
+                .publisherCount(issue.getPublisherCount())
+                .independentContentCount(issue.getIndependentContentCount())
+                .topicName(issue.getTopic().getName())
+                .entities(issue.getEntities())
                 .build();
     }
 

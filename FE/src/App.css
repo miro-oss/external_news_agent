@@ -2114,7 +2114,7 @@ body.modal-open {
 }
 
 .report-document {
-  max-width: 780px;
+  max-width: 860px;
   margin: 0 auto;
   padding: 3rem clamp(1.5rem, 5vw, 3.5rem) 5rem;
 }
@@ -2135,6 +2135,53 @@ body.modal-open {
 .report-document-header time {
   color: var(--fg-3);
   font-size: 0.84rem;
+}
+
+.report-ai-context {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+  color: var(--fg-3);
+  font-size: 0.78rem;
+}
+
+.report-ai-context details {
+  position: relative;
+}
+
+.report-ai-context summary {
+  display: grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  cursor: pointer;
+  list-style: none;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--fg-3);
+  font-weight: 700;
+}
+
+.report-ai-context summary::-webkit-details-marker {
+  display: none;
+}
+
+.report-ai-context details p {
+  position: absolute;
+  z-index: 4;
+  top: 1.65rem;
+  left: -7rem;
+  width: min(320px, 75vw);
+  margin: 0;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--fg-2);
+  font-size: 0.78rem;
+  line-height: 1.6;
 }
 
 .report-stat-row {
@@ -2170,6 +2217,83 @@ body.modal-open {
   color: var(--danger);
 }
 
+.report-perspective {
+  margin: 1.5rem 0;
+  padding: 1.15rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.report-perspective-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.report-perspective-heading h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+}
+
+.report-perspective-heading p,
+.report-perspective-note {
+  margin: 0.25rem 0 0;
+  color: var(--fg-3);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.report-perspective-heading > span {
+  flex-shrink: 0;
+  padding: 0.22rem 0.5rem;
+  border-radius: 999px;
+  background: var(--success-weak);
+  color: var(--success-strong);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.report-perspective-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+
+.report-perspective-tab {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.55rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--fg-2);
+  font-size: 0.76rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.report-perspective-tab small {
+  color: var(--fg-3);
+  font-size: 0.62rem;
+}
+
+.report-perspective-tab.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+
+.report-perspective-tab.active small {
+  color: rgba(255, 255, 255, 0.75);
+}
+
 .markdown-report {
   margin: 2.25rem 0 3rem;
   color: var(--fg-2);
@@ -2200,7 +2324,7 @@ body.modal-open {
 }
 
 .markdown-report a,
-.finding-card a {
+.issue-card a {
   color: var(--primary);
   overflow-wrap: anywhere;
 }
@@ -2225,18 +2349,23 @@ body.modal-open {
 
 .finding-list {
   display: grid;
-  gap: 0.6rem;
+  gap: 0.75rem;
 }
 
-.finding-card {
-  padding: 1.25rem;
+.issue-card {
+  overflow: hidden;
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
+  background: var(--surface);
+  box-shadow: 0 3px 12px rgba(25, 31, 40, 0.04);
 }
 
-.finding-card-meta {
+.issue-card-primary {
+  padding: 1.25rem;
+}
+
+.issue-card-topline {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
   color: var(--fg-3);
@@ -2244,67 +2373,267 @@ body.modal-open {
   font-weight: 600;
 }
 
-.finding-card h4 {
-  margin: 0.55rem 0 0.35rem;
-  font-size: 0.98rem;
+.issue-card-topline time {
+  margin-left: auto;
+  font-weight: 500;
 }
 
-.finding-card p {
+.issue-card h4 {
+  margin: 0.7rem 0 0.4rem;
+  font-size: 1.02rem;
+  line-height: 1.45;
+  letter-spacing: -0.025em;
+}
+
+.issue-card-summary {
+  min-height: 2.9em;
   margin: 0;
   color: var(--fg-2);
   font-size: 0.87rem;
   line-height: 1.65;
 }
 
-/*
-  핵심 목록은 기사 상세의 어두운 패널과 같은 컴포넌트다. 거기 색은 검은 바탕에 맞춰 잡혀
-  있어서 흰 카드에 그대로 올리면 글자가 배경에 묻는다. 구조는 두고 색만 여기서 되돌린다.
-*/
-.finding-card .key-points {
+.issue-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.8rem;
+  margin-top: 1rem;
+}
+
+.issue-source-count {
+  color: var(--fg-2);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.issue-keywords {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.issue-keywords span {
+  padding: 0.15rem 0.42rem;
+  border-radius: 999px;
+  background: var(--primary-weak);
+  color: var(--primary-strong);
+  font-size: 0.7rem;
+  font-weight: 650;
+}
+
+.issue-keywords .issue-keywords-loading {
+  background: var(--line-soft);
+  color: var(--fg-3);
+  font-weight: 500;
+}
+
+.issue-detail-toggle {
+  margin-left: auto;
+  padding: 0.25rem 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.issue-detail-toggle:hover:not(:disabled) {
+  background: transparent;
+  color: var(--primary-strong);
+}
+
+.issue-card-details {
+  padding: 1.1rem 1.25rem 1.25rem;
+  border-top: 1px solid var(--line);
+  background: var(--surface-sunken);
+}
+
+.issue-perspective-hook {
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius-xs);
+  background: var(--primary-weak);
+}
+
+.issue-perspective-hook > span {
+  color: var(--primary-strong);
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.issue-perspective-hook p {
+  margin: 0.3rem 0 0;
+  color: var(--fg-2);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.issue-perspective-hook .text-button {
+  margin-top: 0.35rem;
+  padding: 0;
+  font-size: 0.74rem;
+}
+
+/* 기사 상세의 어두운 패널용 핵심 목록 색을 밝은 이슈 카드에 맞춰 되돌린다. */
+.issue-card .key-points {
   gap: 0.6rem;
   margin-top: 0.9rem;
   padding-top: 0.9rem;
   border-top-color: var(--line);
 }
 
-.finding-card .key-points-heading {
+.issue-card .key-points-heading {
   color: var(--fg-3);
 }
 
-.finding-card .key-point-text {
+.issue-card .key-point-text {
   color: var(--fg-2);
   font-size: 0.87rem;
 }
 
-.finding-card .key-point-number {
+.issue-card .key-point-number {
   color: var(--primary);
 }
 
-.finding-card .groundedness {
+.issue-card .groundedness {
   color: var(--warning-strong);
 }
 
-.finding-card .evidence {
+.issue-card .evidence {
   margin-right: 0.3rem;
   color: var(--fg-3);
 }
 
-.finding-card .evidence:hover:not(:disabled),
-.finding-card .evidence:focus-visible,
-.finding-card .key-points-toggle:hover:not(:disabled) .key-points-action {
+.issue-card .evidence:hover:not(:disabled),
+.issue-card .evidence:focus-visible,
+.issue-card .key-points-toggle:hover:not(:disabled) .key-points-action {
   color: var(--primary-strong);
 }
 
-.finding-card .key-points-action {
+.issue-card .key-points-action {
   color: var(--primary);
 }
 
-.finding-card a {
-  display: inline-block;
-  margin-top: 0.4rem;
+.issue-related-articles {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.issue-detail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.issue-detail-heading h5 {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.issue-detail-heading span,
+.issue-detail-state {
+  color: var(--fg-3);
+  font-size: 0.74rem;
+}
+
+.issue-detail-state.error {
+  color: var(--danger);
+}
+
+.issue-related-articles ul {
+  display: grid;
+  gap: 0;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.issue-related-articles li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.issue-related-articles li > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.issue-related-articles li strong {
+  overflow: hidden;
   font-size: 0.8rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-related-articles li span {
+  color: var(--fg-3);
+  font-size: 0.7rem;
+}
+
+.issue-article-actions,
+.issue-legacy-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.issue-article-actions button,
+.issue-legacy-actions button,
+.issue-article-actions a,
+.issue-legacy-actions a {
+  padding: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 0.74rem;
   font-weight: 700;
   text-decoration: none;
+}
+
+.issue-reference-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.75rem;
+  color: var(--fg-3);
+  font-size: 0.72rem;
+}
+
+.report-disclaimer {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+  color: var(--fg-3);
+  font-size: 0.78rem;
+}
+
+.report-disclaimer summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.report-disclaimer ul {
+  margin: 0.75rem 0 0;
+  padding-left: 1.15rem;
+  line-height: 1.7;
+}
+
+.investment-disclaimer {
+  margin: 0 0 0.8rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: var(--radius-xs);
+  background: var(--warning-weak);
+  color: var(--warning-strong);
+  font-weight: 650;
 }
 
 .risk-label-high {
@@ -2899,6 +3228,16 @@ body.modal-open {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .report-perspective-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .issue-related-articles li {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
   .channel-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2958,7 +3297,7 @@ body.modal-open {
     background: var(--bg);
   }
 
-  /* 링크마다 글자 수가 달라도(분석 기사 · 리포트 · 수집 설정) 칸은 같아야 묶음으로 읽힌다. */
+  /* 링크마다 글자 수가 달라도(알림 관리 · 리포트 · 수집 설정) 칸은 같아야 묶음으로 읽힌다. */
   .nav-link {
     flex: 1;
     border-radius: 10px;
@@ -2967,5 +3306,25 @@ body.modal-open {
 
   .nav-link:hover:not(.active) {
     background: var(--line);
+  }
+
+  .report-ai-context,
+  .report-perspective-heading,
+  .report-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .report-ai-context details p {
+    left: -1rem;
+  }
+
+  .issue-card-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .issue-detail-toggle {
+    margin-left: 0;
   }
 }
