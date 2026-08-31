@@ -17,7 +17,6 @@ import com.example.be.domain.collection.repository.ArticleVersionRepository;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
-import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.entity.Topic;
@@ -44,9 +43,6 @@ import java.util.Map;
 @Service
 @RequiredArgsConstructor
 public class CollectionResultWriter {
-
-    /** 소스에 정책이 없을 때 한 번에 저장할 최대 건수. */
-    private static final int DEFAULT_MAX_ARTICLES_PER_RUN = 30;
 
     private final ArticleRepository articleRepository;
     private final ArticleVersionRepository articleVersionRepository;
@@ -100,14 +96,57 @@ public class CollectionResultWriter {
         }
 
         List<CollectedArticle> collected = outcome.fetch().articles();
-        List<CollectedArticle> matched = dedupeByUrl(TopicKeywordFilter.filter(topic, collected))
-                .stream()
-                .limit(maxArticlesPerRun(source))
-                .toList();
+        List<CollectedArticle> matched = dedupeByUrl(TopicKeywordFilter.filter(topic, collected));
+
+        writeArticles(run, item, topic, source, collected.size(), matched);
+    }
+
+    /** 주제 전체 후보에서 우선순위 선별을 마친 운영 경로. 소스별 선착순 상한을 다시 적용하지 않는다. */
+    @Transactional
+    public void writeSelected(Long runId,
+                              Long itemId,
+                              Long topicId,
+                              Long sourceId,
+                              CollectionOutcome outcome,
+                              List<CollectedArticle> selected) {
+        CollectionRun run = runRepository.findById(runId).orElseThrow();
+        CollectionRunItem item = runItemRepository.findById(itemId).orElseThrow();
+        Topic topic = topicRepository.findById(topicId).orElseThrow();
+        Source source = sourceRepository.findById(sourceId).orElseThrow();
+
+        outcome.robots().applyTo(source);
+        if (!outcome.robots().allowed()) {
+            item.markSkipped();
+            run.addWarning(warning(source, CollectionRunWarning.CODE_ROBOTS_DISALLOWED,
+                    "robots.txt가 수집을 막는다: " + outcome.robots().robotsTxtUrl()));
+            return;
+        }
+        if (outcome.validatorsUpdated()) {
+            source.applyFetchState(outcome.etag(), outcome.lastModified(), LocalDateTime.now(ApiTimeZone.ZONE));
+        }
+        if (outcome.notModified()) {
+            item.markSkipped();
+            return;
+        }
+        if (!outcome.fetch().success()) {
+            item.markFailed();
+            run.addWarning(warning(source, outcome.fetch().failureCode(), outcome.fetch().failureMessage()));
+            return;
+        }
+
+        writeArticles(run, item, topic, source, outcome.fetch().articles().size(), dedupeByUrl(selected));
+    }
+
+    private void writeArticles(CollectionRun run,
+                               CollectionRunItem item,
+                               Topic topic,
+                               Source source,
+                               int scannedCount,
+                               List<CollectedArticle> articles) {
 
         int newCount = 0;
         int updatedCount = 0;
-        for (CollectedArticle article : matched) {
+        for (CollectedArticle article : articles) {
             ChangeType changeType = save(run, topic, source, article);
             if (changeType == ChangeType.NEW) {
                 newCount++;
@@ -116,7 +155,7 @@ public class CollectionResultWriter {
             }
         }
 
-        item.recordResult(RunItemStatus.SUCCESS, collected.size(), newCount, updatedCount);
+        item.recordResult(RunItemStatus.SUCCESS, scannedCount, newCount, updatedCount);
     }
 
     /**
@@ -313,15 +352,6 @@ public class CollectionResultWriter {
         return articleVersionRepository.findFirstByArticleIdOrderByVersionNoDesc(articleId)
                 .map(version -> version.getVersionNo() + 1)
                 .orElse(ArticleVersion.FIRST_VERSION_NO);
-    }
-
-    private int maxArticlesPerRun(Source source) {
-        CrawlPolicy policy = source.getCrawlPolicy();
-        if (policy == null || policy.maxArticlesPerRun() == null || policy.maxArticlesPerRun() <= 0) {
-            return DEFAULT_MAX_ARTICLES_PER_RUN;
-        }
-
-        return policy.maxArticlesPerRun();
     }
 
 }

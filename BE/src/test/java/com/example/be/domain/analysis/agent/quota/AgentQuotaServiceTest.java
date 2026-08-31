@@ -52,7 +52,6 @@ class AgentQuotaServiceTest {
         QuotaReservation reservation = reservation(AgentTask.ANALYZE, AgentPlan.PAID);
         when(repository.findByIdempotencyKey("run:42:article:10"))
                 .thenReturn(Optional.of(reservation));
-        when(repository.countRunAnalysis(42L, AgentPlan.PAID)).thenReturn(19);
 
         QuotaReservation result = service.reserve(
                 42L, "run:42:article:10", AgentTask.ANALYZE, AgentPlan.PAID);
@@ -69,7 +68,6 @@ class AgentQuotaServiceTest {
     @Test
     void rejectsAnalysisAtSeventyCreditsButStillAllowsReport() {
         stubUsage(BigDecimal.ZERO, new BigDecimal("70"), new BigDecimal("70"), new BigDecimal("100"));
-        when(repository.countRunAnalysis(42L, AgentPlan.PAID)).thenReturn(10);
 
         assertThrows(QuotaExceededException.class, () -> service.reserve(
                 42L, "run:42:article:10", AgentTask.ANALYZE, AgentPlan.PAID));

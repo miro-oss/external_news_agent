@@ -31,11 +31,9 @@ public class AgentProperties implements InitializingBean {
             throw new IllegalStateException(
                     "news.agent.enabled=true이면 AGENT_SHARED_SECRET을 설정해야 합니다.");
         }
-        if (quota.freeRunArticleLimit <= 0
-                || quota.freeDailyCalls <= 0
+        if (quota.freeDailyCalls <= 0
                 || quota.paidMonthlyCredits <= 0
                 || quota.paidDailyCredits <= 0
-                || quota.paidRunArticleLimit <= 0
                 || quota.paidDailyReportReserve < 0
                 || quota.paidDailyReportReserve >= quota.paidDailyCredits
                 || quota.paidCreditsPerRequest == null
@@ -146,23 +144,13 @@ public class AgentProperties implements InitializingBean {
 
     public static class Quota {
 
-        private int freeRunArticleLimit = 30;
         private int freeDailyCalls = 1500;
         private int paidMonthlyCredits = 3000;
         private int paidDailyCredits = 90;
         private int paidDailyReportReserve = 20;
-        private int paidRunArticleLimit = 20;
         private BigDecimal paidCreditsPerRequest = BigDecimal.ONE;
         private BigDecimal paidMaxCreditsPerRequest = BigDecimal.valueOf(5);
         private Duration reservationTtl = Duration.ofMinutes(15);
-
-        public int getFreeRunArticleLimit() {
-            return freeRunArticleLimit;
-        }
-
-        public void setFreeRunArticleLimit(int freeRunArticleLimit) {
-            this.freeRunArticleLimit = freeRunArticleLimit;
-        }
 
         public int getFreeDailyCalls() {
             return freeDailyCalls;
@@ -194,14 +182,6 @@ public class AgentProperties implements InitializingBean {
 
         public void setPaidDailyReportReserve(int paidDailyReportReserve) {
             this.paidDailyReportReserve = paidDailyReportReserve;
-        }
-
-        public int getPaidRunArticleLimit() {
-            return paidRunArticleLimit;
-        }
-
-        public void setPaidRunArticleLimit(int paidRunArticleLimit) {
-            this.paidRunArticleLimit = paidRunArticleLimit;
         }
 
         public BigDecimal getPaidCreditsPerRequest() {

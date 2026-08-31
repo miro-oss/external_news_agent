@@ -21,13 +21,14 @@ class CollectionRunExecutionServiceTest {
 
     private final CollectionRunItemRepository runItemRepository = mock(CollectionRunItemRepository.class);
     private final CollectionExecutor collectionExecutor = mock(CollectionExecutor.class);
+    private final CollectionCandidatePrioritizer candidatePrioritizer = mock(CollectionCandidatePrioritizer.class);
     private final ArticleContentEnricher contentEnricher = mock(ArticleContentEnricher.class);
     private final IssueClusteringService issueClusteringService = mock(IssueClusteringService.class);
     private final ArticleAnalysisPipeline analysisPipeline = mock(ArticleAnalysisPipeline.class);
     private final ReportCreationService reportCreationService = mock(ReportCreationService.class);
     private final CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
     private final CollectionRunExecutionService service = new CollectionRunExecutionService(
-            runItemRepository, collectionExecutor, contentEnricher, issueClusteringService,
+            runItemRepository, collectionExecutor, candidatePrioritizer, contentEnricher, issueClusteringService,
             analysisPipeline, reportCreationService, resultWriter);
 
     @Test

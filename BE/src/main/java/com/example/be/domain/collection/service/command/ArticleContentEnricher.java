@@ -2,9 +2,11 @@ package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.collection.content.ArticleContentClient;
 import com.example.be.domain.collection.content.ArticleContentResult;
+import com.example.be.domain.collection.converter.TopicKeywordFilter;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.FetchStatus;
-import com.example.be.domain.collection.repository.ArticleRepository;
+import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.robots.RobotsLookup;
 import com.example.be.domain.collection.robots.RobotsTxtClient;
 import com.example.be.domain.sources.entity.CrawlPolicy;
@@ -15,6 +17,7 @@ import org.springframework.stereotype.Component;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -36,13 +39,13 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ArticleContentEnricher {
 
-    private final ArticleRepository articleRepository;
+    private final CollectionRunArticleRepository runArticleRepository;
     private final ArticleContentClient contentClient;
     private final RobotsTxtClient robotsTxtClient;
     private final CollectionResultWriter resultWriter;
 
     public Set<Long> enrich(Long runId) {
-        List<Article> targets = articleRepository.findFullTextTargetsByRunId(runId);
+        List<Article> targets = prioritizedTargets(runId);
         if (targets.isEmpty()) {
             return Set.of();
         }
@@ -70,6 +73,31 @@ public class ArticleContentEnricher {
         blockedCountBySource.forEach((sourceId, count) ->
                 resultWriter.addFullTextBlockedWarning(runId, sourceId, count));
         return Set.copyOf(refreshedArticleIds);
+    }
+
+    private List<Article> prioritizedTargets(Long runId) {
+        Map<Long, Target> byArticleId = new LinkedHashMap<>();
+        for (CollectionRunArticle observation : runArticleRepository.findClusterTargetsByRunId(runId)) {
+            Article article = observation.getArticle();
+            if (article.getFetchStatus() != FetchStatus.METADATA_ONLY
+                    && article.getFetchStatus() != FetchStatus.FETCH_FAILED) {
+                continue;
+            }
+            double metadataFit = TopicKeywordFilter.metadataFit(
+                    observation.getTopic(), article.getTitle(), article.getSummary());
+            byArticleId.merge(
+                    article.getId(),
+                    new Target(article, metadataFit),
+                    (left, right) -> left.metadataFit() >= right.metadataFit() ? left : right);
+        }
+        return byArticleId.values().stream()
+                .sorted(Comparator.comparingDouble(Target::metadataFit).reversed()
+                        .thenComparing(
+                                target -> target.article().getPublishedAt(),
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(target -> target.article().getId()))
+                .map(Target::article)
+                .toList();
     }
 
     /**
@@ -116,5 +144,8 @@ public class ArticleContentEnricher {
         } catch (URISyntaxException e) {
             return null;
         }
+    }
+
+    private record Target(Article article, double metadataFit) {
     }
 }

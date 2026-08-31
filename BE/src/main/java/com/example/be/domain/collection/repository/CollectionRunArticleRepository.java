@@ -29,6 +29,16 @@ public interface CollectionRunArticleRepository
 
     long countByRunIdAndChangeType(Long runId, ChangeType changeType);
 
+    /** run 커버리지는 기사×주제 관측을 분모로 삼는다. */
+    @Query("""
+            SELECT observation.article.id AS articleId,
+                   observation.topic.id AS topicId
+            FROM CollectionRunArticle observation
+            WHERE observation.run.id = :runId
+            ORDER BY observation.id ASC
+            """)
+    List<CoverageObservation> findCoverageObservationsByRunId(@Param("runId") Long runId);
+
     /** 이번 실행에서 관측한 고유 기사별 최신 수집 상태를 보고서 통계에 제공한다. */
     @Query("""
             SELECT observation.article.id AS articleId,
@@ -124,6 +134,13 @@ public interface CollectionRunArticleRepository
         Long getArticleId();
 
         FetchStatus getFetchStatus();
+    }
+
+    interface CoverageObservation {
+
+        Long getArticleId();
+
+        Long getTopicId();
     }
 
 }

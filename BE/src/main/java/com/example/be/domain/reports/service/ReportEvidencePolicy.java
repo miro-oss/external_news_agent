@@ -7,7 +7,7 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 
 /** 최종 보고서에 사용할 수 있는 근거 연결만 남기는 공통 정책이다. */
-final class ReportEvidencePolicy {
+public final class ReportEvidencePolicy {
 
     private ReportEvidencePolicy() {
     }
@@ -18,7 +18,7 @@ final class ReportEvidencePolicy {
                 .toList();
     }
 
-    static boolean hasSupportedEvidence(Finding finding) {
+    public static boolean hasSupportedEvidence(Finding finding) {
         return !supportedKeyPoints(finding).isEmpty();
     }
 

@@ -198,7 +198,7 @@ public class CollectionRunController {
     @GetMapping("/{runId}")
     @Operation(
             summary = "수집 실행 상세 조회",
-            description = "수집 실행 1건의 진행 상황과 결과를 조회합니다. 조합별 breakdown과 warnings를 포함합니다."
+            description = "수집 실행 1건의 진행 상황과 결과를 조회합니다. 단계별 coverage, 조합별 breakdown과 warnings를 포함합니다."
     )
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -221,6 +221,19 @@ public class CollectionRunController {
                                 "updatedCount": 3,
                                 "skippedCount": 111,
                                 "reportId": 17,
+                                "coverage": {
+                                  "observedArticleCount": 32,
+                                  "issueAssignedArticleCount": 32,
+                                  "issueAssignmentRate": 1.0,
+                                  "issueCount": 32,
+                                  "analysisTargetIssueCount": 30,
+                                  "llmAnalyzedIssueCount": 30,
+                                  "llmAnalysisRate": 0.9375,
+                                  "reportReflectedIssueCount": 28,
+                                  "reportExcludedIssueCount": 2,
+                                  "reportCoverageRate": 1.0,
+                                  "issueLimitPerRun": 30
+                                },
                                 "breakdown": [],
                                 "warnings": []
                               }

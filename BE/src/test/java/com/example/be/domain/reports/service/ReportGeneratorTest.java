@@ -177,6 +177,7 @@ class ReportGeneratorTest {
         assertTrue(!document.markdownBody().contains("제외할 주장"));
         assertTrue(document.markdownBody().contains("검증된 주장"));
         assertTrue(document.markdownBody().contains("근거 부족 분석 1건 제외"));
+        assertTrue(document.markdownBody().contains("왜곡 기사 — 검증된 문장 근거가 없어 제외했습니다."));
     }
 
     @Test

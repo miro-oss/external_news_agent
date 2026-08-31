@@ -44,6 +44,7 @@ import java.util.stream.LongStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -268,12 +269,15 @@ class AgentReportOrchestratorTest {
                 .toList();
         when(client.report(any())).thenReturn(response(List.of(1L)));
 
-        orchestrator.generate(run(), findings, LocalDateTime.of(2026, 8, 21, 9, 3));
+        ReportDocument document = orchestrator.generate(
+                run(), findings, LocalDateTime.of(2026, 8, 21, 9, 3));
 
         ArgumentCaptor<AgentReportRequest> captor = ArgumentCaptor.forClass(AgentReportRequest.class);
         verify(client).report(captor.capture());
         assertEquals(50, captor.getValue().findings().size());
         assertEquals(1L, captor.getValue().findings().getFirst().id());
+        assertTrue(document.markdownBody().contains("## 기타 분석 이슈"));
+        assertTrue(document.markdownBody().contains("기사 2"));
     }
 
     @Test
@@ -292,7 +296,7 @@ class AgentReportOrchestratorTest {
                 List.of(new FindingKeyPoint("근거 없는 주장", List.of(0), "ungrounded")));
         when(client.report(any())).thenReturn(response(List.of(501L)));
 
-        orchestrator.generate(
+        ReportDocument document = orchestrator.generate(
                 run(), List.of(unsupported, supported), LocalDateTime.of(2026, 8, 21, 9, 3));
 
         ArgumentCaptor<AgentReportRequest> captor = ArgumentCaptor.forClass(AgentReportRequest.class);
@@ -300,6 +304,8 @@ class AgentReportOrchestratorTest {
         assertEquals(List.of(501L), captor.getValue().findings().stream()
                 .map(AgentReportRequest.FindingPayload::id)
                 .toList());
+        assertTrue(document.markdownBody()
+                .contains("기사 502 — 검증된 문장 근거가 없어 제외했습니다."));
     }
 
     @Test

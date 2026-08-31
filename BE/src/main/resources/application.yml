@@ -44,6 +44,12 @@ springdoc:
     path: /v3/api-docs
 
 news:
+  collection:
+    # 조합별 선착순 상한 대신 주제 전체 후보를 metadataFit으로 정렬해 고른다.
+    topic-article-limit: 300
+  analysis:
+    # 기사 수가 아니라 이번 실행에서 변화가 생긴 이슈 대표 수를 제한한다.
+    issue-limit-per-run: 30
   clustering:
     # P1-1 골든 클러스터셋 홀드아웃 스윕에서 고정한 균등 자카드 기준이다.
     title-jaccard-threshold: 0.50
@@ -73,12 +79,10 @@ news:
     free-model: ${GEMINI_MODEL:}
     paid-model: ${MINDLOGIC_CLAUDE_MODEL:}
     quota:
-      free-run-article-limit: 30
       free-daily-calls: 1500
       paid-monthly-credits: 3000
       paid-daily-credits: 90
       paid-daily-report-reserve: 20
-      paid-run-article-limit: 20
       # 실사용량이 없을 때 적용할 요청당 환산값과 Agent hard cap. 호출 전에는 hard cap을 예약한다.
       paid-credits-per-request: 1
       paid-max-credits-per-request: ${AGENT_HARD_CAP_CREDITS_PER_REQUEST:5}

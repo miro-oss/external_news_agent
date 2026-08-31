@@ -4,6 +4,7 @@ import com.example.be.domain.collection.dto.res.CollectionRunResDTO;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
+import com.example.be.domain.collection.service.query.CollectionRunCoverage;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.global.config.ApiTimeZone;
 
@@ -62,7 +63,8 @@ public class CollectionRunConverter {
 
     public static CollectionRunResDTO.Detail toDetail(CollectionRun run,
                                                       List<CollectionRunItem> items,
-                                                      List<CollectionRunWarning> warnings) {
+                                                      List<CollectionRunWarning> warnings,
+                                                      CollectionRunCoverage coverage) {
         return CollectionRunResDTO.Detail.builder()
                 .runId(run.getId())
                 .status(run.getStatus().name())
@@ -76,8 +78,25 @@ public class CollectionRunConverter {
                 .skippedCount(run.getSkippedCount())
                 .reportId(run.getReportId())
                 .llmPlan(run.getLlmPlan().name())
+                .coverage(toCoverage(coverage))
                 .breakdown(toBreakdown(items))
                 .warnings(toWarnings(warnings))
+                .build();
+    }
+
+    private static CollectionRunResDTO.Coverage toCoverage(CollectionRunCoverage coverage) {
+        return CollectionRunResDTO.Coverage.builder()
+                .observedArticleCount(coverage.observedArticleCount())
+                .issueAssignedArticleCount(coverage.issueAssignedArticleCount())
+                .issueAssignmentRate(coverage.issueAssignmentRate())
+                .issueCount(coverage.issueCount())
+                .analysisTargetIssueCount(coverage.analysisTargetIssueCount())
+                .llmAnalyzedIssueCount(coverage.llmAnalyzedIssueCount())
+                .llmAnalysisRate(coverage.llmAnalysisRate())
+                .reportReflectedIssueCount(coverage.reportReflectedIssueCount())
+                .reportExcludedIssueCount(coverage.reportExcludedIssueCount())
+                .reportCoverageRate(coverage.reportCoverageRate())
+                .issueLimitPerRun(coverage.issueLimitPerRun())
                 .build();
     }
 

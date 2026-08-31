@@ -1,6 +1,8 @@
 package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.config.AnalysisSelectionProperties;
+import com.example.be.domain.collection.converter.TopicKeywordFilter;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
@@ -9,11 +11,14 @@ import com.example.be.domain.collection.repository.CollectionRunArticleRepositor
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.topics.entity.Topic;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +37,7 @@ public class ArticleAnalysisPipeline {
     private final ArticleAnalysisOrchestrator orchestrator;
     private final FindingReuseCache reuseCache;
     private final FindingWriter findingWriter;
+    private final AnalysisSelectionProperties selectionProperties;
 
     public void analyze(Long runId) {
         analyze(runId, Set.of());
@@ -88,7 +94,7 @@ public class ArticleAnalysisPipeline {
         Map<Long, Target> byArticleId = new LinkedHashMap<>();
         if (!clustered) {
             addUnclusteredTargets(byArticleId, runId, refreshedArticleIds);
-            return byArticleId.values().stream().filter(this::isReady).toList();
+            return prioritized(byArticleId.values());
         }
         for (CollectionRunArticle observation :
                 runArticleRepository.findRepresentativeAnalysisTargetsByRunId(runId)) {
@@ -109,15 +115,23 @@ public class ArticleAnalysisPipeline {
                     issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(
                             runId, refreshedArticleIds));
         }
-        return byArticleId.values().stream().filter(this::isReady).toList();
+        return prioritized(byArticleId.values());
     }
 
     private void addMissingRepresentatives(Map<Long, Target> targets, List<IssueArticle> memberships) {
         if (memberships == null) {
             return;
         }
-        memberships.forEach(membership -> targets.putIfAbsent(
-                membership.getArticle().getId(), new Target(membership.getArticle(), ChangeType.UPDATED)));
+        memberships.forEach(membership -> {
+            Article article = membership.getArticle();
+            Topic topic = membership.getIssue() == null
+                    ? article.getTopic()
+                    : membership.getIssue().getTopic();
+            targets.merge(
+                    article.getId(),
+                    new Target(article, ChangeType.UPDATED, metadataFit(topic, article)),
+                    this::preferUpdated);
+        });
     }
 
     private void addUnclusteredTargets(Map<Long, Target> targets,
@@ -139,8 +153,29 @@ public class ArticleAnalysisPipeline {
     private void addTarget(Map<Long, Target> byArticleId,
                            CollectionRunArticle observation,
                            ChangeType changeType) {
-        Target candidate = new Target(observation.getArticle(), changeType);
+        Target candidate = new Target(
+                observation.getArticle(),
+                changeType,
+                metadataFit(observation.getTopic(), observation.getArticle()));
         byArticleId.merge(observation.getArticle().getId(), candidate, this::preferUpdated);
+    }
+
+    private List<Target> prioritized(Collection<Target> targets) {
+        return targets.stream()
+                .filter(this::isReady)
+                .sorted(Comparator.comparingDouble(Target::metadataFit).reversed()
+                        .thenComparing(
+                                target -> target.article().getPublishedAt(),
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(target -> target.article().getId()))
+                .limit(selectionProperties.getIssueLimitPerRun())
+                .toList();
+    }
+
+    private double metadataFit(Topic topic, Article article) {
+        return topic == null
+                ? 1.0
+                : TopicKeywordFilter.metadataFit(topic, article.getTitle(), article.getSummary());
     }
 
     private boolean isReady(Target target) {
@@ -150,13 +185,17 @@ public class ArticleAnalysisPipeline {
     }
 
     private Target preferUpdated(Target left, Target right) {
-        return left.changeType() == ChangeType.UPDATED ? left : right;
+        ChangeType changeType = left.changeType() == ChangeType.UPDATED
+                || right.changeType() == ChangeType.UPDATED
+                ? ChangeType.UPDATED
+                : right.changeType();
+        return new Target(left.article(), changeType, Math.max(left.metadataFit(), right.metadataFit()));
     }
 
     private String messageOf(RuntimeException exception) {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
     }
 
-    private record Target(Article article, ChangeType changeType) {
+    private record Target(Article article, ChangeType changeType, double metadataFit) {
     }
 }

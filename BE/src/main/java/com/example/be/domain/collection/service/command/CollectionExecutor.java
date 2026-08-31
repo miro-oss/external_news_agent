@@ -37,20 +37,29 @@ public class CollectionExecutor {
     private final CollectionResultWriter resultWriter;
 
     public void execute(Long runId, Long itemId, Topic topic, Source source, boolean forceRefresh) {
+        CollectionBatch batch = collect(itemId, topic, source, forceRefresh);
+        if (batch.failed()) {
+            resultWriter.writeFailure(runId, itemId, source.getId(), batch.failureMessage());
+            return;
+        }
+        resultWriter.write(runId, itemId, topic.getId(), source.getId(), batch.outcome());
+    }
+
+    public CollectionBatch collect(Long itemId, Topic topic, Source source, boolean forceRefresh) {
         try {
-            CollectionOutcome outcome = collect(topic, source, forceRefresh);
-            resultWriter.write(runId, itemId, topic.getId(), source.getId(), outcome);
+            return CollectionBatch.success(itemId, topic, source,
+                    collectOutcome(topic, source, forceRefresh));
         } catch (RuntimeException e) {
             log.warn("조합 수집에 실패했다. topicId={} sourceId={} error={}",
                     topic.getId(), source.getId(), e.getMessage(), e);
-            resultWriter.writeFailure(runId, itemId, source.getId(), messageOf(e));
+            return CollectionBatch.failure(itemId, topic, source, messageOf(e));
         }
     }
 
     /**
      * 외부 호출과 대기만 한다. DB는 건드리지 않는다.
      */
-    private CollectionOutcome collect(Topic topic, Source source, boolean forceRefresh) {
+    private CollectionOutcome collectOutcome(Topic topic, Source source, boolean forceRefresh) {
         if (source.isSearchKind()) {
             return CollectionOutcome.of(searchOf(topic, source), RobotsDecision.skipped(source));
         }

@@ -90,7 +90,7 @@ public class AgentReportOrchestrator {
                     selection.plan(),
                     selection.reservation().idempotencyKey());
             AgentReportResponse response = client.report(request);
-            ReportDocument document = toDocument(response, request);
+            ReportDocument document = toDocument(response, request, representativeFindings);
             recordSuccessSafely(run.getId(), request, response, startedAt);
             completeSuccessSafely(selection.reservation(), response.meta().credits());
             return document;
@@ -272,12 +272,14 @@ public class AgentReportOrchestrator {
                         .toList());
     }
 
-    private ReportDocument toDocument(AgentReportResponse response, AgentReportRequest request) {
+    private ReportDocument toDocument(AgentReportResponse response,
+                                      AgentReportRequest request,
+                                      List<Finding> representativeFindings) {
         validate(response, request);
         AgentReportResponse.Meta meta = response.meta();
         return new ReportDocument(
                 response.title().trim(),
-                response.markdownBody(),
+                appendCoverage(response, request, representativeFindings),
                 meta.model(),
                 meta.promptVersion(),
                 meta.provider(),
@@ -286,6 +288,50 @@ public class AgentReportOrchestrator {
                 meta.costUsd(),
                 meta.credits(),
                 meta.mock() ? ReportStatus.MOCK : ReportStatus.GENERATED);
+    }
+
+    private String appendCoverage(AgentReportResponse response,
+                                  AgentReportRequest request,
+                                  List<Finding> representativeFindings) {
+        Set<Long> referencedIds = new HashSet<>();
+        response.importantEvents().forEach(event -> referencedIds.addAll(event.sourceFindingIds()));
+        response.watchItems().forEach(item -> referencedIds.addAll(item.sourceFindingIds()));
+        List<AgentReportRequest.FindingPayload> unreferenced = request.findings().stream()
+                .filter(finding -> !referencedIds.contains(finding.id()))
+                .toList();
+        List<Finding> excluded = representativeFindings.stream()
+                .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
+                .filter(finding -> !ReportEvidencePolicy.hasSupportedEvidence(finding))
+                .toList();
+        if (unreferenced.isEmpty() && excluded.isEmpty()) {
+            return response.markdownBody();
+        }
+
+        StringBuilder markdown = new StringBuilder(response.markdownBody().stripTrailing());
+        if (!unreferenced.isEmpty()) {
+            markdown.append("\n\n## 기타 분석 이슈\n\n");
+            unreferenced.forEach(finding -> markdown
+                    .append("- [")
+                    .append(markdownText(finding.articleTitle()))
+                    .append("](<")
+                    .append(finding.canonicalUrl())
+                    .append(">)\n"));
+        }
+        if (!excluded.isEmpty()) {
+            markdown.append("\n## 보고서 제외 이슈\n\n");
+            excluded.forEach(finding -> markdown
+                    .append("- ")
+                    .append(markdownText(finding.getArticle().getTitle()))
+                    .append(" — 검증된 문장 근거가 없어 제외했습니다.\n"));
+        }
+        return markdown.toString();
+    }
+
+    private String markdownText(String value) {
+        return value == null
+                ? ""
+                : value.replaceAll("\\s+", " ").trim()
+                .replaceAll("([\\\\`*_{}\\[\\]<>()#+!|])", "\\\\$1");
     }
 
     private void validate(AgentReportResponse response, AgentReportRequest request) {

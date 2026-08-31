@@ -49,10 +49,14 @@ public class ReportGenerator {
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
                 .filter(ReportEvidencePolicy::hasSupportedEvidence)
                 .toList());
+        List<Finding> excluded = ReportFindingOrder.sort(findings.stream()
+                .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
+                .filter(finding -> !ReportEvidencePolicy.hasSupportedEvidence(finding))
+                .toList());
         String title = title(ordered, generatedAt);
         return new ReportDocument(
                 title,
-                markdown(title, ordered, effectiveStats),
+                markdown(title, ordered, excluded, effectiveStats),
                 MODEL_NAME,
                 null,
                 null,
@@ -73,7 +77,10 @@ public class ReportGenerator {
         return truncateUtf8(prefix + " 보고서 " + generatedAt.format(TITLE_TIME), NewsReport.MAX_TITLE_LENGTH);
     }
 
-    private String markdown(String title, List<Finding> findings, ReportSourceStats sourceStats) {
+    private String markdown(String title,
+                            List<Finding> findings,
+                            List<Finding> excluded,
+                            ReportSourceStats sourceStats) {
         StringBuilder body = new StringBuilder("# ").append(markdownText(title)).append("\n\n");
         body.append("## 오늘의 핵심\n\n");
         if (findings.isEmpty()) {
@@ -120,6 +127,12 @@ public class ReportGenerator {
             if (safeHttpUrl(finding.getArticle().getCanonicalUrl())) {
                 body.append("- 원문: <").append(finding.getArticle().getCanonicalUrl().trim()).append(">\n");
             }
+        }
+        if (!excluded.isEmpty()) {
+            body.append("\n## 보고서 제외 이슈\n\n");
+            excluded.forEach(finding -> body
+                    .append("- ").append(markdownText(finding.getArticle().getTitle()))
+                    .append(" — 검증된 문장 근거가 없어 제외했습니다.\n"));
         }
         appendSourceNotes(body, sourceStats);
         return body.toString();

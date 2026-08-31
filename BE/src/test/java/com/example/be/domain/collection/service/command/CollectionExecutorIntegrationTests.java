@@ -283,7 +283,7 @@ class CollectionExecutorIntegrationTests {
     }
 
     @Test
-    void limitsArticlesToCrawlPolicy() {
+    void ignoresDeprecatedCrawlPolicyArticleLimit() {
         Source limited = sourceRepository.save(Source.builder()
                 .sourceKind(Source.KIND_FEED)
                 .name("정책 제한 소스")
@@ -305,7 +305,7 @@ class CollectionExecutorIntegrationTests {
         flushAndClear();
 
         assertEquals(3, item.getScannedCount());
-        assertEquals(2, item.getNewCount());
+        assertEquals(3, item.getNewCount());
     }
 
     /**

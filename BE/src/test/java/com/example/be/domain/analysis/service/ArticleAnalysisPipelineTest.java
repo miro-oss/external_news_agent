@@ -1,6 +1,7 @@
 package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.config.AnalysisSelectionProperties;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -40,10 +41,11 @@ class ArticleAnalysisPipelineTest {
     private final ArticleAnalysisOrchestrator orchestrator = mock(ArticleAnalysisOrchestrator.class);
     private final FindingReuseCache reuseCache = mock(FindingReuseCache.class);
     private final FindingWriter findingWriter = mock(FindingWriter.class);
+    private final AnalysisSelectionProperties selectionProperties = new AnalysisSelectionProperties();
     private final ArticleAnalysisPipeline pipeline =
             new ArticleAnalysisPipeline(
                     runArticleRepository, runRepository, issueArticleRepository,
-                    orchestrator, reuseCache, findingWriter);
+                    orchestrator, reuseCache, findingWriter, selectionProperties);
 
     @BeforeEach
     void loadRunPlan() {
@@ -200,9 +202,43 @@ class ArticleAnalysisPipelineTest {
         verify(findingWriter).write(42L, 10L, ChangeType.UPDATED, inputHash(article), reused);
     }
 
+    @Test
+    void limitsIssuesAfterOrderingByMetadataFit() {
+        selectionProperties.setIssueLimitPerRun(2);
+        com.example.be.domain.topics.entity.Topic topic =
+                com.example.be.domain.topics.entity.Topic.builder()
+                        .optionalKeywords(List.of("HBM", "삼성", "양산"))
+                        .build();
+        Article low = Article.builder().id(10L).title("HBM 소식").summary("요약").build();
+        Article high = Article.builder().id(11L).title("삼성 HBM 양산").summary("요약").build();
+        Article medium = Article.builder().id(12L).title("삼성 HBM").summary("요약").build();
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
+                observation(low, topic, ChangeType.NEW),
+                observation(high, topic, ChangeType.NEW),
+                observation(medium, topic, ChangeType.NEW)));
+        when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
+
+        pipeline.analyze(42L);
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(orchestrator);
+        order.verify(orchestrator).analyze(new AnalysisContext(42L, high, AgentPlan.FREE));
+        order.verify(orchestrator).analyze(new AnalysisContext(42L, medium, AgentPlan.FREE));
+        verify(orchestrator, never()).analyze(new AnalysisContext(42L, low, AgentPlan.FREE));
+    }
+
     private CollectionRunArticle observation(Article article, ChangeType changeType) {
         return CollectionRunArticle.builder()
                 .article(article)
+                .changeType(changeType)
+                .build();
+    }
+
+    private CollectionRunArticle observation(Article article,
+                                             com.example.be.domain.topics.entity.Topic topic,
+                                             ChangeType changeType) {
+        return CollectionRunArticle.builder()
+                .article(article)
+                .topic(topic)
                 .changeType(changeType)
                 .build();
     }
