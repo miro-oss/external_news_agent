@@ -188,14 +188,17 @@ public class IssueClusterer {
                 .filter(article -> contentGrouping.representativeByArticle().get(article.articleId())
                         .equals(article.articleId()))
                 .toList();
+        Set<String> commonEntities = commonEntities(voting, entities);
         for (int left = 0; left < voting.size(); left++) {
             for (int right = left + 1; right < voting.size(); right++) {
                 ClusterArticle first = voting.get(left);
                 ClusterArticle second = voting.get(right);
                 double jaccard = jaccard(
                         titleTokens.get(first.articleId()), titleTokens.get(second.articleId()));
-                int entityOverlap = intersectionSize(
-                        entities.get(first.articleId()), entities.get(second.articleId()));
+                int entityOverlap = discriminativeOverlap(
+                        entities.get(first.articleId()),
+                        entities.get(second.articleId()),
+                        commonEntities);
                 double hoursApart = hoursApart(first.eventTime(), second.eventTime());
                 boolean breakingPair = breakingNewsDetector.isBreaking(first)
                         || breakingNewsDetector.isBreaking(second);
@@ -312,6 +315,40 @@ public class IssueClusterer {
     private int intersectionSize(Set<String> left, Set<String> right) {
         Set<String> intersection = new HashSet<>(left);
         intersection.retainAll(right);
+        return intersection.size();
+    }
+
+    /**
+     * 이번 실행에서 이 주제의 기사 상당수에 나타나는 엔티티를 고른다. 사건이 아니라 주제를 가리키는 말이다.
+     *
+     * <p>반도체 주제에서 {@code HBM}·{@code GPU}·{@code 삼성전자}가 그렇다. 이런 걸 2개 공유했다고
+     * 같은 사건으로 묶으면 주제 전체가 한 이슈가 된다 (#118). 실행 안에서만 세므로 IDF 테이블도
+     * DB 조회도 필요 없고, 같은 입력이면 같은 결과라 결정론이 깨지지 않는다.
+     *
+     * <p>표본이 작으면 비율이 의미를 갖지 못하므로 기사 수가 기준 미만이면 아무것도 빼지 않는다.
+     */
+    private Set<String> commonEntities(List<ClusterArticle> voting, Map<Long, Set<String>> entities) {
+        if (voting.size() < properties.getCommonEntityMinArticles()) {
+            return Set.of();
+        }
+        Map<String, Integer> documentFrequency = new HashMap<>();
+        for (ClusterArticle article : voting) {
+            for (String entity : entities.getOrDefault(article.articleId(), Set.of())) {
+                documentFrequency.merge(entity, 1, Integer::sum);
+            }
+        }
+        int cut = (int) Math.ceil(voting.size() * properties.getCommonEntityDocumentRatio());
+        return documentFrequency.entrySet().stream()
+                .filter(entry -> entry.getValue() >= cut)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    /** 주제 어휘를 뺀 뒤 남는 교집합만 사건 신호로 센다. */
+    private int discriminativeOverlap(Set<String> left, Set<String> right, Set<String> common) {
+        Set<String> intersection = new HashSet<>(left);
+        intersection.retainAll(right);
+        intersection.removeAll(common);
         return intersection.size();
     }
 
