@@ -195,11 +195,11 @@ export function useReport(reportId: number | null) {
   })
 }
 
-export function useIssue(issueId: number | null) {
+export function useIssue(issueId: number | null, enabled = true) {
   return useQuery({
     queryKey: keys.issue(issueId),
     queryFn: () => get<IssueDetail>(`/issues/${issueId}`),
-    enabled: issueId !== null,
+    enabled: issueId !== null && enabled,
   })
 }
 

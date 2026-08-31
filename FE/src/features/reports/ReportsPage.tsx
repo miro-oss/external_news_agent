@@ -146,7 +146,7 @@ function ReportListItem({ report, active, onSelect }: {
       <span className="report-list-date">{formatShortDate(report.generatedAt)}</span>
       <strong>{report.title}</strong>
       <span className="report-list-meta">
-        이슈 {report.findingCount}건
+        분석 {report.findingCount}건
         {report.highRiskCount > 0 && <em>{RISK_LEVEL_LABELS.high} {report.highRiskCount}</em>}
       </span>
     </button>
@@ -160,11 +160,11 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
   onAudienceSelect: (audience: Audience) => void
   onEvidenceSelect: (articleId: number, sentences: number[]) => void
 }) {
-  const stats = report.summaryStats
   const findings = useMemo(
-    () => sortFindingsForAudience(report.findings ?? [], audience),
+    () => selectFindingsForAudience(report.findings ?? [], audience),
     [audience, report.findings],
   )
+  const stats = useMemo(() => summarizeFindings(findings), [findings])
   const evidenceCount = useMemo(() => countEvidenceSentences(report.findings ?? []), [report.findings])
   return (
     <article className="report-document">
@@ -179,10 +179,10 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
           </details>
         </div>
         <div className="report-stat-row" aria-label="보고서 요약 통계">
-          <ReportStat value={stats.findingCount} label="전체 이슈" />
+          <ReportStat value={findings.length} label="전체 이슈" />
           <ReportStat value={stats.newCount} label={CHANGE_TYPE_LABELS.NEW} />
           <ReportStat value={stats.updatedCount} label={CHANGE_TYPE_LABELS.UPDATED} />
-          <ReportStat value={stats.byRiskLevel.high ?? 0} label={RISK_LEVEL_LABELS.high} tone="danger" />
+          <ReportStat value={stats.highRiskCount} label={RISK_LEVEL_LABELS.high} tone="danger" />
         </div>
       </header>
 
@@ -233,12 +233,11 @@ function ReportPerspectiveSelector({ audience, defaultAudience, onSelect }: {
         <div><h3>누구의 관점으로 볼까요?</h3><p>저장된 리포트는 그대로 두고 이슈 순서와 강조만 바꿉니다.</p></div>
         <span>추가 AI 호출 없음</span>
       </div>
-      <div className="report-perspective-tabs" role="tablist" aria-label="독자 관점">
+      <div className="report-perspective-tabs" role="group" aria-label="독자 관점">
         {AUDIENCES.map((item) => (
           <button
             type="button"
-            role="tab"
-            aria-selected={audience === item}
+            aria-pressed={audience === item}
             className={audience === item ? 'report-perspective-tab active' : 'report-perspective-tab'}
             key={item}
             onClick={() => onSelect(item)}
@@ -351,14 +350,15 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
   const panelId = `${useId()}-issue-detail`
   // FE와 BE가 따로 재시작되는 로컬 환경에서도 구버전 응답의 누락 값을 잘못 조회하지 않는다.
   const issueId = finding.issueId ?? null
-  const issue = useIssue(issueId)
+  const issue = useIssue(issueId, open)
+  const issueInfo = finding.issue ?? issue.data
   const keyPoints = useMemo(() => normalizeKeyPoints(finding.keyPoints), [finding.keyPoints])
   const perspective = perspectiveFor(finding, audience)
-  const title = issue.data?.title || finding.articleTitle
-  const summary = limitText(issue.data?.summary || finding.summary, 120)
+  const title = issueInfo?.title || finding.articleTitle
+  const summary = limitText(issueInfo?.summary || finding.summary, 120)
   const keywords = unique([
-    ...(issue.data?.entities ?? []),
-    ...(issue.data?.topicName ? [issue.data.topicName] : []),
+    ...(issueInfo?.entities ?? []),
+    ...(issueInfo?.topicName ? [issueInfo.topicName] : []),
   ]).slice(0, 4)
 
   return (
@@ -367,24 +367,29 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
         <div className="issue-card-topline">
           <span className={`signal-dot risk-${finding.riskLevel}`} aria-hidden="true" />
           <span className={`status-pill risk-label-${finding.riskLevel}`}>
-            {issue.data?.sensitivityScore !== null && issue.data?.sensitivityScore !== undefined
-              ? `민감 ${Math.round(issue.data.sensitivityScore)}`
-              : RISK_LEVEL_LABELS[finding.riskLevel]}
+            {RISK_LEVEL_LABELS[finding.riskLevel]}
           </span>
           <span>{finding.category}</span>
-          {issue.data && <time dateTime={issue.data.lastSeenAt}>{formatShortDate(issue.data.lastSeenAt)}</time>}
+          {issueInfo && <time dateTime={issueInfo.lastSeenAt}>{formatShortDate(issueInfo.lastSeenAt)}</time>}
         </div>
         <h4>{title}</h4>
         <p className="issue-card-summary">{summary}</p>
         <div className="issue-card-footer">
           <span className="issue-source-count">
-            {issue.isPending && issueId !== null
+            {issue.isError && issueId !== null
+              ? '관련 기사 상세 불러오기 실패'
+              : issue.isLoading && issueId !== null
               ? '관련 기사 확인 중'
-              : `관련 ${issue.data?.articleCount ?? 1}건 · 매체 ${issue.data?.publisherCount ?? 1}곳`}
+              : issueInfo
+                ? `관련 ${issueInfo.articleCount}건 · 매체 ${issueInfo.publisherCount}곳`
+                : issueId === null
+                  ? '관련 1건 · 매체 1곳'
+                  : '관련 기사 정보는 자세히에서 확인'}
           </span>
           <div className="issue-keywords" aria-label="이슈 키워드">
             {keywords.map((keyword) => <span key={keyword}>#{keyword}</span>)}
-            {issue.isPending && issueId !== null && <span className="issue-keywords-loading">키워드 확인 중</span>}
+            {!issueInfo && issue.isLoading && issueId !== null && <span className="issue-keywords-loading">키워드 확인 중</span>}
+            {!issueInfo && issue.isError && issueId !== null && <span className="issue-keywords-loading">키워드 불러오기 실패</span>}
           </div>
           <button
             type="button"
@@ -416,16 +421,16 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
 
           <KeyPointList
             points={keyPoints}
-            articleTitle={title}
+            articleTitle={finding.articleTitle}
             onEvidenceSelect={(sentenceId) => onEvidenceSelect(finding.articleId, [sentenceId])}
           />
 
           <section className="issue-related-articles">
             <div className="issue-detail-heading">
               <h5>관련 기사</h5>
-              <span>{issue.data?.articles.length ?? 1}건</span>
+              <span>{issue.data?.articles.length ?? issueInfo?.articleCount ?? 1}건</span>
             </div>
-            {issue.isPending && <p className="issue-detail-state">관련 기사를 불러오는 중입니다.</p>}
+            {issue.isLoading && <p className="issue-detail-state">관련 기사를 불러오는 중입니다.</p>}
             {issue.isError && <p className="issue-detail-state error">이슈 묶음을 불러오지 못했습니다. 대표 기사로 이동할 수 있습니다.</p>}
             {issue.data ? (
               <ul>
@@ -439,7 +444,7 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
                   </li>
                 ))}
               </ul>
-            ) : !issue.isPending && (
+            ) : !issue.isLoading && (
               <div className="issue-legacy-actions">
                 <button type="button" className="text-button" onClick={() => onEvidenceSelect(finding.articleId, [])}>대표 기사 본문 보기</button>
                 <a href={finding.canonicalUrl} target="_blank" rel="noreferrer">원문 열기 ↗</a>
@@ -449,7 +454,7 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
 
           <div className="issue-reference-meta">
             <span>{CHANGE_TYPE_LABELS[finding.changeType]}</span>
-            {issue.data && <span>독립 원문 {issue.data.independentContentCount}건</span>}
+            {issueInfo && <span>독립 원문 {issueInfo.independentContentCount}건</span>}
             {finding.intent && <span>발표 맥락 · {finding.intent}</span>}
           </div>
         </div>
@@ -469,7 +474,7 @@ function ReportDisclaimer({ report, audience }: { report: ReportDetail; audience
         <ul>
           <li>요약은 원문 문장에서 생성했고, 근거가 없는 문장은 보고서 대상에서 제외했습니다.</li>
           <li>검증을 거쳤지만 오류가 있을 수 있으니 중요한 판단 전에 원문을 확인해 주세요.</li>
-          <li>시장·투자 관점은 정보 제공용이며 투자 자문이 아닙니다.</li>
+          {audience !== 'MARKET_INVESTOR' && <li>시장·투자 관점은 정보 제공용이며 투자 자문이 아닙니다.</li>}
           <li>{generationMeta(report)}</li>
         </ul>
       </details>
@@ -492,6 +497,24 @@ function sortFindingsForAudience(findings: ReportFinding[], audience: Audience) 
       return rankDifference || left.index - right.index
     })
     .map(({ finding }) => finding)
+}
+
+function selectFindingsForAudience(findings: ReportFinding[], audience: Audience) {
+  const seenIssueIds = new Set<number>()
+  return sortFindingsForAudience(findings, audience).filter((finding) => {
+    if (finding.issueId === null || finding.issueId === undefined) return true
+    if (seenIssueIds.has(finding.issueId)) return false
+    seenIssueIds.add(finding.issueId)
+    return true
+  })
+}
+
+function summarizeFindings(findings: ReportFinding[]) {
+  return {
+    newCount: findings.filter((finding) => finding.changeType === 'NEW').length,
+    updatedCount: findings.filter((finding) => finding.changeType === 'UPDATED').length,
+    highRiskCount: findings.filter((finding) => finding.riskLevel === 'high').length,
+  }
 }
 
 function perspectiveRank(finding: ReportFinding, audience: Audience) {

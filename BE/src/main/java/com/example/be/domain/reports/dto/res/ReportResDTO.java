@@ -78,14 +78,15 @@ public class ReportResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "id", "articleId", "issueId", "articleTitle", "canonicalUrl", "changeType", "summary", "keyPoints",
-            "intent", "sentiment", "riskLevel", "relevance", "category", "perspectiveTags"
+            "id", "articleId", "issueId", "issue", "articleTitle", "canonicalUrl", "changeType", "summary",
+            "keyPoints", "intent", "sentiment", "riskLevel", "relevance", "category", "perspectiveTags"
     })
     public static class Finding {
 
         private final Long id;
         private final Long articleId;
         private final Long issueId;
+        private final IssueSummary issue;
         private final String articleTitle;
         private final String canonicalUrl;
         private final String changeType;
@@ -97,6 +98,27 @@ public class ReportResDTO {
         private final String relevance;
         private final String category;
         private final List<PerspectiveTag> perspectiveTags;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @JsonPropertyOrder({
+            "id", "title", "summary", "lastSeenAt", "articleCount", "publisherCount",
+            "independentContentCount", "topicName", "entities"
+    })
+    @Schema(name = "ReportFindingIssueSummary", description = "접힌 이슈 카드에 필요한 이슈 요약")
+    public static class IssueSummary {
+
+        private final Long id;
+        private final String title;
+        private final String summary;
+        private final OffsetDateTime lastSeenAt;
+        private final int articleCount;
+        private final int publisherCount;
+        private final int independentContentCount;
+        private final String topicName;
+        private final List<String> entities;
     }
 
     @Getter

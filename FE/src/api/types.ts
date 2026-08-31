@@ -252,6 +252,7 @@ export interface ReportFinding {
   id: number
   articleId: number
   issueId: number | null
+  issue?: ReportIssueSummary | null
   articleTitle: string
   canonicalUrl: string
   changeType: ChangeType
@@ -263,6 +264,18 @@ export interface ReportFinding {
   relevance: Relevance
   category: string
   perspectiveTags: PerspectiveTag[]
+}
+
+export interface ReportIssueSummary {
+  id: number
+  title: string
+  summary: string | null
+  lastSeenAt: string
+  articleCount: number
+  publisherCount: number
+  independentContentCount: number
+  topicName: string
+  entities: string[]
 }
 
 export interface ReportDetail {
