@@ -72,6 +72,7 @@ public interface CollectionRunArticleRepository
             JOIN FETCH observation.article article
             JOIN FETCH article.topic
             JOIN FETCH article.source
+            JOIN FETCH observation.topic
             JOIN IssueArticle membership ON membership.article = article
             WHERE observation.run.id = :runId
               AND membership.issue.topic = observation.topic
@@ -91,6 +92,7 @@ public interface CollectionRunArticleRepository
             JOIN FETCH observation.article article
             JOIN FETCH article.topic
             JOIN FETCH article.source
+            JOIN FETCH observation.topic
             JOIN IssueArticle membership ON membership.article = article
             WHERE observation.run.id = :runId
               AND article.id IN :articleIds
@@ -109,6 +111,7 @@ public interface CollectionRunArticleRepository
             JOIN FETCH observation.article article
             JOIN FETCH article.topic
             JOIN FETCH article.source
+            JOIN FETCH observation.topic
             WHERE observation.run.id = :runId
               AND observation.changeType IN (
                   com.example.be.domain.collection.entity.ChangeType.NEW,
@@ -124,6 +127,7 @@ public interface CollectionRunArticleRepository
             JOIN FETCH observation.article article
             JOIN FETCH article.topic
             JOIN FETCH article.source
+            JOIN FETCH observation.topic
             WHERE observation.run.id = :runId
               AND article.id IN :articleIds
             ORDER BY observation.id ASC

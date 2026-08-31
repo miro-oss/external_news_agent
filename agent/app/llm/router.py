@@ -81,6 +81,9 @@ def get_analyze_provider(
                             rate_limit_max_backoff_seconds=(
                                 settings.rate_limit_max_backoff_seconds
                             ),
+                            rate_limit_max_wait_seconds=(
+                                settings.rate_limit_max_wait_seconds
+                            ),
                         )
                     )
                     _COORDINATOR_CACHE[plan] = coordinator

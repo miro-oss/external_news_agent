@@ -95,13 +95,21 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             @Param("topicIds") Collection<Long> topicIds,
             @Param("since") OffsetDateTime since);
 
-    /** 이번 실행에서 새 기사나 갱신 기사가 붙은 이슈의 대표를 반환한다. 대표 자체가 이번 run에 없어도 포함한다. */
+    /**
+     * 이번 실행에서 새 기사나 갱신 기사가 붙은 이슈의 대표를 반환한다. 대표 자체가 이번 run에 없어도 포함한다.
+     *
+     * <p>{@code representative.issue}까지 fetch join 하는 이유는 호출자인 {@code ArticleAnalysisPipeline}이
+     * 트랜잭션 밖에서 돌기 때문이다. {@code issue}는 {@code optional = false} LAZY라 프록시가 절대 null이 아니고,
+     * {@code open-in-view: false}에서 프록시를 건드리면 {@code LazyInitializationException}이 난다.
+     */
     @Query("""
             SELECT representative
             FROM IssueArticle representative
             JOIN FETCH representative.article representativeArticle
             JOIN FETCH representativeArticle.topic
             JOIN FETCH representativeArticle.source
+            JOIN FETCH representative.issue representativeIssue
+            JOIN FETCH representativeIssue.topic
             WHERE representative.role = com.example.be.domain.issues.entity.IssueArticleRole.REPRESENTATIVE
               AND representative.issue.id IN (
                   SELECT observedMembership.issue.id
@@ -118,13 +126,15 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             """)
     List<IssueArticle> findRepresentativesForRun(@Param("runId") Long runId);
 
-    /** 전문을 새로 확보한 멤버가 있는 이슈도 대표 분석을 갱신한다. */
+    /** 전문을 새로 확보한 멤버가 있는 이슈도 대표 분석을 갱신한다. issue fetch join 이유는 위와 같다. */
     @Query("""
             SELECT representative
             FROM IssueArticle representative
             JOIN FETCH representative.article representativeArticle
             JOIN FETCH representativeArticle.topic
             JOIN FETCH representativeArticle.source
+            JOIN FETCH representative.issue representativeIssue
+            JOIN FETCH representativeIssue.topic
             WHERE representative.role = com.example.be.domain.issues.entity.IssueArticleRole.REPRESENTATIVE
               AND representative.issue.id IN (
                   SELECT observedMembership.issue.id

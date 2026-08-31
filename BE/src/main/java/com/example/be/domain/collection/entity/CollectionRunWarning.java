@@ -42,6 +42,8 @@ public class CollectionRunWarning {
     public static final String CODE_REPORT_GENERATION_FAILED = "REPORT_GENERATION_FAILED";
     /** 이슈 파생 단계만 실패했다. 기사 분석은 이슈 필터 없이 계속한다. */
     public static final String CODE_ISSUE_CLUSTERING_FAILED = "ISSUE_CLUSTERING_FAILED";
+    /** 분석 단계가 기사 루프 바깥에서 실패했다. 수집 결과는 보존하고 보고서 생성으로 넘어간다. */
+    public static final String CODE_ANALYSIS_FAILED = "ANALYSIS_FAILED";
     /** 실행 도중 애플리케이션이 내려가 아무도 닫지 못한 실행. 다음 기동에서 reaper가 닫는다. */
     public static final String CODE_RUN_INTERRUPTED = "RUN_INTERRUPTED";
     /** 스레드풀이 작업을 거절해 시작조차 못 한 실행. */

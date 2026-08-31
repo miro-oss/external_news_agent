@@ -53,10 +53,18 @@ public class CollectionRunExecutionService {
                 resultWriter.addIssueClusteringFailedWarning(runId, exception.getMessage());
             }
             // 분석도 외부 어댑터 경계다. Stub 단계부터 실행 트랜잭션과 분리해 실제 LLM 교체 시에도 DB를 잡지 않는다.
-            if (clustered) {
-                analysisPipeline.analyze(runId, refreshedArticleIds);
-            } else {
-                analysisPipeline.analyzeWithoutClustering(runId, refreshedArticleIds);
+            // 기사 루프 안의 실패는 파이프라인이 직접 경고로 남긴다. 여기서 잡는 것은 대상 선별처럼
+            // 루프 바깥에서 터지는 예외다. 이걸 흘려보내면 수집이 성공했는데도 RUN_REJECTED로 닫힌다.
+            try {
+                if (clustered) {
+                    analysisPipeline.analyze(runId, refreshedArticleIds);
+                } else {
+                    analysisPipeline.analyzeWithoutClustering(runId, refreshedArticleIds);
+                }
+            } catch (RuntimeException exception) {
+                log.error("기사 분석 단계에 실패해 보고서 생성으로 넘어간다. runId={} error={}",
+                        runId, exception.getMessage(), exception);
+                resultWriter.addAnalysisFailedWarning(runId, exception.getMessage());
             }
             // M5 보고서는 findings를 모두 저장한 뒤 만든다. 생성과 reportId 연결은 별도 짧은 트랜잭션이다.
             try {

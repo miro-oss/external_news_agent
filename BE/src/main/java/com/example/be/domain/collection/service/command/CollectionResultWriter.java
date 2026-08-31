@@ -168,6 +168,20 @@ public class CollectionResultWriter {
                 "이슈 클러스터링에 실패해 기사 단위 분석으로 전환했습니다. " + detail));
     }
 
+    /**
+     * 분석 단계 실패를 수집 거절과 구분해 실행 수준 경고로 남긴다.
+     *
+     * <p>대상 선별처럼 기사 루프 바깥에서 터지는 예외는 기존에 {@code executeRun}의 바깥 catch까지 올라가
+     * {@code RUN_REJECTED}로 뭉개졌다. 수집은 성공했는데 "시작하지 못했습니다"가 뜨면 원인을 찾을 수 없다.
+     */
+    @Transactional
+    public void addAnalysisFailedWarning(Long runId, String cause) {
+        CollectionRun run = runRepository.findById(runId).orElseThrow();
+        String detail = cause == null ? "원인 정보가 없습니다." : cause;
+        run.addWarning(warning(null, CollectionRunWarning.CODE_ANALYSIS_FAILED,
+                "기사 분석 단계에 실패해 이번 실행의 finding을 만들지 못했습니다. " + detail));
+    }
+
     /** 같은 Agent 경고는 실행당 한 행으로 묶고 발생 건수만 올린다. */
     @Transactional
     public void addAgentWarning(Long runId, String code, String message) {
