@@ -18,6 +18,7 @@ import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.settings.exception.AudienceException;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
+import com.example.be.domain.issues.entity.IssueStanceSource;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.global.apiPayload.PageResponse;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
@@ -96,7 +97,9 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
         Article article = articleRepository.findById(articleId)
                 .orElseThrow(() -> new ArticleException(ArticleErrorCode.ARTICLE_NOT_FOUND));
         IssueContext issueContext = issueContext(article);
-        Article analyzedArticle = issueContext.representative() == null
+        boolean promoted = issueContext.membership() != null
+                && issueContext.membership().getStanceSource() == IssueStanceSource.LLM;
+        Article analyzedArticle = promoted || issueContext.representative() == null
                 ? article
                 : issueContext.representative().getArticle();
         Finding finding = findFinding(analyzedArticle.getId(), runId);

@@ -6,6 +6,72 @@ run 보고서 작성(`/v1/report`)을 제공하며, 기본 Mock 모드에서는 
 단일 문장에서 직접 확인되는 주장은 rule-only로 확정합니다. 복합 주장, 인과·전망 및 의미상
 애매한 표현만 provider에 위임하고 근거 연결 상태를 `grounded` / `weak` / `ungrounded`로 반환합니다.
 
+## `/v1/analyze` 교차 출처 계약
+
+`analyze.ko.v4`부터 대표 기사 요청은 같은 이슈의 다른 기사 제목·요약·매체를 `issueMembers`로
+함께 받을 수 있습니다. 멤버 본문은 교차 비교 입력에 넣지 않습니다. 배열이 비어 있으면 기존 기사
+단독 분석과 같으며 `crossSource`와 `promoteCandidates`도 빈 값입니다.
+
+```json
+{
+  "idempotencyKey": "run:42:article:401",
+  "plan": "FREE",
+  "article": {
+    "id": 401,
+    "title": "A사 투자 규모 3조원",
+    "canonicalUrl": "https://example.com/401",
+    "language": "ko",
+    "publishedAt": "2026-08-31T09:00:00+09:00",
+    "bodyText": "..."
+  },
+  "issueMembers": [
+    {
+      "id": 412,
+      "title": "A사 투자 규모 5조원",
+      "summary": "투자 규모를 5조원으로 보도했다.",
+      "publisher": "다른경제"
+    }
+  ],
+  "topic": {
+    "name": "반도체 투자",
+    "queryText": "반도체 투자",
+    "requiredKeywords": [],
+    "optionalKeywords": [],
+    "excludedKeywords": []
+  },
+  "previousFinding": null
+}
+```
+
+응답은 기존 분석 필드와 함께 다음 값을 반환합니다.
+
+```json
+{
+  "crossSource": {
+    "consensus": ["A사가 신규 투자를 준비하고 있다."],
+    "soleSource": [],
+    "conflicts": [
+      {"articleIds": [401, 412], "text": "투자 규모가 3조원과 5조원으로 갈린다."}
+    ],
+    "missingStakeholders": ["A사 공식 입장"]
+  },
+  "promoteCandidates": [412],
+  "memberStances": [
+    {"articleId": 412, "stance": "ADDS", "confidence": 0.65}
+  ]
+}
+```
+
+- `crossSource`는 멤버 제목·요약 수준의 관측이므로 근거 문장 번호와
+  `factual_mismatches`를 적용하지 않습니다.
+- `promoteCandidates`는 `conflicts`에 포함되고, provider 호출 전에 숫자·기업명·부정어 차이를
+  규칙으로 확인한 멤버만 포함합니다. 최대 1건입니다.
+- `memberStances`는 provider 출력이 아니라 같은 사전 컷에서 만든 결정적 RULE 후보입니다.
+  Spring은 모든 후보를 저장한 뒤 대표 기사와 실제 승격 분석에 성공한 기사만 `stanceSource=LLM`으로
+  덮어씁니다.
+- 승격 요청도 `/v1/analyze`를 사용하지만 재귀 승격은 하지 않습니다. Spring이 이슈당 최대 1건만
+  선택하며 추가 호출의 `credits`와 `costUsd`를 별도 `agent_runs` 행에 기록합니다.
+
 ```bash
 uv sync --frozen
 AGENT_SHARED_SECRET=local-dev-agent-token uv run uvicorn app.main:app \
@@ -39,7 +105,7 @@ uv run pytest
 ## Golden eval
 
 `app/eval/golden/semiconductor.v1.json`은 한국어·영어 반도체 기사 24건과
-`analyze.ko.v3+perspective.ko.v1+sensitivity.ko.v1` replay 출력 및 관점 정답을 담습니다. 수치 오기,
+`analyze.ko.v4+perspective.ko.v1+sensitivity.ko.v1` replay 출력 및 관점 정답을 담습니다. 수치 오기,
 기업명 바꿔치기, 부정 반전, 영문 요약은 기존 `expectedFailures` 4건으로 보존합니다.
 `claims.ko.v1.json`은 숫자 불일치·부정 반전·기업명 바꿔치기·강도 과장·원문에 없는 주장 5유형을
 각 3쌍씩 담으며, 같은 근거에 invalid claim과 패러프레이즈한 valid positive control을 함께 둡니다.
@@ -49,7 +115,7 @@ uv run pytest
 
 ```bash
 uv run python -m app.eval --profile replay \
-  --compare app/eval/golden/analyze.ko.v3.baseline.json
+  --compare app/eval/golden/analyze.ko.v4.baseline.json
 ```
 
 replay의 `perspectiveTagAccuracy` 96/96은 모델 품질이 아니라 fixture 출력과
@@ -60,6 +126,8 @@ replay는 외부 API 없이 실제 스키마·문장 분할·사실값 검증·�
 **계약/규칙 회귀 하네스**입니다. 저장된 출력을 재생하므로 프롬프트 생성 품질을 측정하지는 않습니다.
 기본 CI는 replay 기준선만 사용하며 메타데이터, 런타임 설정, 지표 또는 평가 커버리지가 회귀하면
 실패합니다.
+
+live 프로필은 실제 provider 인증 정보와 비용 승인이 필요하다. 이 저장소에서는 토큰을 읽지 않으므로, P1-9의 `analyze.ko.v4` 기준선은 replay로만 재생성을 확인한다.
 
 - schema pass rate: 분석 24건과 보고서 1건의 계약 검증 통과율
 - grounded rate: 분석 bullet 중 `grounded` 판정 비율 (`weak`은 포함하지 않음)

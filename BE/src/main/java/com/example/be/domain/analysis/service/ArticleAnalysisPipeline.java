@@ -10,6 +10,7 @@ import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.database.OracleInClause;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /** 외부 모델 호출 자리가 생겨도 DB 트랜잭션을 잡지 않도록 분석과 저장을 분리한다. */
 @Slf4j
@@ -59,16 +61,18 @@ public class ArticleAnalysisPipeline {
         List<Target> targets = targets(runId, refreshedArticleIds, clustered);
         // coverage의 분모는 이슈다. 클러스터링 실패 시 기사 단위 degrade 결과를 이슈 수로 가장하지 않는다.
         findingWriter.recordTargetCount(runId, clustered ? targets.size() : 0);
-        Map<Long, FindingReuseCache.Lookup> lookups = cacheLookups(targets, plan);
+        Map<Long, AnalysisContext> contexts = analysisContexts(runId, targets, plan, clustered);
+        Map<Long, FindingReuseCache.Lookup> lookups = cacheLookups(contexts.values().stream().toList(), plan);
         for (Target target : targets) {
             try {
+                AnalysisContext context = contexts.get(target.article().getId());
                 FindingReuseCache.Lookup lookup = lookups.get(target.article().getId());
                 if (lookup.cached().isPresent()) {
                     findingWriter.write(runId, target.article().getId(), target.changeType(),
                             lookup.analysisInputHash(), lookup.cached().orElseThrow());
                     continue;
                 }
-                AnalysisResult result = orchestrator.analyze(new AnalysisContext(runId, target.article(), plan));
+                AnalysisResult result = orchestrator.analyze(context);
                 findingWriter.write(runId, target.article().getId(), target.changeType(),
                         lookup.analysisInputHash(), result);
             } catch (RuntimeException exception) {
@@ -79,18 +83,65 @@ public class ArticleAnalysisPipeline {
         }
     }
 
-    private Map<Long, FindingReuseCache.Lookup> cacheLookups(List<Target> targets, AgentPlan plan) {
+    private Map<Long, FindingReuseCache.Lookup> cacheLookups(List<AnalysisContext> contexts, AgentPlan plan) {
         try {
-            return reuseCache.lookupAll(targets.stream().map(Target::article).toList(), plan);
+            return reuseCache.lookupContexts(contexts, plan);
         } catch (RuntimeException exception) {
             log.warn("finding 재사용 캐시 조회에 실패해 새로 분석한다. error={}", exception.getMessage());
             Map<Long, FindingReuseCache.Lookup> misses = new LinkedHashMap<>();
-            targets.forEach(target -> misses.put(
-                    target.article().getId(),
+            contexts.forEach(context -> misses.put(
+                    context.article().getId(),
                     new FindingReuseCache.Lookup(
-                            FindingReuseCache.inputHash(target.article()), Optional.empty())));
+                            FindingReuseCache.inputHash(context), Optional.empty())));
             return Map.copyOf(misses);
         }
+    }
+
+    private Map<Long, AnalysisContext> analysisContexts(Long runId,
+                                                        List<Target> targets,
+                                                        AgentPlan plan,
+                                                        boolean clustered) {
+        Map<Long, IssueAnalysisContext> issues = clustered
+                ? issueContexts(targets)
+                : Map.of();
+        Map<Long, AnalysisContext> contexts = new LinkedHashMap<>();
+        targets.forEach(target -> contexts.put(
+                target.article().getId(),
+                new AnalysisContext(
+                        runId,
+                        target.article(),
+                        plan,
+                        issues.getOrDefault(
+                                target.article().getId(), IssueAnalysisContext.empty()))));
+        return Map.copyOf(contexts);
+    }
+
+    private Map<Long, IssueAnalysisContext> issueContexts(List<Target> targets) {
+        if (targets.isEmpty()) {
+            return Map.of();
+        }
+        Set<Long> representativeIds = targets.stream()
+                .map(target -> target.article().getId())
+                .collect(Collectors.toSet());
+        List<IssueArticle> memberships =
+                issueArticleRepository.findIssueContextsByRepresentativeArticleIds(representativeIds);
+        Map<Long, List<IssueArticle>> byIssue = memberships.stream()
+                .collect(Collectors.groupingBy(
+                        membership -> membership.getIssue().getId(),
+                        LinkedHashMap::new,
+                        Collectors.toList()));
+        Map<Long, IssueAnalysisContext> result = new LinkedHashMap<>();
+        byIssue.forEach((issueId, issueMemberships) -> issueMemberships.stream()
+                .filter(membership -> membership.getRole() == IssueArticleRole.REPRESENTATIVE)
+                .filter(membership -> representativeIds.contains(membership.getArticle().getId()))
+                .findFirst()
+                .ifPresent(representative -> result.putIfAbsent(
+                        representative.getArticle().getId(),
+                        new IssueAnalysisContext(
+                                issueId,
+                                representative.getArticle().getId(),
+                                issueMemberships.stream().map(IssueArticle::getArticle).toList()))));
+        return Map.copyOf(result);
     }
 
     private List<Target> targets(Long runId, Set<Long> refreshedArticleIds, boolean clustered) {

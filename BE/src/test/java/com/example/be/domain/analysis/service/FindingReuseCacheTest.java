@@ -132,6 +132,42 @@ class FindingReuseCacheTest {
                 .equals(FindingReuseCache.inputHash(changedTopic)));
     }
 
+    @Test
+    void invalidatesRepresentativeCacheWhenIssueMemberContentChanges() {
+        Article representative = article(10L, "대표 본문");
+        Article originalMember = article(11L, "양산 일정은 9월이다.");
+        Article changedMember = article(11L, "양산 일정은 12월이다.");
+        AnalysisContext original = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, originalMember)));
+        AnalysisContext changed = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, changedMember)));
+
+        assertTrue(!FindingReuseCache.inputHash(original)
+                .equals(FindingReuseCache.inputHash(changed)));
+    }
+
+    @Test
+    void alwaysReanalyzesIssueRepresentativeToPersistCrossSourceComparison() {
+        Article representative = article(10L, "대표 본문");
+        Article member = article(11L, "멤버 본문");
+        AnalysisContext context = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, member)));
+
+        FindingReuseCache.Lookup lookup = cache.lookupContexts(List.of(context), AgentPlan.FREE).get(10L);
+
+        assertTrue(lookup.cached().isEmpty());
+        verifyNoInteractions(findingRepository);
+    }
+
     private AgentProperties properties() {
         AgentProperties value = new AgentProperties();
         value.setAnalysisPromptVersion("analyze.ko.v1");

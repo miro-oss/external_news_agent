@@ -146,6 +146,54 @@ class RuleAssessment:
     reason: str
 
 
+@dataclass(frozen=True, slots=True)
+class CrossSourceSignal:
+    extra_numbers: frozenset[str]
+    extra_companies: frozenset[str]
+    polarity_mismatch: bool
+    number_mismatch: bool
+
+    @property
+    def promotion_eligible(self) -> bool:
+        return bool(
+            self.extra_numbers or self.extra_companies or self.polarity_mismatch
+        )
+
+    @property
+    def stance(self) -> str:
+        if self.polarity_mismatch:
+            return "DISPUTES"
+        if self.extra_numbers or self.extra_companies:
+            return "ADDS"
+        return "SUPPORTS"
+
+    @property
+    def confidence(self) -> float:
+        if self.polarity_mismatch:
+            return 0.85
+        if self.extra_numbers or self.extra_companies:
+            return 0.65
+        return 0.55
+
+
+def cross_source_signal(reference_text: str, candidate_text: str) -> CrossSourceSignal:
+    """제목·요약만으로 승격 사전 컷과 RULE stance 후보를 결정한다."""
+    reference = _normalize(reference_text)
+    candidate = _normalize(candidate_text)
+    reference_numbers = _numbers(reference)
+    candidate_numbers = _numbers(candidate)
+    return CrossSourceSignal(
+        extra_numbers=frozenset(candidate_numbers - reference_numbers),
+        extra_companies=frozenset(_companies(candidate) - _companies(reference)),
+        polarity_mismatch=_polarity_mismatch(candidate, reference),
+        number_mismatch=bool(
+            reference_numbers
+            and candidate_numbers
+            and reference_numbers != candidate_numbers
+        ),
+    )
+
+
 def factual_mismatches(claim: str, evidence_text: str) -> list[str]:
     """근거에 문자 그대로 존재해야 하는 사실만 보수적으로 검사한다."""
     normalized_claim = _normalize(claim)

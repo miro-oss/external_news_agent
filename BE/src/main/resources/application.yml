@@ -81,7 +81,7 @@ news:
     default-plan: FREE
     allow-run-override: true
     # 분석 캐시는 콘텐츠뿐 아니라 현재 프롬프트·플랜별 모델 계약까지 같을 때만 사용한다.
-    analysis-prompt-version: ${AGENT_ANALYSIS_PROMPT_VERSION:analyze.ko.v3+perspective.ko.v1+sensitivity.ko.v1}
+    analysis-prompt-version: ${AGENT_ANALYSIS_PROMPT_VERSION:analyze.ko.v4+perspective.ko.v1+sensitivity.ko.v1}
     free-model: ${GEMINI_MODEL:}
     paid-model: ${MINDLOGIC_CLAUDE_MODEL:}
     quota:

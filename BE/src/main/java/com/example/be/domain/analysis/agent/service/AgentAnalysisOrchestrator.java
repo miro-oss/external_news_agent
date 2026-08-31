@@ -30,10 +30,16 @@ import com.example.be.domain.analysis.service.AnalysisMetadata;
 import com.example.be.domain.analysis.service.AnalysisResult;
 import com.example.be.domain.analysis.service.AnalysisContext;
 import com.example.be.domain.analysis.service.ArticleAnalysisOrchestrator;
+import com.example.be.domain.analysis.service.FindingReuseCache;
+import com.example.be.domain.analysis.service.FindingWriter;
 import com.example.be.domain.analysis.service.StubArticleAnalyzer;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.service.command.CollectionResultWriter;
+import com.example.be.domain.issues.entity.IssueCrossSource;
+import com.example.be.domain.issues.entity.IssueStance;
+import com.example.be.domain.issues.service.IssueCrossSourceWriter;
 import com.example.be.domain.settings.entity.PaidExhaustedAction;
 import com.example.be.domain.settings.service.LlmPlanService;
 import com.example.be.domain.topics.entity.Topic;
@@ -68,6 +74,8 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
     private final AgentQuotaService quotaService;
     private final LlmPlanService planService;
     private final CollectionResultWriter resultWriter;
+    private final IssueCrossSourceWriter crossSourceWriter;
+    private final FindingWriter findingWriter;
 
     @Override
     public AnalysisResult analyze(AnalysisContext context) {
@@ -83,13 +91,15 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
         }
 
         AgentAnalyzeRequest request = request(
-                article, selection.plan(), selection.reservation().idempotencyKey());
+                context, selection.plan(), selection.reservation().idempotencyKey());
         LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
         AgentAnalyzeResponse response;
         AnalysisResult result;
+        List<IssueCrossSourceWriter.RuleStance> memberStances;
         try {
             response = client.analyze(request);
             result = toAnalysisResult(response);
+            memberStances = validateIssueComparison(context, response);
             result = verifyEvidence(runId, article.getId(), selection.plan(), result);
         } catch (RuntimeException exception) {
             AgentClientException clientException = exception instanceof AgentClientException value
@@ -120,12 +130,16 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
 
         recordSuccessSafely(runId, article.getId(), request, response, startedAt);
         completeSuccessSafely(selection.reservation(), response.meta().credits());
+        if (applyIssueComparisonSafely(context, response, memberStances)) {
+            promoteConflictCandidate(context, response, memberStances);
+        }
         return result;
     }
 
-    private AgentAnalyzeRequest request(Article article,
+    private AgentAnalyzeRequest request(AnalysisContext context,
                                         AgentPlan plan,
                                         String idempotencyKey) {
+        Article article = context.article();
         Topic topic = article.getTopic();
         return new AgentAnalyzeRequest(
                 idempotencyKey,
@@ -133,10 +147,18 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 new AgentAnalyzeRequest.ArticlePayload(
                         article.getId(),
                         article.getTitle(),
+                        article.getSummary(),
                         article.getCanonicalUrl(),
                         article.getLanguage(),
                         article.getPublishedAt(),
                         analysisText(article)),
+                context.issue().membersExcept(article.getId()).stream()
+                        .map(member -> new AgentAnalyzeRequest.IssueMemberPayload(
+                                member.getId(),
+                                member.getTitle(),
+                                member.getSummary(),
+                                publisher(member)))
+                        .toList(),
                 new AgentAnalyzeRequest.TopicPayload(
                         topic.getName(),
                         topic.getQueryText(),
@@ -146,8 +168,229 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 null);
     }
 
+    private String publisher(Article article) {
+        if (StringUtils.hasText(article.getSourceName())) {
+            return article.getSourceName().trim();
+        }
+        if (article.getSource() != null && StringUtils.hasText(article.getSource().getName())) {
+            return article.getSource().getName().trim();
+        }
+        return "Unknown";
+    }
+
+    private List<IssueCrossSourceWriter.RuleStance> validateIssueComparison(
+            AnalysisContext context,
+            AgentAnalyzeResponse response) {
+        IssueCrossSource crossSource = response.crossSource();
+        if (crossSource == null || response.promoteCandidates() == null
+                || response.memberStances() == null) {
+            throw schemaViolation("Agent 이슈 교차 비교 응답의 필수 필드가 없습니다.");
+        }
+        if (!context.issue().present()) {
+            if (!crossSource.consensus().isEmpty()
+                    || !crossSource.soleSource().isEmpty()
+                    || !crossSource.conflicts().isEmpty()
+                    || !crossSource.missingStakeholders().isEmpty()
+                    || !response.promoteCandidates().isEmpty()
+                    || !response.memberStances().isEmpty()) {
+                throw schemaViolation("이슈 문맥이 없는 분석은 교차 비교 결과가 비어야 합니다.");
+            }
+            return List.of();
+        }
+
+        Set<Long> articleIds = context.issue().articles().stream()
+                .map(Article::getId)
+                .collect(Collectors.toSet());
+        validateObservationTexts(crossSource.consensus(), "consensus");
+        validateObservationTexts(crossSource.missingStakeholders(), "missingStakeholders");
+        crossSource.soleSource().forEach(observation -> {
+            if (observation == null || !articleIds.contains(observation.articleId())
+                    || !StringUtils.hasText(observation.text())) {
+                throw schemaViolation("Agent soleSource가 이슈 기사를 올바르게 참조하지 않습니다.");
+            }
+        });
+        Set<Long> conflictArticleIds = new HashSet<>();
+        crossSource.conflicts().forEach(observation -> {
+            if (observation == null || observation.articleIds().size() < 2
+                    || observation.articleIds().size() != new HashSet<>(observation.articleIds()).size()
+                    || !articleIds.containsAll(observation.articleIds())
+                    || !StringUtils.hasText(observation.text())) {
+                throw schemaViolation("Agent conflicts가 이슈 기사를 올바르게 참조하지 않습니다.");
+            }
+            conflictArticleIds.addAll(observation.articleIds());
+        });
+
+        List<Long> expectedMemberIds = context.issue().membersExcept(context.article().getId()).stream()
+                .map(Article::getId)
+                .toList();
+        if (response.memberStances().size() != expectedMemberIds.size()) {
+            throw schemaViolation("Agent memberStances의 기사 수가 일치하지 않습니다.");
+        }
+        Set<Long> stanceIds = new HashSet<>();
+        List<IssueCrossSourceWriter.RuleStance> stances = response.memberStances().stream()
+                .map(value -> toRuleStance(value, expectedMemberIds, stanceIds))
+                .toList();
+        if (stanceIds.size() != expectedMemberIds.size()) {
+            throw schemaViolation("Agent memberStances가 이슈 멤버와 일치하지 않습니다.");
+        }
+
+        if (response.promoteCandidates().size() > 1
+                || response.promoteCandidates().size()
+                != new HashSet<>(response.promoteCandidates()).size()) {
+            throw schemaViolation("Agent promoteCandidates는 이슈당 최대 1건입니다.");
+        }
+        response.promoteCandidates().forEach(articleId -> {
+            if (!expectedMemberIds.contains(articleId) || !conflictArticleIds.contains(articleId)) {
+                throw schemaViolation("Agent 승격 후보는 충돌 멤버 기사여야 합니다.");
+            }
+        });
+        return stances;
+    }
+
+    private IssueCrossSourceWriter.RuleStance toRuleStance(
+            AgentAnalyzeResponse.MemberStance value,
+            List<Long> expectedMemberIds,
+            Set<Long> stanceIds) {
+        if (value == null || !expectedMemberIds.contains(value.articleId())
+                || !stanceIds.add(value.articleId()) || value.confidence() == null
+                || value.confidence().signum() < 0
+                || value.confidence().compareTo(BigDecimal.ONE) > 0) {
+            throw schemaViolation("Agent memberStance가 올바르지 않습니다.");
+        }
+        try {
+            return new IssueCrossSourceWriter.RuleStance(
+                    value.articleId(), IssueStance.valueOf(value.stance()), value.confidence());
+        } catch (IllegalArgumentException | NullPointerException exception) {
+            throw schemaViolation("Agent memberStance 값이 올바르지 않습니다.");
+        }
+    }
+
+    private void validateObservationTexts(List<String> values, String field) {
+        if (values.stream().anyMatch(value -> !StringUtils.hasText(value))) {
+            throw schemaViolation("Agent " + field + " 값이 올바르지 않습니다.");
+        }
+    }
+
+    private boolean applyIssueComparisonSafely(
+            AnalysisContext context,
+            AgentAnalyzeResponse response,
+            List<IssueCrossSourceWriter.RuleStance> memberStances) {
+        if (!context.issue().present()) {
+            return false;
+        }
+        try {
+            crossSourceWriter.applyRepresentative(
+                    context.issue().issueId(),
+                    response.crossSource(),
+                    memberStances,
+                    !response.meta().mock());
+            return true;
+        } catch (RuntimeException exception) {
+            addAgentWarning(
+                    context.runId(),
+                    CollectionRunWarning.CODE_LLM_CROSS_SOURCE_FAILED,
+                    "이슈 교차 비교 결과를 저장하지 못했습니다.");
+            log.warn("이슈 교차 비교 결과 저장에 실패했다. runId={} issueId={} error={}",
+                    context.runId(), context.issue().issueId(), exception.getMessage(), exception);
+            return false;
+        }
+    }
+
+    private void promoteConflictCandidate(
+            AnalysisContext context,
+            AgentAnalyzeResponse representativeResponse,
+            List<IssueCrossSourceWriter.RuleStance> memberStances) {
+        if (representativeResponse.promoteCandidates().isEmpty()) {
+            return;
+        }
+        Long articleId = representativeResponse.promoteCandidates().getFirst();
+        Article article = context.issue().article(articleId);
+        IssueCrossSourceWriter.RuleStance stance = memberStances.stream()
+                .filter(value -> value.articleId().equals(articleId))
+                .findFirst()
+                .orElseThrow();
+        AnalysisContext promotedContext = context.withArticle(article);
+        String idempotencyKey = "run:" + context.runId()
+                + ":issue:" + context.issue().issueId()
+                + ":promotion:article:" + articleId;
+        ReservationSelection selection = reserve(
+                context.runId(), articleId, context.plan(), idempotencyKey);
+        if (selection == null) {
+            return;
+        }
+
+        AgentAnalyzeRequest request = request(
+                promotedContext, selection.plan(), selection.reservation().idempotencyKey());
+        LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
+        AgentAnalyzeResponse response;
+        AnalysisResult result;
+        try {
+            response = client.analyze(request);
+            result = toAnalysisResult(response);
+            validateIssueComparison(promotedContext, response);
+            result = verifyEvidence(context.runId(), articleId, selection.plan(), result);
+        } catch (RuntimeException exception) {
+            handlePromotionFailure(context, articleId, request, selection, startedAt, exception);
+            return;
+        }
+
+        recordSuccessSafely(context.runId(), articleId, request, response, startedAt);
+        completeSuccessSafely(selection.reservation(), response.meta().credits());
+        try {
+            findingWriter.write(
+                    context.runId(),
+                    articleId,
+                    ChangeType.UPDATED,
+                    FindingReuseCache.inputHash(promotedContext),
+                    result);
+            crossSourceWriter.confirmPromotion(
+                    context.issue().issueId(),
+                    articleId,
+                    stance.stance(),
+                    stance.confidence(),
+                    !response.meta().mock());
+        } catch (RuntimeException exception) {
+            addAgentWarning(
+                    context.runId(),
+                    CollectionRunWarning.CODE_LLM_CROSS_SOURCE_FAILED,
+                    "충돌 기사 분석 결과를 저장하지 못했습니다. articleId=" + articleId);
+            log.warn("충돌 기사 승격 결과 저장에 실패했다. runId={} issueId={} articleId={} error={}",
+                    context.runId(), context.issue().issueId(), articleId, exception.getMessage(), exception);
+        }
+    }
+
+    private void handlePromotionFailure(
+            AnalysisContext context,
+            Long articleId,
+            AgentAnalyzeRequest request,
+            ReservationSelection selection,
+            LocalDateTime startedAt,
+            RuntimeException exception) {
+        AgentClientException clientException = exception instanceof AgentClientException value
+                ? value
+                : null;
+        String code = clientException == null ? "SCHEMA_VIOLATION" : clientException.getCode();
+        AgentClientException.Usage usage = failureUsage(clientException, selection.reservation());
+        recordFailureSafely(
+                context.runId(), articleId, request, code, exception.getMessage(), usage,
+                timeoutPhase(clientException), startedAt);
+        completeFailureSafely(selection.reservation(), clientException, code);
+        addAgentWarning(
+                context.runId(),
+                CollectionRunWarning.CODE_LLM_CROSS_SOURCE_FAILED,
+                "충돌 기사 추가 분석에 실패했습니다. articleId=" + articleId);
+        log.warn("충돌 기사 승격 분석에 실패했다. runId={} issueId={} articleId={} error={}",
+                context.runId(), context.issue().issueId(), articleId, exception.getMessage(), exception);
+    }
+
     private ReservationSelection reserve(Long runId, Long articleId, AgentPlan requestedPlan) {
-        String idempotencyKey = "run:" + runId + ":article:" + articleId;
+        return reserve(runId, articleId, requestedPlan, "run:" + runId + ":article:" + articleId);
+    }
+
+    private ReservationSelection reserve(Long runId,
+                                         Long articleId,
+                                         AgentPlan requestedPlan,
+                                         String idempotencyKey) {
         try {
             return new ReservationSelection(
                     requestedPlan,

@@ -52,11 +52,13 @@ class ArticleAnalysisPipelineTest {
     void loadRunPlan() {
         when(runRepository.findById(42L)).thenReturn(java.util.Optional.of(
                 CollectionRun.builder().id(42L).llmPlan(AgentPlan.FREE).build()));
-        when(reuseCache.lookupAll(anyList(), any(AgentPlan.class))).thenAnswer(invocation -> {
-            List<Article> articles = invocation.getArgument(0);
+        when(reuseCache.lookupContexts(anyList(), any(AgentPlan.class))).thenAnswer(invocation -> {
+            List<AnalysisContext> contexts = invocation.getArgument(0);
             Map<Long, FindingReuseCache.Lookup> lookups = new LinkedHashMap<>();
-            articles.forEach(article -> lookups.put(
-                    article.getId(), new FindingReuseCache.Lookup(inputHash(article), Optional.empty())));
+            contexts.forEach(context -> lookups.put(
+                    context.article().getId(),
+                    new FindingReuseCache.Lookup(
+                            FindingReuseCache.inputHash(context), Optional.empty())));
             return Map.copyOf(lookups);
         });
     }
@@ -110,7 +112,7 @@ class ArticleAnalysisPipelineTest {
         verify(findingWriter).addFailureWarning(42L, 10L, "stub failure");
         verify(findingWriter, never()).write(eq(42L), eq(10L), any(), any(), any());
         verify(findingWriter).write(42L, 11L, ChangeType.NEW, inputHash(succeeded), result);
-        verify(reuseCache).lookupAll(List.of(failed, succeeded), AgentPlan.FREE);
+        verify(reuseCache).lookupContexts(anyList(), eq(AgentPlan.FREE));
     }
 
     @Test
@@ -214,7 +216,8 @@ class ArticleAnalysisPipelineTest {
                 .thenReturn(List.of(observation(article, ChangeType.UPDATED)));
         AnalysisResult reused = mock(AnalysisResult.class);
         when(reused.analysisSource()).thenReturn(AnalysisSource.REUSED);
-        when(reuseCache.lookupAll(List.of(article), AgentPlan.FREE)).thenReturn(Map.of(
+        when(reuseCache.lookupContexts(
+                List.of(new AnalysisContext(42L, article, AgentPlan.FREE)), AgentPlan.FREE)).thenReturn(Map.of(
                 10L, new FindingReuseCache.Lookup(inputHash(article), Optional.of(reused))));
 
         pipeline.analyze(42L);

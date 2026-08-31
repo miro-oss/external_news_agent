@@ -38,6 +38,27 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             """)
     List<IssueArticle> findByArticleIds(@Param("articleIds") Collection<Long> articleIds);
 
+    /** 대표 분석 요청에 넣을 같은 이슈의 모든 기사 snapshot을 한 번에 읽는다. */
+    @Query("""
+            SELECT membership
+            FROM IssueArticle membership
+            JOIN FETCH membership.issue issue
+            JOIN FETCH issue.topic issueTopic
+            JOIN FETCH membership.article article
+            JOIN FETCH article.topic articleTopic
+            JOIN FETCH article.source
+            LEFT JOIN FETCH article.contentGroup
+            WHERE issue.id IN (
+                SELECT representative.issue.id
+                FROM IssueArticle representative
+                WHERE representative.role = com.example.be.domain.issues.entity.IssueArticleRole.REPRESENTATIVE
+                  AND representative.article.id IN :representativeArticleIds
+            )
+            ORDER BY issue.id ASC, membership.id ASC
+            """)
+    List<IssueArticle> findIssueContextsByRepresentativeArticleIds(
+            @Param("representativeArticleIds") Collection<Long> representativeArticleIds);
+
     @Query("""
             SELECT membership.article.id AS articleId,
                    membership.issue.id AS issueId,

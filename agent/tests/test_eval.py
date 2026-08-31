@@ -34,7 +34,7 @@ _GOLDEN_DIR = Path(__file__).resolve().parents[1] / "app" / "eval" / "golden"
 _DATASET_PATH = _GOLDEN_DIR / "semiconductor.v1.json"
 _CLAIM_DATASET_PATH = _GOLDEN_DIR / "claims.ko.v1.json"
 _REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.3.json"
-_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v3.baseline.json"
+_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v4.baseline.json"
 
 
 def eval_settings() -> Settings:
