@@ -21,6 +21,9 @@ import com.example.be.domain.issues.repository.IssueRelationRepository;
 import com.example.be.domain.issues.repository.IssueStatusHistoryRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.issues.repository.NewsWatchRepository;
+import com.example.be.domain.notifications.entity.WatchAlertDeliveryStatus;
+import com.example.be.domain.notifications.entity.WatchAlertOutbox;
+import com.example.be.domain.notifications.repository.WatchAlertOutboxRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.config.ApiTimeZone;
@@ -58,10 +61,11 @@ public class IssueClusterWriter {
     private final IssueRelationRepository issueRelationRepository;
     private final IssueStatusHistoryRepository statusHistoryRepository;
     private final NewsWatchRepository watchRepository;
+    private final WatchAlertOutboxRepository watchAlertOutboxRepository;
     private final BreakingNewsDetector breakingNewsDetector;
 
     @Transactional
-    public List<BreakingWatchAlert> write(ClusterPlan plan) {
+    public void write(ClusterPlan plan) {
         Set<Long> articleIds = new LinkedHashSet<>();
         plan.contentGroups().forEach(group -> articleIds.addAll(group.articleIds()));
         plan.issues().forEach(issue -> articleIds.addAll(issue.articleIds()));
@@ -72,11 +76,9 @@ public class IssueClusterWriter {
         }
 
         applyContentGroups(plan.contentGroups(), articles);
-        List<BreakingWatchAlert> alerts = new ArrayList<>();
         for (ClusterPlan.IssueAssignment assignment : plan.issues()) {
-            alerts.addAll(applyIssue(assignment, articles));
+            applyIssue(assignment, articles);
         }
-        return List.copyOf(alerts);
     }
 
     private void applyContentGroups(List<ClusterPlan.ContentGroupAssignment> assignments,
@@ -119,8 +121,8 @@ public class IssueClusterWriter {
         winner.refreshRepresentative(representative, assignment.simhash());
     }
 
-    private List<BreakingWatchAlert> applyIssue(ClusterPlan.IssueAssignment assignment,
-                                                Map<Long, Article> articles) {
+    private void applyIssue(ClusterPlan.IssueAssignment assignment,
+                            Map<Long, Article> articles) {
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
         Topic topic = topicRepository.findById(assignment.topicId()).orElseThrow();
         Article representative = requiredArticle(articles, assignment.representativeArticleId());
@@ -173,17 +175,21 @@ public class IssueClusterWriter {
                 .filter(entry -> !existingArticleIds.contains(entry.getKey()))
                 .map(entry -> entry.getValue().getArticle())
                 .toList();
-        List<BreakingWatchAlert> alerts = !newArticles.isEmpty()
-                ? claimAlerts(eligibleWatches, issue, members, now)
-                : List.of();
+        if (!newArticles.isEmpty()) {
+            enqueueAlerts(eligibleWatches, issue, members, now);
+        }
         registerBreakingWatch(issue, newArticles, now);
-        return alerts;
     }
 
     private void mergeIssues(NewsIssue winner,
                              Topic topic,
                              List<Long> losingIssueIds,
                              Map<Long, IssueArticle> membershipByArticle) {
+        Map<WatchType, NewsWatch> winnerWatches = new LinkedHashMap<>();
+        if (!losingIssueIds.isEmpty()) {
+            watchRepository.findByIssueIdOrderByIdAsc(winner.getId())
+                    .forEach(watch -> winnerWatches.put(watch.getWatchType(), watch));
+        }
         for (Long losingIssueId : losingIssueIds) {
             NewsIssue loser = issueRepository.findById(losingIssueId)
                     .orElseThrow(() -> new IllegalStateException("병합할 이슈가 없습니다. id=" + losingIssueId));
@@ -200,15 +206,14 @@ public class IssueClusterWriter {
                     issueArticleRepository.delete(losingMembership);
                 }
             }
-            mergeWatches(winner, loser);
+            mergeWatches(winner, loser, winnerWatches);
             recordIssueMerge(loser, winner);
         }
     }
 
-    private void mergeWatches(NewsIssue winner, NewsIssue loser) {
-        Map<WatchType, NewsWatch> winnerByType = new LinkedHashMap<>();
-        watchRepository.findByIssueIdOrderByIdAsc(winner.getId())
-                .forEach(watch -> winnerByType.put(watch.getWatchType(), watch));
+    private void mergeWatches(NewsIssue winner,
+                              NewsIssue loser,
+                              Map<WatchType, NewsWatch> winnerByType) {
         for (NewsWatch losingWatch : watchRepository.findByIssueIdOrderByIdAsc(loser.getId())) {
             if (winnerByType.containsKey(losingWatch.getWatchType())) {
                 losingWatch.deactivate();
@@ -229,15 +234,7 @@ public class IssueClusterWriter {
     }
 
     private boolean isBreaking(Article article) {
-        return breakingNewsDetector.hasExplicitMarker(article.getTitle())
-                || breakingNewsDetector.isRecentShortFullText(
-                article.getFetchStatus(), article.getBody(), article.getPublishedAt(), observedAt(article));
-    }
-
-    private OffsetDateTime observedAt(Article article) {
-        return article.getCollectedAt() == null
-                ? article.getPublishedAt()
-                : article.getCollectedAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime();
+        return breakingNewsDetector.hasExplicitMarker(article.getTitle());
     }
 
     private String issueTitle(Article representative) {
@@ -271,12 +268,12 @@ public class IssueClusterWriter {
                                 .build()));
     }
 
-    private List<BreakingWatchAlert> claimAlerts(List<NewsWatch> watches,
-                                                 NewsIssue issue,
-                                                 List<Article> members,
-                                                 LocalDateTime now) {
+    private void enqueueAlerts(List<NewsWatch> watches,
+                               NewsIssue issue,
+                               List<Article> members,
+                               LocalDateTime now) {
         if (watches.isEmpty()) {
-            return List.of();
+            return;
         }
         OffsetDateTime claimedAt = now.atZone(ApiTimeZone.ZONE).toOffsetDateTime();
         int followUpCount = Math.max(1, issue.getArticleCount() - 1);
@@ -289,19 +286,22 @@ public class IssueClusterWriter {
         OffsetDateTime breakingAt = breakingArticle == null || eventTime(breakingArticle) == null
                 ? issue.getFirstSeenAt()
                 : eventTime(breakingArticle);
-        List<BreakingWatchAlert> alerts = new ArrayList<>();
         for (NewsWatch watch : watches) {
             watch.claimUntil(now.plus(WATCH_COOLDOWN));
-            alerts.add(new BreakingWatchAlert(
-                    watch.getId(),
-                    watch.getNotifyGroup() == null ? null : watch.getNotifyGroup().getId(),
-                    breakingTitle,
-                    breakingAt,
-                    followUpCount,
-                    issue.getPublisherCount(),
-                    claimedAt));
+            watchAlertOutboxRepository.save(WatchAlertOutbox.builder()
+                    .watch(watch)
+                    .notifyGroupId(watch.getNotifyGroup() == null
+                            ? null
+                            : watch.getNotifyGroup().getId())
+                    .issueTitle(breakingTitle)
+                    .firstSeenAt(breakingAt)
+                    .followUpCount(followUpCount)
+                    .publisherCount(issue.getPublisherCount())
+                    .queuedAt(claimedAt)
+                    .status(WatchAlertDeliveryStatus.PENDING)
+                    .attemptCount(0)
+                    .build());
         }
-        return List.copyOf(alerts);
     }
 
     private void recordIssueMerge(NewsIssue loser, NewsIssue winner) {
@@ -330,7 +330,7 @@ public class IssueClusterWriter {
                                   Article representative,
                                   ClusterPlan.IssueAssignment assignment) {
         NewsIssue issue = issueRepository.save(NewsIssue.builder()
-                .title(representative.getTitle())
+                .title(issueTitle(representative))
                 .status(IssueStatus.EMERGING)
                 .firstSeenAt(assignment.firstSeenAt())
                 .lastSeenAt(assignment.lastSeenAt())

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -19,7 +20,7 @@ class IssueClustererTest {
     @BeforeEach
     void setUp() {
         IssueClusteringProperties properties = new IssueClusteringProperties();
-        clusterer = new IssueClusterer(properties);
+        clusterer = new IssueClusterer(properties, new BreakingNewsDetector());
     }
 
     @Test
@@ -109,6 +110,24 @@ class IssueClustererTest {
 
         assertEquals(2, plan.issues().size());
         assertFalse(plan.pairScores().getFirst().sameCluster());
+    }
+
+    @Test
+    void preservesSubHourPrecisionInBreakingWindow() {
+        IssueClusteringProperties properties = new IssueClusteringProperties();
+        properties.setBreakingTimeWindow(Duration.ofMinutes(90));
+        clusterer = new IssueClusterer(properties, new BreakingNewsDetector());
+        ClusterArticle breaking = article(
+                1L, "[속보] 삼성전자 HBM4 증설 발표", null,
+                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+        ClusterArticle followUp = article(
+                2L, "삼성전자 HBM4 증설 발표", null,
+                FetchStatus.METADATA_ONLY, "매일경제", "0.9", hour(1));
+
+        ClusterPlan plan = clusterer.cluster(List.of(breaking, followUp), true);
+
+        assertEquals(1, plan.issues().size());
+        assertTrue(plan.pairScores().getFirst().sameCluster());
     }
 
     @Test

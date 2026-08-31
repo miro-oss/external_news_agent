@@ -1,6 +1,6 @@
 package com.example.be.domain.collection.cluster;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -19,6 +19,7 @@ import java.util.stream.Collectors;
 
 /** 제목·결정론적 엔티티·본문 지문만 쓰는 Spring 내부 클러스터러. LLM과 DB를 호출하지 않는다. */
 @Component
+@RequiredArgsConstructor
 public class IssueClusterer {
 
     private static final OffsetDateTime UNKNOWN_EVENT_TIME = OffsetDateTime.parse("1970-01-01T00:00:00Z");
@@ -26,17 +27,6 @@ public class IssueClusterer {
     private final IssueClusteringProperties properties;
     private final BreakingNewsDetector breakingNewsDetector;
     private final DeterministicEntityExtractor entityExtractor = new DeterministicEntityExtractor();
-
-    @Autowired
-    public IssueClusterer(IssueClusteringProperties properties,
-                          BreakingNewsDetector breakingNewsDetector) {
-        this.properties = properties;
-        this.breakingNewsDetector = breakingNewsDetector;
-    }
-
-    IssueClusterer(IssueClusteringProperties properties) {
-        this(properties, new BreakingNewsDetector());
-    }
 
     public ClusterPlan cluster(List<ClusterArticle> rawArticles) {
         return cluster(rawArticles, false);
@@ -212,10 +202,10 @@ public class IssueClusterer {
                 boolean titleMatches = jaccard >= properties.getTitleJaccardThreshold();
                 boolean enoughEntities = entityOverlap >= properties.getEntityOverlapThreshold();
                 boolean matches = breakingPair
-                        ? hoursApart <= properties.getBreakingTimeWindow().toHours()
+                        ? within(first.eventTime(), second.eventTime(), properties.getBreakingTimeWindow())
                         && (titleMatches || enoughEntities)
                         : titleMatches || (enoughEntities
-                        && hoursApart <= properties.getEntityTimeWindow().toHours());
+                        && within(first.eventTime(), second.eventTime(), properties.getEntityTimeWindow()));
                 if (matches) {
                     union.join(first.articleId(), second.articleId());
                 }
@@ -329,7 +319,12 @@ public class IssueClusterer {
         if (left == null || right == null) {
             return Double.POSITIVE_INFINITY;
         }
-        return Math.abs(Duration.between(left, right).toMinutes()) / 60.0;
+        return Duration.between(left, right).abs().toMillis() / 3_600_000.0;
+    }
+
+    private boolean within(OffsetDateTime left, OffsetDateTime right, Duration window) {
+        return left != null && right != null
+                && Duration.between(left, right).abs().compareTo(window) <= 0;
     }
 
     private ClusterArticle forTopic(ClusterArticle representative, ClusterArticle proxy) {

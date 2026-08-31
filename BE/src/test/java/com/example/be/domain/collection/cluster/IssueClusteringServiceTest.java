@@ -22,13 +22,13 @@ class IssueClusteringServiceTest {
         ClusterPlan plan = new ClusterPlan(List.of(), List.of(), List.of());
         when(loader.load(42L)).thenReturn(List.of());
         when(clusterer.cluster(List.of())).thenReturn(plan);
-        when(writer.write(plan)).thenReturn(List.of());
 
         service.cluster(42L);
 
-        var order = inOrder(loader, clusterer, writer);
+        var order = inOrder(loader, clusterer, writer, deliveryService);
         order.verify(loader).load(42L);
         order.verify(clusterer).cluster(List.of());
         order.verify(writer).write(plan);
+        order.verify(deliveryService).deliverPending();
     }
 }

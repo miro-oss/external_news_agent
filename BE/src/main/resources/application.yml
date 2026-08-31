@@ -61,6 +61,8 @@ news:
     entity-overlap-threshold: 2
     simhash-hamming-threshold: 3
   notifications:
+    # 미설정 시 자동 속보 알림은 전송하지 않는다. 활성 알림 그룹 ID를 명시적으로 지정해야 한다.
+    breaking-group-id: ${BREAKING_NOTIFICATION_GROUP_ID:}
     telegram:
       base-url: ${TELEGRAM_API_BASE_URL:https://api.telegram.org}
       bot-token: ${TELEGRAM_BOT_TOKEN:}

@@ -16,6 +16,7 @@ public class IssueClusteringService {
 
     public void cluster(Long runId) {
         ClusterPlan plan = clusterer.cluster(loader.load(runId));
-        writer.write(plan).forEach(watchNotificationDeliveryService::deliver);
+        writer.write(plan);
+        watchNotificationDeliveryService.deliverPending();
     }
 }
