@@ -21,11 +21,7 @@ public final class TopicKeywordFilter {
     }
 
     public static boolean matches(Topic topic, CollectedArticle article) {
-        String haystack = haystackOf(article);
-
-        return containsEvery(haystack, topic.getRequiredKeywords())
-                && containsAny(haystack, topic.getOptionalKeywords())
-                && containsNone(haystack, topic.getExcludedKeywords());
+        return evaluate(topic, article).matches();
     }
 
     public static List<CollectedArticle> filter(Topic topic, List<CollectedArticle> articles) {
@@ -34,21 +30,47 @@ public final class TopicKeywordFilter {
                 .toList();
     }
 
+    /**
+     * AND/NOT은 기존처럼 통과 여부만 결정하고, OR은 일치한 선택 키워드 비율로 점수화한다.
+     * 선택 키워드가 없으면 조건도 없으므로 1.0이다.
+     */
+    public static MatchResult evaluate(Topic topic, CollectedArticle article) {
+        String haystack = haystackOf(article);
+        List<String> optionalKeywords = normalized(topic.getOptionalKeywords());
+        int matchedOptionalCount = (int) optionalKeywords.stream()
+                .filter(keyword -> haystack.contains(keyword))
+                .count();
+        double metadataFit = optionalKeywords.isEmpty()
+                ? 1.0
+                : (double) matchedOptionalCount / optionalKeywords.size();
+        boolean matches = containsEvery(haystack, topic.getRequiredKeywords())
+                && (optionalKeywords.isEmpty() || matchedOptionalCount > 0)
+                && containsNone(haystack, topic.getExcludedKeywords());
+        return new MatchResult(matches, metadataFit, matchedOptionalCount, optionalKeywords.size());
+    }
+
+    public static double metadataFit(Topic topic, String title, String summary) {
+        String haystack = haystackOf(title, summary);
+        List<String> optionalKeywords = normalized(topic.getOptionalKeywords());
+        if (optionalKeywords.isEmpty()) {
+            return 1.0;
+        }
+        long matchedCount = optionalKeywords.stream().filter(haystack::contains).count();
+        return (double) matchedCount / optionalKeywords.size();
+    }
+
     private static String haystackOf(CollectedArticle article) {
-        return (nullToEmpty(article.title()) + " " + nullToEmpty(article.summary()))
+        return haystackOf(article.title(), article.summary());
+    }
+
+    private static String haystackOf(String title, String summary) {
+        return (nullToEmpty(title) + " " + nullToEmpty(summary))
                 .toLowerCase(Locale.ROOT);
     }
 
     /** AND. 하나라도 없으면 탈락한다. */
     private static boolean containsEvery(String haystack, List<String> keywords) {
         return isEmpty(keywords) || keywords.stream().allMatch(keyword -> contains(haystack, keyword));
-    }
-
-    /**
-     * OR. <b>비어 있으면 조건 자체가 없는 것</b>이라 통과시킨다. 하나라도 적혀 있으면 그중 하나는 맞아야 한다.
-     */
-    private static boolean containsAny(String haystack, List<String> keywords) {
-        return isEmpty(keywords) || keywords.stream().anyMatch(keyword -> contains(haystack, keyword));
     }
 
     /** NOT. 하나라도 있으면 탈락한다. */
@@ -60,11 +82,30 @@ public final class TopicKeywordFilter {
         return StringUtils.hasText(keyword) && haystack.contains(keyword.trim().toLowerCase(Locale.ROOT));
     }
 
+    private static List<String> normalized(List<String> keywords) {
+        if (isEmpty(keywords)) {
+            return List.of();
+        }
+        return keywords.stream()
+                .filter(StringUtils::hasText)
+                .map(keyword -> keyword.trim().toLowerCase(Locale.ROOT))
+                .distinct()
+                .toList();
+    }
+
     private static boolean isEmpty(List<String> keywords) {
         return keywords == null || keywords.isEmpty();
     }
 
     private static String nullToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    public record MatchResult(
+            boolean matches,
+            double metadataFit,
+            int matchedOptionalCount,
+            int optionalKeywordCount
+    ) {
     }
 }

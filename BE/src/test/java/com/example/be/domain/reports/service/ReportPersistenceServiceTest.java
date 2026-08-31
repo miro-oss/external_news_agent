@@ -60,7 +60,8 @@ class ReportPersistenceServiceTest {
                 .build();
         ReportDocument document = new ReportDocument(
                 "보고서", "# 보고서", "configured-model", "report.ko.v1", "gemini",
-                100L, 20L, new BigDecimal("0.001"), BigDecimal.ZERO, ReportStatus.GENERATED);
+                100L, 20L, new BigDecimal("0.001"), BigDecimal.ZERO, ReportStatus.GENERATED,
+                java.util.List.of(501L), java.util.List.of(502L));
         when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
 
         assertEquals(17L, service.complete(17L, document, generatedAt));
@@ -70,6 +71,9 @@ class ReportPersistenceServiceTest {
         assertEquals("gemini", report.getLlmProvider());
         assertEquals(100L, report.getInputTokens());
         assertEquals(ReportStatus.GENERATED, report.getReportStatus());
+        assertTrue(report.isCoverageRecorded());
+        assertEquals(java.util.List.of(501L), report.getReflectedFindingIds());
+        assertEquals(java.util.List.of(502L), report.getExcludedFindingIds());
     }
 
     @Test

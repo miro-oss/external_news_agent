@@ -156,22 +156,9 @@ public class AgentQuotaService {
                                                AgentPlan plan) {
         UsageWindow usage = usageWindow();
         BigDecimal units = plan == AgentPlan.FREE ? BigDecimal.ONE : paidMaxUnits();
-        validateRunLimit(runId, task, plan);
         validateDailyAndMonthly(task, plan, units, usage);
         repository.insert(runId, idempotencyKey, task, plan, units, now());
         return repository.findByIdempotencyKey(idempotencyKey).orElseThrow();
-    }
-
-    private void validateRunLimit(Long runId, AgentTask task, AgentPlan plan) {
-        if (task != AgentTask.ANALYZE || runId == null) {
-            return;
-        }
-        int limit = plan == AgentPlan.FREE
-                ? properties.getQuota().getFreeRunArticleLimit()
-                : properties.getQuota().getPaidRunArticleLimit();
-        if (repository.countRunAnalysis(runId, plan) >= limit) {
-            throw exhausted(plan, "run당 기사 분석 한도를 초과했습니다.");
-        }
     }
 
     private void validateDailyAndMonthly(AgentTask task,

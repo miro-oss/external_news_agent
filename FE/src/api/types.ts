@@ -28,6 +28,7 @@ export const SEARCH_PROVIDERS = ['NAVER', 'TAVILY', 'SERPAPI'] as const
 
 export interface CrawlPolicy {
   robotsMode: string
+  /** @deprecated 실제 선별은 주제 전체 상한(news.collection.topic-article-limit)을 사용한다. */
   maxArticlesPerRun: number
   fullTextAllowed: boolean
 }

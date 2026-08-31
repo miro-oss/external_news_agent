@@ -48,6 +48,9 @@ class CollectionRunQueryServiceImplTest {
     @Mock
     private CollectionRunItemRepository runItemRepository;
 
+    @Mock
+    private CollectionRunCoverageService coverageService;
+
     @InjectMocks
     private CollectionRunQueryServiceImpl runQueryService;
 
@@ -120,6 +123,10 @@ class CollectionRunQueryServiceImplTest {
                 .build());
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(runItemRepository.findByRunIdOrderByIdAsc(42L)).thenReturn(List.of(item));
+        when(coverageService.calculate(42L)).thenReturn(new CollectionRunCoverage(
+                1, 1, java.math.BigDecimal.ONE,
+                1, 1, 1, java.math.BigDecimal.ONE,
+                1, 0, java.math.BigDecimal.ONE, 30));
 
         CollectionRunResDTO.Detail result = runQueryService.getRun(42L);
 
@@ -129,6 +136,7 @@ class CollectionRunQueryServiceImplTest {
         assertEquals(50, result.getBreakdown().get(0).getScannedCount());
         assertEquals("FULLTEXT_BLOCKED", result.getWarnings().get(0).getCode());
         assertEquals(5, result.getWarnings().get(0).getArticleCount());
+        assertEquals(java.math.BigDecimal.ONE, result.getCoverage().getIssueAssignmentRate());
     }
 
     @Test

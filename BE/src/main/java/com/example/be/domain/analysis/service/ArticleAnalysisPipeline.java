@@ -1,6 +1,8 @@
 package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.config.AnalysisSelectionProperties;
+import com.example.be.domain.collection.converter.TopicKeywordFilter;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
@@ -9,11 +11,15 @@ import com.example.be.domain.collection.repository.CollectionRunArticleRepositor
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.topics.entity.Topic;
+import com.example.be.global.database.OracleInClause;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +38,7 @@ public class ArticleAnalysisPipeline {
     private final ArticleAnalysisOrchestrator orchestrator;
     private final FindingReuseCache reuseCache;
     private final FindingWriter findingWriter;
+    private final AnalysisSelectionProperties selectionProperties;
 
     public void analyze(Long runId) {
         analyze(runId, Set.of());
@@ -50,6 +57,8 @@ public class ArticleAnalysisPipeline {
                 .orElseThrow(() -> new IllegalStateException("분석할 수집 실행이 없습니다. runId=" + runId))
                 .getLlmPlan();
         List<Target> targets = targets(runId, refreshedArticleIds, clustered);
+        // coverage의 분모는 이슈다. 클러스터링 실패 시 기사 단위 degrade 결과를 이슈 수로 가장하지 않는다.
+        findingWriter.recordTargetCount(runId, clustered ? targets.size() : 0);
         Map<Long, FindingReuseCache.Lookup> lookups = cacheLookups(targets, plan);
         for (Target target : targets) {
             try {
@@ -88,7 +97,7 @@ public class ArticleAnalysisPipeline {
         Map<Long, Target> byArticleId = new LinkedHashMap<>();
         if (!clustered) {
             addUnclusteredTargets(byArticleId, runId, refreshedArticleIds);
-            return byArticleId.values().stream().filter(this::isReady).toList();
+            return prioritized(byArticleId.values());
         }
         for (CollectionRunArticle observation :
                 runArticleRepository.findRepresentativeAnalysisTargetsByRunId(runId)) {
@@ -96,28 +105,38 @@ public class ArticleAnalysisPipeline {
         }
         addMissingRepresentatives(byArticleId, issueArticleRepository.findRepresentativesForRun(runId));
         if (!refreshedArticleIds.isEmpty()) {
-            for (CollectionRunArticle observation :
-                    runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
-                            runId, refreshedArticleIds)) {
-                // 메타데이터는 그대로여도 새 전문을 확보했으므로 분석 결과 관점에서는 UPDATED다.
-                ChangeType changeType = observation.getChangeType() == ChangeType.UNCHANGED
-                        ? ChangeType.UPDATED
-                        : observation.getChangeType();
-                addTarget(byArticleId, observation, changeType);
+            for (List<Long> articleIds : OracleInClause.batches(refreshedArticleIds)) {
+                for (CollectionRunArticle observation :
+                        runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
+                                runId, articleIds)) {
+                    // 메타데이터는 그대로여도 새 전문을 확보했으므로 분석 결과 관점에서는 UPDATED다.
+                    ChangeType changeType = observation.getChangeType() == ChangeType.UNCHANGED
+                            ? ChangeType.UPDATED
+                            : observation.getChangeType();
+                    addTarget(byArticleId, observation, changeType);
+                }
+                addMissingRepresentatives(byArticleId,
+                        issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(
+                                runId, articleIds));
             }
-            addMissingRepresentatives(byArticleId,
-                    issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(
-                            runId, refreshedArticleIds));
         }
-        return byArticleId.values().stream().filter(this::isReady).toList();
+        return prioritized(byArticleId.values());
     }
 
     private void addMissingRepresentatives(Map<Long, Target> targets, List<IssueArticle> memberships) {
         if (memberships == null) {
             return;
         }
-        memberships.forEach(membership -> targets.putIfAbsent(
-                membership.getArticle().getId(), new Target(membership.getArticle(), ChangeType.UPDATED)));
+        memberships.forEach(membership -> {
+            Article article = membership.getArticle();
+            Topic topic = membership.getIssue() == null
+                    ? article.getTopic()
+                    : membership.getIssue().getTopic();
+            targets.merge(
+                    article.getId(),
+                    new Target(article, ChangeType.UPDATED, metadataFit(topic, article)),
+                    this::preserveObservedChangeType);
+        });
     }
 
     private void addUnclusteredTargets(Map<Long, Target> targets,
@@ -126,21 +145,48 @@ public class ArticleAnalysisPipeline {
         runArticleRepository.findUnclusteredAnalysisTargetsByRunId(runId)
                 .forEach(observation -> addTarget(targets, observation, observation.getChangeType()));
         if (!refreshedArticleIds.isEmpty()) {
-            runArticleRepository.findUnclusteredAnalysisTargetsByRunIdAndArticleIdIn(runId, refreshedArticleIds)
-                    .forEach(observation -> addTarget(
-                            targets,
-                            observation,
-                            observation.getChangeType() == ChangeType.UNCHANGED
-                                    ? ChangeType.UPDATED
-                                    : observation.getChangeType()));
+            for (List<Long> articleIds : OracleInClause.batches(refreshedArticleIds)) {
+                runArticleRepository.findUnclusteredAnalysisTargetsByRunIdAndArticleIdIn(runId, articleIds)
+                        .forEach(observation -> addTarget(
+                                targets,
+                                observation,
+                                observation.getChangeType() == ChangeType.UNCHANGED
+                                        ? ChangeType.UPDATED
+                                        : observation.getChangeType()));
+            }
         }
     }
 
     private void addTarget(Map<Long, Target> byArticleId,
                            CollectionRunArticle observation,
                            ChangeType changeType) {
-        Target candidate = new Target(observation.getArticle(), changeType);
+        Target candidate = new Target(
+                observation.getArticle(),
+                changeType,
+                metadataFit(observation.getTopic(), observation.getArticle()));
         byArticleId.merge(observation.getArticle().getId(), candidate, this::preferUpdated);
+    }
+
+    private List<Target> prioritized(Collection<Target> targets) {
+        List<Target> ordered = targets.stream()
+                .filter(this::isReady)
+                .sorted(Comparator.comparingDouble(Target::metadataFit).reversed()
+                        .thenComparing(
+                                target -> target.article().getPublishedAt(),
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(target -> target.article().getId()))
+                .toList();
+        int limit = selectionProperties.getIssueLimitPerRun();
+        if (ordered.size() > limit) {
+            log.info("분석 상한으로 이슈 대표를 선별한다. candidates={} selected={}", ordered.size(), limit);
+        }
+        return ordered.stream().limit(limit).toList();
+    }
+
+    private double metadataFit(Topic topic, Article article) {
+        return topic == null
+                ? 1.0
+                : TopicKeywordFilter.metadataFit(topic, article.getTitle(), article.getSummary());
     }
 
     private boolean isReady(Target target) {
@@ -150,13 +196,25 @@ public class ArticleAnalysisPipeline {
     }
 
     private Target preferUpdated(Target left, Target right) {
-        return left.changeType() == ChangeType.UPDATED ? left : right;
+        ChangeType changeType = left.changeType() == ChangeType.UPDATED
+                || right.changeType() == ChangeType.UPDATED
+                ? ChangeType.UPDATED
+                : right.changeType();
+        return new Target(left.article(), changeType, Math.max(left.metadataFit(), right.metadataFit()));
+    }
+
+    /** 이슈 대표 보충은 metadataFit만 보강하며, 이번 run에서 직접 관측한 NEW/UPDATED 판정은 바꾸지 않는다. */
+    private Target preserveObservedChangeType(Target existing, Target representative) {
+        return new Target(
+                existing.article(),
+                existing.changeType(),
+                Math.max(existing.metadataFit(), representative.metadataFit()));
     }
 
     private String messageOf(RuntimeException exception) {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
     }
 
-    private record Target(Article article, ChangeType changeType) {
+    private record Target(Article article, ChangeType changeType, double metadataFit) {
     }
 }

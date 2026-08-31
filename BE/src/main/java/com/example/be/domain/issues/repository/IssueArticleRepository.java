@@ -1,6 +1,7 @@
 package com.example.be.domain.issues.repository;
 
 import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.entity.IssueArticleRole;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -36,6 +37,26 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             ORDER BY issue.id ASC, membership.id ASC
             """)
     List<IssueArticle> findByArticleIds(@Param("articleIds") Collection<Long> articleIds);
+
+    @Query("""
+            SELECT membership.article.id AS articleId,
+                   membership.issue.id AS issueId,
+                   membership.issue.topic.id AS topicId,
+                   membership.role AS role
+            FROM IssueArticle membership
+            WHERE membership.article.id IN :articleIds
+            """)
+    List<CoverageMembership> findCoverageMembershipsByArticleIds(
+            @Param("articleIds") Collection<Long> articleIds);
+
+    @Query("""
+            SELECT membership.issue.id AS issueId,
+                   membership.article.id AS articleId
+            FROM IssueArticle membership
+            WHERE membership.issue.id IN :issueIds
+              AND membership.role = com.example.be.domain.issues.entity.IssueArticleRole.REPRESENTATIVE
+            """)
+    List<IssueRepresentative> findRepresentativesByIssueIds(@Param("issueIds") Collection<Long> issueIds);
 
     @Query("""
             SELECT membership
@@ -96,6 +117,24 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             """)
     List<IssueArticle> findRepresentativesForRunAndObservedArticleIdIn(
             @Param("runId") Long runId,
-            @Param("articleIds") Set<Long> articleIds);
+            @Param("articleIds") Collection<Long> articleIds);
+
+    interface CoverageMembership {
+
+        Long getArticleId();
+
+        Long getIssueId();
+
+        Long getTopicId();
+
+        IssueArticleRole getRole();
+    }
+
+    interface IssueRepresentative {
+
+        Long getIssueId();
+
+        Long getArticleId();
+    }
 
 }

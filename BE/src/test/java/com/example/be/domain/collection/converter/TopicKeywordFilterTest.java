@@ -47,6 +47,14 @@ class TopicKeywordFilterTest {
     }
 
     @Test
+    void treatsBlankOptionalKeywordsAsNoOptionalCondition() {
+        Topic topic = topic(List.of(), List.of("", "   "), List.of());
+
+        assertTrue(TopicKeywordFilter.matches(topic, article("아무 기사", "요약")));
+        assertEquals(1.0, TopicKeywordFilter.evaluate(topic, article("아무 기사", "요약")).metadataFit());
+    }
+
+    @Test
     void looksAtSummaryAsWell() {
         Topic topic = topic(List.of("HBM"), List.of(), List.of());
 
@@ -76,6 +84,27 @@ class TopicKeywordFilterTest {
                 article("HBM3E 공급", "요약"));
 
         assertEquals(2, TopicKeywordFilter.filter(topic, articles).size());
+    }
+
+    @Test
+    void calculatesUniformMetadataFitFromOptionalKeywords() {
+        Topic topic = topic(List.of("반도체"), List.of("HBM", "삼성", "양산"), List.of());
+
+        TopicKeywordFilter.MatchResult result = TopicKeywordFilter.evaluate(
+                topic, article("삼성 반도체 투자", "HBM 공급 확대"));
+
+        assertTrue(result.matches());
+        assertEquals(2, result.matchedOptionalCount());
+        assertEquals(3, result.optionalKeywordCount());
+        assertEquals(2.0 / 3.0, result.metadataFit(), 0.000001);
+    }
+
+    @Test
+    void usesFullFitWhenOptionalKeywordsAreEmpty() {
+        Topic topic = topic(List.of("HBM"), List.of(), List.of());
+
+        assertEquals(1.0, TopicKeywordFilter.evaluate(
+                topic, article("HBM 양산", "요약")).metadataFit());
     }
 
     private Topic topic(List<String> required, List<String> optional, List<String> excluded) {

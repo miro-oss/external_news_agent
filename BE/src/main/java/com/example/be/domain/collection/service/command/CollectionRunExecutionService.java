@@ -2,6 +2,7 @@ package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.analysis.service.ArticleAnalysisPipeline;
 import com.example.be.domain.collection.cluster.IssueClusteringService;
+import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.reports.service.ReportCreationService;
@@ -9,7 +10,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Slf4j
@@ -19,6 +23,7 @@ public class CollectionRunExecutionService {
 
     private final CollectionRunItemRepository runItemRepository;
     private final CollectionExecutor collectionExecutor;
+    private final CollectionCandidatePrioritizer candidatePrioritizer;
     private final ArticleContentEnricher contentEnricher;
     private final IssueClusteringService issueClusteringService;
     private final ArticleAnalysisPipeline analysisPipeline;
@@ -28,13 +33,12 @@ public class CollectionRunExecutionService {
     public void executeRun(Long runId) {
         try {
             List<CollectionRunItem> items = runItemRepository.findExecutionItemsByRunId(runId);
-            for (CollectionRunItem item : items) {
-                collectionExecutor.execute(
-                        item.getRun().getId(),
-                        item.getId(),
-                        item.getTopic(),
-                        item.getSource(),
-                        item.getRun().isForceRefresh());
+            Map<Long, List<CollectionRunItem>> itemsByTopic = new LinkedHashMap<>();
+            items.forEach(item -> itemsByTopic
+                    .computeIfAbsent(item.getTopic().getId(), ignored -> new ArrayList<>())
+                    .add(item));
+            for (List<CollectionRunItem> topicItems : itemsByTopic.values()) {
+                collectAndWriteTopic(runId, topicItems);
             }
             // 메타데이터를 다 모은 뒤에 본문을 받는다. 조합마다 섞으면 같은 호스트를 번갈아 두드리게 된다.
             Set<Long> refreshedArticleIds = contentEnricher.enrich(runId);
@@ -66,5 +70,43 @@ public class CollectionRunExecutionService {
             log.error("수집 실행을 완료하지 못했다. runId={} error={}", runId, exception.getMessage(), exception);
             resultWriter.failRun(runId);
         }
+    }
+
+    private void collectAndWriteTopic(Long runId, List<CollectionRunItem> items) {
+        List<CollectionBatch> batches = items.stream()
+                .map(item -> collectionExecutor.collect(
+                        item.getId(),
+                        item.getTopic(),
+                        item.getSource(),
+                        item.getRun().isForceRefresh()))
+                .toList();
+        Map<Long, List<CollectedArticle>> selected = candidatePrioritizer.prioritize(batches);
+        for (CollectionBatch batch : batches) {
+            if (batch.failed()) {
+                resultWriter.writeFailure(
+                        runId, batch.itemId(), batch.source().getId(), batch.failureMessage());
+                continue;
+            }
+            try {
+                resultWriter.writeSelected(
+                        runId,
+                        batch.itemId(),
+                        batch.topic().getId(),
+                        batch.source().getId(),
+                        batch.outcome(),
+                        selected.getOrDefault(batch.itemId(), List.of()));
+            } catch (RuntimeException exception) {
+                log.warn("조합 저장에 실패했다. topicId={} sourceId={} error={}",
+                        batch.topic().getId(), batch.source().getId(), exception.getMessage(), exception);
+                resultWriter.writeFailure(
+                        runId, batch.itemId(), batch.source().getId(), messageOf(exception));
+            }
+        }
+    }
+
+    private String messageOf(RuntimeException exception) {
+        return exception.getMessage() == null
+                ? exception.getClass().getSimpleName()
+                : exception.getMessage();
     }
 }

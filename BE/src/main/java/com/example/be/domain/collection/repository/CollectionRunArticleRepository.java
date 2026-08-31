@@ -8,8 +8,8 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
-import java.util.Set;
 
 /**
  * 기사 목록 조회의 runId/topicId/sourceId/changeType 필터가 이 테이블 위에서 돈다.
@@ -29,6 +29,16 @@ public interface CollectionRunArticleRepository
 
     long countByRunIdAndChangeType(Long runId, ChangeType changeType);
 
+    /** run 커버리지는 기사×주제 관측을 분모로 삼는다. */
+    @Query("""
+            SELECT observation.article.id AS articleId,
+                   observation.topic.id AS topicId
+            FROM CollectionRunArticle observation
+            WHERE observation.run.id = :runId
+            ORDER BY observation.id ASC
+            """)
+    List<CoverageObservation> findCoverageObservationsByRunId(@Param("runId") Long runId);
+
     /** 이번 실행에서 관측한 고유 기사별 최신 수집 상태를 보고서 통계에 제공한다. */
     @Query("""
             SELECT observation.article.id AS articleId,
@@ -39,7 +49,10 @@ public interface CollectionRunArticleRepository
             """)
     List<ArticleFetchStatus> findArticleFetchStatusesByRunId(@Param("runId") Long runId);
 
-    /** 클러스터 계산용 값 복사를 마치면 트랜잭션 밖에서 비교할 수 있게 필요한 연관을 한 번에 붙인다. */
+    /**
+     * 클러스터 계산용 값 복사를 마치면 트랜잭션 밖에서 비교할 수 있게 필요한 연관을 한 번에 붙인다.
+     * Article.body가 CLOB이므로 Oracle ORA-22848을 피하기 위해 이 쿼리에 DISTINCT를 추가하지 않는다.
+     */
     @Query("""
             SELECT observation
             FROM CollectionRunArticle observation
@@ -87,7 +100,7 @@ public interface CollectionRunArticleRepository
             """)
     List<CollectionRunArticle> findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
             @Param("runId") Long runId,
-            @Param("articleIds") Set<Long> articleIds);
+            @Param("articleIds") Collection<Long> articleIds);
 
     /** 클러스터링이 실패했을 때 수집 결과 분석까지 잃지 않도록 쓰는 레거시 대상 조회. */
     @Query("""
@@ -117,13 +130,20 @@ public interface CollectionRunArticleRepository
             """)
     List<CollectionRunArticle> findUnclusteredAnalysisTargetsByRunIdAndArticleIdIn(
             @Param("runId") Long runId,
-            @Param("articleIds") Set<Long> articleIds);
+            @Param("articleIds") Collection<Long> articleIds);
 
     interface ArticleFetchStatus {
 
         Long getArticleId();
 
         FetchStatus getFetchStatus();
+    }
+
+    interface CoverageObservation {
+
+        Long getArticleId();
+
+        Long getTopicId();
     }
 
 }

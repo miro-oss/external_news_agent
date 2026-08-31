@@ -178,18 +178,6 @@ public class AgentQuotaJdbcRepository {
         return nonNull(reserved).add(nonNull(legacy));
     }
 
-    public int countRunAnalysis(Long runId, AgentPlan plan) {
-        Integer count = jdbcTemplate.queryForObject("""
-                SELECT COUNT(*)
-                FROM agent_quota_reservations
-                WHERE collection_run_id = ?
-                  AND llm_plan = ?
-                  AND agent_task = 'ANALYZE'
-                  AND status <> 'RELEASED'
-                """, Integer.class, runId, plan.name());
-        return count == null ? 0 : count;
-    }
-
     public void consume(QuotaReservation reservation,
                         BigDecimal consumedUnits,
                         LocalDateTime finishedAt) {

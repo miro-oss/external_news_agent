@@ -44,6 +44,7 @@ import java.util.stream.LongStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -100,6 +101,8 @@ class AgentReportOrchestratorTest {
         assertEquals("report.ko.v1", document.promptVersion());
         assertEquals("gemini", document.llmProvider());
         assertEquals(ReportStatus.GENERATED, document.status());
+        assertEquals(List.of(501L, 503L), document.reflectedFindingIds());
+        assertEquals(List.of(), document.excludedFindingIds());
 
         ArgumentCaptor<AgentReportRequest> captor = ArgumentCaptor.forClass(AgentReportRequest.class);
         verify(client).report(captor.capture());
@@ -268,12 +271,15 @@ class AgentReportOrchestratorTest {
                 .toList();
         when(client.report(any())).thenReturn(response(List.of(1L)));
 
-        orchestrator.generate(run(), findings, LocalDateTime.of(2026, 8, 21, 9, 3));
+        ReportDocument document = orchestrator.generate(
+                run(), findings, LocalDateTime.of(2026, 8, 21, 9, 3));
 
         ArgumentCaptor<AgentReportRequest> captor = ArgumentCaptor.forClass(AgentReportRequest.class);
         verify(client).report(captor.capture());
         assertEquals(50, captor.getValue().findings().size());
         assertEquals(1L, captor.getValue().findings().getFirst().id());
+        assertTrue(document.markdownBody().contains("## 기타 분석 이슈"));
+        assertTrue(document.markdownBody().contains("기사 2"));
     }
 
     @Test
@@ -292,7 +298,7 @@ class AgentReportOrchestratorTest {
                 List.of(new FindingKeyPoint("근거 없는 주장", List.of(0), "ungrounded")));
         when(client.report(any())).thenReturn(response(List.of(501L)));
 
-        orchestrator.generate(
+        ReportDocument document = orchestrator.generate(
                 run(), List.of(unsupported, supported), LocalDateTime.of(2026, 8, 21, 9, 3));
 
         ArgumentCaptor<AgentReportRequest> captor = ArgumentCaptor.forClass(AgentReportRequest.class);
@@ -300,6 +306,29 @@ class AgentReportOrchestratorTest {
         assertEquals(List.of(501L), captor.getValue().findings().stream()
                 .map(AgentReportRequest.FindingPayload::id)
                 .toList());
+        assertTrue(document.markdownBody()
+                .contains("기사 502 — 검증된 문장 근거가 없어 제외했습니다."));
+        assertEquals(List.of(501L), document.reflectedFindingIds());
+        assertEquals(List.of(502L), document.excludedFindingIds());
+    }
+
+    @Test
+    void rendersUnsafeUnreferencedUrlAsPlainText() {
+        Finding referenced = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "참조 요약");
+        Finding unsafe = finding(
+                502L,
+                AnalysisSource.LLM,
+                FetchStatus.FULLTEXT,
+                "미참조 요약",
+                List.of(new FindingKeyPoint("핵심", List.of(0), "grounded")),
+                "javascript:alert(1)");
+        when(client.report(any())).thenReturn(response(List.of(501L)));
+
+        ReportDocument document = orchestrator.generate(
+                run(), List.of(referenced, unsafe), LocalDateTime.of(2026, 8, 21, 9, 3));
+
+        assertTrue(document.markdownBody().contains("- 기사 502"));
+        assertFalse(document.markdownBody().contains("javascript:alert"));
     }
 
     @Test
@@ -367,12 +396,21 @@ class AgentReportOrchestratorTest {
                             FetchStatus fetchStatus,
                             String summary,
                             List<FindingKeyPoint> keyPoints) {
+        return finding(id, source, fetchStatus, summary, keyPoints, "https://example.com/" + id);
+    }
+
+    private Finding finding(Long id,
+                            AnalysisSource source,
+                            FetchStatus fetchStatus,
+                            String summary,
+                            List<FindingKeyPoint> keyPoints,
+                            String canonicalUrl) {
         Topic topic = Topic.builder().id(3L).name("HBM").build();
         Article article = Article.builder()
                 .id(id + 1000)
                 .topic(topic)
                 .title("기사 " + id)
-                .canonicalUrl("https://example.com/" + id)
+                .canonicalUrl(canonicalUrl)
                 .sourceName("Example")
                 .fetchStatus(fetchStatus)
                 .build();

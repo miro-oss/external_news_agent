@@ -84,6 +84,10 @@ public class CollectionRun {
     @Column(name = "report_id")
     private Long reportId;
 
+    /** 분석 준비 조건과 실행 상한을 모두 적용한 뒤 실제로 선택된 이슈 대표 수다. */
+    @Column(name = "analysis_target_issue_count")
+    private Integer analysisTargetIssueCount;
+
     @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(name = "llm_plan", nullable = false, length = 10)
@@ -149,6 +153,13 @@ public class CollectionRun {
 
     public void attachReport(Long reportId) {
         this.reportId = reportId;
+    }
+
+    public void recordAnalysisTargetIssueCount(int targetCount) {
+        if (targetCount < 0) {
+            throw new IllegalArgumentException("분석 대상 이슈 수는 0 이상이어야 합니다.");
+        }
+        this.analysisTargetIssueCount = targetCount;
     }
 
     public int getWarningCount() {

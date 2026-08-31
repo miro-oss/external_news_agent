@@ -14,7 +14,11 @@ public record CrawlPolicy(
         @Schema(description = "robots.txt 준수 모드", example = "respect", allowableValues = {"respect", "ignore"})
         String robotsMode,
 
-        @Schema(description = "1회 실행에서 수집할 최대 기사 수", example = "30")
+        @Schema(
+                description = "[Deprecated] 기존 클라이언트 호환용 저장·응답 값. 실제 선별은 주제 전체 상한을 사용",
+                example = "30",
+                deprecated = true
+        )
         Integer maxArticlesPerRun,
 
         @Schema(description = "본문 전문 저장 허용 여부. 페이월 매체는 false", example = "true")

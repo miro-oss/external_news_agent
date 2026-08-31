@@ -38,6 +38,7 @@ public class CollectionRunQueryServiceImpl implements CollectionRunQueryService 
 
     private final CollectionRunRepository runRepository;
     private final CollectionRunItemRepository runItemRepository;
+    private final CollectionRunCoverageService coverageService;
 
     @Override
     public PageResponse<CollectionRunResDTO.Summary> getRuns(String status,
@@ -81,7 +82,7 @@ public class CollectionRunQueryServiceImpl implements CollectionRunQueryService 
         List<CollectionRunItem> items = runItemRepository.findByRunIdOrderByIdAsc(runId);
         List<CollectionRunWarning> warnings = List.copyOf(run.getWarnings());
 
-        return CollectionRunConverter.toDetail(run, items, warnings);
+        return CollectionRunConverter.toDetail(run, items, warnings, coverageService.calculate(runId));
     }
 
     private Map<Long, Integer> countWarnings(List<CollectionRun> runs) {

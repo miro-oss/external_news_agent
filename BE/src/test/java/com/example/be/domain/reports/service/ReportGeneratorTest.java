@@ -39,6 +39,8 @@ class ReportGeneratorTest {
         assertTrue(highIndex < lowIndex);
         assertTrue(document.markdownBody().contains("민감도: 높음 1 · 보통 0 · 낮음 1"));
         assertTrue(document.markdownBody().contains("원문: <https://example.com/1>"));
+        assertEquals(List.of(1L, 2L), document.reflectedFindingIds());
+        assertEquals(List.of(), document.excludedFindingIds());
     }
 
     /**
@@ -177,6 +179,9 @@ class ReportGeneratorTest {
         assertTrue(!document.markdownBody().contains("제외할 주장"));
         assertTrue(document.markdownBody().contains("검증된 주장"));
         assertTrue(document.markdownBody().contains("근거 부족 분석 1건 제외"));
+        assertTrue(document.markdownBody().contains("왜곡 기사 — 검증된 문장 근거가 없어 제외했습니다."));
+        assertEquals(List.of(2L), document.reflectedFindingIds());
+        assertEquals(List.of(1L), document.excludedFindingIds());
     }
 
     @Test

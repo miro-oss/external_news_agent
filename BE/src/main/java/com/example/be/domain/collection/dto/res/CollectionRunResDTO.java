@@ -8,6 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -104,7 +105,8 @@ public class CollectionRunResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
             "runId", "status", "triggerType", "idempotencyKey", "startedAt", "finishedAt",
-            "scannedCount", "newCount", "updatedCount", "skippedCount", "reportId", "llmPlan", "breakdown", "warnings"
+            "scannedCount", "newCount", "updatedCount", "skippedCount", "reportId", "llmPlan",
+            "coverage", "breakdown", "warnings"
     })
     @Schema(name = "CollectionRunDetailResponse", description = "수집 실행 상세")
     public static class Detail {
@@ -145,11 +147,59 @@ public class CollectionRunResDTO {
         @Schema(description = "실행에 확정 적용된 LLM 플랜", example = "PAID")
         private final String llmPlan;
 
+        @Schema(description = "이슈 귀속·LLM 분석·리포트 반영의 분리 집계")
+        private final Coverage coverage;
+
         @Schema(description = "조합별 수집 결과")
         private final List<Breakdown> breakdown;
 
         @Schema(description = "수집 실행 경고 목록")
         private final List<Warning> warnings;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @JsonPropertyOrder({
+            "observedArticleCount", "issueAssignedArticleCount", "issueAssignmentRate",
+            "issueCount", "analysisTargetIssueCount", "llmAnalyzedIssueCount", "llmAnalysisRate",
+            "reportReflectedIssueCount", "reportExcludedIssueCount", "reportCoverageRate", "issueLimitPerRun"
+    })
+    @Schema(name = "CollectionRunCoverageResponse", description = "단계별 run 커버리지")
+    public static class Coverage {
+
+        @Schema(description = "이번 실행의 고유 기사×주제 관측 수", example = "32")
+        private final int observedArticleCount;
+
+        @Schema(description = "같은 주제의 이슈 membership을 가진 관측 수", example = "32")
+        private final int issueAssignedArticleCount;
+
+        @Schema(description = "이슈 귀속률. 분모가 0이면 null", example = "1.0", nullable = true)
+        private final BigDecimal issueAssignmentRate;
+
+        @Schema(description = "이번 실행이 건드린 고유 이슈 수", example = "32")
+        private final int issueCount;
+
+        @Schema(description = "설정 상한을 적용한 분석 대상 이슈 수", example = "30")
+        private final int analysisTargetIssueCount;
+
+        @Schema(description = "LLM 분석 또는 동일 입력 LLM 결과를 재사용한 이슈 수", example = "30")
+        private final int llmAnalyzedIssueCount;
+
+        @Schema(description = "LLM 분석률. 분모가 0이면 null", example = "0.9375", nullable = true)
+        private final BigDecimal llmAnalysisRate;
+
+        @Schema(description = "근거가 있어 완료된 보고서에 반영된 이슈 수", example = "28")
+        private final int reportReflectedIssueCount;
+
+        @Schema(description = "근거 부족이라는 제외 사유를 가진 LLM 분석 이슈 수", example = "2")
+        private final int reportExcludedIssueCount;
+
+        @Schema(description = "반영 또는 제외 사유 보유 비율. 분모가 0이면 null", example = "1.0", nullable = true)
+        private final BigDecimal reportCoverageRate;
+
+        @Schema(description = "실행당 분석 이슈 설정 상한", example = "30")
+        private final int issueLimitPerRun;
     }
 
     @Getter

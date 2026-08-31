@@ -1,14 +1,13 @@
 package com.example.be.domain.reports.service;
 
-import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.AnalysisSource;
+import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -36,7 +35,7 @@ public class ReportGenerator {
                 .count();
         int actualEvidenceExcluded = (int) findings.stream()
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
-                .filter(finding -> !ReportEvidencePolicy.hasSupportedEvidence(finding))
+                .filter(finding -> !FindingEvidencePolicy.hasSupportedEvidence(finding))
                 .count();
         ReportSourceStats effectiveStats = new ReportSourceStats(
                 sourceStats.collected(),
@@ -47,12 +46,16 @@ public class ReportGenerator {
                 Math.max(sourceStats.evidenceExcluded(), actualEvidenceExcluded));
         List<Finding> ordered = ReportFindingOrder.sort(findings.stream()
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
-                .filter(ReportEvidencePolicy::hasSupportedEvidence)
+                .filter(FindingEvidencePolicy::hasSupportedEvidence)
+                .toList());
+        List<Finding> excluded = ReportFindingOrder.sort(findings.stream()
+                .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
+                .filter(finding -> !FindingEvidencePolicy.hasSupportedEvidence(finding))
                 .toList());
         String title = title(ordered, generatedAt);
         return new ReportDocument(
                 title,
-                markdown(title, ordered, effectiveStats),
+                markdown(title, ordered, excluded, effectiveStats),
                 MODEL_NAME,
                 null,
                 null,
@@ -60,7 +63,9 @@ public class ReportGenerator {
                 null,
                 null,
                 null,
-                ReportStatus.FALLBACK);
+                ReportStatus.FALLBACK,
+                ordered.stream().map(Finding::getId).toList(),
+                excluded.stream().map(Finding::getId).toList());
     }
 
     private String title(List<Finding> findings, LocalDateTime generatedAt) {
@@ -73,8 +78,11 @@ public class ReportGenerator {
         return truncateUtf8(prefix + " 보고서 " + generatedAt.format(TITLE_TIME), NewsReport.MAX_TITLE_LENGTH);
     }
 
-    private String markdown(String title, List<Finding> findings, ReportSourceStats sourceStats) {
-        StringBuilder body = new StringBuilder("# ").append(markdownText(title)).append("\n\n");
+    private String markdown(String title,
+                            List<Finding> findings,
+                            List<Finding> excluded,
+                            ReportSourceStats sourceStats) {
+        StringBuilder body = new StringBuilder("# ").append(ReportMarkdown.text(title)).append("\n\n");
         body.append("## 오늘의 핵심\n\n");
         if (findings.isEmpty()) {
             body.append("- 이번 실행에서 기사 ").append(sourceStats.collected())
@@ -83,8 +91,8 @@ public class ReportGenerator {
                             : "건을 관측했지만 분석 결과가 없어 기사 내용을 요약하지 않았습니다.\n");
         } else {
             findings.stream().limit(5).forEach(finding -> body
-                    .append("- ").append(markdownText(
-                            ReportEvidencePolicy.reportSummary(finding))).append("\n"));
+                    .append("- ").append(ReportMarkdown.text(
+                            FindingEvidencePolicy.reportSummary(finding))).append("\n"));
         }
 
         Map<String, Long> riskCounts = counts(findings, finding -> finding.getRiskLevel().toApiValue());
@@ -110,16 +118,23 @@ public class ReportGenerator {
             body.append("\n원문에서 근거를 확인하지 못한 분석은 보고서에 담지 않았습니다.\n");
         }
         for (Finding finding : findings) {
-            body.append("\n### ").append(markdownText(finding.getArticle().getTitle())).append("\n\n")
-                    .append(markdownText(ReportEvidencePolicy.reportSummary(finding))).append("\n\n")
-                    .append("- 분류: ").append(markdownText(finding.getCategory()))
+            body.append("\n### ").append(ReportMarkdown.text(finding.getArticle().getTitle())).append("\n\n")
+                    .append(ReportMarkdown.text(FindingEvidencePolicy.reportSummary(finding))).append("\n\n")
+                    .append("- 분류: ").append(ReportMarkdown.text(finding.getCategory()))
                     .append(" · 민감도: ").append(ReportLabels.risk(finding.getRiskLevel()))
                     .append(" · 관련도: ").append(ReportLabels.relevance(finding.getRelevance())).append("\n");
-            ReportEvidencePolicy.supportedKeyPoints(finding).forEach(point -> body
-                    .append("- 핵심: ").append(markdownText(point.text())).append("\n"));
-            if (safeHttpUrl(finding.getArticle().getCanonicalUrl())) {
-                body.append("- 원문: <").append(finding.getArticle().getCanonicalUrl().trim()).append(">\n");
+            FindingEvidencePolicy.supportedKeyPoints(finding).forEach(point -> body
+                    .append("- 핵심: ").append(ReportMarkdown.text(point.text())).append("\n"));
+            String canonicalUrl = ReportMarkdown.httpUrl(finding.getArticle().getCanonicalUrl());
+            if (canonicalUrl != null) {
+                body.append("- 원문: <").append(canonicalUrl).append(">\n");
             }
+        }
+        if (!excluded.isEmpty()) {
+            body.append("\n## 보고서 제외 이슈\n\n");
+            excluded.forEach(finding -> body
+                    .append("- ").append(ReportMarkdown.text(finding.getArticle().getTitle()))
+                    .append(" — 검증된 문장 근거가 없어 제외했습니다.\n"));
         }
         appendSourceNotes(body, sourceStats);
         return body.toString();
@@ -127,7 +142,7 @@ public class ReportGenerator {
 
     private void appendSourceNotes(StringBuilder body, ReportSourceStats stats) {
         body.append("\n## 수집 및 출처 참고\n\n");
-        ReportSourceNotes.from(stats).forEach(note -> body.append("- ").append(markdownText(note)).append("\n"));
+        ReportSourceNotes.from(stats).forEach(note -> body.append("- ").append(ReportMarkdown.text(note)).append("\n"));
     }
 
     private Map<String, Long> counts(List<Finding> findings,
@@ -135,29 +150,6 @@ public class ReportGenerator {
         Map<String, Long> counts = new LinkedHashMap<>();
         findings.forEach(finding -> counts.merge(classifier.apply(finding), 1L, Long::sum));
         return counts;
-    }
-
-    private String singleLine(String value) {
-        return value == null ? "" : value.replaceAll("\\s+", " ").trim();
-    }
-
-    private String markdownText(String value) {
-        return singleLine(value).replaceAll("([\\\\`*_{}\\[\\]<>()#+!|])", "\\\\$1");
-    }
-
-    private boolean safeHttpUrl(String value) {
-        if (!StringUtils.hasText(value)
-                || value.chars().anyMatch(character -> Character.isWhitespace(character)
-                || character == '<' || character == '>')) {
-            return false;
-        }
-        try {
-            URI uri = new URI(value);
-            return ("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
-                    && StringUtils.hasText(uri.getHost());
-        } catch (URISyntaxException ignored) {
-            return false;
-        }
     }
 
     private String truncateUtf8(String value, int maxBytes) {

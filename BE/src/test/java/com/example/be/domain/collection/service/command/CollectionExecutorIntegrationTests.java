@@ -67,6 +67,9 @@ class CollectionExecutorIntegrationTests {
     private CollectionExecutor collectionExecutor;
 
     @Autowired
+    private CollectionCandidatePrioritizer candidatePrioritizer;
+
+    @Autowired
     private CollectionRunRepository runRepository;
 
     @Autowired
@@ -283,7 +286,7 @@ class CollectionExecutorIntegrationTests {
     }
 
     @Test
-    void limitsArticlesToCrawlPolicy() {
+    void ignoresDeprecatedCrawlPolicyArticleLimit() {
         Source limited = sourceRepository.save(Source.builder()
                 .sourceKind(Source.KIND_FEED)
                 .name("정책 제한 소스")
@@ -305,7 +308,7 @@ class CollectionExecutorIntegrationTests {
         flushAndClear();
 
         assertEquals(3, item.getScannedCount());
-        assertEquals(2, item.getNewCount());
+        assertEquals(3, item.getNewCount());
     }
 
     /**
@@ -557,7 +560,16 @@ class CollectionExecutorIntegrationTests {
      * 그 경로에서 나는 문제가 테스트에 걸리지 않는다.
      */
     private void execute(CollectionRun run, CollectionRunItem item, Topic itemTopic, Source itemSource) {
-        collectionExecutor.execute(run.getId(), item.getId(), itemTopic, itemSource, run.isForceRefresh());
+        CollectionBatch batch = collectionExecutor.collect(
+                item.getId(), itemTopic, itemSource, run.isForceRefresh());
+        if (batch.failed()) {
+            resultWriter.writeFailure(run.getId(), item.getId(), itemSource.getId(), batch.failureMessage());
+            return;
+        }
+        List<CollectedArticle> selected = candidatePrioritizer.prioritize(List.of(batch))
+                .getOrDefault(item.getId(), List.of());
+        resultWriter.writeSelected(
+                run.getId(), item.getId(), itemTopic.getId(), itemSource.getId(), batch.outcome(), selected);
     }
 
     private void flushAndClear() {
