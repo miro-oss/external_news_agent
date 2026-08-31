@@ -68,6 +68,18 @@ class NotificationRendererTest {
         assertTrue(rendered.chunks().stream().noneMatch(chunk -> chunk.endsWith("&")));
     }
 
+    @Test
+    void breakingAlertEscapesChannelSpecificMarkup() {
+        RenderedNotification email = renderer.renderBreakingAlert(
+                "HBM4", "속보 '<HBM4>'에 후속 1건", channel(ChannelType.EMAIL, Integer.MAX_VALUE));
+        RenderedNotification telegram = renderer.renderBreakingAlert(
+                "HBM4", "속보 '<HBM4>'에 후속 1건", channel(ChannelType.TELEGRAM, 3500));
+
+        assertTrue(email.subject().startsWith("[속보 후속]"));
+        assertTrue(email.chunks().getFirst().contains("&#39;&lt;HBM4&gt;&#39;"));
+        assertTrue(telegram.chunks().getFirst().contains("&#39;&lt;HBM4&gt;&#39;"));
+    }
+
     private NewsReport report(String markdown) {
         return NewsReport.builder()
                 .id(17L)

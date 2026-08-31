@@ -1,5 +1,6 @@
 package com.example.be.domain.collection.cluster;
 
+import com.example.be.domain.notifications.service.WatchNotificationDeliveryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -11,9 +12,10 @@ public class IssueClusteringService {
     private final IssueClusteringLoader loader;
     private final IssueClusterer clusterer;
     private final IssueClusterWriter writer;
+    private final WatchNotificationDeliveryService watchNotificationDeliveryService;
 
     public void cluster(Long runId) {
         ClusterPlan plan = clusterer.cluster(loader.load(runId));
-        writer.write(plan);
+        writer.write(plan).forEach(watchNotificationDeliveryService::deliver);
     }
 }

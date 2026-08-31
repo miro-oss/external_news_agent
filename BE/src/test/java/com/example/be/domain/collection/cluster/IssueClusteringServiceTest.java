@@ -1,5 +1,6 @@
 package com.example.be.domain.collection.cluster;
 
+import com.example.be.domain.notifications.service.WatchNotificationDeliveryService;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -15,10 +16,13 @@ class IssueClusteringServiceTest {
         IssueClusteringLoader loader = mock(IssueClusteringLoader.class);
         IssueClusterer clusterer = mock(IssueClusterer.class);
         IssueClusterWriter writer = mock(IssueClusterWriter.class);
-        IssueClusteringService service = new IssueClusteringService(loader, clusterer, writer);
+        WatchNotificationDeliveryService deliveryService = mock(WatchNotificationDeliveryService.class);
+        IssueClusteringService service = new IssueClusteringService(
+                loader, clusterer, writer, deliveryService);
         ClusterPlan plan = new ClusterPlan(List.of(), List.of(), List.of());
         when(loader.load(42L)).thenReturn(List.of());
         when(clusterer.cluster(List.of())).thenReturn(plan);
+        when(writer.write(plan)).thenReturn(List.of());
 
         service.cluster(42L);
 

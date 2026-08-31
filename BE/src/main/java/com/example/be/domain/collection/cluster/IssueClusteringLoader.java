@@ -69,7 +69,7 @@ public class IssueClusteringLoader {
             snapshot.put(new ArticleTopicKey(article.getId(), topicId),
                     value(article, observation.getTopic(),
                             issueByCurrentArticle.get(new ArticleTopicKey(article.getId(), topicId)),
-                            true, eventTime(article, observation)));
+                            true, observedAt(article)));
         }
         return List.copyOf(snapshot.values());
     }
@@ -132,8 +132,12 @@ public class IssueClusteringLoader {
 
     private OffsetDateTime eventTime(Article article, CollectionRunArticle observation) {
         return article.getPublishedAt() == null
-                ? observation.getObservedAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime()
+                ? observationTime(observation)
                 : article.getPublishedAt();
+    }
+
+    private OffsetDateTime observationTime(CollectionRunArticle observation) {
+        return observation.getObservedAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime();
     }
 
     private OffsetDateTime observedAt(Article article) {

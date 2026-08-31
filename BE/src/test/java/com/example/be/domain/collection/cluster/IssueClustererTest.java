@@ -48,7 +48,7 @@ class IssueClustererTest {
         assertEquals(List.of(1L, 2L), grouped.articleIds());
         assertEquals(2, grouped.publisherCount());
         assertEquals(1, grouped.independentContentCount());
-        assertEquals(2L, grouped.representativeArticleId());
+        assertEquals(1L, grouped.representativeArticleId());
     }
 
     @Test
@@ -94,6 +94,37 @@ class IssueClustererTest {
 
         assertEquals(2, plan.issues().size());
         assertFalse(plan.pairScores().getFirst().sameCluster());
+    }
+
+    @Test
+    void breakingTitleMatchIsLimitedToSixHours() {
+        ClusterArticle breaking = article(
+                1L, "[속보] 삼성전자 HBM4 증설 발표", null,
+                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+        ClusterArticle lateFollowUp = article(
+                2L, "삼성전자 HBM4 증설 발표", null,
+                FetchStatus.METADATA_ONLY, "매일경제", "0.9", hour(7));
+
+        ClusterPlan plan = clusterer.cluster(List.of(breaking, lateFollowUp), true);
+
+        assertEquals(2, plan.issues().size());
+        assertFalse(plan.pairScores().getFirst().sameCluster());
+    }
+
+    @Test
+    void detailedFollowUpBecomesRepresentativeInsteadOfBreakingArticle() {
+        ClusterArticle breaking = article(
+                1L, "[속보] 삼성전자 HBM4 증설 발표", "짧은 속보",
+                FetchStatus.FULLTEXT, "연합뉴스", "0.95", hour(0));
+        ClusterArticle followUp = article(
+                2L, "삼성전자 HBM4 증설 발표", longBody("삼성전자 HBM4 증설 발표"),
+                FetchStatus.FULLTEXT, "전자신문", "0.80", hour(1));
+
+        ClusterPlan plan = clusterer.cluster(List.of(breaking, followUp));
+
+        assertEquals(1, plan.issues().size());
+        assertEquals(2L, plan.issues().getFirst().representativeArticleId());
+        assertFalse(plan.issues().getFirst().entities().contains("BREAKING"));
     }
 
     @Test

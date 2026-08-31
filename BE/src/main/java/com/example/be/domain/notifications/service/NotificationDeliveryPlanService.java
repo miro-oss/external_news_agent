@@ -9,6 +9,7 @@ import com.example.be.domain.notifications.entity.RecipientDestination;
 import com.example.be.domain.notifications.exception.NotificationException;
 import com.example.be.domain.notifications.exception.code.NotificationErrorCode;
 import com.example.be.domain.notifications.repository.NotificationChannelRepository;
+import com.example.be.domain.notifications.repository.NotificationGroupRepository;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.exception.ReportException;
@@ -31,6 +32,7 @@ public class NotificationDeliveryPlanService {
 
     private final NewsReportRepository reportRepository;
     private final NotificationChannelRepository channelRepository;
+    private final NotificationGroupRepository groupRepository;
     private final NotificationManagementService managementService;
     private final NotificationRenderer renderer;
 
@@ -54,6 +56,22 @@ public class NotificationDeliveryPlanService {
         Map<Long, RenderedNotification> renderedByChannel = new LinkedHashMap<>();
         channels.forEach(channel -> renderedByChannel.put(channel.getId(), renderer.render(report, channel)));
         return new PreparedDelivery(reportId, targets, renderedByChannel);
+    }
+
+    @Transactional(readOnly = true)
+    public PreparedWatchDelivery prepareWatchAlert(Long notifyGroupId,
+                                                    String issueTitle,
+                                                    String message) {
+        List<NotificationChannel> channels = resolveChannels(List.of());
+        // 자동 BREAKING watch는 그룹을 미리 선택하지 않으므로 null이면 활성 그룹 전체로 보낸다.
+        List<NotificationGroup> groups = notifyGroupId == null
+                ? groupRepository.findAllByActiveOrderByIdAsc(true)
+                : groupRepository.findByIdAndActive(notifyGroupId, true).stream().toList();
+        List<PreparedTarget> targets = resolveTargets(groups, channels);
+        Map<Long, RenderedNotification> renderedByChannel = new LinkedHashMap<>();
+        channels.forEach(channel -> renderedByChannel.put(
+                channel.getId(), renderer.renderBreakingAlert(issueTitle, message, channel)));
+        return new PreparedWatchDelivery(targets, renderedByChannel);
     }
 
     private List<PreparedTarget> resolveTargets(List<NotificationGroup> groups,
@@ -98,6 +116,11 @@ public class NotificationDeliveryPlanService {
     public record PreparedDelivery(Long reportId,
                                    List<PreparedTarget> targets,
                                    Map<Long, RenderedNotification> renderedByChannel) {
+    }
+
+    public record PreparedWatchDelivery(
+            List<PreparedTarget> targets,
+            Map<Long, RenderedNotification> renderedByChannel) {
     }
 
     public record PreparedTarget(Long recipientId,

@@ -36,6 +36,21 @@ public class NotificationRenderer {
                 : renderTelegram(report, findings, channel.getMaxLength());
     }
 
+    public RenderedNotification renderBreakingAlert(String issueTitle,
+                                                     String message,
+                                                     NotificationChannel channel) {
+        if (channel.getChannelType() == ChannelType.EMAIL) {
+            String subject = "[속보 후속] " + singleLine(issueTitle);
+            String html = "<html><body><h2>속보 후속</h2><p>" + escape(message) + "</p></body></html>";
+            return new RenderedNotification(subject, null, List.of(html));
+        }
+        String body = "<b>속보 후속</b>\n" + escape(message);
+        if (body.length() > channel.getMaxLength()) {
+            body = shortTelegramBlock(body, channel.getMaxLength());
+        }
+        return new RenderedNotification(null, "HTML", List.of(body));
+    }
+
     private RenderedNotification renderEmail(NewsReport report, List<Finding> findings) {
         String subject = "[반도체 뉴스] " + report.getGeneratedAt().format(SUBJECT_TIME) + " 보고서";
         StringBuilder html = new StringBuilder("<html><body>")
@@ -144,6 +159,10 @@ public class NotificationRenderer {
 
     private String escape(String value) {
         return HtmlUtils.htmlEscape(value == null ? "" : value);
+    }
+
+    private String singleLine(String value) {
+        return value == null ? "" : value.replaceAll("[\\r\\n]+", " ").trim();
     }
 
     private String attribute(String value) {

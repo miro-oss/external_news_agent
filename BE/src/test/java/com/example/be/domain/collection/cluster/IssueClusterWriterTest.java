@@ -10,6 +10,9 @@ import com.example.be.domain.issues.entity.IssueStance;
 import com.example.be.domain.issues.entity.IssueStanceSource;
 import com.example.be.domain.issues.entity.IssueStatus;
 import com.example.be.domain.issues.entity.NewsIssue;
+import com.example.be.domain.issues.entity.NewsWatch;
+import com.example.be.domain.issues.entity.WatchType;
+import com.example.be.domain.issues.repository.NewsWatchRepository;
 import com.example.be.domain.issues.repository.ContentGroupRepository;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.IssueRelationRepository;
@@ -18,7 +21,9 @@ import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
+import com.example.be.global.config.ApiTimeZone;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -28,8 +33,10 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,6 +50,7 @@ class IssueClusterWriterTest {
     private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
     private final IssueRelationRepository issueRelationRepository = mock(IssueRelationRepository.class);
     private final IssueStatusHistoryRepository statusHistoryRepository = mock(IssueStatusHistoryRepository.class);
+    private final NewsWatchRepository watchRepository = mock(NewsWatchRepository.class);
     private final IssueClusterWriter writer = new IssueClusterWriter(
             articleRepository,
             topicRepository,
@@ -50,7 +58,9 @@ class IssueClusterWriterTest {
             issueRepository,
             issueArticleRepository,
             issueRelationRepository,
-            statusHistoryRepository);
+            statusHistoryRepository,
+            watchRepository,
+            new BreakingNewsDetector());
 
     @Test
     void mergesAllArticlesFromLosingContentGroupAndRefreshesFingerprint() {
@@ -125,6 +135,110 @@ class IssueClusterWriterTest {
         verify(statusHistoryRepository, times(1)).save(any());
         verify(issueRelationRepository, times(1)).save(any());
         verify(issueArticleRepository, times(0)).save(any());
+    }
+
+    @Test
+    void explicitBreakingArticleCreatesBreakingMembershipAndWatchWithoutInitialAlert() {
+        Topic topic = topic();
+        Article breaking = article(1L, "[속보] 삼성전자 HBM4 증설", topic);
+        NewsIssue created = issue(100L, topic, "임시 제목");
+        OffsetDateTime time = breaking.getPublishedAt();
+        ClusterPlan.IssueAssignment assignment = new ClusterPlan.IssueAssignment(
+                null, List.of(), topic.getId(), breaking.getId(), List.of(breaking.getId()),
+                List.of("HBM4", "삼성전자"), time, time, 1, 1);
+        when(articleRepository.findAllById(any())).thenReturn(List.of(breaking));
+        when(topicRepository.findById(topic.getId())).thenReturn(Optional.of(topic));
+        when(issueRepository.save(any())).thenReturn(created);
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L)).thenReturn(List.of());
+        when(issueArticleRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(watchRepository.findByIssueIdAndWatchType(100L, WatchType.BREAKING))
+                .thenReturn(Optional.empty());
+
+        List<BreakingWatchAlert> alerts = writer.write(
+                new ClusterPlan(List.of(), List.of(assignment), List.of()));
+
+        ArgumentCaptor<IssueArticle> membershipCaptor = ArgumentCaptor.forClass(IssueArticle.class);
+        ArgumentCaptor<NewsWatch> watchCaptor = ArgumentCaptor.forClass(NewsWatch.class);
+        verify(issueArticleRepository).save(membershipCaptor.capture());
+        verify(watchRepository).save(watchCaptor.capture());
+        assertTrue(alerts.isEmpty());
+        assertEquals(IssueArticleRole.BREAKING, membershipCaptor.getValue().getRole());
+        assertEquals("삼성전자 HBM4 증설", created.getTitle());
+        assertEquals(WatchType.BREAKING, watchCaptor.getValue().getWatchType());
+        assertTrue(watchCaptor.getValue().getExpiresAt()
+                .isAfter(LocalDateTime.now(ApiTimeZone.ZONE).plusHours(47)));
+    }
+
+    @Test
+    void recentShortFullTextGetsBreakingRoleWithoutAutomaticWatch() {
+        Topic topic = topic();
+        OffsetDateTime publishedAt = OffsetDateTime.parse("2026-08-31T10:00:00+09:00");
+        Source source = Source.builder().id(1L).name("전자신문").build();
+        Article breaking = Article.builder()
+                .id(1L).title("삼성전자 HBM4 증설").body("짧은 속보 본문")
+                .topic(topic).source(source).sourceName(source.getName())
+                .fetchStatus(FetchStatus.FULLTEXT).publishedAt(publishedAt)
+                .collectedAt(LocalDateTime.of(2026, 8, 31, 11, 0)).build();
+        NewsIssue created = issue(100L, topic, "임시 제목");
+        ClusterPlan.IssueAssignment assignment = new ClusterPlan.IssueAssignment(
+                null, List.of(), topic.getId(), breaking.getId(), List.of(breaking.getId()),
+                List.of("HBM4", "삼성전자"), publishedAt, publishedAt, 1, 1);
+        when(articleRepository.findAllById(any())).thenReturn(List.of(breaking));
+        when(topicRepository.findById(topic.getId())).thenReturn(Optional.of(topic));
+        when(issueRepository.save(any())).thenReturn(created);
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L)).thenReturn(List.of());
+        when(issueArticleRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        writer.write(new ClusterPlan(List.of(), List.of(assignment), List.of()));
+
+        ArgumentCaptor<IssueArticle> membershipCaptor = ArgumentCaptor.forClass(IssueArticle.class);
+        verify(issueArticleRepository).save(membershipCaptor.capture());
+        assertEquals(IssueArticleRole.BREAKING, membershipCaptor.getValue().getRole());
+        verify(watchRepository, never()).save(any());
+    }
+
+    @Test
+    void newFollowUpClaimsExistingWatchForThirtyMinuteCooldown() {
+        Topic topic = topic();
+        Article breaking = article(1L, "[속보] 삼성전자 HBM4 증설", topic);
+        Article followUp = article(2L, "삼성전자 HBM4 증설 상세 발표", topic);
+        NewsIssue issue = issue(100L, topic, "삼성전자 HBM4 증설");
+        IssueArticle breakingMembership = membership(
+                11L, issue, breaking, IssueArticleRole.BREAKING);
+        NewsWatch watch = NewsWatch.builder()
+                .id(50L)
+                .watchType(WatchType.BREAKING)
+                .issue(issue)
+                .expiresAt(LocalDateTime.now().plusHours(24))
+                .active(true)
+                .build();
+        OffsetDateTime time = breaking.getPublishedAt();
+        ClusterPlan.IssueAssignment assignment = new ClusterPlan.IssueAssignment(
+                100L, List.of(), topic.getId(), followUp.getId(), List.of(1L, 2L),
+                List.of("HBM4", "삼성전자"), time, followUp.getPublishedAt(), 2, 2);
+        when(articleRepository.findAllById(any())).thenReturn(List.of(breaking, followUp));
+        when(topicRepository.findById(topic.getId())).thenReturn(Optional.of(topic));
+        when(issueRepository.findById(100L)).thenReturn(Optional.of(issue));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L))
+                .thenReturn(List.of(breakingMembership));
+        when(issueArticleRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(watchRepository.findEligibleBreakingForNotification(any(), any())).thenReturn(List.of(watch));
+        when(watchRepository.findByIssueIdAndWatchType(100L, WatchType.BREAKING))
+                .thenReturn(Optional.of(watch));
+
+        List<BreakingWatchAlert> alerts = writer.write(
+                new ClusterPlan(List.of(), List.of(assignment), List.of()));
+
+        ArgumentCaptor<IssueArticle> membershipCaptor = ArgumentCaptor.forClass(IssueArticle.class);
+        verify(issueArticleRepository).save(membershipCaptor.capture());
+        assertEquals(1, alerts.size());
+        assertEquals(1, alerts.getFirst().followUpCount());
+        assertEquals("삼성전자 HBM4 증설", alerts.getFirst().issueTitle());
+        assertEquals(IssueArticleRole.REPRESENTATIVE, membershipCaptor.getValue().getRole());
+        assertTrue(watch.getCooldownUntil()
+                .isAfter(LocalDateTime.now(ApiTimeZone.ZONE).plusMinutes(29)));
+        assertTrue(alerts.getFirst().message().contains("후속 1건"));
+        verify(watchRepository, never()).save(any());
     }
 
     private ClusterPlan.IssueAssignment assignment(Long existingId,

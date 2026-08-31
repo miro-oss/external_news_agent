@@ -47,7 +47,7 @@ class IssueClusteringLoaderTest {
         CollectionRunArticle observation = CollectionRunArticle.builder()
                 .article(current)
                 .topic(topic)
-                .observedAt(LocalDateTime.of(2026, 8, 10, 10, 0))
+                .observedAt(LocalDateTime.of(2026, 8, 10, 12, 0))
                 .build();
 
         when(observationRepository.findClusterTargetsByRunId(42L)).thenReturn(List.of(observation));
@@ -62,6 +62,8 @@ class IssueClusteringLoaderTest {
         assertFalse(loaded.getFirst().observedInRun());
         assertTrue(loaded.getLast().observedInRun());
         assertEquals(88L, loaded.getLast().existingIssueId());
+        assertEquals(OffsetDateTime.parse("2026-08-10T10:00:00+09:00"),
+                loaded.getLast().observedAt());
     }
 
     private Article article(Long id, Topic topic, Source source, String title) {
@@ -72,7 +74,7 @@ class IssueClusteringLoaderTest {
                 .title(title)
                 .fetchStatus(FetchStatus.METADATA_ONLY)
                 .publishedAt(OffsetDateTime.parse("2026-08-10T09:00:00+09:00"))
-                .collectedAt(LocalDateTime.of(2026, 8, 10, 9, 0))
+                .collectedAt(LocalDateTime.of(2026, 8, 10, 10, 0))
                 .build();
     }
 }

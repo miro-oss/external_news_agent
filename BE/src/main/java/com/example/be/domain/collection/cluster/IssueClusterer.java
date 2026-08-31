@@ -1,6 +1,6 @@
 package com.example.be.domain.collection.cluster;
 
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -19,13 +19,24 @@ import java.util.stream.Collectors;
 
 /** 제목·결정론적 엔티티·본문 지문만 쓰는 Spring 내부 클러스터러. LLM과 DB를 호출하지 않는다. */
 @Component
-@RequiredArgsConstructor
 public class IssueClusterer {
 
     private static final OffsetDateTime UNKNOWN_EVENT_TIME = OffsetDateTime.parse("1970-01-01T00:00:00Z");
 
     private final IssueClusteringProperties properties;
+    private final BreakingNewsDetector breakingNewsDetector;
     private final DeterministicEntityExtractor entityExtractor = new DeterministicEntityExtractor();
+
+    @Autowired
+    public IssueClusterer(IssueClusteringProperties properties,
+                          BreakingNewsDetector breakingNewsDetector) {
+        this.properties = properties;
+        this.breakingNewsDetector = breakingNewsDetector;
+    }
+
+    IssueClusterer(IssueClusteringProperties properties) {
+        this(properties, new BreakingNewsDetector());
+    }
 
     public ClusterPlan cluster(List<ClusterArticle> rawArticles) {
         return cluster(rawArticles, false);
@@ -176,9 +187,10 @@ public class IssueClusterer {
         Map<Long, Set<String>> titleTokens = new HashMap<>();
         Map<Long, Set<String>> entities = new HashMap<>();
         unique.forEach(article -> {
-            titleTokens.put(article.articleId(), TitleTokenizer.tokens(article.title()));
+            String coreTitle = breakingNewsDetector.coreTitle(article.title());
+            titleTokens.put(article.articleId(), TitleTokenizer.tokens(coreTitle));
             entities.put(article.articleId(), entityExtractor.extract(
-                    article.title(), article.summary(), article.body(), article.topicKeywords()));
+                    coreTitle, article.summary(), article.body(), article.topicKeywords()));
         });
 
         // 같은 본문 중복군에서는 대표만 사건 유사도 투표에 참여한다.
@@ -195,8 +207,14 @@ public class IssueClusterer {
                 int entityOverlap = intersectionSize(
                         entities.get(first.articleId()), entities.get(second.articleId()));
                 double hoursApart = hoursApart(first.eventTime(), second.eventTime());
-                boolean matches = jaccard >= properties.getTitleJaccardThreshold()
-                        || (entityOverlap >= properties.getEntityOverlapThreshold()
+                boolean breakingPair = breakingNewsDetector.isBreaking(first)
+                        || breakingNewsDetector.isBreaking(second);
+                boolean titleMatches = jaccard >= properties.getTitleJaccardThreshold();
+                boolean enoughEntities = entityOverlap >= properties.getEntityOverlapThreshold();
+                boolean matches = breakingPair
+                        ? hoursApart <= properties.getBreakingTimeWindow().toHours()
+                        && (titleMatches || enoughEntities)
+                        : titleMatches || (enoughEntities
                         && hoursApart <= properties.getEntityTimeWindow().toHours());
                 if (matches) {
                     union.join(first.articleId(), second.articleId());
@@ -268,7 +286,8 @@ public class IssueClusterer {
 
     private ClusterArticle representative(Collection<ClusterArticle> articles) {
         return articles.stream().min(Comparator
-                        .comparing((ClusterArticle article) -> !hasSubstantialBody(article))
+                        .comparing(breakingNewsDetector::isBreaking)
+                        .thenComparing(article -> !hasSubstantialBody(article))
                         .thenComparing(ClusterArticle::reliabilityScore,
                                 Comparator.nullsLast(Comparator.reverseOrder()))
                         .thenComparing(ClusterArticle::eventTime,
