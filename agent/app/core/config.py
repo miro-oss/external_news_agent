@@ -61,7 +61,7 @@ class Settings(BaseSettings):
         validation_alias="GEMINI_REQUEST_INTERVAL_SECONDS",
     )
     rate_limit_retry_attempts: int = Field(
-        default=1,
+        default=2,
         ge=0,
         le=3,
         validation_alias="AGENT_RATE_LIMIT_RETRY_ATTEMPTS",
@@ -75,6 +75,12 @@ class Settings(BaseSettings):
         default=10.0,
         gt=0,
         validation_alias="AGENT_RATE_LIMIT_MAX_BACKOFF_SECONDS",
+    )
+    # provider가 retryDelay로 알려준 대기 시간에만 쓰는 상한. 추측 backoff보다 크게 둔다.
+    rate_limit_max_wait_seconds: float = Field(
+        default=60.0,
+        gt=0,
+        validation_alias="AGENT_RATE_LIMIT_MAX_WAIT_SECONDS",
     )
     provider_concurrency: int = Field(
         default=4,
@@ -160,6 +166,10 @@ class Settings(BaseSettings):
         if self.rate_limit_max_backoff_seconds < self.rate_limit_backoff_seconds:
             raise ValueError(
                 "AGENT_RATE_LIMIT_MAX_BACKOFF_SECONDS는 기본 backoff보다 작을 수 없습니다."
+            )
+        if self.rate_limit_max_wait_seconds < self.rate_limit_max_backoff_seconds:
+            raise ValueError(
+                "AGENT_RATE_LIMIT_MAX_WAIT_SECONDS는 최대 backoff보다 작을 수 없습니다."
             )
         return self
 
