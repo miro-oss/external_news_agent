@@ -1650,6 +1650,23 @@ body.modal-open {
   text-decoration: none;
 }
 
+.issue-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.85rem;
+  margin: 0 2.75rem 1.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--primary-weak);
+  color: var(--fg-2);
+  font-size: 0.82rem;
+}
+
+.issue-context strong {
+  color: var(--primary);
+}
+
 .analysis-panel {
   margin: 0.5rem 2.75rem 2rem;
   padding: 1.6rem;

@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.analysis.service.ArticleAnalysisPipeline;
+import com.example.be.domain.collection.cluster.IssueClusteringService;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.reports.service.ReportCreationService;
 import org.junit.jupiter.api.Test;
@@ -14,17 +15,20 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 class CollectionRunExecutionServiceTest {
 
     private final CollectionRunItemRepository runItemRepository = mock(CollectionRunItemRepository.class);
     private final CollectionExecutor collectionExecutor = mock(CollectionExecutor.class);
     private final ArticleContentEnricher contentEnricher = mock(ArticleContentEnricher.class);
+    private final IssueClusteringService issueClusteringService = mock(IssueClusteringService.class);
     private final ArticleAnalysisPipeline analysisPipeline = mock(ArticleAnalysisPipeline.class);
     private final ReportCreationService reportCreationService = mock(ReportCreationService.class);
     private final CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
     private final CollectionRunExecutionService service = new CollectionRunExecutionService(
-            runItemRepository, collectionExecutor, contentEnricher, analysisPipeline, reportCreationService, resultWriter);
+            runItemRepository, collectionExecutor, contentEnricher, issueClusteringService,
+            analysisPipeline, reportCreationService, resultWriter);
 
     @Test
     void createsReportAfterAnalysisBeforeClosingRun() {
@@ -33,7 +37,8 @@ class CollectionRunExecutionServiceTest {
 
         service.executeRun(42L);
 
-        InOrder order = inOrder(analysisPipeline, reportCreationService, resultWriter);
+        InOrder order = inOrder(issueClusteringService, analysisPipeline, reportCreationService, resultWriter);
+        order.verify(issueClusteringService).cluster(42L);
         order.verify(analysisPipeline).analyze(42L, Set.of());
         order.verify(reportCreationService).generate(42L);
         order.verify(resultWriter).finishRun(42L);
@@ -52,6 +57,22 @@ class CollectionRunExecutionServiceTest {
         order.verify(reportCreationService).generate(42L);
         order.verify(resultWriter).addReportGenerationFailedWarning(42L, "report failure");
         order.verify(resultWriter).finishRun(42L);
+        verify(resultWriter, never()).failRun(42L);
+    }
+
+    @Test
+    void fallsBackToArticleAnalysisWhenIssueClusteringFails() {
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
+        when(contentEnricher.enrich(42L)).thenReturn(Set.of(10L));
+        doThrow(new IllegalStateException("cluster failure"))
+                .when(issueClusteringService).cluster(42L);
+
+        service.executeRun(42L);
+
+        verify(resultWriter).addIssueClusteringFailedWarning(42L, "cluster failure");
+        verify(analysisPipeline).analyzeWithoutClustering(42L, Set.of(10L));
+        verify(reportCreationService).generate(42L);
+        verify(resultWriter).finishRun(42L);
         verify(resultWriter, never()).failRun(42L);
     }
 }

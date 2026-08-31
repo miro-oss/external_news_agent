@@ -18,6 +18,10 @@ import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.entity.IssueArticleRole;
+import com.example.be.domain.issues.entity.NewsIssue;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -39,7 +43,9 @@ class FindingWriterTest {
     private final FindingRepository findingRepository = mock(FindingRepository.class);
     private final CollectionRunRepository runRepository = mock(CollectionRunRepository.class);
     private final ArticleRepository articleRepository = mock(ArticleRepository.class);
-    private final FindingWriter writer = new FindingWriter(findingRepository, runRepository, articleRepository);
+    private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
+    private final FindingWriter writer = new FindingWriter(
+            findingRepository, runRepository, articleRepository, issueArticleRepository);
 
     @Test
     void locksArticleBeforeCheckingForDuplicateFinding() {
@@ -97,5 +103,35 @@ class FindingWriterTest {
         assertEquals("핵심 주장", finding.getValue().getEffectiveKeyPoints().getFirst().text());
         assertEquals(Audience.CHIP_MAKER,
                 finding.getValue().getPerspectiveTags().getFirst().audience());
+    }
+
+    @Test
+    void appliesRepresentativeSummaryToEveryLinkedIssue() {
+        CollectionRun run = mock(CollectionRun.class);
+        Article article = mock(Article.class);
+        NewsIssue firstIssue = NewsIssue.builder().id(1L).build();
+        NewsIssue secondIssue = NewsIssue.builder().id(2L).build();
+        when(runRepository.findById(42L)).thenReturn(Optional.of(run));
+        when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
+        when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
+        when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(10L)).thenReturn(List.of(
+                IssueArticle.builder()
+                        .issue(firstIssue)
+                        .article(article)
+                        .role(IssueArticleRole.REPRESENTATIVE)
+                        .build(),
+                IssueArticle.builder()
+                        .issue(secondIssue)
+                        .article(article)
+                        .role(IssueArticleRole.REPRESENTATIVE)
+                        .build()));
+        AnalysisResult result = new AnalysisResult(
+                "대표 이슈 요약", List.of(), null, Sentiment.NEUTRAL,
+                RiskLevel.LOW, Relevance.REFERENCE, "기업", List.of());
+
+        writer.write(42L, 10L, ChangeType.NEW, "a".repeat(64), result);
+
+        assertEquals("대표 이슈 요약", firstIssue.getSummary());
+        assertEquals("대표 이슈 요약", secondIssue.getSummary());
     }
 }

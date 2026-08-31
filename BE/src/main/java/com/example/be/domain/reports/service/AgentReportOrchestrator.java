@@ -25,6 +25,9 @@ import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.global.config.ApiTimeZone;
 import com.example.be.domain.settings.entity.PaidExhaustedAction;
 import com.example.be.domain.settings.service.LlmPlanService;
+import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.entity.IssueArticleRole;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -56,22 +59,24 @@ public class AgentReportOrchestrator {
     private final AgentQuotaService quotaService;
     private final LlmPlanService planService;
     private final CollectionResultWriter resultWriter;
+    private final IssueArticleRepository issueArticleRepository;
 
     public ReportDocument generate(CollectionRun run,
                                    List<Finding> findings,
                                    LocalDateTime generatedAt) {
-        ReportSourceStats sourceStats = sourceStats(run, findings);
+        List<Finding> representativeFindings = representativeFindings(findings);
+        ReportSourceStats sourceStats = sourceStats(run, representativeFindings);
         if (!properties.isEnabled()) {
-            return fallbackGenerator.generate(findings, generatedAt, sourceStats);
+            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
         }
-        List<Finding> eligible = eligibleFindings(findings);
+        List<Finding> eligible = eligibleFindings(representativeFindings);
         if (eligible.isEmpty()) {
-            return fallbackGenerator.generate(findings, generatedAt, sourceStats);
+            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
         }
 
         ReservationSelection selection = reserve(run);
         if (selection == null) {
-            return fallbackGenerator.generate(findings, generatedAt, sourceStats);
+            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
         }
 
         LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
@@ -105,7 +110,7 @@ public class AgentReportOrchestrator {
             completeFailureSafely(selection.reservation(), exception, code);
             log.warn("Agent 보고서 생성에 실패해 안전한 fallback을 사용한다. runId={} code={} error={}",
                     run.getId(), code, exception.getMessage());
-            return fallbackGenerator.generate(findings, generatedAt, sourceStats);
+            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
         }
     }
 
@@ -243,6 +248,28 @@ public class AgentReportOrchestrator {
                 .stream()
                 .limit(MAX_REPORT_FINDINGS)
                 .toList();
+    }
+
+    private List<Finding> representativeFindings(List<Finding> findings) {
+        if (findings.isEmpty()) {
+            return List.of();
+        }
+        List<IssueArticle> memberships = issueArticleRepository.findByArticleIds(findings.stream()
+                .map(finding -> finding.getArticle().getId())
+                .toList());
+        memberships = memberships == null ? List.of() : memberships;
+        Set<Long> issueArticleIds = memberships.stream()
+                .map(membership -> membership.getArticle().getId())
+                .collect(java.util.stream.Collectors.toSet());
+        Set<Long> representativeArticleIds = memberships.stream()
+                .filter(membership -> membership.getRole() == IssueArticleRole.REPRESENTATIVE)
+                .map(membership -> membership.getArticle().getId())
+                .collect(java.util.stream.Collectors.toSet());
+        return ReportFindingOrder.sort(findings.stream()
+                        // 마이그레이션 전 finding은 유지하고, 이슈에 귀속된 기사는 대표만 사용한다.
+                        .filter(finding -> !issueArticleIds.contains(finding.getArticle().getId())
+                                || representativeArticleIds.contains(finding.getArticle().getId()))
+                        .toList());
     }
 
     private ReportDocument toDocument(AgentReportResponse response, AgentReportRequest request) {

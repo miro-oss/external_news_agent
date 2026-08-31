@@ -39,7 +39,57 @@ public interface CollectionRunArticleRepository
             """)
     List<ArticleFetchStatus> findArticleFetchStatusesByRunId(@Param("runId") Long runId);
 
-    /** 분석은 NEW/UPDATED만 한다. 본문과 주제·소스까지 이 조회에서 붙여 트랜잭션 밖에서도 안전하게 읽는다. */
+    /** 클러스터 계산용 값 복사를 마치면 트랜잭션 밖에서 비교할 수 있게 필요한 연관을 한 번에 붙인다. */
+    @Query("""
+            SELECT observation
+            FROM CollectionRunArticle observation
+            JOIN FETCH observation.article article
+            JOIN FETCH observation.topic topic
+            JOIN FETCH article.source source
+            LEFT JOIN FETCH article.contentGroup
+            WHERE observation.run.id = :runId
+            ORDER BY observation.id ASC
+            """)
+    List<CollectionRunArticle> findClusterTargetsByRunId(@Param("runId") Long runId);
+
+    /** 이슈 대표만 분석한다. 멤버의 상세 조회는 대표 finding을 재사용한다. */
+    @Query("""
+            SELECT observation
+            FROM CollectionRunArticle observation
+            JOIN FETCH observation.article article
+            JOIN FETCH article.topic
+            JOIN FETCH article.source
+            JOIN IssueArticle membership ON membership.article = article
+            WHERE observation.run.id = :runId
+              AND membership.issue.topic = observation.topic
+              AND membership.role = com.example.be.domain.issues.entity.IssueArticleRole.REPRESENTATIVE
+              AND observation.changeType IN (
+                  com.example.be.domain.collection.entity.ChangeType.NEW,
+                  com.example.be.domain.collection.entity.ChangeType.UPDATED
+              )
+            ORDER BY observation.id ASC
+            """)
+    List<CollectionRunArticle> findRepresentativeAnalysisTargetsByRunId(@Param("runId") Long runId);
+
+    /** 전문을 새로 확보했어도 이슈 대표일 때만 재분석한다. */
+    @Query("""
+            SELECT observation
+            FROM CollectionRunArticle observation
+            JOIN FETCH observation.article article
+            JOIN FETCH article.topic
+            JOIN FETCH article.source
+            JOIN IssueArticle membership ON membership.article = article
+            WHERE observation.run.id = :runId
+              AND article.id IN :articleIds
+              AND membership.issue.topic = observation.topic
+              AND membership.role = com.example.be.domain.issues.entity.IssueArticleRole.REPRESENTATIVE
+            ORDER BY observation.id ASC
+            """)
+    List<CollectionRunArticle> findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
+            @Param("runId") Long runId,
+            @Param("articleIds") Set<Long> articleIds);
+
+    /** 클러스터링이 실패했을 때 수집 결과 분석까지 잃지 않도록 쓰는 레거시 대상 조회. */
     @Query("""
             SELECT observation
             FROM CollectionRunArticle observation
@@ -53,9 +103,8 @@ public interface CollectionRunArticleRepository
               )
             ORDER BY observation.id ASC
             """)
-    List<CollectionRunArticle> findAnalysisTargetsByRunId(@Param("runId") Long runId);
+    List<CollectionRunArticle> findUnclusteredAnalysisTargetsByRunId(@Param("runId") Long runId);
 
-    /** 이번 실행에서 전문 재수집에 성공한 기사는 UNCHANGED 관측이어도 다시 분석한다. */
     @Query("""
             SELECT observation
             FROM CollectionRunArticle observation
@@ -66,7 +115,7 @@ public interface CollectionRunArticleRepository
               AND article.id IN :articleIds
             ORDER BY observation.id ASC
             """)
-    List<CollectionRunArticle> findAnalysisTargetsByRunIdAndArticleIdIn(
+    List<CollectionRunArticle> findUnclusteredAnalysisTargetsByRunIdAndArticleIdIn(
             @Param("runId") Long runId,
             @Param("articleIds") Set<Long> articleIds);
 

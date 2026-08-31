@@ -7,6 +7,8 @@ import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -26,6 +28,7 @@ public class ArticleAnalysisPipeline {
 
     private final CollectionRunArticleRepository runArticleRepository;
     private final CollectionRunRepository runRepository;
+    private final IssueArticleRepository issueArticleRepository;
     private final ArticleAnalysisOrchestrator orchestrator;
     private final FindingReuseCache reuseCache;
     private final FindingWriter findingWriter;
@@ -35,10 +38,18 @@ public class ArticleAnalysisPipeline {
     }
 
     public void analyze(Long runId, Set<Long> refreshedArticleIds) {
+        analyze(runId, refreshedArticleIds, true);
+    }
+
+    public void analyzeWithoutClustering(Long runId, Set<Long> refreshedArticleIds) {
+        analyze(runId, refreshedArticleIds, false);
+    }
+
+    private void analyze(Long runId, Set<Long> refreshedArticleIds, boolean clustered) {
         AgentPlan plan = runRepository.findById(runId)
                 .orElseThrow(() -> new IllegalStateException("분석할 수집 실행이 없습니다. runId=" + runId))
                 .getLlmPlan();
-        List<Target> targets = targets(runId, refreshedArticleIds);
+        List<Target> targets = targets(runId, refreshedArticleIds, clustered);
         Map<Long, FindingReuseCache.Lookup> lookups = cacheLookups(targets, plan);
         for (Target target : targets) {
             try {
@@ -73,22 +84,56 @@ public class ArticleAnalysisPipeline {
         }
     }
 
-    private List<Target> targets(Long runId, Set<Long> refreshedArticleIds) {
+    private List<Target> targets(Long runId, Set<Long> refreshedArticleIds, boolean clustered) {
         Map<Long, Target> byArticleId = new LinkedHashMap<>();
-        for (CollectionRunArticle observation : runArticleRepository.findAnalysisTargetsByRunId(runId)) {
+        if (!clustered) {
+            addUnclusteredTargets(byArticleId, runId, refreshedArticleIds);
+            return byArticleId.values().stream().filter(this::isReady).toList();
+        }
+        for (CollectionRunArticle observation :
+                runArticleRepository.findRepresentativeAnalysisTargetsByRunId(runId)) {
             addTarget(byArticleId, observation, observation.getChangeType());
         }
+        addMissingRepresentatives(byArticleId, issueArticleRepository.findRepresentativesForRun(runId));
         if (!refreshedArticleIds.isEmpty()) {
             for (CollectionRunArticle observation :
-                    runArticleRepository.findAnalysisTargetsByRunIdAndArticleIdIn(runId, refreshedArticleIds)) {
+                    runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
+                            runId, refreshedArticleIds)) {
                 // 메타데이터는 그대로여도 새 전문을 확보했으므로 분석 결과 관점에서는 UPDATED다.
                 ChangeType changeType = observation.getChangeType() == ChangeType.UNCHANGED
                         ? ChangeType.UPDATED
                         : observation.getChangeType();
                 addTarget(byArticleId, observation, changeType);
             }
+            addMissingRepresentatives(byArticleId,
+                    issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(
+                            runId, refreshedArticleIds));
         }
         return byArticleId.values().stream().filter(this::isReady).toList();
+    }
+
+    private void addMissingRepresentatives(Map<Long, Target> targets, List<IssueArticle> memberships) {
+        if (memberships == null) {
+            return;
+        }
+        memberships.forEach(membership -> targets.putIfAbsent(
+                membership.getArticle().getId(), new Target(membership.getArticle(), ChangeType.UPDATED)));
+    }
+
+    private void addUnclusteredTargets(Map<Long, Target> targets,
+                                       Long runId,
+                                       Set<Long> refreshedArticleIds) {
+        runArticleRepository.findUnclusteredAnalysisTargetsByRunId(runId)
+                .forEach(observation -> addTarget(targets, observation, observation.getChangeType()));
+        if (!refreshedArticleIds.isEmpty()) {
+            runArticleRepository.findUnclusteredAnalysisTargetsByRunIdAndArticleIdIn(runId, refreshedArticleIds)
+                    .forEach(observation -> addTarget(
+                            targets,
+                            observation,
+                            observation.getChangeType() == ChangeType.UNCHANGED
+                                    ? ChangeType.UPDATED
+                                    : observation.getChangeType()));
+        }
     }
 
     private void addTarget(Map<Long, Target> byArticleId,

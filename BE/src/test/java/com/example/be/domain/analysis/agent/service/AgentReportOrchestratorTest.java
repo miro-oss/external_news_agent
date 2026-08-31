@@ -29,6 +29,10 @@ import com.example.be.domain.reports.service.ReportGenerator;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.settings.service.LlmPlanService;
 import com.example.be.domain.settings.entity.PaidExhaustedAction;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.entity.IssueArticleRole;
+import com.example.be.domain.issues.entity.NewsIssue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -58,12 +62,13 @@ class AgentReportOrchestratorTest {
     private final AgentQuotaService quotaService = mock(AgentQuotaService.class);
     private final LlmPlanService planService = mock(LlmPlanService.class);
     private final CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
+    private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
     private final QuotaReservation reservation = new QuotaReservation(
             1L, 42L, "run:42:report", AgentTask.REPORT, AgentPlan.FREE, BigDecimal.ONE);
     private final AgentReportOrchestrator orchestrator =
             new AgentReportOrchestrator(
                     properties, client, recorder, fallback, observationRepository,
-                    quotaService, planService, resultWriter);
+                    quotaService, planService, resultWriter, issueArticleRepository);
 
     @BeforeEach
     void reserveQuota() {
@@ -115,6 +120,58 @@ class AgentReportOrchestratorTest {
     }
 
     @Test
+    void excludesMemberFindingWhenIssueRepresentativeExists() {
+        Finding representative = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "대표 요약");
+        Finding member = finding(502L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "멤버 요약");
+        NewsIssue issue = NewsIssue.builder().id(88L).build();
+        when(issueArticleRepository.findByArticleIds(List.of(1501L, 1502L))).thenReturn(List.of(
+                IssueArticle.builder()
+                        .issue(issue)
+                        .article(representative.getArticle())
+                        .role(IssueArticleRole.REPRESENTATIVE)
+                        .build(),
+                IssueArticle.builder()
+                        .issue(issue)
+                        .article(member.getArticle())
+                        .role(IssueArticleRole.MEMBER)
+                        .build()));
+        when(client.report(any())).thenReturn(response(List.of(501L)));
+
+        orchestrator.generate(run(), List.of(representative, member), LocalDateTime.now());
+
+        ArgumentCaptor<AgentReportRequest> request = ArgumentCaptor.forClass(AgentReportRequest.class);
+        verify(client).report(request.capture());
+        assertEquals(List.of(501L), request.getValue().findings().stream()
+                .map(AgentReportRequest.FindingPayload::id)
+                .toList());
+    }
+
+    @Test
+    void excludesMemberFindingFromDisabledAgentFallback() {
+        AgentProperties disabled = new AgentProperties();
+        AgentReportOrchestrator disabledOrchestrator = new AgentReportOrchestrator(
+                disabled, client, recorder, fallback, observationRepository,
+                quotaService, planService, resultWriter, issueArticleRepository);
+        Finding representative = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "대표 요약");
+        Finding member = finding(502L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "멤버 요약");
+        NewsIssue issue = NewsIssue.builder().id(88L).build();
+        when(issueArticleRepository.findByArticleIds(List.of(1501L, 1502L))).thenReturn(List.of(
+                IssueArticle.builder().issue(issue).article(representative.getArticle())
+                        .role(IssueArticleRole.REPRESENTATIVE).build(),
+                IssueArticle.builder().issue(issue).article(member.getArticle())
+                        .role(IssueArticleRole.MEMBER).build()));
+        ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
+        when(fallback.generate(eq(List.of(representative)), any(), any())).thenReturn(fallbackDocument);
+
+        ReportDocument document = disabledOrchestrator.generate(
+                run(), List.of(representative, member), LocalDateTime.now());
+
+        assertEquals(fallbackDocument, document);
+        verify(fallback).generate(eq(List.of(representative)), any(), any());
+        verify(client, never()).report(any());
+    }
+
+    @Test
     void rejectsUnknownFindingReferenceAndUsesSafeFallback() {
         CollectionRun run = run();
         Finding llm = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "실제 LLM 요약");
@@ -139,7 +196,7 @@ class AgentReportOrchestratorTest {
         AgentReportOrchestrator disabledOrchestrator =
                 new AgentReportOrchestrator(
                         disabled, client, recorder, fallback, observationRepository,
-                        quotaService, planService, resultWriter);
+                        quotaService, planService, resultWriter, issueArticleRepository);
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT, "STUB 요약");
         ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
         when(fallback.generate(eq(List.of(stub)), any(), any())).thenReturn(fallbackDocument);
