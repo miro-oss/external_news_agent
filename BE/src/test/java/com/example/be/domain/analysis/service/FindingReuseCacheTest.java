@@ -133,7 +133,7 @@ class FindingReuseCacheTest {
     }
 
     @Test
-    void invalidatesRepresentativeCacheWhenIssueMemberContentChanges() {
+    void keepsIssueSnapshotOutOfPrimaryFindingHash() {
         Article representative = article(10L, "대표 본문");
         Article originalMember = article(11L, "양산 일정은 9월이다.");
         Article changedMember = article(11L, "양산 일정은 12월이다.");
@@ -148,8 +148,7 @@ class FindingReuseCacheTest {
                 AgentPlan.FREE,
                 new IssueAnalysisContext(88L, 10L, List.of(representative, changedMember)));
 
-        assertTrue(!FindingReuseCache.inputHash(original)
-                .equals(FindingReuseCache.inputHash(changed)));
+        assertEquals(FindingReuseCache.inputHash(original), FindingReuseCache.inputHash(changed));
     }
 
     @Test
@@ -166,6 +165,29 @@ class FindingReuseCacheTest {
 
         assertTrue(lookup.cached().isEmpty());
         verifyNoInteractions(findingRepository);
+    }
+
+    @Test
+    void reusesSingleArticleIssueWhenThereIsNothingToCompare() {
+        Article representative = article(10L, "대표 본문");
+        AnalysisContext context = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative)));
+        String inputHash = FindingReuseCache.inputHash(context);
+        when(findingRepository.findReusableSources(
+                Set.of(10L), AnalysisSource.LLM, Set.of(inputHash),
+                "analyze.ko.v1", "gemini", "free-model"))
+                .thenReturn(List.of());
+
+        FindingReuseCache.Lookup lookup = cache.lookupContexts(
+                List.of(context), AgentPlan.FREE).get(10L);
+
+        assertTrue(lookup.cached().isEmpty());
+        verify(findingRepository).findReusableSources(
+                Set.of(10L), AnalysisSource.LLM, Set.of(inputHash),
+                "analyze.ko.v1", "gemini", "free-model");
     }
 
     private AgentProperties properties() {

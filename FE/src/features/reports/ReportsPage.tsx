@@ -561,7 +561,7 @@ function CrossSourceObservation({ text, articles, onEvidenceSelect }: {
             </a>
             {article.stanceSource === 'LLM' && (
               <button type="button" className="text-button" onClick={() => onEvidenceSelect(article.id, [])}>
-                검증 근거 보기
+                분석 본문 보기
               </button>
             )}
           </div>

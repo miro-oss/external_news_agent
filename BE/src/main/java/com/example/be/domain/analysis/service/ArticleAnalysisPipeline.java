@@ -140,7 +140,8 @@ public class ArticleAnalysisPipeline {
                         new IssueAnalysisContext(
                                 issueId,
                                 representative.getArticle().getId(),
-                                issueMemberships.stream().map(IssueArticle::getArticle).toList()))));
+                                issueMemberships.stream().map(IssueArticle::getArticle).toList(),
+                                representativeIds))));
         return Map.copyOf(result);
     }
 

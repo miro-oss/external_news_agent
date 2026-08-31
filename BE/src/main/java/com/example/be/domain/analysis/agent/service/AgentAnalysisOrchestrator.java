@@ -66,6 +66,14 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
     private static final Set<String> GROUNDEDNESS_VALUES =
             Set.of("grounded", "weak", "ungrounded");
     private static final int AUDIENCE_COUNT = Audience.values().length;
+    private static final int MAX_ARTICLE_TITLE_LENGTH = 1000;
+    private static final int MAX_ARTICLE_SUMMARY_LENGTH = 2000;
+    private static final int MAX_CANONICAL_URL_LENGTH = 2000;
+    private static final int MAX_LANGUAGE_LENGTH = 10;
+    private static final int MAX_TOPIC_NAME_LENGTH = 200;
+    private static final int MAX_TOPIC_QUERY_LENGTH = 500;
+    private static final int MAX_PUBLISHER_LENGTH = 500;
+    private static final int MAX_ISSUE_MEMBERS = 10;
 
     private final AgentProperties properties;
     private final AgentClient client;
@@ -100,7 +108,8 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             response = client.analyze(request);
             result = toAnalysisResult(response);
             memberStances = validateIssueComparison(context, response);
-            result = verifyEvidence(runId, article.getId(), selection.plan(), result);
+            result = verifyEvidence(
+                    runId, article.getId(), selection.plan(), result, false);
         } catch (RuntimeException exception) {
             AgentClientException clientException = exception instanceof AgentClientException value
                     ? value
@@ -131,7 +140,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
         recordSuccessSafely(runId, article.getId(), request, response, startedAt);
         completeSuccessSafely(selection.reservation(), response.meta().credits());
         if (applyIssueComparisonSafely(context, response, memberStances)) {
-            promoteConflictCandidate(context, response, memberStances);
+            promoteConflictCandidateSafely(context, response, memberStances);
         }
         return result;
     }
@@ -146,26 +155,38 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 plan,
                 new AgentAnalyzeRequest.ArticlePayload(
                         article.getId(),
-                        article.getTitle(),
-                        article.getSummary(),
-                        article.getCanonicalUrl(),
-                        article.getLanguage(),
+                        truncate(article.getTitle(), MAX_ARTICLE_TITLE_LENGTH),
+                        truncate(article.getSummary(), MAX_ARTICLE_SUMMARY_LENGTH),
+                        truncate(article.getCanonicalUrl(), MAX_CANONICAL_URL_LENGTH),
+                        truncate(article.getLanguage(), MAX_LANGUAGE_LENGTH),
                         article.getPublishedAt(),
                         analysisText(article)),
-                context.issue().membersExcept(article.getId()).stream()
+                issueMembers(context).stream()
                         .map(member -> new AgentAnalyzeRequest.IssueMemberPayload(
                                 member.getId(),
-                                member.getTitle(),
-                                member.getSummary(),
-                                publisher(member)))
+                                truncate(member.getTitle(), MAX_ARTICLE_TITLE_LENGTH),
+                                truncate(member.getSummary(), MAX_ARTICLE_SUMMARY_LENGTH),
+                                truncate(publisher(member), MAX_PUBLISHER_LENGTH)))
                         .toList(),
                 new AgentAnalyzeRequest.TopicPayload(
-                        topic.getName(),
-                        topic.getQueryText(),
+                        truncate(topic.getName(), MAX_TOPIC_NAME_LENGTH),
+                        truncate(topic.getQueryText(), MAX_TOPIC_QUERY_LENGTH),
                         listOrEmpty(topic.getRequiredKeywords()),
                         listOrEmpty(topic.getOptionalKeywords()),
                         listOrEmpty(topic.getExcludedKeywords())),
                 null);
+    }
+
+    private List<Article> issueMembers(AnalysisContext context) {
+        return context.issue().membersExcept(context.article().getId()).stream()
+                .limit(MAX_ISSUE_MEMBERS)
+                .toList();
+    }
+
+    private String truncate(String value, int maxLength) {
+        return value == null || value.length() <= maxLength
+                ? value
+                : value.substring(0, maxLength);
     }
 
     private String publisher(Article article) {
@@ -181,7 +202,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
     private List<IssueCrossSourceWriter.RuleStance> validateIssueComparison(
             AnalysisContext context,
             AgentAnalyzeResponse response) {
-        IssueCrossSource crossSource = response.crossSource();
+        AgentAnalyzeResponse.CrossSource crossSource = response.crossSource();
         if (crossSource == null || response.promoteCandidates() == null
                 || response.memberStances() == null) {
             throw schemaViolation("Agent 이슈 교차 비교 응답의 필수 필드가 없습니다.");
@@ -220,7 +241,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             conflictArticleIds.addAll(observation.articleIds());
         });
 
-        List<Long> expectedMemberIds = context.issue().membersExcept(context.article().getId()).stream()
+        List<Long> expectedMemberIds = issueMembers(context).stream()
                 .map(Article::getId)
                 .toList();
         if (response.memberStances().size() != expectedMemberIds.size()) {
@@ -281,7 +302,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
         try {
             crossSourceWriter.applyRepresentative(
                     context.issue().issueId(),
-                    response.crossSource(),
+                    toIssueCrossSource(response.crossSource()),
                     memberStances,
                     !response.meta().mock());
             return true;
@@ -296,6 +317,22 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
         }
     }
 
+    private void promoteConflictCandidateSafely(
+            AnalysisContext context,
+            AgentAnalyzeResponse representativeResponse,
+            List<IssueCrossSourceWriter.RuleStance> memberStances) {
+        try {
+            promoteConflictCandidate(context, representativeResponse, memberStances);
+        } catch (RuntimeException exception) {
+            addAgentWarning(
+                    context.runId(),
+                    CollectionRunWarning.CODE_LLM_CROSS_SOURCE_FAILED,
+                    "충돌 기사 승격 처리에 실패했습니다.");
+            log.warn("충돌 기사 승격 처리에 실패했다. runId={} issueId={} error={}",
+                    context.runId(), context.issue().issueId(), exception.getMessage(), exception);
+        }
+    }
+
     private void promoteConflictCandidate(
             AnalysisContext context,
             AgentAnalyzeResponse representativeResponse,
@@ -304,12 +341,19 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             return;
         }
         Long articleId = representativeResponse.promoteCandidates().getFirst();
+        // 같은 run의 대표 분석 대상은 파이프라인 결과가 우선한다. 승격 finding과 먼저 쓴 쪽이
+        // 우연히 이기는 순서 의존성을 만들지 않는다.
+        if (context.issue().primaryTargetArticleIds().contains(articleId)) {
+            return;
+        }
         Article article = context.issue().article(articleId);
         IssueCrossSourceWriter.RuleStance stance = memberStances.stream()
                 .filter(value -> value.articleId().equals(articleId))
                 .findFirst()
                 .orElseThrow();
-        AnalysisContext promotedContext = context.withArticle(article);
+        // 승격 호출은 해당 기사 자체만 분석한다. 이슈 멤버를 다시 보내 교차 비교를 재귀 실행하지 않는다.
+        AnalysisContext promotedContext = new AnalysisContext(
+                context.runId(), article, context.plan());
         String idempotencyKey = "run:" + context.runId()
                 + ":issue:" + context.issue().issueId()
                 + ":promotion:article:" + articleId;
@@ -328,7 +372,8 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             response = client.analyze(request);
             result = toAnalysisResult(response);
             validateIssueComparison(promotedContext, response);
-            result = verifyEvidence(context.runId(), articleId, selection.plan(), result);
+            result = verifyEvidence(
+                    context.runId(), articleId, selection.plan(), result, true);
         } catch (RuntimeException exception) {
             handlePromotionFailure(context, articleId, request, selection, startedAt, exception);
             return;
@@ -357,6 +402,20 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             log.warn("충돌 기사 승격 결과 저장에 실패했다. runId={} issueId={} articleId={} error={}",
                     context.runId(), context.issue().issueId(), articleId, exception.getMessage(), exception);
         }
+    }
+
+    private IssueCrossSource toIssueCrossSource(AgentAnalyzeResponse.CrossSource source) {
+        return new IssueCrossSource(
+                source.consensus(),
+                source.soleSource().stream()
+                        .map(value -> new IssueCrossSource.SoleSource(
+                                value.articleId(), value.text()))
+                        .toList(),
+                source.conflicts().stream()
+                        .map(value -> new IssueCrossSource.Conflict(
+                                value.articleIds(), value.text()))
+                        .toList(),
+                source.missingStakeholders());
     }
 
     private void handlePromotionFailure(
@@ -523,7 +582,8 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
     private AnalysisResult verifyEvidence(Long runId,
                                           Long articleId,
                                           AgentPlan plan,
-                                          AnalysisResult result) {
+                                          AnalysisResult result,
+                                          boolean promotion) {
         if (result.analysisSource() != AnalysisSource.LLM) {
             return result;
         }
@@ -539,7 +599,8 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                                     result.sections(),
                                     section.bullets().get(bulletIndex),
                                     sectionIndex,
-                                    bulletIndex))
+                                    bulletIndex,
+                                    promotion))
                             .toList();
                     return new FindingAnalysisSection(section.heading(), bullets);
                 })
@@ -571,11 +632,13 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                                                 List<FindingSection> sentences,
                                                 FindingAnalysisBullet bullet,
                                                 int sectionIndex,
-                                                int bulletIndex) {
+                                                int bulletIndex,
+                                                boolean promotion) {
         if ("ungrounded".equals(bullet.groundedness())) {
             return unsupportedBullet(bullet);
         }
         String idempotencyKey = "run:" + runId + ":article:" + articleId
+                + (promotion ? ":promotion" : "")
                 + ":evidence:" + sectionIndex + ":" + bulletIndex;
         QuotaReservation evidenceReservation;
         try {

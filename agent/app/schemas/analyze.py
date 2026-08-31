@@ -16,6 +16,7 @@ Audience = Literal[
 AudienceRelevance = Literal["none", "low", "medium", "high"]
 NonEmptyString = Annotated[str, Field(min_length=1)]
 AUDIENCES = frozenset(get_args(Audience))
+MAX_ISSUE_MEMBERS = 10
 
 
 class ArticleInput(AgentModel):
@@ -47,7 +48,9 @@ class AnalyzeRequest(AgentModel):
     idempotency_key: str = Field(min_length=1, max_length=200)
     plan: Plan
     article: ArticleInput
-    issue_members: list[IssueMemberInput] = Field(default_factory=list)
+    issue_members: list[IssueMemberInput] = Field(
+        default_factory=list, max_length=MAX_ISSUE_MEMBERS
+    )
     topic: TopicInput
     previous_finding: dict[str, Any] | None = None
 

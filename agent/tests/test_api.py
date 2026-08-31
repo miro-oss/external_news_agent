@@ -148,8 +148,29 @@ def test_mock_analysis_compares_issue_members_and_promotes_at_most_one() -> None
     assert payload["crossSource"]["conflicts"][0]["articleIds"] == [10, 11]
     assert payload["promoteCandidates"] == [11]
     assert payload["memberStances"] == [
-        {"articleId": 11, "stance": "ADDS", "confidence": 0.65}
+        {"articleId": 11, "stance": "DISPUTES", "confidence": 0.85}
     ]
+
+
+def test_rejects_more_than_ten_issue_members() -> None:
+    body = request_body()
+    body["issueMembers"] = [
+        {
+            "id": article_id,
+            "title": f"비교 기사 {article_id}",
+            "summary": None,
+            "publisher": "테스트 매체",
+        }
+        for article_id in range(11, 22)
+    ]
+
+    response = client.post(
+        "/v1/analyze",
+        headers={"X-Agent-Token": "local-dev-agent-token"},
+        json=body,
+    )
+
+    assert response.status_code == 422
 
 
 def test_mock_analysis_respects_summary_and_bullet_length_limits() -> None:

@@ -14,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -24,7 +23,6 @@ import java.util.Set;
 public class IssueCrossSourceWriter {
 
     private static final BigDecimal REPRESENTATIVE_CONFIDENCE = new BigDecimal("0.900");
-    private static final BigDecimal DEFAULT_MEMBER_CONFIDENCE = new BigDecimal("0.500");
 
     private final NewsIssueRepository issueRepository;
     private final IssueArticleRepository issueArticleRepository;
@@ -40,18 +38,21 @@ public class IssueCrossSourceWriter {
         Set<Long> articleIds = memberships.stream()
                 .map(membership -> membership.getArticle().getId())
                 .collect(java.util.stream.Collectors.toSet());
-        validateReferences(crossSource, articleIds);
+        IssueCrossSource currentCrossSource = currentReferences(crossSource, articleIds);
 
         Map<Long, RuleStance> stanceByArticle = new HashMap<>();
         List<RuleStance> candidates = ruleStances == null ? List.of() : ruleStances;
         for (RuleStance candidate : candidates) {
-            if (!articleIds.contains(candidate.articleId())
-                    || stanceByArticle.putIfAbsent(candidate.articleId(), candidate) != null) {
+            // 긴 Agent 왕복 사이 다른 이슈로 이동한 멤버는 stale snapshot이므로 건너뛴다.
+            if (!articleIds.contains(candidate.articleId())) {
+                continue;
+            }
+            if (stanceByArticle.putIfAbsent(candidate.articleId(), candidate) != null) {
                 throw new IllegalArgumentException("memberStances가 이슈 기사와 일치하지 않습니다.");
             }
         }
 
-        issue.applyCrossSource(crossSource);
+        issue.applyCrossSource(currentCrossSource);
         memberships.forEach(membership -> {
             if (membership.getRole() == IssueArticleRole.REPRESENTATIVE) {
                 membership.applyStance(
@@ -61,10 +62,13 @@ public class IssueCrossSourceWriter {
                 return;
             }
             RuleStance candidate = stanceByArticle.get(membership.getArticle().getId());
+            if (candidate == null || membership.getStanceSource() == IssueStanceSource.LLM) {
+                return;
+            }
             membership.applyStance(
-                    candidate == null ? IssueStance.SUPPORTS : candidate.stance(),
+                    candidate.stance(),
                     IssueStanceSource.RULE,
-                    candidate == null ? DEFAULT_MEMBER_CONFIDENCE : candidate.confidence());
+                    candidate.confidence());
         });
     }
 
@@ -86,16 +90,24 @@ public class IssueCrossSourceWriter {
                 confidence);
     }
 
-    private void validateReferences(IssueCrossSource crossSource, Set<Long> articleIds) {
+    private IssueCrossSource currentReferences(IssueCrossSource crossSource, Set<Long> articleIds) {
         if (crossSource == null) {
             throw new IllegalArgumentException("crossSource는 필수입니다.");
         }
-        Set<Long> references = new HashSet<>();
-        crossSource.soleSource().forEach(value -> references.add(value.articleId()));
-        crossSource.conflicts().forEach(value -> references.addAll(value.articleIds()));
-        if (!articleIds.containsAll(references)) {
-            throw new IllegalArgumentException("crossSource가 이슈 밖의 기사를 참조합니다.");
-        }
+        List<IssueCrossSource.SoleSource> soleSource = crossSource.soleSource().stream()
+                .filter(value -> articleIds.contains(value.articleId()))
+                .toList();
+        List<IssueCrossSource.Conflict> conflicts = crossSource.conflicts().stream()
+                .map(value -> new IssueCrossSource.Conflict(
+                        value.articleIds().stream().filter(articleIds::contains).toList(),
+                        value.text()))
+                .filter(value -> value.articleIds().size() >= 2)
+                .toList();
+        return new IssueCrossSource(
+                crossSource.consensus(),
+                soleSource,
+                conflicts,
+                crossSource.missingStakeholders());
     }
 
     public record RuleStance(Long articleId, IssueStance stance, BigDecimal confidence) {

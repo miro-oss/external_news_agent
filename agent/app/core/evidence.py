@@ -156,12 +156,15 @@ class CrossSourceSignal:
     @property
     def promotion_eligible(self) -> bool:
         return bool(
-            self.extra_numbers or self.extra_companies or self.polarity_mismatch
+            self.extra_numbers
+            or self.extra_companies
+            or self.polarity_mismatch
+            or self.number_mismatch
         )
 
     @property
     def stance(self) -> str:
-        if self.polarity_mismatch:
+        if self.polarity_mismatch or self.number_mismatch:
             return "DISPUTES"
         if self.extra_numbers or self.extra_companies:
             return "ADDS"
@@ -169,7 +172,7 @@ class CrossSourceSignal:
 
     @property
     def confidence(self) -> float:
-        if self.polarity_mismatch:
+        if self.polarity_mismatch or self.number_mismatch:
             return 0.85
         if self.extra_numbers or self.extra_companies:
             return 0.65

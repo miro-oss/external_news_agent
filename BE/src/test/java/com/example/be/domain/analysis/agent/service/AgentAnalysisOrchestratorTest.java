@@ -41,6 +41,7 @@ import org.mockito.ArgumentCaptor;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -146,13 +147,12 @@ class AgentAnalysisOrchestratorTest {
                 response(List.of(1), "제품/공정", false),
                 IssueCrossSource.empty(),
                 List.of(),
-                List.of(new AgentAnalyzeResponse.MemberStance(
-                        10L, "DISPUTES", new BigDecimal("0.85"))));
+                List.of());
         QuotaReservation promotionReservation = new QuotaReservation(
                 3L, 42L, "run:42:issue:88:promotion:article:11",
                 AgentTask.ANALYZE, AgentPlan.FREE, BigDecimal.ONE);
         QuotaReservation promotionEvidenceReservation = new QuotaReservation(
-                4L, 42L, "run:42:article:11:evidence:0:0",
+                4L, 42L, "run:42:article:11:promotion:evidence:0:0",
                 AgentTask.VERIFY_EVIDENCE, AgentPlan.FREE, BigDecimal.ONE);
         when(quotaService.reserve(
                 42L,
@@ -161,7 +161,7 @@ class AgentAnalysisOrchestratorTest {
                 AgentPlan.FREE)).thenReturn(promotionReservation);
         when(quotaService.reserve(
                 42L,
-                "run:42:article:11:evidence:0:0",
+                "run:42:article:11:promotion:evidence:0:0",
                 AgentTask.VERIFY_EVIDENCE,
                 AgentPlan.FREE)).thenReturn(promotionEvidenceReservation);
         when(client.analyze(any())).thenReturn(primary, promoted);
@@ -175,6 +175,7 @@ class AgentAnalysisOrchestratorTest {
                 .map(AgentAnalyzeRequest.IssueMemberPayload::id)
                 .toList());
         assertEquals(11L, requestCaptor.getAllValues().get(1).article().id());
+        assertTrue(requestCaptor.getAllValues().get(1).issueMembers().isEmpty());
         verify(crossSourceWriter).applyRepresentative(
                 eq(88L),
                 eq(crossSource),
@@ -185,6 +186,116 @@ class AgentAnalysisOrchestratorTest {
                 any(), any());
         verify(crossSourceWriter).confirmPromotion(
                 88L, 11L, IssueStance.DISPUTES, new BigDecimal("0.85"), true);
+    }
+
+    @Test
+    void keepsRepresentativeResultWhenPromotionSetupFails() {
+        Article representative = article();
+        Article member = issueMember(representative, 11L, "충돌 기사", "양산 일정 5조원");
+        AnalysisContext context = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, member)));
+        AgentAnalyzeResponse primary = comparisonResponse(
+                response(List.of(1)),
+                new IssueCrossSource(
+                        List.of(),
+                        List.of(),
+                        List.of(new IssueCrossSource.Conflict(
+                                List.of(10L, 11L), "투자 규모가 다릅니다.")),
+                        List.of()),
+                List.of(11L),
+                List.of(new AgentAnalyzeResponse.MemberStance(
+                        11L, "DISPUTES", new BigDecimal("0.85"))));
+        when(client.analyze(any())).thenReturn(primary);
+        when(quotaService.reserve(
+                42L,
+                "run:42:issue:88:promotion:article:11",
+                AgentTask.ANALYZE,
+                AgentPlan.FREE)).thenThrow(new IllegalStateException("quota store unavailable"));
+
+        AnalysisResult result = orchestrator.analyze(context);
+
+        assertEquals("한국어 요약", result.summary());
+        verify(resultWriter).addAgentWarning(
+                42L,
+                com.example.be.domain.collection.entity.CollectionRunWarning.CODE_LLM_CROSS_SOURCE_FAILED,
+                "충돌 기사 승격 처리에 실패했습니다.");
+        verifyNoInteractions(findingWriter);
+    }
+
+    @Test
+    void skipsPromotionWhenCandidateIsAlreadyAPrimaryPipelineTarget() {
+        Article representative = article();
+        Article member = issueMember(representative, 11L, "다른 이슈 대표", "양산 일정 5조원");
+        AnalysisContext context = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(
+                        88L, 10L, List.of(representative, member), Set.of(10L, 11L)));
+        AgentAnalyzeResponse primary = comparisonResponse(
+                response(List.of(1)),
+                new IssueCrossSource(
+                        List.of(),
+                        List.of(),
+                        List.of(new IssueCrossSource.Conflict(
+                                List.of(10L, 11L), "투자 규모가 다릅니다.")),
+                        List.of()),
+                List.of(11L),
+                List.of(new AgentAnalyzeResponse.MemberStance(
+                        11L, "DISPUTES", new BigDecimal("0.85"))));
+        when(client.analyze(any())).thenReturn(primary);
+
+        orchestrator.analyze(context);
+
+        verify(client).analyze(any());
+        verifyNoInteractions(findingWriter);
+    }
+
+    @Test
+    void capsIssueMembersAndTruncatesSummariesToAgentContract() {
+        Article base = article();
+        Article representative = Article.builder()
+                .id(base.getId())
+                .topic(base.getTopic())
+                .canonicalUrl(base.getCanonicalUrl())
+                .title(base.getTitle())
+                .summary("가".repeat(2100))
+                .body(base.getBody())
+                .language(base.getLanguage())
+                .fetchStatus(base.getFetchStatus())
+                .build();
+        List<Article> members = Stream.iterate(11L, id -> id + 1)
+                .limit(12)
+                .map(id -> issueMember(
+                        representative, id, "멤버 " + id, "나".repeat(2100)))
+                .toList();
+        List<AgentAnalyzeResponse.MemberStance> stances = members.stream()
+                .limit(10)
+                .map(member -> new AgentAnalyzeResponse.MemberStance(
+                        member.getId(), "SUPPORTS", new BigDecimal("0.55")))
+                .toList();
+        AnalysisContext context = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(
+                        88L,
+                        10L,
+                        Stream.concat(Stream.of(representative), members.stream()).toList()));
+        when(client.analyze(any())).thenReturn(comparisonResponse(
+                response(List.of(1)), IssueCrossSource.empty(), List.of(), stances));
+
+        orchestrator.analyze(context);
+
+        ArgumentCaptor<AgentAnalyzeRequest> requestCaptor =
+                ArgumentCaptor.forClass(AgentAnalyzeRequest.class);
+        verify(client).analyze(requestCaptor.capture());
+        assertEquals(10, requestCaptor.getValue().issueMembers().size());
+        assertEquals(2000, requestCaptor.getValue().article().summary().length());
+        assertEquals(2000, requestCaptor.getValue().issueMembers().getFirst().summary().length());
     }
 
     @Test
@@ -432,6 +543,23 @@ class AgentAnalysisOrchestratorTest {
                 .build();
     }
 
+    private Article issueMember(Article representative,
+                                Long id,
+                                String title,
+                                String summary) {
+        return Article.builder()
+                .id(id)
+                .topic(representative.getTopic())
+                .canonicalUrl("https://example.com/" + id)
+                .title(title)
+                .summary(summary)
+                .body(title + " 본문")
+                .sourceName("다른경제")
+                .language("ko")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+    }
+
     private static AgentAnalyzeResponse response(List<Integer> evidenceIds) {
         return response(evidenceIds, "제품/공정");
     }
@@ -458,7 +586,7 @@ class AgentAnalysisOrchestratorTest {
                         mock ? "mock" : "gemini",
                         mock ? "mock" : "gemini-2.5-flash",
                         mock
-                                ? "analyze.mock.v2"
+                                ? "analyze.mock.v4"
                                 : "analyze.ko.v4+perspective.ko.v1+sensitivity.ko.v1",
                         mock ? 0L : 120L,
                         mock ? 0L : 30L,
@@ -480,7 +608,17 @@ class AgentAnalysisOrchestratorTest {
                 source.classification(),
                 source.entities(),
                 source.perspectiveTags(),
-                crossSource,
+                new AgentAnalyzeResponse.CrossSource(
+                        crossSource.consensus(),
+                        crossSource.soleSource().stream()
+                                .map(value -> new AgentAnalyzeResponse.SoleSourceObservation(
+                                        value.articleId(), value.text()))
+                                .toList(),
+                        crossSource.conflicts().stream()
+                                .map(value -> new AgentAnalyzeResponse.ConflictObservation(
+                                        value.articleIds(), value.text()))
+                                .toList(),
+                        crossSource.missingStakeholders()),
                 promoteCandidates,
                 memberStances,
                 source.meta());

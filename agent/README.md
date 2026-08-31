@@ -9,8 +9,9 @@ run 보고서 작성(`/v1/report`)을 제공하며, 기본 Mock 모드에서는 
 ## `/v1/analyze` 교차 출처 계약
 
 `analyze.ko.v4`부터 대표 기사 요청은 같은 이슈의 다른 기사 제목·요약·매체를 `issueMembers`로
-함께 받을 수 있습니다. 멤버 본문은 교차 비교 입력에 넣지 않습니다. 배열이 비어 있으면 기존 기사
-단독 분석과 같으며 `crossSource`와 `promoteCandidates`도 빈 값입니다.
+최대 10건까지 함께 받을 수 있습니다. 대표와 멤버 모두 교차 비교에는 제목·요약만 사용하고 본문은
+넣지 않습니다. 배열이 비어 있으면 기존 기사 단독 분석과 같으며 `crossSource`와
+`promoteCandidates`도 빈 값입니다.
 
 ```json
 {
@@ -57,7 +58,7 @@ run 보고서 작성(`/v1/report`)을 제공하며, 기본 Mock 모드에서는 
   },
   "promoteCandidates": [412],
   "memberStances": [
-    {"articleId": 412, "stance": "ADDS", "confidence": 0.65}
+    {"articleId": 412, "stance": "DISPUTES", "confidence": 0.85}
   ]
 }
 ```

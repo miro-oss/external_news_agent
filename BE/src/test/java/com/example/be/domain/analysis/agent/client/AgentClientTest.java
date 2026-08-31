@@ -46,6 +46,8 @@ class AgentClientTest {
                 .andExpect(jsonPath("$.idempotencyKey").value("run:42:article:10"))
                 .andExpect(jsonPath("$.article.bodyText").value("기사 본문"))
                 .andExpect(jsonPath("$.issueMembers[0].id").value(11))
+                .andExpect(jsonPath("$.issueMembers[0].title").value("충돌 기사"))
+                .andExpect(jsonPath("$.issueMembers[0].summary").value("다른 수치"))
                 .andExpect(jsonPath("$.issueMembers[0].publisher").value("다른경제"))
                 .andRespond(withSuccess(responseJson(), MediaType.APPLICATION_JSON));
 

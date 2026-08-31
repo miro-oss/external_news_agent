@@ -62,6 +62,50 @@ class IssueCrossSourceWriterTest {
 
         assertEquals(IssueStanceSource.LLM, member.getStanceSource());
         assertEquals(new BigDecimal("0.850"), member.getStanceConfidence());
+
+        writer.applyRepresentative(
+                88L,
+                crossSource,
+                List.of(new IssueCrossSourceWriter.RuleStance(
+                        11L, IssueStance.ADDS, new BigDecimal("0.650"))),
+                true);
+
+        assertEquals(IssueStance.DISPUTES, member.getStance());
+        assertEquals(IssueStanceSource.LLM, member.getStanceSource());
+        assertEquals(new BigDecimal("0.850"), member.getStanceConfidence());
+    }
+
+    @Test
+    void ignoresStaleStancesAndPreservesMembersMissingFromCurrentSnapshot() {
+        NewsIssue issue = NewsIssue.builder().id(88L).crossSource(IssueCrossSource.empty()).build();
+        IssueArticle representative = membership(
+                1L, issue, Article.builder().id(10L).build(), IssueArticleRole.REPRESENTATIVE);
+        IssueArticle member = membership(
+                2L, issue, Article.builder().id(11L).build(), IssueArticleRole.MEMBER);
+        member.applyStance(
+                IssueStance.ADDS, IssueStanceSource.RULE, new BigDecimal("0.700"));
+        IssueCrossSource staleCrossSource = new IssueCrossSource(
+                List.of("공통 관측"),
+                List.of(new IssueCrossSource.SoleSource(12L, "이미 이동한 기사")),
+                List.of(new IssueCrossSource.Conflict(
+                        List.of(10L, 11L, 12L), "일정이 다릅니다.")),
+                List.of());
+        when(issueRepository.findByIdForUpdate(88L)).thenReturn(Optional.of(issue));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(88L))
+                .thenReturn(List.of(representative, member));
+
+        writer.applyRepresentative(
+                88L,
+                staleCrossSource,
+                List.of(new IssueCrossSourceWriter.RuleStance(
+                        12L, IssueStance.DISPUTES, new BigDecimal("0.850"))),
+                true);
+
+        assertEquals(List.of(), issue.getCrossSource().soleSource());
+        assertEquals(List.of(10L, 11L),
+                issue.getCrossSource().conflicts().getFirst().articleIds());
+        assertEquals(IssueStance.ADDS, member.getStance());
+        assertEquals(new BigDecimal("0.700"), member.getStanceConfidence());
     }
 
     private IssueArticle membership(

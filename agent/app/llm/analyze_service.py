@@ -259,7 +259,6 @@ def _member_stances(request: AnalyzeRequest) -> tuple[list[MemberStance], set[in
         for value in (
             request.article.title,
             request.article.summary,
-            request.article.body_text,
         )
         if value
     )

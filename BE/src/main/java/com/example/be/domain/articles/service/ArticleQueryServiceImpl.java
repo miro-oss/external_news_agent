@@ -103,6 +103,15 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                 ? article
                 : issueContext.representative().getArticle();
         Finding finding = findFinding(analyzedArticle.getId(), runId);
+        Article representativeArticle = issueContext.representative() == null
+                ? null
+                : issueContext.representative().getArticle();
+        if (finding == null && representativeArticle != null
+                && !representativeArticle.getId().equals(analyzedArticle.getId())) {
+            // 승격된 멤버에 선택한 run의 finding이 없으면 해당 run의 대표 분석을 먼저 보여준다.
+            analyzedArticle = representativeArticle;
+            finding = findFinding(analyzedArticle.getId(), runId);
+        }
         if (finding == null && !analyzedArticle.getId().equals(articleId)) {
             // 이관 전 레거시 finding이 멤버에만 있으면 상세 분석을 갑자기 비우지 않는다.
             analyzedArticle = article;

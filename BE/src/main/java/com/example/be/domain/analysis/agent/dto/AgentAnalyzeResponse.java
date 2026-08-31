@@ -1,7 +1,5 @@
 package com.example.be.domain.analysis.agent.dto;
 
-import com.example.be.domain.issues.entity.IssueCrossSource;
-
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -12,7 +10,7 @@ public record AgentAnalyzeResponse(
         Classification classification,
         Entities entities,
         List<PerspectiveTag> perspectiveTags,
-        IssueCrossSource crossSource,
+        CrossSource crossSource,
         List<Long> promoteCandidates,
         List<MemberStance> memberStances,
         Meta meta
@@ -32,7 +30,7 @@ public record AgentAnalyzeResponse(
                 classification,
                 entities,
                 perspectiveTags,
-                IssueCrossSource.empty(),
+                CrossSource.empty(),
                 List.of(),
                 List.of(),
                 meta);
@@ -71,6 +69,37 @@ public record AgentAnalyzeResponse(
             String hook,
             List<Integer> evidenceSentenceIds
     ) {
+    }
+
+    public record CrossSource(
+            List<String> consensus,
+            List<SoleSourceObservation> soleSource,
+            List<ConflictObservation> conflicts,
+            List<String> missingStakeholders
+    ) {
+
+        public CrossSource {
+            consensus = consensus == null ? List.of() : List.copyOf(consensus);
+            soleSource = soleSource == null ? List.of() : List.copyOf(soleSource);
+            conflicts = conflicts == null ? List.of() : List.copyOf(conflicts);
+            missingStakeholders = missingStakeholders == null
+                    ? List.of()
+                    : List.copyOf(missingStakeholders);
+        }
+
+        public static CrossSource empty() {
+            return new CrossSource(List.of(), List.of(), List.of(), List.of());
+        }
+    }
+
+    public record SoleSourceObservation(Long articleId, String text) {
+    }
+
+    public record ConflictObservation(List<Long> articleIds, String text) {
+
+        public ConflictObservation {
+            articleIds = articleIds == null ? List.of() : List.copyOf(articleIds);
+        }
     }
 
     public record MemberStance(

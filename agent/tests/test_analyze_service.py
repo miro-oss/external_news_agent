@@ -275,6 +275,27 @@ def test_cross_source_contract_filters_and_promotes_one_conflicting_member() -> 
     assert "Example Daily" in provider.prompts[0]
 
 
+def test_cross_source_prefilter_does_not_use_representative_body() -> None:
+    provider = FakeProvider(provider_response(valid_output()))
+    issue_request = request("삼성전자가 본문에서만 언급된다.").model_copy(
+        update={
+            "issue_members": [
+                IssueMemberInput(
+                    id=11,
+                    title="삼성전자 신규 투자",
+                    summary=None,
+                    publisher="Example Daily",
+                )
+            ]
+        }
+    )
+
+    response = ArticleAnalyzeService(Settings(), provider).analyze(issue_request)
+
+    assert response.member_stances[0].stance == "ADDS"
+    assert '"promotionEligibleArticleIds": [11]' in provider.prompts[0]
+
+
 def test_rejects_promotion_that_did_not_pass_rule_prefilter() -> None:
     raw = json.loads(valid_output())
     raw["crossSource"] = {

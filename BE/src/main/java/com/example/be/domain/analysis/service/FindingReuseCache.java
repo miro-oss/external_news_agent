@@ -52,7 +52,8 @@ public class FindingReuseCache {
 
         Map<Long, String> reusableInputHashes = new LinkedHashMap<>(inputHashes);
         contexts.stream()
-                .filter(context -> context.issue().present())
+                .filter(context -> context.issue().present()
+                        && !context.issue().membersExcept(context.article().getId()).isEmpty())
                 .forEach(context -> reusableInputHashes.remove(context.article().getId()));
         Map<Long, AnalysisResult> cachedByArticleId = new LinkedHashMap<>();
         contract(plan).ifPresent(contract -> reusableSources(reusableInputHashes, contract).forEach(finding -> {
@@ -133,28 +134,7 @@ public class FindingReuseCache {
         fields.add(article.getLanguage());
         fields.add(article.getPublishedAt() == null ? null : article.getPublishedAt().toString());
         appendTopic(fields, article.getTopic());
-        appendIssue(fields, context.issue());
         return ArticleHasher.analysisInputHash(fields.toArray(String[]::new));
-    }
-
-    private static void appendIssue(List<String> fields, IssueAnalysisContext issue) {
-        if (issue == null || !issue.present()) {
-            fields.add(null);
-            return;
-        }
-        fields.add(issue.issueId().toString());
-        fields.add(issue.representativeArticleId().toString());
-        fields.add(Integer.toString(issue.articles().size()));
-        issue.articles().forEach(member -> {
-            fields.add(member.getId().toString());
-            fields.add(member.getTitle());
-            fields.add(member.getSummary());
-            fields.add(member.getBody());
-            fields.add(member.getSourceName());
-            fields.add(member.getSource() == null ? null : member.getSource().getName());
-            fields.add(member.getFetchStatus() == null ? null : member.getFetchStatus().name());
-            fields.add(member.getPublishedAt() == null ? null : member.getPublishedAt().toString());
-        });
     }
 
     private static void appendTopic(List<String> fields, Topic topic) {
