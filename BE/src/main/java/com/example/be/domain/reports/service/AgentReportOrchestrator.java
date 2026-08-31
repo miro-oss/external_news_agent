@@ -25,6 +25,9 @@ import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.global.config.ApiTimeZone;
 import com.example.be.domain.settings.entity.PaidExhaustedAction;
 import com.example.be.domain.settings.service.LlmPlanService;
+import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.entity.IssueArticleRole;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -56,6 +59,7 @@ public class AgentReportOrchestrator {
     private final AgentQuotaService quotaService;
     private final LlmPlanService planService;
     private final CollectionResultWriter resultWriter;
+    private final IssueArticleRepository issueArticleRepository;
 
     public ReportDocument generate(CollectionRun run,
                                    List<Finding> findings,
@@ -236,7 +240,24 @@ public class AgentReportOrchestrator {
     }
 
     private List<Finding> eligibleFindings(List<Finding> findings) {
+        if (findings.isEmpty()) {
+            return List.of();
+        }
+        List<IssueArticle> memberships = issueArticleRepository.findByArticleIds(findings.stream()
+                .map(finding -> finding.getArticle().getId())
+                .toList());
+        memberships = memberships == null ? List.of() : memberships;
+        Set<Long> issueArticleIds = memberships.stream()
+                .map(membership -> membership.getArticle().getId())
+                .collect(java.util.stream.Collectors.toSet());
+        Set<Long> representativeArticleIds = memberships.stream()
+                .filter(membership -> membership.getRole() == IssueArticleRole.REPRESENTATIVE)
+                .map(membership -> membership.getArticle().getId())
+                .collect(java.util.stream.Collectors.toSet());
         return ReportFindingOrder.sort(findings.stream()
+                        // 마이그레이션 전 finding은 유지하고, 이슈에 귀속된 기사는 대표만 사용한다.
+                        .filter(finding -> !issueArticleIds.contains(finding.getArticle().getId())
+                                || representativeArticleIds.contains(finding.getArticle().getId()))
                         .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
                         .filter(ReportEvidencePolicy::hasSupportedEvidence)
                         .toList())

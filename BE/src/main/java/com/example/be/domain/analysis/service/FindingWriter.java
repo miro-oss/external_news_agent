@@ -9,6 +9,8 @@ import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.global.config.ApiTimeZone;
+import com.example.be.domain.issues.entity.IssueArticleRole;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +27,7 @@ public class FindingWriter {
     private final FindingRepository findingRepository;
     private final CollectionRunRepository runRepository;
     private final ArticleRepository articleRepository;
+    private final IssueArticleRepository issueArticleRepository;
 
     @Transactional
     public void write(Long runId,
@@ -67,6 +70,9 @@ public class FindingWriter {
                 .inputTruncated(result.metadata().truncated())
                 .analyzedAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build());
+        issueArticleRepository.findByArticleIdOrderByIssueIdAsc(articleId).stream()
+                .filter(membership -> membership.getRole() == IssueArticleRole.REPRESENTATIVE)
+                .forEach(membership -> membership.getIssue().applyRepresentativeSummary(result.summary()));
     }
 
     @Transactional

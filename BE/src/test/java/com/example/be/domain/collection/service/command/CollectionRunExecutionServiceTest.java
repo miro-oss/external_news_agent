@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.analysis.service.ArticleAnalysisPipeline;
+import com.example.be.domain.collection.cluster.IssueClusteringService;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.reports.service.ReportCreationService;
 import org.junit.jupiter.api.Test;
@@ -20,11 +21,13 @@ class CollectionRunExecutionServiceTest {
     private final CollectionRunItemRepository runItemRepository = mock(CollectionRunItemRepository.class);
     private final CollectionExecutor collectionExecutor = mock(CollectionExecutor.class);
     private final ArticleContentEnricher contentEnricher = mock(ArticleContentEnricher.class);
+    private final IssueClusteringService issueClusteringService = mock(IssueClusteringService.class);
     private final ArticleAnalysisPipeline analysisPipeline = mock(ArticleAnalysisPipeline.class);
     private final ReportCreationService reportCreationService = mock(ReportCreationService.class);
     private final CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
     private final CollectionRunExecutionService service = new CollectionRunExecutionService(
-            runItemRepository, collectionExecutor, contentEnricher, analysisPipeline, reportCreationService, resultWriter);
+            runItemRepository, collectionExecutor, contentEnricher, issueClusteringService,
+            analysisPipeline, reportCreationService, resultWriter);
 
     @Test
     void createsReportAfterAnalysisBeforeClosingRun() {
@@ -33,7 +36,8 @@ class CollectionRunExecutionServiceTest {
 
         service.executeRun(42L);
 
-        InOrder order = inOrder(analysisPipeline, reportCreationService, resultWriter);
+        InOrder order = inOrder(issueClusteringService, analysisPipeline, reportCreationService, resultWriter);
+        order.verify(issueClusteringService).cluster(42L);
         order.verify(analysisPipeline).analyze(42L, Set.of());
         order.verify(reportCreationService).generate(42L);
         order.verify(resultWriter).finishRun(42L);

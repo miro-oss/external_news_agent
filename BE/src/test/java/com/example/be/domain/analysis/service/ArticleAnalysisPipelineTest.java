@@ -56,7 +56,7 @@ class ArticleAnalysisPipelineTest {
     @Test
     void analyzesSameArticleOnlyOnceAndPrefersUpdatedObservation() {
         Article article = Article.builder().id(10L).title("기사").build();
-        when(runArticleRepository.findAnalysisTargetsByRunId(42L)).thenReturn(List.of(
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
                 observation(article, ChangeType.NEW),
                 observation(article, ChangeType.UPDATED)));
         AnalysisResult result = mock(AnalysisResult.class);
@@ -74,7 +74,7 @@ class ArticleAnalysisPipelineTest {
         Article article = Article.builder().id(10L).title("기사").build();
         when(runRepository.findById(42L)).thenReturn(java.util.Optional.of(
                 CollectionRun.builder().id(42L).llmPlan(AgentPlan.PAID).build()));
-        when(runArticleRepository.findAnalysisTargetsByRunId(42L))
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
                 .thenReturn(List.of(observation(article, ChangeType.NEW)));
         when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
 
@@ -89,7 +89,7 @@ class ArticleAnalysisPipelineTest {
     void recordsWarningAndContinuesWhenOneArticleFails() {
         Article failed = Article.builder().id(10L).title("실패").build();
         Article succeeded = Article.builder().id(11L).title("성공").build();
-        when(runArticleRepository.findAnalysisTargetsByRunId(42L)).thenReturn(List.of(
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
                 observation(failed, ChangeType.NEW),
                 observation(succeeded, ChangeType.NEW)));
         when(orchestrator.analyze(new AnalysisContext(42L, failed, AgentPlan.FREE)))
@@ -113,8 +113,9 @@ class ArticleAnalysisPipelineTest {
                 .body("새로 확보한 전문")
                 .fetchStatus(FetchStatus.FULLTEXT)
                 .build();
-        when(runArticleRepository.findAnalysisTargetsByRunId(42L)).thenReturn(List.of());
-        when(runArticleRepository.findAnalysisTargetsByRunIdAndArticleIdIn(42L, Set.of(10L)))
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of());
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
+                42L, Set.of(10L)))
                 .thenReturn(List.of(observation(article, ChangeType.UNCHANGED)));
         AnalysisResult result = mock(AnalysisResult.class);
         when(orchestrator.analyze(new AnalysisContext(42L, article, AgentPlan.FREE))).thenReturn(result);
@@ -132,7 +133,7 @@ class ArticleAnalysisPipelineTest {
                 .body("직전 전문")
                 .fetchStatus(FetchStatus.FETCH_FAILED)
                 .build();
-        when(runArticleRepository.findAnalysisTargetsByRunId(42L))
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
                 .thenReturn(List.of(observation(article, ChangeType.UPDATED)));
 
         pipeline.analyze(42L);
@@ -150,7 +151,7 @@ class ArticleAnalysisPipelineTest {
                 .body("동일 본문")
                 .fetchStatus(FetchStatus.FULLTEXT)
                 .build();
-        when(runArticleRepository.findAnalysisTargetsByRunId(42L))
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
                 .thenReturn(List.of(observation(article, ChangeType.UPDATED)));
         AnalysisResult reused = mock(AnalysisResult.class);
         when(reused.analysisSource()).thenReturn(AnalysisSource.REUSED);

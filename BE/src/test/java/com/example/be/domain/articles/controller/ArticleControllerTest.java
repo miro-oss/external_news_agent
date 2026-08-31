@@ -129,6 +129,7 @@ class ArticleControllerTest {
                         .perspectiveTags(List.of(perspectiveTag()))
                         .runId(42L)
                         .build())
+                .issueId(88L)
                 .relatedArticles(List.of())
                 .build();
     }

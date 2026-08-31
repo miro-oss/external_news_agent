@@ -16,6 +16,9 @@ import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.settings.exception.AudienceException;
+import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.entity.IssueArticleRole;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.global.apiPayload.PageResponse;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
@@ -41,6 +44,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
 
     private final FindingRepository findingRepository;
     private final ArticleRepository articleRepository;
+    private final IssueArticleRepository issueArticleRepository;
 
     @Override
     public PageResponse<ArticleResDTO.Summary> getArticles(Long runId,
@@ -91,11 +95,16 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
     public ArticleResDTO.Detail getArticle(Long articleId, Long runId) {
         Article article = articleRepository.findById(articleId)
                 .orElseThrow(() -> new ArticleException(ArticleErrorCode.ARTICLE_NOT_FOUND));
-        Finding finding = runId == null
-                ? findingRepository.findFirstByArticleIdOrderByIdDesc(articleId).orElse(null)
-                : findingRepository.findByRunIdAndArticleId(runId, articleId).orElse(null);
+        IssueArticle membership = primaryMembership(article);
+        Article analyzedArticle = representativeArticle(membership, article);
+        Finding finding = findFinding(analyzedArticle.getId(), runId);
+        if (finding == null && !analyzedArticle.getId().equals(articleId)) {
+            // 이관 전 레거시 finding이 멤버에만 있으면 상세 분석을 갑자기 비우지 않는다.
+            analyzedArticle = article;
+            finding = findFinding(articleId, runId);
+        }
 
-        boolean hasAnalyzedBody = finding != null && StringUtils.hasText(article.getBody());
+        boolean hasAnalyzedBody = finding != null && StringUtils.hasText(analyzedArticle.getBody());
         List<FindingSection> sections = hasAnalyzedBody ? finding.getSections() : List.of();
         String bodyText = hasAnalyzedBody
                 ? sections.stream().map(FindingSection::text).collect(Collectors.joining(" "))
@@ -120,9 +129,48 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                         .text(section.text())
                         .build()).toList())
                 .analysis(toAnalysis(finding))
-                .eventId(null)
-                .relatedArticles(List.of())
+                .issueId(membership == null ? null : membership.getIssue().getId())
+                .relatedArticles(relatedArticles(membership, articleId))
                 .build();
+    }
+
+    private Finding findFinding(Long articleId, Long runId) {
+        return runId == null
+                ? findingRepository.findFirstByArticleIdOrderByIdDesc(articleId).orElse(null)
+                : findingRepository.findByRunIdAndArticleId(runId, articleId).orElse(null);
+    }
+
+    private IssueArticle primaryMembership(Article article) {
+        List<IssueArticle> memberships = issueArticleRepository.findByArticleIdOrderByIssueIdAsc(article.getId());
+        return memberships.stream()
+                .filter(value -> value.getIssue().getTopic().getId().equals(article.getTopic().getId()))
+                .findFirst()
+                .orElse(memberships.isEmpty() ? null : memberships.getFirst());
+    }
+
+    private Article representativeArticle(IssueArticle membership, Article fallback) {
+        if (membership == null || membership.getRole() == IssueArticleRole.REPRESENTATIVE) {
+            return fallback;
+        }
+        return issueArticleRepository.findFirstByIssueIdAndRole(
+                        membership.getIssue().getId(), IssueArticleRole.REPRESENTATIVE)
+                .map(IssueArticle::getArticle)
+                .orElse(fallback);
+    }
+
+    private List<ArticleResDTO.RelatedArticle> relatedArticles(IssueArticle membership, Long articleId) {
+        if (membership == null) {
+            return List.of();
+        }
+        return issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(membership.getIssue().getId()).stream()
+                .map(IssueArticle::getArticle)
+                .filter(article -> !article.getId().equals(articleId))
+                .map(article -> ArticleResDTO.RelatedArticle.builder()
+                        .id(article.getId())
+                        .title(article.getTitle())
+                        .publisher(publisher(article))
+                        .build())
+                .toList();
     }
 
     private ArticleResDTO.Summary toSummary(Finding finding) {

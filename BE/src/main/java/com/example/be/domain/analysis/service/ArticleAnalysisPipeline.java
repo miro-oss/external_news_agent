@@ -75,12 +75,14 @@ public class ArticleAnalysisPipeline {
 
     private List<Target> targets(Long runId, Set<Long> refreshedArticleIds) {
         Map<Long, Target> byArticleId = new LinkedHashMap<>();
-        for (CollectionRunArticle observation : runArticleRepository.findAnalysisTargetsByRunId(runId)) {
+        for (CollectionRunArticle observation :
+                runArticleRepository.findRepresentativeAnalysisTargetsByRunId(runId)) {
             addTarget(byArticleId, observation, observation.getChangeType());
         }
         if (!refreshedArticleIds.isEmpty()) {
             for (CollectionRunArticle observation :
-                    runArticleRepository.findAnalysisTargetsByRunIdAndArticleIdIn(runId, refreshedArticleIds)) {
+                    runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
+                            runId, refreshedArticleIds)) {
                 // 메타데이터는 그대로여도 새 전문을 확보했으므로 분석 결과 관점에서는 UPDATED다.
                 ChangeType changeType = observation.getChangeType() == ChangeType.UNCHANGED
                         ? ChangeType.UPDATED

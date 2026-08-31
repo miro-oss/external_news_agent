@@ -2,6 +2,7 @@ package com.example.be.domain.collection.entity;
 
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
+import com.example.be.domain.issues.entity.ContentGroup;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -78,6 +79,11 @@ public class Article {
     @Column(name = "content_hash", length = 64)
     private String contentHash;
 
+    /** URL이 다른 전재 기사도 행은 보존하고 같은 본문 중복군만 가리킨다. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "content_group_id")
+    private ContentGroup contentGroup;
+
     @Column(name = "language", length = 5)
     private String language;
 
@@ -139,6 +145,10 @@ public class Article {
         }
         this.fetchStatus = fetchStatus;
         this.updatedAt = updatedAt;
+    }
+
+    public void assignContentGroup(ContentGroup contentGroup) {
+        this.contentGroup = contentGroup;
     }
 
     public void applyUpdate(String title,

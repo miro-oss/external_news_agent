@@ -54,7 +54,7 @@ public class ArticleResDTO {
     @JsonPropertyOrder({
             "id", "title", "publisher", "canonicalUrl", "language", "publishedAt", "fetchedAt", "fetchStatus",
             "topicId", "topicName", "sourceId", "sourceName", "bodyText", "sentences", "analysis",
-            "eventId", "relatedArticles"
+            "issueId", "relatedArticles"
     })
     @Schema(name = "ArticleDetailResponse", description = "수집 기사 상세")
     public static class Detail {
@@ -74,7 +74,7 @@ public class ArticleResDTO {
         private final String bodyText;
         private final List<Sentence> sentences;
         private final Analysis analysis;
-        private final Long eventId;
+        private final Long issueId;
         private final List<RelatedArticle> relatedArticles;
     }
 

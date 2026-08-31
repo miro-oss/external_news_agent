@@ -122,6 +122,14 @@ export function ArticleDetailModal({
               </a>
             </header>
 
+            {article.data.issueId !== null && (
+              <div className="issue-context">
+                <strong>이슈 #{article.data.issueId}</strong>
+                <span>관련 기사 {article.data.relatedArticles.length + 1}건</span>
+                <span>요약과 근거는 이슈 대표 분석에 연결됩니다.</span>
+              </div>
+            )}
+
             {article.data.analysis ? (
               <AnalysisPanel
                 analysis={article.data.analysis}
