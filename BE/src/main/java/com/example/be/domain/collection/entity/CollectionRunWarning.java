@@ -55,6 +55,8 @@ public class CollectionRunWarning {
     /** 근거 검증 호출·quota·응답 실패로 해당 주장을 보고서 근거에서 제외했다. */
     public static final String CODE_LLM_EVIDENCE_VERIFICATION_FAILED =
             "LLM_EVIDENCE_VERIFICATION_FAILED";
+    /** 이슈 교차 비교 저장 또는 충돌 기사 추가 분석에 실패했다. */
+    public static final String CODE_LLM_CROSS_SOURCE_FAILED = "LLM_CROSS_SOURCE_FAILED";
 
     public static final int MAX_CODE_LENGTH = 50;
     public static final int MAX_MESSAGE_LENGTH = 1000;

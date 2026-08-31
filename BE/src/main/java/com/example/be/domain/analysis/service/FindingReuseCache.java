@@ -36,14 +36,27 @@ public class FindingReuseCache {
 
     @Transactional(readOnly = true)
     public Map<Long, Lookup> lookupAll(List<Article> articles, AgentPlan plan) {
+        return lookupContexts(articles.stream()
+                .map(article -> new AnalysisContext(0L, article, plan))
+                .toList(), plan);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<Long, Lookup> lookupContexts(List<AnalysisContext> contexts, AgentPlan plan) {
         Map<Long, String> inputHashes = new LinkedHashMap<>();
-        articles.forEach(article -> inputHashes.put(article.getId(), inputHash(article)));
+        contexts.forEach(context -> inputHashes.put(
+                context.article().getId(), inputHash(context)));
         if (inputHashes.isEmpty()) {
             return Map.of();
         }
 
+        Map<Long, String> reusableInputHashes = new LinkedHashMap<>(inputHashes);
+        contexts.stream()
+                .filter(context -> context.issue().present()
+                        && !context.issue().membersExcept(context.article().getId()).isEmpty())
+                .forEach(context -> reusableInputHashes.remove(context.article().getId()));
         Map<Long, AnalysisResult> cachedByArticleId = new LinkedHashMap<>();
-        contract(plan).ifPresent(contract -> reusableSources(inputHashes, contract).forEach(finding -> {
+        contract(plan).ifPresent(contract -> reusableSources(reusableInputHashes, contract).forEach(finding -> {
             Long articleId = finding.getArticle().getId();
             if (Objects.equals(inputHashes.get(articleId), finding.getAnalysisInputHash())) {
                 cachedByArticleId.putIfAbsent(articleId, toReusedResult(finding));
@@ -58,6 +71,9 @@ public class FindingReuseCache {
     }
 
     private List<Finding> reusableSources(Map<Long, String> inputHashes, CacheContract contract) {
+        if (inputHashes.isEmpty()) {
+            return List.of();
+        }
         Collection<String> distinctHashes = new LinkedHashSet<>(inputHashes.values());
         return findingRepository.findReusableSources(
                 inputHashes.keySet(),
@@ -105,6 +121,11 @@ public class FindingReuseCache {
     }
 
     static String inputHash(Article article) {
+        return inputHash(new AnalysisContext(0L, article, AgentPlan.FREE));
+    }
+
+    public static String inputHash(AnalysisContext context) {
+        Article article = context.article();
         List<String> fields = new ArrayList<>();
         fields.add(article.getTitle());
         fields.add(article.getSummary());

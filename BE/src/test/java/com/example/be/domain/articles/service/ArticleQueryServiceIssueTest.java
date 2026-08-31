@@ -105,6 +105,102 @@ class ArticleQueryServiceIssueTest {
         assertEquals(List.of(), detail.getRelatedArticles());
     }
 
+    @Test
+    void promotedMemberDetailUsesItsOwnAnalysisAndEvidence() {
+        Topic topic = Topic.builder().id(7L).name("HBM").build();
+        Source source = Source.builder().id(9L).name("전자신문").build();
+        Article representative = article(101L, "대표 기사", "대표 본문", topic, source);
+        Article promoted = article(102L, "충돌 기사", "충돌 본문", topic, source);
+        NewsIssue issue = NewsIssue.builder()
+                .id(88L)
+                .title("HBM4 양산")
+                .status(IssueStatus.EMERGING)
+                .topic(topic)
+                .build();
+        IssueArticle representativeMembership = membership(
+                1L, issue, representative, IssueArticleRole.REPRESENTATIVE);
+        IssueArticle promotedMembership = membership(
+                2L, issue, promoted, IssueArticleRole.MEMBER, IssueStanceSource.LLM);
+        Finding finding = Finding.builder()
+                .id(502L)
+                .run(CollectionRun.builder().id(42L).build())
+                .article(promoted)
+                .changeType(ChangeType.UPDATED)
+                .summary("충돌 기사 분석")
+                .keyPoints(List.of(new FindingKeyPoint("충돌 주장", List.of(0), "grounded")))
+                .sentiment(Sentiment.NEGATIVE)
+                .riskLevel(RiskLevel.HIGH)
+                .relevance(Relevance.IMPORTANT)
+                .category("기업")
+                .analysisSource(AnalysisSource.LLM)
+                .sections(List.of(new FindingSection(0, "충돌 근거 문장")))
+                .analyzedAt(LocalDateTime.of(2026, 8, 10, 10, 2))
+                .build();
+
+        when(articleRepository.findById(102L)).thenReturn(Optional.of(promoted));
+        when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(102L))
+                .thenReturn(List.of(promotedMembership));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(88L))
+                .thenReturn(List.of(representativeMembership, promotedMembership));
+        when(findingRepository.findFirstByArticleIdOrderByIdDesc(102L))
+                .thenReturn(Optional.of(finding));
+
+        ArticleResDTO.Detail detail = service.getArticle(102L, null);
+
+        assertEquals(102L, detail.getAnalysisArticleId());
+        assertEquals("충돌 기사 분석", detail.getAnalysis().getSummary());
+        assertEquals("충돌 근거 문장", detail.getBodyText());
+    }
+
+    @Test
+    void promotedMemberFallsBackToRepresentativeFindingForRequestedRun() {
+        Topic topic = Topic.builder().id(7L).name("HBM").build();
+        Source source = Source.builder().id(9L).name("전자신문").build();
+        Article representative = article(101L, "대표 기사", "대표 본문", topic, source);
+        Article promoted = article(102L, "충돌 기사", "충돌 본문", topic, source);
+        NewsIssue issue = NewsIssue.builder()
+                .id(88L)
+                .title("HBM4 양산")
+                .status(IssueStatus.EMERGING)
+                .topic(topic)
+                .build();
+        IssueArticle representativeMembership = membership(
+                1L, issue, representative, IssueArticleRole.REPRESENTATIVE);
+        IssueArticle promotedMembership = membership(
+                2L, issue, promoted, IssueArticleRole.MEMBER, IssueStanceSource.LLM);
+        Finding representativeFinding = Finding.builder()
+                .id(503L)
+                .run(CollectionRun.builder().id(50L).build())
+                .article(representative)
+                .changeType(ChangeType.UPDATED)
+                .summary("대표 기사 분석")
+                .keyPoints(List.of(new FindingKeyPoint("대표 주장", List.of(0), "grounded")))
+                .sentiment(Sentiment.NEUTRAL)
+                .riskLevel(RiskLevel.MEDIUM)
+                .relevance(Relevance.IMPORTANT)
+                .category("기업")
+                .analysisSource(AnalysisSource.LLM)
+                .sections(List.of(new FindingSection(0, "대표 근거 문장")))
+                .analyzedAt(LocalDateTime.of(2026, 8, 10, 10, 2))
+                .build();
+
+        when(articleRepository.findById(102L)).thenReturn(Optional.of(promoted));
+        when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(102L))
+                .thenReturn(List.of(promotedMembership));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(88L))
+                .thenReturn(List.of(representativeMembership, promotedMembership));
+        when(findingRepository.findByRunIdAndArticleId(50L, 102L))
+                .thenReturn(Optional.empty());
+        when(findingRepository.findByRunIdAndArticleId(50L, 101L))
+                .thenReturn(Optional.of(representativeFinding));
+
+        ArticleResDTO.Detail detail = service.getArticle(102L, 50L);
+
+        assertEquals(101L, detail.getAnalysisArticleId());
+        assertEquals("대표 기사 분석", detail.getAnalysis().getSummary());
+        assertEquals("대표 근거 문장", detail.getBodyText());
+    }
+
     private Article article(Long id, String title, String body, Topic topic, Source source) {
         return Article.builder()
                 .id(id)
@@ -122,13 +218,21 @@ class ArticleQueryServiceIssueTest {
                                     NewsIssue issue,
                                     Article article,
                                     IssueArticleRole role) {
+        return membership(id, issue, article, role, IssueStanceSource.RULE);
+    }
+
+    private IssueArticle membership(Long id,
+                                    NewsIssue issue,
+                                    Article article,
+                                    IssueArticleRole role,
+                                    IssueStanceSource stanceSource) {
         return IssueArticle.builder()
                 .id(id)
                 .issue(issue)
                 .article(article)
                 .role(role)
                 .stance(IssueStance.SUPPORTS)
-                .stanceSource(IssueStanceSource.RULE)
+                .stanceSource(stanceSource)
                 .stanceConfidence(BigDecimal.ONE)
                 .joinedAt(LocalDateTime.of(2026, 8, 10, 10, 1))
                 .build();

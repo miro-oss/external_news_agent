@@ -45,12 +45,19 @@ class AgentClientTest {
                 .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
                 .andExpect(jsonPath("$.idempotencyKey").value("run:42:article:10"))
                 .andExpect(jsonPath("$.article.bodyText").value("기사 본문"))
+                .andExpect(jsonPath("$.issueMembers[0].id").value(11))
+                .andExpect(jsonPath("$.issueMembers[0].title").value("충돌 기사"))
+                .andExpect(jsonPath("$.issueMembers[0].summary").value("다른 수치"))
+                .andExpect(jsonPath("$.issueMembers[0].publisher").value("다른경제"))
                 .andRespond(withSuccess(responseJson(), MediaType.APPLICATION_JSON));
 
         AgentAnalyzeResponse response = client.analyze(request());
 
         assertEquals("Mock 한국어 요약", response.summaryKo());
         assertEquals(List.of(1), response.sections().getFirst().bullets().getFirst().evidenceSentenceIds());
+        assertEquals(List.of(10L, 11L), response.crossSource().conflicts().getFirst().articleIds());
+        assertEquals(List.of(11L), response.promoteCandidates());
+        assertEquals("DISPUTES", response.memberStances().getFirst().stance());
         assertEquals("mock", response.meta().provider());
         server.verify();
     }
@@ -225,7 +232,9 @@ class AgentClientTest {
                 "run:42:article:10",
                 AgentPlan.FREE,
                 new AgentAnalyzeRequest.ArticlePayload(
-                        10L, "기사", "https://example.com/10", "ko", OffsetDateTime.now(), "기사 본문"),
+                        10L, "기사", "기사 요약", "https://example.com/10", "ko", OffsetDateTime.now(), "기사 본문"),
+                List.of(new AgentAnalyzeRequest.IssueMemberPayload(
+                        11L, "충돌 기사", "다른 수치", "다른경제")),
                 new AgentAnalyzeRequest.TopicPayload("HBM", "HBM", List.of("HBM"), List.of(), List.of()),
                 null);
     }
@@ -261,6 +270,20 @@ class AgentClientTest {
                     "category": "제품/공정"
                   },
                   "entities": {"companies": [], "products": [], "technologies": []},
+                  "perspectiveTags": [
+                    {"audience": "CHIP_MAKER", "relevance": "low", "hook": "핵심 주장", "evidenceSentenceIds": [1]},
+                    {"audience": "EQUIPMENT_MAKER", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+                    {"audience": "MARKET_INVESTOR", "relevance": "none", "hook": null, "evidenceSentenceIds": []},
+                    {"audience": "IT_INFRA", "relevance": "none", "hook": null, "evidenceSentenceIds": []}
+                  ],
+                  "crossSource": {
+                    "consensus": [],
+                    "soleSource": [],
+                    "conflicts": [{"articleIds": [10, 11], "text": "수치가 다릅니다."}],
+                    "missingStakeholders": []
+                  },
+                  "promoteCandidates": [11],
+                  "memberStances": [{"articleId": 11, "stance": "DISPUTES", "confidence": 0.85}],
                   "meta": {
                     "provider": "mock",
                     "model": "mock",

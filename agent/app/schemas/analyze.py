@@ -16,11 +16,13 @@ Audience = Literal[
 AudienceRelevance = Literal["none", "low", "medium", "high"]
 NonEmptyString = Annotated[str, Field(min_length=1)]
 AUDIENCES = frozenset(get_args(Audience))
+MAX_ISSUE_MEMBERS = 10
 
 
 class ArticleInput(AgentModel):
     id: int = Field(gt=0)
     title: str = Field(min_length=1, max_length=1000)
+    summary: str | None = Field(default=None, max_length=2000)
     canonical_url: str = Field(min_length=1, max_length=2000)
     language: str | None = Field(default=None, max_length=10)
     published_at: datetime | None = None
@@ -35,12 +37,31 @@ class TopicInput(AgentModel):
     excluded_keywords: list[str] = Field(default_factory=list)
 
 
+class IssueMemberInput(AgentModel):
+    id: int = Field(gt=0)
+    title: str = Field(min_length=1, max_length=1000)
+    summary: str | None = Field(default=None, max_length=2000)
+    publisher: str | None = Field(default=None, max_length=500)
+
+
 class AnalyzeRequest(AgentModel):
     idempotency_key: str = Field(min_length=1, max_length=200)
     plan: Plan
     article: ArticleInput
+    issue_members: list[IssueMemberInput] = Field(
+        default_factory=list, max_length=MAX_ISSUE_MEMBERS
+    )
     topic: TopicInput
     previous_finding: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_issue_members(self) -> "AnalyzeRequest":
+        member_ids = [member.id for member in self.issue_members]
+        if len(member_ids) != len(set(member_ids)):
+            raise ValueError("issueMembers의 기사 ID는 중복될 수 없습니다.")
+        if self.article.id in member_ids:
+            raise ValueError("대표 기사는 issueMembers에 다시 포함할 수 없습니다.")
+        return self
 
 
 class EvidenceBullet(AgentModel):
@@ -89,6 +110,52 @@ class PerspectiveTag(AgentModel):
         return self
 
 
+class SoleSourceObservation(AgentModel):
+    article_id: int = Field(gt=0)
+    text: NonEmptyString = Field(max_length=500)
+
+
+class ConflictObservation(AgentModel):
+    article_ids: list[Annotated[int, Field(gt=0)]] = Field(min_length=2)
+    text: NonEmptyString = Field(max_length=500)
+
+    @model_validator(mode="after")
+    def validate_unique_article_ids(self) -> "ConflictObservation":
+        if len(self.article_ids) != len(set(self.article_ids)):
+            raise ValueError("conflicts의 articleIds는 중복될 수 없습니다.")
+        return self
+
+
+class CrossSource(AgentModel):
+    consensus: list[NonEmptyString]
+    sole_source: list[SoleSourceObservation]
+    conflicts: list[ConflictObservation]
+    missing_stakeholders: list[NonEmptyString]
+
+    @model_validator(mode="after")
+    def validate_unique_strings(self) -> "CrossSource":
+        if len(self.consensus) != len(set(self.consensus)):
+            raise ValueError("crossSource.consensus는 중복될 수 없습니다.")
+        if len(self.missing_stakeholders) != len(set(self.missing_stakeholders)):
+            raise ValueError("crossSource.missingStakeholders는 중복될 수 없습니다.")
+        return self
+
+    @classmethod
+    def empty(cls) -> "CrossSource":
+        return cls(
+            consensus=[],
+            sole_source=[],
+            conflicts=[],
+            missing_stakeholders=[],
+        )
+
+
+class MemberStance(AgentModel):
+    article_id: int = Field(gt=0)
+    stance: Literal["SUPPORTS", "ADDS", "DISPUTES", "RETRACTS"]
+    confidence: float = Field(ge=0, le=1)
+
+
 class ResponseMeta(AgentModel):
     provider: Literal["gemini", "mindlogic-claude", "mock"]
     model: str = Field(min_length=1)
@@ -107,6 +174,8 @@ class AnalyzeOutput(AgentModel):
     classification: Classification
     entities: Entities
     perspective_tags: list[PerspectiveTag]
+    cross_source: CrossSource
+    promote_candidates: list[Annotated[int, Field(gt=0)]] = Field(max_length=1)
 
     @model_validator(mode="after")
     def validate_perspective_tags(self) -> "AnalyzeOutput":
@@ -121,6 +190,9 @@ class AnalyzeResponse(AgentModel):
     classification: Classification
     entities: Entities
     perspective_tags: list[PerspectiveTag]
+    cross_source: CrossSource
+    promote_candidates: list[Annotated[int, Field(gt=0)]] = Field(max_length=1)
+    member_stances: list[MemberStance]
     meta: ResponseMeta
 
     @model_validator(mode="after")
@@ -144,6 +216,9 @@ class AnalyzeResponse(AgentModel):
             raise ValueError(
                 "perspective tag의 evidenceSentenceIds는 sentences 범위 안이어야 합니다."
             )
+        stance_ids = [stance.article_id for stance in self.member_stances]
+        if len(stance_ids) != len(set(stance_ids)):
+            raise ValueError("memberStances의 articleId는 중복될 수 없습니다.")
         return self
 
 

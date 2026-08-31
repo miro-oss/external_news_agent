@@ -69,4 +69,17 @@ public class IssueArticle {
     public void moveToIssue(NewsIssue issue) {
         this.issue = issue;
     }
+
+    public void applyStance(IssueStance stance,
+                            IssueStanceSource stanceSource,
+                            BigDecimal stanceConfidence) {
+        if (stance == null || stanceSource == null || stanceConfidence == null
+                || stanceConfidence.signum() < 0
+                || stanceConfidence.compareTo(BigDecimal.ONE) > 0) {
+            throw new IllegalArgumentException("이슈 기사 stance 값이 올바르지 않습니다.");
+        }
+        this.stance = stance;
+        this.stanceSource = stanceSource;
+        this.stanceConfidence = stanceConfidence;
+    }
 }

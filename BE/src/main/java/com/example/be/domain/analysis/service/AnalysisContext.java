@@ -6,11 +6,25 @@ import com.example.be.domain.collection.entity.Article;
 import java.util.Objects;
 
 /** 수집 실행과 분석 대상을 묶어 오케스트레이션 계층에만 전달한다. */
-public record AnalysisContext(Long runId, Article article, AgentPlan plan) {
+public record AnalysisContext(
+        Long runId,
+        Article article,
+        AgentPlan plan,
+        IssueAnalysisContext issue
+) {
 
     public AnalysisContext {
         Objects.requireNonNull(runId, "runId는 필수입니다.");
         Objects.requireNonNull(article, "article은 필수입니다.");
         Objects.requireNonNull(plan, "plan은 필수입니다.");
+        issue = issue == null ? IssueAnalysisContext.empty() : issue;
+    }
+
+    public AnalysisContext(Long runId, Article article, AgentPlan plan) {
+        this(runId, article, plan, IssueAnalysisContext.empty());
+    }
+
+    public AnalysisContext withArticle(Article target) {
+        return new AnalysisContext(runId, target, plan, issue);
     }
 }

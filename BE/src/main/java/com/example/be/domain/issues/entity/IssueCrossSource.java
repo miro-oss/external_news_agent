@@ -2,7 +2,7 @@ package com.example.be.domain.issues.entity;
 
 import java.util.List;
 
-/** P1-9가 채우기 전에도 응답 모양을 고정하는 교차 출처 관측값. */
+/** 같은 이슈의 출처별 합의·독점·충돌 관측값. */
 public record IssueCrossSource(
         List<String> consensus,
         List<SoleSource> soleSource,

@@ -108,6 +108,10 @@ public class NewsIssue {
         this.summary = summary;
     }
 
+    public void applyCrossSource(IssueCrossSource crossSource) {
+        this.crossSource = crossSource == null ? IssueCrossSource.empty() : crossSource;
+    }
+
     public IssueStatus markMerged() {
         IssueStatus previous = this.status;
         this.status = IssueStatus.RETRACTED;

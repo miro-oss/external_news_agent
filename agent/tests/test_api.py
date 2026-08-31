@@ -109,12 +109,68 @@ def test_analyze_returns_deterministic_mock_contract() -> None:
     assert payload["classification"]["riskLevel"] == "low"
     assert payload["meta"]["provider"] == "mock"
     assert payload["meta"]["mock"] is True
+    assert payload["crossSource"] == {
+        "consensus": [],
+        "soleSource": [],
+        "conflicts": [],
+        "missingStakeholders": [],
+    }
+    assert payload["promoteCandidates"] == []
+    assert payload["memberStances"] == []
     assert [tag["audience"] for tag in payload["perspectiveTags"]] == [
         "CHIP_MAKER",
         "EQUIPMENT_MAKER",
         "MARKET_INVESTOR",
         "IT_INFRA",
     ]
+
+
+def test_mock_analysis_compares_issue_members_and_promotes_at_most_one() -> None:
+    body = request_body("A사는 투자 규모를 3조원으로 발표했다.")
+    body["article"]["summary"] = "투자 규모는 3조원이다."
+    body["issueMembers"] = [
+        {
+            "id": 11,
+            "title": "A사 투자 규모 5조원",
+            "summary": "투자 규모를 5조원으로 보도했다.",
+            "publisher": "다른경제",
+        }
+    ]
+
+    response = client.post(
+        "/v1/analyze",
+        headers={"X-Agent-Token": "local-dev-agent-token"},
+        json=body,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["crossSource"]["conflicts"][0]["articleIds"] == [10, 11]
+    assert payload["promoteCandidates"] == [11]
+    assert payload["memberStances"] == [
+        {"articleId": 11, "stance": "DISPUTES", "confidence": 0.85}
+    ]
+
+
+def test_rejects_more_than_ten_issue_members() -> None:
+    body = request_body()
+    body["issueMembers"] = [
+        {
+            "id": article_id,
+            "title": f"비교 기사 {article_id}",
+            "summary": None,
+            "publisher": "테스트 매체",
+        }
+        for article_id in range(11, 22)
+    ]
+
+    response = client.post(
+        "/v1/analyze",
+        headers={"X-Agent-Token": "local-dev-agent-token"},
+        json=body,
+    )
+
+    assert response.status_code == 422
 
 
 def test_mock_analysis_respects_summary_and_bullet_length_limits() -> None:

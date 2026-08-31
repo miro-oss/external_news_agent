@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 
 from app.core.config import Settings
-from app.core.evidence import factual_mismatches
+from app.core.evidence import cross_source_signal, factual_mismatches
 from app.core.parser import parse_json_object
 from app.core.sentences import split_sentences_with_meta
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
@@ -13,11 +13,12 @@ from app.schemas.analyze import (
     AnalyzeOutput,
     AnalyzeRequest,
     AnalyzeResponse,
+    MemberStance,
     ResponseMeta,
     Section,
 )
 
-_ANALYZE_PROMPT_VERSION = "analyze.ko.v3"
+_ANALYZE_PROMPT_VERSION = "analyze.ko.v4"
 _PERSPECTIVE_PROMPT_VERSION = "perspective.ko.v1"
 _SENSITIVITY_PROMPT_VERSION = "sensitivity.ko.v1"
 PROMPT_VERSION = (
@@ -69,14 +70,20 @@ class ArticleAnalyzeService:
         split = split_sentences_with_meta(material, self._settings.max_sentences)
         sentences = split.sentences or [request.article.title]
         provider = self._provider or get_analyze_provider(self._settings, request.plan)
+        member_stances, promotion_eligible_ids = _member_stances(request)
         response_schema = AnalyzeOutput.model_json_schema(by_alias=True)
-        prompt = _analysis_prompt(request, sentences)
+        prompt = _analysis_prompt(request, sentences, promotion_eligible_ids)
         result = structured_call(
             provider,
             system_instruction=SYSTEM_INSTRUCTION,
             prompt=prompt,
             response_schema=response_schema,
-            validate=lambda response: _validated_output(response, len(sentences)),
+            validate=lambda response: _validated_output(
+                response,
+                len(sentences),
+                request,
+                promotion_eligible_ids,
+            ),
             repair_attempts=self._settings.schema_repair_attempts,
             task_name="분석",
             input_tag="analysis",
@@ -89,6 +96,7 @@ class ArticleAnalyzeService:
             result.output,
             sentences,
             result.usage,
+            member_stances,
             truncated=input_truncated or split.truncated,
         )
 
@@ -96,6 +104,8 @@ class ArticleAnalyzeService:
 def _validated_output(
     provider_response: ProviderResponse,
     sentence_count: int,
+    request: AnalyzeRequest,
+    promotion_eligible_ids: set[int],
 ) -> AnalyzeOutput:
     output = AnalyzeOutput.model_validate(parse_json_object(provider_response.text))
     if any(
@@ -113,6 +123,37 @@ def _validated_output(
         raise ValueError(
             "perspective tag의 evidenceSentenceIds는 요청 sentences 범위 안에 있어야 합니다."
         )
+    known_ids = {request.article.id, *(member.id for member in request.issue_members)}
+    member_ids = {member.id for member in request.issue_members}
+    referenced_ids = {
+        observation.article_id for observation in output.cross_source.sole_source
+    }
+    referenced_ids.update(
+        article_id
+        for conflict in output.cross_source.conflicts
+        for article_id in conflict.article_ids
+    )
+    if not referenced_ids <= known_ids:
+        raise ValueError("crossSource는 요청에 포함된 기사 ID만 참조해야 합니다.")
+    conflict_ids = {
+        article_id
+        for conflict in output.cross_source.conflicts
+        for article_id in conflict.article_ids
+    }
+    if any(
+        candidate not in member_ids
+        or candidate not in promotion_eligible_ids
+        or candidate not in conflict_ids
+        for candidate in output.promote_candidates
+    ):
+        raise ValueError(
+            "promoteCandidates는 사전 컷을 통과하고 conflicts에 포함된 멤버여야 합니다."
+        )
+    if not request.issue_members and (
+        output.cross_source != output.cross_source.empty()
+        or output.promote_candidates
+    ):
+        raise ValueError("issueMembers가 없으면 교차 출처 관측값도 비어 있어야 합니다.")
     return output
 
 
@@ -121,6 +162,7 @@ def _assembled_response(
     output: AnalyzeOutput,
     sentences: list[str],
     usage: ProviderUsage,
+    member_stances: list[MemberStance],
     *,
     truncated: bool,
 ) -> AnalyzeResponse:
@@ -131,6 +173,9 @@ def _assembled_response(
         classification=output.classification,
         entities=output.entities,
         perspective_tags=output.perspective_tags,
+        cross_source=output.cross_source,
+        promote_candidates=output.promote_candidates,
+        member_stances=member_stances,
         meta=ResponseMeta(
             provider=provider_response.provider,
             model=provider_response.model,
@@ -171,11 +216,16 @@ def _verified_sections(response: AnalyzeResponse) -> list[Section]:
     return sections
 
 
-def _analysis_prompt(request: AnalyzeRequest, sentences: list[str]) -> str:
+def _analysis_prompt(
+    request: AnalyzeRequest,
+    sentences: list[str],
+    promotion_eligible_ids: set[int],
+) -> str:
     metadata = {
         "article": {
             "id": request.article.id,
             "title": request.article.title,
+            "summary": request.article.summary,
             "canonicalUrl": request.article.canonical_url,
             "language": request.article.language,
             "publishedAt": (
@@ -185,6 +235,14 @@ def _analysis_prompt(request: AnalyzeRequest, sentences: list[str]) -> str:
             ),
         },
         "topic": request.topic.model_dump(by_alias=True, mode="json"),
+        "issueComparison": {
+            "representativeArticleId": request.article.id,
+            "members": [
+                member.model_dump(by_alias=True, mode="json")
+                for member in request.issue_members
+            ],
+            "promotionEligibleArticleIds": sorted(promotion_eligible_ids),
+        },
     }
     numbered = "\n".join(f"[{index}] {sentence}" for index, sentence in enumerate(sentences, 1))
     return (
@@ -193,3 +251,31 @@ def _analysis_prompt(request: AnalyzeRequest, sentences: list[str]) -> str:
         f"<article-metadata>\n{json.dumps(metadata, ensure_ascii=False)}\n</article-metadata>\n\n"
         f"<source-sentences>\n{numbered}\n</source-sentences>"
     )
+
+
+def _member_stances(request: AnalyzeRequest) -> tuple[list[MemberStance], set[int]]:
+    reference_text = "\n".join(
+        value
+        for value in (
+            request.article.title,
+            request.article.summary,
+        )
+        if value
+    )
+    stances = []
+    promotion_eligible_ids = set()
+    for member in request.issue_members:
+        candidate_text = "\n".join(
+            value for value in (member.title, member.summary) if value
+        )
+        signal = cross_source_signal(reference_text, candidate_text)
+        stances.append(
+            MemberStance(
+                article_id=member.id,
+                stance=signal.stance,
+                confidence=signal.confidence,
+            )
+        )
+        if signal.promotion_eligible:
+            promotion_eligible_ids.add(member.id)
+    return stances, promotion_eligible_ids

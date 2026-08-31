@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo, useState } from 'react'
+import { useCallback, useId, useMemo, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import {
   useLatestReport,
@@ -18,6 +18,8 @@ import {
   RISK_LEVEL_LABELS,
   type Audience,
   type AudienceRelevance,
+  type IssueArticle,
+  type IssueDetail,
   type ReportDetail,
   type ReportFinding,
   type ReportSummary,
@@ -425,6 +427,10 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
             onEvidenceSelect={(sentenceId) => onEvidenceSelect(finding.articleId, [sentenceId])}
           />
 
+          {issue.data && (
+            <CrossSourcePanel issue={issue.data} onEvidenceSelect={onEvidenceSelect} />
+          )}
+
           <section className="issue-related-articles">
             <div className="issue-detail-heading">
               <h5>관련 기사</h5>
@@ -461,6 +467,112 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
       )}
     </article>
   )
+}
+
+function CrossSourcePanel({ issue, onEvidenceSelect }: {
+  issue: IssueDetail
+  onEvidenceSelect: (articleId: number, sentences: number[]) => void
+}) {
+  const { crossSource } = issue
+  const hasObservations = crossSource.consensus.length > 0
+    || crossSource.soleSource.length > 0
+    || crossSource.conflicts.length > 0
+    || crossSource.missingStakeholders.length > 0
+
+  if (!hasObservations) return null
+
+  const articleById = new Map(issue.articles.map((article) => [article.id, article]))
+  return (
+    <section className="issue-cross-source">
+      <div className="issue-detail-heading">
+        <h5>교차 출처 비교</h5>
+        <span>매체별 차이</span>
+      </div>
+
+      {crossSource.consensus.length > 0 && (
+        <CrossSourceGroup label="합의" tone="consensus">
+          <ul>{crossSource.consensus.map((text) => <li key={text}>{text}</li>)}</ul>
+        </CrossSourceGroup>
+      )}
+
+      {crossSource.soleSource.length > 0 && (
+        <CrossSourceGroup label="단독 보도" tone="sole">
+          {crossSource.soleSource.map((observation) => (
+            <CrossSourceObservation
+              key={`${observation.articleId}-${observation.text}`}
+              text={observation.text}
+              articles={[articleById.get(observation.articleId)].filter(isIssueArticle)}
+              onEvidenceSelect={onEvidenceSelect}
+            />
+          ))}
+        </CrossSourceGroup>
+      )}
+
+      {crossSource.conflicts.length > 0 && (
+        <CrossSourceGroup label="충돌" tone="conflict">
+          {crossSource.conflicts.map((observation) => (
+            <CrossSourceObservation
+              key={`${observation.articleIds.join('-')}-${observation.text}`}
+              text={observation.text}
+              articles={observation.articleIds.map((articleId) => articleById.get(articleId)).filter(isIssueArticle)}
+              onEvidenceSelect={onEvidenceSelect}
+            />
+          ))}
+        </CrossSourceGroup>
+      )}
+
+      {crossSource.missingStakeholders.length > 0 && (
+        <CrossSourceGroup label="확인 필요" tone="missing">
+          <div className="issue-missing-stakeholders">
+            {crossSource.missingStakeholders.map((stakeholder) => <span key={stakeholder}>{stakeholder}</span>)}
+          </div>
+        </CrossSourceGroup>
+      )}
+    </section>
+  )
+}
+
+function CrossSourceGroup({ label, tone, children }: {
+  label: string
+  tone: 'consensus' | 'sole' | 'conflict' | 'missing'
+  children: ReactNode
+}) {
+  return (
+    <div className={`issue-cross-source-group ${tone}`}>
+      <strong>{label}</strong>
+      <div>{children}</div>
+    </div>
+  )
+}
+
+function CrossSourceObservation({ text, articles, onEvidenceSelect }: {
+  text: string
+  articles: IssueArticle[]
+  onEvidenceSelect: (articleId: number, sentences: number[]) => void
+}) {
+  return (
+    <article className="issue-cross-source-observation">
+      <p>{text}</p>
+      <div className="issue-cross-source-articles">
+        {articles.map((article) => (
+          <div key={article.id}>
+            <a href={article.canonicalUrl} target="_blank" rel="noreferrer">
+              {article.publisher || '매체 미상'} · {article.title} ↗
+            </a>
+            {article.stanceSource === 'LLM' && (
+              <button type="button" className="text-button" onClick={() => onEvidenceSelect(article.id, [])}>
+                분석 본문 보기
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </article>
+  )
+}
+
+function isIssueArticle(article: IssueArticle | undefined): article is IssueArticle {
+  return article !== undefined
 }
 
 function ReportDisclaimer({ report, audience }: { report: ReportDetail; audience: Audience }) {

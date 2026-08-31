@@ -53,7 +53,7 @@ jobs:
         run: >-
           uv run python -m app.eval
           --profile replay
-          --compare app/eval/golden/analyze.ko.v3.baseline.json
+          --compare app/eval/golden/analyze.ko.v4.baseline.json
 
   frontend:
     name: Frontend
