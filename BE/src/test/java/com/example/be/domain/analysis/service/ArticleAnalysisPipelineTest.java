@@ -13,6 +13,7 @@ import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
+import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -122,7 +123,7 @@ class ArticleAnalysisPipelineTest {
                 .build();
         when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of());
         when(runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
-                42L, Set.of(10L)))
+                42L, List.of(10L)))
                 .thenReturn(List.of(observation(article, ChangeType.UNCHANGED)));
         AnalysisResult result = mock(AnalysisResult.class);
         when(orchestrator.analyze(new AnalysisContext(42L, article, AgentPlan.FREE))).thenReturn(result);
@@ -151,6 +152,25 @@ class ArticleAnalysisPipelineTest {
     }
 
     @Test
+    void keepsNewChangeTypeWhenObservedRepresentativeIsAlsoBackfilled() {
+        Article representative = Article.builder().id(10L).title("이번 실행의 새 대표").build();
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
+                .thenReturn(List.of(observation(representative, ChangeType.NEW)));
+        when(issueArticleRepository.findRepresentativesForRun(42L)).thenReturn(List.of(
+                IssueArticle.builder()
+                        .article(representative)
+                        .role(IssueArticleRole.REPRESENTATIVE)
+                        .build()));
+        AnalysisResult result = mock(AnalysisResult.class);
+        when(orchestrator.analyze(new AnalysisContext(42L, representative, AgentPlan.FREE)))
+                .thenReturn(result);
+
+        pipeline.analyze(42L);
+
+        verify(findingWriter).write(42L, 10L, ChangeType.NEW, inputHash(representative), result);
+    }
+
+    @Test
     void usesUnclusteredTargetsAfterClusteringFailure() {
         Article article = Article.builder().id(10L).title("기사").build();
         when(runArticleRepository.findUnclusteredAnalysisTargetsByRunId(42L))
@@ -160,6 +180,7 @@ class ArticleAnalysisPipelineTest {
 
         pipeline.analyzeWithoutClustering(42L, Set.of());
 
+        verify(findingWriter).recordTargetCount(42L, 0);
         verify(findingWriter).write(42L, 10L, ChangeType.NEW, inputHash(article), result);
     }
 
@@ -205,8 +226,8 @@ class ArticleAnalysisPipelineTest {
     @Test
     void limitsIssuesAfterOrderingByMetadataFit() {
         selectionProperties.setIssueLimitPerRun(2);
-        com.example.be.domain.topics.entity.Topic topic =
-                com.example.be.domain.topics.entity.Topic.builder()
+        Topic topic =
+                Topic.builder()
                         .optionalKeywords(List.of("HBM", "삼성", "양산"))
                         .build();
         Article low = Article.builder().id(10L).title("HBM 소식").summary("요약").build();
@@ -234,7 +255,7 @@ class ArticleAnalysisPipelineTest {
     }
 
     private CollectionRunArticle observation(Article article,
-                                             com.example.be.domain.topics.entity.Topic topic,
+                                             Topic topic,
                                              ChangeType changeType) {
         return CollectionRunArticle.builder()
                 .article(article)

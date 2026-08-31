@@ -14,6 +14,7 @@ import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.agent.service.AgentRunRecorder;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
@@ -42,6 +43,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -225,8 +227,8 @@ public class AgentReportOrchestrator {
                 finding.getArticle().getCanonicalUrl(),
                 finding.getArticle().getSourceName(),
                 finding.getChangeType().name(),
-                ReportEvidencePolicy.reportSummary(finding),
-                ReportEvidencePolicy.supportedKeyPoints(finding).stream()
+                FindingEvidencePolicy.reportSummary(finding),
+                FindingEvidencePolicy.supportedKeyPoints(finding).stream()
                         .map(point -> new AgentReportRequest.KeyPointPayload(
                                 point.text(),
                                 point.evidence().stream().distinct().toList(),
@@ -243,7 +245,7 @@ public class AgentReportOrchestrator {
     private List<Finding> eligibleFindings(List<Finding> findings) {
         return ReportFindingOrder.sort(findings.stream()
                         .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
-                        .filter(ReportEvidencePolicy::hasSupportedEvidence)
+                        .filter(FindingEvidencePolicy::hasSupportedEvidence)
                         .toList())
                 .stream()
                 .limit(MAX_REPORT_FINDINGS)
@@ -260,11 +262,11 @@ public class AgentReportOrchestrator {
         memberships = memberships == null ? List.of() : memberships;
         Set<Long> issueArticleIds = memberships.stream()
                 .map(membership -> membership.getArticle().getId())
-                .collect(java.util.stream.Collectors.toSet());
+                .collect(Collectors.toSet());
         Set<Long> representativeArticleIds = memberships.stream()
                 .filter(membership -> membership.getRole() == IssueArticleRole.REPRESENTATIVE)
                 .map(membership -> membership.getArticle().getId())
-                .collect(java.util.stream.Collectors.toSet());
+                .collect(Collectors.toSet());
         return ReportFindingOrder.sort(findings.stream()
                         // 마이그레이션 전 finding은 유지하고, 이슈에 귀속된 기사는 대표만 사용한다.
                         .filter(finding -> !issueArticleIds.contains(finding.getArticle().getId())
@@ -277,9 +279,10 @@ public class AgentReportOrchestrator {
                                       List<Finding> representativeFindings) {
         validate(response, request);
         AgentReportResponse.Meta meta = response.meta();
+        CoverageAppendResult coverage = appendCoverage(response, request, representativeFindings);
         return new ReportDocument(
                 response.title().trim(),
-                appendCoverage(response, request, representativeFindings),
+                coverage.markdownBody(),
                 meta.model(),
                 meta.promptVersion(),
                 meta.provider(),
@@ -287,12 +290,14 @@ public class AgentReportOrchestrator {
                 meta.outputTokens(),
                 meta.costUsd(),
                 meta.credits(),
-                meta.mock() ? ReportStatus.MOCK : ReportStatus.GENERATED);
+                meta.mock() ? ReportStatus.MOCK : ReportStatus.GENERATED,
+                coverage.reflectedFindingIds(),
+                coverage.excludedFindingIds());
     }
 
-    private String appendCoverage(AgentReportResponse response,
-                                  AgentReportRequest request,
-                                  List<Finding> representativeFindings) {
+    private CoverageAppendResult appendCoverage(AgentReportResponse response,
+                                                AgentReportRequest request,
+                                                List<Finding> representativeFindings) {
         Set<Long> referencedIds = new HashSet<>();
         response.importantEvents().forEach(event -> referencedIds.addAll(event.sourceFindingIds()));
         response.watchItems().forEach(item -> referencedIds.addAll(item.sourceFindingIds()));
@@ -301,37 +306,42 @@ public class AgentReportOrchestrator {
                 .toList();
         List<Finding> excluded = representativeFindings.stream()
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
-                .filter(finding -> !ReportEvidencePolicy.hasSupportedEvidence(finding))
+                .filter(finding -> !FindingEvidencePolicy.hasSupportedEvidence(finding))
                 .toList();
+        List<Long> reflectedFindingIds = request.findings().stream()
+                .map(AgentReportRequest.FindingPayload::id)
+                .toList();
+        List<Long> excludedFindingIds = excluded.stream().map(Finding::getId).toList();
         if (unreferenced.isEmpty() && excluded.isEmpty()) {
-            return response.markdownBody();
+            return new CoverageAppendResult(
+                    response.markdownBody(), reflectedFindingIds, excludedFindingIds);
         }
 
         StringBuilder markdown = new StringBuilder(response.markdownBody().stripTrailing());
         if (!unreferenced.isEmpty()) {
             markdown.append("\n\n## 기타 분석 이슈\n\n");
-            unreferenced.forEach(finding -> markdown
-                    .append("- [")
-                    .append(markdownText(finding.articleTitle()))
-                    .append("](<")
-                    .append(finding.canonicalUrl())
-                    .append(">)\n"));
+            unreferenced.forEach(finding -> appendFindingLink(markdown, finding));
         }
         if (!excluded.isEmpty()) {
             markdown.append("\n## 보고서 제외 이슈\n\n");
             excluded.forEach(finding -> markdown
                     .append("- ")
-                    .append(markdownText(finding.getArticle().getTitle()))
+                    .append(ReportMarkdown.text(finding.getArticle().getTitle()))
                     .append(" — 검증된 문장 근거가 없어 제외했습니다.\n"));
         }
-        return markdown.toString();
+        return new CoverageAppendResult(
+                markdown.toString(), reflectedFindingIds, excludedFindingIds);
     }
 
-    private String markdownText(String value) {
-        return value == null
-                ? ""
-                : value.replaceAll("\\s+", " ").trim()
-                .replaceAll("([\\\\`*_{}\\[\\]<>()#+!|])", "\\\\$1");
+    private void appendFindingLink(StringBuilder markdown, AgentReportRequest.FindingPayload finding) {
+        String title = ReportMarkdown.text(finding.articleTitle());
+        String canonicalUrl = ReportMarkdown.httpUrl(finding.canonicalUrl());
+        markdown.append("- ");
+        if (canonicalUrl == null) {
+            markdown.append(title).append("\n");
+            return;
+        }
+        markdown.append("[").append(title).append("](<").append(canonicalUrl).append(">)\n");
     }
 
     private void validate(AgentReportResponse response, AgentReportRequest request) {
@@ -405,7 +415,7 @@ public class AgentReportOrchestrator {
                 .count();
         int evidenceExcluded = (int) findings.stream()
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
-                .filter(finding -> !ReportEvidencePolicy.hasSupportedEvidence(finding))
+                .filter(finding -> !FindingEvidencePolicy.hasSupportedEvidence(finding))
                 .count();
         List<CollectionRunItem> items = run.getItems();
         int collected = items == null || items.isEmpty()
@@ -449,6 +459,13 @@ public class AgentReportOrchestrator {
 
     private boolean isNegative(BigDecimal value) {
         return value == null || value.compareTo(BigDecimal.ZERO) < 0;
+    }
+
+    private record CoverageAppendResult(
+            String markdownBody,
+            List<Long> reflectedFindingIds,
+            List<Long> excludedFindingIds
+    ) {
     }
 
     private OffsetDateTime toOffset(LocalDateTime value) {

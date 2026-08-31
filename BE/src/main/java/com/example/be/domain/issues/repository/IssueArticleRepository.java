@@ -117,7 +117,7 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             """)
     List<IssueArticle> findRepresentativesForRunAndObservedArticleIdIn(
             @Param("runId") Long runId,
-            @Param("articleIds") Set<Long> articleIds);
+            @Param("articleIds") Collection<Long> articleIds);
 
     interface CoverageMembership {
 

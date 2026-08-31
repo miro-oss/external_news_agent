@@ -2,6 +2,7 @@ package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.collection.content.ArticleContentClient;
 import com.example.be.domain.collection.content.ArticleContentResult;
+import com.example.be.domain.collection.config.CollectionPipelineProperties;
 import com.example.be.domain.collection.converter.TopicKeywordFilter;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
@@ -43,6 +44,7 @@ public class ArticleContentEnricher {
     private final ArticleContentClient contentClient;
     private final RobotsTxtClient robotsTxtClient;
     private final CollectionResultWriter resultWriter;
+    private final CollectionPipelineProperties properties;
 
     public Set<Long> enrich(Long runId) {
         List<Article> targets = prioritizedTargets(runId);
@@ -97,6 +99,7 @@ public class ArticleContentEnricher {
                                 Comparator.nullsLast(Comparator.reverseOrder()))
                         .thenComparing(target -> target.article().getId()))
                 .map(Target::article)
+                .limit(properties.getFulltextLimitPerRun())
                 .toList();
     }
 
@@ -110,6 +113,8 @@ public class ArticleContentEnricher {
             log.debug("fullTextAllowed=false라 본문을 받지 않는다. sourceId={}", source.getId());
             return null;
         }
+
+        // FETCH_FAILED도 다음 run에서는 재시도한다. 일시 장애를 영구 실패로 고정하지 않기 위해서다.
 
         String url = article.getCanonicalUrl();
         String host = hostOf(url);

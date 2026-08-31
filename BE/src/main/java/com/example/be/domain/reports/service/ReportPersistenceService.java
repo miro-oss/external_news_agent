@@ -57,6 +57,8 @@ public class ReportPersistenceService {
                 document.outputTokens(),
                 document.costUsd(),
                 document.credits(),
+                document.reflectedFindingIds(),
+                document.excludedFindingIds(),
                 document.status(),
                 generatedAt);
         return report.getId();

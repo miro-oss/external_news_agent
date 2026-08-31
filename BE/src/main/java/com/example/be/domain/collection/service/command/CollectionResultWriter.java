@@ -2,7 +2,6 @@ package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.collection.converter.ArticleHasher;
-import com.example.be.domain.collection.converter.TopicKeywordFilter;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ArticleVersion;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -53,55 +52,9 @@ public class CollectionResultWriter {
     private final SourceRepository sourceRepository;
 
     /**
-     * <b>ID로 받는다.</b> 수집은 트랜잭션 밖에서 돌아 그동안 엔티티가 detached 상태가 되므로,
-     * 이 트랜잭션에 붙은 인스턴스를 여기서 다시 읽어야 변경이 반영된다(#27).
-     *
-     * <p>{@code scannedCount}는 <b>필터 전에 받은 건수</b>다. 키워드로 걸러진 기사도 "훑기는 했다".
-     * 그래서 {@code skipped = scanned - new - updated}에는 중복과 필터 탈락이 함께 들어간다.
+     * 주제 전체 후보에서 우선순위 선별을 마친 운영 경로. 소스별 선착순 상한을 다시 적용하지 않는다.
+     * {@code scannedCount}는 필터 전 수신 건수이고, writer는 detached 엔티티 대신 ID로 다시 조회한다.
      */
-    @Transactional
-    public void write(Long runId,
-                      Long itemId,
-                      Long topicId,
-                      Long sourceId,
-                      CollectionOutcome outcome) {
-        CollectionRun run = runRepository.findById(runId).orElseThrow();
-        CollectionRunItem item = runItemRepository.findById(itemId).orElseThrow();
-        Topic topic = topicRepository.findById(topicId).orElseThrow();
-        Source source = sourceRepository.findById(sourceId).orElseThrow();
-
-        outcome.robots().applyTo(source);
-
-        if (!outcome.robots().allowed()) {
-            item.markSkipped();
-            run.addWarning(warning(source, CollectionRunWarning.CODE_ROBOTS_DISALLOWED,
-                    "robots.txt가 수집을 막는다: " + outcome.robots().robotsTxtUrl()));
-            return;
-        }
-
-        // 실패한 응답에는 검증자가 없다. 그대로 덮으면 503 한 번에 저장해 둔 ETag가 사라진다.
-        if (outcome.validatorsUpdated()) {
-            source.applyFetchState(outcome.etag(), outcome.lastModified(), LocalDateTime.now(ApiTimeZone.ZONE));
-        }
-
-        if (outcome.notModified()) {
-            item.markSkipped();
-            return;
-        }
-
-        if (!outcome.fetch().success()) {
-            item.markFailed();
-            run.addWarning(warning(source, outcome.fetch().failureCode(), outcome.fetch().failureMessage()));
-            return;
-        }
-
-        List<CollectedArticle> collected = outcome.fetch().articles();
-        List<CollectedArticle> matched = dedupeByUrl(TopicKeywordFilter.filter(topic, collected));
-
-        writeArticles(run, item, topic, source, collected.size(), matched);
-    }
-
-    /** 주제 전체 후보에서 우선순위 선별을 마친 운영 경로. 소스별 선착순 상한을 다시 적용하지 않는다. */
     @Transactional
     public void writeSelected(Long runId,
                               Long itemId,

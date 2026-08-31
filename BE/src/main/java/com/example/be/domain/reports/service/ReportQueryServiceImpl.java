@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -184,7 +185,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .canonicalUrl(finding.getArticle().getCanonicalUrl())
                 .changeType(finding.getChangeType().name())
                 .summary(finding.getSummary())
-                .keyPoints(ReportEvidencePolicy.supportedKeyPoints(finding).stream()
+                .keyPoints(FindingEvidencePolicy.supportedKeyPoints(finding).stream()
                         .map(point -> ReportResDTO.KeyPoint.builder()
                                 .text(point.text())
                                 .evidence(point.evidence())

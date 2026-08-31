@@ -34,16 +34,6 @@ public class CollectionExecutor {
     private final FeedClient feedClient;
     private final RobotsPolicyService robotsPolicyService;
     private final SearchConnectorRegistry searchConnectorRegistry;
-    private final CollectionResultWriter resultWriter;
-
-    public void execute(Long runId, Long itemId, Topic topic, Source source, boolean forceRefresh) {
-        CollectionBatch batch = collect(itemId, topic, source, forceRefresh);
-        if (batch.failed()) {
-            resultWriter.writeFailure(runId, itemId, source.getId(), batch.failureMessage());
-            return;
-        }
-        resultWriter.write(runId, itemId, topic.getId(), source.getId(), batch.outcome());
-    }
 
     public CollectionBatch collect(Long itemId, Topic topic, Source source, boolean forceRefresh) {
         try {

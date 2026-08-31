@@ -8,8 +8,8 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
-import java.util.Set;
 
 /**
  * 기사 목록 조회의 runId/topicId/sourceId/changeType 필터가 이 테이블 위에서 돈다.
@@ -49,7 +49,10 @@ public interface CollectionRunArticleRepository
             """)
     List<ArticleFetchStatus> findArticleFetchStatusesByRunId(@Param("runId") Long runId);
 
-    /** 클러스터 계산용 값 복사를 마치면 트랜잭션 밖에서 비교할 수 있게 필요한 연관을 한 번에 붙인다. */
+    /**
+     * 클러스터 계산용 값 복사를 마치면 트랜잭션 밖에서 비교할 수 있게 필요한 연관을 한 번에 붙인다.
+     * Article.body가 CLOB이므로 Oracle ORA-22848을 피하기 위해 이 쿼리에 DISTINCT를 추가하지 않는다.
+     */
     @Query("""
             SELECT observation
             FROM CollectionRunArticle observation
@@ -97,7 +100,7 @@ public interface CollectionRunArticleRepository
             """)
     List<CollectionRunArticle> findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
             @Param("runId") Long runId,
-            @Param("articleIds") Set<Long> articleIds);
+            @Param("articleIds") Collection<Long> articleIds);
 
     /** 클러스터링이 실패했을 때 수집 결과 분석까지 잃지 않도록 쓰는 레거시 대상 조회. */
     @Query("""
@@ -127,7 +130,7 @@ public interface CollectionRunArticleRepository
             """)
     List<CollectionRunArticle> findUnclusteredAnalysisTargetsByRunIdAndArticleIdIn(
             @Param("runId") Long runId,
-            @Param("articleIds") Set<Long> articleIds);
+            @Param("articleIds") Collection<Long> articleIds);
 
     interface ArticleFetchStatus {
 

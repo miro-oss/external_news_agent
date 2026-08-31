@@ -1,7 +1,10 @@
 package com.example.be.domain.reports.entity;
 
 import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.global.converter.LongListJsonConverter;
+import com.example.be.global.converter.YnBooleanConverter;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -20,8 +23,9 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
-import java.time.LocalDateTime;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "news_reports")
@@ -72,6 +76,24 @@ public class NewsReport {
     private BigDecimal credits;
 
     @Builder.Default
+    @Convert(converter = LongListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "report_reflected_finding_ids", nullable = false)
+    private List<Long> reflectedFindingIds = List.of();
+
+    @Builder.Default
+    @Convert(converter = LongListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "report_excluded_finding_ids", nullable = false)
+    private List<Long> excludedFindingIds = List.of();
+
+    /** false인 기존 행은 저장된 참조 스냅샷이 없으므로 조회 시 레거시 계산을 사용한다. */
+    @Convert(converter = YnBooleanConverter.class)
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "coverage_recorded_yn", nullable = false, length = 1)
+    private boolean coverageRecorded;
+
+    @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(name = "report_status", nullable = false, length = 30)
     private ReportStatus reportStatus = ReportStatus.FALLBACK;
@@ -88,6 +110,8 @@ public class NewsReport {
                          Long outputTokens,
                          BigDecimal costUsd,
                          BigDecimal credits,
+                         List<Long> reflectedFindingIds,
+                         List<Long> excludedFindingIds,
                          ReportStatus reportStatus,
                          LocalDateTime generatedAt) {
         this.title = title;
@@ -99,6 +123,9 @@ public class NewsReport {
         this.outputTokens = outputTokens;
         this.costUsd = costUsd;
         this.credits = credits;
+        this.reflectedFindingIds = reflectedFindingIds == null ? List.of() : List.copyOf(reflectedFindingIds);
+        this.excludedFindingIds = excludedFindingIds == null ? List.of() : List.copyOf(excludedFindingIds);
+        this.coverageRecorded = true;
         this.reportStatus = reportStatus;
         this.generatedAt = generatedAt;
     }

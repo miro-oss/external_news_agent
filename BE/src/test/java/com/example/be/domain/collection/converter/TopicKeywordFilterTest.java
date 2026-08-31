@@ -47,6 +47,14 @@ class TopicKeywordFilterTest {
     }
 
     @Test
+    void treatsBlankOptionalKeywordsAsNoOptionalCondition() {
+        Topic topic = topic(List.of(), List.of("", "   "), List.of());
+
+        assertTrue(TopicKeywordFilter.matches(topic, article("아무 기사", "요약")));
+        assertEquals(1.0, TopicKeywordFilter.evaluate(topic, article("아무 기사", "요약")).metadataFit());
+    }
+
+    @Test
     void looksAtSummaryAsWell() {
         Topic topic = topic(List.of("HBM"), List.of(), List.of());
 

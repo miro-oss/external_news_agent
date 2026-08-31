@@ -6,33 +6,42 @@ import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
+import java.util.stream.LongStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CollectionRunCoverageServiceTest {
 
     private final CollectionRunArticleRepository observationRepository =
             mock(CollectionRunArticleRepository.class);
+    private final CollectionRunRepository runRepository = mock(CollectionRunRepository.class);
     private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
     private final FindingRepository findingRepository = mock(FindingRepository.class);
     private final NewsReportRepository reportRepository = mock(NewsReportRepository.class);
     private final AnalysisSelectionProperties properties = new AnalysisSelectionProperties();
     private final CollectionRunCoverageService service = new CollectionRunCoverageService(
             observationRepository,
+            runRepository,
             issueArticleRepository,
             findingRepository,
             reportRepository,
@@ -49,14 +58,21 @@ class CollectionRunCoverageServiceTest {
         List<IssueArticleRepository.IssueRepresentative> representatives = List.of(
                 representative(101L, 10L), representative(102L, 11L));
         when(observationRepository.findCoverageObservationsByRunId(42L)).thenReturn(observations);
-        when(issueArticleRepository.findCoverageMembershipsByArticleIds(Set.of(1L, 2L, 3L)))
+        when(issueArticleRepository.findCoverageMembershipsByArticleIds(List.of(1L, 2L, 3L)))
                 .thenReturn(memberships);
-        when(issueArticleRepository.findRepresentativesByIssueIds(Set.of(101L, 102L)))
+        when(issueArticleRepository.findRepresentativesByIssueIds(List.of(101L, 102L)))
                 .thenReturn(representatives);
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(
-                finding(10L, "grounded"), finding(11L, "ungrounded")));
+                finding(201L, 10L, "grounded"), finding(202L, 11L, "ungrounded")));
+        when(runRepository.findById(42L)).thenReturn(Optional.of(
+                CollectionRun.builder().analysisTargetIssueCount(2).build()));
         when(reportRepository.findByRunId(42L)).thenReturn(Optional.of(
-                NewsReport.builder().reportStatus(ReportStatus.GENERATED).build()));
+                NewsReport.builder()
+                        .reportStatus(ReportStatus.GENERATED)
+                        .coverageRecorded(true)
+                        .reflectedFindingIds(List.of(201L))
+                        .excludedFindingIds(List.of(202L))
+                        .build()));
 
         CollectionRunCoverage coverage = service.calculate(42L);
 
@@ -93,9 +109,9 @@ class CollectionRunCoverageServiceTest {
         Finding finding = finding(10L, "ungrounded");
         when(observationRepository.findCoverageObservationsByRunId(42L))
                 .thenReturn(List.of(observation));
-        when(issueArticleRepository.findCoverageMembershipsByArticleIds(Set.of(1L)))
+        when(issueArticleRepository.findCoverageMembershipsByArticleIds(List.of(1L)))
                 .thenReturn(List.of(membership));
-        when(issueArticleRepository.findRepresentativesByIssueIds(Set.of(101L)))
+        when(issueArticleRepository.findRepresentativesByIssueIds(List.of(101L)))
                 .thenReturn(List.of(representative));
         when(findingRepository.findForReportByRunId(42L))
                 .thenReturn(List.of(finding));
@@ -107,6 +123,55 @@ class CollectionRunCoverageServiceTest {
         assertEquals(0, coverage.reportReflectedIssueCount());
         assertEquals(0, coverage.reportExcludedIssueCount());
         assertEquals(BigDecimal.ZERO, coverage.reportCoverageRate());
+    }
+
+    @Test
+    void exposesIncompleteCoverageFromRecordedFindingIds() {
+        List<CollectionRunArticleRepository.CoverageObservation> observations =
+                List.of(observation(1L, 7L), observation(2L, 7L));
+        List<IssueArticleRepository.CoverageMembership> memberships =
+                List.of(membership(1L, 101L, 7L), membership(2L, 102L, 7L));
+        List<IssueArticleRepository.IssueRepresentative> representatives =
+                List.of(representative(101L, 10L), representative(102L, 11L));
+        List<Finding> findings = List.of(
+                finding(201L, 10L, "grounded"), finding(202L, 11L, "grounded"));
+        when(observationRepository.findCoverageObservationsByRunId(42L))
+                .thenReturn(observations);
+        when(issueArticleRepository.findCoverageMembershipsByArticleIds(List.of(1L, 2L)))
+                .thenReturn(memberships);
+        when(issueArticleRepository.findRepresentativesByIssueIds(List.of(101L, 102L)))
+                .thenReturn(representatives);
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(findings);
+        when(reportRepository.findByRunId(42L)).thenReturn(Optional.of(
+                NewsReport.builder()
+                        .reportStatus(ReportStatus.GENERATED)
+                        .coverageRecorded(true)
+                        .reflectedFindingIds(List.of(201L))
+                        .excludedFindingIds(List.of())
+                        .build()));
+
+        CollectionRunCoverage coverage = service.calculate(42L);
+
+        assertEquals(1, coverage.reportReflectedIssueCount());
+        assertEquals(0, coverage.reportExcludedIssueCount());
+        assertEquals(new BigDecimal("0.5"), coverage.reportCoverageRate());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void chunksCoverageMembershipQueriesBelowOracleLimit() {
+        List<CollectionRunArticleRepository.CoverageObservation> observations =
+                LongStream.rangeClosed(1, 1_001).mapToObj(id -> observation(id, 7L)).toList();
+        when(observationRepository.findCoverageObservationsByRunId(42L)).thenReturn(observations);
+        when(issueArticleRepository.findCoverageMembershipsByArticleIds(anyCollection()))
+                .thenReturn(List.of());
+
+        service.calculate(42L);
+
+        ArgumentCaptor<Collection<Long>> ids = ArgumentCaptor.forClass(Collection.class);
+        verify(issueArticleRepository, times(2))
+                .findCoverageMembershipsByArticleIds(ids.capture());
+        assertEquals(List.of(900, 101), ids.getAllValues().stream().map(Collection::size).toList());
     }
 
     private CollectionRunArticleRepository.CoverageObservation observation(Long articleId, Long topicId) {
@@ -137,7 +202,12 @@ class CollectionRunCoverageServiceTest {
     }
 
     private Finding finding(Long articleId, String groundedness) {
+        return finding(articleId + 100L, articleId, groundedness);
+    }
+
+    private Finding finding(Long findingId, Long articleId, String groundedness) {
         return Finding.builder()
+                .id(findingId)
                 .article(Article.builder().id(articleId).build())
                 .analysisSource(AnalysisSource.LLM)
                 .keyPoints(List.of(new FindingKeyPoint("주장", List.of(0), groundedness)))

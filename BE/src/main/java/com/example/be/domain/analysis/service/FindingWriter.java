@@ -30,6 +30,11 @@ public class FindingWriter {
     private final IssueArticleRepository issueArticleRepository;
 
     @Transactional
+    public void recordTargetCount(Long runId, int targetCount) {
+        runRepository.findById(runId).orElseThrow().recordAnalysisTargetIssueCount(targetCount);
+    }
+
+    @Transactional
     public void write(Long runId,
                       Long articleId,
                       ChangeType changeType,

@@ -17,6 +17,7 @@ import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
+import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.reports.service.ReportCreationService;
@@ -117,7 +118,7 @@ class ReportOracleIntegrationTests {
                 .lastSeenRun(run)
                 .collectedAt(now)
                 .build());
-        findingRepository.save(Finding.builder()
+        Finding finding = findingRepository.save(Finding.builder()
                 .run(run)
                 .article(article)
                 .changeType(ChangeType.NEW)
@@ -142,8 +143,11 @@ class ReportOracleIntegrationTests {
         assertEquals(firstId, secondId);
         assertEquals(reportCountBefore + 1, reportRepository.count());
         assertEquals(firstId, runRepository.findById(run.getId()).orElseThrow().getReportId());
-        assertEquals(ReportStatus.FALLBACK,
-                reportRepository.findById(firstId).orElseThrow().getReportStatus());
+        NewsReport report = reportRepository.findById(firstId).orElseThrow();
+        assertEquals(ReportStatus.FALLBACK, report.getReportStatus());
+        assertTrue(report.isCoverageRecorded());
+        assertEquals(List.of(finding.getId()), report.getReflectedFindingIds());
+        assertEquals(List.of(), report.getExcludedFindingIds());
 
         ReportResDTO.Detail detail = queryService.getReport(firstId, true);
         assertEquals(run.getId(), detail.getRunId());
