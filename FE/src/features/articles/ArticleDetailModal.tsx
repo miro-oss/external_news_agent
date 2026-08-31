@@ -126,7 +126,11 @@ export function ArticleDetailModal({
               <div className="issue-context">
                 <strong>이슈 #{article.data.issueId}</strong>
                 <span>관련 기사 {article.data.relatedArticles.length + 1}건</span>
-                <span>요약과 근거는 이슈 대표 분석에 연결됩니다.</span>
+                <span>
+                  {article.data.analysisArticleId === article.data.id
+                    ? '요약과 근거는 이 기사 분석에 연결됩니다.'
+                    : `요약·근거와 아래 본문은 대표 기사 #${article.data.analysisArticleId} 기준입니다.`}
+                </span>
               </div>
             )}
 
@@ -143,7 +147,11 @@ export function ArticleDetailModal({
 
             <section className="article-body-section">
               <div className="section-heading">
-                <h3>기사 본문</h3>
+                <h3>
+                  {article.data.analysisArticleId === article.data.id
+                    ? '기사 본문'
+                    : `분석 근거 본문 · 기사 #${article.data.analysisArticleId}`}
+                </h3>
               </div>
               {article.data.bodyText && article.data.sentences.length > 0 ? (
                 <div className="sentence-list">

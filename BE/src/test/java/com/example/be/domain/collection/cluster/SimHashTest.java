@@ -21,4 +21,10 @@ class SimHashTest {
 
         assertTrue(SimHash.distance(SimHash.of(original), SimHash.of(edited)) <= 3);
     }
+
+    @Test
+    void supportsUnicodeLetterBodiesAndSkipsTokenlessBodies() {
+        assertTrue(SimHash.tryOf("日本の半導体産業について詳しく説明する記事です").isPresent());
+        assertTrue(SimHash.tryOf("… !!!").isEmpty());
+    }
 }

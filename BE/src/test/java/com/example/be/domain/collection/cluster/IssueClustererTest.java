@@ -19,7 +19,6 @@ class IssueClustererTest {
     @BeforeEach
     void setUp() {
         IssueClusteringProperties properties = new IssueClusteringProperties();
-        properties.setTitleJaccardThreshold(0.6);
         clusterer = new IssueClusterer(properties);
     }
 
@@ -61,7 +60,7 @@ class IssueClustererTest {
                 2L, "삼성전자 HBM4 공급 전망 공개", null,
                 FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(1));
 
-        ClusterPlan plan = clusterer.cluster(List.of(first, second));
+        ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
 
         assertTrue(plan.contentGroups().isEmpty());
     }
@@ -75,7 +74,7 @@ class IssueClustererTest {
                 2L, "HBM4 생산라인에 추가 장비 투입", longBody("삼성전자 HBM4 생산라인"),
                 FetchStatus.FULLTEXT, "매일경제", "0.8", hour(47));
 
-        ClusterPlan plan = clusterer.cluster(List.of(first, second));
+        ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
 
         assertEquals(1, plan.issues().size());
         assertTrue(plan.pairScores().getFirst().entityOverlap() >= 2);
@@ -91,7 +90,7 @@ class IssueClustererTest {
                 2L, "HBM4 생산라인에 추가 장비 투입", longBody("삼성전자 HBM4 생산라인"),
                 FetchStatus.FULLTEXT, "매일경제", "0.8", hour(49));
 
-        ClusterPlan plan = clusterer.cluster(List.of(first, second));
+        ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
 
         assertEquals(2, plan.issues().size());
         assertFalse(plan.pairScores().getFirst().sameCluster());
@@ -132,6 +131,60 @@ class IssueClustererTest {
                 .orElseThrow()
                 .articleIds()
                 .containsAll(List.of(1L, 2L)));
+    }
+
+    @Test
+    void recordsLosingExistingGroupsAndIssuesForTransactionalMerge() {
+        String body = longBody("동일 배포 원고");
+        ClusterArticle first = existingArticle(1L, "삼성전자 HBM4 투자 확정", body, 10L, 100L);
+        ClusterArticle second = existingArticle(2L, "삼성전자 HBM4 투자 공식 발표", body, 20L, 200L);
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second));
+
+        assertEquals(1, plan.contentGroups().size());
+        assertEquals(10L, plan.contentGroups().getFirst().existingContentGroupId());
+        assertEquals(List.of(20L), plan.contentGroups().getFirst().mergedContentGroupIds());
+        assertEquals(1, plan.issues().size());
+        assertEquals(100L, plan.issues().getFirst().existingIssueId());
+        assertEquals(List.of(200L), plan.issues().getFirst().mergedIssueIds());
+    }
+
+    @Test
+    void usesStableEpochWhenEveryEventTimeIsMissing() {
+        ClusterArticle article = new ClusterArticle(
+                1L, 7L, "시간 정보 없는 기사", null, null, FetchStatus.METADATA_ONLY,
+                1L, "전자신문", new BigDecimal("0.8"), null, null,
+                List.of("반도체"), null, null, null, true);
+
+        ClusterPlan plan = clusterer.cluster(List.of(article));
+
+        assertEquals(OffsetDateTime.parse("1970-01-01T00:00:00Z"),
+                plan.issues().getFirst().firstSeenAt());
+        assertTrue(plan.pairScores().isEmpty());
+    }
+
+    @Test
+    void keepsPairDiagnosticsOptIn() {
+        ClusterArticle first = article(
+                1L, "삼성전자 HBM4 투자", null,
+                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+        ClusterArticle second = article(
+                2L, "삼성전자 HBM4 공식 투자", null,
+                FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(1));
+
+        assertTrue(clusterer.cluster(List.of(first, second)).pairScores().isEmpty());
+        assertEquals(1, clusterer.cluster(List.of(first, second), true).pairScores().size());
+    }
+
+    private ClusterArticle existingArticle(long id,
+                                           String title,
+                                           String body,
+                                           long contentGroupId,
+                                           long issueId) {
+        return new ClusterArticle(
+                id, 7L, title, title, body, FetchStatus.FULLTEXT, id,
+                "매체" + id, new BigDecimal("0.9"), hour(0), hour(0),
+                List.of("반도체"), contentGroupId, SimHash.toHex(SimHash.of(body)), issueId, true);
     }
 
     private ClusterArticle article(long id,

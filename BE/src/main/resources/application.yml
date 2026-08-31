@@ -46,7 +46,7 @@ springdoc:
 news:
   clustering:
     # P1-1 골든 클러스터셋 홀드아웃 스윕에서 고정한 균등 자카드 기준이다.
-    title-jaccard-threshold: 0.55
+    title-jaccard-threshold: 0.50
     entity-time-window: 48h
     entity-overlap-threshold: 2
     simhash-hamming-threshold: 3

@@ -65,4 +65,8 @@ public class IssueArticle {
     public void changeRole(IssueArticleRole role) {
         this.role = role;
     }
+
+    public void moveToIssue(NewsIssue issue) {
+        this.issue = issue;
+    }
 }

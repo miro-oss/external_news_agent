@@ -24,6 +24,9 @@ public interface ArticleRepository extends JpaRepository<Article, Long>, JpaSpec
      */
     List<Article> findByUrlHashIn(Collection<String> urlHashes);
 
+    /** 본문 중복군 병합 시 로더 시간창 밖의 기사까지 승자 그룹으로 옮긴다. */
+    List<Article> findByContentGroupIdIn(Collection<Long> contentGroupIds);
+
     boolean existsByUrlHash(String urlHash);
 
     /** 같은 기사의 분석 결과를 동시에 저장할 때 unique check와 insert를 직렬화한다. */

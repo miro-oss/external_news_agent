@@ -63,7 +63,9 @@ class ArticleControllerTest {
                 .andExpect(jsonPath("$.result.analysis.keyPoints[0].evidence[0]").value(0))
                 .andExpect(jsonPath("$.result.analysis.perspectiveTags[0].evidenceSentenceIds[0]")
                         .value(0))
-                .andExpect(jsonPath("$.result.analysis.runId").value(42));
+                .andExpect(jsonPath("$.result.analysis.runId").value(42))
+                .andExpect(jsonPath("$.result.analysisArticleId").value(1024))
+                .andExpect(jsonPath("$.result.issueId").value(88));
     }
 
     @Test
@@ -129,6 +131,7 @@ class ArticleControllerTest {
                         .perspectiveTags(List.of(perspectiveTag()))
                         .runId(42L)
                         .build())
+                .analysisArticleId(1024L)
                 .issueId(88L)
                 .relatedArticles(List.of())
                 .build();

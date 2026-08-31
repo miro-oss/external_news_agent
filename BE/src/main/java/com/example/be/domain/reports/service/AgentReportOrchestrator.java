@@ -64,18 +64,19 @@ public class AgentReportOrchestrator {
     public ReportDocument generate(CollectionRun run,
                                    List<Finding> findings,
                                    LocalDateTime generatedAt) {
-        ReportSourceStats sourceStats = sourceStats(run, findings);
+        List<Finding> representativeFindings = representativeFindings(findings);
+        ReportSourceStats sourceStats = sourceStats(run, representativeFindings);
         if (!properties.isEnabled()) {
-            return fallbackGenerator.generate(findings, generatedAt, sourceStats);
+            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
         }
-        List<Finding> eligible = eligibleFindings(findings);
+        List<Finding> eligible = eligibleFindings(representativeFindings);
         if (eligible.isEmpty()) {
-            return fallbackGenerator.generate(findings, generatedAt, sourceStats);
+            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
         }
 
         ReservationSelection selection = reserve(run);
         if (selection == null) {
-            return fallbackGenerator.generate(findings, generatedAt, sourceStats);
+            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
         }
 
         LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
@@ -109,7 +110,7 @@ public class AgentReportOrchestrator {
             completeFailureSafely(selection.reservation(), exception, code);
             log.warn("Agent 보고서 생성에 실패해 안전한 fallback을 사용한다. runId={} code={} error={}",
                     run.getId(), code, exception.getMessage());
-            return fallbackGenerator.generate(findings, generatedAt, sourceStats);
+            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
         }
     }
 
@@ -240,6 +241,16 @@ public class AgentReportOrchestrator {
     }
 
     private List<Finding> eligibleFindings(List<Finding> findings) {
+        return ReportFindingOrder.sort(findings.stream()
+                        .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
+                        .filter(ReportEvidencePolicy::hasSupportedEvidence)
+                        .toList())
+                .stream()
+                .limit(MAX_REPORT_FINDINGS)
+                .toList();
+    }
+
+    private List<Finding> representativeFindings(List<Finding> findings) {
         if (findings.isEmpty()) {
             return List.of();
         }
@@ -258,12 +269,7 @@ public class AgentReportOrchestrator {
                         // 마이그레이션 전 finding은 유지하고, 이슈에 귀속된 기사는 대표만 사용한다.
                         .filter(finding -> !issueArticleIds.contains(finding.getArticle().getId())
                                 || representativeArticleIds.contains(finding.getArticle().getId()))
-                        .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
-                        .filter(ReportEvidencePolicy::hasSupportedEvidence)
-                        .toList())
-                .stream()
-                .limit(MAX_REPORT_FINDINGS)
-                .toList();
+                        .toList());
     }
 
     private ReportDocument toDocument(AgentReportResponse response, AgentReportRequest request) {

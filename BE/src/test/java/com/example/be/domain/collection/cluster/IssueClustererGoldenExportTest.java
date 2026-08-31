@@ -22,6 +22,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class IssueClustererGoldenExportTest {
 
     private static final List<String> PUBLISHERS = List.of("전자신문", "연합뉴스", "매일경제", "산업일보");
+    private static final List<String> BODY_MARKERS = List.of(
+            "현장 취재 관계자 설명 생산 일정 공급 계약",
+            "공시 자료 경영진 발표 투자 계획 세부 내용",
+            "산업계 분석 시장 반응 고객사 협의 진행",
+            "후속 보도 정책 영향 향후 전망 검증 결과");
+    private static final List<Long> PUBLISHED_HOUR_OFFSETS = List.of(0L, 1L, 2L, 47L);
 
     @Test
     void exportsJavaFeaturesAndMeetsPairwisePrecisionGate() throws IOException {
@@ -31,7 +37,8 @@ class IssueClustererGoldenExportTest {
 
         IssueClusteringProperties properties = new IssueClusteringProperties();
         IssueClusterer clusterer = new IssueClusterer(properties);
-        ClusterPlan plan = clusterer.cluster(goldenArticles.stream().map(GoldenArticle::article).toList());
+        ClusterPlan plan = clusterer.cluster(
+                goldenArticles.stream().map(GoldenArticle::article).toList(), true);
 
         Map<Long, Integer> predictedClusterByArticle = predictedClusters(plan);
         Map<PairKey, ClusterPlan.PairScore> scores = new HashMap<>();
@@ -89,10 +96,6 @@ class IssueClustererGoldenExportTest {
         List<List<String>> mixedClusters = issueKeysByPredictedCluster.values().stream()
                 .filter(values -> values.stream().distinct().count() > 1)
                 .toList();
-        assertTrue(precision >= 0.90,
-                "pairwise precision=" + precision + " mixedClusters=" + mixedClusters);
-        assertTrue(recall >= 0.85, "pairwise recall=" + recall);
-
         List<Map<String, Object>> exportedArticles = goldenArticles.stream().map(article -> {
             Map<String, Object> value = new LinkedHashMap<>();
             value.put("articleId", article.article().articleId());
@@ -109,6 +112,7 @@ class IssueClustererGoldenExportTest {
         output.put("articleCount", goldenArticles.size());
         output.put("configuredTitleJaccardThreshold", properties.getTitleJaccardThreshold());
         output.put("configuredEntityTimeWindowHours", properties.getEntityTimeWindow().toHours());
+        output.put("configuredEntityOverlapThreshold", properties.getEntityOverlapThreshold());
         output.put("precision", precision);
         output.put("recall", recall);
         output.put("articles", exportedArticles);
@@ -118,6 +122,10 @@ class IssueClustererGoldenExportTest {
         Files.createDirectories(outputPath.getParent());
         Files.writeString(outputPath, new ObjectMapper().writerWithDefaultPrettyPrinter()
                 .writeValueAsString(output) + System.lineSeparator());
+
+        assertTrue(precision >= 0.90,
+                "pairwise precision=" + precision + " mixedClusters=" + mixedClusters);
+        assertTrue(recall >= 0.85, "pairwise recall=" + recall);
     }
 
     private GoldenDataset load() throws IOException {
@@ -130,20 +138,19 @@ class IssueClustererGoldenExportTest {
         List<GoldenArticle> result = new ArrayList<>();
         long articleId = 1;
         for (GoldenIssue issue : dataset.issues()) {
-            List<String> titles = List.of(
-                    issue.baseTitle(),
-                    "[속보] " + issue.baseTitle() + " - 연합뉴스",
-                    issue.baseTitle() + " 관련 업계 반응",
-                    issue.baseTitle() + " 세부 일정 공개");
+            List<String> titles = titleVariants(issue);
             for (int variant = 0; variant < dataset.articlesPerIssue(); variant++) {
-                OffsetDateTime publishedAt = OffsetDateTime.parse(issue.publishedAt()).plusMinutes(variant * 17L);
+                OffsetDateTime publishedAt = OffsetDateTime.parse(issue.publishedAt())
+                        .plusHours(PUBLISHED_HOUR_OFFSETS.get(variant));
+                String body = (titles.get(variant) + ". " + BODY_MARKERS.get(variant) + ". ")
+                        .repeat(12);
                 ClusterArticle article = new ClusterArticle(
                         articleId,
                         issue.topicId(),
                         titles.get(variant),
                         issue.summary(),
-                        null,
-                        FetchStatus.METADATA_ONLY,
+                        body,
+                        FetchStatus.FULLTEXT,
                         articleId,
                         PUBLISHERS.get(variant),
                         new BigDecimal("0.80").add(BigDecimal.valueOf(variant, 2)),
@@ -159,6 +166,29 @@ class IssueClustererGoldenExportTest {
             }
         }
         return List.copyOf(result);
+    }
+
+    private List<String> titleVariants(GoldenIssue issue) {
+        List<String> tokens = List.of(issue.baseTitle().split("\\s+"));
+        String announcement = String.join(" ", tokens.subList(0, tokens.size() - 1)) + " 공식 발표";
+        String followUp = tokens.getFirst() + " "
+                + String.join(" ", tokens.subList(2, tokens.size())) + " 업계 분석";
+        String lateTitle = issue.issueKey().endsWith("05")
+                ? indexedTokens(tokens, 1) + " 후속 확인"
+                : String.join(" ", tokens.subList(1, tokens.size())) + " 후속 확인";
+        return List.of(
+                issue.baseTitle(),
+                announcement,
+                followUp,
+                lateTitle);
+    }
+
+    private String indexedTokens(List<String> tokens, int parity) {
+        List<String> selected = new ArrayList<>();
+        for (int index = parity; index < tokens.size(); index += 2) {
+            selected.add(tokens.get(index));
+        }
+        return String.join(" ", selected);
     }
 
     private Map<Long, Integer> predictedClusters(ClusterPlan plan) {

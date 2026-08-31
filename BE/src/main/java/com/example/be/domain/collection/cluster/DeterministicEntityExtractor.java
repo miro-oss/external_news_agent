@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.cluster;
 
 import java.text.Normalizer;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -52,7 +53,7 @@ public final class DeterministicEntityExtractor {
                     .map(DeterministicEntityExtractor::canonicalKeyword)
                     .forEach(entities::add);
         }
-        return Set.copyOf(entities);
+        return Collections.unmodifiableSet(new LinkedHashSet<>(entities));
     }
 
     private static Map<String, List<String>> companyAliases() {

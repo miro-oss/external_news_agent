@@ -11,7 +11,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -23,10 +22,17 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class IssueClusterer {
 
+    private static final OffsetDateTime UNKNOWN_EVENT_TIME = OffsetDateTime.parse("1970-01-01T00:00:00Z");
+
     private final IssueClusteringProperties properties;
     private final DeterministicEntityExtractor entityExtractor = new DeterministicEntityExtractor();
 
     public ClusterPlan cluster(List<ClusterArticle> rawArticles) {
+        return cluster(rawArticles, false);
+    }
+
+    /** pair score는 오프라인 측정 전용이다. 프로덕션에서는 O(n²) 진단 목록을 보관하지 않는다. */
+    public ClusterPlan cluster(List<ClusterArticle> rawArticles, boolean includePairScores) {
         List<ClusterArticle> articles = deduplicate(rawArticles);
         if (articles.isEmpty()) {
             return new ClusterPlan(List.of(), List.of(), List.of());
@@ -38,7 +44,7 @@ public class IssueClusterer {
         articles.stream().collect(Collectors.groupingBy(
                         ClusterArticle::topicId, LinkedHashMap::new, Collectors.toList()))
                 .forEach((topicId, topicArticles) -> issues.addAll(
-                        clusterTopic(topicId, topicArticles, contentGrouping, pairScores)));
+                        clusterTopic(topicId, topicArticles, contentGrouping, pairScores, includePairScores)));
 
         return new ClusterPlan(contentGrouping.assignments(), issues, pairScores);
     }
@@ -53,17 +59,19 @@ public class IssueClusterer {
     }
 
     private ContentGrouping contentGroups(List<ClusterArticle> articles) {
-        Map<Long, ClusterArticle> fullTextById = articles.stream()
-                .filter(ClusterArticle::hasFullText)
-                .collect(Collectors.toMap(
-                        ClusterArticle::articleId,
-                        Function.identity(),
-                        (left, right) -> left,
-                        LinkedHashMap::new));
+        Map<Long, ClusterArticle> fullTextById = new LinkedHashMap<>();
+        Map<Long, Long> fingerprintByArticle = new LinkedHashMap<>();
+        for (ClusterArticle article : articles) {
+            if (!article.hasFullText() || fullTextById.containsKey(article.articleId())) {
+                continue;
+            }
+            SimHash.tryOf(article.body()).ifPresent(fingerprint -> {
+                fullTextById.put(article.articleId(), article);
+                fingerprintByArticle.put(article.articleId(), fingerprint);
+            });
+        }
         List<ClusterArticle> fullText = List.copyOf(fullTextById.values());
         UnionFind union = new UnionFind(fullText.stream().map(ClusterArticle::articleId).toList());
-        Map<Long, Long> fingerprintByArticle = new LinkedHashMap<>();
-        fullText.forEach(article -> fingerprintByArticle.put(article.articleId(), SimHash.of(article.body())));
 
         for (int left = 0; left < fullText.size(); left++) {
             for (int right = left + 1; right < fullText.size(); right++) {
@@ -109,6 +117,7 @@ public class IssueClusterer {
             List<Long> articleIds = component.stream().map(ClusterArticle::articleId).sorted().toList();
             assignments.add(new ClusterPlan.ContentGroupAssignment(
                     existingId,
+                    existingIds.stream().filter(id -> !id.equals(existingId)).toList(),
                     representative.articleId(),
                     SimHash.toHex(fingerprintByArticle.get(representative.articleId())),
                     articleIds));
@@ -134,7 +143,8 @@ public class IssueClusterer {
     private List<ClusterPlan.IssueAssignment> clusterTopic(long topicId,
                                                             List<ClusterArticle> articles,
                                                             ContentGrouping contentGrouping,
-                                                            List<ClusterPlan.PairScore> pairScores) {
+                                                            List<ClusterPlan.PairScore> pairScores,
+                                                            boolean includePairScores) {
         Map<Long, ClusterArticle> byId = articles.stream().collect(Collectors.toMap(
                 ClusterArticle::articleId,
                 Function.identity(),
@@ -191,9 +201,11 @@ public class IssueClusterer {
                 if (matches) {
                     union.join(first.articleId(), second.articleId());
                 }
-                pairScores.add(new ClusterPlan.PairScore(
-                        first.articleId(), second.articleId(), topicId,
-                        jaccard, entityOverlap, hoursApart, matches));
+                if (includePairScores) {
+                    pairScores.add(new ClusterPlan.PairScore(
+                            first.articleId(), second.articleId(), topicId,
+                            jaccard, entityOverlap, hoursApart, matches));
+                }
             }
         }
 
@@ -206,20 +218,24 @@ public class IssueClusterer {
                     .filter(article -> contentGrouping.representativeByArticle().get(article.articleId())
                             .equals(article.articleId()))
                     .toList());
-            Long existingIssueId = component.stream()
+            List<Long> existingIssueIds = component.stream()
                     .map(ClusterArticle::existingIssueId)
                     .filter(value -> value != null)
-                    .min(Long::compareTo)
-                    .orElse(null);
+                    .distinct()
+                    .sorted()
+                    .toList();
+            Long existingIssueId = existingIssueIds.isEmpty() ? null : existingIssueIds.getFirst();
             List<Long> memberIds = component.stream().map(ClusterArticle::articleId).sorted().toList();
-            Set<String> combinedEntities = component.stream()
+            List<String> combinedEntities = component.stream()
                     .flatMap(article -> entities.get(article.articleId()).stream())
-                    .collect(Collectors.toCollection(LinkedHashSet::new));
+                    .distinct()
+                    .sorted()
+                    .toList();
             OffsetDateTime firstSeen = component.stream()
                     .map(ClusterArticle::eventTime)
                     .filter(value -> value != null)
                     .min(OffsetDateTime::compareTo)
-                    .orElseThrow();
+                    .orElse(UNKNOWN_EVENT_TIME);
             OffsetDateTime lastSeen = component.stream()
                     .map(ClusterArticle::eventTime)
                     .filter(value -> value != null)
@@ -237,10 +253,11 @@ public class IssueClusterer {
                     .count();
             assignments.add(new ClusterPlan.IssueAssignment(
                     existingIssueId,
+                    existingIssueIds.stream().filter(id -> !id.equals(existingIssueId)).toList(),
                     topicId,
                     representative.articleId(),
                     memberIds,
-                    List.copyOf(combinedEntities),
+                    combinedEntities,
                     firstSeen,
                     lastSeen,
                     publisherCount,

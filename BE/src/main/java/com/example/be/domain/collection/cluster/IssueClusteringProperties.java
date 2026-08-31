@@ -8,7 +8,7 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "news.clustering")
 public class IssueClusteringProperties implements InitializingBean {
 
-    private double titleJaccardThreshold = 0.55;
+    private double titleJaccardThreshold = 0.50;
     private Duration entityTimeWindow = Duration.ofHours(48);
     private int entityOverlapThreshold = 2;
     private int simhashHammingThreshold = 3;

@@ -50,11 +50,19 @@ class UnionFind:
 def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
     articles = java_output["articles"]
     pairs = java_output["pairs"]
+    entity_overlap_threshold = int(java_output["configuredEntityOverlapThreshold"])
     calibration = [
         Candidate(
             title_jaccard_threshold=threshold,
             time_window_hours=hours,
-            metrics=_evaluate_rule(articles, pairs, "CALIBRATION", threshold, hours),
+            metrics=_evaluate_rule(
+                articles,
+                pairs,
+                "CALIBRATION",
+                threshold,
+                hours,
+                entity_overlap_threshold,
+            ),
         )
         for threshold in _JACCARD_THRESHOLDS
         for hours in _TIME_WINDOWS
@@ -66,8 +74,12 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         "HOLDOUT",
         selected.title_jaccard_threshold,
         selected.time_window_hours,
+        entity_overlap_threshold,
     )
-    baseline = _tfidf_baseline(articles, "HOLDOUT")
+    baseline_threshold, baseline_calibration = _select_tfidf_threshold(
+        articles, "CALIBRATION"
+    )
+    baseline_holdout = _evaluate_tfidf(articles, "HOLDOUT", baseline_threshold)
     return {
         "datasetVersion": java_output["datasetVersion"],
         "articleCount": java_output["articleCount"],
@@ -75,7 +87,12 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         "validationSplit": "HOLDOUT",
         "selected": asdict(selected),
         "holdout": asdict(holdout),
-        "tfidfCharWbBaseline": baseline,
+        "configuredEntityOverlapThreshold": entity_overlap_threshold,
+        "tfidfCharWbBaseline": {
+            "threshold": baseline_threshold,
+            "calibrationMetrics": asdict(baseline_calibration),
+            "metrics": asdict(baseline_holdout),
+        },
         "precisionGate": 0.90,
         "precisionGatePassed": holdout.precision >= 0.90,
         "candidates": [asdict(candidate) for candidate in calibration],
@@ -88,6 +105,7 @@ def _evaluate_rule(
     split: str,
     threshold: float,
     time_window_hours: int,
+    entity_overlap_threshold: int,
 ) -> Metrics:
     selected = [article for article in articles if article["split"] == split]
     article_ids = [int(article["articleId"]) for article in selected]
@@ -99,7 +117,7 @@ def _evaluate_rule(
         if left not in selected_ids or right not in selected_ids:
             continue
         matches = float(pair["titleJaccard"]) >= threshold or (
-            int(pair["entityOverlap"]) >= 2
+            int(pair["entityOverlap"]) >= entity_overlap_threshold
             and float(pair["hoursApart"]) <= time_window_hours
         )
         if matches:
@@ -112,39 +130,63 @@ def _evaluate_rule(
     return _metrics(expected, predicted)
 
 
-def _tfidf_baseline(articles: list[dict[str, Any]], split: str) -> dict[str, Any]:
-    selected = [article for article in articles if article["split"] == split]
-    best: tuple[float, Metrics] | None = None
-    for threshold in _JACCARD_THRESHOLDS:
-        ids = [int(article["articleId"]) for article in selected]
-        union = UnionFind(ids)
-        for topic_id in sorted({int(article["topicId"]) for article in selected}):
-            topic_articles = [
-                article for article in selected if int(article["topicId"]) == topic_id
-            ]
-            vectors = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4)).fit_transform(
-                article["title"] for article in topic_articles
-            )
-            similarities = cosine_similarity(vectors)
-            for left in range(len(topic_articles)):
-                for right in range(left + 1, len(topic_articles)):
-                    if similarities[left, right] >= threshold:
-                        union.join(
-                            int(topic_articles[left]["articleId"]),
-                            int(topic_articles[right]["articleId"]),
-                        )
-        expected = [f'{article["topicId"]}:{article["expectedIssueId"]}' for article in selected]
-        predicted = [
-            f'{article["topicId"]}:{union.root(int(article["articleId"]))}'
-            for article in selected
-        ]
-        metrics = _metrics(expected, predicted)
-        candidate = (threshold, metrics)
-        if best is None or _metric_rank(metrics, threshold) > _metric_rank(best[1], best[0]):
-            best = candidate
-    if best is None:
+def _select_tfidf_threshold(
+    articles: list[dict[str, Any]], split: str
+) -> tuple[float, Metrics]:
+    selected, topic_similarities = _prepare_tfidf(articles, split)
+    candidates = [
+        (threshold, _evaluate_prepared_tfidf(selected, topic_similarities, threshold))
+        for threshold in _JACCARD_THRESHOLDS
+    ]
+    if not candidates:
         raise ValueError("TF-IDF 비교군을 계산할 기사가 없습니다.")
-    return {"threshold": best[0], "metrics": asdict(best[1])}
+    return max(candidates, key=lambda candidate: _metric_rank(candidate[1], candidate[0]))
+
+
+def _evaluate_tfidf(
+    articles: list[dict[str, Any]], split: str, threshold: float
+) -> Metrics:
+    selected, topic_similarities = _prepare_tfidf(articles, split)
+    return _evaluate_prepared_tfidf(selected, topic_similarities, threshold)
+
+
+def _evaluate_prepared_tfidf(
+    selected: list[dict[str, Any]],
+    topic_similarities: list[tuple[list[dict[str, Any]], Any]],
+    threshold: float,
+) -> Metrics:
+    ids = [int(article["articleId"]) for article in selected]
+    union = UnionFind(ids)
+    for topic_articles, similarities in topic_similarities:
+        for left in range(len(topic_articles)):
+            for right in range(left + 1, len(topic_articles)):
+                if similarities[left, right] >= threshold:
+                    union.join(
+                        int(topic_articles[left]["articleId"]),
+                        int(topic_articles[right]["articleId"]),
+                    )
+    expected = [f'{article["topicId"]}:{article["expectedIssueId"]}' for article in selected]
+    predicted = [
+        f'{article["topicId"]}:{union.root(int(article["articleId"]))}'
+        for article in selected
+    ]
+    return _metrics(expected, predicted)
+
+
+def _prepare_tfidf(
+    articles: list[dict[str, Any]], split: str
+) -> tuple[list[dict[str, Any]], list[tuple[list[dict[str, Any]], Any]]]:
+    selected = [article for article in articles if article["split"] == split]
+    result: list[tuple[list[dict[str, Any]], Any]] = []
+    for topic_id in sorted({int(article["topicId"]) for article in selected}):
+        topic_articles = [
+            article for article in selected if int(article["topicId"]) == topic_id
+        ]
+        vectors = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4)).fit_transform(
+            article["title"] for article in topic_articles
+        )
+        result.append((topic_articles, cosine_similarity(vectors)))
+    return selected, result
 
 
 def _metrics(expected: list[str], predicted: list[str]) -> Metrics:

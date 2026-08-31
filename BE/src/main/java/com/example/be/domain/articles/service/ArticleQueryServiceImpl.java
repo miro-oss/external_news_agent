@@ -95,8 +95,10 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
     public ArticleResDTO.Detail getArticle(Long articleId, Long runId) {
         Article article = articleRepository.findById(articleId)
                 .orElseThrow(() -> new ArticleException(ArticleErrorCode.ARTICLE_NOT_FOUND));
-        IssueArticle membership = primaryMembership(article);
-        Article analyzedArticle = representativeArticle(membership, article);
+        IssueContext issueContext = issueContext(article);
+        Article analyzedArticle = issueContext.representative() == null
+                ? article
+                : issueContext.representative().getArticle();
         Finding finding = findFinding(analyzedArticle.getId(), runId);
         if (finding == null && !analyzedArticle.getId().equals(articleId)) {
             // 이관 전 레거시 finding이 멤버에만 있으면 상세 분석을 갑자기 비우지 않는다.
@@ -106,9 +108,11 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
 
         boolean hasAnalyzedBody = finding != null && StringUtils.hasText(analyzedArticle.getBody());
         List<FindingSection> sections = hasAnalyzedBody ? finding.getSections() : List.of();
-        String bodyText = hasAnalyzedBody
+        String bodyText = finding == null
+                ? article.getBody()
+                : hasAnalyzedBody
                 ? sections.stream().map(FindingSection::text).collect(Collectors.joining(" "))
-                : article.getBody();
+                : analyzedArticle.getBody();
 
         return ArticleResDTO.Detail.builder()
                 .id(article.getId())
@@ -129,8 +133,11 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                         .text(section.text())
                         .build()).toList())
                 .analysis(toAnalysis(finding))
-                .issueId(membership == null ? null : membership.getIssue().getId())
-                .relatedArticles(relatedArticles(membership, articleId))
+                .analysisArticleId(finding == null ? article.getId() : analyzedArticle.getId())
+                .issueId(issueContext.membership() == null
+                        ? null
+                        : issueContext.membership().getIssue().getId())
+                .relatedArticles(relatedArticles(issueContext.memberships(), articleId))
                 .build();
     }
 
@@ -140,29 +147,29 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                 : findingRepository.findByRunIdAndArticleId(runId, articleId).orElse(null);
     }
 
-    private IssueArticle primaryMembership(Article article) {
+    private IssueContext issueContext(Article article) {
         List<IssueArticle> memberships = issueArticleRepository.findByArticleIdOrderByIssueIdAsc(article.getId());
-        return memberships.stream()
+        IssueArticle membership = memberships.stream()
                 .filter(value -> value.getIssue().getTopic().getId().equals(article.getTopic().getId()))
                 .findFirst()
-                .orElse(memberships.isEmpty() ? null : memberships.getFirst());
-    }
-
-    private Article representativeArticle(IssueArticle membership, Article fallback) {
-        if (membership == null || membership.getRole() == IssueArticleRole.REPRESENTATIVE) {
-            return fallback;
-        }
-        return issueArticleRepository.findFirstByIssueIdAndRole(
-                        membership.getIssue().getId(), IssueArticleRole.REPRESENTATIVE)
-                .map(IssueArticle::getArticle)
-                .orElse(fallback);
-    }
-
-    private List<ArticleResDTO.RelatedArticle> relatedArticles(IssueArticle membership, Long articleId) {
+                .orElse(null);
         if (membership == null) {
+            return IssueContext.empty();
+        }
+        List<IssueArticle> issueMemberships = issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(
+                membership.getIssue().getId());
+        IssueArticle representative = issueMemberships.stream()
+                .filter(value -> value.getRole() == IssueArticleRole.REPRESENTATIVE)
+                .findFirst()
+                .orElse(null);
+        return new IssueContext(membership, representative, issueMemberships);
+    }
+
+    private List<ArticleResDTO.RelatedArticle> relatedArticles(List<IssueArticle> memberships, Long articleId) {
+        if (memberships.isEmpty()) {
             return List.of();
         }
-        return issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(membership.getIssue().getId()).stream()
+        return memberships.stream()
                 .map(IssueArticle::getArticle)
                 .filter(article -> !article.getId().equals(articleId))
                 .map(article -> ArticleResDTO.RelatedArticle.builder()
@@ -171,6 +178,21 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                         .publisher(publisher(article))
                         .build())
                 .toList();
+    }
+
+    private record IssueContext(
+            IssueArticle membership,
+            IssueArticle representative,
+            List<IssueArticle> memberships
+    ) {
+
+        private IssueContext {
+            memberships = List.copyOf(memberships);
+        }
+
+        private static IssueContext empty() {
+            return new IssueContext(null, null, List.of());
+        }
     }
 
     private ArticleResDTO.Summary toSummary(Finding finding) {

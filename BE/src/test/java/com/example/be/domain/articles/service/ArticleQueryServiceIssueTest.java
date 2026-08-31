@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -63,8 +64,6 @@ class ArticleQueryServiceIssueTest {
         when(articleRepository.findById(102L)).thenReturn(Optional.of(member));
         when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(102L))
                 .thenReturn(List.of(memberMembership));
-        when(issueArticleRepository.findFirstByIssueIdAndRole(88L, IssueArticleRole.REPRESENTATIVE))
-                .thenReturn(Optional.of(representativeMembership));
         when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(88L))
                 .thenReturn(List.of(representativeMembership, memberMembership));
         when(findingRepository.findFirstByArticleIdOrderByIdDesc(101L))
@@ -73,11 +72,37 @@ class ArticleQueryServiceIssueTest {
         ArticleResDTO.Detail detail = service.getArticle(102L, null);
 
         assertEquals(88L, detail.getIssueId());
+        assertEquals(101L, detail.getAnalysisArticleId());
         assertEquals("대표 분석", detail.getAnalysis().getSummary());
         assertEquals("대표 근거 문장", detail.getBodyText());
         assertEquals(List.of(101L), detail.getRelatedArticles().stream()
                 .map(ArticleResDTO.RelatedArticle::getId)
                 .toList());
+    }
+
+    @Test
+    void ignoresMembershipFromAnotherTopic() {
+        Topic articleTopic = Topic.builder().id(7L).name("HBM").build();
+        Topic otherTopic = Topic.builder().id(8L).name("제조").build();
+        Source source = Source.builder().id(9L).name("전자신문").build();
+        Article article = article(102L, "기사", "기사 본문", articleTopic, source);
+        NewsIssue otherIssue = NewsIssue.builder()
+                .id(99L)
+                .title("다른 주제 이슈")
+                .status(IssueStatus.EMERGING)
+                .topic(otherTopic)
+                .build();
+
+        when(articleRepository.findById(102L)).thenReturn(Optional.of(article));
+        when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(102L))
+                .thenReturn(List.of(membership(3L, otherIssue, article, IssueArticleRole.REPRESENTATIVE)));
+        when(findingRepository.findFirstByArticleIdOrderByIdDesc(102L)).thenReturn(Optional.empty());
+
+        ArticleResDTO.Detail detail = service.getArticle(102L, null);
+
+        assertNull(detail.getIssueId());
+        assertEquals(102L, detail.getAnalysisArticleId());
+        assertEquals(List.of(), detail.getRelatedArticles());
     }
 
     private Article article(Long id, String title, String body, Topic topic, Source source) {

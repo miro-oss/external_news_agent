@@ -9,6 +9,9 @@ import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.entity.IssueArticleRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -33,12 +36,14 @@ class ArticleAnalysisPipelineTest {
 
     private final CollectionRunArticleRepository runArticleRepository = mock(CollectionRunArticleRepository.class);
     private final CollectionRunRepository runRepository = mock(CollectionRunRepository.class);
+    private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
     private final ArticleAnalysisOrchestrator orchestrator = mock(ArticleAnalysisOrchestrator.class);
     private final FindingReuseCache reuseCache = mock(FindingReuseCache.class);
     private final FindingWriter findingWriter = mock(FindingWriter.class);
     private final ArticleAnalysisPipeline pipeline =
             new ArticleAnalysisPipeline(
-                    runArticleRepository, runRepository, orchestrator, reuseCache, findingWriter);
+                    runArticleRepository, runRepository, issueArticleRepository,
+                    orchestrator, reuseCache, findingWriter);
 
     @BeforeEach
     void loadRunPlan() {
@@ -123,6 +128,37 @@ class ArticleAnalysisPipelineTest {
         pipeline.analyze(42L, Set.of(10L));
 
         verify(findingWriter).write(42L, 10L, ChangeType.UPDATED, inputHash(article), result);
+    }
+
+    @Test
+    void analyzesHistoricalRepresentativeWhenOnlyNewMemberWasObserved() {
+        Article representative = Article.builder().id(10L).title("기존 대표").build();
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of());
+        when(issueArticleRepository.findRepresentativesForRun(42L)).thenReturn(List.of(
+                IssueArticle.builder()
+                        .article(representative)
+                        .role(IssueArticleRole.REPRESENTATIVE)
+                        .build()));
+        AnalysisResult result = mock(AnalysisResult.class);
+        when(orchestrator.analyze(new AnalysisContext(42L, representative, AgentPlan.FREE)))
+                .thenReturn(result);
+
+        pipeline.analyze(42L);
+
+        verify(findingWriter).write(42L, 10L, ChangeType.UPDATED, inputHash(representative), result);
+    }
+
+    @Test
+    void usesUnclusteredTargetsAfterClusteringFailure() {
+        Article article = Article.builder().id(10L).title("기사").build();
+        when(runArticleRepository.findUnclusteredAnalysisTargetsByRunId(42L))
+                .thenReturn(List.of(observation(article, ChangeType.NEW)));
+        AnalysisResult result = mock(AnalysisResult.class);
+        when(orchestrator.analyze(new AnalysisContext(42L, article, AgentPlan.FREE))).thenReturn(result);
+
+        pipeline.analyzeWithoutClustering(42L, Set.of());
+
+        verify(findingWriter).write(42L, 10L, ChangeType.NEW, inputHash(article), result);
     }
 
     @Test

@@ -6,6 +6,8 @@ import com.example.be.domain.issues.entity.ContentGroup;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.entity.IssueCrossSource;
+import com.example.be.domain.issues.entity.IssueRelation;
+import com.example.be.domain.issues.entity.IssueRelationType;
 import com.example.be.domain.issues.entity.IssueStance;
 import com.example.be.domain.issues.entity.IssueStanceSource;
 import com.example.be.domain.issues.entity.IssueStatus;
@@ -13,6 +15,7 @@ import com.example.be.domain.issues.entity.IssueStatusHistory;
 import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.repository.ContentGroupRepository;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.issues.repository.IssueRelationRepository;
 import com.example.be.domain.issues.repository.IssueStatusHistoryRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.topics.entity.Topic;
@@ -43,6 +46,7 @@ public class IssueClusterWriter {
     private final ContentGroupRepository contentGroupRepository;
     private final NewsIssueRepository issueRepository;
     private final IssueArticleRepository issueArticleRepository;
+    private final IssueRelationRepository issueRelationRepository;
     private final IssueStatusHistoryRepository statusHistoryRepository;
 
     @Transactional
@@ -77,11 +81,29 @@ public class IssueClusterWriter {
                 group = contentGroupRepository.findById(assignment.existingContentGroupId())
                         .orElseThrow(() -> new IllegalStateException(
                                 "본문 중복군이 없습니다. id=" + assignment.existingContentGroupId()));
-                // 기존 그룹의 대표는 안정적으로 유지한다. 재선정으로 unique FK가 흔들리지 않게 한다.
             }
             assignment.articleIds().forEach(articleId -> requiredArticle(articles, articleId)
                     .assignContentGroup(group));
+            mergeContentGroups(group, assignment, representative);
         }
+    }
+
+    private void mergeContentGroups(ContentGroup winner,
+                                    ClusterPlan.ContentGroupAssignment assignment,
+                                    Article representative) {
+        List<Long> losingIds = assignment.mergedContentGroupIds();
+        if (!losingIds.isEmpty()) {
+            List<ContentGroup> losingGroups = contentGroupRepository.findAllById(losingIds);
+            if (losingGroups.size() != losingIds.size()) {
+                throw new IllegalStateException("병합할 본문 중복군 일부가 없습니다. ids=" + losingIds);
+            }
+            articleRepository.findByContentGroupIdIn(losingIds)
+                    .forEach(article -> article.assignContentGroup(winner));
+            articleRepository.flush();
+            contentGroupRepository.deleteAll(losingGroups);
+            contentGroupRepository.flush();
+        }
+        winner.refreshRepresentative(representative, assignment.simhash());
     }
 
     private void applyIssue(ClusterPlan.IssueAssignment assignment, Map<Long, Article> articles) {
@@ -100,6 +122,7 @@ public class IssueClusterWriter {
         issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(issue.getId())
                 .forEach(membership -> membershipByArticle.put(
                         membership.getArticle().getId(), membership));
+        mergeIssues(issue, topic, assignment.mergedIssueIds(), membershipByArticle);
         for (Long articleId : assignment.articleIds()) {
             membershipByArticle.computeIfAbsent(articleId, ignored -> issueArticleRepository.save(
                     IssueArticle.builder()
@@ -128,6 +151,52 @@ public class IssueClusterWriter {
                 publisherCount(members),
                 independentContentCount(members),
                 assignment.entities());
+    }
+
+    private void mergeIssues(NewsIssue winner,
+                             Topic topic,
+                             List<Long> losingIssueIds,
+                             Map<Long, IssueArticle> membershipByArticle) {
+        for (Long losingIssueId : losingIssueIds) {
+            NewsIssue loser = issueRepository.findById(losingIssueId)
+                    .orElseThrow(() -> new IllegalStateException("병합할 이슈가 없습니다. id=" + losingIssueId));
+            if (!loser.getTopic().getId().equals(topic.getId())) {
+                throw new IllegalStateException("서로 다른 주제의 이슈를 병합할 수 없습니다.");
+            }
+            for (IssueArticle losingMembership :
+                    issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(losingIssueId)) {
+                IssueArticle duplicate = membershipByArticle.get(losingMembership.getArticle().getId());
+                if (duplicate == null) {
+                    losingMembership.moveToIssue(winner);
+                    membershipByArticle.put(losingMembership.getArticle().getId(), losingMembership);
+                } else {
+                    issueArticleRepository.delete(losingMembership);
+                }
+            }
+            recordIssueMerge(loser, winner);
+        }
+    }
+
+    private void recordIssueMerge(NewsIssue loser, NewsIssue winner) {
+        IssueStatus previous = loser.markMerged();
+        if (previous != IssueStatus.RETRACTED) {
+            statusHistoryRepository.save(IssueStatusHistory.builder()
+                    .issue(loser)
+                    .fromStatus(previous)
+                    .toStatus(IssueStatus.RETRACTED)
+                    .reason("이슈 병합: #" + winner.getId())
+                    .changedAt(LocalDateTime.now(ApiTimeZone.ZONE))
+                    .build());
+        }
+        if (!issueRelationRepository.existsByFromIssueIdAndToIssueIdAndRelationType(
+                loser.getId(), winner.getId(), IssueRelationType.UPDATES)) {
+            issueRelationRepository.save(IssueRelation.builder()
+                    .fromIssue(loser)
+                    .toIssue(winner)
+                    .relationType(IssueRelationType.UPDATES)
+                    .createdAt(LocalDateTime.now(ApiTimeZone.ZONE))
+                    .build());
+        }
     }
 
     private NewsIssue createIssue(Topic topic,

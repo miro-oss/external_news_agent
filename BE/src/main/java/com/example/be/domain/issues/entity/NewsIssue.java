@@ -107,4 +107,13 @@ public class NewsIssue {
     public void applyRepresentativeSummary(String summary) {
         this.summary = summary;
     }
+
+    public IssueStatus markMerged() {
+        IssueStatus previous = this.status;
+        this.status = IssueStatus.RETRACTED;
+        this.articleCount = 0;
+        this.publisherCount = 0;
+        this.independentContentCount = 0;
+        return previous;
+    }
 }

@@ -167,6 +167,15 @@ public class CollectionResultWriter {
                 "보고서 생성에 실패했습니다. " + detail));
     }
 
+    /** 이슈 클러스터링 실패를 남기고 기사 단위 분석으로 degrade한다. */
+    @Transactional
+    public void addIssueClusteringFailedWarning(Long runId, String cause) {
+        CollectionRun run = runRepository.findById(runId).orElseThrow();
+        String detail = cause == null ? "원인 정보가 없습니다." : cause;
+        run.addWarning(warning(null, CollectionRunWarning.CODE_ISSUE_CLUSTERING_FAILED,
+                "이슈 클러스터링에 실패해 기사 단위 분석으로 전환했습니다. " + detail));
+    }
+
     /** 같은 Agent 경고는 실행당 한 행으로 묶고 발생 건수만 올린다. */
     @Transactional
     public void addAgentWarning(Long runId, String code, String message) {

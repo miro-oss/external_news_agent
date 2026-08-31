@@ -1,6 +1,6 @@
 {
   "datasetVersion": "clusters.v1",
-  "description": "P1-1 균등 자카드 임계값 측정용 수동 이슈 라벨 50개. 각 라벨은 매체별 제목 변형 4건으로 확장되어 총 200건이다.",
+  "description": "P1-1 임계값 측정용 수동 이슈 라벨 50개. 요약형·부분 어휘형·47시간 후속형 제목과 서로 다른 FULLTEXT 원고 4건으로 확장해 총 200건을 검증한다.",
   "articlesPerIssue": 4,
   "issues": [
     {"issueKey":"semi-01","topicId":1,"split":"CALIBRATION","baseTitle":"삼성전자 HBM4 평택 P5 양산 투자 확정","summary":"삼성전자가 평택 P5에서 HBM4 양산 투자를 확정했다.","publishedAt":"2026-08-01T09:00:00+09:00"},

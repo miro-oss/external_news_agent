@@ -89,6 +89,36 @@ public interface CollectionRunArticleRepository
             @Param("runId") Long runId,
             @Param("articleIds") Set<Long> articleIds);
 
+    /** 클러스터링이 실패했을 때 수집 결과 분석까지 잃지 않도록 쓰는 레거시 대상 조회. */
+    @Query("""
+            SELECT observation
+            FROM CollectionRunArticle observation
+            JOIN FETCH observation.article article
+            JOIN FETCH article.topic
+            JOIN FETCH article.source
+            WHERE observation.run.id = :runId
+              AND observation.changeType IN (
+                  com.example.be.domain.collection.entity.ChangeType.NEW,
+                  com.example.be.domain.collection.entity.ChangeType.UPDATED
+              )
+            ORDER BY observation.id ASC
+            """)
+    List<CollectionRunArticle> findUnclusteredAnalysisTargetsByRunId(@Param("runId") Long runId);
+
+    @Query("""
+            SELECT observation
+            FROM CollectionRunArticle observation
+            JOIN FETCH observation.article article
+            JOIN FETCH article.topic
+            JOIN FETCH article.source
+            WHERE observation.run.id = :runId
+              AND article.id IN :articleIds
+            ORDER BY observation.id ASC
+            """)
+    List<CollectionRunArticle> findUnclusteredAnalysisTargetsByRunIdAndArticleIdIn(
+            @Param("runId") Long runId,
+            @Param("articleIds") Set<Long> articleIds);
+
     interface ArticleFetchStatus {
 
         Long getArticleId();

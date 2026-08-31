@@ -39,9 +39,21 @@ public class CollectionRunExecutionService {
             // 메타데이터를 다 모은 뒤에 본문을 받는다. 조합마다 섞으면 같은 호스트를 번갈아 두드리게 된다.
             Set<Long> refreshedArticleIds = contentEnricher.enrich(runId);
             // FULLTEXT가 확정된 뒤에만 SimHash를 계산하고, 대표를 정한 다음 분석한다.
-            issueClusteringService.cluster(runId);
+            boolean clustered = true;
+            try {
+                issueClusteringService.cluster(runId);
+            } catch (RuntimeException exception) {
+                clustered = false;
+                log.error("이슈 클러스터링에 실패해 기사 단위 분석으로 전환한다. runId={} error={}",
+                        runId, exception.getMessage(), exception);
+                resultWriter.addIssueClusteringFailedWarning(runId, exception.getMessage());
+            }
             // 분석도 외부 어댑터 경계다. Stub 단계부터 실행 트랜잭션과 분리해 실제 LLM 교체 시에도 DB를 잡지 않는다.
-            analysisPipeline.analyze(runId, refreshedArticleIds);
+            if (clustered) {
+                analysisPipeline.analyze(runId, refreshedArticleIds);
+            } else {
+                analysisPipeline.analyzeWithoutClustering(runId, refreshedArticleIds);
+            }
             // M5 보고서는 findings를 모두 저장한 뒤 만든다. 생성과 reportId 연결은 별도 짧은 트랜잭션이다.
             try {
                 reportCreationService.generate(runId);

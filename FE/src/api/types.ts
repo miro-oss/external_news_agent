@@ -211,6 +211,7 @@ export interface ArticleDetail {
   bodyText: string | null
   sentences: ArticleSentence[]
   analysis: ArticleAnalysis | null
+  analysisArticleId: number
   issueId: number | null
   relatedArticles: Array<{ id: number; title: string; publisher: string | null }>
 }
