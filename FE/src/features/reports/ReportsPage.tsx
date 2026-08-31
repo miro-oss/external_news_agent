@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useId, useMemo, useState } from 'react'
 import Markdown from 'react-markdown'
 import {
   useLatestReport,
   useAudienceSetting,
+  useIssue,
   useNotificationChannels,
   useNotificationGroups,
   usePreviewNotification,
@@ -11,8 +12,12 @@ import {
   useSendNotification,
 } from '../../api/queries'
 import {
+  AUDIENCES,
+  AUDIENCE_LABELS,
   CHANGE_TYPE_LABELS,
   RISK_LEVEL_LABELS,
+  type Audience,
+  type AudienceRelevance,
   type ReportDetail,
   type ReportFinding,
   type ReportSummary,
@@ -25,6 +30,7 @@ import { MutationStatus } from '../settings/MutationStatus'
 
 export function ReportsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [audienceOverride, setAudienceOverride] = useState<Audience | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
     articleId: number | null
     runId: number | null
@@ -39,6 +45,7 @@ export function ReportsPage() {
   const activeReportData = activeReport.data
   const isInitialLoading = latest.isPending || reports.isPending
   const initialError = latest.isError ? latest.error : reports.isError ? reports.error : null
+  const activeAudience = audienceOverride ?? audienceSetting.data?.audience ?? 'CHIP_MAKER'
   const closeArticle = useCallback(() => {
     setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
   }, [])
@@ -48,7 +55,7 @@ export function ReportsPage() {
       <header className="page-header report-header">
         <div>
           <h1>뉴스 리포트</h1>
-          <p className="muted">한 번의 수집 실행에서 발견한 신호를 보고서 한 장으로 읽습니다.</p>
+          <p className="muted">같은 사건을 묶은 주요 이슈와 원문 근거를 한 장에서 읽습니다.</p>
         </div>
         <div className="summary-count" aria-live="polite">
           <strong>{reports.data?.totalElements ?? 0}</strong>
@@ -97,6 +104,9 @@ export function ReportsPage() {
             {activeReportData && (
               <ReportView
                 report={activeReportData}
+                audience={activeAudience}
+                defaultAudience={audienceSetting.data?.audience}
+                onAudienceSelect={setAudienceOverride}
                 onEvidenceSelect={(articleId, sentences) => {
                   setEvidenceSelection({
                     articleId,
@@ -113,7 +123,7 @@ export function ReportsPage() {
       <ArticleDetailModal
         articleId={evidenceSelection.articleId}
         runId={evidenceSelection.runId ?? undefined}
-        defaultAudience={audienceSetting.data?.audience}
+        defaultAudience={activeAudience}
         initialEvidence={evidenceSelection.sentences}
         onClose={closeArticle}
       />
@@ -136,31 +146,51 @@ function ReportListItem({ report, active, onSelect }: {
       <span className="report-list-date">{formatShortDate(report.generatedAt)}</span>
       <strong>{report.title}</strong>
       <span className="report-list-meta">
-        근거 {report.findingCount}건
+        이슈 {report.findingCount}건
         {report.highRiskCount > 0 && <em>{RISK_LEVEL_LABELS.high} {report.highRiskCount}</em>}
       </span>
     </button>
   )
 }
 
-function ReportView({ report, onEvidenceSelect }: {
+function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvidenceSelect }: {
   report: ReportDetail
+  audience: Audience
+  defaultAudience?: Audience
+  onAudienceSelect: (audience: Audience) => void
   onEvidenceSelect: (articleId: number, sentences: number[]) => void
 }) {
   const stats = report.summaryStats
+  const findings = useMemo(
+    () => sortFindingsForAudience(report.findings ?? [], audience),
+    [audience, report.findings],
+  )
+  const evidenceCount = useMemo(() => countEvidenceSentences(report.findings ?? []), [report.findings])
   return (
     <article className="report-document">
       <header className="report-document-header">
-        {/* 실행 번호와 모델명은 운영자가 로그를 찾을 때 쓰는 값이지 보고서를 읽는 사람에게 줄 정보가 아니다. */}
         <h2>{report.title}</h2>
         <time dateTime={report.generatedAt}>{formatFullDate(report.generatedAt)}</time>
+        <div className="report-ai-context">
+          <span>{generationKind(report.modelName)} · {AUDIENCE_LABELS[audience]} 관점 · 원문 근거 {evidenceCount}문장</span>
+          <details>
+            <summary aria-label="관점 적용 방식 안내">ⓘ</summary>
+            <p>‘{AUDIENCE_LABELS[audience]}’ 관점으로 중요도를 다시 매긴 결과입니다. 같은 이슈도 관점에 따라 순서와 강조가 달라집니다.</p>
+          </details>
+        </div>
         <div className="report-stat-row" aria-label="보고서 요약 통계">
-          <ReportStat value={stats.findingCount} label="전체 근거" />
+          <ReportStat value={stats.findingCount} label="전체 이슈" />
           <ReportStat value={stats.newCount} label={CHANGE_TYPE_LABELS.NEW} />
           <ReportStat value={stats.updatedCount} label={CHANGE_TYPE_LABELS.UPDATED} />
           <ReportStat value={stats.byRiskLevel.high ?? 0} label={RISK_LEVEL_LABELS.high} tone="danger" />
         </div>
       </header>
+
+      <ReportPerspectiveSelector
+        audience={audience}
+        defaultAudience={defaultAudience}
+        onSelect={onAudienceSelect}
+      />
 
       <ReportDeliveryActions key={report.id} reportId={report.id} />
 
@@ -170,22 +200,56 @@ function ReportView({ report, onEvidenceSelect }: {
 
       <section className="report-findings">
         <div className="section-heading report-section-heading">
-          <h3>근거</h3>
-          <span>{report.findings?.length ?? 0}건</span>
+          <h3>주요 이슈</h3>
+          <span>{findings.length}건 · {AUDIENCE_LABELS[audience]} 관점순</span>
         </div>
-        {report.findings && report.findings.length > 0 ? (
+        {findings.length > 0 ? (
           <div className="finding-list">
-            {report.findings.map((finding) => (
-              <FindingCard
+            {findings.map((finding) => (
+              <IssueCard
                 finding={finding}
                 key={finding.id}
+                audience={audience}
                 onEvidenceSelect={onEvidenceSelect}
               />
             ))}
           </div>
-        ) : <p className="muted">이 보고서에 포함된 근거가 없습니다.</p>}
+        ) : <p className="muted">이 보고서에 포함된 주요 이슈가 없습니다.</p>}
       </section>
+
+      <ReportDisclaimer report={report} audience={audience} />
     </article>
+  )
+}
+
+function ReportPerspectiveSelector({ audience, defaultAudience, onSelect }: {
+  audience: Audience
+  defaultAudience?: Audience
+  onSelect: (audience: Audience) => void
+}) {
+  return (
+    <section className="report-perspective" aria-label="리포트 관점 선택">
+      <div className="report-perspective-heading">
+        <div><h3>누구의 관점으로 볼까요?</h3><p>저장된 리포트는 그대로 두고 이슈 순서와 강조만 바꿉니다.</p></div>
+        <span>추가 AI 호출 없음</span>
+      </div>
+      <div className="report-perspective-tabs" role="tablist" aria-label="독자 관점">
+        {AUDIENCES.map((item) => (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={audience === item}
+            className={audience === item ? 'report-perspective-tab active' : 'report-perspective-tab'}
+            key={item}
+            onClick={() => onSelect(item)}
+          >
+            {AUDIENCE_LABELS[item]}
+            {defaultAudience === item && <small>기본</small>}
+          </button>
+        ))}
+      </div>
+      <p className="report-perspective-note">화면에서 보는 관점만 바뀌며, 발송할 보고서 본문은 중립 원본을 유지합니다.</p>
+    </section>
   )
 }
 
@@ -278,28 +342,190 @@ function ReportStat({ value, label, tone }: { value: number; label: string; tone
   )
 }
 
-function FindingCard({ finding, onEvidenceSelect }: {
+function IssueCard({ finding, audience, onEvidenceSelect }: {
   finding: ReportFinding
+  audience: Audience
   onEvidenceSelect: (articleId: number, sentences: number[]) => void
 }) {
+  const [open, setOpen] = useState(false)
+  const panelId = `${useId()}-issue-detail`
+  // FE와 BE가 따로 재시작되는 로컬 환경에서도 구버전 응답의 누락 값을 잘못 조회하지 않는다.
+  const issueId = finding.issueId ?? null
+  const issue = useIssue(issueId)
   const keyPoints = useMemo(() => normalizeKeyPoints(finding.keyPoints), [finding.keyPoints])
+  const perspective = perspectiveFor(finding, audience)
+  const title = issue.data?.title || finding.articleTitle
+  const summary = limitText(issue.data?.summary || finding.summary, 120)
+  const keywords = unique([
+    ...(issue.data?.entities ?? []),
+    ...(issue.data?.topicName ? [issue.data.topicName] : []),
+  ]).slice(0, 4)
+
   return (
-    <article className="finding-card">
-      <div className="finding-card-meta">
-        <span>{finding.category}</span>
-        <span className={`status-pill risk-label-${finding.riskLevel}`}>{RISK_LEVEL_LABELS[finding.riskLevel]}</span>
-        <span>{CHANGE_TYPE_LABELS[finding.changeType]}</span>
+    <article className="issue-card">
+      <div className="issue-card-primary">
+        <div className="issue-card-topline">
+          <span className={`signal-dot risk-${finding.riskLevel}`} aria-hidden="true" />
+          <span className={`status-pill risk-label-${finding.riskLevel}`}>
+            {issue.data?.sensitivityScore !== null && issue.data?.sensitivityScore !== undefined
+              ? `민감 ${Math.round(issue.data.sensitivityScore)}`
+              : RISK_LEVEL_LABELS[finding.riskLevel]}
+          </span>
+          <span>{finding.category}</span>
+          {issue.data && <time dateTime={issue.data.lastSeenAt}>{formatShortDate(issue.data.lastSeenAt)}</time>}
+        </div>
+        <h4>{title}</h4>
+        <p className="issue-card-summary">{summary}</p>
+        <div className="issue-card-footer">
+          <span className="issue-source-count">
+            {issue.isPending && issueId !== null
+              ? '관련 기사 확인 중'
+              : `관련 ${issue.data?.articleCount ?? 1}건 · 매체 ${issue.data?.publisherCount ?? 1}곳`}
+          </span>
+          <div className="issue-keywords" aria-label="이슈 키워드">
+            {keywords.map((keyword) => <span key={keyword}>#{keyword}</span>)}
+            {issue.isPending && issueId !== null && <span className="issue-keywords-loading">키워드 확인 중</span>}
+          </div>
+          <button
+            type="button"
+            className="issue-detail-toggle"
+            aria-expanded={open}
+            aria-controls={panelId}
+            onClick={() => setOpen((current) => !current)}
+          >
+            {open ? '접기' : '자세히'} <span aria-hidden="true">{open ? '▴' : '▾'}</span>
+          </button>
+        </div>
       </div>
-      <h4>{finding.articleTitle}</h4>
-      <p>{finding.summary}</p>
-      <KeyPointList
-        points={keyPoints}
-        articleTitle={finding.articleTitle}
-        onEvidenceSelect={(sentenceId) => onEvidenceSelect(finding.articleId, [sentenceId])}
-      />
-      <a href={finding.canonicalUrl} target="_blank" rel="noreferrer">원문 열기 <span aria-hidden="true">↗</span></a>
+
+      {open && (
+        <div className="issue-card-details" id={panelId}>
+          <section className="issue-perspective-hook">
+            <span>{AUDIENCE_LABELS[audience]} 관점 · 왜 봐야 하나</span>
+            <p>{perspective?.hook || '이 관점에 대한 별도 강조 없이 중립 요약을 유지합니다.'}</p>
+            {perspective && perspective.evidenceSentenceIds.length > 0 && (
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => onEvidenceSelect(finding.articleId, [perspective.evidenceSentenceIds[0]])}
+              >
+                관점 근거 확인
+              </button>
+            )}
+          </section>
+
+          <KeyPointList
+            points={keyPoints}
+            articleTitle={title}
+            onEvidenceSelect={(sentenceId) => onEvidenceSelect(finding.articleId, [sentenceId])}
+          />
+
+          <section className="issue-related-articles">
+            <div className="issue-detail-heading">
+              <h5>관련 기사</h5>
+              <span>{issue.data?.articles.length ?? 1}건</span>
+            </div>
+            {issue.isPending && <p className="issue-detail-state">관련 기사를 불러오는 중입니다.</p>}
+            {issue.isError && <p className="issue-detail-state error">이슈 묶음을 불러오지 못했습니다. 대표 기사로 이동할 수 있습니다.</p>}
+            {issue.data ? (
+              <ul>
+                {issue.data.articles.map((article) => (
+                  <li key={article.id}>
+                    <div><strong>{article.title}</strong><span>{article.publisher || '매체 미상'} · {formatShortDate(article.publishedAt)}</span></div>
+                    <div className="issue-article-actions">
+                      <button type="button" className="text-button" onClick={() => onEvidenceSelect(article.id, [])}>본문 보기</button>
+                      <a href={article.canonicalUrl} target="_blank" rel="noreferrer" aria-label={`${article.title} 원문 열기`}>원문 ↗</a>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : !issue.isPending && (
+              <div className="issue-legacy-actions">
+                <button type="button" className="text-button" onClick={() => onEvidenceSelect(finding.articleId, [])}>대표 기사 본문 보기</button>
+                <a href={finding.canonicalUrl} target="_blank" rel="noreferrer">원문 열기 ↗</a>
+              </div>
+            )}
+          </section>
+
+          <div className="issue-reference-meta">
+            <span>{CHANGE_TYPE_LABELS[finding.changeType]}</span>
+            {issue.data && <span>독립 원문 {issue.data.independentContentCount}건</span>}
+            {finding.intent && <span>발표 맥락 · {finding.intent}</span>}
+          </div>
+        </div>
+      )}
     </article>
   )
+}
+
+function ReportDisclaimer({ report, audience }: { report: ReportDetail; audience: Audience }) {
+  return (
+    <footer className="report-disclaimer">
+      {audience === 'MARKET_INVESTOR' && (
+        <p className="investment-disclaimer">시장·투자 관점은 정보 제공용이며 투자 자문이 아닙니다.</p>
+      )}
+      <details>
+        <summary>리포트 생성 및 검증 안내</summary>
+        <ul>
+          <li>요약은 원문 문장에서 생성했고, 근거가 없는 문장은 보고서 대상에서 제외했습니다.</li>
+          <li>검증을 거쳤지만 오류가 있을 수 있으니 중요한 판단 전에 원문을 확인해 주세요.</li>
+          <li>시장·투자 관점은 정보 제공용이며 투자 자문이 아닙니다.</li>
+          <li>{generationMeta(report)}</li>
+        </ul>
+      </details>
+    </footer>
+  )
+}
+
+const PERSPECTIVE_RANK: Record<AudienceRelevance, number> = {
+  high: 3,
+  medium: 2,
+  low: 1,
+  none: 0,
+}
+
+function sortFindingsForAudience(findings: ReportFinding[], audience: Audience) {
+  return findings
+    .map((finding, index) => ({ finding, index }))
+    .sort((left, right) => {
+      const rankDifference = perspectiveRank(right.finding, audience) - perspectiveRank(left.finding, audience)
+      return rankDifference || left.index - right.index
+    })
+    .map(({ finding }) => finding)
+}
+
+function perspectiveRank(finding: ReportFinding, audience: Audience) {
+  return PERSPECTIVE_RANK[perspectiveFor(finding, audience)?.relevance ?? 'none']
+}
+
+function perspectiveFor(finding: ReportFinding, audience: Audience) {
+  return (finding.perspectiveTags ?? []).find((tag) => tag.audience === audience)
+}
+
+function countEvidenceSentences(findings: ReportFinding[]) {
+  return new Set(findings.flatMap((finding) => finding.keyPoints.flatMap((point) =>
+    point.evidence.map((sentenceId) => `${finding.articleId}:${sentenceId}`),
+  ))).size
+}
+
+function generationKind(modelName: string) {
+  return modelName.toLowerCase().includes('stub') ? '자동 생성' : 'AI 생성'
+}
+
+function generationMeta(report: ReportDetail) {
+  const model = report.modelName.toLowerCase().includes('stub') ? '규칙 기반 대체 생성' : report.modelName
+  const provider = report.llmProvider ? `${report.llmProvider} · ` : ''
+  const prompt = report.promptVersion || '프롬프트 버전 기록 없음'
+  return `생성 모델 · ${provider}${model} / ${prompt} / ${formatFullDate(report.generatedAt)}`
+}
+
+function limitText(value: string, limit: number) {
+  const normalized = value.trim()
+  return normalized.length <= limit ? normalized : `${normalized.slice(0, limit - 1).trimEnd()}…`
+}
+
+function unique(values: string[]) {
+  return [...new Set(values.filter((value) => value.trim().length > 0))]
 }
 
 /** 서버가 만든 마크다운을 HTML 주입 없이 표준 문법으로 렌더링한다. */

@@ -5,6 +5,8 @@ import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.ChangeType;
+import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.notifications.entity.DeliveryStatus;
 import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
@@ -46,6 +48,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     private final NewsReportRepository reportRepository;
     private final FindingRepository findingRepository;
+    private final IssueArticleRepository issueArticleRepository;
     private final DeliveryLogRepository deliveryLogRepository;
 
     @Override
@@ -122,6 +125,9 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         List<Finding> findings = includeFindings
                 ? ReportFindingOrder.sort(findingRepository.findForReportByRunId(runId))
                 : null;
+        Map<Long, Long> issueIdsByArticle = includeFindings
+                ? issueIdsByArticle(findings)
+                : Map.of();
         ReportResDTO.SummaryStats summaryStats = includeFindings
                 ? toStats(findings)
                 : toStatsFromCounts(findingRepository.countStatsByRunId(runId));
@@ -131,10 +137,35 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .title(report.getTitle())
                 .markdownBody(report.getMarkdownBody())
                 .modelName(report.getModelName())
+                .promptVersion(report.getPromptVersion())
+                .llmProvider(report.getLlmProvider())
                 .generatedAt(toOffset(report.getGeneratedAt()))
                 .summaryStats(summaryStats)
-                .findings(includeFindings ? findings.stream().map(this::toFinding).toList() : null)
+                .findings(includeFindings ? findings.stream()
+                        .map(finding -> toFinding(finding,
+                                issueIdsByArticle.get(finding.getArticle().getId())))
+                        .toList() : null)
                 .build();
+    }
+
+    private Map<Long, Long> issueIdsByArticle(List<Finding> findings) {
+        if (findings.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> articleIds = findings.stream()
+                .map(finding -> finding.getArticle().getId())
+                .toList();
+        Map<Long, Long> result = new LinkedHashMap<>();
+        for (IssueArticle membership : issueArticleRepository.findByArticleIds(articleIds)) {
+            if (membership.getArticle().getTopic() != null
+                    && membership.getIssue().getTopic() != null
+                    && !membership.getArticle().getTopic().getId()
+                    .equals(membership.getIssue().getTopic().getId())) {
+                continue;
+            }
+            result.putIfAbsent(membership.getArticle().getId(), membership.getIssue().getId());
+        }
+        return result;
     }
 
     private ReportResDTO.SummaryStats toStats(List<Finding> findings) {
@@ -177,10 +208,11 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .build();
     }
 
-    private ReportResDTO.Finding toFinding(Finding finding) {
+    private ReportResDTO.Finding toFinding(Finding finding, Long issueId) {
         return ReportResDTO.Finding.builder()
                 .id(finding.getId())
                 .articleId(finding.getArticle().getId())
+                .issueId(issueId)
                 .articleTitle(finding.getArticle().getTitle())
                 .canonicalUrl(finding.getArticle().getCanonicalUrl())
                 .changeType(finding.getChangeType().name())
@@ -197,6 +229,15 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .riskLevel(finding.getRiskLevel().toApiValue())
                 .relevance(finding.getRelevance().toApiValue())
                 .category(finding.getCategory())
+                .perspectiveTags(finding.getPerspectiveTags() == null ? List.of()
+                        : finding.getPerspectiveTags().stream()
+                        .map(tag -> ReportResDTO.PerspectiveTag.builder()
+                                .audience(tag.audience().name())
+                                .relevance(tag.relevance().toApiValue())
+                                .hook(tag.hook())
+                                .evidenceSentenceIds(tag.evidenceSentenceIds())
+                                .build())
+                        .toList())
                 .build();
     }
 

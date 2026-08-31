@@ -2,6 +2,9 @@ package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
+import com.example.be.domain.analysis.entity.FindingPerspectiveTag;
+import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.analysis.entity.AudienceRelevance;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
@@ -10,6 +13,9 @@ import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.notifications.repository.DeliveryLogRepository;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
@@ -37,9 +43,10 @@ class ReportQueryServiceImplTest {
 
     private final NewsReportRepository reportRepository = mock(NewsReportRepository.class);
     private final FindingRepository findingRepository = mock(FindingRepository.class);
+    private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
     private final DeliveryLogRepository deliveryLogRepository = mock(DeliveryLogRepository.class);
     private final ReportQueryServiceImpl service = new ReportQueryServiceImpl(
-            reportRepository, findingRepository, deliveryLogRepository);
+            reportRepository, findingRepository, issueArticleRepository, deliveryLogRepository);
 
     @Test
     void latestReturnsNullWhenNoReportExists() {
@@ -135,16 +142,31 @@ class ReportQueryServiceImplTest {
     void detailFindingsUseSamePriorityOrderAsGeneratedMarkdown() {
         CollectionRun run = CollectionRun.builder().id(42L).build();
         NewsReport report = NewsReport.builder().id(17L).run(run).title("보고서")
+                .modelName("claude-sonnet-5")
+                .promptVersion("report.ko.v1.3")
+                .llmProvider("anthropic")
                 .generatedAt(LocalDateTime.of(2026, 8, 18, 10, 0)).build();
         Finding low = finding(2L, RiskLevel.LOW, Relevance.REFERENCE);
         Finding high = finding(1L, RiskLevel.HIGH, Relevance.IMPORTANT);
+        IssueArticle membership = mock(IssueArticle.class);
+        NewsIssue issue = mock(NewsIssue.class);
         when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING))
                 .thenReturn(Optional.of(report));
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(low, high));
+        when(issueArticleRepository.findByArticleIds(List.of(101L, 102L)))
+                .thenReturn(List.of(membership));
+        when(membership.getArticle()).thenReturn(high.getArticle());
+        when(membership.getIssue()).thenReturn(issue);
+        when(issue.getId()).thenReturn(88L);
 
         ReportResDTO.Detail detail = service.getReport(17L, true);
 
         assertEquals(List.of(1L, 2L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
+        assertEquals("report.ko.v1.3", detail.getPromptVersion());
+        assertEquals("anthropic", detail.getLlmProvider());
+        assertEquals(88L, detail.getFindings().getFirst().getIssueId());
+        assertEquals("CHIP_MAKER", detail.getFindings().getFirst()
+                .getPerspectiveTags().getFirst().getAudience());
         ReportResDTO.KeyPoint keyPoint = detail.getFindings().getFirst().getKeyPoints().getFirst();
         assertEquals("핵심", keyPoint.getText());
         assertEquals(List.of(0), keyPoint.getEvidence());
@@ -169,6 +191,11 @@ class ReportQueryServiceImplTest {
                 .riskLevel(riskLevel)
                 .relevance(relevance)
                 .category("정책")
+                .perspectiveTags(List.of(new FindingPerspectiveTag(
+                        Audience.CHIP_MAKER,
+                        AudienceRelevance.HIGH,
+                        "생산 계획에 직접 영향을 줍니다.",
+                        List.of(0))))
                 .build();
     }
 }

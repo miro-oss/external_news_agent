@@ -41,7 +41,8 @@ public class ReportResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "id", "runId", "title", "markdownBody", "modelName", "generatedAt", "summaryStats", "findings"
+            "id", "runId", "title", "markdownBody", "modelName", "promptVersion", "llmProvider",
+            "generatedAt", "summaryStats", "findings"
     })
     @Schema(name = "ReportDetailResponse", description = "보고서 상세")
     public static class Detail {
@@ -51,6 +52,8 @@ public class ReportResDTO {
         private final String title;
         private final String markdownBody;
         private final String modelName;
+        private final String promptVersion;
+        private final String llmProvider;
         private final OffsetDateTime generatedAt;
         private final SummaryStats summaryStats;
 
@@ -75,13 +78,14 @@ public class ReportResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "id", "articleId", "articleTitle", "canonicalUrl", "changeType", "summary", "keyPoints",
-            "intent", "sentiment", "riskLevel", "relevance", "category"
+            "id", "articleId", "issueId", "articleTitle", "canonicalUrl", "changeType", "summary", "keyPoints",
+            "intent", "sentiment", "riskLevel", "relevance", "category", "perspectiveTags"
     })
     public static class Finding {
 
         private final Long id;
         private final Long articleId;
+        private final Long issueId;
         private final String articleTitle;
         private final String canonicalUrl;
         private final String changeType;
@@ -92,6 +96,20 @@ public class ReportResDTO {
         private final String riskLevel;
         private final String relevance;
         private final String category;
+        private final List<PerspectiveTag> perspectiveTags;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @JsonPropertyOrder({"audience", "relevance", "hook", "evidenceSentenceIds"})
+    @Schema(name = "ReportFindingPerspectiveTag", description = "추가 생성 없이 화면 정렬과 강조에 쓰는 독자 관점")
+    public static class PerspectiveTag {
+
+        private final String audience;
+        private final String relevance;
+        private final String hook;
+        private final List<Integer> evidenceSentenceIds;
     }
 
     @Getter

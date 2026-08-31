@@ -251,6 +251,7 @@ export interface ReportSummaryStats {
 export interface ReportFinding {
   id: number
   articleId: number
+  issueId: number | null
   articleTitle: string
   canonicalUrl: string
   changeType: ChangeType
@@ -261,6 +262,7 @@ export interface ReportFinding {
   riskLevel: RiskLevel
   relevance: Relevance
   category: string
+  perspectiveTags: PerspectiveTag[]
 }
 
 export interface ReportDetail {
@@ -269,9 +271,50 @@ export interface ReportDetail {
   title: string
   markdownBody: string
   modelName: string
+  promptVersion: string | null
+  llmProvider: string | null
   generatedAt: string
   summaryStats: ReportSummaryStats
   findings?: ReportFinding[]
+}
+
+export interface IssueArticle {
+  id: number
+  title: string
+  publisher: string | null
+  canonicalUrl: string
+  publishedAt: string | null
+  contentGroupId: number | null
+  role: 'REPRESENTATIVE' | 'MEMBER' | 'BREAKING'
+  stance: 'SUPPORTS' | 'ADDS' | 'DISPUTES' | 'RETRACTS'
+  stanceSource: 'RULE' | 'LLM'
+  stanceConfidence: number
+  joinedAt: string
+}
+
+export interface IssueDetail {
+  id: number
+  title: string
+  summary: string | null
+  status: 'EMERGING' | 'CORROBORATED' | 'DISPUTED' | 'RETRACTED'
+  importanceScore: number | null
+  sensitivityScore: number | null
+  firstSeenAt: string
+  lastSeenAt: string
+  articleCount: number
+  publisherCount: number
+  independentContentCount: number
+  topicId: number
+  topicName: string
+  entities: string[]
+  crossSource: {
+    consensus: string[]
+    soleSource: Array<{ articleId: number; text: string }>
+    conflicts: Array<{ articleIds: number[]; text: string }>
+    missingStakeholders: string[]
+  }
+  representativeArticleId: number | null
+  articles: IssueArticle[]
 }
 
 export type NotificationChannelType = 'TELEGRAM' | 'EMAIL'

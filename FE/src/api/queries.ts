@@ -24,6 +24,7 @@ import type {
   LlmUsage,
   DeliveryLogPage,
   GroupPerspective,
+  IssueDetail,
   NotificationChannel,
   NotificationGroup,
   NotificationPreview,
@@ -49,6 +50,7 @@ const keys = {
   reports: ['reports', 'list'] as const,
   latestReport: ['reports', 'latest'] as const,
   report: (id: number | null) => ['reports', id] as const,
+  issue: (id: number | null) => ['issues', id] as const,
   llmPlan: ['settings', 'llm-plan'] as const,
   llmUsage: ['usage', 'llm'] as const,
   audience: ['settings', 'audience'] as const,
@@ -190,6 +192,14 @@ export function useReport(reportId: number | null) {
     queryKey: keys.report(reportId),
     queryFn: () => get<ReportDetail>(`/reports/${reportId}`, { includeFindings: true }),
     enabled: reportId !== null,
+  })
+}
+
+export function useIssue(issueId: number | null) {
+  return useQuery({
+    queryKey: keys.issue(issueId),
+    queryFn: () => get<IssueDetail>(`/issues/${issueId}`),
+    enabled: issueId !== null,
   })
 }
 
