@@ -1,5 +1,6 @@
 package com.example.be.domain.notifications.service;
 
+import com.example.be.domain.notifications.config.NotificationProperties;
 import com.example.be.domain.notifications.dto.req.NotificationReqDTO;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
@@ -9,6 +10,7 @@ import com.example.be.domain.notifications.entity.RecipientDestination;
 import com.example.be.domain.notifications.exception.NotificationException;
 import com.example.be.domain.notifications.exception.code.NotificationErrorCode;
 import com.example.be.domain.notifications.repository.NotificationChannelRepository;
+import com.example.be.domain.notifications.repository.NotificationGroupRepository;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.exception.ReportException;
@@ -31,8 +33,10 @@ public class NotificationDeliveryPlanService {
 
     private final NewsReportRepository reportRepository;
     private final NotificationChannelRepository channelRepository;
+    private final NotificationGroupRepository groupRepository;
     private final NotificationManagementService managementService;
     private final NotificationRenderer renderer;
+    private final NotificationProperties properties;
 
     @Transactional(readOnly = true)
     public void requireReport(Long reportId) {
@@ -54,6 +58,42 @@ public class NotificationDeliveryPlanService {
         Map<Long, RenderedNotification> renderedByChannel = new LinkedHashMap<>();
         channels.forEach(channel -> renderedByChannel.put(channel.getId(), renderer.render(report, channel)));
         return new PreparedDelivery(reportId, targets, renderedByChannel);
+    }
+
+    @Transactional(readOnly = true)
+    public PreparedWatchDelivery prepareWatchAlert(Long notifyGroupId,
+                                                    String issueTitle,
+                                                    String message) {
+        return prepareWatchAlerts(List.of(
+                new WatchAlertRequest(0L, notifyGroupId, issueTitle, message))).get(0L);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<Long, PreparedWatchDelivery> prepareWatchAlerts(List<WatchAlertRequest> requests) {
+        List<NotificationChannel> channels = resolveChannels(List.of());
+        Map<Long, NotificationGroup> groupById = new LinkedHashMap<>();
+        requests.stream()
+                .map(request -> targetGroupId(request.notifyGroupId()))
+                .filter(Objects::nonNull)
+                .distinct()
+                .forEach(groupId -> groupRepository.findByIdAndActive(groupId, true)
+                        .ifPresent(group -> groupById.put(groupId, group)));
+
+        Map<Long, PreparedWatchDelivery> plans = new LinkedHashMap<>();
+        for (WatchAlertRequest request : requests) {
+            NotificationGroup group = groupById.get(targetGroupId(request.notifyGroupId()));
+            List<PreparedTarget> targets = resolveTargets(
+                    group == null ? List.of() : List.of(group), channels);
+            Map<Long, RenderedNotification> renderedByChannel = new LinkedHashMap<>();
+            channels.forEach(channel -> renderedByChannel.put(channel.getId(),
+                    renderer.renderBreakingAlert(request.issueTitle(), request.message(), channel)));
+            plans.put(request.alertId(), new PreparedWatchDelivery(targets, renderedByChannel));
+        }
+        return Map.copyOf(plans);
+    }
+
+    private Long targetGroupId(Long notifyGroupId) {
+        return notifyGroupId == null ? properties.getBreakingGroupId() : notifyGroupId;
     }
 
     private List<PreparedTarget> resolveTargets(List<NotificationGroup> groups,
@@ -98,6 +138,17 @@ public class NotificationDeliveryPlanService {
     public record PreparedDelivery(Long reportId,
                                    List<PreparedTarget> targets,
                                    Map<Long, RenderedNotification> renderedByChannel) {
+    }
+
+    public record PreparedWatchDelivery(
+            List<PreparedTarget> targets,
+            Map<Long, RenderedNotification> renderedByChannel) {
+    }
+
+    public record WatchAlertRequest(Long alertId,
+                                    Long notifyGroupId,
+                                    String issueTitle,
+                                    String message) {
     }
 
     public record PreparedTarget(Long recipientId,

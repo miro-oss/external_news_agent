@@ -41,9 +41,10 @@ public class IssueClusteringLoader {
         Set<Long> topicIds = new LinkedHashSet<>();
         OffsetDateTime earliest = null;
         for (CollectionRunArticle observation : current) {
-            currentArticleIds.add(observation.getArticle().getId());
+            Article article = observation.getArticle();
+            currentArticleIds.add(article.getId());
             topicIds.add(observation.getTopic().getId());
-            OffsetDateTime eventTime = eventTime(observation.getArticle(), observation);
+            OffsetDateTime eventTime = eventTime(article, observedAt(article, observation));
             earliest = earliest == null || eventTime.isBefore(earliest) ? eventTime : earliest;
         }
 
@@ -69,7 +70,7 @@ public class IssueClusteringLoader {
             snapshot.put(new ArticleTopicKey(article.getId(), topicId),
                     value(article, observation.getTopic(),
                             issueByCurrentArticle.get(new ArticleTopicKey(article.getId(), topicId)),
-                            true, eventTime(article, observation)));
+                            true, observedAt(article, observation)));
         }
         return List.copyOf(snapshot.values());
     }
@@ -130,10 +131,15 @@ public class IssueClusteringLoader {
                 : article.getSource().getName();
     }
 
-    private OffsetDateTime eventTime(Article article, CollectionRunArticle observation) {
-        return article.getPublishedAt() == null
+    private OffsetDateTime eventTime(Article article, OffsetDateTime observedAt) {
+        return article.getPublishedAt() == null ? observedAt : article.getPublishedAt();
+    }
+
+    private OffsetDateTime observedAt(Article article, CollectionRunArticle observation) {
+        OffsetDateTime collectedAt = observedAt(article);
+        return collectedAt == null
                 ? observation.getObservedAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime()
-                : article.getPublishedAt();
+                : collectedAt;
     }
 
     private OffsetDateTime observedAt(Article article) {

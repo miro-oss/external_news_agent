@@ -56,9 +56,13 @@ news:
     # P1-1 골든 클러스터셋 홀드아웃 스윕에서 고정한 균등 자카드 기준이다.
     title-jaccard-threshold: 0.50
     entity-time-window: 48h
+    # 속보는 마커를 제거한 핵심구와 엔티티를 더 짧은 시간창에서만 비교한다.
+    breaking-time-window: 6h
     entity-overlap-threshold: 2
     simhash-hamming-threshold: 3
   notifications:
+    # 미설정 시 자동 속보 알림은 전송하지 않는다. 활성 알림 그룹 ID를 명시적으로 지정해야 한다.
+    breaking-group-id: ${BREAKING_NOTIFICATION_GROUP_ID:}
     telegram:
       base-url: ${TELEGRAM_API_BASE_URL:https://api.telegram.org}
       bot-token: ${TELEGRAM_BOT_TOKEN:}

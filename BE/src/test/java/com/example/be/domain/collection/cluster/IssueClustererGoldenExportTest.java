@@ -36,7 +36,7 @@ class IssueClustererGoldenExportTest {
         assertEquals(200, goldenArticles.size());
 
         IssueClusteringProperties properties = new IssueClusteringProperties();
-        IssueClusterer clusterer = new IssueClusterer(properties);
+        IssueClusterer clusterer = new IssueClusterer(properties, new BreakingNewsDetector());
         ClusterPlan plan = clusterer.cluster(
                 goldenArticles.stream().map(GoldenArticle::article).toList(), true);
 

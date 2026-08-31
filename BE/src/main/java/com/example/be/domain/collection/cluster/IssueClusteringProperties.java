@@ -10,6 +10,7 @@ public class IssueClusteringProperties implements InitializingBean {
 
     private double titleJaccardThreshold = 0.50;
     private Duration entityTimeWindow = Duration.ofHours(48);
+    private Duration breakingTimeWindow = Duration.ofHours(6);
     private int entityOverlapThreshold = 2;
     private int simhashHammingThreshold = 3;
 
@@ -21,6 +22,9 @@ public class IssueClusteringProperties implements InitializingBean {
                 || entityTimeWindow == null
                 || entityTimeWindow.isZero()
                 || entityTimeWindow.isNegative()
+                || breakingTimeWindow == null
+                || breakingTimeWindow.isZero()
+                || breakingTimeWindow.isNegative()
                 || entityOverlapThreshold <= 0
                 || simhashHammingThreshold < 0
                 || simhashHammingThreshold > 64) {
@@ -42,6 +46,14 @@ public class IssueClusteringProperties implements InitializingBean {
 
     public void setEntityTimeWindow(Duration entityTimeWindow) {
         this.entityTimeWindow = entityTimeWindow;
+    }
+
+    public Duration getBreakingTimeWindow() {
+        return breakingTimeWindow;
+    }
+
+    public void setBreakingTimeWindow(Duration breakingTimeWindow) {
+        this.breakingTimeWindow = breakingTimeWindow;
     }
 
     public int getEntityOverlapThreshold() {

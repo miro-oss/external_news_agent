@@ -13,6 +13,7 @@ public class NotificationProperties {
 
     private Telegram telegram = new Telegram();
     private Smtp smtp = new Smtp();
+    private Long breakingGroupId;
     private Duration connectTimeout = Duration.ofSeconds(5);
     private Duration readTimeout = Duration.ofSeconds(10);
 

@@ -25,6 +25,7 @@ public class IssueClusterer {
     private static final OffsetDateTime UNKNOWN_EVENT_TIME = OffsetDateTime.parse("1970-01-01T00:00:00Z");
 
     private final IssueClusteringProperties properties;
+    private final BreakingNewsDetector breakingNewsDetector;
     private final DeterministicEntityExtractor entityExtractor = new DeterministicEntityExtractor();
 
     public ClusterPlan cluster(List<ClusterArticle> rawArticles) {
@@ -176,9 +177,10 @@ public class IssueClusterer {
         Map<Long, Set<String>> titleTokens = new HashMap<>();
         Map<Long, Set<String>> entities = new HashMap<>();
         unique.forEach(article -> {
-            titleTokens.put(article.articleId(), TitleTokenizer.tokens(article.title()));
+            String coreTitle = breakingNewsDetector.coreTitle(article.title());
+            titleTokens.put(article.articleId(), TitleTokenizer.tokens(coreTitle));
             entities.put(article.articleId(), entityExtractor.extract(
-                    article.title(), article.summary(), article.body(), article.topicKeywords()));
+                    coreTitle, article.summary(), article.body(), article.topicKeywords()));
         });
 
         // 같은 본문 중복군에서는 대표만 사건 유사도 투표에 참여한다.
@@ -195,9 +197,15 @@ public class IssueClusterer {
                 int entityOverlap = intersectionSize(
                         entities.get(first.articleId()), entities.get(second.articleId()));
                 double hoursApart = hoursApart(first.eventTime(), second.eventTime());
-                boolean matches = jaccard >= properties.getTitleJaccardThreshold()
-                        || (entityOverlap >= properties.getEntityOverlapThreshold()
-                        && hoursApart <= properties.getEntityTimeWindow().toHours());
+                boolean breakingPair = breakingNewsDetector.isBreaking(first)
+                        || breakingNewsDetector.isBreaking(second);
+                boolean titleMatches = jaccard >= properties.getTitleJaccardThreshold();
+                boolean enoughEntities = entityOverlap >= properties.getEntityOverlapThreshold();
+                boolean matches = breakingPair
+                        ? within(first.eventTime(), second.eventTime(), properties.getBreakingTimeWindow())
+                        && (titleMatches || enoughEntities)
+                        : titleMatches || (enoughEntities
+                        && within(first.eventTime(), second.eventTime(), properties.getEntityTimeWindow()));
                 if (matches) {
                     union.join(first.articleId(), second.articleId());
                 }
@@ -268,7 +276,8 @@ public class IssueClusterer {
 
     private ClusterArticle representative(Collection<ClusterArticle> articles) {
         return articles.stream().min(Comparator
-                        .comparing((ClusterArticle article) -> !hasSubstantialBody(article))
+                        .comparing(breakingNewsDetector::isBreaking)
+                        .thenComparing(article -> !hasSubstantialBody(article))
                         .thenComparing(ClusterArticle::reliabilityScore,
                                 Comparator.nullsLast(Comparator.reverseOrder()))
                         .thenComparing(ClusterArticle::eventTime,
@@ -310,7 +319,12 @@ public class IssueClusterer {
         if (left == null || right == null) {
             return Double.POSITIVE_INFINITY;
         }
-        return Math.abs(Duration.between(left, right).toMinutes()) / 60.0;
+        return Duration.between(left, right).abs().toMillis() / 3_600_000.0;
+    }
+
+    private boolean within(OffsetDateTime left, OffsetDateTime right, Duration window) {
+        return left != null && right != null
+                && Duration.between(left, right).abs().compareTo(window) <= 0;
     }
 
     private ClusterArticle forTopic(ClusterArticle representative, ClusterArticle proxy) {

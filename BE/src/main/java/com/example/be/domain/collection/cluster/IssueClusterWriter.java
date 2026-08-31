@@ -13,11 +13,17 @@ import com.example.be.domain.issues.entity.IssueStanceSource;
 import com.example.be.domain.issues.entity.IssueStatus;
 import com.example.be.domain.issues.entity.IssueStatusHistory;
 import com.example.be.domain.issues.entity.NewsIssue;
+import com.example.be.domain.issues.entity.NewsWatch;
+import com.example.be.domain.issues.entity.WatchType;
 import com.example.be.domain.issues.repository.ContentGroupRepository;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.IssueRelationRepository;
 import com.example.be.domain.issues.repository.IssueStatusHistoryRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
+import com.example.be.domain.issues.repository.NewsWatchRepository;
+import com.example.be.domain.notifications.entity.WatchAlertDeliveryStatus;
+import com.example.be.domain.notifications.entity.WatchAlertOutbox;
+import com.example.be.domain.notifications.repository.WatchAlertOutboxRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.config.ApiTimeZone;
@@ -27,8 +33,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -41,6 +50,9 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class IssueClusterWriter {
 
+    private static final Duration WATCH_TTL = Duration.ofHours(48);
+    private static final Duration WATCH_COOLDOWN = Duration.ofMinutes(30);
+
     private final ArticleRepository articleRepository;
     private final TopicRepository topicRepository;
     private final ContentGroupRepository contentGroupRepository;
@@ -48,6 +60,9 @@ public class IssueClusterWriter {
     private final IssueArticleRepository issueArticleRepository;
     private final IssueRelationRepository issueRelationRepository;
     private final IssueStatusHistoryRepository statusHistoryRepository;
+    private final NewsWatchRepository watchRepository;
+    private final WatchAlertOutboxRepository watchAlertOutboxRepository;
+    private final BreakingNewsDetector breakingNewsDetector;
 
     @Transactional
     public void write(ClusterPlan plan) {
@@ -106,7 +121,9 @@ public class IssueClusterWriter {
         winner.refreshRepresentative(representative, assignment.simhash());
     }
 
-    private void applyIssue(ClusterPlan.IssueAssignment assignment, Map<Long, Article> articles) {
+    private void applyIssue(ClusterPlan.IssueAssignment assignment,
+                            Map<Long, Article> articles) {
+        LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
         Topic topic = topicRepository.findById(assignment.topicId()).orElseThrow();
         Article representative = requiredArticle(articles, assignment.representativeArticleId());
         NewsIssue issue = assignment.existingIssueId() == null
@@ -123,6 +140,10 @@ public class IssueClusterWriter {
                 .forEach(membership -> membershipByArticle.put(
                         membership.getArticle().getId(), membership));
         mergeIssues(issue, topic, assignment.mergedIssueIds(), membershipByArticle);
+        Set<Long> existingArticleIds = Set.copyOf(membershipByArticle.keySet());
+        List<NewsWatch> eligibleWatches = assignment.existingIssueId() == null
+                ? List.of()
+                : watchRepository.findEligibleBreakingForNotification(issue.getId(), now);
         for (Long articleId : assignment.articleIds()) {
             membershipByArticle.computeIfAbsent(articleId, ignored -> issueArticleRepository.save(
                     IssueArticle.builder()
@@ -132,31 +153,43 @@ public class IssueClusterWriter {
                             .stance(IssueStance.SUPPORTS)
                             .stanceSource(IssueStanceSource.RULE)
                             .stanceConfidence(BigDecimal.ONE)
-                            .joinedAt(LocalDateTime.now(ApiTimeZone.ZONE))
+                            .joinedAt(now)
                             .build()));
         }
         membershipByArticle.values().forEach(membership -> membership.changeRole(
-                membership.getArticle().getId().equals(representative.getId())
-                        ? IssueArticleRole.REPRESENTATIVE
-                        : IssueArticleRole.MEMBER));
+                roleOf(membership.getArticle(), representative)));
 
         List<Article> members = membershipByArticle.values().stream()
                 .map(IssueArticle::getArticle)
                 .toList();
         issue.refresh(
-                representative.getTitle(),
+                issueTitle(representative),
                 firstSeen(members, assignment.firstSeenAt()),
                 lastSeen(members, assignment.lastSeenAt()),
                 members.size(),
                 publisherCount(members),
                 independentContentCount(members),
                 assignment.entities());
+
+        List<Article> newArticles = membershipByArticle.entrySet().stream()
+                .filter(entry -> !existingArticleIds.contains(entry.getKey()))
+                .map(entry -> entry.getValue().getArticle())
+                .toList();
+        if (!newArticles.isEmpty()) {
+            enqueueAlerts(eligibleWatches, issue, members, now);
+        }
+        registerBreakingWatch(issue, newArticles, now);
     }
 
     private void mergeIssues(NewsIssue winner,
                              Topic topic,
                              List<Long> losingIssueIds,
                              Map<Long, IssueArticle> membershipByArticle) {
+        Map<WatchType, NewsWatch> winnerWatches = new LinkedHashMap<>();
+        if (!losingIssueIds.isEmpty()) {
+            watchRepository.findByIssueIdOrderByIdAsc(winner.getId())
+                    .forEach(watch -> winnerWatches.put(watch.getWatchType(), watch));
+        }
         for (Long losingIssueId : losingIssueIds) {
             NewsIssue loser = issueRepository.findById(losingIssueId)
                     .orElseThrow(() -> new IllegalStateException("병합할 이슈가 없습니다. id=" + losingIssueId));
@@ -173,7 +206,101 @@ public class IssueClusterWriter {
                     issueArticleRepository.delete(losingMembership);
                 }
             }
+            mergeWatches(winner, loser, winnerWatches);
             recordIssueMerge(loser, winner);
+        }
+    }
+
+    private void mergeWatches(NewsIssue winner,
+                              NewsIssue loser,
+                              Map<WatchType, NewsWatch> winnerByType) {
+        for (NewsWatch losingWatch : watchRepository.findByIssueIdOrderByIdAsc(loser.getId())) {
+            if (winnerByType.containsKey(losingWatch.getWatchType())) {
+                losingWatch.deactivate();
+            } else {
+                losingWatch.moveToIssue(winner);
+                winnerByType.put(losingWatch.getWatchType(), losingWatch);
+            }
+        }
+    }
+
+    private IssueArticleRole roleOf(Article article, Article representative) {
+        if (isBreaking(article)) {
+            return IssueArticleRole.BREAKING;
+        }
+        return article.getId().equals(representative.getId())
+                ? IssueArticleRole.REPRESENTATIVE
+                : IssueArticleRole.MEMBER;
+    }
+
+    private boolean isBreaking(Article article) {
+        return breakingNewsDetector.hasExplicitMarker(article.getTitle());
+    }
+
+    private String issueTitle(Article representative) {
+        if (!breakingNewsDetector.hasExplicitMarker(representative.getTitle())) {
+            return representative.getTitle();
+        }
+        String coreTitle = breakingNewsDetector.coreTitle(representative.getTitle());
+        return StringUtils.hasText(coreTitle) ? coreTitle : representative.getTitle();
+    }
+
+    private void registerBreakingWatch(NewsIssue issue,
+                                       List<Article> members,
+                                       LocalDateTime now) {
+        if (members.stream().noneMatch(article -> breakingNewsDetector.hasExplicitMarker(article.getTitle()))) {
+            return;
+        }
+        LocalDateTime expiresAt = now.plus(WATCH_TTL);
+        watchRepository.findByIssueIdAndWatchType(issue.getId(), WatchType.BREAKING)
+                .ifPresentOrElse(
+                        watch -> {
+                            if (!watch.isActive() || !watch.getExpiresAt().isAfter(now)) {
+                                watch.renewUntil(expiresAt);
+                            }
+                        },
+                        () -> watchRepository.save(NewsWatch.builder()
+                                .watchType(WatchType.BREAKING)
+                                .issue(issue)
+                                .sensitivityAtWatch(issue.getSensitivityScore())
+                                .expiresAt(expiresAt)
+                                .active(true)
+                                .build()));
+    }
+
+    private void enqueueAlerts(List<NewsWatch> watches,
+                               NewsIssue issue,
+                               List<Article> members,
+                               LocalDateTime now) {
+        if (watches.isEmpty()) {
+            return;
+        }
+        OffsetDateTime claimedAt = now.atZone(ApiTimeZone.ZONE).toOffsetDateTime();
+        int followUpCount = Math.max(1, issue.getArticleCount() - 1);
+        Article breakingArticle = members.stream()
+                .filter(article -> breakingNewsDetector.hasExplicitMarker(article.getTitle()))
+                .min(Comparator.comparing(
+                        this::eventTime, Comparator.nullsLast(Comparator.naturalOrder())))
+                .orElse(null);
+        String breakingTitle = breakingArticle == null ? issue.getTitle() : issueTitle(breakingArticle);
+        OffsetDateTime breakingAt = breakingArticle == null || eventTime(breakingArticle) == null
+                ? issue.getFirstSeenAt()
+                : eventTime(breakingArticle);
+        for (NewsWatch watch : watches) {
+            watch.claimUntil(now.plus(WATCH_COOLDOWN));
+            watchAlertOutboxRepository.save(WatchAlertOutbox.builder()
+                    .watch(watch)
+                    .notifyGroupId(watch.getNotifyGroup() == null
+                            ? null
+                            : watch.getNotifyGroup().getId())
+                    .issueTitle(breakingTitle)
+                    .firstSeenAt(breakingAt)
+                    .followUpCount(followUpCount)
+                    .publisherCount(issue.getPublisherCount())
+                    .queuedAt(claimedAt)
+                    .status(WatchAlertDeliveryStatus.PENDING)
+                    .attemptCount(0)
+                    .build());
         }
     }
 
@@ -203,7 +330,7 @@ public class IssueClusterWriter {
                                   Article representative,
                                   ClusterPlan.IssueAssignment assignment) {
         NewsIssue issue = issueRepository.save(NewsIssue.builder()
-                .title(representative.getTitle())
+                .title(issueTitle(representative))
                 .status(IssueStatus.EMERGING)
                 .firstSeenAt(assignment.firstSeenAt())
                 .lastSeenAt(assignment.lastSeenAt())

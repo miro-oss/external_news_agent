@@ -11,6 +11,7 @@ import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -47,7 +48,7 @@ class IssueClusteringLoaderTest {
         CollectionRunArticle observation = CollectionRunArticle.builder()
                 .article(current)
                 .topic(topic)
-                .observedAt(LocalDateTime.of(2026, 8, 10, 10, 0))
+                .observedAt(LocalDateTime.of(2026, 8, 10, 12, 0))
                 .build();
 
         when(observationRepository.findClusterTargetsByRunId(42L)).thenReturn(List.of(observation));
@@ -62,6 +63,38 @@ class IssueClusteringLoaderTest {
         assertFalse(loaded.getFirst().observedInRun());
         assertTrue(loaded.getLast().observedInRun());
         assertEquals(88L, loaded.getLast().existingIssueId());
+        assertEquals(OffsetDateTime.parse("2026-08-10T10:00:00+09:00"),
+                loaded.getLast().observedAt());
+    }
+
+    @Test
+    void historicalWindowUsesSameCollectedAtFallbackAsSnapshotEventTime() {
+        Topic topic = Topic.builder().id(7L).name("HBM").requiredKeywords(List.of("HBM4")).build();
+        Source source = Source.builder().id(9L).name("전자신문").build();
+        Article current = Article.builder()
+                .id(102L)
+                .topic(topic)
+                .source(source)
+                .title("신규")
+                .fetchStatus(FetchStatus.METADATA_ONLY)
+                .collectedAt(LocalDateTime.of(2026, 8, 10, 10, 0))
+                .build();
+        CollectionRunArticle observation = CollectionRunArticle.builder()
+                .article(current)
+                .topic(topic)
+                .observedAt(LocalDateTime.of(2026, 8, 10, 12, 0))
+                .build();
+        when(observationRepository.findClusterTargetsByRunId(42L)).thenReturn(List.of(observation));
+        when(issueArticleRepository.findByArticleIds(java.util.Set.of(102L))).thenReturn(List.of());
+        when(issueArticleRepository.findRecentByTopicIds(eq(java.util.Set.of(7L)), any()))
+                .thenReturn(List.of());
+
+        loader.load(42L);
+
+        ArgumentCaptor<OffsetDateTime> since = ArgumentCaptor.forClass(OffsetDateTime.class);
+        org.mockito.Mockito.verify(issueArticleRepository)
+                .findRecentByTopicIds(eq(java.util.Set.of(7L)), since.capture());
+        assertEquals(OffsetDateTime.parse("2026-08-08T10:00:00+09:00"), since.getValue());
     }
 
     private Article article(Long id, Topic topic, Source source, String title) {
@@ -72,7 +105,7 @@ class IssueClusteringLoaderTest {
                 .title(title)
                 .fetchStatus(FetchStatus.METADATA_ONLY)
                 .publishedAt(OffsetDateTime.parse("2026-08-10T09:00:00+09:00"))
-                .collectedAt(LocalDateTime.of(2026, 8, 10, 9, 0))
+                .collectedAt(LocalDateTime.of(2026, 8, 10, 10, 0))
                 .build();
     }
 }
