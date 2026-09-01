@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useId, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import {
   useLatestReport,
@@ -169,10 +169,14 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
     () => selectFindingsForAudience(report.findings ?? [], audience),
     [audience, report.findings],
   )
-  const filteredFindings = useMemo(
-    () => findings.filter((finding) => !filters.riskLevel || finding.riskLevel === filters.riskLevel),
-    [filters, findings],
-  )
+  const filteredFindings = useMemo(() => {
+    if (filters.riskLevel) {
+      return findings.filter((finding) => finding.riskLevel === filters.riskLevel)
+    }
+    return [...findings].sort(
+      (left, right) => RISK_LEVEL_RANK[right.riskLevel] - RISK_LEVEL_RANK[left.riskLevel],
+    )
+  }, [filters, findings])
   const stats = useMemo(() => summarizeFindings(findings), [findings])
   const evidenceCount = useMemo(() => countEvidenceSentences(report.findings ?? []), [report.findings])
   return (
@@ -214,7 +218,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
             {filteredFindings.length === findings.length
               ? `${findings.length}건`
               : `${filteredFindings.length} / ${findings.length}건`}
-            {' · '}{AUDIENCE_LABELS[audience]} 관점순
+            {' · '}{filters.riskLevel ? '' : '높은 민감도순 · '}{AUDIENCE_LABELS[audience]} 관점순
           </span>
         </div>
         <ReportFindingFilterBar
@@ -298,7 +302,7 @@ function ReportFindingFilterBar({
           ))}
         </select>
       </label>
-      <button type="button" className="secondary-button" disabled={!hasActiveFilters} onClick={onReset}>
+      <button type="button" disabled={!hasActiveFilters} onClick={onReset}>
         전체 보기
       </button>
     </div>
@@ -440,13 +444,32 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
   const perspective = perspectiveFor(finding, audience)
   const title = issueInfo?.title || finding.articleTitle
   const summary = limitText(issueInfo?.summary || finding.summary, 120)
-  const keywords = selectIssueKeywords(issueInfo?.entities ?? [])
   const relatedArticles = issue.data?.articles ?? []
   const visibleRelatedArticles = relatedArticles.slice(0, visibleRelatedCount)
 
+  function toggleOpen() {
+    if (open) setVisibleRelatedCount(RELATED_ARTICLE_BATCH_SIZE)
+    setOpen((current) => !current)
+  }
+
+  function handlePrimaryKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    toggleOpen()
+  }
+
   return (
     <article className="issue-card">
-      <div className="issue-card-primary">
+      <div
+        className="issue-card-primary"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label={`${title} ${open ? '접기' : '자세히 보기'}`}
+        onClick={toggleOpen}
+        onKeyDown={handlePrimaryKeyDown}
+      >
         <div className="issue-card-topline">
           <span className={`signal-dot risk-${finding.riskLevel}`} aria-hidden="true" />
           <span className={`status-pill risk-label-${finding.riskLevel}`}>
@@ -469,23 +492,9 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
                   ? '관련 1건 · 매체 1곳'
                   : '관련 기사 정보는 자세히에서 확인'}
           </span>
-          <div className="issue-keywords" aria-label="이슈 키워드">
-            {keywords.map((keyword) => <span key={keyword}>#{keyword}</span>)}
-            {!issueInfo && issue.isLoading && issueId !== null && <span className="issue-keywords-loading">키워드 확인 중</span>}
-            {!issueInfo && issue.isError && issueId !== null && <span className="issue-keywords-loading">키워드 불러오기 실패</span>}
-          </div>
-          <button
-            type="button"
-            className="issue-detail-toggle"
-            aria-expanded={open}
-            aria-controls={panelId}
-            onClick={() => {
-              if (open) setVisibleRelatedCount(RELATED_ARTICLE_BATCH_SIZE)
-              setOpen((current) => !current)
-            }}
-          >
+          <span className="issue-detail-toggle" aria-hidden="true">
             {open ? '접기' : '자세히'} <span aria-hidden="true">{open ? '▴' : '▾'}</span>
-          </button>
+          </span>
         </div>
       </div>
 
@@ -705,6 +714,12 @@ const PERSPECTIVE_RANK: Record<AudienceRelevance, number> = {
   none: 0,
 }
 
+const RISK_LEVEL_RANK: Record<RiskLevel, number> = {
+  high: 3,
+  medium: 2,
+  low: 1,
+}
+
 function sortFindingsForAudience(findings: ReportFinding[], audience: Audience) {
   return findings
     .map((finding, index) => ({ finding, index }))
@@ -763,22 +778,7 @@ function limitText(value: string, limit: number) {
   return normalized.length <= limit ? normalized : `${normalized.slice(0, limit - 1).trimEnd()}…`
 }
 
-function unique(values: string[]) {
-  return [...new Set(values.filter((value) => value.trim().length > 0))]
-}
-
 const RELATED_ARTICLE_BATCH_SIZE = 8
-
-function selectIssueKeywords(values: string[]) {
-  return unique(values)
-    .filter((value) => !/^[A-Z]\d$/i.test(value.trim()))
-    .sort((left, right) => Number(hasHangul(right)) - Number(hasHangul(left)))
-    .slice(0, 4)
-}
-
-function hasHangul(value: string) {
-  return /[가-힣]/.test(value)
-}
 
 /** 서버가 만든 마크다운을 HTML 주입 없이 표준 문법으로 렌더링한다. */
 function MarkdownBody({ markdown }: { markdown: string }) {

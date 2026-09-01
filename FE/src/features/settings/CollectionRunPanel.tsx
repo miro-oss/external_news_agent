@@ -141,6 +141,8 @@ export function CollectionRunPanel() {
         )}
       </div>
 
+      <DefaultAudienceSetting />
+
       <button className="collection-run-button" type="button" onClick={runNow} disabled={!canRun}>
         {startRun.isPending
           ? '실행 요청 중…'
@@ -152,8 +154,6 @@ export function CollectionRunPanel() {
           ? `실행 #${startRun.data.runId}을 ${startRun.data.llmPlan} 플랜으로 시작했습니다.`
           : null}
       />
-
-      <DefaultAudienceSetting />
     </section>
   )
 }

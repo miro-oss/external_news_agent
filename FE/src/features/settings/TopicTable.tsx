@@ -50,24 +50,24 @@ export function TopicTable() {
       <table className="topic-table">
         <colgroup>
           <col className="topic-name-column" />
-          <col className="topic-status-column" />
-          <col className="topic-collected-column" />
           <col className="topic-query-column" />
           <col className="topic-required-column" />
           <col className="topic-optional-column" />
           <col className="topic-excluded-column" />
           <col className="topic-interval-column" />
+          <col className="topic-collected-column" />
+          <col className="topic-status-column" />
         </colgroup>
         <thead>
           <tr>
             <th>주제</th>
-            <th>상태</th>
-            <th>마지막 수집</th>
             <th>검색어</th>
             <th title="모두 포함되어야 하는 AND 조건입니다.">필수 키워드</th>
             <th title="하나라도 포함되면 통과하는 OR 조건입니다.">선택 키워드</th>
             <th title="하나라도 포함되면 제외하는 NOT 조건입니다.">제외 키워드</th>
             <th title="새로운 기사를 다시 확인하는 주기입니다.">수집 주기</th>
+            <th>마지막 수집</th>
+            <th>상태</th>
           </tr>
         </thead>
         <tbody>
@@ -82,17 +82,17 @@ export function TopicTable() {
                   {topic.name}
                 </strong>
               </td>
-              <td>
-                <span className={topic.active ? 'dot-on' : 'dot-off'}>
-                  {topic.active ? '활성' : '비활성'}
-                </span>
-              </td>
-              <td>{formatCollectedAt(topic.lastCollectedAt)}</td>
               <td>{topic.queryText ?? '—'}</td>
               <td>{formatKeywords(topic.requiredKeywords)}</td>
               <td>{formatKeywords(topic.optionalKeywords)}</td>
               <td>{formatKeywords(topic.excludedKeywords)}</td>
               <td>{formatInterval(topic.intervalMinutes)}</td>
+              <td>{formatCollectedAt(topic.lastCollectedAt)}</td>
+              <td>
+                <span className={topic.active ? 'dot-on' : 'dot-off'}>
+                  {topic.active ? '활성' : '비활성'}
+                </span>
+              </td>
             </tr>
           ))}
         </tbody>

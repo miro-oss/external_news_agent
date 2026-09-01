@@ -754,10 +754,7 @@ tbody tr:hover td {
   background: var(--surface-sunken);
 }
 
-/*
-  주제명 길이가 표 전체의 열 너비를 결정하지 않게 한다. 요약 정보인 상태·마지막 수집을 주제 바로
-  뒤에 고정 폭으로 두고, 긴 이름만 셀 안에서 좌우로 움직여 전체를 확인한다.
-*/
+/* 주제명 길이가 표 전체의 열 너비를 결정하지 않게 하고, 긴 이름만 셀 안에서 좌우로 확인한다. */
 .topic-table {
   min-width: 1040px;
   table-layout: fixed;
@@ -2478,6 +2475,17 @@ body.modal-open {
 
 .issue-card-primary {
   padding: 1.25rem;
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+
+.issue-card-primary:hover {
+  background: var(--surface-sunken);
+}
+
+.issue-card-primary:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--primary) 38%, transparent);
 }
 
 .issue-card-topline {
@@ -2524,41 +2532,12 @@ body.modal-open {
   white-space: nowrap;
 }
 
-.issue-keywords {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-}
-
-.issue-keywords span {
-  padding: 0.15rem 0.42rem;
-  border-radius: 999px;
-  background: var(--primary-weak);
-  color: var(--primary-strong);
-  font-size: 0.7rem;
-  font-weight: 650;
-}
-
-.issue-keywords .issue-keywords-loading {
-  background: var(--line-soft);
-  color: var(--fg-3);
-  font-weight: 500;
-}
-
 .issue-detail-toggle {
   margin-left: auto;
   padding: 0.25rem 0;
-  background: transparent;
   color: var(--primary);
   font-size: 0.78rem;
   font-weight: 700;
-}
-
-.issue-detail-toggle:hover:not(:disabled) {
-  background: transparent;
-  color: var(--primary-strong);
 }
 
 .issue-card-details {
