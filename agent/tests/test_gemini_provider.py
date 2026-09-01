@@ -40,7 +40,13 @@ def test_uses_gemini_json_schema_contract() -> None:
         response_schema={
             "type": "object",
             "additionalProperties": False,
-            "properties": {"name": {"type": "string", "minLength": 1}},
+            "properties": {
+                "name": {"type": "string", "minLength": 1},
+                "attributedTo": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
+                    "default": None,
+                },
+            },
         },
     )
 
@@ -48,6 +54,7 @@ def test_uses_gemini_json_schema_contract() -> None:
     assert models.config.response_mime_type == "application/json"
     assert models.config.response_json_schema["additionalProperties"] is False
     assert "minLength" not in models.config.response_json_schema["properties"]["name"]
+    assert "default" not in models.config.response_json_schema["properties"]["attributedTo"]
     assert models.config.automatic_function_calling.disable is True
     assert models.config.temperature == 0
     assert response.usage.input_tokens == 12

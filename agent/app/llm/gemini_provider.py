@@ -15,7 +15,7 @@ from app.llm.base import ProviderResponse, ProviderUsage
 
 logger = logging.getLogger(__name__)
 
-_UNSUPPORTED_SCHEMA_KEYS = frozenset({"maxLength", "minLength", "pattern"})
+_UNSUPPORTED_SCHEMA_KEYS = frozenset({"default", "maxLength", "minLength", "pattern"})
 _RETRY_DELAY = re.compile(r"^\s*(\d+(?:\.\d+)?)s\s*$")
 
 
