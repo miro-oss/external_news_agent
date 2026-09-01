@@ -193,7 +193,12 @@ function DefaultAudienceSetting() {
       </div>
       <div className="field">
         <label htmlFor="default-audience">기본 관점</label>
-        <select id="default-audience" name="audience" defaultValue={audience}>
+        <select
+          id="default-audience"
+          name="audience"
+          defaultValue={audience}
+          disabled={updateAudience.isPending}
+        >
           {AUDIENCES.map((value) => (
             <option value={value} key={value}>{AUDIENCE_LABELS[value]}</option>
           ))}
