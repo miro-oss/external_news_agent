@@ -23,6 +23,8 @@ import java.util.stream.Collectors;
 public class IssueClusterer {
 
     private static final OffsetDateTime UNKNOWN_EVENT_TIME = OffsetDateTime.parse("1970-01-01T00:00:00Z");
+    /** 기사 한 쌍에만 나타나는 엔티티(문서빈도 2)는 사건 신호이므로 흔한 주제 어휘로 보지 않는다. */
+    private static final int MIN_COMMON_ENTITY_DOCUMENT_FREQUENCY = 3;
 
     private final IssueClusteringProperties properties;
     private final BreakingNewsDetector breakingNewsDetector;
@@ -337,7 +339,9 @@ public class IssueClusterer {
                 documentFrequency.merge(entity, 1, Integer::sum);
             }
         }
-        int cut = (int) Math.ceil(voting.size() * properties.getCommonEntityDocumentRatio());
+        int cut = Math.max(
+                MIN_COMMON_ENTITY_DOCUMENT_FREQUENCY,
+                (int) Math.ceil(voting.size() * properties.getCommonEntityDocumentRatio()));
         return documentFrequency.entrySet().stream()
                 .filter(entry -> entry.getValue() >= cut)
                 .map(Map.Entry::getKey)

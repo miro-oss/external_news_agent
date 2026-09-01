@@ -67,6 +67,19 @@ class DeterministicEntityExtractorTest {
     }
 
     @Test
+    @DisplayName("숫자로 끝나는 제품 코드는 기자 이메일 ID로 오인하지 않는다")
+    void keepsProductCodesEndingInDigits() {
+        Set<String> entities = extractor.extract(
+                "엔비디아 H100·RTX5090 공급 확대",
+                "차세대 데이터센터와 그래픽카드 물량을 늘린다.",
+                "",
+                List.of());
+
+        assertTrue(entities.contains("H100"));
+        assertTrue(entities.contains("RTX5090"));
+    }
+
+    @Test
     @DisplayName("회사 사전과 주제 키워드는 본문까지 훑는다 — 닫힌 집합이라 안전하다")
     void stillScansBodyForClosedSets() {
         Set<String> entities = extractor.extract(

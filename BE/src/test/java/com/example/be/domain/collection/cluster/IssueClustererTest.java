@@ -324,4 +324,41 @@ class IssueClustererTest {
 
         assertEquals(1, plan.issues().size());
     }
+
+    /** 최소 표본 20건에서도 한 쌍만 공유하는 엔티티는 흔한 주제 어휘로 제거하지 않는다. */
+    @Test
+    void keepsPairOnlyEntitiesAtMinimumDocumentFrequencySample() {
+        List<String> unrelatedTitles = List.of(
+                "롯데 주력 계열사 영업익 일제 반등", "노란봉투법 해석지침 보완 임박",
+                "대한화섬 고성능 섬유 상업 생산 개시", "7월 산업생산 제자리걸음",
+                "가톨릭관동대 피지컬 포럼 개최", "유럽증시 무력충돌 여파로 하락",
+                "네이버 컬리 거래액 1년 새 급증", "넥슨 신작 게임 출시일 확정",
+                "조선업 수주 잔량 역대 최대", "은행권 가계대출 증가폭 둔화",
+                "제주 항공편 결항 속출", "전기차 보조금 지급 기준 개편",
+                "프로야구 관중 신기록 경신", "서울 아파트 전세가율 상승",
+                "농산물 도매가격 급등세", "해운 운임 지수 반락",
+                "철강 수출 관세 협상 난항", "바이오 위탁생산 계약 체결");
+        List<ClusterArticle> articles = new java.util.ArrayList<>();
+        articles.add(article(
+                1L, "오로라 가속기 MI300X CDNA4 공급 계약",
+                null, FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0)));
+        articles.add(article(
+                2L, "데이터센터 MI300X CDNA4 생산 일정 공개",
+                null, FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(1)));
+        for (int index = 0; index < unrelatedTitles.size(); index++) {
+            articles.add(article(
+                    index + 3L, unrelatedTitles.get(index), null,
+                    FetchStatus.METADATA_ONLY, "매체" + index, "0.8", hour(index + 2)));
+        }
+
+        ClusterPlan plan = clusterer.cluster(articles, true);
+
+        assertEquals(19, plan.issues().size(), "관련 기사 한 쌍만 합쳐져야 한다");
+        ClusterPlan.PairScore relatedPair = plan.pairScores().stream()
+                .filter(score -> score.leftArticleId() == 1L && score.rightArticleId() == 2L)
+                .findFirst()
+                .orElseThrow();
+        assertEquals(2, relatedPair.entityOverlap());
+        assertTrue(relatedPair.sameCluster());
+    }
 }

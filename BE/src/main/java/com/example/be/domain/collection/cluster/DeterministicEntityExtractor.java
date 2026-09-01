@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
  * 닫힌 집합이라 본문까지 훑어도 안전하다. 대문자·제품코드 패턴은 열린 집합이라 위치에 따라 가른다.
  *
  * <ul>
- *   <li><b>제목·요약</b> — 기자가 사건을 가리키려고 고른 말이다. 길이·일반어·기자ID 규칙만 건다
+ *   <li><b>제목·요약</b> — 기자가 사건을 가리키려고 고른 말이다. 길이·일반어·이메일 규칙만 건다
  *   <li><b>본문</b> — 바이라인·광고·저작권 문구가 섞인다. 위 규칙에 더해
  *       <b>숫자를 포함한 토큰만</b> 받는다. {@code HBM4}·{@code DDR5}·{@code M15X}처럼
  *       제품·팹 코드는 통과하고 {@code CEO}·{@code IT}·{@code BBQ}·{@code ADVERTISEMENT}는 떨어진다
@@ -56,9 +56,6 @@ public final class DeterministicEntityExtractor {
             "PREMIUM", "EXCLUSIVE", "INTERVIEW", "REPORT", "PRESS", "TECH", "LIVE");
     private static final Pattern TECHNICAL_ANCHOR = Pattern.compile(
             "(?<![A-Za-z0-9])(?:[A-Z]{2,}[A-Z0-9-]*|[A-Za-z]+[0-9][A-Za-z0-9-]*)(?![A-Za-z0-9])");
-    /** 기자 이메일 ID 형태. 영문 뒤에 숫자만 붙고 끝나면 사건 식별자가 아니다 (HONG1987, JUDY6956). */
-    private static final Pattern REPORTER_ID = Pattern.compile("^[A-Z]+[0-9]{2,}$");
-
     public Set<String> extract(String title,
                                String summary,
                                String body,
@@ -104,11 +101,21 @@ public final class DeterministicEntityExtractor {
         Matcher anchor = TECHNICAL_ANCHOR.matcher(source);
         while (anchor.find() && anchors < MAX_ANCHORS_PER_ARTICLE) {
             String value = anchor.group().toUpperCase(Locale.ROOT);
-            if (isUsableAnchor(value, requireDigit) && entities.add(value)) {
+            if (!isEmailLocalPart(source, anchor)
+                    && isUsableAnchor(value, requireDigit)
+                    && entities.add(value)) {
                 anchors++;
             }
         }
         return anchors;
+    }
+
+    /**
+     * 기자 ID는 제품 코드와 같은 {@code 영문+숫자} 형태일 수 있으므로 값만 보고 제외하지 않는다.
+     * 실제 이메일의 {@code @} 바로 앞에서 발견된 앵커만 사용자명으로 판정한다.
+     */
+    private static boolean isEmailLocalPart(String source, Matcher anchor) {
+        return anchor.end() < source.length() && source.charAt(anchor.end()) == '@';
     }
 
     /** 사건을 가를 수 있는 앵커만 통과시킨다. 판정 순서는 싼 것부터다. */
@@ -116,7 +123,6 @@ public final class DeterministicEntityExtractor {
         return value.length() >= MIN_ANCHOR_LENGTH
                 && !BROAD_TECHNICAL_ANCHORS.contains(value)
                 && !GENERIC_ANCHORS.contains(value)
-                && !REPORTER_ID.matcher(value).matches()
                 && (!requireDigit || containsDigit(value));
     }
 
