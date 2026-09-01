@@ -141,7 +141,7 @@ class AgentAnalysisOrchestratorTest {
 
         AnalysisResult result = orchestrator.analyze(context);
 
-        assertEquals("자기 검증을 반영한 한국어 요약입니다.", result.summary());
+        assertEquals("최초 근거 검증을 마친 한국어 요약입니다.", result.summary());
         assertEquals("검토된 핵심 주장", result.keyPoints().getFirst().text());
         ArgumentCaptor<AgentAnalyzeRequest> requestCaptor =
                 ArgumentCaptor.forClass(AgentAnalyzeRequest.class);
@@ -182,7 +182,7 @@ class AgentAnalysisOrchestratorTest {
 
         AnalysisResult result = orchestrator.analyze(context);
 
-        assertEquals("한국어 요약", result.summary());
+        assertEquals("최초 근거 검증을 마친 한국어 요약입니다.", result.summary());
         assertEquals("핵심 주장", result.keyPoints().getFirst().text());
         verify(recorder).recordSelfCritiqueFailure(
                 eq(42L), eq(88L), any(), eq("PROVIDER_UNAVAILABLE"),
@@ -192,6 +192,41 @@ class AgentAnalysisOrchestratorTest {
                 com.example.be.domain.collection.entity.CollectionRunWarning
                         .CODE_LLM_SELF_CRITIQUE_FAILED,
                 "자기 검증 실패로 최초 검증 결과를 유지했습니다. code=PROVIDER_UNAVAILABLE");
+    }
+
+    @Test
+    void rejectsUnverifiedSelfCritiqueSummaryAndKeepsVerifiedDraft() {
+        Article representative = article();
+        Article member = issueMember(representative, 11L, "같은 이슈 기사", "같은 결론");
+        AnalysisContext context = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, member)),
+                true);
+        QuotaReservation reservation = new QuotaReservation(
+                3L,
+                42L,
+                "run:42:issue:88:self-critique",
+                AgentTask.SELF_CRITIQUE,
+                AgentPlan.FREE,
+                BigDecimal.ONE);
+        when(quotaService.reserve(
+                42L,
+                "run:42:issue:88:self-critique",
+                AgentTask.SELF_CRITIQUE,
+                AgentPlan.FREE)).thenReturn(reservation);
+        when(client.analyze(any())).thenReturn(highRiskIssueResponse());
+        when(client.selfCritique(any())).thenReturn(
+                selfCritiqueResponse("검증되지 않은 교체 요약입니다."));
+
+        AnalysisResult result = orchestrator.analyze(context);
+
+        assertEquals("최초 근거 검증을 마친 한국어 요약입니다.", result.summary());
+        assertEquals("핵심 주장", result.keyPoints().getFirst().text());
+        verify(recorder).recordSelfCritiqueFailure(
+                eq(42L), eq(88L), any(), eq("SCHEMA_VIOLATION"),
+                any(), any(), any(), any(LocalDateTime.class));
     }
 
     @Test
@@ -787,7 +822,7 @@ class AgentAnalysisOrchestratorTest {
         return new AgentAnalyzeResponse(
                 source.sentences(),
                 source.sections(),
-                source.summaryKo(),
+                "최초 근거 검증을 마친 한국어 요약입니다.",
                 new AgentAnalyzeResponse.Classification(
                         source.classification().intent(),
                         source.classification().sentiment(),
@@ -804,6 +839,10 @@ class AgentAnalysisOrchestratorTest {
     }
 
     private static AgentSelfCritiqueResponse selfCritiqueResponse() {
+        return selfCritiqueResponse("최초 근거 검증을 마친 한국어 요약입니다.");
+    }
+
+    private static AgentSelfCritiqueResponse selfCritiqueResponse(String summary) {
         return new AgentSelfCritiqueResponse(
                 List.of(new AgentSelfCritiqueResponse.Section(
                         "핵심",
@@ -815,7 +854,7 @@ class AgentAnalysisOrchestratorTest {
                                 "원문 문장에서 직접 확인됩니다.",
                                 "FACT",
                                 null)))),
-                "자기 검증을 반영한 한국어 요약입니다.",
+                summary,
                 1,
                 1,
                 List.of("원문보다 강한 표현"),

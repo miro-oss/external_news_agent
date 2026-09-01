@@ -109,13 +109,10 @@ class ArticleSelfCritiqueService:
         output = result.output
         revised = _safe_revision(output.revision, bullet, sentences)
         sections = _replace_target(previous.sections, claim_id, revised)
-        changed = (
-            revised != ReviewedBullet.model_validate(bullet.model_dump())
-            or output.summary_ko != previous.summary_ko
-        )
+        changed = revised != ReviewedBullet.model_validate(bullet.model_dump())
         return SelfCritiqueResponse(
             sections=sections,
-            summary_ko=output.summary_ko,
+            summary_ko=previous.summary_ko,
             target_claim_count=1,
             revised_claim_count=1 if changed else 0,
             unsupported_expressions=output.unsupported_expressions,
@@ -202,6 +199,7 @@ def _validated_output(
         or revision.evidence_sentence_ids != original.evidence_sentence_ids
         or revision.groundedness != original.groundedness
         or revision.confidence != original.confidence
+        or revision.grounding_reason != original.grounding_reason
     ):
         raise ValueError("KEEP 결과는 기존 주장 값을 바꿀 수 없습니다.")
     return output

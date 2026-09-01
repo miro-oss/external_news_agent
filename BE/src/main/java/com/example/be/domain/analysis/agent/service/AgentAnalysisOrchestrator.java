@@ -351,14 +351,15 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             sections.add(new FindingAnalysisSection(originalSection.heading(), bullets));
         }
         boolean summaryChanged = !response.summaryKo().trim().equals(original.summary());
-        if (changedBullets > 1
-                || (response.revisedClaimCount() == 0 && (changedBullets > 0 || summaryChanged))
-                || (response.revisedClaimCount() == 1 && changedBullets == 0 && !summaryChanged)) {
+        if (summaryChanged
+                || changedBullets > 1
+                || (response.revisedClaimCount() == 0 && changedBullets > 0)
+                || (response.revisedClaimCount() == 1 && changedBullets == 0)) {
             throw schemaViolation("Agent 자기 검증은 대상 주장 한 건만 수정할 수 있습니다.");
         }
         return withSelfCritique(
                 original,
-                response.summaryKo().trim(),
+                original.summary(),
                 List.copyOf(sections));
     }
 

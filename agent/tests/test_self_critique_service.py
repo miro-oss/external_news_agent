@@ -1,6 +1,9 @@
 import json
 
+import pytest
+
 from app.core.config import Settings
+from app.core.errors import AgentError
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.self_critique_service import ArticleSelfCritiqueService
 from app.schemas.analyze import AnalyzeRequest
@@ -106,7 +109,37 @@ def test_revises_one_weak_modality_claim_with_one_provider_call() -> None:
     assert response.target_claim_count == 1
     assert response.revised_claim_count == 1
     assert response.sections[0].bullets[0].text == "A사는 투자를 발표했다."
+    assert response.summary_ko == target.previous_finding.summary_ko
     assert response.meta.prompt_version == "self-critique.ko.v1"
+
+
+def test_rejects_keep_that_changes_grounding_reason() -> None:
+    provider = FakeProvider(
+        {
+            "unsupportedExpressions": [],
+            "summaryKo": "회사의 투자 결정을 다룬 기사입니다.",
+            "revision": {
+                "claimId": "0:0",
+                "action": "KEEP",
+                "text": "A사는 투자를 승인했다.",
+                "evidenceSentenceIds": [1],
+                "groundedness": "weak",
+                "confidence": 0.6,
+                "groundingReason": "provider가 임의로 바꾼 판정 이유입니다.",
+            },
+        }
+    )
+    target = request(
+        claim="A사는 투자를 승인했다.",
+        evidence="A사는 투자를 발표했다.",
+    )
+
+    with pytest.raises(AgentError) as error:
+        ArticleSelfCritiqueService(
+            Settings(AGENT_MOCK=False), provider
+        ).critique(target)
+
+    assert error.value.code == "SCHEMA_VIOLATION"
 
 
 def test_skips_provider_when_decisive_rule_already_confirms_claim() -> None:

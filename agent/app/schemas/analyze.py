@@ -277,6 +277,12 @@ class SelfCritiqueResponse(AgentModel):
     )
     meta: "ResponseMeta"
 
+    @model_validator(mode="after")
+    def validate_claim_counts(self) -> "SelfCritiqueResponse":
+        if self.revised_claim_count > self.target_claim_count:
+            raise ValueError("revisedClaimCount는 targetClaimCount를 초과할 수 없습니다.")
+        return self
+
 
 class MemberStance(AgentModel):
     article_id: int = Field(gt=0)

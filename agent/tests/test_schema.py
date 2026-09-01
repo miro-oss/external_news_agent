@@ -1,7 +1,12 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.analyze import AnalyzeOutput, AnalyzeRequest, AnalyzeResponse
+from app.schemas.analyze import (
+    AnalyzeOutput,
+    AnalyzeRequest,
+    AnalyzeResponse,
+    SelfCritiqueResponse,
+)
 
 
 def response(evidence_sentence_ids: list[int]) -> dict[str, object]:
@@ -137,5 +142,44 @@ def test_self_critique_requires_typed_previous_finding() -> None:
                 },
                 "topic": {"name": "반도체"},
                 "selfCritique": True,
+            }
+        )
+
+
+def test_self_critique_revised_count_cannot_exceed_target_count() -> None:
+    with pytest.raises(ValidationError):
+        SelfCritiqueResponse.model_validate(
+            {
+                "sections": [
+                    {
+                        "heading": "핵심",
+                        "bullets": [
+                            {
+                                "text": "검토된 주장",
+                                "evidenceSentenceIds": [1],
+                                "groundedness": "grounded",
+                                "confidence": 1,
+                                "groundingReason": "원문에서 직접 확인됩니다.",
+                                "claimType": "FACT",
+                                "attributedTo": None,
+                            }
+                        ],
+                    }
+                ],
+                "summaryKo": "최초 검증을 마친 한국어 요약입니다.",
+                "targetClaimCount": 0,
+                "revisedClaimCount": 1,
+                "unsupportedExpressions": [],
+                "meta": {
+                    "provider": "mock",
+                    "model": "mock",
+                    "promptVersion": "self-critique.mock.v1",
+                    "inputTokens": 0,
+                    "outputTokens": 0,
+                    "costUsd": 0,
+                    "credits": 0,
+                    "mock": True,
+                    "truncated": False,
+                },
             }
         )
