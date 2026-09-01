@@ -132,12 +132,15 @@ class GeminiAnalyzeProvider:
             self._client.close()
 
 
-def _gemini_schema(value: Any) -> Any:
+def _gemini_schema(value: Any, *, preserve_names: bool = False) -> Any:
     if isinstance(value, dict):
         return {
-            key: _gemini_schema(child)
+            key: _gemini_schema(
+                child,
+                preserve_names=key in {"$defs", "properties"},
+            )
             for key, child in value.items()
-            if key not in _UNSUPPORTED_SCHEMA_KEYS
+            if preserve_names or key not in _UNSUPPORTED_SCHEMA_KEYS
         }
     if isinstance(value, list):
         return [_gemini_schema(child) for child in value]

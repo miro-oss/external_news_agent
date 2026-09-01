@@ -42,6 +42,7 @@ def test_uses_gemini_json_schema_contract() -> None:
             "title": "AnalyzeOutput",
             "additionalProperties": False,
             "properties": {
+                "title": {"type": "string", "title": "Title"},
                 "name": {"type": "string", "minLength": 1, "title": "Name"},
                 "attributedTo": {
                     "anyOf": [{"type": "string"}, {"type": "null"}],
@@ -56,6 +57,9 @@ def test_uses_gemini_json_schema_contract() -> None:
     assert models.config.response_mime_type == "application/json"
     assert "title" not in models.config.response_json_schema
     assert models.config.response_json_schema["additionalProperties"] is False
+    assert models.config.response_json_schema["properties"]["title"] == {
+        "type": "string"
+    }
     assert "minLength" not in models.config.response_json_schema["properties"]["name"]
     assert "title" not in models.config.response_json_schema["properties"]["name"]
     assert "default" not in models.config.response_json_schema["properties"]["attributedTo"]
