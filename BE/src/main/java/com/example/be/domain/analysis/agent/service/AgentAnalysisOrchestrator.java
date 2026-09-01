@@ -7,6 +7,7 @@ import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
+import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
 import com.example.be.domain.analysis.agent.entity.AgentTimeoutPhase;
@@ -55,6 +56,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -142,6 +144,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
 
         recordSuccessSafely(runId, article.getId(), request, response, startedAt);
         completeSuccessSafely(selection.reservation(), response.meta().credits());
+        result = selfCritiqueSafely(context, selection.plan(), result, response.crossSource());
         if (applyIssueComparisonSafely(context, response, memberStances)) {
             promoteConflictCandidateSafely(context, response, memberStances);
         }
@@ -178,6 +181,277 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                         listOrEmpty(topic.getOptionalKeywords()),
                         listOrEmpty(topic.getExcludedKeywords())),
                 null);
+    }
+
+    private AnalysisResult selfCritiqueSafely(AnalysisContext context,
+                                               AgentPlan plan,
+                                               AnalysisResult result,
+                                               AgentAnalyzeResponse.CrossSource crossSource) {
+        if (!context.selfCritiqueEligible()
+                || !context.issue().present()
+                || result.analysisSource() != AnalysisSource.LLM
+                || result.riskLevel() != RiskLevel.HIGH) {
+            return result;
+        }
+
+        String idempotencyKey = "run:" + context.runId()
+                + ":issue:" + context.issue().issueId() + ":self-critique";
+        QuotaReservation reservation;
+        try {
+            reservation = quotaService.reserve(
+                    context.runId(), idempotencyKey, AgentTask.SELF_CRITIQUE, plan);
+        } catch (QuotaExceededException exception) {
+            addAgentWarning(
+                    context.runId(),
+                    CollectionRunWarning.CODE_LLM_SELF_CRITIQUE_FAILED,
+                    "자기 검증 quota가 부족해 최초 검증 결과를 유지했습니다.");
+            return result;
+        } catch (RuntimeException exception) {
+            addAgentWarning(
+                    context.runId(),
+                    CollectionRunWarning.CODE_LLM_SELF_CRITIQUE_FAILED,
+                    "자기 검증 quota 예약 실패로 최초 검증 결과를 유지했습니다.");
+            log.warn("자기 검증 quota 예약에 실패했다. runId={} issueId={} error={}",
+                    context.runId(), context.issue().issueId(), exception.getMessage(), exception);
+            return result;
+        }
+
+        AgentAnalyzeRequest request;
+        try {
+            request = selfCritiqueRequest(context, plan, idempotencyKey, result, crossSource);
+        } catch (RuntimeException exception) {
+            completeFailureSafely(reservation, null, "SCHEMA_VIOLATION");
+            addAgentWarning(
+                    context.runId(),
+                    CollectionRunWarning.CODE_LLM_SELF_CRITIQUE_FAILED,
+                    "자기 검증 요청 구성 실패로 최초 검증 결과를 유지했습니다.");
+            return result;
+        }
+        LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
+        try {
+            AgentSelfCritiqueResponse response = client.selfCritique(request);
+            AnalysisResult revised = toSelfCritiquedResult(result, response);
+            recordSelfCritiqueSuccessSafely(
+                    context.runId(), context.issue().issueId(), request, response, startedAt);
+            completeSuccessSafely(
+                    reservation,
+                    response.meta().credits(),
+                    selfCritiqueProviderInvoked(response.meta()));
+            return revised;
+        } catch (RuntimeException exception) {
+            AgentClientException clientException = exception instanceof AgentClientException value
+                    ? value
+                    : null;
+            String code = clientException == null ? "SCHEMA_VIOLATION" : clientException.getCode();
+            recordSelfCritiqueFailureSafely(
+                    context.runId(),
+                    context.issue().issueId(),
+                    request,
+                    code,
+                    exception.getMessage(),
+                    failureUsage(clientException, reservation),
+                    timeoutPhase(clientException),
+                    startedAt);
+            completeFailureSafely(reservation, clientException, code);
+            addAgentWarning(
+                    context.runId(),
+                    CollectionRunWarning.CODE_LLM_SELF_CRITIQUE_FAILED,
+                    "자기 검증 실패로 최초 검증 결과를 유지했습니다. code=" + code);
+            log.warn("자기 검증에 실패해 최초 검증 결과를 유지한다. runId={} issueId={} code={} error={}",
+                    context.runId(), context.issue().issueId(), code, exception.getMessage());
+            return result;
+        }
+    }
+
+    private AgentAnalyzeRequest selfCritiqueRequest(
+            AnalysisContext context,
+            AgentPlan plan,
+            String idempotencyKey,
+            AnalysisResult result,
+            AgentAnalyzeResponse.CrossSource crossSource) {
+        AgentAnalyzeRequest base = request(context, plan, idempotencyKey);
+        AgentAnalyzeRequest.PreviousFindingPayload previous =
+                new AgentAnalyzeRequest.PreviousFindingPayload(
+                        result.summary(),
+                        result.riskLevel().toApiValue(),
+                        result.analysisSections().stream()
+                                .map(section -> new AgentAnalyzeRequest.PreviousSectionPayload(
+                                        section.heading(),
+                                        section.bullets().stream()
+                                                .map(this::toPreviousBullet)
+                                                .toList()))
+                                .toList(),
+                        crossSource);
+        return new AgentAnalyzeRequest(
+                base.idempotencyKey(),
+                base.plan(),
+                base.article(),
+                base.issueMembers(),
+                base.topic(),
+                previous,
+                true);
+    }
+
+    private AgentAnalyzeRequest.PreviousBulletPayload toPreviousBullet(
+            FindingAnalysisBullet bullet) {
+        return new AgentAnalyzeRequest.PreviousBulletPayload(
+                bullet.text(),
+                bullet.evidence().stream().map(index -> index + 1).toList(),
+                bullet.groundedness(),
+                bullet.confidence(),
+                bullet.groundingReason(),
+                bullet.claimType(),
+                bullet.attributedTo());
+    }
+
+    private AnalysisResult toSelfCritiquedResult(AnalysisResult original,
+                                                 AgentSelfCritiqueResponse response) {
+        if (response == null || response.sections() == null || response.meta() == null
+                || !StringUtils.hasText(response.summaryKo())
+                || response.summaryKo().length() < 10 || response.summaryKo().length() > 120
+                || response.targetClaimCount() == null
+                || response.revisedClaimCount() == null
+                || response.targetClaimCount() < 0 || response.targetClaimCount() > 1
+                || response.revisedClaimCount() < 0
+                || response.revisedClaimCount() > response.targetClaimCount()
+                || response.unsupportedExpressions() == null
+                || response.unsupportedExpressions().size() > 3
+                || response.unsupportedExpressions().stream()
+                .anyMatch(value -> !StringUtils.hasText(value) || value.length() > 500)) {
+            throw schemaViolation("Agent 자기 검증 응답의 필수 필드가 올바르지 않습니다.");
+        }
+        validateSelfCritiqueMeta(response.meta());
+        if (response.sections().size() != original.analysisSections().size()) {
+            throw schemaViolation("Agent 자기 검증 section 수가 기존 결과와 다릅니다.");
+        }
+
+        int changedBullets = 0;
+        List<FindingAnalysisSection> sections = new ArrayList<>();
+        for (int sectionIndex = 0; sectionIndex < response.sections().size(); sectionIndex++) {
+            AgentSelfCritiqueResponse.Section responseSection = response.sections().get(sectionIndex);
+            FindingAnalysisSection originalSection = original.analysisSections().get(sectionIndex);
+            if (responseSection == null
+                    || !originalSection.heading().equals(responseSection.heading())
+                    || responseSection.bullets() == null
+                    || responseSection.bullets().size() != originalSection.bullets().size()) {
+                throw schemaViolation("Agent 자기 검증 section 계약이 기존 결과와 다릅니다.");
+            }
+            List<FindingAnalysisBullet> bullets = new ArrayList<>();
+            for (int bulletIndex = 0; bulletIndex < responseSection.bullets().size(); bulletIndex++) {
+                FindingAnalysisBullet originalBullet = originalSection.bullets().get(bulletIndex);
+                FindingAnalysisBullet bullet = toSelfCritiquedBullet(
+                        responseSection.bullets().get(bulletIndex),
+                        originalBullet,
+                        original.sections().size());
+                if (!bullet.equals(originalBullet)) {
+                    changedBullets++;
+                }
+                bullets.add(bullet);
+            }
+            sections.add(new FindingAnalysisSection(originalSection.heading(), bullets));
+        }
+        boolean summaryChanged = !response.summaryKo().trim().equals(original.summary());
+        if (changedBullets > 1
+                || (response.revisedClaimCount() == 0 && (changedBullets > 0 || summaryChanged))
+                || (response.revisedClaimCount() == 1 && changedBullets == 0 && !summaryChanged)) {
+            throw schemaViolation("Agent 자기 검증은 대상 주장 한 건만 수정할 수 있습니다.");
+        }
+        return withSelfCritique(
+                original,
+                response.summaryKo().trim(),
+                List.copyOf(sections));
+    }
+
+    private FindingAnalysisBullet toSelfCritiquedBullet(
+            AgentSelfCritiqueResponse.Bullet response,
+            FindingAnalysisBullet original,
+            int sentenceCount) {
+        if (response == null || !StringUtils.hasText(response.text())
+                || response.text().length() > 80
+                || response.evidenceSentenceIds() == null
+                || !GROUNDEDNESS_VALUES.contains(response.groundedness())
+                || response.confidence() == null
+                || response.confidence().signum() < 0
+                || response.confidence().compareTo(BigDecimal.ONE) > 0
+                || !StringUtils.hasText(response.groundingReason())
+                || response.groundingReason().length() > 1000
+                || !original.claimType().equals(response.claimType())
+                || !Objects.equals(original.attributedTo(), response.attributedTo())) {
+            throw schemaViolation("Agent 자기 검증 bullet 계약이 올바르지 않습니다.");
+        }
+        boolean unsupported = "ungrounded".equals(response.groundedness());
+        if (response.evidenceSentenceIds().size()
+                != new HashSet<>(response.evidenceSentenceIds()).size()
+                || (unsupported && !response.evidenceSentenceIds().isEmpty())
+                || (!unsupported && response.evidenceSentenceIds().isEmpty())
+                || (unsupported && response.confidence().signum() != 0)) {
+            throw schemaViolation("Agent 자기 검증 evidence 계약이 올바르지 않습니다.");
+        }
+        List<Integer> publicEvidence = toPublicEvidenceIndexes(
+                response.evidenceSentenceIds(), sentenceCount);
+        if (!original.evidence().containsAll(publicEvidence)) {
+            throw schemaViolation("Agent 자기 검증은 새로운 근거 문장을 추가할 수 없습니다.");
+        }
+        return new FindingAnalysisBullet(
+                response.text().trim(),
+                publicEvidence,
+                response.groundedness(),
+                response.confidence(),
+                response.groundingReason().trim(),
+                response.claimType(),
+                response.attributedTo());
+    }
+
+    private AnalysisResult withSelfCritique(AnalysisResult original,
+                                            String summary,
+                                            List<FindingAnalysisSection> sections) {
+        List<FindingKeyPoint> keyPoints = sections.stream()
+                .flatMap(section -> section.bullets().stream())
+                .map(bullet -> new FindingKeyPoint(
+                        bullet.text(),
+                        bullet.evidence(),
+                        bullet.groundedness(),
+                        bullet.groundingReason(),
+                        bullet.claimType(),
+                        bullet.attributedTo()))
+                .toList();
+        return new AnalysisResult(
+                summary,
+                keyPoints,
+                original.intent(),
+                original.sentiment(),
+                original.riskLevel(),
+                original.relevance(),
+                original.category(),
+                original.sections(),
+                original.analysisSource(),
+                sections,
+                original.entities(),
+                original.perspectiveTags(),
+                original.metadata());
+    }
+
+    private void validateSelfCritiqueMeta(AgentAnalyzeResponse.Meta meta) {
+        if (!StringUtils.hasText(meta.provider())
+                || !StringUtils.hasText(meta.model())
+                || !StringUtils.hasText(meta.promptVersion())
+                || isNegative(meta.inputTokens())
+                || isNegative(meta.outputTokens())
+                || isNegative(meta.costUsd())
+                || isNegative(meta.credits())) {
+            throw schemaViolation("Agent 자기 검증 meta가 올바르지 않습니다.");
+        }
+        if (!selfCritiqueProviderInvoked(meta)
+                && (meta.inputTokens() != 0L
+                || meta.outputTokens() != 0L
+                || meta.costUsd().compareTo(BigDecimal.ZERO) != 0
+                || meta.credits().compareTo(BigDecimal.ZERO) != 0)) {
+            throw schemaViolation("Agent provider 미호출 자기 검증 meta가 올바르지 않습니다.");
+        }
+    }
+
+    private boolean selfCritiqueProviderInvoked(AgentAnalyzeResponse.Meta meta) {
+        return !meta.mock() && !meta.promptVersion().startsWith("self-critique.rules.");
     }
 
     private List<Article> issueMembers(AnalysisContext context) {
@@ -1041,6 +1315,40 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
             log.error("실패한 Agent 근거 검증의 감사 로그를 기록하지 못했다. "
                             + "runId={} articleId={} code={}",
                     runId, articleId, code, exception);
+        }
+    }
+
+    private void recordSelfCritiqueSuccessSafely(
+            Long runId,
+            Long issueId,
+            AgentAnalyzeRequest request,
+            AgentSelfCritiqueResponse response,
+            LocalDateTime startedAt) {
+        try {
+            recorder.recordSelfCritiqueSuccess(runId, issueId, request, response, startedAt);
+        } catch (RuntimeException exception) {
+            log.error("성공한 Agent 자기 검증 감사 로그를 기록하지 못했다. "
+                            + "runId={} issueId={}",
+                    runId, issueId, exception);
+        }
+    }
+
+    private void recordSelfCritiqueFailureSafely(
+            Long runId,
+            Long issueId,
+            AgentAnalyzeRequest request,
+            String code,
+            String message,
+            AgentClientException.Usage usage,
+            AgentTimeoutPhase timeoutPhase,
+            LocalDateTime startedAt) {
+        try {
+            recorder.recordSelfCritiqueFailure(
+                    runId, issueId, request, code, message, usage, timeoutPhase, startedAt);
+        } catch (RuntimeException exception) {
+            log.error("실패한 Agent 자기 검증 감사 로그를 기록하지 못했다. "
+                            + "runId={} issueId={} code={}",
+                    runId, issueId, code, exception);
         }
     }
 

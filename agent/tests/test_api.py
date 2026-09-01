@@ -132,6 +132,50 @@ def test_analyze_returns_deterministic_mock_contract() -> None:
     ]
 
 
+def test_analyze_self_critique_flag_reuses_same_endpoint() -> None:
+    body = request_body("A사는 투자를 발표했다.")
+    body["idempotencyKey"] = "run:42:issue:88:self-critique"
+    body["selfCritique"] = True
+    body["previousFinding"] = {
+        "summaryKo": "회사가 투자를 확정한 기사입니다.",
+        "riskLevel": "high",
+        "sections": [
+            {
+                "heading": "핵심",
+                "bullets": [
+                    {
+                        "text": "A사는 투자를 승인했다.",
+                        "evidenceSentenceIds": [1],
+                        "groundedness": "weak",
+                        "confidence": 0.6,
+                        "groundingReason": "표현 강도를 추가로 확인해야 합니다.",
+                        "claimType": "FACT",
+                        "attributedTo": None,
+                    }
+                ],
+            }
+        ],
+        "crossSource": {
+            "consensus": [],
+            "soleSource": [],
+            "conflicts": [],
+            "missingStakeholders": [],
+        },
+    }
+
+    response = client.post(
+        "/v1/analyze",
+        headers={"X-Agent-Token": "local-dev-agent-token"},
+        json=body,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["targetClaimCount"] == 1
+    assert payload["revisedClaimCount"] == 0
+    assert payload["meta"]["promptVersion"] == "self-critique.mock.v1"
+
+
 def test_mock_analysis_compares_issue_members_and_promotes_at_most_one() -> None:
     body = request_body("A사는 투자 규모를 3조원으로 발표했다.")
     body["article"]["summary"] = "투자 규모는 3조원이다."

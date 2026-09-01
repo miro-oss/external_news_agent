@@ -5,6 +5,7 @@ import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentRun;
 import com.example.be.domain.analysis.agent.entity.AgentRunStatus;
@@ -133,6 +134,73 @@ class AgentRunRecorderIntegrationTests {
         assertEquals(AgentRunStatus.SUCCESS, recorded.getStatus());
         assertEquals(AgentPlan.PAID, recorded.getLlmPlan());
         assertEquals(BigDecimal.ONE, recorded.getCredits());
+    }
+
+    @Test
+    void recordsSelfCritiqueAgainstIssueTarget() {
+        LocalDateTime startedAt = LocalDateTime.now();
+        CollectionRun run = collectionRunRepository.save(CollectionRun.builder()
+                .status(RunStatus.RUNNING)
+                .triggerType(TriggerType.MANUAL)
+                .forceRefresh(false)
+                .startedAt(startedAt)
+                .scannedCount(1)
+                .newCount(1)
+                .updatedCount(0)
+                .skippedCount(0)
+                .build());
+        AgentAnalyzeRequest request = new AgentAnalyzeRequest(
+                "integration:run:" + run.getId() + ":issue:88:self-critique",
+                AgentPlan.FREE,
+                new AgentAnalyzeRequest.ArticlePayload(
+                        10L, "기사", "https://example.com/10", "ko", null, "기사 본문"),
+                List.of(),
+                new AgentAnalyzeRequest.TopicPayload(
+                        "HBM", "HBM", List.of("HBM"), List.of(), List.of()),
+                new AgentAnalyzeRequest.PreviousFindingPayload(
+                        "최초 분석 결과를 담은 한국어 요약입니다.",
+                        "high",
+                        List.of(new AgentAnalyzeRequest.PreviousSectionPayload(
+                                "핵심",
+                                List.of(new AgentAnalyzeRequest.PreviousBulletPayload(
+                                        "기사 핵심 주장",
+                                        List.of(1),
+                                        "weak",
+                                        new BigDecimal("0.6"),
+                                        "추가 검토가 필요합니다.",
+                                        "FACT",
+                                        null)))),
+                        AgentAnalyzeResponse.CrossSource.empty()),
+                true);
+        AgentSelfCritiqueResponse response = new AgentSelfCritiqueResponse(
+                List.of(new AgentSelfCritiqueResponse.Section(
+                        "핵심",
+                        List.of(new AgentSelfCritiqueResponse.Bullet(
+                                "검토된 기사 핵심 주장",
+                                List.of(1),
+                                "grounded",
+                                new BigDecimal("0.9"),
+                                "원문에서 확인됩니다.",
+                                "FACT",
+                                null)))),
+                "자기 검증을 반영한 한국어 요약입니다.",
+                1,
+                1,
+                List.of("강한 표현"),
+                new AgentAnalyzeResponse.Meta(
+                        "gemini", "gemini-2.5-flash", "self-critique.ko.v1",
+                        20L, 10L, BigDecimal.ZERO, BigDecimal.ZERO, false, false));
+
+        recorder.recordSelfCritiqueSuccess(run.getId(), 88L, request, response, startedAt);
+        entityManager.flush();
+        entityManager.clear();
+
+        AgentRun recorded = agentRunRepository.findByIdempotencyKey(
+                request.idempotencyKey()).orElseThrow();
+        assertEquals(AgentTask.SELF_CRITIQUE, recorded.getAgentTask());
+        assertEquals(AgentTargetType.ISSUE, recorded.getTargetType());
+        assertEquals(88L, recorded.getTargetId());
+        assertEquals(AgentRunStatus.SUCCESS, recorded.getStatus());
     }
 
     @Test

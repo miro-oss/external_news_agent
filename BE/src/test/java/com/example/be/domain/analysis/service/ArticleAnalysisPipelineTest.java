@@ -13,6 +13,7 @@ import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
+import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -248,6 +250,43 @@ class ArticleAnalysisPipelineTest {
         order.verify(orchestrator).analyze(new AnalysisContext(42L, high, AgentPlan.FREE));
         order.verify(orchestrator).analyze(new AnalysisContext(42L, medium, AgentPlan.FREE));
         verify(orchestrator, never()).analyze(new AnalysisContext(42L, low, AgentPlan.FREE));
+    }
+
+    @Test
+    void marksOnlyTopTwentyPercentOfIssuesForSelfCritique() {
+        Topic topic = Topic.builder()
+                .optionalKeywords(List.of("HBM", "삼성", "양산"))
+                .build();
+        List<Article> articles = List.of(
+                Article.builder().id(10L).title("일반 소식").sourceName("A").build(),
+                Article.builder().id(11L).title("HBM 소식").sourceName("B").build(),
+                Article.builder().id(12L).title("삼성 소식").sourceName("C").build(),
+                Article.builder().id(13L).title("삼성 HBM 소식").sourceName("D").build(),
+                Article.builder().id(14L).title("삼성 HBM 양산").sourceName("E").build());
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
+                .thenReturn(articles.stream()
+                        .map(article -> observation(article, topic, ChangeType.NEW))
+                        .toList());
+        when(issueArticleRepository.findIssueContextsByRepresentativeArticleIds(any()))
+                .thenReturn(articles.stream()
+                        .map(article -> IssueArticle.builder()
+                                .issue(NewsIssue.builder().id(100L + article.getId()).build())
+                                .article(article)
+                                .role(IssueArticleRole.REPRESENTATIVE)
+                                .build())
+                        .toList());
+        when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
+
+        pipeline.analyze(42L);
+
+        ArgumentCaptor<AnalysisContext> captor = ArgumentCaptor.forClass(AnalysisContext.class);
+        verify(orchestrator, times(5)).analyze(captor.capture());
+        List<AnalysisContext> eligible = captor.getAllValues().stream()
+                .filter(AnalysisContext::selfCritiqueEligible)
+                .toList();
+        assertEquals(1, eligible.size());
+        assertEquals(14L, eligible.getFirst().article().getId());
+        assertTrue(eligible.getFirst().issue().present());
     }
 
     private CollectionRunArticle observation(Article article, ChangeType changeType) {

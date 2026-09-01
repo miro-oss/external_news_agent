@@ -10,7 +10,8 @@ public record AnalysisContext(
         Long runId,
         Article article,
         AgentPlan plan,
-        IssueAnalysisContext issue
+        IssueAnalysisContext issue,
+        boolean selfCritiqueEligible
 ) {
 
     public AnalysisContext {
@@ -21,10 +22,17 @@ public record AnalysisContext(
     }
 
     public AnalysisContext(Long runId, Article article, AgentPlan plan) {
-        this(runId, article, plan, IssueAnalysisContext.empty());
+        this(runId, article, plan, IssueAnalysisContext.empty(), false);
+    }
+
+    public AnalysisContext(Long runId,
+                           Article article,
+                           AgentPlan plan,
+                           IssueAnalysisContext issue) {
+        this(runId, article, plan, issue, false);
     }
 
     public AnalysisContext withArticle(Article target) {
-        return new AnalysisContext(runId, target, plan, issue);
+        return new AnalysisContext(runId, target, plan, issue, selfCritiqueEligible);
     }
 }

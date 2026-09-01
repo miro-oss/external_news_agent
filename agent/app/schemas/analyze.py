@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Any, Literal, get_args
+from typing import Annotated, Literal, get_args
 
 from pydantic import Field, model_validator
 
@@ -44,26 +44,6 @@ class IssueMemberInput(AgentModel):
     title: str = Field(min_length=1, max_length=1000)
     summary: str | None = Field(default=None, max_length=2000)
     publisher: str | None = Field(default=None, max_length=500)
-
-
-class AnalyzeRequest(AgentModel):
-    idempotency_key: str = Field(min_length=1, max_length=200)
-    plan: Plan
-    article: ArticleInput
-    issue_members: list[IssueMemberInput] = Field(
-        default_factory=list, max_length=MAX_ISSUE_MEMBERS
-    )
-    topic: TopicInput
-    previous_finding: dict[str, Any] | None = None
-
-    @model_validator(mode="after")
-    def validate_issue_members(self) -> "AnalyzeRequest":
-        member_ids = [member.id for member in self.issue_members]
-        if len(member_ids) != len(set(member_ids)):
-            raise ValueError("issueMembers의 기사 ID는 중복될 수 없습니다.")
-        if self.article.id in member_ids:
-            raise ValueError("대표 기사는 issueMembers에 다시 포함할 수 없습니다.")
-        return self
 
 
 class EvidenceBullet(AgentModel):
@@ -161,6 +141,141 @@ class CrossSource(AgentModel):
             conflicts=[],
             missing_stakeholders=[],
         )
+
+
+class PreviousFindingBullet(AgentModel):
+    text: str = Field(min_length=1, max_length=80)
+    evidence_sentence_ids: list[Annotated[int, Field(ge=1)]]
+    groundedness: Groundedness
+    confidence: float = Field(ge=0, le=1)
+    grounding_reason: str | None = Field(default=None, min_length=1, max_length=1000)
+    claim_type: ClaimType
+    attributed_to: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> "PreviousFindingBullet":
+        if len(self.evidence_sentence_ids) != len(set(self.evidence_sentence_ids)):
+            raise ValueError("evidenceSentenceIds는 중복될 수 없습니다.")
+        if self.groundedness == "ungrounded":
+            if self.evidence_sentence_ids:
+                raise ValueError("ungrounded 주장은 evidenceSentenceIds가 비어 있어야 합니다.")
+        elif not self.evidence_sentence_ids:
+            raise ValueError("grounded/weak 주장은 evidenceSentenceIds가 필요합니다.")
+        if self.claim_type == "OPINION":
+            if self.attributed_to is None:
+                raise ValueError("OPINION은 attributedTo가 필요합니다.")
+        elif self.attributed_to is not None:
+            raise ValueError("OPINION이 아니면 attributedTo는 null이어야 합니다.")
+        return self
+
+
+class PreviousFindingSection(AgentModel):
+    heading: str = Field(min_length=1)
+    bullets: list[PreviousFindingBullet] = Field(min_length=1, max_length=3)
+
+
+class PreviousFinding(AgentModel):
+    summary_ko: str = Field(min_length=10, max_length=120)
+    risk_level: Literal["low", "medium", "high"]
+    sections: list[PreviousFindingSection] = Field(
+        min_length=1, max_length=MAX_ANALYZE_SECTIONS
+    )
+    cross_source: CrossSource
+
+
+class AnalyzeRequest(AgentModel):
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    plan: Plan
+    article: ArticleInput
+    issue_members: list[IssueMemberInput] = Field(
+        default_factory=list, max_length=MAX_ISSUE_MEMBERS
+    )
+    topic: TopicInput
+    previous_finding: PreviousFinding | None = None
+    self_critique: bool = False
+
+    @model_validator(mode="after")
+    def validate_request(self) -> "AnalyzeRequest":
+        member_ids = [member.id for member in self.issue_members]
+        if len(member_ids) != len(set(member_ids)):
+            raise ValueError("issueMembers의 기사 ID는 중복될 수 없습니다.")
+        if self.article.id in member_ids:
+            raise ValueError("대표 기사는 issueMembers에 다시 포함할 수 없습니다.")
+        if self.self_critique and self.previous_finding is None:
+            raise ValueError("selfCritique=true이면 previousFinding이 필요합니다.")
+        if not self.self_critique and self.previous_finding is not None:
+            raise ValueError("previousFinding은 selfCritique=true일 때만 보낼 수 있습니다.")
+        if self.previous_finding is not None:
+            known_ids = {self.article.id, *member_ids}
+            referenced_ids = {
+                observation.article_id
+                for observation in self.previous_finding.cross_source.sole_source
+            }
+            referenced_ids.update(
+                article_id
+                for conflict in self.previous_finding.cross_source.conflicts
+                for article_id in conflict.article_ids
+            )
+            if not referenced_ids <= known_ids:
+                raise ValueError(
+                    "previousFinding.crossSource는 요청에 포함된 기사만 참조해야 합니다."
+                )
+        return self
+
+
+class SelfCritiqueRevision(AgentModel):
+    claim_id: str = Field(min_length=1, max_length=20)
+    action: Literal["KEEP", "REVISE", "REJECT"]
+    text: str = Field(min_length=1, max_length=80)
+    evidence_sentence_ids: list[Annotated[int, Field(ge=1)]]
+    groundedness: Groundedness
+    confidence: float = Field(ge=0, le=1)
+    grounding_reason: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_revision(self) -> "SelfCritiqueRevision":
+        if len(self.evidence_sentence_ids) != len(set(self.evidence_sentence_ids)):
+            raise ValueError("evidenceSentenceIds는 중복될 수 없습니다.")
+        if (self.action == "REJECT") != (self.groundedness == "ungrounded"):
+            raise ValueError("REJECT action과 ungrounded 판정은 함께 사용해야 합니다.")
+        if self.action == "REJECT" or self.groundedness == "ungrounded":
+            if self.evidence_sentence_ids:
+                raise ValueError(
+                    "REJECT/ungrounded 결과는 evidenceSentenceIds가 비어 있어야 합니다."
+                )
+        elif not self.evidence_sentence_ids:
+            raise ValueError("유지·수정한 주장은 evidenceSentenceIds가 필요합니다.")
+        return self
+
+
+class SelfCritiqueOutput(AgentModel):
+    unsupported_expressions: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
+        max_length=3
+    )
+    summary_ko: str = Field(min_length=10, max_length=120)
+    revision: SelfCritiqueRevision
+
+
+class ReviewedBullet(PreviousFindingBullet):
+    pass
+
+
+class ReviewedSection(AgentModel):
+    heading: str = Field(min_length=1)
+    bullets: list[ReviewedBullet] = Field(min_length=1, max_length=3)
+
+
+class SelfCritiqueResponse(AgentModel):
+    sections: list[ReviewedSection] = Field(
+        min_length=1, max_length=MAX_ANALYZE_SECTIONS
+    )
+    summary_ko: str = Field(min_length=10, max_length=120)
+    target_claim_count: int = Field(ge=0, le=1)
+    revised_claim_count: int = Field(ge=0, le=1)
+    unsupported_expressions: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
+        max_length=3
+    )
+    meta: "ResponseMeta"
 
 
 class MemberStance(AgentModel):

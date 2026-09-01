@@ -8,6 +8,7 @@ import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
 import com.example.be.domain.analysis.agent.dto.AgentErrorResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.global.config.RestClientFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -63,6 +64,10 @@ public class AgentClient {
 
     public AgentAnalyzeResponse analyze(AgentAnalyzeRequest request) {
         return post(analyzeClient, "/v1/analyze", request, AgentAnalyzeResponse.class);
+    }
+
+    public AgentSelfCritiqueResponse selfCritique(AgentAnalyzeRequest request) {
+        return post(analyzeClient, "/v1/analyze", request, AgentSelfCritiqueResponse.class);
     }
 
     public AgentReportResponse report(AgentReportRequest request) {

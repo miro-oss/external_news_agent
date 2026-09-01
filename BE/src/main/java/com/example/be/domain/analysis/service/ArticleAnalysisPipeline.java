@@ -22,6 +22,7 @@ import org.springframework.util.StringUtils;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -104,6 +105,7 @@ public class ArticleAnalysisPipeline {
         Map<Long, IssueAnalysisContext> issues = clustered
                 ? issueContexts(targets)
                 : Map.of();
+        Set<Long> selfCritiqueTargets = selfCritiqueTargets(targets, issues);
         Map<Long, AnalysisContext> contexts = new LinkedHashMap<>();
         targets.forEach(target -> contexts.put(
                 target.article().getId(),
@@ -112,8 +114,41 @@ public class ArticleAnalysisPipeline {
                         target.article(),
                         plan,
                         issues.getOrDefault(
-                                target.article().getId(), IssueAnalysisContext.empty()))));
+                                target.article().getId(), IssueAnalysisContext.empty()),
+                        selfCritiqueTargets.contains(target.article().getId()))));
         return Map.copyOf(contexts);
+    }
+
+    private Set<Long> selfCritiqueTargets(List<Target> targets,
+                                          Map<Long, IssueAnalysisContext> issues) {
+        int limit = (int) Math.floor(issues.size() * 0.2d);
+        if (limit == 0 || issues.isEmpty()) {
+            return Set.of();
+        }
+        return targets.stream()
+                .filter(target -> issues.containsKey(target.article().getId()))
+                .sorted(Comparator.comparingDouble(Target::metadataFit).reversed()
+                        .thenComparing(
+                                target -> distinctPublisherCount(
+                                        issues.get(target.article().getId())),
+                                Comparator.reverseOrder())
+                        .thenComparing(
+                                target -> target.article().getPublishedAt(),
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(target -> target.article().getId()))
+                .limit(limit)
+                .map(target -> target.article().getId())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private long distinctPublisherCount(IssueAnalysisContext issue) {
+        return issue.articles().stream()
+                .map(article -> StringUtils.hasText(article.getSourceName())
+                        ? article.getSourceName().trim()
+                        : article.getSource() == null ? null : article.getSource().getName())
+                .filter(StringUtils::hasText)
+                .distinct()
+                .count();
     }
 
     private Map<Long, IssueAnalysisContext> issueContexts(List<Target> targets) {

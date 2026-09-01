@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.analyze import AnalyzeOutput, AnalyzeResponse
+from app.schemas.analyze import AnalyzeOutput, AnalyzeRequest, AnalyzeResponse
 
 
 def response(evidence_sentence_ids: list[int]) -> dict[str, object]:
@@ -122,3 +122,20 @@ def test_rejects_more_than_three_bullets_or_eighty_character_bullet() -> None:
     payload["sections"][0]["bullets"][0]["text"] = "가" * 81
     with pytest.raises(ValidationError):
         AnalyzeResponse.model_validate(payload)
+
+
+def test_self_critique_requires_typed_previous_finding() -> None:
+    with pytest.raises(ValidationError):
+        AnalyzeRequest.model_validate(
+            {
+                "idempotencyKey": "run:42:issue:88:self-critique",
+                "plan": "FREE",
+                "article": {
+                    "id": 10,
+                    "title": "기사",
+                    "canonicalUrl": "https://example.com/10",
+                },
+                "topic": {"name": "반도체"},
+                "selfCritique": True,
+            }
+        )

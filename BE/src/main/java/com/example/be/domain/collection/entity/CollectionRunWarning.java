@@ -59,6 +59,8 @@ public class CollectionRunWarning {
             "LLM_EVIDENCE_VERIFICATION_FAILED";
     /** 이슈 교차 비교 저장 또는 충돌 기사 추가 분석에 실패했다. */
     public static final String CODE_LLM_CROSS_SOURCE_FAILED = "LLM_CROSS_SOURCE_FAILED";
+    /** 자기 검증 호출·quota·응답 실패로 최초 검증 결과를 유지했다. */
+    public static final String CODE_LLM_SELF_CRITIQUE_FAILED = "LLM_SELF_CRITIQUE_FAILED";
 
     public static final int MAX_CODE_LENGTH = 50;
     public static final int MAX_MESSAGE_LENGTH = 1000;
