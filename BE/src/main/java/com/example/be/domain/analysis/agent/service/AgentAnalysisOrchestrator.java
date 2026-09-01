@@ -618,11 +618,14 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
 
         AgentEvidenceRequest request = evidenceRequest(
                 idempotencyKey, plan, targets, result.sections());
+        LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
         List<FindingAnalysisSection> verifiedSections;
         try {
             AgentEvidenceResponse response = client.verifyEvidence(request);
             verifiedSections = verifiedSections(
                     result.analysisSections(), response, result.sections().size(), request);
+            recordEvidenceSuccessSafely(
+                    runId, articleId, request, response, startedAt);
             completeSuccessSafely(
                     evidenceReservation,
                     response.meta().credits(),
@@ -632,6 +635,15 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                     ? value
                     : null;
             String code = clientException == null ? "SCHEMA_VIOLATION" : clientException.getCode();
+            recordEvidenceFailureSafely(
+                    runId,
+                    articleId,
+                    request,
+                    code,
+                    exception.getMessage(),
+                    failureUsage(clientException, evidenceReservation),
+                    timeoutPhase(clientException),
+                    startedAt);
             completeFailureSafely(evidenceReservation, clientException, code);
             addAgentWarning(
                     runId,
@@ -996,6 +1008,38 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                     runId, articleId, request, code, message, usage, timeoutPhase, startedAt);
         } catch (RuntimeException exception) {
             log.error("실패한 Agent 분석의 감사 로그를 기록하지 못했다. runId={} articleId={} code={}",
+                    runId, articleId, code, exception);
+        }
+    }
+
+    private void recordEvidenceSuccessSafely(Long runId,
+                                             Long articleId,
+                                             AgentEvidenceRequest request,
+                                             AgentEvidenceResponse response,
+                                             LocalDateTime startedAt) {
+        try {
+            recorder.recordEvidenceSuccess(runId, articleId, request, response, startedAt);
+        } catch (RuntimeException exception) {
+            log.error("성공한 Agent 근거 검증의 감사 로그를 기록하지 못했다. "
+                            + "runId={} articleId={}",
+                    runId, articleId, exception);
+        }
+    }
+
+    private void recordEvidenceFailureSafely(Long runId,
+                                             Long articleId,
+                                             AgentEvidenceRequest request,
+                                             String code,
+                                             String message,
+                                             AgentClientException.Usage usage,
+                                             AgentTimeoutPhase timeoutPhase,
+                                             LocalDateTime startedAt) {
+        try {
+            recorder.recordEvidenceFailure(
+                    runId, articleId, request, code, message, usage, timeoutPhase, startedAt);
+        } catch (RuntimeException exception) {
+            log.error("실패한 Agent 근거 검증의 감사 로그를 기록하지 못했다. "
+                            + "runId={} articleId={} code={}",
                     runId, articleId, code, exception);
         }
     }

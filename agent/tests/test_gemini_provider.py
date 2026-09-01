@@ -25,6 +25,7 @@ class FakeModels:
             usage_metadata=SimpleNamespace(
                 prompt_token_count=12,
                 candidates_token_count=4,
+                thoughts_token_count=6,
             ),
         )
 
@@ -67,7 +68,7 @@ def test_uses_gemini_json_schema_contract() -> None:
     assert models.config.automatic_function_calling.disable is True
     assert models.config.temperature == 0
     assert response.usage.input_tokens == 12
-    assert response.usage.output_tokens == 4
+    assert response.usage.output_tokens == 10
 
 
 def test_configures_timeout_and_closes_only_owned_client(monkeypatch) -> None:

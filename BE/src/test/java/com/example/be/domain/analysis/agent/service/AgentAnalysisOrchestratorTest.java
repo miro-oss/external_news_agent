@@ -50,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -374,6 +375,8 @@ class AgentAnalysisOrchestratorTest {
         assertEquals(
                 "근거 문장.",
                 captor.getValue().claims().getFirst().sentences().getFirst().text());
+        verify(recorder).recordEvidenceSuccess(
+                eq(42L), eq(10L), eq(captor.getValue()), any(), any(LocalDateTime.class));
         verify(quotaService).completeSuccess(evidenceReservation, BigDecimal.ZERO, true);
     }
 
@@ -384,7 +387,32 @@ class AgentAnalysisOrchestratorTest {
 
         orchestrator.analyze(new AnalysisContext(42L, article(), AgentPlan.FREE));
 
+        verify(recorder).recordEvidenceSuccess(
+                eq(42L), eq(10L), any(), eq(ruleEvidenceResponse()), any(LocalDateTime.class));
         verify(quotaService).completeSuccess(evidenceReservation, BigDecimal.ZERO, false);
+    }
+
+    @Test
+    void recordsEvidenceProviderFailureUsage() {
+        AgentClientException.Usage usage = new AgentClientException.Usage(
+                11L, 7L, new BigDecimal("0.02"), BigDecimal.ZERO);
+        when(client.analyze(any())).thenReturn(response(List.of(1), "제품/공정", false));
+        when(client.verifyEvidence(any())).thenThrow(new AgentClientException(
+                "PROVIDER_UNAVAILABLE", "provider down", null, usage));
+
+        AnalysisResult result = orchestrator.analyze(
+                new AnalysisContext(42L, article(), AgentPlan.FREE));
+
+        assertEquals("ungrounded", result.keyPoints().getFirst().groundedness());
+        verify(recorder).recordEvidenceFailure(
+                eq(42L),
+                eq(10L),
+                any(),
+                eq("PROVIDER_UNAVAILABLE"),
+                eq("provider down"),
+                eq(usage),
+                isNull(),
+                any(LocalDateTime.class));
     }
 
     @Test
