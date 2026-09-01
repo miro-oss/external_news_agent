@@ -3,13 +3,13 @@ package com.example.be.domain.collection.service.command;
 import com.example.be.domain.collection.content.ArticleContentClient;
 import com.example.be.domain.collection.content.ArticleContentResult;
 import com.example.be.domain.collection.config.CollectionPipelineProperties;
-import com.example.be.domain.collection.converter.TopicKeywordFilter;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.robots.RobotsLookup;
 import com.example.be.domain.collection.robots.RobotsTxtClient;
+import com.example.be.domain.collection.scoring.TopicFitScorer;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +45,7 @@ public class ArticleContentEnricher {
     private final RobotsTxtClient robotsTxtClient;
     private final CollectionResultWriter resultWriter;
     private final CollectionPipelineProperties properties;
+    private final TopicFitScorer topicFitScorer;
 
     public Set<Long> enrich(Long runId) {
         List<Article> targets = prioritizedTargets(runId);
@@ -85,15 +86,19 @@ public class ArticleContentEnricher {
                     && article.getFetchStatus() != FetchStatus.FETCH_FAILED) {
                 continue;
             }
-            double metadataFit = TopicKeywordFilter.metadataFit(
-                    observation.getTopic(), article.getTitle(), article.getSummary());
+            double topicFit = topicFitScorer.score(
+                    observation.getTopic(),
+                    article.getTitle(),
+                    article.getSummary(),
+                    article.getLanguage(),
+                    article.getSource().getLanguage());
             byArticleId.merge(
                     article.getId(),
-                    new Target(article, metadataFit),
-                    (left, right) -> left.metadataFit() >= right.metadataFit() ? left : right);
+                    new Target(article, topicFit),
+                    (left, right) -> left.topicFit() >= right.topicFit() ? left : right);
         }
         return byArticleId.values().stream()
-                .sorted(Comparator.comparingDouble(Target::metadataFit).reversed()
+                .sorted(Comparator.comparingDouble(Target::topicFit).reversed()
                         .thenComparing(
                                 target -> target.article().getPublishedAt(),
                                 Comparator.nullsLast(Comparator.reverseOrder()))
@@ -151,6 +156,6 @@ public class ArticleContentEnricher {
         }
     }
 
-    private record Target(Article article, double metadataFit) {
+    private record Target(Article article, double topicFit) {
     }
 }
