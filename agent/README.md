@@ -6,6 +6,71 @@ run 보고서 작성(`/v1/report`)을 제공하며, 기본 Mock 모드에서는 
 단일 문장에서 직접 확인되는 주장은 rule-only로 확정합니다. 복합 주장, 인과·전망 및 의미상
 애매한 표현만 provider에 위임하고 근거 연결 상태를 `grounded` / `weak` / `ungrounded`로 반환합니다.
 
+## `/v1/analyze` 주장 유형 계약
+
+`analyze.ko.v5`부터 모든 bullet은 `claimType`을 반환합니다.
+
+- `FACT`: 숫자·날짜·기업명·부정 반전과 표현 강도를 사실값으로 검증합니다.
+- `FORECAST`: 전망·예상·가능성처럼 아직 발생하지 않은 내용이며 그 한정 표현을 유지합니다.
+- `OPINION`: 기자·애널리스트·기업 임원·정부 관계자 등의 해석이며 `attributedTo`가 필수입니다.
+
+`OPINION`이 아니면 `attributedTo`는 `null`입니다. Spring은 검증 결과의 `reason`을
+`groundingReason`으로 finding에 보존하며 기사·보고서 조회 API와 근거 배지 설명에 전달합니다.
+
+## `/v1/verify-evidence` 배치 계약
+
+P1-5부터 기사 하나의 검증 대상 bullet을 `claims[]` 한 요청으로 묶습니다. 분석 응답은 최대 16개
+section × 3개 bullet로 제한되어 배치 상한 50건 안에 들어옵니다. `claimId`는 요청 안에서
+유일하며 응답 `results[]`가 같은 ID를 정확히 한 번씩 반환합니다. 규칙으로 확정하지 못한 주장만
+한 번의 provider 구조화 출력에 묶이므로 기사당 검증 HTTP 호출과 provider 호출은 각각 최대 1회입니다.
+
+```json
+{
+  "idempotencyKey": "run:42:article:401:evidence",
+  "plan": "FREE",
+  "claims": [
+    {
+      "claimId": "0:0",
+      "claim": "삼성전자는 평택 투자를 결정했다.",
+      "claimType": "FACT",
+      "attributedTo": null,
+      "sentences": [
+        {"id": 1, "text": "삼성전자는 평택 투자를 검토 중이다."}
+      ]
+    }
+  ]
+}
+```
+
+```json
+{
+  "results": [
+    {
+      "claimId": "0:0",
+      "status": "ungrounded",
+      "acceptedSentenceIds": [],
+      "reason": "근거는 '검토' 단계인데 주장은 '결정' 단계입니다."
+    }
+  ],
+  "meta": {
+    "provider": "gemini",
+    "model": "evidence-rules-v3",
+    "promptVersion": "evidence.rules.v3",
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0,
+    "credits": 0,
+    "mock": false,
+    "truncated": false
+  }
+}
+```
+
+입력 상한은 claim별 `AGENT_EVIDENCE_MAX_CLAIM_CHARS`와
+`AGENT_EVIDENCE_MAX_SENTENCES`, 요청 전체 `AGENT_EVIDENCE_MAX_TOTAL_CHARS`를 적용합니다.
+`FACT`는 전체 사실·강도 검증, `FORECAST`는 전망 한정 표현 유지, `OPINION`은 발화 주체 귀속을
+검증합니다.
+
 ## `/v1/analyze` 교차 출처 계약
 
 `analyze.ko.v4`부터 대표 기사 요청은 같은 이슈의 다른 기사 제목·요약·매체를 `issueMembers`로
@@ -106,17 +171,17 @@ uv run pytest
 ## Golden eval
 
 `app/eval/golden/semiconductor.v1.json`은 한국어·영어 반도체 기사 24건과
-`analyze.ko.v4+perspective.ko.v1+sensitivity.ko.v1` replay 출력 및 관점 정답을 담습니다. 수치 오기,
+`analyze.ko.v5+perspective.ko.v1+sensitivity.ko.v1` replay 출력 및 관점 정답을 담습니다. 수치 오기,
 기업명 바꿔치기, 부정 반전, 영문 요약은 기존 `expectedFailures` 4건으로 보존합니다.
 `claims.ko.v1.json`은 숫자 불일치·부정 반전·기업명 바꿔치기·강도 과장·원문에 없는 주장 5유형을
 각 3쌍씩 담으며, 같은 근거에 invalid claim과 패러프레이즈한 valid positive control을 함께 둡니다.
 규칙 대조군은 분석 데이터셋과 분리되어 live checkpoint의 기사 fixture 지문에 영향을 주지 않습니다.
-`report.ko.v1.3.json`은 finding과 독립된 버전 보고서 fixture이며 grounded·weak·ungrounded 주장 기대값을
-각각 가집니다.
+`report.ko.v1.4.json`은 finding과 독립된 버전 보고서 fixture이며 원래 ungrounded였던 보고서 주장이
+최종 재검증에서 근거 문장으로 대체되는 것까지 확인합니다.
 
 ```bash
 uv run python -m app.eval --profile replay \
-  --compare app/eval/golden/analyze.ko.v4.baseline.json
+  --compare app/eval/golden/analyze.ko.v5.baseline.json
 ```
 
 replay의 `perspectiveTagAccuracy` 96/96은 모델 품질이 아니라 fixture 출력과
@@ -128,7 +193,7 @@ replay는 외부 API 없이 실제 스키마·문장 분할·사실값 검증·�
 기본 CI는 replay 기준선만 사용하며 메타데이터, 런타임 설정, 지표 또는 평가 커버리지가 회귀하면
 실패합니다.
 
-live 프로필은 실제 provider 인증 정보와 비용 승인이 필요하다. 이 저장소에서는 토큰을 읽지 않으므로, P1-9의 `analyze.ko.v4` 기준선은 replay로만 재생성을 확인한다.
+live 프로필은 실제 provider 인증 정보와 비용 승인이 필요하다. 이 저장소에서는 토큰을 읽지 않으므로, P1-5의 `analyze.ko.v5` 기준선은 replay로만 재생성을 확인한다.
 
 - schema pass rate: 분석 24건과 보고서 1건의 계약 검증 통과율
 - grounded rate: 분석 bullet 중 `grounded` 판정 비율 (`weak`은 포함하지 않음)
@@ -144,11 +209,11 @@ live 프로필은 실제 provider 인증 정보와 비용 승인이 필요하다
   rule-only로 처리해 예상 provider 호출을 10건으로 줄임
 - false pass rate: invalid claim 15건 중 실서비스의 결정 규칙
   (`assess_with_decisive_rules`)이 `grounded`/`weak`로 수용한 비율. provider 위임은 판정 전이므로
-  통과로 세지 않습니다. P1-0 기준선은 강도 과장 2건이 통과해 2/15(0.133333)
+  통과로 세지 않습니다. P1-5 기준선은 강도 과장 2건을 차단해 0/15입니다.
 - false reject count: 패러프레이즈한 valid positive control 15건 중 결정 규칙이 `ungrounded`로
   선차단한 건수. provider 위임은 오탈락이 아니며 P1-0 기준선은 0건
 - claim control provider required count: 결정 규칙이 확정하지 않아 provider 판정이 필요한 대조군
-  개수. P1-0 기준선은 invalid 4건과 valid 6건을 합친 10건
+  개수. P1-5 기준선은 9건입니다.
 
 실제 프롬프트 품질은 provider 환경변수를 설정한 뒤 live 프로필로 수동 평가합니다. 결과에는 모델 id,
 근거 임계값, 문장 상한, schema repair 횟수와 출력 토큰 상한이 기록됩니다. 전체 골든셋 분석 24회와

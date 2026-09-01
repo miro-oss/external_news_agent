@@ -152,7 +152,7 @@ class ReportQueryServiceImplTest {
         CollectionRun run = CollectionRun.builder().id(42L).build();
         NewsReport report = NewsReport.builder().id(17L).run(run).title("보고서")
                 .modelName("claude-sonnet-5")
-                .promptVersion("report.ko.v1.3")
+                .promptVersion("report.ko.v1.4")
                 .llmProvider("anthropic")
                 .generatedAt(LocalDateTime.of(2026, 8, 18, 10, 0)).build();
         Finding low = finding(2L, RiskLevel.LOW, Relevance.REFERENCE);
@@ -180,7 +180,7 @@ class ReportQueryServiceImplTest {
         ReportResDTO.Detail detail = service.getReport(17L, true);
 
         assertEquals(List.of(1L, 2L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
-        assertEquals("report.ko.v1.3", detail.getPromptVersion());
+        assertEquals("report.ko.v1.4", detail.getPromptVersion());
         assertEquals("anthropic", detail.getLlmProvider());
         assertEquals(88L, detail.getFindings().getFirst().getIssueId());
         assertEquals("HBM4 양산 일정 이슈", detail.getFindings().getFirst().getIssue().getTitle());
@@ -192,6 +192,9 @@ class ReportQueryServiceImplTest {
         assertEquals("핵심", keyPoint.getText());
         assertEquals(List.of(0), keyPoint.getEvidence());
         assertEquals("grounded", keyPoint.getGroundedness());
+        assertEquals("직접 확인", keyPoint.getGroundingReason());
+        assertEquals("OPINION", keyPoint.getClaimType());
+        assertEquals("분석가", keyPoint.getAttributedTo());
     }
 
     @Test
@@ -230,7 +233,8 @@ class ReportQueryServiceImplTest {
                 .changeType(ChangeType.NEW)
                 .summary("요약 " + id)
                 .keyPoints(List.of(
-                        new FindingKeyPoint("핵심", List.of(0), "grounded"),
+                        new FindingKeyPoint(
+                                "핵심", List.of(0), "grounded", "직접 확인", "OPINION", "분석가"),
                         new FindingKeyPoint("비근거 주장", List.of(1), "ungrounded")))
                 .sentiment(Sentiment.NEUTRAL)
                 .riskLevel(riskLevel)

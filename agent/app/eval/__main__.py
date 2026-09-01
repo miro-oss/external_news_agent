@@ -16,7 +16,7 @@ from app.eval.scorer import ComparisonError, compare_results
 _GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 _DEFAULT_DATASET = _GOLDEN_DIR / "semiconductor.v1.json"
 _DEFAULT_CLAIM_DATASET = _GOLDEN_DIR / "claims.ko.v1.json"
-_DEFAULT_REPORT_FIXTURE = _GOLDEN_DIR / "report.ko.v1.3.json"
+_DEFAULT_REPORT_FIXTURE = _GOLDEN_DIR / "report.ko.v1.4.json"
 
 
 def main(argv: list[str] | None = None) -> int:

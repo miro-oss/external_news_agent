@@ -41,6 +41,8 @@ class MockAnalyzeProvider:
                             evidence_sentence_ids=[1],
                             groundedness=groundedness,
                             confidence=1.0 if groundedness == "grounded" else 0.5,
+                            claim_type="FACT",
+                            attributed_to=None,
                         )
                     ],
                 )
@@ -86,7 +88,7 @@ class MockAnalyzeProvider:
             meta=ResponseMeta(
                 provider="mock",
                 model="mock",
-                prompt_version="analyze.mock.v4",
+                prompt_version="analyze.mock.v5",
                 input_tokens=0,
                 output_tokens=0,
                 cost_usd=0,

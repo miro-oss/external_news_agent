@@ -44,7 +44,7 @@ from app.schemas.report import ReportRequest, ReportResponse
 
 EvalProfile = Literal["replay", "live"]
 _DEFAULT_CLAIM_DATASET = Path(__file__).resolve().parent / "golden" / "claims.ko.v1.json"
-_DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.3.json"
+_DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.4.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -492,6 +492,9 @@ def _report_request(
                             for sentence_id in bullet.evidence_sentence_ids
                         ],
                         "groundedness": bullet.groundedness,
+                        "groundingReason": None,
+                        "claimType": bullet.claim_type,
+                        "attributedTo": bullet.attributed_to,
                     }
                     for section in response.sections
                     for bullet in section.bullets

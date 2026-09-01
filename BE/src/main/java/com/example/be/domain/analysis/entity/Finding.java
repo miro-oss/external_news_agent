@@ -155,7 +155,12 @@ public class Finding {
         return analysisSections.stream()
                 .flatMap(section -> section.bullets().stream())
                 .map(bullet -> new FindingKeyPoint(
-                        bullet.text(), bullet.evidence(), bullet.groundedness()))
+                        bullet.text(),
+                        bullet.evidence(),
+                        bullet.groundedness(),
+                        bullet.groundingReason(),
+                        bullet.claimType(),
+                        bullet.attributedTo()))
                 .toList();
     }
 }

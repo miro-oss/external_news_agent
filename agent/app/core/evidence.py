@@ -35,6 +35,65 @@ _AMBIGUOUS_RELATION = re.compile(
     r"expected|likely|may|might|could|should)\b)",
     re.IGNORECASE,
 )
+_CONDITIONAL_MODALITY = re.compile(
+    r"(?:가능성|전망|(?:할|일)\s*수도|수\s*있(?:다|습니다|을)|"
+    r"\b(?:may|might|could|possibly|likely)\b)",
+    re.IGNORECASE,
+)
+_MODALITY_LADDER = (
+    (
+        6,
+        "완료·양산",
+        re.compile(
+            r"(?:완료(?:했|됐|되었|하였|했다|됐다|함)|마쳤|완공|준공|"
+            r"(?:양산|가동|출하)(?:을|를)?\s*(?:했|됐|되|한다|중|개시|돌입)|"
+            r"\b(?:completed|finished|qualified|certified)\b)"
+        ),
+    ),
+    (
+        5,
+        "착수·시작",
+        re.compile(
+            r"(?:착수|시작|개시|돌입|들어갔|들어갔다|"
+            r"(?:확대|공급|제공|설치|건설)(?:했|한|한다|됐다|중)|"
+            r"늘(?:렸|린다)|\b(?:started|began|launched|expanded|"
+            r"supplied|provided|installed|shipped|delivered)\b)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        4,
+        "승인·계약·확정",
+        re.compile(
+            r"(?:승인|체결|확정|결정|합의|"
+            r"\b(?:approved|signed|confirmed|decided|contracted)\b)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        3,
+        "발표·공식화",
+        re.compile(r"(?:발표|공식화|공표|공개|\b(?:announced|published)\b)", re.IGNORECASE),
+    ),
+    (
+        2,
+        "계획·추진",
+        re.compile(r"(?:계획|추진|준비|\b(?:planned|plans?|preparing)\b)", re.IGNORECASE),
+    ),
+    (
+        1,
+        "검토·논의",
+        re.compile(
+            r"(?:검토|논의|협의|고려|\b(?:reviewing|discussing|considering)\b)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        0,
+        "관측·보도",
+        re.compile(r"(?:관측|보도|언급|\b(?:observed|reported|mentioned)\b)", re.IGNORECASE),
+    ),
+)
 _BILINGUAL_DIRECT_RELATIONS = (
     (
         re.compile(r"(?:계약.{0,20}체결|체결.{0,20}계약)"),
@@ -147,6 +206,25 @@ class RuleAssessment:
 
 
 @dataclass(frozen=True, slots=True)
+class ModalityAssessment:
+    claim_stage: int
+    evidence_stage: int
+    claim_term: str
+    evidence_term: str
+
+    @property
+    def difference(self) -> int:
+        return self.claim_stage - self.evidence_stage
+
+    @property
+    def reason(self) -> str:
+        return (
+            f"근거는 '{self.evidence_term}' 단계인데 주장은 "
+            f"'{self.claim_term}' 단계입니다."
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CrossSourceSignal:
     extra_numbers: frozenset[str]
     extra_companies: frozenset[str]
@@ -227,7 +305,31 @@ def factual_mismatches(claim: str, evidence_text: str) -> list[str]:
 
     if _polarity_mismatch(normalized_claim, normalized_evidence):
         mismatches.append("근거와 반대되는 부정 표현이 포함되어 있습니다.")
+    modality = modality_overreach(claim, evidence_text)
+    if modality is not None and modality.difference >= 2:
+        mismatches.append(modality.reason)
     return mismatches
+
+
+def modality_overreach(claim: str, evidence_text: str) -> ModalityAssessment | None:
+    """표현의 확정 단계가 근거보다 강한 경우 단계와 설명을 반환한다."""
+    claim_stage, claim_term = _modality_stage(claim)
+    evidence_stage, evidence_term = _modality_stage(evidence_text)
+    if claim_stage <= evidence_stage:
+        return None
+    return ModalityAssessment(
+        claim_stage=claim_stage,
+        evidence_stage=evidence_stage,
+        claim_term=claim_term,
+        evidence_term=evidence_term,
+    )
+
+
+def has_forecast_qualifier(value: str) -> bool:
+    return _CONDITIONAL_MODALITY.search(_normalize(value)) is not None or any(
+        marker in _normalize(value)
+        for marker in ("예상", "예정", "계획", "목표", "전망")
+    )
 
 
 def assess_with_rules(
@@ -267,10 +369,17 @@ def assess_with_rules(
 
     combined_tokens = _tokens("\n".join(sentence.text for sentence in accepted))
     coverage = len(claim_tokens & combined_tokens) / len(claim_tokens)
-    status = "grounded" if coverage >= grounded_overlap else "weak"
+    modality = modality_overreach(claim, evidence_text)
+    status = (
+        "weak"
+        if modality is not None and modality.difference == 1
+        else "grounded" if coverage >= grounded_overlap else "weak"
+    )
     reason = (
         "주장의 핵심 표현과 사실값이 근거 문장에서 확인됩니다."
         if status == "grounded"
+        else modality.reason
+        if modality is not None and modality.difference == 1
         else "일부 표현은 연결되지만 직접 근거가 충분하지 않습니다."
     )
     return RuleAssessment(status, [sentence.id for sentence in accepted], reason)
@@ -287,6 +396,14 @@ def assess_with_decisive_rules(
     mismatches = factual_mismatches(claim, evidence_text)
     if mismatches:
         return RuleAssessment("ungrounded", [], "; ".join(mismatches))
+
+    modality = modality_overreach(claim, evidence_text)
+    if modality is not None and modality.difference == 1:
+        return RuleAssessment(
+            "weak",
+            [sentence.id for sentence in sentences],
+            modality.reason,
+        )
 
     claim_tokens = _tokens(claim)
     if not claim_tokens:
@@ -322,6 +439,25 @@ def assess_with_decisive_rules(
 def _normalize(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()
     return re.sub(r"[^\S\n]+", " ", normalized).strip()
+
+
+def _modality_stage(value: str) -> tuple[int, str]:
+    normalized = _normalize(value)
+    normalized_tokens = " ".join(
+        _strip_korean_suffix(match.group()) for match in _WORD.finditer(normalized)
+    )
+    searchable = f"{normalized} {normalized_tokens}"
+    conditional = _CONDITIONAL_MODALITY.search(searchable)
+    if conditional is not None:
+        return 0, conditional.group().strip()
+    for stage, label, pattern in _MODALITY_LADDER:
+        for clause in _clauses(searchable):
+            if _has_negation(clause):
+                continue
+            match = pattern.search(clause)
+            if match is not None:
+                return stage, match.group().strip() or label
+    return 0, "관측·보도"
 
 
 def _bilingual_direct_match(claim: str, evidence: str) -> bool:

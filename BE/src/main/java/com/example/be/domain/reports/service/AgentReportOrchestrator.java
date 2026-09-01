@@ -232,7 +232,10 @@ public class AgentReportOrchestrator {
                         .map(point -> new AgentReportRequest.KeyPointPayload(
                                 point.text(),
                                 point.evidence().stream().distinct().toList(),
-                                point.groundedness()))
+                                point.groundedness(),
+                                point.groundingReason(),
+                                point.claimType(),
+                                point.attributedTo()))
                         .toList(),
                 finding.getIntent(),
                 finding.getSentiment().toApiValue(),

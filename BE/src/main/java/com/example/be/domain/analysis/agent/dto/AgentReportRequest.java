@@ -44,7 +44,10 @@ public record AgentReportRequest(
     public record KeyPointPayload(
             String text,
             List<Integer> evidence,
-            String groundedness
+            String groundedness,
+            String groundingReason,
+            String claimType,
+            String attributedTo
     ) {
     }
 

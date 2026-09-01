@@ -33,8 +33,8 @@ from app.llm.base import ProviderResponse, ProviderUsage
 _GOLDEN_DIR = Path(__file__).resolve().parents[1] / "app" / "eval" / "golden"
 _DATASET_PATH = _GOLDEN_DIR / "semiconductor.v1.json"
 _CLAIM_DATASET_PATH = _GOLDEN_DIR / "claims.ko.v1.json"
-_REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.3.json"
-_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v4.baseline.json"
+_REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.4.json"
+_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v5.baseline.json"
 
 
 def eval_settings() -> Settings:
@@ -135,9 +135,9 @@ def test_claim_controls_exercise_decisive_rules_and_provider_routes() -> None:
         "company-hbm4-pilot-invalid": "ungrounded",
         "company-euv-shipment-invalid": "ungrounded",
         "company-two-nanometer-invalid": "ungrounded",
-        "modality-investment-decision-invalid": "provider-required",
-        "modality-expansion-start-invalid": "grounded",
-        "modality-center-completion-invalid": "grounded",
+        "modality-investment-decision-invalid": "ungrounded",
+        "modality-expansion-start-invalid": "ungrounded",
+        "modality-center-completion-invalid": "ungrounded",
         "unsupported-customer-cause-invalid": "provider-required",
         "unsupported-yield-purpose-invalid": "provider-required",
         "unsupported-order-cause-invalid": "provider-required",
@@ -160,19 +160,16 @@ def test_claim_controls_exercise_decisive_rules_and_provider_routes() -> None:
         assert valid.claim not in {sentence.text for sentence in control.evidence}
 
 
-def test_claim_control_metrics_record_false_pass_baseline_without_false_rejects() -> None:
+def test_claim_control_metrics_record_modality_improvement_without_false_rejects() -> None:
     result = replay_result()
 
     assert result.metrics["invalidClaimCount"] == 15
-    assert result.metrics["falsePassCount"] == 2
-    assert result.metrics["falsePassRate"] == 0.133333
+    assert result.metrics["falsePassCount"] == 0
+    assert result.metrics["falsePassRate"] == 0
     assert result.metrics["positiveControlCount"] == 15
     assert result.metrics["falseRejectCount"] == 0
-    assert result.metrics["claimControlProviderRequiredCount"] == 10
-    assert result.claim_control_diagnostics["falsePassClaimIds"] == [
-        "modality-expansion-start-invalid",
-        "modality-center-completion-invalid",
-    ]
+    assert result.metrics["claimControlProviderRequiredCount"] == 9
+    assert result.claim_control_diagnostics["falsePassClaimIds"] == []
     assert result.claim_control_diagnostics["falseRejectClaimIds"] == []
 
 
@@ -310,13 +307,13 @@ def test_report_replay_is_validated_by_the_service_contract() -> None:
     )
 
 
-def test_report_fixture_exercises_all_grounding_outcomes() -> None:
+def test_report_final_validation_removes_unsupported_claims() -> None:
     result = replay_result()
 
     assert result.metrics["reportClaimCount"] == 9
-    assert result.metrics["reportGroundedClaimCount"] == 6
+    assert result.metrics["reportGroundedClaimCount"] == 8
     assert result.metrics["reportWeakClaimCount"] == 1
-    assert result.metrics["unsupportedReportClaimCount"] == 2
+    assert result.metrics["unsupportedReportClaimCount"] == 0
 
 
 def test_executive_summary_supports_independent_clauses_without_fact_laundering() -> None:
@@ -334,8 +331,8 @@ def test_executive_summary_supports_independent_clauses_without_fact_laundering(
     )
 
     assert result.errors == ()
-    assert result.metrics["reportGroundedClaimCount"] == 6
-    assert result.metrics["unsupportedReportClaimCount"] == 2
+    assert result.metrics["reportGroundedClaimCount"] == 8
+    assert result.metrics["unsupportedReportClaimCount"] == 0
 
 
 def test_replay_provider_is_not_labeled_as_real_traffic() -> None:

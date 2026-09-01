@@ -1916,6 +1916,24 @@ body.modal-open {
   font-weight: 700;
 }
 
+.claim-type-marker {
+  display: inline-block;
+  width: 0.38rem;
+  height: 0.38rem;
+  margin-right: 0.38rem;
+  border-radius: 50%;
+  background: var(--fg-3);
+  vertical-align: 0.08rem;
+}
+
+.claim-type-marker.forecast {
+  background: var(--warning-strong);
+}
+
+.claim-type-marker.opinion {
+  background: var(--primary);
+}
+
 .evidence {
   margin-right: 0.3rem;
   padding: 0;

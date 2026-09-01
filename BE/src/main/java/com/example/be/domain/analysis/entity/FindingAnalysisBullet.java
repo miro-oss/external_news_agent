@@ -8,10 +8,21 @@ public record FindingAnalysisBullet(
         String text,
         List<Integer> evidence,
         String groundedness,
-        BigDecimal confidence
+        BigDecimal confidence,
+        String groundingReason,
+        String claimType,
+        String attributedTo
 ) {
 
     public FindingAnalysisBullet {
         evidence = evidence == null ? List.of() : List.copyOf(evidence);
+        claimType = claimType == null || claimType.isBlank() ? "FACT" : claimType;
+    }
+
+    public FindingAnalysisBullet(String text,
+                                 List<Integer> evidence,
+                                 String groundedness,
+                                 BigDecimal confidence) {
+        this(text, evidence, groundedness, confidence, null, "FACT", null);
     }
 }

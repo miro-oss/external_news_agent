@@ -16,6 +16,8 @@ def response(evidence_sentence_ids: list[int]) -> dict[str, object]:
                         "evidenceSentenceIds": evidence_sentence_ids,
                         "groundedness": "grounded",
                         "confidence": 1,
+                        "claimType": "FACT",
+                        "attributedTo": None,
                     }
                 ],
             }
