@@ -39,22 +39,27 @@ def test_uses_gemini_json_schema_contract() -> None:
         prompt="prompt",
         response_schema={
             "type": "object",
+            "title": "AnalyzeOutput",
             "additionalProperties": False,
             "properties": {
-                "name": {"type": "string", "minLength": 1},
+                "name": {"type": "string", "minLength": 1, "title": "Name"},
                 "attributedTo": {
                     "anyOf": [{"type": "string"}, {"type": "null"}],
                     "default": None,
                 },
+                "sections": {"type": "array", "items": {"type": "string"}, "maxItems": 16},
             },
         },
     )
 
     assert models.model == "configured-gemini"
     assert models.config.response_mime_type == "application/json"
+    assert "title" not in models.config.response_json_schema
     assert models.config.response_json_schema["additionalProperties"] is False
     assert "minLength" not in models.config.response_json_schema["properties"]["name"]
+    assert "title" not in models.config.response_json_schema["properties"]["name"]
     assert "default" not in models.config.response_json_schema["properties"]["attributedTo"]
+    assert "maxItems" not in models.config.response_json_schema["properties"]["sections"]
     assert models.config.automatic_function_calling.disable is True
     assert models.config.temperature == 0
     assert response.usage.input_tokens == 12
