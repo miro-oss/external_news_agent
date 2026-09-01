@@ -4,6 +4,7 @@ import com.example.be.domain.collection.config.CollectionPipelineProperties;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.collection.connector.dto.res.FetchResult;
 import com.example.be.domain.collection.robots.RobotsDecision;
+import com.example.be.domain.collection.scoring.TopicFitScorer;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.topics.entity.Topic;
@@ -21,7 +22,8 @@ class CollectionCandidatePrioritizerTest {
     void selectsTopUrlsAcrossAllSourcesForOneTopic() {
         CollectionPipelineProperties properties = new CollectionPipelineProperties();
         properties.setTopicArticleLimit(2);
-        CollectionCandidatePrioritizer prioritizer = new CollectionCandidatePrioritizer(properties);
+        CollectionCandidatePrioritizer prioritizer = new CollectionCandidatePrioritizer(
+                properties, equalWeightScorer());
         Topic topic = Topic.builder()
                 .id(7L)
                 .optionalKeywords(List.of("HBM", "삼성", "양산"))
@@ -42,7 +44,8 @@ class CollectionCandidatePrioritizerTest {
     void keepsEveryObservationOfASelectedNormalizedUrl() {
         CollectionPipelineProperties properties = new CollectionPipelineProperties();
         properties.setTopicArticleLimit(1);
-        CollectionCandidatePrioritizer prioritizer = new CollectionCandidatePrioritizer(properties);
+        CollectionCandidatePrioritizer prioritizer = new CollectionCandidatePrioritizer(
+                properties, equalWeightScorer());
         Topic topic = Topic.builder().id(7L).optionalKeywords(List.of("HBM")).build();
         CollectionBatch first = batch(1L, topic, 11L,
                 article("HBM", "https://example.com/same?utm_source=a", "요약"));
@@ -59,7 +62,8 @@ class CollectionCandidatePrioritizerTest {
     void ignoresDeprecatedSourceLimitAndUsesTopicLimit() {
         CollectionPipelineProperties properties = new CollectionPipelineProperties();
         properties.setTopicArticleLimit(3);
-        CollectionCandidatePrioritizer prioritizer = new CollectionCandidatePrioritizer(properties);
+        CollectionCandidatePrioritizer prioritizer = new CollectionCandidatePrioritizer(
+                properties, equalWeightScorer());
         Topic topic = Topic.builder()
                 .id(7L)
                 .optionalKeywords(List.of("HBM", "삼성", "양산"))
@@ -73,6 +77,26 @@ class CollectionCandidatePrioritizerTest {
         assertEquals(
                 List.of("https://example.com/high", "https://example.com/low"),
                 urls(selected.get(1L)));
+    }
+
+    @Test
+    void prioritizesOneRareMatchOverTwoCommonMatches() {
+        CollectionPipelineProperties properties = new CollectionPipelineProperties();
+        properties.setTopicArticleLimit(1);
+        TopicFitScorer scorer = new TopicFitScorer((language, keywords) ->
+                Map.of("반도체", 1.0d, "ai", 1.0d, "hbm4", 4.0d));
+        CollectionCandidatePrioritizer prioritizer = new CollectionCandidatePrioritizer(properties, scorer);
+        Topic topic = Topic.builder()
+                .id(7L)
+                .optionalKeywords(List.of("반도체", "AI", "HBM4"))
+                .build();
+        CollectionBatch batch = batch(1L, topic, 11L,
+                article("반도체 AI 투자", "https://example.com/common", "요약"),
+                article("HBM4 투자", "https://example.com/rare", "요약"));
+
+        Map<Long, List<CollectedArticle>> selected = prioritizer.prioritize(List.of(batch));
+
+        assertEquals(List.of("https://example.com/rare"), urls(selected.get(1L)));
     }
 
     private CollectionBatch batch(Long itemId,
@@ -115,5 +139,9 @@ class CollectionCandidatePrioritizerTest {
 
     private List<String> urls(List<CollectedArticle> articles) {
         return articles.stream().map(CollectedArticle::canonicalUrl).toList();
+    }
+
+    private TopicFitScorer equalWeightScorer() {
+        return new TopicFitScorer((language, keywords) -> Map.of());
     }
 }

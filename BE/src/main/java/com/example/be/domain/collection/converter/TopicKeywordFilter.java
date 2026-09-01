@@ -6,6 +6,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * 주제의 키워드로 수집 결과를 거른다.
@@ -31,32 +32,51 @@ public final class TopicKeywordFilter {
     }
 
     /**
-     * AND/NOT은 기존처럼 통과 여부만 결정하고, OR은 일치한 선택 키워드 비율로 점수화한다.
+     * AND/NOT은 기존처럼 통과 여부만 결정하고, OR은 일치한 선택 키워드의 가중 비율로 점수화한다.
      * 선택 키워드가 없으면 조건도 없으므로 1.0이다.
      */
     public static MatchResult evaluate(Topic topic, CollectedArticle article) {
+        return evaluate(topic, article, Map.of());
+    }
+
+    public static MatchResult evaluate(Topic topic,
+                                       CollectedArticle article,
+                                       Map<String, Double> weights) {
         String haystack = haystackOf(article);
-        List<String> optionalKeywords = normalized(topic.getOptionalKeywords());
+        List<String> optionalKeywords = normalizedOptionalKeywords(topic);
         int matchedOptionalCount = (int) optionalKeywords.stream()
                 .filter(keyword -> haystack.contains(keyword))
                 .count();
-        double metadataFit = optionalKeywords.isEmpty()
-                ? 1.0
-                : (double) matchedOptionalCount / optionalKeywords.size();
+        double topicFit = weightedFit(haystack, optionalKeywords, weights);
         boolean matches = containsEvery(haystack, topic.getRequiredKeywords())
                 && (optionalKeywords.isEmpty() || matchedOptionalCount > 0)
                 && containsNone(haystack, topic.getExcludedKeywords());
-        return new MatchResult(matches, metadataFit, matchedOptionalCount, optionalKeywords.size());
+        return new MatchResult(matches, topicFit, matchedOptionalCount, optionalKeywords.size());
     }
 
-    public static double metadataFit(Topic topic, String title, String summary) {
+    public static double topicFit(Topic topic,
+                                  String title,
+                                  String summary,
+                                  Map<String, Double> weights) {
         String haystack = haystackOf(title, summary);
-        List<String> optionalKeywords = normalized(topic.getOptionalKeywords());
+        List<String> optionalKeywords = normalizedOptionalKeywords(topic);
+        return weightedFit(haystack, optionalKeywords, weights);
+    }
+
+    private static double weightedFit(String haystack,
+                                      List<String> optionalKeywords,
+                                      Map<String, Double> weights) {
         if (optionalKeywords.isEmpty()) {
             return 1.0;
         }
-        long matchedCount = optionalKeywords.stream().filter(haystack::contains).count();
-        return (double) matchedCount / optionalKeywords.size();
+        double totalWeight = optionalKeywords.stream()
+                .mapToDouble(keyword -> validWeight(weights.get(keyword)))
+                .sum();
+        double matchedWeight = optionalKeywords.stream()
+                .filter(haystack::contains)
+                .mapToDouble(keyword -> validWeight(weights.get(keyword)))
+                .sum();
+        return matchedWeight / totalWeight;
     }
 
     private static String haystackOf(CollectedArticle article) {
@@ -82,6 +102,10 @@ public final class TopicKeywordFilter {
         return StringUtils.hasText(keyword) && haystack.contains(keyword.trim().toLowerCase(Locale.ROOT));
     }
 
+    public static List<String> normalizedOptionalKeywords(Topic topic) {
+        return normalized(topic == null ? null : topic.getOptionalKeywords());
+    }
+
     private static List<String> normalized(List<String> keywords) {
         if (isEmpty(keywords)) {
             return List.of();
@@ -101,9 +125,13 @@ public final class TopicKeywordFilter {
         return value == null ? "" : value;
     }
 
+    private static double validWeight(Double weight) {
+        return weight != null && Double.isFinite(weight) && weight > 0.0d ? weight : 1.0d;
+    }
+
     public record MatchResult(
             boolean matches,
-            double metadataFit,
+            double topicFit,
             int matchedOptionalCount,
             int optionalKeywordCount
     ) {

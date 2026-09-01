@@ -5,6 +5,7 @@ import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -51,7 +52,7 @@ class TopicKeywordFilterTest {
         Topic topic = topic(List.of(), List.of("", "   "), List.of());
 
         assertTrue(TopicKeywordFilter.matches(topic, article("아무 기사", "요약")));
-        assertEquals(1.0, TopicKeywordFilter.evaluate(topic, article("아무 기사", "요약")).metadataFit());
+        assertEquals(1.0, TopicKeywordFilter.evaluate(topic, article("아무 기사", "요약")).topicFit());
     }
 
     @Test
@@ -87,7 +88,7 @@ class TopicKeywordFilterTest {
     }
 
     @Test
-    void calculatesUniformMetadataFitFromOptionalKeywords() {
+    void calculatesUniformTopicFitFromOptionalKeywords() {
         Topic topic = topic(List.of("반도체"), List.of("HBM", "삼성", "양산"), List.of());
 
         TopicKeywordFilter.MatchResult result = TopicKeywordFilter.evaluate(
@@ -96,7 +97,24 @@ class TopicKeywordFilterTest {
         assertTrue(result.matches());
         assertEquals(2, result.matchedOptionalCount());
         assertEquals(3, result.optionalKeywordCount());
-        assertEquals(2.0 / 3.0, result.metadataFit(), 0.000001);
+        assertEquals(2.0 / 3.0, result.topicFit(), 0.000001);
+    }
+
+    @Test
+    void givesRareMatchedKeywordMoreWeight() {
+        Topic topic = topic(List.of(), List.of("반도체", "AI", "HBM4"), List.of());
+
+        double commonFit = TopicKeywordFilter.evaluate(
+                topic,
+                article("반도체 AI 투자", "요약"),
+                Map.of("반도체", 1.0, "ai", 1.0, "hbm4", 4.0)).topicFit();
+        double rareFit = TopicKeywordFilter.evaluate(
+                topic,
+                article("HBM4 투자", "요약"),
+                Map.of("반도체", 1.0, "ai", 1.0, "hbm4", 4.0)).topicFit();
+
+        assertEquals(2.0 / 6.0, commonFit, 0.000001);
+        assertEquals(4.0 / 6.0, rareFit, 0.000001);
     }
 
     @Test
@@ -104,7 +122,7 @@ class TopicKeywordFilterTest {
         Topic topic = topic(List.of("HBM"), List.of(), List.of());
 
         assertEquals(1.0, TopicKeywordFilter.evaluate(
-                topic, article("HBM 양산", "요약")).metadataFit());
+                topic, article("HBM 양산", "요약")).topicFit());
     }
 
     private Topic topic(List<String> required, List<String> optional, List<String> excluded) {

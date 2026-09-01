@@ -3,7 +3,7 @@ package com.example.be.domain.collection.service.command;
 import com.example.be.domain.collection.config.CollectionPipelineProperties;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.collection.converter.ArticleHasher;
-import com.example.be.domain.collection.converter.TopicKeywordFilter;
+import com.example.be.domain.collection.scoring.TopicFitScorer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -16,18 +16,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** 주제에 연결된 모든 조합을 합친 뒤 metadataFit 상위 URL을 고른다. */
+/** 주제에 연결된 모든 조합을 합친 뒤 topicFit 상위 URL을 고른다. */
 @Component
 @RequiredArgsConstructor
 public class CollectionCandidatePrioritizer {
 
     private static final Comparator<Candidate> PRIORITY = Comparator
-            .comparingDouble(Candidate::metadataFit).reversed()
+            .comparingDouble(Candidate::topicFit).reversed()
             .thenComparing(Candidate::publishedAt, Comparator.nullsLast(Comparator.reverseOrder()))
             .thenComparing(Candidate::normalizedUrl)
             .thenComparing(candidate -> candidate.batch().itemId());
 
     private final CollectionPipelineProperties properties;
+    private final TopicFitScorer topicFitScorer;
 
     public Map<Long, List<CollectedArticle>> prioritize(List<CollectionBatch> batches) {
         Map<Long, List<CollectedArticle>> selectedByItem = new LinkedHashMap<>();
@@ -72,13 +73,13 @@ public class CollectionCandidatePrioritizer {
 
         Map<String, Candidate> byUrl = new LinkedHashMap<>();
         for (CollectedArticle article : batch.outcome().fetch().articles()) {
-            TopicKeywordFilter.MatchResult match = TopicKeywordFilter.evaluate(batch.topic(), article);
+            var match = topicFitScorer.evaluate(batch.topic(), batch.source(), article);
             if (!match.matches()) {
                 continue;
             }
             String normalizedUrl = ArticleHasher.normalizeUrl(article.canonicalUrl());
             Candidate candidate = new Candidate(
-                    batch, article, normalizedUrl, match.metadataFit(), article.publishedAt());
+                    batch, article, normalizedUrl, match.topicFit(), article.publishedAt());
             byUrl.merge(normalizedUrl, candidate,
                     (left, right) -> PRIORITY.compare(left, right) <= 0 ? left : right);
         }
@@ -91,7 +92,7 @@ public class CollectionCandidatePrioritizer {
             CollectionBatch batch,
             CollectedArticle article,
             String normalizedUrl,
-            double metadataFit,
+            double topicFit,
             OffsetDateTime publishedAt
     ) {
     }

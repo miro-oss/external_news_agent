@@ -2,13 +2,13 @@ package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.config.AnalysisSelectionProperties;
-import com.example.be.domain.collection.converter.TopicKeywordFilter;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.collection.scoring.TopicFitScorer;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
@@ -42,6 +42,7 @@ public class ArticleAnalysisPipeline {
     private final FindingReuseCache reuseCache;
     private final FindingWriter findingWriter;
     private final AnalysisSelectionProperties selectionProperties;
+    private final TopicFitScorer topicFitScorer;
 
     public void analyze(Long runId) {
         analyze(runId, Set.of());
@@ -127,7 +128,7 @@ public class ArticleAnalysisPipeline {
         }
         return targets.stream()
                 .filter(target -> issues.containsKey(target.article().getId()))
-                .sorted(Comparator.comparingDouble(Target::metadataFit).reversed()
+                .sorted(Comparator.comparingDouble(Target::topicFit).reversed()
                         .thenComparing(
                                 target -> distinctPublisherCount(
                                         issues.get(target.article().getId())),
@@ -221,7 +222,7 @@ public class ArticleAnalysisPipeline {
                     : membership.getIssue().getTopic();
             targets.merge(
                     article.getId(),
-                    new Target(article, ChangeType.UPDATED, metadataFit(topic, article)),
+                    new Target(article, ChangeType.UPDATED, topicFit(topic, article)),
                     this::preserveObservedChangeType);
         });
     }
@@ -250,14 +251,14 @@ public class ArticleAnalysisPipeline {
         Target candidate = new Target(
                 observation.getArticle(),
                 changeType,
-                metadataFit(observation.getTopic(), observation.getArticle()));
+                topicFit(observation.getTopic(), observation.getArticle()));
         byArticleId.merge(observation.getArticle().getId(), candidate, this::preferUpdated);
     }
 
     private List<Target> prioritized(Collection<Target> targets) {
         List<Target> ordered = targets.stream()
                 .filter(this::isReady)
-                .sorted(Comparator.comparingDouble(Target::metadataFit).reversed()
+                .sorted(Comparator.comparingDouble(Target::topicFit).reversed()
                         .thenComparing(
                                 target -> target.article().getPublishedAt(),
                                 Comparator.nullsLast(Comparator.reverseOrder()))
@@ -270,10 +271,13 @@ public class ArticleAnalysisPipeline {
         return ordered.stream().limit(limit).toList();
     }
 
-    private double metadataFit(Topic topic, Article article) {
-        return topic == null
-                ? 1.0
-                : TopicKeywordFilter.metadataFit(topic, article.getTitle(), article.getSummary());
+    private double topicFit(Topic topic, Article article) {
+        return topicFitScorer.score(
+                topic,
+                article.getTitle(),
+                article.getSummary(),
+                article.getLanguage(),
+                article.getSource() == null ? null : article.getSource().getLanguage());
     }
 
     private boolean isReady(Target target) {
@@ -287,21 +291,21 @@ public class ArticleAnalysisPipeline {
                 || right.changeType() == ChangeType.UPDATED
                 ? ChangeType.UPDATED
                 : right.changeType();
-        return new Target(left.article(), changeType, Math.max(left.metadataFit(), right.metadataFit()));
+        return new Target(left.article(), changeType, Math.max(left.topicFit(), right.topicFit()));
     }
 
-    /** 이슈 대표 보충은 metadataFit만 보강하며, 이번 run에서 직접 관측한 NEW/UPDATED 판정은 바꾸지 않는다. */
+    /** 이슈 대표 보충은 topicFit만 보강하며, 이번 run에서 직접 관측한 NEW/UPDATED 판정은 바꾸지 않는다. */
     private Target preserveObservedChangeType(Target existing, Target representative) {
         return new Target(
                 existing.article(),
                 existing.changeType(),
-                Math.max(existing.metadataFit(), representative.metadataFit()));
+                Math.max(existing.topicFit(), representative.topicFit()));
     }
 
     private String messageOf(RuntimeException exception) {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
     }
 
-    private record Target(Article article, ChangeType changeType, double metadataFit) {
+    private record Target(Article article, ChangeType changeType, double topicFit) {
     }
 }

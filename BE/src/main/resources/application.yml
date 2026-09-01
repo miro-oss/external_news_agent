@@ -45,9 +45,9 @@ springdoc:
 
 news:
   collection:
-    # 조합별 선착순 상한 대신 주제 전체 후보를 metadataFit으로 정렬해 고른다.
+    # 조합별 선착순 상한 대신 주제 전체 후보를 IDF topicFit으로 정렬해 고른다.
     topic-article-limit: 300
-    # 본문 HTTP 요청은 run 전체에서 metadataFit 상위 기사만 수행한다.
+    # 본문 HTTP 요청은 run 전체에서 IDF topicFit 상위 기사만 수행한다.
     fulltext-limit-per-run: 300
   analysis:
     # 기사 수가 아니라 이번 실행에서 변화가 생긴 이슈 대표 수를 제한한다.

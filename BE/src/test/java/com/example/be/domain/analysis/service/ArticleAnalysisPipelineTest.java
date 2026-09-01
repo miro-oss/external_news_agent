@@ -10,6 +10,7 @@ import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.collection.scoring.TopicFitScorer;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
@@ -45,13 +46,16 @@ class ArticleAnalysisPipelineTest {
     private final FindingReuseCache reuseCache = mock(FindingReuseCache.class);
     private final FindingWriter findingWriter = mock(FindingWriter.class);
     private final AnalysisSelectionProperties selectionProperties = new AnalysisSelectionProperties();
+    private Map<String, Double> topicWeights = Map.of();
     private final ArticleAnalysisPipeline pipeline =
             new ArticleAnalysisPipeline(
                     runArticleRepository, runRepository, issueArticleRepository,
-                    orchestrator, reuseCache, findingWriter, selectionProperties);
+                    orchestrator, reuseCache, findingWriter, selectionProperties,
+                    new TopicFitScorer((language, keywords) -> topicWeights));
 
     @BeforeEach
     void loadRunPlan() {
+        topicWeights = Map.of();
         when(runRepository.findById(42L)).thenReturn(java.util.Optional.of(
                 CollectionRun.builder().id(42L).llmPlan(AgentPlan.FREE).build()));
         when(reuseCache.lookupContexts(anyList(), any(AgentPlan.class))).thenAnswer(invocation -> {
@@ -229,7 +233,7 @@ class ArticleAnalysisPipelineTest {
     }
 
     @Test
-    void limitsIssuesAfterOrderingByMetadataFit() {
+    void limitsIssuesAfterOrderingByTopicFit() {
         selectionProperties.setIssueLimitPerRun(2);
         Topic topic =
                 Topic.builder()
@@ -250,6 +254,26 @@ class ArticleAnalysisPipelineTest {
         order.verify(orchestrator).analyze(new AnalysisContext(42L, high, AgentPlan.FREE));
         order.verify(orchestrator).analyze(new AnalysisContext(42L, medium, AgentPlan.FREE));
         verify(orchestrator, never()).analyze(new AnalysisContext(42L, low, AgentPlan.FREE));
+    }
+
+    @Test
+    void analyzesRareKeywordMatchBeforeTwoCommonMatches() {
+        selectionProperties.setIssueLimitPerRun(1);
+        topicWeights = Map.of("반도체", 1.0d, "ai", 1.0d, "hbm4", 4.0d);
+        Topic topic = Topic.builder()
+                .optionalKeywords(List.of("반도체", "AI", "HBM4"))
+                .build();
+        Article common = Article.builder().id(10L).title("반도체 AI 투자").build();
+        Article rare = Article.builder().id(11L).title("HBM4 투자").build();
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
+                observation(common, topic, ChangeType.NEW),
+                observation(rare, topic, ChangeType.NEW)));
+        when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
+
+        pipeline.analyze(42L);
+
+        verify(orchestrator).analyze(new AnalysisContext(42L, rare, AgentPlan.FREE));
+        verify(orchestrator, never()).analyze(new AnalysisContext(42L, common, AgentPlan.FREE));
     }
 
     @Test

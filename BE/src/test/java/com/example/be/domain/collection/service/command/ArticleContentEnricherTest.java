@@ -8,6 +8,7 @@ import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.robots.RobotsTxtClient;
+import com.example.be.domain.collection.scoring.TopicFitScorer;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -24,13 +26,18 @@ import static org.mockito.Mockito.when;
 class ArticleContentEnricherTest {
 
     @Test
-    void fetchesHigherMetadataFitFirst() {
+    void fetchesHigherTopicFitFirst() {
         CollectionRunArticleRepository repository = mock(CollectionRunArticleRepository.class);
         ArticleContentClient contentClient = mock(ArticleContentClient.class);
         CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
         CollectionPipelineProperties properties = new CollectionPipelineProperties();
         ArticleContentEnricher enricher = new ArticleContentEnricher(
-                repository, contentClient, mock(RobotsTxtClient.class), resultWriter, properties);
+                repository,
+                contentClient,
+                mock(RobotsTxtClient.class),
+                resultWriter,
+                properties,
+                equalWeightScorer());
         Topic topic = Topic.builder().id(7L).optionalKeywords(List.of("HBM", "삼성")).build();
         Source source = Source.builder()
                 .id(8L)
@@ -52,7 +59,7 @@ class ArticleContentEnricherTest {
     }
 
     @Test
-    void limitsFulltextRequestsAfterMetadataFitOrdering() {
+    void limitsFulltextRequestsAfterTopicFitOrdering() {
         CollectionRunArticleRepository repository = mock(CollectionRunArticleRepository.class);
         ArticleContentClient contentClient = mock(ArticleContentClient.class);
         CollectionPipelineProperties properties = new CollectionPipelineProperties();
@@ -62,7 +69,8 @@ class ArticleContentEnricherTest {
                 contentClient,
                 mock(RobotsTxtClient.class),
                 mock(CollectionResultWriter.class),
-                properties);
+                properties,
+                equalWeightScorer());
         Topic topic = Topic.builder().id(7L).optionalKeywords(List.of("HBM", "삼성")).build();
         Source source = Source.builder()
                 .id(8L)
@@ -83,6 +91,45 @@ class ArticleContentEnricherTest {
         assertEquals(List.of("https://example.com/high"), fetchedUrls);
     }
 
+    @Test
+    void fetchesRareKeywordMatchBeforeTwoCommonMatches() {
+        CollectionRunArticleRepository repository = mock(CollectionRunArticleRepository.class);
+        ArticleContentClient contentClient = mock(ArticleContentClient.class);
+        CollectionPipelineProperties properties = new CollectionPipelineProperties();
+        properties.setFulltextLimitPerRun(1);
+        TopicFitScorer weightedScorer = new TopicFitScorer((language, keywords) ->
+                Map.of("반도체", 1.0d, "ai", 1.0d, "hbm4", 4.0d));
+        ArticleContentEnricher enricher = new ArticleContentEnricher(
+                repository,
+                contentClient,
+                mock(RobotsTxtClient.class),
+                mock(CollectionResultWriter.class),
+                properties,
+                weightedScorer);
+        Topic topic = Topic.builder()
+                .id(7L)
+                .optionalKeywords(List.of("반도체", "AI", "HBM4"))
+                .build();
+        Source source = Source.builder()
+                .id(8L)
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 30, true))
+                .build();
+        Article common = article(
+                1L, "https://example.com/common", "반도체 AI 투자", source, topic);
+        Article rare = article(2L, "https://example.com/rare", "HBM4 투자", source, topic);
+        when(repository.findClusterTargetsByRunId(42L)).thenReturn(List.of(
+                observation(common, topic), observation(rare, topic)));
+        List<String> fetchedUrls = new ArrayList<>();
+        when(contentClient.fetch(any(), any())).thenAnswer(invocation -> {
+            fetchedUrls.add(invocation.getArgument(0));
+            return ArticleContentResult.fullText("본문");
+        });
+
+        enricher.enrich(42L);
+
+        assertEquals(List.of("https://example.com/rare"), fetchedUrls);
+    }
+
     private Article article(Long id, String url, String title, Source source, Topic topic) {
         return Article.builder()
                 .id(id)
@@ -97,5 +144,9 @@ class ArticleContentEnricherTest {
 
     private CollectionRunArticle observation(Article article, Topic topic) {
         return CollectionRunArticle.builder().article(article).topic(topic).build();
+    }
+
+    private TopicFitScorer equalWeightScorer() {
+        return new TopicFitScorer((language, keywords) -> java.util.Map.of());
     }
 }

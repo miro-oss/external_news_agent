@@ -59,6 +59,7 @@ class BeDatabaseIntegrationTests {
                 """, String.class);
 
         assertTrue(versions.containsAll(
-                List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "27", "28")));
+                List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11",
+                        "27", "28", "29", "30")));
     }
 }
