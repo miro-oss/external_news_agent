@@ -2,6 +2,8 @@ package com.example.be.domain.analysis.agent.service;
 
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
+import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
+import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.client.AgentClientException;
@@ -72,6 +74,64 @@ public class AgentRunRecorder {
                 .collectionRunId(runId)
                 .idempotencyKey(request.idempotencyKey())
                 .agentTask(AgentTask.ANALYZE)
+                .targetType(AgentTargetType.ARTICLE)
+                .targetId(articleId)
+                .status(AgentRunStatus.FAILED)
+                .failureCode(failureCode)
+                .failureMessage(truncate(failureMessage))
+                .timeoutPhase(timeoutPhase)
+                .llmPlan(request.plan())
+                .inputTokens(usage == null ? null : usage.inputTokens())
+                .outputTokens(usage == null ? null : usage.outputTokens())
+                .costUsd(usage == null ? null : usage.costUsd())
+                .credits(usage == null ? null : usage.credits())
+                .requestHash(hash(request))
+                .startedAt(startedAt)
+                .finishedAt(now())
+                .build());
+    }
+
+    @Transactional
+    public void recordEvidenceSuccess(Long runId,
+                                      Long articleId,
+                                      AgentEvidenceRequest request,
+                                      AgentEvidenceResponse response,
+                                      LocalDateTime startedAt) {
+        AgentEvidenceResponse.Meta meta = response.meta();
+        repository.insertIfAbsent(AgentRun.builder()
+                .collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey())
+                .agentTask(AgentTask.VERIFY_EVIDENCE)
+                .targetType(AgentTargetType.ARTICLE)
+                .targetId(articleId)
+                .status(meta.mock() ? AgentRunStatus.MOCK : AgentRunStatus.SUCCESS)
+                .promptVersion(meta.promptVersion())
+                .llmProvider(meta.provider())
+                .llmModel(meta.model())
+                .llmPlan(request.plan())
+                .inputTokens(meta.inputTokens())
+                .outputTokens(meta.outputTokens())
+                .costUsd(meta.costUsd())
+                .credits(meta.credits())
+                .requestHash(hash(request))
+                .startedAt(startedAt)
+                .finishedAt(now())
+                .build());
+    }
+
+    @Transactional
+    public void recordEvidenceFailure(Long runId,
+                                      Long articleId,
+                                      AgentEvidenceRequest request,
+                                      String failureCode,
+                                      String failureMessage,
+                                      AgentClientException.Usage usage,
+                                      AgentTimeoutPhase timeoutPhase,
+                                      LocalDateTime startedAt) {
+        repository.insertIfAbsent(AgentRun.builder()
+                .collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey())
+                .agentTask(AgentTask.VERIFY_EVIDENCE)
                 .targetType(AgentTargetType.ARTICLE)
                 .targetId(articleId)
                 .status(AgentRunStatus.FAILED)

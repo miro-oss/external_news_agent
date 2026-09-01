@@ -53,13 +53,19 @@ class GeminiAnalyzeProvider:
             usage = getattr(response, "usage_metadata", None)
             candidates = getattr(response, "candidates", None) or []
             finish_reason = getattr(candidates[0], "finish_reason", None) if candidates else None
+            candidate_tokens = (
+                safe_int(getattr(usage, "candidates_token_count", 0), 0) or 0
+            )
+            thinking_tokens = (
+                safe_int(getattr(usage, "thoughts_token_count", 0), 0) or 0
+            )
             return ProviderResponse(
                 text=text,
                 provider="gemini",
                 model=self._model,
                 usage=ProviderUsage(
                     input_tokens=safe_int(getattr(usage, "prompt_token_count", 0), 0) or 0,
-                    output_tokens=safe_int(getattr(usage, "candidates_token_count", 0), 0) or 0,
+                    output_tokens=candidate_tokens + thinking_tokens,
                 ),
                 truncated=str(finish_reason).upper().endswith("MAX_TOKENS"),
             )

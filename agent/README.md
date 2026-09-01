@@ -71,6 +71,9 @@ section × 3개 bullet로 제한되어 배치 상한 50건 안에 들어옵니�
 `FACT`는 전체 사실·강도 검증, `FORECAST`는 전망 한정 표현 유지, `OPINION`은 발화 주체 귀속을
 검증합니다.
 
+`meta.outputTokens`는 provider 과금 기준 출력 토큰입니다. Gemini는 화면에 반환된 candidate
+토큰과 내부 thinking 토큰을 합산하고, Mindlogic Claude는 completion 토큰을 사용합니다.
+
 ## `/v1/analyze` 교차 출처 계약
 
 `analyze.ko.v4`부터 대표 기사 요청은 같은 이슈의 다른 기사 제목·요약·매체를 `issueMembers`로
