@@ -168,13 +168,8 @@ export function TopicForm() {
 
       {sources.isPending && <p className="muted">활성 수집 소스를 확인하는 중…</p>}
       {sources.isError && <p className="error">활성 수집 소스를 불러오지 못했습니다.</p>}
-      {!sources.isPending && !sources.isError && activeSources.length > 0 && (
-        <p className="hint topic-source-notice">
-          현재 활성화된 수집 소스 {activeSources.length}개가 자동으로 연결됩니다.
-        </p>
-      )}
       {!sources.isPending && !sources.isError && activeSources.length === 0 && (
-        <p className="error topic-source-notice">
+        <p className="error topic-source-error">
           활성 수집 소스가 없습니다. 먼저 소스를 등록하거나 활성화하세요.
         </p>
       )}

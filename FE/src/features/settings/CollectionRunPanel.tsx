@@ -47,10 +47,6 @@ export function CollectionRunPanel() {
   const targetCombinations = scope === 'ALL'
     ? activeCombinations
     : activeCombinations.filter((combination) => combination.topicId === effectiveTopic?.id)
-  // 피드 소스는 발행된 만큼 들어와 실행 전에 규모를 셀 수 없다. 몇 곳이 그런지만 문장으로 알린다.
-  const feedCount = targetCombinations.filter(
-    (combination) => combination.sourceKind === 'FEED',
-  ).length
   const setting = planQuery.data
 
   function resetRequestState() {
@@ -145,27 +141,6 @@ export function CollectionRunPanel() {
         )}
       </div>
 
-      <DefaultAudienceSetting />
-
-      {/*
-        기사 수 상한은 빼 둔다. 주제의 batchSize 합계라 사용자가 화면에서 바꿀 수 없고, 보고 나서
-        할 수 있는 일이 없다. 실행 전에 정말 알아야 하는 건 몇 개 조합이 도는지뿐이다.
-      */}
-      <div className="collection-run-preview" aria-live="polite">
-        <div>
-          <span>실행 조합</span>
-          <strong>{targetCombinations.length.toLocaleString()}개</strong>
-        </div>
-        <p>
-          {scope === 'ALL'
-            ? '모든 활성 주제와 연결된 소스를 실행합니다.'
-            : effectiveTopic
-              ? `‘${effectiveTopic.name}’에 연결된 활성 소스만 실행합니다.`
-              : '실행할 활성 주제를 먼저 등록해 주세요.'}
-          {feedCount > 0 && ` 피드 ${feedCount}곳은 새로 올라온 만큼 가져옵니다.`}
-        </p>
-      </div>
-
       <button className="collection-run-button" type="button" onClick={runNow} disabled={!canRun}>
         {startRun.isPending
           ? '실행 요청 중…'
@@ -177,6 +152,8 @@ export function CollectionRunPanel() {
           ? `실행 #${startRun.data.runId}을 ${startRun.data.llmPlan} 플랜으로 시작했습니다.`
           : null}
       />
+
+      <DefaultAudienceSetting />
     </section>
   )
 }
@@ -222,7 +199,7 @@ function DefaultAudienceSetting() {
           ))}
         </select>
       </div>
-      <button type="submit" className="secondary-button" disabled={updateAudience.isPending}>
+      <button type="submit" disabled={updateAudience.isPending}>
         {updateAudience.isPending ? '저장 중…' : '기본 관점 저장'}
       </button>
       <MutationStatus

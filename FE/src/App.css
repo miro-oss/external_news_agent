@@ -697,7 +697,7 @@ section {
   margin-bottom: 0.9rem;
 }
 
-.topic-source-notice {
+.topic-source-error {
   margin-bottom: 1rem;
 }
 
@@ -930,21 +930,28 @@ tbody tr:hover td {
   margin-top: 1.25rem;
 }
 
+.collection-run-controls .field {
+  margin: 0;
+}
+
 .run-audience-setting {
   display: grid;
   align-items: end;
   grid-template-columns: minmax(0, 1fr) minmax(160px, 0.65fr) auto;
-  gap: 0.7rem;
-  margin-top: 0.85rem;
-  padding: 1rem;
-  border-radius: var(--radius-sm);
-  background: var(--bg);
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
 }
 
 .run-audience-setting.state-panel {
   display: flex;
-  margin-top: 0.85rem;
-  padding: 1rem;
+  margin-top: 1.25rem;
+  padding: 1.25rem 0 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .run-audience-copy p {
@@ -958,6 +965,11 @@ tbody tr:hover td {
   margin: 0;
 }
 
+.run-audience-setting select {
+  border-color: var(--line);
+  background-color: var(--surface);
+}
+
 .run-audience-setting > button {
   white-space: nowrap;
 }
@@ -968,46 +980,9 @@ form.run-audience-setting > .success {
   grid-column: 1 / -1;
 }
 
-.collection-run-preview {
-  display: grid;
-  grid-template-columns: minmax(110px, 0.3fr) minmax(0, 1fr);
-  gap: 0.6rem;
-  margin: 0.85rem 0;
-}
-
-.collection-run-preview > div,
-.collection-run-preview > p {
-  margin: 0;
-  padding: 0.85rem 1rem;
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-}
-
-.collection-run-preview > div {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.collection-run-preview span,
-.collection-run-preview p {
-  color: var(--fg-3);
-  font-size: 0.78rem;
-}
-
-.collection-run-preview strong {
-  font-size: 1.2rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.collection-run-preview p {
-  display: flex;
-  align-items: center;
-  line-height: 1.5;
-}
-
 .collection-run-button {
   width: 100%;
+  margin-top: 1.25rem;
   padding: 0.95rem;
   font-size: 1rem;
 }
@@ -1968,17 +1943,31 @@ body.modal-open {
 }
 
 .key-point-content {
+  display: grid;
+  gap: 0.35rem;
   color: inherit;
   text-align: left;
 }
 
+.key-point-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
 .key-point-text {
-  display: block;
-  margin: 0 0 0.3rem;
+  margin: 0;
   color: #eaedf0;
   font-size: 0.86rem;
   font-weight: 500;
   line-height: 1.6;
+}
+
+.key-point-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 /* 근거가 약하거나 없을 때만 붙는 라벨이다. 정상은 근거 버튼이 이미 말해 준다. */
@@ -1989,22 +1978,25 @@ body.modal-open {
   font-weight: 700;
 }
 
-.claim-type-marker {
-  display: inline-block;
-  width: 0.38rem;
-  height: 0.38rem;
-  margin-right: 0.38rem;
-  border-radius: 50%;
-  background: var(--fg-3);
-  vertical-align: 0.08rem;
+.claim-type-label {
+  flex-shrink: 0;
+  margin-top: 0.18rem;
+  padding: 0.12rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #aab2bd;
+  font-size: 0.64rem;
+  font-weight: 700;
 }
 
-.claim-type-marker.forecast {
-  background: var(--warning-strong);
+.claim-type-label.forecast {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: #e8b339;
 }
 
-.claim-type-marker.opinion {
-  background: var(--primary);
+.claim-type-label.opinion {
+  background: rgba(110, 168, 254, 0.14);
+  color: #a5c9fa;
 }
 
 .evidence {
@@ -2441,7 +2433,7 @@ body.modal-open {
 .report-finding-filter {
   display: grid;
   align-items: end;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   gap: 0.55rem;
   margin: 0.9rem 0 1rem;
   padding: 0.9rem;
@@ -2621,6 +2613,21 @@ body.modal-open {
   color: var(--primary);
 }
 
+.issue-card .claim-type-label {
+  background: var(--line-soft);
+  color: var(--fg-3);
+}
+
+.issue-card .claim-type-label.forecast {
+  background: var(--warning-weak);
+  color: var(--warning-strong);
+}
+
+.issue-card .claim-type-label.opinion {
+  background: var(--primary-weak);
+  color: var(--primary-strong);
+}
+
 .issue-card .groundedness {
   color: var(--warning-strong);
 }
@@ -2644,6 +2651,21 @@ body.modal-open {
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--line);
+}
+
+.issue-cluster-warning {
+  margin: 0.65rem 0 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--radius-xs);
+  background: var(--warning-weak);
+  color: var(--warning-strong);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.issue-related-more {
+  width: 100%;
+  margin-top: 0.65rem;
 }
 
 .issue-cross-source {
@@ -3312,7 +3334,6 @@ body.modal-open {
 }
 
 @media (max-width: 860px) {
-  .collection-run-preview,
   .usage-grid {
     grid-template-columns: 1fr;
   }
