@@ -1,4 +1,4 @@
-import { useCallback, useId, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useId, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import {
   useLatestReport,
@@ -23,6 +23,7 @@ import {
   type ReportDetail,
   type ReportFinding,
   type ReportSummary,
+  type RiskLevel,
 } from '../../api/types'
 import { KeyPointList } from '../../components/KeyPointList'
 import { formatFullDate, formatShortDate } from '../../lib/datetime'
@@ -105,6 +106,7 @@ export function ReportsPage() {
             )}
             {activeReportData && (
               <ReportView
+                key={activeReportData.id}
                 report={activeReportData}
                 audience={activeAudience}
                 defaultAudience={audienceSetting.data?.audience}
@@ -162,10 +164,19 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
   onAudienceSelect: (audience: Audience) => void
   onEvidenceSelect: (articleId: number, sentences: number[]) => void
 }) {
+  const [filters, setFilters] = useState<ReportFindingFilters>(DEFAULT_REPORT_FINDING_FILTERS)
   const findings = useMemo(
     () => selectFindingsForAudience(report.findings ?? [], audience),
     [audience, report.findings],
   )
+  const filteredFindings = useMemo(() => {
+    if (filters.riskLevel) {
+      return findings.filter((finding) => finding.riskLevel === filters.riskLevel)
+    }
+    return [...findings].sort(
+      (left, right) => RISK_LEVEL_RANK[right.riskLevel] - RISK_LEVEL_RANK[left.riskLevel],
+    )
+  }, [filters, findings])
   const stats = useMemo(() => summarizeFindings(findings), [findings])
   const evidenceCount = useMemo(() => countEvidenceSentences(report.findings ?? []), [report.findings])
   return (
@@ -203,11 +214,24 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
       <section className="report-findings">
         <div className="section-heading report-section-heading">
           <h3>주요 이슈</h3>
-          <span>{findings.length}건 · {AUDIENCE_LABELS[audience]} 관점순</span>
+          <span>
+            {filteredFindings.length === findings.length
+              ? `${findings.length}건`
+              : `${filteredFindings.length} / ${findings.length}건`}
+            {' · '}{filters.riskLevel ? '' : '높은 민감도순 · '}{AUDIENCE_LABELS[audience]} 관점순
+          </span>
         </div>
-        {findings.length > 0 ? (
+        <ReportFindingFilterBar
+          filters={filters}
+          audience={audience}
+          defaultAudience={defaultAudience}
+          onChange={(key, value) => setFilters((current) => ({ ...current, [key]: value }))}
+          onAudienceSelect={onAudienceSelect}
+          onReset={() => setFilters(EMPTY_REPORT_FINDING_FILTERS)}
+        />
+        {filteredFindings.length > 0 ? (
           <div className="finding-list">
-            {findings.map((finding) => (
+            {filteredFindings.map((finding) => (
               <IssueCard
                 finding={finding}
                 key={finding.id}
@@ -216,11 +240,72 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
               />
             ))}
           </div>
-        ) : <p className="muted">이 보고서에 포함된 주요 이슈가 없습니다.</p>}
+        ) : findings.length > 0
+          ? <p className="muted report-findings-empty">조건에 맞는 주요 이슈가 없습니다. 필터를 바꿔보세요.</p>
+          : <p className="muted report-findings-empty">이 보고서에 포함된 주요 이슈가 없습니다.</p>}
       </section>
 
       <ReportDisclaimer report={report} audience={audience} />
     </article>
+  )
+}
+
+type ReportFindingFilters = {
+  riskLevel: '' | RiskLevel
+}
+
+const DEFAULT_REPORT_FINDING_FILTERS: ReportFindingFilters = {
+  riskLevel: 'high',
+}
+
+const EMPTY_REPORT_FINDING_FILTERS: ReportFindingFilters = {
+  riskLevel: '',
+}
+
+function ReportFindingFilterBar({
+  filters,
+  audience,
+  defaultAudience,
+  onChange,
+  onAudienceSelect,
+  onReset,
+}: {
+  filters: ReportFindingFilters
+  audience: Audience
+  defaultAudience?: Audience
+  onChange: <K extends keyof ReportFindingFilters>(key: K, value: ReportFindingFilters[K]) => void
+  onAudienceSelect: (audience: Audience) => void
+  onReset: () => void
+}) {
+  const hasActiveFilters = Boolean(filters.riskLevel)
+  return (
+    <div className="report-finding-filter" aria-label="주요 이슈 필터">
+      <label>
+        민감도
+        <select
+          value={filters.riskLevel}
+          onChange={(event) => onChange('riskLevel', event.target.value as ReportFindingFilters['riskLevel'])}
+        >
+          <option value="">전체</option>
+          <option value="high">{RISK_LEVEL_LABELS.high}</option>
+          <option value="medium">{RISK_LEVEL_LABELS.medium}</option>
+          <option value="low">{RISK_LEVEL_LABELS.low}</option>
+        </select>
+      </label>
+      <label>
+        관점
+        <select value={audience} onChange={(event) => onAudienceSelect(event.target.value as Audience)}>
+          {AUDIENCES.map((value) => (
+            <option value={value} key={value}>
+              {AUDIENCE_LABELS[value]}{defaultAudience === value ? ' · 내 기본' : ''}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button type="button" disabled={!hasActiveFilters} onClick={onReset}>
+        전체 보기
+      </button>
+    </div>
   )
 }
 
@@ -349,6 +434,7 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
   onEvidenceSelect: (articleId: number, sentences: number[]) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [visibleRelatedCount, setVisibleRelatedCount] = useState(RELATED_ARTICLE_BATCH_SIZE)
   const panelId = `${useId()}-issue-detail`
   // FE와 BE가 따로 재시작되는 로컬 환경에서도 구버전 응답의 누락 값을 잘못 조회하지 않는다.
   const issueId = finding.issueId ?? null
@@ -358,14 +444,32 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
   const perspective = perspectiveFor(finding, audience)
   const title = issueInfo?.title || finding.articleTitle
   const summary = limitText(issueInfo?.summary || finding.summary, 120)
-  const keywords = unique([
-    ...(issueInfo?.entities ?? []),
-    ...(issueInfo?.topicName ? [issueInfo.topicName] : []),
-  ]).slice(0, 4)
+  const relatedArticles = issue.data?.articles ?? []
+  const visibleRelatedArticles = relatedArticles.slice(0, visibleRelatedCount)
+
+  function toggleOpen() {
+    if (open) setVisibleRelatedCount(RELATED_ARTICLE_BATCH_SIZE)
+    setOpen((current) => !current)
+  }
+
+  function handlePrimaryKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    toggleOpen()
+  }
 
   return (
     <article className="issue-card">
-      <div className="issue-card-primary">
+      <div
+        className="issue-card-primary"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label={`${title} ${open ? '접기' : '자세히 보기'}`}
+        onClick={toggleOpen}
+        onKeyDown={handlePrimaryKeyDown}
+      >
         <div className="issue-card-topline">
           <span className={`signal-dot risk-${finding.riskLevel}`} aria-hidden="true" />
           <span className={`status-pill risk-label-${finding.riskLevel}`}>
@@ -388,20 +492,9 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
                   ? '관련 1건 · 매체 1곳'
                   : '관련 기사 정보는 자세히에서 확인'}
           </span>
-          <div className="issue-keywords" aria-label="이슈 키워드">
-            {keywords.map((keyword) => <span key={keyword}>#{keyword}</span>)}
-            {!issueInfo && issue.isLoading && issueId !== null && <span className="issue-keywords-loading">키워드 확인 중</span>}
-            {!issueInfo && issue.isError && issueId !== null && <span className="issue-keywords-loading">키워드 불러오기 실패</span>}
-          </div>
-          <button
-            type="button"
-            className="issue-detail-toggle"
-            aria-expanded={open}
-            aria-controls={panelId}
-            onClick={() => setOpen((current) => !current)}
-          >
+          <span className="issue-detail-toggle" aria-hidden="true">
             {open ? '접기' : '자세히'} <span aria-hidden="true">{open ? '▴' : '▾'}</span>
-          </button>
+          </span>
         </div>
       </div>
 
@@ -434,22 +527,42 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
           <section className="issue-related-articles">
             <div className="issue-detail-heading">
               <h5>관련 기사</h5>
-              <span>{issue.data?.articles.length ?? issueInfo?.articleCount ?? 1}건</span>
+              <span>
+                {issue.data && relatedArticles.length > RELATED_ARTICLE_BATCH_SIZE
+                  ? `${visibleRelatedArticles.length} / ${relatedArticles.length}건`
+                  : `${relatedArticles.length || issueInfo?.articleCount || 1}건`}
+              </span>
             </div>
             {issue.isLoading && <p className="issue-detail-state">관련 기사를 불러오는 중입니다.</p>}
             {issue.isError && <p className="issue-detail-state error">이슈 묶음을 불러오지 못했습니다. 대표 기사로 이동할 수 있습니다.</p>}
             {issue.data ? (
-              <ul>
-                {issue.data.articles.map((article) => (
-                  <li key={article.id}>
-                    <div><strong>{article.title}</strong><span>{article.publisher || '매체 미상'} · {formatShortDate(article.publishedAt)}</span></div>
-                    <div className="issue-article-actions">
-                      <button type="button" className="text-button" onClick={() => onEvidenceSelect(article.id, [])}>본문 보기</button>
-                      <a href={article.canonicalUrl} target="_blank" rel="noreferrer" aria-label={`${article.title} 원문 열기`}>원문 ↗</a>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <>
+                {relatedArticles.length >= 50 && (
+                  <p className="issue-cluster-warning">
+                    기사 묶음이 매우 큽니다. 서로 다른 사건이 섞였을 수 있어 일부만 먼저 보여드립니다.
+                  </p>
+                )}
+                <ul>
+                  {visibleRelatedArticles.map((article) => (
+                    <li key={article.id}>
+                      <div><strong>{article.title}</strong><span>{article.publisher || '매체 미상'} · {formatShortDate(article.publishedAt)}</span></div>
+                      <div className="issue-article-actions">
+                        <button type="button" className="text-button" onClick={() => onEvidenceSelect(article.id, [])}>본문 보기</button>
+                        <a href={article.canonicalUrl} target="_blank" rel="noreferrer" aria-label={`${article.title} 원문 열기`}>원문 ↗</a>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                {visibleRelatedArticles.length < relatedArticles.length && (
+                  <button
+                    type="button"
+                    className="secondary-button issue-related-more"
+                    onClick={() => setVisibleRelatedCount((current) => current + RELATED_ARTICLE_BATCH_SIZE)}
+                  >
+                    다음 {Math.min(RELATED_ARTICLE_BATCH_SIZE, relatedArticles.length - visibleRelatedArticles.length)}건 더 보기
+                  </button>
+                )}
+              </>
             ) : !issue.isLoading && (
               <div className="issue-legacy-actions">
                 <button type="button" className="text-button" onClick={() => onEvidenceSelect(finding.articleId, [])}>대표 기사 본문 보기</button>
@@ -601,6 +714,12 @@ const PERSPECTIVE_RANK: Record<AudienceRelevance, number> = {
   none: 0,
 }
 
+const RISK_LEVEL_RANK: Record<RiskLevel, number> = {
+  high: 3,
+  medium: 2,
+  low: 1,
+}
+
 function sortFindingsForAudience(findings: ReportFinding[], audience: Audience) {
   return findings
     .map((finding, index) => ({ finding, index }))
@@ -659,9 +778,7 @@ function limitText(value: string, limit: number) {
   return normalized.length <= limit ? normalized : `${normalized.slice(0, limit - 1).trimEnd()}…`
 }
 
-function unique(values: string[]) {
-  return [...new Set(values.filter((value) => value.trim().length > 0))]
-}
+const RELATED_ARTICLE_BATCH_SIZE = 8
 
 /** 서버가 만든 마크다운을 HTML 주입 없이 표준 문법으로 렌더링한다. */
 function MarkdownBody({ markdown }: { markdown: string }) {

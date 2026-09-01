@@ -1,15 +1,10 @@
 import { useState } from 'react'
 import {
-  useAudienceSetting,
   useLlmPlan,
   useLlmUsage,
   useUpdateLlmPlan,
-  useUpdateAudienceSetting,
 } from '../../api/queries'
 import {
-  AUDIENCES,
-  AUDIENCE_LABELS,
-  type Audience,
   type LlmPlan,
   type PaidExhaustedAction,
 } from '../../api/types'
@@ -18,21 +13,11 @@ import { MutationStatus } from './MutationStatus'
 export function LlmControlPanel() {
   const planQuery = useLlmPlan()
   const usageQuery = useLlmUsage()
-  const audienceQuery = useAudienceSetting()
   const updatePlan = useUpdateLlmPlan()
-  const updateAudience = useUpdateAudienceSetting()
   const [saved, setSaved] = useState(false)
-  const [audienceSaved, setAudienceSaved] = useState(false)
 
-  if (planQuery.isPending || usageQuery.isPending || audienceQuery.isPending) {
+  if (planQuery.isPending || usageQuery.isPending) {
     return <div className="llm-panel state-panel">LLM 설정과 사용량을 불러오는 중입니다.</div>
-  }
-  if (audienceQuery.error || !audienceQuery.data) {
-    return (
-      <div className="llm-panel state-panel error" role="alert">
-        기본 관점 설정을 불러오지 못했습니다.
-      </div>
-    )
   }
   if (planQuery.error || usageQuery.error || !planQuery.data || !usageQuery.data) {
     return (
@@ -44,7 +29,6 @@ export function LlmControlPanel() {
 
   const setting = planQuery.data
   const usage = usageQuery.data
-  const audience = audienceQuery.data.audience
 
   function save(event: React.FormEvent) {
     event.preventDefault()
@@ -56,16 +40,6 @@ export function LlmControlPanel() {
         paidExhaustedAction: values.get('paidExhaustedAction') as PaidExhaustedAction,
       },
       { onSuccess: () => setSaved(true) },
-    )
-  }
-
-  function saveAudience(event: React.FormEvent) {
-    event.preventDefault()
-    setAudienceSaved(false)
-    const values = new FormData(event.currentTarget as HTMLFormElement)
-    updateAudience.mutate(
-      values.get('audience') as Audience,
-      { onSuccess: () => setAudienceSaved(true) },
     )
   }
 
@@ -98,66 +72,37 @@ export function LlmControlPanel() {
         />
       </div>
 
-      <div className="llm-actions-grid">
-        <form
-          key={`${setting.plan}-${setting.paidExhaustedAction}`}
-          className="llm-setting-form"
-          onSubmit={save}
-        >
-          <fieldset className="field">
-            <legend>기본 플랜</legend>
-            <div className="plan-options">
-              <PlanOption value="FREE" current={setting.plan} label="Gemini 무료" />
-              <PlanOption value="PAID" current={setting.plan} label="Claude 유료" />
-            </div>
-          </fieldset>
-          <div className="field">
-            <label htmlFor="paid-exhausted-action">PAID 실행 중 소진 시</label>
-            <select
-              id="paid-exhausted-action"
-              name="paidExhaustedAction"
-              defaultValue={setting.paidExhaustedAction}
-            >
-              <option value="STUB">임시 응답으로 계속 — 기본</option>
-              <option value="FALLBACK_FREE">FREE Gemini로 계속</option>
-            </select>
+      <form
+        key={`${setting.plan}-${setting.paidExhaustedAction}`}
+        className="llm-setting-form"
+        onSubmit={save}
+      >
+        <fieldset className="field">
+          <legend>기본 플랜</legend>
+          <div className="plan-options">
+            <PlanOption value="FREE" current={setting.plan} label="Gemini 무료" />
+            <PlanOption value="PAID" current={setting.plan} label="Claude 유료" />
           </div>
-          <button type="submit" disabled={updatePlan.isPending}>
-            {updatePlan.isPending ? '저장 중…' : '플랜 설정 저장'}
-          </button>
-          <MutationStatus
-            error={updatePlan.error}
-            success={saved ? 'LLM 플랜 설정을 저장했습니다.' : null}
-          />
-        </form>
-
-        <form
-          key={audience}
-          className="audience-setting-form"
-          onSubmit={saveAudience}
-        >
-          <div>
-            <h3 className="card-title">내 기본 관점</h3>
-            <p className="muted">기사 목록과 상세 화면에서 처음 선택할 독자 관점입니다.</p>
-          </div>
-          <div className="field">
-            <label htmlFor="default-audience">기본 관점</label>
-            <select id="default-audience" name="audience" defaultValue={audience}>
-              {AUDIENCES.map((value) => (
-                <option value={value} key={value}>{AUDIENCE_LABELS[value]}</option>
-              ))}
-            </select>
-          </div>
-          <button type="submit" disabled={updateAudience.isPending}>
-            {updateAudience.isPending ? '저장 중…' : '기본 관점 저장'}
-          </button>
-          <MutationStatus
-            error={updateAudience.error}
-            success={audienceSaved ? '기본 관점을 저장했습니다.' : null}
-          />
-        </form>
-
-      </div>
+        </fieldset>
+        <div className="field">
+          <label htmlFor="paid-exhausted-action">PAID 실행 중 소진 시</label>
+          <select
+            id="paid-exhausted-action"
+            name="paidExhaustedAction"
+            defaultValue={setting.paidExhaustedAction}
+          >
+            <option value="STUB">임시 응답으로 계속 — 기본</option>
+            <option value="FALLBACK_FREE">FREE Gemini로 계속</option>
+          </select>
+        </div>
+        <button type="submit" disabled={updatePlan.isPending}>
+          {updatePlan.isPending ? '저장 중…' : '플랜 설정 저장'}
+        </button>
+        <MutationStatus
+          error={updatePlan.error}
+          success={saved ? 'LLM 플랜 설정을 저장했습니다.' : null}
+        />
+      </form>
     </div>
   )
 }

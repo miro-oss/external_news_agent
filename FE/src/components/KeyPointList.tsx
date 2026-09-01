@@ -67,37 +67,46 @@ export function KeyPointList({ points, onEvidenceSelect, articleTitle }: Props) 
               <div className="key-point" key={`${index}-${point.text}`}>
                 <span className="key-point-number">{index + 1}</span>
                 <div className="key-point-content">
-                  <span
-                    className={`claim-type-marker ${point.claimType.toLowerCase()}`}
-                    aria-label={`주장 유형: ${CLAIM_TYPE_LABELS[point.claimType]}`}
-                    title={point.attributedTo
-                      ? `${CLAIM_TYPE_LABELS[point.claimType]} · ${point.attributedTo}`
-                      : CLAIM_TYPE_LABELS[point.claimType]}
-                  />
-                  <span className="key-point-text">{point.text}</span>
-                  {warning && (
-                    <span
-                      className={`groundedness ${point.groundedness}`}
-                      title={point.groundingReason ?? undefined}
-                    >
-                      {warning}
-                    </span>
+                  <div className="key-point-main">
+                    {point.claimType !== 'FACT' && (
+                      <span
+                        className={`claim-type-label ${point.claimType.toLowerCase()}`}
+                        title={point.attributedTo
+                          ? `${CLAIM_TYPE_LABELS[point.claimType]} · ${point.attributedTo}`
+                          : CLAIM_TYPE_LABELS[point.claimType]}
+                      >
+                        {CLAIM_TYPE_LABELS[point.claimType]}
+                      </span>
+                    )}
+                    <span className="key-point-text">{point.text}</span>
+                  </div>
+                  {(warning || point.evidence.length > 0) && (
+                    <div className="key-point-evidence">
+                      {warning && (
+                        <span
+                          className={`groundedness ${point.groundedness}`}
+                          title={point.groundingReason ?? undefined}
+                        >
+                          {warning}
+                        </span>
+                      )}
+                      {point.evidence.map((sentenceId, localIndex) => (
+                        <button
+                          type="button"
+                          className="evidence"
+                          key={`${sentenceId}-${localIndex}`}
+                          aria-label={[
+                            `핵심 ${index + 1}의 근거 ${localIndex + 1}`,
+                            articleTitle,
+                            `본문 ${sentenceId + 1}번째 문장으로 이동`,
+                          ].filter(Boolean).join(' · ')}
+                          onClick={() => onEvidenceSelect(sentenceId)}
+                        >
+                          원문 근거 {localIndex + 1}
+                        </button>
+                      ))}
+                    </div>
                   )}
-                  {point.evidence.map((sentenceId, localIndex) => (
-                    <button
-                      type="button"
-                      className="evidence"
-                      key={`${sentenceId}-${localIndex}`}
-                      aria-label={[
-                        `핵심 ${index + 1}의 근거 ${localIndex + 1}`,
-                        articleTitle,
-                        `본문 ${sentenceId + 1}번째 문장으로 이동`,
-                      ].filter(Boolean).join(' · ')}
-                      onClick={() => onEvidenceSelect(sentenceId)}
-                    >
-                      근거 {localIndex + 1}
-                    </button>
-                  ))}
                 </div>
               </div>
             )
