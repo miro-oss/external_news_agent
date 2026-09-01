@@ -271,4 +271,94 @@ class IssueClustererTest {
     private OffsetDateTime hour(int hours) {
         return OffsetDateTime.parse("2026-08-10T00:00:00+09:00").plusHours(hours);
     }
+
+    /**
+     * 주제 어휘로 전체가 한 이슈가 되는 것을 막는다 (#118).
+     *
+     * <p>반도체 주제의 기사는 거의 다 {@code HBM4}·{@code DDR5}를 언급한다. 그것만 공유하는
+     * 서로 다른 사건 24건이 교집합 2 규칙으로 한 덩어리가 되던 것이 실수집 과병합의 정체다.
+     * 실행 안에서 문서빈도를 세어 흔한 말을 빼면 각 사건이 따로 남는다.
+     */
+    @Test
+    void doesNotMergeEverythingThatSharesTopicVocabulary() {
+        // 제목이 서로 겹치지 않는 별개 사건들이다. 공유하는 것은 본문의 주제 어휘 둘(HBM4·DDR5)뿐.
+        List<String> titles = List.of(
+                "롯데 주력 계열사 영업익 일제 반등", "노란봉투법 해석지침 보완 임박",
+                "대한화섬 고성능 섬유 상업 생산 개시", "7월 산업생산 제자리걸음",
+                "가톨릭관동대 피지컬 포럼 개최", "유럽증시 무력충돌 여파로 하락",
+                "네이버 컬리 거래액 1년 새 급증", "넥슨 신작 게임 출시일 확정",
+                "조선업 수주 잔량 역대 최대", "은행권 가계대출 증가폭 둔화",
+                "제주 항공편 결항 속출", "전기차 보조금 지급 기준 개편",
+                "프로야구 관중 신기록 경신", "서울 아파트 전세가율 상승",
+                "농산물 도매가격 급등세", "해운 운임 지수 반락",
+                "철강 수출 관세 협상 난항", "바이오 위탁생산 계약 체결",
+                "카드사 연체율 소폭 상승", "면세점 매출 회복 조짐",
+                "택배 물동량 추석 앞두고 증가", "건설 수주액 전년비 감소",
+                "국제 유가 배럴당 등락", "통신 3사 요금제 개편 검토");
+        List<ClusterArticle> articles = new java.util.ArrayList<>();
+        for (int index = 0; index < titles.size(); index++) {
+            articles.add(article(
+                    index + 1L,
+                    titles.get(index),
+                    longBody("HBM4 DDR5 시장 상황과 " + titles.get(index)),
+                    FetchStatus.FULLTEXT, "매체" + index, "0.8", hour(index % 40)));
+        }
+
+        ClusterPlan plan = clusterer.cluster(articles);
+
+        assertTrue(plan.issues().size() >= 20,
+                "주제 어휘만 공유하는 사건 24건이 이슈 %d개로 뭉쳤다".formatted(plan.issues().size()));
+    }
+
+    /** 표본이 작으면 문서빈도 컷을 적용하지 않는다. 비율이 의미를 갖지 못한다. */
+    @Test
+    void keepsEntityMatchingWhenSampleIsTooSmallForDocumentFrequency() {
+        ClusterArticle first = article(
+                1L, "삼성전자 차세대 메모리 투자 확대", longBody("삼성전자 HBM4 투자"),
+                FetchStatus.FULLTEXT, "전자신문", "0.8", hour(0));
+        ClusterArticle second = article(
+                2L, "HBM4 생산라인에 추가 장비 투입", longBody("삼성전자 HBM4 생산라인"),
+                FetchStatus.FULLTEXT, "매일경제", "0.8", hour(47));
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second));
+
+        assertEquals(1, plan.issues().size());
+    }
+
+    /** 최소 표본 20건에서도 한 쌍만 공유하는 엔티티는 흔한 주제 어휘로 제거하지 않는다. */
+    @Test
+    void keepsPairOnlyEntitiesAtMinimumDocumentFrequencySample() {
+        List<String> unrelatedTitles = List.of(
+                "롯데 주력 계열사 영업익 일제 반등", "노란봉투법 해석지침 보완 임박",
+                "대한화섬 고성능 섬유 상업 생산 개시", "7월 산업생산 제자리걸음",
+                "가톨릭관동대 피지컬 포럼 개최", "유럽증시 무력충돌 여파로 하락",
+                "네이버 컬리 거래액 1년 새 급증", "넥슨 신작 게임 출시일 확정",
+                "조선업 수주 잔량 역대 최대", "은행권 가계대출 증가폭 둔화",
+                "제주 항공편 결항 속출", "전기차 보조금 지급 기준 개편",
+                "프로야구 관중 신기록 경신", "서울 아파트 전세가율 상승",
+                "농산물 도매가격 급등세", "해운 운임 지수 반락",
+                "철강 수출 관세 협상 난항", "바이오 위탁생산 계약 체결");
+        List<ClusterArticle> articles = new java.util.ArrayList<>();
+        articles.add(article(
+                1L, "오로라 가속기 MI300X CDNA4 공급 계약",
+                null, FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0)));
+        articles.add(article(
+                2L, "데이터센터 MI300X CDNA4 생산 일정 공개",
+                null, FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(1)));
+        for (int index = 0; index < unrelatedTitles.size(); index++) {
+            articles.add(article(
+                    index + 3L, unrelatedTitles.get(index), null,
+                    FetchStatus.METADATA_ONLY, "매체" + index, "0.8", hour(index + 2)));
+        }
+
+        ClusterPlan plan = clusterer.cluster(articles, true);
+
+        assertEquals(19, plan.issues().size(), "관련 기사 한 쌍만 합쳐져야 한다");
+        ClusterPlan.PairScore relatedPair = plan.pairScores().stream()
+                .filter(score -> score.leftArticleId() == 1L && score.rightArticleId() == 2L)
+                .findFirst()
+                .orElseThrow();
+        assertEquals(2, relatedPair.entityOverlap());
+        assertTrue(relatedPair.sameCluster());
+    }
 }

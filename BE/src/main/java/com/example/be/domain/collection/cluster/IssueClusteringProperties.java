@@ -13,6 +13,16 @@ public class IssueClusteringProperties implements InitializingBean {
     private Duration breakingTimeWindow = Duration.ofHours(6);
     private int entityOverlapThreshold = 2;
     private int simhashHammingThreshold = 3;
+    /**
+     * 이 비율 이상의 기사에 나타나는 엔티티는 주제 어휘로 보고 교집합 계산에서 뺀다.
+     *
+     * <p>반도체 주제에서 {@code HBM}·{@code GPU}·{@code 삼성전자}는 거의 모든 기사에 나온다.
+     * 두 기사가 그걸 2개 공유한다고 같은 사건은 아닌데, 교집합 규칙은 그걸 구분하지 못한다.
+     * 실행 안에서 문서빈도를 세어 흔한 말을 빼면 남는 교집합만 사건 신호가 된다.
+     */
+    private double commonEntityDocumentRatio = 0.10;
+    /** 문서빈도 컷을 적용할 최소 기사 수. 표본이 작으면 비율이 의미를 갖지 못한다. */
+    private int commonEntityMinArticles = 20;
 
     @Override
     public void afterPropertiesSet() {
@@ -26,10 +36,30 @@ public class IssueClusteringProperties implements InitializingBean {
                 || breakingTimeWindow.isZero()
                 || breakingTimeWindow.isNegative()
                 || entityOverlapThreshold <= 0
+                || !Double.isFinite(commonEntityDocumentRatio)
+                || commonEntityDocumentRatio <= 0
+                || commonEntityDocumentRatio > 1
+                || commonEntityMinArticles < 1
                 || simhashHammingThreshold < 0
                 || simhashHammingThreshold > 64) {
             throw new IllegalStateException("news.clustering 설정값이 올바르지 않습니다.");
         }
+    }
+
+    public double getCommonEntityDocumentRatio() {
+        return commonEntityDocumentRatio;
+    }
+
+    public void setCommonEntityDocumentRatio(double commonEntityDocumentRatio) {
+        this.commonEntityDocumentRatio = commonEntityDocumentRatio;
+    }
+
+    public int getCommonEntityMinArticles() {
+        return commonEntityMinArticles;
+    }
+
+    public void setCommonEntityMinArticles(int commonEntityMinArticles) {
+        this.commonEntityMinArticles = commonEntityMinArticles;
     }
 
     public double getTitleJaccardThreshold() {
