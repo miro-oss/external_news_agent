@@ -211,7 +211,7 @@ live 프로필은 실제 provider 인증 정보와 비용 승인이 필요하다
   (`assess_with_decisive_rules`)이 `grounded`/`weak`로 수용한 비율. provider 위임은 판정 전이므로
   통과로 세지 않습니다. P1-5 기준선은 강도 과장 2건을 차단해 0/15입니다.
 - false reject count: 패러프레이즈한 valid positive control 15건 중 결정 규칙이 `ungrounded`로
-  선차단한 건수. provider 위임은 오탈락이 아니며 P1-0 기준선은 0건
+  선차단한 건수. provider 위임은 오탈락이 아니며 P1-5 기준선은 0건
 - claim control provider required count: 결정 규칙이 확정하지 않아 provider 판정이 필요한 대조군
   개수. P1-5 기준선은 9건입니다.
 

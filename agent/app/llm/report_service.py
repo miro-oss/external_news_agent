@@ -11,6 +11,7 @@ from app.core.parser import parse_json_object
 from app.core.report_grounding import (
     assess_finding_claim,
     assess_independent_finding_claim,
+    attributed_opinion,
     report_claim_policy_violation,
 )
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
@@ -212,7 +213,13 @@ def _best_finding_fallback(claim: str, findings: list[ReportFindingInput]) -> st
         for finding in findings
         for text in [
             finding.summary_ko,
-            *(point.text for point in finding.key_points if point.groundedness != "ungrounded"),
+            *(
+                attributed_opinion(point.attributed_to, point.text)
+                if point.claim_type == "OPINION"
+                else point.text
+                for point in finding.key_points
+                if point.groundedness != "ungrounded"
+            ),
         ]
     ]
     if not candidates:

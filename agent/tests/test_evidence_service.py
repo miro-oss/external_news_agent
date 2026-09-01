@@ -4,6 +4,7 @@ import pytest
 
 from app.core.config import Settings
 from app.core.errors import AgentError
+from app.core.evidence import modality_overreach
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.evidence_service import EvidenceVerifierService
 from app.schemas.evidence import EvidenceVerifyRequest
@@ -170,6 +171,28 @@ def test_rules_reject_opposite_polarity() -> None:
 
     assert first_result(response).status == "ungrounded"
     assert "부정 표현" in first_result(response).reason
+
+
+def test_modality_uses_strongest_clause_instead_of_unrelated_possibility() -> None:
+    assessment = modality_overreach(
+        "회사는 HBM4 양산을 시작했고, 수율 개선 가능성을 검토했다.",
+        "회사는 HBM4 양산을 계획했고, 수율 개선 가능성을 검토했다.",
+    )
+
+    assert assessment is not None
+    assert assessment.claim_stage == 5
+    assert assessment.evidence_stage == 0
+
+
+def test_modality_does_not_treat_scheduled_start_as_completed_start() -> None:
+    assessment = modality_overreach(
+        "회사는 HBM4 양산을 시작했다.",
+        "회사는 HBM4 양산을 시작할 예정이다.",
+    )
+
+    assert assessment is not None
+    assert assessment.claim_stage == 5
+    assert assessment.evidence_stage == 0
 
 
 def test_rules_reject_swapped_year_amount_pairs() -> None:
@@ -353,7 +376,7 @@ def test_opinion_requires_attributed_speaker_in_evidence() -> None:
     payload["claims"][0]["sentences"][0]["text"] = (
         "김 연구원은 수요 회복이 빨라질 것으로 해석했다."
     )
-    provider = FakeProvider()
+    provider = FakeProvider(provider_response(output()))
 
     accepted = EvidenceVerifierService(Settings(AGENT_MOCK=False), provider).verify(
         EvidenceVerifyRequest.model_validate(payload)
@@ -368,7 +391,32 @@ def test_opinion_requires_attributed_speaker_in_evidence() -> None:
     assert first_result(accepted).status == "grounded"
     assert first_result(rejected).status == "ungrounded"
     assert "발화 주체" in first_result(rejected).reason
-    assert provider.prompts == []
+    assert len(provider.prompts) == 1
+
+
+def test_opinion_with_same_speaker_still_requires_semantic_validation() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["claims"][0].update(
+        {
+            "claim": "수요 회복을 예상했다.",
+            "claimType": "OPINION",
+            "attributedTo": "김 연구원",
+        }
+    )
+    payload["claims"][0]["sentences"][0]["text"] = (
+        "김 연구원은 양산 완료를 발표했다."
+    )
+    provider = FakeProvider(
+        provider_response(output(status="ungrounded", accepted_ids=[]))
+    )
+
+    response = EvidenceVerifierService(Settings(AGENT_MOCK=False), provider).verify(
+        EvidenceVerifyRequest.model_validate(payload)
+    )
+
+    assert first_result(response).status == "ungrounded"
+    assert first_result(response).accepted_sentence_ids == []
+    assert len(provider.prompts) == 1
 
 
 def test_non_mock_verifier_resolves_high_confidence_bilingual_contract() -> None:

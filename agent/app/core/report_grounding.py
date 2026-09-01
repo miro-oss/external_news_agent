@@ -81,7 +81,7 @@ def report_claim_policy_violation(
             violations.append(
                 ReportPolicyViolation(
                     "견해의 발화 주체가 리포트 문장에서 빠졌습니다.",
-                    _attributed_opinion(point.attributed_to, point.text),
+                    attributed_opinion(point.attributed_to, point.text),
                 )
             )
             continue
@@ -90,7 +90,6 @@ def report_claim_policy_violation(
             if modality is not None:
                 violations.append(ReportPolicyViolation(modality.reason, point.text))
                 continue
-        return None
     return violations[0] if violations else None
 
 
@@ -139,7 +138,7 @@ def _related_claim(left: str, right: str) -> bool:
     return len(left_tokens & right_tokens) / min(len(left_tokens), len(right_tokens)) >= 0.4
 
 
-def _attributed_opinion(attributed_to: str | None, text: str) -> str:
+def attributed_opinion(attributed_to: str | None, text: str) -> str:
     if attributed_to is None or attributed_to.casefold() in text.casefold():
         return text
     return f"{attributed_to}{_topic_particle(attributed_to)} {text}"

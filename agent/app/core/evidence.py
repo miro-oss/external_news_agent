@@ -36,7 +36,7 @@ _AMBIGUOUS_RELATION = re.compile(
     re.IGNORECASE,
 )
 _CONDITIONAL_MODALITY = re.compile(
-    r"(?:가능성|전망|(?:할|일)\s*수도|수\s*있(?:다|습니다|을)|"
+    r"(?:가능성|전망|예정|예상|계획|(?:할|일)\s*수도|수\s*있(?:다|습니다|을)|"
     r"\b(?:may|might|could|possibly|likely)\b)",
     re.IGNORECASE,
 )
@@ -443,21 +443,27 @@ def _normalize(value: str) -> str:
 
 def _modality_stage(value: str) -> tuple[int, str]:
     normalized = _normalize(value)
-    normalized_tokens = " ".join(
-        _strip_korean_suffix(match.group()) for match in _WORD.finditer(normalized)
-    )
-    searchable = f"{normalized} {normalized_tokens}"
-    conditional = _CONDITIONAL_MODALITY.search(searchable)
-    if conditional is not None:
-        return 0, conditional.group().strip()
-    for stage, label, pattern in _MODALITY_LADDER:
-        for clause in _clauses(searchable):
-            if _has_negation(clause):
-                continue
-            match = pattern.search(clause)
+    clause_stages: list[tuple[int, str]] = []
+    for clause in _clauses(normalized):
+        normalized_tokens = " ".join(
+            _strip_korean_suffix(match.group()) for match in _WORD.finditer(clause)
+        )
+        searchable = f"{clause} {normalized_tokens}"
+        conditional = _CONDITIONAL_MODALITY.search(searchable)
+        if conditional is not None:
+            clause_stages.append((0, conditional.group().strip()))
+            continue
+        if _has_negation(searchable):
+            clause_stages.append((0, "부정 표현"))
+            continue
+        for stage, label, pattern in _MODALITY_LADDER:
+            match = pattern.search(searchable)
             if match is not None:
-                return stage, match.group().strip() or label
-    return 0, "관측·보도"
+                clause_stages.append((stage, match.group().strip() or label))
+                break
+        else:
+            clause_stages.append((0, "관측·보도"))
+    return max(clause_stages, key=lambda value: value[0], default=(0, "관측·보도"))
 
 
 def _bilingual_direct_match(claim: str, evidence: str) -> bool:

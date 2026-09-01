@@ -179,11 +179,7 @@ def _claim_type_assessment(claim: EvidenceClaim) -> RuleAssessment | None:
             [],
             "OPINION의 발화 주체가 근거 문장에서 확인되지 않습니다.",
         )
-    return RuleAssessment(
-        "grounded",
-        sentence_ids,
-        "견해가 근거에 명시된 발화 주체에 귀속되었습니다.",
-    )
+    return None
 
 
 def _postprocessed_result(

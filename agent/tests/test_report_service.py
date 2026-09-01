@@ -194,6 +194,40 @@ def test_revalidates_forecast_written_as_completed_fact() -> None:
     )
 
 
+def test_revalidates_every_related_key_point_before_accepting_claim() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["summaryKo"] = "회사는 HBM4 양산을 시작했다."
+    payload["findings"][0]["keyPoints"] = [
+        {
+            "text": "회사는 HBM4 양산을 시작했다.",
+            "evidence": [0],
+            "groundedness": "grounded",
+            "groundingReason": None,
+            "claimType": "FACT",
+            "attributedTo": None,
+        },
+        {
+            "text": "회사는 HBM4 양산을 시작할 예정이다.",
+            "evidence": [0],
+            "groundedness": "grounded",
+            "groundingReason": "향후 계획입니다.",
+            "claimType": "FORECAST",
+            "attributedTo": None,
+        },
+    ]
+    provider = FakeProvider(
+        provider_response(valid_output(significance="회사는 HBM4 양산을 시작했다."))
+    )
+
+    response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(
+        ReportRequest.model_validate(payload)
+    )
+
+    assert response.important_events[0].significance == (
+        "회사는 HBM4 양산을 시작할 예정이다."
+    )
+
+
 def test_editor_removes_duplicate_report_items() -> None:
     raw = json.loads(valid_output())
     raw["executiveSummary"].append(raw["executiveSummary"][0])
@@ -230,6 +264,31 @@ def test_reinserts_opinion_attribution_during_final_validation() -> None:
     )
 
     assert response.important_events[0].significance.startswith("김 연구원은")
+
+
+def test_fallback_candidate_preserves_opinion_attribution() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["keyPoints"] = [
+        {
+            "text": "시장 수요가 개선될 것이라는 해석이다.",
+            "evidence": [0],
+            "groundedness": "grounded",
+            "groundingReason": "발화 주체와 함께 확인됩니다.",
+            "claimType": "OPINION",
+            "attributedTo": "김 연구원",
+        }
+    ]
+    raw = json.loads(valid_output())
+    raw["importantEvents"][0]["summaryKo"] = (
+        "시장 공급망 병목 해소 및 신규 고객 확보로 매출이 크게 증가했다."
+    )
+    provider = FakeProvider(provider_response(json.dumps(raw, ensure_ascii=False)))
+
+    response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(
+        ReportRequest.model_validate(payload)
+    )
+
+    assert response.important_events[0].summary_ko.startswith("김 연구원은")
 
 
 def test_repairs_unknown_finding_reference_once_and_accumulates_usage() -> None:
