@@ -262,7 +262,7 @@ class FindingRepositoryIntegrationTests {
                 detail.getSentences().getFirst().getText());
         assertEquals("The United States tightened export controls.", detail.getBodyText());
         assertEquals(1, detail.getSentences().size());
-        assertEquals("미국이 수출 통제를 강화했다.",
+        assertEquals("미국 정부는 수출 통제를 강화해야 한다는 입장이다.",
                 detail.getAnalysis().getKeyPoints().getFirst().getText());
     }
 
