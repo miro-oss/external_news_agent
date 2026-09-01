@@ -109,7 +109,7 @@ public class FindingReuseCache {
                 finding.getEffectiveKeyPoints(),
                 finding.getIntent(),
                 finding.getSentiment(),
-                finding.getRiskLevel(),
+                finding.getSensitivity(),
                 finding.getRelevance(),
                 finding.getCategory(),
                 finding.getSections(),

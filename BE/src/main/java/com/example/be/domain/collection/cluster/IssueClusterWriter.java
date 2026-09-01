@@ -143,7 +143,7 @@ public class IssueClusterWriter {
         Set<Long> existingArticleIds = Set.copyOf(membershipByArticle.keySet());
         List<NewsWatch> eligibleWatches = assignment.existingIssueId() == null
                 ? List.of()
-                : watchRepository.findEligibleBreakingForNotification(issue.getId(), now);
+                : watchRepository.findEligibleForNotification(issue.getId(), now);
         for (Long articleId : assignment.articleIds()) {
             membershipByArticle.computeIfAbsent(articleId, ignored -> issueArticleRepository.save(
                     IssueArticle.builder()

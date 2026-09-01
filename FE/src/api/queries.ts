@@ -151,7 +151,7 @@ export function useArticles(filters: ArticleFilters) {
   return useQuery({
     queryKey: keys.articles(filters),
     queryFn: () => get<PageResult<ArticleSummary>>('/articles', {
-      riskLevel: filters.riskLevel,
+      sensitivityLevel: filters.sensitivityLevel,
       relevance: filters.relevance,
       category: filters.category,
       language: filters.language,

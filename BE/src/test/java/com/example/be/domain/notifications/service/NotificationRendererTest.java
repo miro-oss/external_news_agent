@@ -2,7 +2,7 @@ package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.CollectionRun;
@@ -111,7 +111,7 @@ class NotificationRendererTest {
                         .body("원문 전체 내용")
                         .build())
                 .summary("검증된 핵심 요약")
-                .riskLevel(RiskLevel.HIGH)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.HIGH))
                 .relevance(Relevance.IMPORTANT)
                 .build();
     }

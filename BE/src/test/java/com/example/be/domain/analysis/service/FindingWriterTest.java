@@ -9,8 +9,9 @@ import com.example.be.domain.analysis.entity.FindingAnalysisSection;
 import com.example.be.domain.analysis.entity.FindingEntities;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingPerspectiveTag;
+import com.example.be.domain.analysis.entity.FindingSensitivityAxis;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
@@ -19,9 +20,12 @@ import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.issues.repository.NewsWatchRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.entity.NewsIssue;
+import com.example.be.domain.issues.entity.NewsWatch;
+import com.example.be.domain.issues.entity.WatchType;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -44,8 +48,11 @@ class FindingWriterTest {
     private final CollectionRunRepository runRepository = mock(CollectionRunRepository.class);
     private final ArticleRepository articleRepository = mock(ArticleRepository.class);
     private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
+    private final NewsWatchRepository watchRepository = mock(NewsWatchRepository.class);
+    private final SensitivityCalculator sensitivityCalculator = SensitivityCalculator.defaults();
     private final FindingWriter writer = new FindingWriter(
-            findingRepository, runRepository, articleRepository, issueArticleRepository);
+            findingRepository, runRepository, articleRepository, issueArticleRepository,
+            watchRepository, sensitivityCalculator);
 
     @Test
     void locksArticleBeforeCheckingForDuplicateFinding() {
@@ -79,7 +86,9 @@ class FindingWriterTest {
                 "한국어 요약",
                 List.of(new FindingKeyPoint("핵심 주장", List.of(0), "grounded")),
                 "산업 동향 보도",
-                Sentiment.NEUTRAL, RiskLevel.LOW, Relevance.REFERENCE, "기업", List.of(),
+                Sentiment.NEUTRAL,
+                com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.LOW),
+                Relevance.REFERENCE, "기업", List.of(),
                 AnalysisSource.LLM, analysisSections, FindingEntities.empty(),
                 List.of(new FindingPerspectiveTag(
                         Audience.CHIP_MAKER,
@@ -127,11 +136,46 @@ class FindingWriterTest {
                         .build()));
         AnalysisResult result = new AnalysisResult(
                 "대표 이슈 요약", List.of(), null, Sentiment.NEUTRAL,
-                RiskLevel.LOW, Relevance.REFERENCE, "기업", List.of());
+                com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.LOW),
+                Relevance.REFERENCE, "기업", List.of());
 
         writer.write(42L, 10L, ChangeType.NEW, "a".repeat(64), result);
 
         assertEquals("대표 이슈 요약", firstIssue.getSummary());
         assertEquals("대표 이슈 요약", secondIssue.getSummary());
+    }
+
+    @Test
+    void registersHighSensitivityWatchForHighScoringBreakingArticle() {
+        CollectionRun run = mock(CollectionRun.class);
+        Article article = mock(Article.class);
+        NewsIssue issue = NewsIssue.builder().id(88L).build();
+        when(runRepository.findById(42L)).thenReturn(Optional.of(run));
+        when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
+        when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
+        when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(10L)).thenReturn(List.of(
+                IssueArticle.builder()
+                        .issue(issue)
+                        .article(article)
+                        .role(IssueArticleRole.BREAKING)
+                        .build()));
+        when(watchRepository.findByIssueIdAndWatchType(88L, WatchType.HIGH_SENSITIVITY))
+                .thenReturn(Optional.empty());
+        AnalysisResult result = new AnalysisResult(
+                "고민감도 속보 요약", List.of(), null, Sentiment.NEUTRAL,
+                sensitivityCalculator.calculate(
+                        new FindingSensitivityAxis(3, List.of(0)),
+                        FindingSensitivityAxis.unavailable(),
+                        new FindingSensitivityAxis(2, List.of(0)),
+                        new FindingSensitivityAxis(1, List.of(0))),
+                Relevance.IMPORTANT, "기업", List.of());
+
+        writer.write(42L, 10L, ChangeType.NEW, "a".repeat(64), result);
+
+        ArgumentCaptor<NewsWatch> watch = ArgumentCaptor.forClass(NewsWatch.class);
+        verify(watchRepository).save(watch.capture());
+        assertEquals(WatchType.HIGH_SENSITIVITY, watch.getValue().getWatchType());
+        assertEquals(new BigDecimal("76.19"), watch.getValue().getSensitivityAtWatch());
+        assertEquals(new BigDecimal("76.19"), issue.getSensitivityScore());
     }
 }

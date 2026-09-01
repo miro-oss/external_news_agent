@@ -10,7 +10,10 @@ import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.global.config.ApiTimeZone;
 import com.example.be.domain.issues.entity.IssueArticleRole;
+import com.example.be.domain.issues.entity.NewsWatch;
+import com.example.be.domain.issues.entity.WatchType;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.issues.repository.NewsWatchRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +31,10 @@ public class FindingWriter {
     private final CollectionRunRepository runRepository;
     private final ArticleRepository articleRepository;
     private final IssueArticleRepository issueArticleRepository;
+    private final NewsWatchRepository watchRepository;
+    private final SensitivityCalculator sensitivityCalculator;
+
+    private static final long HIGH_SENSITIVITY_WATCH_HOURS = 48;
 
     @Transactional
     public void recordTargetCount(Long runId, int targetCount) {
@@ -56,7 +63,7 @@ public class FindingWriter {
                 .keyPoints(result.analysisSections().isEmpty() ? result.keyPoints() : List.of())
                 .intent(result.intent())
                 .sentiment(result.sentiment())
-                .riskLevel(result.riskLevel())
+                .sensitivity(result.sensitivity())
                 .relevance(result.relevance())
                 .category(result.category())
                 .analysisSource(result.analysisSource())
@@ -75,9 +82,30 @@ public class FindingWriter {
                 .inputTruncated(result.metadata().truncated())
                 .analyzedAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build());
-        issueArticleRepository.findByArticleIdOrderByIssueIdAsc(articleId).stream()
-                .filter(membership -> membership.getRole() == IssueArticleRole.REPRESENTATIVE)
-                .forEach(membership -> membership.getIssue().applyRepresentativeSummary(result.summary()));
+        LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
+        issueArticleRepository.findByArticleIdOrderByIssueIdAsc(articleId).forEach(membership -> {
+            if (membership.getRole() == IssueArticleRole.REPRESENTATIVE
+                    || membership.getRole() == IssueArticleRole.BREAKING) {
+                    membership.getIssue().applyRepresentativeSummary(result.summary());
+                    membership.getIssue().applyRepresentativeSensitivity(result.sensitivity().getScore());
+            }
+            if (membership.getRole() == IssueArticleRole.BREAKING
+                    && sensitivityCalculator.isHigh(result.sensitivity().getScore())) {
+                LocalDateTime expiresAt = now.plusHours(HIGH_SENSITIVITY_WATCH_HOURS);
+                watchRepository.findByIssueIdAndWatchType(
+                                membership.getIssue().getId(), WatchType.HIGH_SENSITIVITY)
+                        .ifPresentOrElse(
+                                watch -> watch.renewHighSensitivity(
+                                        expiresAt, result.sensitivity().getScore()),
+                                () -> watchRepository.save(NewsWatch.builder()
+                                        .watchType(WatchType.HIGH_SENSITIVITY)
+                                        .issue(membership.getIssue())
+                                        .sensitivityAtWatch(result.sensitivity().getScore())
+                                        .expiresAt(expiresAt)
+                                        .active(true)
+                                        .build()));
+            }
+        });
     }
 
     @Transactional

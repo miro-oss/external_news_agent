@@ -59,9 +59,23 @@ public record AgentAnalyzeResponse(
     public record Classification(
             String intent,
             String sentiment,
-            String riskLevel,
+            Sensitivity sensitivity,
             String relevance,
             String category
+    ) {
+    }
+
+    public record Sensitivity(
+            SensitivityAxis customerMove,
+            SensitivityAxis dealSignal,
+            SensitivityAxis competitorThreat,
+            SensitivityAxis industryShift
+    ) {
+    }
+
+    public record SensitivityAxis(
+            Integer score,
+            List<Integer> evidenceSentenceIds
     ) {
     }
 

@@ -86,7 +86,12 @@ def valid_output(evidence_ids: list[int] | None = None) -> str:
             "classification": {
                 "intent": "생산 계획 발표",
                 "sentiment": "positive",
-                "riskLevel": "medium",
+                "sensitivity": {
+                    "customerMove": {"score": 2, "evidenceSentenceIds": [1]},
+                    "dealSignal": {"score": None, "evidenceSentenceIds": []},
+                    "competitorThreat": {"score": 1, "evidenceSentenceIds": [1]},
+                    "industryShift": {"score": 2, "evidenceSentenceIds": [1]},
+                },
                 "relevance": "important",
                 "category": "제품/공정",
             },
@@ -144,9 +149,7 @@ def test_generates_korean_analysis_from_english_article_with_sentence_ssot() -> 
         "Yield improved.",
     ]
     assert response.sections[0].bullets[0].evidence_sentence_ids == [1]
-    assert response.meta.prompt_version == (
-        "analyze.ko.v5+perspective.ko.v1+sensitivity.ko.v1"
-    )
+    assert response.meta.prompt_version == ("analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2")
     assert len(provider.prompts) == 1
 
 

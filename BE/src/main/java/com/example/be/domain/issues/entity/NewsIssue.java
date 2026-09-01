@@ -108,6 +108,10 @@ public class NewsIssue {
         this.summary = summary;
     }
 
+    public void applyRepresentativeSensitivity(BigDecimal sensitivityScore) {
+        this.sensitivityScore = sensitivityScore;
+    }
+
     public void applyCrossSource(IssueCrossSource crossSource) {
         this.crossSource = crossSource == null ? IssueCrossSource.empty() : crossSource;
     }

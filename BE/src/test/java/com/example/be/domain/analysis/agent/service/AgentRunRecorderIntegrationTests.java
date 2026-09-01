@@ -159,7 +159,7 @@ class AgentRunRecorderIntegrationTests {
                         "HBM", "HBM", List.of("HBM"), List.of(), List.of()),
                 new AgentAnalyzeRequest.PreviousFindingPayload(
                         "최초 분석 결과를 담은 한국어 요약입니다.",
-                        "high",
+                        com.example.be.domain.analysis.agent.AgentSensitivityFixtures.analyze(3),
                         List.of(new AgentAnalyzeRequest.PreviousSectionPayload(
                                 "핵심",
                                 List.of(new AgentAnalyzeRequest.PreviousBulletPayload(
@@ -266,7 +266,9 @@ class AgentRunRecorderIntegrationTests {
                                 "기사", List.of(1), "grounded", BigDecimal.ONE)))),
                 "기사",
                 new AgentAnalyzeResponse.Classification(
-                        "산업 동향 보도", "neutral", "low", "reference", "제품/공정"),
+                        "산업 동향 보도", "neutral",
+                        com.example.be.domain.analysis.agent.AgentSensitivityFixtures.analyze(1),
+                        "reference", "제품/공정"),
                 new AgentAnalyzeResponse.Entities(List.of(), List.of(), List.of()),
                 List.of(),
                 new AgentAnalyzeResponse.Meta(

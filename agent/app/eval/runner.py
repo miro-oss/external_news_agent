@@ -38,13 +38,31 @@ from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.report_service import PROMPT_VERSION as REPORT_PROMPT_VERSION
 from app.llm.report_service import ReportWriterService
 from app.llm.router import get_analyze_provider
-from app.schemas.analyze import AUDIENCES, AnalyzeRequest, AnalyzeResponse, Plan
+from app.schemas.analyze import AUDIENCES, AnalyzeRequest, AnalyzeResponse, Plan, Sensitivity
 from app.schemas.evidence import EvidenceSentence
 from app.schemas.report import ReportRequest, ReportResponse
 
 EvalProfile = Literal["replay", "live"]
 _DEFAULT_CLAIM_DATASET = Path(__file__).resolve().parent / "golden" / "claims.ko.v1.json"
 _DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.4.json"
+
+
+def _classification_sensitivity(sensitivity: Sensitivity) -> dict[str, object]:
+    named_axes = (
+        ("customerMove", sensitivity.customer_move, 0.35),
+        ("dealSignal", sensitivity.deal_signal, 0.30),
+        ("competitorThreat", sensitivity.competitor_threat, 0.20),
+        ("industryShift", sensitivity.industry_shift, 0.15),
+    )
+    available = [(axis.score, weight) for _, axis, weight in named_axes if axis.score is not None]
+    weighted = sum(score * weight for score, weight in available)
+    score = round(weighted * 100 / (sum(weight for _, weight in available) * 3), 2)
+    level = "high" if score >= 70 else "medium" if score >= 40 else "low"
+    return {
+        "score": score,
+        "level": level,
+        "axes": {name: axis.model_dump(by_alias=True, mode="json") for name, axis, _ in named_axes},
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,9 +175,7 @@ def run_evaluation(
 
     source_settings = settings or Settings()
     execution_settings = source_settings.model_copy(update={"mock": False})
-    selected_live_policy = (
-        live_policy or default_live_policy(plan) if profile == "live" else None
-    )
+    selected_live_policy = live_policy or default_live_policy(plan) if profile == "live" else None
     selected_claim_dataset = claim_dataset or load_claim_dataset(_DEFAULT_CLAIM_DATASET)
     config = _eval_config(source_settings, profile, plan, selected_live_policy)
     fixture = _replay_fixture(dataset, profile, report_fixture)
@@ -276,13 +292,11 @@ def run_evaluation(
     high_sensitivity_responses = [
         response
         for _, response in responses
-        if response.classification.risk_level == "high"
+        if _classification_sensitivity(response.classification.sensitivity)["level"] == "high"
     ]
-    evidence_verification_count, evidence_rule_decision_count = (
-        _estimated_evidence_routes(
-            responses,
-            grounded_overlap=execution_settings.evidence_grounded_overlap,
-        )
+    evidence_verification_count, evidence_rule_decision_count = _estimated_evidence_routes(
+        responses,
+        grounded_overlap=execution_settings.evidence_grounded_overlap,
     )
     claim_control_counts = ClaimControlCounts.from_scores(
         score_claim_controls(
@@ -323,18 +337,21 @@ def run_evaluation(
         summary_length_max=max(summary_lengths, default=0),
         high_sensitivity_count=len(high_sensitivity_responses),
         high_sensitivity_evidence_count=sum(
-            any(
-                bullet.evidence_sentence_ids
-                for section in response.sections
-                for bullet in section.bullets
+            all(
+                axis.score is None or bool(axis.evidence_sentence_ids)
+                for axis in (
+                    response.classification.sensitivity.customer_move,
+                    response.classification.sensitivity.deal_signal,
+                    response.classification.sensitivity.competitor_threat,
+                    response.classification.sensitivity.industry_shift,
+                )
             )
             for response in high_sensitivity_responses
         ),
         # replay에서는 fixture/라벨 일관성 가드이며, provider 품질은 live에서만 측정한다.
         perspective_tag_checks=len(responses) * len(AUDIENCES),
         perspective_tag_correct_count=sum(
-            _perspective_tag_correct_count(case, response)
-            for case, response in responses
+            _perspective_tag_correct_count(case, response) for case, response in responses
         ),
         report_claim_count=len(claim_statuses),
         report_grounded_claim_count=sum(score.status == "grounded" for score in claim_statuses),
@@ -488,8 +505,7 @@ def _report_request(
                     {
                         "text": bullet.text,
                         "evidence": [
-                            sentence_id - 1
-                            for sentence_id in bullet.evidence_sentence_ids
+                            sentence_id - 1 for sentence_id in bullet.evidence_sentence_ids
                         ],
                         "groundedness": bullet.groundedness,
                         "groundingReason": None,
@@ -502,7 +518,7 @@ def _report_request(
                 ],
                 "intent": response.classification.intent,
                 "sentiment": response.classification.sentiment,
-                "riskLevel": response.classification.risk_level,
+                "sensitivity": _classification_sensitivity(response.classification.sensitivity),
                 "relevance": response.classification.relevance,
                 "category": response.classification.category,
                 "fetchStatus": "FULLTEXT",

@@ -71,7 +71,7 @@ class AgentClientTest {
         server.expect(requestTo("http://127.0.0.1:8088/v1/analyze"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(jsonPath("$.selfCritique").value(true))
-                .andExpect(jsonPath("$.previousFinding.riskLevel").value("high"))
+                .andExpect(jsonPath("$.previousFinding.sensitivity.customerMove.score").value(3))
                 .andExpect(jsonPath("$.previousFinding.sections[0].bullets[0]"
                         + ".evidenceSentenceIds[0]").value(1))
                 .andRespond(withSuccess(selfCritiqueResponseJson(), MediaType.APPLICATION_JSON));
@@ -243,7 +243,7 @@ class AgentClientTest {
                                 "핵심", List.of(0), "grounded", "직접 확인", "FACT", null)),
                         "발표",
                         "neutral",
-                        "low",
+                        com.example.be.domain.analysis.agent.AgentSensitivityFixtures.report(1, "low"),
                         "important",
                         "제품/공정",
                         "FULLTEXT")),
@@ -274,7 +274,7 @@ class AgentClientTest {
                 source.topic(),
                 new AgentAnalyzeRequest.PreviousFindingPayload(
                         "최초 분석 결과를 담은 한국어 요약입니다.",
-                        "high",
+                        com.example.be.domain.analysis.agent.AgentSensitivityFixtures.analyze(3),
                         List.of(new AgentAnalyzeRequest.PreviousSectionPayload(
                                 "핵심",
                                 List.of(new AgentAnalyzeRequest.PreviousBulletPayload(
@@ -319,7 +319,12 @@ class AgentClientTest {
                   "classification": {
                     "intent": "산업 동향 보도",
                     "sentiment": "neutral",
-                    "riskLevel": "low",
+                    "sensitivity": {
+                      "customerMove": {"score": 1, "evidenceSentenceIds": [1]},
+                      "dealSignal": {"score": null, "evidenceSentenceIds": []},
+                      "competitorThreat": {"score": 0, "evidenceSentenceIds": [1]},
+                      "industryShift": {"score": 0, "evidenceSentenceIds": [1]}
+                    },
                     "relevance": "reference",
                     "category": "제품/공정"
                   },

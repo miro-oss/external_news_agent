@@ -72,7 +72,7 @@ public record AgentAnalyzeRequest(
 
     public record PreviousFindingPayload(
             String summaryKo,
-            String riskLevel,
+            AgentAnalyzeResponse.Sensitivity sensitivity,
             List<PreviousSectionPayload> sections,
             AgentAnalyzeResponse.CrossSource crossSource
     ) {

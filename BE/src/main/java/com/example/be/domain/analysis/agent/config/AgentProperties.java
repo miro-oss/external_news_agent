@@ -20,7 +20,7 @@ public class AgentProperties implements InitializingBean {
     private AgentPlan defaultPlan = AgentPlan.FREE;
     private boolean allowRunOverride = true;
     private String analysisPromptVersion =
-            "analyze.ko.v5+perspective.ko.v1+sensitivity.ko.v1";
+            "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2";
     private String freeModel = "";
     private String paidModel = "";
     private final Quota quota = new Quota();

@@ -18,6 +18,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Embedded;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -74,9 +75,8 @@ public class Finding {
     @Column(name = "sentiment", nullable = false, length = 20)
     private Sentiment sentiment;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "risk_level", nullable = false, length = 20)
-    private RiskLevel riskLevel;
+    @Embedded
+    private FindingSensitivity sensitivity;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "relevance", nullable = false, length = 20)

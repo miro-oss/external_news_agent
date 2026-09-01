@@ -3,13 +3,15 @@ package com.example.be.domain.analysis.service;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingSection;
+import com.example.be.domain.analysis.entity.FindingSensitivity;
+import com.example.be.domain.analysis.entity.FindingSensitivityAxis;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.FetchStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
+import lombok.RequiredArgsConstructor;
 
 import java.util.List;
 import java.util.Locale;
@@ -23,6 +25,7 @@ import java.util.regex.Pattern;
  * {@link ArticleAnalyzer} 경계 뒤에 붙인다. 로컬 PoC와 테스트에서 재현 가능하다는 게 Stub의 우선 계약이다.
  */
 @Component
+@RequiredArgsConstructor
 public class StubArticleAnalyzer implements ArticleAnalyzer {
 
     private static final int MAX_KEY_POINTS = 3;
@@ -43,6 +46,8 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
             "subscribe to continue reading",
             "all rights reserved");
 
+    private final SensitivityCalculator sensitivityCalculator;
+
     @Override
     public AnalysisResult analyze(Article article) {
         String fullText = article.getFetchStatus() == FetchStatus.FULLTEXT ? article.getBody() : null;
@@ -62,7 +67,7 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
                 keyPoints(meaningfulSections, hasFullText),
                 intent(searchable),
                 sentiment(searchable),
-                riskLevel(searchable),
+                sensitivity(searchable, sections),
                 relevance(searchable),
                 category(searchable),
                 sections);
@@ -121,15 +126,21 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
         return Sentiment.NEUTRAL;
     }
 
-    private RiskLevel riskLevel(String text) {
-        if (containsAny(text, "수출 통제", "금지", "제재", "공급 중단",
-                "export control", "ban", "sanction", "supply disruption")) {
-            return RiskLevel.HIGH;
-        }
-        if (containsAny(text, "규제", "정책", "공급망", "가격", "regulation", "policy", "supply", "price")) {
-            return RiskLevel.MEDIUM;
-        }
-        return RiskLevel.LOW;
+    private FindingSensitivity sensitivity(String text, List<FindingSection> sections) {
+        int evidence = sections.isEmpty() ? 0 : sections.get(0).index();
+        List<Integer> evidenceIds = List.of(evidence);
+        int customerMove = containsAny(text, "증설", "양산", "도입", "투자", "expand", "production", "adopt") ? 3 : 1;
+        FindingSensitivityAxis dealSignal = containsAny(text, "계약", "수주", "발주", "구매", "contract", "order", "procure")
+                ? new FindingSensitivityAxis(3, evidenceIds)
+                : FindingSensitivityAxis.unavailable();
+        int competitorThreat = containsAny(text, "경쟁", "점유율", "신제품", "competitor", "market share", "launch") ? 3 : 1;
+        int industryShift = containsAny(text, "수출 통제", "금지", "제재", "공급 중단", "규제", "정책",
+                "export control", "ban", "sanction", "supply disruption", "regulation", "policy") ? 3 : 1;
+        return sensitivityCalculator.calculate(
+                new FindingSensitivityAxis(customerMove, evidenceIds),
+                dealSignal,
+                new FindingSensitivityAxis(competitorThreat, evidenceIds),
+                new FindingSensitivityAxis(industryShift, evidenceIds));
     }
 
     private Relevance relevance(String text) {

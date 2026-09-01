@@ -6,8 +6,10 @@ import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
+import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.example.be.domain.analysis.repository.FindingRepository;
+import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.articles.dto.res.ArticleResDTO;
 import com.example.be.domain.articles.exception.ArticleException;
 import com.example.be.domain.articles.exception.code.ArticleErrorCode;
@@ -46,6 +48,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
     private final FindingRepository findingRepository;
     private final ArticleRepository articleRepository;
     private final IssueArticleRepository issueArticleRepository;
+    private final SensitivityCalculator sensitivityCalculator;
 
     @Override
     public PageResponse<ArticleResDTO.Summary> getArticles(Long runId,
@@ -53,7 +56,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                                                             Long sourceId,
                                                             String changeType,
                                                             String relevance,
-                                                            String riskLevel,
+                                                            String sensitivityLevel,
                                                             String category,
                                                             String language,
                                                             String audience,
@@ -78,14 +81,16 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                         sourceId,
                         parseChangeType(changeType),
                         parseRelevance(relevance),
-                        parseRiskLevel(riskLevel),
+                        parseSensitivityLevel(sensitivityLevel),
                         normalizedCategory,
                         normalize(language),
                         parsedAudience,
                         parsedAudienceRelevance,
                         from,
                         to,
-                        normalizedSort),
+                        normalizedSort,
+                        sensitivityCalculator.mediumThreshold(),
+                        sensitivityCalculator.highThreshold()),
                 PageRequest.of(page, size));
 
         return PageResponse.of(findings.getContent().stream().map(this::toSummary).toList(),
@@ -227,7 +232,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                 .summary(finding.getSummary())
                 .category(finding.getCategory())
                 .relevance(finding.getRelevance().toApiValue())
-                .riskLevel(finding.getRiskLevel().toApiValue())
+                .sensitivity(toSensitivity(finding))
                 .sentiment(finding.getSentiment().toApiValue())
                 .perspectiveTags(toPerspectiveTags(finding))
                 .build();
@@ -250,7 +255,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                         .build()).toList())
                 .intent(finding.getIntent())
                 .sentiment(finding.getSentiment().toApiValue())
-                .riskLevel(finding.getRiskLevel().toApiValue())
+                .sensitivity(toSensitivity(finding))
                 .relevance(finding.getRelevance().toApiValue())
                 .category(finding.getCategory())
                 .perspectiveTags(toPerspectiveTags(finding))
@@ -309,15 +314,20 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
         }
     }
 
-    private RiskLevel parseRiskLevel(String value) {
+    private SensitivityLevel parseSensitivityLevel(String value) {
         if (!StringUtils.hasText(value)) {
             return null;
         }
         try {
-            return RiskLevel.fromApiValue(value.trim());
+            return SensitivityLevel.fromApiValue(value.trim());
         } catch (IllegalArgumentException exception) {
-            throw badRequest("riskLevel은 low, medium, high 중 하나여야 합니다.");
+            throw badRequest("sensitivityLevel은 low, medium, high 중 하나여야 합니다.");
         }
+    }
+
+    private SensitivityResDTO toSensitivity(Finding finding) {
+        return SensitivityResDTO.of(finding.getSensitivity(),
+                sensitivityCalculator.level(finding.getSensitivity().getScore()));
     }
 
     private String normalizeCategory(String value) {
@@ -334,7 +344,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                 : FindingSpecification.SORT_PUBLISHED_DESC;
         if (!Set.of(FindingSpecification.SORT_PUBLISHED_DESC,
                 FindingSpecification.SORT_PUBLISHED_ASC,
-                FindingSpecification.SORT_RISK_DESC).contains(normalized)) {
+                FindingSpecification.SORT_SENSITIVITY_DESC).contains(normalized)) {
             throw badRequest("지원하지 않는 정렬 조건입니다.");
         }
         return normalized;

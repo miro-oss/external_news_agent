@@ -115,8 +115,11 @@ export function ArticlesPage() {
         <label>
           민감도
           <select
-            value={filters.riskLevel ?? ''}
-            onChange={(event) => changeFilter('riskLevel', event.target.value as ArticleFilters['riskLevel'])}
+            value={filters.sensitivityLevel ?? ''}
+            onChange={(event) => changeFilter(
+              'sensitivityLevel',
+              event.target.value as ArticleFilters['sensitivityLevel'],
+            )}
           >
             <option value="">전체</option>
             <option value="high">높음</option>
@@ -165,7 +168,7 @@ export function ArticlesPage() {
           >
             <option value="PUBLISHED_DESC">최신순</option>
             <option value="PUBLISHED_ASC">오래된순</option>
-            <option value="RISK_DESC">민감도순</option>
+            <option value="SENSITIVITY_DESC">민감도순</option>
           </select>
         </label>
       </section>
@@ -230,7 +233,7 @@ function ArticleCard({ article, onOpen }: { article: ArticleSummary; onOpen: () 
     */
     <article className="article-card" onClick={onOpen}>
       <div className="article-card-topline">
-        <span className={`signal-dot risk-${article.riskLevel}`} aria-hidden="true" />
+        <span className={`signal-dot sensitivity-${article.sensitivity.level}`} aria-hidden="true" />
         <span>{article.category}</span>
         <span className="separator">·</span>
         {/* 이 줄에서 길이를 예측할 수 없는 값은 주제명뿐이다. 자리가 모자라면 여기가 줄어든다. */}

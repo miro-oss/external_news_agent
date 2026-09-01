@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.dto.res;
 
+import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -21,7 +22,7 @@ public class ReportResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "id", "runId", "title", "generatedAt", "modelName", "findingCount", "highRiskCount",
+            "id", "runId", "title", "generatedAt", "modelName", "findingCount", "highSensitivityCount",
             "deliveryStatus"
     })
     @Schema(name = "ReportSummaryResponse", description = "보고서 목록 항목")
@@ -33,7 +34,7 @@ public class ReportResDTO {
         private final OffsetDateTime generatedAt;
         private final String modelName;
         private final long findingCount;
-        private final long highRiskCount;
+        private final long highSensitivityCount;
         private final String deliveryStatus;
     }
 
@@ -64,13 +65,13 @@ public class ReportResDTO {
     @Getter
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
-    @JsonPropertyOrder({"findingCount", "newCount", "updatedCount", "byRiskLevel", "byCategory"})
+    @JsonPropertyOrder({"findingCount", "newCount", "updatedCount", "bySensitivityLevel", "byCategory"})
     public static class SummaryStats {
 
         private final long findingCount;
         private final long newCount;
         private final long updatedCount;
-        private final Map<String, Long> byRiskLevel;
+        private final Map<String, Long> bySensitivityLevel;
         private final Map<String, Long> byCategory;
     }
 
@@ -79,7 +80,7 @@ public class ReportResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
             "id", "articleId", "issueId", "issue", "articleTitle", "canonicalUrl", "changeType", "summary",
-            "keyPoints", "intent", "sentiment", "riskLevel", "relevance", "category", "perspectiveTags"
+            "keyPoints", "intent", "sentiment", "sensitivity", "relevance", "category", "perspectiveTags"
     })
     public static class Finding {
 
@@ -94,7 +95,7 @@ public class ReportResDTO {
         private final List<KeyPoint> keyPoints;
         private final String intent;
         private final String sentiment;
-        private final String riskLevel;
+        private final SensitivityResDTO sensitivity;
         private final String relevance;
         private final String category;
         private final List<PerspectiveTag> perspectiveTags;

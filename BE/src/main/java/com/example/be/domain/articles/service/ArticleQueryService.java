@@ -13,7 +13,7 @@ public interface ArticleQueryService {
             Long sourceId,
             String changeType,
             String relevance,
-            String riskLevel,
+            String sensitivityLevel,
             String category,
             String language,
             String audience,

@@ -60,13 +60,7 @@ class ArticleSelfCritiqueService:
         material = request.article.body_text or request.article.title
         split = split_sentences_with_meta(material, self._settings.max_sentences)
         sentences = split.sentences or [request.article.title]
-        if previous.risk_level != "high":
-            return _unchanged_response(
-                request,
-                target_count=0,
-                truncated=input_truncated or split.truncated,
-                mock=self._settings.mock,
-            )
+        # 민감도 총점과 configurable high 임계값은 Spring이 계산해 이 호출 대상을 선별한다.
         target = _select_target(
             previous.sections,
             previous.cross_source.conflicts,
@@ -141,10 +135,7 @@ def _select_target(
         for bullet_index, bullet in enumerate(section.bullets):
             if bullet.groundedness == "ungrounded" or not bullet.evidence_sentence_ids:
                 continue
-            if any(
-                sentence_id > len(sentences)
-                for sentence_id in bullet.evidence_sentence_ids
-            ):
+            if any(sentence_id > len(sentences) for sentence_id in bullet.evidence_sentence_ids):
                 raise ValueError(
                     "previousFinding의 evidenceSentenceIds가 원문 범위를 벗어났습니다."
                 )
@@ -216,8 +207,7 @@ def _safe_revision(
     invalid = (
         bool(factual_mismatches(revision.text, evidence_text))
         if original.claim_type == "FACT"
-        else original.claim_type == "FORECAST"
-        and not has_forecast_qualifier(revision.text)
+        else original.claim_type == "FORECAST" and not has_forecast_qualifier(revision.text)
     )
     if invalid:
         return ReviewedBullet(
@@ -275,8 +265,7 @@ def _unchanged_response(
             ReviewedSection(
                 heading=section.heading,
                 bullets=[
-                    ReviewedBullet.model_validate(bullet.model_dump())
-                    for bullet in section.bullets
+                    ReviewedBullet.model_validate(bullet.model_dump()) for bullet in section.bullets
                 ],
             )
             for section in previous.sections
@@ -319,8 +308,7 @@ def _critique_prompt(
             for conflict in previous.cross_source.conflicts
         ],
         "sourceSentences": [
-            {"id": index, "text": sentence}
-            for index, sentence in enumerate(sentences, 1)
+            {"id": index, "text": sentence} for index, sentence in enumerate(sentences, 1)
         ],
     }
     return (

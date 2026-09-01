@@ -224,7 +224,7 @@ class IssueClusterWriterTest {
         when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L))
                 .thenReturn(List.of(breakingMembership));
         when(issueArticleRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(watchRepository.findEligibleBreakingForNotification(any(), any())).thenReturn(List.of(watch));
+        when(watchRepository.findEligibleForNotification(any(), any())).thenReturn(List.of(watch));
         when(watchRepository.findByIssueIdAndWatchType(100L, WatchType.BREAKING))
                 .thenReturn(Optional.of(watch));
 

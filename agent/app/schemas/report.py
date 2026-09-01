@@ -56,7 +56,7 @@ class ReportFindingInput(AgentModel):
     key_points: list[ReportKeyPointInput]
     intent: str | None = Field(default=None, max_length=200)
     sentiment: Literal["positive", "neutral", "negative"]
-    risk_level: Literal["low", "medium", "high"]
+    sensitivity: "ReportSensitivityInput"
     relevance: Literal["important", "watch", "reference"]
     category: Literal["제품/공정", "기업", "정책", "공급망"]
     fetch_status: Literal[
@@ -76,6 +76,35 @@ class ReportFindingInput(AgentModel):
         if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
             raise ValueError("canonicalUrl은 hostname이 있는 HTTP(S) URL이어야 합니다.")
         return value
+
+
+class ReportSensitivityAxesInput(AgentModel):
+    customer_move: "ReportSensitivityAxisInput"
+    deal_signal: "ReportSensitivityAxisInput"
+    competitor_threat: "ReportSensitivityAxisInput"
+    industry_shift: "ReportSensitivityAxisInput"
+
+
+class ReportSensitivityAxisInput(AgentModel):
+    score: Annotated[int, Field(ge=0, le=3)] | None
+    evidence_sentence_ids: list[Annotated[int, Field(ge=0)]]
+
+    @model_validator(mode="after")
+    def validate_evidence_contract(self) -> "ReportSensitivityAxisInput":
+        if self.score is None and self.evidence_sentence_ids:
+            raise ValueError("unavailable 민감도 축은 evidenceSentenceIds가 없어야 합니다.")
+        if self.score is not None and not self.evidence_sentence_ids:
+            raise ValueError("판정 가능한 민감도 축은 evidenceSentenceIds가 필요합니다.")
+        if len(self.evidence_sentence_ids) != len(set(self.evidence_sentence_ids)):
+            raise ValueError("민감도 축 evidenceSentenceIds는 중복될 수 없습니다.")
+        return self
+
+
+class ReportSensitivityInput(AgentModel):
+    # 총점과 단계는 configurable 가중치·임계값을 소유한 Spring의 계산 결과를 신뢰한다.
+    score: float = Field(ge=0, le=100)
+    level: Literal["low", "medium", "high"]
+    axes: ReportSensitivityAxesInput
 
 
 class ReportEventInput(AgentModel):

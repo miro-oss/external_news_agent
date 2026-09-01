@@ -9,7 +9,7 @@ import java.util.List;
 public final class ReportFindingOrder {
 
     private static final Comparator<Finding> PRIORITY = Comparator
-            .comparing(Finding::getRiskLevel).reversed()
+            .comparing((Finding finding) -> finding.getSensitivity().getScore()).reversed()
             .thenComparing(Finding::getRelevance)
             .thenComparing(Finding::getId, Comparator.nullsLast(Comparator.naturalOrder()));
 

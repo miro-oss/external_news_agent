@@ -2,7 +2,7 @@ package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.FetchStatus;
@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StubArticleAnalyzerTest {
 
-    private final StubArticleAnalyzer analyzer = new StubArticleAnalyzer();
+    private final StubArticleAnalyzer analyzer = new StubArticleAnalyzer(SensitivityCalculator.defaults());
 
     @Test
     void splitsFullTextAndKeepsEvidenceIndexesStable() {
@@ -49,7 +49,8 @@ class StubArticleAnalyzerTest {
 
         assertEquals("미국의 첨단 반도체 장비 수출 통제 강화와 관련된 소식이 보도됐다.", result.summary());
         assertEquals("정책", result.category());
-        assertEquals(RiskLevel.HIGH, result.riskLevel());
+        assertEquals(com.example.be.domain.analysis.entity.SensitivityLevel.MEDIUM,
+                result.sensitivity().defaultLevel());
         assertEquals(Sentiment.NEGATIVE, result.sentiment());
         assertFalse(result.sections().isEmpty());
         assertTrue(result.summary().matches(".*[가-힣].*"));
@@ -115,7 +116,9 @@ class StubArticleAnalyzerTest {
 
         AnalysisResult result = analyzer.analyze(article);
 
-        assertEquals(RiskLevel.LOW, result.riskLevel());
+        assertEquals(com.example.be.domain.analysis.entity.SensitivityLevel.MEDIUM,
+                result.sensitivity().defaultLevel());
+        assertEquals(3, result.sensitivity().dealSignal().score());
         assertEquals(Sentiment.NEUTRAL, result.sentiment());
         assertEquals(1, result.keyPoints().size());
     }

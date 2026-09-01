@@ -4,7 +4,7 @@ import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.reports.entity.NewsReport;
@@ -21,12 +21,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReportGeneratorTest {
 
-    private final ReportGenerator generator = new ReportGenerator();
+    private final ReportGenerator generator = new ReportGenerator(
+            com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
 
     @Test
     void buildsDeterministicMarkdownFromFindingsInPriorityOrder() {
-        Finding low = finding(2L, "일반 기사", "일반 요약", RiskLevel.LOW, Relevance.WATCH, "기업");
-        Finding high = finding(1L, "중요 기사", "중요 요약", RiskLevel.HIGH, Relevance.IMPORTANT, "정책");
+        Finding low = finding(2L, "일반 기사", "일반 요약", SensitivityLevel.LOW, Relevance.WATCH, "기업");
+        Finding high = finding(1L, "중요 기사", "중요 요약", SensitivityLevel.HIGH, Relevance.IMPORTANT, "정책");
 
         ReportDocument document = generator.generate(List.of(low, high),
                 LocalDateTime.of(2026, 8, 18, 10, 30));
@@ -49,7 +50,7 @@ class ReportGeneratorTest {
      */
     @Test
     void writesReaderFacingKoreanLabelsInsteadOfApiValues() {
-        Finding finding = finding(1L, "중요 기사", "중요 요약", RiskLevel.HIGH, Relevance.IMPORTANT, "정책");
+        Finding finding = finding(1L, "중요 기사", "중요 요약", SensitivityLevel.HIGH, Relevance.IMPORTANT, "정책");
 
         String body = generator.generate(List.of(finding), LocalDateTime.of(2026, 8, 18, 10, 30))
                 .markdownBody();
@@ -82,7 +83,7 @@ class ReportGeneratorTest {
                 .changeType(ChangeType.NEW)
                 .summary("본문에 들어가면 안 되는 STUB 요약")
                 .keyPoints(List.of())
-                .riskLevel(RiskLevel.HIGH)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.HIGH))
                 .relevance(Relevance.IMPORTANT)
                 .category("정책")
                 .analysisSource(AnalysisSource.STUB)
@@ -110,7 +111,7 @@ class ReportGeneratorTest {
                 .changeType(ChangeType.UPDATED)
                 .summary("재사용된 REUSED 요약")
                 .keyPoints(List.of(new FindingKeyPoint("재사용된 근거 주장", List.of(0), "grounded")))
-                .riskLevel(RiskLevel.HIGH)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.HIGH))
                 .relevance(Relevance.IMPORTANT)
                 .category("기업")
                 .analysisSource(AnalysisSource.REUSED)
@@ -138,7 +139,7 @@ class ReportGeneratorTest {
                 .changeType(ChangeType.NEW)
                 .summary("포함되면 안 되는 요약")
                 .keyPoints(List.of(new FindingKeyPoint("주장", List.of(0), "grounded")))
-                .riskLevel(RiskLevel.HIGH)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.HIGH))
                 .relevance(Relevance.IMPORTANT)
                 .category("기업")
                 .analysisSource(null)
@@ -156,7 +157,7 @@ class ReportGeneratorTest {
                 1L,
                 "왜곡 기사",
                 "보고서에 들어가면 안 되는 요약",
-                RiskLevel.HIGH,
+                SensitivityLevel.HIGH,
                 Relevance.IMPORTANT,
                 "기업",
                 List.of(new FindingKeyPoint("근거 없는 주장", List.of(0), "ungrounded")));
@@ -164,7 +165,7 @@ class ReportGeneratorTest {
                 2L,
                 "검증 기사",
                 "검증된 기사 요약",
-                RiskLevel.MEDIUM,
+                SensitivityLevel.MEDIUM,
                 Relevance.WATCH,
                 "기업",
                 List.of(
@@ -190,7 +191,7 @@ class ReportGeneratorTest {
                 1L,
                 "왜곡 기사",
                 "보고서에 들어가면 안 되는 요약",
-                RiskLevel.HIGH,
+                SensitivityLevel.HIGH,
                 Relevance.IMPORTANT,
                 "기업",
                 List.of(new FindingKeyPoint("근거 없는 주장", List.of(0), "ungrounded")));
@@ -205,7 +206,7 @@ class ReportGeneratorTest {
     @Test
     void escapesMarkdownMetacharactersWithoutChangingAmpersands() {
         Finding finding = finding(
-                1L, "TSMC & *삼성* [HBM]", "요약 _강조_", RiskLevel.HIGH, Relevance.IMPORTANT, "기업");
+                1L, "TSMC & *삼성* [HBM]", "요약 _강조_", SensitivityLevel.HIGH, Relevance.IMPORTANT, "기업");
 
         ReportDocument document = generator.generate(
                 List.of(finding), LocalDateTime.of(2026, 8, 18, 9, 0));
@@ -217,7 +218,7 @@ class ReportGeneratorTest {
 
     @Test
     void truncatesMultibyteTitleWithinOracleByteLimit() {
-        Finding finding = finding(1L, "기사", "요약", RiskLevel.LOW, Relevance.REFERENCE,
+        Finding finding = finding(1L, "기사", "요약", SensitivityLevel.LOW, Relevance.REFERENCE,
                 "기업", "가".repeat(200));
 
         ReportDocument document = generator.generate(List.of(finding),
@@ -229,37 +230,37 @@ class ReportGeneratorTest {
     private Finding finding(Long id,
                             String title,
                             String summary,
-                            RiskLevel riskLevel,
+                            SensitivityLevel sensitivityLevel,
                             Relevance relevance,
                             String category) {
-        return finding(id, title, summary, riskLevel, relevance, category, "반도체");
+        return finding(id, title, summary, sensitivityLevel, relevance, category, "반도체");
     }
 
     private Finding finding(Long id,
                             String title,
                             String summary,
-                            RiskLevel riskLevel,
+                            SensitivityLevel sensitivityLevel,
                             Relevance relevance,
                             String category,
                             String topicName) {
-        return finding(id, title, summary, riskLevel, relevance, category,
+        return finding(id, title, summary, sensitivityLevel, relevance, category,
                 List.of(new FindingKeyPoint("핵심 포인트", List.of(0), "grounded")), topicName);
     }
 
     private Finding finding(Long id,
                             String title,
                             String summary,
-                            RiskLevel riskLevel,
+                            SensitivityLevel sensitivityLevel,
                             Relevance relevance,
                             String category,
                             List<FindingKeyPoint> keyPoints) {
-        return finding(id, title, summary, riskLevel, relevance, category, keyPoints, "반도체");
+        return finding(id, title, summary, sensitivityLevel, relevance, category, keyPoints, "반도체");
     }
 
     private Finding finding(Long id,
                             String title,
                             String summary,
-                            RiskLevel riskLevel,
+                            SensitivityLevel sensitivityLevel,
                             Relevance relevance,
                             String category,
                             List<FindingKeyPoint> keyPoints,
@@ -277,7 +278,7 @@ class ReportGeneratorTest {
                 .changeType(ChangeType.NEW)
                 .summary(summary)
                 .keyPoints(keyPoints)
-                .riskLevel(riskLevel)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(sensitivityLevel))
                 .relevance(relevance)
                 .category(category)
                 .analysisSource(AnalysisSource.LLM)

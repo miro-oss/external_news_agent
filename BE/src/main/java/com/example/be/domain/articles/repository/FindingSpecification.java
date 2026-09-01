@@ -4,7 +4,7 @@ import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.analysis.entity.AudienceRelevance;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
 import jakarta.persistence.criteria.Expression;
@@ -14,6 +14,7 @@ import jakarta.persistence.criteria.Subquery;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.time.OffsetDateTime;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -24,7 +25,7 @@ public class FindingSpecification {
 
     public static final String SORT_PUBLISHED_DESC = "PUBLISHED_DESC";
     public static final String SORT_PUBLISHED_ASC = "PUBLISHED_ASC";
-    public static final String SORT_RISK_DESC = "RISK_DESC";
+    public static final String SORT_SENSITIVITY_DESC = "SENSITIVITY_DESC";
 
     private FindingSpecification() {
     }
@@ -34,14 +35,16 @@ public class FindingSpecification {
                                                             Long sourceId,
                                                             ChangeType changeType,
                                                             Relevance relevance,
-                                                            RiskLevel riskLevel,
+                                                            SensitivityLevel sensitivityLevel,
                                                             String category,
                                                             String language,
                                                             Audience audience,
                                                             AudienceRelevance minAudienceRelevance,
                                                             OffsetDateTime from,
                                                             OffsetDateTime to,
-                                                            String sort) {
+                                                            String sort,
+                                                            BigDecimal mediumThreshold,
+                                                            BigDecimal highThreshold) {
         return (root, query, builder) -> {
             List<Predicate> predicates = new ArrayList<>();
 
@@ -75,7 +78,8 @@ public class FindingSpecification {
 
             addEqual(predicates, builder, root, "changeType", changeType);
             addEqual(predicates, builder, root, "relevance", relevance);
-            addEqual(predicates, builder, root, "riskLevel", riskLevel);
+            addSensitivityLevel(predicates, builder, root, sensitivityLevel,
+                    mediumThreshold, highThreshold);
             addEqual(predicates, builder, root, "category", category);
             if (language != null) {
                 predicates.add(builder.equal(
@@ -120,6 +124,25 @@ public class FindingSpecification {
         }
     }
 
+    private static void addSensitivityLevel(List<Predicate> predicates,
+                                            jakarta.persistence.criteria.CriteriaBuilder builder,
+                                            Root<Finding> root,
+                                            SensitivityLevel level,
+                                            BigDecimal mediumThreshold,
+                                            BigDecimal highThreshold) {
+        if (level == null) {
+            return;
+        }
+        Expression<java.math.BigDecimal> score = root.get("sensitivity").get("score");
+        switch (level) {
+            case HIGH -> predicates.add(builder.greaterThanOrEqualTo(score, highThreshold));
+            case MEDIUM -> predicates.add(builder.and(
+                    builder.greaterThanOrEqualTo(score, mediumThreshold),
+                    builder.lessThan(score, highThreshold)));
+            case LOW -> predicates.add(builder.lessThan(score, mediumThreshold));
+        }
+    }
+
     private static void applyOrder(jakarta.persistence.criteria.CriteriaQuery<?> query,
                                    jakarta.persistence.criteria.CriteriaBuilder builder,
                                    Root<Finding> root,
@@ -133,12 +156,9 @@ public class FindingSpecification {
             query.orderBy(builder.asc(publishedAt), builder.asc(root.get("id")));
             return;
         }
-        if (SORT_RISK_DESC.equals(sort)) {
-            Expression<Integer> riskOrder = builder.<Integer>selectCase()
-                    .when(builder.equal(root.get("riskLevel"), RiskLevel.HIGH), 3)
-                    .when(builder.equal(root.get("riskLevel"), RiskLevel.MEDIUM), 2)
-                    .otherwise(1);
-            query.orderBy(builder.desc(riskOrder), builder.desc(publishedAt), builder.desc(root.get("id")));
+        if (SORT_SENSITIVITY_DESC.equals(sort)) {
+            query.orderBy(builder.desc(root.get("sensitivity").get("score")),
+                    builder.desc(publishedAt), builder.desc(root.get("id")));
             return;
         }
         query.orderBy(builder.desc(publishedAt), builder.desc(root.get("id")));

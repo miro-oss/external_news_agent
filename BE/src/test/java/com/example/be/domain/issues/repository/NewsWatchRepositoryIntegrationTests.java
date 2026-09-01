@@ -85,13 +85,13 @@ class NewsWatchRepositoryIntegrationTests {
         entityManager.flush();
         entityManager.clear();
 
-        List<NewsWatch> eligible = watchRepository.findEligibleBreakingForNotification(issue.getId(), now);
+        List<NewsWatch> eligible = watchRepository.findEligibleForNotification(issue.getId(), now);
 
         assertEquals(List.of(watch.getId()), eligible.stream().map(NewsWatch::getId).toList());
         eligible.getFirst().claimUntil(now.plusMinutes(30));
         entityManager.flush();
         entityManager.clear();
-        assertTrue(watchRepository.findEligibleBreakingForNotification(
+        assertTrue(watchRepository.findEligibleForNotification(
                 issue.getId(), now.plusMinutes(29)).isEmpty());
     }
 
@@ -136,7 +136,7 @@ class NewsWatchRepositoryIntegrationTests {
 
         try {
             Future<List<Long>> first = executor.submit(() -> transactionTemplate.execute(status -> {
-                List<NewsWatch> eligible = watchRepository.findEligibleBreakingForNotification(
+                List<NewsWatch> eligible = watchRepository.findEligibleForNotification(
                         fixture.issueId(), now);
                 firstLocked.countDown();
                 await(releaseFirst);
@@ -148,7 +148,7 @@ class NewsWatchRepositoryIntegrationTests {
             Future<List<Long>> second = executor.submit(() -> {
                 secondStarted.countDown();
                 return transactionTemplate.execute(status -> watchRepository
-                        .findEligibleBreakingForNotification(fixture.issueId(), now).stream()
+                        .findEligibleForNotification(fixture.issueId(), now).stream()
                         .map(NewsWatch::getId)
                         .toList());
             });

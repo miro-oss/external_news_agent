@@ -2,6 +2,7 @@ package com.example.be.domain.analysis.agent.dto;
 
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -34,11 +35,29 @@ public record AgentReportRequest(
             List<KeyPointPayload> keyPoints,
             String intent,
             String sentiment,
-            String riskLevel,
+            SensitivityPayload sensitivity,
             String relevance,
             String category,
             String fetchStatus
     ) {
+    }
+
+    public record SensitivityPayload(
+            BigDecimal score,
+            String level,
+            SensitivityAxesPayload axes
+    ) {
+    }
+
+    public record SensitivityAxesPayload(
+            SensitivityAxisPayload customerMove,
+            SensitivityAxisPayload dealSignal,
+            SensitivityAxisPayload competitorThreat,
+            SensitivityAxisPayload industryShift
+    ) {
+    }
+
+    public record SensitivityAxisPayload(Integer score, List<Integer> evidenceSentenceIds) {
     }
 
     public record KeyPointPayload(

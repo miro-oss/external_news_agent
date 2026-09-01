@@ -52,6 +52,13 @@ news:
   analysis:
     # 기사 수가 아니라 이번 실행에서 변화가 생긴 이슈 대표 수를 제한한다.
     issue-limit-per-run: 30
+    sensitivity:
+      customer-move-weight: 0.35
+      deal-signal-weight: 0.30
+      competitor-threat-weight: 0.20
+      industry-shift-weight: 0.15
+      medium-threshold: 40
+      high-threshold: 70
   clustering:
     # P1-1 골든 클러스터셋 홀드아웃 스윕에서 고정한 균등 자카드 기준이다.
     title-jaccard-threshold: 0.50
@@ -81,7 +88,7 @@ news:
     default-plan: FREE
     allow-run-override: true
     # 분석 캐시는 콘텐츠뿐 아니라 현재 프롬프트·플랜별 모델 계약까지 같을 때만 사용한다.
-    analysis-prompt-version: ${AGENT_ANALYSIS_PROMPT_VERSION:analyze.ko.v5+perspective.ko.v1+sensitivity.ko.v1}
+    analysis-prompt-version: ${AGENT_ANALYSIS_PROMPT_VERSION:analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2}
     free-model: ${GEMINI_MODEL:}
     paid-model: ${MINDLOGIC_CLAUDE_MODEL:}
     quota:

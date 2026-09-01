@@ -5,7 +5,7 @@ import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
@@ -126,7 +126,7 @@ class ReportOracleIntegrationTests {
                 .keyPoints(List.of(new FindingKeyPoint("핵심 근거", List.of(0), "grounded")))
                 .intent("통합 검증")
                 .sentiment(Sentiment.NEUTRAL)
-                .riskLevel(RiskLevel.HIGH)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.HIGH))
                 .relevance(Relevance.IMPORTANT)
                 .category("정책")
                 .analysisSource(AnalysisSource.LLM)
@@ -153,7 +153,7 @@ class ReportOracleIntegrationTests {
         assertEquals(run.getId(), detail.getRunId());
         assertTrue(detail.getMarkdownBody().contains("Oracle CLOB 보고서에 들어갈 한국어 요약"));
         assertEquals(1, detail.getSummaryStats().getFindingCount());
-        assertEquals(1, detail.getSummaryStats().getByRiskLevel().get("high"));
+        assertEquals(1, detail.getSummaryStats().getBySensitivityLevel().get("high"));
         assertNotNull(detail.getFindings());
         assertEquals(article.getId(), detail.getFindings().getFirst().getArticleId());
 
@@ -163,12 +163,12 @@ class ReportOracleIntegrationTests {
                 .findFirst()
                 .orElseThrow();
         assertEquals(1, summary.getFindingCount());
-        assertEquals(1, summary.getHighRiskCount());
+        assertEquals(1, summary.getHighSensitivityCount());
         assertEquals("NOT_SENT", summary.getDeliveryStatus());
 
         ReportResDTO.Detail withoutFindings = queryService.getReport(firstId, false);
         assertNull(withoutFindings.getFindings());
         assertEquals(1, withoutFindings.getSummaryStats().getFindingCount());
-        assertEquals(1, withoutFindings.getSummaryStats().getByRiskLevel().get("high"));
+        assertEquals(1, withoutFindings.getSummaryStats().getBySensitivityLevel().get("high"));
     }
 }

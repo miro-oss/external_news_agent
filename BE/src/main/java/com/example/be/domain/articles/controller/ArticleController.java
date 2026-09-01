@@ -47,7 +47,8 @@ public class ArticleController {
             @RequestParam(required = false) Long sourceId,
             @RequestParam(required = false) String changeType,
             @RequestParam(required = false) String relevance,
-            @RequestParam(required = false) String riskLevel,
+            @Parameter(description = "low / medium / high")
+            @RequestParam(required = false) String sensitivityLevel,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String language,
             @Parameter(description = "CHIP_MAKER / EQUIPMENT_MAKER / MARKET_INVESTOR / IT_INFRA")
@@ -56,12 +57,13 @@ public class ArticleController {
             @RequestParam(required = false) String minAudienceRelevance,
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) @RequestParam(required = false) OffsetDateTime from,
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) @RequestParam(required = false) OffsetDateTime to,
+            @Parameter(description = "PUBLISHED_DESC / PUBLISHED_ASC / SENSITIVITY_DESC")
             @RequestParam(defaultValue = "PUBLISHED_DESC") String sort,
             @RequestParam(defaultValue = "" + PageResponse.DEFAULT_PAGE) int page,
             @RequestParam(defaultValue = "" + PageResponse.DEFAULT_SIZE) int size
     ) {
         return ApiResponse.of(GeneralSuccessCode.OK,
-                articleQueryService.getArticles(runId, topicId, sourceId, changeType, relevance, riskLevel,
+                articleQueryService.getArticles(runId, topicId, sourceId, changeType, relevance, sensitivityLevel,
                         category, language, audience, minAudienceRelevance,
                         from, to, sort, page, size));
     }

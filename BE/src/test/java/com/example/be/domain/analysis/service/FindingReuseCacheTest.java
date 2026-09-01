@@ -8,7 +8,7 @@ import com.example.be.domain.analysis.entity.FindingEntities;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
@@ -45,7 +45,7 @@ class FindingReuseCacheTest {
                 .keyPoints(List.of(new FindingKeyPoint("핵심", List.of(0), "grounded")))
                 .intent("산업 동향")
                 .sentiment(Sentiment.NEUTRAL)
-                .riskLevel(RiskLevel.MEDIUM)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.MEDIUM))
                 .relevance(Relevance.IMPORTANT)
                 .category("제품/공정")
                 .analysisSource(AnalysisSource.LLM)

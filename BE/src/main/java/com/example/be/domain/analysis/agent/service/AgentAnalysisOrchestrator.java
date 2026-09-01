@@ -24,8 +24,9 @@ import com.example.be.domain.analysis.entity.FindingEntities;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingPerspectiveTag;
 import com.example.be.domain.analysis.entity.FindingSection;
+import com.example.be.domain.analysis.entity.FindingSensitivity;
+import com.example.be.domain.analysis.entity.FindingSensitivityAxis;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.service.AnalysisMetadata;
 import com.example.be.domain.analysis.service.AnalysisResult;
@@ -34,6 +35,7 @@ import com.example.be.domain.analysis.service.ArticleAnalysisOrchestrator;
 import com.example.be.domain.analysis.service.FindingReuseCache;
 import com.example.be.domain.analysis.service.FindingWriter;
 import com.example.be.domain.analysis.service.StubArticleAnalyzer;
+import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
@@ -89,6 +91,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
     private final CollectionResultWriter resultWriter;
     private final IssueCrossSourceWriter crossSourceWriter;
     private final FindingWriter findingWriter;
+    private final SensitivityCalculator sensitivityCalculator;
 
     @Override
     public AnalysisResult analyze(AnalysisContext context) {
@@ -190,7 +193,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
         if (!context.selfCritiqueEligible()
                 || !context.issue().present()
                 || result.analysisSource() != AnalysisSource.LLM
-                || result.riskLevel() != RiskLevel.HIGH) {
+                || !sensitivityCalculator.isHigh(result.sensitivity().getScore())) {
             return result;
         }
 
@@ -273,7 +276,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
         AgentAnalyzeRequest.PreviousFindingPayload previous =
                 new AgentAnalyzeRequest.PreviousFindingPayload(
                         result.summary(),
-                        result.riskLevel().toApiValue(),
+                        toAgentSensitivity(result.sensitivity()),
                         result.analysisSections().stream()
                                 .map(section -> new AgentAnalyzeRequest.PreviousSectionPayload(
                                         section.heading(),
@@ -421,7 +424,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 keyPoints,
                 original.intent(),
                 original.sentiment(),
-                original.riskLevel(),
+                original.sensitivity(),
                 original.relevance(),
                 original.category(),
                 original.sections(),
@@ -851,7 +854,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 keyPoints,
                 classification.intent().trim(),
                 Sentiment.fromApiValue(classification.sentiment()),
-                RiskLevel.fromApiValue(classification.riskLevel()),
+                toSensitivity(classification.sensitivity(), sentences.size()),
                 Relevance.fromApiValue(classification.relevance()),
                 classification.category(),
                 sentences,
@@ -860,6 +863,51 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 entities,
                 perspectiveTags,
                 metadata);
+    }
+
+    private FindingSensitivity toSensitivity(AgentAnalyzeResponse.Sensitivity sensitivity,
+                                             int sentenceCount) {
+        if (sensitivity == null) {
+            throw schemaViolation("Agent classification sensitivity가 없습니다.");
+        }
+        return sensitivityCalculator.calculate(
+                toSensitivityAxis("customerMove", sensitivity.customerMove(), sentenceCount),
+                toSensitivityAxis("dealSignal", sensitivity.dealSignal(), sentenceCount),
+                toSensitivityAxis("competitorThreat", sensitivity.competitorThreat(), sentenceCount),
+                toSensitivityAxis("industryShift", sensitivity.industryShift(), sentenceCount));
+    }
+
+    private FindingSensitivityAxis toSensitivityAxis(String name,
+                                                      AgentAnalyzeResponse.SensitivityAxis axis,
+                                                      int sentenceCount) {
+        if (axis == null) {
+            throw schemaViolation("Agent sensitivity." + name + "이 없습니다.");
+        }
+        List<Integer> agentEvidence = listOrEmpty(axis.evidenceSentenceIds());
+        if (agentEvidence.stream().anyMatch(id -> id == null || id < 1 || id > sentenceCount)) {
+            throw schemaViolation("Agent sensitivity." + name + " 근거 문장 ID가 범위를 벗어났습니다.");
+        }
+        try {
+            return new FindingSensitivityAxis(
+                    axis.score(),
+                    agentEvidence.stream().map(id -> id - 1).distinct().toList());
+        } catch (IllegalArgumentException exception) {
+            throw schemaViolation("Agent sensitivity." + name + " 형식이 올바르지 않습니다.");
+        }
+    }
+
+    private AgentAnalyzeResponse.Sensitivity toAgentSensitivity(FindingSensitivity sensitivity) {
+        return new AgentAnalyzeResponse.Sensitivity(
+                toAgentSensitivityAxis(sensitivity.customerMove()),
+                toAgentSensitivityAxis(sensitivity.dealSignal()),
+                toAgentSensitivityAxis(sensitivity.competitorThreat()),
+                toAgentSensitivityAxis(sensitivity.industryShift()));
+    }
+
+    private AgentAnalyzeResponse.SensitivityAxis toAgentSensitivityAxis(FindingSensitivityAxis axis) {
+        return new AgentAnalyzeResponse.SensitivityAxis(
+                axis.score(),
+                axis.evidenceSentenceIds().stream().map(id -> id + 1).toList());
     }
 
     private AnalysisResult verifyEvidence(Long runId,
@@ -950,7 +998,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 keyPoints,
                 result.intent(),
                 result.sentiment(),
-                result.riskLevel(),
+                result.sensitivity(),
                 result.relevance(),
                 result.category(),
                 result.sections(),

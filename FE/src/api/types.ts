@@ -116,7 +116,7 @@ export interface TopicCreated extends Topic {
 
 export type ChangeType = 'NEW' | 'UPDATED'
 export type Relevance = 'important' | 'watch' | 'reference'
-export type RiskLevel = 'low' | 'medium' | 'high'
+export type SensitivityLevel = 'low' | 'medium' | 'high'
 export type Sentiment = 'positive' | 'neutral' | 'negative'
 
 export const CHANGE_TYPE_LABELS: Record<ChangeType, string> = {
@@ -124,10 +124,26 @@ export const CHANGE_TYPE_LABELS: Record<ChangeType, string> = {
   UPDATED: '갱신',
 }
 
-export const RISK_LEVEL_LABELS: Record<RiskLevel, string> = {
+export const SENSITIVITY_LEVEL_LABELS: Record<SensitivityLevel, string> = {
   low: '낮은 민감도',
   medium: '중간 민감도',
   high: '높은 민감도',
+}
+
+export interface SensitivityAxis {
+  score: 0 | 1 | 2 | 3 | null
+  evidenceSentenceIds: number[]
+}
+
+export interface Sensitivity {
+  score: number
+  level: SensitivityLevel
+  axes: {
+    customerMove: SensitivityAxis
+    dealSignal: SensitivityAxis
+    competitorThreat: SensitivityAxis
+    industryShift: SensitivityAxis
+  }
 }
 
 export const AUDIENCES = ['CHIP_MAKER', 'EQUIPMENT_MAKER', 'MARKET_INVESTOR', 'IT_INFRA'] as const
@@ -166,7 +182,7 @@ export interface ArticleSummary {
   summary: string
   category: '제품/공정' | '기업' | '정책' | '공급망'
   relevance: Relevance
-  riskLevel: RiskLevel
+  sensitivity: Sensitivity
   sentiment: Sentiment
   perspectiveTags: PerspectiveTag[]
 }
@@ -191,7 +207,7 @@ export interface ArticleAnalysis {
   keyPoints: ArticleKeyPoint[]
   intent: string | null
   sentiment: Sentiment
-  riskLevel: RiskLevel
+  sensitivity: Sensitivity
   relevance: Relevance
   category: string
   perspectiveTags: PerspectiveTag[]
@@ -221,13 +237,13 @@ export interface ArticleDetail {
 }
 
 export interface ArticleFilters {
-  riskLevel?: RiskLevel
+  sensitivityLevel?: SensitivityLevel
   relevance?: Relevance
   category?: ArticleSummary['category']
   language?: string
   audience?: Audience
   minAudienceRelevance?: AudienceRelevance
-  sort?: 'PUBLISHED_DESC' | 'PUBLISHED_ASC' | 'RISK_DESC'
+  sort?: 'PUBLISHED_DESC' | 'PUBLISHED_ASC' | 'SENSITIVITY_DESC'
   page: number
   size: number
 }
@@ -239,7 +255,7 @@ export interface ReportSummary {
   generatedAt: string
   modelName: string
   findingCount: number
-  highRiskCount: number
+  highSensitivityCount: number
   deliveryStatus: 'NOT_SENT' | 'SENT' | 'FAILED'
 }
 
@@ -247,7 +263,7 @@ export interface ReportSummaryStats {
   findingCount: number
   newCount: number
   updatedCount: number
-  byRiskLevel: Partial<Record<RiskLevel, number>>
+  bySensitivityLevel: Partial<Record<SensitivityLevel, number>>
   byCategory: Record<string, number>
 }
 
@@ -263,7 +279,7 @@ export interface ReportFinding {
   keyPoints: ArticleKeyPoint[]
   intent: string | null
   sentiment: Sentiment
-  riskLevel: RiskLevel
+  sensitivity: Sensitivity
   relevance: Relevance
   category: string
   perspectiveTags: PerspectiveTag[]

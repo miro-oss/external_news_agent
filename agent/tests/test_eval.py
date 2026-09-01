@@ -34,7 +34,7 @@ _GOLDEN_DIR = Path(__file__).resolve().parents[1] / "app" / "eval" / "golden"
 _DATASET_PATH = _GOLDEN_DIR / "semiconductor.v1.json"
 _CLAIM_DATASET_PATH = _GOLDEN_DIR / "claims.ko.v1.json"
 _REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.4.json"
-_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v5.baseline.json"
+_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v6.baseline.json"
 
 
 def eval_settings() -> Settings:
@@ -67,9 +67,7 @@ def test_replay_golden_eval_keeps_quality_and_validates_perspective_fixture() ->
 
     assert result.errors == ()
     legacy_metrics = {
-        key: value
-        for key, value in result.metrics.items()
-        if not key.startswith("perspectiveTag")
+        key: value for key, value in result.metrics.items() if not key.startswith("perspectiveTag")
     }
     baseline_legacy_metrics = {
         key: value
@@ -117,13 +115,9 @@ def test_claim_controls_exercise_decisive_rules_and_provider_routes() -> None:
     dataset = load_claim_dataset(_CLAIM_DATASET_PATH)
     scores = score_claim_controls(dataset.controls, grounded_overlap=0.6)
     invalid_statuses = {
-        score.claim_id: score.status
-        for score in scores
-        if score.validity == "invalid"
+        score.claim_id: score.status for score in scores if score.validity == "invalid"
     }
-    positive_statuses = [
-        score.status for score in scores if score.validity == "valid"
-    ]
+    positive_statuses = [score.status for score in scores if score.validity == "valid"]
 
     assert invalid_statuses == {
         "number-percent-invalid": "ungrounded",
@@ -199,9 +193,7 @@ def test_claim_control_counts_treat_weak_invalid_as_false_pass() -> None:
 
 
 def test_claim_control_schema_requires_invalid_and_valid_pair() -> None:
-    payload = json.loads(
-        load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True)
-    )
+    payload = json.loads(load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True))
     payload["controls"][0]["labels"][1]["validity"] = "invalid"
 
     with pytest.raises(ValueError, match="invalid/valid"):
@@ -209,9 +201,7 @@ def test_claim_control_schema_requires_invalid_and_valid_pair() -> None:
 
 
 def test_claim_control_schema_requires_three_pairs_per_failure_type() -> None:
-    payload = json.loads(
-        load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True)
-    )
+    payload = json.loads(load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True))
     payload["controls"][0]["failureType"] = "unsupported-claim"
 
     with pytest.raises(ValueError, match="유형별 3쌍"):
@@ -219,12 +209,8 @@ def test_claim_control_schema_requires_three_pairs_per_failure_type() -> None:
 
 
 def test_claim_control_schema_rejects_duplicate_claim_text() -> None:
-    payload = json.loads(
-        load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True)
-    )
-    payload["controls"][1]["labels"][1]["claim"] = payload["controls"][0][
-        "labels"
-    ][1]["claim"]
+    payload = json.loads(load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True))
+    payload["controls"][1]["labels"][1]["claim"] = payload["controls"][0]["labels"][1]["claim"]
 
     with pytest.raises(ValueError, match="claim 문장"):
         GoldenClaimDataset.model_validate(payload)

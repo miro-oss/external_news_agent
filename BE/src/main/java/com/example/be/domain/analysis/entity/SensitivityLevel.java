@@ -1,6 +1,6 @@
 package com.example.be.domain.analysis.entity;
 
-public enum RiskLevel implements ApiValue {
+public enum SensitivityLevel implements ApiValue {
 
     LOW("low"),
     MEDIUM("medium"),
@@ -8,15 +8,16 @@ public enum RiskLevel implements ApiValue {
 
     private final String apiValue;
 
-    RiskLevel(String apiValue) {
+    SensitivityLevel(String apiValue) {
         this.apiValue = apiValue;
     }
 
+    @Override
     public String toApiValue() {
         return apiValue;
     }
 
-    public static RiskLevel fromApiValue(String value) {
-        return ApiValue.parse(values(), value, "위험도");
+    public static SensitivityLevel fromApiValue(String value) {
+        return ApiValue.parse(values(), value, "민감도");
     }
 }
