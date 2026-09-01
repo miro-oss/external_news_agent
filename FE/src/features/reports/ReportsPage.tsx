@@ -18,11 +18,13 @@ import {
   RISK_LEVEL_LABELS,
   type Audience,
   type AudienceRelevance,
+  type ChangeType,
   type IssueArticle,
   type IssueDetail,
   type ReportDetail,
   type ReportFinding,
   type ReportSummary,
+  type RiskLevel,
 } from '../../api/types'
 import { KeyPointList } from '../../components/KeyPointList'
 import { formatFullDate, formatShortDate } from '../../lib/datetime'
@@ -105,6 +107,7 @@ export function ReportsPage() {
             )}
             {activeReportData && (
               <ReportView
+                key={activeReportData.id}
                 report={activeReportData}
                 audience={activeAudience}
                 defaultAudience={audienceSetting.data?.audience}
@@ -162,9 +165,17 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
   onAudienceSelect: (audience: Audience) => void
   onEvidenceSelect: (articleId: number, sentences: number[]) => void
 }) {
+  const [filters, setFilters] = useState<ReportFindingFilters>(DEFAULT_REPORT_FINDING_FILTERS)
   const findings = useMemo(
     () => selectFindingsForAudience(report.findings ?? [], audience),
     [audience, report.findings],
+  )
+  const filteredFindings = useMemo(
+    () => findings.filter((finding) => (
+      (!filters.riskLevel || finding.riskLevel === filters.riskLevel)
+      && (!filters.changeType || finding.changeType === filters.changeType)
+    )),
+    [filters, findings],
   )
   const stats = useMemo(() => summarizeFindings(findings), [findings])
   const evidenceCount = useMemo(() => countEvidenceSentences(report.findings ?? []), [report.findings])
@@ -203,11 +214,24 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
       <section className="report-findings">
         <div className="section-heading report-section-heading">
           <h3>주요 이슈</h3>
-          <span>{findings.length}건 · {AUDIENCE_LABELS[audience]} 관점순</span>
+          <span>
+            {filteredFindings.length === findings.length
+              ? `${findings.length}건`
+              : `${filteredFindings.length} / ${findings.length}건`}
+            {' · '}{AUDIENCE_LABELS[audience]} 관점순
+          </span>
         </div>
-        {findings.length > 0 ? (
+        <ReportFindingFilterBar
+          filters={filters}
+          audience={audience}
+          defaultAudience={defaultAudience}
+          onChange={(key, value) => setFilters((current) => ({ ...current, [key]: value }))}
+          onAudienceSelect={onAudienceSelect}
+          onReset={() => setFilters(EMPTY_REPORT_FINDING_FILTERS)}
+        />
+        {filteredFindings.length > 0 ? (
           <div className="finding-list">
-            {findings.map((finding) => (
+            {filteredFindings.map((finding) => (
               <IssueCard
                 finding={finding}
                 key={finding.id}
@@ -216,11 +240,86 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
               />
             ))}
           </div>
-        ) : <p className="muted">이 보고서에 포함된 주요 이슈가 없습니다.</p>}
+        ) : findings.length > 0
+          ? <p className="muted report-findings-empty">조건에 맞는 주요 이슈가 없습니다. 필터를 바꿔보세요.</p>
+          : <p className="muted report-findings-empty">이 보고서에 포함된 주요 이슈가 없습니다.</p>}
       </section>
 
       <ReportDisclaimer report={report} audience={audience} />
     </article>
+  )
+}
+
+type ReportFindingFilters = {
+  riskLevel: '' | RiskLevel
+  changeType: '' | ChangeType
+}
+
+const DEFAULT_REPORT_FINDING_FILTERS: ReportFindingFilters = {
+  riskLevel: 'high',
+  changeType: 'NEW',
+}
+
+const EMPTY_REPORT_FINDING_FILTERS: ReportFindingFilters = {
+  riskLevel: '',
+  changeType: '',
+}
+
+function ReportFindingFilterBar({
+  filters,
+  audience,
+  defaultAudience,
+  onChange,
+  onAudienceSelect,
+  onReset,
+}: {
+  filters: ReportFindingFilters
+  audience: Audience
+  defaultAudience?: Audience
+  onChange: <K extends keyof ReportFindingFilters>(key: K, value: ReportFindingFilters[K]) => void
+  onAudienceSelect: (audience: Audience) => void
+  onReset: () => void
+}) {
+  const hasActiveFilters = Boolean(filters.riskLevel || filters.changeType)
+  return (
+    <div className="report-finding-filter" aria-label="주요 이슈 필터">
+      <label>
+        민감도
+        <select
+          value={filters.riskLevel}
+          onChange={(event) => onChange('riskLevel', event.target.value as ReportFindingFilters['riskLevel'])}
+        >
+          <option value="">전체</option>
+          <option value="high">높음</option>
+          <option value="medium">보통</option>
+          <option value="low">낮음</option>
+        </select>
+      </label>
+      <label>
+        변경 유형
+        <select
+          value={filters.changeType}
+          onChange={(event) => onChange('changeType', event.target.value as ReportFindingFilters['changeType'])}
+        >
+          <option value="">전체</option>
+          <option value="NEW">신규</option>
+          <option value="UPDATED">갱신</option>
+        </select>
+      </label>
+      <label>
+        관점
+        <select value={audience} onChange={(event) => onAudienceSelect(event.target.value as Audience)}>
+          {AUDIENCES.map((value) => (
+            <option value={value} key={value}>
+              {AUDIENCE_LABELS[value]}{defaultAudience === value ? ' · 내 기본' : ''}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button type="button" className="secondary-button" disabled={!hasActiveFilters} onClick={onReset}>
+        전체 보기
+      </button>
+    </div>
   )
 }
 

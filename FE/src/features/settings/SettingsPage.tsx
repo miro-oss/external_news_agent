@@ -1,17 +1,17 @@
 import { useState } from 'react'
 import { CollapsibleSection } from '../../components/CollapsibleSection'
-import { useCombinations } from '../../api/queries'
-import { CombinationTable } from './CombinationTable'
+import { useTopics } from '../../api/queries'
+import { TopicTable } from './TopicTable'
 import { SourceForm } from './SourceForm'
 import { TopicForm } from './TopicForm'
 import { LlmControlPanel } from './LlmControlPanel'
 import { CollectionRunPanel } from './CollectionRunPanel'
 
-type PanelKey = 'llm' | 'source' | 'topic' | 'combinations'
+type PanelKey = 'llm' | 'source' | 'topic' | 'topics'
 
 /**
- * M2 설정 화면. 영상 1~3의 흐름을 재현한다 — 소스를 등록하고, 주제를 만들며 그 소스를 연결하면,
- * 아래 테이블에 조합이 나타난다.
+ * M2 설정 화면. 소스를 등록하고 주제를 만들면 활성 소스가 자동으로 연결되며, 아래 목록에는
+ * 사용자가 직접 관리하는 주제만 한 번씩 나타난다.
  *
  * <p>조회와 등록만 있다. 수정·삭제·활성 토글은 API가 있지만 이번 범위가 아니다.
  *
@@ -28,16 +28,16 @@ type PanelKey = 'llm' | 'source' | 'topic' | 'combinations'
  * 있어서, 주제를 하나 만들고 바로 돌려 보려면 매번 그걸 지나 스크롤해야 했다. 같은 줄에 두면
  * 등록하고 실행하는 왕복이 한 화면 안에서 끝난다.
  *
- * <p>조합 표만 두 열 아래 전체 폭을 쓴다. 한 행에 주제·소스·종류·주기가 다 들어가는 표라 절반
+ * <p>주제 목록만 두 열 아래 전체 폭을 쓴다. 검색어와 키워드 조건까지 한 줄에 보여 주므로 절반
  * 폭에서는 열이 서로를 밀어낸다.
  */
 export function SettingsPage() {
-  const combinations = useCombinations()
+  const topics = useTopics()
   const [open, setOpen] = useState<Record<PanelKey, boolean>>({
     llm: false,
     source: false,
     topic: false,
-    combinations: true,
+    topics: true,
   })
 
   function toggle(key: PanelKey) {
@@ -49,7 +49,7 @@ export function SettingsPage() {
       <header className="page-header">
         <div>
           <h1>수집 설정</h1>
-          <p className="muted">수집할 주제와 소스를 등록하고, 등록된 조합을 확인합니다.</p>
+          <p className="muted">수집할 주제와 소스를 등록하고, 내가 등록한 주제를 확인합니다.</p>
         </div>
       </header>
 
@@ -88,7 +88,7 @@ export function SettingsPage() {
           <CollapsibleSection
             id="llm"
             title="LLM 플랜과 사용량"
-            description="기본 플랜과 사용량, 보고서 예약분, 기본 독자 관점을 확인합니다."
+            description="기본 플랜과 사용량, 보고서 예약분을 확인합니다."
             open={open.llm}
             onToggle={() => toggle('llm')}
           >
@@ -98,14 +98,14 @@ export function SettingsPage() {
       </div>
 
       <CollapsibleSection
-        id="combinations"
-        title="등록된 수집 조합"
-        description="한 행이 (주제 × 소스) 조합 하나입니다."
-        count={combinations.data?.combinationCount}
-        open={open.combinations}
-        onToggle={() => toggle('combinations')}
+        id="topics"
+        title="등록된 수집 주제"
+        description="내가 등록한 검색 주제와 조건을 주제별로 확인합니다."
+        count={topics.data?.totalElements}
+        open={open.topics}
+        onToggle={() => toggle('topics')}
       >
-        <CombinationTable />
+        <TopicTable />
       </CollapsibleSection>
     </main>
   )

@@ -697,6 +697,10 @@ section {
   margin-bottom: 0.9rem;
 }
 
+.topic-source-notice {
+  margin-bottom: 1rem;
+}
+
 /* =============================================================================
    표 · 배지
    ============================================================================= */
@@ -748,6 +752,58 @@ tbody tr:last-child td {
 
 tbody tr:hover td {
   background: var(--surface-sunken);
+}
+
+/*
+  주제명 길이가 표 전체의 열 너비를 결정하지 않게 한다. 요약 정보인 상태·마지막 수집을 주제 바로
+  뒤에 고정 폭으로 두고, 긴 이름만 셀 안에서 좌우로 움직여 전체를 확인한다.
+*/
+.topic-table {
+  min-width: 1040px;
+  table-layout: fixed;
+}
+
+.topic-table .topic-name-column { width: 20%; }
+.topic-table .topic-status-column { width: 7%; }
+.topic-table .topic-collected-column { width: 14%; }
+.topic-table .topic-query-column { width: 16%; }
+.topic-table .topic-required-column { width: 11%; }
+.topic-table .topic-optional-column { width: 13%; }
+.topic-table .topic-excluded-column { width: 11%; }
+.topic-table .topic-interval-column { width: 8%; }
+
+.topic-table td:not(.topic-name-cell) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topic-name-cell {
+  overflow: hidden;
+}
+
+.topic-name-scroll {
+  display: block;
+  max-width: 100%;
+  padding-bottom: 0.18rem;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-color: var(--fg-4) transparent;
+  scrollbar-width: thin;
+}
+
+.topic-name-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.topic-name-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--fg-4);
+}
+
+.topic-name-scroll:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .badge {
@@ -872,6 +928,44 @@ tbody tr:hover td {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 0.7rem;
   margin-top: 1.25rem;
+}
+
+.run-audience-setting {
+  display: grid;
+  align-items: end;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.65fr) auto;
+  gap: 0.7rem;
+  margin-top: 0.85rem;
+  padding: 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.run-audience-setting.state-panel {
+  display: flex;
+  margin-top: 0.85rem;
+  padding: 1rem;
+}
+
+.run-audience-copy p {
+  margin: 0.3rem 0 0;
+  color: var(--fg-3);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.run-audience-setting .field {
+  margin: 0;
+}
+
+.run-audience-setting > button {
+  white-space: nowrap;
+}
+
+form.run-audience-setting > .error,
+form.run-audience-setting > .success {
+  margin: 0;
+  grid-column: 1 / -1;
 }
 
 .collection-run-preview {
@@ -1015,15 +1109,7 @@ tbody tr:hover td {
   background: var(--primary);
 }
 
-/* 폼 둘이 나란히 서려면 각각 260px는 있어야 한다. 절반 폭 열에서는 못 서므로 위아래로 눕는다. */
-.llm-actions-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 0.6rem;
-}
-
-.llm-setting-form,
-.audience-setting-form {
+.llm-setting-form {
   display: flex;
   flex-direction: column;
   margin: 0;
@@ -1032,21 +1118,8 @@ tbody tr:hover td {
   background: var(--bg);
 }
 
-.llm-setting-form button,
-.audience-setting-form button {
+.llm-setting-form button {
   margin-top: auto;
-}
-
-.card-title {
-  margin: 0 0 0.3rem;
-  font-size: 0.98rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-}
-
-.audience-setting-form .muted {
-  margin-bottom: 1rem;
-  font-size: 0.83rem;
 }
 
 .plan-options {
@@ -2365,6 +2438,39 @@ body.modal-open {
   font-weight: 600;
 }
 
+.report-finding-filter {
+  display: grid;
+  align-items: end;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 0.55rem;
+  margin: 0.9rem 0 1rem;
+  padding: 0.9rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.report-finding-filter label {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 0.79rem;
+}
+
+.report-finding-filter select {
+  margin-top: 0.3rem;
+  background-color: var(--surface);
+  font-size: 0.86rem;
+}
+
+.report-finding-filter button {
+  white-space: nowrap;
+}
+
+.report-findings-empty {
+  padding: 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
 .finding-list {
   display: grid;
   gap: 0.75rem;
@@ -3207,9 +3313,16 @@ body.modal-open {
 
 @media (max-width: 860px) {
   .collection-run-preview,
-  .llm-actions-grid,
   .usage-grid {
     grid-template-columns: 1fr;
+  }
+
+  .run-audience-setting {
+    grid-template-columns: minmax(0, 1fr) minmax(160px, 0.8fr);
+  }
+
+  .run-audience-setting > button {
+    grid-column: 1 / -1;
   }
 }
 
@@ -3238,7 +3351,8 @@ body.modal-open {
     gap: 0.75rem;
   }
 
-  .filter-bar {
+  .filter-bar,
+  .report-finding-filter {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -3398,7 +3512,9 @@ body.modal-open {
   }
 
   .notification-form-grid,
-  .delivery-filter-bar {
+  .delivery-filter-bar,
+  .run-audience-setting,
+  .report-finding-filter {
     grid-template-columns: minmax(0, 1fr);
   }
 

@@ -94,7 +94,7 @@ async function getAllNotificationPages<T>(path: string): Promise<PageResult<T>> 
   return { ...first, content, hasNext: false }
 }
 
-/** 설정 화면의 "등록된 수집 주제" 테이블. 한 행 = (주제 × 소스). */
+/** 수집 실행 범위 계산에 쓰는 (주제 × 소스) 조합 목록. */
 export function useCombinations() {
   return useQuery({
     queryKey: keys.combinations,
@@ -110,7 +110,7 @@ export function useSources() {
   })
 }
 
-/** 조합 표에 주제의 AND/OR/NOT 키워드를 보이기 위한 주제 목록. */
+/** 설정 화면의 등록 주제 목록과 주제 등록 후 캐시 갱신에 쓰는 주제 목록. */
 export function useTopics() {
   return useQuery({
     queryKey: keys.topics,
