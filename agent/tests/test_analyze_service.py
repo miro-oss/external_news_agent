@@ -76,6 +76,8 @@ def valid_output(evidence_ids: list[int] | None = None) -> str:
                             "evidenceSentenceIds": evidence_ids or [1],
                             "groundedness": "grounded",
                             "confidence": 0.9,
+                            "claimType": "FACT",
+                            "attributedTo": None,
                         }
                     ],
                 }
@@ -143,7 +145,7 @@ def test_generates_korean_analysis_from_english_article_with_sentence_ssot() -> 
     ]
     assert response.sections[0].bullets[0].evidence_sentence_ids == [1]
     assert response.meta.prompt_version == (
-        "analyze.ko.v4+perspective.ko.v1+sensitivity.ko.v1"
+        "analyze.ko.v5+perspective.ko.v1+sensitivity.ko.v1"
     )
     assert len(provider.prompts) == 1
 
@@ -343,6 +345,43 @@ def test_downgrades_bullet_when_numeric_fact_is_not_in_evidence(caplog) -> None:
     assert bullet.confidence == 0
     assert "provider=gemini model=configured-model" in caplog.text
     assert "2027" in caplog.text
+
+
+def test_does_not_apply_fact_mismatch_to_qualified_forecast() -> None:
+    raw = json.loads(valid_output())
+    bullet = raw["sections"][0]["bullets"][0]
+    bullet.update(
+        {
+            "text": "HBM4 양산은 2027년에 시작할 예정이다.",
+            "claimType": "FORECAST",
+        }
+    )
+    provider = FakeProvider(provider_response(json.dumps(raw, ensure_ascii=False)))
+
+    response = ArticleAnalyzeService(Settings(), provider).analyze(
+        request("The company discussed a future production plan.")
+    )
+
+    assert response.sections[0].bullets[0].groundedness == "grounded"
+
+
+def test_does_not_apply_fact_mismatch_to_attributed_opinion() -> None:
+    raw = json.loads(valid_output())
+    bullet = raw["sections"][0]["bullets"][0]
+    bullet.update(
+        {
+            "text": "수요 회복이 빨라질 것이라는 해석이다.",
+            "claimType": "OPINION",
+            "attributedTo": "김 연구원",
+        }
+    )
+    provider = FakeProvider(provider_response(json.dumps(raw, ensure_ascii=False)))
+
+    response = ArticleAnalyzeService(Settings(), provider).analyze(
+        request("김 연구원은 수요 회복이 빨라질 것으로 해석했다.")
+    )
+
+    assert response.sections[0].bullets[0].groundedness == "grounded"
 
 
 def test_resets_confidence_for_mismatch_already_marked_ungrounded() -> None:

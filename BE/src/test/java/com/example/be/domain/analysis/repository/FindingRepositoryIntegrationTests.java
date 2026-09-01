@@ -166,6 +166,10 @@ class FindingRepositoryIntegrationTests {
         assertEquals("핵심", found.getAnalysisSections().getFirst().heading());
         assertEquals(BigDecimal.ONE,
                 found.getAnalysisSections().getFirst().bullets().getFirst().confidence());
+        assertEquals("발화 주체와 함께 확인됩니다.",
+                found.getEffectiveKeyPoints().getFirst().groundingReason());
+        assertEquals("OPINION", found.getEffectiveKeyPoints().getFirst().claimType());
+        assertEquals("미국 정부", found.getEffectiveKeyPoints().getFirst().attributedTo());
         assertEquals(List.of("HBM4"), found.getEntities().products());
         assertEquals("gemini", found.getLlmProvider());
         assertEquals("c".repeat(64), found.getAnalysisInputHash());
@@ -258,7 +262,7 @@ class FindingRepositoryIntegrationTests {
                 detail.getSentences().getFirst().getText());
         assertEquals("The United States tightened export controls.", detail.getBodyText());
         assertEquals(1, detail.getSentences().size());
-        assertEquals("미국이 수출 통제를 강화했다.",
+        assertEquals("미국 정부는 수출 통제를 강화해야 한다는 입장이다.",
                 detail.getAnalysis().getKeyPoints().getFirst().getText());
     }
 
@@ -339,10 +343,13 @@ class FindingRepositoryIntegrationTests {
                 .analysisSections(List.of(new FindingAnalysisSection(
                         "핵심",
                         List.of(new FindingAnalysisBullet(
-                                "미국이 수출 통제를 강화했다.",
+                                "미국 정부는 수출 통제를 강화해야 한다는 입장이다.",
                                 List.of(0),
                                 "grounded",
-                                BigDecimal.ONE)))))
+                                BigDecimal.ONE,
+                                "발화 주체와 함께 확인됩니다.",
+                                "OPINION",
+                                "미국 정부")))))
                 .entities(new FindingEntities(List.of("미국 정부"), List.of("HBM4"), List.of()))
                 .perspectiveTags(List.of(
                         new FindingPerspectiveTag(

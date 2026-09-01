@@ -43,8 +43,17 @@ public record AgentAnalyzeResponse(
             String text,
             List<Integer> evidenceSentenceIds,
             String groundedness,
-            BigDecimal confidence
+            BigDecimal confidence,
+            String claimType,
+            String attributedTo
     ) {
+
+        public Bullet(String text,
+                      List<Integer> evidenceSentenceIds,
+                      String groundedness,
+                      BigDecimal confidence) {
+            this(text, evidenceSentenceIds, groundedness, confidence, "FACT", null);
+        }
     }
 
     public record Classification(

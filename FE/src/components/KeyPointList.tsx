@@ -21,6 +21,12 @@ const GROUNDEDNESS_WARNINGS: Partial<Record<ArticleKeyPoint['groundedness'], str
   ungrounded: '근거 없음',
 }
 
+const CLAIM_TYPE_LABELS: Record<ArticleKeyPoint['claimType'], string> = {
+  FACT: '사실',
+  FORECAST: '전망',
+  OPINION: '견해',
+}
+
 /**
  * 문장 단위 근거가 달린 핵심 목록. 기사 상세와 리포트 근거 카드가 같은 것을 보여 준다.
  *
@@ -61,8 +67,22 @@ export function KeyPointList({ points, onEvidenceSelect, articleTitle }: Props) 
               <div className="key-point" key={`${index}-${point.text}`}>
                 <span className="key-point-number">{index + 1}</span>
                 <div className="key-point-content">
+                  <span
+                    className={`claim-type-marker ${point.claimType.toLowerCase()}`}
+                    aria-label={`주장 유형: ${CLAIM_TYPE_LABELS[point.claimType]}`}
+                    title={point.attributedTo
+                      ? `${CLAIM_TYPE_LABELS[point.claimType]} · ${point.attributedTo}`
+                      : CLAIM_TYPE_LABELS[point.claimType]}
+                  />
                   <span className="key-point-text">{point.text}</span>
-                  {warning && <span className={`groundedness ${point.groundedness}`}>{warning}</span>}
+                  {warning && (
+                    <span
+                      className={`groundedness ${point.groundedness}`}
+                      title={point.groundingReason ?? undefined}
+                    >
+                      {warning}
+                    </span>
+                  )}
                   {point.evidence.map((sentenceId, localIndex) => (
                     <button
                       type="button"

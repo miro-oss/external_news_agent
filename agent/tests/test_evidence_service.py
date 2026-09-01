@@ -4,6 +4,7 @@ import pytest
 
 from app.core.config import Settings
 from app.core.errors import AgentError
+from app.core.evidence import modality_overreach
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.evidence_service import EvidenceVerifierService
 from app.schemas.evidence import EvidenceVerifyRequest
@@ -31,12 +32,19 @@ def request(
         {
             "idempotencyKey": "finding:999:verify",
             "plan": "FREE",
-            "claim": claim,
-            "sentences": sentences
-            or [
+            "claims": [
                 {
-                    "id": 1,
-                    "text": "SK하이닉스가 HBM4 양산을 앞당겼다.",
+                    "claimId": "claim-1",
+                    "claim": claim,
+                    "claimType": "FACT",
+                    "attributedTo": None,
+                    "sentences": sentences
+                    or [
+                        {
+                            "id": 1,
+                            "text": "SK하이닉스가 HBM4 양산을 앞당겼다.",
+                        }
+                    ],
                 }
             ],
         }
@@ -59,12 +67,21 @@ def output(
 ) -> str:
     return json.dumps(
         {
-            "status": status,
-            "acceptedSentenceIds": [1] if accepted_ids is None else accepted_ids,
-            "reason": "주장이 근거 문장에 직접 나타납니다.",
+            "results": [
+                {
+                    "claimId": "claim-1",
+                    "status": status,
+                    "acceptedSentenceIds": [1] if accepted_ids is None else accepted_ids,
+                    "reason": "주장이 근거 문장에 직접 나타납니다.",
+                }
+            ]
         },
         ensure_ascii=False,
     )
+
+
+def first_result(response: object):
+    return response.results[0]
 
 
 def provider_request() -> EvidenceVerifyRequest:
@@ -77,10 +94,10 @@ def provider_request() -> EvidenceVerifyRequest:
 def test_mock_verifier_returns_deterministic_grounded_contract() -> None:
     response = EvidenceVerifierService(Settings()).verify(request())
 
-    assert response.status == "grounded"
-    assert response.accepted_sentence_ids == [1]
+    assert first_result(response).status == "grounded"
+    assert first_result(response).accepted_sentence_ids == [1]
     assert response.meta.provider == "mock"
-    assert response.meta.prompt_version == "evidence.rules.v2"
+    assert response.meta.prompt_version == "evidence.rules.v3"
 
 
 @pytest.mark.parametrize(
@@ -112,9 +129,9 @@ def test_rules_reject_distorted_fact_values(
         request(claim, [{"id": 1, "text": sentence}])
     )
 
-    assert response.status == "ungrounded"
-    assert response.accepted_sentence_ids == []
-    assert reason_fragment in response.reason
+    assert first_result(response).status == "ungrounded"
+    assert first_result(response).accepted_sentence_ids == []
+    assert reason_fragment in first_result(response).reason
 
 
 def test_company_aliases_do_not_create_false_mismatch() -> None:
@@ -125,7 +142,7 @@ def test_company_aliases_do_not_create_false_mismatch() -> None:
         )
     )
 
-    assert response.status != "ungrounded"
+    assert first_result(response).status != "ungrounded"
 
 
 @pytest.mark.parametrize(
@@ -141,7 +158,7 @@ def test_korean_company_aliases_do_not_match_word_prefixes(claim: str) -> None:
         request(claim, [{"id": 1, "text": claim}])
     )
 
-    assert response.status == "grounded"
+    assert first_result(response).status == "grounded"
 
 
 def test_rules_reject_opposite_polarity() -> None:
@@ -152,8 +169,30 @@ def test_rules_reject_opposite_polarity() -> None:
         )
     )
 
-    assert response.status == "ungrounded"
-    assert "부정 표현" in response.reason
+    assert first_result(response).status == "ungrounded"
+    assert "부정 표현" in first_result(response).reason
+
+
+def test_modality_uses_strongest_clause_instead_of_unrelated_possibility() -> None:
+    assessment = modality_overreach(
+        "회사는 HBM4 양산을 시작했고, 수율 개선 가능성을 검토했다.",
+        "회사는 HBM4 양산을 계획했고, 수율 개선 가능성을 검토했다.",
+    )
+
+    assert assessment is not None
+    assert assessment.claim_stage == 5
+    assert assessment.evidence_stage == 0
+
+
+def test_modality_does_not_treat_scheduled_start_as_completed_start() -> None:
+    assessment = modality_overreach(
+        "회사는 HBM4 양산을 시작했다.",
+        "회사는 HBM4 양산을 시작할 예정이다.",
+    )
+
+    assert assessment is not None
+    assert assessment.claim_stage == 5
+    assert assessment.evidence_stage == 0
 
 
 def test_rules_reject_swapped_year_amount_pairs() -> None:
@@ -164,9 +203,9 @@ def test_rules_reject_swapped_year_amount_pairs() -> None:
         )
     )
 
-    assert response.status == "ungrounded"
-    assert response.accepted_sentence_ids == []
-    assert "연결이 다른 숫자" in response.reason
+    assert first_result(response).status == "ungrounded"
+    assert first_result(response).accepted_sentence_ids == []
+    assert "연결이 다른 숫자" in first_result(response).reason
 
 
 def test_rules_accept_matching_year_amount_pairs() -> None:
@@ -180,7 +219,7 @@ def test_rules_accept_matching_year_amount_pairs() -> None:
         )
     )
 
-    assert response.status != "ungrounded"
+    assert first_result(response).status != "ungrounded"
 
 
 def test_rules_only_accept_sentences_that_add_support() -> None:
@@ -194,8 +233,8 @@ def test_rules_only_accept_sentences_that_add_support() -> None:
         )
     )
 
-    assert response.status == "grounded"
-    assert response.accepted_sentence_ids == [1]
+    assert first_result(response).status == "grounded"
+    assert first_result(response).accepted_sentence_ids == [1]
 
 
 def test_non_mock_verifier_resolves_direct_claim_without_provider() -> None:
@@ -203,11 +242,11 @@ def test_non_mock_verifier_resolves_direct_claim_without_provider() -> None:
 
     response = EvidenceVerifierService(Settings(AGENT_MOCK=False), provider).verify(request())
 
-    assert response.status == "grounded"
-    assert response.accepted_sentence_ids == [1]
+    assert first_result(response).status == "grounded"
+    assert first_result(response).accepted_sentence_ids == [1]
     assert response.meta.provider == "gemini"
-    assert response.meta.model == "evidence-rules-v2"
-    assert response.meta.prompt_version == "evidence.rules.v2"
+    assert response.meta.model == "evidence-rules-v3"
+    assert response.meta.prompt_version == "evidence.rules.v3"
     assert response.meta.input_tokens == 0
     assert provider.prompts == []
 
@@ -219,7 +258,164 @@ def test_non_mock_verifier_delegates_semantic_paraphrase_to_provider() -> None:
         provider_request()
     )
 
-    assert response.status == "grounded"
+    assert first_result(response).status == "grounded"
+    assert len(provider.prompts) == 1
+
+
+def test_batches_unresolved_claims_into_one_provider_call() -> None:
+    evidence_request = EvidenceVerifyRequest.model_validate(
+        {
+            "idempotencyKey": "article:10:verify",
+            "plan": "FREE",
+            "claims": [
+                {
+                    "claimId": "0:0",
+                    "claim": "설비 투자 계획이 확대됐다.",
+                    "claimType": "FACT",
+                    "attributedTo": None,
+                    "sentences": [
+                        {"id": 1, "text": "생산 능력을 높이기 위해 팹 지출을 늘린다."}
+                    ],
+                },
+                {
+                    "claimId": "0:1",
+                    "claim": "공급망 대응이 강화됐다.",
+                    "claimType": "FACT",
+                    "attributedTo": None,
+                    "sentences": [
+                        {"id": 2, "text": "부품 조달 경로를 다변화하고 있다."}
+                    ],
+                },
+            ],
+        }
+    )
+    provider = FakeProvider(
+        provider_response(
+            json.dumps(
+                {
+                    "results": [
+                        {
+                            "claimId": "0:0",
+                            "status": "weak",
+                            "acceptedSentenceIds": [1],
+                            "reason": "의미상 뒷받침됩니다.",
+                        },
+                        {
+                            "claimId": "0:1",
+                            "status": "weak",
+                            "acceptedSentenceIds": [2],
+                            "reason": "의미상 뒷받침됩니다.",
+                        },
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        )
+    )
+
+    response = EvidenceVerifierService(Settings(AGENT_MOCK=False), provider).verify(
+        evidence_request
+    )
+
+    assert [result.claim_id for result in response.results] == ["0:0", "0:1"]
+    assert len(provider.prompts) == 1
+    assert '"claimId": "0:0"' in provider.prompts[0]
+    assert '"claimId": "0:1"' in provider.prompts[0]
+
+
+def test_rejects_forecast_that_is_written_as_completed_fact_without_provider() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["claims"][0].update(
+        {
+            "claim": "회사는 HBM4 양산을 시작했다.",
+            "claimType": "FORECAST",
+        }
+    )
+    provider = FakeProvider()
+
+    response = EvidenceVerifierService(Settings(AGENT_MOCK=False), provider).verify(
+        EvidenceVerifyRequest.model_validate(payload)
+    )
+
+    assert first_result(response).status == "ungrounded"
+    assert "전망" in first_result(response).reason
+    assert provider.prompts == []
+
+
+def test_accepts_qualified_forecast_without_fact_grounding_or_provider() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["claims"][0].update(
+        {
+            "claim": "회사는 HBM4 양산을 시작할 예정이다.",
+            "claimType": "FORECAST",
+        }
+    )
+    payload["claims"][0]["sentences"][0]["text"] = (
+        "회사는 내년 생산 계획을 설명했다."
+    )
+    provider = FakeProvider()
+
+    response = EvidenceVerifierService(Settings(AGENT_MOCK=False), provider).verify(
+        EvidenceVerifyRequest.model_validate(payload)
+    )
+
+    assert first_result(response).status == "grounded"
+    assert first_result(response).accepted_sentence_ids == [1]
+    assert provider.prompts == []
+
+
+def test_opinion_requires_attributed_speaker_in_evidence() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["claims"][0].update(
+        {
+            "claim": "수요 회복이 빨라질 것이라는 해석이다.",
+            "claimType": "OPINION",
+            "attributedTo": "김 연구원",
+        }
+    )
+    payload["claims"][0]["sentences"][0]["text"] = (
+        "김 연구원은 수요 회복이 빨라질 것으로 해석했다."
+    )
+    provider = FakeProvider(provider_response(output()))
+
+    accepted = EvidenceVerifierService(Settings(AGENT_MOCK=False), provider).verify(
+        EvidenceVerifyRequest.model_validate(payload)
+    )
+    payload["claims"][0]["sentences"][0]["text"] = (
+        "업계는 수요 회복이 빨라질 것으로 해석했다."
+    )
+    rejected = EvidenceVerifierService(Settings(AGENT_MOCK=False), provider).verify(
+        EvidenceVerifyRequest.model_validate(payload)
+    )
+
+    assert first_result(accepted).status == "grounded"
+    assert first_result(rejected).status == "ungrounded"
+    assert "발화 주체" in first_result(rejected).reason
+    assert len(provider.prompts) == 1
+
+
+def test_opinion_with_same_speaker_still_requires_semantic_validation() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["claims"][0].update(
+        {
+            "claim": "수요 회복을 예상했다.",
+            "claimType": "OPINION",
+            "attributedTo": "김 연구원",
+        }
+    )
+    payload["claims"][0]["sentences"][0]["text"] = (
+        "김 연구원은 양산 완료를 발표했다."
+    )
+    provider = FakeProvider(
+        provider_response(output(status="ungrounded", accepted_ids=[]))
+    )
+
+    response = EvidenceVerifierService(Settings(AGENT_MOCK=False), provider).verify(
+        EvidenceVerifyRequest.model_validate(payload)
+    )
+
+    assert first_result(response).status == "ungrounded"
+    assert first_result(response).accepted_sentence_ids == []
     assert len(provider.prompts) == 1
 
 
@@ -242,8 +438,8 @@ def test_non_mock_verifier_resolves_high_confidence_bilingual_contract() -> None
         bilingual
     )
 
-    assert response.status == "grounded"
-    assert response.accepted_sentence_ids == [1]
+    assert first_result(response).status == "grounded"
+    assert first_result(response).accepted_sentence_ids == [1]
     assert provider.prompts == []
 
 
@@ -266,7 +462,7 @@ def test_non_mock_verifier_delegates_unmapped_bilingual_relation() -> None:
         bilingual
     )
 
-    assert response.status == "weak"
+    assert first_result(response).status == "weak"
     assert len(provider.prompts) == 1
 
 
@@ -281,7 +477,7 @@ def test_bilingual_rule_requires_two_independent_fact_anchors() -> None:
         sparse
     )
 
-    assert response.status == "grounded"
+    assert first_result(response).status == "grounded"
     assert len(provider.prompts) == 1
 
 
@@ -299,8 +495,8 @@ def test_non_mock_verifier_delegates_compound_claim_across_sentences() -> None:
         compound
     )
 
-    assert response.status == "grounded"
-    assert response.accepted_sentence_ids == [1, 2]
+    assert first_result(response).status == "grounded"
+    assert first_result(response).accepted_sentence_ids == [1, 2]
     assert len(provider.prompts) == 1
 
 
@@ -315,7 +511,7 @@ def test_decimal_does_not_make_direct_claim_look_compound() -> None:
         decimal_claim
     )
 
-    assert response.status == "grounded"
+    assert first_result(response).status == "grounded"
     assert provider.prompts == []
 
 
@@ -330,7 +526,7 @@ def test_non_mock_rule_rejection_keeps_real_provider_meta() -> None:
         )
     )
 
-    assert response.status == "ungrounded"
+    assert first_result(response).status == "ungrounded"
     assert response.meta.provider == "gemini"
     assert response.meta.mock is False
 
@@ -345,7 +541,7 @@ def test_repairs_unknown_sentence_reference_once() -> None:
         provider_request()
     )
 
-    assert response.status == "grounded"
+    assert first_result(response).status == "grounded"
     assert len(provider.prompts) == 2
     assert "validation-error" in provider.prompts[1]
 
@@ -377,9 +573,9 @@ def test_downgrades_provider_when_accepted_sentence_distorts_number() -> None:
         evidence_request
     )
 
-    assert response.status == "ungrounded"
-    assert response.accepted_sentence_ids == []
-    assert "2027" in response.reason
+    assert first_result(response).status == "ungrounded"
+    assert first_result(response).accepted_sentence_ids == []
+    assert "2027" in first_result(response).reason
 
 
 def test_prompt_treats_injected_sentence_as_data() -> None:

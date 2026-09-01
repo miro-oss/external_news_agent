@@ -1,6 +1,6 @@
 {
   "datasetVersion": "semiconductor.v1",
-  "promptVersion": "report.ko.v1.3",
+  "promptVersion": "report.ko.v1.4",
   "output": {
     "title": "반도체 산업 골든 평가 보고서",
     "executiveSummary": [
@@ -38,13 +38,13 @@
   },
   "expectedClaimStatuses": {
     "executiveSummary:0": "grounded",
-    "executiveSummary:1": "ungrounded",
+    "executiveSummary:1": "grounded",
     "executiveSummary:2": "weak",
     "importantEvents:0:summaryKo": "grounded",
     "importantEvents:0:significance": "grounded",
     "importantEvents:1:summaryKo": "grounded",
     "importantEvents:1:significance": "grounded",
     "watchItems:0:reason": "grounded",
-    "watchItems:1:reason": "ungrounded"
+    "watchItems:1:reason": "grounded"
   }
 }

@@ -119,16 +119,19 @@ class AgentClientTest {
                 .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
                 .andExpect(jsonPath("$.idempotencyKey").value("finding:501:verify"))
                 .andExpect(jsonPath("$.plan").value("FREE"))
-                .andExpect(jsonPath("$.claim").value("HBM4 양산 일정이 앞당겨졌다."))
-                .andExpect(jsonPath("$.sentences[0].id").value(1))
-                .andExpect(jsonPath("$.sentences[0].text").value("HBM4 양산 일정이 앞당겨졌다."))
+                .andExpect(jsonPath("$.claims[0].claimId").value("0:0"))
+                .andExpect(jsonPath("$.claims[0].claim").value("HBM4 양산 일정이 앞당겨졌다."))
+                .andExpect(jsonPath("$.claims[0].claimType").value("FACT"))
+                .andExpect(jsonPath("$.claims[0].sentences[0].id").value(1))
+                .andExpect(jsonPath("$.claims[0].sentences[0].text")
+                        .value("HBM4 양산 일정이 앞당겨졌다."))
                 .andRespond(withSuccess(evidenceResponseJson(), MediaType.APPLICATION_JSON));
 
         AgentEvidenceResponse response = client.verifyEvidence(evidenceRequest());
 
-        assertEquals("grounded", response.status());
-        assertEquals(List.of(1), response.acceptedSentenceIds());
-        assertEquals("evidence.rules.v2", response.meta().promptVersion());
+        assertEquals("grounded", response.results().getFirst().status());
+        assertEquals(List.of(1), response.results().getFirst().acceptedSentenceIds());
+        assertEquals("evidence.rules.v3", response.meta().promptVersion());
         server.verify();
     }
 
@@ -215,7 +218,7 @@ class AgentClientTest {
                         "NEW",
                         "한국어 요약",
                         List.of(new AgentReportRequest.KeyPointPayload(
-                                "핵심", List.of(0), "grounded")),
+                                "핵심", List.of(0), "grounded", "직접 확인", "FACT", null)),
                         "발표",
                         "neutral",
                         "low",
@@ -243,9 +246,13 @@ class AgentClientTest {
         return new AgentEvidenceRequest(
                 "finding:501:verify",
                 AgentPlan.FREE,
-                "HBM4 양산 일정이 앞당겨졌다.",
-                List.of(new AgentEvidenceRequest.SentencePayload(
-                        1, "HBM4 양산 일정이 앞당겨졌다.")));
+                List.of(new AgentEvidenceRequest.ClaimPayload(
+                        "0:0",
+                        "HBM4 양산 일정이 앞당겨졌다.",
+                        "FACT",
+                        null,
+                        List.of(new AgentEvidenceRequest.SentencePayload(
+                                1, "HBM4 양산 일정이 앞당겨졌다.")))));
     }
 
     private String responseJson() {
@@ -331,13 +338,16 @@ class AgentClientTest {
     private String evidenceResponseJson() {
         return """
                 {
-                  "status": "grounded",
-                  "acceptedSentenceIds": [1],
-                  "reason": "주장이 근거 문장에 직접 나타납니다.",
+                  "results": [{
+                    "claimId": "0:0",
+                    "status": "grounded",
+                    "acceptedSentenceIds": [1],
+                    "reason": "주장이 근거 문장에 직접 나타납니다."
+                  }],
                   "meta": {
                     "provider": "mock",
-                    "model": "evidence-rules-v2",
-                    "promptVersion": "evidence.rules.v2",
+                    "model": "evidence-rules-v3",
+                    "promptVersion": "evidence.rules.v3",
                     "inputTokens": 0,
                     "outputTokens": 0,
                     "costUsd": 0,

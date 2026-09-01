@@ -180,6 +180,9 @@ export interface ArticleKeyPoint {
   text: string
   evidence: number[]
   groundedness: 'grounded' | 'weak' | 'ungrounded'
+  groundingReason: string | null
+  claimType: 'FACT' | 'FORECAST' | 'OPINION'
+  attributedTo: string | null
 }
 
 export interface ArticleAnalysis {

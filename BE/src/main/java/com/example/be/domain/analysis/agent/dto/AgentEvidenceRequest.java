@@ -7,9 +7,17 @@ import java.util.List;
 public record AgentEvidenceRequest(
         String idempotencyKey,
         AgentPlan plan,
-        String claim,
-        List<SentencePayload> sentences
+        List<ClaimPayload> claims
 ) {
+
+    public record ClaimPayload(
+            String claimId,
+            String claim,
+            String claimType,
+            String attributedTo,
+            List<SentencePayload> sentences
+    ) {
+    }
 
     public record SentencePayload(
             Integer id,

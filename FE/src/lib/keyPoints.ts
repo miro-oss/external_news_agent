@@ -15,15 +15,32 @@ export function normalizeKeyPoints(points: unknown): ArticleKeyPoint[] {
   if (!Array.isArray(points)) return []
   return points.flatMap((point) => {
     if (typeof point === 'string') {
-      return point.trim() ? [{ text: point, evidence: [], groundedness: 'ungrounded' as const }] : []
+      return point.trim() ? [{
+        text: point,
+        evidence: [],
+        groundedness: 'ungrounded' as const,
+        groundingReason: null,
+        claimType: 'FACT' as const,
+        attributedTo: null,
+      }] : []
     }
     if (typeof point !== 'object' || point === null) return []
-    const { text, evidence, groundedness } = point as Partial<ArticleKeyPoint>
+    const {
+      text,
+      evidence,
+      groundedness,
+      groundingReason,
+      claimType,
+      attributedTo,
+    } = point as Partial<ArticleKeyPoint>
     if (typeof text !== 'string' || !text.trim()) return []
     return [{
       text,
       evidence: Array.isArray(evidence) ? evidence.filter((id) => typeof id === 'number') : [],
       groundedness: groundedness === 'grounded' || groundedness === 'weak' ? groundedness : 'ungrounded',
+      groundingReason: typeof groundingReason === 'string' ? groundingReason : null,
+      claimType: claimType === 'FORECAST' || claimType === 'OPINION' ? claimType : 'FACT',
+      attributedTo: claimType === 'OPINION' && typeof attributedTo === 'string' ? attributedTo : null,
     }]
   })
 }

@@ -60,9 +60,16 @@ def report_request_body() -> dict[str, object]:
 def evidence_request_body() -> dict[str, object]:
     return {
         "idempotencyKey": "finding:999:verify",
-        "claim": "HBM4 양산 일정이 앞당겨졌다.",
-        "sentences": [
-            {"id": 1, "text": "HBM4 양산 일정이 앞당겨졌다."},
+        "claims": [
+            {
+                "claimId": "0:0",
+                "claim": "HBM4 양산 일정이 앞당겨졌다.",
+                "claimType": "FACT",
+                "attributedTo": None,
+                "sentences": [
+                    {"id": 1, "text": "HBM4 양산 일정이 앞당겨졌다."},
+                ],
+            }
         ],
     }
 
@@ -215,9 +222,15 @@ def test_verify_evidence_returns_deterministic_mock_contract() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "grounded"
-    assert payload["acceptedSentenceIds"] == [1]
-    assert payload["meta"]["promptVersion"] == "evidence.rules.v2"
+    assert payload["results"] == [
+        {
+            "claimId": "0:0",
+            "status": "grounded",
+            "acceptedSentenceIds": [1],
+            "reason": "주장의 핵심 표현과 사실값이 근거 문장에서 확인됩니다.",
+        }
+    ]
+    assert payload["meta"]["promptVersion"] == "evidence.rules.v3"
 
 
 def test_validation_failure_uses_json_error_contract() -> None:

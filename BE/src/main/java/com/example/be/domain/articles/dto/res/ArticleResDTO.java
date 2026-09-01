@@ -114,12 +114,23 @@ public class ArticleResDTO {
     @Getter
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
-    @JsonPropertyOrder({"text", "evidence", "groundedness"})
+    @JsonPropertyOrder({
+            "text", "evidence", "groundedness", "groundingReason", "claimType", "attributedTo"
+    })
     public static class KeyPoint {
 
         private final String text;
         private final List<Integer> evidence;
         private final String groundedness;
+
+        @Schema(description = "근거 검증 또는 강등 이유", nullable = true)
+        private final String groundingReason;
+
+        @Schema(description = "주장 유형", allowableValues = {"FACT", "FORECAST", "OPINION"})
+        private final String claimType;
+
+        @Schema(description = "OPINION 발화 주체. 다른 주장 유형은 null", nullable = true)
+        private final String attributedTo;
     }
 
     @Getter

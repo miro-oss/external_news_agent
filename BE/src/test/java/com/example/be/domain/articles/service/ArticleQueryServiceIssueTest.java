@@ -127,7 +127,13 @@ class ArticleQueryServiceIssueTest {
                 .article(promoted)
                 .changeType(ChangeType.UPDATED)
                 .summary("충돌 기사 분석")
-                .keyPoints(List.of(new FindingKeyPoint("충돌 주장", List.of(0), "grounded")))
+                .keyPoints(List.of(new FindingKeyPoint(
+                        "충돌 주장일 전망이다.",
+                        List.of(0),
+                        "weak",
+                        "발표 전 계획입니다.",
+                        "FORECAST",
+                        null)))
                 .sentiment(Sentiment.NEGATIVE)
                 .riskLevel(RiskLevel.HIGH)
                 .relevance(Relevance.IMPORTANT)
@@ -150,6 +156,9 @@ class ArticleQueryServiceIssueTest {
         assertEquals(102L, detail.getAnalysisArticleId());
         assertEquals("충돌 기사 분석", detail.getAnalysis().getSummary());
         assertEquals("충돌 근거 문장", detail.getBodyText());
+        assertEquals("FORECAST", detail.getAnalysis().getKeyPoints().getFirst().getClaimType());
+        assertEquals("발표 전 계획입니다.",
+                detail.getAnalysis().getKeyPoints().getFirst().getGroundingReason());
     }
 
     @Test

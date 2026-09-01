@@ -4,7 +4,7 @@ from urllib.parse import urlsplit
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 
-from app.schemas.analyze import Groundedness, Plan
+from app.schemas.analyze import ClaimType, Groundedness, Plan
 from app.schemas.common import AgentModel
 
 NonEmptyString = Annotated[str, Field(min_length=1)]
@@ -29,11 +29,19 @@ class ReportKeyPointInput(AgentModel):
     text: NonEmptyString
     evidence: list[Annotated[int, Field(ge=0)]] = Field(min_length=1)
     groundedness: Groundedness
+    grounding_reason: str | None = Field(default=None, min_length=1, max_length=500)
+    claim_type: ClaimType
+    attributed_to: str | None = Field(default=None, min_length=1, max_length=200)
 
     @model_validator(mode="after")
     def validate_evidence_indexes(self) -> "ReportKeyPointInput":
         if len(self.evidence) != len(set(self.evidence)):
             raise ValueError("report key point의 evidence는 중복될 수 없습니다.")
+        if self.claim_type == "OPINION":
+            if self.attributed_to is None:
+                raise ValueError("OPINION은 attributedTo가 필요합니다.")
+        elif self.attributed_to is not None:
+            raise ValueError("OPINION이 아니면 attributedTo는 null이어야 합니다.")
         return self
 
 

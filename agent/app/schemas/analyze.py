@@ -7,6 +7,7 @@ from app.schemas.common import AgentModel
 
 Plan = Literal["FREE", "PAID"]
 Groundedness = Literal["grounded", "weak", "ungrounded"]
+ClaimType = Literal["FACT", "FORECAST", "OPINION"]
 Audience = Literal[
     "CHIP_MAKER",
     "EQUIPMENT_MAKER",
@@ -17,6 +18,7 @@ AudienceRelevance = Literal["none", "low", "medium", "high"]
 NonEmptyString = Annotated[str, Field(min_length=1)]
 AUDIENCES = frozenset(get_args(Audience))
 MAX_ISSUE_MEMBERS = 10
+MAX_ANALYZE_SECTIONS = 16
 
 
 class ArticleInput(AgentModel):
@@ -69,6 +71,17 @@ class EvidenceBullet(AgentModel):
     evidence_sentence_ids: list[Annotated[int, Field(ge=1)]] = Field(min_length=1)
     groundedness: Groundedness
     confidence: float = Field(ge=0, le=1)
+    claim_type: ClaimType
+    attributed_to: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_claim_type(self) -> "EvidenceBullet":
+        if self.claim_type == "OPINION":
+            if self.attributed_to is None:
+                raise ValueError("OPINION은 attributedTo가 필요합니다.")
+        elif self.attributed_to is not None:
+            raise ValueError("OPINION이 아니면 attributedTo는 null이어야 합니다.")
+        return self
 
 
 class Section(AgentModel):
@@ -169,7 +182,7 @@ class ResponseMeta(AgentModel):
 
 
 class AnalyzeOutput(AgentModel):
-    sections: list[Section] = Field(min_length=1)
+    sections: list[Section] = Field(min_length=1, max_length=MAX_ANALYZE_SECTIONS)
     summary_ko: str = Field(min_length=10, max_length=120)
     classification: Classification
     entities: Entities
@@ -185,7 +198,7 @@ class AnalyzeOutput(AgentModel):
 
 class AnalyzeResponse(AgentModel):
     sentences: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
-    sections: list[Section] = Field(min_length=1)
+    sections: list[Section] = Field(min_length=1, max_length=MAX_ANALYZE_SECTIONS)
     summary_ko: str = Field(min_length=10, max_length=120)
     classification: Classification
     entities: Entities

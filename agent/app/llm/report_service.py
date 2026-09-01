@@ -8,7 +8,12 @@ from pydantic import ValidationError
 from app.core.config import Settings
 from app.core.errors import AgentError
 from app.core.parser import parse_json_object
-from app.core.report_grounding import assess_finding_claim
+from app.core.report_grounding import (
+    assess_finding_claim,
+    assess_independent_finding_claim,
+    attributed_opinion,
+    report_claim_policy_violation,
+)
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.router import get_analyze_provider
 from app.llm.structured_call import structured_call
@@ -22,7 +27,7 @@ from app.schemas.report import (
     WatchItem,
 )
 
-PROMPT_VERSION = "report.ko.v1.3"
+PROMPT_VERSION = "report.ko.v1.4"
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md"
 SYSTEM_INSTRUCTION = _PROMPT_PATH.read_text(encoding="utf-8").strip()
 
@@ -46,7 +51,11 @@ class ReportWriterService:
 
     def write(self, request: ReportRequest) -> ReportResponse:
         if self._settings.mock or not request.findings:
-            return _deterministic_response(request)
+            return _deterministic_response(
+                request,
+                grounded_overlap=self._settings.evidence_grounded_overlap,
+                weak_overlap=self._settings.evidence_weak_overlap,
+            )
 
         provider = self._provider or get_analyze_provider(self._report_settings, request.plan)
         response_schema = ReportOutput.model_json_schema(by_alias=True)
@@ -91,38 +100,142 @@ def _limit_unsupported_significance(
     weak_overlap: float,
 ) -> ReportOutput:
     finding_by_id = {finding.id: finding for finding in request.findings}
-    important_events = []
+    important_events: list[ImportantEvent] = []
+    seen_events: set[str] = set()
     for event in output.important_events:
         findings = [finding_by_id[finding_id] for finding_id in event.source_finding_ids]
-        assessment = assess_finding_claim(
-            event.significance,
-            findings,
-            grounded_overlap=grounded_overlap,
-            weak_overlap=weak_overlap,
-        )
-        if assessment.status != "ungrounded":
-            important_events.append(event)
-            continue
-
-        summary_assessment = assess_finding_claim(
+        summary_ko = _validated_report_claim(
             event.summary_ko,
             findings,
+            fallback=_best_finding_fallback(event.summary_ko, findings),
+            grounded_overlap=grounded_overlap,
+            weak_overlap=weak_overlap,
+            max_chars=150,
+        )
+        significance = _validated_report_claim(
+            event.significance,
+            findings,
+            fallback=summary_ko,
             grounded_overlap=grounded_overlap,
             weak_overlap=weak_overlap,
         )
-        fallback = (
-            event.summary_ko
-            if summary_assessment.status == "grounded"
-            else findings[0].summary_ko
+        updated = event.model_copy(
+            update={"summary_ko": summary_ko, "significance": significance}
         )
-        logger.warning(
-            "보고서 significance가 연결 finding에서 확인되지 않아 근거 문장으로 대체합니다. "
-            "sourceFindingIds=%s reason=%s",
-            event.source_finding_ids,
-            assessment.reason[:500],
+        dedupe_key = _normalized_key(updated.summary_ko)
+        if dedupe_key not in seen_events:
+            seen_events.add(dedupe_key)
+            important_events.append(updated)
+
+    watch_items: list[WatchItem] = []
+    seen_watch_items: set[str] = set()
+    for item in output.watch_items:
+        findings = [finding_by_id[finding_id] for finding_id in item.source_finding_ids]
+        reason = _validated_report_claim(
+            item.reason,
+            findings,
+            fallback=_best_finding_fallback(item.reason, findings),
+            grounded_overlap=grounded_overlap,
+            weak_overlap=weak_overlap,
         )
-        important_events.append(event.model_copy(update={"significance": fallback}))
-    return output.model_copy(update={"important_events": important_events})
+        updated = item.model_copy(update={"reason": reason})
+        dedupe_key = _normalized_key(updated.reason)
+        if dedupe_key not in seen_watch_items:
+            seen_watch_items.add(dedupe_key)
+            watch_items.append(updated)
+
+    executive_summary: list[str] = []
+    seen_summaries: set[str] = set()
+    for summary in output.executive_summary:
+        validated = _validated_report_claim(
+            summary,
+            request.findings,
+            fallback=_best_finding_fallback(summary, request.findings),
+            grounded_overlap=grounded_overlap,
+            weak_overlap=weak_overlap,
+            max_chars=100,
+            independent=True,
+        )
+        dedupe_key = _normalized_key(validated)
+        if dedupe_key not in seen_summaries:
+            seen_summaries.add(dedupe_key)
+            executive_summary.append(validated)
+
+    return output.model_copy(
+        update={
+            "executive_summary": executive_summary[:3],
+            "important_events": important_events,
+            "watch_items": watch_items,
+        }
+    )
+
+
+def _validated_report_claim(
+    claim: str,
+    findings: list[ReportFindingInput],
+    *,
+    fallback: str,
+    grounded_overlap: float,
+    weak_overlap: float,
+    max_chars: int | None = None,
+    independent: bool = False,
+) -> str:
+    assessment_function = (
+        assess_independent_finding_claim if independent else assess_finding_claim
+    )
+    assessment = assessment_function(
+        claim,
+        findings,
+        grounded_overlap=grounded_overlap,
+        weak_overlap=weak_overlap,
+    )
+    violation = report_claim_policy_violation(claim, findings)
+    if assessment.status != "ungrounded" and violation is None:
+        return _truncate_chars(claim, max_chars) if max_chars is not None else claim
+
+    replacement = violation.fallback if violation is not None else fallback
+    reason = violation.reason if violation is not None else assessment.reason
+    logger.warning(
+        "리포트 문장이 최종 검증을 통과하지 못해 근거 문장으로 대체합니다. "
+        "reason=%s",
+        reason[:500],
+    )
+    return (
+        _truncate_chars(replacement, max_chars)
+        if max_chars is not None
+        else replacement
+    )
+
+
+def _best_finding_fallback(claim: str, findings: list[ReportFindingInput]) -> str:
+    candidates = [
+        text
+        for finding in findings
+        for text in [
+            finding.summary_ko,
+            *(
+                attributed_opinion(point.attributed_to, point.text)
+                if point.claim_type == "OPINION"
+                else point.text
+                for point in finding.key_points
+                if point.groundedness != "ungrounded"
+            ),
+        ]
+    ]
+    if not candidates:
+        return findings[0].summary_ko
+    claim_tokens = set(re.findall(r"[A-Za-z0-9가-힣]+", claim.casefold()))
+    return max(
+        candidates,
+        key=lambda candidate: len(
+            claim_tokens
+            & set(re.findall(r"[A-Za-z0-9가-힣]+", candidate.casefold()))
+        ),
+    )
+
+
+def _normalized_key(value: str) -> str:
+    return " ".join(value.casefold().split())
 
 
 def _assembled_response(
@@ -165,7 +278,12 @@ def _assembled_response(
         raise _assembly_error(usage, provider_response.truncated) from error
 
 
-def _deterministic_response(request: ReportRequest) -> ReportResponse:
+def _deterministic_response(
+    request: ReportRequest,
+    *,
+    grounded_overlap: float,
+    weak_overlap: float,
+) -> ReportResponse:
     ordered = sorted(
         request.findings,
         key=lambda finding: (
@@ -208,18 +326,32 @@ def _deterministic_response(request: ReportRequest) -> ReportResponse:
     ][:5]
     source_notes = _source_notes(request)
     title = _deterministic_title(request)
-    return ReportResponse(
+    output = ReportOutput(
         title=title,
         executive_summary=executive_summary,
         important_events=important_events,
         watch_items=watch_items,
         source_notes=source_notes,
+    )
+    if request.findings:
+        output = _limit_unsupported_significance(
+            output,
+            request,
+            grounded_overlap=grounded_overlap,
+            weak_overlap=weak_overlap,
+        )
+    return ReportResponse(
+        title=output.title,
+        executive_summary=output.executive_summary,
+        important_events=output.important_events,
+        watch_items=output.watch_items,
+        source_notes=source_notes,
         markdown_body=_render_markdown(
             request,
-            title=title,
-            executive_summary=executive_summary,
-            important_events=important_events,
-            watch_items=watch_items,
+            title=output.title,
+            executive_summary=output.executive_summary,
+            important_events=output.important_events,
+            watch_items=output.watch_items,
             source_notes=source_notes,
         ),
         meta=ReportResponseMeta(

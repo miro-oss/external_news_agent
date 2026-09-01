@@ -71,7 +71,7 @@ class AgentAnalysisOrchestratorTest {
     private final QuotaReservation reservation = new QuotaReservation(
             1L, 42L, "run:42:article:10", AgentTask.ANALYZE, AgentPlan.FREE, BigDecimal.ONE);
     private final QuotaReservation evidenceReservation = new QuotaReservation(
-            2L, 42L, "run:42:article:10:evidence:0:0",
+            2L, 42L, "run:42:article:10:evidence",
             AgentTask.VERIFY_EVIDENCE, AgentPlan.FREE, BigDecimal.ONE);
     private final AgentAnalysisOrchestrator orchestrator =
             new AgentAnalysisOrchestrator(
@@ -84,7 +84,7 @@ class AgentAnalysisOrchestratorTest {
                 .thenReturn(reservation);
         when(quotaService.reserve(
                 eq(42L),
-                eq("run:42:article:10:evidence:0:0"),
+                eq("run:42:article:10:evidence"),
                 eq(AgentTask.VERIFY_EVIDENCE),
                 eq(AgentPlan.FREE)))
                 .thenReturn(evidenceReservation);
@@ -152,7 +152,7 @@ class AgentAnalysisOrchestratorTest {
                 3L, 42L, "run:42:issue:88:promotion:article:11",
                 AgentTask.ANALYZE, AgentPlan.FREE, BigDecimal.ONE);
         QuotaReservation promotionEvidenceReservation = new QuotaReservation(
-                4L, 42L, "run:42:article:11:promotion:evidence:0:0",
+                4L, 42L, "run:42:article:11:promotion:evidence",
                 AgentTask.VERIFY_EVIDENCE, AgentPlan.FREE, BigDecimal.ONE);
         when(quotaService.reserve(
                 42L,
@@ -161,7 +161,7 @@ class AgentAnalysisOrchestratorTest {
                 AgentPlan.FREE)).thenReturn(promotionReservation);
         when(quotaService.reserve(
                 42L,
-                "run:42:article:11:promotion:evidence:0:0",
+                "run:42:article:11:promotion:evidence",
                 AgentTask.VERIFY_EVIDENCE,
                 AgentPlan.FREE)).thenReturn(promotionEvidenceReservation);
         when(client.analyze(any())).thenReturn(primary, promoted);
@@ -358,7 +358,7 @@ class AgentAnalysisOrchestratorTest {
         assertEquals("gemini", result.metadata().provider());
         assertEquals("gemini-2.5-flash", result.metadata().model());
         assertEquals(
-                "analyze.ko.v4+perspective.ko.v1+sensitivity.ko.v1",
+                "analyze.ko.v5+perspective.ko.v1+sensitivity.ko.v1",
                 result.metadata().promptVersion());
         assertEquals(120L, result.metadata().inputTokens());
         assertEquals(30L, result.metadata().outputTokens());
@@ -367,8 +367,13 @@ class AgentAnalysisOrchestratorTest {
         ArgumentCaptor<AgentEvidenceRequest> captor =
                 ArgumentCaptor.forClass(AgentEvidenceRequest.class);
         verify(client).verifyEvidence(captor.capture());
-        assertEquals("핵심 주장", captor.getValue().claim());
-        assertEquals("근거 문장.", captor.getValue().sentences().getFirst().text());
+        assertEquals(1, captor.getValue().claims().size());
+        assertEquals("0:0", captor.getValue().claims().getFirst().claimId());
+        assertEquals("핵심 주장", captor.getValue().claims().getFirst().claim());
+        assertEquals("FACT", captor.getValue().claims().getFirst().claimType());
+        assertEquals(
+                "근거 문장.",
+                captor.getValue().claims().getFirst().sentences().getFirst().text());
         verify(quotaService).completeSuccess(evidenceReservation, BigDecimal.ZERO, true);
     }
 
@@ -383,13 +388,57 @@ class AgentAnalysisOrchestratorTest {
     }
 
     @Test
+    void verifiesMultipleBulletsWithOneBatchCallAndOneQuotaReservation() {
+        AgentAnalyzeResponse base = response(List.of(1), "제품/공정", false);
+        AgentAnalyzeResponse batched = new AgentAnalyzeResponse(
+                base.sentences(),
+                List.of(new AgentAnalyzeResponse.Section(
+                        "핵심",
+                        List.of(
+                                new AgentAnalyzeResponse.Bullet(
+                                        "첫 주장", List.of(1), "grounded", BigDecimal.ONE,
+                                        "FACT", null),
+                                new AgentAnalyzeResponse.Bullet(
+                                        "두 번째 전망일 수 있다", List.of(1), "weak", new BigDecimal("0.7"),
+                                        "FORECAST", null)))),
+                base.summaryKo(),
+                base.classification(),
+                base.entities(),
+                base.perspectiveTags(),
+                base.meta());
+        when(client.analyze(any())).thenReturn(batched);
+        when(client.verifyEvidence(any())).thenReturn(new AgentEvidenceResponse(
+                List.of(
+                        new AgentEvidenceResponse.Result(
+                                "0:0", "grounded", List.of(1), "직접 확인"),
+                        new AgentEvidenceResponse.Result(
+                                "0:1", "weak", List.of(1), "전망 표현으로 제한")),
+                ruleEvidenceResponse().meta()));
+
+        AnalysisResult result = orchestrator.analyze(
+                new AnalysisContext(42L, article(), AgentPlan.FREE));
+
+        ArgumentCaptor<AgentEvidenceRequest> captor =
+                ArgumentCaptor.forClass(AgentEvidenceRequest.class);
+        verify(client).verifyEvidence(captor.capture());
+        assertEquals(List.of("0:0", "0:1"), captor.getValue().claims().stream()
+                .map(AgentEvidenceRequest.ClaimPayload::claimId)
+                .toList());
+        assertEquals("FORECAST", result.keyPoints().get(1).claimType());
+        assertEquals("전망 표현으로 제한", result.keyPoints().get(1).groundingReason());
+        verify(quotaService, times(1)).reserve(
+                42L,
+                "run:42:article:10:evidence",
+                AgentTask.VERIFY_EVIDENCE,
+                AgentPlan.FREE);
+    }
+
+    @Test
     void rejectsRuleOnlyMetaThatClaimsProviderUsage() {
         when(client.analyze(any())).thenReturn(response(List.of(1), "제품/공정", false));
         AgentEvidenceResponse valid = ruleEvidenceResponse();
         when(client.verifyEvidence(any())).thenReturn(new AgentEvidenceResponse(
-                valid.status(),
-                valid.acceptedSentenceIds(),
-                valid.reason(),
+                valid.results(),
                 new AgentEvidenceResponse.Meta(
                         valid.meta().provider(),
                         valid.meta().model(),
@@ -586,8 +635,8 @@ class AgentAnalysisOrchestratorTest {
                         mock ? "mock" : "gemini",
                         mock ? "mock" : "gemini-2.5-flash",
                         mock
-                                ? "analyze.mock.v4"
-                                : "analyze.ko.v4+perspective.ko.v1+sensitivity.ko.v1",
+                                ? "analyze.mock.v5"
+                                : "analyze.ko.v5+perspective.ko.v1+sensitivity.ko.v1",
                         mock ? 0L : 120L,
                         mock ? 0L : 30L,
                         mock ? BigDecimal.ZERO : new BigDecimal("0.001"),
@@ -626,13 +675,12 @@ class AgentAnalysisOrchestratorTest {
 
     private static AgentEvidenceResponse evidenceResponse(String status, List<Integer> acceptedIds) {
         return new AgentEvidenceResponse(
-                status,
-                acceptedIds,
-                "검증 결과",
+                List.of(new AgentEvidenceResponse.Result(
+                        "0:0", status, acceptedIds, "검증 결과")),
                 new AgentEvidenceResponse.Meta(
                         "gemini",
                         "gemini-2.5-flash",
-                        "evidence.ko.v1",
+                        "evidence.ko.v2",
                         10L,
                         5L,
                         BigDecimal.ZERO,
@@ -643,13 +691,12 @@ class AgentAnalysisOrchestratorTest {
 
     private static AgentEvidenceResponse ruleEvidenceResponse() {
         return new AgentEvidenceResponse(
-                "grounded",
-                List.of(1),
-                "규칙 검증 결과",
+                List.of(new AgentEvidenceResponse.Result(
+                        "0:0", "grounded", List.of(1), "규칙 검증 결과")),
                 new AgentEvidenceResponse.Meta(
                         "gemini",
-                        "evidence-rules-v2",
-                        "evidence.rules.v2",
+                        "evidence-rules-v3",
+                        "evidence.rules.v3",
                         0L,
                         0L,
                         BigDecimal.ZERO,

@@ -137,7 +137,9 @@ public class ReportResDTO {
     @Getter
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
-    @JsonPropertyOrder({"text", "evidence", "groundedness"})
+    @JsonPropertyOrder({
+            "text", "evidence", "groundedness", "groundingReason", "claimType", "attributedTo"
+    })
     @Schema(name = "ReportFindingKeyPoint", description = "보고서 핵심 주장과 기사 문장 근거")
     public static class KeyPoint {
 
@@ -148,5 +150,14 @@ public class ReportResDTO {
 
         @Schema(description = "근거 검증 상태", allowableValues = {"grounded", "weak"})
         private final String groundedness;
+
+        @Schema(description = "근거 검증 또는 강등 이유", nullable = true)
+        private final String groundingReason;
+
+        @Schema(description = "주장 유형", allowableValues = {"FACT", "FORECAST", "OPINION"})
+        private final String claimType;
+
+        @Schema(description = "OPINION 발화 주체. 다른 주장 유형은 null", nullable = true)
+        private final String attributedTo;
     }
 }

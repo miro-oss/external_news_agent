@@ -54,6 +54,9 @@ def request() -> ReportRequest:
                             "text": "양산 일정이 앞당겨졌다.",
                             "evidence": [0],
                             "groundedness": "grounded",
+                            "groundingReason": None,
+                            "claimType": "FACT",
+                            "attributedTo": None,
                         }
                     ],
                     "intent": "생산 계획 발표",
@@ -125,7 +128,7 @@ def test_generates_structured_report_and_deterministic_markdown() -> None:
     assert "STUB 분석 3건" in response.markdown_body
     assert "페이월" in response.markdown_body
     assert "수집 실패 1건" in response.markdown_body
-    assert response.meta.prompt_version == "report.ko.v1.3"
+    assert response.meta.prompt_version == "report.ko.v1.4"
     assert response.meta.mock is False
 
 
@@ -147,6 +150,9 @@ def test_ungrounded_key_point_cannot_support_report_significance() -> None:
             "text": "공급망 병목이 완전히 해결된다.",
             "evidence": [1],
             "groundedness": "ungrounded",
+            "groundingReason": "근거에서 확인되지 않습니다.",
+            "claimType": "FACT",
+            "attributedTo": None,
         }
     )
     provider = FakeProvider(
@@ -158,6 +164,131 @@ def test_ungrounded_key_point_cannot_support_report_significance() -> None:
     )
 
     assert response.important_events[0].significance == "HBM4 양산 일정이 앞당겨졌다."
+
+
+def test_revalidates_forecast_written_as_completed_fact() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["summaryKo"] = "회사는 HBM4 양산을 시작할 예정이다."
+    payload["findings"][0]["keyPoints"] = [
+        {
+            "text": "회사는 HBM4 양산을 시작할 예정이다.",
+            "evidence": [0],
+            "groundedness": "grounded",
+            "groundingReason": None,
+            "claimType": "FORECAST",
+            "attributedTo": None,
+        }
+    ]
+    provider = FakeProvider(
+        provider_response(
+            valid_output(significance="회사는 HBM4 양산을 시작했다.")
+        )
+    )
+
+    response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(
+        ReportRequest.model_validate(payload)
+    )
+
+    assert response.important_events[0].significance == (
+        "회사는 HBM4 양산을 시작할 예정이다."
+    )
+
+
+def test_revalidates_every_related_key_point_before_accepting_claim() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["summaryKo"] = "회사는 HBM4 양산을 시작했다."
+    payload["findings"][0]["keyPoints"] = [
+        {
+            "text": "회사는 HBM4 양산을 시작했다.",
+            "evidence": [0],
+            "groundedness": "grounded",
+            "groundingReason": None,
+            "claimType": "FACT",
+            "attributedTo": None,
+        },
+        {
+            "text": "회사는 HBM4 양산을 시작할 예정이다.",
+            "evidence": [0],
+            "groundedness": "grounded",
+            "groundingReason": "향후 계획입니다.",
+            "claimType": "FORECAST",
+            "attributedTo": None,
+        },
+    ]
+    provider = FakeProvider(
+        provider_response(valid_output(significance="회사는 HBM4 양산을 시작했다."))
+    )
+
+    response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(
+        ReportRequest.model_validate(payload)
+    )
+
+    assert response.important_events[0].significance == (
+        "회사는 HBM4 양산을 시작할 예정이다."
+    )
+
+
+def test_editor_removes_duplicate_report_items() -> None:
+    raw = json.loads(valid_output())
+    raw["executiveSummary"].append(raw["executiveSummary"][0])
+    raw["importantEvents"].append(dict(raw["importantEvents"][0]))
+    provider = FakeProvider(provider_response(json.dumps(raw, ensure_ascii=False)))
+
+    response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(request())
+
+    assert response.executive_summary == ["HBM4 양산 일정이 앞당겨졌다."]
+    assert len(response.important_events) == 1
+
+
+def test_reinserts_opinion_attribution_during_final_validation() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["summaryKo"] = "시장 수요가 개선될 것이라는 해석이다."
+    payload["findings"][0]["keyPoints"] = [
+        {
+            "text": "시장 수요가 개선될 것이라는 해석이다.",
+            "evidence": [0],
+            "groundedness": "grounded",
+            "groundingReason": "발화 주체와 함께 확인됩니다.",
+            "claimType": "OPINION",
+            "attributedTo": "김 연구원",
+        }
+    ]
+    provider = FakeProvider(
+        provider_response(
+            valid_output(significance="시장 수요가 개선될 것이라는 해석이다.")
+        )
+    )
+
+    response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(
+        ReportRequest.model_validate(payload)
+    )
+
+    assert response.important_events[0].significance.startswith("김 연구원은")
+
+
+def test_fallback_candidate_preserves_opinion_attribution() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["keyPoints"] = [
+        {
+            "text": "시장 수요가 개선될 것이라는 해석이다.",
+            "evidence": [0],
+            "groundedness": "grounded",
+            "groundingReason": "발화 주체와 함께 확인됩니다.",
+            "claimType": "OPINION",
+            "attributedTo": "김 연구원",
+        }
+    ]
+    raw = json.loads(valid_output())
+    raw["importantEvents"][0]["summaryKo"] = (
+        "시장 공급망 병목 해소 및 신규 고객 확보로 매출이 크게 증가했다."
+    )
+    provider = FakeProvider(provider_response(json.dumps(raw, ensure_ascii=False)))
+
+    response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(
+        ReportRequest.model_validate(payload)
+    )
+
+    assert response.important_events[0].summary_ko.startswith("김 연구원은")
 
 
 def test_repairs_unknown_finding_reference_once_and_accumulates_usage() -> None:
@@ -289,6 +420,28 @@ def test_mock_report_does_not_repeat_important_finding_in_watch_items() -> None:
 
     assert response.important_events[0].source_finding_ids == [501]
     assert response.watch_items == []
+
+
+def test_mock_report_also_revalidates_forecast_wording() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["findings"][0]["summaryKo"] = "회사는 HBM4 양산을 시작했다."
+    payload["findings"][0]["keyPoints"] = [
+        {
+            "text": "회사는 HBM4 양산을 시작할 예정이다.",
+            "evidence": [0],
+            "groundedness": "grounded",
+            "groundingReason": "향후 계획입니다.",
+            "claimType": "FORECAST",
+            "attributedTo": None,
+        }
+    ]
+
+    response = ReportWriterService(Settings()).write(
+        ReportRequest.model_validate(payload)
+    )
+
+    assert response.executive_summary == ["회사는 HBM4 양산을 시작할 예정이다."]
+    assert response.important_events[0].summary_ko.endswith("예정이다.")
 
 
 def test_markdown_escapes_markdown_metacharacters_without_html_entities() -> None:

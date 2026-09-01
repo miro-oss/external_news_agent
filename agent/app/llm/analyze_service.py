@@ -3,7 +3,11 @@ import logging
 from pathlib import Path
 
 from app.core.config import Settings
-from app.core.evidence import cross_source_signal, factual_mismatches
+from app.core.evidence import (
+    cross_source_signal,
+    factual_mismatches,
+    has_forecast_qualifier,
+)
 from app.core.parser import parse_json_object
 from app.core.sentences import split_sentences_with_meta
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
@@ -18,7 +22,7 @@ from app.schemas.analyze import (
     Section,
 )
 
-_ANALYZE_PROMPT_VERSION = "analyze.ko.v4"
+_ANALYZE_PROMPT_VERSION = "analyze.ko.v5"
 _PERSPECTIVE_PROMPT_VERSION = "perspective.ko.v1"
 _SENSITIVITY_PROMPT_VERSION = "sensitivity.ko.v1"
 PROMPT_VERSION = (
@@ -200,7 +204,14 @@ def _verified_sections(response: AnalyzeResponse) -> list[Section]:
                 response.sentences[sentence_id - 1]
                 for sentence_id in bullet.evidence_sentence_ids
             )
-            mismatches = factual_mismatches(bullet.text, evidence_text)
+            mismatches = (
+                factual_mismatches(bullet.text, evidence_text)
+                if bullet.claim_type == "FACT"
+                else ["FORECAST 주장의 한정 표현이 빠졌습니다."]
+                if bullet.claim_type == "FORECAST"
+                and not has_forecast_qualifier(bullet.text)
+                else []
+            )
             if mismatches:
                 logger.warning(
                     "근거 사실값 불일치로 bullet을 강등합니다. provider=%s model=%s reasons=%s",
