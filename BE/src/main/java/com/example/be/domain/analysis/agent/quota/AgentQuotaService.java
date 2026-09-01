@@ -76,9 +76,11 @@ public class AgentQuotaService {
     public void completeSuccess(QuotaReservation reservation,
                                 BigDecimal actualCredits,
                                 boolean providerInvoked) {
-        if (!providerInvoked && reservation.task() != AgentTask.VERIFY_EVIDENCE) {
+        if (!providerInvoked
+                && reservation.task() != AgentTask.VERIFY_EVIDENCE
+                && reservation.task() != AgentTask.SELF_CRITIQUE) {
             throw new IllegalArgumentException(
-                    "provider 미호출 정산은 근거 검증 task에서만 허용됩니다.");
+                    "provider 미호출 정산은 근거 검증 또는 자기 검증 task에서만 허용됩니다.");
         }
         BigDecimal units = BigDecimal.ZERO;
         if (providerInvoked) {
@@ -172,15 +174,16 @@ public class AgentQuotaService {
             return;
         }
 
-        BigDecimal dailyLimit = task == AgentTask.ANALYZE
+        boolean analysisTask = task == AgentTask.ANALYZE || task == AgentTask.SELF_CRITIQUE;
+        BigDecimal dailyLimit = analysisTask
                 ? paidDailyLimit().subtract(reportReserve())
                 : paidDailyLimit();
-        BigDecimal taskUsage = task == AgentTask.ANALYZE
+        BigDecimal taskUsage = analysisTask
                 ? usage.paidAnalysisDailyUsed()
                 : usage.paidDailyUsed();
         if (taskUsage.add(units).compareTo(dailyLimit) > 0
                 || usage.paidDailyUsed().add(units).compareTo(paidDailyLimit()) > 0) {
-            throw exhausted(plan, task == AgentTask.ANALYZE
+            throw exhausted(plan, analysisTask
                     ? "PAID 분석 예산을 소진했습니다. 보고서 예약분은 유지합니다."
                     : "PAID 일일 예산을 소진했습니다.");
         }
@@ -199,7 +202,7 @@ public class AgentQuotaService {
         return new UsageWindow(
                 repository.usage(AgentPlan.FREE, dayStart, dayEnd),
                 repository.usage(AgentPlan.PAID, dayStart, dayEnd),
-                repository.usage(AgentPlan.PAID, dayStart, dayEnd, AgentTask.ANALYZE),
+                repository.analysisUsage(dayStart, dayEnd),
                 repository.usage(AgentPlan.PAID, monthStart, monthEnd),
                 dayEnd.atZone(ApiTimeZone.ZONE).toOffsetDateTime(),
                 monthEnd.atZone(ApiTimeZone.ZONE).toOffsetDateTime());

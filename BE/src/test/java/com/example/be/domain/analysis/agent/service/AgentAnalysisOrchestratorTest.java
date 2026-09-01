@@ -7,6 +7,7 @@ import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
+import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
 import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
@@ -111,6 +112,121 @@ class AgentAnalysisOrchestratorTest {
         assertEquals(Audience.CHIP_MAKER, result.perspectiveTags().getFirst().audience());
         assertEquals(List.of(0), result.perspectiveTags().getFirst().evidenceSentenceIds());
         verify(recorder).recordSuccess(eq(42L), eq(10L), any(), any(), any(LocalDateTime.class));
+    }
+
+    @Test
+    void selfCritiquesOneClaimForEligibleHighRiskIssue() {
+        Article representative = article();
+        Article member = issueMember(representative, 11L, "같은 이슈 기사", "같은 결론");
+        AnalysisContext context = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, member)),
+                true);
+        QuotaReservation selfCritiqueReservation = new QuotaReservation(
+                3L,
+                42L,
+                "run:42:issue:88:self-critique",
+                AgentTask.SELF_CRITIQUE,
+                AgentPlan.FREE,
+                BigDecimal.ONE);
+        when(quotaService.reserve(
+                42L,
+                "run:42:issue:88:self-critique",
+                AgentTask.SELF_CRITIQUE,
+                AgentPlan.FREE)).thenReturn(selfCritiqueReservation);
+        when(client.analyze(any())).thenReturn(highRiskIssueResponse());
+        when(client.selfCritique(any())).thenReturn(selfCritiqueResponse());
+
+        AnalysisResult result = orchestrator.analyze(context);
+
+        assertEquals("최초 근거 검증을 마친 한국어 요약입니다.", result.summary());
+        assertEquals("검토된 핵심 주장", result.keyPoints().getFirst().text());
+        ArgumentCaptor<AgentAnalyzeRequest> requestCaptor =
+                ArgumentCaptor.forClass(AgentAnalyzeRequest.class);
+        verify(client).selfCritique(requestCaptor.capture());
+        assertTrue(requestCaptor.getValue().selfCritique());
+        assertEquals("high", requestCaptor.getValue().previousFinding().riskLevel());
+        assertEquals(List.of(1), requestCaptor.getValue().previousFinding()
+                .sections().getFirst().bullets().getFirst().evidenceSentenceIds());
+        verify(recorder).recordSelfCritiqueSuccess(
+                eq(42L), eq(88L), any(), any(), any(LocalDateTime.class));
+    }
+
+    @Test
+    void keepsVerifiedDraftWhenSelfCritiqueFails() {
+        Article representative = article();
+        Article member = issueMember(representative, 11L, "같은 이슈 기사", "같은 결론");
+        AnalysisContext context = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, member)),
+                true);
+        QuotaReservation selfCritiqueReservation = new QuotaReservation(
+                3L,
+                42L,
+                "run:42:issue:88:self-critique",
+                AgentTask.SELF_CRITIQUE,
+                AgentPlan.FREE,
+                BigDecimal.ONE);
+        when(quotaService.reserve(
+                42L,
+                "run:42:issue:88:self-critique",
+                AgentTask.SELF_CRITIQUE,
+                AgentPlan.FREE)).thenReturn(selfCritiqueReservation);
+        when(client.analyze(any())).thenReturn(highRiskIssueResponse());
+        when(client.selfCritique(any())).thenThrow(
+                new AgentClientException("PROVIDER_UNAVAILABLE", "down"));
+
+        AnalysisResult result = orchestrator.analyze(context);
+
+        assertEquals("최초 근거 검증을 마친 한국어 요약입니다.", result.summary());
+        assertEquals("핵심 주장", result.keyPoints().getFirst().text());
+        verify(recorder).recordSelfCritiqueFailure(
+                eq(42L), eq(88L), any(), eq("PROVIDER_UNAVAILABLE"),
+                any(), any(), any(), any(LocalDateTime.class));
+        verify(resultWriter).addAgentWarning(
+                42L,
+                com.example.be.domain.collection.entity.CollectionRunWarning
+                        .CODE_LLM_SELF_CRITIQUE_FAILED,
+                "자기 검증 실패로 최초 검증 결과를 유지했습니다. code=PROVIDER_UNAVAILABLE");
+    }
+
+    @Test
+    void rejectsUnverifiedSelfCritiqueSummaryAndKeepsVerifiedDraft() {
+        Article representative = article();
+        Article member = issueMember(representative, 11L, "같은 이슈 기사", "같은 결론");
+        AnalysisContext context = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, member)),
+                true);
+        QuotaReservation reservation = new QuotaReservation(
+                3L,
+                42L,
+                "run:42:issue:88:self-critique",
+                AgentTask.SELF_CRITIQUE,
+                AgentPlan.FREE,
+                BigDecimal.ONE);
+        when(quotaService.reserve(
+                42L,
+                "run:42:issue:88:self-critique",
+                AgentTask.SELF_CRITIQUE,
+                AgentPlan.FREE)).thenReturn(reservation);
+        when(client.analyze(any())).thenReturn(highRiskIssueResponse());
+        when(client.selfCritique(any())).thenReturn(
+                selfCritiqueResponse("검증되지 않은 교체 요약입니다."));
+
+        AnalysisResult result = orchestrator.analyze(context);
+
+        assertEquals("최초 근거 검증을 마친 한국어 요약입니다.", result.summary());
+        assertEquals("핵심 주장", result.keyPoints().getFirst().text());
+        verify(recorder).recordSelfCritiqueFailure(
+                eq(42L), eq(88L), any(), eq("SCHEMA_VIOLATION"),
+                any(), any(), any(), any(LocalDateTime.class));
     }
 
     @Test
@@ -699,6 +815,59 @@ class AgentAnalysisOrchestratorTest {
                 promoteCandidates,
                 memberStances,
                 source.meta());
+    }
+
+    private static AgentAnalyzeResponse highRiskIssueResponse() {
+        AgentAnalyzeResponse source = response(List.of(1), "제품/공정", false);
+        return new AgentAnalyzeResponse(
+                source.sentences(),
+                source.sections(),
+                "최초 근거 검증을 마친 한국어 요약입니다.",
+                new AgentAnalyzeResponse.Classification(
+                        source.classification().intent(),
+                        source.classification().sentiment(),
+                        "high",
+                        source.classification().relevance(),
+                        source.classification().category()),
+                source.entities(),
+                source.perspectiveTags(),
+                AgentAnalyzeResponse.CrossSource.empty(),
+                List.of(),
+                List.of(new AgentAnalyzeResponse.MemberStance(
+                        11L, "SUPPORTS", new BigDecimal("0.55"))),
+                source.meta());
+    }
+
+    private static AgentSelfCritiqueResponse selfCritiqueResponse() {
+        return selfCritiqueResponse("최초 근거 검증을 마친 한국어 요약입니다.");
+    }
+
+    private static AgentSelfCritiqueResponse selfCritiqueResponse(String summary) {
+        return new AgentSelfCritiqueResponse(
+                List.of(new AgentSelfCritiqueResponse.Section(
+                        "핵심",
+                        List.of(new AgentSelfCritiqueResponse.Bullet(
+                                "검토된 핵심 주장",
+                                List.of(1),
+                                "grounded",
+                                new BigDecimal("0.9"),
+                                "원문 문장에서 직접 확인됩니다.",
+                                "FACT",
+                                null)))),
+                summary,
+                1,
+                1,
+                List.of("원문보다 강한 표현"),
+                new AgentAnalyzeResponse.Meta(
+                        "gemini",
+                        "gemini-2.5-flash",
+                        "self-critique.ko.v1",
+                        30L,
+                        10L,
+                        new BigDecimal("0.001"),
+                        BigDecimal.ZERO,
+                        false,
+                        false));
     }
 
     private static AgentEvidenceResponse evidenceResponse(String status, List<Integer> acceptedIds) {

@@ -85,6 +85,20 @@ class AgentQuotaServiceTest {
     }
 
     @Test
+    void selfCritiqueCannotConsumePaidReportReserve() {
+        stubUsage(BigDecimal.ZERO, new BigDecimal("70"), new BigDecimal("70"),
+                new BigDecimal("100"));
+
+        assertThrows(QuotaExceededException.class, () -> service.reserve(
+                42L,
+                "run:42:issue:88:self-critique",
+                AgentTask.SELF_CRITIQUE,
+                AgentPlan.PAID));
+
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void releasesUnavailableAndConnectTimeoutButConsumesReadTimeoutReservation() {
         QuotaReservation first = reservation(AgentTask.ANALYZE, AgentPlan.PAID);
         AgentClientException unavailable = new AgentClientException(
@@ -167,6 +181,18 @@ class AgentQuotaServiceTest {
     }
 
     @Test
+    void settlesRuleOnlySelfCritiqueAtZero() {
+        QuotaReservation reservation = new QuotaReservation(
+                3L, 42L, "run:42:issue:88:self-critique",
+                AgentTask.SELF_CRITIQUE, AgentPlan.FREE, BigDecimal.ONE);
+
+        service.completeSuccess(reservation, BigDecimal.ZERO, false);
+
+        verify(repository).consume(
+                eq(reservation), eq(BigDecimal.ZERO), any(LocalDateTime.class));
+    }
+
+    @Test
     void rejectsProviderFreeSettlementForNonEvidenceTask() {
         QuotaReservation reservation = reservation(AgentTask.ANALYZE, AgentPlan.FREE);
 
@@ -208,8 +234,7 @@ class AgentQuotaServiceTest {
                 .thenReturn(freeDaily);
         when(repository.usage(eq(AgentPlan.PAID), any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(paidDaily, paidMonthly);
-        when(repository.usage(
-                eq(AgentPlan.PAID), any(LocalDateTime.class), any(LocalDateTime.class), eq(AgentTask.ANALYZE)))
+        when(repository.analysisUsage(any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(paidAnalysisDaily);
     }
 

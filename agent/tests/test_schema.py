@@ -1,7 +1,12 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.analyze import AnalyzeOutput, AnalyzeResponse
+from app.schemas.analyze import (
+    AnalyzeOutput,
+    AnalyzeRequest,
+    AnalyzeResponse,
+    SelfCritiqueResponse,
+)
 
 
 def response(evidence_sentence_ids: list[int]) -> dict[str, object]:
@@ -122,3 +127,59 @@ def test_rejects_more_than_three_bullets_or_eighty_character_bullet() -> None:
     payload["sections"][0]["bullets"][0]["text"] = "가" * 81
     with pytest.raises(ValidationError):
         AnalyzeResponse.model_validate(payload)
+
+
+def test_self_critique_requires_typed_previous_finding() -> None:
+    with pytest.raises(ValidationError):
+        AnalyzeRequest.model_validate(
+            {
+                "idempotencyKey": "run:42:issue:88:self-critique",
+                "plan": "FREE",
+                "article": {
+                    "id": 10,
+                    "title": "기사",
+                    "canonicalUrl": "https://example.com/10",
+                },
+                "topic": {"name": "반도체"},
+                "selfCritique": True,
+            }
+        )
+
+
+def test_self_critique_revised_count_cannot_exceed_target_count() -> None:
+    with pytest.raises(ValidationError):
+        SelfCritiqueResponse.model_validate(
+            {
+                "sections": [
+                    {
+                        "heading": "핵심",
+                        "bullets": [
+                            {
+                                "text": "검토된 주장",
+                                "evidenceSentenceIds": [1],
+                                "groundedness": "grounded",
+                                "confidence": 1,
+                                "groundingReason": "원문에서 직접 확인됩니다.",
+                                "claimType": "FACT",
+                                "attributedTo": None,
+                            }
+                        ],
+                    }
+                ],
+                "summaryKo": "최초 검증을 마친 한국어 요약입니다.",
+                "targetClaimCount": 0,
+                "revisedClaimCount": 1,
+                "unsupportedExpressions": [],
+                "meta": {
+                    "provider": "mock",
+                    "model": "mock",
+                    "promptVersion": "self-critique.mock.v1",
+                    "inputTokens": 0,
+                    "outputTokens": 0,
+                    "costUsd": 0,
+                    "credits": 0,
+                    "mock": True,
+                    "truncated": False,
+                },
+            }
+        )

@@ -152,6 +152,22 @@ class FindingReuseCacheTest {
     }
 
     @Test
+    void selfCritiqueEligibilityChangesOnlyEligibleInputHash() {
+        Article representative = article(10L, "대표 본문");
+        IssueAnalysisContext issue = new IssueAnalysisContext(
+                88L, 10L, List.of(representative));
+        AnalysisContext regular = new AnalysisContext(
+                42L, representative, AgentPlan.FREE, issue, false);
+        AnalysisContext eligible = new AnalysisContext(
+                42L, representative, AgentPlan.FREE, issue, true);
+
+        assertTrue(!FindingReuseCache.inputHash(regular)
+                .equals(FindingReuseCache.inputHash(eligible)));
+        assertEquals(FindingReuseCache.inputHash(representative),
+                FindingReuseCache.inputHash(regular));
+    }
+
+    @Test
     void alwaysReanalyzesIssueRepresentativeToPersistCrossSourceComparison() {
         Article representative = article(10L, "대표 본문");
         Article member = article(11L, "멤버 본문");

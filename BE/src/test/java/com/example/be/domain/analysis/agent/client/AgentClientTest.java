@@ -7,6 +7,7 @@ import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -59,6 +60,27 @@ class AgentClientTest {
         assertEquals(List.of(11L), response.promoteCandidates());
         assertEquals("DISPUTES", response.memberStances().getFirst().stance());
         assertEquals("mock", response.meta().provider());
+        server.verify();
+    }
+
+    @Test
+    void sendsSelfCritiqueFlagToSameAnalyzeEndpoint() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/analyze"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.selfCritique").value(true))
+                .andExpect(jsonPath("$.previousFinding.riskLevel").value("high"))
+                .andExpect(jsonPath("$.previousFinding.sections[0].bullets[0]"
+                        + ".evidenceSentenceIds[0]").value(1))
+                .andRespond(withSuccess(selfCritiqueResponseJson(), MediaType.APPLICATION_JSON));
+
+        AgentSelfCritiqueResponse response = client.selfCritique(selfCritiqueRequest());
+
+        assertEquals(1, response.targetClaimCount());
+        assertEquals("수정된 핵심 주장", response.sections().getFirst().bullets().getFirst().text());
+        assertEquals("self-critique.ko.v1", response.meta().promptVersion());
         server.verify();
     }
 
@@ -242,6 +264,31 @@ class AgentClientTest {
                 null);
     }
 
+    private AgentAnalyzeRequest selfCritiqueRequest() {
+        AgentAnalyzeRequest source = request();
+        return new AgentAnalyzeRequest(
+                "run:42:issue:88:self-critique",
+                source.plan(),
+                source.article(),
+                source.issueMembers(),
+                source.topic(),
+                new AgentAnalyzeRequest.PreviousFindingPayload(
+                        "최초 분석 결과를 담은 한국어 요약입니다.",
+                        "high",
+                        List.of(new AgentAnalyzeRequest.PreviousSectionPayload(
+                                "핵심",
+                                List.of(new AgentAnalyzeRequest.PreviousBulletPayload(
+                                        "핵심 주장",
+                                        List.of(1),
+                                        "weak",
+                                        new java.math.BigDecimal("0.6"),
+                                        "추가 검토가 필요합니다.",
+                                        "FACT",
+                                        null)))),
+                        AgentAnalyzeResponse.CrossSource.empty()),
+                true);
+    }
+
     private AgentEvidenceRequest evidenceRequest() {
         return new AgentEvidenceRequest(
                 "finding:501:verify",
@@ -300,6 +347,40 @@ class AgentClientTest {
                     "costUsd": 0,
                     "credits": 0,
                     "mock": true,
+                    "truncated": false
+                  }
+                }
+                """;
+    }
+
+    private String selfCritiqueResponseJson() {
+        return """
+                {
+                  "sections": [{
+                    "heading": "핵심",
+                    "bullets": [{
+                      "text": "수정된 핵심 주장",
+                      "evidenceSentenceIds": [1],
+                      "groundedness": "grounded",
+                      "confidence": 0.9,
+                      "groundingReason": "원문에서 확인됩니다.",
+                      "claimType": "FACT",
+                      "attributedTo": null
+                    }]
+                  }],
+                  "summaryKo": "자기 검증을 반영한 한국어 요약입니다.",
+                  "targetClaimCount": 1,
+                  "revisedClaimCount": 1,
+                  "unsupportedExpressions": ["강한 표현"],
+                  "meta": {
+                    "provider": "gemini",
+                    "model": "gemini-2.5-flash",
+                    "promptVersion": "self-critique.ko.v1",
+                    "inputTokens": 20,
+                    "outputTokens": 10,
+                    "costUsd": 0.001,
+                    "credits": 0,
+                    "mock": false,
                     "truncated": false
                   }
                 }

@@ -44,6 +44,8 @@ public class AgentQuotaJdbcRepository {
             """;
     private static final String RESERVATION_TASK_USAGE_SQL = RESERVATION_USAGE_SQL
             + " AND agent_task = ?";
+    private static final String RESERVATION_ANALYSIS_USAGE_SQL = RESERVATION_USAGE_SQL
+            + " AND agent_task IN ('ANALYZE', 'SELF_CRITIQUE')";
     private static final String LEGACY_PAID_USAGE_SQL = """
             SELECT COALESCE(SUM(COALESCE(run.credits, 0)), 0)
             FROM agent_runs run
@@ -82,6 +84,23 @@ public class AgentQuotaJdbcRepository {
             WHERE run.llm_plan = 'PAID'
               AND run.started_at >= ? AND run.started_at < ?
               AND run.agent_task = ?
+              AND NOT (
+                  run.status = 'FAILED'
+                  AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
+                  AND (run.timeout_phase IS NULL OR run.timeout_phase <> 'READ')
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM agent_quota_reservations reservation
+                  WHERE reservation.idempotency_key = run.idempotency_key
+                    AND reservation.status IN ('RESERVED', 'CONSUMED')
+              )
+            """;
+    private static final String LEGACY_PAID_ANALYSIS_USAGE_SQL = """
+            SELECT COALESCE(SUM(COALESCE(run.credits, 0)), 0)
+            FROM agent_runs run
+            WHERE run.llm_plan = 'PAID'
+              AND run.started_at >= ? AND run.started_at < ?
+              AND run.agent_task IN ('ANALYZE', 'SELF_CRITIQUE')
               AND NOT (
                   run.status = 'FAILED'
                   AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
@@ -175,6 +194,23 @@ public class AgentQuotaJdbcRepository {
                         end,
                         task.name())
                 : BigDecimal.ZERO;
+        return nonNull(reserved).add(nonNull(legacy));
+    }
+
+    public BigDecimal analysisUsage(LocalDateTime from, LocalDateTime to) {
+        Timestamp start = Timestamp.valueOf(from);
+        Timestamp end = Timestamp.valueOf(to);
+        BigDecimal reserved = jdbcTemplate.queryForObject(
+                RESERVATION_ANALYSIS_USAGE_SQL,
+                BigDecimal.class,
+                AgentPlan.PAID.name(),
+                start,
+                end);
+        BigDecimal legacy = jdbcTemplate.queryForObject(
+                LEGACY_PAID_ANALYSIS_USAGE_SQL,
+                BigDecimal.class,
+                start,
+                end);
         return nonNull(reserved).add(nonNull(legacy));
     }
 

@@ -133,6 +133,9 @@ public class FindingReuseCache {
         fields.add(article.getCanonicalUrl());
         fields.add(article.getLanguage());
         fields.add(article.getPublishedAt() == null ? null : article.getPublishedAt().toString());
+        if (context.selfCritiqueEligible()) {
+            fields.add("self-critique-eligible");
+        }
         appendTopic(fields, article.getTopic());
         return ArticleHasher.analysisInputHash(fields.toArray(String[]::new));
     }

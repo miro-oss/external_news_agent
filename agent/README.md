@@ -17,6 +17,49 @@ run 보고서 작성(`/v1/report`)을 제공하며, 기본 Mock 모드에서는 
 `OPINION`이 아니면 `attributedTo`는 `null`입니다. Spring은 검증 결과의 `reason`을
 `groundingReason`으로 finding에 보존하며 기사·보고서 조회 API와 근거 배지 설명에 전달합니다.
 
+## `/v1/analyze` 자기 검증 계약
+
+P1-7 자기 검증도 새 엔드포인트를 만들지 않고 `/v1/analyze`를 사용합니다. Spring은 이번 실행의
+`topicFit + 매체 수 + 최신성` 상위 20% 이슈 가운데 최초 분석의 `riskLevel=high`인 결과에만
+`selfCritique: true`와 검증된 `previousFinding`을 보냅니다. Agent는 규칙층이 확정하지 못했거나
+표현 강도가 한 단계 높거나 교차 출처 충돌과 연결된 주장 중 최대 한 건만 고릅니다.
+
+```json
+{
+  "idempotencyKey": "run:42:issue:88:self-critique",
+  "plan": "FREE",
+  "article": {"id": 401, "title": "...", "canonicalUrl": "...", "bodyText": "..."},
+  "issueMembers": [],
+  "topic": {"name": "반도체 투자"},
+  "previousFinding": {
+    "summaryKo": "A사가 투자를 승인했다.",
+    "riskLevel": "high",
+    "sections": [{
+      "heading": "핵심",
+      "bullets": [{
+        "text": "A사가 투자를 승인했다.",
+        "evidenceSentenceIds": [1],
+        "groundedness": "weak",
+        "confidence": 0.6,
+        "groundingReason": "근거보다 표현이 한 단계 강합니다.",
+        "claimType": "FACT",
+        "attributedTo": null
+      }]
+    }],
+    "crossSource": {
+      "consensus": [], "soleSource": [], "conflicts": [], "missingStakeholders": []
+    }
+  },
+  "selfCritique": true
+}
+```
+
+검토 질문은 `이 요약에서 원문 문장으로 확인되지 않는 표현은 무엇인가?` 하나로 고정합니다.
+provider 호출은 대상 주장당 최대 한 번이며 새 사실과 새 근거 문장 번호를 추가할 수 없습니다.
+자기 검증은 선택된 bullet 한 건만 유지·수정·기각하며 `summaryKo`는 최초 검증 값을 그대로 보존합니다.
+규칙으로 이미 확정된 경우 `self-critique.rules.v1` 응답을 비용 0으로 반환합니다. 실패하거나 quota가
+부족하면 Spring은 최초 근거 검증 결과를 유지하고 `SELF_CRITIQUE / ISSUE` 감사 행과 경고를 남깁니다.
+
 ## `/v1/verify-evidence` 배치 계약
 
 P1-5부터 기사 하나의 검증 대상 bullet을 `claims[]` 한 요청으로 묶습니다. 분석 응답은 최대 16개

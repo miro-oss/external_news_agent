@@ -6,6 +6,7 @@ import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.entity.AgentRun;
 import com.example.be.domain.analysis.agent.entity.AgentRunStatus;
@@ -134,6 +135,64 @@ public class AgentRunRecorder {
                 .agentTask(AgentTask.VERIFY_EVIDENCE)
                 .targetType(AgentTargetType.ARTICLE)
                 .targetId(articleId)
+                .status(AgentRunStatus.FAILED)
+                .failureCode(failureCode)
+                .failureMessage(truncate(failureMessage))
+                .timeoutPhase(timeoutPhase)
+                .llmPlan(request.plan())
+                .inputTokens(usage == null ? null : usage.inputTokens())
+                .outputTokens(usage == null ? null : usage.outputTokens())
+                .costUsd(usage == null ? null : usage.costUsd())
+                .credits(usage == null ? null : usage.credits())
+                .requestHash(hash(request))
+                .startedAt(startedAt)
+                .finishedAt(now())
+                .build());
+    }
+
+    @Transactional
+    public void recordSelfCritiqueSuccess(Long runId,
+                                          Long issueId,
+                                          AgentAnalyzeRequest request,
+                                          AgentSelfCritiqueResponse response,
+                                          LocalDateTime startedAt) {
+        AgentAnalyzeResponse.Meta meta = response.meta();
+        repository.insertIfAbsent(AgentRun.builder()
+                .collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey())
+                .agentTask(AgentTask.SELF_CRITIQUE)
+                .targetType(AgentTargetType.ISSUE)
+                .targetId(issueId)
+                .status(meta.mock() ? AgentRunStatus.MOCK : AgentRunStatus.SUCCESS)
+                .promptVersion(meta.promptVersion())
+                .llmProvider(meta.provider())
+                .llmModel(meta.model())
+                .llmPlan(request.plan())
+                .inputTokens(meta.inputTokens())
+                .outputTokens(meta.outputTokens())
+                .costUsd(meta.costUsd())
+                .credits(meta.credits())
+                .requestHash(hash(request))
+                .startedAt(startedAt)
+                .finishedAt(now())
+                .build());
+    }
+
+    @Transactional
+    public void recordSelfCritiqueFailure(Long runId,
+                                          Long issueId,
+                                          AgentAnalyzeRequest request,
+                                          String failureCode,
+                                          String failureMessage,
+                                          AgentClientException.Usage usage,
+                                          AgentTimeoutPhase timeoutPhase,
+                                          LocalDateTime startedAt) {
+        repository.insertIfAbsent(AgentRun.builder()
+                .collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey())
+                .agentTask(AgentTask.SELF_CRITIQUE)
+                .targetType(AgentTargetType.ISSUE)
+                .targetId(issueId)
                 .status(AgentRunStatus.FAILED)
                 .failureCode(failureCode)
                 .failureMessage(truncate(failureMessage))
