@@ -12,10 +12,10 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
-import java.math.BigDecimal;
 
 public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpecificationExecutor<Finding> {
 
@@ -61,15 +61,28 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
     List<Finding> findForReportByRunId(@Param("runId") Long runId);
 
     @Query("""
-            SELECT finding.sensitivity.score AS sensitivityScore,
+            SELECT CASE
+                       WHEN finding.sensitivity.score >= :highThreshold THEN 'high'
+                       WHEN finding.sensitivity.score >= :mediumThreshold THEN 'medium'
+                       ELSE 'low'
+                   END AS sensitivityLevel,
                    finding.category AS category,
                    finding.changeType AS changeType,
                    COUNT(finding) AS findingCount
             FROM Finding finding
             WHERE finding.run.id = :runId
-            GROUP BY finding.sensitivity.score, finding.category, finding.changeType
+            GROUP BY CASE
+                         WHEN finding.sensitivity.score >= :highThreshold THEN 'high'
+                         WHEN finding.sensitivity.score >= :mediumThreshold THEN 'medium'
+                         ELSE 'low'
+                     END,
+                     finding.category,
+                     finding.changeType
             """)
-    List<ReportStatsCount> countStatsByRunId(@Param("runId") Long runId);
+    List<ReportStatsCount> countStatsByRunId(
+            @Param("runId") Long runId,
+            @Param("mediumThreshold") BigDecimal mediumThreshold,
+            @Param("highThreshold") BigDecimal highThreshold);
 
     @Query("""
             SELECT finding.run.id AS runId,
@@ -95,7 +108,7 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
 
     interface ReportStatsCount {
 
-        BigDecimal getSensitivityScore();
+        String getSensitivityLevel();
 
         String getCategory();
 

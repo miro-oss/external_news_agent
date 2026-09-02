@@ -159,6 +159,14 @@ def test_rejects_sensitivity_when_every_axis_is_unavailable() -> None:
         AnalyzeResponse.model_validate(payload)
 
 
+def test_rejects_sensitivity_evidence_outside_sentence_range() -> None:
+    payload = response([1])
+    payload["classification"]["sensitivity"]["customerMove"]["evidenceSentenceIds"] = [2]
+
+    with pytest.raises(ValidationError):
+        AnalyzeResponse.model_validate(payload)
+
+
 def test_self_critique_requires_typed_previous_finding() -> None:
     with pytest.raises(ValidationError):
         AnalyzeRequest.model_validate(

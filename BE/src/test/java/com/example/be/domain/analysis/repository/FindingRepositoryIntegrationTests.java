@@ -12,6 +12,7 @@ import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
+import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.articles.service.ArticleQueryService;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -161,7 +162,8 @@ class FindingRepositoryIntegrationTests {
         assertTrue(found.getKeyPoints().isEmpty());
         assertEquals(List.of(0), found.getEffectiveKeyPoints().getFirst().evidence());
         assertEquals("The United States tightened export controls.", found.getSections().get(0).text());
-        assertEquals(SensitivityLevel.HIGH, found.getSensitivity().defaultLevel());
+        assertEquals(SensitivityLevel.HIGH,
+                SensitivityCalculator.defaults().level(found.getSensitivity().getScore()));
         assertEquals(AnalysisSource.LLM, found.getAnalysisSource());
         assertEquals("핵심", found.getAnalysisSections().getFirst().heading());
         assertEquals(BigDecimal.ONE,

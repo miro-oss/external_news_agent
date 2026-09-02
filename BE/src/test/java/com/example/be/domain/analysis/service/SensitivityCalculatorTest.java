@@ -1,5 +1,6 @@
 package com.example.be.domain.analysis.service;
 
+import com.example.be.domain.analysis.config.AnalysisSelectionProperties;
 import com.example.be.domain.analysis.entity.FindingSensitivity;
 import com.example.be.domain.analysis.entity.FindingSensitivityAxis;
 import com.example.be.domain.analysis.entity.SensitivityLevel;
@@ -46,6 +47,24 @@ class SensitivityCalculatorTest {
         FindingSensitivityAxis unavailable = FindingSensitivityAxis.unavailable();
         assertThrows(IllegalArgumentException.class,
                 () -> calculator.calculate(unavailable, unavailable, unavailable, unavailable));
+    }
+
+    @Test
+    void honorsConfiguredWeightsAndThresholds() {
+        AnalysisSelectionProperties properties = new AnalysisSelectionProperties();
+        properties.getSensitivity().setCustomerMoveWeight(new BigDecimal("0.10"));
+        properties.getSensitivity().setDealSignalWeight(new BigDecimal("0.20"));
+        properties.getSensitivity().setCompetitorThreatWeight(new BigDecimal("0.30"));
+        properties.getSensitivity().setIndustryShiftWeight(new BigDecimal("0.40"));
+        properties.getSensitivity().setMediumThreshold(new BigDecimal("30"));
+        properties.getSensitivity().setHighThreshold(new BigDecimal("80"));
+        SensitivityCalculator configured = new SensitivityCalculator(properties);
+
+        FindingSensitivity sensitivity = configured.calculate(axis(3), axis(0), axis(0), axis(0));
+
+        assertEquals(new BigDecimal("10.00"), sensitivity.getScore());
+        assertEquals(SensitivityLevel.LOW, configured.level(sensitivity.getScore()));
+        assertEquals(SensitivityLevel.HIGH, configured.level(new BigDecimal("80.00")));
     }
 
     private FindingSensitivityAxis axis(int score) {

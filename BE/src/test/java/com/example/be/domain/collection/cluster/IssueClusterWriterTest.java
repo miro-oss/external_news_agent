@@ -12,12 +12,12 @@ import com.example.be.domain.issues.entity.IssueStatus;
 import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.entity.NewsWatch;
 import com.example.be.domain.issues.entity.WatchType;
-import com.example.be.domain.issues.repository.NewsWatchRepository;
 import com.example.be.domain.issues.repository.ContentGroupRepository;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.IssueRelationRepository;
 import com.example.be.domain.issues.repository.IssueStatusHistoryRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
+import com.example.be.domain.issues.repository.NewsWatchRepository;
 import com.example.be.domain.notifications.entity.WatchAlertOutbox;
 import com.example.be.domain.notifications.repository.WatchAlertOutboxRepository;
 import com.example.be.domain.sources.entity.Source;
@@ -164,7 +164,7 @@ class IssueClusterWriterTest {
         ArgumentCaptor<NewsWatch> watchCaptor = ArgumentCaptor.forClass(NewsWatch.class);
         verify(issueArticleRepository).save(membershipCaptor.capture());
         verify(watchRepository).save(watchCaptor.capture());
-        assertEquals(IssueArticleRole.BREAKING, membershipCaptor.getValue().getRole());
+        assertEquals(IssueArticleRole.REPRESENTATIVE, membershipCaptor.getValue().getRole());
         assertEquals("삼성전자 HBM4 증설", created.getTitle());
         assertEquals(WatchType.BREAKING, watchCaptor.getValue().getWatchType());
         assertTrue(watchCaptor.getValue().getExpiresAt()

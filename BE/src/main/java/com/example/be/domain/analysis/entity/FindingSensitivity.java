@@ -90,17 +90,6 @@ public class FindingSensitivity {
         return FindingSensitivity.builder().score(legacyScore).build();
     }
 
-    /** 임계값은 API 계약의 기본값이다. 런타임 계산에는 SensitivityCalculator를 사용한다. */
-    public SensitivityLevel defaultLevel() {
-        if (score.compareTo(new BigDecimal("70")) >= 0) {
-            return SensitivityLevel.HIGH;
-        }
-        if (score.compareTo(new BigDecimal("40")) >= 0) {
-            return SensitivityLevel.MEDIUM;
-        }
-        return SensitivityLevel.LOW;
-    }
-
     private FindingSensitivityAxis axis(Integer value, List<Integer> evidence) {
         // V31 레거시 백필 행은 총점만 있고 축별 근거가 없다.
         return value == null ? FindingSensitivityAxis.unavailable()

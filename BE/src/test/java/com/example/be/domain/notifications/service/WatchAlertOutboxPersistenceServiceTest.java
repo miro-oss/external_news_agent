@@ -1,5 +1,6 @@
 package com.example.be.domain.notifications.service;
 
+import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.entity.NewsWatch;
 import com.example.be.domain.notifications.entity.WatchAlertDeliveryStatus;
 import com.example.be.domain.notifications.entity.WatchAlertOutbox;
@@ -26,7 +27,9 @@ class WatchAlertOutboxPersistenceServiceTest {
         OffsetDateTime now = OffsetDateTime.parse("2026-08-31T12:00:00+09:00");
         WatchAlertOutbox alert = WatchAlertOutbox.builder()
                 .id(60L)
-                .watch(NewsWatch.builder().id(50L).build())
+                .watch(NewsWatch.builder().id(50L)
+                        .issue(NewsIssue.builder().id(70L).build())
+                        .build())
                 .issueTitle("삼성전자 HBM4 증설")
                 .firstSeenAt(now.minusHours(2))
                 .followUpCount(1)
@@ -42,6 +45,7 @@ class WatchAlertOutboxPersistenceServiceTest {
         assertEquals(WatchAlertDeliveryStatus.PROCESSING, alert.getStatus());
         assertEquals(1, alert.getAttemptCount());
         assertEquals(60L, snapshots.getFirst().id());
+        assertEquals(70L, snapshots.getFirst().issueId());
         assertEquals("2시간 전 속보 '삼성전자 HBM4 증설'에 후속 1건 · 매체 2곳 확인됨",
                 snapshots.getFirst().message());
         verify(repository).flush();

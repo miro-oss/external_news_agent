@@ -225,12 +225,13 @@ public class IssueClusterWriter {
     }
 
     private IssueArticleRole roleOf(Article article, Article representative) {
+        if (article.getId().equals(representative.getId())) {
+            return IssueArticleRole.REPRESENTATIVE;
+        }
         if (isBreaking(article)) {
             return IssueArticleRole.BREAKING;
         }
-        return article.getId().equals(representative.getId())
-                ? IssueArticleRole.REPRESENTATIVE
-                : IssueArticleRole.MEMBER;
+        return IssueArticleRole.MEMBER;
     }
 
     private boolean isBreaking(Article article) {

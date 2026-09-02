@@ -2,18 +2,19 @@ package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
+import com.example.be.domain.collection.cluster.BreakingNewsDetector;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
-import com.example.be.global.config.ApiTimeZone;
 import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.entity.NewsWatch;
 import com.example.be.domain.issues.entity.WatchType;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.NewsWatchRepository;
+import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +34,7 @@ public class FindingWriter {
     private final IssueArticleRepository issueArticleRepository;
     private final NewsWatchRepository watchRepository;
     private final SensitivityCalculator sensitivityCalculator;
+    private final BreakingNewsDetector breakingNewsDetector;
 
     private static final long HIGH_SENSITIVITY_WATCH_HOURS = 48;
 
@@ -84,19 +86,25 @@ public class FindingWriter {
                 .build());
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
         issueArticleRepository.findByArticleIdOrderByIssueIdAsc(articleId).forEach(membership -> {
-            if (membership.getRole() == IssueArticleRole.REPRESENTATIVE
-                    || membership.getRole() == IssueArticleRole.BREAKING) {
-                    membership.getIssue().applyRepresentativeSummary(result.summary());
-                    membership.getIssue().applyRepresentativeSensitivity(result.sensitivity().getScore());
+            if (membership.getRole() == IssueArticleRole.REPRESENTATIVE) {
+                membership.getIssue().applyRepresentativeSummary(result.summary());
+                membership.getIssue().applyRepresentativeSensitivity(result.sensitivity().getScore());
             }
-            if (membership.getRole() == IssueArticleRole.BREAKING
+            if (breakingNewsDetector.hasExplicitMarker(article.getTitle())
                     && sensitivityCalculator.isHigh(result.sensitivity().getScore())) {
                 LocalDateTime expiresAt = now.plusHours(HIGH_SENSITIVITY_WATCH_HOURS);
                 watchRepository.findByIssueIdAndWatchType(
                                 membership.getIssue().getId(), WatchType.HIGH_SENSITIVITY)
                         .ifPresentOrElse(
-                                watch -> watch.renewHighSensitivity(
-                                        expiresAt, result.sensitivity().getScore()),
+                                watch -> {
+                                    if (!watch.isActive() || !watch.getExpiresAt().isAfter(now)) {
+                                        watch.renewHighSensitivity(
+                                                expiresAt, result.sensitivity().getScore());
+                                    } else {
+                                        watch.extendHighSensitivityUntil(
+                                                expiresAt, result.sensitivity().getScore());
+                                    }
+                                },
                                 () -> watchRepository.save(NewsWatch.builder()
                                         .watchType(WatchType.HIGH_SENSITIVITY)
                                         .issue(membership.getIssue())

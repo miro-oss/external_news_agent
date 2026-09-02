@@ -135,11 +135,13 @@ class ReportQueryServiceImplTest {
         FindingRepository.ReportStatsCount count = mock(FindingRepository.ReportStatsCount.class);
         when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING))
                 .thenReturn(Optional.of(report));
-        when(count.getSensitivityScore()).thenReturn(new java.math.BigDecimal("83.33"));
+        when(count.getSensitivityLevel()).thenReturn("high");
         when(count.getCategory()).thenReturn("정책");
         when(count.getChangeType()).thenReturn(ChangeType.NEW);
         when(count.getFindingCount()).thenReturn(2L);
-        when(findingRepository.countStatsByRunId(42L)).thenReturn(List.of(count));
+        when(findingRepository.countStatsByRunId(
+                eq(42L), eq(new java.math.BigDecimal("40")), eq(new java.math.BigDecimal("70"))))
+                .thenReturn(List.of(count));
 
         ReportResDTO.Detail detail = service.getReport(17L, false);
 

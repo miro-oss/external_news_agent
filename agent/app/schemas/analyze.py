@@ -380,6 +380,20 @@ class AnalyzeResponse(AgentModel):
             raise ValueError(
                 "perspective tag의 evidenceSentenceIds는 sentences 범위 안이어야 합니다."
             )
+        sensitivity_axes = (
+            self.classification.sensitivity.customer_move,
+            self.classification.sensitivity.deal_signal,
+            self.classification.sensitivity.competitor_threat,
+            self.classification.sensitivity.industry_shift,
+        )
+        if any(
+            sentence_id > sentence_count
+            for axis in sensitivity_axes
+            for sentence_id in axis.evidence_sentence_ids
+        ):
+            raise ValueError(
+                "민감도 축의 evidenceSentenceIds는 sentences 범위 안이어야 합니다."
+            )
         stance_ids = [stance.article_id for stance in self.member_stances]
         if len(stance_ids) != len(set(stance_ids)):
             raise ValueError("memberStances의 articleId는 중복될 수 없습니다.")

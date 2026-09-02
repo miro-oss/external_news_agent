@@ -176,10 +176,13 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
     if (filters.sensitivityLevel) {
       return findings.filter((finding) => finding.sensitivity.level === filters.sensitivityLevel)
     }
-    return [...findings].sort(
-      (left, right) => right.sensitivity.score - left.sensitivity.score,
-    )
-  }, [filters, findings])
+    return [...findings].sort((left, right) => {
+      const levelDifference = SENSITIVITY_RANK[right.sensitivity.level]
+        - SENSITIVITY_RANK[left.sensitivity.level]
+      const perspectiveDifference = perspectiveRank(right, audience) - perspectiveRank(left, audience)
+      return levelDifference || perspectiveDifference || right.sensitivity.score - left.sensitivity.score
+    })
+  }, [audience, filters, findings])
   const stats = useMemo(() => summarizeFindings(findings), [findings])
   const evidenceCount = useMemo(() => countEvidenceSentences(report.findings ?? []), [report.findings])
   return (
@@ -723,6 +726,12 @@ const PERSPECTIVE_RANK: Record<AudienceRelevance, number> = {
   medium: 2,
   low: 1,
   none: 0,
+}
+
+const SENSITIVITY_RANK: Record<SensitivityLevel, number> = {
+  high: 3,
+  medium: 2,
+  low: 1,
 }
 
 function sortFindingsForAudience(findings: ReportFinding[], audience: Audience) {

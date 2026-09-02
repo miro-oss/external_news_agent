@@ -50,6 +50,7 @@ public class WatchAlertOutboxPersistenceService {
         return new WatchAlertSnapshot(
                 alert.getId(),
                 alert.getWatch().getId(),
+                alert.getWatch().getIssue().getId(),
                 alert.getNotifyGroupId(),
                 alert.getIssueTitle(),
                 alert.getFirstSeenAt(),
@@ -61,6 +62,7 @@ public class WatchAlertOutboxPersistenceService {
 
     public record WatchAlertSnapshot(Long id,
                                      Long watchId,
+                                     Long issueId,
                                      Long notifyGroupId,
                                      String issueTitle,
                                      OffsetDateTime firstSeenAt,

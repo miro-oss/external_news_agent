@@ -27,6 +27,15 @@ public class IntegerListJsonConverter implements AttributeConverter<List<Integer
             return List.of();
         }
         List<?> values = OBJECT_MAPPER.readValue(dbData, List.class);
-        return values.stream().map(value -> ((Number) value).intValue()).toList();
+        return values.stream().map(this::toInteger).toList();
+    }
+
+    private Integer toInteger(Object value) {
+        if (value == null) {
+            throw new IllegalArgumentException("정수 JSON 배열에는 null을 넣을 수 없습니다.");
+        }
+        return value instanceof Number number
+                ? number.intValue()
+                : Integer.parseInt(String.valueOf(value));
     }
 }

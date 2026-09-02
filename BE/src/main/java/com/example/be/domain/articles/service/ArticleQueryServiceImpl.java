@@ -1,5 +1,6 @@
 package com.example.be.domain.articles.service;
 
+import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.analysis.entity.AudienceRelevance;
 import com.example.be.domain.analysis.entity.Finding;
@@ -7,7 +8,6 @@ import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.SensitivityLevel;
-import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.articles.dto.res.ArticleResDTO;
@@ -17,11 +17,11 @@ import com.example.be.domain.articles.repository.FindingSpecification;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.repository.ArticleRepository;
-import com.example.be.domain.settings.exception.AudienceException;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.entity.IssueStanceSource;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.settings.exception.AudienceException;
 import com.example.be.global.apiPayload.PageResponse;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;

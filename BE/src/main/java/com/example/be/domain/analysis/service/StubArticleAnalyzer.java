@@ -9,10 +9,11 @@ import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.FetchStatus;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
-import lombok.RequiredArgsConstructor;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
@@ -56,6 +57,14 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
         List<FindingSection> meaningfulSections = sections.stream()
                 .filter(section -> isMeaningful(section.text()))
                 .toList();
+        List<FindingSection> sensitivitySections = meaningfulSections;
+        if (sensitivitySections.isEmpty() && StringUtils.hasText(article.getTitle())) {
+            FindingSection titleSection = new FindingSection(sections.size(), article.getTitle().trim());
+            List<FindingSection> sectionsWithTitle = new ArrayList<>(sections);
+            sectionsWithTitle.add(titleSection);
+            sections = List.copyOf(sectionsWithTitle);
+            sensitivitySections = List.of(titleSection);
+        }
         String meaningfulText = meaningfulSections.stream()
                 .map(FindingSection::text)
                 .collect(Collectors.joining(" "));
@@ -67,7 +76,7 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
                 keyPoints(meaningfulSections, hasFullText),
                 intent(searchable),
                 sentiment(searchable),
-                sensitivity(searchable, sections),
+                sensitivity(sensitivitySections),
                 relevance(searchable),
                 category(searchable),
                 sections);
@@ -126,21 +135,35 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
         return Sentiment.NEUTRAL;
     }
 
-    private FindingSensitivity sensitivity(String text, List<FindingSection> sections) {
-        int evidence = sections.isEmpty() ? 0 : sections.get(0).index();
-        List<Integer> evidenceIds = List.of(evidence);
-        int customerMove = containsAny(text, "증설", "양산", "도입", "투자", "expand", "production", "adopt") ? 3 : 1;
-        FindingSensitivityAxis dealSignal = containsAny(text, "계약", "수주", "발주", "구매", "contract", "order", "procure")
-                ? new FindingSensitivityAxis(3, evidenceIds)
-                : FindingSensitivityAxis.unavailable();
-        int competitorThreat = containsAny(text, "경쟁", "점유율", "신제품", "competitor", "market share", "launch") ? 3 : 1;
-        int industryShift = containsAny(text, "수출 통제", "금지", "제재", "공급 중단", "규제", "정책",
-                "export control", "ban", "sanction", "supply disruption", "regulation", "policy") ? 3 : 1;
+    private FindingSensitivity sensitivity(List<FindingSection> sections) {
+        FindingSensitivityAxis customerMove = matchingAxis(sections,
+                "증설", "양산", "도입", "투자", "감산", "expand", "production", "adopt", "invest");
+        FindingSensitivityAxis dealSignal = matchingAxis(sections,
+                "계약", "수주", "발주", "구매", "입찰", "예산", "contract", "order", "procure", "bid");
+        FindingSensitivityAxis competitorThreat = matchingAxis(sections,
+                "경쟁", "점유율", "신제품", "내재화", "대체", "competitor", "market share", "launch", "replace");
+        FindingSensitivityAxis industryShift = matchingAxis(sections,
+                "수출 통제", "금지", "제재", "공급 중단", "규제", "정책", "제한",
+                "export control", "ban", "sanction", "supply disruption", "regulation",
+                "policy", "restriction");
+        if (customerMove.score() == null && dealSignal.score() == null
+                && competitorThreat.score() == null && industryShift.score() == null) {
+            FindingSection fallback = sections.getFirst();
+            customerMove = new FindingSensitivityAxis(0, List.of(fallback.index()));
+        }
         return sensitivityCalculator.calculate(
-                new FindingSensitivityAxis(customerMove, evidenceIds),
+                customerMove,
                 dealSignal,
-                new FindingSensitivityAxis(competitorThreat, evidenceIds),
-                new FindingSensitivityAxis(industryShift, evidenceIds));
+                competitorThreat,
+                industryShift);
+    }
+
+    private FindingSensitivityAxis matchingAxis(List<FindingSection> sections, String... keywords) {
+        return sections.stream()
+                .filter(section -> containsAny(section.text().toLowerCase(Locale.ROOT), keywords))
+                .findFirst()
+                .map(section -> new FindingSensitivityAxis(3, List.of(section.index())))
+                .orElseGet(FindingSensitivityAxis::unavailable);
     }
 
     private Relevance relevance(String text) {

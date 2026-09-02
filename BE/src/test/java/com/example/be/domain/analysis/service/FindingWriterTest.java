@@ -17,6 +17,7 @@ import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.domain.collection.cluster.BreakingNewsDetector;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
@@ -50,9 +51,10 @@ class FindingWriterTest {
     private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
     private final NewsWatchRepository watchRepository = mock(NewsWatchRepository.class);
     private final SensitivityCalculator sensitivityCalculator = SensitivityCalculator.defaults();
+    private final BreakingNewsDetector breakingNewsDetector = new BreakingNewsDetector();
     private final FindingWriter writer = new FindingWriter(
             findingRepository, runRepository, articleRepository, issueArticleRepository,
-            watchRepository, sensitivityCalculator);
+            watchRepository, sensitivityCalculator, breakingNewsDetector);
 
     @Test
     void locksArticleBeforeCheckingForDuplicateFinding() {
@@ -146,12 +148,35 @@ class FindingWriterTest {
     }
 
     @Test
+    void breakingMemberDoesNotOverwriteRepresentativeSummary() {
+        CollectionRun run = mock(CollectionRun.class);
+        Article article = mock(Article.class);
+        NewsIssue issue = NewsIssue.builder().id(1L).summary("대표 기사 요약").build();
+        when(runRepository.findById(42L)).thenReturn(Optional.of(run));
+        when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
+        when(article.getTitle()).thenReturn("[속보] 후속 기사");
+        when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
+        when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(10L)).thenReturn(List.of(
+                IssueArticle.builder().issue(issue).article(article)
+                        .role(IssueArticleRole.BREAKING).build()));
+        AnalysisResult result = new AnalysisResult(
+                "후속 기사 요약", List.of(), null, Sentiment.NEUTRAL,
+                com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.LOW),
+                Relevance.REFERENCE, "기업", List.of());
+
+        writer.write(42L, 10L, ChangeType.NEW, "a".repeat(64), result);
+
+        assertEquals("대표 기사 요약", issue.getSummary());
+    }
+
+    @Test
     void registersHighSensitivityWatchForHighScoringBreakingArticle() {
         CollectionRun run = mock(CollectionRun.class);
         Article article = mock(Article.class);
         NewsIssue issue = NewsIssue.builder().id(88L).build();
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
+        when(article.getTitle()).thenReturn("[속보] 고민감도 기사");
         when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
         when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(10L)).thenReturn(List.of(
                 IssueArticle.builder()
@@ -176,6 +201,44 @@ class FindingWriterTest {
         verify(watchRepository).save(watch.capture());
         assertEquals(WatchType.HIGH_SENSITIVITY, watch.getValue().getWatchType());
         assertEquals(new BigDecimal("76.19"), watch.getValue().getSensitivityAtWatch());
-        assertEquals(new BigDecimal("76.19"), issue.getSensitivityScore());
+        assertEquals(null, issue.getSensitivityScore());
+    }
+
+    @Test
+    void keepsCooldownWhenExtendingActiveHighSensitivityWatch() {
+        CollectionRun run = mock(CollectionRun.class);
+        Article article = mock(Article.class);
+        NewsIssue issue = NewsIssue.builder().id(88L).build();
+        java.time.LocalDateTime cooldown = java.time.LocalDateTime.now().plusMinutes(20);
+        NewsWatch watch = NewsWatch.builder()
+                .watchType(WatchType.HIGH_SENSITIVITY)
+                .issue(issue)
+                .sensitivityAtWatch(new BigDecimal("75.00"))
+                .cooldownUntil(cooldown)
+                .expiresAt(java.time.LocalDateTime.now().plusHours(12))
+                .active(true)
+                .build();
+        when(runRepository.findById(42L)).thenReturn(Optional.of(run));
+        when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
+        when(article.getTitle()).thenReturn("[속보] 고민감도 기사");
+        when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
+        when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(10L)).thenReturn(List.of(
+                IssueArticle.builder().issue(issue).article(article)
+                        .role(IssueArticleRole.BREAKING).build()));
+        when(watchRepository.findByIssueIdAndWatchType(88L, WatchType.HIGH_SENSITIVITY))
+                .thenReturn(Optional.of(watch));
+        AnalysisResult result = new AnalysisResult(
+                "고민감도 속보 요약", List.of(), null, Sentiment.NEUTRAL,
+                sensitivityCalculator.calculate(
+                        new FindingSensitivityAxis(3, List.of(0)),
+                        FindingSensitivityAxis.unavailable(),
+                        new FindingSensitivityAxis(2, List.of(0)),
+                        new FindingSensitivityAxis(1, List.of(0))),
+                Relevance.IMPORTANT, "기업", List.of());
+
+        writer.write(42L, 10L, ChangeType.NEW, "a".repeat(64), result);
+
+        assertEquals(cooldown, watch.getCooldownUntil());
+        assertEquals(new BigDecimal("76.19"), watch.getSensitivityAtWatch());
     }
 }

@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,7 @@ from app.eval.scorer import (
     korean_summary_pass,
     score_claim_controls,
 )
+from app.llm.analyze_service import ArticleAnalyzeService
 from app.llm.base import ProviderResponse, ProviderUsage
 
 _GOLDEN_DIR = Path(__file__).resolve().parents[1] / "app" / "eval" / "golden"
@@ -82,9 +84,58 @@ def test_replay_golden_eval_keeps_quality_and_validates_perspective_fixture() ->
     assert result.metrics["summaryLengthP50"] == 39
     assert result.metrics["summaryLengthP95"] == 45
     assert result.metrics["summaryLengthMax"] == 68
-    assert result.metrics["highSensitivityEvidenceRate"] == 1.0
+    assert result.metrics["highSensitivityEvidenceRate"] == 0.5
     assert result.claim_control_diagnostics == baseline["claimControlDiagnostics"]
     assert compare_results(result.to_dict(), baseline)["regressions"] == []
+
+
+def test_sensitivity_scoring_uses_backend_configuration_and_zero_based_report_evidence() -> None:
+    scoring = eval_runner.load_sensitivity_scoring_config()
+    case = load_dataset(_DATASET_PATH).cases[0]
+    sensitivity = eval_runner.Sensitivity.model_validate(
+        case.replay["classification"]["sensitivity"]
+    )
+
+    payload = eval_runner._classification_sensitivity(sensitivity, scoring)
+
+    assert scoring.customer_move_weight == Decimal("0.35")
+    assert scoring.high_threshold == Decimal("70")
+    assert payload["score"] == 57.14
+    assert payload["axes"]["customerMove"]["evidenceSentenceIds"] == [0]
+
+
+def test_non_default_sensitivity_threshold_changes_eval_counts_and_recorded_config() -> None:
+    scoring = eval_runner.SensitivityScoringConfig(
+        customer_move_weight=Decimal("0.35"),
+        deal_signal_weight=Decimal("0.30"),
+        competitor_threat_weight=Decimal("0.20"),
+        industry_shift_weight=Decimal("0.15"),
+        medium_threshold=Decimal("30"),
+        high_threshold=Decimal("55"),
+    )
+
+    result = run_evaluation(
+        load_dataset(_DATASET_PATH),
+        settings=eval_settings(),
+        claim_dataset=load_claim_dataset(_CLAIM_DATASET_PATH),
+        report_fixture=load_report_fixture(_REPORT_FIXTURE_PATH),
+        sensitivity_scoring=scoring,
+    )
+
+    assert result.metrics["highSensitivityCount"] > 2
+    assert result.config.to_dict()["sensitivityScoring"]["highThreshold"] == 55.0
+
+
+def test_high_sensitivity_evidence_gate_rejects_unlinked_axis_evidence() -> None:
+    case = load_dataset(_DATASET_PATH).cases[5]
+    response = ArticleAnalyzeService(
+        eval_settings().model_copy(update={"mock": False}), ReplayProvider(case.replay)
+    ).analyze(eval_runner._analyze_request(case, "FREE"))
+    assert eval_runner._has_high_sensitivity_evidence(response)
+
+    response.classification.sensitivity.customer_move.evidence_sentence_ids = [999]
+
+    assert not eval_runner._has_high_sensitivity_evidence(response)
 
 
 def test_adversarial_cases_have_expected_failure_labels() -> None:

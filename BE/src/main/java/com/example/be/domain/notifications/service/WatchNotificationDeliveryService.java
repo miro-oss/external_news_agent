@@ -9,9 +9,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** 보고서 발송과 같은 텔레그램·이메일 어댑터를 사용해 속보 후속 문구만 전달한다. */
 @Slf4j
@@ -49,8 +51,8 @@ public class WatchNotificationDeliveryService {
         Map<Long, Integer> deliveredByAlert = deliverBatch(alerts, plans);
         int delivered = 0;
         for (WatchAlertSnapshot alert : alerts) {
-            int alertDeliveries = deliveredByAlert.getOrDefault(alert.id(), 0);
-            if (alertDeliveries > 0) {
+            Integer alertDeliveries = deliveredByAlert.get(alert.id());
+            if (alertDeliveries != null) {
                 outboxPersistenceService.markSent(alert.id());
                 delivered += alertDeliveries;
             } else {
@@ -98,9 +100,22 @@ public class WatchNotificationDeliveryService {
         }
 
         Map<Long, Boolean> readyByDestination = new LinkedHashMap<>();
+        Set<String> deliveredRecipients = new HashSet<>();
+        Map<String, Set<Long>> alertIdsByRecipient = new LinkedHashMap<>();
+        for (ChannelWork work : works) {
+            for (NotificationDeliveryPlanService.PreparedTarget target : work.targets()) {
+                String recipientKey = recipientKey(work.alert(), target);
+                alertIdsByRecipient.computeIfAbsent(recipientKey, ignored -> new HashSet<>())
+                        .add(work.alert().id());
+            }
+        }
         try (NotificationSender.DeliverySession session = sender.openSession(channel)) {
             for (ChannelWork work : works) {
                 for (NotificationDeliveryPlanService.PreparedTarget target : work.targets()) {
+                    String recipientKey = recipientKey(work.alert(), target);
+                    if (deliveredRecipients.contains(recipientKey)) {
+                        continue;
+                    }
                     boolean targetReady = readyByDestination.computeIfAbsent(
                             target.destinationId(), ignored -> ready(target, sender));
                     if (!targetReady) {
@@ -110,6 +125,9 @@ public class WatchNotificationDeliveryService {
                         for (String chunk : work.rendered().chunks()) {
                             session.send(target.address(), work.rendered().subject(), chunk);
                         }
+                        deliveredRecipients.add(recipientKey);
+                        alertIdsByRecipient.get(recipientKey)
+                                .forEach(alertId -> deliveredByAlert.putIfAbsent(alertId, 0));
                         deliveredByAlert.merge(work.alert().id(), 1, Integer::sum);
                     } catch (RuntimeException exception) {
                         logFailure(work.alert(), channel, exception);
@@ -119,6 +137,11 @@ public class WatchNotificationDeliveryService {
         } catch (RuntimeException exception) {
             logFailure(works.getFirst().alert(), channel, exception);
         }
+    }
+
+    private String recipientKey(WatchAlertSnapshot alert,
+                                NotificationDeliveryPlanService.PreparedTarget target) {
+        return alert.issueId() + ":" + target.recipientId();
     }
 
     private boolean ready(NotificationDeliveryPlanService.PreparedTarget target,

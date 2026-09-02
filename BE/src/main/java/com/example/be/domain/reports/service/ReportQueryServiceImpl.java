@@ -1,10 +1,10 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.analysis.service.FindingEvidencePolicy;
-import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.issues.entity.NewsIssue;
@@ -142,7 +142,10 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 : Map.of();
         ReportResDTO.SummaryStats summaryStats = includeFindings
                 ? toStats(findings)
-                : toStatsFromCounts(findingRepository.countStatsByRunId(runId));
+                : toStatsFromCounts(findingRepository.countStatsByRunId(
+                        runId,
+                        sensitivityCalculator.mediumThreshold(),
+                        sensitivityCalculator.highThreshold()));
         return ReportResDTO.Detail.builder()
                 .id(report.getId())
                 .runId(runId)
@@ -227,8 +230,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
             } else if (count.getChangeType() == ChangeType.UPDATED) {
                 updatedCount += value;
             }
-            bySensitivityLevel.merge(sensitivityCalculator.level(count.getSensitivityScore()).toApiValue(),
-                    value, Long::sum);
+            bySensitivityLevel.merge(count.getSensitivityLevel(), value, Long::sum);
             byCategory.merge(count.getCategory(), value, Long::sum);
         }
         return ReportResDTO.SummaryStats.builder()

@@ -1788,9 +1788,9 @@ body.modal-open {
   display: grid;
   gap: 0.2rem;
   padding: 0.65rem;
-  border: 1px solid color-mix(in srgb, currentColor 13%, transparent);
+  border: 1px solid color-mix(in srgb, currentcolor 13%, transparent);
   border-radius: var(--radius-xs);
-  background: color-mix(in srgb, currentColor 5%, transparent);
+  background: color-mix(in srgb, currentcolor 5%, transparent);
 }
 
 .sensitivity-axis > span {

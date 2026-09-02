@@ -80,6 +80,11 @@ public class NewsWatch {
         this.sensitivityAtWatch = sensitivityAtWatch;
     }
 
+    public void extendHighSensitivityUntil(LocalDateTime expiresAt, BigDecimal sensitivityAtWatch) {
+        this.expiresAt = expiresAt;
+        this.sensitivityAtWatch = sensitivityAtWatch;
+    }
+
     public void moveToIssue(NewsIssue issue) {
         this.issue = issue;
     }

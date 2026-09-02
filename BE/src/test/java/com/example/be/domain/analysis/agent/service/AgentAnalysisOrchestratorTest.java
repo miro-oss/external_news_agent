@@ -21,6 +21,7 @@ import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.service.AnalysisResult;
 import com.example.be.domain.analysis.service.AnalysisContext;
 import com.example.be.domain.analysis.service.IssueAnalysisContext;
+import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.analysis.service.StubArticleAnalyzer;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.FetchStatus;
@@ -104,7 +105,8 @@ class AgentAnalysisOrchestratorTest {
         assertEquals(List.of(0), result.keyPoints().getFirst().evidence());
         assertEquals(0, result.sections().getFirst().index());
         assertEquals(Sentiment.NEUTRAL, result.sentiment());
-        assertEquals(SensitivityLevel.LOW, result.sensitivity().defaultLevel());
+        assertEquals(SensitivityLevel.LOW,
+                SensitivityCalculator.defaults().level(result.sensitivity().getScore()));
         assertEquals(Relevance.REFERENCE, result.relevance());
         assertEquals(AnalysisSource.STUB, result.analysisSource());
         assertEquals(BigDecimal.ONE,

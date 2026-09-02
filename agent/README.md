@@ -244,7 +244,9 @@ replay는 외부 API 없이 실제 스키마·문장 분할·사실값 검증·�
 기본 CI는 replay 기준선만 사용하며 메타데이터, 런타임 설정, 지표 또는 평가 커버리지가 회귀하면
 실패합니다.
 
-live 프로필은 실제 provider 인증 정보와 비용 승인이 필요하다. 이 저장소에서는 토큰을 읽지 않으므로, P2-2의 `analyze.ko.v6+sensitivity.ko.v2` 기준선은 replay로만 재생성을 확인한다.
+live 프로필은 실제 provider 인증 정보와 비용 승인이 필요하다. replay와 CI는 저장소에 인증 정보를
+보관하거나 읽지 않고, live 프로필만 실행 환경의 provider 인증 변수를 읽는다. P2-2의
+`analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2` 기준선은 replay로 재생성을 확인한다.
 
 - schema pass rate: 분석 24건과 보고서 1건의 계약 검증 통과율
 - grounded rate: 분석 bullet 중 `grounded` 판정 비율 (`weak`은 포함하지 않음)
@@ -253,7 +255,8 @@ live 프로필은 실제 provider 인증 정보와 비용 승인이 필요하다
   않고 가장 잘 맞는 단일 finding으로 판정
 - Korean summary pass rate: 한글 5자 이상이며 한글·영문 문자 중 한글 비율이 50% 이상인 요약 비율
 - summary length P50/P95/max: 분석 요약의 글자 수 분포. P95는 120자 이하여야 함
-- high sensitivity evidence rate: high 민감도 판정 중 하나 이상의 근거 bullet이 연결된 비율
+- high sensitivity evidence rate: high 민감도 판정 중 가용 축이 둘 이상이고, 각 축의 유효한 근거 문장이
+  하나 이상의 grounded/weak bullet에도 연결된 비율
 - perspective tag accuracy: 기사별 정답 관점과 `medium`/`high`로 태깅된 관점의 4×24 일치율
 - evidence provider call reduction rate: `ungrounded`로 선차단된 bullet을 제외하고 근거 검증이 필요한
   bullet 중 rule-only로 확정돼 provider 호출을 생략할 수 있는 비율. replay 기준선은 21건 중 11건을

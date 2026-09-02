@@ -13,7 +13,15 @@
     "maxSentences": 200,
     "schemaRepairAttempts": 1,
     "maxOutputTokens": 4096,
-    "reportMaxOutputTokens": 8192
+    "reportMaxOutputTokens": 8192,
+    "sensitivityScoring": {
+      "customerMoveWeight": 0.35,
+      "dealSignalWeight": 0.3,
+      "competitorThreatWeight": 0.2,
+      "industryShiftWeight": 0.15,
+      "mediumThreshold": 40.0,
+      "highThreshold": 70.0
+    }
   },
   "complete": true,
   "metrics": {
@@ -30,8 +38,8 @@
     "summaryLengthP95": 45,
     "summaryLengthMax": 68,
     "highSensitivityCount": 2,
-    "highSensitivityEvidenceCount": 2,
-    "highSensitivityEvidenceRate": 1.0,
+    "highSensitivityEvidenceCount": 1,
+    "highSensitivityEvidenceRate": 0.5,
     "perspectiveTagChecks": 96,
     "perspectiveTagCorrectCount": 96,
     "perspectiveTagAccuracy": 1.0,

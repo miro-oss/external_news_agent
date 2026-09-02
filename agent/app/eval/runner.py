@@ -2,9 +2,11 @@ import json
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Literal
 
+import yaml
 from pydantic import ValidationError
 
 from app.core.config import Settings
@@ -45,24 +47,121 @@ from app.schemas.report import ReportRequest, ReportResponse
 EvalProfile = Literal["replay", "live"]
 _DEFAULT_CLAIM_DATASET = Path(__file__).resolve().parent / "golden" / "claims.ko.v1.json"
 _DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.4.json"
+_DEFAULT_SENSITIVITY_CONFIG = (
+    Path(__file__).resolve().parents[3] / "BE" / "src" / "main" / "resources" / "application.yml"
+)
 
 
-def _classification_sensitivity(sensitivity: Sensitivity) -> dict[str, object]:
-    named_axes = (
-        ("customerMove", sensitivity.customer_move, 0.35),
-        ("dealSignal", sensitivity.deal_signal, 0.30),
-        ("competitorThreat", sensitivity.competitor_threat, 0.20),
-        ("industryShift", sensitivity.industry_shift, 0.15),
+@dataclass(frozen=True, slots=True)
+class SensitivityScoringConfig:
+    customer_move_weight: Decimal
+    deal_signal_weight: Decimal
+    competitor_threat_weight: Decimal
+    industry_shift_weight: Decimal
+    medium_threshold: Decimal
+    high_threshold: Decimal
+
+    def __post_init__(self) -> None:
+        weights = (
+            self.customer_move_weight,
+            self.deal_signal_weight,
+            self.competitor_threat_weight,
+            self.industry_shift_weight,
+        )
+        if any(weight <= 0 for weight in weights) or sum(weights) != Decimal("1"):
+            raise ValueError("민감도 축 가중치 합은 1이어야 합니다.")
+        if not Decimal("0") <= self.medium_threshold < self.high_threshold <= Decimal("100"):
+            raise ValueError("민감도 임계값은 0 <= medium < high <= 100이어야 합니다.")
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "customerMoveWeight": float(self.customer_move_weight),
+            "dealSignalWeight": float(self.deal_signal_weight),
+            "competitorThreatWeight": float(self.competitor_threat_weight),
+            "industryShiftWeight": float(self.industry_shift_weight),
+            "mediumThreshold": float(self.medium_threshold),
+            "highThreshold": float(self.high_threshold),
+        }
+
+
+def load_sensitivity_scoring_config(
+    path: Path = _DEFAULT_SENSITIVITY_CONFIG,
+) -> SensitivityScoringConfig:
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    values = document["news"]["analysis"]["sensitivity"]
+    return SensitivityScoringConfig(
+        customer_move_weight=Decimal(str(values["customer-move-weight"])),
+        deal_signal_weight=Decimal(str(values["deal-signal-weight"])),
+        competitor_threat_weight=Decimal(str(values["competitor-threat-weight"])),
+        industry_shift_weight=Decimal(str(values["industry-shift-weight"])),
+        medium_threshold=Decimal(str(values["medium-threshold"])),
+        high_threshold=Decimal(str(values["high-threshold"])),
     )
-    available = [(axis.score, weight) for _, axis, weight in named_axes if axis.score is not None]
-    weighted = sum(score * weight for score, weight in available)
-    score = round(weighted * 100 / (sum(weight for _, weight in available) * 3), 2)
-    level = "high" if score >= 70 else "medium" if score >= 40 else "low"
+
+
+def _classification_sensitivity(
+    sensitivity: Sensitivity,
+    scoring: SensitivityScoringConfig,
+) -> dict[str, object]:
+    named_axes = (
+        ("customerMove", sensitivity.customer_move, scoring.customer_move_weight),
+        ("dealSignal", sensitivity.deal_signal, scoring.deal_signal_weight),
+        ("competitorThreat", sensitivity.competitor_threat, scoring.competitor_threat_weight),
+        ("industryShift", sensitivity.industry_shift, scoring.industry_shift_weight),
+    )
+    available = [
+        (Decimal(axis.score), weight)
+        for _, axis, weight in named_axes
+        if axis.score is not None
+    ]
+    weighted = sum((score * weight for score, weight in available), start=Decimal("0"))
+    available_weight = sum((weight for _, weight in available), start=Decimal("0"))
+    score = (weighted * Decimal("100") / (available_weight * Decimal("3"))).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    level = (
+        "high"
+        if score >= scoring.high_threshold
+        else "medium"
+        if score >= scoring.medium_threshold
+        else "low"
+    )
     return {
-        "score": score,
+        "score": float(score),
         "level": level,
-        "axes": {name: axis.model_dump(by_alias=True, mode="json") for name, axis, _ in named_axes},
+        "axes": {
+            name: {
+                **axis.model_dump(by_alias=True, mode="json"),
+                "evidenceSentenceIds": [
+                    sentence_id - 1 for sentence_id in axis.evidence_sentence_ids
+                ],
+            }
+            for name, axis, _ in named_axes
+        },
     }
+
+
+def _has_high_sensitivity_evidence(response: AnalyzeResponse) -> bool:
+    axes = (
+        response.classification.sensitivity.customer_move,
+        response.classification.sensitivity.deal_signal,
+        response.classification.sensitivity.competitor_threat,
+        response.classification.sensitivity.industry_shift,
+    )
+    available_axes = [axis for axis in axes if axis.score is not None]
+    bullet_evidence_ids = {
+        sentence_id
+        for section in response.sections
+        for bullet in section.bullets
+        if bullet.groundedness != "ungrounded"
+        for sentence_id in bullet.evidence_sentence_ids
+    }
+    sentence_count = len(response.sentences)
+    return len(available_axes) >= 2 and all(
+        all(sentence_id <= sentence_count for sentence_id in axis.evidence_sentence_ids)
+        and bool(set(axis.evidence_sentence_ids) & bullet_evidence_ids)
+        for axis in available_axes
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +186,7 @@ class EvalConfig:
     schema_repair_attempts: int
     max_output_tokens: int
     report_max_output_tokens: int
+    sensitivity_scoring: SensitivityScoringConfig
     live_policy: LiveProviderPolicy | None = None
 
     def to_dict(self) -> dict[str, object]:
@@ -98,6 +198,7 @@ class EvalConfig:
             "schemaRepairAttempts": self.schema_repair_attempts,
             "maxOutputTokens": self.max_output_tokens,
             "reportMaxOutputTokens": self.report_max_output_tokens,
+            "sensitivityScoring": self.sensitivity_scoring.to_dict(),
         }
         if self.live_policy is not None:
             payload["livePolicy"] = self.live_policy.to_dict()
@@ -167,6 +268,7 @@ def run_evaluation(
     live_policy: LiveProviderPolicy | None = None,
     checkpoint_path: Path | None = None,
     resume: bool = False,
+    sensitivity_scoring: SensitivityScoringConfig | None = None,
 ) -> EvalResult:
     if profile != "live" and (checkpoint_path is not None or resume):
         raise ValueError("checkpoint와 resume은 live profile에서만 사용할 수 있습니다.")
@@ -177,7 +279,14 @@ def run_evaluation(
     execution_settings = source_settings.model_copy(update={"mock": False})
     selected_live_policy = live_policy or default_live_policy(plan) if profile == "live" else None
     selected_claim_dataset = claim_dataset or load_claim_dataset(_DEFAULT_CLAIM_DATASET)
-    config = _eval_config(source_settings, profile, plan, selected_live_policy)
+    selected_sensitivity_scoring = sensitivity_scoring or load_sensitivity_scoring_config()
+    config = _eval_config(
+        source_settings,
+        profile,
+        plan,
+        selected_live_policy,
+        selected_sensitivity_scoring,
+    )
     fixture = _replay_fixture(dataset, profile, report_fixture)
     checkpoint = (
         LiveCheckpointStore(
@@ -250,7 +359,7 @@ def run_evaluation(
         if checkpoint is not None:
             checkpoint.record_analysis(case.case_id, response)
 
-    report_request = _report_request(dataset, responses, plan)
+    report_request = _report_request(dataset, responses, plan, selected_sensitivity_scoring)
     report_response: ReportResponse | None = None
     if profile == "live" and len(responses) != len(dataset.cases):
         errors.append(
@@ -292,7 +401,10 @@ def run_evaluation(
     high_sensitivity_responses = [
         response
         for _, response in responses
-        if _classification_sensitivity(response.classification.sensitivity)["level"] == "high"
+        if _classification_sensitivity(
+            response.classification.sensitivity, selected_sensitivity_scoring
+        )["level"]
+        == "high"
     ]
     evidence_verification_count, evidence_rule_decision_count = _estimated_evidence_routes(
         responses,
@@ -337,15 +449,7 @@ def run_evaluation(
         summary_length_max=max(summary_lengths, default=0),
         high_sensitivity_count=len(high_sensitivity_responses),
         high_sensitivity_evidence_count=sum(
-            all(
-                axis.score is None or bool(axis.evidence_sentence_ids)
-                for axis in (
-                    response.classification.sensitivity.customer_move,
-                    response.classification.sensitivity.deal_signal,
-                    response.classification.sensitivity.competitor_threat,
-                    response.classification.sensitivity.industry_shift,
-                )
-            )
+            _has_high_sensitivity_evidence(response)
             for response in high_sensitivity_responses
         ),
         # replay에서는 fixture/라벨 일관성 가드이며, provider 품질은 live에서만 측정한다.
@@ -486,6 +590,7 @@ def _report_request(
     dataset: GoldenDataset,
     responses: list[tuple[GoldenCase, AnalyzeResponse]],
     plan: Plan,
+    sensitivity_scoring: SensitivityScoringConfig,
 ) -> ReportRequest:
     timestamp = datetime(2026, 8, 25, tzinfo=UTC)
     findings = []
@@ -518,7 +623,9 @@ def _report_request(
                 ],
                 "intent": response.classification.intent,
                 "sentiment": response.classification.sentiment,
-                "sensitivity": _classification_sensitivity(response.classification.sensitivity),
+                "sensitivity": _classification_sensitivity(
+                    response.classification.sensitivity, sensitivity_scoring
+                ),
                 "relevance": response.classification.relevance,
                 "category": response.classification.category,
                 "fetchStatus": "FULLTEXT",
@@ -551,6 +658,7 @@ def _eval_config(
     profile: EvalProfile,
     plan: Plan,
     live_policy: LiveProviderPolicy | None,
+    sensitivity_scoring: SensitivityScoringConfig,
 ) -> EvalConfig:
     if profile == "replay":
         provider_model = "golden-replay"
@@ -566,6 +674,7 @@ def _eval_config(
         schema_repair_attempts=settings.schema_repair_attempts,
         max_output_tokens=settings.max_output_tokens,
         report_max_output_tokens=settings.report_max_output_tokens,
+        sensitivity_scoring=sensitivity_scoring,
         live_policy=live_policy,
     )
 
