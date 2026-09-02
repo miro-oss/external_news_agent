@@ -113,6 +113,7 @@ class IssueClustererGoldenExportTest {
         output.put("configuredTitleJaccardThreshold", properties.getTitleJaccardThreshold());
         output.put("configuredEntityTimeWindowHours", properties.getEntityTimeWindow().toHours());
         output.put("configuredEntityOverlapThreshold", properties.getEntityOverlapThreshold());
+        output.put("configuredCommonEntityDocumentRatio", properties.getCommonEntityDocumentRatio());
         output.put("precision", precision);
         output.put("recall", recall);
         output.put("articles", exportedArticles);

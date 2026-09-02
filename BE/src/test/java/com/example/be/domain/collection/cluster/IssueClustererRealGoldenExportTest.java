@@ -10,7 +10,6 @@ import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -26,12 +25,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class IssueClustererRealGoldenExportTest {
 
-    private static final double CONFIGURED_COMMON_ENTITY_RATIO = 0.10;
-
     @Test
     void exportsRealCollectionFeaturesForRatioAndThresholdSweep() throws IOException {
         RealGoldenDataset dataset = load();
-        validate(dataset);
+        IssueClusteringProperties configuredProperties = new IssueClusteringProperties();
+        double configuredCommonEntityRatio = configuredProperties.getCommonEntityDocumentRatio();
+        validate(dataset, configuredCommonEntityRatio);
         List<GoldenArticle> articles = dataset.articles().stream()
                 .map(this::toGoldenArticle)
                 .toList();
@@ -41,11 +40,11 @@ class IssueClustererRealGoldenExportTest {
                 .toList();
         RatioEvaluation configured = evaluations.stream()
                 .filter(evaluation -> close(evaluation.commonEntityDocumentRatio(),
-                        CONFIGURED_COMMON_ENTITY_RATIO))
+                        configuredCommonEntityRatio))
                 .findFirst()
-                .orElseThrow();
+                .orElseThrow(() -> new IllegalStateException(
+                        "프로덕션 common entity ratio 후보가 없습니다: " + configuredCommonEntityRatio));
 
-        IssueClusteringProperties configuredProperties = properties(CONFIGURED_COMMON_ENTITY_RATIO);
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("datasetVersion", dataset.datasetVersion());
         output.put("articleCount", articles.size());
@@ -78,10 +77,14 @@ class IssueClustererRealGoldenExportTest {
                 articles.stream().map(GoldenArticle::article).toList(), true);
 
         Map<Long, String> contentGroupByArticle = new HashMap<>();
+        Map<Long, Long> contentGroupRepresentativeByArticle = new HashMap<>();
         for (int index = 0; index < plan.contentGroups().size(); index++) {
             String groupKey = "content-" + index;
-            plan.contentGroups().get(index).articleIds()
-                    .forEach(articleId -> contentGroupByArticle.put(articleId, groupKey));
+            ClusterPlan.ContentGroupAssignment group = plan.contentGroups().get(index);
+            group.articleIds().forEach(articleId -> {
+                contentGroupByArticle.put(articleId, groupKey);
+                contentGroupRepresentativeByArticle.put(articleId, group.representativeArticleId());
+            });
         }
         List<Map<String, Object>> exportedArticles = articles.stream().map(article -> {
             RealGoldenArticle source = article.source();
@@ -95,6 +98,8 @@ class IssueClustererRealGoldenExportTest {
             value.put("split", source.split());
             value.put("fixedContentGroupId",
                     contentGroupByArticle.get(article.article().articleId()));
+            value.put("fixedContentGroupRepresentativeId",
+                    contentGroupRepresentativeByArticle.get(article.article().articleId()));
             return value;
         }).toList();
 
@@ -124,11 +129,13 @@ class IssueClustererRealGoldenExportTest {
         }
     }
 
-    private void validate(RealGoldenDataset dataset) {
+    private void validate(RealGoldenDataset dataset, double configuredCommonEntityRatio) {
         assertEquals("clusters.v2", dataset.datasetVersion());
-        assertEquals(List.of(3859L, 3862L, 3868L), dataset.sourceRuns());
+        assertEquals(List.of(3862L), dataset.sourceRuns());
         assertTrue(dataset.commonEntityDocumentRatioCandidates().stream()
-                .anyMatch(candidate -> close(candidate, CONFIGURED_COMMON_ENTITY_RATIO)));
+                .anyMatch(candidate -> close(candidate, configuredCommonEntityRatio)),
+                "프로덕션 common entity ratio가 사전 고정 후보에 포함돼야 한다: "
+                        + configuredCommonEntityRatio);
 
         Set<Long> articleIds = new HashSet<>();
         Set<Long> sourceArticleIds = new HashSet<>();

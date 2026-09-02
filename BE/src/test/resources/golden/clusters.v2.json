@@ -1,10 +1,8 @@
 {
   "datasetVersion": "clusters.v2",
-  "description": "run 3862에서 사람이 사건 단위로 다시 라벨링한 실수집 hard case. 원문 전체 대신 실패 재현에 필요한 제목·요약·본문 앞부분만 보존한다.",
+  "description": "run 3862에서 사람이 사건 단위로 다시 라벨링한 실수집 hard case. 제목·요약과 최대 120자의 본문 관측 조각을 보존하며 SimHash 결과는 원문 재확인이 필요한 조건부 측정이다.",
   "sourceRuns": [
-    3859,
-    3862,
-    3868
+    3862
   ],
   "commonEntityDocumentRatioCandidates": [
     0.05,

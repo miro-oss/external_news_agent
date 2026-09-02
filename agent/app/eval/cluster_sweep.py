@@ -51,7 +51,9 @@ class UnionFind:
 def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
     articles = java_output["articles"]
     entity_overlap_threshold = int(java_output["configuredEntityOverlapThreshold"])
-    configured_ratio = float(java_output.get("configuredCommonEntityDocumentRatio", 0.10))
+    configured_ratio = float(java_output["configuredCommonEntityDocumentRatio"])
+    configured_title_threshold = float(java_output["configuredTitleJaccardThreshold"])
+    configured_time_window = int(java_output["configuredEntityTimeWindowHours"])
     pair_evaluations = java_output.get("pairEvaluations") or [
         {
             "commonEntityDocumentRatio": configured_ratio,
@@ -76,7 +78,11 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         for threshold in _JACCARD_THRESHOLDS
         for hours in _TIME_WINDOWS
     ]
-    selected = _select(calibration)
+    selected = _select(
+        calibration,
+        configured_time_window,
+        configured_ratio,
+    )
     selected_pairs = _pairs_for_ratio(pair_evaluations, selected.common_entity_document_ratio)
     holdout = _evaluate_rule(
         articles,
@@ -87,8 +93,6 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         entity_overlap_threshold,
     )
     configured_pairs = _pairs_for_ratio(pair_evaluations, configured_ratio)
-    configured_title_threshold = float(java_output.get("configuredTitleJaccardThreshold", 0.50))
-    configured_time_window = int(java_output.get("configuredEntityTimeWindowHours", 48))
     configured_calibration = _evaluate_rule(
         articles,
         configured_pairs,
@@ -105,8 +109,14 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         configured_time_window,
         entity_overlap_threshold,
     )
-    baseline_threshold, baseline_calibration = _select_tfidf_threshold(articles, "CALIBRATION")
-    baseline_holdout = _evaluate_tfidf(articles, "HOLDOUT", baseline_threshold)
+    baseline_threshold, baseline_calibration = _select_tfidf_threshold(
+        articles, "CALIBRATION", True
+    )
+    baseline_holdout = _evaluate_tfidf(articles, "HOLDOUT", baseline_threshold, True)
+    standalone_threshold, standalone_calibration = _select_tfidf_threshold(
+        articles, "CALIBRATION", False
+    )
+    standalone_holdout = _evaluate_tfidf(articles, "HOLDOUT", standalone_threshold, False)
     return {
         "datasetVersion": java_output["datasetVersion"],
         "articleCount": java_output["articleCount"],
@@ -123,9 +133,16 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
             "holdoutMetrics": asdict(configured_holdout),
         },
         "tfidfCharWbBaseline": {
+            "includesFixedContentGroups": True,
             "threshold": baseline_threshold,
             "calibrationMetrics": asdict(baseline_calibration),
             "metrics": asdict(baseline_holdout),
+        },
+        "tfidfCharWbStandaloneBaseline": {
+            "includesFixedContentGroups": False,
+            "threshold": standalone_threshold,
+            "calibrationMetrics": asdict(standalone_calibration),
+            "metrics": asdict(standalone_holdout),
         },
         "precisionGate": 0.90,
         "precisionGatePassed": holdout.precision >= 0.90,
@@ -145,14 +162,14 @@ def _evaluate_rule(
     entity_overlap_threshold: int,
 ) -> Metrics:
     selected = [article for article in articles if article["split"] == split]
-    article_ids = [int(article["articleId"]) for article in selected]
-    selected_ids = set(article_ids)
-    union = UnionFind(article_ids)
-    _join_fixed_content_groups(union, selected)
+    selected_ids_by_topic = _selected_ids_by_topic(selected)
+    unions = _topic_unions(selected, include_fixed_content_groups=True)
 
     for pair in pairs:
         left = int(pair["leftArticleId"])
         right = int(pair["rightArticleId"])
+        topic_id = int(pair["topicId"])
+        selected_ids = selected_ids_by_topic.get(topic_id, set())
         if left not in selected_ids or right not in selected_ids:
             continue
         matches = float(pair["titleJaccard"]) >= threshold or (
@@ -160,31 +177,68 @@ def _evaluate_rule(
             and float(pair["hoursApart"]) <= time_window_hours
         )
         if matches:
-            union.join(left, right)
+            unions[topic_id].join(left, right)
     expected = [f"{article['topicId']}:{article['expectedIssueId']}" for article in selected]
     predicted = [
-        f"{article['topicId']}:{union.root(int(article['articleId']))}" for article in selected
+        f"{article['topicId']}:{unions[int(article['topicId'])].root(int(article['articleId']))}"
+        for article in selected
     ]
     return _metrics(expected, predicted)
 
 
-def _join_fixed_content_groups(union: UnionFind, selected: list[dict[str, Any]]) -> None:
-    fixed_groups: dict[str, list[int]] = {}
+def _selected_ids_by_topic(
+    selected: list[dict[str, Any]],
+) -> dict[int, set[int]]:
+    result: dict[int, set[int]] = {}
+    for article in selected:
+        result.setdefault(int(article["topicId"]), set()).add(int(article["articleId"]))
+    return result
+
+
+def _topic_unions(
+    selected: list[dict[str, Any]], include_fixed_content_groups: bool
+) -> dict[int, UnionFind]:
+    selected_ids_by_topic = _selected_ids_by_topic(selected)
+    representative_by_group: dict[str, int] = {}
     for article in selected:
         group_id = article.get("fixedContentGroupId")
         if group_id is None:
             continue
-        key = f"{article['topicId']}:{group_id}"
-        fixed_groups.setdefault(key, []).append(int(article["articleId"]))
-    for values in fixed_groups.values():
-        for article_id in values[1:]:
-            union.join(values[0], article_id)
+        representative_id = article.get("fixedContentGroupRepresentativeId")
+        if representative_id is not None:
+            representative_by_group[str(group_id)] = int(representative_id)
+        else:
+            representative_by_group.setdefault(str(group_id), int(article["articleId"]))
+
+    result: dict[int, UnionFind] = {}
+    for topic_id, article_ids in selected_ids_by_topic.items():
+        topic_articles = [article for article in selected if int(article["topicId"]) == topic_id]
+        proxy_ids = {
+            representative_by_group[str(article["fixedContentGroupId"])]
+            for article in topic_articles
+            if include_fixed_content_groups and article.get("fixedContentGroupId") is not None
+        }
+        union = UnionFind(sorted(article_ids | proxy_ids))
+        if include_fixed_content_groups:
+            for article in topic_articles:
+                group_id = article.get("fixedContentGroupId")
+                if group_id is not None:
+                    union.join(int(article["articleId"]), representative_by_group[str(group_id)])
+        result[topic_id] = union
+    return result
 
 
-def _select_tfidf_threshold(articles: list[dict[str, Any]], split: str) -> tuple[float, Metrics]:
+def _select_tfidf_threshold(
+    articles: list[dict[str, Any]], split: str, include_fixed_content_groups: bool
+) -> tuple[float, Metrics]:
     selected, topic_similarities = _prepare_tfidf(articles, split)
     candidates = [
-        (threshold, _evaluate_prepared_tfidf(selected, topic_similarities, threshold))
+        (
+            threshold,
+            _evaluate_prepared_tfidf(
+                selected, topic_similarities, threshold, include_fixed_content_groups
+            ),
+        )
         for threshold in _JACCARD_THRESHOLDS
     ]
     if not candidates:
@@ -192,30 +246,38 @@ def _select_tfidf_threshold(articles: list[dict[str, Any]], split: str) -> tuple
     return max(candidates, key=lambda candidate: _metric_rank(candidate[1], candidate[0]))
 
 
-def _evaluate_tfidf(articles: list[dict[str, Any]], split: str, threshold: float) -> Metrics:
+def _evaluate_tfidf(
+    articles: list[dict[str, Any]],
+    split: str,
+    threshold: float,
+    include_fixed_content_groups: bool,
+) -> Metrics:
     selected, topic_similarities = _prepare_tfidf(articles, split)
-    return _evaluate_prepared_tfidf(selected, topic_similarities, threshold)
+    return _evaluate_prepared_tfidf(
+        selected, topic_similarities, threshold, include_fixed_content_groups
+    )
 
 
 def _evaluate_prepared_tfidf(
     selected: list[dict[str, Any]],
     topic_similarities: list[tuple[list[dict[str, Any]], Any]],
     threshold: float,
+    include_fixed_content_groups: bool,
 ) -> Metrics:
-    ids = [int(article["articleId"]) for article in selected]
-    union = UnionFind(ids)
-    _join_fixed_content_groups(union, selected)
+    unions = _topic_unions(selected, include_fixed_content_groups)
     for topic_articles, similarities in topic_similarities:
+        topic_id = int(topic_articles[0]["topicId"])
         for left in range(len(topic_articles)):
             for right in range(left + 1, len(topic_articles)):
                 if similarities[left, right] >= threshold:
-                    union.join(
+                    unions[topic_id].join(
                         int(topic_articles[left]["articleId"]),
                         int(topic_articles[right]["articleId"]),
                     )
     expected = [f"{article['topicId']}:{article['expectedIssueId']}" for article in selected]
     predicted = [
-        f"{article['topicId']}:{union.root(int(article['articleId']))}" for article in selected
+        f"{article['topicId']}:{unions[int(article['topicId'])].root(int(article['articleId']))}"
+        for article in selected
     ]
     return _metrics(expected, predicted)
 
@@ -249,30 +311,55 @@ def _metrics(expected: list[str], predicted: list[str]) -> Metrics:
     )
 
 
-def _select(candidates: list[Candidate]) -> Candidate:
+def _select(
+    candidates: list[Candidate],
+    configured_time_window: int,
+    configured_ratio: float,
+) -> Candidate:
     passing = [candidate for candidate in candidates if candidate.metrics.precision >= 0.90]
     if not passing:
-        return max(candidates, key=lambda candidate: _candidate_rank(candidate, False))
-    return max(passing, key=lambda candidate: _candidate_rank(candidate, True))
+        return max(
+            candidates,
+            key=lambda candidate: _candidate_rank(
+                candidate,
+                False,
+                configured_time_window,
+                configured_ratio,
+            ),
+        )
+    return max(
+        passing,
+        key=lambda candidate: _candidate_rank(
+            candidate,
+            True,
+            configured_time_window,
+            configured_ratio,
+        ),
+    )
 
 
-def _candidate_rank(candidate: Candidate, precision_gate_passed: bool) -> tuple[float, ...]:
+def _candidate_rank(
+    candidate: Candidate,
+    precision_gate_passed: bool,
+    configured_time_window: int,
+    configured_ratio: float,
+) -> tuple[float, ...]:
     if precision_gate_passed:
         return (
             candidate.metrics.recall,
             candidate.metrics.precision,
             candidate.metrics.adjusted_rand,
             candidate.title_jaccard_threshold,
-            -abs(candidate.time_window_hours - 48),
-            -abs(candidate.common_entity_document_ratio - 0.10),
+            -abs(candidate.time_window_hours - configured_time_window),
+            -abs(candidate.common_entity_document_ratio - configured_ratio),
         )
     return (
         candidate.metrics.precision,
         candidate.metrics.recall,
         candidate.metrics.adjusted_rand,
         candidate.title_jaccard_threshold,
-        -abs(candidate.time_window_hours - 48),
-        -abs(candidate.common_entity_document_ratio - 0.10),
+        -abs(candidate.time_window_hours - configured_time_window),
+        -abs(candidate.common_entity_document_ratio - configured_ratio),
     )
 
 
