@@ -143,7 +143,7 @@ public class IssueClusterWriter {
         Set<Long> existingArticleIds = Set.copyOf(membershipByArticle.keySet());
         List<NewsWatch> eligibleWatches = assignment.existingIssueId() == null
                 ? List.of()
-                : watchRepository.findEligibleBreakingForNotification(issue.getId(), now);
+                : watchRepository.findEligibleForNotification(issue.getId(), now);
         for (Long articleId : assignment.articleIds()) {
             membershipByArticle.computeIfAbsent(articleId, ignored -> issueArticleRepository.save(
                     IssueArticle.builder()
@@ -225,12 +225,13 @@ public class IssueClusterWriter {
     }
 
     private IssueArticleRole roleOf(Article article, Article representative) {
+        if (article.getId().equals(representative.getId())) {
+            return IssueArticleRole.REPRESENTATIVE;
+        }
         if (isBreaking(article)) {
             return IssueArticleRole.BREAKING;
         }
-        return article.getId().equals(representative.getId())
-                ? IssueArticleRole.REPRESENTATIVE
-                : IssueArticleRole.MEMBER;
+        return IssueArticleRole.MEMBER;
     }
 
     private boolean isBreaking(Article article) {

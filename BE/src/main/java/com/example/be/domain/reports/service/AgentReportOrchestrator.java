@@ -14,7 +14,9 @@ import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.agent.service.AgentRunRecorder;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.FindingSensitivityAxis;
 import com.example.be.domain.analysis.service.FindingEvidencePolicy;
+import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
@@ -62,6 +64,7 @@ public class AgentReportOrchestrator {
     private final LlmPlanService planService;
     private final CollectionResultWriter resultWriter;
     private final IssueArticleRepository issueArticleRepository;
+    private final SensitivityCalculator sensitivityCalculator;
 
     public ReportDocument generate(CollectionRun run,
                                    List<Finding> findings,
@@ -239,10 +242,25 @@ public class AgentReportOrchestrator {
                         .toList(),
                 finding.getIntent(),
                 finding.getSentiment().toApiValue(),
-                finding.getRiskLevel().toApiValue(),
+                sensitivityPayload(finding),
                 finding.getRelevance().toApiValue(),
                 finding.getCategory(),
                 fetchStatus == null ? FetchStatus.METADATA_ONLY.name() : fetchStatus.name());
+    }
+
+    private AgentReportRequest.SensitivityPayload sensitivityPayload(Finding finding) {
+        return new AgentReportRequest.SensitivityPayload(
+                finding.getSensitivity().getScore(),
+                sensitivityCalculator.level(finding.getSensitivity().getScore()).toApiValue(),
+                new AgentReportRequest.SensitivityAxesPayload(
+                        sensitivityAxisPayload(finding.getSensitivity().customerMove()),
+                        sensitivityAxisPayload(finding.getSensitivity().dealSignal()),
+                        sensitivityAxisPayload(finding.getSensitivity().competitorThreat()),
+                        sensitivityAxisPayload(finding.getSensitivity().industryShift())));
+    }
+
+    private AgentReportRequest.SensitivityAxisPayload sensitivityAxisPayload(FindingSensitivityAxis axis) {
+        return new AgentReportRequest.SensitivityAxisPayload(axis.score(), axis.evidenceSentenceIds());
     }
 
     private List<Finding> eligibleFindings(List<Finding> findings) {

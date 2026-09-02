@@ -10,8 +10,9 @@ import com.example.be.domain.analysis.entity.FindingEntities;
 import com.example.be.domain.analysis.entity.FindingPerspectiveTag;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
+import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.articles.service.ArticleQueryService;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -161,7 +162,8 @@ class FindingRepositoryIntegrationTests {
         assertTrue(found.getKeyPoints().isEmpty());
         assertEquals(List.of(0), found.getEffectiveKeyPoints().getFirst().evidence());
         assertEquals("The United States tightened export controls.", found.getSections().get(0).text());
-        assertEquals(RiskLevel.HIGH, found.getRiskLevel());
+        assertEquals(SensitivityLevel.HIGH,
+                SensitivityCalculator.defaults().level(found.getSensitivity().getScore()));
         assertEquals(AnalysisSource.LLM, found.getAnalysisSource());
         assertEquals("핵심", found.getAnalysisSections().getFirst().heading());
         assertEquals(BigDecimal.ONE,
@@ -220,12 +222,12 @@ class FindingRepositoryIntegrationTests {
 
         var response = articleQueryService.getArticles(
                 run.getId(), null, null, "NEW", "important", "high", "정책", "en",
-                null, null, null, null, "RISK_DESC", 0, 20);
+                null, null, null, null, "SENSITIVITY_DESC", 0, 20);
 
         assertEquals(1, response.getTotalElements());
         assertEquals("미국의 첨단 반도체 장비 수출 통제 강화와 관련된 소식이 보도됐다.",
                 response.getContent().get(0).getSummary());
-        assertEquals("high", response.getContent().get(0).getRiskLevel());
+        assertEquals("high", response.getContent().get(0).getSensitivity().level());
     }
 
     @Test
@@ -335,7 +337,7 @@ class FindingRepositoryIntegrationTests {
                 .keyPoints(List.of())
                 .intent("정책 변화 보도")
                 .sentiment(Sentiment.NEGATIVE)
-                .riskLevel(RiskLevel.HIGH)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.HIGH))
                 .relevance(Relevance.IMPORTANT)
                 .category("정책")
                 .analysisSource(AnalysisSource.LLM)

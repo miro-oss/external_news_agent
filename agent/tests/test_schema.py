@@ -31,7 +31,12 @@ def response(evidence_sentence_ids: list[int]) -> dict[str, object]:
         "classification": {
             "intent": "산업 동향 보도",
             "sentiment": "neutral",
-            "riskLevel": "low",
+            "sensitivity": {
+                "customerMove": {"score": 1, "evidenceSentenceIds": [1]},
+                "dealSignal": {"score": None, "evidenceSentenceIds": []},
+                "competitorThreat": {"score": 0, "evidenceSentenceIds": [1]},
+                "industryShift": {"score": 0, "evidenceSentenceIds": [1]},
+            },
             "relevance": "reference",
             "category": "제품/공정",
         },
@@ -125,6 +130,39 @@ def test_rejects_more_than_three_bullets_or_eighty_character_bullet() -> None:
 
     payload = response([1])
     payload["sections"][0]["bullets"][0]["text"] = "가" * 81
+    with pytest.raises(ValidationError):
+        AnalyzeResponse.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda axis: axis.update({"score": 4}),
+        lambda axis: axis.update({"score": 2, "evidenceSentenceIds": []}),
+        lambda axis: axis.update({"score": None, "evidenceSentenceIds": [1]}),
+    ],
+)
+def test_rejects_invalid_sensitivity_axis_contract(mutate) -> None:
+    payload = response([1])
+    mutate(payload["classification"]["sensitivity"]["customerMove"])
+
+    with pytest.raises(ValidationError):
+        AnalyzeResponse.model_validate(payload)
+
+
+def test_rejects_sensitivity_when_every_axis_is_unavailable() -> None:
+    payload = response([1])
+    for axis in payload["classification"]["sensitivity"].values():
+        axis.update({"score": None, "evidenceSentenceIds": []})
+
+    with pytest.raises(ValidationError):
+        AnalyzeResponse.model_validate(payload)
+
+
+def test_rejects_sensitivity_evidence_outside_sentence_range() -> None:
+    payload = response([1])
+    payload["classification"]["sensitivity"]["customerMove"]["evidenceSentenceIds"] = [2]
+
     with pytest.raises(ValidationError):
         AnalyzeResponse.model_validate(payload)
 

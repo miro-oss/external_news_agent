@@ -119,9 +119,7 @@ def _limit_unsupported_significance(
             grounded_overlap=grounded_overlap,
             weak_overlap=weak_overlap,
         )
-        updated = event.model_copy(
-            update={"summary_ko": summary_ko, "significance": significance}
-        )
+        updated = event.model_copy(update={"summary_ko": summary_ko, "significance": significance})
         dedupe_key = _normalized_key(updated.summary_ko)
         if dedupe_key not in seen_events:
             seen_events.add(dedupe_key)
@@ -180,9 +178,7 @@ def _validated_report_claim(
     max_chars: int | None = None,
     independent: bool = False,
 ) -> str:
-    assessment_function = (
-        assess_independent_finding_claim if independent else assess_finding_claim
-    )
+    assessment_function = assess_independent_finding_claim if independent else assess_finding_claim
     assessment = assessment_function(
         claim,
         findings,
@@ -196,15 +192,10 @@ def _validated_report_claim(
     replacement = violation.fallback if violation is not None else fallback
     reason = violation.reason if violation is not None else assessment.reason
     logger.warning(
-        "리포트 문장이 최종 검증을 통과하지 못해 근거 문장으로 대체합니다. "
-        "reason=%s",
+        "리포트 문장이 최종 검증을 통과하지 못해 근거 문장으로 대체합니다. reason=%s",
         reason[:500],
     )
-    return (
-        _truncate_chars(replacement, max_chars)
-        if max_chars is not None
-        else replacement
-    )
+    return _truncate_chars(replacement, max_chars) if max_chars is not None else replacement
 
 
 def _best_finding_fallback(claim: str, findings: list[ReportFindingInput]) -> str:
@@ -228,8 +219,7 @@ def _best_finding_fallback(claim: str, findings: list[ReportFindingInput]) -> st
     return max(
         candidates,
         key=lambda candidate: len(
-            claim_tokens
-            & set(re.findall(r"[A-Za-z0-9가-힣]+", candidate.casefold()))
+            claim_tokens & set(re.findall(r"[A-Za-z0-9가-힣]+", candidate.casefold()))
         ),
     )
 
@@ -287,7 +277,7 @@ def _deterministic_response(
     ordered = sorted(
         request.findings,
         key=lambda finding: (
-            {"high": 0, "medium": 1, "low": 2}[finding.risk_level],
+            -finding.sensitivity.score,
             {"important": 0, "watch": 1, "reference": 2}[finding.relevance],
             finding.id,
         ),
@@ -307,12 +297,10 @@ def _deterministic_response(
             source_finding_ids=[finding.id],
         )
         for finding in ordered
-        if finding.risk_level == "high" or finding.relevance == "important"
+        if finding.sensitivity.level == "high" or finding.relevance == "important"
     ][:5]
     important_ids = {
-        finding_id
-        for event in important_events
-        for finding_id in event.source_finding_ids
+        finding_id for event in important_events for finding_id in event.source_finding_ids
     }
     watch_items = [
         WatchItem(
@@ -321,7 +309,7 @@ def _deterministic_response(
             source_finding_ids=[finding.id],
         )
         for finding in ordered
-        if (finding.relevance == "watch" or finding.risk_level == "medium")
+        if (finding.relevance == "watch" or finding.sensitivity.level == "medium")
         and finding.id not in important_ids
     ][:5]
     source_notes = _source_notes(request)

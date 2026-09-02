@@ -69,10 +69,46 @@ class Section(AgentModel):
     bullets: list[EvidenceBullet] = Field(min_length=1, max_length=3)
 
 
+class SensitivityAxis(AgentModel):
+    score: Annotated[int, Field(ge=0, le=3)] | None
+    evidence_sentence_ids: list[Annotated[int, Field(ge=1)]]
+
+    @model_validator(mode="after")
+    def validate_evidence_contract(self) -> "SensitivityAxis":
+        if self.score is None and self.evidence_sentence_ids:
+            raise ValueError("unavailable 민감도 축은 evidenceSentenceIds가 없어야 합니다.")
+        if self.score is not None and not self.evidence_sentence_ids:
+            raise ValueError("판정 가능한 민감도 축은 evidenceSentenceIds가 필요합니다.")
+        if len(self.evidence_sentence_ids) != len(set(self.evidence_sentence_ids)):
+            raise ValueError("민감도 축 evidenceSentenceIds는 중복될 수 없습니다.")
+        return self
+
+
+class Sensitivity(AgentModel):
+    customer_move: SensitivityAxis
+    deal_signal: SensitivityAxis
+    competitor_threat: SensitivityAxis
+    industry_shift: SensitivityAxis
+
+    @model_validator(mode="after")
+    def validate_available_axis(self) -> "Sensitivity":
+        if all(
+            axis.score is None
+            for axis in (
+                self.customer_move,
+                self.deal_signal,
+                self.competitor_threat,
+                self.industry_shift,
+            )
+        ):
+            raise ValueError("민감도 축은 하나 이상 판정 가능해야 합니다.")
+        return self
+
+
 class Classification(AgentModel):
     intent: str = Field(min_length=1)
     sentiment: Literal["positive", "neutral", "negative"]
-    risk_level: Literal["low", "medium", "high"]
+    sensitivity: Sensitivity
     relevance: Literal["important", "watch", "reference"]
     category: Literal["제품/공정", "기업", "정책", "공급망"]
 
@@ -95,9 +131,7 @@ class PerspectiveTag(AgentModel):
             if self.hook is not None or self.evidence_sentence_ids:
                 raise ValueError("relevance가 none이면 hook과 evidenceSentenceIds가 없어야 합니다.")
         elif self.hook is None or not self.evidence_sentence_ids:
-            raise ValueError(
-                "relevance가 none이 아니면 hook과 evidenceSentenceIds가 필요합니다."
-            )
+            raise ValueError("relevance가 none이 아니면 hook과 evidenceSentenceIds가 필요합니다.")
         if len(self.evidence_sentence_ids) != len(set(self.evidence_sentence_ids)):
             raise ValueError("perspective tag의 evidenceSentenceIds는 중복될 수 없습니다.")
         return self
@@ -176,10 +210,8 @@ class PreviousFindingSection(AgentModel):
 
 class PreviousFinding(AgentModel):
     summary_ko: str = Field(min_length=10, max_length=120)
-    risk_level: Literal["low", "medium", "high"]
-    sections: list[PreviousFindingSection] = Field(
-        min_length=1, max_length=MAX_ANALYZE_SECTIONS
-    )
+    sensitivity: Sensitivity
+    sections: list[PreviousFindingSection] = Field(min_length=1, max_length=MAX_ANALYZE_SECTIONS)
     cross_source: CrossSource
 
 
@@ -266,9 +298,7 @@ class ReviewedSection(AgentModel):
 
 
 class SelfCritiqueResponse(AgentModel):
-    sections: list[ReviewedSection] = Field(
-        min_length=1, max_length=MAX_ANALYZE_SECTIONS
-    )
+    sections: list[ReviewedSection] = Field(min_length=1, max_length=MAX_ANALYZE_SECTIONS)
     summary_ko: str = Field(min_length=10, max_length=120)
     target_claim_count: int = Field(ge=0, le=1)
     revised_claim_count: int = Field(ge=0, le=1)
@@ -349,6 +379,20 @@ class AnalyzeResponse(AgentModel):
         ):
             raise ValueError(
                 "perspective tag의 evidenceSentenceIds는 sentences 범위 안이어야 합니다."
+            )
+        sensitivity_axes = (
+            self.classification.sensitivity.customer_move,
+            self.classification.sensitivity.deal_signal,
+            self.classification.sensitivity.competitor_threat,
+            self.classification.sensitivity.industry_shift,
+        )
+        if any(
+            sentence_id > sentence_count
+            for axis in sensitivity_axes
+            for sentence_id in axis.evidence_sentence_ids
+        ):
+            raise ValueError(
+                "민감도 축의 evidenceSentenceIds는 sentences 범위 안이어야 합니다."
             )
         stance_ids = [stance.article_id for stance in self.member_stances]
         if len(stance_ids) != len(set(stance_ids)):

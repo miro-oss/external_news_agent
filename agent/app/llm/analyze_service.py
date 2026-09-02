@@ -22,27 +22,18 @@ from app.schemas.analyze import (
     Section,
 )
 
-_ANALYZE_PROMPT_VERSION = "analyze.ko.v5"
+_ANALYZE_PROMPT_VERSION = "analyze.ko.v6"
 _PERSPECTIVE_PROMPT_VERSION = "perspective.ko.v1"
-_SENSITIVITY_PROMPT_VERSION = "sensitivity.ko.v1"
+_SENSITIVITY_PROMPT_VERSION = "sensitivity.ko.v2"
 PROMPT_VERSION = (
-    f"{_ANALYZE_PROMPT_VERSION}+{_PERSPECTIVE_PROMPT_VERSION}"
-    f"+{_SENSITIVITY_PROMPT_VERSION}"
+    f"{_ANALYZE_PROMPT_VERSION}+{_PERSPECTIVE_PROMPT_VERSION}+{_SENSITIVITY_PROMPT_VERSION}"
 )
-_PROMPT_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "prompts"
-    / f"{_ANALYZE_PROMPT_VERSION}.md"
-)
+_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / f"{_ANALYZE_PROMPT_VERSION}.md"
 _PERSPECTIVE_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "prompts"
-    / f"{_PERSPECTIVE_PROMPT_VERSION}.md"
+    Path(__file__).resolve().parents[1] / "prompts" / f"{_PERSPECTIVE_PROMPT_VERSION}.md"
 )
 _SENSITIVITY_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "prompts"
-    / f"{_SENSITIVITY_PROMPT_VERSION}.md"
+    Path(__file__).resolve().parents[1] / "prompts" / f"{_SENSITIVITY_PROMPT_VERSION}.md"
 )
 SYSTEM_INSTRUCTION = "\n\n".join(
     (
@@ -127,11 +118,21 @@ def _validated_output(
         raise ValueError(
             "perspective tag의 evidenceSentenceIds는 요청 sentences 범위 안에 있어야 합니다."
         )
+    sensitivity = output.classification.sensitivity
+    if any(
+        sentence_id > sentence_count
+        for axis in (
+            sensitivity.customer_move,
+            sensitivity.deal_signal,
+            sensitivity.competitor_threat,
+            sensitivity.industry_shift,
+        )
+        for sentence_id in axis.evidence_sentence_ids
+    ):
+        raise ValueError("민감도 축 evidenceSentenceIds는 요청 sentences 범위 안에 있어야 합니다.")
     known_ids = {request.article.id, *(member.id for member in request.issue_members)}
     member_ids = {member.id for member in request.issue_members}
-    referenced_ids = {
-        observation.article_id for observation in output.cross_source.sole_source
-    }
+    referenced_ids = {observation.article_id for observation in output.cross_source.sole_source}
     referenced_ids.update(
         article_id
         for conflict in output.cross_source.conflicts
@@ -154,8 +155,7 @@ def _validated_output(
             "promoteCandidates는 사전 컷을 통과하고 conflicts에 포함된 멤버여야 합니다."
         )
     if not request.issue_members and (
-        output.cross_source != output.cross_source.empty()
-        or output.promote_candidates
+        output.cross_source != output.cross_source.empty() or output.promote_candidates
     ):
         raise ValueError("issueMembers가 없으면 교차 출처 관측값도 비어 있어야 합니다.")
     return output
@@ -201,15 +201,13 @@ def _verified_sections(response: AnalyzeResponse) -> list[Section]:
         bullets = []
         for bullet in section.bullets:
             evidence_text = "\n".join(
-                response.sentences[sentence_id - 1]
-                for sentence_id in bullet.evidence_sentence_ids
+                response.sentences[sentence_id - 1] for sentence_id in bullet.evidence_sentence_ids
             )
             mismatches = (
                 factual_mismatches(bullet.text, evidence_text)
                 if bullet.claim_type == "FACT"
                 else ["FORECAST 주장의 한정 표현이 빠졌습니다."]
-                if bullet.claim_type == "FORECAST"
-                and not has_forecast_qualifier(bullet.text)
+                if bullet.claim_type == "FORECAST" and not has_forecast_qualifier(bullet.text)
                 else []
             )
             if mismatches:
@@ -219,9 +217,7 @@ def _verified_sections(response: AnalyzeResponse) -> list[Section]:
                     response.meta.model,
                     "; ".join(mismatches)[:500],
                 )
-                bullet = bullet.model_copy(
-                    update={"groundedness": "ungrounded", "confidence": 0.0}
-                )
+                bullet = bullet.model_copy(update={"groundedness": "ungrounded", "confidence": 0.0})
             bullets.append(bullet)
         sections.append(section.model_copy(update={"bullets": bullets}))
     return sections
@@ -249,8 +245,7 @@ def _analysis_prompt(
         "issueComparison": {
             "representativeArticleId": request.article.id,
             "members": [
-                member.model_dump(by_alias=True, mode="json")
-                for member in request.issue_members
+                member.model_dump(by_alias=True, mode="json") for member in request.issue_members
             ],
             "promotionEligibleArticleIds": sorted(promotion_eligible_ids),
         },
@@ -276,9 +271,7 @@ def _member_stances(request: AnalyzeRequest) -> tuple[list[MemberStance], set[in
     stances = []
     promotion_eligible_ids = set()
     for member in request.issue_members:
-        candidate_text = "\n".join(
-            value for value in (member.title, member.summary) if value
-        )
+        candidate_text = "\n".join(value for value in (member.title, member.summary) if value)
         signal = cross_source_signal(reference_text, candidate_text)
         stances.append(
             MemberStance(

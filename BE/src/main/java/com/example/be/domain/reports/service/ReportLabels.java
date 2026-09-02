@@ -1,7 +1,7 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 
 /**
  * 보고서 본문에 찍는 한글 표시 라벨.
@@ -15,7 +15,7 @@ final class ReportLabels {
     private ReportLabels() {
     }
 
-    static String risk(RiskLevel value) {
+    static String sensitivity(SensitivityLevel value) {
         return switch (value) {
             case HIGH -> "높음";
             case MEDIUM -> "보통";

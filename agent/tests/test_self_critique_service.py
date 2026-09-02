@@ -17,9 +17,7 @@ class FakeProvider:
     def generate(
         self, *, system_instruction: str, prompt: str, response_schema: dict
     ) -> ProviderResponse:
-        assert "이 요약에서 원문 문장으로 확인되지 않는 표현은 무엇인가?" in (
-            system_instruction
-        )
+        assert "이 요약에서 원문 문장으로 확인되지 않는 표현은 무엇인가?" in (system_instruction)
         assert response_schema["additionalProperties"] is False
         self.prompts.append(prompt)
         return ProviderResponse(
@@ -51,7 +49,12 @@ def request(*, claim: str, evidence: str) -> AnalyzeRequest:
             },
             "previousFinding": {
                 "summaryKo": "회사의 투자 결정을 다룬 기사입니다.",
-                "riskLevel": "high",
+                "sensitivity": {
+                    "customerMove": {"score": 3, "evidenceSentenceIds": [1]},
+                    "dealSignal": {"score": None, "evidenceSentenceIds": []},
+                    "competitorThreat": {"score": 3, "evidenceSentenceIds": [1]},
+                    "industryShift": {"score": 3, "evidenceSentenceIds": [1]},
+                },
                 "sections": [
                     {
                         "heading": "핵심",
@@ -101,9 +104,7 @@ def test_revises_one_weak_modality_claim_with_one_provider_call() -> None:
         evidence="A사는 투자를 발표했다.",
     )
 
-    response = ArticleSelfCritiqueService(
-        Settings(AGENT_MOCK=False), provider
-    ).critique(target)
+    response = ArticleSelfCritiqueService(Settings(AGENT_MOCK=False), provider).critique(target)
 
     assert len(provider.prompts) == 1
     assert response.target_claim_count == 1
@@ -135,9 +136,7 @@ def test_rejects_keep_that_changes_grounding_reason() -> None:
     )
 
     with pytest.raises(AgentError) as error:
-        ArticleSelfCritiqueService(
-            Settings(AGENT_MOCK=False), provider
-        ).critique(target)
+        ArticleSelfCritiqueService(Settings(AGENT_MOCK=False), provider).critique(target)
 
     assert error.value.code == "SCHEMA_VIOLATION"
 
@@ -149,9 +148,7 @@ def test_skips_provider_when_decisive_rule_already_confirms_claim() -> None:
         evidence="A사는 투자 계획을 발표했다.",
     )
 
-    response = ArticleSelfCritiqueService(
-        Settings(AGENT_MOCK=False), provider
-    ).critique(target)
+    response = ArticleSelfCritiqueService(Settings(AGENT_MOCK=False), provider).critique(target)
 
     assert provider.prompts == []
     assert response.target_claim_count == 0

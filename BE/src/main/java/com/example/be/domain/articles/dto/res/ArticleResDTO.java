@@ -1,5 +1,6 @@
 package com.example.be.domain.articles.dto.res;
 
+import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AccessLevel;
@@ -21,7 +22,7 @@ public class ArticleResDTO {
     @JsonPropertyOrder({
             "id", "title", "publisher", "canonicalUrl", "urlHash", "language", "publishedAt", "fetchedAt",
             "fetchStatus", "topicId", "topicName", "sourceId", "sourceName", "changeType", "summary",
-            "category", "relevance", "riskLevel", "sentiment", "perspectiveTags"
+            "category", "relevance", "sensitivity", "sentiment", "perspectiveTags"
     })
     @Schema(name = "ArticleSummaryResponse", description = "수집 기사 목록 항목")
     public static class Summary {
@@ -43,7 +44,7 @@ public class ArticleResDTO {
         private final String summary;
         private final String category;
         private final String relevance;
-        private final String riskLevel;
+        private final SensitivityResDTO sensitivity;
         private final String sentiment;
         private final List<PerspectiveTag> perspectiveTags;
     }
@@ -93,7 +94,7 @@ public class ArticleResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "changeType", "summary", "keyPoints", "intent", "sentiment", "riskLevel", "relevance",
+            "changeType", "summary", "keyPoints", "intent", "sentiment", "sensitivity", "relevance",
             "category", "perspectiveTags", "analyzedAt", "runId"
     })
     public static class Analysis {
@@ -103,7 +104,7 @@ public class ArticleResDTO {
         private final List<KeyPoint> keyPoints;
         private final String intent;
         private final String sentiment;
-        private final String riskLevel;
+        private final SensitivityResDTO sensitivity;
         private final String relevance;
         private final String category;
         private final List<PerspectiveTag> perspectiveTags;

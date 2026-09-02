@@ -14,7 +14,8 @@ class ArticleQueryServiceAudienceTest {
 
     private final ArticleQueryServiceImpl service = new ArticleQueryServiceImpl(
             mock(FindingRepository.class), mock(ArticleRepository.class),
-            mock(IssueArticleRepository.class));
+            mock(IssueArticleRepository.class),
+            com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
 
     @Test
     void rejectsUnknownAudienceWithAudience400() {

@@ -21,7 +21,10 @@ class FakeProvider:
         assert "반도체와 관련된 제조 산업" in system_instruction
         assert "회사 민감도 판정 기준" in system_instruction
         assert "summaryKo는 공백 포함 10자 이상 120자 이하" in system_instruction
-        assert "relevance가 none이면 해당 evidenceSentenceIds는 빈 배열" in system_instruction
+        assert (
+            "relevance가 none이거나 classification.sensitivity 축의 score가 null이면"
+            in system_instruction
+        )
         assert "교차 출처 비교 규칙" in system_instruction
         assert response_schema["additionalProperties"] is False
         self.prompts.append(prompt)
@@ -86,7 +89,12 @@ def valid_output(evidence_ids: list[int] | None = None) -> str:
             "classification": {
                 "intent": "생산 계획 발표",
                 "sentiment": "positive",
-                "riskLevel": "medium",
+                "sensitivity": {
+                    "customerMove": {"score": 2, "evidenceSentenceIds": [1]},
+                    "dealSignal": {"score": None, "evidenceSentenceIds": []},
+                    "competitorThreat": {"score": 1, "evidenceSentenceIds": [1]},
+                    "industryShift": {"score": 2, "evidenceSentenceIds": [1]},
+                },
                 "relevance": "important",
                 "category": "제품/공정",
             },
@@ -144,9 +152,7 @@ def test_generates_korean_analysis_from_english_article_with_sentence_ssot() -> 
         "Yield improved.",
     ]
     assert response.sections[0].bullets[0].evidence_sentence_ids == [1]
-    assert response.meta.prompt_version == (
-        "analyze.ko.v5+perspective.ko.v1+sensitivity.ko.v1"
-    )
+    assert response.meta.prompt_version == ("analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2")
     assert len(provider.prompts) == 1
 
 

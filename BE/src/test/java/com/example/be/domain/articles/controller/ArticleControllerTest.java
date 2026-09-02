@@ -42,13 +42,13 @@ class ArticleControllerTest {
         mockMvc.perform(get("/api/news/articles")
                         .param("runId", "42")
                         .param("changeType", "NEW")
-                        .param("riskLevel", "high"))
+                        .param("sensitivityLevel", "high"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("COMMON200"))
                 .andExpect(jsonPath("$.result.content[0].id").value(1025))
                 .andExpect(jsonPath("$.result.content[0].summary")
                         .value("미국의 첨단 반도체 장비 수출 통제 강화와 관련된 소식이 보도됐다."))
-                .andExpect(jsonPath("$.result.content[0].riskLevel").value("high"))
+                .andExpect(jsonPath("$.result.content[0].sensitivity.level").value("high"))
                 .andExpect(jsonPath("$.result.content[0].perspectiveTags[0].audience")
                         .value("CHIP_MAKER"));
     }
@@ -110,7 +110,10 @@ class ArticleControllerTest {
                 .id(1025L)
                 .title("US tightens export controls")
                 .summary("미국의 첨단 반도체 장비 수출 통제 강화와 관련된 소식이 보도됐다.")
-                .riskLevel("high")
+                .sensitivity(com.example.be.domain.analysis.dto.res.SensitivityResDTO.of(
+                        com.example.be.domain.analysis.entity.FindingSensitivity.legacy(
+                                com.example.be.domain.analysis.entity.SensitivityLevel.HIGH),
+                        com.example.be.domain.analysis.entity.SensitivityLevel.HIGH))
                 .perspectiveTags(List.of(perspectiveTag()))
                 .build();
     }

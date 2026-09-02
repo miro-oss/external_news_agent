@@ -81,7 +81,7 @@ class WatchNotificationDeliveryServiceTest {
                         3L, "김철수", channel, 4L, "user@example.com", true);
         WatchAlertSnapshot first = alert();
         WatchAlertSnapshot second = new WatchAlertSnapshot(
-                61L, 51L, null, "SK하이닉스 HBM4 증설",
+                61L, 51L, 71L, null, "SK하이닉스 HBM4 증설",
                 first.firstSeenAt(), 2, 3, first.queuedAt(), 1);
         RenderedNotification firstRendered = new RenderedNotification(
                 "[속보 후속] 삼성전자", null, List.of("첫 번째"));
@@ -108,9 +108,42 @@ class WatchNotificationDeliveryServiceTest {
         verify(outboxPersistenceService).markSent(61L);
     }
 
+    @Test
+    void deduplicatesWatchTypesForSameIssueAndRecipient() {
+        NotificationChannel channel = NotificationChannel.builder()
+                .id(2L).channelType(ChannelType.EMAIL).name("메일").maxLength(Integer.MAX_VALUE).active(true)
+                .build();
+        NotificationDeliveryPlanService.PreparedTarget target =
+                new NotificationDeliveryPlanService.PreparedTarget(
+                        3L, "김철수", channel, 4L, "user@example.com", true);
+        WatchAlertSnapshot first = alert();
+        WatchAlertSnapshot second = new WatchAlertSnapshot(
+                61L, 51L, first.issueId(), null, first.issueTitle(),
+                first.firstSeenAt(), 2, 3, first.queuedAt(), 1);
+        RenderedNotification rendered = new RenderedNotification(
+                "[속보 후속] 삼성전자", null, List.of("후속 내용"));
+        when(outboxPersistenceService.claimPending()).thenReturn(List.of(first, second));
+        when(planService.prepareWatchAlerts(any())).thenReturn(Map.of(
+                first.id(), new NotificationDeliveryPlanService.PreparedWatchDelivery(
+                        List.of(target), Map.of(2L, rendered)),
+                second.id(), new NotificationDeliveryPlanService.PreparedWatchDelivery(
+                        List.of(target), Map.of(2L, rendered))));
+        NotificationSender sender = mock(NotificationSender.class);
+        NotificationSender.DeliverySession session = mock(NotificationSender.DeliverySession.class);
+        when(senderRegistry.get(ChannelType.EMAIL)).thenReturn(sender);
+        when(sender.isConfigured(channel)).thenReturn(true);
+        when(sender.openSession(channel)).thenReturn(session);
+
+        assertEquals(1, service.deliverPending());
+
+        verify(session, times(1)).send("user@example.com", rendered.subject(), "후속 내용");
+        verify(outboxPersistenceService).markSent(60L);
+        verify(outboxPersistenceService).markSent(61L);
+    }
+
     private WatchAlertSnapshot alert() {
         OffsetDateTime now = OffsetDateTime.parse("2026-08-31T12:00:00+09:00");
-        return new WatchAlertSnapshot(60L, 50L, null, "삼성전자 HBM4 증설",
+        return new WatchAlertSnapshot(60L, 50L, 70L, null, "삼성전자 HBM4 증설",
                 now.minusHours(2), 1, 2, now, 1);
     }
 }

@@ -15,7 +15,7 @@ import {
   AUDIENCES,
   AUDIENCE_LABELS,
   CHANGE_TYPE_LABELS,
-  RISK_LEVEL_LABELS,
+  SENSITIVITY_LEVEL_LABELS,
   type Audience,
   type AudienceRelevance,
   type IssueArticle,
@@ -23,9 +23,10 @@ import {
   type ReportDetail,
   type ReportFinding,
   type ReportSummary,
-  type RiskLevel,
+  type SensitivityLevel,
 } from '../../api/types'
 import { KeyPointList } from '../../components/KeyPointList'
+import { SensitivityAxes } from '../../components/SensitivityAxes'
 import { formatFullDate, formatShortDate } from '../../lib/datetime'
 import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
@@ -151,7 +152,9 @@ function ReportListItem({ report, active, onSelect }: {
       <strong>{report.title}</strong>
       <span className="report-list-meta">
         분석 {report.findingCount}건
-        {report.highRiskCount > 0 && <em>{RISK_LEVEL_LABELS.high} {report.highRiskCount}</em>}
+        {report.highSensitivityCount > 0 && (
+          <em>{SENSITIVITY_LEVEL_LABELS.high} {report.highSensitivityCount}</em>
+        )}
       </span>
     </button>
   )
@@ -170,13 +173,16 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
     [audience, report.findings],
   )
   const filteredFindings = useMemo(() => {
-    if (filters.riskLevel) {
-      return findings.filter((finding) => finding.riskLevel === filters.riskLevel)
+    if (filters.sensitivityLevel) {
+      return findings.filter((finding) => finding.sensitivity.level === filters.sensitivityLevel)
     }
-    return [...findings].sort(
-      (left, right) => RISK_LEVEL_RANK[right.riskLevel] - RISK_LEVEL_RANK[left.riskLevel],
-    )
-  }, [filters, findings])
+    return [...findings].sort((left, right) => {
+      const levelDifference = SENSITIVITY_RANK[right.sensitivity.level]
+        - SENSITIVITY_RANK[left.sensitivity.level]
+      const perspectiveDifference = perspectiveRank(right, audience) - perspectiveRank(left, audience)
+      return levelDifference || perspectiveDifference || right.sensitivity.score - left.sensitivity.score
+    })
+  }, [audience, filters, findings])
   const stats = useMemo(() => summarizeFindings(findings), [findings])
   const evidenceCount = useMemo(() => countEvidenceSentences(report.findings ?? []), [report.findings])
   return (
@@ -195,7 +201,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
           <ReportStat value={findings.length} label="전체 이슈" />
           <ReportStat value={stats.newCount} label={CHANGE_TYPE_LABELS.NEW} />
           <ReportStat value={stats.updatedCount} label={CHANGE_TYPE_LABELS.UPDATED} />
-          <ReportStat value={stats.highRiskCount} label={RISK_LEVEL_LABELS.high} tone="danger" />
+          <ReportStat value={stats.highSensitivityCount} label={SENSITIVITY_LEVEL_LABELS.high} tone="danger" />
         </div>
       </header>
 
@@ -218,7 +224,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
             {filteredFindings.length === findings.length
               ? `${findings.length}건`
               : `${filteredFindings.length} / ${findings.length}건`}
-            {' · '}{filters.riskLevel ? '' : '높은 민감도순 · '}{AUDIENCE_LABELS[audience]} 관점순
+            {' · '}{filters.sensitivityLevel ? '' : '높은 민감도순 · '}{AUDIENCE_LABELS[audience]} 관점순
           </span>
         </div>
         <ReportFindingFilterBar
@@ -251,15 +257,15 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
 }
 
 type ReportFindingFilters = {
-  riskLevel: '' | RiskLevel
+  sensitivityLevel: '' | SensitivityLevel
 }
 
 const DEFAULT_REPORT_FINDING_FILTERS: ReportFindingFilters = {
-  riskLevel: 'high',
+  sensitivityLevel: 'high',
 }
 
 const EMPTY_REPORT_FINDING_FILTERS: ReportFindingFilters = {
-  riskLevel: '',
+  sensitivityLevel: '',
 }
 
 function ReportFindingFilterBar({
@@ -277,19 +283,22 @@ function ReportFindingFilterBar({
   onAudienceSelect: (audience: Audience) => void
   onReset: () => void
 }) {
-  const hasActiveFilters = Boolean(filters.riskLevel)
+  const hasActiveFilters = Boolean(filters.sensitivityLevel)
   return (
     <div className="report-finding-filter" aria-label="주요 이슈 필터">
       <label>
         민감도
         <select
-          value={filters.riskLevel}
-          onChange={(event) => onChange('riskLevel', event.target.value as ReportFindingFilters['riskLevel'])}
+          value={filters.sensitivityLevel}
+          onChange={(event) => onChange(
+            'sensitivityLevel',
+            event.target.value as ReportFindingFilters['sensitivityLevel'],
+          )}
         >
           <option value="">전체</option>
-          <option value="high">{RISK_LEVEL_LABELS.high}</option>
-          <option value="medium">{RISK_LEVEL_LABELS.medium}</option>
-          <option value="low">{RISK_LEVEL_LABELS.low}</option>
+          <option value="high">{SENSITIVITY_LEVEL_LABELS.high}</option>
+          <option value="medium">{SENSITIVITY_LEVEL_LABELS.medium}</option>
+          <option value="low">{SENSITIVITY_LEVEL_LABELS.low}</option>
         </select>
       </label>
       <label>
@@ -471,9 +480,9 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
         onKeyDown={handlePrimaryKeyDown}
       >
         <div className="issue-card-topline">
-          <span className={`signal-dot risk-${finding.riskLevel}`} aria-hidden="true" />
-          <span className={`status-pill risk-label-${finding.riskLevel}`}>
-            {RISK_LEVEL_LABELS[finding.riskLevel]}
+          <span className={`signal-dot sensitivity-${finding.sensitivity.level}`} aria-hidden="true" />
+          <span className={`status-pill sensitivity-label-${finding.sensitivity.level}`}>
+            {SENSITIVITY_LEVEL_LABELS[finding.sensitivity.level]} · {finding.sensitivity.score.toFixed(1)}
           </span>
           <span>{finding.category}</span>
           {issueInfo && <time dateTime={issueInfo.lastSeenAt}>{formatShortDate(issueInfo.lastSeenAt)}</time>}
@@ -513,6 +522,11 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
               </button>
             )}
           </section>
+
+          <SensitivityAxes
+            sensitivity={finding.sensitivity}
+            onEvidenceSelect={(evidence) => onEvidenceSelect(finding.articleId, evidence)}
+          />
 
           <KeyPointList
             points={keyPoints}
@@ -714,7 +728,7 @@ const PERSPECTIVE_RANK: Record<AudienceRelevance, number> = {
   none: 0,
 }
 
-const RISK_LEVEL_RANK: Record<RiskLevel, number> = {
+const SENSITIVITY_RANK: Record<SensitivityLevel, number> = {
   high: 3,
   medium: 2,
   low: 1,
@@ -744,7 +758,7 @@ function summarizeFindings(findings: ReportFinding[]) {
   return {
     newCount: findings.filter((finding) => finding.changeType === 'NEW').length,
     updatedCount: findings.filter((finding) => finding.changeType === 'UPDATED').length,
-    highRiskCount: findings.filter((finding) => finding.riskLevel === 'high').length,
+    highSensitivityCount: findings.filter((finding) => finding.sensitivity.level === 'high').length,
   }
 }
 

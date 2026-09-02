@@ -61,7 +61,16 @@ def request() -> ReportRequest:
                     ],
                     "intent": "생산 계획 발표",
                     "sentiment": "positive",
-                    "riskLevel": "high",
+                    "sensitivity": {
+                        "score": 100,
+                        "level": "high",
+                        "axes": {
+                            "customerMove": {"score": 3, "evidenceSentenceIds": [0]},
+                            "dealSignal": {"score": None, "evidenceSentenceIds": []},
+                            "competitorThreat": {"score": 3, "evidenceSentenceIds": [0]},
+                            "industryShift": {"score": 3, "evidenceSentenceIds": [0]},
+                        },
+                    },
                     "relevance": "important",
                     "category": "제품/공정",
                     "fetchStatus": "FULLTEXT",
@@ -180,18 +189,14 @@ def test_revalidates_forecast_written_as_completed_fact() -> None:
         }
     ]
     provider = FakeProvider(
-        provider_response(
-            valid_output(significance="회사는 HBM4 양산을 시작했다.")
-        )
+        provider_response(valid_output(significance="회사는 HBM4 양산을 시작했다."))
     )
 
     response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(
         ReportRequest.model_validate(payload)
     )
 
-    assert response.important_events[0].significance == (
-        "회사는 HBM4 양산을 시작할 예정이다."
-    )
+    assert response.important_events[0].significance == ("회사는 HBM4 양산을 시작할 예정이다.")
 
 
 def test_revalidates_every_related_key_point_before_accepting_claim() -> None:
@@ -223,9 +228,7 @@ def test_revalidates_every_related_key_point_before_accepting_claim() -> None:
         ReportRequest.model_validate(payload)
     )
 
-    assert response.important_events[0].significance == (
-        "회사는 HBM4 양산을 시작할 예정이다."
-    )
+    assert response.important_events[0].significance == ("회사는 HBM4 양산을 시작할 예정이다.")
 
 
 def test_editor_removes_duplicate_report_items() -> None:
@@ -254,9 +257,7 @@ def test_reinserts_opinion_attribution_during_final_validation() -> None:
         }
     ]
     provider = FakeProvider(
-        provider_response(
-            valid_output(significance="시장 수요가 개선될 것이라는 해석이다.")
-        )
+        provider_response(valid_output(significance="시장 수요가 개선될 것이라는 해석이다."))
     )
 
     response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(
@@ -367,8 +368,7 @@ def test_rejects_unsafe_canonical_url(canonical_url: str) -> None:
 def test_rejects_more_than_fifty_findings() -> None:
     payload = request().model_dump(by_alias=True, mode="json")
     payload["findings"] = [
-        {**payload["findings"][0], "id": index, "articleId": index + 1000}
-        for index in range(1, 52)
+        {**payload["findings"][0], "id": index, "articleId": index + 1000} for index in range(1, 52)
     ]
 
     with pytest.raises(ValidationError):
@@ -436,9 +436,7 @@ def test_mock_report_also_revalidates_forecast_wording() -> None:
         }
     ]
 
-    response = ReportWriterService(Settings()).write(
-        ReportRequest.model_validate(payload)
-    )
+    response = ReportWriterService(Settings()).write(ReportRequest.model_validate(payload))
 
     assert response.executive_summary == ["회사는 HBM4 양산을 시작할 예정이다."]
     assert response.important_events[0].summary_ko.endswith("예정이다.")

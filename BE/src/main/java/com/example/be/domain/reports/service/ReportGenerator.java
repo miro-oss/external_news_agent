@@ -3,8 +3,10 @@ package com.example.be.domain.reports.service;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.service.FindingEvidencePolicy;
+import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -17,11 +19,14 @@ import java.util.Map;
 
 /** Agent 비활성·장애 시에도 STUB finding을 오염시키지 않는 결정적 fallback 보고서를 만든다. */
 @Component
+@RequiredArgsConstructor
 public class ReportGenerator {
 
     public static final String MODEL_NAME = "safe-fallback-report-v1";
 
     private static final DateTimeFormatter TITLE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+
+    private final SensitivityCalculator sensitivityCalculator;
 
     public ReportDocument generate(List<Finding> findings, LocalDateTime generatedAt) {
         return generate(findings, generatedAt, ReportSourceStats.empty());
@@ -95,15 +100,16 @@ public class ReportGenerator {
                             FindingEvidencePolicy.reportSummary(finding))).append("\n"));
         }
 
-        Map<String, Long> riskCounts = counts(findings, finding -> finding.getRiskLevel().toApiValue());
+        Map<String, Long> sensitivityCounts = counts(findings, finding -> sensitivityCalculator
+                .level(finding.getSensitivity().getScore()).toApiValue());
         Map<String, Long> categoryCounts = counts(findings, Finding::getCategory);
         // 집계 키는 apiValue 그대로 두고 찍을 때만 한글로 바꾼다. 키까지 한글로 만들면
         // 같은 값이 코드 안에서 두 이름을 갖게 된다.
         body.append("\n## 요약 통계\n\n")
                 .append("- 전체 근거: ").append(findings.size()).append("건\n")
-                .append("- 민감도: 높음 ").append(riskCounts.getOrDefault("high", 0L))
-                .append(" · 보통 ").append(riskCounts.getOrDefault("medium", 0L))
-                .append(" · 낮음 ").append(riskCounts.getOrDefault("low", 0L)).append("\n");
+                .append("- 민감도: 높음 ").append(sensitivityCounts.getOrDefault("high", 0L))
+                .append(" · 보통 ").append(sensitivityCounts.getOrDefault("medium", 0L))
+                .append(" · 낮음 ").append(sensitivityCounts.getOrDefault("low", 0L)).append("\n");
         if (!categoryCounts.isEmpty()) {
             body.append("- 분류: ");
             body.append(categoryCounts.entrySet().stream()
@@ -121,7 +127,8 @@ public class ReportGenerator {
             body.append("\n### ").append(ReportMarkdown.text(finding.getArticle().getTitle())).append("\n\n")
                     .append(ReportMarkdown.text(FindingEvidencePolicy.reportSummary(finding))).append("\n\n")
                     .append("- 분류: ").append(ReportMarkdown.text(finding.getCategory()))
-                    .append(" · 민감도: ").append(ReportLabels.risk(finding.getRiskLevel()))
+                    .append(" · 민감도: ").append(ReportLabels.sensitivity(
+                            sensitivityCalculator.level(finding.getSensitivity().getScore())))
                     .append(" · 관련도: ").append(ReportLabels.relevance(finding.getRelevance())).append("\n");
             FindingEvidencePolicy.supportedKeyPoints(finding).forEach(point -> body
                     .append("- 핵심: ").append(ReportMarkdown.text(point.text())).append("\n"));

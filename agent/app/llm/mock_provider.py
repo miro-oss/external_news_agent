@@ -13,6 +13,8 @@ from app.schemas.analyze import (
     PerspectiveTag,
     ResponseMeta,
     Section,
+    Sensitivity,
+    SensitivityAxis,
     SoleSourceObservation,
 )
 
@@ -51,7 +53,12 @@ class MockAnalyzeProvider:
             classification=Classification(
                 intent="산업 동향 보도",
                 sentiment="neutral",
-                risk_level="low",
+                sensitivity=Sensitivity(
+                    customer_move=SensitivityAxis(score=1, evidence_sentence_ids=[1]),
+                    deal_signal=SensitivityAxis(score=None, evidence_sentence_ids=[]),
+                    competitor_threat=SensitivityAxis(score=0, evidence_sentence_ids=[1]),
+                    industry_shift=SensitivityAxis(score=0, evidence_sentence_ids=[1]),
+                ),
                 relevance="reference",
                 category="제품/공정",
             ),
@@ -126,9 +133,7 @@ def _cross_source(
     promote_candidates = []
     has_distinct_observation = False
     for member in request.issue_members:
-        candidate_text = "\n".join(
-            value for value in (member.title, member.summary) if value
-        )
+        candidate_text = "\n".join(value for value in (member.title, member.summary) if value)
         signal = cross_source_signal(reference_text, candidate_text)
         member_stances.append(
             MemberStance(
@@ -148,9 +153,7 @@ def _cross_source(
                 promote_candidates.append(member.id)
             has_distinct_observation = True
         elif signal.promotion_eligible:
-            sole_source.append(
-                SoleSourceObservation(article_id=member.id, text=member.title[:500])
-            )
+            sole_source.append(SoleSourceObservation(article_id=member.id, text=member.title[:500]))
             has_distinct_observation = True
 
     consensus = [] if has_distinct_observation else [request.article.title]

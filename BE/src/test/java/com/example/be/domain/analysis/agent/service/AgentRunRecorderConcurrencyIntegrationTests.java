@@ -120,7 +120,9 @@ class AgentRunRecorderConcurrencyIntegrationTests {
                                 "기사", List.of(1), "grounded", BigDecimal.ONE)))),
                 "기사",
                 new AgentAnalyzeResponse.Classification(
-                        "산업 동향 보도", "neutral", "low", "reference", "제품/공정"),
+                        "산업 동향 보도", "neutral",
+                        com.example.be.domain.analysis.agent.AgentSensitivityFixtures.analyze(1),
+                        "reference", "제품/공정"),
                 new AgentAnalyzeResponse.Entities(List.of(), List.of(), List.of()),
                 List.of(),
                 new AgentAnalyzeResponse.Meta(

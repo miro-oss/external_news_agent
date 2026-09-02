@@ -24,12 +24,14 @@ public interface NewsWatchRepository extends JpaRepository<NewsWatch, Long> {
             FROM NewsWatch watch
             WHERE watch.issue.id = :issueId
               AND watch.active = true
-              AND watch.watchType = com.example.be.domain.issues.entity.WatchType.BREAKING
+              AND watch.watchType IN (
+                    com.example.be.domain.issues.entity.WatchType.BREAKING,
+                    com.example.be.domain.issues.entity.WatchType.HIGH_SENSITIVITY)
               AND watch.expiresAt > :now
               AND (watch.cooldownUntil IS NULL OR watch.cooldownUntil <= :now)
             ORDER BY watch.id ASC
             """)
-    List<NewsWatch> findEligibleBreakingForNotification(
+    List<NewsWatch> findEligibleForNotification(
             @Param("issueId") Long issueId,
             @Param("now") LocalDateTime now);
 }

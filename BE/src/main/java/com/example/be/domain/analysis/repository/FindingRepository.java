@@ -2,7 +2,6 @@ package com.example.be.domain.analysis.repository;
 
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
-import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.collection.entity.ChangeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -13,6 +12,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -61,26 +61,37 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
     List<Finding> findForReportByRunId(@Param("runId") Long runId);
 
     @Query("""
-            SELECT finding.riskLevel AS riskLevel,
-                   finding.category AS category,
+            SELECT finding.category AS category,
                    finding.changeType AS changeType,
-                   COUNT(finding) AS findingCount
+                   COUNT(finding) AS findingCount,
+                   SUM(CASE WHEN finding.sensitivity.score >= :highThreshold
+                            THEN 1 ELSE 0 END) AS highSensitivityCount,
+                   SUM(CASE WHEN finding.sensitivity.score >= :mediumThreshold
+                                 AND finding.sensitivity.score < :highThreshold
+                            THEN 1 ELSE 0 END) AS mediumSensitivityCount,
+                   SUM(CASE WHEN finding.sensitivity.score < :mediumThreshold
+                            THEN 1 ELSE 0 END) AS lowSensitivityCount
             FROM Finding finding
             WHERE finding.run.id = :runId
-            GROUP BY finding.riskLevel, finding.category, finding.changeType
+            GROUP BY finding.category, finding.changeType
             """)
-    List<ReportStatsCount> countStatsByRunId(@Param("runId") Long runId);
+    List<ReportStatsCount> countStatsByRunId(
+            @Param("runId") Long runId,
+            @Param("mediumThreshold") BigDecimal mediumThreshold,
+            @Param("highThreshold") BigDecimal highThreshold);
 
     @Query("""
             SELECT finding.run.id AS runId,
                    COUNT(finding) AS findingCount,
-                   SUM(CASE WHEN finding.riskLevel = com.example.be.domain.analysis.entity.RiskLevel.HIGH
-                            THEN 1 ELSE 0 END) AS highRiskCount
+                   SUM(CASE WHEN finding.sensitivity.score >= :highThreshold
+                            THEN 1 ELSE 0 END) AS highSensitivityCount
             FROM Finding finding
             WHERE finding.run.id IN :runIds
             GROUP BY finding.run.id
             """)
-    List<ReportCount> countForReports(@Param("runIds") Collection<Long> runIds);
+    List<ReportCount> countForReports(
+            @Param("runIds") Collection<Long> runIds,
+            @Param("highThreshold") BigDecimal highThreshold);
 
     interface ReportCount {
 
@@ -88,17 +99,21 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
 
         long getFindingCount();
 
-        long getHighRiskCount();
+        long getHighSensitivityCount();
     }
 
     interface ReportStatsCount {
-
-        RiskLevel getRiskLevel();
 
         String getCategory();
 
         ChangeType getChangeType();
 
         long getFindingCount();
+
+        long getHighSensitivityCount();
+
+        long getMediumSensitivityCount();
+
+        long getLowSensitivityCount();
     }
 }

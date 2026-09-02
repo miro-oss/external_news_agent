@@ -16,11 +16,12 @@ import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.service.AnalysisResult;
 import com.example.be.domain.analysis.service.AnalysisContext;
 import com.example.be.domain.analysis.service.IssueAnalysisContext;
+import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.analysis.service.StubArticleAnalyzer;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.FetchStatus;
@@ -78,7 +79,8 @@ class AgentAnalysisOrchestratorTest {
     private final AgentAnalysisOrchestrator orchestrator =
             new AgentAnalysisOrchestrator(
                     properties, client, recorder, stub, quotaService, planService, resultWriter,
-                    crossSourceWriter, findingWriter);
+                    crossSourceWriter, findingWriter,
+                    com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
 
     @BeforeEach
     void reserveQuota() {
@@ -103,7 +105,8 @@ class AgentAnalysisOrchestratorTest {
         assertEquals(List.of(0), result.keyPoints().getFirst().evidence());
         assertEquals(0, result.sections().getFirst().index());
         assertEquals(Sentiment.NEUTRAL, result.sentiment());
-        assertEquals(RiskLevel.LOW, result.riskLevel());
+        assertEquals(SensitivityLevel.LOW,
+                SensitivityCalculator.defaults().level(result.sensitivity().getScore()));
         assertEquals(Relevance.REFERENCE, result.relevance());
         assertEquals(AnalysisSource.STUB, result.analysisSource());
         assertEquals(BigDecimal.ONE,
@@ -136,7 +139,7 @@ class AgentAnalysisOrchestratorTest {
                 "run:42:issue:88:self-critique",
                 AgentTask.SELF_CRITIQUE,
                 AgentPlan.FREE)).thenReturn(selfCritiqueReservation);
-        when(client.analyze(any())).thenReturn(highRiskIssueResponse());
+        when(client.analyze(any())).thenReturn(highSensitivityIssueResponse());
         when(client.selfCritique(any())).thenReturn(selfCritiqueResponse());
 
         AnalysisResult result = orchestrator.analyze(context);
@@ -147,7 +150,8 @@ class AgentAnalysisOrchestratorTest {
                 ArgumentCaptor.forClass(AgentAnalyzeRequest.class);
         verify(client).selfCritique(requestCaptor.capture());
         assertTrue(requestCaptor.getValue().selfCritique());
-        assertEquals("high", requestCaptor.getValue().previousFinding().riskLevel());
+        assertEquals(3, requestCaptor.getValue().previousFinding()
+                .sensitivity().customerMove().score());
         assertEquals(List.of(1), requestCaptor.getValue().previousFinding()
                 .sections().getFirst().bullets().getFirst().evidenceSentenceIds());
         verify(recorder).recordSelfCritiqueSuccess(
@@ -176,7 +180,7 @@ class AgentAnalysisOrchestratorTest {
                 "run:42:issue:88:self-critique",
                 AgentTask.SELF_CRITIQUE,
                 AgentPlan.FREE)).thenReturn(selfCritiqueReservation);
-        when(client.analyze(any())).thenReturn(highRiskIssueResponse());
+        when(client.analyze(any())).thenReturn(highSensitivityIssueResponse());
         when(client.selfCritique(any())).thenThrow(
                 new AgentClientException("PROVIDER_UNAVAILABLE", "down"));
 
@@ -216,7 +220,7 @@ class AgentAnalysisOrchestratorTest {
                 "run:42:issue:88:self-critique",
                 AgentTask.SELF_CRITIQUE,
                 AgentPlan.FREE)).thenReturn(reservation);
-        when(client.analyze(any())).thenReturn(highRiskIssueResponse());
+        when(client.analyze(any())).thenReturn(highSensitivityIssueResponse());
         when(client.selfCritique(any())).thenReturn(
                 selfCritiqueResponse("검증되지 않은 교체 요약입니다."));
 
@@ -475,7 +479,7 @@ class AgentAnalysisOrchestratorTest {
         assertEquals("gemini", result.metadata().provider());
         assertEquals("gemini-2.5-flash", result.metadata().model());
         assertEquals(
-                "analyze.ko.v5+perspective.ko.v1+sensitivity.ko.v1",
+                "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2",
                 result.metadata().promptVersion());
         assertEquals(120L, result.metadata().inputTokens());
         assertEquals(30L, result.metadata().outputTokens());
@@ -772,7 +776,9 @@ class AgentAnalysisOrchestratorTest {
                                 "핵심 주장", evidenceIds, "grounded", BigDecimal.ONE)))),
                 "한국어 요약",
                 new AgentAnalyzeResponse.Classification(
-                        "산업 동향 보도", "neutral", "low", "reference", category),
+                        "산업 동향 보도", "neutral",
+                        com.example.be.domain.analysis.agent.AgentSensitivityFixtures.analyze(1),
+                        "reference", category),
                 new AgentAnalyzeResponse.Entities(List.of("SK하이닉스"), List.of("HBM4"), List.of()),
                 perspectiveTags(),
                 new AgentAnalyzeResponse.Meta(
@@ -780,7 +786,7 @@ class AgentAnalysisOrchestratorTest {
                         mock ? "mock" : "gemini-2.5-flash",
                         mock
                                 ? "analyze.mock.v5"
-                                : "analyze.ko.v5+perspective.ko.v1+sensitivity.ko.v1",
+                                : "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2",
                         mock ? 0L : 120L,
                         mock ? 0L : 30L,
                         mock ? BigDecimal.ZERO : new BigDecimal("0.001"),
@@ -817,7 +823,7 @@ class AgentAnalysisOrchestratorTest {
                 source.meta());
     }
 
-    private static AgentAnalyzeResponse highRiskIssueResponse() {
+    private static AgentAnalyzeResponse highSensitivityIssueResponse() {
         AgentAnalyzeResponse source = response(List.of(1), "제품/공정", false);
         return new AgentAnalyzeResponse(
                 source.sentences(),
@@ -826,7 +832,7 @@ class AgentAnalysisOrchestratorTest {
                 new AgentAnalyzeResponse.Classification(
                         source.classification().intent(),
                         source.classification().sentiment(),
-                        "high",
+                        com.example.be.domain.analysis.agent.AgentSensitivityFixtures.analyze(3),
                         source.classification().relevance(),
                         source.classification().category()),
                 source.entities(),

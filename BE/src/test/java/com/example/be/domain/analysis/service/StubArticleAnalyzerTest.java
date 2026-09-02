@@ -2,11 +2,13 @@ package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.FetchStatus;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -14,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StubArticleAnalyzerTest {
 
-    private final StubArticleAnalyzer analyzer = new StubArticleAnalyzer();
+    private final StubArticleAnalyzer analyzer = new StubArticleAnalyzer(SensitivityCalculator.defaults());
 
     @Test
     void splitsFullTextAndKeepsEvidenceIndexesStable() {
@@ -49,7 +51,8 @@ class StubArticleAnalyzerTest {
 
         assertEquals("미국의 첨단 반도체 장비 수출 통제 강화와 관련된 소식이 보도됐다.", result.summary());
         assertEquals("정책", result.category());
-        assertEquals(RiskLevel.HIGH, result.riskLevel());
+        assertEquals(com.example.be.domain.analysis.entity.SensitivityLevel.HIGH,
+                SensitivityCalculator.defaults().level(result.sensitivity().getScore()));
         assertEquals(Sentiment.NEGATIVE, result.sentiment());
         assertFalse(result.sections().isEmpty());
         assertTrue(result.summary().matches(".*[가-힣].*"));
@@ -115,7 +118,9 @@ class StubArticleAnalyzerTest {
 
         AnalysisResult result = analyzer.analyze(article);
 
-        assertEquals(RiskLevel.LOW, result.riskLevel());
+        assertEquals(com.example.be.domain.analysis.entity.SensitivityLevel.HIGH,
+                SensitivityCalculator.defaults().level(result.sensitivity().getScore()));
+        assertEquals(3, result.sensitivity().dealSignal().score());
         assertEquals(Sentiment.NEUTRAL, result.sentiment());
         assertEquals(1, result.keyPoints().size());
     }
@@ -151,5 +156,23 @@ class StubArticleAnalyzerTest {
         assertEquals("유료 회원 가입 증가가 반도체 교육 플랫폼의 매출 성장을 이끌었다.",
                 result.summary());
         assertEquals(1, result.keyPoints().size());
+    }
+
+    @Test
+    void bindsEachSensitivityAxisToItsMatchingSection() {
+        Article article = Article.builder()
+                .title("투자 전망이 언급된 기사")
+                .body("회사는 일반 현황을 설명했다. 경쟁사가 신제품을 출시했다. 정부가 수출 통제를 강화했다.")
+                .language("ko")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+
+        AnalysisResult result = analyzer.analyze(article);
+
+        assertEquals(null, result.sensitivity().customerMove().score());
+        assertEquals(List.of(1), result.sensitivity().competitorThreat().evidenceSentenceIds());
+        assertEquals(List.of(2), result.sensitivity().industryShift().evidenceSentenceIds());
+        assertTrue(result.sections().get(1).text().contains("신제품"));
+        assertTrue(result.sections().get(2).text().contains("수출 통제"));
     }
 }

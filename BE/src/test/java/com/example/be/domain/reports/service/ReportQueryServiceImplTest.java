@@ -6,7 +6,7 @@ import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingPerspectiveTag;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
@@ -40,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -55,7 +56,8 @@ class ReportQueryServiceImplTest {
     private final DeliveryLogRepository deliveryLogRepository = mock(DeliveryLogRepository.class);
     private final ReportQueryServiceImpl service = new ReportQueryServiceImpl(
             reportRepository, findingRepository, issueArticleRepository,
-            newsIssueRepository, deliveryLogRepository);
+            newsIssueRepository, deliveryLogRepository,
+            com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
 
     @Test
     void latestReturnsNullWhenNoReportExists() {
@@ -78,7 +80,8 @@ class ReportQueryServiceImplTest {
                 .build();
         when(reportRepository.findAll(any(Specification.class), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(report)));
-        when(findingRepository.countForReports(List.of(42L))).thenReturn(List.of());
+        when(findingRepository.countForReports(
+                eq(List.of(42L)), any(java.math.BigDecimal.class))).thenReturn(List.of());
 
         var result = service.getReports(null, null, 0, 20);
 
@@ -132,18 +135,20 @@ class ReportQueryServiceImplTest {
         FindingRepository.ReportStatsCount count = mock(FindingRepository.ReportStatsCount.class);
         when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING))
                 .thenReturn(Optional.of(report));
-        when(count.getRiskLevel()).thenReturn(RiskLevel.HIGH);
         when(count.getCategory()).thenReturn("정책");
         when(count.getChangeType()).thenReturn(ChangeType.NEW);
         when(count.getFindingCount()).thenReturn(2L);
-        when(findingRepository.countStatsByRunId(42L)).thenReturn(List.of(count));
+        when(count.getHighSensitivityCount()).thenReturn(2L);
+        when(findingRepository.countStatsByRunId(
+                eq(42L), eq(new java.math.BigDecimal("40")), eq(new java.math.BigDecimal("70"))))
+                .thenReturn(List.of(count));
 
         ReportResDTO.Detail detail = service.getReport(17L, false);
 
         assertNull(detail.getFindings());
         assertEquals(2, detail.getSummaryStats().getFindingCount());
         assertEquals(2, detail.getSummaryStats().getNewCount());
-        assertEquals(2, detail.getSummaryStats().getByRiskLevel().get("high"));
+        assertEquals(2, detail.getSummaryStats().getBySensitivityLevel().get("high"));
         verify(findingRepository, never()).findForReportByRunId(42L);
     }
 
@@ -155,8 +160,8 @@ class ReportQueryServiceImplTest {
                 .promptVersion("report.ko.v1.4")
                 .llmProvider("anthropic")
                 .generatedAt(LocalDateTime.of(2026, 8, 18, 10, 0)).build();
-        Finding low = finding(2L, RiskLevel.LOW, Relevance.REFERENCE);
-        Finding high = finding(1L, RiskLevel.HIGH, Relevance.IMPORTANT);
+        Finding low = finding(2L, SensitivityLevel.LOW, Relevance.REFERENCE);
+        Finding high = finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
         IssueArticleRepository.CoverageMembership matchingMembership = membership(101L, 88L, 7L);
         IssueArticleRepository.CoverageMembership wrongTopicMembership = membership(102L, 99L, 8L);
         NewsIssue issue = NewsIssue.builder()
@@ -204,7 +209,7 @@ class ReportQueryServiceImplTest {
         NewsReport report = NewsReport.builder().id(17L).run(run).title("보고서")
                 .generatedAt(LocalDateTime.of(2026, 8, 18, 10, 0)).build();
         List<Finding> findings = LongStream.rangeClosed(1, 1_001)
-                .mapToObj(id -> finding(id, RiskLevel.LOW, Relevance.REFERENCE))
+                .mapToObj(id -> finding(id, SensitivityLevel.LOW, Relevance.REFERENCE))
                 .toList();
         when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING))
                 .thenReturn(Optional.of(report));
@@ -220,7 +225,7 @@ class ReportQueryServiceImplTest {
         assertEquals(List.of(900, 101), ids.getAllValues().stream().map(Collection::size).toList());
     }
 
-    private Finding finding(Long id, RiskLevel riskLevel, Relevance relevance) {
+    private Finding finding(Long id, SensitivityLevel sensitivityLevel, Relevance relevance) {
         Article article = Article.builder()
                 .id(id + 100)
                 .topic(topic(7L))
@@ -237,7 +242,7 @@ class ReportQueryServiceImplTest {
                                 "핵심", List.of(0), "grounded", "직접 확인", "OPINION", "분석가"),
                         new FindingKeyPoint("비근거 주장", List.of(1), "ungrounded")))
                 .sentiment(Sentiment.NEUTRAL)
-                .riskLevel(riskLevel)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(sensitivityLevel))
                 .relevance(relevance)
                 .category("정책")
                 .perspectiveTags(List.of(new FindingPerspectiveTag(

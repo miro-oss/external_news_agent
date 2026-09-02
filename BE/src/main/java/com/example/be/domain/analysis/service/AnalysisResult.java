@@ -5,9 +5,9 @@ import com.example.be.domain.analysis.entity.FindingAnalysisSection;
 import com.example.be.domain.analysis.entity.FindingEntities;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingPerspectiveTag;
+import com.example.be.domain.analysis.entity.FindingSensitivity;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 
 import java.util.List;
@@ -17,7 +17,7 @@ public record AnalysisResult(
         List<FindingKeyPoint> keyPoints,
         String intent,
         Sentiment sentiment,
-        RiskLevel riskLevel,
+        FindingSensitivity sensitivity,
         Relevance relevance,
         String category,
         List<FindingSection> sections,
@@ -43,13 +43,14 @@ public record AnalysisResult(
             List<FindingKeyPoint> keyPoints,
             String intent,
             Sentiment sentiment,
-            RiskLevel riskLevel,
+            FindingSensitivity sensitivity,
             Relevance relevance,
             String category,
             List<FindingSection> sections
     ) {
-        this(summary, keyPoints, intent, sentiment, riskLevel, relevance, category, sections,
+        this(summary, keyPoints, intent, sentiment, sensitivity, relevance, category, sections,
                 AnalysisSource.STUB, List.of(), FindingEntities.empty(), List.of(),
                 AnalysisMetadata.empty());
     }
+
 }

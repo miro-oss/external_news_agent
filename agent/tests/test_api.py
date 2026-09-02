@@ -113,7 +113,8 @@ def test_analyze_returns_deterministic_mock_contract() -> None:
     payload = response.json()
     assert payload["sentences"] == ["첫 문장입니다.", "두 번째 문장입니다."]
     assert payload["sections"][0]["bullets"][0]["evidenceSentenceIds"] == [1]
-    assert payload["classification"]["riskLevel"] == "low"
+    assert payload["classification"]["sensitivity"]["customerMove"]["score"] == 1
+    assert payload["classification"]["sensitivity"]["dealSignal"]["score"] is None
     assert payload["meta"]["provider"] == "mock"
     assert payload["meta"]["mock"] is True
     assert payload["crossSource"] == {
@@ -138,7 +139,12 @@ def test_analyze_self_critique_flag_reuses_same_endpoint() -> None:
     body["selfCritique"] = True
     body["previousFinding"] = {
         "summaryKo": "회사가 투자를 확정한 기사입니다.",
-        "riskLevel": "high",
+        "sensitivity": {
+            "customerMove": {"score": 3, "evidenceSentenceIds": [1]},
+            "dealSignal": {"score": None, "evidenceSentenceIds": []},
+            "competitorThreat": {"score": 3, "evidenceSentenceIds": [1]},
+            "industryShift": {"score": 3, "evidenceSentenceIds": [1]},
+        },
         "sections": [
             {
                 "heading": "핵심",
@@ -198,9 +204,7 @@ def test_mock_analysis_compares_issue_members_and_promotes_at_most_one() -> None
     payload = response.json()
     assert payload["crossSource"]["conflicts"][0]["articleIds"] == [10, 11]
     assert payload["promoteCandidates"] == [11]
-    assert payload["memberStances"] == [
-        {"articleId": 11, "stance": "DISPUTES", "confidence": 0.85}
-    ]
+    assert payload["memberStances"] == [{"articleId": 11, "stance": "DISPUTES", "confidence": 0.85}]
 
 
 def test_rejects_more_than_ten_issue_members() -> None:

@@ -38,7 +38,7 @@ class ReportControllerTest {
                 .generatedAt(OffsetDateTime.parse("2026-08-18T10:03:12+09:00"))
                 .modelName("stub-report-v1")
                 .findingCount(17)
-                .highRiskCount(3)
+                .highSensitivityCount(3)
                 .deliveryStatus("NOT_SENT")
                 .build();
         when(reportQueryService.getReports("2026-08-01", null, 0, 20))
@@ -48,7 +48,7 @@ class ReportControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("COMMON200"))
                 .andExpect(jsonPath("$.result.content[0].runId").value(42))
-                .andExpect(jsonPath("$.result.content[0].highRiskCount").value(3))
+                .andExpect(jsonPath("$.result.content[0].highSensitivityCount").value(3))
                 .andExpect(jsonPath("$.result.content[0].deliveryStatus").value("NOT_SENT"));
     }
 
@@ -77,7 +77,7 @@ class ReportControllerTest {
                         .findingCount(1)
                         .newCount(1)
                         .updatedCount(0)
-                        .byRiskLevel(Map.of("high", 1L))
+                        .bySensitivityLevel(Map.of("high", 1L))
                         .byCategory(Map.of("정책", 1L))
                         .build())
                 .findings(null)
@@ -104,7 +104,7 @@ class ReportControllerTest {
                         .findingCount(1)
                         .newCount(1)
                         .updatedCount(0)
-                        .byRiskLevel(Map.of("high", 1L))
+                        .bySensitivityLevel(Map.of("high", 1L))
                         .byCategory(Map.of("정책", 1L))
                         .build())
                 .findings(List.of(ReportResDTO.Finding.builder()

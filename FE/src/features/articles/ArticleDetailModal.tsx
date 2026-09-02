@@ -3,11 +3,12 @@ import { useArticle } from '../../api/queries'
 import {
   AUDIENCES,
   AUDIENCE_LABELS,
-  RISK_LEVEL_LABELS,
+  SENSITIVITY_LEVEL_LABELS,
   type ArticleAnalysis,
   type Audience,
 } from '../../api/types'
 import { KeyPointList } from '../../components/KeyPointList'
+import { SensitivityAxes } from '../../components/SensitivityAxes'
 import { formatMediumDate } from '../../lib/datetime'
 import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { scrollIntoViewGently } from '../../lib/motion'
@@ -204,12 +205,13 @@ function AnalysisPanel({
         </div>
         <div className="analysis-labels">
           <span>{analysis.category}</span>
-          <span>{RISK_LEVEL_LABELS[analysis.riskLevel]}</span>
+          <span>{SENSITIVITY_LEVEL_LABELS[analysis.sensitivity.level]} · {analysis.sensitivity.score.toFixed(1)}</span>
           <span>{analysis.relevance === 'important' ? '중요' : analysis.relevance === 'watch' ? '관찰' : '참고'}</span>
         </div>
       </div>
       <p className="analysis-summary">{analysis.summary}</p>
       {analysis.intent && <p className="intent">의도 · {analysis.intent}</p>}
+      <SensitivityAxes sensitivity={analysis.sensitivity} onEvidenceSelect={onEvidenceSelect} />
       <div className="perspective-tabs" role="tablist" aria-label="독자 관점별 분석">
         {AUDIENCES.map((audience) => {
           const tag = perspectiveTags.find((item) => item.audience === audience)

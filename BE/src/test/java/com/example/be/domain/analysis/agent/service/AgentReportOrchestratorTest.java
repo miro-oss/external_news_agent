@@ -13,7 +13,7 @@ import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -69,7 +69,8 @@ class AgentReportOrchestratorTest {
     private final AgentReportOrchestrator orchestrator =
             new AgentReportOrchestrator(
                     properties, client, recorder, fallback, observationRepository,
-                    quotaService, planService, resultWriter, issueArticleRepository);
+                    quotaService, planService, resultWriter, issueArticleRepository,
+                    com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
 
     @BeforeEach
     void reserveQuota() {
@@ -154,7 +155,8 @@ class AgentReportOrchestratorTest {
         AgentProperties disabled = new AgentProperties();
         AgentReportOrchestrator disabledOrchestrator = new AgentReportOrchestrator(
                 disabled, client, recorder, fallback, observationRepository,
-                quotaService, planService, resultWriter, issueArticleRepository);
+                quotaService, planService, resultWriter, issueArticleRepository,
+                com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
         Finding representative = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "대표 요약");
         Finding member = finding(502L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "멤버 요약");
         NewsIssue issue = NewsIssue.builder().id(88L).build();
@@ -199,7 +201,8 @@ class AgentReportOrchestratorTest {
         AgentReportOrchestrator disabledOrchestrator =
                 new AgentReportOrchestrator(
                         disabled, client, recorder, fallback, observationRepository,
-                        quotaService, planService, resultWriter, issueArticleRepository);
+                        quotaService, planService, resultWriter, issueArticleRepository,
+                        com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT, "STUB 요약");
         ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
         when(fallback.generate(eq(List.of(stub)), any(), any())).thenReturn(fallbackDocument);
@@ -422,7 +425,7 @@ class AgentReportOrchestratorTest {
                 .keyPoints(keyPoints)
                 .intent("산업 동향 보도")
                 .sentiment(Sentiment.NEUTRAL)
-                .riskLevel(RiskLevel.HIGH)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.HIGH))
                 .relevance(Relevance.IMPORTANT)
                 .category("제품/공정")
                 .analysisSource(source)

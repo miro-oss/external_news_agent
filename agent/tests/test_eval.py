@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -28,13 +29,14 @@ from app.eval.scorer import (
     korean_summary_pass,
     score_claim_controls,
 )
+from app.llm.analyze_service import ArticleAnalyzeService
 from app.llm.base import ProviderResponse, ProviderUsage
 
 _GOLDEN_DIR = Path(__file__).resolve().parents[1] / "app" / "eval" / "golden"
 _DATASET_PATH = _GOLDEN_DIR / "semiconductor.v1.json"
 _CLAIM_DATASET_PATH = _GOLDEN_DIR / "claims.ko.v1.json"
 _REPORT_FIXTURE_PATH = _GOLDEN_DIR / "report.ko.v1.4.json"
-_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v5.baseline.json"
+_BASELINE_PATH = _GOLDEN_DIR / "analyze.ko.v6.baseline.json"
 
 
 def eval_settings() -> Settings:
@@ -67,9 +69,7 @@ def test_replay_golden_eval_keeps_quality_and_validates_perspective_fixture() ->
 
     assert result.errors == ()
     legacy_metrics = {
-        key: value
-        for key, value in result.metrics.items()
-        if not key.startswith("perspectiveTag")
+        key: value for key, value in result.metrics.items() if not key.startswith("perspectiveTag")
     }
     baseline_legacy_metrics = {
         key: value
@@ -84,9 +84,58 @@ def test_replay_golden_eval_keeps_quality_and_validates_perspective_fixture() ->
     assert result.metrics["summaryLengthP50"] == 39
     assert result.metrics["summaryLengthP95"] == 45
     assert result.metrics["summaryLengthMax"] == 68
-    assert result.metrics["highSensitivityEvidenceRate"] == 1.0
+    assert result.metrics["highSensitivityEvidenceRate"] == 0.5
     assert result.claim_control_diagnostics == baseline["claimControlDiagnostics"]
     assert compare_results(result.to_dict(), baseline)["regressions"] == []
+
+
+def test_sensitivity_scoring_uses_backend_configuration_and_zero_based_report_evidence() -> None:
+    scoring = eval_runner.load_sensitivity_scoring_config()
+    case = load_dataset(_DATASET_PATH).cases[0]
+    sensitivity = eval_runner.Sensitivity.model_validate(
+        case.replay["classification"]["sensitivity"]
+    )
+
+    payload = eval_runner._classification_sensitivity(sensitivity, scoring)
+
+    assert scoring.customer_move_weight == Decimal("0.35")
+    assert scoring.high_threshold == Decimal("70")
+    assert payload["score"] == 57.14
+    assert payload["axes"]["customerMove"]["evidenceSentenceIds"] == [0]
+
+
+def test_non_default_sensitivity_threshold_changes_eval_counts_and_recorded_config() -> None:
+    scoring = eval_runner.SensitivityScoringConfig(
+        customer_move_weight=Decimal("0.35"),
+        deal_signal_weight=Decimal("0.30"),
+        competitor_threat_weight=Decimal("0.20"),
+        industry_shift_weight=Decimal("0.15"),
+        medium_threshold=Decimal("30"),
+        high_threshold=Decimal("55"),
+    )
+
+    result = run_evaluation(
+        load_dataset(_DATASET_PATH),
+        settings=eval_settings(),
+        claim_dataset=load_claim_dataset(_CLAIM_DATASET_PATH),
+        report_fixture=load_report_fixture(_REPORT_FIXTURE_PATH),
+        sensitivity_scoring=scoring,
+    )
+
+    assert result.metrics["highSensitivityCount"] > 2
+    assert result.config.to_dict()["sensitivityScoring"]["highThreshold"] == 55.0
+
+
+def test_high_sensitivity_evidence_gate_rejects_unlinked_axis_evidence() -> None:
+    case = load_dataset(_DATASET_PATH).cases[5]
+    response = ArticleAnalyzeService(
+        eval_settings().model_copy(update={"mock": False}), ReplayProvider(case.replay)
+    ).analyze(eval_runner._analyze_request(case, "FREE"))
+    assert eval_runner._has_high_sensitivity_evidence(response)
+
+    response.classification.sensitivity.customer_move.evidence_sentence_ids = [999]
+
+    assert not eval_runner._has_high_sensitivity_evidence(response)
 
 
 def test_adversarial_cases_have_expected_failure_labels() -> None:
@@ -117,13 +166,9 @@ def test_claim_controls_exercise_decisive_rules_and_provider_routes() -> None:
     dataset = load_claim_dataset(_CLAIM_DATASET_PATH)
     scores = score_claim_controls(dataset.controls, grounded_overlap=0.6)
     invalid_statuses = {
-        score.claim_id: score.status
-        for score in scores
-        if score.validity == "invalid"
+        score.claim_id: score.status for score in scores if score.validity == "invalid"
     }
-    positive_statuses = [
-        score.status for score in scores if score.validity == "valid"
-    ]
+    positive_statuses = [score.status for score in scores if score.validity == "valid"]
 
     assert invalid_statuses == {
         "number-percent-invalid": "ungrounded",
@@ -199,9 +244,7 @@ def test_claim_control_counts_treat_weak_invalid_as_false_pass() -> None:
 
 
 def test_claim_control_schema_requires_invalid_and_valid_pair() -> None:
-    payload = json.loads(
-        load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True)
-    )
+    payload = json.loads(load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True))
     payload["controls"][0]["labels"][1]["validity"] = "invalid"
 
     with pytest.raises(ValueError, match="invalid/valid"):
@@ -209,9 +252,7 @@ def test_claim_control_schema_requires_invalid_and_valid_pair() -> None:
 
 
 def test_claim_control_schema_requires_three_pairs_per_failure_type() -> None:
-    payload = json.loads(
-        load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True)
-    )
+    payload = json.loads(load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True))
     payload["controls"][0]["failureType"] = "unsupported-claim"
 
     with pytest.raises(ValueError, match="유형별 3쌍"):
@@ -219,12 +260,8 @@ def test_claim_control_schema_requires_three_pairs_per_failure_type() -> None:
 
 
 def test_claim_control_schema_rejects_duplicate_claim_text() -> None:
-    payload = json.loads(
-        load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True)
-    )
-    payload["controls"][1]["labels"][1]["claim"] = payload["controls"][0][
-        "labels"
-    ][1]["claim"]
+    payload = json.loads(load_claim_dataset(_CLAIM_DATASET_PATH).model_dump_json(by_alias=True))
+    payload["controls"][1]["labels"][1]["claim"] = payload["controls"][0]["labels"][1]["claim"]
 
     with pytest.raises(ValueError, match="claim 문장"):
         GoldenClaimDataset.model_validate(payload)

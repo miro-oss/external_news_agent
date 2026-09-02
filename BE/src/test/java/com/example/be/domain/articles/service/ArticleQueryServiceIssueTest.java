@@ -5,7 +5,7 @@ import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.entity.Relevance;
-import com.example.be.domain.analysis.entity.RiskLevel;
+import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.articles.dto.res.ArticleResDTO;
@@ -42,7 +42,8 @@ class ArticleQueryServiceIssueTest {
     private final ArticleRepository articleRepository = mock(ArticleRepository.class);
     private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
     private final ArticleQueryServiceImpl service = new ArticleQueryServiceImpl(
-            findingRepository, articleRepository, issueArticleRepository);
+            findingRepository, articleRepository, issueArticleRepository,
+            com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
 
     @Test
     void memberDetailUsesRepresentativeAnalysisAndLinksIssue() {
@@ -135,7 +136,7 @@ class ArticleQueryServiceIssueTest {
                         "FORECAST",
                         null)))
                 .sentiment(Sentiment.NEGATIVE)
-                .riskLevel(RiskLevel.HIGH)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.HIGH))
                 .relevance(Relevance.IMPORTANT)
                 .category("기업")
                 .analysisSource(AnalysisSource.LLM)
@@ -185,7 +186,7 @@ class ArticleQueryServiceIssueTest {
                 .summary("대표 기사 분석")
                 .keyPoints(List.of(new FindingKeyPoint("대표 주장", List.of(0), "grounded")))
                 .sentiment(Sentiment.NEUTRAL)
-                .riskLevel(RiskLevel.MEDIUM)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.MEDIUM))
                 .relevance(Relevance.IMPORTANT)
                 .category("기업")
                 .analysisSource(AnalysisSource.LLM)
@@ -256,7 +257,7 @@ class ArticleQueryServiceIssueTest {
                 .summary("대표 분석")
                 .keyPoints(List.of(new FindingKeyPoint("대표 주장", List.of(0), "grounded")))
                 .sentiment(Sentiment.NEUTRAL)
-                .riskLevel(RiskLevel.MEDIUM)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.MEDIUM))
                 .relevance(Relevance.IMPORTANT)
                 .category("기업")
                 .analysisSource(AnalysisSource.LLM)

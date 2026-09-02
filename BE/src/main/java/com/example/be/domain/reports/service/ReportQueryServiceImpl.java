@@ -1,9 +1,11 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.analysis.service.FindingEvidencePolicy;
+import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
@@ -56,6 +58,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     private final IssueArticleRepository issueArticleRepository;
     private final NewsIssueRepository newsIssueRepository;
     private final DeliveryLogRepository deliveryLogRepository;
+    private final SensitivityCalculator sensitivityCalculator;
 
     @Override
     public PageResponse<ReportResDTO.Summary> getReports(String from, String to, int page, int size) {
@@ -105,7 +108,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .generatedAt(toOffset(report.getGeneratedAt()))
                 .modelName(report.getModelName())
                 .findingCount(count == null ? 0 : count.getFindingCount())
-                .highRiskCount(count == null ? 0 : count.getHighRiskCount())
+                .highSensitivityCount(count == null ? 0 : count.getHighSensitivityCount())
                 .deliveryStatus(deliveryStatus)
                 .build();
     }
@@ -139,7 +142,10 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 : Map.of();
         ReportResDTO.SummaryStats summaryStats = includeFindings
                 ? toStats(findings)
-                : toStatsFromCounts(findingRepository.countStatsByRunId(runId));
+                : toStatsFromCounts(findingRepository.countStatsByRunId(
+                        runId,
+                        sensitivityCalculator.mediumThreshold(),
+                        sensitivityCalculator.highThreshold()));
         return ReportResDTO.Detail.builder()
                 .id(report.getId())
                 .runId(runId)
@@ -196,21 +202,22 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     }
 
     private ReportResDTO.SummaryStats toStats(List<Finding> findings) {
-        Map<String, Long> byRiskLevel = orderedCounts(findings,
-                finding -> finding.getRiskLevel().toApiValue(), List.of("high", "medium", "low"));
+        Map<String, Long> bySensitivityLevel = orderedCounts(findings,
+                finding -> sensitivityCalculator.level(finding.getSensitivity().getScore()).toApiValue(),
+                List.of("high", "medium", "low"));
         Map<String, Long> byCategory = orderedCounts(findings, Finding::getCategory,
                 FindingCategory.ORDERED_VALUES);
         return ReportResDTO.SummaryStats.builder()
                 .findingCount(findings.size())
                 .newCount(findings.stream().filter(finding -> finding.getChangeType() == ChangeType.NEW).count())
                 .updatedCount(findings.stream().filter(finding -> finding.getChangeType() == ChangeType.UPDATED).count())
-                .byRiskLevel(byRiskLevel)
+                .bySensitivityLevel(bySensitivityLevel)
                 .byCategory(byCategory)
                 .build();
     }
 
     private ReportResDTO.SummaryStats toStatsFromCounts(List<FindingRepository.ReportStatsCount> counts) {
-        Map<String, Long> byRiskLevel = emptyOrderedCounts(List.of("high", "medium", "low"));
+        Map<String, Long> bySensitivityLevel = emptyOrderedCounts(List.of("high", "medium", "low"));
         Map<String, Long> byCategory = emptyOrderedCounts(FindingCategory.ORDERED_VALUES);
         long findingCount = 0;
         long newCount = 0;
@@ -223,14 +230,16 @@ public class ReportQueryServiceImpl implements ReportQueryService {
             } else if (count.getChangeType() == ChangeType.UPDATED) {
                 updatedCount += value;
             }
-            byRiskLevel.merge(count.getRiskLevel().toApiValue(), value, Long::sum);
+            bySensitivityLevel.merge("high", count.getHighSensitivityCount(), Long::sum);
+            bySensitivityLevel.merge("medium", count.getMediumSensitivityCount(), Long::sum);
+            bySensitivityLevel.merge("low", count.getLowSensitivityCount(), Long::sum);
             byCategory.merge(count.getCategory(), value, Long::sum);
         }
         return ReportResDTO.SummaryStats.builder()
                 .findingCount(findingCount)
                 .newCount(newCount)
                 .updatedCount(updatedCount)
-                .byRiskLevel(byRiskLevel)
+                .bySensitivityLevel(bySensitivityLevel)
                 .byCategory(byCategory)
                 .build();
     }
@@ -257,7 +266,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                         .toList())
                 .intent(finding.getIntent())
                 .sentiment(finding.getSentiment().toApiValue())
-                .riskLevel(finding.getRiskLevel().toApiValue())
+                .sensitivity(SensitivityResDTO.of(finding.getSensitivity(),
+                        sensitivityCalculator.level(finding.getSensitivity().getScore())))
                 .relevance(finding.getRelevance().toApiValue())
                 .category(finding.getCategory())
                 .perspectiveTags(finding.getPerspectiveTags() == null ? List.of()
@@ -294,7 +304,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
             return Map.of();
         }
         List<Long> runIds = reports.stream().map(report -> report.getRun().getId()).toList();
-        return findingRepository.countForReports(runIds).stream()
+        return findingRepository.countForReports(runIds, sensitivityCalculator.highThreshold()).stream()
                 .collect(Collectors.toMap(FindingRepository.ReportCount::getRunId, Function.identity()));
     }
 

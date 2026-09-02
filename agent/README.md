@@ -20,7 +20,7 @@ run 보고서 작성(`/v1/report`)을 제공하며, 기본 Mock 모드에서는 
 ## `/v1/analyze` 자기 검증 계약
 
 P1-7 자기 검증도 새 엔드포인트를 만들지 않고 `/v1/analyze`를 사용합니다. Spring은 이번 실행의
-`topicFit + 매체 수 + 최신성` 상위 20% 이슈 가운데 최초 분석의 `riskLevel=high`인 결과에만
+`topicFit + 매체 수 + 최신성` 상위 20% 이슈 가운데 서버 계산 민감도 총점이 70 이상인 결과에만
 `selfCritique: true`와 검증된 `previousFinding`을 보냅니다. Agent는 규칙층이 확정하지 못했거나
 표현 강도가 한 단계 높거나 교차 출처 충돌과 연결된 주장 중 최대 한 건만 고릅니다.
 
@@ -33,7 +33,12 @@ P1-7 자기 검증도 새 엔드포인트를 만들지 않고 `/v1/analyze`를 �
   "topic": {"name": "반도체 투자"},
   "previousFinding": {
     "summaryKo": "A사가 투자를 승인했다.",
-    "riskLevel": "high",
+    "sensitivity": {
+      "customerMove": {"score": 3, "evidenceSentenceIds": [1]},
+      "dealSignal": {"score": null, "evidenceSentenceIds": []},
+      "competitorThreat": {"score": 2, "evidenceSentenceIds": [1]},
+      "industryShift": {"score": 1, "evidenceSentenceIds": [1]}
+    },
     "sections": [{
       "heading": "핵심",
       "bullets": [{
@@ -217,7 +222,7 @@ uv run pytest
 ## Golden eval
 
 `app/eval/golden/semiconductor.v1.json`은 한국어·영어 반도체 기사 24건과
-`analyze.ko.v5+perspective.ko.v1+sensitivity.ko.v1` replay 출력 및 관점 정답을 담습니다. 수치 오기,
+`analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2` replay 출력 및 관점 정답을 담습니다. 수치 오기,
 기업명 바꿔치기, 부정 반전, 영문 요약은 기존 `expectedFailures` 4건으로 보존합니다.
 `claims.ko.v1.json`은 숫자 불일치·부정 반전·기업명 바꿔치기·강도 과장·원문에 없는 주장 5유형을
 각 3쌍씩 담으며, 같은 근거에 invalid claim과 패러프레이즈한 valid positive control을 함께 둡니다.
@@ -227,7 +232,7 @@ uv run pytest
 
 ```bash
 uv run python -m app.eval --profile replay \
-  --compare app/eval/golden/analyze.ko.v5.baseline.json
+  --compare app/eval/golden/analyze.ko.v6.baseline.json
 ```
 
 replay의 `perspectiveTagAccuracy` 96/96은 모델 품질이 아니라 fixture 출력과
@@ -239,7 +244,9 @@ replay는 외부 API 없이 실제 스키마·문장 분할·사실값 검증·�
 기본 CI는 replay 기준선만 사용하며 메타데이터, 런타임 설정, 지표 또는 평가 커버리지가 회귀하면
 실패합니다.
 
-live 프로필은 실제 provider 인증 정보와 비용 승인이 필요하다. 이 저장소에서는 토큰을 읽지 않으므로, P1-5의 `analyze.ko.v5` 기준선은 replay로만 재생성을 확인한다.
+live 프로필은 실제 provider 인증 정보와 비용 승인이 필요하다. replay와 CI는 저장소에 인증 정보를
+보관하거나 읽지 않고, live 프로필만 실행 환경의 provider 인증 변수를 읽는다. P2-2의
+`analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2` 기준선은 replay로 재생성을 확인한다.
 
 - schema pass rate: 분석 24건과 보고서 1건의 계약 검증 통과율
 - grounded rate: 분석 bullet 중 `grounded` 판정 비율 (`weak`은 포함하지 않음)
@@ -248,7 +255,8 @@ live 프로필은 실제 provider 인증 정보와 비용 승인이 필요하다
   않고 가장 잘 맞는 단일 finding으로 판정
 - Korean summary pass rate: 한글 5자 이상이며 한글·영문 문자 중 한글 비율이 50% 이상인 요약 비율
 - summary length P50/P95/max: 분석 요약의 글자 수 분포. P95는 120자 이하여야 함
-- high sensitivity evidence rate: high 민감도 판정 중 하나 이상의 근거 bullet이 연결된 비율
+- high sensitivity evidence rate: high 민감도 판정 중 가용 축이 둘 이상이고, 각 축의 유효한 근거 문장이
+  하나 이상의 grounded/weak bullet에도 연결된 비율
 - perspective tag accuracy: 기사별 정답 관점과 `medium`/`high`로 태깅된 관점의 4×24 일치율
 - evidence provider call reduction rate: `ungrounded`로 선차단된 bullet을 제외하고 근거 검증이 필요한
   bullet 중 rule-only로 확정돼 provider 호출을 생략할 수 있는 비율. replay 기준선은 21건 중 11건을
