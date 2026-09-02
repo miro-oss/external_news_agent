@@ -1,12 +1,14 @@
 package com.example.be.domain.issues.service;
 
 import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.entity.IssueRelationType;
 import com.example.be.domain.issues.entity.IssueStatus;
 import com.example.be.domain.issues.entity.IssueStatusHistory;
 import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.entity.NewsWatch;
 import com.example.be.domain.issues.entity.WatchType;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.issues.repository.IssueRelationRepository;
 import com.example.be.domain.issues.repository.IssueStatusHistoryRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.issues.repository.NewsWatchRepository;
@@ -29,6 +31,7 @@ public class IssueProjectionService {
 
     private final NewsIssueRepository issueRepository;
     private final IssueArticleRepository issueArticleRepository;
+    private final IssueRelationRepository issueRelationRepository;
     private final IssueStatusHistoryRepository statusHistoryRepository;
     private final NewsWatchRepository watchRepository;
     private final IssueStatusCalculator statusCalculator;
@@ -45,7 +48,12 @@ public class IssueProjectionService {
     public void recalculate(NewsIssue issue,
                             List<IssueArticle> memberships,
                             OffsetDateTime now) {
-        IssueStatusCalculator.Projection projection = statusCalculator.calculate(issue, memberships);
+        IssueStatusCalculator.Projection projection = issueRelationRepository
+                .existsByToIssueIdAndRelationType(issue.getId(), IssueRelationType.REFUTES)
+                ? new IssueStatusCalculator.Projection(
+                IssueStatus.RETRACTED,
+                "연결된 검증 실패·정정 이슈가 원 주장을 반박")
+                : statusCalculator.calculate(issue, memberships);
         IssueStatus previous = issue.applyStatus(projection.status());
         if (previous != projection.status()) {
             statusHistoryRepository.save(IssueStatusHistory.builder()

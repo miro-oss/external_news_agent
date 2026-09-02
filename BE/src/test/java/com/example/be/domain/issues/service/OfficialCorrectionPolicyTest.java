@@ -57,6 +57,24 @@ class OfficialCorrectionPolicyTest {
         assertFalse(policy.matches(issue, membership(issue, correction)));
     }
 
+    @Test
+    void rejectsCorrectionHostedOutsideRegisteredEntityDomain() {
+        NewsIssue issue = NewsIssue.builder().entities(List.of("삼성전자")).build();
+        Source source = Source.builder()
+                .sourceKind(Source.KIND_FEED)
+                .name("삼성전자 뉴스룸")
+                .urlTemplate("https://news.samsung.com/kr/feed")
+                .build();
+        Article correction = Article.builder()
+                .id(2L)
+                .title("삼성전자 HBM4 보도 정정")
+                .canonicalUrl("https://news.samsung.com.evil.example/article/1")
+                .source(source)
+                .build();
+
+        assertFalse(policy.matches(issue, membership(issue, correction)));
+    }
+
     private IssueArticle membership(NewsIssue issue, Article article) {
         return IssueArticle.builder()
                 .issue(issue)

@@ -10,4 +10,8 @@ public interface IssueRelationRepository extends JpaRepository<IssueRelation, Lo
             Long fromIssueId,
             Long toIssueId,
             IssueRelationType relationType);
+
+    boolean existsByToIssueIdAndRelationType(
+            Long toIssueId,
+            IssueRelationType relationType);
 }

@@ -1,11 +1,13 @@
 package com.example.be.domain.issues.service;
 
 import com.example.be.domain.issues.entity.IssueStatus;
+import com.example.be.domain.issues.entity.IssueRelationType;
 import com.example.be.domain.issues.entity.IssueStatusHistory;
 import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.entity.NewsWatch;
 import com.example.be.domain.issues.entity.WatchType;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.issues.repository.IssueRelationRepository;
 import com.example.be.domain.issues.repository.IssueStatusHistoryRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.issues.repository.NewsWatchRepository;
@@ -22,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -30,6 +33,7 @@ class IssueProjectionServiceTest {
 
     private final NewsIssueRepository issueRepository = mock(NewsIssueRepository.class);
     private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
+    private final IssueRelationRepository issueRelationRepository = mock(IssueRelationRepository.class);
     private final IssueStatusHistoryRepository historyRepository = mock(IssueStatusHistoryRepository.class);
     private final NewsWatchRepository watchRepository = mock(NewsWatchRepository.class);
     private final IssueStatusCalculator statusCalculator = mock(IssueStatusCalculator.class);
@@ -37,10 +41,34 @@ class IssueProjectionServiceTest {
     private final IssueProjectionService service = new IssueProjectionService(
             issueRepository,
             issueArticleRepository,
+            issueRelationRepository,
             historyRepository,
             watchRepository,
             statusCalculator,
             importanceCalculator);
+
+    @Test
+    void incomingRefutationRetractsOriginalIssueAndRecalculatesImportance() {
+        NewsIssue issue = NewsIssue.builder().id(10L).status(IssueStatus.CORROBORATED).build();
+        when(issueRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(issue));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(10L)).thenReturn(List.of());
+        when(issueRelationRepository.existsByToIssueIdAndRelationType(
+                10L, IssueRelationType.REFUTES)).thenReturn(true);
+        when(importanceCalculator.calculate(any(), any(), any()))
+                .thenReturn(new BigDecimal("18.00"));
+        when(watchRepository.findByIssueIdAndWatchType(10L, WatchType.DISPUTED))
+                .thenReturn(Optional.empty());
+
+        service.recalculate(10L);
+
+        assertEquals(IssueStatus.RETRACTED, issue.getStatus());
+        assertEquals(new BigDecimal("18.00"), issue.getImportanceScore());
+        verify(statusCalculator, never()).calculate(any(), any());
+        ArgumentCaptor<IssueStatusHistory> history = ArgumentCaptor.forClass(IssueStatusHistory.class);
+        verify(historyRepository).save(history.capture());
+        assertEquals(IssueStatus.CORROBORATED, history.getValue().getFromStatus());
+        assertEquals(IssueStatus.RETRACTED, history.getValue().getToStatus());
+    }
 
     @Test
     void storesHistoryOnlyOnChangeAndAllowsStatusReversal() {

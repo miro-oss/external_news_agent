@@ -149,9 +149,6 @@ public class IssueClusterWriter {
         Article stanceReference = stanceReference(
                 representative, assignment.articleIds(), membershipByArticle, articles);
         Set<Long> existingArticleIds = Set.copyOf(membershipByArticle.keySet());
-        List<NewsWatch> eligibleWatches = assignment.existingIssueId() == null
-                ? List.of()
-                : watchRepository.findEligibleForNotification(issue.getId(), now);
         for (Long articleId : assignment.articleIds()) {
             membershipByArticle.computeIfAbsent(articleId, ignored -> {
                 Article article = requiredArticle(articles, articleId);
@@ -169,14 +166,6 @@ public class IssueClusterWriter {
         }
         membershipByArticle.values().forEach(membership -> membership.changeRole(
                 roleOf(membership.getArticle(), representative)));
-        membershipByArticle.values().stream()
-                .filter(membership -> membership.getStanceSource() == IssueStanceSource.RULE)
-                .forEach(membership -> {
-                    IssueStanceClassifier.Result stance = stanceClassifier.classify(
-                            stanceReference, membership.getArticle());
-                    membership.applyStance(
-                            stance.stance(), IssueStanceSource.RULE, stance.confidence());
-                });
 
         List<Article> members = membershipByArticle.values().stream()
                 .map(IssueArticle::getArticle)
@@ -195,13 +184,17 @@ public class IssueClusterWriter {
                 memberships,
                 now.atZone(ApiTimeZone.ZONE).toOffsetDateTime());
         if (newIssue) {
-            refutationLinker.linkNewIssue(issue, representative);
+            refutationLinker.linkNewIssue(issue, representative)
+                    .ifPresent(projectionService::recalculate);
         }
 
         List<Article> newArticles = membershipByArticle.entrySet().stream()
                 .filter(entry -> !existingArticleIds.contains(entry.getKey()))
                 .map(entry -> entry.getValue().getArticle())
                 .toList();
+        List<NewsWatch> eligibleWatches = newIssue
+                ? List.of()
+                : watchRepository.findEligibleForNotification(issue.getId(), now);
         if (!newArticles.isEmpty()) {
             enqueueAlerts(eligibleWatches, issue, members, now);
         }
