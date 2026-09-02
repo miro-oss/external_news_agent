@@ -88,8 +88,10 @@ def test_uses_gateway_usage_metrics_when_present() -> None:
                 "usage": {
                     "prompt_tokens": 8,
                     "completion_tokens": 2,
+                    "credits": "invalid",
                     "credits_used": "1.750000000000000000123",
-                    "cost_usd": "0.025000000000000000456",
+                    "cost_usd": -1,
+                    "total_cost": "0.025000000000000000456",
                 },
             },
         )

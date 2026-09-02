@@ -12,7 +12,14 @@ from app.llm.base import ProviderResponse, ProviderUsage
 
 logger = logging.getLogger(__name__)
 
-_UNSUPPORTED_STRICT_SCHEMA_KEYS = frozenset(
+MINDLOGIC_CREDIT_USAGE_KEYS = (
+    "credits",
+    "credits_used",
+    "credit_usage",
+    "total_credits",
+)
+MINDLOGIC_COST_USAGE_KEYS = ("cost_usd", "costUsd", "total_cost")
+MINDLOGIC_UNSUPPORTED_STRICT_SCHEMA_KEYS = frozenset(
     {
         "maxItems",
         "maxLength",
@@ -66,7 +73,7 @@ class MindlogicAnalyzeProvider:
                         "json_schema": {
                             "name": _schema_name(response_schema),
                             "strict": True,
-                            "schema": _strict_schema(response_schema),
+                            "schema": sanitize_mindlogic_strict_schema(response_schema),
                         },
                     },
                 },
@@ -78,19 +85,14 @@ class MindlogicAnalyzeProvider:
             if not isinstance(text, str) or not text.strip():
                 raise ValueError("Mindlogic 응답 본문이 비어 있습니다.")
             usage = body.get("usage") or {}
-            credits = _usage_decimal(
+            credits = parse_usage_decimal(
                 usage,
-                "credits",
-                "credits_used",
-                "credit_usage",
-                "total_credits",
+                *MINDLOGIC_CREDIT_USAGE_KEYS,
                 default=self._credits_per_request,
             )
-            cost_usd = _usage_decimal(
+            cost_usd = parse_usage_decimal(
                 usage,
-                "cost_usd",
-                "costUsd",
-                "total_cost",
+                *MINDLOGIC_COST_USAGE_KEYS,
                 default=Decimal("0"),
             )
             return ProviderResponse(
@@ -130,16 +132,16 @@ class MindlogicAnalyzeProvider:
             self._client.close()
 
 
-def _strict_schema(value: Any) -> Any:
+def sanitize_mindlogic_strict_schema(value: Any) -> Any:
     """OpenAI 호환 strict 모드가 거부하는 검증 키워드는 서버 검증에 맡긴다."""
     if isinstance(value, dict):
         return {
-            key: _strict_schema(child)
+            key: sanitize_mindlogic_strict_schema(child)
             for key, child in value.items()
-            if key not in _UNSUPPORTED_STRICT_SCHEMA_KEYS
+            if key not in MINDLOGIC_UNSUPPORTED_STRICT_SCHEMA_KEYS
         }
     if isinstance(value, list):
-        return [_strict_schema(child) for child in value]
+        return [sanitize_mindlogic_strict_schema(child) for child in value]
     return value
 
 
@@ -149,11 +151,12 @@ def _schema_name(schema: dict[str, Any]) -> str:
     return normalized[:64] or "structured_output"
 
 
-def _usage_decimal(
+def parse_usage_decimal(
     usage: dict[str, Any],
     *keys: str,
     default: Decimal,
 ) -> Decimal:
+    """Return the first finite non-negative decimal among ordered usage aliases."""
     for key in keys:
         raw = usage.get(key)
         if raw is None or isinstance(raw, bool):
