@@ -16,11 +16,13 @@ public class AgentProperties implements InitializingBean {
     private String token = "";
     private Duration connectTimeout = Duration.ofSeconds(5);
     private Duration analyzeTimeout = Duration.ofSeconds(90);
+    private Duration insightTimeout = Duration.ofSeconds(60);
     private Duration reportTimeout = Duration.ofSeconds(120);
     private AgentPlan defaultPlan = AgentPlan.FREE;
     private boolean allowRunOverride = true;
     private String analysisPromptVersion =
             "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2";
+    private String insightPromptVersion = "insight.ko.v1+perspective.ko.v1";
     private String freeModel = "";
     private String paidModel = "";
     private final Quota quota = new Quota();
@@ -36,6 +38,9 @@ public class AgentProperties implements InitializingBean {
                 || quota.paidDailyCredits <= 0
                 || quota.paidDailyReportReserve < 0
                 || quota.paidDailyReportReserve >= quota.paidDailyCredits
+                || quota.paidDailyInsightCap <= 0
+                || quota.paidDailyInsightCap
+                        > quota.paidDailyCredits - quota.paidDailyReportReserve
                 || quota.paidCreditsPerRequest == null
                 || quota.paidCreditsPerRequest.signum() <= 0
                 || quota.paidMaxCreditsPerRequest == null
@@ -94,6 +99,14 @@ public class AgentProperties implements InitializingBean {
         return reportTimeout;
     }
 
+    public Duration getInsightTimeout() {
+        return insightTimeout;
+    }
+
+    public void setInsightTimeout(Duration insightTimeout) {
+        this.insightTimeout = insightTimeout;
+    }
+
     public void setReportTimeout(Duration reportTimeout) {
         this.reportTimeout = reportTimeout;
     }
@@ -122,6 +135,14 @@ public class AgentProperties implements InitializingBean {
         this.analysisPromptVersion = analysisPromptVersion;
     }
 
+    public String getInsightPromptVersion() {
+        return insightPromptVersion;
+    }
+
+    public void setInsightPromptVersion(String insightPromptVersion) {
+        this.insightPromptVersion = insightPromptVersion;
+    }
+
     public String getFreeModel() {
         return freeModel;
     }
@@ -148,6 +169,7 @@ public class AgentProperties implements InitializingBean {
         private int paidMonthlyCredits = 3000;
         private int paidDailyCredits = 90;
         private int paidDailyReportReserve = 20;
+        private int paidDailyInsightCap = 15;
         private BigDecimal paidCreditsPerRequest = BigDecimal.ONE;
         private BigDecimal paidMaxCreditsPerRequest = BigDecimal.valueOf(5);
         private Duration reservationTtl = Duration.ofMinutes(15);
@@ -182,6 +204,14 @@ public class AgentProperties implements InitializingBean {
 
         public void setPaidDailyReportReserve(int paidDailyReportReserve) {
             this.paidDailyReportReserve = paidDailyReportReserve;
+        }
+
+        public int getPaidDailyInsightCap() {
+            return paidDailyInsightCap;
+        }
+
+        public void setPaidDailyInsightCap(int paidDailyInsightCap) {
+            this.paidDailyInsightCap = paidDailyInsightCap;
         }
 
         public BigDecimal getPaidCreditsPerRequest() {

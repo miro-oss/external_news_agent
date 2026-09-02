@@ -74,6 +74,25 @@ def evidence_request_body() -> dict[str, object]:
     }
 
 
+def insight_request_body() -> dict[str, object]:
+    return {
+        "idempotencyKey": "insight:issue:77:chip-maker",
+        "plan": "FREE",
+        "audiences": ["CHIP_MAKER"],
+        "target": {"type": "ISSUE", "id": 77},
+        "topic": {"name": "CPO", "queryText": "CPO"},
+        "findings": [
+            {
+                "id": 501,
+                "articleTitle": "CPO 양산 일정",
+                "canonicalUrl": "https://example.com/501",
+                "summaryKo": "CPO 양산 일정을 다룬 기사입니다.",
+                "sentences": [{"id": 1, "text": "A사가 CPO 양산 일정을 발표했다."}],
+            }
+        ],
+    }
+
+
 def test_health_does_not_require_agent_token() -> None:
     response = client.get("/v1/health")
 
@@ -100,6 +119,28 @@ def test_verify_evidence_requires_agent_token() -> None:
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_insight_requires_agent_token() -> None:
+    response = client.post("/v1/insight", json=insight_request_body())
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_insight_returns_deterministic_mock_contract() -> None:
+    response = client.post(
+        "/v1/insight",
+        headers={"X-Agent-Token": "local-dev-agent-token"},
+        json=insight_request_body(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["audience"] for item in payload["insights"]] == ["CHIP_MAKER"]
+    assert payload["insights"][0]["facts"][0]["claimType"] == "FACT"
+    assert payload["insights"][0]["implications"][0]["falsifiedBy"]
+    assert payload["meta"]["promptVersion"] == "insight.ko.v1+perspective.ko.v1"
 
 
 def test_analyze_returns_deterministic_mock_contract() -> None:

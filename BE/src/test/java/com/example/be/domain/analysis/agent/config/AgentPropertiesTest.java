@@ -19,6 +19,8 @@ class AgentPropertiesTest {
         assertEquals(
                 "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2",
                 properties.getAnalysisPromptVersion());
+        assertEquals("insight.ko.v1+perspective.ko.v1", properties.getInsightPromptVersion());
+        assertEquals(15, properties.getQuota().getPaidDailyInsightCap());
     }
 
     @Test
@@ -42,6 +44,14 @@ class AgentPropertiesTest {
     void rejectsPerRequestMaximumAbovePaidBudget() {
         AgentProperties properties = new AgentProperties();
         properties.getQuota().setPaidMaxCreditsPerRequest(new BigDecimal("91"));
+
+        assertThrows(IllegalStateException.class, properties::afterPropertiesSet);
+    }
+
+    @Test
+    void rejectsInsightCapAboveWorkBudget() {
+        AgentProperties properties = new AgentProperties();
+        properties.getQuota().setPaidDailyInsightCap(71);
 
         assertThrows(IllegalStateException.class, properties::afterPropertiesSet);
     }

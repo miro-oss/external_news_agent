@@ -5,5 +5,6 @@ public enum AgentTask {
     SELF_CRITIQUE,
     VERIFY_EVIDENCE,
     REPORT,
-    EXPLORE
+    EXPLORE,
+    INSIGHT
 }

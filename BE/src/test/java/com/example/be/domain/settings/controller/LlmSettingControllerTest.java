@@ -73,7 +73,9 @@ class LlmSettingControllerTest {
                         new BigDecimal("1488"), reset),
                 new LlmSettingDTO.PaidUsage(
                         new BigDecimal("71"), new BigDecimal("90"), new BigDecimal("19"),
-                        BigDecimal.ZERO, new BigDecimal("20"),
+                        BigDecimal.ZERO,
+                        new BigDecimal("7"), new BigDecimal("15"), new BigDecimal("8"),
+                        new BigDecimal("20"),
                         new BigDecimal("2140"), new BigDecimal("3000"), new BigDecimal("860"),
                         reset, reset.plusMonths(1))));
 
@@ -82,6 +84,9 @@ class LlmSettingControllerTest {
                 .andExpect(jsonPath("$.result.currentPlan").value("PAID"))
                 .andExpect(jsonPath("$.result.paid.dailyCreditsRemaining").value(19))
                 .andExpect(jsonPath("$.result.paid.analysisCreditsRemaining").value(0))
+                .andExpect(jsonPath("$.result.paid.insightCreditsUsed").value(7))
+                .andExpect(jsonPath("$.result.paid.insightCreditsCap").value(15))
+                .andExpect(jsonPath("$.result.paid.insightCreditsRemaining").value(8))
                 .andExpect(jsonPath("$.result.paid.reportReserve").value(20))
                 .andExpect(jsonPath("$.result.paid.monthlyCreditsRemaining").value(860));
     }

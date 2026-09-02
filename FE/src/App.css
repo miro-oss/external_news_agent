@@ -1913,6 +1913,173 @@ body.modal-open {
   color: #a5c9fa;
 }
 
+.perspective-insight {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.perspective-insight-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.perspective-insight-action > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.perspective-insight-action strong {
+  font-size: 0.84rem;
+}
+
+.perspective-insight-action span {
+  color: #8b95a1;
+  font-size: 0.72rem;
+}
+
+.perspective-insight-action button {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.75rem;
+  background: var(--primary);
+  font-size: 0.74rem;
+}
+
+.perspective-insight-error,
+.perspective-insight-empty {
+  margin: 0.8rem 0 0;
+  color: #ffb4b4;
+  font-size: 0.78rem;
+}
+
+.perspective-insight-empty {
+  color: #aeb6c0;
+}
+
+.perspective-insight-result {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.perspective-insight-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.perspective-insight-heading h4,
+.insight-claim-group h5,
+.insight-watch-next h5 {
+  margin: 0;
+  color: #fff;
+}
+
+.perspective-insight-heading h4 {
+  font-size: 0.95rem;
+}
+
+.perspective-insight-heading > span {
+  color: #8b95a1;
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.insight-claim-group {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.insight-claim-group h5,
+.insight-watch-next h5 {
+  font-size: 0.76rem;
+}
+
+.insight-fact,
+.insight-implication {
+  padding: 0.8rem;
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.insight-claim-labels {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.insight-claim-labels span {
+  padding: 0.12rem 0.38rem;
+  border-radius: 999px;
+  background: rgba(110, 168, 254, 0.18);
+  color: #9cc4ff;
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.insight-claim-labels small,
+.insight-fact > small {
+  color: #8b95a1;
+  font-size: 0.68rem;
+}
+
+.insight-fact p,
+.insight-implication p {
+  margin: 0.55rem 0;
+  color: #edf0f3;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.insight-fact button {
+  display: block;
+  margin-top: 0.55rem;
+  padding: 0;
+  background: transparent;
+  color: #6ea8fe;
+  font-size: 0.72rem;
+}
+
+.insight-implication dl {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.65rem 0 0;
+}
+
+.insight-implication dl div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 0.45rem;
+}
+
+.insight-implication dt,
+.insight-implication dd,
+.insight-watch-next li {
+  margin: 0;
+  color: #aeb6c0;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.insight-implication dt {
+  color: #7f8995;
+  font-weight: 700;
+}
+
+.insight-watch-next ul {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.45rem 0 0;
+  padding-left: 1rem;
+}
+
 .key-points {
   display: grid;
   gap: 0.8rem;
@@ -3476,6 +3643,16 @@ body.modal-open {
 
   .analysis-title-row {
     flex-direction: column;
+  }
+
+  .perspective-insight-action,
+  .perspective-insight-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .perspective-insight-action button {
+    width: 100%;
   }
 
   .analysis-labels {

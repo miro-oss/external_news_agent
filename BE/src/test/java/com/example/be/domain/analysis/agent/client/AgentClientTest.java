@@ -5,6 +5,8 @@ import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
+import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
+import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
@@ -158,6 +160,30 @@ class AgentClientTest {
     }
 
     @Test
+    void sendsInsightContractAndReadsFactImplicationSplit() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/insight"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
+                .andExpect(jsonPath("$.idempotencyKey").value("insight:issue:88:test"))
+                .andExpect(jsonPath("$.target.type").value("ISSUE"))
+                .andExpect(jsonPath("$.audiences[0]").value("CHIP_MAKER"))
+                .andExpect(jsonPath("$.findings[0].sentences[0].id").value(1))
+                .andRespond(withSuccess(insightResponseJson(), MediaType.APPLICATION_JSON));
+
+        AgentInsightResponse response = client.insight(insightRequest());
+
+        assertEquals("CHIP_MAKER", response.insights().getFirst().audience());
+        assertEquals("FACT", response.insights().getFirst().facts().getFirst().claimType());
+        assertEquals("IMPLICATION",
+                response.insights().getFirst().implications().getFirst().claimType());
+        assertEquals("insight.ko.v1+perspective.ko.v1", response.meta().promptVersion());
+        server.verify();
+    }
+
+    @Test
     void preservesUsageFromFailedReportContract() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -220,6 +246,7 @@ class AgentClientTest {
         properties.setToken("test-agent-token");
         properties.setConnectTimeout(Duration.ofSeconds(1));
         properties.setAnalyzeTimeout(Duration.ofSeconds(1));
+        properties.setInsightTimeout(Duration.ofSeconds(1));
         properties.setReportTimeout(Duration.ofSeconds(2));
         return properties;
     }
@@ -299,6 +326,23 @@ class AgentClientTest {
                         "FACT",
                         null,
                         List.of(new AgentEvidenceRequest.SentencePayload(
+                                1, "HBM4 양산 일정이 앞당겨졌다.")))));
+    }
+
+    private AgentInsightRequest insightRequest() {
+        return new AgentInsightRequest(
+                "insight:issue:88:test",
+                AgentPlan.FREE,
+                List.of("CHIP_MAKER"),
+                new AgentInsightRequest.TargetPayload("ISSUE", 88L),
+                new AgentInsightRequest.TopicPayload(
+                        "HBM", "HBM", List.of("HBM"), List.of(), List.of()),
+                List.of(new AgentInsightRequest.FindingPayload(
+                        501L,
+                        "HBM4 기사",
+                        "https://example.com/501",
+                        "HBM4 일정 요약",
+                        List.of(new AgentInsightRequest.SentencePayload(
                                 1, "HBM4 양산 일정이 앞당겨졌다.")))));
     }
 
@@ -434,6 +478,47 @@ class AgentClientTest {
                     "provider": "mock",
                     "model": "evidence-rules-v3",
                     "promptVersion": "evidence.rules.v3",
+                    "inputTokens": 0,
+                    "outputTokens": 0,
+                    "costUsd": 0,
+                    "credits": 0,
+                    "mock": true,
+                    "truncated": false
+                  }
+                }
+                """;
+    }
+
+    private String insightResponseJson() {
+        return """
+                {
+                  "insights": [{
+                    "audience": "CHIP_MAKER",
+                    "headline": "양산 일정 변화",
+                    "facts": [{
+                      "claimType": "FACT",
+                      "id": "f1",
+                      "text": "HBM4 양산 일정이 앞당겨졌다.",
+                      "findingId": 501,
+                      "evidenceSentenceIds": [1],
+                      "groundedness": "grounded",
+                      "groundingReason": "원문에서 확인됩니다."
+                    }],
+                    "implications": [{
+                      "claimType": "IMPLICATION",
+                      "id": "i1",
+                      "text": "공급 일정 점검이 필요합니다.",
+                      "basisFactIds": ["f1"],
+                      "assumption": "일정이 유지되는 경우",
+                      "falsifiedBy": "후속 발표에서 일정이 번복되는 경우"
+                    }],
+                    "watchNext": ["후속 양산 발표"],
+                    "confidence": 0.8
+                  }],
+                  "meta": {
+                    "provider": "mock",
+                    "model": "mock",
+                    "promptVersion": "insight.ko.v1+perspective.ko.v1",
                     "inputTokens": 0,
                     "outputTokens": 0,
                     "costUsd": 0,

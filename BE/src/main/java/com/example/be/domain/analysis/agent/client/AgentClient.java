@@ -6,6 +6,8 @@ import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
 import com.example.be.domain.analysis.agent.dto.AgentErrorResponse;
+import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
+import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
@@ -31,6 +33,7 @@ public class AgentClient {
     private static final int MAX_ERROR_BODY_LENGTH = 500;
 
     private final RestClient analyzeClient;
+    private final RestClient insightClient;
     private final RestClient reportClient;
 
     @Autowired
@@ -39,18 +42,22 @@ public class AgentClient {
                 restClientFactory.create(
                         properties.getConnectTimeout(), properties.getAnalyzeTimeout()),
                 restClientFactory.create(
+                        properties.getConnectTimeout(), properties.getInsightTimeout()),
+                restClientFactory.create(
                         properties.getConnectTimeout(), properties.getReportTimeout()),
                 properties);
     }
 
     AgentClient(RestClient.Builder builder, AgentProperties properties) {
-        this(builder, builder, properties);
+        this(builder, builder, builder, properties);
     }
 
     AgentClient(RestClient.Builder analyzeBuilder,
+                RestClient.Builder insightBuilder,
                 RestClient.Builder reportBuilder,
                 AgentProperties properties) {
         this.analyzeClient = configured(analyzeBuilder, properties).build();
+        this.insightClient = configured(insightBuilder, properties).build();
         this.reportClient = configured(reportBuilder, properties).build();
     }
 
@@ -72,6 +79,10 @@ public class AgentClient {
 
     public AgentReportResponse report(AgentReportRequest request) {
         return post(reportClient, "/v1/report", request, AgentReportResponse.class);
+    }
+
+    public AgentInsightResponse insight(AgentInsightRequest request) {
+        return post(insightClient, "/v1/insight", request, AgentInsightResponse.class);
     }
 
     public AgentEvidenceResponse verifyEvidence(AgentEvidenceRequest request) {

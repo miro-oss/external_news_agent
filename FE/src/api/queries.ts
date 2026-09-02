@@ -25,6 +25,7 @@ import type {
   DeliveryLogPage,
   GroupPerspective,
   IssueDetail,
+  InsightResult,
   NotificationChannel,
   NotificationGroup,
   NotificationPreview,
@@ -200,6 +201,21 @@ export function useIssue(issueId: number | null, enabled = true) {
     queryKey: keys.issue(issueId),
     queryFn: () => get<IssueDetail>(`/issues/${issueId}`),
     enabled: issueId !== null && enabled,
+  })
+}
+
+export function useGenerateInsight() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ issueId, audience }: { issueId: number; audience: Audience }) =>
+      post<InsightResult>('/insights', {
+        targetType: 'ISSUE',
+        targetId: issueId,
+        audiences: [audience],
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: keys.llmUsage })
+    },
   })
 }
 

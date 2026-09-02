@@ -236,6 +236,46 @@ export interface ArticleDetail {
   relatedArticles: Array<{ id: number; title: string; publisher: string | null }>
 }
 
+export interface InsightFact {
+  claimType: 'FACT'
+  id: string
+  text: string
+  findingId: number
+  evidenceSentenceIds: number[]
+  groundedness: 'grounded' | 'weak' | 'ungrounded'
+  groundingReason: string
+}
+
+export interface InsightImplication {
+  claimType: 'IMPLICATION'
+  id: string
+  text: string
+  basisFactIds: string[]
+  assumption: string
+  falsifiedBy: string
+}
+
+export interface AudienceInsight {
+  audience: Audience
+  headline: string
+  facts: InsightFact[]
+  implications: InsightImplication[]
+  watchNext: string[]
+  confidence: number
+  llmProvider: string | null
+  llmModel: string | null
+  createdAt: string
+}
+
+export interface InsightResult {
+  cached: boolean
+  targetType: 'ISSUE'
+  targetId: number
+  inputHash: string
+  promptVersion: string
+  insights: AudienceInsight[]
+}
+
 export interface ArticleFilters {
   sensitivityLevel?: SensitivityLevel
   relevance?: Relevance
@@ -472,6 +512,9 @@ export interface LlmUsage {
     dailyCreditsLimit: number
     dailyCreditsRemaining: number
     analysisCreditsRemaining: number
+    insightCreditsUsed: number
+    insightCreditsCap: number
+    insightCreditsRemaining: number
     reportReserve: number
     monthlyCreditsUsed: number
     monthlyCreditsLimit: number
