@@ -67,6 +67,38 @@ class IssueClustererTest {
     }
 
     @Test
+    void excludesBoilerplateOnlyFullTextFromContentGrouping() {
+        String footer = ("대표이사 : 염영남 주소 : 서울 중구 퇴계로 173 "
+                + "사업자등록번호 : 102-81-36588 통신판매업신고 : 서울중구 00665 ").repeat(5);
+        ClusterArticle first = article(
+                1L, "현대로템 장갑형 구급차 개발 완료", footer,
+                FetchStatus.FULLTEXT, "뉴시스", "0.8", hour(0));
+        ClusterArticle second = article(
+                2L, "SK온 미국 ESS 공급계약 체결", footer,
+                FetchStatus.FULLTEXT, "뉴시스", "0.8", hour(72));
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second));
+
+        assertTrue(plan.contentGroups().isEmpty());
+        assertEquals(2, plan.issues().size());
+    }
+
+    @Test
+    void doesNotReuseExistingContentGroupForBoilerplateOnlyBody() {
+        String footer = ("대표이사 : 염영남 주소 : 서울 중구 퇴계로 173 "
+                + "사업자등록번호 : 102-81-36588 통신판매업신고 : 서울중구 00665 ").repeat(5);
+        ClusterArticle first = articleWithContentGroup(
+                1L, "현대로템 장갑형 구급차 개발 완료", footer, 10L, hour(0));
+        ClusterArticle second = articleWithContentGroup(
+                2L, "SK온 미국 ESS 공급계약 체결", footer, 10L, hour(72));
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second));
+
+        assertTrue(plan.contentGroups().isEmpty());
+        assertEquals(2, plan.issues().size());
+    }
+
+    @Test
     void joinsDifferentTitlesWhenTwoDeterministicEntitiesOverlapWithinWindow() {
         ClusterArticle first = article(
                 1L, "삼성전자 차세대 메모리 투자 확대", longBody("삼성전자 HBM4 투자"),
@@ -259,6 +291,30 @@ class IssueClustererTest {
                 List.of("반도체"),
                 null,
                 null,
+                null,
+                true);
+    }
+
+    private ClusterArticle articleWithContentGroup(long id,
+                                                   String title,
+                                                   String body,
+                                                   long contentGroupId,
+                                                   OffsetDateTime publishedAt) {
+        return new ClusterArticle(
+                id,
+                7L,
+                title,
+                title + " 관련 상세 보도",
+                body,
+                FetchStatus.FULLTEXT,
+                id,
+                "뉴시스",
+                new BigDecimal("0.8"),
+                publishedAt,
+                publishedAt,
+                List.of("반도체"),
+                contentGroupId,
+                SimHash.toHex(SimHash.of(body)),
                 null,
                 true);
     }

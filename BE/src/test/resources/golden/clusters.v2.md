@@ -70,6 +70,30 @@ regression case. Rerun the exact v2 fixture and precommitted grid after that fix
 truncation caveat. Only return to recall tuning or the embedding decision table after holdout
 precision recovers to at least 0.90 on a source-faithful replay.
 
+## After issue #141
+
+The SimHash input now removes known publisher/legal footer suffixes and requires at least 200
+characters of article content to remain. A separate lossless regression test uses bodies longer
+than the cutoff to prove that boilerplate-only bodies are excluded while syndicated article text
+still groups. The quota-ownership and supported-evidence fixes from PR #139's post-merge review are
+also covered by focused tests but do not affect these clustering metrics.
+
+All 48 `FULLTEXT` rows in this fixture contain only 120-character fragments, so the conditional
+replay intentionally creates no fixed SimHash groups. It therefore verifies that truncated
+boilerplate cannot force an over-merge, but it cannot measure full-body duplicate recall.
+
+| Evaluation after #141 | Jaccard | Window | Common ratio | Precision | Recall | ARI | V-measure |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Configured calibration | 0.50 | 48h | 0.10 | 1.0000 | 0.1707 | 0.2646 | 0.7844 |
+| **Configured holdout** | 0.50 | 48h | 0.10 | **1.0000** | **0.0408** | 0.0702 | 0.8073 |
+| Selected calibration | 0.40 | 48h | 0.10 | 1.0000 | 0.3171 | 0.4479 | 0.8208 |
+| **Selected holdout** | 0.40 | 48h | 0.10 | **1.0000** | **0.0816** | 0.1363 | 0.8210 |
+
+The fixture precision gate now passes, while the recall gate still fails and
+`decisionGatePassed` remains false. Treat this as a regression result for the defensive cutoff,
+not as a source-faithful final threshold decision; full-body fingerprints or a fresh real
+collection are still required before changing production thresholds.
+
 ## Reproduction
 
 ```bash

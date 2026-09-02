@@ -68,7 +68,7 @@ public class IssueClusterer {
             if (!article.hasFullText() || fullTextById.containsKey(article.articleId())) {
                 continue;
             }
-            SimHash.tryOf(article.body()).ifPresent(fingerprint -> {
+            SimHash.tryOfArticleBody(article.body()).ifPresent(fingerprint -> {
                 fullTextById.put(article.articleId(), article);
                 fingerprintByArticle.put(article.articleId(), fingerprint);
             });
@@ -133,6 +133,7 @@ public class IssueClusterer {
         articles.forEach(article -> {
             contentKeyByArticle.putIfAbsent(article.articleId(),
                     article.contentGroupId() == null
+                            || !fingerprintByArticle.containsKey(article.articleId())
                             ? "article:" + article.articleId()
                             : "content-group:" + article.contentGroupId());
             representativeByArticle.putIfAbsent(article.articleId(), article.articleId());

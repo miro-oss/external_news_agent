@@ -114,7 +114,6 @@ public class IssueInvestigationOrchestrator {
             }
             int attemptedStep = state.nextStep();
             if (!investigationRepository.markInFlight(state.id(), attemptedStep)) {
-                releaseUnused(reservation);
                 state = investigationRepository.findByRunIdAndIssueId(runId, state.issueId())
                         .orElseThrow();
                 if (state.finished()) {
@@ -384,10 +383,6 @@ public class IssueInvestigationOrchestrator {
         } catch (RuntimeException exception) {
             log.error("조사 실패 quota 정산에 실패했다. key={}", reservation.idempotencyKey(), exception);
         }
-    }
-
-    private void releaseUnused(QuotaReservation reservation) {
-        completeFailure(reservation, "PROVIDER_UNAVAILABLE");
     }
 
     private void completeFailedStepSafely(IssueInvestigationState state,

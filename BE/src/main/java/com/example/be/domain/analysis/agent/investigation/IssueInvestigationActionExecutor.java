@@ -68,7 +68,7 @@ public class IssueInvestigationActionExecutor {
         InvestigationContext after = contextService.current(runId, before.issueId());
         return new InvestigationActionResult(
                 Math.max(0, after.articleIds().size() - before.articleIds().size()),
-                Math.max(0, after.availableSentenceCount() - before.availableSentenceCount()),
+                Math.max(0, after.evidenceSentenceCount() - before.evidenceSentenceCount()),
                 "추가 수집 %d건, 변경 후보 %d건".formatted(
                         write.observedArticleCount(), write.changedArticleCount()));
     }
@@ -80,7 +80,7 @@ public class IssueInvestigationActionExecutor {
         InvestigationContext after = contextService.current(runId, before.issueId());
         return new InvestigationActionResult(
                 0,
-                Math.max(0, after.availableSentenceCount() - before.availableSentenceCount()),
+                Math.max(0, after.evidenceSentenceCount() - before.evidenceSentenceCount()),
                 "기사 #%d 전문 확보 시도".formatted(articleId));
     }
 

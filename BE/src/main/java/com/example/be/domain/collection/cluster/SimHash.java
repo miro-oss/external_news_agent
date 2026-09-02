@@ -7,6 +7,7 @@ import java.security.NoSuchAlgorithmException;
 import java.text.Normalizer;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.OptionalLong;
@@ -16,6 +17,14 @@ import java.util.regex.Pattern;
 /** FULLTEXT 본문끼리만 비교하는 64비트 SimHash. 기존 contentHash와 역할을 섞지 않는다. */
 public final class SimHash {
 
+    private static final int MIN_ARTICLE_CONTENT_LENGTH = 200;
+    private static final List<String> BOILERPLATE_START_MARKERS = List.of(
+            "대표이사 :", "대표이사:",
+            "사업자등록번호 :", "사업자등록번호:",
+            "통신판매업신고", "고충처리인 :", "고충처리인:",
+            "저작권자 (c)", "저작권자(c)",
+            "무단전재", "무단 전재", "재배포 금지",
+            "copyright ©", "copyright(c)");
     private static final Pattern WORD = Pattern.compile("[\\p{L}\\p{N}]+");
     private static final ThreadLocal<MessageDigest> SHA_256 = ThreadLocal.withInitial(SimHash::newDigest);
 
@@ -45,6 +54,25 @@ public final class SimHash {
             }
         }
         return OptionalLong.of(fingerprint);
+    }
+
+    /** 기사 본문 뒤에 붙은 매체 푸터를 걷어내고, 본문이 충분히 남을 때만 지문을 만든다. */
+    static OptionalLong tryOfArticleBody(String body) {
+        if (body == null || body.isBlank()) {
+            return OptionalLong.empty();
+        }
+        String normalized = Normalizer.normalize(body, Normalizer.Form.NFKC)
+                .toLowerCase(Locale.ROOT);
+        int boilerplateStart = BOILERPLATE_START_MARKERS.stream()
+                .mapToInt(normalized::indexOf)
+                .filter(index -> index >= 0)
+                .min()
+                .orElse(normalized.length());
+        String articleContent = normalized.substring(0, boilerplateStart).strip();
+        if (articleContent.length() < MIN_ARTICLE_CONTENT_LENGTH) {
+            return OptionalLong.empty();
+        }
+        return tryOf(articleContent);
     }
 
     public static int distance(long left, long right) {
