@@ -61,23 +61,19 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
     List<Finding> findForReportByRunId(@Param("runId") Long runId);
 
     @Query("""
-            SELECT CASE
-                       WHEN finding.sensitivity.score >= :highThreshold THEN 'high'
-                       WHEN finding.sensitivity.score >= :mediumThreshold THEN 'medium'
-                       ELSE 'low'
-                   END AS sensitivityLevel,
-                   finding.category AS category,
+            SELECT finding.category AS category,
                    finding.changeType AS changeType,
-                   COUNT(finding) AS findingCount
+                   COUNT(finding) AS findingCount,
+                   SUM(CASE WHEN finding.sensitivity.score >= :highThreshold
+                            THEN 1 ELSE 0 END) AS highSensitivityCount,
+                   SUM(CASE WHEN finding.sensitivity.score >= :mediumThreshold
+                                 AND finding.sensitivity.score < :highThreshold
+                            THEN 1 ELSE 0 END) AS mediumSensitivityCount,
+                   SUM(CASE WHEN finding.sensitivity.score < :mediumThreshold
+                            THEN 1 ELSE 0 END) AS lowSensitivityCount
             FROM Finding finding
             WHERE finding.run.id = :runId
-            GROUP BY CASE
-                         WHEN finding.sensitivity.score >= :highThreshold THEN 'high'
-                         WHEN finding.sensitivity.score >= :mediumThreshold THEN 'medium'
-                         ELSE 'low'
-                     END,
-                     finding.category,
-                     finding.changeType
+            GROUP BY finding.category, finding.changeType
             """)
     List<ReportStatsCount> countStatsByRunId(
             @Param("runId") Long runId,
@@ -108,12 +104,16 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
 
     interface ReportStatsCount {
 
-        String getSensitivityLevel();
-
         String getCategory();
 
         ChangeType getChangeType();
 
         long getFindingCount();
+
+        long getHighSensitivityCount();
+
+        long getMediumSensitivityCount();
+
+        long getLowSensitivityCount();
     }
 }

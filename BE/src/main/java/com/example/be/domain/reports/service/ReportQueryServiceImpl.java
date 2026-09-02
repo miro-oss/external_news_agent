@@ -230,7 +230,9 @@ public class ReportQueryServiceImpl implements ReportQueryService {
             } else if (count.getChangeType() == ChangeType.UPDATED) {
                 updatedCount += value;
             }
-            bySensitivityLevel.merge(count.getSensitivityLevel(), value, Long::sum);
+            bySensitivityLevel.merge("high", count.getHighSensitivityCount(), Long::sum);
+            bySensitivityLevel.merge("medium", count.getMediumSensitivityCount(), Long::sum);
+            bySensitivityLevel.merge("low", count.getLowSensitivityCount(), Long::sum);
             byCategory.merge(count.getCategory(), value, Long::sum);
         }
         return ReportResDTO.SummaryStats.builder()
