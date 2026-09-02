@@ -6,6 +6,8 @@ import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
 import com.example.be.domain.analysis.agent.dto.AgentErrorResponse;
+import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
+import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
@@ -20,6 +22,7 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.net.SocketTimeoutException;
+import java.net.URI;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpTimeoutException;
 import java.util.Locale;
@@ -31,6 +34,7 @@ public class AgentClient {
     private static final int MAX_ERROR_BODY_LENGTH = 500;
 
     private final RestClient analyzeClient;
+    private final RestClient insightClient;
     private final RestClient reportClient;
 
     @Autowired
@@ -39,18 +43,23 @@ public class AgentClient {
                 restClientFactory.create(
                         properties.getConnectTimeout(), properties.getAnalyzeTimeout()),
                 restClientFactory.create(
+                        properties.getConnectTimeout(), properties.getInsightTimeout()),
+                restClientFactory.create(
                         properties.getConnectTimeout(), properties.getReportTimeout()),
                 properties);
     }
 
     AgentClient(RestClient.Builder builder, AgentProperties properties) {
-        this(builder, builder, properties);
+        this(builder, builder, builder, properties);
     }
 
     AgentClient(RestClient.Builder analyzeBuilder,
+                RestClient.Builder insightBuilder,
                 RestClient.Builder reportBuilder,
                 AgentProperties properties) {
+        validateSecureBaseUrl(properties);
         this.analyzeClient = configured(analyzeBuilder, properties).build();
+        this.insightClient = configured(insightBuilder, properties).build();
         this.reportClient = configured(reportBuilder, properties).build();
     }
 
@@ -60,6 +69,38 @@ public class AgentClient {
             configured.defaultHeader(AGENT_TOKEN_HEADER, properties.getToken());
         }
         return configured;
+    }
+
+    private void validateSecureBaseUrl(AgentProperties properties) {
+        if (!properties.isEnabled()) {
+            return;
+        }
+        URI baseUrl;
+        try {
+            baseUrl = URI.create(properties.getBaseUrl());
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("news.agent.base-url 형식이 올바르지 않습니다.", exception);
+        }
+        String scheme = baseUrl.getScheme();
+        String host = baseUrl.getHost();
+        if ("https".equalsIgnoreCase(scheme)) {
+            return;
+        }
+        if ("http".equalsIgnoreCase(scheme) && isLoopbackHost(host)) {
+            return;
+        }
+        throw new IllegalStateException(
+                "활성 Agent base URL은 HTTPS여야 하며 HTTP는 loopback 개발 주소만 허용됩니다.");
+    }
+
+    private boolean isLoopbackHost(String host) {
+        if (host == null) {
+            return false;
+        }
+        String normalized = host.toLowerCase(Locale.ROOT);
+        return "localhost".equals(normalized)
+                || "::1".equals(normalized)
+                || normalized.startsWith("127.");
     }
 
     public AgentAnalyzeResponse analyze(AgentAnalyzeRequest request) {
@@ -72,6 +113,10 @@ public class AgentClient {
 
     public AgentReportResponse report(AgentReportRequest request) {
         return post(reportClient, "/v1/report", request, AgentReportResponse.class);
+    }
+
+    public AgentInsightResponse insight(AgentInsightRequest request) {
+        return post(insightClient, "/v1/insight", request, AgentInsightResponse.class);
     }
 
     public AgentEvidenceResponse verifyEvidence(AgentEvidenceRequest request) {

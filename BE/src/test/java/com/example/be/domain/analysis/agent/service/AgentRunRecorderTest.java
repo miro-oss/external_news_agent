@@ -3,6 +3,8 @@ package com.example.be.domain.analysis.agent.service;
 import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
+import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
+import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentRun;
 import com.example.be.domain.analysis.agent.entity.AgentRunStatus;
@@ -92,6 +94,33 @@ class AgentRunRecorderTest {
         assertEquals(12L, recorded.getOutputTokens());
         assertEquals(0, new BigDecimal("0.03").compareTo(recorded.getCostUsd()));
         assertNull(recorded.getPromptVersion());
+    }
+
+    @Test
+    void recordsInsightAgainstIssue() {
+        AgentInsightRequest request = new AgentInsightRequest(
+                "insight:issue:88:test",
+                AgentPlan.PAID,
+                List.of("CHIP_MAKER"),
+                new AgentInsightRequest.TargetPayload("ISSUE", 88L),
+                new AgentInsightRequest.TopicPayload("HBM", "HBM", List.of(), List.of(), List.of()),
+                List.of(new AgentInsightRequest.FindingPayload(
+                        501L, "기사", "https://example.com/501", "요약",
+                        List.of(new AgentInsightRequest.SentencePayload(1, "근거 문장")))));
+        AgentInsightResponse response = new AgentInsightResponse(
+                List.of(new AgentInsightResponse.Insight(
+                        "CHIP_MAKER", "인사이트", List.of(), List.of(), List.of(), BigDecimal.ONE)),
+                new AgentInsightResponse.Meta(
+                        "gemini", "gemini-test", "insight.ko.v1+perspective.ko.v1",
+                        20L, 10L, BigDecimal.ZERO, BigDecimal.ONE, false, false));
+
+        recorder.recordInsightSuccess(42L, 88L, request, response, LocalDateTime.now());
+
+        AgentRun recorded = capturedRun();
+        assertEquals(AgentTask.INSIGHT, recorded.getAgentTask());
+        assertEquals(AgentTargetType.ISSUE, recorded.getTargetType());
+        assertEquals(88L, recorded.getTargetId());
+        assertEquals(AgentPlan.PAID, recorded.getLlmPlan());
     }
 
     private AgentRun capturedRun() {

@@ -62,7 +62,7 @@ export function LlmControlPanel() {
           used={usage.paid.dailyCreditsUsed}
           limit={usage.paid.dailyCreditsLimit}
           unit="크레딧"
-          note={`분석 잔량 ${usage.paid.analysisCreditsRemaining} · 보고서 예약 ${usage.paid.reportReserve}`}
+          note={`분석·인사이트 잔량 ${usage.paid.analysisCreditsRemaining} · 인사이트 ${usage.paid.insightCreditsUsed}/${usage.paid.insightCreditsCap} · 보고서 예약 ${usage.paid.reportReserve}`}
         />
         <UsageCard
           label="PAID · 이번 달"

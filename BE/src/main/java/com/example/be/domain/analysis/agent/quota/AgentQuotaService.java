@@ -55,14 +55,16 @@ public class AgentQuotaService {
         releaseExpiredReservations();
         UsageWindow usage = usageWindow();
         BigDecimal units = paidMaxUnits();
-        BigDecimal dailyAnalysisLimit = paidDailyLimit().subtract(reportReserve());
+        BigDecimal dailyAnalysisLimit = workBudget();
+        BigDecimal analysisAndInsightUsed = usage.paidAnalysisDailyUsed()
+                .add(usage.paidInsightDailyUsed());
         if (usage.paidMonthlyUsed().add(units).compareTo(paidMonthlyLimit()) > 0
                 || usage.paidDailyUsed().add(units).compareTo(paidDailyLimit()) > 0
-                || usage.paidAnalysisDailyUsed().add(units).compareTo(dailyAnalysisLimit) > 0) {
+                || analysisAndInsightUsed.add(units).compareTo(dailyAnalysisLimit) > 0) {
             throw new LlmException(LlmErrorCode.QUOTA_EXHAUSTED, Map.of(
                     "plan", plan.name(),
                     "monthlyRemaining", remaining(paidMonthlyLimit(), usage.paidMonthlyUsed()),
-                    "dailyRemaining", remaining(dailyAnalysisLimit, usage.paidAnalysisDailyUsed()),
+                    "dailyRemaining", remaining(dailyAnalysisLimit, analysisAndInsightUsed),
                     "resetAt", usage.dailyResetAt()));
         }
     }
@@ -131,7 +133,10 @@ public class AgentQuotaService {
         releaseExpiredReservations();
         UsageWindow usage = usageWindow();
         BigDecimal paidDailyRemaining = remaining(paidDailyLimit(), usage.paidDailyUsed());
-        BigDecimal analysisLimit = paidDailyLimit().subtract(reportReserve());
+        BigDecimal insightRemaining = remaining(insightCap(), usage.paidInsightDailyUsed());
+        BigDecimal analysisRemaining = remaining(
+                workBudget(),
+                usage.paidAnalysisDailyUsed().add(usage.paidInsightDailyUsed()));
         return new LlmSettingDTO.UsageResponse(
                 planService.get().plan(),
                 new LlmSettingDTO.FreeUsage(
@@ -143,7 +148,10 @@ public class AgentQuotaService {
                         usage.paidDailyUsed(),
                         paidDailyLimit(),
                         paidDailyRemaining,
-                        remaining(analysisLimit, usage.paidAnalysisDailyUsed()),
+                        analysisRemaining,
+                        usage.paidInsightDailyUsed(),
+                        insightCap(),
+                        insightRemaining,
                         reportReserve(),
                         usage.paidMonthlyUsed(),
                         paidMonthlyLimit(),
@@ -175,17 +183,20 @@ public class AgentQuotaService {
         }
 
         boolean analysisTask = task == AgentTask.ANALYZE || task == AgentTask.SELF_CRITIQUE;
-        BigDecimal dailyLimit = analysisTask
-                ? paidDailyLimit().subtract(reportReserve())
-                : paidDailyLimit();
-        BigDecimal taskUsage = analysisTask
-                ? usage.paidAnalysisDailyUsed()
-                : usage.paidDailyUsed();
-        if (taskUsage.add(units).compareTo(dailyLimit) > 0
-                || usage.paidDailyUsed().add(units).compareTo(paidDailyLimit()) > 0) {
+        boolean insightTask = task == AgentTask.INSIGHT;
+        BigDecimal workUsed = usage.paidAnalysisDailyUsed().add(usage.paidInsightDailyUsed());
+        if ((analysisTask || insightTask)
+                && workUsed.add(units).compareTo(workBudget()) > 0) {
             throw exhausted(plan, analysisTask
                     ? "PAID 분석 예산을 소진했습니다. 보고서 예약분은 유지합니다."
-                    : "PAID 일일 예산을 소진했습니다.");
+                    : "PAID 인사이트 예산을 소진했습니다. 보고서 예약분은 유지합니다.");
+        }
+        if (insightTask
+                && usage.paidInsightDailyUsed().add(units).compareTo(insightCap()) > 0) {
+            throw exhausted(plan, "PAID 인사이트 일일 상한을 소진했습니다.");
+        }
+        if (usage.paidDailyUsed().add(units).compareTo(paidDailyLimit()) > 0) {
+            throw exhausted(plan, "PAID 일일 예산을 소진했습니다.");
         }
         if (usage.paidMonthlyUsed().add(units).compareTo(paidMonthlyLimit()) > 0) {
             throw exhausted(plan, "PAID 월간 예산을 소진했습니다.");
@@ -203,6 +214,7 @@ public class AgentQuotaService {
                 repository.usage(AgentPlan.FREE, dayStart, dayEnd),
                 repository.usage(AgentPlan.PAID, dayStart, dayEnd),
                 repository.analysisUsage(dayStart, dayEnd),
+                repository.usage(AgentPlan.PAID, dayStart, dayEnd, AgentTask.INSIGHT),
                 repository.usage(AgentPlan.PAID, monthStart, monthEnd),
                 dayEnd.atZone(ApiTimeZone.ZONE).toOffsetDateTime(),
                 monthEnd.atZone(ApiTimeZone.ZONE).toOffsetDateTime());
@@ -226,6 +238,14 @@ public class AgentQuotaService {
 
     private BigDecimal reportReserve() {
         return BigDecimal.valueOf(properties.getQuota().getPaidDailyReportReserve());
+    }
+
+    private BigDecimal insightCap() {
+        return BigDecimal.valueOf(properties.getQuota().getPaidDailyInsightCap());
+    }
+
+    private BigDecimal workBudget() {
+        return paidDailyLimit().subtract(reportReserve());
     }
 
     private BigDecimal paidUnits() {
@@ -269,6 +289,7 @@ public class AgentQuotaService {
     private record UsageWindow(BigDecimal freeDailyUsed,
                                BigDecimal paidDailyUsed,
                                BigDecimal paidAnalysisDailyUsed,
+                               BigDecimal paidInsightDailyUsed,
                                BigDecimal paidMonthlyUsed,
                                OffsetDateTime dailyResetAt,
                                OffsetDateTime monthlyResetAt) {

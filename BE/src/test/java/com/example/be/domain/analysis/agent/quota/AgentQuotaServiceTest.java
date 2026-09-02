@@ -99,6 +99,29 @@ class AgentQuotaServiceTest {
     }
 
     @Test
+    void insightUsesSharedWorkBudgetAndHasFifteenCreditCap() {
+        stubUsage(BigDecimal.ZERO, new BigDecimal("11"), BigDecimal.ZERO,
+                new BigDecimal("100"), new BigDecimal("11"));
+
+        assertThrows(QuotaExceededException.class, () -> service.reserve(
+                null,
+                "insight:issue:88:cap",
+                AgentTask.INSIGHT,
+                AgentPlan.PAID));
+
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void consumedInsightReducesRemainingAnalysisBudget() {
+        stubUsage(BigDecimal.ZERO, new BigDecimal("70"), new BigDecimal("60"),
+                new BigDecimal("100"), new BigDecimal("10"));
+
+        assertThrows(QuotaExceededException.class, () -> service.reserve(
+                42L, "run:42:article:10", AgentTask.ANALYZE, AgentPlan.PAID));
+    }
+
+    @Test
     void releasesUnavailableAndConnectTimeoutButConsumesReadTimeoutReservation() {
         QuotaReservation first = reservation(AgentTask.ANALYZE, AgentPlan.PAID);
         AgentClientException unavailable = new AgentClientException(
@@ -230,12 +253,24 @@ class AgentQuotaServiceTest {
                            BigDecimal paidDaily,
                            BigDecimal paidAnalysisDaily,
                            BigDecimal paidMonthly) {
+        stubUsage(freeDaily, paidDaily, paidAnalysisDaily, paidMonthly, BigDecimal.ZERO);
+    }
+
+    private void stubUsage(BigDecimal freeDaily,
+                           BigDecimal paidDaily,
+                           BigDecimal paidAnalysisDaily,
+                           BigDecimal paidMonthly,
+                           BigDecimal paidInsightDaily) {
         when(repository.usage(eq(AgentPlan.FREE), any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(freeDaily);
         when(repository.usage(eq(AgentPlan.PAID), any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(paidDaily, paidMonthly);
         when(repository.analysisUsage(any(LocalDateTime.class), any(LocalDateTime.class)))
                 .thenReturn(paidAnalysisDaily);
+        when(repository.usage(
+                eq(AgentPlan.PAID), any(LocalDateTime.class), any(LocalDateTime.class),
+                eq(AgentTask.INSIGHT)))
+                .thenReturn(paidInsightDaily);
     }
 
     private QuotaReservation reservation(AgentTask task, AgentPlan plan) {

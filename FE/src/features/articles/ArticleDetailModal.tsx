@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useArticle } from '../../api/queries'
+import { useArticle, useGenerateInsight, useInsight } from '../../api/queries'
 import {
   AUDIENCES,
   AUDIENCE_LABELS,
   SENSITIVITY_LEVEL_LABELS,
   type ArticleAnalysis,
   type Audience,
+  type AudienceInsight,
 } from '../../api/types'
 import { KeyPointList } from '../../components/KeyPointList'
 import { SensitivityAxes } from '../../components/SensitivityAxes'
@@ -138,6 +139,8 @@ export function ArticleDetailModal({
             {article.data.analysis ? (
               <AnalysisPanel
                 analysis={article.data.analysis}
+                analysisArticleId={article.data.analysisArticleId}
+                issueId={article.data.issueId}
                 selectedAudience={selectedAudience}
                 onAudienceSelect={(audience) => setPerspectiveSelection({ articleId, audience })}
                 onEvidenceSelect={highlightEvidence}
@@ -182,11 +185,15 @@ export function ArticleDetailModal({
 
 function AnalysisPanel({
   analysis,
+  analysisArticleId,
+  issueId,
   selectedAudience,
   onAudienceSelect,
   onEvidenceSelect,
 }: {
   analysis: ArticleAnalysis
+  analysisArticleId: number
+  issueId: number | null
   selectedAudience: Audience
   onAudienceSelect: (audience: Audience) => void
   onEvidenceSelect: (evidence: number[]) => void
@@ -263,11 +270,136 @@ function AnalysisPanel({
           <p className="perspective-empty">이 관점과 직접 연결되는 근거가 없습니다.</p>
         )}
       </div>
+      {issueId !== null && (
+        <PerspectiveInsight
+          issueId={issueId}
+          audience={selectedAudience}
+          analysisArticleId={analysisArticleId}
+          onEvidenceSelect={onEvidenceSelect}
+        />
+      )}
       <KeyPointList
         points={keyPoints}
         onEvidenceSelect={(sentenceId) => onEvidenceSelect([sentenceId])}
       />
     </section>
+  )
+}
+
+function PerspectiveInsight({
+  issueId,
+  audience,
+  analysisArticleId,
+  onEvidenceSelect,
+}: {
+  issueId: number
+  audience: Audience
+  analysisArticleId: number
+  onEvidenceSelect: (evidence: number[]) => void
+}) {
+  const stored = useInsight(issueId, audience)
+  const generate = useGenerateInsight()
+  const matchesCurrentSelection = generate.variables?.issueId === issueId
+    && generate.variables?.audience === audience
+  const result = matchesCurrentSelection && generate.data ? generate.data : stored.data
+  const insight = result?.insights.find((item) => item.audience === audience)
+  const error = matchesCurrentSelection ? generate.error : null
+
+  return (
+    <section className="perspective-insight" aria-label={`${AUDIENCE_LABELS[audience]} 관점 인사이트`}>
+      <div className="perspective-insight-action">
+        <div>
+          <strong>관점 인사이트</strong>
+          <span>검증된 사실과 조건부 해석을 분리해 생성합니다.</span>
+        </div>
+        <button
+          type="button"
+          disabled={generate.isPending}
+          onClick={() => generate.mutate({ issueId, audience })}
+        >
+          {generate.isPending && matchesCurrentSelection
+            ? '인사이트 생성 중…'
+            : '이 관점으로 인사이트 보기 · 크레딧 1 사용'}
+        </button>
+      </div>
+      {error && <p className="perspective-insight-error" role="alert">{error.message}</p>}
+      {insight && (
+        <InsightContents
+          insight={insight}
+          cached={result?.cached ?? false}
+          analysisArticleId={analysisArticleId}
+          onEvidenceSelect={onEvidenceSelect}
+        />
+      )}
+    </section>
+  )
+}
+
+function InsightContents({
+  insight,
+  cached,
+  analysisArticleId,
+  onEvidenceSelect,
+}: {
+  insight: AudienceInsight
+  cached: boolean
+  analysisArticleId: number
+  onEvidenceSelect: (evidence: number[]) => void
+}) {
+  const hasContents = insight.facts.length > 0 || insight.implications.length > 0
+  return (
+    <div className="perspective-insight-result">
+      <div className="perspective-insight-heading">
+        <h4>{insight.headline}</h4>
+        <span>{cached ? '저장된 결과' : '새 결과'} · 신뢰도 {Math.round(insight.confidence * 100)}%</span>
+      </div>
+      {!hasContents && (
+        <p className="perspective-insight-empty">
+          현재 근거에서는 이 관점에 직접 연결되는 검증된 인사이트가 없습니다.
+        </p>
+      )}
+      {insight.facts.length > 0 && (
+        <div className="insight-claim-group">
+          <h5>확인된 사실</h5>
+          {insight.facts.map((fact) => (
+            <article className="insight-fact" key={fact.id}>
+              <div className="insight-claim-labels">
+                <span>사실</span>
+                <small>{fact.groundedness === 'grounded' ? '근거 확인' : '근거 보강 필요'}</small>
+              </div>
+              <p>{fact.text}</p>
+              <small>{fact.groundingReason}</small>
+              {fact.articleId === analysisArticleId && fact.evidenceSentenceIds.length > 0 && (
+                <button type="button" onClick={() => onEvidenceSelect(fact.evidenceSentenceIds)}>
+                  본문 근거 보기
+                </button>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+      {insight.implications.length > 0 && (
+        <div className="insight-claim-group">
+          <h5>조건부 해석</h5>
+          {insight.implications.map((implication) => (
+            <article className="insight-implication" key={implication.id}>
+              <div className="insight-claim-labels"><span>해석</span></div>
+              <p>{implication.text}</p>
+              <dl>
+                <div><dt>전제</dt><dd>{implication.assumption}</dd></div>
+                <div><dt>틀릴 조건</dt><dd>{implication.falsifiedBy}</dd></div>
+              </dl>
+            </article>
+          ))}
+        </div>
+      )}
+      {insight.watchNext.length > 0 && (
+        <div className="insight-watch-next">
+          <h5>다음 확인 항목</h5>
+          <ul>{insight.watchNext.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul>
+        </div>
+      )}
+    </div>
   )
 }
 

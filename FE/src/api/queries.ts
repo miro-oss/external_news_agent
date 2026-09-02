@@ -25,6 +25,7 @@ import type {
   DeliveryLogPage,
   GroupPerspective,
   IssueDetail,
+  InsightResult,
   NotificationChannel,
   NotificationGroup,
   NotificationPreview,
@@ -51,6 +52,7 @@ const keys = {
   latestReport: ['reports', 'latest'] as const,
   report: (id: number | null) => ['reports', id] as const,
   issue: (id: number | null) => ['issues', id] as const,
+  insight: (issueId: number, audience: Audience) => ['insights', issueId, audience] as const,
   llmPlan: ['settings', 'llm-plan'] as const,
   llmUsage: ['usage', 'llm'] as const,
   audience: ['settings', 'audience'] as const,
@@ -200,6 +202,34 @@ export function useIssue(issueId: number | null, enabled = true) {
     queryKey: keys.issue(issueId),
     queryFn: () => get<IssueDetail>(`/issues/${issueId}`),
     enabled: issueId !== null && enabled,
+  })
+}
+
+export function useGenerateInsight() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ issueId, audience }: { issueId: number; audience: Audience }) =>
+      post<InsightResult>('/insights', {
+        targetType: 'ISSUE',
+        targetId: issueId,
+        audiences: [audience],
+      }),
+    onSuccess: (result, variables) => {
+      queryClient.setQueryData(keys.insight(variables.issueId, variables.audience), result)
+      void queryClient.invalidateQueries({ queryKey: keys.llmUsage })
+    },
+  })
+}
+
+export function useInsight(issueId: number, audience: Audience) {
+  return useQuery({
+    queryKey: keys.insight(issueId, audience),
+    queryFn: () => get<InsightResult>('/insights', {
+      targetType: 'ISSUE',
+      targetId: issueId,
+      audience,
+    }),
+    retry: false,
   })
 }
 

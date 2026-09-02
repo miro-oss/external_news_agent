@@ -4,6 +4,8 @@ import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
+import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
+import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
@@ -191,6 +193,64 @@ public class AgentRunRecorder {
                 .collectionRunId(runId)
                 .idempotencyKey(request.idempotencyKey())
                 .agentTask(AgentTask.SELF_CRITIQUE)
+                .targetType(AgentTargetType.ISSUE)
+                .targetId(issueId)
+                .status(AgentRunStatus.FAILED)
+                .failureCode(failureCode)
+                .failureMessage(truncate(failureMessage))
+                .timeoutPhase(timeoutPhase)
+                .llmPlan(request.plan())
+                .inputTokens(usage == null ? null : usage.inputTokens())
+                .outputTokens(usage == null ? null : usage.outputTokens())
+                .costUsd(usage == null ? null : usage.costUsd())
+                .credits(usage == null ? null : usage.credits())
+                .requestHash(hash(request))
+                .startedAt(startedAt)
+                .finishedAt(now())
+                .build());
+    }
+
+    @Transactional
+    public void recordInsightSuccess(Long runId,
+                                     Long issueId,
+                                     AgentInsightRequest request,
+                                     AgentInsightResponse response,
+                                     LocalDateTime startedAt) {
+        AgentInsightResponse.Meta meta = response.meta();
+        repository.insertIfAbsent(AgentRun.builder()
+                .collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey())
+                .agentTask(AgentTask.INSIGHT)
+                .targetType(AgentTargetType.ISSUE)
+                .targetId(issueId)
+                .status(meta.mock() ? AgentRunStatus.MOCK : AgentRunStatus.SUCCESS)
+                .promptVersion(meta.promptVersion())
+                .llmProvider(meta.provider())
+                .llmModel(meta.model())
+                .llmPlan(request.plan())
+                .inputTokens(meta.inputTokens())
+                .outputTokens(meta.outputTokens())
+                .costUsd(meta.costUsd())
+                .credits(meta.credits())
+                .requestHash(hash(request))
+                .startedAt(startedAt)
+                .finishedAt(now())
+                .build());
+    }
+
+    @Transactional
+    public void recordInsightFailure(Long runId,
+                                     Long issueId,
+                                     AgentInsightRequest request,
+                                     String failureCode,
+                                     String failureMessage,
+                                     AgentClientException.Usage usage,
+                                     AgentTimeoutPhase timeoutPhase,
+                                     LocalDateTime startedAt) {
+        repository.insertIfAbsent(AgentRun.builder()
+                .collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey())
+                .agentTask(AgentTask.INSIGHT)
                 .targetType(AgentTargetType.ISSUE)
                 .targetId(issueId)
                 .status(AgentRunStatus.FAILED)
