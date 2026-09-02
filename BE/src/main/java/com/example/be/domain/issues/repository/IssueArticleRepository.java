@@ -95,6 +95,26 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             @Param("topicIds") Collection<Long> topicIds,
             @Param("since") OffsetDateTime since);
 
+    @Query("""
+            SELECT membership
+            FROM IssueArticle membership
+            JOIN FETCH membership.issue issue
+            JOIN FETCH issue.topic
+            JOIN FETCH membership.article article
+            JOIN FETCH article.source
+            LEFT JOIN FETCH article.contentGroup
+            WHERE membership.role = com.example.be.domain.issues.entity.IssueArticleRole.REPRESENTATIVE
+              AND issue.topic.id = :topicId
+              AND issue.id <> :excludedIssueId
+              AND issue.lastSeenAt >= :since
+              AND issue.articleCount > 0
+            ORDER BY issue.lastSeenAt DESC, issue.id DESC
+            """)
+    List<IssueArticle> findRecentRepresentativesByTopicIdExcludingIssueId(
+            @Param("topicId") Long topicId,
+            @Param("excludedIssueId") Long excludedIssueId,
+            @Param("since") OffsetDateTime since);
+
     /**
      * 이번 실행에서 새 기사나 갱신 기사가 붙은 이슈의 대표를 반환한다. 대표 자체가 이번 run에 없어도 포함한다.
      *

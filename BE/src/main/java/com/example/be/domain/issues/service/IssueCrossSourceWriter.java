@@ -8,6 +8,7 @@ import com.example.be.domain.issues.entity.IssueStanceSource;
 import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
+import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.time.OffsetDateTime;
 
 @Service
 @RequiredArgsConstructor
@@ -26,6 +28,7 @@ public class IssueCrossSourceWriter {
 
     private final NewsIssueRepository issueRepository;
     private final IssueArticleRepository issueArticleRepository;
+    private final IssueProjectionService projectionService;
 
     @Transactional
     public void applyRepresentative(Long issueId,
@@ -55,6 +58,9 @@ public class IssueCrossSourceWriter {
         issue.applyCrossSource(currentCrossSource);
         memberships.forEach(membership -> {
             if (membership.getRole() == IssueArticleRole.REPRESENTATIVE) {
+                if (membership.getStance() == IssueStance.RETRACTS) {
+                    return;
+                }
                 membership.applyStance(
                         IssueStance.SUPPORTS,
                         llmConfirmed ? IssueStanceSource.LLM : IssueStanceSource.RULE,
@@ -70,6 +76,8 @@ public class IssueCrossSourceWriter {
                     IssueStanceSource.RULE,
                     candidate.confidence());
         });
+        projectionService.recalculate(
+                issue, memberships, OffsetDateTime.now(ApiTimeZone.ZONE));
     }
 
     @Transactional
@@ -78,7 +86,7 @@ public class IssueCrossSourceWriter {
                                  IssueStance stance,
                                  BigDecimal confidence,
                                  boolean llmConfirmed) {
-        issueRepository.findByIdForUpdate(issueId)
+        NewsIssue issue = issueRepository.findByIdForUpdate(issueId)
                 .orElseThrow(() -> new IllegalStateException("승격 결과를 저장할 이슈가 없습니다. id=" + issueId));
         IssueArticle membership = issueArticleRepository.findByIssueIdAndArticleId(issueId, articleId)
                 .orElseThrow(() -> new IllegalStateException(
@@ -88,6 +96,10 @@ public class IssueCrossSourceWriter {
                 stance,
                 llmConfirmed ? IssueStanceSource.LLM : IssueStanceSource.RULE,
                 confidence);
+        projectionService.recalculate(
+                issue,
+                issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(issueId),
+                OffsetDateTime.now(ApiTimeZone.ZONE));
     }
 
     private IssueCrossSource currentReferences(IssueCrossSource crossSource, Set<Long> articleIds) {

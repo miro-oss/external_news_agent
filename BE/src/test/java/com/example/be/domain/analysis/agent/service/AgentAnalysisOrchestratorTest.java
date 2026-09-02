@@ -159,6 +159,36 @@ class AgentAnalysisOrchestratorTest {
     }
 
     @Test
+    void selfCritiquesImportanceSelectedIssueWithoutLegacyHighSensitivityGate() {
+        Article representative = article();
+        Article member = issueMember(representative, 11L, "같은 이슈 기사", "같은 결론");
+        AnalysisContext context = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, member)),
+                true);
+        QuotaReservation reservation = new QuotaReservation(
+                3L,
+                42L,
+                "run:42:issue:88:self-critique",
+                AgentTask.SELF_CRITIQUE,
+                AgentPlan.FREE,
+                BigDecimal.ONE);
+        when(quotaService.reserve(
+                42L,
+                "run:42:issue:88:self-critique",
+                AgentTask.SELF_CRITIQUE,
+                AgentPlan.FREE)).thenReturn(reservation);
+        when(client.analyze(any())).thenReturn(lowSensitivityIssueResponse());
+        when(client.selfCritique(any())).thenReturn(selfCritiqueResponse());
+
+        orchestrator.analyze(context);
+
+        verify(client).selfCritique(any());
+    }
+
+    @Test
     void keepsVerifiedDraftWhenSelfCritiqueFails() {
         Article representative = article();
         Article member = issueMember(representative, 11L, "같은 이슈 기사", "같은 결론");
@@ -835,6 +865,22 @@ class AgentAnalysisOrchestratorTest {
                         com.example.be.domain.analysis.agent.AgentSensitivityFixtures.analyze(3),
                         source.classification().relevance(),
                         source.classification().category()),
+                source.entities(),
+                source.perspectiveTags(),
+                AgentAnalyzeResponse.CrossSource.empty(),
+                List.of(),
+                List.of(new AgentAnalyzeResponse.MemberStance(
+                        11L, "SUPPORTS", new BigDecimal("0.55"))),
+                source.meta());
+    }
+
+    private static AgentAnalyzeResponse lowSensitivityIssueResponse() {
+        AgentAnalyzeResponse source = response(List.of(1), "제품/공정", false);
+        return new AgentAnalyzeResponse(
+                source.sentences(),
+                source.sections(),
+                "최초 근거 검증을 마친 한국어 요약입니다.",
+                source.classification(),
                 source.entities(),
                 source.perspectiveTags(),
                 AgentAnalyzeResponse.CrossSource.empty(),

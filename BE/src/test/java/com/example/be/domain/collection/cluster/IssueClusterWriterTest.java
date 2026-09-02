@@ -18,6 +18,9 @@ import com.example.be.domain.issues.repository.IssueRelationRepository;
 import com.example.be.domain.issues.repository.IssueStatusHistoryRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.issues.repository.NewsWatchRepository;
+import com.example.be.domain.issues.service.IssueProjectionService;
+import com.example.be.domain.issues.service.IssueRefutationLinker;
+import com.example.be.domain.issues.service.IssueStanceClassifier;
 import com.example.be.domain.notifications.entity.WatchAlertOutbox;
 import com.example.be.domain.notifications.repository.WatchAlertOutboxRepository;
 import com.example.be.domain.sources.entity.Source;
@@ -26,6 +29,7 @@ import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.config.ApiTimeZone;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -38,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -54,6 +59,8 @@ class IssueClusterWriterTest {
     private final IssueStatusHistoryRepository statusHistoryRepository = mock(IssueStatusHistoryRepository.class);
     private final NewsWatchRepository watchRepository = mock(NewsWatchRepository.class);
     private final WatchAlertOutboxRepository watchAlertOutboxRepository = mock(WatchAlertOutboxRepository.class);
+    private final IssueProjectionService projectionService = mock(IssueProjectionService.class);
+    private final IssueRefutationLinker refutationLinker = mock(IssueRefutationLinker.class);
     private final IssueClusterWriter writer = new IssueClusterWriter(
             articleRepository,
             topicRepository,
@@ -64,7 +71,10 @@ class IssueClusterWriterTest {
             statusHistoryRepository,
             watchRepository,
             watchAlertOutboxRepository,
-            new BreakingNewsDetector());
+            new BreakingNewsDetector(),
+            new IssueStanceClassifier(),
+            projectionService,
+            refutationLinker);
 
     @Test
     void mergesAllArticlesFromLosingContentGroupAndRefreshesFingerprint() {
@@ -169,6 +179,7 @@ class IssueClusterWriterTest {
         assertEquals(WatchType.BREAKING, watchCaptor.getValue().getWatchType());
         assertTrue(watchCaptor.getValue().getExpiresAt()
                 .isAfter(LocalDateTime.now(ApiTimeZone.ZONE).plusHours(47)));
+        verify(refutationLinker).linkNewIssue(created, breaking);
     }
 
     @Test
@@ -240,6 +251,116 @@ class IssueClusterWriterTest {
         assertTrue(watch.getCooldownUntil()
                 .isAfter(LocalDateTime.now(ApiTimeZone.ZONE).plusMinutes(29)));
         verify(watchRepository, never()).save(any());
+    }
+
+    @Test
+    void correctionKeepsOriginalArticleAsStanceReferenceEvenWhenItBecomesRepresentative() {
+        Topic topic = topic();
+        Article original = article(1L, "삼성전자 HBM4 양산 확정", topic);
+        Article correction = article(2L, "삼성전자 HBM4 양산 보도 정정", topic);
+        NewsIssue issue = issue(100L, topic, "삼성전자 HBM4 양산 확정");
+        IssueArticle originalMembership = membership(
+                11L, issue, original, IssueArticleRole.REPRESENTATIVE);
+        OffsetDateTime time = original.getPublishedAt();
+        ClusterPlan.IssueAssignment assignment = new ClusterPlan.IssueAssignment(
+                100L, List.of(), topic.getId(), correction.getId(), List.of(1L, 2L),
+                List.of("HBM4", "삼성전자"), time, correction.getPublishedAt(), 2, 2);
+        when(articleRepository.findAllById(any())).thenReturn(List.of(original, correction));
+        when(topicRepository.findById(topic.getId())).thenReturn(Optional.of(topic));
+        when(issueRepository.findById(100L)).thenReturn(Optional.of(issue));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L))
+                .thenReturn(List.of(originalMembership));
+        when(issueArticleRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        writer.write(new ClusterPlan(List.of(), List.of(assignment), List.of()));
+
+        ArgumentCaptor<IssueArticle> membership = ArgumentCaptor.forClass(IssueArticle.class);
+        verify(issueArticleRepository).save(membership.capture());
+        assertEquals(IssueStance.RETRACTS, membership.getValue().getStance());
+        assertEquals(IssueStanceSource.RULE, membership.getValue().getStanceSource());
+        assertEquals(IssueArticleRole.REPRESENTATIVE, membership.getValue().getRole());
+    }
+
+    @Test
+    void preservesExistingCrossSourceRuleStanceWhenNewArticleJoins() {
+        Topic topic = topic();
+        Article original = article(1L, "삼성전자 HBM4 양산 확정", topic);
+        Article followUp = article(2L, "삼성전자 HBM4 양산 후속 보도", topic);
+        NewsIssue issue = issue(100L, topic, original.getTitle());
+        IssueArticle originalMembership = membership(
+                11L, issue, original, IssueArticleRole.REPRESENTATIVE);
+        originalMembership.applyStance(
+                IssueStance.DISPUTES,
+                IssueStanceSource.RULE,
+                new BigDecimal("0.850"));
+        ClusterPlan.IssueAssignment assignment = assignment(100L, List.of(), topic, followUp);
+        when(articleRepository.findAllById(any())).thenReturn(List.of(original, followUp));
+        when(topicRepository.findById(topic.getId())).thenReturn(Optional.of(topic));
+        when(issueRepository.findById(100L)).thenReturn(Optional.of(issue));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L))
+                .thenReturn(List.of(originalMembership));
+        when(issueArticleRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        writer.write(new ClusterPlan(List.of(), List.of(assignment), List.of()));
+
+        assertEquals(IssueStance.DISPUTES, originalMembership.getStance());
+        assertEquals(new BigDecimal("0.850"), originalMembership.getStanceConfidence());
+    }
+
+    @Test
+    void queriesWatchesAfterProjectionSoFirstDisputedArticleIsAlerted() {
+        Topic topic = topic();
+        Article original = article(1L, "삼성전자 HBM4 양산 확정", topic);
+        Article correction = article(2L, "삼성전자 HBM4 양산 보도 정정", topic);
+        NewsIssue issue = issue(100L, topic, original.getTitle());
+        IssueArticle originalMembership = membership(
+                11L, issue, original, IssueArticleRole.REPRESENTATIVE);
+        NewsWatch disputedWatch = NewsWatch.builder()
+                .id(50L)
+                .watchType(WatchType.DISPUTED)
+                .issue(issue)
+                .expiresAt(LocalDateTime.now(ApiTimeZone.ZONE).plusHours(48))
+                .active(true)
+                .build();
+        ClusterPlan.IssueAssignment assignment = assignment(100L, List.of(), topic, correction);
+        when(articleRepository.findAllById(any())).thenReturn(List.of(original, correction));
+        when(topicRepository.findById(topic.getId())).thenReturn(Optional.of(topic));
+        when(issueRepository.findById(100L)).thenReturn(Optional.of(issue));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L))
+                .thenReturn(List.of(originalMembership));
+        when(issueArticleRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(watchRepository.findEligibleForNotification(any(), any()))
+                .thenReturn(List.of(disputedWatch));
+
+        writer.write(new ClusterPlan(List.of(), List.of(assignment), List.of()));
+
+        InOrder order = inOrder(projectionService, watchRepository);
+        order.verify(projectionService).recalculate(any(), any(), any());
+        order.verify(watchRepository).findEligibleForNotification(any(), any());
+        ArgumentCaptor<WatchAlertOutbox> alert = ArgumentCaptor.forClass(WatchAlertOutbox.class);
+        verify(watchAlertOutboxRepository).save(alert.capture());
+        assertSame(disputedWatch, alert.getValue().getWatch());
+    }
+
+    @Test
+    void newCorrectionRecalculatesRefutedOriginalIssue() {
+        Topic topic = topic();
+        Article correction = article(1L, "삼성전자 HBM4 양산 보도 정정", topic);
+        NewsIssue created = issue(100L, topic, correction.getTitle());
+        OffsetDateTime time = correction.getPublishedAt();
+        ClusterPlan.IssueAssignment assignment = new ClusterPlan.IssueAssignment(
+                null, List.of(), topic.getId(), correction.getId(), List.of(correction.getId()),
+                List.of("HBM4", "삼성전자"), time, time, 1, 1);
+        when(articleRepository.findAllById(any())).thenReturn(List.of(correction));
+        when(topicRepository.findById(topic.getId())).thenReturn(Optional.of(topic));
+        when(issueRepository.save(any())).thenReturn(created);
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L)).thenReturn(List.of());
+        when(issueArticleRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(refutationLinker.linkNewIssue(created, correction)).thenReturn(Optional.of(200L));
+
+        writer.write(new ClusterPlan(List.of(), List.of(assignment), List.of()));
+
+        verify(projectionService).recalculate(200L);
     }
 
     private ClusterPlan.IssueAssignment assignment(Long existingId,

@@ -26,6 +26,7 @@ public interface NewsWatchRepository extends JpaRepository<NewsWatch, Long> {
               AND watch.active = true
               AND watch.watchType IN (
                     com.example.be.domain.issues.entity.WatchType.BREAKING,
+                    com.example.be.domain.issues.entity.WatchType.DISPUTED,
                     com.example.be.domain.issues.entity.WatchType.HIGH_SENSITIVITY)
               AND watch.expiresAt > :now
               AND (watch.cooldownUntil IS NULL OR watch.cooldownUntil <= :now)

@@ -22,6 +22,7 @@ import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.NewsWatchRepository;
+import com.example.be.domain.issues.service.IssueProjectionService;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.entity.NewsIssue;
@@ -52,9 +53,10 @@ class FindingWriterTest {
     private final NewsWatchRepository watchRepository = mock(NewsWatchRepository.class);
     private final SensitivityCalculator sensitivityCalculator = SensitivityCalculator.defaults();
     private final BreakingNewsDetector breakingNewsDetector = new BreakingNewsDetector();
+    private final IssueProjectionService projectionService = mock(IssueProjectionService.class);
     private final FindingWriter writer = new FindingWriter(
             findingRepository, runRepository, articleRepository, issueArticleRepository,
-            watchRepository, sensitivityCalculator, breakingNewsDetector);
+            watchRepository, sensitivityCalculator, breakingNewsDetector, projectionService);
 
     @Test
     void locksArticleBeforeCheckingForDuplicateFinding() {
@@ -145,6 +147,8 @@ class FindingWriterTest {
 
         assertEquals("대표 이슈 요약", firstIssue.getSummary());
         assertEquals("대표 이슈 요약", secondIssue.getSummary());
+        verify(projectionService).recalculate(1L);
+        verify(projectionService).recalculate(2L);
     }
 
     @Test

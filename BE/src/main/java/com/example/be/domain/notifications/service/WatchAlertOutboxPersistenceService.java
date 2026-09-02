@@ -1,5 +1,6 @@
 package com.example.be.domain.notifications.service;
 
+import com.example.be.domain.issues.entity.WatchType;
 import com.example.be.domain.notifications.entity.WatchAlertOutbox;
 import com.example.be.domain.notifications.repository.WatchAlertOutboxRepository;
 import com.example.be.global.config.ApiTimeZone;
@@ -50,6 +51,7 @@ public class WatchAlertOutboxPersistenceService {
         return new WatchAlertSnapshot(
                 alert.getId(),
                 alert.getWatch().getId(),
+                alert.getWatch().getWatchType(),
                 alert.getWatch().getIssue().getId(),
                 alert.getNotifyGroupId(),
                 alert.getIssueTitle(),
@@ -62,6 +64,7 @@ public class WatchAlertOutboxPersistenceService {
 
     public record WatchAlertSnapshot(Long id,
                                      Long watchId,
+                                     WatchType watchType,
                                      Long issueId,
                                      Long notifyGroupId,
                                      String issueTitle,
@@ -72,6 +75,10 @@ public class WatchAlertOutboxPersistenceService {
                                      int attemptCount) {
 
         public String message() {
+            if (watchType == WatchType.DISPUTED) {
+                return "⚠ '%s'에 반박 기사 등장 · 후속 %d건 · 매체 %d곳 확인됨"
+                        .formatted(issueTitle, followUpCount, publisherCount);
+            }
             long elapsedHours = Math.max(0, Duration.between(firstSeenAt, queuedAt).toHours());
             String elapsed = elapsedHours == 0 ? "방금" : elapsedHours + "시간 전";
             return "%s 속보 '%s'에 후속 %d건 · 매체 %d곳 확인됨"

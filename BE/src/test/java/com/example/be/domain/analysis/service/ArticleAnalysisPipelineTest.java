@@ -20,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -277,7 +278,7 @@ class ArticleAnalysisPipelineTest {
     }
 
     @Test
-    void marksOnlyTopTwentyPercentOfIssuesForSelfCritique() {
+    void marksTopTwentyPercentByPersistedIssueImportanceForSelfCritique() {
         Topic topic = Topic.builder()
                 .optionalKeywords(List.of("HBM", "삼성", "양산"))
                 .build();
@@ -294,7 +295,12 @@ class ArticleAnalysisPipelineTest {
         when(issueArticleRepository.findIssueContextsByRepresentativeArticleIds(any()))
                 .thenReturn(articles.stream()
                         .map(article -> IssueArticle.builder()
-                                .issue(NewsIssue.builder().id(100L + article.getId()).build())
+                                .issue(NewsIssue.builder()
+                                        .id(100L + article.getId())
+                                        .importanceScore(article.getId() == 10L
+                                                ? new BigDecimal("90.00")
+                                                : new BigDecimal("20.00"))
+                                        .build())
                                 .article(article)
                                 .role(IssueArticleRole.REPRESENTATIVE)
                                 .build())
@@ -309,8 +315,9 @@ class ArticleAnalysisPipelineTest {
                 .filter(AnalysisContext::selfCritiqueEligible)
                 .toList();
         assertEquals(1, eligible.size());
-        assertEquals(14L, eligible.getFirst().article().getId());
+        assertEquals(10L, eligible.getFirst().article().getId());
         assertTrue(eligible.getFirst().issue().present());
+        assertEquals(new BigDecimal("90.00"), eligible.getFirst().issue().importanceScore());
     }
 
     private CollectionRunArticle observation(Article article, ChangeType changeType) {

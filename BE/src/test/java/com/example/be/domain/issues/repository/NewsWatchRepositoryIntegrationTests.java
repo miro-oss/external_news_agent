@@ -59,7 +59,7 @@ class NewsWatchRepositoryIntegrationTests {
 
     @Test
     @Transactional
-    void locksEligibleWatchAndExcludesItDuringCooldown() {
+    void locksBreakingAndDisputedWatchesAndExcludesThemDuringCooldown() {
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
         Topic topic = topicRepository.save(Topic.builder()
                 .name("속보 watch 통합테스트 " + System.nanoTime())
@@ -82,13 +82,20 @@ class NewsWatchRepositoryIntegrationTests {
                 .expiresAt(now.plusHours(48))
                 .active(true)
                 .build());
+        NewsWatch disputed = watchRepository.save(NewsWatch.builder()
+                .watchType(WatchType.DISPUTED)
+                .issue(issue)
+                .expiresAt(now.plusHours(48))
+                .active(true)
+                .build());
         entityManager.flush();
         entityManager.clear();
 
         List<NewsWatch> eligible = watchRepository.findEligibleForNotification(issue.getId(), now);
 
-        assertEquals(List.of(watch.getId()), eligible.stream().map(NewsWatch::getId).toList());
-        eligible.getFirst().claimUntil(now.plusMinutes(30));
+        assertEquals(List.of(watch.getId(), disputed.getId()),
+                eligible.stream().map(NewsWatch::getId).toList());
+        eligible.forEach(value -> value.claimUntil(now.plusMinutes(30)));
         entityManager.flush();
         entityManager.clear();
         assertTrue(watchRepository.findEligibleForNotification(

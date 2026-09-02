@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -128,7 +129,10 @@ public class ArticleAnalysisPipeline {
         }
         return targets.stream()
                 .filter(target -> issues.containsKey(target.article().getId()))
-                .sorted(Comparator.comparingDouble(Target::topicFit).reversed()
+                .sorted(Comparator.<Target, BigDecimal>comparing(
+                                target -> importanceScore(target, issues),
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(Comparator.comparingDouble(Target::topicFit).reversed())
                         .thenComparing(
                                 target -> distinctPublisherCount(
                                         issues.get(target.article().getId())),
@@ -140,6 +144,11 @@ public class ArticleAnalysisPipeline {
                 .limit(limit)
                 .map(target -> target.article().getId())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private BigDecimal importanceScore(Target target,
+                                       Map<Long, IssueAnalysisContext> issues) {
+        return issues.get(target.article().getId()).importanceScore();
     }
 
     private long distinctPublisherCount(IssueAnalysisContext issue) {
@@ -177,7 +186,8 @@ public class ArticleAnalysisPipeline {
                                 issueId,
                                 representative.getArticle().getId(),
                                 issueMemberships.stream().map(IssueArticle::getArticle).toList(),
-                                representativeIds))));
+                                representativeIds,
+                                representative.getIssue().getImportanceScore()))));
         return Map.copyOf(result);
     }
 

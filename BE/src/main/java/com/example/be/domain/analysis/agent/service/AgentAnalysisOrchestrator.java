@@ -192,8 +192,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                                                AgentAnalyzeResponse.CrossSource crossSource) {
         if (!context.selfCritiqueEligible()
                 || !context.issue().present()
-                || result.analysisSource() != AnalysisSource.LLM
-                || !sensitivityCalculator.isHigh(result.sensitivity().getScore())) {
+                || result.analysisSource() != AnalysisSource.LLM) {
             return result;
         }
 
