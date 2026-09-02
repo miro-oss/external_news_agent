@@ -36,7 +36,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 @Service
 @Slf4j
@@ -52,6 +53,9 @@ public class InsightService {
     private final AgentQuotaService quotaService;
     private final AgentRunRecorder runRecorder;
     private final LlmPlanService planService;
+    private final Object[] generationLocks = IntStream.range(0, 256)
+            .mapToObj(ignored -> new Object())
+            .toArray(Object[]::new);
 
     public InsightDTO.Result create(InsightDTO.CreateRequest createRequest) {
         AgentTargetType targetType = targetType(createRequest == null
@@ -59,8 +63,28 @@ public class InsightService {
         Long targetId = targetId(createRequest == null ? null : createRequest.targetId());
         List<Audience> audiences = audiences(createRequest == null
                 ? null : createRequest.audiences());
+        if (!properties.isEnabled()) {
+            throw new GeneralException(
+                    GeneralErrorCode.CONFLICT,
+                    "관점 인사이트 기능이 현재 비활성화되어 있습니다.");
+        }
         InsightInputAssembler.Snapshot snapshot = inputAssembler.assemble(targetId);
+        GenerationKey generationKey = new GenerationKey(
+                targetType,
+                targetId,
+                snapshot.inputHash(),
+                properties.getInsightPromptVersion());
+        Object lock = generationLocks[Math.floorMod(
+                generationKey.hashCode(), generationLocks.length)];
+        synchronized (lock) {
+            return createUnderLock(targetType, targetId, audiences, snapshot);
+        }
+    }
 
+    private InsightDTO.Result createUnderLock(AgentTargetType targetType,
+                                               Long targetId,
+                                               List<Audience> audiences,
+                                               InsightInputAssembler.Snapshot snapshot) {
         Map<Audience, NewsInsight> byAudience = new HashMap<>();
         persistenceService.findCached(
                         targetType,
@@ -76,14 +100,13 @@ public class InsightService {
             return result(true, targetType, targetId, snapshot.inputHash(),
                     properties.getInsightPromptVersion(), audiences, byAudience);
         }
-        if (!properties.isEnabled()) {
-            throw new GeneralException(
-                    GeneralErrorCode.INTERNAL_SERVER_ERROR,
-                    "Agent 인사이트 기능이 비활성화되어 있습니다.");
-        }
-
         AgentPlan plan = planService.get().plan();
-        String idempotencyKey = idempotencyKey(targetId, snapshot.inputHash());
+        String idempotencyKey = idempotencyKey(
+                targetType,
+                targetId,
+                snapshot.inputHash(),
+                properties.getInsightPromptVersion(),
+                missing);
         QuotaReservation reservation;
         try {
             reservation = quotaService.reserve(
@@ -92,6 +115,22 @@ public class InsightService {
             throw new LlmException(LlmErrorCode.QUOTA_EXHAUSTED, Map.of(
                     "plan", exception.getPlan().name(),
                     "reason", exception.getMessage()));
+        } catch (IllegalStateException exception) {
+            List<NewsInsight> concurrentlySaved = persistenceService.findCached(
+                    targetType,
+                    targetId,
+                    snapshot.inputHash(),
+                    properties.getInsightPromptVersion(),
+                    audiences);
+            if (concurrentlySaved.size() == audiences.size()) {
+                concurrentlySaved.forEach(
+                        insight -> byAudience.put(insight.getAudience(), insight));
+                return result(true, targetType, targetId, snapshot.inputHash(),
+                        properties.getInsightPromptVersion(), audiences, byAudience);
+            }
+            throw new GeneralException(
+                    GeneralErrorCode.CONFLICT,
+                    "동일한 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.");
         }
 
         AgentInsightRequest request = new AgentInsightRequest(
@@ -102,13 +141,29 @@ public class InsightService {
                 snapshot.topic(),
                 snapshot.findings());
         LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
-        AgentInsightResponse response;
+        AgentInsightResponse response = null;
+        List<NewsInsight> saved;
+        boolean validated = false;
         try {
             response = agentClient.insight(request);
             validate(response, request);
+            validated = true;
+            saved = persistenceService.saveGenerated(
+                    targetType,
+                    targetId,
+                    snapshot.inputHash(),
+                    response,
+                    snapshot.articleIdsByFinding());
         } catch (RuntimeException exception) {
-            recordFailure(snapshot.runId(), targetId, request, exception, startedAt);
-            completeFailure(reservation, exception);
+            RuntimeException recordedException = validated
+                    ? persistenceFailure(exception, response)
+                    : exception;
+            recordFailure(snapshot.runId(), targetId, request, recordedException, startedAt);
+            if (validated) {
+                quotaService.completeFailure(reservation, "SCHEMA_VIOLATION");
+            } else {
+                completeFailure(reservation, exception);
+            }
             throw new GeneralException(
                     GeneralErrorCode.INTERNAL_SERVER_ERROR,
                     "관점 인사이트 생성에 실패했습니다.");
@@ -116,8 +171,7 @@ public class InsightService {
 
         recordSuccess(snapshot.runId(), targetId, request, response, startedAt);
         quotaService.completeSuccess(reservation, response.meta().credits());
-        persistenceService.saveGenerated(targetType, targetId, snapshot.inputHash(), response)
-                .forEach(insight -> byAudience.put(insight.getAudience(), insight));
+        saved.forEach(insight -> byAudience.put(insight.getAudience(), insight));
         return result(false, targetType, targetId, snapshot.inputHash(),
                 response.meta().promptVersion(), audiences, byAudience);
     }
@@ -195,17 +249,28 @@ public class InsightService {
         }
     }
 
-    private String idempotencyKey(Long targetId, String inputHash) {
-        return "insight:issue:%d:%s:%s".formatted(
+    private String idempotencyKey(AgentTargetType targetType,
+                                  Long targetId,
+                                  String inputHash,
+                                  String promptVersion,
+                                  List<Audience> missing) {
+        String audienceKey = missing.stream()
+                .map(Enum::name)
+                .sorted()
+                .collect(Collectors.joining(","));
+        return "insight:%s:%d:%s:%s:%s".formatted(
+                targetType.name(),
                 targetId,
-                inputHash.substring(0, 12),
-                UUID.randomUUID());
+                inputHash,
+                promptVersion,
+                audienceKey);
     }
 
     private void validate(AgentInsightResponse response, AgentInsightRequest request) {
         if (response == null || response.meta() == null || response.insights() == null
+                || response.meta().truncated()
                 || !properties.getInsightPromptVersion().equals(response.meta().promptVersion())) {
-            throw schemaViolation("meta 또는 promptVersion이 올바르지 않습니다.");
+            throw schemaViolation("meta, promptVersion 또는 truncated 상태가 올바르지 않습니다.");
         }
         Set<String> requestedAudiences = Set.copyOf(request.audiences());
         Set<String> returnedAudiences = new HashSet<>();
@@ -235,6 +300,10 @@ public class InsightService {
             validateImplications(insight, factIds);
             if (insight.watchNext().stream().anyMatch(value -> !StringUtils.hasText(value))) {
                 throw schemaViolation("watchNext는 빈 문자열일 수 없습니다.");
+            }
+            if ("MARKET_INVESTOR".equals(insight.audience())
+                    && containsInvestmentAdvice(insight)) {
+                throw schemaViolation("MARKET_INVESTOR 인사이트에 투자 자문 표현이 있습니다.");
             }
         }
     }
@@ -291,6 +360,32 @@ public class InsightService {
 
     private boolean containsInvestmentAdvice(String value) {
         return value.contains("매수") || value.contains("매도") || value.contains("목표가");
+    }
+
+    private boolean containsInvestmentAdvice(AgentInsightResponse.Insight insight) {
+        return containsInvestmentAdvice(insight.headline())
+                || insight.facts().stream()
+                        .map(AgentInsightResponse.Fact::text)
+                        .anyMatch(this::containsInvestmentAdvice)
+                || insight.implications().stream()
+                        .anyMatch(implication -> containsInvestmentAdvice(implication.text())
+                                || containsInvestmentAdvice(implication.assumption())
+                                || containsInvestmentAdvice(implication.falsifiedBy()))
+                || insight.watchNext().stream().anyMatch(this::containsInvestmentAdvice);
+    }
+
+    private AgentClientException persistenceFailure(RuntimeException exception,
+                                                     AgentInsightResponse response) {
+        AgentInsightResponse.Meta meta = response.meta();
+        return new AgentClientException(
+                "PERSISTENCE_FAILED",
+                "인사이트 저장에 실패했습니다.",
+                exception,
+                new AgentClientException.Usage(
+                        meta.inputTokens(),
+                        meta.outputTokens(),
+                        meta.costUsd(),
+                        meta.credits()));
     }
 
     private AgentClientException schemaViolation(String message) {
@@ -352,5 +447,11 @@ public class InsightService {
             case READ -> AgentTimeoutPhase.READ;
             case NONE -> null;
         };
+    }
+
+    private record GenerationKey(AgentTargetType targetType,
+                                 Long targetId,
+                                 String inputHash,
+                                 String promptVersion) {
     }
 }

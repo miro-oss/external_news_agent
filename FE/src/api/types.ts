@@ -241,6 +241,7 @@ export interface InsightFact {
   id: string
   text: string
   findingId: number
+  articleId: number | null
   evidenceSentenceIds: number[]
   groundedness: 'grounded' | 'weak' | 'ungrounded'
   groundingReason: string

@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -41,7 +42,7 @@ public class InsightPersistenceService {
     public Optional<NewsInsight> findLatest(AgentTargetType targetType,
                                             Long targetId,
                                             Audience audience) {
-        return repository.findFirstByTargetTypeAndTargetIdAndAudienceOrderByCreatedAtDesc(
+        return repository.findFirstByTargetTypeAndTargetIdAndAudienceOrderByCreatedAtDescIdDesc(
                 targetType, targetId, audience);
     }
 
@@ -49,7 +50,8 @@ public class InsightPersistenceService {
     public List<NewsInsight> saveGenerated(AgentTargetType targetType,
                                            Long targetId,
                                            String inputHash,
-                                           AgentInsightResponse response) {
+                                           AgentInsightResponse response,
+                                           Map<Long, Long> articleIdsByFinding) {
         AgentInsightResponse.Meta meta = response.meta();
         LocalDateTime createdAt = LocalDateTime.now(ApiTimeZone.ZONE);
         List<NewsInsight> insights = response.insights().stream()
@@ -58,7 +60,9 @@ public class InsightPersistenceService {
                         .targetId(targetId)
                         .audience(Audience.fromApiValue(insight.audience()))
                         .headline(insight.headline())
-                        .facts(insight.facts().stream().map(this::toFact).toList())
+                        .facts(insight.facts().stream()
+                                .map(fact -> toFact(fact, articleIdsByFinding))
+                                .toList())
                         .implications(insight.implications().stream()
                                 .map(this::toImplication).toList())
                         .watchNext(List.copyOf(insight.watchNext()))
@@ -90,12 +94,14 @@ public class InsightPersistenceService {
                 insight.getCreatedAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime());
     }
 
-    private InsightFact toFact(AgentInsightResponse.Fact fact) {
+    private InsightFact toFact(AgentInsightResponse.Fact fact,
+                               Map<Long, Long> articleIdsByFinding) {
         return new InsightFact(
                 fact.claimType(),
                 fact.id(),
                 fact.text(),
                 fact.findingId(),
+                articleIdsByFinding.get(fact.findingId()),
                 fact.evidenceSentenceIds().stream().map(id -> id - 1).toList(),
                 fact.groundedness(),
                 fact.groundingReason());

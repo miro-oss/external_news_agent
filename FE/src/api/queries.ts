@@ -52,6 +52,7 @@ const keys = {
   latestReport: ['reports', 'latest'] as const,
   report: (id: number | null) => ['reports', id] as const,
   issue: (id: number | null) => ['issues', id] as const,
+  insight: (issueId: number, audience: Audience) => ['insights', issueId, audience] as const,
   llmPlan: ['settings', 'llm-plan'] as const,
   llmUsage: ['usage', 'llm'] as const,
   audience: ['settings', 'audience'] as const,
@@ -213,9 +214,22 @@ export function useGenerateInsight() {
         targetId: issueId,
         audiences: [audience],
       }),
-    onSuccess: () => {
+    onSuccess: (result, variables) => {
+      queryClient.setQueryData(keys.insight(variables.issueId, variables.audience), result)
       void queryClient.invalidateQueries({ queryKey: keys.llmUsage })
     },
+  })
+}
+
+export function useInsight(issueId: number, audience: Audience) {
+  return useQuery({
+    queryKey: keys.insight(issueId, audience),
+    queryFn: () => get<InsightResult>('/insights', {
+      targetType: 'ISSUE',
+      targetId: issueId,
+      audience,
+    }),
+    retry: false,
   })
 }
 

@@ -4,7 +4,7 @@ CREATE TABLE news_insights (
     target_type         VARCHAR2(20) DEFAULT 'ISSUE' NOT NULL,
     target_id           NUMBER NOT NULL,
     audience            VARCHAR2(30) NOT NULL,
-    headline            VARCHAR2(500) NOT NULL,
+    headline            VARCHAR2(500 CHAR) NOT NULL,
     facts_json          CLOB DEFAULT '[]' NOT NULL,
     implications_json   CLOB DEFAULT '[]' NOT NULL,
     watch_next_json     CLOB DEFAULT '[]' NOT NULL,

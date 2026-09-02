@@ -73,8 +73,8 @@ class InsightInputAssemblerTest {
         when(issueRepository.findById(88L)).thenReturn(Optional.of(issue));
         when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(88L))
                 .thenReturn(List.of(membership));
-        when(findingRepository.findFirstByArticleIdOrderByIdDesc(10L))
-                .thenReturn(Optional.of(finding));
+        when(findingRepository.findLatestByArticleIds(List.of(10L)))
+                .thenReturn(List.of(finding));
 
         InsightInputAssembler.Snapshot snapshot = assembler.assemble(88L);
 
@@ -82,6 +82,7 @@ class InsightInputAssemblerTest {
         assertEquals(64, snapshot.inputHash().length());
         assertEquals(List.of(1, 2), snapshot.findings().getFirst().sentences().stream()
                 .map(sentence -> sentence.id()).toList());
+        assertEquals(10L, snapshot.articleIdsByFinding().get(501L));
         assertEquals("HBM", snapshot.topic().name());
     }
 
@@ -99,8 +100,8 @@ class InsightInputAssemblerTest {
         when(issueRepository.findById(88L)).thenReturn(Optional.of(issue));
         when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(88L))
                 .thenReturn(List.of(IssueArticle.builder().issue(issue).article(article).build()));
-        when(findingRepository.findFirstByArticleIdOrderByIdDesc(10L))
-                .thenReturn(Optional.of(stub));
+        when(findingRepository.findLatestByArticleIds(List.of(10L)))
+                .thenReturn(List.of(stub));
 
         GeneralException exception = assertThrows(
                 GeneralException.class,

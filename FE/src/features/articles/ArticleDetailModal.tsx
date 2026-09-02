@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useArticle, useGenerateInsight } from '../../api/queries'
+import { useArticle, useGenerateInsight, useInsight } from '../../api/queries'
 import {
   AUDIENCES,
   AUDIENCE_LABELS,
@@ -139,6 +139,7 @@ export function ArticleDetailModal({
             {article.data.analysis ? (
               <AnalysisPanel
                 analysis={article.data.analysis}
+                analysisArticleId={article.data.analysisArticleId}
                 issueId={article.data.issueId}
                 selectedAudience={selectedAudience}
                 onAudienceSelect={(audience) => setPerspectiveSelection({ articleId, audience })}
@@ -184,12 +185,14 @@ export function ArticleDetailModal({
 
 function AnalysisPanel({
   analysis,
+  analysisArticleId,
   issueId,
   selectedAudience,
   onAudienceSelect,
   onEvidenceSelect,
 }: {
   analysis: ArticleAnalysis
+  analysisArticleId: number
   issueId: number | null
   selectedAudience: Audience
   onAudienceSelect: (audience: Audience) => void
@@ -271,6 +274,7 @@ function AnalysisPanel({
         <PerspectiveInsight
           issueId={issueId}
           audience={selectedAudience}
+          analysisArticleId={analysisArticleId}
           onEvidenceSelect={onEvidenceSelect}
         />
       )}
@@ -285,16 +289,19 @@ function AnalysisPanel({
 function PerspectiveInsight({
   issueId,
   audience,
+  analysisArticleId,
   onEvidenceSelect,
 }: {
   issueId: number
   audience: Audience
+  analysisArticleId: number
   onEvidenceSelect: (evidence: number[]) => void
 }) {
+  const stored = useInsight(issueId, audience)
   const generate = useGenerateInsight()
   const matchesCurrentSelection = generate.variables?.issueId === issueId
     && generate.variables?.audience === audience
-  const result = matchesCurrentSelection ? generate.data : undefined
+  const result = matchesCurrentSelection && generate.data ? generate.data : stored.data
   const insight = result?.insights.find((item) => item.audience === audience)
   const error = matchesCurrentSelection ? generate.error : null
 
@@ -316,7 +323,14 @@ function PerspectiveInsight({
         </button>
       </div>
       {error && <p className="perspective-insight-error" role="alert">{error.message}</p>}
-      {insight && <InsightContents insight={insight} cached={result?.cached ?? false} onEvidenceSelect={onEvidenceSelect} />}
+      {insight && (
+        <InsightContents
+          insight={insight}
+          cached={result?.cached ?? false}
+          analysisArticleId={analysisArticleId}
+          onEvidenceSelect={onEvidenceSelect}
+        />
+      )}
     </section>
   )
 }
@@ -324,10 +338,12 @@ function PerspectiveInsight({
 function InsightContents({
   insight,
   cached,
+  analysisArticleId,
   onEvidenceSelect,
 }: {
   insight: AudienceInsight
   cached: boolean
+  analysisArticleId: number
   onEvidenceSelect: (evidence: number[]) => void
 }) {
   const hasContents = insight.facts.length > 0 || insight.implications.length > 0
@@ -353,7 +369,7 @@ function InsightContents({
               </div>
               <p>{fact.text}</p>
               <small>{fact.groundingReason}</small>
-              {fact.evidenceSentenceIds.length > 0 && (
+              {fact.articleId === analysisArticleId && fact.evidenceSentenceIds.length > 0 && (
                 <button type="button" onClick={() => onEvidenceSelect(fact.evidenceSentenceIds)}>
                   본문 근거 보기
                 </button>

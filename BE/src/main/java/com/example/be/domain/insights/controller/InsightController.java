@@ -49,7 +49,7 @@ public class InsightController {
                                     {"isSuccess":false,"code":"ISSUE404","message":"이슈를 찾을 수 없습니다.","result":{}}
                                     """))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                    responseCode = "409", description = "인사이트 입력용 Agent finding이 없는 경우"),
+                    responseCode = "409", description = "기능 비활성 또는 분석된 기사가 없는 경우"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "429", description = "LLM 사용 한도 소진",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
@@ -57,7 +57,7 @@ public class InsightController {
                                     {"isSuccess":false,"code":"QUOTA429","message":"LLM 사용 한도가 소진되었습니다.","result":{"plan":"PAID"}}
                                     """))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                    responseCode = "500", description = "Agent 호출 또는 응답 계약 실패")
+                    responseCode = "500", description = "인사이트 생성 또는 응답 계약 실패")
     })
     public ApiResponse<InsightDTO.Result> create(@RequestBody InsightDTO.CreateRequest request) {
         return ApiResponse.of(GeneralSuccessCode.OK, service.create(request));

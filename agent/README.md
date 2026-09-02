@@ -199,6 +199,11 @@ AGENT_SHARED_SECRET=local-dev-agent-token uv run uvicorn app.main:app \
 `AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS`(기본 120초)를 사용합니다. 한 요청에는 우선순위가 높은
 LLM finding을 최대 50건까지 받습니다.
 
+관점 인사이트는 최대 4개 관점을 한 번에 생성하므로
+`AGENT_INSIGHT_MAX_OUTPUT_TOKENS`(기본 8192)와
+`AGENT_INSIGHT_PROVIDER_TIMEOUT_SECONDS`(기본 60초)를 별도로 사용합니다. Spring의
+`AGENT_INSIGHT_TIMEOUT` 기본값은 네트워크·직렬화 여유를 포함해 75초입니다.
+
 Mock 근거 검증의 어휘 겹침 임계값은 `AGENT_EVIDENCE_GROUNDED_OVERLAP`(기본 0.6)과
 `AGENT_EVIDENCE_WEAK_OVERLAP`(기본 0.2)로 조정할 수 있습니다.
 실제 모드의 rule-only `grounded` 판정은 단일 문장 기준으로 최소 0.8 overlap을 요구하며,

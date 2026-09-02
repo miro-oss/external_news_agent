@@ -18,7 +18,7 @@ public interface NewsInsightRepository extends JpaRepository<NewsInsight, Long> 
             String promptVersion,
             Collection<Audience> audiences);
 
-    Optional<NewsInsight> findFirstByTargetTypeAndTargetIdAndAudienceOrderByCreatedAtDesc(
+    Optional<NewsInsight> findFirstByTargetTypeAndTargetIdAndAudienceOrderByCreatedAtDescIdDesc(
             AgentTargetType targetType,
             Long targetId,
             Audience audience);

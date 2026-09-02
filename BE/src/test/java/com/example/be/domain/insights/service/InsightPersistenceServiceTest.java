@@ -10,6 +10,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -40,13 +41,19 @@ class InsightPersistenceServiceTest {
                         "gemini", "gemini-test", "insight.ko.v1+perspective.ko.v1",
                         20L, 10L, new BigDecimal("0.1"), BigDecimal.ONE, false, false));
 
-        service.saveGenerated(AgentTargetType.ISSUE, 88L, "a".repeat(64), response);
+        service.saveGenerated(
+                AgentTargetType.ISSUE,
+                88L,
+                "a".repeat(64),
+                response,
+                Map.of(501L, 10L));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<NewsInsight>> captor = ArgumentCaptor.forClass(List.class);
         verify(repository).saveAll(captor.capture());
         NewsInsight saved = captor.getValue().getFirst();
         assertEquals(Audience.CHIP_MAKER, saved.getAudience());
+        assertEquals(10L, saved.getFacts().getFirst().articleId());
         assertEquals(List.of(0, 2), saved.getFacts().getFirst().evidenceSentenceIds());
         assertEquals("일정 번복", saved.getImplications().getFirst().falsifiedBy());
     }

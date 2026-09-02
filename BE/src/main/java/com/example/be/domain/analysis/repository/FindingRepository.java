@@ -31,6 +31,20 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             SELECT finding
             FROM Finding finding
             JOIN FETCH finding.article article
+            JOIN FETCH finding.run
+            WHERE article.id IN :articleIds
+              AND finding.id = (
+                  SELECT MAX(latest.id)
+                  FROM Finding latest
+                  WHERE latest.article.id = article.id
+              )
+            """)
+    List<Finding> findLatestByArticleIds(@Param("articleIds") Collection<Long> articleIds);
+
+    @Query("""
+            SELECT finding
+            FROM Finding finding
+            JOIN FETCH finding.article article
             WHERE article.id IN :articleIds
               AND finding.analysisSource = :analysisSource
               AND finding.analysisInputHash IN :analysisInputHashes

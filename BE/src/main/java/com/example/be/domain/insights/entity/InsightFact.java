@@ -7,6 +7,7 @@ public record InsightFact(
         String id,
         String text,
         Long findingId,
+        Long articleId,
         List<Integer> evidenceSentenceIds,
         String groundedness,
         String groundingReason

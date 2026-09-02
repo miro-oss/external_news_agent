@@ -22,6 +22,7 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.net.SocketTimeoutException;
+import java.net.URI;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpTimeoutException;
 import java.util.Locale;
@@ -56,6 +57,7 @@ public class AgentClient {
                 RestClient.Builder insightBuilder,
                 RestClient.Builder reportBuilder,
                 AgentProperties properties) {
+        validateSecureBaseUrl(properties);
         this.analyzeClient = configured(analyzeBuilder, properties).build();
         this.insightClient = configured(insightBuilder, properties).build();
         this.reportClient = configured(reportBuilder, properties).build();
@@ -67,6 +69,38 @@ public class AgentClient {
             configured.defaultHeader(AGENT_TOKEN_HEADER, properties.getToken());
         }
         return configured;
+    }
+
+    private void validateSecureBaseUrl(AgentProperties properties) {
+        if (!properties.isEnabled()) {
+            return;
+        }
+        URI baseUrl;
+        try {
+            baseUrl = URI.create(properties.getBaseUrl());
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException("news.agent.base-url 형식이 올바르지 않습니다.", exception);
+        }
+        String scheme = baseUrl.getScheme();
+        String host = baseUrl.getHost();
+        if ("https".equalsIgnoreCase(scheme)) {
+            return;
+        }
+        if ("http".equalsIgnoreCase(scheme) && isLoopbackHost(host)) {
+            return;
+        }
+        throw new IllegalStateException(
+                "활성 Agent base URL은 HTTPS여야 하며 HTTP는 loopback 개발 주소만 허용됩니다.");
+    }
+
+    private boolean isLoopbackHost(String host) {
+        if (host == null) {
+            return false;
+        }
+        String normalized = host.toLowerCase(Locale.ROOT);
+        return "localhost".equals(normalized)
+                || "::1".equals(normalized)
+                || normalized.startsWith("127.");
     }
 
     public AgentAnalyzeResponse analyze(AgentAnalyzeRequest request) {

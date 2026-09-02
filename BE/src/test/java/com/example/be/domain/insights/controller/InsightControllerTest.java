@@ -74,7 +74,7 @@ class InsightControllerTest {
                         Audience.CHIP_MAKER,
                         "양산 일정 변화",
                         List.of(new com.example.be.domain.insights.entity.InsightFact(
-                                "FACT", "f1", "확인된 사실", 501L, List.of(0),
+                                "FACT", "f1", "확인된 사실", 501L, 10L, List.of(0),
                                 "grounded", "원문 확인")),
                         List.of(new com.example.be.domain.insights.entity.InsightImplication(
                                 "IMPLICATION", "i1", "점검 필요", List.of("f1"),

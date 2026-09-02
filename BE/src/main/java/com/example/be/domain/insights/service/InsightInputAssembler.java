@@ -25,6 +25,9 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -49,31 +52,46 @@ public class InsightInputAssembler {
                 listOrEmpty(topic.getOptionalKeywords()),
                 listOrEmpty(topic.getExcludedKeywords()));
 
-        List<Finding> findings = issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(issueId)
-                .stream()
+        List<IssueArticle> memberships =
+                issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(issueId);
+        List<Long> articleIds = memberships.stream()
+                .map(membership -> membership.getArticle().getId())
+                .toList();
+        Map<Long, Finding> latestByArticleId = articleIds.isEmpty()
+                ? Map.of()
+                : findingRepository.findLatestByArticleIds(articleIds).stream()
+                        .collect(Collectors.toMap(
+                                finding -> finding.getArticle().getId(),
+                                Function.identity()));
+        List<SelectedFinding> selectedFindings = memberships.stream()
                 .map(IssueArticle::getArticle)
-                .map(article -> findingRepository.findFirstByArticleIdOrderByIdDesc(article.getId())
-                        .orElse(null))
+                .map(article -> latestByArticleId.get(article.getId()))
                 .filter(finding -> finding != null
                         && AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
-                .filter(finding -> !sentences(finding).isEmpty())
+                .map(finding -> new SelectedFinding(finding, toPayload(finding)))
+                .filter(selected -> !selected.payload().sentences().isEmpty())
                 .limit(MAX_FINDINGS)
                 .toList();
-        if (findings.isEmpty()) {
+        if (selectedFindings.isEmpty()) {
             throw new GeneralException(
                     GeneralErrorCode.CONFLICT,
-                    "인사이트를 생성할 Agent 분석 finding이 없습니다.");
+                    "이 이슈는 아직 분석된 기사가 없어 인사이트를 만들 수 없습니다.");
         }
 
-        List<AgentInsightRequest.FindingPayload> findingPayloads = findings.stream()
-                .map(this::toPayload)
+        List<AgentInsightRequest.FindingPayload> findingPayloads = selectedFindings.stream()
+                .map(SelectedFinding::payload)
                 .toList();
-        Long runId = findings.stream()
-                .map(finding -> finding.getRun().getId())
+        Long runId = selectedFindings.stream()
+                .map(selected -> selected.finding().getRun().getId())
                 .max(Comparator.naturalOrder())
                 .orElse(null);
+        Map<Long, Long> articleIdsByFinding = selectedFindings.stream()
+                .collect(Collectors.toUnmodifiableMap(
+                        selected -> selected.finding().getId(),
+                        selected -> selected.finding().getArticle().getId()));
         String inputHash = hash(new Fingerprint(topicPayload, findingPayloads));
-        return new Snapshot(issueId, runId, inputHash, topicPayload, findingPayloads);
+        return new Snapshot(
+                issueId, runId, inputHash, topicPayload, findingPayloads, articleIdsByFinding);
     }
 
     private AgentInsightRequest.FindingPayload toPayload(Finding finding) {
@@ -117,10 +135,15 @@ public class InsightInputAssembler {
                                List<AgentInsightRequest.FindingPayload> findings) {
     }
 
+    private record SelectedFinding(Finding finding,
+                                   AgentInsightRequest.FindingPayload payload) {
+    }
+
     public record Snapshot(Long issueId,
                            Long runId,
                            String inputHash,
                            AgentInsightRequest.TopicPayload topic,
-                           List<AgentInsightRequest.FindingPayload> findings) {
+                           List<AgentInsightRequest.FindingPayload> findings,
+                           Map<Long, Long> articleIdsByFinding) {
     }
 }

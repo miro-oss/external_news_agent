@@ -240,6 +240,19 @@ class AgentClientTest {
                         "read", new SocketTimeoutException("Read timed out"))));
     }
 
+    @Test
+    void rejectsEnabledAgentTokenOverNonLoopbackHttp() {
+        AgentProperties properties = properties();
+        properties.setEnabled(true);
+        properties.setBaseUrl("http://agent.internal:8088");
+
+        IllegalStateException exception = assertThrows(
+                IllegalStateException.class,
+                () -> new AgentClient(RestClient.builder(), properties));
+
+        assertTrue(exception.getMessage().contains("HTTPS"));
+    }
+
     private AgentProperties properties() {
         AgentProperties properties = new AgentProperties();
         properties.setBaseUrl("http://127.0.0.1:8088");
