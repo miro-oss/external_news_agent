@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx2
 from pydantic_ai import Agent, NativeOutput, UnexpectedModelBehavior
@@ -131,9 +132,18 @@ class ExploreService:
 
 
 def _run_mindlogic(settings: Settings, prompt: str) -> _ExploreCallResult:
+    endpoint = urlsplit(settings.mindlogic_base_url)
+    if endpoint.scheme.lower() != "https" or not endpoint.netloc:
+        raise AgentError(
+            status_code=503,
+            code="PROVIDER_UNAVAILABLE",
+            message="Mindlogic provider HTTPS 주소가 올바르지 않습니다.",
+        )
+
     async def run() -> _ExploreCallResult:
         async with httpx2.AsyncClient(
             timeout=settings.provider_timeout_seconds,
+            follow_redirects=False,
             event_hooks={"request": [preserve_mindlogic_trailing_slash]},
         ) as client:
             provider = OpenAIProvider(

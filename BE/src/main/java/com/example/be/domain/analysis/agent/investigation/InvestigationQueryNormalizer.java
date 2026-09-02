@@ -43,9 +43,14 @@ public final class InvestigationQueryNormalizer {
                 .collect(java.util.stream.Collectors.joining(" "));
     }
 
+    static String normalizeEntity(String entity) {
+        return normalize(entity).replace(" ", "");
+    }
+
     private static String stripParticle(String token) {
         return KOREAN_PARTICLES.stream()
-                .filter(particle -> token.length() > particle.length() && token.endsWith(particle))
+                .filter(particle -> token.length() - particle.length() >= 2
+                        && token.endsWith(particle))
                 .max(java.util.Comparator.comparingInt(String::length))
                 .map(particle -> token.substring(0, token.length() - particle.length()))
                 .orElse(token);

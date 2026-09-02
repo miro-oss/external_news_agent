@@ -59,7 +59,8 @@ public class AgentProperties implements InitializingBean {
                 || investigation.dailyBudgetPercent == null
                 || investigation.dailyBudgetPercent.signum() <= 0
                 || investigation.dailyBudgetPercent.compareTo(BigDecimal.valueOf(100)) > 0) {
-            throw new IllegalStateException("news.agent.quota 설정값이 올바르지 않습니다.");
+            throw new IllegalStateException(
+                    "news.agent.quota / news.agent.investigation 설정값이 올바르지 않습니다.");
         }
     }
 

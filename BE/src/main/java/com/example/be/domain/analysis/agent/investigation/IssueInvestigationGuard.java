@@ -6,8 +6,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -24,7 +24,8 @@ public class IssueInvestigationGuard {
         }
         return switch (proposal.action()) {
             case "SEARCH_MORE" -> search(runId, context, proposal);
-            case "READ_FULLTEXT" -> context.metadataOnlyArticleIds().contains(proposal.articleId())
+            case "READ_FULLTEXT" -> proposal.articleId() != null
+                    && context.metadataOnlyArticleIds().contains(proposal.articleId())
                     ? Decision.accept(null)
                     : Decision.reject("이 이슈의 본문 미확보 기사가 아닙니다.", null);
             case "COMPARE_HISTORY" -> history(context, proposal);
@@ -36,7 +37,8 @@ public class IssueInvestigationGuard {
     private Decision search(Long runId,
                             InvestigationContext context,
                             AgentExploreResponse.Proposal proposal) {
-        if (!context.sourceIdsByKey().containsKey(proposal.sourceKey())) {
+        if (proposal.sourceKey() == null
+                || !context.sourceIdsByKey().containsKey(proposal.sourceKey())) {
             return Decision.reject("허용 소스가 아닙니다: " + proposal.sourceKey(), null);
         }
         if (!StringUtils.hasText(proposal.query())) {
@@ -55,8 +57,14 @@ public class IssueInvestigationGuard {
                 || proposal.entities() == null || proposal.entities().isEmpty()) {
             return Decision.reject("과거 비교 범위가 올바르지 않습니다.", null);
         }
-        Set<String> allowed = new HashSet<>(context.entities());
-        if (!allowed.containsAll(proposal.entities())) {
+        Set<String> allowed = context.entities().stream()
+                .map(InvestigationQueryNormalizer::normalizeEntity)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toSet());
+        boolean containsUnknownEntity = proposal.entities().stream()
+                .map(InvestigationQueryNormalizer::normalizeEntity)
+                .anyMatch(value -> !StringUtils.hasText(value) || !allowed.contains(value));
+        if (containsUnknownEntity) {
             return Decision.reject("이슈에 없는 엔티티를 과거 비교에 사용할 수 없습니다.", null);
         }
         return Decision.accept(null);

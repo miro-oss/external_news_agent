@@ -3,8 +3,10 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from app.core.config import Settings
+from app.core.errors import AgentError
 from app.llm import explore_service
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.explore_service import PROMPT_VERSION, ExploreService
@@ -134,3 +136,29 @@ def test_paid_path_uses_pydantic_ai_adapter_and_preserves_usage(
     assert response.meta.credits == 1.25
     assert response.meta.cost_usd == 0.03
     close_analyze_providers()
+
+
+def test_rejects_oversized_explore_collections_and_aggregate_input() -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["issue"]["entities"] = [f"기업-{index}" for index in range(51)]
+
+    with pytest.raises(ValidationError):
+        ExploreRequest.model_validate(payload)
+
+    payload["issue"]["entities"] = ["가" * 200 for _ in range(50)]
+    payload["issue"]["missingStakeholders"] = ["나" * 200 for _ in range(50)]
+
+    with pytest.raises(ValidationError, match="20000자"):
+        ExploreRequest.model_validate(payload)
+
+
+def test_mindlogic_provider_requires_https() -> None:
+    settings = Settings(
+        AGENT_MOCK=False,
+        MINDLOGIC_BASE_URL="http://mindlogic.invalid/v1/gateway",
+    )
+
+    with pytest.raises(AgentError) as error:
+        explore_service._run_mindlogic(settings, "prompt")
+
+    assert "HTTPS" in error.value.message

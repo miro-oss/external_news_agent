@@ -5,6 +5,8 @@ from pydantic import Field, RootModel, model_validator
 from app.schemas.analyze import Plan, ResponseMeta
 from app.schemas.common import AgentModel
 
+MAX_EXPLORE_INPUT_CHARS = 20_000
+
 
 class ExploreTarget(AgentModel):
     type: Literal["ISSUE"]
@@ -17,10 +19,16 @@ class ExploreIssue(AgentModel):
     status: str = Field(min_length=1, max_length=30)
     importance_score: float | None = Field(default=None, ge=0, le=100)
     sensitivity_score: float | None = Field(default=None, ge=0, le=100)
-    entities: list[Annotated[str, Field(min_length=1, max_length=200)]]
-    missing_stakeholders: list[Annotated[str, Field(min_length=1, max_length=200)]]
+    entities: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        max_length=50
+    )
+    missing_stakeholders: list[
+        Annotated[str, Field(min_length=1, max_length=200)]
+    ] = Field(max_length=50)
     evidence_sentence_count: int = Field(ge=0)
-    metadata_only_article_ids: list[Annotated[int, Field(gt=0)]]
+    metadata_only_article_ids: list[Annotated[int, Field(gt=0)]] = Field(
+        max_length=500
+    )
 
 
 class AllowedSource(AgentModel):
@@ -43,7 +51,7 @@ class ExploreRequest(AgentModel):
     target: ExploreTarget
     step: int = Field(ge=1, le=3)
     issue: ExploreIssue
-    allowed_sources: list[AllowedSource]
+    allowed_sources: list[AllowedSource] = Field(max_length=100)
     previous_steps: list[ExploreObservation] = Field(max_length=2)
 
     @model_validator(mode="after")
@@ -53,6 +61,8 @@ class ExploreRequest(AgentModel):
             raise ValueError("allowedSources key는 중복될 수 없습니다.")
         if [item.step for item in self.previous_steps] != list(range(1, self.step)):
             raise ValueError("previousSteps는 현재 step 전까지 순서대로 포함해야 합니다.")
+        if len(self.model_dump_json(by_alias=True)) > MAX_EXPLORE_INPUT_CHARS:
+            raise ValueError("explore 입력은 20000자를 초과할 수 없습니다.")
         return self
 
 

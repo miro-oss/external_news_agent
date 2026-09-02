@@ -112,11 +112,17 @@ public class IssueInvestigationOrchestrator {
                 reservation = quotaService.findActiveReservation(request.idempotencyKey())
                         .orElseThrow(() -> exception);
             }
-            if (!investigationRepository.markInFlight(state.id(), state.nextStep())) {
+            int attemptedStep = state.nextStep();
+            if (!investigationRepository.markInFlight(state.id(), attemptedStep)) {
                 releaseUnused(reservation);
                 state = investigationRepository.findByRunIdAndIssueId(runId, state.issueId())
                         .orElseThrow();
                 if (state.finished()) {
+                    return;
+                }
+                if (state.inFlightStep() != null || state.nextStep() == attemptedStep) {
+                    log.debug("다른 실행자가 조사 step을 처리 중이어서 현재 루프를 종료한다. id={} step={}",
+                            state.id(), attemptedStep);
                     return;
                 }
                 continue;
@@ -288,10 +294,10 @@ public class IssueInvestigationOrchestrator {
         } else {
             completeFailure(reservation, code);
         }
-        completeFailedStepSafely(
-                state,
-                state.nextStep(),
-                response == null ? exception.getMessage() : response.proposal().reason());
+        String failureReason = response != null && response.proposal() != null
+                && StringUtils.hasText(response.proposal().reason())
+                ? response.proposal().reason() : exception.getMessage();
+        completeFailedStepSafely(state, state.nextStep(), failureReason);
         investigationRepository.finish(state.id(), "FAILED", now());
         addFailureWarning(state.runId(), state.issueId(), exception.getMessage());
     }
@@ -302,7 +308,9 @@ public class IssueInvestigationOrchestrator {
         if ("CONCLUDE".equals(proposal.action())) {
             return "CONCLUDED";
         }
-        if (result.addedEvidenceCount() == 0) {
+        if (result.addedEvidenceCount() == 0
+                && ("SEARCH_MORE".equals(proposal.action())
+                || "READ_FULLTEXT".equals(proposal.action()))) {
             return "NO_NEW_EVIDENCE";
         }
         return step >= MAX_STEPS ? "MAX_STEPS" : null;

@@ -59,11 +59,36 @@ class IssueInvestigationGuardTest {
         assertFalse(rejected.accepted());
     }
 
+    @Test
+    void rejectsMissingLookupKeysInsteadOfThrowing() {
+        IssueInvestigationGuard.Decision missingArticle = guard.evaluate(
+                42L,
+                context(),
+                proposal("READ_FULLTEXT", null, null, null, List.of(), null));
+        IssueInvestigationGuard.Decision missingSource = guard.evaluate(
+                42L,
+                context(),
+                proposal("SEARCH_MORE", null, "HBM 투자", null, List.of(), null));
+
+        assertFalse(missingArticle.accepted());
+        assertFalse(missingSource.accepted());
+    }
+
+    @Test
+    void acceptsHistoryEntityWithEquivalentCaseAndSpacing() {
+        IssueInvestigationGuard.Decision decision = guard.evaluate(
+                42L,
+                context(),
+                proposal("COMPARE_HISTORY", null, null, null, List.of("sk 하이닉스"), 30));
+
+        assertTrue(decision.accepted());
+    }
+
     private InvestigationContext context() {
         return new InvestigationContext(
                 88L, 7L, "HBM 투자", "투자 검토", "DISPUTED",
                 new BigDecimal("90"), new BigDecimal("70"),
-                List.of("기업A"), List.of(), 2, 5,
+                List.of("SK하이닉스"), List.of(), 2, 5,
                 List.of(101L), List.of(101L),
                 List.of(new AgentExploreRequest.AllowedSource("NAVER", "네이버", "SEARCH")),
                 Map.of("NAVER", 11L), false, "상충 보도 상태");

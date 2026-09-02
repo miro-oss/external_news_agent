@@ -2,9 +2,7 @@ package com.example.be.domain.analysis.agent.investigation;
 
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentExploreResponse;
-import com.example.be.domain.analysis.service.SentenceSplitter;
 import com.example.be.domain.collection.cluster.IssueClusteringService;
-import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.service.command.ArticleContentEnricher;
 import com.example.be.domain.collection.service.command.CollectionExecutor;
 import com.example.be.domain.collection.service.command.CollectionOutcome;
@@ -19,7 +17,6 @@ import org.springframework.stereotype.Component;
 
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Locale;
 
 /** 승인된 조사 행동만 수행하는 외부 I/O 경계다. */
 @Component
@@ -96,25 +93,19 @@ public class IssueInvestigationActionExecutor {
         List<IssueArticle> matched = candidates.stream()
                 .filter(value -> matchesAnyEntity(value, proposal.entities()))
                 .toList();
-        int evidenceCount = matched.stream()
-                .map(IssueArticle::getArticle)
-                .filter(article -> article.getFetchStatus() == FetchStatus.FULLTEXT)
-                .mapToInt(article -> SentenceSplitter.split(
-                        article.getBody(), article.getLanguage()).size())
-                .sum();
         return new InvestigationActionResult(
                 0,
-                evidenceCount,
+                0,
                 "최근 %d일의 관련 이슈 %d건 비교".formatted(proposal.days(), matched.size()));
     }
 
     private boolean matchesAnyEntity(IssueArticle candidate, List<String> entities) {
-        String haystack = (candidate.getIssue().getTitle() + " "
+        String haystack = InvestigationQueryNormalizer.normalizeEntity(
+                candidate.getIssue().getTitle() + " "
                 + candidate.getIssue().getSummary() + " "
-                + String.join(" ", candidate.getIssue().getEntities()))
-                .toLowerCase(Locale.ROOT);
+                + String.join(" ", candidate.getIssue().getEntities()));
         return entities.stream()
-                .map(value -> value.toLowerCase(Locale.ROOT).trim())
+                .map(InvestigationQueryNormalizer::normalizeEntity)
                 .anyMatch(value -> !value.isEmpty() && haystack.contains(value));
     }
 }

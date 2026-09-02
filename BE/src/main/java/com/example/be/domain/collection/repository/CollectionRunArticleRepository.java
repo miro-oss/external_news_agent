@@ -22,6 +22,13 @@ public interface CollectionRunArticleRepository
 
     List<CollectionRunArticle> findByRunIdAndChangeTypeOrderByIdAsc(Long runId, ChangeType changeType);
 
+    @Query("""
+            SELECT DISTINCT observation.article.id
+            FROM CollectionRunArticle observation
+            WHERE observation.run.id = :runId
+            """)
+    List<Long> findArticleIdsByRunId(@Param("runId") Long runId);
+
     /**
      * 한 기사가 실행을 거치며 어떻게 바뀌어 왔는지. 최신 관측이 마지막이다.
      */

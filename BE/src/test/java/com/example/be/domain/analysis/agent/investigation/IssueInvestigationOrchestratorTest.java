@@ -188,7 +188,78 @@ class IssueInvestigationOrchestratorTest {
                 eq(inFlight.id()), eq("NO_NEW_EVIDENCE"), any(LocalDateTime.class));
     }
 
+    @Test
+    void yieldsWhenAnotherWorkerOwnsTheSameStep() {
+        IssueInvestigationState state = state(1, null, "IN_PROGRESS", null);
+        IssueInvestigationState owned = state(1, 1, "IN_PROGRESS", null);
+        when(investigationRepository.reserve(
+                eq(RUN_ID), eq(ISSUE_ID), anyString(), anyString(), anyInt(), any(LocalDateTime.class)))
+                .thenReturn(state);
+        when(contextService.current(RUN_ID, ISSUE_ID)).thenReturn(context());
+        QuotaReservation reservation = reservation(1);
+        when(quotaService.reserve(eq(RUN_ID), anyString(), eq(AgentTask.INVESTIGATE), eq(AgentPlan.FREE)))
+                .thenReturn(reservation);
+        when(investigationRepository.markInFlight(state.id(), 1)).thenReturn(false);
+        when(investigationRepository.findByRunIdAndIssueId(RUN_ID, ISSUE_ID))
+                .thenReturn(Optional.of(owned));
+
+        orchestrator.investigate(RUN_ID);
+
+        verify(agentClient, never()).explore(any());
+        verify(quotaService).completeFailure(reservation, "PROVIDER_UNAVAILABLE");
+        verify(investigationRepository, times(1)).markInFlight(state.id(), 1);
+    }
+
+    @Test
+    void compareHistoryCanContinueWithoutInflatingEvidence() {
+        IssueInvestigationState first = state(1, null, "IN_PROGRESS", null);
+        IssueInvestigationState second = state(2, null, "IN_PROGRESS", null);
+        when(investigationRepository.reserve(
+                eq(RUN_ID), eq(ISSUE_ID), anyString(), anyString(), anyInt(), any(LocalDateTime.class)))
+                .thenReturn(first);
+        when(contextService.current(RUN_ID, ISSUE_ID)).thenReturn(context());
+        when(quotaService.reserve(eq(RUN_ID), anyString(), eq(AgentTask.INVESTIGATE), eq(AgentPlan.FREE)))
+                .thenReturn(reservation(1), reservation(2));
+        when(investigationRepository.markInFlight(first.id(), 1)).thenReturn(true);
+        when(investigationRepository.markInFlight(second.id(), 2)).thenReturn(true);
+        when(agentClient.explore(any(AgentExploreRequest.class)))
+                .thenReturn(compareHistoryResponse(), concludeResponse());
+        when(guard.evaluate(eq(RUN_ID), any(), any()))
+                .thenReturn(new IssueInvestigationGuard.Decision(true, null, null));
+        when(actionExecutor.execute(eq(RUN_ID), any(), any()))
+                .thenReturn(new InvestigationActionResult(0, 0, "과거 이슈 비교"),
+                        InvestigationActionResult.conclude("조사 완료"));
+        when(investigationRepository.findByRunIdAndIssueId(RUN_ID, ISSUE_ID))
+                .thenReturn(Optional.of(second));
+
+        orchestrator.investigate(RUN_ID);
+
+        verify(agentClient, times(2)).explore(any(AgentExploreRequest.class));
+        verify(investigationRepository).finish(
+                eq(first.id()), eq("CONCLUDED"), any(LocalDateTime.class));
+    }
+
+    @Test
+    void nullProposalStillCompletesFailedStep() {
+        IssueInvestigationState state = state(1, null, "IN_PROGRESS", null);
+        prepareAgentCall(state, response(null));
+
+        orchestrator.investigate(RUN_ID);
+
+        verify(investigationRepository).completeStep(
+                eq(state.id()), eq(1), eq(2), eq(0), anyString(), eq(null));
+        verify(investigationRepository).finish(
+                eq(state.id()), eq("FAILED"), any(LocalDateTime.class));
+        verify(actionExecutor, never()).execute(any(), any(), any());
+    }
+
     private void prepareFirstStep(IssueInvestigationState state, AgentExploreResponse response) {
+        prepareAgentCall(state, response);
+        when(guard.evaluate(eq(RUN_ID), any(), any()))
+                .thenReturn(new IssueInvestigationGuard.Decision(true, null, "query-hash"));
+    }
+
+    private void prepareAgentCall(IssueInvestigationState state, AgentExploreResponse response) {
         when(investigationRepository.reserve(
                 eq(RUN_ID), eq(ISSUE_ID), anyString(), anyString(), anyInt(), any(LocalDateTime.class)))
                 .thenReturn(state);
@@ -197,8 +268,6 @@ class IssueInvestigationOrchestratorTest {
                 .thenReturn(reservation(1));
         when(investigationRepository.markInFlight(eq(state.id()), anyInt())).thenReturn(true);
         when(agentClient.explore(any(AgentExploreRequest.class))).thenReturn(response);
-        when(guard.evaluate(eq(RUN_ID), any(), any()))
-                .thenReturn(new IssueInvestigationGuard.Decision(true, null, "query-hash"));
     }
 
     private InvestigationContext context() {
@@ -236,6 +305,11 @@ class IssueInvestigationOrchestratorTest {
     private AgentExploreResponse concludeResponse() {
         return response(new AgentExploreResponse.Proposal(
                 "CONCLUDE", null, null, null, List.of(), null, "조사 완료"));
+    }
+
+    private AgentExploreResponse compareHistoryResponse() {
+        return response(new AgentExploreResponse.Proposal(
+                "COMPARE_HISTORY", null, null, null, List.of("기업A"), 30, "과거 비교"));
     }
 
     private AgentExploreResponse response(AgentExploreResponse.Proposal proposal) {
