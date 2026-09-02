@@ -1,6 +1,8 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.analysis.agent.investigation.IssueInvestigationJdbcRepository;
+import com.example.be.domain.analysis.agent.investigation.InvestigationTrace;
 import com.example.be.domain.analysis.entity.AudienceRelevance;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
@@ -54,10 +56,13 @@ class ReportQueryServiceImplTest {
     private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
     private final NewsIssueRepository newsIssueRepository = mock(NewsIssueRepository.class);
     private final DeliveryLogRepository deliveryLogRepository = mock(DeliveryLogRepository.class);
+    private final IssueInvestigationJdbcRepository investigationRepository =
+            mock(IssueInvestigationJdbcRepository.class);
     private final ReportQueryServiceImpl service = new ReportQueryServiceImpl(
             reportRepository, findingRepository, issueArticleRepository,
             newsIssueRepository, deliveryLogRepository,
-            com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
+            com.example.be.domain.analysis.service.SensitivityCalculator.defaults(),
+            investigationRepository);
 
     @Test
     void latestReturnsNullWhenNoReportExists() {
@@ -181,6 +186,10 @@ class ReportQueryServiceImplTest {
         when(issueArticleRepository.findCoverageMembershipsByArticleIds(List.of(101L, 102L)))
                 .thenReturn(List.of(matchingMembership, wrongTopicMembership));
         when(newsIssueRepository.findAllById(List.of(88L))).thenReturn(List.of(issue));
+        when(investigationRepository.findTraces(42L)).thenReturn(java.util.Map.of(
+                88L,
+                new InvestigationTrace("NO_NEW_EVIDENCE", 1, 2, 0,
+                        "B사 입장 확인", null)));
 
         ReportResDTO.Detail detail = service.getReport(17L, true);
 
@@ -190,6 +199,10 @@ class ReportQueryServiceImplTest {
         assertEquals(88L, detail.getFindings().getFirst().getIssueId());
         assertEquals("HBM4 양산 일정 이슈", detail.getFindings().getFirst().getIssue().getTitle());
         assertEquals(3, detail.getFindings().getFirst().getIssue().getArticleCount());
+        assertEquals("NO_NEW_EVIDENCE",
+                detail.getFindings().getFirst().getInvestigation().getStatus());
+        assertEquals(2,
+                detail.getFindings().getFirst().getInvestigation().getAddedArticleCount());
         assertNull(detail.getFindings().get(1).getIssueId());
         assertEquals("CHIP_MAKER", detail.getFindings().getFirst()
                 .getPerspectiveTags().getFirst().getAudience());

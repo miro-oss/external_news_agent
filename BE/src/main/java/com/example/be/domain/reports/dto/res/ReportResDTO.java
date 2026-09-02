@@ -80,7 +80,8 @@ public class ReportResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
             "id", "articleId", "issueId", "issue", "articleTitle", "canonicalUrl", "changeType", "summary",
-            "keyPoints", "intent", "sentiment", "sensitivity", "relevance", "category", "perspectiveTags"
+            "keyPoints", "intent", "sentiment", "sensitivity", "relevance", "category", "perspectiveTags",
+            "investigation"
     })
     public static class Finding {
 
@@ -99,6 +100,29 @@ public class ReportResDTO {
         private final String relevance;
         private final String category;
         private final List<PerspectiveTag> perspectiveTags;
+
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private final Investigation investigation;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @JsonPropertyOrder({
+            "status", "stepCount", "addedArticleCount", "addedEvidenceCount", "reason", "rejectionReason"
+    })
+    @Schema(name = "ReportFindingInvestigation", description = "해당 이슈의 추가 조사 실행 trace")
+    public static class Investigation {
+
+        @Schema(allowableValues = {
+                "CONCLUDED", "NO_NEW_EVIDENCE", "MAX_STEPS", "BUDGET_LIMIT", "REJECTED", "FAILED"
+        })
+        private final String status;
+        private final int stepCount;
+        private final int addedArticleCount;
+        private final int addedEvidenceCount;
+        private final String reason;
+        private final String rejectionReason;
     }
 
     @Getter

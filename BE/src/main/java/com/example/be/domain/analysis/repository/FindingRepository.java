@@ -67,6 +67,18 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             SELECT finding
             FROM Finding finding
             JOIN FETCH finding.article article
+            WHERE finding.run.id = :runId
+              AND article.id IN :articleIds
+            ORDER BY finding.id ASC
+            """)
+    List<Finding> findByRunIdAndArticleIdIn(
+            @Param("runId") Long runId,
+            @Param("articleIds") Collection<Long> articleIds);
+
+    @Query("""
+            SELECT finding
+            FROM Finding finding
+            JOIN FETCH finding.article article
             JOIN FETCH article.topic
             JOIN FETCH article.source
             WHERE finding.run.id = :runId

@@ -93,6 +93,30 @@ def insight_request_body() -> dict[str, object]:
     }
 
 
+def explore_request_body() -> dict[str, object]:
+    return {
+        "idempotencyKey": "run:42:issue:77:investigate:1",
+        "plan": "FREE",
+        "target": {"type": "ISSUE", "id": 77},
+        "step": 1,
+        "issue": {
+            "title": "A사와 B사의 HBM 공급 협상",
+            "summary": "A사 발표만 확인됐습니다.",
+            "status": "DISPUTED",
+            "importanceScore": 81.5,
+            "sensitivityScore": 72.0,
+            "entities": ["A사", "B사"],
+            "missingStakeholders": ["B사"],
+            "evidenceSentenceCount": 2,
+            "metadataOnlyArticleIds": [1024],
+        },
+        "allowedSources": [
+            {"key": "NAVER", "name": "네이버 뉴스", "kind": "SEARCH"}
+        ],
+        "previousSteps": [],
+    }
+
+
 def test_health_does_not_require_agent_token() -> None:
     response = client.get("/v1/health")
 
@@ -126,6 +150,27 @@ def test_insight_requires_agent_token() -> None:
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_explore_requires_agent_token() -> None:
+    response = client.post("/v1/explore", json=explore_request_body())
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_explore_returns_deterministic_mock_contract() -> None:
+    response = client.post(
+        "/v1/explore",
+        headers={"X-Agent-Token": "local-dev-agent-token"},
+        json=explore_request_body(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["proposal"]["action"] == "SEARCH_MORE"
+    assert payload["proposal"]["sourceKey"] == "NAVER"
+    assert payload["meta"]["promptVersion"] == "explore.ko.v1"
 
 
 def test_insight_returns_deterministic_mock_contract() -> None:

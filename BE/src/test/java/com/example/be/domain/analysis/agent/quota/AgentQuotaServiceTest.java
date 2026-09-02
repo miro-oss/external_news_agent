@@ -122,6 +122,50 @@ class AgentQuotaServiceTest {
     }
 
     @Test
+    void investigationCannotReserveBeyondFifteenPercentOfPaidDailyBudget() {
+        stubUsage(BigDecimal.ZERO, new BigDecimal("10"), BigDecimal.ZERO,
+                new BigDecimal("100"));
+        when(repository.usage(
+                eq(AgentPlan.PAID), any(LocalDateTime.class), any(LocalDateTime.class),
+                eq(AgentTask.INVESTIGATE)))
+                .thenReturn(new BigDecimal("10"));
+        when(repository.usage(
+                eq(AgentPlan.FREE), any(LocalDateTime.class), any(LocalDateTime.class),
+                eq(AgentTask.INVESTIGATE)))
+                .thenReturn(BigDecimal.ZERO);
+
+        assertThrows(QuotaExceededException.class, () -> service.reserve(
+                42L,
+                "run:42:issue:88:investigation:step:3",
+                AgentTask.INVESTIGATE,
+                AgentPlan.PAID));
+
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void investigationCannotReserveBeyondFifteenPercentOfFreeDailyCalls() {
+        stubUsage(new BigDecimal("225"), BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO);
+        when(repository.usage(
+                eq(AgentPlan.FREE), any(LocalDateTime.class), any(LocalDateTime.class),
+                eq(AgentTask.INVESTIGATE)))
+                .thenReturn(new BigDecimal("225"));
+        when(repository.usage(
+                eq(AgentPlan.PAID), any(LocalDateTime.class), any(LocalDateTime.class),
+                eq(AgentTask.INVESTIGATE)))
+                .thenReturn(BigDecimal.ZERO);
+
+        assertThrows(QuotaExceededException.class, () -> service.reserve(
+                42L,
+                "run:42:issue:88:investigation:step:1",
+                AgentTask.INVESTIGATE,
+                AgentPlan.FREE));
+
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void releasesUnavailableAndConnectTimeoutButConsumesReadTimeoutReservation() {
         QuotaReservation first = reservation(AgentTask.ANALYZE, AgentPlan.PAID);
         AgentClientException unavailable = new AgentClientException(

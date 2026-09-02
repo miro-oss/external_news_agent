@@ -27,6 +27,18 @@ public interface CollectionRunArticleRepository
      */
     List<CollectionRunArticle> findByArticleIdOrderByObservedAtAsc(Long articleId);
 
+    @Query("""
+            SELECT observation
+            FROM CollectionRunArticle observation
+            JOIN FETCH observation.article article
+            JOIN FETCH article.source
+            WHERE observation.run.id = :runId AND article.id = :articleId
+            ORDER BY observation.id ASC
+            """)
+    List<CollectionRunArticle> findForEnrichment(
+            @Param("runId") Long runId,
+            @Param("articleId") Long articleId);
+
     long countByRunIdAndChangeType(Long runId, ChangeType changeType);
 
     /** run 커버리지는 기사×주제 관측을 분모로 삼는다. */

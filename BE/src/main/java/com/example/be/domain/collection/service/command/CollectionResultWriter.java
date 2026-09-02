@@ -90,6 +90,45 @@ public class CollectionResultWriter {
         writeArticles(run, item, topic, source, outcome.fetch().articles().size(), dedupeByUrl(selected));
     }
 
+    /** 승인된 Agent 추가 수집 결과를 기존 실행의 관측으로 붙인다. 원래 수집 item 통계는 바꾸지 않는다. */
+    @Transactional
+    public InvestigationWriteResult writeInvestigation(Long runId,
+                                                       Long topicId,
+                                                       Long sourceId,
+                                                       CollectionOutcome outcome) {
+        CollectionRun run = runRepository.findById(runId).orElseThrow();
+        Topic topic = topicRepository.findById(topicId).orElseThrow();
+        Source source = sourceRepository.findById(sourceId).orElseThrow();
+
+        outcome.robots().applyTo(source);
+        if (!outcome.robots().allowed()) {
+            run.addWarning(warning(source, CollectionRunWarning.CODE_ROBOTS_DISALLOWED,
+                    "robots.txt가 추가 수집을 막는다: " + outcome.robots().robotsTxtUrl()));
+            return InvestigationWriteResult.empty();
+        }
+        if (outcome.validatorsUpdated()) {
+            source.applyFetchState(outcome.etag(), outcome.lastModified(), LocalDateTime.now(ApiTimeZone.ZONE));
+        }
+        if (outcome.notModified()) {
+            return InvestigationWriteResult.empty();
+        }
+        if (!outcome.fetch().success()) {
+            run.addWarning(warning(source, outcome.fetch().failureCode(), outcome.fetch().failureMessage()));
+            return InvestigationWriteResult.empty();
+        }
+
+        int observed = 0;
+        int changed = 0;
+        for (CollectedArticle article : dedupeByUrl(outcome.fetch().articles())) {
+            ChangeType changeType = save(run, topic, source, article);
+            observed++;
+            if (changeType == ChangeType.NEW || changeType == ChangeType.UPDATED) {
+                changed++;
+            }
+        }
+        return new InvestigationWriteResult(observed, changed);
+    }
+
     private void writeArticles(CollectionRun run,
                                CollectionRunItem item,
                                Topic topic,
@@ -319,6 +358,13 @@ public class CollectionResultWriter {
         return articleVersionRepository.findFirstByArticleIdOrderByVersionNoDesc(articleId)
                 .map(version -> version.getVersionNo() + 1)
                 .orElse(ArticleVersion.FIRST_VERSION_NO);
+    }
+
+    public record InvestigationWriteResult(int observedArticleCount, int changedArticleCount) {
+
+        static InvestigationWriteResult empty() {
+            return new InvestigationWriteResult(0, 0);
+        }
     }
 
 }

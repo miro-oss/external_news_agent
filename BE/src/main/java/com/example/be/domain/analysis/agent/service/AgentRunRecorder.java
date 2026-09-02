@@ -4,6 +4,8 @@ import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
+import com.example.be.domain.analysis.agent.dto.AgentExploreRequest;
+import com.example.be.domain.analysis.agent.dto.AgentExploreResponse;
 import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
 import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
@@ -319,6 +321,115 @@ public class AgentRunRecorder {
                 .costUsd(usage == null ? null : usage.costUsd())
                 .credits(usage == null ? null : usage.credits())
                 .requestHash(hash(request))
+                .startedAt(startedAt)
+                .finishedAt(now())
+                .build());
+    }
+
+    @Transactional
+    public void recordInvestigationSuccess(Long runId,
+                                           Long issueId,
+                                           AgentExploreRequest request,
+                                           AgentExploreResponse response,
+                                           LocalDateTime startedAt,
+                                           String queryHash,
+                                           String rejectionReason,
+                                           int addedArticleCount,
+                                           int evidenceBefore,
+                                           int evidenceAfter,
+                                           String terminationReason) {
+        AgentExploreResponse.Meta meta = response.meta();
+        AgentExploreResponse.Proposal proposal = response.proposal();
+        repository.insertIfAbsent(AgentRun.builder()
+                .collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey())
+                .agentTask(AgentTask.INVESTIGATE)
+                .targetType(AgentTargetType.ISSUE)
+                .targetId(issueId)
+                .status(rejectionReason != null
+                        ? AgentRunStatus.SKIPPED
+                        : meta.mock() ? AgentRunStatus.MOCK : AgentRunStatus.SUCCESS)
+                .promptVersion(meta.promptVersion())
+                .llmProvider(meta.provider())
+                .llmModel(meta.model())
+                .llmPlan(request.plan())
+                .inputTokens(meta.inputTokens())
+                .outputTokens(meta.outputTokens())
+                .costUsd(meta.costUsd())
+                .credits(meta.credits())
+                .requestHash(hash(request))
+                .investigationStep(request.step())
+                .investigationAction(proposal.action())
+                .actionReason(truncate(proposal.reason()))
+                .sourceKey(proposal.sourceKey())
+                .queryHash(queryHash)
+                .actionPayload(objectMapper.writeValueAsString(proposal))
+                .rejectionReason(truncate(rejectionReason))
+                .addedArticleCount(addedArticleCount)
+                .evidenceBefore(evidenceBefore)
+                .evidenceAfter(evidenceAfter)
+                .terminationReason(terminationReason)
+                .startedAt(startedAt)
+                .finishedAt(now())
+                .build());
+    }
+
+    @Transactional
+    public void recordInvestigationFailure(Long runId,
+                                           Long issueId,
+                                           AgentExploreRequest request,
+                                           String failureCode,
+                                           String failureMessage,
+                                           AgentClientException.Usage usage,
+                                           AgentTimeoutPhase timeoutPhase,
+                                           LocalDateTime startedAt) {
+        repository.insertIfAbsent(AgentRun.builder()
+                .collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey())
+                .agentTask(AgentTask.INVESTIGATE)
+                .targetType(AgentTargetType.ISSUE)
+                .targetId(issueId)
+                .status(AgentRunStatus.FAILED)
+                .failureCode(failureCode)
+                .failureMessage(truncate(failureMessage))
+                .timeoutPhase(timeoutPhase)
+                .llmPlan(request.plan())
+                .inputTokens(usage == null ? null : usage.inputTokens())
+                .outputTokens(usage == null ? null : usage.outputTokens())
+                .costUsd(usage == null ? null : usage.costUsd())
+                .credits(usage == null ? null : usage.credits())
+                .requestHash(hash(request))
+                .investigationStep(request.step())
+                .terminationReason("FAILED")
+                .startedAt(startedAt)
+                .finishedAt(now())
+                .build());
+    }
+
+    @Transactional
+    public void recordInvestigationSkipped(Long runId,
+                                           Long issueId,
+                                           AgentExploreRequest request,
+                                           String rejectionReason,
+                                           String terminationReason,
+                                           int evidenceCount,
+                                           LocalDateTime startedAt) {
+        repository.insertIfAbsent(AgentRun.builder()
+                .collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey())
+                .agentTask(AgentTask.INVESTIGATE)
+                .targetType(AgentTargetType.ISSUE)
+                .targetId(issueId)
+                .status(AgentRunStatus.SKIPPED)
+                .failureCode(terminationReason)
+                .failureMessage(truncate(rejectionReason))
+                .llmPlan(request.plan())
+                .requestHash(hash(request))
+                .investigationStep(request.step())
+                .rejectionReason(truncate(rejectionReason))
+                .evidenceBefore(evidenceCount)
+                .evidenceAfter(evidenceCount)
+                .terminationReason(terminationReason)
                 .startedAt(startedAt)
                 .finishedAt(now())
                 .build());

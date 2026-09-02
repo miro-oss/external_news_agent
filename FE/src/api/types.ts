@@ -324,6 +324,16 @@ export interface ReportFinding {
   relevance: Relevance
   category: string
   perspectiveTags: PerspectiveTag[]
+  investigation?: ReportInvestigation | null
+}
+
+export interface ReportInvestigation {
+  status: 'CONCLUDED' | 'NO_NEW_EVIDENCE' | 'MAX_STEPS' | 'BUDGET_LIMIT' | 'REJECTED' | 'FAILED'
+  stepCount: number
+  addedArticleCount: number
+  addedEvidenceCount: number
+  reason: string | null
+  rejectionReason: string | null
 }
 
 export interface ReportIssueSummary {

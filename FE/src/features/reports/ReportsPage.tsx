@@ -32,6 +32,15 @@ import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { MutationStatus } from '../settings/MutationStatus'
 
+const INVESTIGATION_STATUS_LABELS = {
+  CONCLUDED: '결론 도달',
+  NO_NEW_EVIDENCE: '새 근거 없음',
+  MAX_STEPS: '3단계 종료',
+  BUDGET_LIMIT: '예산 상한',
+  REJECTED: '제안 거절',
+  FAILED: '조사 실패',
+} as const
+
 export function ReportsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [audienceOverride, setAudienceOverride] = useState<Audience | null>(null)
@@ -589,6 +598,14 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
             <span>{CHANGE_TYPE_LABELS[finding.changeType]}</span>
             {issueInfo && <span>독립 원문 {issueInfo.independentContentCount}건</span>}
             {finding.intent && <span>발표 맥락 · {finding.intent}</span>}
+            {finding.investigation && (
+              <span title={finding.investigation.rejectionReason || finding.investigation.reason || undefined}>
+                추가 조사 · {INVESTIGATION_STATUS_LABELS[finding.investigation.status]}
+                {' · '}{finding.investigation.stepCount}단계
+                {' · '}기사 +{finding.investigation.addedArticleCount}
+                {' · '}근거 +{finding.investigation.addedEvidenceCount}
+              </span>
+            )}
           </div>
         </div>
       )}

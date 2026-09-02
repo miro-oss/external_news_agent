@@ -13,6 +13,8 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -87,6 +89,40 @@ public class AgentRun {
 
     @Column(name = "request_hash", length = 64)
     private String requestHash;
+
+    @Column(name = "investigation_step")
+    private Integer investigationStep;
+
+    @Column(name = "investigation_action", length = 30)
+    private String investigationAction;
+
+    @Column(name = "action_reason", length = 1000)
+    private String actionReason;
+
+    @Column(name = "source_key", length = 100)
+    private String sourceKey;
+
+    @Column(name = "query_hash", length = 64)
+    private String queryHash;
+
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "action_payload")
+    private String actionPayload;
+
+    @Column(name = "rejection_reason", length = 1000)
+    private String rejectionReason;
+
+    @Column(name = "added_article_count", nullable = false)
+    private int addedArticleCount;
+
+    @Column(name = "evidence_before")
+    private Integer evidenceBefore;
+
+    @Column(name = "evidence_after")
+    private Integer evidenceAfter;
+
+    @Column(name = "termination_reason", length = 30)
+    private String terminationReason;
 
     @Column(name = "started_at", nullable = false)
     private LocalDateTime startedAt;
