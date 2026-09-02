@@ -1,5 +1,6 @@
 package com.example.be.domain.notifications.service;
 
+import com.example.be.domain.issues.entity.WatchType;
 import com.example.be.domain.notifications.channel.NotificationSender;
 import com.example.be.domain.notifications.channel.NotificationSenderRegistry;
 import com.example.be.domain.notifications.entity.ChannelType;
@@ -81,7 +82,7 @@ class WatchNotificationDeliveryServiceTest {
                         3L, "김철수", channel, 4L, "user@example.com", true);
         WatchAlertSnapshot first = alert();
         WatchAlertSnapshot second = new WatchAlertSnapshot(
-                61L, 51L, 71L, null, "SK하이닉스 HBM4 증설",
+                61L, 51L, WatchType.HIGH_SENSITIVITY, 71L, null, "SK하이닉스 HBM4 증설",
                 first.firstSeenAt(), 2, 3, first.queuedAt(), 1);
         RenderedNotification firstRendered = new RenderedNotification(
                 "[속보 후속] 삼성전자", null, List.of("첫 번째"));
@@ -118,7 +119,7 @@ class WatchNotificationDeliveryServiceTest {
                         3L, "김철수", channel, 4L, "user@example.com", true);
         WatchAlertSnapshot first = alert();
         WatchAlertSnapshot second = new WatchAlertSnapshot(
-                61L, 51L, first.issueId(), null, first.issueTitle(),
+                61L, 51L, WatchType.HIGH_SENSITIVITY, first.issueId(), null, first.issueTitle(),
                 first.firstSeenAt(), 2, 3, first.queuedAt(), 1);
         RenderedNotification rendered = new RenderedNotification(
                 "[속보 후속] 삼성전자", null, List.of("후속 내용"));
@@ -143,7 +144,7 @@ class WatchNotificationDeliveryServiceTest {
 
     private WatchAlertSnapshot alert() {
         OffsetDateTime now = OffsetDateTime.parse("2026-08-31T12:00:00+09:00");
-        return new WatchAlertSnapshot(60L, 50L, 70L, null, "삼성전자 HBM4 증설",
+        return new WatchAlertSnapshot(60L, 50L, WatchType.BREAKING, 70L, null, "삼성전자 HBM4 증설",
                 now.minusHours(2), 1, 2, now, 1);
     }
 }

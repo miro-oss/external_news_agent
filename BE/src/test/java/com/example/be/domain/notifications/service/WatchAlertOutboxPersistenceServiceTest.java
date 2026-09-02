@@ -2,6 +2,7 @@ package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.entity.NewsWatch;
+import com.example.be.domain.issues.entity.WatchType;
 import com.example.be.domain.notifications.entity.WatchAlertDeliveryStatus;
 import com.example.be.domain.notifications.entity.WatchAlertOutbox;
 import com.example.be.domain.notifications.repository.WatchAlertOutboxRepository;
@@ -28,6 +29,7 @@ class WatchAlertOutboxPersistenceServiceTest {
         WatchAlertOutbox alert = WatchAlertOutbox.builder()
                 .id(60L)
                 .watch(NewsWatch.builder().id(50L)
+                        .watchType(WatchType.BREAKING)
                         .issue(NewsIssue.builder().id(70L).build())
                         .build())
                 .issueTitle("삼성전자 HBM4 증설")
@@ -49,5 +51,30 @@ class WatchAlertOutboxPersistenceServiceTest {
         assertEquals("2시간 전 속보 '삼성전자 HBM4 증설'에 후속 1건 · 매체 2곳 확인됨",
                 snapshots.getFirst().message());
         verify(repository).flush();
+    }
+
+    @Test
+    void rendersDisputedWatchAsRefutationAlert() {
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-02T12:00:00+09:00");
+        WatchAlertOutbox alert = WatchAlertOutbox.builder()
+                .id(61L)
+                .watch(NewsWatch.builder().id(51L)
+                        .watchType(WatchType.DISPUTED)
+                        .issue(NewsIssue.builder().id(71L).build())
+                        .build())
+                .issueTitle("HBM4 양산 전망")
+                .firstSeenAt(now.minusHours(4))
+                .followUpCount(2)
+                .publisherCount(3)
+                .queuedAt(now)
+                .status(WatchAlertDeliveryStatus.PENDING)
+                .attemptCount(0)
+                .build();
+        when(repository.findClaimable(any())).thenReturn(List.of(alert));
+
+        var snapshot = service.claimPending().getFirst();
+
+        assertEquals("⚠ 'HBM4 양산 전망'에 반박 기사 등장 · 후속 2건 · 매체 3곳 확인됨",
+                snapshot.message());
     }
 }

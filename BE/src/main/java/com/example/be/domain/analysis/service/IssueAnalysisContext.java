@@ -2,6 +2,7 @@ package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.collection.entity.Article;
 
+import java.math.BigDecimal;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -12,7 +13,8 @@ public record IssueAnalysisContext(
         Long issueId,
         Long representativeArticleId,
         List<Article> articles,
-        Set<Long> primaryTargetArticleIds
+        Set<Long> primaryTargetArticleIds,
+        BigDecimal importanceScore
 ) {
 
     public IssueAnalysisContext {
@@ -30,11 +32,18 @@ public record IssueAnalysisContext(
     public IssueAnalysisContext(Long issueId,
                                 Long representativeArticleId,
                                 List<Article> articles) {
-        this(issueId, representativeArticleId, articles, Set.of());
+        this(issueId, representativeArticleId, articles, Set.of(), null);
+    }
+
+    public IssueAnalysisContext(Long issueId,
+                                Long representativeArticleId,
+                                List<Article> articles,
+                                Set<Long> primaryTargetArticleIds) {
+        this(issueId, representativeArticleId, articles, primaryTargetArticleIds, null);
     }
 
     public static IssueAnalysisContext empty() {
-        return new IssueAnalysisContext(null, null, List.of(), Set.of());
+        return new IssueAnalysisContext(null, null, List.of(), Set.of(), null);
     }
 
     public boolean present() {

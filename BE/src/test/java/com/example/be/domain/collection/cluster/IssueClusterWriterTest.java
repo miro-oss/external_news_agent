@@ -18,6 +18,9 @@ import com.example.be.domain.issues.repository.IssueRelationRepository;
 import com.example.be.domain.issues.repository.IssueStatusHistoryRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.issues.repository.NewsWatchRepository;
+import com.example.be.domain.issues.service.IssueProjectionService;
+import com.example.be.domain.issues.service.IssueRefutationLinker;
+import com.example.be.domain.issues.service.IssueStanceClassifier;
 import com.example.be.domain.notifications.entity.WatchAlertOutbox;
 import com.example.be.domain.notifications.repository.WatchAlertOutboxRepository;
 import com.example.be.domain.sources.entity.Source;
@@ -54,6 +57,8 @@ class IssueClusterWriterTest {
     private final IssueStatusHistoryRepository statusHistoryRepository = mock(IssueStatusHistoryRepository.class);
     private final NewsWatchRepository watchRepository = mock(NewsWatchRepository.class);
     private final WatchAlertOutboxRepository watchAlertOutboxRepository = mock(WatchAlertOutboxRepository.class);
+    private final IssueProjectionService projectionService = mock(IssueProjectionService.class);
+    private final IssueRefutationLinker refutationLinker = mock(IssueRefutationLinker.class);
     private final IssueClusterWriter writer = new IssueClusterWriter(
             articleRepository,
             topicRepository,
@@ -64,7 +69,10 @@ class IssueClusterWriterTest {
             statusHistoryRepository,
             watchRepository,
             watchAlertOutboxRepository,
-            new BreakingNewsDetector());
+            new BreakingNewsDetector(),
+            new IssueStanceClassifier(),
+            projectionService,
+            refutationLinker);
 
     @Test
     void mergesAllArticlesFromLosingContentGroupAndRefreshesFingerprint() {
@@ -169,6 +177,7 @@ class IssueClusterWriterTest {
         assertEquals(WatchType.BREAKING, watchCaptor.getValue().getWatchType());
         assertTrue(watchCaptor.getValue().getExpiresAt()
                 .isAfter(LocalDateTime.now(ApiTimeZone.ZONE).plusHours(47)));
+        verify(refutationLinker).linkNewIssue(created, breaking);
     }
 
     @Test
@@ -240,6 +249,34 @@ class IssueClusterWriterTest {
         assertTrue(watch.getCooldownUntil()
                 .isAfter(LocalDateTime.now(ApiTimeZone.ZONE).plusMinutes(29)));
         verify(watchRepository, never()).save(any());
+    }
+
+    @Test
+    void correctionKeepsOriginalArticleAsStanceReferenceEvenWhenItBecomesRepresentative() {
+        Topic topic = topic();
+        Article original = article(1L, "삼성전자 HBM4 양산 확정", topic);
+        Article correction = article(2L, "삼성전자 HBM4 양산 보도 정정", topic);
+        NewsIssue issue = issue(100L, topic, "삼성전자 HBM4 양산 확정");
+        IssueArticle originalMembership = membership(
+                11L, issue, original, IssueArticleRole.REPRESENTATIVE);
+        OffsetDateTime time = original.getPublishedAt();
+        ClusterPlan.IssueAssignment assignment = new ClusterPlan.IssueAssignment(
+                100L, List.of(), topic.getId(), correction.getId(), List.of(1L, 2L),
+                List.of("HBM4", "삼성전자"), time, correction.getPublishedAt(), 2, 2);
+        when(articleRepository.findAllById(any())).thenReturn(List.of(original, correction));
+        when(topicRepository.findById(topic.getId())).thenReturn(Optional.of(topic));
+        when(issueRepository.findById(100L)).thenReturn(Optional.of(issue));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L))
+                .thenReturn(List.of(originalMembership));
+        when(issueArticleRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        writer.write(new ClusterPlan(List.of(), List.of(assignment), List.of()));
+
+        ArgumentCaptor<IssueArticle> membership = ArgumentCaptor.forClass(IssueArticle.class);
+        verify(issueArticleRepository).save(membership.capture());
+        assertEquals(IssueStance.RETRACTS, membership.getValue().getStance());
+        assertEquals(IssueStanceSource.RULE, membership.getValue().getStanceSource());
+        assertEquals(IssueArticleRole.REPRESENTATIVE, membership.getValue().getRole());
     }
 
     private ClusterPlan.IssueAssignment assignment(Long existingId,

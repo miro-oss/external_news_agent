@@ -116,6 +116,23 @@ public class NewsIssue {
         this.crossSource = crossSource == null ? IssueCrossSource.empty() : crossSource;
     }
 
+    public IssueStatus applyStatus(IssueStatus status) {
+        if (status == null) {
+            throw new IllegalArgumentException("이슈 상태는 필수입니다.");
+        }
+        IssueStatus previous = this.status;
+        this.status = status;
+        return previous;
+    }
+
+    public void applyImportanceScore(BigDecimal importanceScore) {
+        if (importanceScore == null || importanceScore.signum() < 0
+                || importanceScore.compareTo(new BigDecimal("100")) > 0) {
+            throw new IllegalArgumentException("이슈 중요도는 0~100이어야 합니다.");
+        }
+        this.importanceScore = importanceScore;
+    }
+
     public IssueStatus markMerged() {
         IssueStatus previous = this.status;
         this.status = IssueStatus.RETRACTED;

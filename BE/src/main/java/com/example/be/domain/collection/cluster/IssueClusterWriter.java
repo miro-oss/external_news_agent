@@ -21,6 +21,9 @@ import com.example.be.domain.issues.repository.IssueRelationRepository;
 import com.example.be.domain.issues.repository.IssueStatusHistoryRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.issues.repository.NewsWatchRepository;
+import com.example.be.domain.issues.service.IssueProjectionService;
+import com.example.be.domain.issues.service.IssueRefutationLinker;
+import com.example.be.domain.issues.service.IssueStanceClassifier;
 import com.example.be.domain.notifications.entity.WatchAlertDeliveryStatus;
 import com.example.be.domain.notifications.entity.WatchAlertOutbox;
 import com.example.be.domain.notifications.repository.WatchAlertOutboxRepository;
@@ -32,7 +35,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -63,6 +65,9 @@ public class IssueClusterWriter {
     private final NewsWatchRepository watchRepository;
     private final WatchAlertOutboxRepository watchAlertOutboxRepository;
     private final BreakingNewsDetector breakingNewsDetector;
+    private final IssueStanceClassifier stanceClassifier;
+    private final IssueProjectionService projectionService;
+    private final IssueRefutationLinker refutationLinker;
 
     @Transactional
     public void write(ClusterPlan plan) {
@@ -126,7 +131,8 @@ public class IssueClusterWriter {
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
         Topic topic = topicRepository.findById(assignment.topicId()).orElseThrow();
         Article representative = requiredArticle(articles, assignment.representativeArticleId());
-        NewsIssue issue = assignment.existingIssueId() == null
+        boolean newIssue = assignment.existingIssueId() == null;
+        NewsIssue issue = newIssue
                 ? createIssue(topic, representative, assignment)
                 : issueRepository.findById(assignment.existingIssueId())
                 .orElseThrow(() -> new IllegalStateException(
@@ -140,24 +146,37 @@ public class IssueClusterWriter {
                 .forEach(membership -> membershipByArticle.put(
                         membership.getArticle().getId(), membership));
         mergeIssues(issue, topic, assignment.mergedIssueIds(), membershipByArticle);
+        Article stanceReference = stanceReference(
+                representative, assignment.articleIds(), membershipByArticle, articles);
         Set<Long> existingArticleIds = Set.copyOf(membershipByArticle.keySet());
         List<NewsWatch> eligibleWatches = assignment.existingIssueId() == null
                 ? List.of()
                 : watchRepository.findEligibleForNotification(issue.getId(), now);
         for (Long articleId : assignment.articleIds()) {
-            membershipByArticle.computeIfAbsent(articleId, ignored -> issueArticleRepository.save(
-                    IssueArticle.builder()
-                            .issue(issue)
-                            .article(requiredArticle(articles, articleId))
-                            .role(IssueArticleRole.MEMBER)
-                            .stance(IssueStance.SUPPORTS)
-                            .stanceSource(IssueStanceSource.RULE)
-                            .stanceConfidence(BigDecimal.ONE)
-                            .joinedAt(now)
-                            .build()));
+            membershipByArticle.computeIfAbsent(articleId, ignored -> {
+                Article article = requiredArticle(articles, articleId);
+                IssueStanceClassifier.Result stance = stanceClassifier.classify(stanceReference, article);
+                return issueArticleRepository.save(IssueArticle.builder()
+                        .issue(issue)
+                        .article(article)
+                        .role(IssueArticleRole.MEMBER)
+                        .stance(stance.stance())
+                        .stanceSource(IssueStanceSource.RULE)
+                        .stanceConfidence(stance.confidence())
+                        .joinedAt(now)
+                        .build());
+            });
         }
         membershipByArticle.values().forEach(membership -> membership.changeRole(
                 roleOf(membership.getArticle(), representative)));
+        membershipByArticle.values().stream()
+                .filter(membership -> membership.getStanceSource() == IssueStanceSource.RULE)
+                .forEach(membership -> {
+                    IssueStanceClassifier.Result stance = stanceClassifier.classify(
+                            stanceReference, membership.getArticle());
+                    membership.applyStance(
+                            stance.stance(), IssueStanceSource.RULE, stance.confidence());
+                });
 
         List<Article> members = membershipByArticle.values().stream()
                 .map(IssueArticle::getArticle)
@@ -170,6 +189,14 @@ public class IssueClusterWriter {
                 publisherCount(members),
                 independentContentCount(members),
                 assignment.entities());
+        List<IssueArticle> memberships = List.copyOf(membershipByArticle.values());
+        projectionService.recalculate(
+                issue,
+                memberships,
+                now.atZone(ApiTimeZone.ZONE).toOffsetDateTime());
+        if (newIssue) {
+            refutationLinker.linkNewIssue(issue, representative);
+        }
 
         List<Article> newArticles = membershipByArticle.entrySet().stream()
                 .filter(entry -> !existingArticleIds.contains(entry.getKey()))
@@ -179,6 +206,25 @@ public class IssueClusterWriter {
             enqueueAlerts(eligibleWatches, issue, members, now);
         }
         registerBreakingWatch(issue, newArticles, now);
+    }
+
+    private Article stanceReference(Article representative,
+                                    List<Long> assignmentArticleIds,
+                                    Map<Long, IssueArticle> existingMemberships,
+                                    Map<Long, Article> articles) {
+        return existingMemberships.values().stream()
+                .map(IssueArticle::getArticle)
+                .filter(article -> !stanceClassifier.hasExplicitCorrection(article))
+                .findFirst()
+                .or(() -> assignmentArticleIds.stream()
+                        .map(articles::get)
+                        .filter(article -> article != null)
+                        .filter(article -> !stanceClassifier.hasExplicitCorrection(article))
+                        .min(Comparator.comparing(
+                                        this::eventTime,
+                                        Comparator.nullsLast(Comparator.naturalOrder()))
+                                .thenComparing(Article::getId)))
+                .orElse(representative);
     }
 
     private void mergeIssues(NewsIssue winner,
@@ -288,6 +334,9 @@ public class IssueClusterWriter {
                 ? issue.getFirstSeenAt()
                 : eventTime(breakingArticle);
         for (NewsWatch watch : watches) {
+            if (!watch.isActive() || !watch.getExpiresAt().isAfter(now)) {
+                continue;
+            }
             watch.claimUntil(now.plus(WATCH_COOLDOWN));
             watchAlertOutboxRepository.save(WatchAlertOutbox.builder()
                     .watch(watch)

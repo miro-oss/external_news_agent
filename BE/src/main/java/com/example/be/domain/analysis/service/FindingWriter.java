@@ -14,13 +14,16 @@ import com.example.be.domain.issues.entity.NewsWatch;
 import com.example.be.domain.issues.entity.WatchType;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.NewsWatchRepository;
+import com.example.be.domain.issues.service.IssueProjectionService;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -35,6 +38,7 @@ public class FindingWriter {
     private final NewsWatchRepository watchRepository;
     private final SensitivityCalculator sensitivityCalculator;
     private final BreakingNewsDetector breakingNewsDetector;
+    private final IssueProjectionService projectionService;
 
     private static final long HIGH_SENSITIVITY_WATCH_HOURS = 48;
 
@@ -85,7 +89,9 @@ public class FindingWriter {
                 .analyzedAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build());
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
+        Set<Long> affectedIssueIds = new LinkedHashSet<>();
         issueArticleRepository.findByArticleIdOrderByIssueIdAsc(articleId).forEach(membership -> {
+            affectedIssueIds.add(membership.getIssue().getId());
             if (membership.getRole() == IssueArticleRole.REPRESENTATIVE) {
                 membership.getIssue().applyRepresentativeSummary(result.summary());
                 membership.getIssue().applyRepresentativeSensitivity(result.sensitivity().getScore());
@@ -114,6 +120,7 @@ public class FindingWriter {
                                         .build()));
             }
         });
+        affectedIssueIds.forEach(projectionService::recalculate);
     }
 
     @Transactional

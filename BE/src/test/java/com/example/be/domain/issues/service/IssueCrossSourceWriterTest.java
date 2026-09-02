@@ -23,8 +23,9 @@ class IssueCrossSourceWriterTest {
 
     private final NewsIssueRepository issueRepository = mock(NewsIssueRepository.class);
     private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
+    private final IssueProjectionService projectionService = mock(IssueProjectionService.class);
     private final IssueCrossSourceWriter writer =
-            new IssueCrossSourceWriter(issueRepository, issueArticleRepository);
+            new IssueCrossSourceWriter(issueRepository, issueArticleRepository, projectionService);
 
     @Test
     void storesRuleStancesAndMarksOnlyRealPromotedAnalysisAsLlm() {
@@ -106,6 +107,24 @@ class IssueCrossSourceWriterTest {
                 issue.getCrossSource().conflicts().getFirst().articleIds());
         assertEquals(IssueStance.ADDS, member.getStance());
         assertEquals(new BigDecimal("0.700"), member.getStanceConfidence());
+    }
+
+    @Test
+    void representativeCorrectionIsNotOverwrittenAsSupport() {
+        NewsIssue issue = NewsIssue.builder().id(88L).crossSource(IssueCrossSource.empty()).build();
+        IssueArticle representative = membership(
+                1L, issue, Article.builder().id(10L).build(), IssueArticleRole.REPRESENTATIVE);
+        representative.applyStance(
+                IssueStance.RETRACTS, IssueStanceSource.RULE, new BigDecimal("0.850"));
+        when(issueRepository.findByIdForUpdate(88L)).thenReturn(Optional.of(issue));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(88L))
+                .thenReturn(List.of(representative));
+
+        writer.applyRepresentative(88L, IssueCrossSource.empty(), List.of(), true);
+
+        assertEquals(IssueStance.RETRACTS, representative.getStance());
+        assertEquals(IssueStanceSource.RULE, representative.getStanceSource());
+        assertEquals(new BigDecimal("0.850"), representative.getStanceConfidence());
     }
 
     private IssueArticle membership(
