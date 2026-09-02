@@ -1,0 +1,1023 @@
+{
+  "datasetVersion": "clusters.v2",
+  "description": "run 3862에서 사람이 사건 단위로 다시 라벨링한 실수집 hard case. 제목·요약과 최대 120자의 본문 관측 조각을 보존하며 SimHash 결과는 원문 재확인이 필요한 조건부 측정이다.",
+  "sourceRuns": [
+    3862
+  ],
+  "commonEntityDocumentRatioCandidates": [
+    0.05,
+    0.1,
+    0.15,
+    0.2
+  ],
+  "articles": [
+    {
+      "articleId": 1,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2455,
+      "topicId": 4386,
+      "expectedIssueId": "hanul-mlcc-inspection",
+      "split": "CALIBRATION",
+      "title": "한울반도체, AI MLCC 6면 검사 '분당 1만3000개·정확도 98%' 구현…외부...",
+      "summary": "자체 AI 플랫폼 '하와이' 적용…고속 검사·불량 판정 동시 구현 한울반도체(320000)가 자체 인공지능(AI)... 이번 장비에는 한울반도체가 자체 개발 중인 AI 검사 플랫폼",
+      "body": "",
+      "fetchStatus": "FETCH_FAILED",
+      "publisher": "www.newsprime.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:38:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 2,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2456,
+      "topicId": 4386,
+      "expectedIssueId": "hanul-mlcc-inspection",
+      "split": "CALIBRATION",
+      "title": "한울반도체, AI 기반 MLCC 검사장비 고도화…분당 1만3000개 구현",
+      "summary": "최근 AI 서버와 전기차·자율주행 시장 성장에 따라 고용량·고전압·초소형 MLCC 수요가 늘면서 생산공정에서 고속·고정밀 검사의 중요성도 커지고 있다. 한울반도체는 외부기관 평가를",
+      "body": "[데일리한국 김건우 기자] 한울반도체가 자체 인공지능(AI) 검사 플랫폼을 적용한 적층세라믹콘덴서(MLCC) 6면 외관검사장비의 검사속도와 불량 검출 성능을 높였다고 1일 밝혔다.\n\n한울반도체는 자체 성능시험에서 0",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "daily.hankooki.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:38:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 3,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2476,
+      "topicId": 4386,
+      "expectedIssueId": "hanul-mlcc-inspection",
+      "split": "CALIBRATION",
+      "title": "한울반도체, AI MLCC 6면 검사 '분당 1만3000개·정확도 98%'",
+      "summary": "한울반도체가 인공지능(AI) 기반 적층세라믹콘덴서(MLCC) 6면 외관검사장비에서 분당 1만3000개 검사 속도와 98%의 불량 검출 정확도를 기록했다. 1일 한울반도체에 따르면 ",
+      "body": "한울반도체 한울반도체 close 증권정보 320000 KOSDAQ 현재가 8,850 전일대비 등락률 0.00% 거래량 0 전일가 8,930 2026.09.01 개장전(20분지연) 관련기사 한울반도체, 차세대 AI 초",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "view.asiae.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:23:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 4,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2445,
+      "topicId": 4386,
+      "expectedIssueId": "kb-nand-etf",
+      "split": "CALIBRATION",
+      "title": "KB운용 'RISE 글로벌AI낸드메모리반도체 ETF' 출시…\"국내 최초 낸드 밸...",
+      "summary": "AI 산업이 빠르게 성장하면서 반도체 투자의 관심 영역도 그래픽처리장치(GPU)와 고대역폭메모리(HBM)... 이날 기준 주요 투자종목은 삼성전자(19.9%), SK하이닉스(18.",
+      "body": "KB자산운용은 AI 확산으로 데이터 저장 수요가 급증하는 가운데 국내 최초로 글로벌 낸드(NAND) 메모리 밸류체인에 집중 투자하는 ‘RISE 글로벌AI낸드메모리반도체 ETF’를 출시한다고 1일 밝혔다.\n\nAI 산업",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.etoday.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:32:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 5,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2449,
+      "topicId": 4386,
+      "expectedIssueId": "kb-nand-etf",
+      "split": "CALIBRATION",
+      "title": "KB자산운용, 국내 첫 낸드 메모리 밸류체인 상장지수펀드 출시",
+      "summary": "고대역폭메모리(HBM)에서 데이터 저장 분야로 확대되고 있다고 설명했다. 인공지능이 생성하고 처리하는... 이어 SK하이닉스 18.8%, 샌디스크 16.4%, 키옥시아 12.3%,",
+      "body": "KB자산운용이 인공지능 확산에 따른 데이터 저장 수요 증가에 투자하는 낸드(NAND) 메모리 상장지수펀드(ETF)를 선보인다.\n\n삼성전자와 SK하이닉스를 비롯해 미국·일본의 낸드 생산 및 저장장치 관련 기업을 포트폴",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newsfreezone.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:36:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 6,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2519,
+      "topicId": 4386,
+      "expectedIssueId": "kb-nand-etf",
+      "split": "CALIBRATION",
+      "title": "KB자산운용, 글로벌 낸드 메모리 밸류체인 ETF 출시",
+      "summary": "사진=KB자산운용 인공지능(AI) 반도체 투자 범위가 연산을 담당하는 GPU·HBM에서 데이터 저장 영역까지... 1일 기준 편입 비중은 삼성전자 19.9%, SK하이닉스 18.8",
+      "body": "인공지능(AI) 반도체 투자 범위가 연산을 담당하는 GPU·HBM에서 데이터 저장 영역까지 확장되면서 낸드(NAND) 관련 기업을 묶은 상장지수펀드(ETF)가 등장했다. AI가 만들어내는 데이터의 양이 늘어날수록 이",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.pinpointnews.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:42:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 7,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2520,
+      "topicId": 4386,
+      "expectedIssueId": "kb-nand-etf",
+      "split": "CALIBRATION",
+      "title": "AI 투자, HBM 넘어 낸드로…KB운용, 글로벌낸드메모리반도체 ETF 출시",
+      "summary": "고대역폭메모리(HBM)에서 낸드(NAND) 메모리로 확대되고 있다. KB자산운용은 글로벌 낸드 메모리 핵심... 이날 기준 주요 투자 종목은 삼성전자(19.9%), SK하이닉스(1",
+      "body": "[이데일리 김윤정 기자] 인공지능(AI) 산업 성장으로 데이터 저장 수요가 늘면서 반도체 투자의 관심 영역이 그래픽처리장치(GPU)와 고대역폭메모리(HBM)에서 낸드(NAND) 메모리로 확대되고 있다. KB자산운용은",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.edaily.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:40:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 8,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2521,
+      "topicId": 4386,
+      "expectedIssueId": "kb-nand-etf",
+      "split": "CALIBRATION",
+      "title": "KB자산운용 'RISE 글로벌AI낸드메모리반도체 ETF' 출시",
+      "summary": "(GPU)·고대역폭메모리(HBM) 중심에서 데이터 저장을 담당하는 고성능 기업용 솔리드스테이트드라이브(SSD)... 주요 투자종목은 삼성전자(19.9%), SK하이닉스(18.8%)",
+      "body": "인공지능(AI) 기술의 축이 학습에서 추론으로 이동하며 데이터 저장 수요가 급증하는 가운데 글로벌 낸드(NAND) 메모리 밸류체인에 집중 투자하는 국내 최초의 상장지수펀드(ETF)가 나왔다.\n\n1일 KB자산운용은 '",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "view.asiae.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:47:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 9,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2312,
+      "topicId": 4386,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "CALIBRATION",
+      "title": "최태원 “일본에 반도체 공장 설립 검토”…SK, 합작공장은 부인",
+      "summary": "SK하이닉스 “세계 어디서나 가능”SK하이닉스가 일본에 메모리 반도체 공장을 설립하는 방안을 검토하고 있다는 외신 보도가 나왔다. 다만 SK그룹은 일본 투자는 가능한 아이디어 중 ",
+      "body": "SK하이닉스가 일본에 메모리 반도체 공장을 설립하는 방안을 검토하고 있다는 외신 보도가 나왔다. 다만 SK그룹은 일본 투자는 가능한 아이디어 중 하나지만, 합작공장 검토는 사실과 다르다고 해명했다.\n\n31일 블룸버그",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.mk.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T00:00:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 10,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2326,
+      "topicId": 4386,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "CALIBRATION",
+      "title": "최태원 \"투자 검토 중\"…SK하이닉스, 美·日 추가 생산거점 어디에",
+      "summary": "[서울=뉴시스]박나리 기자 = 최태원 SK그룹 회장이 일본 투자 계획과 관련해 \"검토하는 과정에 있다\"고 밝혔다. 1일 업계에 따르면 최 회장은 전날 한일상공회의소 회장단 회의 참",
+      "body": "등록 2026.09.01 05:30:00수정 2026.09.01 06:06:24\n\n[서울=뉴시스] 홍효식 기자 = 최태원 대한상공회의소 회장이 31일 일본 센다이 웨스틴호텔에서 열린 제15회 한일상공회의소 회장단 회",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newsis.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T05:30:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 11,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2327,
+      "topicId": 4386,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "CALIBRATION",
+      "title": "최태원 회장 \"SK하이닉스, 日 반도체 합작공장 검토\"",
+      "summary": "[서울=뉴시스] 신효령 기자 = SK하이닉스가 일본에서 메모리 반도체를 생산하는 합작공장 설립을 검토 중이다. 인공지능(AI) 확산으로 메모리 수요가 빠르게 늘면서 해외 생산기지를",
+      "body": "등록 2026.08.31 16:47:12\n\n[서울=뉴시스] 조성봉 기자 = 최태원 SK그룹 회장은 31일 일본 센다이에서 열린 한일상공회의소 회장단 회의 참석 중 일본 내 메모리 반도체 합작공장 설립 가능성을 검토하",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newsis.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T16:47:12+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 12,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2450,
+      "topicId": 4386,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "CALIBRATION",
+      "title": "日 투자 가능성 열어둔 최태원…합작공장설엔 선 그어",
+      "summary": "인공지능(AI) 확산으로 고대역폭메모리(HBM)와 D램 공급 부족이 장기화할 조짐을 보이자 국내 생산능력을... 한국무역협회에 따르면 지난 7월 HBM의 개당 평균 수출가격은 76",
+      "body": "SK하이닉스가 미국에 이어 일본도 차기 해외 생산거점 후보로 들여다보고 있다. 인공지능(AI) 확산으로 고대역폭메모리(HBM)와 D램 공급 부족이 장기화할 조짐을 보이자 국내 생산능력을 확대하는 동시에 해외 투자처도",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "news.bizwatch.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:33:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 13,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2496,
+      "topicId": 4386,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "CALIBRATION",
+      "title": "최태원이 꺼낸 '日 반도체 공장'…SK는 '합작' 선 긋기",
+      "summary": "일본 반도체 투자 가능성을 언급했다. 이를 계기로 SK하이닉스의 현지 생산시설 구축 여부에 관심이 쏠린다.... 최 회장이 일본을 반도체 생산거점 후보로 거론한 것은 이번이 처음이",
+      "body": "블룸버그 “메모리 합작공장 타당성 검토”…SK “사실과 달라”\n\n“전력·용수 풍부하면 어디든”…美 이어 새 생산거점 관심\n\n[SRT(에스알 타임스) 임현범 기자] 최태원 SK그룹 회장이 외신 인터뷰에서 일본 반도체 ",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.srtimes.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:12:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 14,
+      "sourceRunId": 3862,
+      "sourceArticleId": 1965,
+      "topicId": 4386,
+      "expectedIssueId": "applied-memory-scaling",
+      "split": "HOLDOUT",
+      "title": "[현장] \"메모리 장벽 넘을 것\"…어플라이드, HBM 효율 높일 기술 전략 韓서 공개",
+      "summary": "[서울=뉴시스]이지용 기자 = \"AI 시대엔 데이터를 빠르고 효율적으로 전달하는 게 중요합니다. 우리의 첨단 패키징 기술력으로 메모리 제조 고객사들의 제품 개발·양산 기간을 단축시",
+      "body": "등록 2026.08.31 13:30:20수정 2026.08.31 14:26:24\n\n[서울=뉴시스]이지용 기자 = 무쿤드 스리니바산 어플라이드 머티어리얼즈 그룹 부사장이 31일 서울 오크우드 프리미어 코엑스 센터에서 ",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newsis.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T13:30:20+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 15,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2453,
+      "topicId": 4386,
+      "expectedIssueId": "applied-memory-scaling",
+      "split": "HOLDOUT",
+      "title": "AI 시대 걸림돌은 메모리 장벽, 3D 패키징 기술로 승부하는 어플라이드",
+      "summary": "관련 장비와 소재·공정을 폭넓게 개발하고 있다. 어플라이드는 8월 31일 서울 오크우드 코엑스센터에서 미디어 브리핑을 열고 이 같은 AI 반도체 산업의 변화와 당면 과제, 미래 대",
+      "body": "AI 시대 반도체 기술 경쟁의 초점이 연산 성능에서 데이터 이동으로 옮겨가고 있다. 메모리 대역폭과 데이터 이동 효율이 프로세서를 따라가지 못하면서, 데이터를 제때 공급하지 못하는 이른바 ‘메모리 장벽’이 더 큰 문",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.electimes.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:28:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 16,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2514,
+      "topicId": 4386,
+      "expectedIssueId": "dgist-optical-ultrasound",
+      "split": "HOLDOUT",
+      "title": "“반도체 결함, 초음파로 찾는다” DGIST, 반도체 공정 활용해 초소형 광...",
+      "summary": "국내 연구팀이 반도체나 이차전지 내부 결함을 찾아내는 비파괴검사 혁신 기술을 개발했다. 디지스트(DGIST·총장 이건우)는 로봇및기계전자공학과 한상윤·유재석 교수 공동 연구팀이 반",
+      "body": "국내 연구팀이 반도체나 이차전지 내부 결함을 찾아내는 비파괴검사 혁신 기술을 개발했다. 디지스트(DGIST·총장 이건우)는 로봇및기계전자공학과 한상윤·유재석 교수 공동 연구팀이 반도체 제조 공정을 활용해 머리카락 굵",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.etnews.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:08:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 17,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2546,
+      "topicId": 4386,
+      "expectedIssueId": "dgist-optical-ultrasound",
+      "split": "HOLDOUT",
+      "title": "DGIST, '초소형 광 초음파 센서' 세계 최초 개발",
+      "summary": "대구경북과학기술원(DGIST) 로봇및기계전자공학과 한상윤·유재석 교수 공동 연구팀은 반도체 제조 공정을... 있어 반도체나 이차전지 내부의 결함을 찾아내는 비파괴검사 기술에 혁신을",
+      "body": "대표이사 : 염영남 주소 : 서울 중구 퇴계로 173 남산스퀘어빌딩 (구 극동빌딩) 12층 사업자등록번호 : 102-81-36588\n\n발행인 : 염영남 편집인 : 염영남 고충처리인 : 김경원 통신판매업신고 : 서울중",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newsis.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:40:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 18,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2547,
+      "topicId": 4386,
+      "expectedIssueId": "dgist-optical-ultrasound",
+      "split": "HOLDOUT",
+      "title": "DGIST, 초소형 광(光) 초음파 센서 세계 최초 개발",
+      "summary": "대구경북과학기술원(DGIST) 로봇및기계전자공학과 한상윤·유재석 교수 공동 연구팀이 반도체 제조 공정을... 향후 반도체나 이차전지 내부의 결함을 찾아내는 비파괴검사 기술에 혁신을",
+      "body": "",
+      "fetchStatus": "FETCH_FAILED",
+      "publisher": "www.imaeil.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:39:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 19,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2499,
+      "topicId": 4386,
+      "expectedIssueId": "kiwoom-september-outlook",
+      "split": "HOLDOUT",
+      "title": "키움증권, 코스피 8월 15.9% 상승 이어 9월도 회복세 전망",
+      "summary": "제시하며 반도체 중심의 상승장에서 업종 선택지를 유통·증권·IT하드웨어·방산·화장품... 급락했으나, 반도체 반등에 힘입어 장중 7000p까지 회복했고 이후 미 재무부의 장기국채 ",
+      "body": "국내 증시가 7월 급락장에서 벗어나 회복 궤도에 재진입한 가운데, 키움증권이 9월 코스피 예상 범주를 6300~7600p로 제시하며 반도체 중심의 상승장에서 업종 선택지를 유통·증권·IT하드웨어·방산·화장품 등으로 ",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newsfreezone.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:12:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 20,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2463,
+      "topicId": 4386,
+      "expectedIssueId": "lg-grambook-ai-launch",
+      "split": "HOLDOUT",
+      "title": "삼성 '갤럭시 북6'·LG '그램북 AI 2026'… 실속형 AI 노트북 경쟁",
+      "summary": "반도체 가격 상승을 뜻하는 이른바 '칩플레이션' 여파 속에서 삼성전자와 LG전자가 최신 AI 성능과 오래가는 배터리, 탄탄한 휴대성을 모두 갖춘 신제품을 나란히 선보이며 하반기 보",
+      "body": "[천지일보=황해연 기자] 반도체 가격 상승을 뜻하는 이른바 ‘칩플레이션’ 여파 속에서 삼성전자와 LG전자가 최신 AI 성능과 오래가는 배터리, 탄탄한 휴대성을 모두 갖춘 신제품을 나란히 선보이며 하반기 보급형 노트북",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newscj.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:36:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 21,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2532,
+      "topicId": 4386,
+      "expectedIssueId": "lg-grambook-ai-launch",
+      "split": "HOLDOUT",
+      "title": "LG전자, 실속형 노트북 'LG 그램북 AI 2026' 출시…145만원부터",
+      "summary": "LG전자(066570)가 반도체 가격 상승에 따른 이른바 '칩플레이션'으로 커지는 소비자 부담을 줄이기 위해 실속형 노트북 신제품을 선보인다. 그램의 경량화와 휴대성은 유지하면서 ",
+      "body": "",
+      "fetchStatus": "FETCH_FAILED",
+      "publisher": "www.news1.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:46:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 22,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2537,
+      "topicId": 4386,
+      "expectedIssueId": "nvidia-mediatek-investment",
+      "split": "HOLDOUT",
+      "title": "엔비디아, 미디어텍에 35억달러 투자…AI 칩 시장 판 다시 짠다",
+      "summary": "엔비디아가 미디어텍 전환사채 35억달러어치를 매입하며 AI 반도체 협력을 확대했다. [사진: 엔비디아] 엔비디아가 대만 반도체 기업 미디어텍의 전환사채 35억달러(약 4조8000억",
+      "body": "[디지털투데이 유승아 인턴기자] 엔비디아가 대만 반도체 기업 미디어텍의 전환사채 35억달러(약 4조8000억원)어치를 매입하며 인공지능(AI) 반도체 협력을 대폭 확대했다. 미디어텍은 엔비디아의 NV링크 퓨전 기술을",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.digitaltoday.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:44:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 23,
+      "sourceRunId": 3862,
+      "sourceArticleId": 1960,
+      "topicId": 4386,
+      "expectedIssueId": "semiconductor-bonus-consumption",
+      "split": "HOLDOUT",
+      "title": "삼전닉스, 반도체 성과급 어디에 썼나보니…한은 “동탄 집 사고 테슬라 샀다”",
+      "summary": "“주택 매입 대신 소비로 흘러야…품목 확산도 중요”삼성전자와 SK하이닉스 등 반도체 기업의 성과급 확대가 소비를 끌어올리면서 내년 한국 경제성장률을 최대 0.09%포인트 높일 수 ",
+      "body": "삼성전자와 SK하이닉스 등 반도체 기업의 성과급 확대가 소비를 끌어올리면서 내년 한국 경제성장률을 최대 0.09%포인트 높일 수 있다는 한국은행 분석이 나왔다.\n\n삼성전자 반도체(DS) 부문과 SK하이닉스 직원들이 ",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.mk.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T00:00:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 24,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2314,
+      "topicId": 4386,
+      "expectedIssueId": "semiconductor-bonus-consumption",
+      "split": "HOLDOUT",
+      "title": "반도체 성과급 어디로?…한은 “동탄 집 사고 테슬라 뽑았다”",
+      "summary": "반도체 수혜 지역 누적 소비 증가액 올해 1.7조 예상 한은 “내년 성과급 확대…GDP 0.08~0.12%↑”삼성전자와 SK하이닉스 등 주요 반도체 기업이 지급하는 대규모 성과급이",
+      "body": "삼성전자와 SK하이닉스 등 주요 반도체 기업이 지급하는 대규모 성과급이 내수 회복에 힘을 보태고 있다는 한국은행 분석이 나왔다. 성과급에 따른 소비 증가로 내년 실질 국내총생산(GDP) 성장률이 최대 0.09%포인트",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.mk.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T00:00:00+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 25,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2333,
+      "topicId": 4386,
+      "expectedIssueId": "taiwan-origin-fraud",
+      "split": "HOLDOUT",
+      "title": "대만 검찰, 유니마이크론 압수수색...원산지 '중국산→대만산' 속인 혐의",
+      "summary": "[지디넷코리아]대만 검찰이 자국 인쇄회로기판(PCB) 업체 유니마이크론 사무실을 압수수색했다고 로이터와 닛케이아시아, 대만 언론 등 외신이 보도했다. 유니마이크론은 중국에서 만든 ",
+      "body": "대만 검찰이 자국 인쇄회로기판(PCB) 업체 유니마이크론 사무실을 압수수색했다고 로이터와 닛케이아시아, 대만 언론 등 외신이 보도했다. 유니마이크론은 중국에서 만든 PCB를 대만산으로 허위 표기해 판매한 혐의를 받는",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "zdnet.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T22:47:54+09:00",
+      "topicKeywords": [
+        "반도체"
+      ]
+    },
+    {
+      "articleId": 26,
+      "sourceRunId": 3862,
+      "sourceArticleId": 1867,
+      "topicId": 4387,
+      "expectedIssueId": "ablelabs-series-a",
+      "split": "CALIBRATION",
+      "title": "에이블랩스, 121억 규모 시리즈A 유치…자율실험실·AI 데이터 인프라 확...",
+      "summary": "Handling) 공정을 자동화하는 로봇 장비와 소프트웨어를 공급해왔다. 연구원의 수동 피펫팅 작업을 정밀... 에이블랩스는 올해 반도체, 정밀화학, 화장품, 2차전지 등 4대 첨",
+      "body": "로보틱스 기반 실험실 자동화 기업 에이블랩스(대표 신상)가 121억원 규모의 시리즈A 투자 유치를 마무리했다고 31일 밝혔다.\n\n업체에 따르면 이번 투자는 이노폴리스파트너스가 주도했으며 IBK기업은행, 캡스톤파트너스",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.segyebiz.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T14:46:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 27,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2382,
+      "topicId": 4387,
+      "expectedIssueId": "ablelabs-series-a",
+      "split": "CALIBRATION",
+      "title": "실험실 자동화 로봇 에이블랩스, 121억 원 시리즈A 유치",
+      "summary": "출하 전 모든 피펫을 자동 검사·보정하는 시스템을 제조 공정에 넣어 8채널 20마이크로리터 기준 변동계수... 기업들이 장비를 쓰고 있다. 적용 범위는 바이오 밖으로 넓어지고 있다",
+      "body": "로보틱스 기반 실험실 자동화 기업 에이블랩스가 121억 원 규모의 시리즈A 투자를 유치했다. 이번 라운드는 이노폴리스파트너스가 이끌었으며 기업은행, 캡스톤파트너스, 호라이즌인베스트먼트, 마그나인베스트먼트, 퓨처플레이",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "platum.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T16:40:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 28,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2415,
+      "topicId": 4387,
+      "expectedIssueId": "ablelabs-series-a",
+      "split": "CALIBRATION",
+      "title": "로보틱스 기반 실험실 자동화 기업 '에이블랩스', 121억원 투자 유치",
+      "summary": "에이블랩스는 올해 바이오 외 영역인 반도체, 화학, 화장품, 이차전지 등 4개 산업에서 품질 분석 자동화 프로젝트를 연이어 수주했다. 시료 전처리와 희석, 분주가 반복되는 이들 산",
+      "body": "로보틱스 기반 실험실 자동화 기업 에이블랩스(대표 신상)가 121억원 규모의 시리즈A 투자 유치를 완료했다고 31일 밝혔다.\n\n이번 라운드는 이노폴리스파트너스가 리드했으며 기업은행, 캡스톤파트너스, 호라이즌인베스트먼",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.irobotnews.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T17:50:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 29,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2548,
+      "topicId": 4387,
+      "expectedIssueId": "ablelabs-series-a",
+      "split": "CALIBRATION",
+      "title": "에이블랩스, 121억원 시리즈A 투자 유치…'자율실험실' 사업 본격화",
+      "summary": "바이오 연구실의 반복 실험 공정 자동화를 넘어 AI가 실험 조건을 설계하고 로봇이 이를 수행한 뒤 결과를... 기업들이 장비를 도입해 사용하고 있다. 특히 올해부터 자동화 수요가 ",
+      "body": "로보틱스 기반 실험실 자동화 기업 에이블랩스가 121억원 규모의 시리즈A 투자를 유치하고 인공지능(AI)과 로봇을 결합한 '자율실험실(Self-Driving Lab)' 사업을 본격화한다. 바이오 연구실의 반복 실험 ",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.etnews.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:56:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 30,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2344,
+      "topicId": 4387,
+      "expectedIssueId": "cxmt-supply-chain-series",
+      "split": "CALIBRATION",
+      "title": "[中 거인의 공급망] ①전구체 강자 '아극과기' 없으면 'CXMT'도 없다",
+      "summary": "진출하며 반도체 소재·장비 관련 포트폴리오를 빠르게 넓혀갔다. 구체적으로 2016년 회사는 2억 위안을... 1994년 설립된 유피 케미컬은 원자층 증착(ALD)과 화학기상증착(C",
+      "body": "!AI가 자동 생성한 요약으로 정확하지 않을 수 있어요.\n\n이 기사는 8월 31일 오후 3시15분 '해외 주식 투자의 도우미' GAM(Global Asset Management)에 출고된 프리미엄 기사입니다. GAM",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newspim.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T07:00:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 31,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2345,
+      "topicId": 4387,
+      "expectedIssueId": "cxmt-supply-chain-series",
+      "split": "CALIBRATION",
+      "title": "[中 거인의 공급망] ②전구체 강자 '아극과기' 없으면 'CXMT'도 없다",
+      "summary": "반면 LDS 장비 매출은 1억2400만 위안, 2.75%로 전년 동기 대비 8.77% 감소했다. 다만 LNG 보온·단열 소재는... 장쑤셴커는 중국에서 생산한 조전구체(최종 반도체",
+      "body": "!AI가 자동 생성한 요약으로 정확하지 않을 수 있어요.\n\n이 기사는 8월 31일 오후 3시15분 '해외 주식 투자의 도우미' GAM(Global Asset Management)에 출고된 프리미엄 기사입니다. GAM",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newspim.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T07:00:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 32,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2368,
+      "topicId": 4387,
+      "expectedIssueId": "future-asan-factory",
+      "split": "CALIBRATION",
+      "title": "미래산업, 아산 신공장 가동…생산능력 2.8배 확대",
+      "summary": "7월 29일 인수 후 9월 1일 가동…상반기 매출 이미 작년 연간 실적 넘어서 반도체 후공정 장비 전문기업 미래산업이 아산 신공장 매입과 소유권 이전을 모두 마무리하고 본격적인 가",
+      "body": "[딜사이트경제TV 성우창 기자] 반도체 후공정 장비 전문기업 미래산업이 아산 신공장 매입과 소유권 이전을 모두 마무리하고 본격적인 가동 준비에 나선다.\n\n미래산업은 31일 아산 신공장에서 로아앤코그룹 온성준 회장을 ",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "news.dealsitetv.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T18:10:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 33,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2389,
+      "topicId": 4387,
+      "expectedIssueId": "future-asan-factory",
+      "split": "CALIBRATION",
+      "title": "미래산업, 아산 신공장 매입 마무리 및 개소식 개최… CAPA 2.8배 전격 확...",
+      "summary": "반도체 후공정 장비 전문기업 미래산업이 아산 신공장 매입과 소유권 이전 절차를 최종 완료하고 생산능력(CAPA)을 대폭 끌어올릴 전초기지를 전격 가동한다. 미래산업은 31일 아산 ",
+      "body": "반도체 후공정 장비 전문기업 미래산업이 아산 신공장 매입과 소유권 이전 절차를 최종 완료하고 생산능력(CAPA)을 대폭 끌어올릴 전초기지를 전격 가동한다.\n\n미래산업은 31일 아산 신공장에서 로아앤코그룹 온성준 회장",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.nbntv.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T16:10:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 34,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2390,
+      "topicId": 4387,
+      "expectedIssueId": "future-asan-factory",
+      "split": "CALIBRATION",
+      "title": "미래산업, 아산 신공장 확보 완료…생산 능력 2.8배 확대",
+      "summary": "반도체 후공정 장비 전문기업 미래산업이 충남 아산 신공장 확보를 마치고 생산능력 확대에 나선다. 신공장 가동으로 장비 생산능력은 기존 대비 2.8배로 늘어날 전망이다. 미래산업은 ",
+      "body": "!AI가 자동 생성한 요약으로 정확하지 않을 수 있어요.\n\n[서울=뉴스핌] 이나영 기자= 반도체 후공정 장비 전문기업 미래산업이 충남 아산 신공장 확보를 마치고 생산능력 확대에 나선다. 신공장 가동으로 장비 생산능력",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newspim.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T15:59:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 35,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2392,
+      "topicId": 4387,
+      "expectedIssueId": "future-asan-factory",
+      "split": "CALIBRATION",
+      "title": "미래산업, 아산 신공장 본격 가동…반도체 장비 생산능력 2.8배 확대",
+      "summary": "반도체 후공정 장비 전문기업 미래산업이 아산 신공장 확보를 마무리하고 생산능력 확대에 나선다. 미래산업은 31일 아산 신공장에서 로아앤코그룹 온성준 회장을 비롯한 그룹사 임직원과 ",
+      "body": "[데일리한국 김건우 기자] 반도체 후공정 장비 전문기업 미래산업이 아산 신공장 확보를 마무리하고 생산능력 확대에 나선다.\n\n미래산업은 31일 아산 신공장에서 로아앤코그룹 온성준 회장을 비롯한 그룹사 임직원과 협력업체",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "daily.hankooki.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T15:54:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 36,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2403,
+      "topicId": 4387,
+      "expectedIssueId": "future-asan-factory",
+      "split": "CALIBRATION",
+      "title": "미래산업, 아산 신공장 본격 가동…반도체 장비 생산능력 2.8배 확대",
+      "summary": "이투데이=설경진 기자 | 31일 개소식 개최…연간 최대 720대 생산 인프라 확보 로아앤코그룹 편입 후 실적 수직상승…올해 상반기 매출, 작년 연간치 돌파 반도체 후공정 장비 전문",
+      "body": "반도체 후공정 장비 전문기업 미래산업이 충남 아산 신공장 매입과 소유권 이전을 마치고 생산능력(CAPA) 확장에 본격적으로 나선다.\n\n미래산업은 31일 아산 신공장에서 로아앤코그룹 온성준 회장을 비롯한 그룹사 임직원",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.etoday.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T15:16:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 37,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2343,
+      "topicId": 4387,
+      "expectedIssueId": "hpsp-leadership",
+      "split": "CALIBRATION",
+      "title": "[더벨]HPSP, 김재현 전 한화세미텍 대표 영입",
+      "summary": "김 신임 대표는 반도체 전·후공정 장비 분야를 두루 거쳤다. 최근까지 한화세미텍 대표로 재직하며 전사 손익 관리와 중장기 전략 수립, 글로벌 고객 대상 영업 및 기술 협력 네트워크",
+      "body": "",
+      "fetchStatus": "ROBOTS_DISALLOWED",
+      "publisher": "www.thebell.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T07:02:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 38,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2373,
+      "topicId": 4387,
+      "expectedIssueId": "hpsp-leadership",
+      "split": "CALIBRATION",
+      "title": "HPSP, 신임 각자대표로 김재현 한화세미텍 前 대표 선임",
+      "summary": "반도체 전공정 장비 기업 에이치피에스피(HPSP)가 신임 각자대표이사로 김재현 전(前) 한화세미텍 대표를 내정했다고 31일 밝혔다. HPSP는 이날 오전 이사회 결의를 거쳐 김재현",
+      "body": "반도체 전공정 장비 기업 에이치피에스피(HPSP)가 신임 각자대표이사로 김재현 전(前) 한화세미텍 대표를 내정했다고 31일 밝혔다.\n\nHPSP는 이날 오전 이사회 결의를 거쳐 김재현 신임 대표를 내정했다. 향후 임시",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.thelec.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T17:14:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 39,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2364,
+      "topicId": 4387,
+      "expectedIssueId": "applied-3d-scaling",
+      "split": "HOLDOUT",
+      "title": "어플라이드 “AI 병목, ‘3D 스케일링’으로 뚫는다… 하이브리드 본딩...",
+      "summary": "글로벌 1위 반도체 장비 기업 어플라이드 머티어리얼즈가 인공지능(AI) 시대의 최대 난제로 꼽히는 데이터... 가능한 공정 장비 혁신, 옹스트롬(Å·100억분의 1미터) 단위의 정",
+      "body": "글로벌 1위 반도체 장비 기업 어플라이드 머티어리얼즈가 인공지능(AI) 시대의 최대 난제로 꼽히는 데이터 병목 현상을 해결하기 위한 차세대 기술 로드맵을 공개했다. 어플라이드 머티어리얼즈는 31일 서울 강남구 오크우",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.kmib.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T18:46:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 40,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2374,
+      "topicId": 4387,
+      "expectedIssueId": "applied-3d-scaling",
+      "split": "HOLDOUT",
+      "title": "AI 반도체 ‘메모리 장벽’ 넘는다…어플라이드, D램·HBM 기술 고도화",
+      "summary": "/사진=머니투데이방송(MTN)세계 최대 반도체 장비기업인 어플라이드 머티리얼즈가 AI 반도체의 성능과 전력... 어플라이드 머티리얼즈는 공정 미세화만으로는 한계가 있는 만큼 새로운",
+      "body": "세계 최대 반도체 장비기업인 어플라이드 머티리얼즈가 AI 반도체의 성능과 전력 효율을 떨어뜨리는 이른바 ‘메모리 장벽(Memory Wall)’을 해소하기 위한 기술 로드맵을 제시했다. 연산을 담당하는 프로세서의 성능",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "news.mtn.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T17:08:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 41,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2388,
+      "topicId": 4387,
+      "expectedIssueId": "applied-3d-scaling",
+      "split": "HOLDOUT",
+      "title": "“프로세서 빨라져도 메모리가 못 따라가”… 어플라이드, 3D로 AI 병목 ...",
+      "summary": "증착·식각·이온주입·화학적기계연마(CMP)부터 계측·검사, 첨단 패키징까지 반도체 핵심 공정 전반에 장비를 공급한다. 2026 회계연도 3분기(4~7월) 매출은 91억2000만달러",
+      "body": "",
+      "fetchStatus": "FETCH_FAILED",
+      "publisher": "biz.chosun.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T16:13:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 42,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2405,
+      "topicId": 4387,
+      "expectedIssueId": "applied-3d-scaling",
+      "split": "HOLDOUT",
+      "title": "AMAT \"AI 반도체 성능 '데이터 이동'에 달려...해법은 3D 스케일링\"",
+      "summary": "한국 기업과의 협력에도 적극적으로 동참해 반도체 장비 공백을 줄인다는 방침이다. 회사는 삼성전자와 SK하이닉스는 어플라이드의 EPIC(장비·공정 혁신 상용화 센터) 창립 파트너로 ",
+      "body": "[디지털투데이 석대건 기자] 어플라이드 머티어리얼즈(AMAT)가 인공지능(AI) 반도체 성능의 핵심 병목으로 연산 속도가 아닌 데이터 이동 효율을 지목하고, D램부터 고대역폭메모리(HBM), 시스템 통합까지 전 영역",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.digitaltoday.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T15:14:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 43,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2409,
+      "topicId": 4387,
+      "expectedIssueId": "applied-3d-scaling",
+      "split": "HOLDOUT",
+      "title": "“메모리 병목 해법은 ‘3D 스케일링’”⋯ 어플라이드, D램·HBM·패키징...",
+      "summary": "방식으로 장비 공급 능력을 확대하고 있다”고 말했다. 어플라이드는 차세대 반도체 소재·공정 기술의 개발과 양산 적용을 앞당기기 위한 거점으로 미국 실리콘밸리에 약 50억달러(약 7",
+      "body": "",
+      "fetchStatus": "FETCH_FAILED",
+      "publisher": "www.viva100.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T14:52:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 44,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2410,
+      "topicId": 4387,
+      "expectedIssueId": "applied-3d-scaling",
+      "split": "HOLDOUT",
+      "title": "'K-NPU' 리벨·퓨리·딥엑스, 정부계약 시험대…독자 생존력 입증 변수",
+      "summary": "국산 인공지능(AI) 반도체 산업 경쟁이 정부 지원과 공공 레퍼런스 확보를 넘어 해외 고객·파트너로... 공공기관별 계약 건수와 계약금액, 납품 장비의 실제 가동률과 추론 성능, ",
+      "body": "(서울=뉴스1) 김민석 기자 = 국산 인공지능(AI) 반도체 산업 경쟁이 정부 지원과 공공 레퍼런스 확보를 넘어 해외 고객·파트너로 확장하고 있다. 리벨리온과 퓨리오사AI, 딥엑스 등 국내 대표 신경망처리장치(NPU",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.news1.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T06:10:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 45,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2549,
+      "topicId": 4387,
+      "expectedIssueId": "hyundai-armored-ambulance",
+      "split": "HOLDOUT",
+      "title": "현대로템, 軍 장갑형구급차 개발 완료…\"야전 환자 후송 책임진다\"",
+      "summary": "[서울=뉴시스]박현준 기자 = 현대로템이 전장에서 부상당한 장병을 안전하고 신속하게 후송할 수 있는 장갑형구급차 개발로 군 야전 응급의료 체계 강화에 나선다. 현대로템은 방위사업청",
+      "body": "대표이사 : 염영남 주소 : 서울 중구 퇴계로 173 남산스퀘어빌딩 (구 극동빌딩) 12층 사업자등록번호 : 102-81-36588\n\n발행인 : 염영남 편집인 : 염영남 고충처리인 : 김경원 통신판매업신고 : 서울중",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newsis.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T08:58:36+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 46,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2430,
+      "topicId": 4387,
+      "expectedIssueId": "robot-dog-immigration",
+      "split": "HOLDOUT",
+      "title": "美 이민 단속에 로봇개 투입되나…현대차 '스팟' 구매 검토",
+      "summary": "[서울=뉴시스]서이현 인턴 기자 = 미국 이민세관단속국(ICE)이 현대자동차그룹 계열사인 보스턴다이내믹스가 만든 4족 보행 로봇 '스팟'을 도입하는 방안을 검토하고 있는 것으로 나",
+      "body": "대표이사 : 염영남 주소 : 서울 중구 퇴계로 173 남산스퀘어빌딩 (구 극동빌딩) 12층 사업자등록번호 : 102-81-36588\n\n발행인 : 염영남 편집인 : 염영남 고충처리인 : 김경원 통신판매업신고 : 서울중",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newsis.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T15:30:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 47,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2279,
+      "topicId": 4387,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "HOLDOUT",
+      "title": "SK하이닉스, 日 반도체 공장 검토…최태원 회장 \"확정된 것은 없다\"",
+      "summary": "일본에는 도쿄일렉트론을 비롯한 반도체 장비·소재 기업들이 자리 잡고 있다. 또한 소니 그룹, 닌텐도 등... 지방자치단체들도 반도체 기업 유치에 적극적으로 나서고 있다. 다만 일본",
+      "body": "최태원 SK그룹 회장이 일본 내 반도체 생산거점 투자 가능성에 대해 \"현재 검토하는 단계\"라며 구체적으로 확정된 사항은 없다고 밝혔다.\n\nSK하이닉스가 미국에 이어 일본에서도 생산·협력 거점을 확대할 가능성이 제기되",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.econovill.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T07:30:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 48,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2319,
+      "topicId": 4387,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "HOLDOUT",
+      "title": "부지·전력·용수 준비 끝내놓고…'SK하닉에 러브콜' 日, 최태원 입만 쳐...",
+      "summary": "일본은 반도체 소재·장비 기업이 밀집해 있다는 점에서 생산거점 후보지로서 장점이 있다는 평가를... 일본에 공장을 짓더라도 생산 제품이나 적용 공정에 제한이 생길 가능성이 있다는 ",
+      "body": "일본 미야기현이 SK하이닉스의 첨단 반도체 생산거점 유치에 적극적으로 나서고 있다. 대규모 투자와 고용을 끌어내 지역 산업구조를 바꾼 구마모토현의 TSMC 유치 사례를 재현하겠다는 전략이다 31일 일본 센다이시에서 ",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.etnews.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T16:24:44+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 49,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2352,
+      "topicId": 4387,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "HOLDOUT",
+      "title": "[출근길 포인트] AI시대 선제 대응…SK하이닉스, 한국·미국 이어 일본...",
+      "summary": "일본에는 비상장기업 나믹스부터 반도체 장비 대기업 도쿄일렉트론까지 SK하이닉스의 협력업체가 다수... 이달 초 공정거래위원회의 기업결합 심사를 통과한 뒤 사업양수도 인가, 철도사업",
+      "body": "◇ 방일 최태원 회장 \"일본 전역 후보지 살펴보고 있다\"…AI 수요·비용 절감 포석\n\n[포인트데일리 최영운 기자] SK가 AI시대를 선대적으로 대응하기 위한 반도체 투자에 속도를 내고 있다.\n\n한국 내 반도체 생산시",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.pointdaily.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T04:00:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 50,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2354,
+      "topicId": 4387,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "HOLDOUT",
+      "title": "日도 “SK하이닉스 오라” 유치 총력… 최태원 “공장 설립 검토”",
+      "summary": "일본 반도체 장비업체 도쿄일렉트론과 도요타자동차 공장 등을 유치하며 미야기현 제조품 출하액을 2024년... D램 웨이퍼를 만드는 전공정 공장은 아니지만, 100개 이상의 현지 기",
+      "body": "일본 미야기현이 SK하이닉스 첨단 반도체 공장 유치를 위한 총력전에 나섰다. 인공지능(AI) 시대 글로벌 메모리 공급 부족 장기화가 예상되는 상황에서 일본과 미국이 SK하이닉스 생산 공장 유치에 경쟁적으로 뛰어드는 ",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.kmib.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T00:43:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 51,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2366,
+      "topicId": 4387,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "HOLDOUT",
+      "title": "日미야기현 “SK하이닉스 오라” 유치 총력전… 최태원 “일본 공장 검...",
+      "summary": "일본 반도체 장비업체 도쿄일렉트론과 도요타자동차 공장 등을 유치하며 미야기현 제조품 출하액을 2024년... D램 웨이퍼를 만드는 전공정 공장은 아니지만, 100개 이상의 현지 기",
+      "body": "일본 미야기현이 SK하이닉스 첨단 반도체 공장 유치를 위한 총력전에 나섰다. 인공지능(AI) 시대 글로벌 메모리 공급 부족 장기화가 예상되는 상황에서 일본과 미국이 SK하이닉스 생산 공장 유치에 경쟁적으로 뛰어드는 ",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.kmib.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T18:39:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 52,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2394,
+      "topicId": 4387,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "HOLDOUT",
+      "title": "\"전력·용수 풍부하면 어디든\"…최태원 日 공장 시사",
+      "summary": "실제 일본에는 반도체 소재·장비 기업인 나믹스와 도쿄일렉트론을 비롯해 소니그룹, 닌텐도 등 주요... 총 38억7천만달러(약 5조3천억원) 이상을 투자해 AI 메모리 후공정 생산시",
+      "body": "",
+      "fetchStatus": "FETCH_FAILED",
+      "publisher": "www.imaeil.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T15:51:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 53,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2399,
+      "topicId": 4387,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "HOLDOUT",
+      "title": "최태원, 일본 미야기 '몰래' 다녀갔다..'한일 청년 상호취업' 제안 속내...",
+      "summary": "SK하이닉스가 일본 공장을 짓더라도 생산 품목이나 공정 수준이 제한될 가능성이 있다는 분석이다. 미야기... SK하이닉스 입장에서는 일본 진출을 통해 반도체 제조장비와 소재 분야에",
+      "body": "",
+      "fetchStatus": "FETCH_FAILED",
+      "publisher": "kpenews.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T15:34:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 54,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2412,
+      "topicId": 4387,
+      "expectedIssueId": "sk-japan-factory",
+      "split": "HOLDOUT",
+      "title": "최태원 “전력·용수 좋은 일본 전역서 검토”…SK하이닉스 반도체 합작...",
+      "summary": "메모리반도체 합작공장 건설을 검토하고 있다고 밝혔다. 최 회장이 일본 공장 투자 가능성을 구체적으로... 일본에는 SK하이닉스의 주요 장비·소재 협력사인 도쿄일렉트론과 나믹스가 있",
+      "body": "SK그룹 최태원 회장이 8월 31일(현지시각) 일본 센다이에서 열린 한일경제인회의에서 SK하이닉스가 일본 내 메모리반도체 합작공장 건설을 검토하고 있다고 밝혔다. 최 회장이 일본 공장 투자 가능성을 구체적으로 언급한",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.wikitree.co.kr",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T23:30:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 55,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2426,
+      "topicId": 4387,
+      "expectedIssueId": "skon-ess-deal",
+      "split": "HOLDOUT",
+      "title": "SK온, 1.5조원대 美 ESS 공급계약…실적 반등·공장 전환 '속도'",
+      "summary": "[서울=뉴시스]박현준 기자 = SK온이 전기차 배터리에 이어 에너지저장장치(ESS) 사업을 본격 확대하며 실적 개선 흐름을 이어가기 위한 승부수를 띄운다. 1일 업계에 따르면 SK",
+      "body": "대표이사 : 염영남 주소 : 서울 중구 퇴계로 173 남산스퀘어빌딩 (구 극동빌딩) 12층 사업자등록번호 : 102-81-36588\n\n발행인 : 염영남 편집인 : 염영남 고충처리인 : 김경원 통신판매업신고 : 서울중",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.newsis.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-09-01T05:10:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    },
+    {
+      "articleId": 56,
+      "sourceRunId": 3862,
+      "sourceArticleId": 2416,
+      "topicId": 4387,
+      "expectedIssueId": "us-power-equipment-demand",
+      "split": "HOLDOUT",
+      "title": "AI 특수에 美 전력설비 업계 '일감 폭주'",
+      "summary": "AI 반도체·서버 등 관련 인프라에 4090억달러를 투자했다. 전년보다 75% 늘어난 규모다. 올해 목표액은... 미국에서 변압기와 개폐장치를 함께 생산하고 핵심 공정을 수직계열화",
+      "body": "미국 캘리포니아주 로즈빌시의 전력 사업자인 로즈빌 일렉트릭 유틸리티는 과거 변전소 건설이나 배전망 증설에 필요한 설비를 공사 1년 전에 주문했다. 지금은 3년 전부터 확보에 나선다. 대형 변압기는 납품에 3년 넘게 ",
+      "fetchStatus": "FULLTEXT",
+      "publisher": "www.hankyung.com",
+      "reliabilityScore": 0.8,
+      "publishedAt": "2026-08-31T16:06:00+09:00",
+      "topicKeywords": [
+        "제조장비"
+      ]
+    }
+  ]
+}
