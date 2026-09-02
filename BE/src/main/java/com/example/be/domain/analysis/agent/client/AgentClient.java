@@ -6,6 +6,8 @@ import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceResponse;
 import com.example.be.domain.analysis.agent.dto.AgentErrorResponse;
+import com.example.be.domain.analysis.agent.dto.AgentExploreRequest;
+import com.example.be.domain.analysis.agent.dto.AgentExploreResponse;
 import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
 import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
@@ -121,6 +123,10 @@ public class AgentClient {
 
     public AgentEvidenceResponse verifyEvidence(AgentEvidenceRequest request) {
         return post(analyzeClient, "/v1/verify-evidence", request, AgentEvidenceResponse.class);
+    }
+
+    public AgentExploreResponse explore(AgentExploreRequest request) {
+        return post(analyzeClient, "/v1/explore", request, AgentExploreResponse.class);
     }
 
     private <T> T post(RestClient client, String uri, Object request, Class<T> responseType) {

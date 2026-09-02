@@ -21,6 +21,15 @@ public interface SourceRepository extends JpaRepository<Source, Long>, JpaSpecif
     @Query("SELECT s.id AS sourceId, SIZE(s.topics) AS linkedTopicCount FROM Source s WHERE s.id IN :sourceIds")
     List<LinkedTopicCount> countLinkedTopics(@Param("sourceIds") Collection<Long> sourceIds);
 
+    @Query("""
+            SELECT source
+            FROM Source source
+            JOIN source.topics topic
+            WHERE topic.id = :topicId AND source.active = true
+            ORDER BY source.id ASC
+            """)
+    List<Source> findActiveByTopicId(@Param("topicId") Long topicId);
+
     interface LinkedTopicCount {
 
         Long getSourceId();

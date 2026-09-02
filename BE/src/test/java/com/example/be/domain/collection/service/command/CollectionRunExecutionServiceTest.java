@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.analysis.service.ArticleAnalysisPipeline;
+import com.example.be.domain.analysis.agent.investigation.IssueInvestigationOrchestrator;
 import com.example.be.domain.collection.cluster.IssueClusteringService;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
@@ -29,11 +30,13 @@ class CollectionRunExecutionServiceTest {
     private final ArticleContentEnricher contentEnricher = mock(ArticleContentEnricher.class);
     private final IssueClusteringService issueClusteringService = mock(IssueClusteringService.class);
     private final ArticleAnalysisPipeline analysisPipeline = mock(ArticleAnalysisPipeline.class);
+    private final IssueInvestigationOrchestrator investigationOrchestrator =
+            mock(IssueInvestigationOrchestrator.class);
     private final ReportCreationService reportCreationService = mock(ReportCreationService.class);
     private final CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
     private final CollectionRunExecutionService service = new CollectionRunExecutionService(
             runItemRepository, collectionExecutor, candidatePrioritizer, contentEnricher, issueClusteringService,
-            analysisPipeline, reportCreationService, resultWriter);
+            analysisPipeline, investigationOrchestrator, reportCreationService, resultWriter);
 
     @Test
     void createsReportAfterAnalysisBeforeClosingRun() {
@@ -42,9 +45,12 @@ class CollectionRunExecutionServiceTest {
 
         service.executeRun(42L);
 
-        InOrder order = inOrder(issueClusteringService, analysisPipeline, reportCreationService, resultWriter);
+        InOrder order = inOrder(
+                issueClusteringService, analysisPipeline, investigationOrchestrator,
+                reportCreationService, resultWriter);
         order.verify(issueClusteringService).cluster(42L);
         order.verify(analysisPipeline).analyze(42L, Set.of());
+        order.verify(investigationOrchestrator).investigate(42L);
         order.verify(reportCreationService).generate(42L);
         order.verify(resultWriter).finishRun(42L);
         verify(resultWriter, never()).failRun(42L);

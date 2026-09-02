@@ -143,40 +143,14 @@ class PacedRetryProvider:
         prompt: str,
         response_schema: dict[str, object],
     ) -> ProviderResponse:
-        policy = self._coordinator.policy
-        for attempt in range(policy.rate_limit_retry_attempts + 1):
-            self._coordinator.wait_before_call()
-            try:
-                return self._delegate.generate(
-                    system_instruction=system_instruction,
-                    prompt=prompt,
-                    response_schema=response_schema,
-                )
-            except AgentError as error:
-                if not _is_rate_limited(error):
-                    raise
-                retry_number = attempt + 1
-                # 일 quota 소진처럼 기다려도 소용없는 429는 대기를 늘리지 않는다.
-                if not _is_retryable(error):
-                    raise
-                # 재시도를 포기하는 경우에도 공유 대기 상태는 늘린다. 이걸 빼면 이 호출만
-                # 실패하고 뒤따르는 기사·검증 요청이 곧바로 같은 429를 다시 받는다.
-                delay = self._coordinator.wait_after_rate_limit(error, retry_number)
-                if attempt >= policy.rate_limit_retry_attempts:
-                    logger.warning(
-                        "Provider rate limit 재시도를 모두 소진했습니다. "
-                        "이후 호출을 %.3f초 동안 함께 미룹니다.",
-                        delay,
-                    )
-                    raise
-                logger.warning(
-                    "Provider rate limit 대기를 공유하고 재시도합니다. "
-                    "retry=%d/%d delaySeconds=%.3f",
-                    retry_number,
-                    policy.rate_limit_retry_attempts,
-                    delay,
-                )
-        raise RuntimeError("provider 재시도 상태가 올바르지 않습니다.")
+        return run_with_request_policy(
+            self._coordinator,
+            lambda: self._delegate.generate(
+                system_instruction=system_instruction,
+                prompt=prompt,
+                response_schema=response_schema,
+            ),
+        )
 
     def close(self) -> None:
         close = getattr(self._delegate, "close", None)
@@ -204,3 +178,35 @@ def _retry_after_seconds(error: AgentError) -> float | None:
     ):
         return None
     return float(value)
+
+
+def run_with_request_policy[ResponseT](
+    coordinator: ProviderRequestCoordinator,
+    call: Callable[[], ResponseT],
+) -> ResponseT:
+    """Apply the shared pacing and explicit 429 retry policy to any provider call."""
+    policy = coordinator.policy
+    for attempt in range(policy.rate_limit_retry_attempts + 1):
+        coordinator.wait_before_call()
+        try:
+            return call()
+        except AgentError as error:
+            if not _is_rate_limited(error) or not _is_retryable(error):
+                raise
+            retry_number = attempt + 1
+            delay = coordinator.wait_after_rate_limit(error, retry_number)
+            if attempt >= policy.rate_limit_retry_attempts:
+                logger.warning(
+                    "Provider rate limit 재시도를 모두 소진했습니다. "
+                    "이후 호출을 %.3f초 동안 함께 미룹니다.",
+                    delay,
+                )
+                raise
+            logger.warning(
+                "Provider rate limit 대기를 공유하고 재시도합니다. "
+                "retry=%d/%d delaySeconds=%.3f",
+                retry_number,
+                policy.rate_limit_retry_attempts,
+                delay,
+            )
+    raise RuntimeError("provider 재시도 상태가 올바르지 않습니다.")

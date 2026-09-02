@@ -16,15 +16,15 @@
 5. `NativeOutput(..., strict=True)`와 `retries=0`을 고정하고 streaming을 사용하지 않는다.
 6. 기존 `AnalyzeProvider`, provider guard/retry/breaker, Spring 쿼터 예약·정산을 정본으로 유지한다.
 
-이번 spike의 PydanticAI 의존성은 dev dependency에만 고정했다. production 전환은 P2-5에서
-위 어댑터를 기존 provider 경계 안에 연결할 때 수행한다.
+P2-5에서 PydanticAI 의존성을 production dependency로 전환하고 위 어댑터를
+`/v1/explore` PAID provider 경계에 연결했다.
 
 ## 측정 환경
 
 - Python: 프로젝트 계약 `>=3.12` (로컬 실행 3.13)
 - PydanticAI: `2.36.0` 고정
 - OpenAI SDK: lockfile 기준 `3.7.0`
-- httpx2: `2.12.0` dev 직접 의존성 고정
+- httpx2: `2.12.0` production 직접 의존성 고정
 - 검증 코드: `spikes/pydantic_ai_spike.py`, `tests/test_pydantic_ai_spike.py`
 - 공식 근거:
   - [OpenAI-compatible model과 `base_url` 구성](https://pydantic.dev/docs/ai/models/openai/#openai-compatible-models)
@@ -92,8 +92,8 @@ JSON에서 위 키가 전부 사라지고 기존 description은 그대로이며 
 
 ## 의존성과 위험
 
-dev 환경에는 PydanticAI와 OpenAI SDK가 추가됐고 테스트에서 직접 import하는 `httpx2==2.12.0`도
-직접 고정했다. production 직접 의존성 5개는 바뀌지 않았다. 별칭·스키마 정리·Decimal 변환은
+production 환경에 PydanticAI와 OpenAI SDK가 추가됐고 런타임에서 직접 import하는
+`httpx2==2.12.0`도 고정했다. 별칭·스키마 정리·Decimal 변환은
 production provider의 공용 경계를 재사용해 spike가 app private 구현에 결합하지 않는다.
 
 사용량 보존은 불가피하게 PydanticAI의 private `_process_provider_details` hook에 의존한다. 따라서

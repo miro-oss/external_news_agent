@@ -1,6 +1,8 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
+import com.example.be.domain.analysis.agent.investigation.InvestigationTrace;
+import com.example.be.domain.analysis.agent.investigation.IssueInvestigationJdbcRepository;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.repository.FindingRepository;
@@ -59,6 +61,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     private final NewsIssueRepository newsIssueRepository;
     private final DeliveryLogRepository deliveryLogRepository;
     private final SensitivityCalculator sensitivityCalculator;
+    private final IssueInvestigationJdbcRepository investigationRepository;
 
     @Override
     public PageResponse<ReportResDTO.Summary> getReports(String from, String to, int page, int size) {
@@ -140,6 +143,9 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         Map<Long, NewsIssue> issuesById = includeFindings
                 ? issuesById(issueIdsByArticle.values())
                 : Map.of();
+        Map<Long, InvestigationTrace> investigationsByIssue = includeFindings
+                ? investigationsByIssue(runId)
+                : Map.of();
         ReportResDTO.SummaryStats summaryStats = includeFindings
                 ? toStats(findings)
                 : toStatsFromCounts(findingRepository.countStatsByRunId(
@@ -160,7 +166,9 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                         .map(finding -> {
                             Long issueId = issueIdsByArticle.get(finding.getArticle().getId());
                             NewsIssue issue = issueId == null ? null : issuesById.get(issueId);
-                            return toFinding(finding, issueId, issue);
+                            return toFinding(
+                                    finding, issueId, issue,
+                                    issueId == null ? null : investigationsByIssue.get(issueId));
                         })
                         .toList() : null)
                 .build();
@@ -244,7 +252,10 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .build();
     }
 
-    private ReportResDTO.Finding toFinding(Finding finding, Long issueId, NewsIssue issue) {
+    private ReportResDTO.Finding toFinding(Finding finding,
+                                           Long issueId,
+                                           NewsIssue issue,
+                                           InvestigationTrace investigation) {
         return ReportResDTO.Finding.builder()
                 .id(finding.getId())
                 .articleId(finding.getArticle().getId())
@@ -279,6 +290,26 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                                 .evidenceSentenceIds(tag.evidenceSentenceIds())
                                 .build())
                         .toList())
+                .investigation(toInvestigation(investigation))
+                .build();
+    }
+
+    private Map<Long, InvestigationTrace> investigationsByIssue(Long runId) {
+        Map<Long, InvestigationTrace> result = investigationRepository.findTraces(runId);
+        return result == null ? Map.of() : result;
+    }
+
+    private ReportResDTO.Investigation toInvestigation(InvestigationTrace trace) {
+        if (trace == null) {
+            return null;
+        }
+        return ReportResDTO.Investigation.builder()
+                .status(trace.status())
+                .stepCount(trace.stepCount())
+                .addedArticleCount(trace.addedArticleCount())
+                .addedEvidenceCount(trace.addedEvidenceCount())
+                .reason(trace.reason())
+                .rejectionReason(trace.rejectionReason())
                 .build();
     }
 

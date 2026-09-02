@@ -46,6 +46,11 @@ public class AgentQuotaService {
         return createReservation(runId, idempotencyKey, task, plan);
     }
 
+    @Transactional(readOnly = true)
+    public Optional<QuotaReservation> findActiveReservation(String idempotencyKey) {
+        return repository.findByIdempotencyKey(idempotencyKey);
+    }
+
     @Transactional
     public void assertRunCanStart(AgentPlan plan) {
         if (plan != AgentPlan.PAID || !properties.isEnabled()) {
@@ -57,7 +62,8 @@ public class AgentQuotaService {
         BigDecimal units = paidMaxUnits();
         BigDecimal dailyAnalysisLimit = workBudget();
         BigDecimal analysisAndInsightUsed = usage.paidAnalysisDailyUsed()
-                .add(usage.paidInsightDailyUsed());
+                .add(usage.paidInsightDailyUsed())
+                .add(usage.paidInvestigationDailyUsed());
         if (usage.paidMonthlyUsed().add(units).compareTo(paidMonthlyLimit()) > 0
                 || usage.paidDailyUsed().add(units).compareTo(paidDailyLimit()) > 0
                 || analysisAndInsightUsed.add(units).compareTo(dailyAnalysisLimit) > 0) {
@@ -136,7 +142,9 @@ public class AgentQuotaService {
         BigDecimal insightRemaining = remaining(insightCap(), usage.paidInsightDailyUsed());
         BigDecimal analysisRemaining = remaining(
                 workBudget(),
-                usage.paidAnalysisDailyUsed().add(usage.paidInsightDailyUsed()));
+                usage.paidAnalysisDailyUsed()
+                        .add(usage.paidInsightDailyUsed())
+                        .add(usage.paidInvestigationDailyUsed()));
         return new LlmSettingDTO.UsageResponse(
                 planService.get().plan(),
                 new LlmSettingDTO.FreeUsage(
@@ -176,6 +184,11 @@ public class AgentQuotaService {
                                          BigDecimal units,
                                          UsageWindow usage) {
         if (plan == AgentPlan.FREE) {
+            if (task == AgentTask.INVESTIGATE
+                    && usage.freeInvestigationDailyUsed().add(units)
+                    .compareTo(investigationCap(plan)) > 0) {
+                throw exhausted(plan, "FREE 추가 조사 일일 15% 상한을 소진했습니다.");
+            }
             if (usage.freeDailyUsed().add(units).compareTo(freeDailyLimit()) > 0) {
                 throw exhausted(plan, "FREE 일일 호출 한도를 초과했습니다.");
             }
@@ -184,16 +197,26 @@ public class AgentQuotaService {
 
         boolean analysisTask = task == AgentTask.ANALYZE || task == AgentTask.SELF_CRITIQUE;
         boolean insightTask = task == AgentTask.INSIGHT;
-        BigDecimal workUsed = usage.paidAnalysisDailyUsed().add(usage.paidInsightDailyUsed());
-        if ((analysisTask || insightTask)
+        boolean investigationTask = task == AgentTask.INVESTIGATE;
+        BigDecimal workUsed = usage.paidAnalysisDailyUsed()
+                .add(usage.paidInsightDailyUsed())
+                .add(usage.paidInvestigationDailyUsed());
+        if ((analysisTask || insightTask || investigationTask)
                 && workUsed.add(units).compareTo(workBudget()) > 0) {
             throw exhausted(plan, analysisTask
                     ? "PAID 분석 예산을 소진했습니다. 보고서 예약분은 유지합니다."
+                    : investigationTask
+                    ? "PAID 추가 조사 예산을 소진했습니다. 보고서 예약분은 유지합니다."
                     : "PAID 인사이트 예산을 소진했습니다. 보고서 예약분은 유지합니다.");
         }
         if (insightTask
                 && usage.paidInsightDailyUsed().add(units).compareTo(insightCap()) > 0) {
             throw exhausted(plan, "PAID 인사이트 일일 상한을 소진했습니다.");
+        }
+        if (investigationTask
+                && usage.paidInvestigationDailyUsed().add(units)
+                .compareTo(investigationCap(plan)) > 0) {
+            throw exhausted(plan, "PAID 추가 조사 일일 15% 상한을 소진했습니다.");
         }
         if (usage.paidDailyUsed().add(units).compareTo(paidDailyLimit()) > 0) {
             throw exhausted(plan, "PAID 일일 예산을 소진했습니다.");
@@ -211,11 +234,16 @@ public class AgentQuotaService {
         LocalDateTime monthStart = month.atStartOfDay();
         LocalDateTime monthEnd = month.plusMonths(1).atStartOfDay();
         return new UsageWindow(
-                repository.usage(AgentPlan.FREE, dayStart, dayEnd),
-                repository.usage(AgentPlan.PAID, dayStart, dayEnd),
-                repository.analysisUsage(dayStart, dayEnd),
-                repository.usage(AgentPlan.PAID, dayStart, dayEnd, AgentTask.INSIGHT),
-                repository.usage(AgentPlan.PAID, monthStart, monthEnd),
+                nonNegative(repository.usage(AgentPlan.FREE, dayStart, dayEnd)),
+                nonNegative(repository.usage(AgentPlan.PAID, dayStart, dayEnd)),
+                nonNegative(repository.analysisUsage(dayStart, dayEnd)),
+                nonNegative(repository.usage(
+                        AgentPlan.PAID, dayStart, dayEnd, AgentTask.INSIGHT)),
+                nonNegative(repository.usage(
+                        AgentPlan.FREE, dayStart, dayEnd, AgentTask.INVESTIGATE)),
+                nonNegative(repository.usage(
+                        AgentPlan.PAID, dayStart, dayEnd, AgentTask.INVESTIGATE)),
+                nonNegative(repository.usage(AgentPlan.PAID, monthStart, monthEnd)),
                 dayEnd.atZone(ApiTimeZone.ZONE).toOffsetDateTime(),
                 monthEnd.atZone(ApiTimeZone.ZONE).toOffsetDateTime());
     }
@@ -246,6 +274,12 @@ public class AgentQuotaService {
 
     private BigDecimal workBudget() {
         return paidDailyLimit().subtract(reportReserve());
+    }
+
+    private BigDecimal investigationCap(AgentPlan plan) {
+        BigDecimal dailyLimit = plan == AgentPlan.FREE ? freeDailyLimit() : paidDailyLimit();
+        return dailyLimit.multiply(properties.getInvestigation().getDailyBudgetPercent())
+                .divide(BigDecimal.valueOf(100));
     }
 
     private BigDecimal paidUnits() {
@@ -290,6 +324,8 @@ public class AgentQuotaService {
                                BigDecimal paidDailyUsed,
                                BigDecimal paidAnalysisDailyUsed,
                                BigDecimal paidInsightDailyUsed,
+                               BigDecimal freeInvestigationDailyUsed,
+                               BigDecimal paidInvestigationDailyUsed,
                                BigDecimal paidMonthlyUsed,
                                OffsetDateTime dailyResetAt,
                                OffsetDateTime monthlyResetAt) {

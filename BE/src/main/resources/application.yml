@@ -94,6 +94,11 @@ news:
     insight-prompt-version: ${AGENT_INSIGHT_PROMPT_VERSION:insight.ko.v1+perspective.ko.v1}
     free-model: ${GEMINI_MODEL:}
     paid-model: ${MINDLOGIC_CLAUDE_MODEL:}
+    investigation:
+      candidate-limit: 5
+      evidence-threshold: 3
+      search-batch-size: 10
+      daily-budget-percent: 15
     quota:
       free-daily-calls: 1500
       paid-monthly-credits: 3000

@@ -22,6 +22,7 @@ import {
   type IssueDetail,
   type ReportDetail,
   type ReportFinding,
+  type ReportInvestigation,
   type ReportSummary,
   type SensitivityLevel,
 } from '../../api/types'
@@ -31,6 +32,41 @@ import { formatFullDate, formatShortDate } from '../../lib/datetime'
 import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { MutationStatus } from '../settings/MutationStatus'
+
+const INVESTIGATION_STATUS_LABELS = {
+  CONCLUDED: '결론 도달',
+  NO_NEW_EVIDENCE: '새 근거 없음',
+  MAX_STEPS: '3단계 종료',
+  BUDGET_LIMIT: '이번 실행 예산 도달',
+  REJECTED: '안전 기준으로 생략',
+  FAILED: '기존 분석 유지',
+} as const
+
+function investigationReasonText(investigation: ReportInvestigation) {
+  const rejectionReason = investigation.rejectionReason?.trim()
+  if (rejectionReason) {
+    if (investigation.status === 'BUDGET_LIMIT') {
+      return '이번 실행에 배정된 추가 조사 예산을 모두 사용했습니다.'
+    }
+    if (rejectionReason.includes('이미 수행한 검색')) {
+      return '이미 확인한 검색과 겹쳐 추가 검색을 생략했습니다.'
+    }
+    if (rejectionReason.includes('허용 소스')) {
+      return '사용 가능한 출처 범위를 벗어나 추가 검색을 생략했습니다.'
+    }
+    if (rejectionReason.includes('본문 미확보 기사')) {
+      return '이번 실행에서 확인할 수 있는 본문 대상이 없어 생략했습니다.'
+    }
+    if (rejectionReason.includes('엔티티') || rejectionReason.includes('과거 비교')) {
+      return '이 이슈와 직접 관련된 비교 대상이 아니어서 생략했습니다.'
+    }
+    return '조사 제안이 안전 기준을 충족하지 않아 생략했습니다.'
+  }
+  if (investigation.status === 'FAILED') {
+    return '추가 조사 중 오류가 발생해 기존 분석 결과를 유지했습니다.'
+  }
+  return investigation.reason?.trim() || null
+}
 
 export function ReportsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -455,6 +491,9 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
   const summary = limitText(issueInfo?.summary || finding.summary, 120)
   const relatedArticles = issue.data?.articles ?? []
   const visibleRelatedArticles = relatedArticles.slice(0, visibleRelatedCount)
+  const investigationReason = finding.investigation
+    ? investigationReasonText(finding.investigation)
+    : null
 
   function toggleOpen() {
     if (open) setVisibleRelatedCount(RELATED_ARTICLE_BATCH_SIZE)
@@ -589,6 +628,17 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
             <span>{CHANGE_TYPE_LABELS[finding.changeType]}</span>
             {issueInfo && <span>독립 원문 {issueInfo.independentContentCount}건</span>}
             {finding.intent && <span>발표 맥락 · {finding.intent}</span>}
+            {finding.investigation && (
+              <>
+                <span>
+                  추가 조사 · {INVESTIGATION_STATUS_LABELS[finding.investigation.status]}
+                  {' · '}{finding.investigation.stepCount}단계
+                  {' · '}기사 +{finding.investigation.addedArticleCount}
+                  {' · '}근거 +{finding.investigation.addedEvidenceCount}
+                </span>
+                {investigationReason && <span>조사 사유 · {investigationReason}</span>}
+              </>
+            )}
           </div>
         </div>
       )}

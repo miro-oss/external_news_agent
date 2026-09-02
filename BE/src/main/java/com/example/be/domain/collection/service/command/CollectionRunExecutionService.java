@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.analysis.service.ArticleAnalysisPipeline;
+import com.example.be.domain.analysis.agent.investigation.IssueInvestigationOrchestrator;
 import com.example.be.domain.collection.cluster.IssueClusteringService;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.collection.entity.CollectionRunItem;
@@ -27,6 +28,7 @@ public class CollectionRunExecutionService {
     private final ArticleContentEnricher contentEnricher;
     private final IssueClusteringService issueClusteringService;
     private final ArticleAnalysisPipeline analysisPipeline;
+    private final IssueInvestigationOrchestrator investigationOrchestrator;
     private final ReportCreationService reportCreationService;
     private final CollectionResultWriter resultWriter;
 
@@ -65,6 +67,19 @@ public class CollectionRunExecutionService {
                 log.error("기사 분석 단계에 실패해 보고서 생성으로 넘어간다. runId={} error={}",
                         runId, exception.getMessage(), exception);
                 resultWriter.addAnalysisFailedWarning(runId, exception.getMessage());
+            }
+            // 분석 결과에서 결정론적으로 조사 대상을 고른 뒤 Agent 제안을 Spring guard로 승인·실행한다.
+            // 실패하거나 예산이 끝나도 기존 finding으로 보고서를 만드는 것이 기본 동작이다.
+            try {
+                investigationOrchestrator.investigate(runId);
+            } catch (RuntimeException exception) {
+                log.error("추가 조사 단계에 실패해 기존 분석으로 보고서를 만든다. runId={} error={}",
+                        runId, exception.getMessage(), exception);
+                resultWriter.addAgentWarning(
+                        runId,
+                        com.example.be.domain.collection.entity.CollectionRunWarning
+                                .CODE_LLM_INVESTIGATION_FAILED,
+                        "추가 조사 단계 실패로 기존 분석을 유지했습니다.");
             }
             // M5 보고서는 findings를 모두 저장한 뒤 만든다. 생성과 reportId 연결은 별도 짧은 트랜잭션이다.
             try {

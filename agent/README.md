@@ -1,10 +1,22 @@
 # External News Agent
 
-Spring Boot가 내부 HTTP로 호출하는 stateless FastAPI 에이전트입니다. 기사 분석(`/v1/analyze`)과
-run 보고서 작성(`/v1/report`)을 제공하며, 기본 Mock 모드에서는 외부 LLM 없이 결정적인 결과를
+Spring Boot가 내부 HTTP로 호출하는 stateless FastAPI 에이전트입니다. 기사 분석(`/v1/analyze`),
+이슈 조사 제안(`/v1/explore`), run 보고서 작성(`/v1/report`)을 제공하며, 기본 Mock 모드에서는 외부 LLM 없이 결정적인 결과를
 반환합니다. 근거 검증(`/v1/verify-evidence`)은 숫자·날짜·기업명 왜곡을 먼저 차단하고,
 단일 문장에서 직접 확인되는 주장은 rule-only로 확정합니다. 복합 주장, 인과·전망 및 의미상
 애매한 표현만 provider에 위임하고 근거 연결 상태를 `grounded` / `weak` / `ungrounded`로 반환합니다.
+
+## `/v1/explore` 조사 제안 계약
+
+P2-5 조사 Agent는 DB와 외부 수집원을 직접 변경하지 않습니다. 현재 이슈 snapshot, 허용 소스,
+이전 step을 받아 `SEARCH_MORE`, `READ_FULLTEXT`, `COMPARE_HISTORY`, `CONCLUDE` 중 정확히 하나를
+구조화 출력으로 제안합니다. Spring이 소스 whitelist, 기사 소속, 엔티티, 정규화 질의 hash,
+일일 quota를 검증하고 승인된 행동만 실행합니다.
+
+PAID 경로는 P2-4에서 검증한 PydanticAI `2.36.0`의 `NativeOutput(strict=True)`를 사용합니다.
+Mindlogic trailing slash와 credits/cost 보존 어댑터를 유지하고 PydanticAI 자체 재시도는 0회로
+고정합니다. FREE와 테스트 주입 provider는 기존 구조화 호출 경계를 사용합니다. Agent는 stateless이며
+최대 3단계, 이슈/일 1회, 새 근거 없음 및 15% 조사 예산 종료는 Spring 오케스트레이터가 소유합니다.
 
 ## `/v1/analyze` 주장 유형 계약
 

@@ -26,6 +26,7 @@ public class AgentProperties implements InitializingBean {
     private String freeModel = "";
     private String paidModel = "";
     private final Quota quota = new Quota();
+    private final Investigation investigation = new Investigation();
 
     @Override
     public void afterPropertiesSet() {
@@ -50,8 +51,16 @@ public class AgentProperties implements InitializingBean {
                 || quota.paidMaxCreditsPerRequest.compareTo(BigDecimal.valueOf(quota.paidMonthlyCredits)) > 0
                 || quota.reservationTtl == null
                 || quota.reservationTtl.isNegative()
-                || quota.reservationTtl.isZero()) {
-            throw new IllegalStateException("news.agent.quota 설정값이 올바르지 않습니다.");
+                || quota.reservationTtl.isZero()
+                || investigation.candidateLimit <= 0
+                || investigation.evidenceThreshold < 0
+                || investigation.searchBatchSize <= 0
+                || investigation.searchBatchSize > 100
+                || investigation.dailyBudgetPercent == null
+                || investigation.dailyBudgetPercent.signum() <= 0
+                || investigation.dailyBudgetPercent.compareTo(BigDecimal.valueOf(100)) > 0) {
+            throw new IllegalStateException(
+                    "news.agent.quota / news.agent.investigation 설정값이 올바르지 않습니다.");
         }
     }
 
@@ -161,6 +170,50 @@ public class AgentProperties implements InitializingBean {
 
     public Quota getQuota() {
         return quota;
+    }
+
+    public Investigation getInvestigation() {
+        return investigation;
+    }
+
+    public static class Investigation {
+
+        private int candidateLimit = 5;
+        private int evidenceThreshold = 3;
+        private int searchBatchSize = 10;
+        private BigDecimal dailyBudgetPercent = BigDecimal.valueOf(15);
+
+        public int getCandidateLimit() {
+            return candidateLimit;
+        }
+
+        public void setCandidateLimit(int candidateLimit) {
+            this.candidateLimit = candidateLimit;
+        }
+
+        public int getEvidenceThreshold() {
+            return evidenceThreshold;
+        }
+
+        public void setEvidenceThreshold(int evidenceThreshold) {
+            this.evidenceThreshold = evidenceThreshold;
+        }
+
+        public int getSearchBatchSize() {
+            return searchBatchSize;
+        }
+
+        public void setSearchBatchSize(int searchBatchSize) {
+            this.searchBatchSize = searchBatchSize;
+        }
+
+        public BigDecimal getDailyBudgetPercent() {
+            return dailyBudgetPercent;
+        }
+
+        public void setDailyBudgetPercent(BigDecimal dailyBudgetPercent) {
+            this.dailyBudgetPercent = dailyBudgetPercent;
+        }
     }
 
     public static class Quota {

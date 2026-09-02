@@ -22,10 +22,29 @@ public interface CollectionRunArticleRepository
 
     List<CollectionRunArticle> findByRunIdAndChangeTypeOrderByIdAsc(Long runId, ChangeType changeType);
 
+    @Query("""
+            SELECT DISTINCT observation.article.id
+            FROM CollectionRunArticle observation
+            WHERE observation.run.id = :runId
+            """)
+    List<Long> findArticleIdsByRunId(@Param("runId") Long runId);
+
     /**
      * 한 기사가 실행을 거치며 어떻게 바뀌어 왔는지. 최신 관측이 마지막이다.
      */
     List<CollectionRunArticle> findByArticleIdOrderByObservedAtAsc(Long articleId);
+
+    @Query("""
+            SELECT observation
+            FROM CollectionRunArticle observation
+            JOIN FETCH observation.article article
+            JOIN FETCH article.source
+            WHERE observation.run.id = :runId AND article.id = :articleId
+            ORDER BY observation.id ASC
+            """)
+    List<CollectionRunArticle> findForEnrichment(
+            @Param("runId") Long runId,
+            @Param("articleId") Long articleId);
 
     long countByRunIdAndChangeType(Long runId, ChangeType changeType);
 

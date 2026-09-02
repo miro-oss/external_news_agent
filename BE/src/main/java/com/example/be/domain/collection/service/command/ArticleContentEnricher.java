@@ -78,6 +78,25 @@ public class ArticleContentEnricher {
         return Set.copyOf(refreshedArticleIds);
     }
 
+    /** Agent가 지정한 이슈 기사 한 건만 전문 보강한다. 다른 실행의 articleId는 허용하지 않는다. */
+    public Set<Long> enrichArticle(Long runId, Long articleId) {
+        Article article = runArticleRepository.findForEnrichment(runId, articleId).stream()
+                .findFirst()
+                .map(CollectionRunArticle::getArticle)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "이 실행에서 관측한 기사가 아닙니다. articleId=" + articleId));
+        ArticleContentResult result = fetch(article, new HashMap<>());
+        if (result == null) {
+            return Set.of();
+        }
+        resultWriter.applyFullText(article.getId(), result.status(), result.body());
+        if (result.status() == FetchStatus.FULLTEXT_BLOCKED) {
+            resultWriter.addFullTextBlockedWarning(runId, article.getSource().getId(), 1);
+        }
+        return result.status() == FetchStatus.FULLTEXT
+                ? Set.of(article.getId()) : Set.of();
+    }
+
     private List<Article> prioritizedTargets(Long runId) {
         Map<Long, Target> byArticleId = new LinkedHashMap<>();
         for (CollectionRunArticle observation : runArticleRepository.findClusterTargetsByRunId(runId)) {

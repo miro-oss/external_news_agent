@@ -47,6 +47,36 @@ public class CollectionExecutor {
     }
 
     /**
+     * Agent가 승인받은 추가 수집을 실행한다. SEARCH는 제안된 질의를 쓰고 FEED는 조건부 GET을
+     * 건너뛰어 현재 피드를 다시 읽는다. 저장은 호출자가 별도 짧은 트랜잭션으로 수행한다.
+     */
+    public CollectionOutcome collectInvestigation(String queryText,
+                                                  int batchSize,
+                                                  Source source) {
+        if (source.isSearchKind()) {
+            SearchProvider provider = SearchProvider.fromKey(source.getUrlTemplate());
+            if (provider == null) {
+                return CollectionOutcome.of(
+                        FetchResult.unreadable("어댑터가 없는 SEARCH 소스다: " + source.getUrlTemplate()),
+                        RobotsDecision.skipped(source));
+            }
+            FetchResult result = searchConnectorRegistry.find(provider)
+                    .map(connector -> connector.search(
+                            new SearchQuery(queryText, batchSize, source.getLanguage())))
+                    .orElseGet(() -> FetchResult.unreadable("등록된 커넥터가 없다: " + provider));
+            return CollectionOutcome.of(result, RobotsDecision.skipped(source));
+        }
+
+        RobotsDecision robots = robotsPolicyService.evaluate(source);
+        if (!robots.allowed()) {
+            return CollectionOutcome.blockedByRobots(robots);
+        }
+        FeedFetch fetch = feedClient.fetch(FeedRequest.of(source, robots.crawlDelay(), true));
+        return new CollectionOutcome(fetch.result(), robots, fetch.notModified(),
+                fetch.etag(), fetch.lastModified(), fetch.result().success());
+    }
+
+    /**
      * 외부 호출과 대기만 한다. DB는 건드리지 않는다.
      */
     private CollectionOutcome collectOutcome(Topic topic, Source source, boolean forceRefresh) {

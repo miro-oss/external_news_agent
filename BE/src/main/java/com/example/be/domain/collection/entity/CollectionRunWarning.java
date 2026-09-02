@@ -61,6 +61,8 @@ public class CollectionRunWarning {
     public static final String CODE_LLM_CROSS_SOURCE_FAILED = "LLM_CROSS_SOURCE_FAILED";
     /** 자기 검증 호출·quota·응답 실패로 최초 검증 결과를 유지했다. */
     public static final String CODE_LLM_SELF_CRITIQUE_FAILED = "LLM_SELF_CRITIQUE_FAILED";
+    /** 추가 조사 Agent 호출 또는 승인된 행동 실행에 실패해 기존 분석으로 보고서를 만들었다. */
+    public static final String CODE_LLM_INVESTIGATION_FAILED = "LLM_INVESTIGATION_FAILED";
 
     public static final int MAX_CODE_LENGTH = 50;
     public static final int MAX_MESSAGE_LENGTH = 1000;

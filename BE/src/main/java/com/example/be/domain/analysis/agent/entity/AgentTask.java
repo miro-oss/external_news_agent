@@ -6,5 +6,6 @@ public enum AgentTask {
     VERIFY_EVIDENCE,
     REPORT,
     EXPLORE,
-    INSIGHT
+    INSIGHT,
+    INVESTIGATE
 }
