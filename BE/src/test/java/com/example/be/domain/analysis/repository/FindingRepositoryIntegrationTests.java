@@ -44,6 +44,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -218,7 +219,9 @@ class FindingRepositoryIntegrationTests {
 
     @Test
     void returnsOlderHistoryAfterSixCurrentFindingsFillRequestLimit() {
-        OffsetDateTime currentBaseline = OffsetDateTime.now().minusDays(1);
+        OffsetDateTime currentBaseline = OffsetDateTime.now()
+                .minusDays(1)
+                .truncatedTo(ChronoUnit.MICROS);
         for (int index = 0; index < 6; index++) {
             Article currentArticle = articleRepository.save(historyArticle(
                     "current-" + index,

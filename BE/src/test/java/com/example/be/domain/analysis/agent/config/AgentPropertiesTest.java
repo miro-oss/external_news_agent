@@ -65,4 +65,12 @@ class AgentPropertiesTest {
 
         assertThrows(IllegalStateException.class, properties::afterPropertiesSet);
     }
+
+    @Test
+    void rejectsInsightHistoryLimitWithoutIntegerOverflow() {
+        AgentProperties properties = new AgentProperties();
+        properties.getInsightHistory().setLimit(Integer.MAX_VALUE);
+
+        assertThrows(IllegalStateException.class, properties::afterPropertiesSet);
+    }
 }

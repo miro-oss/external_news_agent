@@ -58,7 +58,8 @@ public class AgentProperties implements InitializingBean {
                 || quota.reservationTtl.isZero()
                 || insightHistory.days <= 0
                 || insightHistory.limit <= 0
-                || MAX_CURRENT_INSIGHT_FINDINGS + insightHistory.limit > MAX_INSIGHT_FINDINGS
+                || insightHistory.limit
+                        > MAX_INSIGHT_FINDINGS - MAX_CURRENT_INSIGHT_FINDINGS
                 || investigation.candidateLimit <= 0
                 || investigation.evidenceThreshold < 0
                 || investigation.searchBatchSize <= 0
