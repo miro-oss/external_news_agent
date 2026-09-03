@@ -12,6 +12,7 @@ import com.example.be.domain.collection.exception.RunException;
 import com.example.be.domain.collection.exception.code.RunErrorCode;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
 import com.example.be.global.config.ApiTimeZone;
@@ -104,6 +105,44 @@ public class CollectionRunCreator {
         return new CollectionRunStartResult(
                 GeneralSuccessCode.COLLECTION_STARTED,
                 CollectionRunConverter.toCreated(saved, targetTopicIds, targets.size()));
+    }
+
+    /**
+     * 스케줄러용 단일 주제 실행 생성. 주제를 잠근 뒤 만료 여부를 확인해야 여러 인스턴스가 같은
+     * 만료 주제를 동시에 발견해도 한 번만 실행된다.
+     */
+    @Transactional
+    public boolean createScheduled(Long topicId, AgentPlan llmPlan, LocalDateTime now) {
+        List<Topic> lockedTopics = topicRepository.lockByIds(List.of(topicId));
+        if (lockedTopics.isEmpty() || !lockedTopics.getFirst().isCollectionDueAt(now)) {
+            return false;
+        }
+
+        List<TopicRepository.CollectionTarget> targets =
+                topicRepository.findActiveCollectionTargetsByTopicIds(List.of(topicId));
+        if (targets.isEmpty()) {
+            return false;
+        }
+
+        validateNoTopicConflict(List.of(topicId));
+
+        CollectionRun run = CollectionRun.builder()
+                .status(RunStatus.RUNNING)
+                .triggerType(TriggerType.SCHEDULED)
+                .forceRefresh(false)
+                .llmPlan(llmPlan)
+                .startedAt(now)
+                .build();
+        targets.forEach(target -> run.addItem(CollectionRunItem.builder()
+                .topic(target.getTopic())
+                .source(target.getSource())
+                .status(RunItemStatus.RUNNING)
+                .build()));
+
+        CollectionRun saved = saveRun(run);
+        lockedTopics.getFirst().recordCollectionStartedAt(now);
+        scheduleAfterCommit(saved.getId());
+        return true;
     }
 
     /**

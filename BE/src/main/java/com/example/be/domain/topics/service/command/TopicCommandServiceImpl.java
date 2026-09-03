@@ -249,7 +249,7 @@ public class TopicCommandServiceImpl implements TopicCommandService {
 
     private void validateSchedule(int batchSize, int intervalMinutes) {
         boolean invalidBatchSize = batchSize < Topic.MIN_BATCH_SIZE || batchSize > Topic.MAX_BATCH_SIZE;
-        boolean invalidInterval = intervalMinutes < Topic.MIN_INTERVAL_MINUTES;
+        boolean invalidInterval = !Topic.ALLOWED_INTERVAL_MINUTES.contains(intervalMinutes);
 
         if (invalidBatchSize || invalidInterval) {
             throw new TopicException(TopicErrorCode.INVALID_SCHEDULE);

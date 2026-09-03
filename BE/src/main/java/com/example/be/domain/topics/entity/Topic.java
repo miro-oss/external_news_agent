@@ -25,6 +25,7 @@ import org.hibernate.type.SqlTypes;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 @Entity
 @Table(name = "news_topics")
@@ -46,9 +47,9 @@ public class Topic {
      */
     public static final int DEFAULT_BATCH_SIZE = 100;
     public static final int DEFAULT_INTERVAL_MINUTES = 60;
+    public static final Set<Integer> ALLOWED_INTERVAL_MINUTES = Set.of(60, 720, 1440);
     public static final int MIN_BATCH_SIZE = 1;
     public static final int MAX_BATCH_SIZE = 300;
-    public static final int MIN_INTERVAL_MINUTES = 10;
     public static final int MAX_NAME_LENGTH = 200;
     public static final int MAX_QUERY_TEXT_LENGTH = 500;
 
@@ -126,6 +127,17 @@ public class Topic {
     public void replaceSources(List<Source> sources) {
         this.sources.clear();
         this.sources.addAll(sources);
+    }
+
+    /** 마지막 자동 수집 시작 시각을 기준으로 다음 실행 시점을 계산한다. */
+    public boolean isCollectionDueAt(LocalDateTime now) {
+        return active
+                && ALLOWED_INTERVAL_MINUTES.contains(intervalMinutes)
+                && (lastCollectedAt == null || !lastCollectedAt.plusMinutes(intervalMinutes).isAfter(now));
+    }
+
+    public void recordCollectionStartedAt(LocalDateTime startedAt) {
+        this.lastCollectedAt = startedAt;
     }
 
     public int getLinkedSourceCount() {

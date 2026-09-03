@@ -109,6 +109,48 @@ class CollectionRunCreatorTest {
     }
 
     @Test
+    void createScheduledBuildsScheduledRunAndRecordsItsStartTime() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 3, 10, 0);
+        Topic scheduledTopic = topic(1L, "HBM");
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(scheduledTopic));
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L)))
+                .thenReturn(List.of(target(scheduledTopic, source(10L))));
+        when(runRepository.findInProgressByTopicIds(List.of(1L), RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(List.of());
+        when(runRepository.saveAndFlush(any(CollectionRun.class))).thenAnswer(invocation -> {
+            CollectionRun run = invocation.getArgument(0);
+            return CollectionRun.builder()
+                    .id(42L)
+                    .status(run.getStatus())
+                    .triggerType(run.getTriggerType())
+                    .forceRefresh(run.isForceRefresh())
+                    .startedAt(run.getStartedAt())
+                    .build();
+        });
+
+        assertTrue(runCreator.createScheduled(1L, AgentPlan.FREE, now));
+
+        ArgumentCaptor<CollectionRun> captor = ArgumentCaptor.forClass(CollectionRun.class);
+        verify(runRepository).saveAndFlush(captor.capture());
+        assertEquals(TriggerType.SCHEDULED, captor.getValue().getTriggerType());
+        assertEquals(now, scheduledTopic.getLastCollectedAt());
+        verify(runAsyncService).execute(42L);
+    }
+
+    @Test
+    void createScheduledSkipsTopicBeforeItsNextDueTime() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 3, 10, 0);
+        Topic scheduledTopic = topic(1L, "HBM");
+        scheduledTopic.recordCollectionStartedAt(now.minusMinutes(30));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(scheduledTopic));
+
+        assertTrue(!runCreator.createScheduled(1L, AgentPlan.FREE, now));
+
+        verify(runRepository, never()).saveAndFlush(any());
+        verify(runAsyncService, never()).execute(any());
+    }
+
+    @Test
     void createRejectsWhenNoTargetCombinationExists() {
         when(topicRepository.findActiveCollectionTargets()).thenReturn(List.of());
 

@@ -121,6 +121,17 @@ class TopicCommandServiceImplTest {
     }
 
     @Test
+    void createTopicRejectsUnsupportedCollectionInterval() {
+        TopicReqDTO.Create request = createRequest();
+        request.setIntervalMinutes(30);
+
+        TopicException exception = assertThrows(TopicException.class,
+                () -> topicCommandService.createTopic(request));
+
+        assertEquals(TopicErrorCode.INVALID_SCHEDULE, exception.getCode());
+    }
+
+    @Test
     void createTopicAcceptsMaximumBatchSize() {
         TopicReqDTO.Create request = createRequest();
         request.setBatchSize(300);
@@ -164,7 +175,7 @@ class TopicCommandServiceImplTest {
         request.setQueryText("HBM4 반도체");
         request.setExcludedKeywords(List.of("광고", "채용", "주가"));
         request.setBatchSize(20);
-        request.setIntervalMinutes(30);
+        request.setIntervalMinutes(720);
 
         Topic topic = existingTopic();
         when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
@@ -176,7 +187,7 @@ class TopicCommandServiceImplTest {
         assertEquals(List.of("HBM"), topic.getRequiredKeywords());
         assertEquals(List.of("광고", "채용", "주가"), topic.getExcludedKeywords());
         assertEquals(20, topic.getBatchSize());
-        assertEquals(30, topic.getIntervalMinutes());
+        assertEquals(720, topic.getIntervalMinutes());
         assertEquals("HBM4 반도체", result.getQueryText());
         assertEquals(20, result.getBatchSize());
     }

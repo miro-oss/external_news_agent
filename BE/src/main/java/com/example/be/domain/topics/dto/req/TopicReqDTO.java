@@ -37,7 +37,7 @@ public class TopicReqDTO {
         @Schema(description = "1회 수집 건수. 1 이상 300 이하이며 SEARCH 소스 한 곳당 요청 건수. 기본값은 100", example = "100")
         private Integer batchSize;
 
-        @Schema(description = "자동 수집 주기(분). 기본값 60", example = "60")
+        @Schema(description = "자동 수집 주기(분). 60, 720, 1440만 허용하며 기본값은 60", example = "60")
         private Integer intervalMinutes;
 
         @Schema(description = "활성 여부. 기본값 true", example = "true")
@@ -71,7 +71,7 @@ public class TopicReqDTO {
         @Schema(description = "1회 수집 건수. 1 이상 300 이하", example = "300")
         private Integer batchSize;
 
-        @Schema(description = "자동 수집 주기(분). 10 이상", example = "30")
+        @Schema(description = "자동 수집 주기(분). 60, 720, 1440만 허용", example = "720")
         private Integer intervalMinutes;
 
         @Schema(description = "활성 여부", example = "true")

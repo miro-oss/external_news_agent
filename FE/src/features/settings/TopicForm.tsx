@@ -8,14 +8,13 @@ const EMPTY = {
   requiredKeywords: '',
   optionalKeywords: '',
   excludedKeywords: '',
-  intervalMinutes: '1440',
+  intervalMinutes: '60',
 }
 
 const COLLECTION_INTERVALS = [
   { value: '60', label: '1시간마다' },
-  { value: '360', label: '6시간마다' },
   { value: '720', label: '12시간마다' },
-  { value: '1440', label: '매일 한 번 (권장)' },
+  { value: '1440', label: '24시간마다' },
 ] as const
 
 /** 쉼표로 나눠 받는다. 빈 칸은 필터 없음이고, 빈 문자열은 필터에 넣지 않는다. */
@@ -162,7 +161,6 @@ export function TopicForm() {
         </select>
         <p className="hint">
           새로운 기사를 확인할 주기입니다. 수집 건수는 검색 결과와 중복 여부에 맞춰 시스템이 관리합니다.
-          현재는 자동 반복 없이 <strong>지금 실행</strong>을 눌렀을 때만 수집합니다.
         </p>
       </div>
 

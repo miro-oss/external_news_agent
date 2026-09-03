@@ -78,6 +78,20 @@ public interface TopicRepository extends JpaRepository<Topic, Long>, JpaSpecific
             """)
     List<CollectionTarget> findActiveCollectionTargetsByTopicIds(@Param("topicIds") Collection<Long> topicIds);
 
+    /** 스케줄러는 주제 잠금 안에서 실제 만료 여부를 다시 확인한다. */
+    @Query("""
+            SELECT t.id
+            FROM Topic t
+            WHERE t.active = TRUE
+              AND EXISTS (
+                  SELECT s.id
+                  FROM t.sources s
+                  WHERE s.active = TRUE
+              )
+            ORDER BY t.id ASC
+            """)
+    List<Long> findActiveCollectionTopicIds();
+
     /**
      * 수집 대상 주제를 잠근다. 충돌 검사(findInProgressByTopicIds)와 실행 생성 사이에 다른 요청이
      * 끼어들면 같은 주제를 동시에 수집하게 되는데, idempotencyKey와 달리 이건 DB 제약으로 막을 수 없다.
