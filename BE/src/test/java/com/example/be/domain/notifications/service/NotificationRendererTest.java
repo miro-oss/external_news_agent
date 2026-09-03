@@ -26,6 +26,20 @@ class NotificationRendererTest {
     private final NotificationRenderer renderer = new NotificationRenderer(findingRepository);
 
     @Test
+    void dailyNotificationUsesOnlySavedFindingsWithoutRunId() {
+        NewsReport daily = NewsReport.builder().id(17L)
+                .reportScope(com.example.be.domain.reports.entity.ReportScope.DAILY)
+                .title("일일 보고서").reflectedFindingIds(List.of(1L))
+                .generatedAt(LocalDateTime.of(2026, 9, 4, 0, 5)).build();
+        when(findingRepository.findForReportByIdIn(List.of(1L))).thenReturn(List.of(finding()));
+        for (ChannelType type : ChannelType.values()) {
+            assertTrue(renderer.render(daily, channel(type, 3500)).chunks().getFirst().contains("검증된 핵심 요약"));
+        }
+        org.mockito.Mockito.verify(findingRepository, org.mockito.Mockito.never())
+                .findForReportByRunId(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void emailContainsOnlySummaryAndSourceLink() {
         NewsReport report = report("# 내부 보고서\n기사 전문을 그대로 싣지 말 것");
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(finding()));

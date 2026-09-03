@@ -271,6 +271,28 @@ AGENT_SHARED_SECRET=local-dev-agent-token uv run uvicorn app.main:app \
   --host 127.0.0.1 --port 8088
 ```
 
+P3-1 일일 통합 보고서도 `/v1/report`를 사용합니다. 기존 RUN 입력은 그대로 유효하며,
+DAILY는 `run` 컨텍스트에 다음 범위를 명시합니다. `startedAt` 포함·`finishedAt` 미포함인 한국 시간
+하루를 나타내며 `id`는 수집 run ID를 가장하지 않도록 null입니다.
+
+```json
+{
+  "id": null,
+  "startedAt": "2026-09-01T00:00:00+09:00",
+  "finishedAt": "2026-09-02T00:00:00+09:00",
+  "topics": ["HBM"],
+  "reportScope": "DAILY",
+  "reportId": 410,
+  "reportDate": "2026-09-01"
+}
+```
+
+Spring이 이슈 중복 제거·최신 근거·상위 N개 선정을 소유하고 finding별 최대 3개 검증 주장을 넘깁니다.
+Agent는 기존 `report.ko.v1.4` 프롬프트와 최종 검증을 재사용하며 일일 제목은 `reportDate`로 정합니다.
+RUN과 DAILY 식별 필드가 섞이면 입력을 거절합니다. 감사/쿼터 키는 `daily-report:{reportId}`이고,
+감사 target은 `REPORT`, `collection_run_id`는 null입니다. 실제 측정과 운영 동작은
+[일일 보고서 실측·재현 문서](../BE/DAILY_REPORTS.md)를 참고하세요.
+
 보고서는 기사 1건 분석과 별도로 `AGENT_REPORT_MAX_OUTPUT_TOKENS`(기본 8192)와
 `AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS`(기본 120초)를 사용합니다. 한 요청에는 우선순위가 높은
 LLM finding을 최대 50건까지 받습니다.

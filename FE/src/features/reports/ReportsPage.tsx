@@ -69,6 +69,8 @@ function investigationReasonText(investigation: ReportInvestigation) {
 }
 
 export function ReportsPage() {
+  const [reportScope, setReportScope] = useState<'ALL' | 'RUN' | 'DAILY'>('ALL')
+  const scopeFilter = reportScope === 'ALL' ? undefined : reportScope
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [audienceOverride, setAudienceOverride] = useState<Audience | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
@@ -76,9 +78,9 @@ export function ReportsPage() {
     runId: number | null
     sentences: number[]
   }>({ articleId: null, runId: null, sentences: [] })
-  const reports = useReports()
+  const reports = useReports(scopeFilter)
   const audienceSetting = useAudienceSetting()
-  const latest = useLatestReport()
+  const latest = useLatestReport(scopeFilter)
   const activeId = selectedId ?? latest.data?.id ?? null
   const selectedReport = useReport(selectedId)
   const activeReport = selectedId === null ? latest : selectedReport
@@ -103,13 +105,25 @@ export function ReportsPage() {
         </div>
       </header>
 
+      <div className="report-perspective-tabs" role="group" aria-label="보고서 범위">
+        {(['ALL', 'DAILY', 'RUN'] as const).map((scope) => (
+          <button key={scope} type="button" aria-pressed={reportScope === scope}
+            className={reportScope === scope ? 'report-perspective-tab active' : 'report-perspective-tab'}
+            onClick={() => { setReportScope(scope); setSelectedId(null) }}>
+            {{ ALL: '전체', DAILY: '일일 통합', RUN: '실행별' }[scope]}
+          </button>
+        ))}
+      </div>
+
       {isInitialLoading && <div className="state-panel" aria-busy="true">최신 보고서를 불러오는 중입니다.</div>}
       {initialError && <div className="state-panel error" role="alert">보고서를 불러오지 못했습니다. {initialError.message}</div>}
       {!isInitialLoading && !initialError && latest.data === null && (
         <div className="state-panel report-empty">
           <span className="empty-mark" aria-hidden="true">⌁</span>
           <strong>아직 생성된 보고서가 없습니다.</strong>
-          <span>수집을 실행하면 분석 완료 후 첫 보고서가 자동으로 만들어집니다.</span>
+          <span>{reportScope === 'DAILY'
+            ? '하루의 수집이 모두 끝나면 다음 날 일일 통합 보고서가 자동으로 만들어집니다.'
+            : '수집을 실행하면 분석 완료 후 첫 보고서가 자동으로 만들어집니다.'}</span>
         </div>
       )}
       {!isInitialLoading && !initialError && latest.data !== null && reports.data?.content.length === 0 && (
@@ -151,7 +165,8 @@ export function ReportsPage() {
                 onEvidenceSelect={(articleId, sentences) => {
                   setEvidenceSelection({
                     articleId,
-                    runId: activeReportData.runId,
+                    runId: activeReportData.findings?.find((finding) => finding.articleId === articleId)?.runId
+                      ?? activeReportData.runId,
                     sentences,
                   })
                 }}
@@ -184,7 +199,8 @@ function ReportListItem({ report, active, onSelect }: {
       aria-pressed={active}
       onClick={onSelect}
     >
-      <span className="report-list-date">{formatShortDate(report.generatedAt)}</span>
+      <span className="report-list-date">{report.reportScope === 'DAILY'
+        ? `${report.reportDate} · 일일 통합` : `${formatShortDate(report.generatedAt)} · 실행별`}</span>
       <strong>{report.title}</strong>
       <span className="report-list-meta">
         분석 {report.findingCount}건
@@ -205,8 +221,10 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
 }) {
   const [filters, setFilters] = useState<ReportFindingFilters>(DEFAULT_REPORT_FINDING_FILTERS)
   const findings = useMemo(
-    () => selectFindingsForAudience(report.findings ?? [], audience),
-    [audience, report.findings],
+    () => report.reportScope === 'DAILY'
+      ? sortFindingsForAudience(report.findings ?? [], audience)
+      : selectFindingsForAudience(report.findings ?? [], audience),
+    [audience, report.findings, report.reportScope],
   )
   const filteredFindings = useMemo(() => {
     if (filters.sensitivityLevel) {
@@ -225,6 +243,9 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
     <article className="report-document">
       <header className="report-document-header">
         <h2>{report.title}</h2>
+        {report.reportScope === 'DAILY' && <p className="muted">
+          {report.reportDate} · 한국 시간 기준 · 수집 {report.sourceRunIds.length}회 통합
+        </p>}
         <time dateTime={report.generatedAt}>{formatFullDate(report.generatedAt)}</time>
         <div className="report-ai-context">
           <span>{generationKind(report.modelName)} · {AUDIENCE_LABELS[audience]} 관점 · 원문 근거 {evidenceCount}문장</span>
@@ -278,6 +299,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
                 finding={finding}
                 key={finding.id}
                 audience={audience}
+                reportDate={report.reportScope === 'DAILY' ? report.reportDate : null}
                 onEvidenceSelect={onEvidenceSelect}
               />
             ))}
@@ -473,9 +495,10 @@ function ReportStat({ value, label, tone }: { value: number; label: string; tone
   )
 }
 
-function IssueCard({ finding, audience, onEvidenceSelect }: {
+function IssueCard({ finding, audience, reportDate, onEvidenceSelect }: {
   finding: ReportFinding
   audience: Audience
+  reportDate: string | null
   onEvidenceSelect: (articleId: number, sentences: number[]) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -487,8 +510,9 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
   const issueInfo = finding.issue ?? issue.data
   const keyPoints = useMemo(() => normalizeKeyPoints(finding.keyPoints), [finding.keyPoints])
   const perspective = perspectiveFor(finding, audience)
-  const title = issueInfo?.title || finding.articleTitle
-  const summary = limitText(issueInfo?.summary || finding.summary, 120)
+  // 일일 보고서는 이후 갱신된 이슈 제목 대신 저장된 근거 분석을 보여준다.
+  const title = reportDate ? finding.articleTitle : issueInfo?.title || finding.articleTitle
+  const summary = limitText(reportDate ? finding.summary : issueInfo?.summary || finding.summary, 120)
   const relatedArticles = issue.data?.articles ?? []
   const visibleRelatedArticles = relatedArticles.slice(0, visibleRelatedCount)
   const investigationReason = finding.investigation
@@ -524,12 +548,15 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
             {SENSITIVITY_LEVEL_LABELS[finding.sensitivity.level]} · {finding.sensitivity.score.toFixed(1)}
           </span>
           <span>{finding.category}</span>
-          {issueInfo && <time dateTime={issueInfo.lastSeenAt}>{formatShortDate(issueInfo.lastSeenAt)}</time>}
+          {reportDate
+            ? <time dateTime={reportDate}>{reportDate} 집계</time>
+            : issueInfo && <time dateTime={issueInfo.lastSeenAt}>{formatShortDate(issueInfo.lastSeenAt)}</time>}
         </div>
         <h4>{title}</h4>
         <p className="issue-card-summary">{summary}</p>
         <div className="issue-card-footer">
           <span className="issue-source-count">
+            {reportDate && '현재 '}
             {issue.isError && issueId !== null
               ? '관련 기사 상세 불러오기 실패'
               : issue.isLoading && issueId !== null

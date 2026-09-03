@@ -30,6 +30,26 @@ class ReportControllerTest {
     private ReportQueryService reportQueryService;
 
     @Test
+    void dailyFilterAndNullableRunIdFollowContract() throws Exception {
+        var scope = com.example.be.domain.reports.entity.ReportScope.DAILY;
+        var date = java.time.LocalDate.of(2026, 9, 3);
+        var detail = ReportResDTO.Detail.builder().id(77L).reportScope(scope).reportDate(date)
+                .sourceRunIds(List.of(42L, 43L)).build();
+        when(reportQueryService.getLatest(true, scope)).thenReturn(detail);
+        mockMvc.perform(get("/api/news/reports/latest").param("reportScope", "DAILY"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.reportScope").value("DAILY"))
+                .andExpect(jsonPath("$.result.runId").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.result.reportDate").value("2026-09-03"))
+                .andExpect(jsonPath("$.result.sourceRunIds[1]").value(43));
+        when(reportQueryService.getReports(null, null, 0, 20, scope))
+                .thenReturn(PageResponse.of(List.of(), 0, 20, 0));
+        mockMvc.perform(get("/api/news/reports").param("reportScope", "DAILY"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.totalElements").value(0));
+        mockMvc.perform(get("/api/news/reports").param("reportScope", "UNKNOWN"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("COMMON400"));
+    }
+
+    @Test
     void getReportsRespondsWithPagedSummary() throws Exception {
         ReportResDTO.Summary summary = ReportResDTO.Summary.builder()
                 .id(17L)

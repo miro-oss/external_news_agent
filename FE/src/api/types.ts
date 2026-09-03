@@ -341,7 +341,10 @@ export interface ArticleFilters {
 
 export interface ReportSummary {
   id: number
-  runId: number
+  runId: number | null
+  reportScope: 'RUN' | 'DAILY'
+  reportDate: string | null
+  sourceRunIds: number[]
   title: string
   generatedAt: string
   modelName: string
@@ -359,6 +362,7 @@ export interface ReportSummaryStats {
 }
 
 export interface ReportFinding {
+  runId: number
   id: number
   articleId: number
   issueId: number | null
@@ -400,7 +404,10 @@ export interface ReportIssueSummary {
 
 export interface ReportDetail {
   id: number
-  runId: number
+  runId: number | null
+  reportScope: 'RUN' | 'DAILY'
+  reportDate: string | null
+  sourceRunIds: number[]
   title: string
   markdownBody: string
   modelName: string
@@ -530,7 +537,7 @@ export interface DeliveryLog {
   id: number
   deliveryBatchId: string
   reportId: number
-  runId: number
+  runId: number | null
   recipientId: number
   recipientName: string
   channelType: NotificationChannelType

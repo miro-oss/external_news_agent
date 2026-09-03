@@ -24,6 +24,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -43,9 +44,27 @@ public class NewsReport {
     @Column(name = "id")
     private Long id;
 
-    @OneToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "run_id", nullable = false, unique = true)
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "run_id", unique = true)
     private CollectionRun run;
+
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(name = "report_scope", nullable = false, length = 10)
+    private ReportScope reportScope = ReportScope.RUN;
+
+    @Column(name = "report_date")
+    private LocalDate reportDate;
+
+    @Builder.Default
+    @Convert(converter = LongListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "source_run_ids", nullable = false)
+    private List<Long> sourceRunIds = List.of();
+
+    public Long getRunId() {
+        return run == null ? null : run.getId();
+    }
 
     @Column(name = "title", nullable = false, length = MAX_TITLE_LENGTH)
     private String title;

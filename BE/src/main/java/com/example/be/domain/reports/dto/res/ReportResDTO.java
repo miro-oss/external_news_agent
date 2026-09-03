@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.dto.res;
 
 import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
+import com.example.be.domain.reports.entity.ReportScope;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -9,6 +10,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -22,14 +24,19 @@ public class ReportResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "id", "runId", "title", "generatedAt", "modelName", "findingCount", "highSensitivityCount",
+            "id", "runId", "reportScope", "reportDate", "sourceRunIds", "title", "generatedAt", "modelName", "findingCount", "highSensitivityCount",
             "deliveryStatus"
     })
     @Schema(name = "ReportSummaryResponse", description = "보고서 목록 항목")
     public static class Summary {
 
         private final Long id;
+        @Schema(description = "RUN 수집 실행 ID. DAILY는 null", nullable = true)
         private final Long runId;
+        private final ReportScope reportScope;
+        @Schema(description = "DAILY 집계일 (Asia/Seoul). RUN은 null", nullable = true)
+        private final LocalDate reportDate;
+        private final List<Long> sourceRunIds;
         private final String title;
         private final OffsetDateTime generatedAt;
         private final String modelName;
@@ -42,14 +49,19 @@ public class ReportResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "id", "runId", "title", "markdownBody", "modelName", "promptVersion", "llmProvider",
+            "id", "runId", "reportScope", "reportDate", "sourceRunIds", "title", "markdownBody", "modelName", "promptVersion", "llmProvider",
             "generatedAt", "summaryStats", "findings"
     })
     @Schema(name = "ReportDetailResponse", description = "보고서 상세")
     public static class Detail {
 
         private final Long id;
+        @Schema(description = "RUN 수집 실행 ID. DAILY는 null", nullable = true)
         private final Long runId;
+        private final ReportScope reportScope;
+        @Schema(description = "DAILY 집계일 (Asia/Seoul). RUN은 null", nullable = true)
+        private final LocalDate reportDate;
+        private final List<Long> sourceRunIds;
         private final String title;
         private final String markdownBody;
         private final String modelName;
@@ -87,6 +99,8 @@ public class ReportResDTO {
 
         private final Long id;
         private final Long articleId;
+        @Schema(description = "근거 분석의 수집 실행 ID. 기사 상세 조회 시 사용")
+        private final Long runId;
         private final Long issueId;
         private final IssueSummary issue;
         private final String articleTitle;
