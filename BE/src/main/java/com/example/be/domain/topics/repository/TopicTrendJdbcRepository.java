@@ -29,32 +29,43 @@ public class TopicTrendJdbcRepository {
     private static final int CANDIDATE_LIMIT = 12;
 
     private static final String OBSERVED_ISSUE_KEYWORDS_CTE = """
-            WITH observed_issue_keywords AS (
+            WITH observed_issues AS (
                 SELECT cra.topic_id,
                        ia.issue_id,
-                       TRUNC(cra.observed_at) AS activity_day,
-                       LOWER(TRIM(jt.keyword)) AS keyword_norm,
-                       MIN(TRIM(jt.keyword)) AS keyword_display
+                       TRUNC(cra.observed_at) AS activity_day
                 FROM news_collection_run_articles cra
                 JOIN news_issue_articles ia
                   ON ia.article_id = cra.article_id
                 JOIN news_issues issue
                   ON issue.id = ia.issue_id
+                WHERE cra.topic_id IN (:topicIds)
+                  AND cra.change_type IN ('NEW', 'UPDATED')
+                  AND cra.observed_at >= :previousWindowStart
+                  AND cra.observed_at < :windowEndExclusive
+                  AND issue.status <> 'RETRACTED'
+                GROUP BY cra.topic_id,
+                         ia.issue_id,
+                         TRUNC(cra.observed_at)
+            ),
+            observed_issue_keywords AS (
+                SELECT observed.topic_id,
+                       observed.issue_id,
+                       observed.activity_day,
+                       LOWER(TRIM(jt.keyword)) AS keyword_norm,
+                       MIN(TRIM(jt.keyword)) AS keyword_display
+                FROM observed_issues observed
+                JOIN news_issues issue
+                  ON issue.id = observed.issue_id
                 CROSS APPLY JSON_TABLE(
                     issue.entities,
                     '$[*]' COLUMNS (
                         keyword VARCHAR2(500 CHAR) PATH '$'
                     )
                 ) jt
-                WHERE cra.topic_id IN (:topicIds)
-                  AND cra.change_type IN ('NEW', 'UPDATED')
-                  AND cra.observed_at >= :previousWindowStart
-                  AND cra.observed_at < :windowEndExclusive
-                  AND issue.status <> 'RETRACTED'
-                  AND TRIM(jt.keyword) IS NOT NULL
-                GROUP BY cra.topic_id,
-                         ia.issue_id,
-                         TRUNC(cra.observed_at),
+                WHERE TRIM(jt.keyword) IS NOT NULL
+                GROUP BY observed.topic_id,
+                         observed.issue_id,
+                         observed.activity_day,
                          LOWER(TRIM(jt.keyword))
             )
             """;
@@ -80,7 +91,7 @@ public class TopicTrendJdbcRepository {
             days AS (
                 SELECT :previousWindowStartDate + (LEVEL - 1) AS activity_day
                 FROM dual
-                CONNECT BY LEVEL <= 14
+                CONNECT BY LEVEL <= :seriesDayCount
             ),
             daily_counts AS (
                 SELECT topic_id,
@@ -190,14 +201,9 @@ public class TopicTrendJdbcRepository {
             topic_totals AS (
                 SELECT topic_id,
                        COUNT(DISTINCT issue_id) AS total_issue_count
-                FROM recent_issue_keywords
+                FROM observed_issues
+                WHERE activity_day >= :recentWindowStartDate
                 GROUP BY topic_id
-            ),
-            global_keyword_totals AS (
-                SELECT keyword_norm,
-                       COUNT(DISTINCT issue_id) AS global_issue_count
-                FROM recent_issue_keywords
-                GROUP BY keyword_norm
             ),
             topic_keyword_counts AS (
                 SELECT topic_id,
@@ -216,14 +222,11 @@ public class TopicTrendJdbcRepository {
                            PARTITION BY tk.topic_id
                            ORDER BY tk.issue_count DESC,
                                     ROUND((tk.issue_count * 100.0) / tt.total_issue_count, 2) DESC,
-                                    gk.global_issue_count ASC,
                                     tk.keyword_display ASC
                        ) AS rn
                 FROM topic_keyword_counts tk
                 JOIN topic_totals tt
                   ON tt.topic_id = tk.topic_id
-                JOIN global_keyword_totals gk
-                  ON gk.keyword_norm = tk.keyword_norm
                 WHERE tk.issue_count >= 2
             )
             SELECT topic_id,
@@ -245,7 +248,6 @@ public class TopicTrendJdbcRepository {
         LocalDate today = now.toLocalDate();
         LocalDate recentWindowStartDate = today.minusDays(WINDOW_DAYS - 1L);
         LocalDate previousWindowStartDate = recentWindowStartDate.minusDays(WINDOW_DAYS);
-        LocalDateTime recentWindowStart = recentWindowStartDate.atStartOfDay();
         LocalDateTime previousWindowStart = previousWindowStartDate.atStartOfDay();
         LocalDateTime windowEndExclusive = today.plusDays(1L).atStartOfDay();
 
@@ -254,11 +256,11 @@ public class TopicTrendJdbcRepository {
 
         MapSqlParameterSource parameters = new MapSqlParameterSource()
                 .addValue("topicIds", topicIds)
-                .addValue("recentWindowStart", recentWindowStart)
                 .addValue("recentWindowStartDate", recentWindowStartDate)
                 .addValue("previousWindowStart", previousWindowStart)
                 .addValue("previousWindowStartDate", previousWindowStartDate)
                 .addValue("windowEndExclusive", windowEndExclusive)
+                .addValue("seriesDayCount", WINDOW_DAYS * 2)
                 .addValue("candidateLimit", CANDIDATE_LIMIT);
 
         jdbcTemplate.query(SURGE_SQL, parameters, (RowCallbackHandler) resultSet -> snapshots.get(resultSet.getLong("topic_id"))

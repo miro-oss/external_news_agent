@@ -33,6 +33,9 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class TopicQueryServiceImpl implements TopicQueryService {
 
+    // SQL 후보에서 등록 키워드를 제거한 뒤 화면에는 상위 신호만 노출한다.
+    private static final int DISPLAY_LIMIT = 5;
+
     private final TopicRepository topicRepository;
     private final TopicTrendJdbcRepository topicTrendJdbcRepository;
 
@@ -100,11 +103,11 @@ public class TopicQueryServiceImpl implements TopicQueryService {
             Set<String> configuredKeywords = configuredKeywordSet(topic);
             List<TopicTrendJdbcRepository.TopicTrendKeyword> surgeKeywords = snapshot.surgeKeywords().stream()
                     .filter(item -> !configuredKeywords.contains(normalizeKeyword(item.keyword())))
-                    .limit(5)
+                    .limit(DISPLAY_LIMIT)
                     .toList();
             List<TopicTrendJdbcRepository.TopicRelatedKeyword> relatedKeywords = snapshot.relatedKeywords().stream()
                     .filter(item -> !configuredKeywords.contains(normalizeKeyword(item.keyword())))
-                    .limit(5)
+                    .limit(DISPLAY_LIMIT)
                     .toList();
 
             result.put(topic.getId(), new TopicTrendJdbcRepository.TopicTrendSnapshot(

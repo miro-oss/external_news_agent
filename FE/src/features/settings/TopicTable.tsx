@@ -35,8 +35,8 @@ function formatSignedDelta(value: number) {
 }
 
 function surgeKeywordTitle(keyword: TopicSurgeKeyword) {
-  const zScore = keyword.zScore === null ? '계산 불가' : keyword.zScore.toFixed(2)
-  return `${keyword.keyword} · 최근 7일 ${keyword.issueCount}이슈 · 전주 대비 ${formatSignedDelta(keyword.deltaIssueCount)} · z-score ${zScore}`
+  const burstDescription = keyword.burst ? ' · 평소보다 크게 늘었어요' : ''
+  return `${keyword.keyword} · 최근 7일 ${keyword.issueCount}이슈 · 전주 대비 ${formatSignedDelta(keyword.deltaIssueCount)}${burstDescription}`
 }
 
 function relatedKeywordTitle(keyword: TopicRelatedKeyword) {
@@ -81,7 +81,7 @@ export function TopicTable() {
             <th title="모두 포함되어야 하는 AND 조건입니다.">필수 키워드</th>
             <th title="하나라도 포함되면 통과하는 OR 조건입니다.">선택 키워드</th>
             <th title="하나라도 포함되면 제외하는 NOT 조건입니다.">제외 키워드</th>
-            <th title="최근 7일 기사×이슈 관측 기준으로 전주보다 늘어난 키워드입니다.">지난주 급상승</th>
+            <th title="최근 7일 동안 지난주보다 많이 언급된 키워드입니다.">지난주 급상승</th>
             <th title="최근 7일 이 주제 이슈에서 반복 등장한 연관 키워드입니다.">연관 키워드</th>
             <th title="새로운 기사를 다시 확인하는 주기입니다.">수집 주기</th>
             <th>마지막 수집</th>

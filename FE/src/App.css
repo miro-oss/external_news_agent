@@ -760,16 +760,16 @@ tbody tr:hover td {
   table-layout: fixed;
 }
 
-.topic-table .topic-name-column { width: 15%; }
+.topic-table .topic-name-column { width: 14%; }
 .topic-table .topic-status-column { width: 6%; }
-.topic-table .topic-collected-column { width: 11%; }
-.topic-table .topic-query-column { width: 12%; }
+.topic-table .topic-collected-column { width: 10%; }
+.topic-table .topic-query-column { width: 11%; }
 .topic-table .topic-required-column { width: 9%; }
 .topic-table .topic-optional-column { width: 10%; }
-.topic-table .topic-excluded-column { width: 9%; }
-.topic-table .topic-surge-column { width: 14%; }
-.topic-table .topic-related-column { width: 14%; }
-.topic-table .topic-interval-column { width: 8%; }
+.topic-table .topic-excluded-column { width: 8%; }
+.topic-table .topic-surge-column { width: 13%; }
+.topic-table .topic-related-column { width: 13%; }
+.topic-table .topic-interval-column { width: 6%; }
 
 .topic-table td:not(.topic-name-cell) {
   overflow: hidden;
@@ -778,10 +778,6 @@ tbody tr:hover td {
 
 .topic-name-cell {
   overflow: hidden;
-}
-
-.topic-signal-cell {
-  overflow: visible;
 }
 
 .topic-name-scroll {
@@ -816,9 +812,9 @@ tbody tr:hover td {
 }
 
 .topic-signal-chip {
-  display: inline-flex;
-  align-items: center;
+  display: inline-block;
   max-width: 100%;
+  overflow: hidden;
   padding: 0.18rem 0.52rem;
   border-radius: 999px;
   background: var(--surface-sunken);
@@ -826,6 +822,8 @@ tbody tr:hover td {
   font-size: 0.76rem;
   font-weight: 600;
   line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topic-signal-chip.burst {

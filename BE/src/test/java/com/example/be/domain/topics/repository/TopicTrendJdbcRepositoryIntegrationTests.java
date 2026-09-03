@@ -98,6 +98,7 @@ class TopicTrendJdbcRepositoryIntegrationTests {
         CollectionRun previousRun = run("trend-prev", NOW.minusDays(8));
         CollectionRun recentRun1 = run("trend-recent-1", NOW.minusDays(2));
         CollectionRun recentRun2 = run("trend-recent-2", NOW.minusDays(1));
+        CollectionRun recentRunWithoutEntities = run("trend-recent-empty", NOW.minusDays(3));
 
         observeIssue(topic, source, previousRun, NOW.minusDays(8),
                 List.of("HBM", "HBM4", "마이크론"), "old");
@@ -105,6 +106,8 @@ class TopicTrendJdbcRepositoryIntegrationTests {
                 List.of("HBM", "HBM4", "마이크론"), "recent-a");
         observeIssue(topic, source, recentRun2, NOW.minusDays(1),
                 List.of("HBM", "HBM4", "마이크론", "패키징"), "recent-b");
+        observeIssue(topic, source, recentRunWithoutEntities, NOW.minusDays(3),
+                List.of(), "recent-empty");
 
         flushAndClear();
 
@@ -122,7 +125,7 @@ class TopicTrendJdbcRepositoryIntegrationTests {
         assertTrue(snapshot.relatedKeywords().stream().anyMatch(keyword ->
                 keyword.keyword().equals("마이크론")
                         && keyword.issueCount() == 2
-                        && keyword.sharePercent().compareTo(new BigDecimal("100.00")) == 0));
+                        && keyword.sharePercent().compareTo(new BigDecimal("66.67")) == 0));
     }
 
     private CollectionRun run(String key, LocalDateTime startedAt) {

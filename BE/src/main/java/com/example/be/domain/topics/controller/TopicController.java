@@ -157,7 +157,7 @@ public class TopicController {
                                     ],
                                     "relatedKeywords": [
                                       {
-                                        "keyword": "마이크론",
+                                        "keyword": "엔비디아",
                                         "issueCount": 3,
                                         "sharePercent": 60.00
                                       }

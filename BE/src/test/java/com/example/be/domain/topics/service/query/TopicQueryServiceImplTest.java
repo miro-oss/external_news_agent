@@ -19,8 +19,8 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 
-import java.time.LocalDateTime;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -64,6 +64,22 @@ class TopicQueryServiceImplTest {
         assertEquals(1L, result.getTotalElements());
         assertEquals(1, result.getTotalPages());
         assertFalse(result.isHasNext());
+    }
+
+    @Test
+    void getTopicsFiltersConfiguredKeywordsBeforeLimitingSignals() {
+        when(topicRepository.findAll(ArgumentMatchers.<Specification<Topic>>any(), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(topic()), PageRequest.of(0, 20), 1L));
+        when(topicRepository.countLinkedSources(List.of(1L))).thenReturn(List.of());
+        when(topicTrendJdbcRepository.findSnapshots(any(), any(LocalDateTime.class)))
+                .thenReturn(Map.of(1L, snapshotWithConfiguredKeywords()));
+
+        TopicResDTO.Summary summary = topicQueryService.getTopics(null, null, 0, 20).getContent().get(0);
+
+        assertEquals(List.of("급상승1", "급상승2", "급상승3", "급상승4", "급상승5"),
+                summary.getSurgeKeywords().stream().map(TopicResDTO.KeywordTrend::getKeyword).toList());
+        assertEquals(List.of("연관1", "연관2", "연관3", "연관4", "연관5"),
+                summary.getRelatedKeywords().stream().map(TopicResDTO.RelatedKeyword::getKeyword).toList());
     }
 
     @Test
@@ -157,6 +173,42 @@ class TopicQueryServiceImplTest {
                 List.of(new TopicTrendJdbcRepository.TopicRelatedKeyword(
                         "마이크론", 3, new BigDecimal("60.00")))
         );
+    }
+
+    private TopicTrendJdbcRepository.TopicTrendSnapshot snapshotWithConfiguredKeywords() {
+        return new TopicTrendJdbcRepository.TopicTrendSnapshot(
+                List.of(
+                        trendKeyword("HBM"),
+                        trendKeyword("SK하이닉스"),
+                        trendKeyword("광고"),
+                        trendKeyword("급상승1"),
+                        trendKeyword("급상승2"),
+                        trendKeyword("급상승3"),
+                        trendKeyword("급상승4"),
+                        trendKeyword("급상승5"),
+                        trendKeyword("급상승6")
+                ),
+                List.of(
+                        relatedKeyword("HBM"),
+                        relatedKeyword("SK하이닉스"),
+                        relatedKeyword("광고"),
+                        relatedKeyword("연관1"),
+                        relatedKeyword("연관2"),
+                        relatedKeyword("연관3"),
+                        relatedKeyword("연관4"),
+                        relatedKeyword("연관5"),
+                        relatedKeyword("연관6")
+                )
+        );
+    }
+
+    private TopicTrendJdbcRepository.TopicTrendKeyword trendKeyword(String keyword) {
+        return new TopicTrendJdbcRepository.TopicTrendKeyword(
+                keyword, 4, 1, 3, new BigDecimal("2.87"), true);
+    }
+
+    private TopicTrendJdbcRepository.TopicRelatedKeyword relatedKeyword(String keyword) {
+        return new TopicTrendJdbcRepository.TopicRelatedKeyword(keyword, 3, new BigDecimal("60.00"));
     }
 
     private Topic topic() {
