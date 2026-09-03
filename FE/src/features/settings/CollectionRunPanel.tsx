@@ -163,14 +163,10 @@ function DefaultAudienceSetting() {
   const updateAudience = useUpdateAudienceSetting()
   const [saved, setSaved] = useState(false)
 
-  function saveAudience(event: React.FormEvent) {
-    event.preventDefault()
+  function selectAudience(next: Audience) {
+    if (next === audienceQuery.data?.audience) return
     setSaved(false)
-    const values = new FormData(event.currentTarget as HTMLFormElement)
-    updateAudience.mutate(
-      values.get('audience') as Audience,
-      { onSuccess: () => setSaved(true) },
-    )
+    updateAudience.mutate(next, { onSuccess: () => setSaved(true) })
   }
 
   if (audienceQuery.isPending) {
@@ -184,33 +180,31 @@ function DefaultAudienceSetting() {
     )
   }
 
-  const audience = audienceQuery.data.audience
+  // 저장이 끝나기 전에도 방금 누른 칸이 선택돼 보여야 한다. 응답을 기다리는 동안은 요청 값을 쓴다.
+  const audience = updateAudience.isPending ? updateAudience.variables : audienceQuery.data.audience
   return (
-    <form key={audience} className="run-audience-setting" onSubmit={saveAudience}>
+    <div className="run-audience-setting">
       <div className="run-audience-copy">
         <h3>내 기본 관점</h3>
-        <p>수집 결과의 기사와 리포트를 처음 볼 때 적용할 관점입니다.</p>
+        <p>기사와 리포트를 처음 열 때 이 관점으로 맞춰 둡니다. 고르면 바로 저장됩니다.</p>
       </div>
-      <div className="field">
-        <label htmlFor="default-audience">기본 관점</label>
-        <select
-          id="default-audience"
-          name="audience"
-          defaultValue={audience}
-          disabled={updateAudience.isPending}
-        >
-          {AUDIENCES.map((value) => (
-            <option value={value} key={value}>{AUDIENCE_LABELS[value]}</option>
-          ))}
-        </select>
+      <div className="segmented run-audience-options" role="group" aria-label="기본 관점">
+        {AUDIENCES.map((value) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={audience === value}
+            className={audience === value ? 'segmented-option active' : 'segmented-option'}
+            onClick={() => selectAudience(value)}
+          >
+            {AUDIENCE_LABELS[value]}
+          </button>
+        ))}
       </div>
-      <button type="submit" disabled={updateAudience.isPending}>
-        {updateAudience.isPending ? '저장 중…' : '기본 관점 저장'}
-      </button>
       <MutationStatus
         error={updateAudience.error}
         success={saved ? '기본 관점을 저장했습니다.' : null}
       />
-    </form>
+    </div>
   )
 }

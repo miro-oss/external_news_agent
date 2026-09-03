@@ -430,6 +430,52 @@ button:disabled {
   color: var(--primary-strong);
 }
 
+/*
+  세그먼트 컨트롤. 서로 배타적인 선택지 서넛 중 하나를 고르는 자리에 쓴다. 버튼을 그대로 나란히
+  세우면 파란 면이 여러 장 생겨 그 화면의 주인공(주 실행 버튼)과 크기·색으로 경쟁한다. 회색 트랙
+  위에 흰 알약 하나만 떠 있으면 "지금 어디"만 남고 나머지 선택지는 조용히 대기한다.
+
+  inline-flex라서 글자 길이만큼만 자리를 차지한다. 폭을 채워야 하는 곳은 쓰는 쪽에서 display를
+  flex로 바꾸고 칸에 flex:1을 준다.
+*/
+.segmented {
+  display: inline-flex;
+  max-width: 100%;
+  gap: 0.15rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: var(--bg);
+}
+
+.segmented-option {
+  padding: 0.42rem 0.9rem;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: 0.86rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* 트랙 위에서 배경까지 바뀌면 알약이 둘로 보인다. 손이 올라간 표시는 글자 색만으로 충분하다. */
+.segmented-option:hover:not(:disabled) {
+  background: transparent;
+  color: var(--fg);
+}
+
+.segmented-option:disabled {
+  background: transparent;
+  color: var(--fg-4);
+}
+
+/* 잠시 못 누르는 동안에도 지금 고른 칸은 그대로 보여야 한다. :disabled보다 뒤에 둔다. */
+.segmented-option.active,
+.segmented-option.active:hover {
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: var(--shadow-sm);
+}
+
 form {
   margin: 0;
   padding: 0;
@@ -914,22 +960,22 @@ tbody tr:hover td {
   gap: 0.7rem;
 }
 
+/*
+  상태 고르기. 전에는 220px 셀렉트가 오른쪽 끝에 "상태" 라벨을 달고 혼자 서 있었고, 그 왼쪽은
+  설명 한 줄과 빈 폭이었다. 넷 다 짧은 배타 선택지라 접었다 펴는 셀렉트일 이유가 없다.
+*/
 .proposal-toolbar {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1rem;
 }
 
-.proposal-toolbar .muted {
-  flex: 1;
-}
-
-.proposal-filter-field {
-  width: min(220px, 100%);
-  margin-bottom: 0;
-  flex-shrink: 0;
+.proposal-toolbar-hint {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 0.84rem;
 }
 
 .proposal-stack {
@@ -1077,6 +1123,17 @@ tbody tr:hover td {
   margin-top: 0;
 }
 
+/* 목록이 비면 한 줄이 넓은 카드 안에 떠 있었다. 자리를 만들어 "여기가 목록"이라고 말해 준다. */
+.proposal-empty-state {
+  margin: 0;
+  padding: 2.25rem 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--fg-3);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
 /* =============================================================================
    LLM 플랜 · 사용량 패널
    ============================================================================= */
@@ -1126,14 +1183,39 @@ tbody tr:hover td {
   margin: 0;
 }
 
+/*
+  실행 옵션과 성격이 다른 저장 설정이라 선 하나로 끊는다. 다만 이 카드의 주인공은 아래 수집 실행
+  버튼이므로, 여기서 두 번째 파란 버튼이 서면 안 된다.
+
+  전에는 [설명][셀렉트][저장] 3열 그리드였다. 패널이 화면의 절반이라 셀렉트가 160px까지 눌리고,
+  그 옆에 파란 저장 버튼이 붙어 바로 아래 실행 버튼과 색·무게가 겹쳤다. 저장 버튼을 없애고
+  (고르면 즉시 저장) 설명 아래에 세그먼트를 한 줄로 눕힌다.
+*/
 .run-audience-setting {
-  display: grid;
-  align-items: end;
-  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.65fr) auto;
-  gap: 0.75rem;
   margin-top: 1.25rem;
   padding-top: 1.25rem;
   border-top: 1px solid var(--line);
+}
+
+.run-audience-copy h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+}
+
+/* 네 관점은 서로 대등하다. 폭을 균등하게 나눠 한 칸만 넓어 보이지 않게 한다. */
+.run-audience-options {
+  display: flex;
+  margin-top: 0.8rem;
+}
+
+.run-audience-options .segmented-option {
+  flex: 1;
+  min-width: 0;
+  padding-right: 0.4rem;
+  padding-left: 0.4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .run-audience-setting.state-panel {
@@ -1153,23 +1235,9 @@ tbody tr:hover td {
   line-height: 1.5;
 }
 
-.run-audience-setting .field {
-  margin: 0;
-}
-
-.run-audience-setting select {
-  border-color: var(--line);
-  background-color: var(--surface);
-}
-
-.run-audience-setting > button {
-  white-space: nowrap;
-}
-
-form.run-audience-setting > .error,
-form.run-audience-setting > .success {
-  margin: 0;
-  grid-column: 1 / -1;
+.run-audience-setting > .error,
+.run-audience-setting > .success {
+  margin: 0.6rem 0 0;
 }
 
 .collection-run-button {
@@ -2532,6 +2600,26 @@ body.modal-open {
   font-size: 2rem;
 }
 
+/*
+  보고서 범위 전환. 목록을 거르는 장치라 목록 바로 위가 제자리다. 전에는 관점 선택용
+  .report-perspective-tabs(4열 그리드)를 빌려 써서, 선택지 셋이 화면 폭을 가로질러 늘어나고
+  제목 바로 아래에서 파랗게 서 있었다 — 페이지의 첫 문장이 필터가 되어 버렸다. 알약 하나 크기로
+  줄이고, 남는 폭은 고른 범위를 설명하는 한 줄에 준다.
+*/
+.report-scope-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: clamp(1rem, 2vw, 1.35rem);
+}
+
+.report-scope-hint {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 0.84rem;
+}
+
 .report-workspace {
   display: grid;
   grid-template-columns: minmax(230px, 0.32fr) minmax(0, 1fr);
@@ -3757,13 +3845,6 @@ body.modal-open {
     grid-template-columns: 1fr;
   }
 
-  .run-audience-setting {
-    grid-template-columns: minmax(0, 1fr) minmax(160px, 0.8fr);
-  }
-
-  .run-audience-setting > button {
-    grid-column: 1 / -1;
-  }
 }
 
 @media (max-width: 760px) {
@@ -3916,6 +3997,11 @@ body.modal-open {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  /* 이 폭에서는 설명 한 줄이 두 줄로 접혀 세그먼트보다 커진다. 선택지만 남긴다. */
+  .report-scope-hint {
+    display: none;
+  }
+
   .issue-related-articles li {
     align-items: flex-start;
     flex-direction: column;
@@ -3972,10 +4058,20 @@ body.modal-open {
 
   .notification-form-grid,
   .delivery-filter-bar,
-  .run-audience-setting,
   .report-finding-filter,
   .sensitivity-axis-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 관점 라벨 넷을 한 줄에 세우면 글자가 잘린다. 두 칸씩 접는다. */
+  .run-audience-options {
+    flex-wrap: wrap;
+    /* 두 줄이 되면 트랙은 알약이 아니라 면이다. 모서리를 카드 반경으로 낮춘다. */
+    border-radius: var(--radius-sm);
+  }
+
+  .run-audience-options .segmented-option {
+    flex: 1 0 calc(50% - 0.15rem);
   }
 
   .delivery-filter-bar .text-button,

@@ -33,6 +33,23 @@ import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { MutationStatus } from '../settings/MutationStatus'
 
+const REPORT_SCOPES = ['ALL', 'DAILY', 'RUN'] as const
+
+type ReportScopeTab = (typeof REPORT_SCOPES)[number]
+
+const REPORT_SCOPE_LABELS: Record<ReportScopeTab, string> = {
+  ALL: '전체',
+  DAILY: '일일 통합',
+  RUN: '실행별',
+}
+
+// 이름만으로는 두 보고서의 차이가 서지 않는다. 고른 범위가 무엇을 담는지 한 줄로 붙여 둔다.
+const REPORT_SCOPE_HINTS: Record<ReportScopeTab, string> = {
+  ALL: '하루치 통합본과 실행별 보고서를 모두 보여줍니다.',
+  DAILY: '하루 동안 모인 같은 이슈를 한 장으로 묶었습니다.',
+  RUN: '수집을 실행할 때마다 만들어진 보고서입니다.',
+}
+
 const INVESTIGATION_STATUS_LABELS = {
   CONCLUDED: '결론 도달',
   NO_NEW_EVIDENCE: '새 근거 없음',
@@ -69,7 +86,7 @@ function investigationReasonText(investigation: ReportInvestigation) {
 }
 
 export function ReportsPage() {
-  const [reportScope, setReportScope] = useState<'ALL' | 'RUN' | 'DAILY'>('ALL')
+  const [reportScope, setReportScope] = useState<ReportScopeTab>('ALL')
   const scopeFilter = reportScope === 'ALL' ? undefined : reportScope
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [audienceOverride, setAudienceOverride] = useState<Audience | null>(null)
@@ -105,14 +122,21 @@ export function ReportsPage() {
         </div>
       </header>
 
-      <div className="report-perspective-tabs" role="group" aria-label="보고서 범위">
-        {(['ALL', 'DAILY', 'RUN'] as const).map((scope) => (
-          <button key={scope} type="button" aria-pressed={reportScope === scope}
-            className={reportScope === scope ? 'report-perspective-tab active' : 'report-perspective-tab'}
-            onClick={() => { setReportScope(scope); setSelectedId(null) }}>
-            {{ ALL: '전체', DAILY: '일일 통합', RUN: '실행별' }[scope]}
-          </button>
-        ))}
+      <div className="report-scope-bar">
+        <div className="segmented" role="group" aria-label="보고서 범위">
+          {REPORT_SCOPES.map((scope) => (
+            <button
+              key={scope}
+              type="button"
+              aria-pressed={reportScope === scope}
+              className={reportScope === scope ? 'segmented-option active' : 'segmented-option'}
+              onClick={() => { setReportScope(scope); setSelectedId(null) }}
+            >
+              {REPORT_SCOPE_LABELS[scope]}
+            </button>
+          ))}
+        </div>
+        <p className="report-scope-hint">{REPORT_SCOPE_HINTS[reportScope]}</p>
       </div>
 
       {isInitialLoading && <div className="state-panel" aria-busy="true">최신 보고서를 불러오는 중입니다.</div>}

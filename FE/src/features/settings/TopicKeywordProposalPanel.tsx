@@ -115,27 +115,26 @@ export function TopicKeywordProposalPanel() {
   return (
     <>
       <div className="proposal-toolbar">
-        <p className="muted">
-          지난 자동 수집을 바탕으로 만든 제안만 보입니다. 승인해야 다음 수집부터 새 키워드가 적용됩니다.
-        </p>
-
-        <div className="field proposal-filter-field">
-          <label htmlFor="proposal-filter">상태</label>
-          <select
-            id="proposal-filter"
-            value={filter}
-            disabled={actionPending}
-            onChange={(event) => changeFilter(event.target.value as TopicKeywordProposalFilter)}
-          >
-            {FILTER_OPTIONS.map((option) => (
-              <option value={option.value} key={option.value}>{option.label}</option>
-            ))}
-          </select>
+        <div className="segmented" role="group" aria-label="제안 상태">
+          {FILTER_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={filter === option.value}
+              className={filter === option.value ? 'segmented-option active' : 'segmented-option'}
+              disabled={actionPending}
+              onClick={() => changeFilter(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
+        {/* 승인해야 반영된다는 말은 섹션 설명이 이미 하고 있다. 여기서는 목록의 범위만 밝힌다. */}
+        <p className="proposal-toolbar-hint">지난 자동 수집이 만든 제안만 보입니다.</p>
       </div>
 
       {proposals.data.content.length === 0 ? (
-        <p className="muted proposal-empty">{emptyMessage(filter)}</p>
+        <p className="proposal-empty-state">{emptyMessage(filter)}</p>
       ) : (
         <div className="proposal-stack">
           {proposals.data.content.map((proposal) => (
