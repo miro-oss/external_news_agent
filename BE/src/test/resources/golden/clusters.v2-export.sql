@@ -13,60 +13,26 @@ set linesize 32767
 
 alter session set container=FREEPDB1;
 
+with ranked_versions as (
+    select v.*,
+           row_number() over (
+               partition by v.article_id
+               order by v.run_id, v.version_no, v.id
+           ) as replay_rank
+    from NEWS_AGENT.NEWS_ARTICLE_VERSIONS v
+    where v.run_id > 3862
+)
 select json_object(
     'id' value a.id,
-    'versioned' value case
-        when exists (
-            select 1
-            from NEWS_AGENT.NEWS_ARTICLE_VERSIONS vx
-            where vx.article_id = a.id
-              and vx.run_id > 3862
-        ) then 1
-        else 0
-    end,
-    'title' value case
-        when exists (
-            select 1
-            from NEWS_AGENT.NEWS_ARTICLE_VERSIONS vx
-            where vx.article_id = a.id
-              and vx.run_id > 3862
-        ) then (
-            select v.title
-            from NEWS_AGENT.NEWS_ARTICLE_VERSIONS v
-            where v.article_id = a.id
-              and v.run_id = (
-                  select min(vm.run_id)
-                  from NEWS_AGENT.NEWS_ARTICLE_VERSIONS vm
-                  where vm.article_id = a.id
-                    and vm.run_id > 3862
-              )
-            fetch first 1 row only
-        )
-        else a.title
-    end,
-    'body' value case
-        when exists (
-            select 1
-            from NEWS_AGENT.NEWS_ARTICLE_VERSIONS vx
-            where vx.article_id = a.id
-              and vx.run_id > 3862
-        ) then (
-            select v.body
-            from NEWS_AGENT.NEWS_ARTICLE_VERSIONS v
-            where v.article_id = a.id
-              and v.run_id = (
-                  select min(vm.run_id)
-                  from NEWS_AGENT.NEWS_ARTICLE_VERSIONS vm
-                  where vm.article_id = a.id
-                    and vm.run_id > 3862
-              )
-            fetch first 1 row only
-        )
-        else a.body
-    end
+    'versioned' value case when v.article_id is null then 0 else 1 end,
+    'title' value case when v.article_id is null then a.title else v.title end,
+    'body' value case when v.article_id is null then a.body else v.body end
     returning clob
 )
 from NEWS_AGENT.NEWS_ARTICLES a
+left join ranked_versions v
+  on v.article_id = a.id
+ and v.replay_rank = 1
 where a.id in (
     2455, 2456, 2476, 2445, 2449, 2519, 2520, 2521, 2312, 2326, 2327, 2450,
     2496, 1965, 2453, 2514, 2546, 2547, 2499, 2463, 2532, 2537, 1960, 2314,

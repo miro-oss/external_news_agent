@@ -102,21 +102,66 @@ def test_fixed_content_group_preserves_cross_topic_java_representative() -> None
     assert unions[4387].root(2) == 1
 
 
-def test_sweep_applies_fixed_organization_corroboration_rule() -> None:
+def test_sweep_reports_post_hoc_relabel_sensitivity() -> None:
     articles = [
-        _article(1, "CALIBRATION", "DGIST 반도체 검사 기술", "calibration-event"),
-        _article(2, "CALIBRATION", "DGIST 초음파 센서 개발", "calibration-event"),
-        _article(3, "HOLDOUT", "AMAT 메모리 병목 해법", "holdout-event"),
-        _article(4, "HOLDOUT", "어플라이드 3D 공정 공개", "holdout-event"),
+        _article(1, "CALIBRATION", "same event first", "calibration-event"),
+        _article(2, "CALIBRATION", "same event second", "calibration-event"),
+        _article(3, "HOLDOUT", "holdout first", "holdout-event"),
+        _article(4, "HOLDOUT", "holdout second", "holdout-event"),
     ]
+    articles[3]["sourceArticleId"] = 2410
     result = sweep(
         {
-            "datasetVersion": "test.organization-rule",
+            "datasetVersion": "test.post-hoc-relabel",
             "articleCount": 4,
+            "postHocRelabeledSourceArticleIds": [2410],
             "configuredEntityOverlapThreshold": 2,
             "configuredCommonEntityDocumentRatio": 0.10,
             "configuredTitleJaccardThreshold": 0.50,
             "configuredEntityTimeWindowHours": 48,
+            "articles": articles,
+            "pairs": [
+                _pair(1, 2, "CALIBRATION", title_jaccard=0.50),
+                _pair(3, 4, "HOLDOUT", title_jaccard=0.0, entity_overlap=0),
+            ],
+        }
+    )
+
+    sensitivity = result["postHocRelabelSensitivity"]
+    assert sensitivity["excludedSourceArticleIds"] == [2410]
+    assert sensitivity["selectedHoldoutMetrics"]["recall"] == 1.0
+
+
+def test_sweep_requires_every_organization_corroboration_predicate() -> None:
+    articles = [
+        _article(1, "CALIBRATION", "DGIST 반도체 검사 기술", "calibration-event"),
+        _article(2, "CALIBRATION", "DGIST 초음파 센서 개발", "calibration-event"),
+        _article(3, "CALIBRATION", "조직 없음 기준 하나", "no-org-a"),
+        _article(4, "CALIBRATION", "조직 없음 기준 둘", "no-org-b"),
+        _article(5, "CALIBRATION", "제목 기준 미달 하나", "weak-title-a"),
+        _article(6, "CALIBRATION", "제목 기준 미달 둘", "weak-title-b"),
+        _article(7, "CALIBRATION", "시간 기준 초과 하나", "late-a"),
+        _article(8, "CALIBRATION", "시간 기준 초과 둘", "late-b"),
+        _article(9, "CALIBRATION", "속보 시간 초과 하나", "breaking-late-a"),
+        _article(10, "CALIBRATION", "속보 시간 초과 둘", "breaking-late-b"),
+        _article(11, "CALIBRATION", "속보 경계 하나", "breaking-event"),
+        _article(12, "CALIBRATION", "속보 경계 둘", "breaking-event"),
+        _article(13, "CALIBRATION", "속보 제목 초과 하나", "breaking-title-a"),
+        _article(14, "CALIBRATION", "속보 제목 초과 둘", "breaking-title-b"),
+        _article(15, "CALIBRATION", "속보 엔티티 초과 하나", "breaking-entity-a"),
+        _article(16, "CALIBRATION", "속보 엔티티 초과 둘", "breaking-entity-b"),
+        _article(17, "HOLDOUT", "AMAT 메모리 병목 해법", "holdout-event"),
+        _article(18, "HOLDOUT", "어플라이드 3D 공정 공개", "holdout-event"),
+    ]
+    result = sweep(
+        {
+            "datasetVersion": "test.organization-rule",
+            "articleCount": 18,
+            "configuredEntityOverlapThreshold": 2,
+            "configuredCommonEntityDocumentRatio": 0.10,
+            "configuredTitleJaccardThreshold": 0.50,
+            "configuredEntityTimeWindowHours": 48,
+            "configuredBreakingTimeWindowHours": 6,
             "configuredOrganizationTitleJaccardThreshold": 0.125,
             "configuredOrganizationTimeWindowHours": 24,
             "articles": articles,
@@ -128,20 +173,88 @@ def test_sweep_applies_fixed_organization_corroboration_rule() -> None:
                     entity_overlap=0,
                     title_jaccard=0.125,
                     organization_overlap=1,
+                    hours_apart=24.0,
                 ),
                 _pair(
                     3,
                     4,
+                    "CALIBRATION",
+                    entity_overlap=0,
+                    title_jaccard=0.125,
+                    organization_overlap=0,
+                ),
+                _pair(
+                    5,
+                    6,
+                    "CALIBRATION",
+                    entity_overlap=0,
+                    title_jaccard=0.124,
+                    organization_overlap=1,
+                ),
+                _pair(
+                    7,
+                    8,
+                    "CALIBRATION",
+                    entity_overlap=0,
+                    title_jaccard=0.125,
+                    organization_overlap=1,
+                    hours_apart=24.01,
+                ),
+                _pair(
+                    9,
+                    10,
+                    "CALIBRATION",
+                    entity_overlap=0,
+                    title_jaccard=0.125,
+                    organization_overlap=1,
+                    hours_apart=6.01,
+                    breaking_pair=True,
+                ),
+                _pair(
+                    11,
+                    12,
+                    "CALIBRATION",
+                    entity_overlap=0,
+                    title_jaccard=0.125,
+                    organization_overlap=1,
+                    hours_apart=6.0,
+                    breaking_pair=True,
+                ),
+                _pair(
+                    13,
+                    14,
+                    "CALIBRATION",
+                    entity_overlap=0,
+                    title_jaccard=0.50,
+                    hours_apart=6.01,
+                    breaking_pair=True,
+                ),
+                _pair(
+                    15,
+                    16,
+                    "CALIBRATION",
+                    entity_overlap=2,
+                    title_jaccard=0.0,
+                    hours_apart=6.01,
+                    breaking_pair=True,
+                ),
+                _pair(
+                    17,
+                    18,
                     "HOLDOUT",
                     entity_overlap=0,
                     title_jaccard=0.125,
                     organization_overlap=1,
+                    hours_apart=24.0,
                 ),
             ],
         }
     )
 
-    assert result["selected"]["title_jaccard_threshold"] == 0.50
+    assert result["bodySource"] == "unspecified"
+    assert result["selected"]["organization_title_jaccard_threshold"] == 0.125
+    assert result["selected"]["organization_time_window_hours"] == 24
+    assert result["configured"]["calibrationMetrics"]["precision"] == 1.0
     assert result["configured"]["calibrationMetrics"]["recall"] == 1.0
     assert result["configured"]["holdoutMetrics"]["recall"] == 1.0
     assert result["decisionGatePassed"] is True
@@ -170,6 +283,8 @@ def _pair(
     entity_overlap: int = 1,
     title_jaccard: float = 0.0,
     organization_overlap: int = 0,
+    hours_apart: float = 1.0,
+    breaking_pair: bool = False,
 ) -> dict[str, object]:
     return {
         "leftArticleId": left,
@@ -178,6 +293,7 @@ def _pair(
         "titleJaccard": title_jaccard,
         "entityOverlap": entity_overlap,
         "organizationOverlap": organization_overlap,
-        "hoursApart": 1.0,
+        "breakingPair": breaking_pair,
+        "hoursApart": hours_apart,
         "split": split,
     }

@@ -106,39 +106,62 @@ The local run 3862 rows were still available, so the 56 fixture IDs were replaye
 stored bodies. Ten articles had been refreshed after run 3862; for those, the earliest later
 `news_article_versions` row restores the title and body that existed immediately before that
 refresh. Version rows do not retain summaries, so the replay omits the summary for those ten
-articles instead of mixing states. The committed `clusters.v2-export.sql` records this extraction
-without committing any article body.
+articles instead of mixing states. `clusters.v2-export.sql` uses an ordered `row_number()` to make
+that choice deterministic and does not commit any article body.
 
-The source-faithful replay contained 48 usable full bodies. SimHash formed one two-article group,
-and both articles were correctly labeled `sk-japan-factory`; there were no mixed content groups.
-After the #141 fix, the remaining failure was under-merging: almost every sampled missed positive
-pair still shared an explicit organization in its title or summary (DGIST, Applied Materials,
-SK hynix, or LG Electronics). This rejects the local-NLI/embedding condition that the misses must
-mostly lack usable title/entity overlap.
-
-Issue #144 therefore preserves the global title Jaccard threshold and adds one conservative edge:
+The replay contained 48 usable full bodies. After the #141 fix, most sampled missed positive pairs
+shared an explicit organization in title or summary. Issue #144 therefore added an auxiliary
+organization edge while preserving the configured global title threshold:
 
 - a known organization must appear in both title/summary fields;
 - title Jaccard must be at least 0.125; and
 - publication times must be no more than 24 hours apart.
 
-Product codes and body-only background mentions cannot satisfy this edge. The organization names
-come from a closed alias map, and short ASCII aliases require word boundaries. When sweep candidates
-tie exactly, the evaluator retains the configured title threshold rather than reporting a
-meaningless stricter candidate.
+Review exposed two unsafe bypasses in the first implementation. An organization appearing in at
+least eight voting documents is now removed from auxiliary overlap, so one large company cannot
+join a topic. Organizations found only in article bodies are not added to the generic two-entity
+edge; this prevents background mentions such as Amazon and Meta from joining unrelated stories.
+Korean aliases use letter boundaries with an explicit postposition allowance, so words such as
+`인텔리전스`, `애플리케이션`, and `메타버스` do not match company aliases. The ambiguous name
+`미래산업` requires a corporate marker.
+
+The organization threshold and window were introduced after the original grid was precommitted.
+The review therefore adds a disclosed post-hoc sensitivity grid rather than calling them
+precommitted candidates:
+
+| Added axis | Candidates |
+|---|---|
+| Organization title Jaccard | 0.10 / 0.125 / 0.15 / 0.20 |
+| Organization time window | 12h / 24h / 48h |
+
+The evaluator now mirrors Java's six-hour breaking-news branch. It reports all configurations tied
+on selection metrics, then uses the stricter title/organization thresholds and shorter organization
+window only as a deterministic tie-break. There are 192 metric-tied candidates on v2, so the chosen
+configuration is not uniquely identified by calibration data.
 
 | Final evaluation | Jaccard | Entity window | Org title/window | Precision | Recall | ARI | V-measure |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| v1 calibration | 0.50 | 48h | 0.125 / 24h | 1.0000 | 0.9750 | 0.9871 | 0.9962 |
-| **v1 holdout** | 0.50 | 48h | 0.125 / 24h | **1.0000** | **1.0000** | 1.0000 | 1.0000 |
-| v2 fixture calibration | 0.50 | 48h | 0.125 / 24h | 1.0000 | 0.9024 | 0.9417 | 0.9751 |
-| **v2 fixture holdout** | 0.50 | 48h | 0.125 / 24h | **1.0000** | **1.0000** | 1.0000 | 1.0000 |
-| v2 full-body calibration | 0.50 | 48h | 0.125 / 24h | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
-| **v2 full-body holdout** | 0.50 | 48h | 0.125 / 24h | **1.0000** | **1.0000** | 1.0000 | 1.0000 |
+| v1 selected calibration | 0.50 | 48h | 0.20 / 12h | 1.0000 | 0.9750 | 0.9871 | 0.9962 |
+| **v1 selected holdout** | 0.50 | 48h | 0.20 / 12h | **1.0000** | **1.0000** | 1.0000 | 1.0000 |
+| v2 fixture configured calibration | 0.50 | 48h | 0.125 / 24h | 1.0000 | 0.5854 | 0.7116 | 0.8844 |
+| **v2 fixture configured holdout** | 0.50 | 48h | 0.125 / 24h | **1.0000** | **0.7045** | 0.8109 | 0.9596 |
+| v2 fixture selected calibration | 0.45 | 48h | 0.20 / 24h | 1.0000 | 0.6585 | 0.7712 | 0.9027 |
+| **v2 fixture selected holdout** | 0.45 | 48h | 0.20 / 24h | **1.0000** | **0.5000** | 0.6426 | 0.9265 |
+| v2 full-body configured calibration | 0.50 | 48h | 0.125 / 24h | 1.0000 | 0.7317 | 0.8266 | 0.9310 |
+| **v2 full-body configured holdout** | 0.50 | 48h | 0.125 / 24h | **1.0000** | **1.0000** | 1.0000 | 1.0000 |
+| v2 full-body selected calibration | 0.45 | 48h | 0.20 / 24h | 1.0000 | 0.8049 | 0.8782 | 0.9514 |
+| **v2 full-body selected holdout** | 0.45 | 48h | 0.20 / 24h | **1.0000** | **0.5000** | 0.6426 | 0.9265 |
 
-Both v2 paths pass the precommitted holdout precision/recall gate. The configured global values
-remain 0.50, 48h, and common-entity ratio 0.10. On this decision table, clusters.v2 is finalized
-without an embedding or local-NLI stage.
+Source article 2410 was relabeled only after inspecting replay predictions, so this holdout is no
+longer independent. Excluding 2410 leaves pairwise precision/recall unchanged: selected full-body
+holdout remains 1.0000/0.5000 and configured full-body holdout remains 1.0000/1.0000. The evaluator
+emits these values under `postHocRelabelSensitivity`.
+
+The configured full-body regression is useful evidence for the targeted fix, but it is not an
+unbiased final threshold result. The independently selected configuration fails the recall gate.
+Consequently `clusters.v2` remains a regression set, production thresholds are not changed from
+0.50/48h/0.10 plus the reviewed 0.125/24h organization edge, and the embedding/local-NLI decision
+is deferred until a fresh run is labeled without inspecting predictions.
 
 ## Reproduction
 
@@ -153,8 +176,8 @@ uv run --group dev python -m app.eval.cluster_sweep \
   --java-pairs ../BE/build/reports/clusters/pairs.v2.json
 ```
 
-Before issue #144, the second command intentionally exited with status 1 because the gate failed.
-It now exits with status 0 and emits `decisionGatePassed: true`.
+The v2 command exits with status 1 because the independently selected configuration does not pass
+the holdout recall gate. This is an expected measurement result, not a test failure.
 
 For a source-faithful replay, run `clusters.v2-export.sql` through SQL*Plus with
 `NLS_LANG=AMERICAN_AMERICA.AL32UTF8`, save the JSONL outside the repository, then run:
@@ -171,5 +194,6 @@ uv run --group dev python -m app.eval.cluster_sweep \
   --java-pairs ../BE/build/reports/clusters/pairs.v2.fullbody.json
 ```
 
-After issue #144, both the ordinary fixture command and this full-body command exit with status 0
-and emit `decisionGatePassed: true`.
+Both the ordinary fixture command and the full-body command currently exit with status 1 and emit
+`decisionGatePassed: false`. The configured full-body metrics and the post-hoc relabel sensitivity
+remain available in the JSON report for regression tracking.

@@ -47,6 +47,8 @@ public class IssueClusteringProperties implements InitializingBean {
                 || !Double.isFinite(organizationTitleJaccardThreshold)
                 || organizationTitleJaccardThreshold <= 0
                 || organizationTitleJaccardThreshold > 1
+                || organizationTitleJaccardThreshold >= titleJaccardThreshold
+                || organizationTimeWindow.compareTo(entityTimeWindow) > 0
                 || !Double.isFinite(commonEntityDocumentRatio)
                 || commonEntityDocumentRatio <= 0
                 || commonEntityDocumentRatio > 1

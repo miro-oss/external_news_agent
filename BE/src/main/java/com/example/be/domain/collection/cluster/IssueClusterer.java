@@ -26,6 +26,8 @@ public class IssueClusterer {
     private static final OffsetDateTime UNKNOWN_EVENT_TIME = OffsetDateTime.parse("1970-01-01T00:00:00Z");
     /** 기사 한 쌍에만 나타나는 엔티티(문서빈도 2)는 사건 신호이므로 흔한 주제 어휘로 보지 않는다. */
     private static final int MIN_COMMON_ENTITY_DOCUMENT_FREQUENCY = 3;
+    /** 조직 하나가 대형 주제 전체를 다시 연결하지 못하게 하되 소규모 보도자료 사건군은 남긴다. */
+    private static final int MAX_COMMON_ORGANIZATION_DOCUMENT_FREQUENCY = 8;
 
     private final IssueClusteringProperties properties;
     private final BreakingNewsDetector breakingNewsDetector;
@@ -185,12 +187,12 @@ public class IssueClusterer {
         unique.forEach(article -> {
             String coreTitle = breakingNewsDetector.coreTitle(article.title());
             titleTokens.put(article.articleId(), TitleTokenizer.tokens(coreTitle));
-            organizations.put(article.articleId(),
-                    entityExtractor.extractOrganizations(coreTitle, article.summary()));
-            entities.put(article.articleId(), entityExtractor.extract(
+            DeterministicEntityExtractor.Extraction extraction = entityExtractor.extractWithOrganizations(
                     coreTitle, article.summary(),
                     ArticleBodyCleaner.withoutTrailingBoilerplate(article.body()),
-                    article.topicKeywords()));
+                    article.topicKeywords());
+            organizations.put(article.articleId(), extraction.organizations());
+            entities.put(article.articleId(), extraction.entities());
         });
 
         // 같은 본문 중복군에서는 대표만 사건 유사도 투표에 참여한다.
@@ -199,6 +201,7 @@ public class IssueClusterer {
                         .equals(article.articleId()))
                 .toList();
         Set<String> commonEntities = commonEntities(voting, entities);
+        Set<String> commonOrganizations = commonOrganizations(voting, organizations);
         for (int left = 0; left < voting.size(); left++) {
             for (int right = left + 1; right < voting.size(); right++) {
                 ClusterArticle first = voting.get(left);
@@ -209,8 +212,10 @@ public class IssueClusterer {
                         entities.get(first.articleId()),
                         entities.get(second.articleId()),
                         commonEntities);
-                int organizationOverlap = intersectionSize(
-                        organizations.get(first.articleId()), organizations.get(second.articleId()));
+                int organizationOverlap = discriminativeOverlap(
+                        organizations.get(first.articleId()),
+                        organizations.get(second.articleId()),
+                        commonOrganizations);
                 double hoursApart = hoursApart(first.eventTime(), second.eventTime());
                 boolean breakingPair = breakingNewsDetector.isBreaking(first)
                         || breakingNewsDetector.isBreaking(second);
@@ -218,20 +223,17 @@ public class IssueClusterer {
                 boolean enoughEntities = entityOverlap >= properties.getEntityOverlapThreshold();
                 boolean organizationTitleMatches = organizationOverlap >= 1
                         && jaccard >= properties.getOrganizationTitleJaccardThreshold();
-                boolean matches = breakingPair
-                        ? within(first.eventTime(), second.eventTime(), properties.getBreakingTimeWindow())
-                        && (titleMatches || enoughEntities || organizationTitleMatches)
-                        : titleMatches || (enoughEntities
-                        && within(first.eventTime(), second.eventTime(), properties.getEntityTimeWindow()))
-                        || (organizationTitleMatches
-                        && within(first.eventTime(), second.eventTime(), properties.getOrganizationTimeWindow()));
+                boolean matches = matchesIssue(
+                        first, second, breakingPair,
+                        titleMatches, enoughEntities, organizationTitleMatches);
                 if (matches) {
                     union.join(first.articleId(), second.articleId());
                 }
                 if (includePairScores) {
                     pairScores.add(new ClusterPlan.PairScore(
                             first.articleId(), second.articleId(), topicId,
-                            jaccard, entityOverlap, organizationOverlap, hoursApart, matches));
+                            jaccard, entityOverlap, organizationOverlap,
+                            breakingPair, hoursApart, matches));
                 }
             }
         }
@@ -329,10 +331,21 @@ public class IssueClusterer {
         return (double) intersection.size() / union.size();
     }
 
-    private int intersectionSize(Set<String> left, Set<String> right) {
-        Set<String> intersection = new HashSet<>(left);
-        intersection.retainAll(right);
-        return intersection.size();
+    private boolean matchesIssue(ClusterArticle first,
+                                 ClusterArticle second,
+                                 boolean breakingPair,
+                                 boolean titleMatches,
+                                 boolean enoughEntities,
+                                 boolean organizationTitleMatches) {
+        if (breakingPair) {
+            return within(first.eventTime(), second.eventTime(), properties.getBreakingTimeWindow())
+                    && (titleMatches || enoughEntities || organizationTitleMatches);
+        }
+        return titleMatches
+                || (enoughEntities
+                && within(first.eventTime(), second.eventTime(), properties.getEntityTimeWindow()))
+                || (organizationTitleMatches
+                && within(first.eventTime(), second.eventTime(), properties.getOrganizationTimeWindow()));
     }
 
     /**
@@ -345,18 +358,30 @@ public class IssueClusterer {
      * <p>표본이 작으면 비율이 의미를 갖지 못하므로 기사 수가 기준 미만이면 아무것도 빼지 않는다.
      */
     private Set<String> commonEntities(List<ClusterArticle> voting, Map<Long, Set<String>> entities) {
+        int cut = Math.max(
+                MIN_COMMON_ENTITY_DOCUMENT_FREQUENCY,
+                (int) Math.ceil(voting.size() * properties.getCommonEntityDocumentRatio()));
+        return commonValues(voting, entities, cut);
+    }
+
+    /** 한 조직이 주제 전체의 보조 간선을 만들지 않도록 조직 전용의 문서빈도 상한을 둔다. */
+    private Set<String> commonOrganizations(List<ClusterArticle> voting,
+                                            Map<Long, Set<String>> organizations) {
+        return commonValues(voting, organizations, MAX_COMMON_ORGANIZATION_DOCUMENT_FREQUENCY);
+    }
+
+    private Set<String> commonValues(List<ClusterArticle> voting,
+                                     Map<Long, Set<String>> values,
+                                     int cut) {
         if (voting.size() < properties.getCommonEntityMinArticles()) {
             return Set.of();
         }
         Map<String, Integer> documentFrequency = new HashMap<>();
         for (ClusterArticle article : voting) {
-            for (String entity : entities.getOrDefault(article.articleId(), Set.of())) {
-                documentFrequency.merge(entity, 1, Integer::sum);
+            for (String value : values.getOrDefault(article.articleId(), Set.of())) {
+                documentFrequency.merge(value, 1, Integer::sum);
             }
         }
-        int cut = Math.max(
-                MIN_COMMON_ENTITY_DOCUMENT_FREQUENCY,
-                (int) Math.ceil(voting.size() * properties.getCommonEntityDocumentRatio()));
         return documentFrequency.entrySet().stream()
                 .filter(entry -> entry.getValue() >= cut)
                 .map(Map.Entry::getKey)

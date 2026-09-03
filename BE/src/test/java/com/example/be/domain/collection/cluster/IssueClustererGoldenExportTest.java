@@ -80,6 +80,7 @@ class IssueClustererGoldenExportTest {
                 pair.put("titleJaccard", score.titleJaccard());
                 pair.put("entityOverlap", score.entityOverlap());
                 pair.put("organizationOverlap", score.organizationOverlap());
+                pair.put("breakingPair", score.breakingPair());
                 pair.put("hoursApart", score.hoursApart());
                 pair.put("expectedSameIssue", expected);
                 pair.put("predictedSameIssue", predicted);
@@ -116,11 +117,13 @@ class IssueClustererGoldenExportTest {
         output.put("configuredTitleJaccardThreshold", properties.getTitleJaccardThreshold());
         output.put("configuredEntityTimeWindowHours", properties.getEntityTimeWindow().toHours());
         output.put("configuredEntityOverlapThreshold", properties.getEntityOverlapThreshold());
+        output.put("configuredBreakingTimeWindowHours", properties.getBreakingTimeWindow().toHours());
         output.put("configuredOrganizationTimeWindowHours",
                 properties.getOrganizationTimeWindow().toHours());
         output.put("configuredOrganizationTitleJaccardThreshold",
                 properties.getOrganizationTitleJaccardThreshold());
         output.put("configuredCommonEntityDocumentRatio", properties.getCommonEntityDocumentRatio());
+        output.put("bodySource", "synthetic-fixture");
         output.put("precision", precision);
         output.put("recall", recall);
         output.put("articles", exportedArticles);

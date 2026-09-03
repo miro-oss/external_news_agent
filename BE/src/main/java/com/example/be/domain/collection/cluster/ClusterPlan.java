@@ -76,6 +76,7 @@ public record ClusterPlan(
             double titleJaccard,
             int entityOverlap,
             int organizationOverlap,
+            boolean breakingPair,
             double hoursApart,
             boolean sameCluster
     ) {
