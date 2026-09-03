@@ -247,7 +247,8 @@ public class TopicController {
             description = """
                     수집 주제를 부분 수정합니다. 전달한 필드만 반영됩니다.
                     키워드 배열은 부분 병합이 아니라 전체 교체입니다. 빈 배열을 보내면 해당 필터가 사라집니다.
-                    intervalMinutes를 바꾸면 스케줄러가 다음 실행부터 바뀐 주기를 적용합니다.
+                    intervalMinutes는 60분, 12시간(720분), 24시간(1440분) 중 하나이며,
+                    바꾸면 스케줄러가 다음 실행부터 바뀐 주기를 적용합니다.
                     """
     )
     @ApiResponses({
@@ -267,7 +268,7 @@ public class TopicController {
                                 "optionalKeywords": ["SK하이닉스", "삼성전자", "마이크론"],
                                 "excludedKeywords": ["광고", "채용", "주가"],
                                 "batchSize": 300,
-                                "intervalMinutes": 30,
+                                "intervalMinutes": 720,
                                 "active": true
                               }
                             }
@@ -279,7 +280,7 @@ public class TopicController {
                             {
                               "isSuccess": false,
                               "code": "TOPIC400",
-                              "message": "batchSize는 1 이상 300 이하, intervalMinutes는 10 이상이어야 합니다.",
+                              "message": "batchSize는 1 이상 300 이하, intervalMinutes는 60, 720, 1440 중 하나여야 합니다.",
                               "result": {}
                             }
                             """))),

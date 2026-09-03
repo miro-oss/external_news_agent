@@ -16,6 +16,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -211,20 +212,45 @@ class TopicRepositoryIntegrationTests {
     }
 
     @Test
+    void findsOnlyTopicsWhoseCollectionIntervalHasElapsed() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 3, 10, 0);
+        Source activeSource = sourceRepository.save(source(Source.KIND_FEED, "만료 확인 소스", "https://example.com/due"));
+
+        Topic neverCollected = topic("미수집 주제");
+        neverCollected.replaceSources(List.of(activeSource));
+        Topic due = topic("만료된 주제");
+        due.replaceSources(List.of(activeSource));
+        due.recordCollectionStartedAt(now.minusMinutes(60));
+        Topic notDue = topic("아직 아닌 주제");
+        notDue.replaceSources(List.of(activeSource));
+        notDue.recordCollectionStartedAt(now.minusMinutes(59));
+
+        Topic savedNeverCollected = topicRepository.save(neverCollected);
+        Topic savedDue = topicRepository.save(due);
+        Topic savedNotDue = topicRepository.save(notDue);
+        flushAndClear();
+
+        List<Long> dueTopicIds = topicRepository.findDueCollectionTopicIds(now);
+        assertTrue(dueTopicIds.contains(savedNeverCollected.getId()));
+        assertTrue(dueTopicIds.contains(savedDue.getId()));
+        assertFalse(dueTopicIds.contains(savedNotDue.getId()));
+    }
+
+    @Test
     void updatesAndDeletesTopic() {
         Topic saved = topicRepository.save(topic("수정 통합테스트"));
         flushAndClear();
 
         Topic loaded = topicRepository.findById(saved.getId()).orElseThrow();
         loaded.update("수정 통합테스트", "HBM4 반도체", List.of("HBM"), List.of("SK하이닉스"),
-                List.of("광고", "채용", "주가"), 20, 30, false);
+                List.of("광고", "채용", "주가"), 20, 720, false);
         flushAndClear();
 
         Topic reloaded = topicRepository.findById(saved.getId()).orElseThrow();
         assertEquals("HBM4 반도체", reloaded.getQueryText());
         assertEquals(List.of("광고", "채용", "주가"), reloaded.getExcludedKeywords());
         assertEquals(20, reloaded.getBatchSize());
-        assertEquals(30, reloaded.getIntervalMinutes());
+        assertEquals(720, reloaded.getIntervalMinutes());
         assertFalse(reloaded.isActive());
 
         topicRepository.delete(reloaded);

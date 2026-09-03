@@ -123,7 +123,7 @@ class TopicControllerTest {
                         .optionalKeywords(List.of())
                         .excludedKeywords(List.of("광고", "채용", "주가"))
                         .batchSize(20)
-                        .intervalMinutes(30)
+                        .intervalMinutes(720)
                         .active(true)
                         .build());
 
@@ -134,7 +134,7 @@ class TopicControllerTest {
                                   "queryText": "HBM4 반도체",
                                   "excludedKeywords": ["광고", "채용", "주가"],
                                   "batchSize": 20,
-                                  "intervalMinutes": 30
+                                  "intervalMinutes": 720
                                 }
                                 """))
                 .andExpect(status().isOk())
@@ -142,7 +142,7 @@ class TopicControllerTest {
                 .andExpect(jsonPath("$.message").value("수정되었습니다."))
                 .andExpect(jsonPath("$.result.queryText").value("HBM4 반도체"))
                 .andExpect(jsonPath("$.result.batchSize").value(20))
-                .andExpect(jsonPath("$.result.intervalMinutes").value(30));
+                .andExpect(jsonPath("$.result.intervalMinutes").value(720));
     }
 
     @Test

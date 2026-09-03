@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -106,6 +107,64 @@ class CollectionRunCreatorTest {
         assertTrue(saved.isForceRefresh());
         assertEquals(2, saved.getItems().size());
         assertEquals(RunItemStatus.RUNNING, saved.getItems().get(0).getStatus());
+    }
+
+    @Test
+    void createScheduledBuildsScheduledRunAndRecordsItsStartTime() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 3, 10, 0);
+        Topic scheduledTopic = topic(1L, "HBM");
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(scheduledTopic));
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L)))
+                .thenReturn(List.of(target(scheduledTopic, source(10L))));
+        when(runRepository.findInProgressByTopicIds(List.of(1L), RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(List.of());
+        when(runRepository.saveAndFlush(any(CollectionRun.class))).thenAnswer(invocation -> {
+            CollectionRun run = invocation.getArgument(0);
+            return CollectionRun.builder()
+                    .id(42L)
+                    .status(run.getStatus())
+                    .triggerType(run.getTriggerType())
+                    .forceRefresh(run.isForceRefresh())
+                    .startedAt(run.getStartedAt())
+                    .build();
+        });
+
+        assertTrue(runCreator.createScheduled(1L, AgentPlan.FREE, now));
+
+        ArgumentCaptor<CollectionRun> captor = ArgumentCaptor.forClass(CollectionRun.class);
+        verify(runRepository).saveAndFlush(captor.capture());
+        assertEquals(TriggerType.SCHEDULED, captor.getValue().getTriggerType());
+        assertEquals(now, scheduledTopic.getLastCollectedAt());
+        verify(runAsyncService).execute(42L);
+    }
+
+    @Test
+    void createScheduledSkipsTopicBeforeItsNextDueTime() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 3, 10, 0);
+        Topic scheduledTopic = topic(1L, "HBM");
+        scheduledTopic.recordCollectionStartedAt(now.minusMinutes(30));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(scheduledTopic));
+
+        assertFalse(runCreator.createScheduled(1L, AgentPlan.FREE, now));
+
+        verify(runRepository, never()).saveAndFlush(any());
+        verify(runAsyncService, never()).execute(any());
+    }
+
+    @Test
+    void createScheduledSkipsWhenManualCollectionStartedAfterDueTopicLookup() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 3, 10, 0);
+        Topic scheduledTopic = topic(1L, "HBM");
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(scheduledTopic));
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L)))
+                .thenReturn(List.of(target(scheduledTopic, source(10L))));
+        when(runRepository.findInProgressByTopicIds(List.of(1L), RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(List.of(CollectionRun.builder().id(41L).status(RunStatus.RUNNING).build()));
+
+        assertFalse(runCreator.createScheduled(1L, AgentPlan.FREE, now));
+
+        verify(runRepository, never()).saveAndFlush(any());
+        verify(runAsyncService, never()).execute(any());
     }
 
     @Test
