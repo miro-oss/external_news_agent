@@ -103,10 +103,27 @@ export interface Topic {
   active: boolean
 }
 
+export interface TopicSurgeKeyword {
+  keyword: string
+  issueCount: number
+  previousIssueCount: number
+  deltaIssueCount: number
+  zScore: number | null
+  burst: boolean
+}
+
+export interface TopicRelatedKeyword {
+  keyword: string
+  issueCount: number
+  sharePercent: number
+}
+
 /** GET /topics 목록의 주제 1건. */
 export interface TopicSummary extends Topic {
   linkedSourceCount: number
   lastCollectedAt: string | null
+  surgeKeywords: TopicSurgeKeyword[]
+  relatedKeywords: TopicRelatedKeyword[]
 }
 
 /** POST /topics 응답의 주제 1건. */

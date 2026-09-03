@@ -1,3 +1,4 @@
+import type { TopicRelatedKeyword, TopicSurgeKeyword } from '../../api/types'
 import { useTopics } from '../../api/queries'
 import { ApiError } from '../../api/client'
 
@@ -29,6 +30,19 @@ function formatKeywords(keywords: string[]) {
   return keywords.length > 0 ? keywords.join(', ') : '—'
 }
 
+function formatSignedDelta(value: number) {
+  return value > 0 ? `+${value}` : `${value}`
+}
+
+function surgeKeywordTitle(keyword: TopicSurgeKeyword) {
+  const zScore = keyword.zScore === null ? '계산 불가' : keyword.zScore.toFixed(2)
+  return `${keyword.keyword} · 최근 7일 ${keyword.issueCount}이슈 · 전주 대비 ${formatSignedDelta(keyword.deltaIssueCount)} · z-score ${zScore}`
+}
+
+function relatedKeywordTitle(keyword: TopicRelatedKeyword) {
+  return `${keyword.keyword} · 최근 7일 ${keyword.issueCount}이슈 · 주제 내 비중 ${keyword.sharePercent.toFixed(0)}%`
+}
+
 export function TopicTable() {
   const topics = useTopics()
 
@@ -54,6 +68,8 @@ export function TopicTable() {
           <col className="topic-required-column" />
           <col className="topic-optional-column" />
           <col className="topic-excluded-column" />
+          <col className="topic-surge-column" />
+          <col className="topic-related-column" />
           <col className="topic-interval-column" />
           <col className="topic-collected-column" />
           <col className="topic-status-column" />
@@ -65,6 +81,8 @@ export function TopicTable() {
             <th title="모두 포함되어야 하는 AND 조건입니다.">필수 키워드</th>
             <th title="하나라도 포함되면 통과하는 OR 조건입니다.">선택 키워드</th>
             <th title="하나라도 포함되면 제외하는 NOT 조건입니다.">제외 키워드</th>
+            <th title="최근 7일 기사×이슈 관측 기준으로 전주보다 늘어난 키워드입니다.">지난주 급상승</th>
+            <th title="최근 7일 이 주제 이슈에서 반복 등장한 연관 키워드입니다.">연관 키워드</th>
             <th title="새로운 기사를 다시 확인하는 주기입니다.">수집 주기</th>
             <th>마지막 수집</th>
             <th>상태</th>
@@ -86,6 +104,23 @@ export function TopicTable() {
               <td>{formatKeywords(topic.requiredKeywords)}</td>
               <td>{formatKeywords(topic.optionalKeywords)}</td>
               <td>{formatKeywords(topic.excludedKeywords)}</td>
+              <td className="topic-signal-cell">
+                <KeywordSignalList
+                  items={topic.surgeKeywords ?? []}
+                  emptyLabel="—"
+                  renderLabel={(keyword) => `${keyword.keyword} ${formatSignedDelta(keyword.deltaIssueCount)}`}
+                  renderTitle={surgeKeywordTitle}
+                  variant={(keyword) => keyword.burst ? 'burst' : 'neutral'}
+                />
+              </td>
+              <td className="topic-signal-cell">
+                <KeywordSignalList
+                  items={topic.relatedKeywords ?? []}
+                  emptyLabel="—"
+                  renderLabel={(keyword) => `${keyword.keyword} ${keyword.sharePercent.toFixed(0)}%`}
+                  renderTitle={relatedKeywordTitle}
+                />
+              </td>
               <td>{formatInterval(topic.intervalMinutes)}</td>
               <td>{formatCollectedAt(topic.lastCollectedAt)}</td>
               <td>
@@ -97,6 +132,38 @@ export function TopicTable() {
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+function KeywordSignalList<T extends TopicSurgeKeyword | TopicRelatedKeyword>({
+  items,
+  emptyLabel,
+  renderLabel,
+  renderTitle,
+  variant,
+}: {
+  items: T[]
+  emptyLabel: string
+  renderLabel: (item: T) => string
+  renderTitle: (item: T) => string
+  variant?: (item: T) => 'burst' | 'neutral'
+}) {
+  if (items.length === 0) {
+    return <span className="topic-signal-empty">{emptyLabel}</span>
+  }
+
+  return (
+    <div className="topic-signal-list">
+      {items.map((item) => (
+        <span
+          className={variant?.(item) === 'burst' ? 'topic-signal-chip burst' : 'topic-signal-chip'}
+          key={renderLabel(item)}
+          title={renderTitle(item)}
+        >
+          {renderLabel(item)}
+        </span>
+      ))}
     </div>
   )
 }
