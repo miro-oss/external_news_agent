@@ -63,7 +63,7 @@ function emptyMessage(filter: TopicKeywordProposalFilter) {
 export function TopicKeywordProposalPanel() {
   const [filter, setFilter] = useState<TopicKeywordProposalFilter>('PENDING')
   const [success, setSuccess] = useState<string | null>(null)
-  const [actingId, setActingId] = useState<number | null>(null)
+  const [actingIds, setActingIds] = useState<Set<number>>(() => new Set())
   const proposals = useTopicKeywordProposals(filter)
   const approve = useApproveTopicKeywordProposal()
   const reject = useRejectTopicKeywordProposal()
@@ -76,19 +76,25 @@ export function TopicKeywordProposalPanel() {
 
   function changeFilter(next: TopicKeywordProposalFilter) {
     resetFeedback()
-    setActingId(null)
+    setActingIds(new Set())
     setFilter(next)
   }
 
   function review(proposalId: number, action: 'approve' | 'reject') {
+    if (actingIds.has(proposalId)) return
+
     resetFeedback()
-    setActingId(proposalId)
+    setActingIds((current) => new Set(current).add(proposalId))
     const mutation = action === 'approve' ? approve : reject
     mutation.mutate(proposalId, {
       onSuccess: (proposal) => {
         setSuccess(`"${proposal.topicName}" 키워드 제안을 ${action === 'approve' ? '승인' : '반려'}했습니다.`)
       },
-      onSettled: () => setActingId(null),
+      onSettled: () => setActingIds((current) => {
+        const next = new Set(current)
+        next.delete(proposalId)
+        return next
+      }),
     })
   }
 
@@ -103,14 +109,14 @@ export function TopicKeywordProposalPanel() {
     return <p className="error">{reason}</p>
   }
 
-  const actionPending = approve.isPending || reject.isPending
+  const actionPending = actingIds.size > 0
   const mutationError = approve.error ?? reject.error
 
   return (
     <>
       <div className="proposal-toolbar">
         <p className="muted">
-          지난 scheduled run을 바탕으로 만든 제안만 보입니다. 승인해야 다음 수집부터 새 키워드가 적용됩니다.
+          지난 자동 수집을 바탕으로 만든 제안만 보입니다. 승인해야 다음 수집부터 새 키워드가 적용됩니다.
         </p>
 
         <div className="field proposal-filter-field">
@@ -136,8 +142,7 @@ export function TopicKeywordProposalPanel() {
             <ProposalCard
               key={proposal.id}
               proposal={proposal}
-              actionPending={actionPending}
-              actingId={actingId}
+              isActing={actingIds.has(proposal.id)}
               onApprove={() => review(proposal.id, 'approve')}
               onReject={() => review(proposal.id, 'reject')}
             />
@@ -152,19 +157,15 @@ export function TopicKeywordProposalPanel() {
 
 function ProposalCard({
   proposal,
-  actionPending,
-  actingId,
+  isActing,
   onApprove,
   onReject,
 }: {
   proposal: TopicKeywordProposal
-  actionPending: boolean
-  actingId: number | null
+  isActing: boolean
   onApprove: () => void
   onReject: () => void
 }) {
-  const isActingThis = actionPending && actingId === proposal.id
-
   return (
     <article className="proposal-card">
       <div className="proposal-header">
@@ -176,7 +177,7 @@ function ProposalCard({
         </div>
         <p className="proposal-summary">{proposal.summary}</p>
         <p className="proposal-meta">
-          실행 #{proposal.collectionRunId} · 제안 {formatDateTime(proposal.createdAt)}
+          자동 수집 #{proposal.collectionRunId} · 제안 {formatDateTime(proposal.createdAt)}
           {proposal.reviewedAt && ` · 검토 ${formatDateTime(proposal.reviewedAt)}`}
         </p>
       </div>
@@ -210,11 +211,11 @@ function ProposalCard({
 
       {proposal.status === 'PENDING' && (
         <div className="proposal-actions">
-          <button type="button" className="secondary-button" disabled={actionPending} onClick={onReject}>
-            {isActingThis ? '처리 중…' : '반려'}
+          <button type="button" className="secondary-button" disabled={isActing} onClick={onReject}>
+            {isActing ? '처리 중…' : '반려'}
           </button>
-          <button type="button" disabled={actionPending} onClick={onApprove}>
-            {isActingThis ? '처리 중…' : '승인'}
+          <button type="button" disabled={isActing} onClick={onApprove}>
+            {isActing ? '처리 중…' : '승인'}
           </button>
         </div>
       )}

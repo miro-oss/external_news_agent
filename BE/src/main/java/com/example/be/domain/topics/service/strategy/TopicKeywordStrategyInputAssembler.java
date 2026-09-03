@@ -17,8 +17,10 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -34,13 +36,21 @@ public class TopicKeywordStrategyInputAssembler {
     public Snapshot assemble(Long runId, Long topicId) {
         Topic topic = topicRepository.findById(topicId)
                 .orElseThrow(() -> new TopicException(TopicErrorCode.TOPIC_NOT_FOUND));
-        List<AgentKeywordStrategyRequest.ArticleObservation> articles = runArticleRepository
+        List<CollectionRunArticle> observations = runArticleRepository
                 .findKeywordStrategyObservations(runId, topicId)
                 .stream()
                 .sorted(Comparator
                         .comparing((CollectionRunArticle observation) -> observation.getArticle().getPublishedAt(),
                                 Comparator.nullsLast(Comparator.reverseOrder()))
                         .thenComparing(CollectionRunArticle::getId, Comparator.reverseOrder()))
+                .collect(LinkedHashMap<Long, CollectionRunArticle>::new,
+                        (byArticleId, observation) -> byArticleId.putIfAbsent(
+                                observation.getArticle().getId(), observation),
+                        Map::putAll)
+                .values()
+                .stream()
+                .toList();
+        List<AgentKeywordStrategyRequest.ArticleObservation> articles = observations.stream()
                 .limit(MAX_ARTICLES)
                 .map(observation -> article(topic, observation))
                 .toList();
@@ -51,7 +61,7 @@ public class TopicKeywordStrategyInputAssembler {
                         topic.getRequiredKeywords(),
                         topic.getOptionalKeywords(),
                         topic.getExcludedKeywords()),
-                keywordStats(topic, articles),
+                keywordStats(topic, observations),
                 articles);
     }
 
@@ -70,9 +80,9 @@ public class TopicKeywordStrategyInputAssembler {
                 : article.getSource() == null ? null : article.getSource().getName();
         return new AgentKeywordStrategyRequest.ArticleObservation(
                 article.getId(),
-                article.getTitle(),
+                truncate(article.getTitle(), 1_000),
                 truncate(article.getSummary(), MAX_ARTICLE_SUMMARY_LENGTH),
-                publisher,
+                truncate(publisher, 500),
                 observation.getChangeType().name(),
                 article.getPublishedAt(),
                 topicFit);
@@ -80,35 +90,46 @@ public class TopicKeywordStrategyInputAssembler {
 
     private List<AgentKeywordStrategyRequest.KeywordStat> keywordStats(
             Topic topic,
-            List<AgentKeywordStrategyRequest.ArticleObservation> articles) {
+            List<CollectionRunArticle> observations) {
+        List<String> articleHaystacks = observations.stream()
+                .map(this::haystack)
+                .toList();
         List<AgentKeywordStrategyRequest.KeywordStat> result = new ArrayList<>();
-        addStats(result, TopicKeywordBucket.REQUIRED, topic.getRequiredKeywords(), articles);
-        addStats(result, TopicKeywordBucket.OPTIONAL, topic.getOptionalKeywords(), articles);
-        addStats(result, TopicKeywordBucket.EXCLUDED, topic.getExcludedKeywords(), articles);
+        addStats(result, TopicKeywordBucket.REQUIRED, topic.getRequiredKeywords(), articleHaystacks);
+        addStats(result, TopicKeywordBucket.OPTIONAL, topic.getOptionalKeywords(), articleHaystacks);
+        addStats(result, TopicKeywordBucket.EXCLUDED, topic.getExcludedKeywords(), articleHaystacks);
         return List.copyOf(result);
     }
 
     private void addStats(List<AgentKeywordStrategyRequest.KeywordStat> sink,
                           TopicKeywordBucket bucket,
                           List<String> keywords,
-                          List<AgentKeywordStrategyRequest.ArticleObservation> articles) {
+                          List<String> articleHaystacks) {
         if (keywords == null) {
             return;
         }
+        Map<String, String> uniqueKeywords = new LinkedHashMap<>();
         for (String keyword : keywords) {
+            if (!StringUtils.hasText(keyword)) {
+                continue;
+            }
             String normalized = normalize(keyword);
-            int matchCount = (int) articles.stream()
-                    .filter(article -> haystack(article).contains(normalized))
+            uniqueKeywords.putIfAbsent(normalized, keyword.trim());
+        }
+        for (Map.Entry<String, String> keyword : uniqueKeywords.entrySet()) {
+            int matchCount = (int) articleHaystacks.stream()
+                    .filter(haystack -> haystack.contains(keyword.getKey()))
                     .count();
             sink.add(new AgentKeywordStrategyRequest.KeywordStat(
                     bucket.name(),
-                    keyword,
+                    keyword.getValue(),
                     matchCount));
         }
     }
 
-    private String haystack(AgentKeywordStrategyRequest.ArticleObservation article) {
-        return normalize(article.title() + " " + (article.summary() == null ? "" : article.summary()));
+    private String haystack(CollectionRunArticle observation) {
+        var article = observation.getArticle();
+        return normalize(article.getTitle() + " " + (article.getSummary() == null ? "" : article.getSummary()));
     }
 
     private String normalize(String value) {

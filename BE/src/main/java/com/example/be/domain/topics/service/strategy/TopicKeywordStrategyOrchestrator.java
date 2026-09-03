@@ -8,6 +8,7 @@ import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyResponse;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
 import com.example.be.domain.analysis.agent.entity.AgentTimeoutPhase;
 import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
+import com.example.be.domain.analysis.agent.quota.DuplicateQuotaReservationException;
 import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
 import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.agent.service.AgentRunRecorder;
@@ -21,10 +22,8 @@ import com.example.be.domain.collection.service.command.CollectionResultWriter;
 import com.example.be.domain.topics.entity.TopicKeywordBucket;
 import com.example.be.domain.topics.entity.TopicKeywordChange;
 import com.example.be.domain.topics.entity.TopicKeywordChangeAction;
-import com.example.be.domain.topics.entity.TopicKeywordProposal;
 import com.example.be.domain.topics.entity.TopicKeywordProposalStatus;
 import com.example.be.domain.topics.repository.TopicKeywordProposalRepository;
-import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,8 +31,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -47,9 +47,10 @@ public class TopicKeywordStrategyOrchestrator {
     private final AgentProperties properties;
     private final CollectionRunRepository runRepository;
     private final CollectionRunItemRepository runItemRepository;
-    private final TopicRepository topicRepository;
     private final TopicKeywordProposalRepository proposalRepository;
     private final TopicKeywordStrategyInputAssembler inputAssembler;
+    private final TopicKeywordStrategyRequestBudgeter requestBudgeter;
+    private final TopicKeywordStrategyFinalizer finalizer;
     private final AgentClient agentClient;
     private final AgentQuotaService quotaService;
     private final AgentRunRecorder runRecorder;
@@ -76,7 +77,7 @@ public class TopicKeywordStrategyOrchestrator {
 
     private void propose(CollectionRun run, Long topicId, TopicRunStats stats) {
         TopicKeywordStrategyInputAssembler.Snapshot snapshot = inputAssembler.assemble(run.getId(), topicId);
-        AgentKeywordStrategyRequest request = new AgentKeywordStrategyRequest(
+        AgentKeywordStrategyRequest request = requestBudgeter.fit(new AgentKeywordStrategyRequest(
                 idempotencyKey(run.getId(), topicId),
                 run.getLlmPlan(),
                 new AgentKeywordStrategyRequest.Target("TOPIC", topicId),
@@ -88,7 +89,7 @@ public class TopicKeywordStrategyOrchestrator {
                         stats.newCount(),
                         stats.updatedCount()),
                 snapshot.currentKeywordStats(),
-                snapshot.articles());
+                snapshot.articles()));
         QuotaReservation reservation;
         try {
             reservation = quotaService.reserve(run.getId(), request.idempotencyKey(),
@@ -97,7 +98,7 @@ public class TopicKeywordStrategyOrchestrator {
             addWarning(run.getId(), topicId,
                     "키워드 제안 예산이 부족해 이번 주기 제안을 건너뛰었습니다.");
             return;
-        } catch (IllegalStateException exception) {
+        } catch (DuplicateQuotaReservationException exception) {
             addWarning(run.getId(), topicId,
                     "동일한 키워드 제안 생성이 이미 진행 중입니다.");
             return;
@@ -107,10 +108,9 @@ public class TopicKeywordStrategyOrchestrator {
         AgentKeywordStrategyResponse response = null;
         try {
             response = agentClient.keywordStrategy(request);
-            validate(response);
-            saveProposal(run.getId(), topicId, request.idempotencyKey(), response);
-            runRecorder.recordKeywordStrategySuccess(run.getId(), topicId, request, response, startedAt);
-            quotaService.completeSuccess(reservation, response.meta().credits());
+            List<TopicKeywordChange> changes = validateAndConvert(response);
+            finalizer.completeSuccess(
+                    run.getId(), topicId, request, response, changes, startedAt, reservation);
         } catch (RuntimeException exception) {
             recordFailure(run.getId(), topicId, request, startedAt, exception);
             completeFailure(reservation, exception);
@@ -119,41 +119,14 @@ public class TopicKeywordStrategyOrchestrator {
         }
     }
 
-    private void saveProposal(Long runId,
-                              Long topicId,
-                              String idempotencyKey,
-                              AgentKeywordStrategyResponse response) {
-        if (response.proposals().isEmpty()) {
-            return;
-        }
-        proposalRepository.save(TopicKeywordProposal.builder()
-                .topic(topicRepository.findById(topicId).orElseThrow())
-                .collectionRunId(runId)
-                .idempotencyKey(idempotencyKey)
-                .summary(response.summary())
-                .changes(response.proposals().stream()
-                        .map(this::toChange)
-                        .toList())
-                .status(TopicKeywordProposalStatus.PENDING)
-                .createdAt(LocalDateTime.now(ApiTimeZone.ZONE))
-                .build());
-    }
-
-    private TopicKeywordChange toChange(AgentKeywordStrategyResponse.Proposal proposal) {
-        return new TopicKeywordChange(
-                TopicKeywordBucket.valueOf(proposal.bucket().trim().toUpperCase(Locale.ROOT)),
-                TopicKeywordChangeAction.valueOf(proposal.action().trim().toUpperCase(Locale.ROOT)),
-                proposal.keyword(),
-                proposal.reason());
-    }
-
-    private void validate(AgentKeywordStrategyResponse response) {
+    private List<TopicKeywordChange> validateAndConvert(AgentKeywordStrategyResponse response) {
         if (response == null || response.meta() == null
                 || !StringUtils.hasText(response.summary())
                 || response.meta().truncated()) {
             throw new IllegalStateException("키워드 제안 응답 meta 또는 summary가 올바르지 않습니다.");
         }
         Set<String> seen = new HashSet<>();
+        List<TopicKeywordChange> changes = new ArrayList<>();
         for (AgentKeywordStrategyResponse.Proposal proposal : response.proposals()) {
             if (proposal == null
                     || !StringUtils.hasText(proposal.bucket())
@@ -162,13 +135,27 @@ public class TopicKeywordStrategyOrchestrator {
                     || !StringUtils.hasText(proposal.reason())) {
                 throw new IllegalStateException("키워드 제안 항목이 비어 있습니다.");
             }
-            String key = proposal.bucket().trim().toUpperCase(Locale.ROOT)
+            TopicKeywordBucket bucket;
+            TopicKeywordChangeAction action;
+            try {
+                bucket = TopicKeywordBucket.valueOf(proposal.bucket().trim().toUpperCase(Locale.ROOT));
+                action = TopicKeywordChangeAction.valueOf(proposal.action().trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException exception) {
+                throw new IllegalStateException("키워드 제안 bucket 또는 action이 올바르지 않습니다.", exception);
+            }
+            String key = bucket.name()
                     + "|"
                     + proposal.keyword().trim().toLowerCase(Locale.ROOT);
             if (!seen.add(key)) {
                 throw new IllegalStateException("같은 버킷의 키워드가 중복 제안되었습니다.");
             }
+            changes.add(new TopicKeywordChange(
+                    bucket,
+                    action,
+                    proposal.keyword(),
+                    proposal.reason()));
         }
+        return List.copyOf(changes);
     }
 
     private void completeFailure(QuotaReservation reservation, RuntimeException exception) {

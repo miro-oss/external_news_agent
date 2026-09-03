@@ -66,6 +66,20 @@ class AgentQuotaServiceTest {
     }
 
     @Test
+    void reportsDuplicateReservationWithDedicatedException() {
+        when(repository.findStatusByIdempotencyKey("run:42:topic:7:keyword-strategy"))
+                .thenReturn(Optional.of("RESERVED"));
+
+        assertThrows(DuplicateQuotaReservationException.class, () -> service.reserve(
+                42L,
+                "run:42:topic:7:keyword-strategy",
+                AgentTask.KEYWORD_STRATEGY,
+                AgentPlan.FREE));
+
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void rejectsAnalysisAtSeventyCreditsButStillAllowsReport() {
         stubUsage(BigDecimal.ZERO, new BigDecimal("70"), new BigDecimal("70"), new BigDecimal("100"));
 

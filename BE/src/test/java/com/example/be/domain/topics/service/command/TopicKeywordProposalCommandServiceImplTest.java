@@ -6,6 +6,8 @@ import com.example.be.domain.topics.entity.TopicKeywordChange;
 import com.example.be.domain.topics.entity.TopicKeywordChangeAction;
 import com.example.be.domain.topics.entity.TopicKeywordProposal;
 import com.example.be.domain.topics.entity.TopicKeywordProposalStatus;
+import com.example.be.domain.topics.exception.TopicException;
+import com.example.be.domain.topics.exception.code.TopicErrorCode;
 import com.example.be.domain.topics.repository.TopicKeywordProposalRepository;
 import org.junit.jupiter.api.Test;
 
@@ -51,6 +53,20 @@ class TopicKeywordProposalCommandServiceImplTest {
         assertThat(response.getStatus()).isEqualTo("REJECTED");
     }
 
+    @Test
+    void rejectsApprovalWhenTopicKeywordsChangedAfterProposalCreation() {
+        Topic topic = topic();
+        TopicKeywordProposal proposal = proposal(topic, List.of("이전 키워드"));
+        when(proposalRepository.findWithTopicById(1L)).thenReturn(Optional.of(proposal));
+
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> service.approve(1L)))
+                .isInstanceOf(TopicException.class)
+                .extracting("code")
+                .isEqualTo(TopicErrorCode.KEYWORD_PROPOSAL_STALE);
+        assertThat(topic.getOptionalKeywords()).containsExactly("SK하이닉스");
+        assertThat(proposal.getStatus()).isEqualTo(TopicKeywordProposalStatus.PENDING);
+    }
+
     private Topic topic() {
         return Topic.builder()
                 .id(7L)
@@ -62,6 +78,10 @@ class TopicKeywordProposalCommandServiceImplTest {
     }
 
     private TopicKeywordProposal proposal(Topic topic) {
+        return proposal(topic, topic.getOptionalKeywords());
+    }
+
+    private TopicKeywordProposal proposal(Topic topic, List<String> baselineOptionalKeywords) {
         return TopicKeywordProposal.builder()
                 .id(1L)
                 .topic(topic)
@@ -73,6 +93,9 @@ class TopicKeywordProposalCommandServiceImplTest {
                         TopicKeywordChangeAction.ADD,
                         "HBM4",
                         "이번 주기 신규 기사에서 반복 등장했습니다.")))
+                .baselineRequiredKeywords(topic.getRequiredKeywords())
+                .baselineOptionalKeywords(baselineOptionalKeywords)
+                .baselineExcludedKeywords(topic.getExcludedKeywords())
                 .status(TopicKeywordProposalStatus.PENDING)
                 .createdAt(LocalDateTime.of(2026, 9, 3, 10, 15))
                 .build();

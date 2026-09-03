@@ -39,9 +39,7 @@ public class AgentQuotaService {
         releaseExpiredReservations();
         Optional<String> existingStatus = repository.findStatusByIdempotencyKey(idempotencyKey);
         if (existingStatus.isPresent()) {
-            throw new IllegalStateException(
-                    "이미 사용된 quota idempotencyKey는 재사용할 수 없습니다. key="
-                            + idempotencyKey + " status=" + existingStatus.get());
+            throw new DuplicateQuotaReservationException(idempotencyKey, existingStatus.get());
         }
         return createReservation(runId, idempotencyKey, task, plan);
     }

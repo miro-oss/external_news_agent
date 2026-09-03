@@ -1,6 +1,7 @@
 package com.example.be.domain.topics.entity;
 
 import com.example.be.domain.topics.converter.TopicKeywordChangeListConverter;
+import com.example.be.global.converter.StringListJsonConverter;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
@@ -22,7 +23,10 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 @Entity
 @Table(name = "news_topic_keyword_proposals")
@@ -58,6 +62,24 @@ public class TopicKeywordProposal {
     @Column(name = "changes_json", nullable = false)
     private List<TopicKeywordChange> changes;
 
+    @Builder.Default
+    @Convert(converter = StringListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "baseline_required_keywords", nullable = false)
+    private List<String> baselineRequiredKeywords = List.of();
+
+    @Builder.Default
+    @Convert(converter = StringListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "baseline_optional_keywords", nullable = false)
+    private List<String> baselineOptionalKeywords = List.of();
+
+    @Builder.Default
+    @Convert(converter = StringListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "baseline_excluded_keywords", nullable = false)
+    private List<String> baselineExcludedKeywords = List.of();
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private TopicKeywordProposalStatus status;
@@ -72,6 +94,12 @@ public class TopicKeywordProposal {
         return status == TopicKeywordProposalStatus.PENDING;
     }
 
+    public boolean matchesCurrentTopicKeywords() {
+        return normalized(baselineRequiredKeywords).equals(normalized(topic.getRequiredKeywords()))
+                && normalized(baselineOptionalKeywords).equals(normalized(topic.getOptionalKeywords()))
+                && normalized(baselineExcludedKeywords).equals(normalized(topic.getExcludedKeywords()));
+    }
+
     public void approve(LocalDateTime reviewedAt) {
         this.status = TopicKeywordProposalStatus.APPROVED;
         this.reviewedAt = reviewedAt;
@@ -80,5 +108,18 @@ public class TopicKeywordProposal {
     public void reject(LocalDateTime reviewedAt) {
         this.status = TopicKeywordProposalStatus.REJECTED;
         this.reviewedAt = reviewedAt;
+    }
+
+    private static Set<String> normalized(List<String> keywords) {
+        Set<String> result = new HashSet<>();
+        if (keywords == null) {
+            return result;
+        }
+        for (String keyword : keywords) {
+            if (keyword != null && !keyword.isBlank()) {
+                result.add(keyword.trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        return result;
     }
 }

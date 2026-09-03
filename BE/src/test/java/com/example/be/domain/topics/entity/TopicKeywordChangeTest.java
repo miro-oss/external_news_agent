@@ -41,6 +41,19 @@ class TopicKeywordChangeTest {
         assertThat(topic.getExcludedKeywords()).isEmpty();
     }
 
+    @Test
+    void appliesAddAndRemoveCaseInsensitively() {
+        Topic topic = Topic.builder()
+                .optionalKeywords(List.of("HBM", " hbm ", "SK하이닉스"))
+                .build();
+
+        topic.applyKeywordChanges(List.of(
+                change(TopicKeywordBucket.OPTIONAL, TopicKeywordChangeAction.REMOVE, "hbm"),
+                change(TopicKeywordBucket.OPTIONAL, TopicKeywordChangeAction.ADD, "sk하이닉스")));
+
+        assertThat(topic.getOptionalKeywords()).containsExactly("SK하이닉스");
+    }
+
     private TopicKeywordChange change(TopicKeywordBucket bucket,
                                       TopicKeywordChangeAction action,
                                       String keyword) {

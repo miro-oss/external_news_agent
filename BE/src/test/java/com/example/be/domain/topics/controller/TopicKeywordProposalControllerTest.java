@@ -107,6 +107,18 @@ class TopicKeywordProposalControllerTest {
                 .andExpect(jsonPath("$.message").value("이미 검토가 끝난 키워드 제안입니다."));
     }
 
+    @Test
+    void returnsConflictWhenProposalBaselineIsStale() throws Exception {
+        when(commandService.approve(1L))
+                .thenThrow(new TopicException(TopicErrorCode.KEYWORD_PROPOSAL_STALE));
+
+        mockMvc.perform(post("/api/news/topics/keyword-proposals/1/approve"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("TOPIC409"))
+                .andExpect(jsonPath("$.message")
+                        .value("제안 생성 후 주제 키워드가 변경되었습니다. 새 제안을 기다려 주세요."));
+    }
+
     private TopicKeywordProposalResDTO.Item proposal(String status) {
         return TopicKeywordProposalResDTO.Item.builder()
                 .id(1L)

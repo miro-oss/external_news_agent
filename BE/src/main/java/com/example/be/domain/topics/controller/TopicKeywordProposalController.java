@@ -161,15 +161,25 @@ public class TopicKeywordProposalController {
                             """))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "409",
-                    description = "이미 검토가 끝난 제안인 경우",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
-                            {
-                              "isSuccess": false,
-                              "code": "TOPIC409",
-                              "message": "이미 검토가 끝난 키워드 제안입니다.",
-                              "result": {}
-                            }
-                            """)))
+                    description = "이미 검토가 끝났거나 생성 후 주제 키워드가 변경된 경우",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = {
+                            @ExampleObject(name = "이미 검토됨", value = """
+                                    {
+                                      "isSuccess": false,
+                                      "code": "TOPIC409",
+                                      "message": "이미 검토가 끝난 키워드 제안입니다.",
+                                      "result": {}
+                                    }
+                                    """),
+                            @ExampleObject(name = "오래된 제안", value = """
+                                    {
+                                      "isSuccess": false,
+                                      "code": "TOPIC409",
+                                      "message": "제안 생성 후 주제 키워드가 변경되었습니다. 새 제안을 기다려 주세요.",
+                                      "result": {}
+                                    }
+                                    """)
+                    }))
     })
     public ApiResponse<TopicKeywordProposalResDTO.Item> approve(
             @Parameter(description = "키워드 제안 ID")

@@ -23,6 +23,9 @@ public class TopicKeywordProposalCommandServiceImpl implements TopicKeywordPropo
     @Override
     public TopicKeywordProposalResDTO.Item approve(Long proposalId) {
         TopicKeywordProposal proposal = getPendingProposal(proposalId);
+        if (!proposal.matchesCurrentTopicKeywords()) {
+            throw new TopicException(TopicErrorCode.KEYWORD_PROPOSAL_STALE);
+        }
         proposal.getTopic().applyKeywordChanges(proposal.getChanges());
         proposal.approve(LocalDateTime.now(ApiTimeZone.ZONE));
         return TopicKeywordProposalConverter.toItem(proposal);
