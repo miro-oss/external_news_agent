@@ -495,6 +495,7 @@ class InsightServiceTest {
         return new InsightDTO.AudienceInsight(
                 audience, "양산 일정 변화", List.of(), List.of(), List.of(),
                 new BigDecimal("0.8"), "gemini", "gemini-test",
+                0,
                 OffsetDateTime.parse("2026-09-02T12:00:00+09:00"));
     }
 }

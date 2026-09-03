@@ -185,4 +185,22 @@ class DeterministicEntityExtractorTest {
         assertEquals(Set.of(), extractor.extractOrganizations("반도체 미래산업 육성 전략", null));
         assertEquals(Set.of("미래산업"), extractor.extractOrganizations("미래산업(주), 장비 공급", null));
     }
+
+    @Test
+    @DisplayName("가설 산문은 숫자 제품 코드와 조직만 추출한다")
+    void extractsOnlyTrackableAnchorsFromHypothesisProse() {
+        Set<String> entities = extractor.extractProse(
+                "SK hynix가 EUV와 DRAM 투자를 늘리고 HBM4를 양산한다. CAPEX와 FAB도 확인한다.",
+                List.of("EUV", "DRAM", "CAPEX", "FAB"));
+
+        assertEquals(Set.of("SK하이닉스", "HBM4"), entities);
+    }
+
+    @Test
+    @DisplayName("조직 별칭은 추출 결과와 동일한 정규명으로 맞춘다")
+    void canonicalizesOrganizationAliases() {
+        assertEquals(
+                Set.of("SK하이닉스", "엔비디아", "HBM4"),
+                extractor.canonicalizeEntities(List.of("SK hynix", "NVIDIA", "HBM4")));
+    }
 }

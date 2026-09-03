@@ -350,7 +350,12 @@ function InsightContents({
   return (
     <div className="perspective-insight-result">
       <div className="perspective-insight-heading">
-        <h4>{insight.headline}</h4>
+        <div className="perspective-insight-title">
+          <h4>{insight.headline}</h4>
+          {insight.relatedArticleCount > 0 && (
+            <span className="insight-related-badge">관련 새 기사 {insight.relatedArticleCount}건</span>
+          )}
+        </div>
         <span>{cached ? '저장된 결과' : '새 결과'} · 신뢰도 {Math.round(insight.confidence * 100)}%</span>
       </div>
       {!hasContents && (

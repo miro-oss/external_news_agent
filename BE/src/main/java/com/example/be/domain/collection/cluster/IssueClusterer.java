@@ -24,8 +24,6 @@ import java.util.stream.Collectors;
 public class IssueClusterer {
 
     private static final OffsetDateTime UNKNOWN_EVENT_TIME = OffsetDateTime.parse("1970-01-01T00:00:00Z");
-    /** 기사 한 쌍에만 나타나는 엔티티(문서빈도 2)는 사건 신호이므로 흔한 주제 어휘로 보지 않는다. */
-    private static final int MIN_COMMON_ENTITY_DOCUMENT_FREQUENCY = 3;
     /** 조직 하나가 대형 주제 전체를 다시 연결하지 못하게 하되 소규모 보도자료 사건군은 남긴다. */
     private static final int MAX_COMMON_ORGANIZATION_DOCUMENT_FREQUENCY = 8;
 
@@ -358,34 +356,24 @@ public class IssueClusterer {
      * <p>표본이 작으면 비율이 의미를 갖지 못하므로 기사 수가 기준 미만이면 아무것도 빼지 않는다.
      */
     private Set<String> commonEntities(List<ClusterArticle> voting, Map<Long, Set<String>> entities) {
-        int cut = Math.max(
-                MIN_COMMON_ENTITY_DOCUMENT_FREQUENCY,
-                (int) Math.ceil(voting.size() * properties.getCommonEntityDocumentRatio()));
-        return commonValues(voting, entities, cut);
+        return EntityDocumentFrequencyFilter.commonValues(
+                voting.stream()
+                        .map(article -> entities.getOrDefault(article.articleId(), Set.of()))
+                        .toList(),
+                properties.getCommonEntityMinArticles(),
+                EntityDocumentFrequencyFilter.MIN_COMMON_ENTITY_DOCUMENT_FREQUENCY,
+                properties.getCommonEntityDocumentRatio());
     }
 
     /** 한 조직이 주제 전체의 보조 간선을 만들지 않도록 조직 전용의 문서빈도 상한을 둔다. */
     private Set<String> commonOrganizations(List<ClusterArticle> voting,
                                             Map<Long, Set<String>> organizations) {
-        return commonValues(voting, organizations, MAX_COMMON_ORGANIZATION_DOCUMENT_FREQUENCY);
-    }
-
-    private Set<String> commonValues(List<ClusterArticle> voting,
-                                     Map<Long, Set<String>> values,
-                                     int cut) {
-        if (voting.size() < properties.getCommonEntityMinArticles()) {
-            return Set.of();
-        }
-        Map<String, Integer> documentFrequency = new HashMap<>();
-        for (ClusterArticle article : voting) {
-            for (String value : values.getOrDefault(article.articleId(), Set.of())) {
-                documentFrequency.merge(value, 1, Integer::sum);
-            }
-        }
-        return documentFrequency.entrySet().stream()
-                .filter(entry -> entry.getValue() >= cut)
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toUnmodifiableSet());
+        return EntityDocumentFrequencyFilter.commonValues(
+                voting.stream()
+                        .map(article -> organizations.getOrDefault(article.articleId(), Set.of()))
+                        .toList(),
+                properties.getCommonEntityMinArticles(),
+                MAX_COMMON_ORGANIZATION_DOCUMENT_FREQUENCY);
     }
 
     /** 주제 어휘를 뺀 뒤 남는 교집합만 사건 신호로 센다. */

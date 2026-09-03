@@ -314,6 +314,7 @@ export interface AudienceInsight {
   confidence: number
   llmProvider: string | null
   llmModel: string | null
+  relatedArticleCount: number
   createdAt: string
 }
 

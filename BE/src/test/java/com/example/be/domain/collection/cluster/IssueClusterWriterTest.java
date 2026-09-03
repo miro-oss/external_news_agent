@@ -1,8 +1,12 @@
 package com.example.be.domain.collection.cluster;
 
+import com.example.be.domain.analysis.agent.entity.AgentTargetType;
+import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.ArticleRepository;
+import com.example.be.domain.insights.entity.NewsInsight;
+import com.example.be.domain.insights.repository.NewsInsightRepository;
 import com.example.be.domain.issues.entity.ContentGroup;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
@@ -38,6 +42,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -55,6 +60,7 @@ class IssueClusterWriterTest {
     private final ContentGroupRepository contentGroupRepository = mock(ContentGroupRepository.class);
     private final NewsIssueRepository issueRepository = mock(NewsIssueRepository.class);
     private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
+    private final NewsInsightRepository insightRepository = mock(NewsInsightRepository.class);
     private final IssueRelationRepository issueRelationRepository = mock(IssueRelationRepository.class);
     private final IssueStatusHistoryRepository statusHistoryRepository = mock(IssueStatusHistoryRepository.class);
     private final NewsWatchRepository watchRepository = mock(NewsWatchRepository.class);
@@ -67,6 +73,7 @@ class IssueClusterWriterTest {
             contentGroupRepository,
             issueRepository,
             issueArticleRepository,
+            insightRepository,
             issueRelationRepository,
             statusHistoryRepository,
             watchRepository,
@@ -120,6 +127,15 @@ class IssueClusterWriterTest {
         IssueArticle firstMembership = membership(11L, winner, first, IssueArticleRole.REPRESENTATIVE);
         IssueArticle secondMembership = membership(12L, loser, second, IssueArticleRole.REPRESENTATIVE);
         IssueArticle historicalMembership = membership(13L, loser, historical, IssueArticleRole.MEMBER);
+        NewsInsight losingInsight = NewsInsight.builder()
+                .targetType(AgentTargetType.ISSUE)
+                .targetId(200L)
+                .audience(Audience.CHIP_MAKER)
+                .inputHash("a".repeat(64))
+                .promptVersion("insight.ko.v2")
+                .relatedArticleIds(List.of())
+                .createdAt(LocalDateTime.now().minusDays(1))
+                .build();
         ClusterPlan.IssueAssignment merged = assignment(100L, List.of(200L), topic, second);
         ClusterPlan.IssueAssignment repeated = assignment(100L, List.of(), topic, second);
 
@@ -132,6 +148,14 @@ class IssueClusterWriterTest {
                 .thenReturn(List.of(firstMembership, secondMembership, historicalMembership));
         when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(200L))
                 .thenReturn(List.of(secondMembership, historicalMembership));
+        when(insightRepository.findByTargetTypeAndTargetIdOrderByCreatedAtAscIdAsc(
+                AgentTargetType.ISSUE, 200L)).thenReturn(List.of(losingInsight));
+        when(insightRepository.findByTargetTypeAndTargetIdAndAudienceAndInputHashAndPromptVersion(
+                AgentTargetType.ISSUE,
+                100L,
+                Audience.CHIP_MAKER,
+                "a".repeat(64),
+                "insight.ko.v2")).thenReturn(Optional.empty());
         when(issueRelationRepository.existsByFromIssueIdAndToIssueIdAndRelationType(any(), any(), any()))
                 .thenReturn(false);
 
@@ -140,6 +164,7 @@ class IssueClusterWriterTest {
 
         assertSame(winner, secondMembership.getIssue());
         assertSame(winner, historicalMembership.getIssue());
+        assertEquals(100L, losingInsight.getTargetId());
         assertEquals(IssueArticleRole.REPRESENTATIVE, secondMembership.getRole());
         assertEquals(IssueArticleRole.MEMBER, firstMembership.getRole());
         assertEquals(IssueStatus.RETRACTED, loser.getStatus());
@@ -149,6 +174,68 @@ class IssueClusterWriterTest {
         verify(statusHistoryRepository, times(1)).save(any());
         verify(issueRelationRepository, times(1)).save(any());
         verify(issueArticleRepository, times(0)).save(any());
+    }
+
+    @Test
+    void mergesDuplicateInsightLinksAndPreservesActiveHypothesisWatch() {
+        Topic topic = topic();
+        Article first = article(1L, "대표", topic);
+        Article second = article(2L, "후속", topic);
+        NewsIssue winner = issue(100L, topic, "승자");
+        NewsIssue loser = issue(200L, topic, "패자");
+        NewsInsight existing = NewsInsight.builder()
+                .targetId(100L)
+                .inputArticleIds(List.of(30L))
+                .relatedArticleIds(List.of(20L, 60L))
+                .build();
+        NewsInsight duplicate = NewsInsight.builder()
+                .targetId(200L)
+                .audience(Audience.CHIP_MAKER)
+                .inputHash("same-hash")
+                .promptVersion("insight.ko.v2")
+                .inputArticleIds(List.of(20L, 30L, 50L))
+                .relatedArticleIds(List.of(40L, 60L))
+                .build();
+        NewsWatch winningWatch = NewsWatch.builder()
+                .issue(winner)
+                .watchType(WatchType.HYPOTHESIS)
+                .active(false)
+                .expiresAt(LocalDateTime.now(ApiTimeZone.ZONE).minusDays(1))
+                .build();
+        NewsWatch losingWatch = NewsWatch.builder()
+                .issue(loser)
+                .watchType(WatchType.HYPOTHESIS)
+                .active(true)
+                .expiresAt(LocalDateTime.now(ApiTimeZone.ZONE).plusDays(20))
+                .build();
+        when(articleRepository.findAllById(any())).thenReturn(List.of(first, second));
+        when(topicRepository.findById(topic.getId())).thenReturn(Optional.of(topic));
+        when(issueRepository.findById(100L)).thenReturn(Optional.of(winner));
+        when(issueRepository.findById(200L)).thenReturn(Optional.of(loser));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L))
+                .thenReturn(List.of(membership(11L, winner, first, IssueArticleRole.REPRESENTATIVE)));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(200L))
+                .thenReturn(List.of(membership(12L, loser, second, IssueArticleRole.REPRESENTATIVE)));
+        when(watchRepository.findByIssueIdOrderByIdAsc(100L)).thenReturn(List.of(winningWatch));
+        when(watchRepository.findByIssueIdOrderByIdAsc(200L)).thenReturn(List.of(losingWatch));
+        when(insightRepository.findByTargetTypeAndTargetIdOrderByCreatedAtAscIdAsc(
+                AgentTargetType.ISSUE, 200L)).thenReturn(List.of(duplicate));
+        when(insightRepository.findByTargetTypeAndTargetIdAndAudienceAndInputHashAndPromptVersion(
+                AgentTargetType.ISSUE, 100L, Audience.CHIP_MAKER, "same-hash", "insight.ko.v2"))
+                .thenReturn(Optional.of(existing));
+
+        writer.write(new ClusterPlan(
+                List.of(), List.of(assignment(100L, List.of(200L), topic, first)), List.of()));
+
+        assertEquals(List.of(20L, 30L, 50L), existing.getInputArticleIds());
+        assertEquals(List.of(60L, 40L), existing.getRelatedArticleIds());
+        existing.addRelatedArticleId(50L);
+        assertEquals(List.of(60L, 40L), existing.getRelatedArticleIds());
+        assertTrue(winningWatch.isActive());
+        assertEquals(losingWatch.getExpiresAt(), winningWatch.getExpiresAt());
+        assertFalse(losingWatch.isActive());
+        verify(insightRepository).deleteAll(List.of(duplicate));
+        verify(insightRepository).flush();
     }
 
     @Test

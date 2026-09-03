@@ -37,6 +37,7 @@ public class InsightDTO {
                                   BigDecimal confidence,
                                   String llmProvider,
                                   String llmModel,
+                                  int relatedArticleCount,
                                   OffsetDateTime createdAt) {
     }
 }

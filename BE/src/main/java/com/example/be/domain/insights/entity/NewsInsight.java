@@ -4,6 +4,7 @@ import com.example.be.domain.analysis.agent.entity.AgentTargetType;
 import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.insights.converter.InsightFactListConverter;
 import com.example.be.domain.insights.converter.InsightImplicationListConverter;
+import com.example.be.global.converter.LongListJsonConverter;
 import com.example.be.global.converter.StringListJsonConverter;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
@@ -24,7 +25,12 @@ import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 @Entity
 @Table(name = "news_insights")
@@ -67,6 +73,24 @@ public class NewsInsight {
     @Column(name = "watch_next_json", nullable = false)
     private List<String> watchNext;
 
+    @Builder.Default
+    @Convert(converter = StringListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "watch_entities_json", nullable = false)
+    private List<String> watchEntities = List.of();
+
+    @Builder.Default
+    @Convert(converter = LongListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "input_article_ids_json", nullable = false)
+    private List<Long> inputArticleIds = List.of();
+
+    @Builder.Default
+    @Convert(converter = LongListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "related_article_ids_json", nullable = false)
+    private List<Long> relatedArticleIds = List.of();
+
     @Column(name = "confidence", precision = 4, scale = 3)
     private BigDecimal confidence;
 
@@ -96,4 +120,32 @@ public class NewsInsight {
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
+
+    public void addRelatedArticleId(Long articleId) {
+        if (articleId == null || inputArticleIds.contains(articleId)
+                || relatedArticleIds.contains(articleId)) {
+            return;
+        }
+        List<Long> updated = new ArrayList<>(relatedArticleIds);
+        updated.add(articleId);
+        this.relatedArticleIds = List.copyOf(updated);
+    }
+
+    public void mergeRelatedArticleIds(Collection<Long> articleIds) {
+        articleIds.forEach(this::addRelatedArticleId);
+    }
+
+    public void mergeInputArticleIds(Collection<Long> articleIds) {
+        Set<Long> merged = new HashSet<>(inputArticleIds);
+        articleIds.stream().filter(Objects::nonNull).forEach(merged::add);
+        this.inputArticleIds = merged.stream().sorted().toList();
+        // 병합으로 원본 기사에 포함된 항목은 관련 새 기사에서도 제외한다.
+        this.relatedArticleIds = relatedArticleIds.stream()
+                .filter(articleId -> !merged.contains(articleId))
+                .toList();
+    }
+
+    public void moveToTarget(Long targetId) {
+        this.targetId = targetId;
+    }
 }

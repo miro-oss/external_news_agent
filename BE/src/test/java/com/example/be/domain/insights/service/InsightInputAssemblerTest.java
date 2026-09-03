@@ -55,7 +55,8 @@ class InsightInputAssemblerTest {
                 issueRepository,
                 issueArticleRepository,
                 findingRepository,
-                new ObjectMapper());
+                new ObjectMapper(),
+                new InsightEntityNormalizer());
     }
 
     @Test
