@@ -42,4 +42,6 @@ tasks.named('test') {
     useJUnitPlatform()
     systemProperty 'news.integration.db', System.getProperty('news.integration.db', 'false')
     systemProperty 'news.integration.mailpit', System.getProperty('news.integration.mailpit', 'false')
+    systemProperty 'news.collection.scheduler.enabled',
+            System.getProperty('news.collection.scheduler.enabled', 'false')
 }

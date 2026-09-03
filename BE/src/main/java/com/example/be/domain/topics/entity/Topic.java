@@ -90,6 +90,7 @@ public class Topic {
     @Column(name = "active_yn", nullable = false, length = 1)
     private boolean active;
 
+    /** 마지막 수집 실행의 시작 시각. 다음 자동 실행 시점 계산에 쓴다. */
     @Column(name = "last_collected_at")
     private LocalDateTime lastCollectedAt;
 
@@ -132,7 +133,6 @@ public class Topic {
     /** 마지막 자동 수집 시작 시각을 기준으로 다음 실행 시점을 계산한다. */
     public boolean isCollectionDueAt(LocalDateTime now) {
         return active
-                && ALLOWED_INTERVAL_MINUTES.contains(intervalMinutes)
                 && (lastCollectedAt == null || !lastCollectedAt.plusMinutes(intervalMinutes).isAfter(now));
     }
 

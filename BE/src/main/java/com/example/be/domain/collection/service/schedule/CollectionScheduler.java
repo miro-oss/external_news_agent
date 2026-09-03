@@ -12,6 +12,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /** 활성 주제를 짧은 주기로 확인하고, 각 주제 설정에 따라 실행을 시작한다. */
 @Slf4j
@@ -27,11 +28,16 @@ public class CollectionScheduler {
     @Scheduled(fixedDelayString = "${news.collection.scheduler.poll-interval-ms:60000}")
     public void startDueCollections() {
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
-        for (Long topicId : topicRepository.findActiveCollectionTopicIds()) {
+        List<Long> dueTopicIds = topicRepository.findDueCollectionTopicIds(now);
+        if (dueTopicIds.isEmpty()) {
+            return;
+        }
+
+        AgentPlan plan = planService.resolveRunPlan(null);
+        for (Long topicId : dueTopicIds) {
             try {
-                AgentPlan plan = planService.resolveRunPlan(null);
                 quotaService.assertRunCanStart(plan);
-                runCreator.createScheduled(topicId, plan, now);
+                runCreator.createScheduled(topicId, plan, LocalDateTime.now(ApiTimeZone.ZONE));
             } catch (Exception exception) {
                 // 한 주제의 설정/수집 실패가 다음 주제의 정기 수집을 막으면 안 된다.
                 log.error("예약 수집 실행을 시작하지 못했다. topicId={}", topicId, exception);

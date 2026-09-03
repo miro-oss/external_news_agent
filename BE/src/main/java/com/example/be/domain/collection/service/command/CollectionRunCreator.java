@@ -124,7 +124,10 @@ public class CollectionRunCreator {
             return false;
         }
 
-        validateNoTopicConflict(List.of(topicId));
+        // 만료 조회 뒤에 수동 실행이 시작될 수 있으므로, 경합은 예약 실행의 정상 스킵으로 처리한다.
+        if (!runRepository.findInProgressByTopicIds(List.of(topicId), RunStatus.IN_PROGRESS_STATUSES).isEmpty()) {
+            return false;
+        }
 
         CollectionRun run = CollectionRun.builder()
                 .status(RunStatus.RUNNING)

@@ -78,19 +78,33 @@ public interface TopicRepository extends JpaRepository<Topic, Long>, JpaSpecific
             """)
     List<CollectionTarget> findActiveCollectionTargetsByTopicIds(@Param("topicIds") Collection<Long> topicIds);
 
-    /** 스케줄러는 주제 잠금 안에서 실제 만료 여부를 다시 확인한다. */
-    @Query("""
+    /**
+     * Oracle의 {@code NUMTODSINTERVAL}로 주제별 분 단위 주기를 비교한다. 잠금 안에서 같은 조건을
+     * 다시 확인하므로 이 쿼리는 불필요한 잠금·쿼터 확인을 줄이는 1차 필터다.
+     */
+    @Query(value = """
             SELECT t.id
-            FROM Topic t
-            WHERE t.active = TRUE
+            FROM news_topics t
+            WHERE t.active_yn = 'Y'
               AND EXISTS (
-                  SELECT s.id
-                  FROM t.sources s
-                  WHERE s.active = TRUE
+                  SELECT 1
+                  FROM news_topic_sources ts
+                  JOIN news_sources s ON s.id = ts.source_id
+                  WHERE ts.topic_id = t.id
+                    AND s.active_yn = 'Y'
+              )
+              AND (t.last_collected_at IS NULL
+                   OR t.last_collected_at + NUMTODSINTERVAL(t.interval_minutes, 'MINUTE') <= :now)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM news_collection_run_items item
+                  JOIN news_collection_runs run ON run.id = item.run_id
+                  WHERE item.topic_id = t.id
+                    AND run.status IN ('PENDING', 'RUNNING')
               )
             ORDER BY t.id ASC
-            """)
-    List<Long> findActiveCollectionTopicIds();
+            """, nativeQuery = true)
+    List<Long> findDueCollectionTopicIds(@Param("now") LocalDateTime now);
 
     /**
      * 수집 대상 주제를 잠근다. 충돌 검사(findInProgressByTopicIds)와 실행 생성 사이에 다른 요청이

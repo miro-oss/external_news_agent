@@ -17,6 +17,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -41,7 +42,7 @@ class CollectionSchedulerTest {
 
     @Test
     void startDueCollectionsContinuesAfterOneTopicFails() {
-        when(topicRepository.findActiveCollectionTopicIds()).thenReturn(List.of(1L, 2L));
+        when(topicRepository.findDueCollectionTopicIds(any(LocalDateTime.class))).thenReturn(List.of(1L, 2L));
         when(planService.resolveRunPlan(null)).thenReturn(AgentPlan.FREE);
         doThrow(new IllegalStateException("broken topic"))
                 .when(runCreator).createScheduled(eq(1L), eq(AgentPlan.FREE), any(LocalDateTime.class));
@@ -50,5 +51,15 @@ class CollectionSchedulerTest {
 
         verify(runCreator).createScheduled(eq(2L), eq(AgentPlan.FREE), any(LocalDateTime.class));
         verify(quotaService, times(2)).assertRunCanStart(AgentPlan.FREE);
+    }
+
+    @Test
+    void startDueCollectionsSkipsPlanAndQuotaChecksWhenNoTopicIsDue() {
+        when(topicRepository.findDueCollectionTopicIds(any(LocalDateTime.class))).thenReturn(List.of());
+
+        scheduler.startDueCollections();
+
+        verify(planService, never()).resolveRunPlan(null);
+        verify(quotaService, never()).assertRunCanStart(any());
     }
 }

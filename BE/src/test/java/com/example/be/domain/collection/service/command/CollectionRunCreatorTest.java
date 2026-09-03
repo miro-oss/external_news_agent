@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -144,7 +145,23 @@ class CollectionRunCreatorTest {
         scheduledTopic.recordCollectionStartedAt(now.minusMinutes(30));
         when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(scheduledTopic));
 
-        assertTrue(!runCreator.createScheduled(1L, AgentPlan.FREE, now));
+        assertFalse(runCreator.createScheduled(1L, AgentPlan.FREE, now));
+
+        verify(runRepository, never()).saveAndFlush(any());
+        verify(runAsyncService, never()).execute(any());
+    }
+
+    @Test
+    void createScheduledSkipsWhenManualCollectionStartedAfterDueTopicLookup() {
+        LocalDateTime now = LocalDateTime.of(2026, 9, 3, 10, 0);
+        Topic scheduledTopic = topic(1L, "HBM");
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(scheduledTopic));
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L)))
+                .thenReturn(List.of(target(scheduledTopic, source(10L))));
+        when(runRepository.findInProgressByTopicIds(List.of(1L), RunStatus.IN_PROGRESS_STATUSES))
+                .thenReturn(List.of(CollectionRun.builder().id(41L).status(RunStatus.RUNNING).build()));
+
+        assertFalse(runCreator.createScheduled(1L, AgentPlan.FREE, now));
 
         verify(runRepository, never()).saveAndFlush(any());
         verify(runAsyncService, never()).execute(any());
