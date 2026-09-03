@@ -43,7 +43,7 @@ public final class InvestigationQueryNormalizer {
                 .collect(java.util.stream.Collectors.joining(" "));
     }
 
-    static String normalizeEntity(String entity) {
+    public static String normalizeEntity(String entity) {
         return normalize(entity).replace(" ", "");
     }
 

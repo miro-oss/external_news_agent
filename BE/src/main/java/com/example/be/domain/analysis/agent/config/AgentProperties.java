@@ -11,6 +11,9 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "news.agent")
 public class AgentProperties implements InitializingBean {
 
+    public static final int MAX_INSIGHT_FINDINGS = 16;
+    public static final int MAX_CURRENT_INSIGHT_FINDINGS = 10;
+
     private boolean enabled = false;
     private String baseUrl = "http://127.0.0.1:8088";
     private String token = "";
@@ -22,10 +25,11 @@ public class AgentProperties implements InitializingBean {
     private boolean allowRunOverride = true;
     private String analysisPromptVersion =
             "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2";
-    private String insightPromptVersion = "insight.ko.v1+perspective.ko.v1";
+    private String insightPromptVersion = "insight.ko.v2+perspective.ko.v1";
     private String freeModel = "";
     private String paidModel = "";
     private final Quota quota = new Quota();
+    private final InsightHistory insightHistory = new InsightHistory();
     private final Investigation investigation = new Investigation();
 
     @Override
@@ -52,6 +56,10 @@ public class AgentProperties implements InitializingBean {
                 || quota.reservationTtl == null
                 || quota.reservationTtl.isNegative()
                 || quota.reservationTtl.isZero()
+                || insightHistory.days <= 0
+                || insightHistory.limit <= 0
+                || insightHistory.limit
+                        > MAX_INSIGHT_FINDINGS - MAX_CURRENT_INSIGHT_FINDINGS
                 || investigation.candidateLimit <= 0
                 || investigation.evidenceThreshold < 0
                 || investigation.searchBatchSize <= 0
@@ -60,7 +68,8 @@ public class AgentProperties implements InitializingBean {
                 || investigation.dailyBudgetPercent.signum() <= 0
                 || investigation.dailyBudgetPercent.compareTo(BigDecimal.valueOf(100)) > 0) {
             throw new IllegalStateException(
-                    "news.agent.quota / news.agent.investigation 설정값이 올바르지 않습니다.");
+                    "news.agent.quota / news.agent.insight-history / "
+                            + "news.agent.investigation 설정값이 올바르지 않습니다.");
         }
     }
 
@@ -172,8 +181,34 @@ public class AgentProperties implements InitializingBean {
         return quota;
     }
 
+    public InsightHistory getInsightHistory() {
+        return insightHistory;
+    }
+
     public Investigation getInvestigation() {
         return investigation;
+    }
+
+    public static class InsightHistory {
+
+        private int days = 30;
+        private int limit = 6;
+
+        public int getDays() {
+            return days;
+        }
+
+        public void setDays(int days) {
+            this.days = days;
+        }
+
+        public int getLimit() {
+            return limit;
+        }
+
+        public void setLimit(int limit) {
+            this.limit = limit;
+        }
     }
 
     public static class Investigation {

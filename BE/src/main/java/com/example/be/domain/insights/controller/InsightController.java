@@ -34,7 +34,7 @@ public class InsightController {
                     responseCode = "200", description = "신규 생성 또는 동일 입력 캐시 반환",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             examples = @ExampleObject(value = """
-                                    {"isSuccess":true,"code":"COMMON200","message":"성공입니다.","result":{"cached":false,"targetType":"ISSUE","targetId":88,"inputHash":"sha256","promptVersion":"insight.ko.v1+perspective.ko.v1","insights":[{"audience":"CHIP_MAKER","headline":"양산 일정 변화","facts":[],"implications":[],"watchNext":[],"confidence":0.8,"llmProvider":"gemini","llmModel":"configured-model","createdAt":"2026-09-02T14:00:00+09:00"}]}}
+                                    {"isSuccess":true,"code":"COMMON200","message":"성공입니다.","result":{"cached":false,"targetType":"ISSUE","targetId":88,"inputHash":"sha256","promptVersion":"insight.ko.v2+perspective.ko.v1","insights":[{"audience":"CHIP_MAKER","headline":"양산 일정 변화","facts":[],"implications":[],"watchNext":[],"confidence":0.8,"llmProvider":"gemini","llmModel":"configured-model","createdAt":"2026-09-02T14:00:00+09:00"}]}}
                                     """))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "400", description = "target 또는 audience 입력값 검증 실패",

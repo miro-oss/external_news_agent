@@ -96,9 +96,12 @@ news:
     allow-run-override: true
     # 분석 캐시는 콘텐츠뿐 아니라 현재 프롬프트·플랜별 모델 계약까지 같을 때만 사용한다.
     analysis-prompt-version: ${AGENT_ANALYSIS_PROMPT_VERSION:analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2}
-    insight-prompt-version: ${AGENT_INSIGHT_PROMPT_VERSION:insight.ko.v1+perspective.ko.v1}
+    insight-prompt-version: ${AGENT_INSIGHT_PROMPT_VERSION:insight.ko.v2+perspective.ko.v1}
     free-model: ${GEMINI_MODEL:}
     paid-model: ${MINDLOGIC_CLAUDE_MODEL:}
+    insight-history:
+      days: 30
+      limit: 6
     investigation:
       candidate-limit: 5
       evidence-threshold: 3

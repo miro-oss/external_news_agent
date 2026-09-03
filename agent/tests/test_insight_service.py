@@ -2,7 +2,7 @@ import json
 
 from app.core.config import Settings
 from app.llm.base import ProviderResponse, ProviderUsage
-from app.llm.insight_service import PROMPT_VERSION, InsightService
+from app.llm.insight_service import PROMPT_VERSION, SYSTEM_INSTRUCTION, InsightService
 from app.schemas.insight import InsightRequest
 
 
@@ -25,7 +25,35 @@ def provider_response(payload: dict[str, object]) -> ProviderResponse:
     )
 
 
-def request(*audiences: str) -> InsightRequest:
+def request(*audiences: str, include_history: bool = False) -> InsightRequest:
+    findings = [
+        {
+            "id": 501,
+            "articleTitle": "CPO 양산 일정",
+            "canonicalUrl": "https://example.com/501",
+            "summaryKo": "CPO 양산 일정을 다룬 기사다.",
+            "role": "CURRENT",
+            "publishedAt": "2026-09-03",
+            "sentences": [
+                {"id": 1, "text": "A사는 2027년 CPO 양산을 계획했다."},
+                {"id": 2, "text": "검증 장비 도입도 추진한다."},
+            ],
+        }
+    ]
+    if include_history:
+        findings.append(
+            {
+                "id": 388,
+                "articleTitle": "3주 전 CPO 일정",
+                "canonicalUrl": "https://example.com/388",
+                "summaryKo": "3주 전에는 2028년 계획이라고 보도됐다.",
+                "role": "HISTORY",
+                "publishedAt": "2026-08-13",
+                "sentences": [
+                    {"id": 1, "text": "3주 전 기사에서는 2028년 CPO 양산 목표를 언급했다."}
+                ],
+            }
+        )
     return InsightRequest.model_validate(
         {
             "idempotencyKey": "insight:issue:77:test",
@@ -33,18 +61,7 @@ def request(*audiences: str) -> InsightRequest:
             "audiences": list(audiences) or ["CHIP_MAKER"],
             "target": {"type": "ISSUE", "id": 77},
             "topic": {"name": "CPO", "queryText": "CPO"},
-            "findings": [
-                {
-                    "id": 501,
-                    "articleTitle": "CPO 양산 일정",
-                    "canonicalUrl": "https://example.com/501",
-                    "summaryKo": "CPO 양산 일정을 다룬 기사다.",
-                    "sentences": [
-                        {"id": 1, "text": "A사는 2027년 CPO 양산을 계획했다."},
-                        {"id": 2, "text": "검증 장비 도입도 추진한다."},
-                    ],
-                }
-            ],
+            "findings": findings,
         }
     )
 
@@ -93,6 +110,7 @@ def test_generates_only_requested_audience_and_records_prompt_version() -> None:
     assert [insight.audience for insight in response.insights] == ["CHIP_MAKER"]
     assert response.meta.prompt_version == PROMPT_VERSION
     assert "<insight-input>" in provider.prompts[0]
+    assert "수집하지 않은 것과 존재하지 않는 것은 다르다" in SYSTEM_INSTRUCTION
 
 
 def test_generates_all_requested_audiences_in_one_provider_call() -> None:
@@ -238,3 +256,38 @@ def test_repairs_invalid_finding_reference_once() -> None:
     assert response.insights[0].facts[0].finding_id == 501
     assert len(provider.prompts) == 2
     assert "validation-error" in provider.prompts[1]
+
+
+def test_accepts_fact_grounded_in_history_finding() -> None:
+    provider = FakeProvider(
+        provider_response(
+            {
+                "insights": [
+                    {
+                        "audience": "CHIP_MAKER",
+                        "headline": "CPO 양산 목표가 앞당겨졌다",
+                        "facts": [
+                            {
+                                "claimType": "FACT",
+                                "id": "f1",
+                                "text": "3주 전 기사에서는 2028년 CPO 양산 목표를 언급했다.",
+                                "findingId": 388,
+                                "evidenceSentenceIds": [1],
+                            }
+                        ],
+                        "implications": [],
+                        "watchNext": ["고객 인증 일정"],
+                        "confidence": 0.7,
+                    }
+                ]
+            }
+        )
+    )
+
+    response = InsightService(Settings(AGENT_MOCK=False), provider).generate(
+        request(include_history=True)
+    )
+
+    assert response.insights[0].facts[0].finding_id == 388
+    assert response.insights[0].facts[0].groundedness == "grounded"
+    assert '"role": "HISTORY"' in provider.prompts[0]

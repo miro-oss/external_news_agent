@@ -60,7 +60,7 @@ class InsightControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.cached").value(true))
                 .andExpect(jsonPath("$.result.promptVersion")
-                        .value("insight.ko.v1+perspective.ko.v1"));
+                        .value("insight.ko.v2+perspective.ko.v1"));
     }
 
     private InsightDTO.Result result(boolean cached) {
@@ -69,7 +69,7 @@ class InsightControllerTest {
                 "ISSUE",
                 88L,
                 "a".repeat(64),
-                "insight.ko.v1+perspective.ko.v1",
+                "insight.ko.v2+perspective.ko.v1",
                 List.of(new InsightDTO.AudienceInsight(
                         Audience.CHIP_MAKER,
                         "양산 일정 변화",

@@ -170,6 +170,8 @@ class AgentClientTest {
                 .andExpect(jsonPath("$.idempotencyKey").value("insight:issue:88:test"))
                 .andExpect(jsonPath("$.target.type").value("ISSUE"))
                 .andExpect(jsonPath("$.audiences[0]").value("CHIP_MAKER"))
+                .andExpect(jsonPath("$.findings[0].role").value("CURRENT"))
+                .andExpect(jsonPath("$.findings[0].publishedAt").value("2026-09-03"))
                 .andExpect(jsonPath("$.findings[0].sentences[0].id").value(1))
                 .andRespond(withSuccess(insightResponseJson(), MediaType.APPLICATION_JSON));
 
@@ -179,7 +181,7 @@ class AgentClientTest {
         assertEquals("FACT", response.insights().getFirst().facts().getFirst().claimType());
         assertEquals("IMPLICATION",
                 response.insights().getFirst().implications().getFirst().claimType());
-        assertEquals("insight.ko.v1+perspective.ko.v1", response.meta().promptVersion());
+        assertEquals("insight.ko.v2+perspective.ko.v1", response.meta().promptVersion());
         server.verify();
     }
 
@@ -355,6 +357,8 @@ class AgentClientTest {
                         "HBM4 기사",
                         "https://example.com/501",
                         "HBM4 일정 요약",
+                        AgentInsightRequest.FindingRole.CURRENT,
+                        "2026-09-03",
                         List.of(new AgentInsightRequest.SentencePayload(
                                 1, "HBM4 양산 일정이 앞당겨졌다.")))));
     }
@@ -531,7 +535,7 @@ class AgentClientTest {
                   "meta": {
                     "provider": "mock",
                     "model": "mock",
-                    "promptVersion": "insight.ko.v1+perspective.ko.v1",
+                    "promptVersion": "insight.ko.v2+perspective.ko.v1",
                     "inputTokens": 0,
                     "outputTokens": 0,
                     "costUsd": 0,
