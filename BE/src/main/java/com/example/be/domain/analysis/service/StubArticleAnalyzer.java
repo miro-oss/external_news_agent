@@ -8,6 +8,7 @@ import com.example.be.domain.analysis.entity.FindingSensitivityAxis;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.content.ArticleBodyCleaner;
 import com.example.be.domain.collection.entity.FetchStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -51,7 +52,9 @@ public class StubArticleAnalyzer implements ArticleAnalyzer {
 
     @Override
     public AnalysisResult analyze(Article article) {
-        String fullText = article.getFetchStatus() == FetchStatus.FULLTEXT ? article.getBody() : null;
+        String fullText = article.getFetchStatus() == FetchStatus.FULLTEXT
+                ? ArticleBodyCleaner.withoutTrailingBoilerplate(article.getBody())
+                : null;
         String material = firstText(fullText, article.getSummary(), article.getTitle());
         List<FindingSection> sections = SentenceSplitter.split(material, article.getLanguage());
         List<FindingSection> meaningfulSections = sections.stream()

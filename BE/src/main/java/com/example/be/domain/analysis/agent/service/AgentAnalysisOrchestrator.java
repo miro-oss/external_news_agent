@@ -39,6 +39,7 @@ import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
+import com.example.be.domain.collection.content.ArticleBodyCleaner;
 import com.example.be.domain.collection.service.command.CollectionResultWriter;
 import com.example.be.domain.issues.entity.IssueCrossSource;
 import com.example.be.domain.issues.entity.IssueStance;
@@ -1412,7 +1413,10 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
 
     private String analysisText(Article article) {
         if (StringUtils.hasText(article.getBody())) {
-            return article.getBody();
+            String articleContent = ArticleBodyCleaner.withoutTrailingBoilerplate(article.getBody());
+            if (StringUtils.hasText(articleContent)) {
+                return articleContent;
+            }
         }
         if (StringUtils.hasText(article.getSummary())) {
             return article.getSummary();

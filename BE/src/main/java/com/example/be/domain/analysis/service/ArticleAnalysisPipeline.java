@@ -57,13 +57,34 @@ public class ArticleAnalysisPipeline {
         analyze(runId, refreshedArticleIds, false);
     }
 
+    /** 조사 액션으로 새 전문이나 이슈 멤버가 생긴 범위만 다시 분석한다. */
+    public void analyzeInvestigation(Long runId, Set<Long> refreshedArticleIds) {
+        if (refreshedArticleIds.isEmpty()) {
+            return;
+        }
+        AgentPlan plan = plan(runId);
+        analyzeTargets(runId, investigationTargets(runId, refreshedArticleIds), plan, true, true);
+    }
+
     private void analyze(Long runId, Set<Long> refreshedArticleIds, boolean clustered) {
-        AgentPlan plan = runRepository.findById(runId)
-                .orElseThrow(() -> new IllegalStateException("분석할 수집 실행이 없습니다. runId=" + runId))
-                .getLlmPlan();
+        AgentPlan plan = plan(runId);
         List<Target> targets = targets(runId, refreshedArticleIds, clustered);
         // coverage의 분모는 이슈다. 클러스터링 실패 시 기사 단위 degrade 결과를 이슈 수로 가장하지 않는다.
         findingWriter.recordTargetCount(runId, clustered ? targets.size() : 0);
+        analyzeTargets(runId, targets, plan, clustered, false);
+    }
+
+    private AgentPlan plan(Long runId) {
+        return runRepository.findById(runId)
+                .orElseThrow(() -> new IllegalStateException("분석할 수집 실행이 없습니다. runId=" + runId))
+                .getLlmPlan();
+    }
+
+    private void analyzeTargets(Long runId,
+                                List<Target> targets,
+                                AgentPlan plan,
+                                boolean clustered,
+                                boolean refreshExisting) {
         Map<Long, AnalysisContext> contexts = analysisContexts(runId, targets, plan, clustered);
         Map<Long, FindingReuseCache.Lookup> lookups = cacheLookups(contexts.values().stream().toList(), plan);
         for (Target target : targets) {
@@ -71,18 +92,31 @@ public class ArticleAnalysisPipeline {
                 AnalysisContext context = contexts.get(target.article().getId());
                 FindingReuseCache.Lookup lookup = lookups.get(target.article().getId());
                 if (lookup.cached().isPresent()) {
-                    findingWriter.write(runId, target.article().getId(), target.changeType(),
-                            lookup.analysisInputHash(), lookup.cached().orElseThrow());
+                    writeFinding(runId, target, lookup.analysisInputHash(),
+                            lookup.cached().orElseThrow(), refreshExisting);
                     continue;
                 }
                 AnalysisResult result = orchestrator.analyze(context);
-                findingWriter.write(runId, target.article().getId(), target.changeType(),
-                        lookup.analysisInputHash(), result);
+                writeFinding(runId, target, lookup.analysisInputHash(), result, refreshExisting);
             } catch (RuntimeException exception) {
                 log.warn("기사 분석에 실패했다. runId={} articleId={} error={}",
                         runId, target.article().getId(), exception.getMessage(), exception);
                 findingWriter.addFailureWarning(runId, target.article().getId(), messageOf(exception));
             }
+        }
+    }
+
+    private void writeFinding(Long runId,
+                              Target target,
+                              String analysisInputHash,
+                              AnalysisResult result,
+                              boolean refreshExisting) {
+        if (refreshExisting) {
+            findingWriter.refresh(
+                    runId, target.article().getId(), target.changeType(), analysisInputHash, result);
+        } else {
+            findingWriter.write(
+                    runId, target.article().getId(), target.changeType(), analysisInputHash, result);
         }
     }
 
@@ -217,6 +251,21 @@ public class ArticleAnalysisPipeline {
                         issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(
                                 runId, articleIds));
             }
+        }
+        return prioritized(byArticleId.values());
+    }
+
+    private List<Target> investigationTargets(Long runId, Set<Long> refreshedArticleIds) {
+        Map<Long, Target> byArticleId = new LinkedHashMap<>();
+        for (List<Long> articleIds : OracleInClause.batches(refreshedArticleIds)) {
+            for (CollectionRunArticle observation :
+                    runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
+                            runId, articleIds)) {
+                addTarget(byArticleId, observation, ChangeType.UPDATED);
+            }
+            addMissingRepresentatives(byArticleId,
+                    issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(
+                            runId, articleIds));
         }
         return prioritized(byArticleId.values());
     }

@@ -62,16 +62,52 @@ class FindingWriterTest {
     void locksArticleBeforeCheckingForDuplicateFinding() {
         CollectionRun run = mock(CollectionRun.class);
         Article article = mock(Article.class);
+        Finding existing = mock(Finding.class);
         AnalysisResult result = mock(AnalysisResult.class);
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
-        when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(true);
+        when(findingRepository.findByRunIdAndArticleId(42L, 10L)).thenReturn(Optional.of(existing));
 
         writer.write(42L, 10L, ChangeType.UPDATED, "a".repeat(64), result);
 
         InOrder order = inOrder(articleRepository, findingRepository);
         order.verify(articleRepository).findByIdForUpdate(10L);
-        order.verify(findingRepository).existsByRunIdAndArticleId(42L, 10L);
+        order.verify(findingRepository).findByRunIdAndArticleId(42L, 10L);
+        verify(findingRepository, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void refreshesExistingFindingAfterFullTextInvestigation() {
+        CollectionRun run = mock(CollectionRun.class);
+        Article article = mock(Article.class);
+        Finding existing = Finding.builder()
+                .run(run)
+                .article(article)
+                .changeType(ChangeType.NEW)
+                .summary("기존 요약")
+                .keyPoints(List.of())
+                .sentiment(Sentiment.NEUTRAL)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity
+                        .legacy(SensitivityLevel.LOW))
+                .relevance(Relevance.REFERENCE)
+                .category("기존")
+                .sections(List.of())
+                .analyzedAt(java.time.LocalDateTime.now())
+                .build();
+        AnalysisResult refreshed = new AnalysisResult(
+                "전문 기반 요약", List.of(), null, Sentiment.POSITIVE,
+                com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.MEDIUM),
+                Relevance.IMPORTANT, "조사", List.of());
+        when(runRepository.findById(42L)).thenReturn(Optional.of(run));
+        when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
+        when(findingRepository.findByRunIdAndArticleId(42L, 10L)).thenReturn(Optional.of(existing));
+        when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(10L)).thenReturn(List.of());
+
+        writer.refresh(42L, 10L, ChangeType.UPDATED, "b".repeat(64), refreshed);
+
+        assertEquals("전문 기반 요약", existing.getSummary());
+        assertEquals(ChangeType.UPDATED, existing.getChangeType());
+        assertEquals("b".repeat(64), existing.getAnalysisInputHash());
         verify(findingRepository, never()).save(org.mockito.ArgumentMatchers.any());
     }
 
@@ -102,7 +138,7 @@ class FindingWriterTest {
                 metadata);
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
-        when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
+        when(findingRepository.findByRunIdAndArticleId(42L, 10L)).thenReturn(Optional.empty());
 
         writer.write(42L, 10L, ChangeType.NEW, "a".repeat(64), result);
 
@@ -126,7 +162,7 @@ class FindingWriterTest {
         NewsIssue secondIssue = NewsIssue.builder().id(2L).build();
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
-        when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
+        when(findingRepository.findByRunIdAndArticleId(42L, 10L)).thenReturn(Optional.empty());
         when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(10L)).thenReturn(List.of(
                 IssueArticle.builder()
                         .issue(firstIssue)
@@ -159,7 +195,7 @@ class FindingWriterTest {
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
         when(article.getTitle()).thenReturn("[속보] 후속 기사");
-        when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
+        when(findingRepository.findByRunIdAndArticleId(42L, 10L)).thenReturn(Optional.empty());
         when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(10L)).thenReturn(List.of(
                 IssueArticle.builder().issue(issue).article(article)
                         .role(IssueArticleRole.BREAKING).build()));
@@ -181,7 +217,7 @@ class FindingWriterTest {
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
         when(article.getTitle()).thenReturn("[속보] 고민감도 기사");
-        when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
+        when(findingRepository.findByRunIdAndArticleId(42L, 10L)).thenReturn(Optional.empty());
         when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(10L)).thenReturn(List.of(
                 IssueArticle.builder()
                         .issue(issue)
@@ -225,7 +261,7 @@ class FindingWriterTest {
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(articleRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(article));
         when(article.getTitle()).thenReturn("[속보] 고민감도 기사");
-        when(findingRepository.existsByRunIdAndArticleId(42L, 10L)).thenReturn(false);
+        when(findingRepository.findByRunIdAndArticleId(42L, 10L)).thenReturn(Optional.empty());
         when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(10L)).thenReturn(List.of(
                 IssueArticle.builder().issue(issue).article(article)
                         .role(IssueArticleRole.BREAKING).build()));

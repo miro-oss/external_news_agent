@@ -143,6 +143,27 @@ class ArticleAnalysisPipelineTest {
     }
 
     @Test
+    void refreshesOnlyInvestigationTargetsWithoutOverwritingCoverageCount() {
+        Article article = Article.builder()
+                .id(10L)
+                .title("조사로 전문을 확보한 기사")
+                .body("새 전문")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
+                42L, List.of(10L)))
+                .thenReturn(List.of(observation(article, ChangeType.UNCHANGED)));
+        AnalysisResult result = mock(AnalysisResult.class);
+        when(orchestrator.analyze(new AnalysisContext(42L, article, AgentPlan.FREE))).thenReturn(result);
+
+        pipeline.analyzeInvestigation(42L, Set.of(10L));
+
+        verify(findingWriter).refresh(42L, 10L, ChangeType.UPDATED, inputHash(article), result);
+        verify(findingWriter, never()).recordTargetCount(any(), org.mockito.ArgumentMatchers.anyInt());
+        verify(runArticleRepository, never()).findRepresentativeAnalysisTargetsByRunId(42L);
+    }
+
+    @Test
     void analyzesHistoricalRepresentativeWhenOnlyNewMemberWasObserved() {
         Article representative = Article.builder().id(10L).title("기존 대표").build();
         when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of());

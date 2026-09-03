@@ -67,6 +67,8 @@ news:
     breaking-time-window: 6h
     entity-overlap-threshold: 2
     simhash-hamming-threshold: 3
+    # 잘린 요약·매체 푸터만으로 동일 본문 그룹을 만들지 않는다.
+    min-article-content-length: 200
   notifications:
     # 미설정 시 자동 속보 알림은 전송하지 않는다. 활성 알림 그룹 ID를 명시적으로 지정해야 한다.
     breaking-group-id: ${BREAKING_NOTIFICATION_GROUP_ID:}

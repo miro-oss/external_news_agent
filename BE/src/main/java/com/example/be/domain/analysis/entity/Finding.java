@@ -163,4 +163,31 @@ public class Finding {
                         bullet.attributedTo()))
                 .toList();
     }
+
+    /** 같은 run에서 전문을 새로 확보했을 때 식별자와 연결은 유지하고 분석 결과만 교체한다. */
+    public void replaceAnalysis(Finding replacement) {
+        this.changeType = replacement.changeType;
+        this.summary = replacement.summary;
+        this.keyPoints = replacement.keyPoints;
+        this.intent = replacement.intent;
+        this.sentiment = replacement.sentiment;
+        this.sensitivity = replacement.sensitivity;
+        this.relevance = replacement.relevance;
+        this.category = replacement.category;
+        this.analysisSource = replacement.analysisSource;
+        this.sections = replacement.sections;
+        this.analysisSections = replacement.analysisSections;
+        this.entities = replacement.entities;
+        this.perspectiveTags = replacement.perspectiveTags;
+        this.promptVersion = replacement.promptVersion;
+        this.llmProvider = replacement.llmProvider;
+        this.llmModel = replacement.llmModel;
+        this.inputTokens = replacement.inputTokens;
+        this.outputTokens = replacement.outputTokens;
+        this.costUsd = replacement.costUsd;
+        this.credits = replacement.credits;
+        this.analysisInputHash = replacement.analysisInputHash;
+        this.inputTruncated = replacement.inputTruncated;
+        this.analyzedAt = replacement.analyzedAt;
+    }
 }

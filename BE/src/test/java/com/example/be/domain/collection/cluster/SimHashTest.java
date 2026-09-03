@@ -3,7 +3,6 @@ package com.example.be.domain.collection.cluster;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SimHashTest {
@@ -31,12 +30,9 @@ class SimHashTest {
 
     @Test
     void excludesPublisherBoilerplateAndShortFragmentsFromArticleFingerprint() {
-        String publisherFooter = ("대표이사 : 염영남 주소 : 서울 중구 퇴계로 173 "
-                + "사업자등록번호 : 102-81-36588 통신판매업신고 : 서울중구 00665 ").repeat(5);
-
-        assertTrue(SimHash.tryOf(publisherFooter).isPresent());
-        assertTrue(SimHash.tryOfArticleBody(publisherFooter).isEmpty());
-        assertTrue(SimHash.tryOfArticleBody("짧지만 정상적인 기사 본문").isEmpty());
+        assertTrue(SimHash.tryOf(ClusterTestFixtures.PUBLISHER_FOOTER).isPresent());
+        assertTrue(SimHash.tryOfArticleBody(ClusterTestFixtures.PUBLISHER_FOOTER, 200).isEmpty());
+        assertTrue(SimHash.tryOfArticleBody("짧지만 정상적인 기사 본문", 200).isEmpty());
     }
 
     @Test
@@ -44,10 +40,31 @@ class SimHashTest {
         String article = "삼성전자가 HBM4 공급 계약과 생산 일정을 발표했다. ".repeat(12);
         String withFooter = article + "대표이사 : 홍길동 사업자등록번호 : 123-45-67890";
 
-        assertTrue(SimHash.tryOfArticleBody(withFooter).isPresent());
         assertEquals(
-                SimHash.tryOfArticleBody(article).orElseThrow(),
-                SimHash.tryOfArticleBody(withFooter).orElseThrow());
-        assertFalse(SimHash.tryOfArticleBody(article).isEmpty());
+                SimHash.tryOfArticleBody(article, 200).orElseThrow(),
+                SimHash.tryOfArticleBody(withFooter, 200).orElseThrow());
+    }
+
+    @Test
+    void keepsLegalMarkerInsideArticleAndRemovesOnlyTheActualTrailingFooter() {
+        String lead = "언론 저작권 분쟁의 법적 쟁점을 설명하는 기사 본문이다. ".repeat(8);
+        String quotedRule = "법원은 무단전재 금지 조항의 적용 범위를 따져야 한다고 밝혔다. ";
+        String conclusion = "당사자 의견과 향후 재판 일정을 함께 정리했다. ".repeat(12);
+        String article = lead + quotedRule + conclusion;
+        String withFooter = article + ClusterTestFixtures.PUBLISHER_FOOTER;
+
+        assertEquals(
+                SimHash.tryOfArticleBody(article, 200).orElseThrow(),
+                SimHash.tryOfArticleBody(withFooter, 200).orElseThrow());
+    }
+
+    @Test
+    void recognizesNormalizedCopyrightSymbolsInTrailingFooter() {
+        String article = "삼성전자가 HBM4 공급 계약과 생산 일정을 발표했다. ".repeat(12);
+        String withFooter = article + "저작권자 ⓒ 뉴시스 무단전재 및 재배포 금지";
+
+        assertEquals(
+                SimHash.tryOfArticleBody(article, 200).orElseThrow(),
+                SimHash.tryOfArticleBody(withFooter, 200).orElseThrow());
     }
 }

@@ -29,4 +29,12 @@ class IssueClusteringPropertiesTest {
 
         assertThrows(IllegalStateException.class, properties::afterPropertiesSet);
     }
+
+    @Test
+    void rejectsNonPositiveMinimumArticleContentLength() {
+        IssueClusteringProperties properties = new IssueClusteringProperties();
+        properties.setMinArticleContentLength(0);
+
+        assertThrows(IllegalStateException.class, properties::afterPropertiesSet);
+    }
 }

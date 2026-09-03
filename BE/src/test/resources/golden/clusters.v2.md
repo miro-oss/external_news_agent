@@ -72,11 +72,13 @@ precision recovers to at least 0.90 on a source-faithful replay.
 
 ## After issue #141
 
-The SimHash input now removes known publisher/legal footer suffixes and requires at least 200
-characters of article content to remain. A separate lossless regression test uses bodies longer
-than the cutoff to prove that boilerplate-only bodies are excluded while syndicated article text
-still groups. The quota-ownership and supported-evidence fixes from PR #139's post-merge review are
-also covered by focused tests but do not affect these clustering metrics.
+The shared article-body cleaner now recognizes a dense publisher/legal footer at the end of the
+body, including NFKC-normalized copyright symbols, without cutting a legal phrase quoted earlier
+in the article. The configured `min-article-content-length` (default 200) must remain after that
+cleanup before SimHash is calculated. A separate lossless regression test uses bodies longer than
+the cutoff to prove that boilerplate-only bodies are excluded while syndicated article text still
+groups. Investigation actions now re-run analysis for refreshed articles before measuring
+supported evidence; these investigation fixes do not affect the clustering metrics below.
 
 All 48 `FULLTEXT` rows in this fixture contain only 120-character fragments, so the conditional
 replay intentionally creates no fixed SimHash groups. It therefore verifies that truncated

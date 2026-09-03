@@ -13,6 +13,7 @@ public class IssueClusteringProperties implements InitializingBean {
     private Duration breakingTimeWindow = Duration.ofHours(6);
     private int entityOverlapThreshold = 2;
     private int simhashHammingThreshold = 3;
+    private int minArticleContentLength = 200;
     /**
      * 이 비율 이상의 기사에 나타나는 엔티티는 주제 어휘로 보고 교집합 계산에서 뺀다.
      *
@@ -41,7 +42,8 @@ public class IssueClusteringProperties implements InitializingBean {
                 || commonEntityDocumentRatio > 1
                 || commonEntityMinArticles < 1
                 || simhashHammingThreshold < 0
-                || simhashHammingThreshold > 64) {
+                || simhashHammingThreshold > 64
+                || minArticleContentLength < 1) {
             throw new IllegalStateException("news.clustering 설정값이 올바르지 않습니다.");
         }
     }
@@ -100,5 +102,13 @@ public class IssueClusteringProperties implements InitializingBean {
 
     public void setSimhashHammingThreshold(int simhashHammingThreshold) {
         this.simhashHammingThreshold = simhashHammingThreshold;
+    }
+
+    public int getMinArticleContentLength() {
+        return minArticleContentLength;
+    }
+
+    public void setMinArticleContentLength(int minArticleContentLength) {
+        this.minArticleContentLength = minArticleContentLength;
     }
 }

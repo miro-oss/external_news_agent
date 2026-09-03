@@ -2,6 +2,7 @@ package com.example.be.domain.analysis.agent.investigation;
 
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentExploreResponse;
+import com.example.be.domain.analysis.service.ArticleAnalysisPipeline;
 import com.example.be.domain.collection.connector.dto.res.FetchResult;
 import com.example.be.domain.collection.cluster.IssueClusteringService;
 import com.example.be.domain.collection.robots.RobotsDecision;
@@ -24,6 +25,7 @@ import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -47,6 +49,8 @@ class IssueInvestigationActionExecutorTest {
     @Mock
     private IssueClusteringService issueClusteringService;
     @Mock
+    private ArticleAnalysisPipeline analysisPipeline;
+    @Mock
     private IssueInvestigationContextService contextService;
 
     private IssueInvestigationActionExecutor executor;
@@ -55,7 +59,8 @@ class IssueInvestigationActionExecutorTest {
     void setUp() {
         executor = new IssueInvestigationActionExecutor(
                 sourceRepository, issueArticleRepository, collectionExecutor, resultWriter,
-                contentEnricher, issueClusteringService, contextService, new AgentProperties());
+                contentEnricher, issueClusteringService, analysisPipeline,
+                contextService, new AgentProperties());
     }
 
     @Test
@@ -82,8 +87,10 @@ class IssueInvestigationActionExecutorTest {
     @Test
     void readFullTextReportsSupportedEvidenceDeltaInsteadOfBodySentenceDelta() {
         InvestigationContext before = context(2, 5, List.of(101L), Map.of());
+        InvestigationContext clustered = context(2, 12, List.of(101L), Map.of());
         InvestigationContext after = context(3, 12, List.of(101L), Map.of());
-        when(contextService.current(42L, 88L)).thenReturn(after);
+        when(contentEnricher.enrichArticle(42L, 101L)).thenReturn(Set.of(101L));
+        when(contextService.current(42L, 88L)).thenReturn(clustered, after);
         AgentExploreResponse.Proposal proposal = new AgentExploreResponse.Proposal(
                 "READ_FULLTEXT", null, null, 101L, List.of(), null, "전문 확인");
 
@@ -92,6 +99,8 @@ class IssueInvestigationActionExecutorTest {
         assertEquals(0, result.addedArticleCount());
         assertEquals(1, result.addedEvidenceCount());
         verify(contentEnricher).enrichArticle(42L, 101L);
+        verify(issueClusteringService).cluster(42L);
+        verify(analysisPipeline).analyzeInvestigation(42L, Set.of(101L));
     }
 
     @Test
@@ -108,13 +117,16 @@ class IssueInvestigationActionExecutorTest {
                 2, 5, List.of(101L), Map.of("NAVER", 11L));
         InvestigationContext after = context(
                 3, 25, List.of(101L, 102L, 103L), Map.of("NAVER", 11L));
+        InvestigationContext clustered = context(
+                2, 25, List.of(101L, 102L, 103L), Map.of("NAVER", 11L));
         CollectionOutcome outcome = CollectionOutcome.of(
                 FetchResult.ok(List.of()), RobotsDecision.skipped(source));
         when(sourceRepository.findActiveByTopicId(7L)).thenReturn(List.of(source));
         when(collectionExecutor.collectInvestigation("HBM 투자", 10, source)).thenReturn(outcome);
         when(resultWriter.writeInvestigation(42L, 7L, 11L, outcome))
                 .thenReturn(new CollectionResultWriter.InvestigationWriteResult(2, 2));
-        when(contextService.current(42L, 88L)).thenReturn(after);
+        when(contentEnricher.enrich(42L)).thenReturn(Set.of(102L, 103L));
+        when(contextService.current(42L, 88L)).thenReturn(clustered, after);
         AgentExploreResponse.Proposal proposal = new AgentExploreResponse.Proposal(
                 "SEARCH_MORE", "NAVER", "HBM 투자", null, List.of(), null, "추가 검색");
 
@@ -124,6 +136,7 @@ class IssueInvestigationActionExecutorTest {
         assertEquals(1, result.addedEvidenceCount());
         verify(contentEnricher).enrich(42L);
         verify(issueClusteringService).cluster(42L);
+        verify(analysisPipeline).analyzeInvestigation(42L, Set.of(102L, 103L));
     }
 
     private InvestigationContext context() {

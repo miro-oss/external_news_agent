@@ -189,7 +189,7 @@ class IssueInvestigationOrchestratorTest {
     }
 
     @Test
-    void doesNotSettleReservationWhenAnotherWorkerOwnsTheSameStep() {
+    void releasesNewReservationWhenAnotherWorkerOwnsTheSameStep() {
         IssueInvestigationState state = state(1, null, "IN_PROGRESS", null);
         IssueInvestigationState owned = state(1, 1, "IN_PROGRESS", null);
         when(investigationRepository.reserve(
@@ -206,7 +206,7 @@ class IssueInvestigationOrchestratorTest {
         orchestrator.investigate(RUN_ID);
 
         verify(agentClient, never()).explore(any());
-        verify(quotaService, never()).completeFailure(eq(reservation), anyString());
+        verify(quotaService).completeFailure(reservation, "PROVIDER_UNAVAILABLE");
         verify(investigationRepository, times(1)).markInFlight(state.id(), 1);
     }
 
