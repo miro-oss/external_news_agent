@@ -6,6 +6,7 @@ import com.example.be.domain.topics.dto.res.TopicResDTO;
 import com.example.be.domain.topics.dto.res.TopicSourceResDTO;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
+import com.example.be.domain.topics.repository.TopicTrendJdbcRepository;
 import com.example.be.global.config.ApiTimeZone;
 import org.springframework.util.StringUtils;
 
@@ -49,13 +50,20 @@ public class TopicConverter {
                 .build();
     }
 
-    public static List<TopicResDTO.Summary> toSummaryList(List<Topic> topics, Map<Long, Integer> linkedSourceCounts) {
+    public static List<TopicResDTO.Summary> toSummaryList(List<Topic> topics,
+                                                          Map<Long, Integer> linkedSourceCounts,
+                                                          Map<Long, TopicTrendJdbcRepository.TopicTrendSnapshot> trendSnapshots) {
         return topics.stream()
-                .map(topic -> toSummary(topic, linkedSourceCounts.getOrDefault(topic.getId(), 0)))
+                .map(topic -> toSummary(
+                        topic,
+                        linkedSourceCounts.getOrDefault(topic.getId(), 0),
+                        trendSnapshots.get(topic.getId())))
                 .toList();
     }
 
-    public static TopicResDTO.Summary toSummary(Topic topic, int linkedSourceCount) {
+    public static TopicResDTO.Summary toSummary(Topic topic,
+                                                int linkedSourceCount,
+                                                TopicTrendJdbcRepository.TopicTrendSnapshot trendSnapshot) {
         return TopicResDTO.Summary.builder()
                 .id(topic.getId())
                 .name(topic.getName())
@@ -68,6 +76,8 @@ public class TopicConverter {
                 .active(topic.isActive())
                 .linkedSourceCount(linkedSourceCount)
                 .lastCollectedAt(toOffsetDateTime(topic.getLastCollectedAt()))
+                .surgeKeywords(toSurgeKeywords(trendSnapshot))
+                .relatedKeywords(toRelatedKeywords(trendSnapshot))
                 .build();
     }
 
@@ -171,6 +181,37 @@ public class TopicConverter {
                 .robotsStatus(source.getRobotsStatus())
                 .active(source.isActive())
                 .build();
+    }
+
+    private static List<TopicResDTO.KeywordTrend> toSurgeKeywords(
+            TopicTrendJdbcRepository.TopicTrendSnapshot trendSnapshot) {
+        if (trendSnapshot == null) {
+            return List.of();
+        }
+        return trendSnapshot.surgeKeywords().stream()
+                .map(keyword -> TopicResDTO.KeywordTrend.builder()
+                        .keyword(keyword.keyword())
+                        .issueCount(keyword.issueCount())
+                        .previousIssueCount(keyword.previousIssueCount())
+                        .deltaIssueCount(keyword.deltaIssueCount())
+                        .zScore(keyword.zScore())
+                        .burst(keyword.burst())
+                        .build())
+                .toList();
+    }
+
+    private static List<TopicResDTO.RelatedKeyword> toRelatedKeywords(
+            TopicTrendJdbcRepository.TopicTrendSnapshot trendSnapshot) {
+        if (trendSnapshot == null) {
+            return List.of();
+        }
+        return trendSnapshot.relatedKeywords().stream()
+                .map(keyword -> TopicResDTO.RelatedKeyword.builder()
+                        .keyword(keyword.keyword())
+                        .issueCount(keyword.issueCount())
+                        .sharePercent(keyword.sharePercent())
+                        .build())
+                .toList();
     }
 
     /**

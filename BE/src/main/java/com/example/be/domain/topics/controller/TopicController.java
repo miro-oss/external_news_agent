@@ -119,6 +119,7 @@ public class TopicController {
             description = """
                     등록된 수집 주제를 목록으로 조회합니다.
                     실제 수집은 주제에 연결된 소스와의 조합으로 실행되므로 연결된 소스 수를 함께 내려줍니다.
+                    최근 7일 기사×이슈 관측을 SQL로 집계한 급상승 키워드와 연관 키워드도 포함합니다.
                     """
     )
     @ApiResponses({
@@ -143,7 +144,24 @@ public class TopicController {
                                     "intervalMinutes": 60,
                                     "active": true,
                                     "linkedSourceCount": 4,
-                                    "lastCollectedAt": "2026-08-10T08:00:00+09:00"
+                                    "lastCollectedAt": "2026-08-10T08:00:00+09:00",
+                                    "surgeKeywords": [
+                                      {
+                                        "keyword": "HBM4",
+                                        "issueCount": 4,
+                                        "previousIssueCount": 1,
+                                        "deltaIssueCount": 3,
+                                        "zScore": 2.87,
+                                        "burst": true
+                                      }
+                                    ],
+                                    "relatedKeywords": [
+                                      {
+                                        "keyword": "엔비디아",
+                                        "issueCount": 3,
+                                        "sharePercent": 60.00
+                                      }
+                                    ]
                                   }
                                 ],
                                 "page": 0,

@@ -756,18 +756,20 @@ tbody tr:hover td {
 
 /* 주제명 길이가 표 전체의 열 너비를 결정하지 않게 하고, 긴 이름만 셀 안에서 좌우로 확인한다. */
 .topic-table {
-  min-width: 1040px;
+  min-width: 1380px;
   table-layout: fixed;
 }
 
-.topic-table .topic-name-column { width: 20%; }
-.topic-table .topic-status-column { width: 7%; }
-.topic-table .topic-collected-column { width: 14%; }
-.topic-table .topic-query-column { width: 16%; }
-.topic-table .topic-required-column { width: 11%; }
-.topic-table .topic-optional-column { width: 13%; }
-.topic-table .topic-excluded-column { width: 11%; }
-.topic-table .topic-interval-column { width: 8%; }
+.topic-table .topic-name-column { width: 14%; }
+.topic-table .topic-status-column { width: 6%; }
+.topic-table .topic-collected-column { width: 10%; }
+.topic-table .topic-query-column { width: 11%; }
+.topic-table .topic-required-column { width: 9%; }
+.topic-table .topic-optional-column { width: 10%; }
+.topic-table .topic-excluded-column { width: 8%; }
+.topic-table .topic-surge-column { width: 13%; }
+.topic-table .topic-related-column { width: 13%; }
+.topic-table .topic-interval-column { width: 6%; }
 
 .topic-table td:not(.topic-name-cell) {
   overflow: hidden;
@@ -801,6 +803,36 @@ tbody tr:hover td {
   border-radius: 4px;
   outline: 2px solid var(--primary);
   outline-offset: 2px;
+}
+
+.topic-signal-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.topic-signal-chip {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0.18rem 0.52rem;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--fg-2);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topic-signal-chip.burst {
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-sunken));
+  color: var(--danger-strong);
+}
+
+.topic-signal-empty {
+  color: var(--fg-4);
 }
 
 .badge {

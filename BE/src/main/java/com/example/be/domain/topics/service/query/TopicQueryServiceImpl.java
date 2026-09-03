@@ -7,6 +7,8 @@ import com.example.be.domain.topics.exception.TopicException;
 import com.example.be.domain.topics.exception.code.TopicErrorCode;
 import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.domain.topics.repository.TopicSpecification;
+import com.example.be.domain.topics.repository.TopicTrendJdbcRepository;
+import com.example.be.global.config.ApiTimeZone;
 import com.example.be.global.apiPayload.PageResponse;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
@@ -17,8 +19,13 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -26,7 +33,11 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class TopicQueryServiceImpl implements TopicQueryService {
 
+    // SQL 후보에서 등록 키워드를 제거한 뒤 화면에는 상위 신호만 노출한다.
+    private static final int DISPLAY_LIMIT = 5;
+
     private final TopicRepository topicRepository;
+    private final TopicTrendJdbcRepository topicTrendJdbcRepository;
 
     @Override
     public PageResponse<TopicResDTO.Summary> getTopics(Boolean active, String keyword, int page, int size) {
@@ -36,9 +47,18 @@ public class TopicQueryServiceImpl implements TopicQueryService {
                 TopicSpecification.filter(active, keyword),
                 PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "id"))
         );
+        List<Topic> content = topics.getContent();
+        Map<Long, TopicTrendJdbcRepository.TopicTrendSnapshot> trendSnapshots = content.isEmpty()
+                ? Map.of()
+                : topicTrendJdbcRepository.findSnapshots(
+                        content.stream().map(Topic::getId).toList(),
+                        LocalDateTime.now(ApiTimeZone.ZONE));
 
         return PageResponse.of(
-                TopicConverter.toSummaryList(topics.getContent(), countLinkedSources(topics.getContent())),
+                TopicConverter.toSummaryList(
+                        content,
+                        countLinkedSources(content),
+                        filterSeedKeywords(content, trendSnapshots)),
                 page,
                 size,
                 topics.getTotalElements()
@@ -64,6 +84,65 @@ public class TopicQueryServiceImpl implements TopicQueryService {
                         TopicRepository.LinkedSourceCount::getTopicId,
                         TopicRepository.LinkedSourceCount::getLinkedSourceCount
                 ));
+    }
+
+    private Map<Long, TopicTrendJdbcRepository.TopicTrendSnapshot> filterSeedKeywords(
+            List<Topic> topics,
+            Map<Long, TopicTrendJdbcRepository.TopicTrendSnapshot> trendSnapshots) {
+        if (topics.isEmpty() || trendSnapshots.isEmpty()) {
+            return trendSnapshots;
+        }
+
+        Map<Long, TopicTrendJdbcRepository.TopicTrendSnapshot> result = new LinkedHashMap<>();
+        for (Topic topic : topics) {
+            TopicTrendJdbcRepository.TopicTrendSnapshot snapshot = trendSnapshots.get(topic.getId());
+            if (snapshot == null) {
+                continue;
+            }
+
+            Set<String> configuredKeywords = configuredKeywordSet(topic);
+            List<TopicTrendJdbcRepository.TopicTrendKeyword> surgeKeywords = snapshot.surgeKeywords().stream()
+                    .filter(item -> !configuredKeywords.contains(normalizeKeyword(item.keyword())))
+                    .limit(DISPLAY_LIMIT)
+                    .toList();
+            List<TopicTrendJdbcRepository.TopicRelatedKeyword> relatedKeywords = snapshot.relatedKeywords().stream()
+                    .filter(item -> !configuredKeywords.contains(normalizeKeyword(item.keyword())))
+                    .limit(DISPLAY_LIMIT)
+                    .toList();
+
+            result.put(topic.getId(), new TopicTrendJdbcRepository.TopicTrendSnapshot(
+                    surgeKeywords,
+                    relatedKeywords
+            ));
+        }
+        return result;
+    }
+
+    private Set<String> configuredKeywordSet(Topic topic) {
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        addConfigured(result, topic.getName());
+        addConfigured(result, topic.getRequiredKeywords());
+        addConfigured(result, topic.getOptionalKeywords());
+        addConfigured(result, topic.getExcludedKeywords());
+        return result;
+    }
+
+    private void addConfigured(Set<String> target, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        target.add(normalizeKeyword(value));
+    }
+
+    private void addConfigured(Set<String> target, List<String> values) {
+        if (values == null) {
+            return;
+        }
+        values.forEach(value -> addConfigured(target, value));
+    }
+
+    private String normalizeKeyword(String value) {
+        return value.trim().toLowerCase(Locale.ROOT);
     }
 
     private void validatePaging(int page, int size) {

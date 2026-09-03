@@ -18,6 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -76,6 +77,8 @@ class TopicControllerTest {
                 .andExpect(jsonPath("$.code").value("COMMON200"))
                 .andExpect(jsonPath("$.result.content[0].name").value("HBM"))
                 .andExpect(jsonPath("$.result.content[0].linkedSourceCount").value(4))
+                .andExpect(jsonPath("$.result.content[0].surgeKeywords[0].keyword").value("HBM4"))
+                .andExpect(jsonPath("$.result.content[0].relatedKeywords[0].sharePercent").value(60.00))
                 .andExpect(jsonPath("$.result.totalElements").value(1))
                 .andExpect(jsonPath("$.result.hasNext").value(false));
     }
@@ -251,6 +254,19 @@ class TopicControllerTest {
                 .intervalMinutes(60)
                 .active(true)
                 .linkedSourceCount(4)
+                .surgeKeywords(List.of(TopicResDTO.KeywordTrend.builder()
+                        .keyword("HBM4")
+                        .issueCount(4)
+                        .previousIssueCount(1)
+                        .deltaIssueCount(3)
+                        .zScore(new BigDecimal("2.87"))
+                        .burst(true)
+                        .build()))
+                .relatedKeywords(List.of(TopicResDTO.RelatedKeyword.builder()
+                        .keyword("마이크론")
+                        .issueCount(3)
+                        .sharePercent(new BigDecimal("60.00"))
+                        .build()))
                 .build();
     }
 }

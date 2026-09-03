@@ -6,6 +6,7 @@ import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.exception.TopicException;
 import com.example.be.domain.topics.exception.code.TopicErrorCode;
 import com.example.be.domain.topics.repository.TopicRepository;
+import com.example.be.domain.topics.repository.TopicTrendJdbcRepository;
 import com.example.be.global.apiPayload.PageResponse;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.Test;
@@ -18,8 +19,10 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.domain.Specification;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -36,6 +39,9 @@ class TopicQueryServiceImplTest {
     @Mock
     private TopicRepository topicRepository;
 
+    @Mock
+    private TopicTrendJdbcRepository topicTrendJdbcRepository;
+
     @InjectMocks
     private TopicQueryServiceImpl topicQueryService;
 
@@ -44,11 +50,15 @@ class TopicQueryServiceImplTest {
         when(topicRepository.findAll(ArgumentMatchers.<Specification<Topic>>any(), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(topic()), PageRequest.of(0, 20), 1L));
         when(topicRepository.countLinkedSources(List.of(1L))).thenReturn(List.of(linkedSourceCount(1L, 4)));
+        when(topicTrendJdbcRepository.findSnapshots(any(), any(LocalDateTime.class)))
+                .thenReturn(Map.of(1L, snapshot()));
 
         PageResponse<TopicResDTO.Summary> result = topicQueryService.getTopics(true, null, 0, 20);
 
         assertEquals(1, result.getContent().size());
         assertEquals(4, result.getContent().get(0).getLinkedSourceCount());
+        assertEquals("HBM4", result.getContent().get(0).getSurgeKeywords().get(0).getKeyword());
+        assertEquals("마이크론", result.getContent().get(0).getRelatedKeywords().get(0).getKeyword());
         assertEquals(0, result.getPage());
         assertEquals(20, result.getSize());
         assertEquals(1L, result.getTotalElements());
@@ -57,14 +67,33 @@ class TopicQueryServiceImplTest {
     }
 
     @Test
+    void getTopicsFiltersConfiguredKeywordsBeforeLimitingSignals() {
+        when(topicRepository.findAll(ArgumentMatchers.<Specification<Topic>>any(), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(topic()), PageRequest.of(0, 20), 1L));
+        when(topicRepository.countLinkedSources(List.of(1L))).thenReturn(List.of());
+        when(topicTrendJdbcRepository.findSnapshots(any(), any(LocalDateTime.class)))
+                .thenReturn(Map.of(1L, snapshotWithConfiguredKeywords()));
+
+        TopicResDTO.Summary summary = topicQueryService.getTopics(null, null, 0, 20).getContent().get(0);
+
+        assertEquals(List.of("급상승1", "급상승2", "급상승3", "급상승4", "급상승5"),
+                summary.getSurgeKeywords().stream().map(TopicResDTO.KeywordTrend::getKeyword).toList());
+        assertEquals(List.of("연관1", "연관2", "연관3", "연관4", "연관5"),
+                summary.getRelatedKeywords().stream().map(TopicResDTO.RelatedKeyword::getKeyword).toList());
+    }
+
+    @Test
     void getTopicsFallsBackToZeroWhenNoSourceLinked() {
         when(topicRepository.findAll(ArgumentMatchers.<Specification<Topic>>any(), any(PageRequest.class)))
                 .thenReturn(new PageImpl<>(List.of(topic()), PageRequest.of(0, 20), 1L));
         when(topicRepository.countLinkedSources(List.of(1L))).thenReturn(List.of());
+        when(topicTrendJdbcRepository.findSnapshots(any(), any(LocalDateTime.class)))
+                .thenReturn(Map.of());
 
         PageResponse<TopicResDTO.Summary> result = topicQueryService.getTopics(null, "HBM", 0, 20);
 
         assertEquals(0, result.getContent().get(0).getLinkedSourceCount());
+        assertEquals(List.of(), result.getContent().get(0).getSurgeKeywords());
     }
 
     @Test
@@ -77,6 +106,7 @@ class TopicQueryServiceImplTest {
         assertEquals(List.of(), result.getContent());
         assertEquals(0, result.getTotalPages());
         verify(topicRepository, never()).countLinkedSources(any());
+        verify(topicTrendJdbcRepository, never()).findSnapshots(any(), any(LocalDateTime.class));
     }
 
     @Test
@@ -134,6 +164,51 @@ class TopicQueryServiceImplTest {
                 return linkedSourceCount;
             }
         };
+    }
+
+    private TopicTrendJdbcRepository.TopicTrendSnapshot snapshot() {
+        return new TopicTrendJdbcRepository.TopicTrendSnapshot(
+                List.of(new TopicTrendJdbcRepository.TopicTrendKeyword(
+                        "HBM4", 4, 1, 3, new BigDecimal("2.87"), true)),
+                List.of(new TopicTrendJdbcRepository.TopicRelatedKeyword(
+                        "마이크론", 3, new BigDecimal("60.00")))
+        );
+    }
+
+    private TopicTrendJdbcRepository.TopicTrendSnapshot snapshotWithConfiguredKeywords() {
+        return new TopicTrendJdbcRepository.TopicTrendSnapshot(
+                List.of(
+                        trendKeyword("HBM"),
+                        trendKeyword("SK하이닉스"),
+                        trendKeyword("광고"),
+                        trendKeyword("급상승1"),
+                        trendKeyword("급상승2"),
+                        trendKeyword("급상승3"),
+                        trendKeyword("급상승4"),
+                        trendKeyword("급상승5"),
+                        trendKeyword("급상승6")
+                ),
+                List.of(
+                        relatedKeyword("HBM"),
+                        relatedKeyword("SK하이닉스"),
+                        relatedKeyword("광고"),
+                        relatedKeyword("연관1"),
+                        relatedKeyword("연관2"),
+                        relatedKeyword("연관3"),
+                        relatedKeyword("연관4"),
+                        relatedKeyword("연관5"),
+                        relatedKeyword("연관6")
+                )
+        );
+    }
+
+    private TopicTrendJdbcRepository.TopicTrendKeyword trendKeyword(String keyword) {
+        return new TopicTrendJdbcRepository.TopicTrendKeyword(
+                keyword, 4, 1, 3, new BigDecimal("2.87"), true);
+    }
+
+    private TopicTrendJdbcRepository.TopicRelatedKeyword relatedKeyword(String keyword) {
+        return new TopicTrendJdbcRepository.TopicRelatedKeyword(keyword, 3, new BigDecimal("60.00"));
     }
 
     private Topic topic() {
