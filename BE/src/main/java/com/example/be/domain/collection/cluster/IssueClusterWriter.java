@@ -1,7 +1,10 @@
 package com.example.be.domain.collection.cluster;
 
+import com.example.be.domain.analysis.agent.entity.AgentTargetType;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.repository.ArticleRepository;
+import com.example.be.domain.insights.entity.NewsInsight;
+import com.example.be.domain.insights.repository.NewsInsightRepository;
 import com.example.be.domain.issues.entity.ContentGroup;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
@@ -60,6 +63,7 @@ public class IssueClusterWriter {
     private final ContentGroupRepository contentGroupRepository;
     private final NewsIssueRepository issueRepository;
     private final IssueArticleRepository issueArticleRepository;
+    private final NewsInsightRepository insightRepository;
     private final IssueRelationRepository issueRelationRepository;
     private final IssueStatusHistoryRepository statusHistoryRepository;
     private final NewsWatchRepository watchRepository;
@@ -246,6 +250,7 @@ public class IssueClusterWriter {
                 }
             }
             mergeWatches(winner, loser, winnerWatches);
+            mergeInsights(winner, loser);
             recordIssueMerge(loser, winner);
         }
     }
@@ -254,13 +259,46 @@ public class IssueClusterWriter {
                               NewsIssue loser,
                               Map<WatchType, NewsWatch> winnerByType) {
         for (NewsWatch losingWatch : watchRepository.findByIssueIdOrderByIdAsc(loser.getId())) {
-            if (winnerByType.containsKey(losingWatch.getWatchType())) {
+            NewsWatch winningWatch = winnerByType.get(losingWatch.getWatchType());
+            if (winningWatch != null) {
+                if (losingWatch.getWatchType() == WatchType.HYPOTHESIS
+                        && losingWatch.isActive()
+                        && losingWatch.getExpiresAt().isAfter(LocalDateTime.now(ApiTimeZone.ZONE))
+                        && (!winningWatch.isActive()
+                            || winningWatch.getExpiresAt().isBefore(losingWatch.getExpiresAt()))) {
+                    winningWatch.renewUntil(losingWatch.getExpiresAt());
+                }
                 losingWatch.deactivate();
             } else {
                 losingWatch.moveToIssue(winner);
                 winnerByType.put(losingWatch.getWatchType(), losingWatch);
             }
         }
+    }
+
+    private void mergeInsights(NewsIssue winner, NewsIssue loser) {
+        List<NewsInsight> duplicates = new ArrayList<>();
+        List<NewsInsight> movable = new ArrayList<>();
+        for (NewsInsight losingInsight : insightRepository
+                .findByTargetTypeAndTargetIdOrderByCreatedAtAscIdAsc(
+                        AgentTargetType.ISSUE, loser.getId())) {
+            insightRepository
+                    .findByTargetTypeAndTargetIdAndAudienceAndInputHashAndPromptVersion(
+                            AgentTargetType.ISSUE,
+                            winner.getId(),
+                            losingInsight.getAudience(),
+                            losingInsight.getInputHash(),
+                            losingInsight.getPromptVersion())
+                    .ifPresentOrElse(existing -> {
+                        existing.mergeRelatedArticleIds(losingInsight.getRelatedArticleIds());
+                        duplicates.add(losingInsight);
+                    }, () -> movable.add(losingInsight));
+        }
+        if (!duplicates.isEmpty()) {
+            insightRepository.deleteAll(duplicates);
+            insightRepository.flush();
+        }
+        movable.forEach(insight -> insight.moveToTarget(winner.getId()));
     }
 
     private IssueArticleRole roleOf(Article article, Article representative) {

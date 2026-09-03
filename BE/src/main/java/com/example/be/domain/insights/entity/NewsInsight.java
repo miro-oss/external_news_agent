@@ -26,6 +26,7 @@ import org.hibernate.type.SqlTypes;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 @Entity
@@ -125,5 +126,13 @@ public class NewsInsight {
         List<Long> updated = new ArrayList<>(relatedArticleIds);
         updated.add(articleId);
         this.relatedArticleIds = List.copyOf(updated);
+    }
+
+    public void mergeRelatedArticleIds(Collection<Long> articleIds) {
+        articleIds.forEach(this::addRelatedArticleId);
+    }
+
+    public void moveToTarget(Long targetId) {
+        this.targetId = targetId;
     }
 }

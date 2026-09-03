@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.cluster;
 
 import java.text.Normalizer;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -66,6 +67,37 @@ public final class DeterministicEntityExtractor {
                                String body,
                                List<String> topicKeywords) {
         return extractWithOrganizations(title, summary, body, topicKeywords).entities();
+    }
+
+    /** LLM 산문은 조직 사전·제품 코드·이슈 고유어로 제한하고 일반 영문 약어를 제외한다. */
+    public Set<String> extractProse(String text, Collection<String> knownEntities) {
+        String source = nullToEmpty(text);
+        String normalized = normalize(source);
+        Set<String> entities = new LinkedHashSet<>();
+        collectOrganizations(normalized, entities);
+        collectAnchors(entities, source, true, 0);
+        if (knownEntities != null) {
+            knownEntities.stream()
+                    .filter(value -> value != null && !value.isBlank())
+                    .filter(value -> !normalize(value).matches("[a-z-]+"))
+                    .filter(value -> containsAlias(normalized, normalize(value)))
+                    .map(DeterministicEntityExtractor::canonicalEntity)
+                    .forEach(entities::add);
+        }
+        return Collections.unmodifiableSet(entities);
+    }
+
+    /** LLM이 반환한 조직 별칭도 추출 결과와 같은 정규명으로 맞춘다. */
+    public Set<String> canonicalizeEntities(Collection<String> values) {
+        if (values == null) {
+            return Set.of();
+        }
+        Set<String> canonical = new LinkedHashSet<>();
+        values.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(DeterministicEntityExtractor::canonicalEntity)
+                .forEach(canonical::add);
+        return Collections.unmodifiableSet(canonical);
     }
 
     /** 조직 사전은 제목·요약과 본문을 한 번씩만 훑고, 보조 간선용 조직은 제목·요약으로 제한한다. */
@@ -239,6 +271,16 @@ public final class DeterministicEntityExtractor {
         return value.chars().anyMatch(Character::isUpperCase)
                 ? value
                 : normalize(value);
+    }
+
+    private static String canonicalEntity(String value) {
+        String normalized = normalize(value);
+        return ORGANIZATION_ALIASES.entrySet().stream()
+                .filter(entry -> entry.getValue().stream()
+                        .anyMatch(alias -> containsAlias(normalized, alias)))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(value.trim());
     }
 
     private static String normalize(String value) {

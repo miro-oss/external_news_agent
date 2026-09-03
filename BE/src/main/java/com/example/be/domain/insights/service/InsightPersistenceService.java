@@ -3,7 +3,6 @@ package com.example.be.domain.insights.service;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.entity.AgentTargetType;
-import com.example.be.domain.analysis.agent.investigation.InvestigationQueryNormalizer;
 import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.collection.cluster.IssueClusteringProperties;
 import com.example.be.domain.insights.dto.InsightDTO;
@@ -16,19 +15,18 @@ import com.example.be.domain.issues.entity.NewsWatch;
 import com.example.be.domain.issues.entity.WatchType;
 import com.example.be.domain.issues.exception.IssueException;
 import com.example.be.domain.issues.exception.code.IssueErrorCode;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.issues.repository.NewsWatchRepository;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -37,8 +35,10 @@ public class InsightPersistenceService {
 
     private final NewsInsightRepository repository;
     private final NewsIssueRepository issueRepository;
+    private final IssueArticleRepository issueArticleRepository;
     private final NewsWatchRepository watchRepository;
     private final InsightHypothesisEntityExtractor hypothesisEntityExtractor;
+    private final InsightEntityNormalizer entityNormalizer;
     private final IssueClusteringProperties clusteringProperties;
     private final AgentProperties agentProperties;
 
@@ -71,10 +71,11 @@ public class InsightPersistenceService {
                                            Map<Long, Long> articleIdsByFinding) {
         AgentInsightResponse.Meta meta = response.meta();
         LocalDateTime createdAt = LocalDateTime.now(ApiTimeZone.ZONE);
-        NewsIssue issue = issueRepository.findById(targetId)
+        NewsIssue issue = issueRepository.findByIdForUpdate(targetId)
                 .orElseThrow(() -> new IssueException(IssueErrorCode.ISSUE_NOT_FOUND));
-        List<Long> inputArticleIds = articleIdsByFinding.values().stream()
-                .filter(Objects::nonNull)
+        List<Long> inputArticleIds = issueArticleRepository
+                .findByIssueIdOrderByJoinedAtAsc(targetId).stream()
+                .map(membership -> membership.getArticle().getId())
                 .distinct()
                 .sorted()
                 .toList();
@@ -127,11 +128,7 @@ public class InsightPersistenceService {
     }
 
     private boolean isTrackable(NewsInsight insight) {
-        return insight.getWatchEntities().stream()
-                .map(InvestigationQueryNormalizer::normalizeEntity)
-                .filter(StringUtils::hasText)
-                .distinct()
-                .count()
+        return entityNormalizer.normalize(insight.getWatchEntities()).size()
                 >= clusteringProperties.getEntityOverlapThreshold();
     }
 

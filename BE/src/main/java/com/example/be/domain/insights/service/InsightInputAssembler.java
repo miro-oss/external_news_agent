@@ -2,10 +2,8 @@ package com.example.be.domain.insights.service;
 
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
-import com.example.be.domain.analysis.agent.investigation.InvestigationQueryNormalizer;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
-import com.example.be.domain.analysis.entity.FindingEntities;
 import com.example.be.domain.analysis.entity.FindingSection;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
@@ -50,6 +48,7 @@ public class InsightInputAssembler {
     private final IssueArticleRepository issueArticleRepository;
     private final FindingRepository findingRepository;
     private final ObjectMapper objectMapper;
+    private final InsightEntityNormalizer entityNormalizer;
 
     @Transactional(readOnly = true)
     public Snapshot assemble(Long issueId) {
@@ -193,14 +192,9 @@ public class InsightInputAssembler {
     }
 
     private Set<String> normalizedEntityNames(Finding finding) {
-        FindingEntities entities = finding.getEntities();
-        if (entities == null) {
-            return Set.of();
-        }
-        return entities.allNames().stream()
-                .map(InvestigationQueryNormalizer::normalizeEntity)
-                .filter(StringUtils::hasText)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+        return finding.getEntities() == null
+                ? Set.of()
+                : entityNormalizer.normalize(finding.getEntities().allNames());
     }
 
     private boolean overlapsAnyEntity(Finding finding, Set<String> normalizedEntityNames) {

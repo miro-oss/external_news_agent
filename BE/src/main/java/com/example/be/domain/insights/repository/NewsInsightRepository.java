@@ -24,8 +24,19 @@ public interface NewsInsightRepository extends JpaRepository<NewsInsight, Long> 
             Long targetId,
             Audience audience);
 
-    List<NewsInsight> findByTargetTypeAndTargetIdInAndCreatedAtGreaterThanEqualOrderByCreatedAtAscIdAsc(
+    List<NewsInsight> findByTargetTypeAndTargetIdInAndCreatedAtGreaterThanEqualOrderByCreatedAtDescIdDesc(
             AgentTargetType targetType,
             Collection<Long> targetIds,
             LocalDateTime createdAt);
+
+    List<NewsInsight> findByTargetTypeAndTargetIdOrderByCreatedAtAscIdAsc(
+            AgentTargetType targetType,
+            Long targetId);
+
+    Optional<NewsInsight> findByTargetTypeAndTargetIdAndAudienceAndInputHashAndPromptVersion(
+            AgentTargetType targetType,
+            Long targetId,
+            Audience audience,
+            String inputHash,
+            String promptVersion);
 }
