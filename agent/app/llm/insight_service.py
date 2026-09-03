@@ -20,7 +20,7 @@ from app.schemas.insight import (
     InsightResponse,
 )
 
-_INSIGHT_PROMPT_VERSION = "insight.ko.v1"
+_INSIGHT_PROMPT_VERSION = "insight.ko.v2"
 _PERSPECTIVE_PROMPT_VERSION = "perspective.ko.v1"
 PROMPT_VERSION = f"{_INSIGHT_PROMPT_VERSION}+{_PERSPECTIVE_PROMPT_VERSION}"
 _PROMPT_ROOT = Path(__file__).resolve().parents[1] / "prompts"

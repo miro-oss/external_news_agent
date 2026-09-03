@@ -106,12 +106,13 @@ class AgentRunRecorderTest {
                 new AgentInsightRequest.TopicPayload("HBM", "HBM", List.of(), List.of(), List.of()),
                 List.of(new AgentInsightRequest.FindingPayload(
                         501L, "기사", "https://example.com/501", "요약",
+                        AgentInsightRequest.FindingRole.CURRENT, "2026-09-03",
                         List.of(new AgentInsightRequest.SentencePayload(1, "근거 문장")))));
         AgentInsightResponse response = new AgentInsightResponse(
                 List.of(new AgentInsightResponse.Insight(
                         "CHIP_MAKER", "인사이트", List.of(), List.of(), List.of(), BigDecimal.ONE)),
                 new AgentInsightResponse.Meta(
-                        "gemini", "gemini-test", "insight.ko.v1+perspective.ko.v1",
+                        "gemini", "gemini-test", "insight.ko.v2+perspective.ko.v1",
                         20L, 10L, BigDecimal.ZERO, BigDecimal.ONE, false, false));
 
         recorder.recordInsightSuccess(42L, 88L, request, response, LocalDateTime.now());

@@ -1,8 +1,11 @@
 package com.example.be.domain.analysis.repository;
 
+import com.example.be.domain.analysis.agent.investigation.InvestigationQueryNormalizer;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.analysis.entity.FindingEntities;
 import com.example.be.domain.collection.entity.ChangeType;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -13,9 +16,13 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Stream;
 
 public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpecificationExecutor<Finding> {
 
@@ -38,6 +45,54 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
               )
             """)
     List<Finding> findLatestByArticleIds(@Param("articleIds") Collection<Long> articleIds);
+
+    @Query("""
+            SELECT finding
+            FROM Finding finding
+            JOIN FETCH finding.article article
+            JOIN FETCH finding.run
+            WHERE article.topic.id = :topicId
+              AND article.publishedAt IS NOT NULL
+              AND article.publishedAt >= :since
+              AND finding.analysisSource IN :analysisSources
+              AND finding.id = (
+                  SELECT MAX(latest.id)
+                  FROM Finding latest
+                  WHERE latest.article.id = article.id
+              )
+            ORDER BY article.publishedAt DESC, finding.id DESC
+            """)
+    List<Finding> findInsightHistoryCandidates(
+            @Param("topicId") Long topicId,
+            @Param("since") OffsetDateTime since,
+            @Param("analysisSources") Collection<AnalysisSource> analysisSources,
+            Pageable pageable);
+
+    default List<Finding> findHistoryForInsight(Long topicId,
+                                                Collection<String> entityNames,
+                                                OffsetDateTime since,
+                                                int limit) {
+        if (topicId == null || since == null || limit <= 0
+                || entityNames == null || entityNames.isEmpty()) {
+            return List.of();
+        }
+        Set<String> normalizedEntities = entityNames.stream()
+                .map(InvestigationQueryNormalizer::normalizeEntity)
+                .filter(value -> !value.isBlank())
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        if (normalizedEntities.isEmpty()) {
+            return List.of();
+        }
+        int candidateLimit = Math.max(limit * 10, 50);
+        return findInsightHistoryCandidates(
+                topicId,
+                since,
+                List.of(AnalysisSource.LLM, AnalysisSource.REUSED),
+                PageRequest.of(0, candidateLimit)).stream()
+                .filter(finding -> overlapsAnyEntity(finding, normalizedEntities))
+                .limit(limit)
+                .toList();
+    }
 
     @Query("""
             SELECT finding
@@ -116,6 +171,21 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
     List<ReportCount> countForReports(
             @Param("runIds") Collection<Long> runIds,
             @Param("highThreshold") BigDecimal highThreshold);
+
+    private static boolean overlapsAnyEntity(Finding finding, Set<String> normalizedEntities) {
+        return entityValues(finding.getEntities())
+                .map(InvestigationQueryNormalizer::normalizeEntity)
+                .anyMatch(value -> !value.isBlank() && normalizedEntities.contains(value));
+    }
+
+    private static Stream<String> entityValues(FindingEntities entities) {
+        if (entities == null) {
+            return Stream.empty();
+        }
+        return Stream.of(entities.companies(), entities.products(), entities.technologies())
+                .filter(values -> values != null && !values.isEmpty())
+                .flatMap(Collection::stream);
+    }
 
     interface ReportCount {
 

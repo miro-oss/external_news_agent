@@ -87,6 +87,8 @@ def insight_request_body() -> dict[str, object]:
                 "articleTitle": "CPO 양산 일정",
                 "canonicalUrl": "https://example.com/501",
                 "summaryKo": "CPO 양산 일정을 다룬 기사입니다.",
+                "role": "CURRENT",
+                "publishedAt": "2026-09-03",
                 "sentences": [{"id": 1, "text": "A사가 CPO 양산 일정을 발표했다."}],
             }
         ],
@@ -241,7 +243,7 @@ def test_insight_returns_deterministic_mock_contract() -> None:
     assert [item["audience"] for item in payload["insights"]] == ["CHIP_MAKER"]
     assert payload["insights"][0]["facts"][0]["claimType"] == "FACT"
     assert payload["insights"][0]["implications"][0]["falsifiedBy"]
-    assert payload["meta"]["promptVersion"] == "insight.ko.v1+perspective.ko.v1"
+    assert payload["meta"]["promptVersion"] == "insight.ko.v2+perspective.ko.v1"
 
 
 def test_analyze_returns_deterministic_mock_contract() -> None:

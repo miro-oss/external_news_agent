@@ -23,10 +23,17 @@ public record AgentInsightRequest(
                                List<String> excludedKeywords) {
     }
 
+    public enum FindingRole {
+        CURRENT,
+        HISTORY
+    }
+
     public record FindingPayload(Long id,
                                  String articleTitle,
                                  String canonicalUrl,
                                  String summaryKo,
+                                 FindingRole role,
+                                 String publishedAt,
                                  List<SentencePayload> sentences) {
     }
 

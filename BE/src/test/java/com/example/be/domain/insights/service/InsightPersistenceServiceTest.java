@@ -38,7 +38,7 @@ class InsightPersistenceServiceTest {
                         List.of("후속 발표"),
                         new BigDecimal("0.8"))),
                 new AgentInsightResponse.Meta(
-                        "gemini", "gemini-test", "insight.ko.v1+perspective.ko.v1",
+                        "gemini", "gemini-test", "insight.ko.v2+perspective.ko.v1",
                         20L, 10L, new BigDecimal("0.1"), BigDecimal.ONE, false, false));
 
         service.saveGenerated(

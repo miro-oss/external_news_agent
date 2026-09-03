@@ -67,7 +67,7 @@ class InsightServiceTest {
     void setUp() {
         properties = new AgentProperties();
         properties.setEnabled(true);
-        properties.setInsightPromptVersion("insight.ko.v1+perspective.ko.v1");
+        properties.setInsightPromptVersion("insight.ko.v2+perspective.ko.v1");
         inputAssembler = mock(InsightInputAssembler.class);
         persistenceService = mock(InsightPersistenceService.class);
         agentClient = mock(AgentClient.class);
@@ -438,6 +438,8 @@ class InsightServiceTest {
                         "HBM4 기사",
                         "https://example.com/501",
                         "HBM4 일정 요약",
+                        AgentInsightRequest.FindingRole.CURRENT,
+                        "2026-09-03",
                         List.of(new AgentInsightRequest.SentencePayload(
                                 1, "HBM4 양산 일정이 앞당겨졌다.")))),
                 Map.of(501L, 10L));

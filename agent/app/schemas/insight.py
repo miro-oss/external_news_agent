@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
@@ -5,7 +6,7 @@ from pydantic import Field, model_validator
 from app.schemas.analyze import Audience, Groundedness, Plan, ResponseMeta, TopicInput
 from app.schemas.common import AgentModel
 
-MAX_INSIGHT_FINDINGS = 10
+MAX_INSIGHT_FINDINGS = 16
 
 
 class InsightTarget(AgentModel):
@@ -23,6 +24,8 @@ class InsightFinding(AgentModel):
     article_title: str = Field(min_length=1, max_length=1000)
     canonical_url: str = Field(min_length=1, max_length=2000)
     summary_ko: str = Field(min_length=1, max_length=2000)
+    role: Literal["CURRENT", "HISTORY"]
+    published_at: date | None = None
     sentences: list[InsightSentence] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -48,6 +51,8 @@ class InsightRequest(AgentModel):
         finding_ids = [finding.id for finding in self.findings]
         if len(finding_ids) != len(set(finding_ids)):
             raise ValueError("findings의 id는 중복될 수 없습니다.")
+        if not any(finding.role == "CURRENT" for finding in self.findings):
+            raise ValueError("findings에는 CURRENT가 하나 이상 있어야 합니다.")
         return self
 
 
