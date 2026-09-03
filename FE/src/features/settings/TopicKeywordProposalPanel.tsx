@@ -12,9 +12,10 @@ import type {
   TopicKeywordProposalFilter,
   TopicKeywordProposalStatus,
 } from '../../api/types'
+import { Segmented, type SegmentedOption } from '../../components/Segmented'
 import { MutationStatus } from './MutationStatus'
 
-const FILTER_OPTIONS: Array<{ value: TopicKeywordProposalFilter; label: string }> = [
+const FILTER_OPTIONS: ReadonlyArray<SegmentedOption<TopicKeywordProposalFilter>> = [
   { value: 'PENDING', label: '대기 중만' },
   { value: 'ALL', label: '전체' },
   { value: 'APPROVED', label: '승인됨' },
@@ -115,26 +116,17 @@ export function TopicKeywordProposalPanel() {
   return (
     <>
       <div className="proposal-toolbar">
-        <div className="segmented" role="group" aria-label="제안 상태">
-          {FILTER_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              aria-pressed={filter === option.value}
-              className={filter === option.value ? 'segmented-option active' : 'segmented-option'}
-              disabled={actionPending}
-              onClick={() => changeFilter(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-        {/* 승인해야 반영된다는 말은 섹션 설명이 이미 하고 있다. 여기서는 목록의 범위만 밝힌다. */}
-        <p className="proposal-toolbar-hint">지난 자동 수집이 만든 제안만 보입니다.</p>
+        <Segmented
+          label="제안 상태"
+          value={filter}
+          options={FILTER_OPTIONS}
+          onSelect={changeFilter}
+          disabled={actionPending}
+        />
       </div>
 
       {proposals.data.content.length === 0 ? (
-        <p className="proposal-empty-state">{emptyMessage(filter)}</p>
+        <p className="empty-block">{emptyMessage(filter)}</p>
       ) : (
         <div className="proposal-stack">
           {proposals.data.content.map((proposal) => (

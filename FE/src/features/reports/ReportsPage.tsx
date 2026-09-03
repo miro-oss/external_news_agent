@@ -27,21 +27,20 @@ import {
   type SensitivityLevel,
 } from '../../api/types'
 import { KeyPointList } from '../../components/KeyPointList'
+import { Segmented, type SegmentedOption } from '../../components/Segmented'
 import { SensitivityAxes } from '../../components/SensitivityAxes'
 import { formatFullDate, formatShortDate } from '../../lib/datetime'
 import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { MutationStatus } from '../settings/MutationStatus'
 
-const REPORT_SCOPES = ['ALL', 'DAILY', 'RUN'] as const
+type ReportScopeTab = 'ALL' | 'DAILY' | 'RUN'
 
-type ReportScopeTab = (typeof REPORT_SCOPES)[number]
-
-const REPORT_SCOPE_LABELS: Record<ReportScopeTab, string> = {
-  ALL: '전체',
-  DAILY: '일일 통합',
-  RUN: '실행별',
-}
+const REPORT_SCOPE_OPTIONS: ReadonlyArray<SegmentedOption<ReportScopeTab>> = [
+  { value: 'ALL', label: '전체' },
+  { value: 'DAILY', label: '일일 통합' },
+  { value: 'RUN', label: '실행별' },
+]
 
 // 이름만으로는 두 보고서의 차이가 서지 않는다. 고른 범위가 무엇을 담는지 한 줄로 붙여 둔다.
 const REPORT_SCOPE_HINTS: Record<ReportScopeTab, string> = {
@@ -123,19 +122,12 @@ export function ReportsPage() {
       </header>
 
       <div className="report-scope-bar">
-        <div className="segmented" role="group" aria-label="보고서 범위">
-          {REPORT_SCOPES.map((scope) => (
-            <button
-              key={scope}
-              type="button"
-              aria-pressed={reportScope === scope}
-              className={reportScope === scope ? 'segmented-option active' : 'segmented-option'}
-              onClick={() => { setReportScope(scope); setSelectedId(null) }}
-            >
-              {REPORT_SCOPE_LABELS[scope]}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="보고서 범위"
+          value={reportScope}
+          options={REPORT_SCOPE_OPTIONS}
+          onSelect={(scope) => { setReportScope(scope); setSelectedId(null) }}
+        />
         <p className="report-scope-hint">{REPORT_SCOPE_HINTS[reportScope]}</p>
       </div>
 
@@ -310,11 +302,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
         </div>
         <ReportFindingFilterBar
           filters={filters}
-          audience={audience}
-          defaultAudience={defaultAudience}
           onChange={(key, value) => setFilters((current) => ({ ...current, [key]: value }))}
-          onAudienceSelect={onAudienceSelect}
-          onReset={() => setFilters(EMPTY_REPORT_FINDING_FILTERS)}
         />
         {filteredFindings.length > 0 ? (
           <div className="finding-list">
@@ -329,8 +317,8 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
             ))}
           </div>
         ) : findings.length > 0
-          ? <p className="muted report-findings-empty">조건에 맞는 주요 이슈가 없습니다. 필터를 바꿔보세요.</p>
-          : <p className="muted report-findings-empty">이 보고서에 포함된 주요 이슈가 없습니다.</p>}
+          ? <p className="empty-block">조건에 맞는 주요 이슈가 없습니다. 필터를 바꿔보세요.</p>
+          : <p className="empty-block">이 보고서에 포함된 주요 이슈가 없습니다.</p>}
       </section>
 
       <ReportDisclaimer report={report} audience={audience} />
@@ -346,56 +334,33 @@ const DEFAULT_REPORT_FINDING_FILTERS: ReportFindingFilters = {
   sensitivityLevel: 'high',
 }
 
-const EMPTY_REPORT_FINDING_FILTERS: ReportFindingFilters = {
-  sensitivityLevel: '',
-}
+const SENSITIVITY_FILTERS: ReadonlyArray<SegmentedOption<ReportFindingFilters['sensitivityLevel']>> = [
+  { value: '', label: '전체' },
+  { value: 'high', label: SENSITIVITY_LEVEL_LABELS.high },
+  { value: 'medium', label: SENSITIVITY_LEVEL_LABELS.medium },
+  { value: 'low', label: SENSITIVITY_LEVEL_LABELS.low },
+]
 
+/*
+  관점은 바로 위 "누구의 관점으로 볼까요?"가 소유한다. 같은 값을 두 군데서 바꾸게 두지 않는다.
+  거를 것이 민감도 하나뿐이라 "전체 보기" 버튼도 없앴다 — 첫 칸의 "전체"가 하는 일과 같다.
+*/
 function ReportFindingFilterBar({
   filters,
-  audience,
-  defaultAudience,
   onChange,
-  onAudienceSelect,
-  onReset,
 }: {
   filters: ReportFindingFilters
-  audience: Audience
-  defaultAudience?: Audience
   onChange: <K extends keyof ReportFindingFilters>(key: K, value: ReportFindingFilters[K]) => void
-  onAudienceSelect: (audience: Audience) => void
-  onReset: () => void
 }) {
-  const hasActiveFilters = Boolean(filters.sensitivityLevel)
   return (
-    <div className="report-finding-filter" aria-label="주요 이슈 필터">
-      <label>
-        민감도
-        <select
-          value={filters.sensitivityLevel}
-          onChange={(event) => onChange(
-            'sensitivityLevel',
-            event.target.value as ReportFindingFilters['sensitivityLevel'],
-          )}
-        >
-          <option value="">전체</option>
-          <option value="high">{SENSITIVITY_LEVEL_LABELS.high}</option>
-          <option value="medium">{SENSITIVITY_LEVEL_LABELS.medium}</option>
-          <option value="low">{SENSITIVITY_LEVEL_LABELS.low}</option>
-        </select>
-      </label>
-      <label>
-        관점
-        <select value={audience} onChange={(event) => onAudienceSelect(event.target.value as Audience)}>
-          {AUDIENCES.map((value) => (
-            <option value={value} key={value}>
-              {AUDIENCE_LABELS[value]}{defaultAudience === value ? ' · 내 기본' : ''}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button type="button" disabled={!hasActiveFilters} onClick={onReset}>
-        전체 보기
-      </button>
+    <div className="report-finding-filter">
+      <span className="filter-label" id="finding-sensitivity-label">민감도</span>
+      <Segmented
+        labelledBy="finding-sensitivity-label"
+        value={filters.sensitivityLevel}
+        options={SENSITIVITY_FILTERS}
+        onSelect={(next) => onChange('sensitivityLevel', next)}
+      />
     </div>
   )
 }
@@ -411,20 +376,16 @@ function ReportPerspectiveSelector({ audience, defaultAudience, onSelect }: {
         <div><h3>누구의 관점으로 볼까요?</h3><p>저장된 리포트는 그대로 두고 이슈 순서와 강조만 바꿉니다.</p></div>
         <span>추가 AI 호출 없음</span>
       </div>
-      <div className="report-perspective-tabs" role="group" aria-label="독자 관점">
-        {AUDIENCES.map((item) => (
-          <button
-            type="button"
-            aria-pressed={audience === item}
-            className={audience === item ? 'report-perspective-tab active' : 'report-perspective-tab'}
-            key={item}
-            onClick={() => onSelect(item)}
-          >
-            {AUDIENCE_LABELS[item]}
-            {defaultAudience === item && <small>기본</small>}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        label="독자 관점"
+        className="report-perspective-options"
+        value={audience}
+        options={AUDIENCES.map((item) => ({
+          value: item,
+          label: <>{AUDIENCE_LABELS[item]}{defaultAudience === item && <small>기본</small>}</>,
+        }))}
+        onSelect={onSelect}
+      />
       <p className="report-perspective-note">화면에서 보는 관점만 바뀌며, 발송할 보고서 본문은 중립 원본을 유지합니다.</p>
     </section>
   )

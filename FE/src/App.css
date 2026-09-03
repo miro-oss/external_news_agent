@@ -11,7 +11,7 @@
   --fg: #191f28;
   --fg-2: #4e5968;
   /*
-    보조 텍스트(.muted, .hint, .nav-link, 표 헤더)가 이 값을 쓴다. 흰 카드와 회색 배경 양쪽에
+    보조 텍스트(.muted, .hint, 세그먼트의 안 고른 칸, 표 헤더)가 이 값을 쓴다. 흰 카드와 회색 배경 양쪽에
     올라가므로 더 어두운 쪽인 --bg(#f2f4f6) 기준으로 WCAG AA 4.5:1을 넘겨야 한다.
     #636c78 → 흰 배경 5.32:1, --bg 4.83:1, --surface-sunken 5.09:1.
   */
@@ -214,33 +214,51 @@ body {
   white-space: nowrap;
 }
 
-.nav-links {
-  display: flex;
+/*
+  내비게이션도 세그먼트 컨트롤이다. 다만 여기 알약은 흰색이 아니라 짙은 색이다 — 반투명 유리판
+  위라서 흰 알약은 배경에 녹고, 지금 보고 있는 화면은 화면에서 가장 확실한 표시여야 한다.
+
+  트랙에 회색 면을 깔지 않는다. 내비게이션 줄 자체가 이미 한 겹 떠 있는 판이라, 그 위에 면을
+  하나 더 깔면 판이 둘로 보인다. 좁은 화면(600px 아래)에서는 로고와 줄이 나뉘므로 그때만 깐다.
+*/
+/*
+  .segmented(0,1,0)를 이기려고 클래스를 겹쳐 쓴다. 공통 규칙이 이 파일 아래쪽 "버튼·입력"에 있어서,
+  한 클래스로 쓰면 순서에서 밀려 알약 모양 트랙과 각진 알약이 섞인다.
+*/
+.segmented.segmented-nav {
   min-width: 0;
   gap: 0.2rem;
+  padding: 0;
+  border-radius: 12px;
+  background: transparent;
 }
 
-.nav-link {
+.segmented-nav .segmented-thumb {
+  border-radius: 10px;
+  background: var(--fg);
+  box-shadow: none;
+}
+
+.segmented-nav .segmented-option {
   flex-shrink: 0;
   padding: 0.5rem 0.9rem;
-  border: 0;
   border-radius: 10px;
-  background: transparent;
-  color: var(--fg-3);
   font-size: 0.94rem;
-  font-weight: 600;
   letter-spacing: -0.02em;
-  white-space: nowrap;
-  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
 
-.nav-link:hover {
+.segmented-nav .segmented-option:hover:not(.active) {
   background: var(--bg);
   color: var(--fg-2);
 }
 
-.nav-link.active {
-  background: var(--fg);
+/*
+  손이 올라가도 흰 글자를 지킨다. 공통 hover 규칙(.segmented-option:hover:not(:disabled))이
+  글자를 --fg로 되돌리는데, 그 밑에는 짙은 알약이 깔려 있어서 지금 보고 있는 화면의 이름이
+  마우스를 올리는 순간 사라진다. 클래스를 겹쳐 세 개짜리 hover 규칙을 넘긴다.
+*/
+.segmented.segmented-nav .segmented-option.active,
+.segmented.segmented-nav .segmented-option.active:hover {
   color: #fff;
 }
 
@@ -385,8 +403,8 @@ button {
 }
 
 /*
-  :not(:disabled)를 붙이면 이 규칙이 (0,2,1)이 되어 .nav-link:hover 같은 한 클래스 규칙(0,2,0)을
-  이긴다. 그러면 내비게이션에 마우스를 올릴 때 회색이 아니라 파란 버튼 배경이 깔린다.
+  :not(:disabled)를 붙이면 이 규칙이 (0,2,1)이 되어 한 클래스짜리 hover 규칙(0,2,0)을 이긴다.
+  그러면 내비게이션이나 세그먼트에 마우스를 올릴 때 회색이 아니라 파란 버튼 배경이 깔린다.
   아래 button:disabled가 뒤에 있으므로 여기서 빼도 비활성 버튼은 그대로 회색으로 남는다.
 */
 button:hover {
@@ -439,6 +457,7 @@ button:disabled {
   flex로 바꾸고 칸에 flex:1을 준다.
 */
 .segmented {
+  position: relative;
   display: inline-flex;
   max-width: 100%;
   gap: 0.15rem;
@@ -447,7 +466,32 @@ button:disabled {
   background: var(--bg);
 }
 
+/*
+  고른 칸을 칠하지 않고 알약 하나를 띄워 옮긴다. 칠하면 한쪽이 꺼지고 다른 쪽이 켜지는 두 사건이라
+  눈이 둘을 따로 보지만, 하나가 미끄러져 가면 "저기서 여기로 옮겼다"는 한 사건이 된다.
+
+  자리는 JS가 잰 값을 인라인 style로 받는다(칸마다 글자 수가 달라 폭이 다르다). 여기서는 움직이는
+  방식만 정한다 — 자리를 옮기는 일이므로 색 바꿈(1단)이 아니라 2단 시간을 쓴다.
+*/
+.segmented-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+}
+
+.segmented-thumb.moving {
+  transition: transform var(--dur-2) var(--ease-out), width var(--dur-2) var(--ease-out),
+    height var(--dur-2) var(--ease-out);
+}
+
 .segmented-option {
+  position: relative;
+  z-index: 1;
   padding: 0.42rem 0.9rem;
   border-radius: 999px;
   background: transparent;
@@ -468,12 +512,16 @@ button:disabled {
   color: var(--fg-4);
 }
 
-/* 잠시 못 누르는 동안에도 지금 고른 칸은 그대로 보여야 한다. :disabled보다 뒤에 둔다. */
+/*
+  흰 면은 위의 알약이 그린다. 여기서는 글자만 진해진다 — 알약이 도착하기 전에 글자가 먼저
+  또렷해져야 손이 누른 곳과 눈이 보는 곳이 어긋나지 않는다.
+  잠시 못 누르는 동안에도 지금 고른 칸은 그대로 보여야 하므로 :disabled보다 뒤에 둔다.
+*/
 .segmented-option.active,
-.segmented-option.active:hover {
-  background: var(--surface);
+.segmented-option.active:hover,
+.segmented-option.active:disabled {
+  background: transparent;
   color: var(--fg);
-  box-shadow: var(--shadow-sm);
 }
 
 form {
@@ -963,19 +1011,13 @@ tbody tr:hover td {
 /*
   상태 고르기. 전에는 220px 셀렉트가 오른쪽 끝에 "상태" 라벨을 달고 혼자 서 있었고, 그 왼쪽은
   설명 한 줄과 빈 폭이었다. 넷 다 짧은 배타 선택지라 접었다 펴는 셀렉트일 이유가 없다.
+  설명은 섹션 제목 아래 한 곳으로 합쳤다 — 같은 말을 두 번 하면 둘 다 안 읽힌다.
 */
 .proposal-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1rem;
-}
-
-.proposal-toolbar-hint {
-  margin: 0;
-  color: var(--fg-3);
-  font-size: 0.84rem;
 }
 
 .proposal-stack {
@@ -1123,16 +1165,6 @@ tbody tr:hover td {
   margin-top: 0;
 }
 
-/* 목록이 비면 한 줄이 넓은 카드 안에 떠 있었다. 자리를 만들어 "여기가 목록"이라고 말해 준다. */
-.proposal-empty-state {
-  margin: 0;
-  padding: 2.25rem 1rem;
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
-  color: var(--fg-3);
-  font-size: 0.9rem;
-  text-align: center;
-}
 
 /* =============================================================================
    LLM 플랜 · 사용량 패널
@@ -1765,6 +1797,25 @@ tbody tr:hover td {
 
 .state-panel.error {
   color: var(--danger);
+}
+
+/*
+  카드 안의 목록이 비었을 때 쓰는 자리. .state-panel과 층이 다르다 — 저쪽은 화면에 아직 아무것도
+  없을 때(카드 한 장 크기, 마크와 굵은 문장까지), 이쪽은 이미 있는 카드 안에서 목록 한 칸만
+  비었을 때다.
+
+  전에는 같은 뜻을 다섯 가지로 말하고 있었다. 회색 한 줄(수신자·수신 그룹), 화면용 큰 카드
+  (발송 이력), --bg 면(주요 이슈), 그리고 키워드 제안. 목록이 비었다는 사실은 화면마다 다르게
+  생길 이유가 없다.
+*/
+.empty-block {
+  margin: 0;
+  padding: 1.75rem 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-3);
+  font-size: 0.88rem;
+  text-align: center;
 }
 
 /*
@@ -2602,7 +2653,7 @@ body.modal-open {
 
 /*
   보고서 범위 전환. 목록을 거르는 장치라 목록 바로 위가 제자리다. 전에는 관점 선택용
-  .report-perspective-tabs(4열 그리드)를 빌려 써서, 선택지 셋이 화면 폭을 가로질러 늘어나고
+  관점 선택기의 4열 그리드를 빌려 써서, 선택지 셋이 화면 폭을 가로질러 늘어나고
   제목 바로 아래에서 파랗게 서 있었다 — 페이지의 첫 문장이 필터가 되어 버렸다. 알약 하나 크기로
   줄이고, 남는 폭은 고른 범위를 설명하는 한 줄에 준다.
 */
@@ -2864,42 +2915,35 @@ body.modal-open {
   font-weight: 700;
 }
 
-.report-perspective-tabs {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.4rem;
+/* 네 관점은 대등하다. 폭을 균등하게 나누고, "기본"은 라벨 옆에 작은 표식으로만 붙인다. */
+.report-perspective-options {
+  display: flex;
   margin-top: 0.85rem;
 }
 
-.report-perspective-tab {
-  display: flex;
+.report-perspective-options .segmented-option {
+  flex: 1;
   min-width: 0;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  padding: 0.55rem 0.4rem;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface);
-  color: var(--fg-2);
-  font-size: 0.76rem;
-  font-weight: 650;
-  white-space: nowrap;
+  gap: 0.3rem;
+  padding-right: 0.4rem;
+  padding-left: 0.4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.report-perspective-tab small {
+.report-perspective-options .segmented-option small {
+  margin-left: 0.3rem;
+  padding: 0.08rem 0.3rem;
+  border-radius: 999px;
+  background: var(--line);
   color: var(--fg-3);
   font-size: 0.62rem;
+  font-weight: 700;
 }
 
-.report-perspective-tab.active {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: #fff;
-}
-
-.report-perspective-tab.active small {
-  color: rgba(255, 255, 255, 0.75);
+.report-perspective-options .segmented-option.active small {
+  background: var(--primary-weak);
+  color: var(--primary-strong);
 }
 
 .markdown-report {
@@ -2955,37 +2999,16 @@ body.modal-open {
   font-weight: 600;
 }
 
+/*
+  관점 셀렉트와 "전체 보기" 버튼이 빠지고 민감도 하나만 남았다. 셋을 담던 회색 바도 걷어낸다 —
+  이제 라벨 하나와 세그먼트 하나뿐이라, 면을 깔면 알약이 놓일 회색 트랙과 색이 겹친다.
+*/
 .report-finding-filter {
-  display: grid;
-  align-items: end;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
-  gap: 0.55rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.7rem;
   margin: 0.9rem 0 1rem;
-  padding: 0.9rem;
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-}
-
-.report-finding-filter label {
-  margin: 0;
-  color: var(--fg-3);
-  font-size: 0.79rem;
-}
-
-.report-finding-filter select {
-  margin-top: 0.3rem;
-  background-color: var(--surface);
-  font-size: 0.86rem;
-}
-
-.report-finding-filter button {
-  white-space: nowrap;
-}
-
-.report-findings-empty {
-  padding: 1rem;
-  border-radius: var(--radius-sm);
-  background: var(--bg);
 }
 
 .finding-list {
@@ -3594,6 +3617,12 @@ body.modal-open {
 
 .member-picker input { width: auto; }
 
+.member-picker-empty {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 0.82rem;
+}
+
 .compact-list {
   display: grid;
   gap: 0.55rem;
@@ -3653,17 +3682,34 @@ body.modal-open {
   color: var(--warning-strong);
 }
 
+/*
+  보고서는 제목이 길고 개수도 늘어나므로 셀렉트로 둔다. 전달 방식·상태는 셋·넷짜리 배타 선택지라
+  펼쳐 보이는 편이 빠르다. 셀렉트 하나와 세그먼트 둘이 한 줄에 서므로 폭은 내용이 정하게 두고,
+  줄이 모자라면 접힌다.
+*/
 .delivery-filter-bar {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(160px, 220px)) auto;
-  align-items: end;
-  justify-content: start;
-  gap: 0.75rem;
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
   margin: 1rem 0;
 }
 
-.delivery-filter-bar label { min-width: 0; }
+.delivery-filter-bar > label { width: min(260px, 100%); min-width: 0; }
 .delivery-filter-bar .text-button { margin-bottom: 0.15rem; }
+
+.delivery-filter-group {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+/* 세그먼트 앞에 붙는 이름표. 세그먼트에는 label 요소를 걸 곳이 없어 span으로 두고 id로 잇는다. */
+.filter-label {
+  color: var(--fg-2);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
 
 .delivery-summary {
   display: flex;
@@ -3861,7 +3907,7 @@ body.modal-open {
     font-size: 0.95rem;
   }
 
-  .nav-link {
+  .segmented-nav .segmented-option {
     padding: 0.45rem 0.7rem;
     font-size: 0.88rem;
   }
@@ -3993,8 +4039,14 @@ body.modal-open {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .report-perspective-tabs {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* 관점 라벨 넷이 한 줄에 들어가지 않는다. 두 칸씩 접고 트랙 모서리를 면에 맞춘다. */
+  .report-perspective-options {
+    flex-wrap: wrap;
+    border-radius: var(--radius-sm);
+  }
+
+  .report-perspective-options .segmented-option {
+    flex: 1 0 calc(50% - 0.15rem);
   }
 
   /* 이 폭에서는 설명 한 줄이 두 줄로 접혀 세그먼트보다 커진다. 선택지만 남긴다. */
@@ -4057,7 +4109,6 @@ body.modal-open {
   }
 
   .notification-form-grid,
-  .delivery-filter-bar,
   .report-finding-filter,
   .sensitivity-axis-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -4093,7 +4144,7 @@ body.modal-open {
     align-self: flex-start;
   }
 
-  .nav-links {
+  .segmented.segmented-nav {
     gap: 0.25rem;
     padding: 0.25rem;
     border-radius: 13px;
@@ -4101,13 +4152,12 @@ body.modal-open {
   }
 
   /* 링크마다 글자 수가 달라도(알림 관리 · 리포트 · 수집 설정) 칸은 같아야 묶음으로 읽힌다. */
-  .nav-link {
+  .segmented-nav .segmented-option {
     flex: 1;
-    border-radius: 10px;
-    text-align: center;
+    min-width: 0;
   }
 
-  .nav-link:hover:not(.active) {
+  .segmented-nav .segmented-option:hover:not(.active) {
     background: var(--line);
   }
 

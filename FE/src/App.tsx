@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import './App.css'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { Segmented, type SegmentedOption } from './components/Segmented'
 import { ReportsPage } from './features/reports/ReportsPage'
 import { NotificationsPage } from './features/notifications/NotificationsPage'
 import { SettingsPage } from './features/settings/SettingsPage'
@@ -10,6 +11,13 @@ const PAGES = ['reports', 'notifications', 'settings'] as const
 type Page = (typeof PAGES)[number]
 
 const DEFAULT_PAGE: Page = 'reports'
+
+/* 화면 순서는 PAGES가 아니라 여기서 정한다 — 왼쪽부터 알림 · 리포트 · 설정. */
+const NAV_OPTIONS: ReadonlyArray<SegmentedOption<Page>> = [
+  { value: 'notifications', label: '알림 관리' },
+  { value: 'reports', label: '리포트' },
+  { value: 'settings', label: '수집 설정' },
+]
 
 function hashValue() {
   return window.location.hash.replace(/^#\/?/, '')
@@ -106,32 +114,13 @@ function App() {
         <button type="button" className="app-logo" onClick={() => go('reports')}>
           <strong>News Signal Desk</strong>
         </button>
-        <div className="nav-links">
-          <button
-            type="button"
-            className={page === 'notifications' ? 'nav-link active' : 'nav-link'}
-            aria-current={page === 'notifications' ? 'page' : undefined}
-            onClick={() => go('notifications')}
-          >
-            알림 관리
-          </button>
-          <button
-            type="button"
-            className={page === 'reports' ? 'nav-link active' : 'nav-link'}
-            aria-current={page === 'reports' ? 'page' : undefined}
-            onClick={() => go('reports')}
-          >
-            리포트
-          </button>
-          <button
-            type="button"
-            className={page === 'settings' ? 'nav-link active' : 'nav-link'}
-            aria-current={page === 'settings' ? 'page' : undefined}
-            onClick={() => go('settings')}
-          >
-            수집 설정
-          </button>
-        </div>
+        <Segmented
+          className="segmented-nav"
+          value={page}
+          options={NAV_OPTIONS}
+          onSelect={go}
+          activeAria="current"
+        />
       </nav>
       {/*
         key에 화면을 건다. 한 화면이 터진 뒤에도 다른 탭을 누르면 경계가 새로 붙어 상태가

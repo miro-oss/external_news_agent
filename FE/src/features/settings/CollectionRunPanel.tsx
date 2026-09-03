@@ -12,9 +12,15 @@ import {
   type Audience,
   type LlmPlan,
 } from '../../api/types'
+import { Segmented, type SegmentedOption } from '../../components/Segmented'
 import { MutationStatus } from './MutationStatus'
 
 type RunScope = 'SELECTED' | 'ALL'
+
+const AUDIENCE_OPTIONS: ReadonlyArray<SegmentedOption<Audience>> = AUDIENCES.map((value) => ({
+  value,
+  label: AUDIENCE_LABELS[value],
+}))
 
 export function CollectionRunPanel() {
   const combinations = useCombinations()
@@ -188,19 +194,13 @@ function DefaultAudienceSetting() {
         <h3>내 기본 관점</h3>
         <p>기사와 리포트를 처음 열 때 이 관점으로 맞춰 둡니다. 고르면 바로 저장됩니다.</p>
       </div>
-      <div className="segmented run-audience-options" role="group" aria-label="기본 관점">
-        {AUDIENCES.map((value) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={audience === value}
-            className={audience === value ? 'segmented-option active' : 'segmented-option'}
-            onClick={() => selectAudience(value)}
-          >
-            {AUDIENCE_LABELS[value]}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        label="기본 관점"
+        className="run-audience-options"
+        value={audience}
+        options={AUDIENCE_OPTIONS}
+        onSelect={selectAudience}
+      />
       <MutationStatus
         error={updateAudience.error}
         success={saved ? '기본 관점을 저장했습니다.' : null}
