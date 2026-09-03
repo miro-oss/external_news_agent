@@ -195,7 +195,9 @@ public class AgentQuotaService {
             return;
         }
 
-        boolean analysisTask = task == AgentTask.ANALYZE || task == AgentTask.SELF_CRITIQUE;
+        boolean analysisTask = task == AgentTask.ANALYZE
+                || task == AgentTask.SELF_CRITIQUE
+                || task == AgentTask.KEYWORD_STRATEGY;
         boolean insightTask = task == AgentTask.INSIGHT;
         boolean investigationTask = task == AgentTask.INVESTIGATE;
         BigDecimal workUsed = usage.paidAnalysisDailyUsed()

@@ -114,6 +114,38 @@ export interface TopicCreated extends Topic {
   sources: TopicSourceBrief[]
 }
 
+export const TOPIC_KEYWORD_PROPOSAL_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const
+export type TopicKeywordProposalStatus = (typeof TOPIC_KEYWORD_PROPOSAL_STATUSES)[number]
+export type TopicKeywordProposalFilter = TopicKeywordProposalStatus | 'ALL'
+export type TopicKeywordBucket = 'REQUIRED' | 'OPTIONAL' | 'EXCLUDED'
+export type TopicKeywordChangeAction = 'ADD' | 'REMOVE'
+
+export interface TopicKeywordProposalCurrentKeywords {
+  requiredKeywords: string[]
+  optionalKeywords: string[]
+  excludedKeywords: string[]
+}
+
+export interface TopicKeywordProposalChange {
+  bucket: TopicKeywordBucket
+  action: TopicKeywordChangeAction
+  keyword: string
+  reason: string
+}
+
+export interface TopicKeywordProposal {
+  id: number
+  topicId: number
+  topicName: string
+  collectionRunId: number
+  status: TopicKeywordProposalStatus
+  summary: string
+  reviewedAt: string | null
+  createdAt: string
+  currentKeywords: TopicKeywordProposalCurrentKeywords
+  changes: TopicKeywordProposalChange[]
+}
+
 export type ChangeType = 'NEW' | 'UPDATED'
 export type Relevance = 'important' | 'watch' | 'reference'
 export type SensitivityLevel = 'low' | 'medium' | 'high'

@@ -882,6 +882,169 @@ tbody tr:hover td {
   gap: 0.7rem;
 }
 
+.proposal-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.proposal-toolbar .muted {
+  flex: 1;
+}
+
+.proposal-filter-field {
+  width: min(220px, 100%);
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.proposal-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.proposal-card {
+  padding: 1rem 1.05rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.proposal-header {
+  margin-bottom: 0.9rem;
+}
+
+.proposal-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.4rem;
+}
+
+.proposal-summary {
+  margin: 0;
+  color: var(--fg-2);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.proposal-meta {
+  margin: 0.55rem 0 0;
+  color: var(--fg-3);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.proposal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.proposal-section {
+  padding: 0.95rem;
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+}
+
+.proposal-section h4 {
+  margin-bottom: 0.75rem;
+}
+
+.proposal-status-pending,
+.proposal-status-approved,
+.proposal-status-rejected {
+  font-weight: 700;
+}
+
+.proposal-status-pending {
+  background: var(--warning-weak);
+  color: var(--warning-strong);
+}
+
+.proposal-status-approved {
+  background: var(--success-weak);
+  color: var(--success-strong);
+}
+
+.proposal-status-rejected {
+  background: var(--danger-weak);
+  color: var(--danger-strong);
+}
+
+.proposal-keyword-group + .proposal-keyword-group {
+  margin-top: 0.75rem;
+}
+
+.proposal-keyword-group strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--fg-2);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.proposal-keyword-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.proposal-keyword-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.16rem 0.5rem;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--fg-2);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.proposal-change-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.proposal-change-item {
+  padding: 0.78rem 0.82rem;
+  border-radius: var(--radius-xs);
+  background: var(--surface-sunken);
+}
+
+.proposal-change-item strong {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--fg-2);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.proposal-change-item p {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.proposal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 0.9rem;
+}
+
+.proposal-empty {
+  margin-top: 0;
+}
+
 /* =============================================================================
    LLM 플랜 · 사용량 패널
    ============================================================================= */
@@ -3728,6 +3891,15 @@ body.modal-open {
     align-items: stretch;
     flex-direction: column;
   }
+
+  .proposal-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .proposal-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /*
@@ -3811,5 +3983,10 @@ body.modal-open {
 
   .issue-detail-toggle {
     margin-left: 0;
+  }
+
+  .proposal-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
   }
 }

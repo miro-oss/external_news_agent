@@ -117,6 +117,39 @@ def explore_request_body() -> dict[str, object]:
     }
 
 
+def keyword_strategy_request_body() -> dict[str, object]:
+    return {
+        "idempotencyKey": "run:42:topic:7:keyword-strategy",
+        "plan": "FREE",
+        "target": {"type": "TOPIC", "id": 7},
+        "topic": {
+            "name": "HBM",
+            "queryText": "HBM 반도체",
+            "requiredKeywords": ["HBM"],
+            "optionalKeywords": ["SK하이닉스"],
+            "excludedKeywords": ["광고"],
+        },
+        "run": {
+            "id": 42,
+            "triggerType": "SCHEDULED",
+            "scannedCount": 30,
+            "newCount": 8,
+            "updatedCount": 2,
+        },
+        "currentKeywordStats": [],
+        "articles": [
+            {
+                "articleId": 501,
+                "title": "HBM4 양산과 SK하이닉스 공급 확대",
+                "summary": "HBM4 공급 계획이 반복 언급됐다.",
+                "publisher": "테크M",
+                "changeType": "NEW",
+                "topicFit": 0.91,
+            }
+        ],
+    }
+
+
 def test_health_does_not_require_agent_token() -> None:
     response = client.get("/v1/health")
 
@@ -157,6 +190,29 @@ def test_explore_requires_agent_token() -> None:
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_keyword_strategy_requires_agent_token() -> None:
+    response = client.post(
+        "/v1/keyword-strategy", json=keyword_strategy_request_body()
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_keyword_strategy_returns_deterministic_mock_contract() -> None:
+    response = client.post(
+        "/v1/keyword-strategy",
+        headers={"X-Agent-Token": "local-dev-agent-token"},
+        json=keyword_strategy_request_body(),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["proposals"][0]["keyword"] == "HBM4"
+    assert payload["proposals"][0]["action"] == "ADD"
+    assert payload["meta"]["promptVersion"] == "keyword-strategy.ko.v1"
 
 
 def test_explore_returns_deterministic_mock_contract() -> None:

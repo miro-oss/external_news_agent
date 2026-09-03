@@ -9,6 +9,7 @@ import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.reports.service.ReportCreationService;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
+import com.example.be.domain.topics.service.strategy.TopicKeywordStrategyOrchestrator;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
@@ -33,10 +34,13 @@ class CollectionRunExecutionServiceTest {
     private final IssueInvestigationOrchestrator investigationOrchestrator =
             mock(IssueInvestigationOrchestrator.class);
     private final ReportCreationService reportCreationService = mock(ReportCreationService.class);
+    private final TopicKeywordStrategyOrchestrator keywordStrategyOrchestrator =
+            mock(TopicKeywordStrategyOrchestrator.class);
     private final CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
     private final CollectionRunExecutionService service = new CollectionRunExecutionService(
             runItemRepository, collectionExecutor, candidatePrioritizer, contentEnricher, issueClusteringService,
-            analysisPipeline, investigationOrchestrator, reportCreationService, resultWriter);
+            analysisPipeline, investigationOrchestrator, reportCreationService,
+            keywordStrategyOrchestrator, resultWriter);
 
     @Test
     void createsReportAfterAnalysisBeforeClosingRun() {
@@ -47,11 +51,12 @@ class CollectionRunExecutionServiceTest {
 
         InOrder order = inOrder(
                 issueClusteringService, analysisPipeline, investigationOrchestrator,
-                reportCreationService, resultWriter);
+                reportCreationService, keywordStrategyOrchestrator, resultWriter);
         order.verify(issueClusteringService).cluster(42L);
         order.verify(analysisPipeline).analyze(42L, Set.of());
         order.verify(investigationOrchestrator).investigate(42L);
         order.verify(reportCreationService).generate(42L);
+        order.verify(keywordStrategyOrchestrator).strategize(42L);
         order.verify(resultWriter).finishRun(42L);
         verify(resultWriter, never()).failRun(42L);
     }
@@ -67,6 +72,25 @@ class CollectionRunExecutionServiceTest {
         InOrder order = inOrder(reportCreationService, resultWriter);
         order.verify(reportCreationService).generate(42L);
         order.verify(resultWriter).addReportGenerationFailedWarning(42L, "report failure");
+        order.verify(resultWriter).finishRun(42L);
+        verify(resultWriter, never()).failRun(42L);
+    }
+
+    @Test
+    void recordsWarningAndFinishesRunWhenKeywordStrategyFails() {
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
+        when(contentEnricher.enrich(42L)).thenReturn(Set.of());
+        doThrow(new IllegalStateException("strategy failure"))
+                .when(keywordStrategyOrchestrator).strategize(42L);
+
+        service.executeRun(42L);
+
+        InOrder order = inOrder(keywordStrategyOrchestrator, resultWriter);
+        order.verify(keywordStrategyOrchestrator).strategize(42L);
+        order.verify(resultWriter).addAgentWarning(
+                42L,
+                "LLM_KEYWORD_STRATEGY_FAILED",
+                "수집 전략가 키워드 제안 생성에 실패해 기존 키워드를 유지했습니다.");
         order.verify(resultWriter).finishRun(42L);
         verify(resultWriter, never()).failRun(42L);
     }

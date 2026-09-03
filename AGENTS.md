@@ -71,6 +71,12 @@ Close #issue-number
 
 When creating a branch, commit, or PR, always ask for or infer the issue number first. If no issue exists, create the issue before creating the branch.
 
+## GitHub Issue Labels
+
+- When creating an issue, inspect the repository's existing labels and choose the label that matches the work type.
+- Never create a new label for an issue unless the user explicitly requests a new label.
+- Prefer the existing feature label for feature work, such as the repository's `✨ feat` label, rather than assuming a plain `feat` label exists.
+
 ## API Specification Source of Truth
 
 - Before implementing, changing, or reviewing any backend or frontend API work, always inspect the Notion page `API 명세서` and the matching endpoint page in the `외부 뉴스 크롤링 에이전트 API` database.

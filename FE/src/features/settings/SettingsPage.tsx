@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { CollapsibleSection } from '../../components/CollapsibleSection'
-import { useTopics } from '../../api/queries'
+import { useTopicKeywordProposals, useTopics } from '../../api/queries'
 import { TopicTable } from './TopicTable'
 import { SourceForm } from './SourceForm'
 import { TopicForm } from './TopicForm'
 import { LlmControlPanel } from './LlmControlPanel'
 import { CollectionRunPanel } from './CollectionRunPanel'
+import { TopicKeywordProposalPanel } from './TopicKeywordProposalPanel'
 
-type PanelKey = 'llm' | 'source' | 'topic' | 'topics'
+type PanelKey = 'llm' | 'source' | 'topic' | 'keywordProposals' | 'topics'
 
 /**
  * M2 설정 화면. 소스를 등록하고 주제를 만들면 활성 소스가 자동으로 연결되며, 아래 목록에는
@@ -33,10 +34,12 @@ type PanelKey = 'llm' | 'source' | 'topic' | 'topics'
  */
 export function SettingsPage() {
   const topics = useTopics()
+  const pendingProposals = useTopicKeywordProposals('PENDING')
   const [open, setOpen] = useState<Record<PanelKey, boolean>>({
     llm: false,
     source: false,
     topic: false,
+    keywordProposals: true,
     topics: true,
   })
 
@@ -96,6 +99,17 @@ export function SettingsPage() {
           </CollapsibleSection>
         </div>
       </div>
+
+      <CollapsibleSection
+        id="keyword-proposals"
+        title="키워드 제안 검토"
+        description="수집 전략가 제안은 승인 전까지 실제 주제 키워드에 반영되지 않습니다."
+        count={pendingProposals.data?.totalElements}
+        open={open.keywordProposals}
+        onToggle={() => toggle('keywordProposals')}
+      >
+        <TopicKeywordProposalPanel />
+      </CollapsibleSection>
 
       <CollapsibleSection
         id="topics"

@@ -39,6 +39,8 @@ import type {
   SourceCreateRequest,
   TopicCreated,
   TopicCreateRequest,
+  TopicKeywordProposal,
+  TopicKeywordProposalFilter,
   TopicSummary,
 } from './types'
 
@@ -46,6 +48,8 @@ const keys = {
   combinations: ['topic-sources'] as const,
   sources: ['sources'] as const,
   topics: ['topics'] as const,
+  topicKeywordProposals: (status: TopicKeywordProposalFilter) =>
+    ['topic-keyword-proposals', status] as const,
   articles: (filters: ArticleFilters) => ['articles', filters] as const,
   article: (id: number | null, runId?: number) => ['article', id, runId ?? null] as const,
   reports: ['reports', 'list'] as const,
@@ -120,6 +124,16 @@ export function useTopics() {
   })
 }
 
+export function useTopicKeywordProposals(status: TopicKeywordProposalFilter = 'PENDING') {
+  return useQuery({
+    queryKey: keys.topicKeywordProposals(status),
+    queryFn: () => getAllPages<TopicKeywordProposal>(
+      '/topics/keyword-proposals',
+      status === 'ALL' ? {} : { status },
+    ),
+  })
+}
+
 /**
  * 등록에 성공하면 조합·소스·주제 목록을 다시 읽는다. 소스를 만들면 선택 후보가 늘고, 주제를
  * 만들면 키워드 표가 늘어나므로 관련 캐시를 함께 무효화한다.
@@ -129,6 +143,14 @@ function useRefreshOnSuccess() {
   return () => {
     void queryClient.invalidateQueries({ queryKey: keys.combinations })
     void queryClient.invalidateQueries({ queryKey: keys.sources })
+    void queryClient.invalidateQueries({ queryKey: keys.topics })
+  }
+}
+
+function useRefreshTopicKeywordProposals() {
+  const queryClient = useQueryClient()
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: ['topic-keyword-proposals'] })
     void queryClient.invalidateQueries({ queryKey: keys.topics })
   }
 }
@@ -145,6 +167,24 @@ export function useCreateTopic() {
   const refresh = useRefreshOnSuccess()
   return useMutation({
     mutationFn: (body: TopicCreateRequest) => post<TopicCreated>('/topics', body),
+    onSuccess: refresh,
+  })
+}
+
+export function useApproveTopicKeywordProposal() {
+  const refresh = useRefreshTopicKeywordProposals()
+  return useMutation({
+    mutationFn: (proposalId: number) =>
+      post<TopicKeywordProposal>(`/topics/keyword-proposals/${proposalId}/approve`, {}),
+    onSuccess: refresh,
+  })
+}
+
+export function useRejectTopicKeywordProposal() {
+  const refresh = useRefreshTopicKeywordProposals()
+  return useMutation({
+    mutationFn: (proposalId: number) =>
+      post<TopicKeywordProposal>(`/topics/keyword-proposals/${proposalId}/reject`, {}),
     onSuccess: refresh,
   })
 }

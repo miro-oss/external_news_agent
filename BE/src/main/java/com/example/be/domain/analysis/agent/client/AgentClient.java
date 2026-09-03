@@ -10,6 +10,8 @@ import com.example.be.domain.analysis.agent.dto.AgentExploreRequest;
 import com.example.be.domain.analysis.agent.dto.AgentExploreResponse;
 import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
 import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
+import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyRequest;
+import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
@@ -119,6 +121,10 @@ public class AgentClient {
 
     public AgentInsightResponse insight(AgentInsightRequest request) {
         return post(insightClient, "/v1/insight", request, AgentInsightResponse.class);
+    }
+
+    public AgentKeywordStrategyResponse keywordStrategy(AgentKeywordStrategyRequest request) {
+        return post(insightClient, "/v1/keyword-strategy", request, AgentKeywordStrategyResponse.class);
     }
 
     public AgentEvidenceResponse verifyEvidence(AgentEvidenceRequest request) {

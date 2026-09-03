@@ -24,6 +24,7 @@ import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -142,5 +143,32 @@ public class Topic {
 
     public int getLinkedSourceCount() {
         return sources.size();
+    }
+
+    public void applyKeywordChanges(List<TopicKeywordChange> changes) {
+        LinkedHashSet<String> required = new LinkedHashSet<>(keywordsOrEmpty(requiredKeywords));
+        LinkedHashSet<String> optional = new LinkedHashSet<>(keywordsOrEmpty(optionalKeywords));
+        LinkedHashSet<String> excluded = new LinkedHashSet<>(keywordsOrEmpty(excludedKeywords));
+
+        for (TopicKeywordChange change : changes) {
+            Set<String> target = switch (change.bucket()) {
+                case REQUIRED -> required;
+                case OPTIONAL -> optional;
+                case EXCLUDED -> excluded;
+            };
+            if (change.action() == TopicKeywordChangeAction.ADD) {
+                target.add(change.keyword());
+            } else {
+                target.remove(change.keyword());
+            }
+        }
+
+        this.requiredKeywords = List.copyOf(required);
+        this.optionalKeywords = List.copyOf(optional);
+        this.excludedKeywords = List.copyOf(excluded);
+    }
+
+    private static List<String> keywordsOrEmpty(List<String> values) {
+        return values == null ? List.of() : values;
     }
 }
