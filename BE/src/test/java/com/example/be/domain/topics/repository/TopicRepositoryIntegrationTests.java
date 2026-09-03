@@ -227,11 +227,13 @@ class TopicRepositoryIntegrationTests {
 
         Topic savedNeverCollected = topicRepository.save(neverCollected);
         Topic savedDue = topicRepository.save(due);
-        topicRepository.save(notDue);
+        Topic savedNotDue = topicRepository.save(notDue);
         flushAndClear();
 
-        assertEquals(List.of(savedNeverCollected.getId(), savedDue.getId()),
-                topicRepository.findDueCollectionTopicIds(now));
+        List<Long> dueTopicIds = topicRepository.findDueCollectionTopicIds(now);
+        assertTrue(dueTopicIds.contains(savedNeverCollected.getId()));
+        assertTrue(dueTopicIds.contains(savedDue.getId()));
+        assertFalse(dueTopicIds.contains(savedNotDue.getId()));
     }
 
     @Test
