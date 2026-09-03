@@ -2,6 +2,7 @@ package com.example.be.domain.analysis.agent.investigation;
 
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentExploreResponse;
+import com.example.be.domain.analysis.service.ArticleAnalysisPipeline;
 import com.example.be.domain.collection.cluster.IssueClusteringService;
 import com.example.be.domain.collection.service.command.ArticleContentEnricher;
 import com.example.be.domain.collection.service.command.CollectionExecutor;
@@ -16,7 +17,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.time.OffsetDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /** 승인된 조사 행동만 수행하는 외부 I/O 경계다. */
 @Component
@@ -29,6 +32,7 @@ public class IssueInvestigationActionExecutor {
     private final CollectionResultWriter resultWriter;
     private final ArticleContentEnricher contentEnricher;
     private final IssueClusteringService issueClusteringService;
+    private final ArticleAnalysisPipeline analysisPipeline;
     private final IssueInvestigationContextService contextService;
     private final AgentProperties properties;
 
@@ -63,12 +67,13 @@ public class IssueInvestigationActionExecutor {
         if (!outcome.fetch().success()) {
             throw new IllegalStateException("추가 수집 실패: " + outcome.fetch().failureMessage());
         }
-        contentEnricher.enrich(runId);
+        Set<Long> refreshedArticleIds = contentEnricher.enrich(runId);
         issueClusteringService.cluster(runId);
-        InvestigationContext after = contextService.current(runId, before.issueId());
+        InvestigationContext after = analyzeChanges(
+                runId, before, refreshedArticleIds, contextService.current(runId, before.issueId()));
         return new InvestigationActionResult(
                 Math.max(0, after.articleIds().size() - before.articleIds().size()),
-                Math.max(0, after.availableSentenceCount() - before.availableSentenceCount()),
+                Math.max(0, after.evidenceSentenceCount() - before.evidenceSentenceCount()),
                 "추가 수집 %d건, 변경 후보 %d건".formatted(
                         write.observedArticleCount(), write.changedArticleCount()));
     }
@@ -76,12 +81,31 @@ public class IssueInvestigationActionExecutor {
     private InvestigationActionResult readFullText(Long runId,
                                                    InvestigationContext before,
                                                    Long articleId) {
-        contentEnricher.enrichArticle(runId, articleId);
-        InvestigationContext after = contextService.current(runId, before.issueId());
+        Set<Long> refreshedArticleIds = contentEnricher.enrichArticle(runId, articleId);
+        if (!refreshedArticleIds.isEmpty()) {
+            issueClusteringService.cluster(runId);
+        }
+        InvestigationContext after = analyzeChanges(
+                runId, before, refreshedArticleIds, contextService.current(runId, before.issueId()));
         return new InvestigationActionResult(
                 0,
-                Math.max(0, after.availableSentenceCount() - before.availableSentenceCount()),
+                Math.max(0, after.evidenceSentenceCount() - before.evidenceSentenceCount()),
                 "기사 #%d 전문 확보 시도".formatted(articleId));
+    }
+
+    private InvestigationContext analyzeChanges(Long runId,
+                                                 InvestigationContext before,
+                                                 Set<Long> refreshedArticleIds,
+                                                 InvestigationContext clustered) {
+        Set<Long> analysisTriggerIds = new LinkedHashSet<>(refreshedArticleIds);
+        clustered.articleIds().stream()
+                .filter(articleId -> !before.articleIds().contains(articleId))
+                .forEach(analysisTriggerIds::add);
+        if (analysisTriggerIds.isEmpty()) {
+            return clustered;
+        }
+        analysisPipeline.analyzeInvestigation(runId, Set.copyOf(analysisTriggerIds));
+        return contextService.current(runId, before.issueId());
     }
 
     private InvestigationActionResult compareHistory(InvestigationContext context,

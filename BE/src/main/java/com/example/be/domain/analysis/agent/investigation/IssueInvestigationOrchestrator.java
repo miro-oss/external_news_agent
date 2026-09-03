@@ -100,6 +100,7 @@ public class IssueInvestigationOrchestrator {
             InvestigationContext current = contextService.current(runId, state.issueId());
             AgentExploreRequest request = request(state, current, plan);
             QuotaReservation reservation;
+            boolean recoveredSharedReservation = false;
             try {
                 reservation = quotaService.reserve(
                         runId, request.idempotencyKey(), AgentTask.INVESTIGATE, plan);
@@ -111,10 +112,13 @@ public class IssueInvestigationOrchestrator {
                 // 남은 RESERVED 행을 그대로 이어 써야 같은 idempotency key를 새로 만들지 않는다.
                 reservation = quotaService.findActiveReservation(request.idempotencyKey())
                         .orElseThrow(() -> exception);
+                recoveredSharedReservation = true;
             }
             int attemptedStep = state.nextStep();
             if (!investigationRepository.markInFlight(state.id(), attemptedStep)) {
-                releaseUnused(reservation);
+                if (!recoveredSharedReservation) {
+                    completeFailure(reservation, "PROVIDER_UNAVAILABLE");
+                }
                 state = investigationRepository.findByRunIdAndIssueId(runId, state.issueId())
                         .orElseThrow();
                 if (state.finished()) {
@@ -384,10 +388,6 @@ public class IssueInvestigationOrchestrator {
         } catch (RuntimeException exception) {
             log.error("조사 실패 quota 정산에 실패했다. key={}", reservation.idempotencyKey(), exception);
         }
-    }
-
-    private void releaseUnused(QuotaReservation reservation) {
-        completeFailure(reservation, "PROVIDER_UNAVAILABLE");
     }
 
     private void completeFailedStepSafely(IssueInvestigationState state,

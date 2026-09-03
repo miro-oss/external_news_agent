@@ -67,6 +67,66 @@ class IssueClustererTest {
     }
 
     @Test
+    void excludesBoilerplateOnlyFullTextFromContentGrouping() {
+        ClusterArticle first = article(
+                1L, "현대로템 장갑형 구급차 개발 완료", ClusterTestFixtures.PUBLISHER_FOOTER,
+                FetchStatus.FULLTEXT, "뉴시스", "0.8", hour(0));
+        ClusterArticle second = article(
+                2L, "SK온 미국 ESS 공급계약 체결", ClusterTestFixtures.PUBLISHER_FOOTER,
+                FetchStatus.FULLTEXT, "뉴시스", "0.8", hour(72));
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second));
+
+        assertTrue(plan.contentGroups().isEmpty());
+        assertEquals(2, plan.issues().size());
+    }
+
+    @Test
+    void doesNotReuseExistingContentGroupForBoilerplateOnlyBody() {
+        ClusterArticle first = articleWithContentGroup(
+                1L, "현대로템 장갑형 구급차 개발 완료",
+                ClusterTestFixtures.PUBLISHER_FOOTER, 10L, hour(0));
+        ClusterArticle second = articleWithContentGroup(
+                2L, "SK온 미국 ESS 공급계약 체결",
+                ClusterTestFixtures.PUBLISHER_FOOTER, 10L, hour(72));
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second));
+
+        assertTrue(plan.contentGroups().isEmpty());
+        assertEquals(2, plan.issues().size());
+    }
+
+    @Test
+    void isolatesBoilerplateMemberFromValidArticleInExistingContentGroup() {
+        ClusterArticle valid = articleWithContentGroup(
+                1L, "삼성전자 HBM4 공급 계약", longBody("삼성전자 HBM4 공급 계약"), 10L, hour(0));
+        ClusterArticle boilerplate = articleWithContentGroup(
+                2L, "현대로템 장갑형 구급차 개발 완료",
+                ClusterTestFixtures.PUBLISHER_FOOTER, 10L, hour(72));
+
+        ClusterPlan plan = clusterer.cluster(List.of(valid, boilerplate));
+
+        assertEquals(1, plan.contentGroups().size());
+        assertEquals(List.of(1L), plan.contentGroups().getFirst().articleIds());
+        assertEquals(2, plan.issues().size());
+    }
+
+    @Test
+    void preservesExistingContentGroupForArticleWithoutFullTextInCurrentRun() {
+        ClusterArticle first = articleWithContentGroup(
+                1L, "삼성전자 HBM4 공급 일정", null,
+                FetchStatus.METADATA_ONLY, 10L, hour(0));
+        ClusterArticle second = articleWithContentGroup(
+                2L, "완전히 다른 제목", null,
+                FetchStatus.FETCH_FAILED, 10L, hour(72));
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second));
+
+        assertEquals(1, plan.issues().size());
+        assertEquals(1, plan.issues().getFirst().independentContentCount());
+    }
+
+    @Test
     void joinsDifferentTitlesWhenTwoDeterministicEntitiesOverlapWithinWindow() {
         ClusterArticle first = article(
                 1L, "삼성전자 차세대 메모리 투자 확대", longBody("삼성전자 HBM4 투자"),
@@ -244,6 +304,17 @@ class IssueClustererTest {
                                    String publisher,
                                    String reliability,
                                    OffsetDateTime publishedAt) {
+        return article(id, title, body, fetchStatus, publisher, reliability, publishedAt, null);
+    }
+
+    private ClusterArticle article(long id,
+                                   String title,
+                                   String body,
+                                   FetchStatus fetchStatus,
+                                   String publisher,
+                                   String reliability,
+                                   OffsetDateTime publishedAt,
+                                   Long contentGroupId) {
         return new ClusterArticle(
                 id,
                 7L,
@@ -257,10 +328,30 @@ class IssueClustererTest {
                 publishedAt,
                 publishedAt,
                 List.of("반도체"),
-                null,
-                null,
+                contentGroupId,
+                contentGroupId == null ? null : body == null
+                        ? "0000000000000000" : SimHash.toHex(SimHash.of(body)),
                 null,
                 true);
+    }
+
+    private ClusterArticle articleWithContentGroup(long id,
+                                                   String title,
+                                                   String body,
+                                                   long contentGroupId,
+                                                   OffsetDateTime publishedAt) {
+        return articleWithContentGroup(
+                id, title, body, FetchStatus.FULLTEXT, contentGroupId, publishedAt);
+    }
+
+    private ClusterArticle articleWithContentGroup(long id,
+                                                   String title,
+                                                   String body,
+                                                   FetchStatus fetchStatus,
+                                                   long contentGroupId,
+                                                   OffsetDateTime publishedAt) {
+        return article(
+                id, title, body, fetchStatus, "뉴시스", "0.8", publishedAt, contentGroupId);
     }
 
     private String longBody(String sentence) {

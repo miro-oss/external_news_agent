@@ -6,6 +6,7 @@ import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.analysis.service.SentenceSplitter;
 import com.example.be.domain.collection.cluster.BreakingNewsDetector;
+import com.example.be.domain.collection.content.ArticleBodyCleaner;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
@@ -116,7 +117,9 @@ public class IssueInvestigationContextService {
         int availableSentenceCount = memberships.stream()
                 .map(IssueArticle::getArticle)
                 .filter(article -> article.getFetchStatus() == FetchStatus.FULLTEXT)
-                .mapToInt(article -> SentenceSplitter.split(article.getBody(), article.getLanguage()).size())
+                .mapToInt(article -> SentenceSplitter.split(
+                        ArticleBodyCleaner.withoutTrailingBoilerplate(article.getBody()),
+                        article.getLanguage()).size())
                 .sum();
         int evidenceCount = supportedEvidenceCount(runId, articleIds);
         IssueCrossSource crossSource = issue.getCrossSource() == null

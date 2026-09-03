@@ -1,5 +1,6 @@
 package com.example.be.domain.collection.cluster;
 
+import com.example.be.domain.collection.content.ArticleBodyCleaner;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -64,14 +65,16 @@ public class IssueClusterer {
     private ContentGrouping contentGroups(List<ClusterArticle> articles) {
         Map<Long, ClusterArticle> fullTextById = new LinkedHashMap<>();
         Map<Long, Long> fingerprintByArticle = new LinkedHashMap<>();
+        Set<Long> rejectedFullTextIds = new HashSet<>();
         for (ClusterArticle article : articles) {
             if (!article.hasFullText() || fullTextById.containsKey(article.articleId())) {
                 continue;
             }
-            SimHash.tryOf(article.body()).ifPresent(fingerprint -> {
-                fullTextById.put(article.articleId(), article);
-                fingerprintByArticle.put(article.articleId(), fingerprint);
-            });
+            SimHash.tryOfArticleBody(article.body(), properties.getMinArticleContentLength())
+                    .ifPresentOrElse(fingerprint -> {
+                        fullTextById.put(article.articleId(), article);
+                        fingerprintByArticle.put(article.articleId(), fingerprint);
+                    }, () -> rejectedFullTextIds.add(article.articleId()));
         }
         List<ClusterArticle> fullText = List.copyOf(fullTextById.values());
         UnionFind union = new UnionFind(fullText.stream().map(ClusterArticle::articleId).toList());
@@ -132,7 +135,7 @@ public class IssueClusterer {
 
         articles.forEach(article -> {
             contentKeyByArticle.putIfAbsent(article.articleId(),
-                    article.contentGroupId() == null
+                    article.contentGroupId() == null || rejectedFullTextIds.contains(article.articleId())
                             ? "article:" + article.articleId()
                             : "content-group:" + article.contentGroupId());
             representativeByArticle.putIfAbsent(article.articleId(), article.articleId());
@@ -182,7 +185,9 @@ public class IssueClusterer {
             String coreTitle = breakingNewsDetector.coreTitle(article.title());
             titleTokens.put(article.articleId(), TitleTokenizer.tokens(coreTitle));
             entities.put(article.articleId(), entityExtractor.extract(
-                    coreTitle, article.summary(), article.body(), article.topicKeywords()));
+                    coreTitle, article.summary(),
+                    ArticleBodyCleaner.withoutTrailingBoilerplate(article.body()),
+                    article.topicKeywords()));
         });
 
         // 같은 본문 중복군에서는 대표만 사건 유사도 투표에 참여한다.
@@ -292,7 +297,8 @@ public class IssueClusterer {
     }
 
     private boolean hasSubstantialBody(ClusterArticle article) {
-        return article.hasFullText() && article.body().strip().length() >= 500;
+        return article.hasFullText()
+                && ArticleBodyCleaner.withoutTrailingBoilerplate(article.body()).length() >= 500;
     }
 
     private void joinAll(UnionFind union, List<ClusterArticle> articles) {

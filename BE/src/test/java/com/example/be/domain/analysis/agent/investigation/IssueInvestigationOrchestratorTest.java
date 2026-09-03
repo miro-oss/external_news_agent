@@ -189,7 +189,7 @@ class IssueInvestigationOrchestratorTest {
     }
 
     @Test
-    void yieldsWhenAnotherWorkerOwnsTheSameStep() {
+    void releasesNewReservationWhenAnotherWorkerOwnsTheSameStep() {
         IssueInvestigationState state = state(1, null, "IN_PROGRESS", null);
         IssueInvestigationState owned = state(1, 1, "IN_PROGRESS", null);
         when(investigationRepository.reserve(
@@ -208,6 +208,28 @@ class IssueInvestigationOrchestratorTest {
         verify(agentClient, never()).explore(any());
         verify(quotaService).completeFailure(reservation, "PROVIDER_UNAVAILABLE");
         verify(investigationRepository, times(1)).markInFlight(state.id(), 1);
+    }
+
+    @Test
+    void doesNotSettleRecoveredSharedReservationAfterLosingStepOwnership() {
+        IssueInvestigationState state = state(1, null, "IN_PROGRESS", null);
+        IssueInvestigationState owned = state(1, 1, "IN_PROGRESS", null);
+        when(investigationRepository.reserve(
+                eq(RUN_ID), eq(ISSUE_ID), anyString(), anyString(), anyInt(), any(LocalDateTime.class)))
+                .thenReturn(state);
+        when(contextService.current(RUN_ID, ISSUE_ID)).thenReturn(context());
+        QuotaReservation shared = reservation(1);
+        when(quotaService.reserve(eq(RUN_ID), anyString(), eq(AgentTask.INVESTIGATE), eq(AgentPlan.FREE)))
+                .thenThrow(new IllegalStateException("이미 예약됨"));
+        when(quotaService.findActiveReservation(anyString())).thenReturn(Optional.of(shared));
+        when(investigationRepository.markInFlight(state.id(), 1)).thenReturn(false);
+        when(investigationRepository.findByRunIdAndIssueId(RUN_ID, ISSUE_ID))
+                .thenReturn(Optional.of(owned));
+
+        orchestrator.investigate(RUN_ID);
+
+        verify(agentClient, never()).explore(any());
+        verify(quotaService, never()).completeFailure(eq(shared), anyString());
     }
 
     @Test

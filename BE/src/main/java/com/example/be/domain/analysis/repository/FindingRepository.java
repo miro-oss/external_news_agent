@@ -23,8 +23,6 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
     @EntityGraph(attributePaths = {"article", "article.topic", "article.source"})
     Page<Finding> findAll(Specification<Finding> specification, Pageable pageable);
 
-    boolean existsByRunIdAndArticleId(Long runId, Long articleId);
-
     Optional<Finding> findFirstByArticleIdOrderByIdDesc(Long articleId);
 
     @Query("""

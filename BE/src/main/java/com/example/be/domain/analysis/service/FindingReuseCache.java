@@ -7,6 +7,7 @@ import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.converter.ArticleHasher;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.content.ArticleBodyCleaner;
 import com.example.be.domain.topics.entity.Topic;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -129,7 +130,7 @@ public class FindingReuseCache {
         List<String> fields = new ArrayList<>();
         fields.add(article.getTitle());
         fields.add(article.getSummary());
-        fields.add(article.getBody());
+        fields.add(ArticleBodyCleaner.withoutTrailingBoilerplate(article.getBody()));
         fields.add(article.getCanonicalUrl());
         fields.add(article.getLanguage());
         fields.add(article.getPublishedAt() == null ? null : article.getPublishedAt().toString());

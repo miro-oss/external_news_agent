@@ -54,6 +54,8 @@ class IssueClustererRealGoldenExportTest {
                 configuredProperties.getEntityTimeWindow().toHours());
         output.put("configuredEntityOverlapThreshold",
                 configuredProperties.getEntityOverlapThreshold());
+        output.put("configuredMinArticleContentLength",
+                configuredProperties.getMinArticleContentLength());
         output.put("configuredCommonEntityDocumentRatio",
                 configuredProperties.getCommonEntityDocumentRatio());
         output.put("articles", configured.articles());

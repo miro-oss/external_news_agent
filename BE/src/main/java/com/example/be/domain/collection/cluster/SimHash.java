@@ -1,5 +1,7 @@
 package com.example.be.domain.collection.cluster;
 
+import com.example.be.domain.collection.content.ArticleBodyCleaner;
+
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -27,7 +29,16 @@ public final class SimHash {
     }
 
     public static OptionalLong tryOf(String body) {
-        Map<String, Integer> features = features(body);
+        if (body == null || body.isBlank()) {
+            return OptionalLong.empty();
+        }
+        String normalized = Normalizer.normalize(body, Normalizer.Form.NFKC)
+                .toLowerCase(Locale.ROOT);
+        return tryOfNormalized(normalized);
+    }
+
+    private static OptionalLong tryOfNormalized(String normalized) {
+        Map<String, Integer> features = features(normalized);
         if (features.isEmpty()) {
             return OptionalLong.empty();
         }
@@ -47,6 +58,15 @@ public final class SimHash {
         return OptionalLong.of(fingerprint);
     }
 
+    /** 기사 본문 뒤에 붙은 매체 푸터를 걷어내고, 본문이 충분히 남을 때만 지문을 만든다. */
+    static OptionalLong tryOfArticleBody(String body, int minArticleContentLength) {
+        String articleContent = ArticleBodyCleaner.withoutTrailingBoilerplate(body);
+        if (articleContent.length() < minArticleContentLength) {
+            return OptionalLong.empty();
+        }
+        return tryOfNormalized(articleContent.toLowerCase(Locale.ROOT));
+    }
+
     public static int distance(long left, long right) {
         return Long.bitCount(left ^ right);
     }
@@ -62,12 +82,7 @@ public final class SimHash {
         return Long.parseUnsignedLong(value, 16);
     }
 
-    private static Map<String, Integer> features(String body) {
-        if (body == null || body.isBlank()) {
-            return Map.of();
-        }
-        String normalized = Normalizer.normalize(body, Normalizer.Form.NFKC)
-                .toLowerCase(Locale.ROOT);
+    private static Map<String, Integer> features(String normalized) {
         Matcher matcher = WORD.matcher(normalized);
         Map<String, Integer> words = new LinkedHashMap<>();
         while (matcher.find()) {

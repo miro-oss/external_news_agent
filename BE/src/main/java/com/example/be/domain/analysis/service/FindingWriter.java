@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -53,14 +54,34 @@ public class FindingWriter {
                       ChangeType changeType,
                       String analysisInputHash,
                       AnalysisResult result) {
+        write(runId, articleId, changeType, analysisInputHash, result, false);
+    }
+
+    /** 조사 중 전문이 보강된 기사는 같은 run의 기존 finding을 최신 입력 결과로 교체한다. */
+    @Transactional
+    public void refresh(Long runId,
+                        Long articleId,
+                        ChangeType changeType,
+                        String analysisInputHash,
+                        AnalysisResult result) {
+        write(runId, articleId, changeType, analysisInputHash, result, true);
+    }
+
+    private void write(Long runId,
+                       Long articleId,
+                       ChangeType changeType,
+                       String analysisInputHash,
+                       AnalysisResult result,
+                       boolean replaceExisting) {
         CollectionRun run = runRepository.findById(runId).orElseThrow();
         // 동일 기사 행을 잠근 뒤 존재 여부를 확인해 동시 호출도 하나의 finding만 남긴다.
         Article article = articleRepository.findByIdForUpdate(articleId).orElseThrow();
-        if (findingRepository.existsByRunIdAndArticleId(runId, articleId)) {
+        Optional<Finding> existing = findingRepository.findByRunIdAndArticleId(runId, articleId);
+        if (existing.isPresent() && !replaceExisting) {
             return;
         }
 
-        findingRepository.save(Finding.builder()
+        Finding analyzed = Finding.builder()
                 .run(run)
                 .article(article)
                 .changeType(changeType)
@@ -87,7 +108,12 @@ public class FindingWriter {
                 .analysisInputHash(analysisInputHash)
                 .inputTruncated(result.metadata().truncated())
                 .analyzedAt(LocalDateTime.now(ApiTimeZone.ZONE))
-                .build());
+                .build();
+        if (existing.isPresent()) {
+            existing.orElseThrow().replaceAnalysis(analyzed);
+        } else {
+            findingRepository.save(analyzed);
+        }
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
         Set<Long> affectedIssueIds = new LinkedHashSet<>();
         issueArticleRepository.findByArticleIdOrderByIssueIdAsc(articleId).forEach(membership -> {
