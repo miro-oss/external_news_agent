@@ -2181,6 +2181,24 @@ body.modal-open {
   font-size: 0.95rem;
 }
 
+.perspective-insight-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.insight-related-badge {
+  padding: 0.18rem 0.48rem;
+  border: 1px solid rgba(64, 193, 158, 0.32);
+  border-radius: 999px;
+  background: rgba(64, 193, 158, 0.12);
+  color: #72d6b9;
+  font-size: 0.66rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .perspective-insight-heading > span {
   color: #8b95a1;
   font-size: 0.68rem;

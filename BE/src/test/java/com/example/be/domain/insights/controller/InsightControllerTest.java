@@ -46,7 +46,8 @@ class InsightControllerTest {
                 .andExpect(jsonPath("$.result.insights[0].facts[0].evidenceSentenceIds[0]")
                         .value(0))
                 .andExpect(jsonPath("$.result.insights[0].implications[0].falsifiedBy")
-                        .value("일정 번복"));
+                        .value("일정 번복"))
+                .andExpect(jsonPath("$.result.insights[0].relatedArticleCount").value(2));
     }
 
     @Test
@@ -83,6 +84,7 @@ class InsightControllerTest {
                         new BigDecimal("0.8"),
                         "gemini",
                         "gemini-test",
+                        2,
                         OffsetDateTime.parse("2026-09-02T12:00:00+09:00"))));
     }
 }

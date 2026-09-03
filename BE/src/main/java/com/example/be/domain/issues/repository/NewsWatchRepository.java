@@ -18,6 +18,18 @@ public interface NewsWatchRepository extends JpaRepository<NewsWatch, Long> {
 
     List<NewsWatch> findByIssueIdOrderByIdAsc(Long issueId);
 
+    @Query("""
+            SELECT DISTINCT watch.issue.id
+            FROM NewsWatch watch
+            WHERE watch.watchType = :watchType
+              AND watch.active = true
+              AND watch.expiresAt > :now
+            ORDER BY watch.issue.id ASC
+            """)
+    List<Long> findActiveIssueIdsByWatchType(
+            @Param("watchType") WatchType watchType,
+            @Param("now") LocalDateTime now);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             SELECT watch

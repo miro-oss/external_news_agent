@@ -7,6 +7,7 @@ import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
+import com.example.be.domain.insights.service.InsightHypothesisTracker;
 import com.example.be.domain.reports.service.ReportCreationService;
 import com.example.be.domain.topics.service.strategy.TopicKeywordStrategyOrchestrator;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,7 @@ public class CollectionRunExecutionService {
     private final IssueClusteringService issueClusteringService;
     private final ArticleAnalysisPipeline analysisPipeline;
     private final IssueInvestigationOrchestrator investigationOrchestrator;
+    private final InsightHypothesisTracker hypothesisTracker;
     private final ReportCreationService reportCreationService;
     private final TopicKeywordStrategyOrchestrator keywordStrategyOrchestrator;
     private final CollectionResultWriter resultWriter;
@@ -82,6 +84,18 @@ public class CollectionRunExecutionService {
                         runId,
                         CollectionRunWarning.CODE_LLM_INVESTIGATION_FAILED,
                         "추가 조사 단계 실패로 기존 분석을 유지했습니다.");
+            }
+            // 저장된 인사이트 가설은 같은 주제와 구조화 엔티티가 겹치는 새 finding만 연결한다.
+            // 이 단계는 LLM을 호출하지 않으며 실패해도 기존 분석과 보고서는 그대로 진행한다.
+            try {
+                hypothesisTracker.track(runId);
+            } catch (RuntimeException exception) {
+                log.error("가설 추적 단계에 실패해 기존 연결을 유지한다. runId={} error={}",
+                        runId, exception.getMessage(), exception);
+                resultWriter.addAgentWarning(
+                        runId,
+                        CollectionRunWarning.CODE_HYPOTHESIS_TRACKING_FAILED,
+                        "가설 추적에 실패해 기존 관련 기사 연결을 유지했습니다.");
             }
             // M5 보고서는 findings를 모두 저장한 뒤 만든다. 생성과 reportId 연결은 별도 짧은 트랜잭션이다.
             try {

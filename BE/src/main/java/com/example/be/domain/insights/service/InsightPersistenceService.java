@@ -1,22 +1,34 @@
 package com.example.be.domain.insights.service;
 
+import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.entity.AgentTargetType;
+import com.example.be.domain.analysis.agent.investigation.InvestigationQueryNormalizer;
 import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.collection.cluster.IssueClusteringProperties;
 import com.example.be.domain.insights.dto.InsightDTO;
 import com.example.be.domain.insights.entity.InsightFact;
 import com.example.be.domain.insights.entity.InsightImplication;
 import com.example.be.domain.insights.entity.NewsInsight;
 import com.example.be.domain.insights.repository.NewsInsightRepository;
+import com.example.be.domain.issues.entity.NewsIssue;
+import com.example.be.domain.issues.entity.NewsWatch;
+import com.example.be.domain.issues.entity.WatchType;
+import com.example.be.domain.issues.exception.IssueException;
+import com.example.be.domain.issues.exception.code.IssueErrorCode;
+import com.example.be.domain.issues.repository.NewsIssueRepository;
+import com.example.be.domain.issues.repository.NewsWatchRepository;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -24,6 +36,11 @@ import java.util.Optional;
 public class InsightPersistenceService {
 
     private final NewsInsightRepository repository;
+    private final NewsIssueRepository issueRepository;
+    private final NewsWatchRepository watchRepository;
+    private final InsightHypothesisEntityExtractor hypothesisEntityExtractor;
+    private final IssueClusteringProperties clusteringProperties;
+    private final AgentProperties agentProperties;
 
     @Transactional(readOnly = true)
     public List<NewsInsight> findCached(AgentTargetType targetType,
@@ -54,6 +71,13 @@ public class InsightPersistenceService {
                                            Map<Long, Long> articleIdsByFinding) {
         AgentInsightResponse.Meta meta = response.meta();
         LocalDateTime createdAt = LocalDateTime.now(ApiTimeZone.ZONE);
+        NewsIssue issue = issueRepository.findById(targetId)
+                .orElseThrow(() -> new IssueException(IssueErrorCode.ISSUE_NOT_FOUND));
+        List<Long> inputArticleIds = articleIdsByFinding.values().stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .sorted()
+                .toList();
         List<NewsInsight> insights = response.insights().stream()
                 .map(insight -> NewsInsight.builder()
                         .targetType(targetType)
@@ -66,6 +90,9 @@ public class InsightPersistenceService {
                         .implications(insight.implications().stream()
                                 .map(this::toImplication).toList())
                         .watchNext(List.copyOf(insight.watchNext()))
+                        .watchEntities(hypothesisEntityExtractor.extract(insight, issue))
+                        .inputArticleIds(inputArticleIds)
+                        .relatedArticleIds(List.of())
                         .confidence(insight.confidence())
                         .inputHash(inputHash)
                         .promptVersion(meta.promptVersion())
@@ -78,7 +105,11 @@ public class InsightPersistenceService {
                         .createdAt(createdAt)
                         .build())
                 .toList();
-        return repository.saveAll(insights);
+        List<NewsInsight> saved = repository.saveAll(insights);
+        if (saved.stream().anyMatch(this::isTrackable)) {
+            registerHypothesisWatch(issue, createdAt);
+        }
+        return saved;
     }
 
     public InsightDTO.AudienceInsight toDto(NewsInsight insight) {
@@ -91,7 +122,35 @@ public class InsightPersistenceService {
                 insight.getConfidence(),
                 insight.getLlmProvider(),
                 insight.getLlmModel(),
+                insight.getRelatedArticleIds().size(),
                 insight.getCreatedAt().atZone(ApiTimeZone.ZONE).toOffsetDateTime());
+    }
+
+    private boolean isTrackable(NewsInsight insight) {
+        return insight.getWatchEntities().stream()
+                .map(InvestigationQueryNormalizer::normalizeEntity)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .count()
+                >= clusteringProperties.getEntityOverlapThreshold();
+    }
+
+    private void registerHypothesisWatch(NewsIssue issue, LocalDateTime createdAt) {
+        LocalDateTime expiresAt = createdAt.plusDays(
+                agentProperties.getInsightHistory().getDays());
+        watchRepository.findByIssueIdAndWatchType(issue.getId(), WatchType.HYPOTHESIS)
+                .ifPresentOrElse(
+                        watch -> {
+                            if (!watch.isActive() || watch.getExpiresAt().isBefore(expiresAt)) {
+                                watch.renewUntil(expiresAt);
+                            }
+                        },
+                        () -> watchRepository.save(NewsWatch.builder()
+                                .watchType(WatchType.HYPOTHESIS)
+                                .issue(issue)
+                                .expiresAt(expiresAt)
+                                .active(true)
+                                .build()));
     }
 
     private InsightFact toFact(AgentInsightResponse.Fact fact,

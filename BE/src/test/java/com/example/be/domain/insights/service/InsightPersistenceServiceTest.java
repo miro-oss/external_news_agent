@@ -1,19 +1,29 @@
 package com.example.be.domain.insights.service;
 
 import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
+import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.entity.AgentTargetType;
 import com.example.be.domain.analysis.entity.Audience;
+import com.example.be.domain.collection.cluster.IssueClusteringProperties;
 import com.example.be.domain.insights.entity.NewsInsight;
 import com.example.be.domain.insights.repository.NewsInsightRepository;
+import com.example.be.domain.issues.entity.NewsIssue;
+import com.example.be.domain.issues.entity.NewsWatch;
+import com.example.be.domain.issues.entity.WatchType;
+import com.example.be.domain.issues.repository.NewsIssueRepository;
+import com.example.be.domain.issues.repository.NewsWatchRepository;
+import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -23,8 +33,28 @@ class InsightPersistenceServiceTest {
     @Test
     void storesProductEvidenceIndexesAsZeroBased() {
         NewsInsightRepository repository = mock(NewsInsightRepository.class);
-        InsightPersistenceService service = new InsightPersistenceService(repository);
+        NewsIssueRepository issueRepository = mock(NewsIssueRepository.class);
+        NewsWatchRepository watchRepository = mock(NewsWatchRepository.class);
+        InsightHypothesisEntityExtractor entityExtractor = mock(InsightHypothesisEntityExtractor.class);
+        IssueClusteringProperties clusteringProperties = new IssueClusteringProperties();
+        AgentProperties agentProperties = new AgentProperties();
+        InsightPersistenceService service = new InsightPersistenceService(
+                repository,
+                issueRepository,
+                watchRepository,
+                entityExtractor,
+                clusteringProperties,
+                agentProperties);
+        NewsIssue issue = NewsIssue.builder()
+                .id(88L)
+                .topic(Topic.builder().id(7L).build())
+                .build();
         when(repository.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(issueRepository.findById(88L)).thenReturn(Optional.of(issue));
+        when(entityExtractor.extract(any(), any()))
+                .thenReturn(List.of("삼성전자", "HBM4"));
+        when(watchRepository.findByIssueIdAndWatchType(88L, WatchType.HYPOTHESIS))
+                .thenReturn(Optional.empty());
         AgentInsightResponse response = new AgentInsightResponse(
                 List.of(new AgentInsightResponse.Insight(
                         "CHIP_MAKER",
@@ -56,5 +86,12 @@ class InsightPersistenceServiceTest {
         assertEquals(10L, saved.getFacts().getFirst().articleId());
         assertEquals(List.of(0, 2), saved.getFacts().getFirst().evidenceSentenceIds());
         assertEquals("일정 번복", saved.getImplications().getFirst().falsifiedBy());
+        assertEquals(List.of(10L), saved.getInputArticleIds());
+        assertEquals(List.of("삼성전자", "HBM4"), saved.getWatchEntities());
+
+        ArgumentCaptor<NewsWatch> watchCaptor = ArgumentCaptor.forClass(NewsWatch.class);
+        verify(watchRepository).save(watchCaptor.capture());
+        assertEquals(WatchType.HYPOTHESIS, watchCaptor.getValue().getWatchType());
+        assertEquals(88L, watchCaptor.getValue().getIssue().getId());
     }
 }

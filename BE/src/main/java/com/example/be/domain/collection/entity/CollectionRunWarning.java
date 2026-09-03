@@ -65,6 +65,8 @@ public class CollectionRunWarning {
     public static final String CODE_LLM_INVESTIGATION_FAILED = "LLM_INVESTIGATION_FAILED";
     /** 수집 전략가 키워드 제안 생성에 실패해 기존 topic 키워드를 유지했다. */
     public static final String CODE_LLM_KEYWORD_STRATEGY_FAILED = "LLM_KEYWORD_STRATEGY_FAILED";
+    /** 저장된 가설과 이번 run의 finding 연결에 실패했다. finding과 기존 연결은 그대로 유지한다. */
+    public static final String CODE_HYPOTHESIS_TRACKING_FAILED = "HYPOTHESIS_TRACKING_FAILED";
 
     public static final int MAX_CODE_LENGTH = 50;
     public static final int MAX_MESSAGE_LENGTH = 1000;
