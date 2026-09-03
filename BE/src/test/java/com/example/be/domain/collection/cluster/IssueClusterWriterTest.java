@@ -186,14 +186,15 @@ class IssueClusterWriterTest {
         NewsInsight existing = NewsInsight.builder()
                 .targetId(100L)
                 .inputArticleIds(List.of(30L))
-                .relatedArticleIds(List.of(20L))
+                .relatedArticleIds(List.of(20L, 60L))
                 .build();
         NewsInsight duplicate = NewsInsight.builder()
                 .targetId(200L)
                 .audience(Audience.CHIP_MAKER)
                 .inputHash("same-hash")
                 .promptVersion("insight.ko.v2")
-                .relatedArticleIds(List.of(20L, 30L, 40L))
+                .inputArticleIds(List.of(20L, 30L, 50L))
+                .relatedArticleIds(List.of(40L, 60L))
                 .build();
         NewsWatch winningWatch = NewsWatch.builder()
                 .issue(winner)
@@ -226,7 +227,10 @@ class IssueClusterWriterTest {
         writer.write(new ClusterPlan(
                 List.of(), List.of(assignment(100L, List.of(200L), topic, first)), List.of()));
 
-        assertEquals(List.of(20L, 40L), existing.getRelatedArticleIds());
+        assertEquals(List.of(20L, 30L, 50L), existing.getInputArticleIds());
+        assertEquals(List.of(60L, 40L), existing.getRelatedArticleIds());
+        existing.addRelatedArticleId(50L);
+        assertEquals(List.of(60L, 40L), existing.getRelatedArticleIds());
         assertTrue(winningWatch.isActive());
         assertEquals(losingWatch.getExpiresAt(), winningWatch.getExpiresAt());
         assertFalse(losingWatch.isActive());

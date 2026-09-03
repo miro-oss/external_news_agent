@@ -290,6 +290,7 @@ public class IssueClusterWriter {
                             losingInsight.getInputHash(),
                             losingInsight.getPromptVersion())
                     .ifPresentOrElse(existing -> {
+                        existing.mergeInputArticleIds(losingInsight.getInputArticleIds());
                         existing.mergeRelatedArticleIds(losingInsight.getRelatedArticleIds());
                         duplicates.add(losingInsight);
                     }, () -> movable.add(losingInsight));

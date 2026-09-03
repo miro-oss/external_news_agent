@@ -27,7 +27,10 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 @Entity
 @Table(name = "news_insights")
@@ -130,6 +133,16 @@ public class NewsInsight {
 
     public void mergeRelatedArticleIds(Collection<Long> articleIds) {
         articleIds.forEach(this::addRelatedArticleId);
+    }
+
+    public void mergeInputArticleIds(Collection<Long> articleIds) {
+        Set<Long> merged = new HashSet<>(inputArticleIds);
+        articleIds.stream().filter(Objects::nonNull).forEach(merged::add);
+        this.inputArticleIds = merged.stream().sorted().toList();
+        // 병합으로 원본 기사에 포함된 항목은 관련 새 기사에서도 제외한다.
+        this.relatedArticleIds = relatedArticleIds.stream()
+                .filter(articleId -> !merged.contains(articleId))
+                .toList();
     }
 
     public void moveToTarget(Long targetId) {
