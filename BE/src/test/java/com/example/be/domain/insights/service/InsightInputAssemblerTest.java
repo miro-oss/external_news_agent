@@ -17,11 +17,15 @@ import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.Pageable;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
-import java.time.OffsetDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -69,7 +73,7 @@ class InsightInputAssemblerTest {
                 .id(10L)
                 .title("HBM4 기사")
                 .canonicalUrl("https://example.com/10")
-                .publishedAt(OffsetDateTime.parse("2026-09-03T09:00:00+09:00"))
+                .publishedAt(OffsetDateTime.parse("2026-09-02T15:30:00Z"))
                 .build();
         IssueArticle membership = IssueArticle.builder().issue(issue).article(article).build();
         Finding finding = Finding.builder()
@@ -88,7 +92,8 @@ class InsightInputAssemblerTest {
                 .thenReturn(List.of(membership));
         when(findingRepository.findLatestByArticleIds(List.of(10L)))
                 .thenReturn(List.of(finding));
-        when(findingRepository.findHistoryForInsight(eq(3L), anyCollection(), any(), eq(6)))
+        when(findingRepository.findInsightHistoryCandidates(
+                eq(3L), any(), any(), anyCollection(), any(Pageable.class)))
                 .thenReturn(List.of());
 
         InsightInputAssembler.Snapshot snapshot = assembler.assemble(88L);
@@ -102,6 +107,11 @@ class InsightInputAssemblerTest {
                 .map(sentence -> sentence.id()).toList());
         assertEquals(10L, snapshot.articleIdsByFinding().get(501L));
         assertEquals("HBM", snapshot.topic().name());
+        ArgumentCaptor<OffsetDateTime> since = ArgumentCaptor.forClass(OffsetDateTime.class);
+        verify(findingRepository).findInsightHistoryCandidates(
+                eq(3L), since.capture(), any(), anyCollection(), any(Pageable.class));
+        assertEquals(LocalTime.MIDNIGHT, since.getValue().toLocalTime());
+        assertEquals(ZoneOffset.ofHours(9), since.getValue().getOffset());
     }
 
     @Test
@@ -149,12 +159,14 @@ class InsightInputAssemblerTest {
                 .thenReturn(List.of(IssueArticle.builder().issue(issue).article(currentArticle).build()));
         when(findingRepository.findLatestByArticleIds(List.of(10L)))
                 .thenReturn(List.of(current));
-        when(findingRepository.findHistoryForInsight(eq(3L), anyCollection(), any(), eq(6)))
+        when(findingRepository.findInsightHistoryCandidates(
+                eq(3L), any(), any(), anyCollection(), any(Pageable.class)))
                 .thenReturn(List.of(current, history));
 
         InsightInputAssembler.Snapshot snapshot = assembler.assemble(88L);
 
-        verify(findingRepository).findHistoryForInsight(eq(3L), anyCollection(), any(), eq(6));
+        verify(findingRepository).findInsightHistoryCandidates(
+                eq(3L), any(), any(), anyCollection(), any(Pageable.class));
         assertEquals(42L, snapshot.runId());
         assertEquals(List.of(501L, 388L), snapshot.findings().stream()
                 .map(AgentInsightRequest.FindingPayload::id)

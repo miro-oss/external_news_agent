@@ -2,6 +2,7 @@ package com.example.be.domain.insights.service;
 
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
+import com.example.be.domain.analysis.agent.investigation.InvestigationQueryNormalizer;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingEntities;
@@ -18,6 +19,7 @@ import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -26,6 +28,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
@@ -40,7 +43,7 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class InsightInputAssembler {
 
-    private static final int MAX_CURRENT_FINDINGS = 10;
+    private static final int MIN_HISTORY_CANDIDATE_PAGE_SIZE = 50;
 
     private final AgentProperties properties;
     private final NewsIssueRepository issueRepository;
@@ -80,7 +83,7 @@ public class InsightInputAssembler {
                         finding,
                         toPayload(finding, AgentInsightRequest.FindingRole.CURRENT)))
                 .filter(selected -> !selected.payload().sentences().isEmpty())
-                .limit(MAX_CURRENT_FINDINGS)
+                .limit(AgentProperties.MAX_CURRENT_INSIGHT_FINDINGS)
                 .toList();
         if (selectedFindings.isEmpty()) {
             throw new GeneralException(
@@ -111,10 +114,10 @@ public class InsightInputAssembler {
 
     private List<SelectedFinding> historyFindings(Long topicId,
                                                   List<SelectedFinding> currentFindings) {
-        Set<String> entityNames = currentFindings.stream()
-                .flatMap(selected -> entityNames(selected.finding()).stream())
+        Set<String> normalizedEntityNames = currentFindings.stream()
+                .flatMap(selected -> normalizedEntityNames(selected.finding()).stream())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        if (entityNames.isEmpty()) {
+        if (normalizedEntityNames.isEmpty()) {
             return List.of();
         }
         Set<Long> currentFindingIds = currentFindings.stream()
@@ -131,21 +134,36 @@ public class InsightInputAssembler {
             return List.of();
         }
         OffsetDateTime since = OffsetDateTime.now(ApiTimeZone.ZONE)
-                .minusDays(properties.getInsightHistory().getDays());
-        return findingRepository.findHistoryForInsight(
-                        topicId,
-                        entityNames,
-                        since,
-                        properties.getInsightHistory().getLimit()).stream()
-                .filter(finding -> !currentFindingIds.contains(finding.getId()))
-                .filter(finding -> !currentArticleIds.contains(finding.getArticle().getId()))
-                .filter(finding -> effectivePublishedAt(finding).isBefore(currentBaseline))
-                .map(finding -> new SelectedFinding(
-                        finding,
-                        toPayload(finding, AgentInsightRequest.FindingRole.HISTORY)))
-                .filter(selected -> !selected.payload().sentences().isEmpty())
-                .limit(properties.getInsightHistory().getLimit())
-                .toList();
+                .toLocalDate()
+                .minusDays(properties.getInsightHistory().getDays())
+                .atStartOfDay(ApiTimeZone.ZONE)
+                .toOffsetDateTime();
+        int limit = properties.getInsightHistory().getLimit();
+        int pageSize = Math.max(limit * 10, MIN_HISTORY_CANDIDATE_PAGE_SIZE);
+        List<SelectedFinding> selected = new ArrayList<>(limit);
+
+        for (int page = 0; selected.size() < limit; page++) {
+            List<Finding> candidates = findingRepository.findInsightHistoryCandidates(
+                    topicId,
+                    since,
+                    currentBaseline,
+                    List.of(AnalysisSource.LLM, AnalysisSource.REUSED),
+                    PageRequest.of(page, pageSize));
+            candidates.stream()
+                    .filter(finding -> !currentFindingIds.contains(finding.getId()))
+                    .filter(finding -> !currentArticleIds.contains(finding.getArticle().getId()))
+                    .filter(finding -> overlapsAnyEntity(finding, normalizedEntityNames))
+                    .map(finding -> new SelectedFinding(
+                            finding,
+                            toPayload(finding, AgentInsightRequest.FindingRole.HISTORY)))
+                    .filter(candidate -> !candidate.payload().sentences().isEmpty())
+                    .limit(limit - selected.size())
+                    .forEach(selected::add);
+            if (candidates.size() < pageSize) {
+                break;
+            }
+        }
+        return List.copyOf(selected);
     }
 
     private AgentInsightRequest.FindingPayload toPayload(Finding finding,
@@ -174,23 +192,28 @@ public class InsightInputAssembler {
                 .toList();
     }
 
-    private List<String> entityNames(Finding finding) {
+    private Set<String> normalizedEntityNames(Finding finding) {
         FindingEntities entities = finding.getEntities();
         if (entities == null) {
-            return List.of();
+            return Set.of();
         }
-        return Stream.of(entities.companies(), entities.products(), entities.technologies())
-                .filter(values -> values != null && !values.isEmpty())
-                .flatMap(List::stream)
+        return entities.allNames().stream()
+                .map(InvestigationQueryNormalizer::normalizeEntity)
                 .filter(StringUtils::hasText)
-                .distinct()
-                .toList();
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private boolean overlapsAnyEntity(Finding finding, Set<String> normalizedEntityNames) {
+        return normalizedEntityNames(finding).stream().anyMatch(normalizedEntityNames::contains);
     }
 
     private String publishedAt(Finding finding) {
         return finding.getArticle().getPublishedAt() == null
                 ? null
-                : finding.getArticle().getPublishedAt().toLocalDate().toString();
+                : finding.getArticle().getPublishedAt()
+                        .atZoneSameInstant(ApiTimeZone.ZONE)
+                        .toLocalDate()
+                        .toString();
     }
 
     private OffsetDateTime effectivePublishedAt(Finding finding) {

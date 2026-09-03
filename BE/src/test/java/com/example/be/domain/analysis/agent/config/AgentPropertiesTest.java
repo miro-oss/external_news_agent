@@ -57,4 +57,12 @@ class AgentPropertiesTest {
 
         assertThrows(IllegalStateException.class, properties::afterPropertiesSet);
     }
+
+    @Test
+    void rejectsInsightHistoryLimitAboveAgentFindingContract() {
+        AgentProperties properties = new AgentProperties();
+        properties.getInsightHistory().setLimit(7);
+
+        assertThrows(IllegalStateException.class, properties::afterPropertiesSet);
+    }
 }

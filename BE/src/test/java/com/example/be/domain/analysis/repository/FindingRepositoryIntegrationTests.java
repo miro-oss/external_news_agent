@@ -36,6 +36,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
@@ -216,6 +217,32 @@ class FindingRepositoryIntegrationTests {
     }
 
     @Test
+    void returnsOlderHistoryAfterSixCurrentFindingsFillRequestLimit() {
+        OffsetDateTime currentBaseline = OffsetDateTime.now().minusDays(1);
+        for (int index = 0; index < 6; index++) {
+            Article currentArticle = articleRepository.save(historyArticle(
+                    "current-" + index,
+                    currentBaseline.plusMinutes(index)));
+            findingRepository.save(historyFinding(currentArticle));
+        }
+        Article historyArticle = articleRepository.save(historyArticle(
+                "history",
+                currentBaseline.minusDays(1)));
+        Finding historyFinding = findingRepository.save(historyFinding(historyArticle));
+        flushAndClear();
+
+        List<Finding> candidates = findingRepository.findInsightHistoryCandidates(
+                topic.getId(),
+                currentBaseline.minusDays(30),
+                currentBaseline,
+                List.of(AnalysisSource.LLM, AnalysisSource.REUSED),
+                PageRequest.of(0, 6));
+
+        assertEquals(List.of(historyFinding.getId()),
+                candidates.stream().map(Finding::getId).toList());
+    }
+
+    @Test
     void filtersAndReturnsKoreanSummaryThroughArticleApiService() {
         findingRepository.save(finding());
         flushAndClear();
@@ -383,6 +410,46 @@ class FindingRepositoryIntegrationTests {
                 .credits(BigDecimal.ZERO)
                 .analysisInputHash("c".repeat(64))
                 .inputTruncated(true)
+                .analyzedAt(LocalDateTime.now())
+                .build();
+    }
+
+    private Article historyArticle(String label, OffsetDateTime publishedAt) {
+        return Article.builder()
+                .topic(topic)
+                .source(source)
+                .urlHash(UUID.randomUUID().toString().replace("-", "").repeat(2))
+                .canonicalUrl("https://example.com/history/" + UUID.randomUUID())
+                .title("HBM history " + label)
+                .summary("HBM history summary")
+                .body("HBM history body")
+                .contentHash(UUID.randomUUID().toString().replace("-", "").repeat(2))
+                .language("ko")
+                .sourceName("테스트 소스")
+                .publishedAt(publishedAt)
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .firstSeenRun(run)
+                .lastSeenRun(run)
+                .collectedAt(LocalDateTime.now())
+                .build();
+    }
+
+    private Finding historyFinding(Article targetArticle) {
+        return Finding.builder()
+                .run(run)
+                .article(targetArticle)
+                .changeType(ChangeType.NEW)
+                .summary("HBM 과거 finding")
+                .keyPoints(List.of())
+                .intent("시간축 통합 검증")
+                .sentiment(Sentiment.NEUTRAL)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(
+                        SensitivityLevel.MEDIUM))
+                .relevance(Relevance.IMPORTANT)
+                .category("공급망")
+                .analysisSource(AnalysisSource.LLM)
+                .sections(List.of(new FindingSection(0, "HBM 공급 일정이 확인됐다.")))
+                .entities(new FindingEntities(List.of("SK하이닉스"), List.of("HBM"), List.of()))
                 .analyzedAt(LocalDateTime.now())
                 .build();
     }
