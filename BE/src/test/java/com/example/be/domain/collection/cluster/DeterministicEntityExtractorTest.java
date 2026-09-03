@@ -80,16 +80,16 @@ class DeterministicEntityExtractorTest {
     }
 
     @Test
-    @DisplayName("회사 사전과 주제 키워드는 본문까지 훑는다 — 닫힌 집합이라 안전하다")
-    void stillScansBodyForClosedSets() {
+    @DisplayName("본문 배경 조직은 엔티티 간선을 우회하지 않고 주제 키워드만 본문까지 훑는다")
+    void excludesBodyOnlyOrganizationsFromEntities() {
         Set<String> entities = extractor.extract(
                 "반도체 장비 수요 회복",
                 "하반기 전망이 개선됐다.",
                 "삼성전자와 마이크론이 증설을 검토 중이라고 업계는 전했다." + NOISY_BODY,
                 List.of("증설"));
 
-        assertTrue(entities.contains("삼성전자"));
-        assertTrue(entities.contains("마이크론"));
+        assertFalse(entities.contains("삼성전자"));
+        assertFalse(entities.contains("마이크론"));
         assertTrue(entities.contains("증설"), "주제 키워드가 본문에서 잡히지 않았다");
     }
 
@@ -137,5 +137,52 @@ class DeterministicEntityExtractorTest {
                 List.of());
 
         assertEquals(Set.of(), entities);
+    }
+
+    @Test
+    @DisplayName("제목·요약 조직 추출은 약칭을 정규화하고 제품코드는 제외한다")
+    void extractsOrganizationsWithoutTechnicalAnchors() {
+        Set<String> organizations = extractor.extractOrganizations(
+                "SK하닉·AMAT·DGIST 공동 발표",
+                "LG전자와 KB운용도 참여하고 HBM4를 공개했다.");
+
+        assertEquals(Set.of(
+                "SK하이닉스", "어플라이드머티어리얼즈", "DGIST", "LG전자", "KB자산운용"),
+                organizations);
+        assertFalse(organizations.contains("HBM4"));
+    }
+
+    @Test
+    @DisplayName("짧은 영문 조직 약칭은 다른 영단어 내부에서 매칭하지 않는다")
+    void requiresWordBoundariesForShortAsciiAliases() {
+        Set<String> organizations = extractor.extractOrganizations(
+                "Dramatic industry outlook", null);
+
+        assertFalse(organizations.contains("어플라이드머티어리얼즈"));
+    }
+
+    @Test
+    @DisplayName("한글 조직 별칭은 일반 단어의 접두사로 등장하면 매칭하지 않는다")
+    void rejectsKoreanAliasPrefixesInsideCommonWords() {
+        Set<String> organizations = extractor.extractOrganizations(
+                "AI 인텔리전스 애플리케이션과 메타버스 전략", null);
+
+        assertEquals(Set.of(), organizations);
+    }
+
+    @Test
+    @DisplayName("한글 조직 별칭 뒤에 붙은 조사는 허용한다")
+    void acceptsKoreanPostpositionsAfterAliases() {
+        Set<String> organizations = extractor.extractOrganizations(
+                "인텔은 애플과 메타의 공동 발표", null);
+
+        assertEquals(Set.of("인텔", "애플", "메타"), organizations);
+    }
+
+    @Test
+    @DisplayName("일반 명사구 미래산업은 법인 표기가 있을 때만 조직으로 본다")
+    void requiresCorporateMarkerForAmbiguousOrganizationName() {
+        assertEquals(Set.of(), extractor.extractOrganizations("반도체 미래산업 육성 전략", null));
+        assertEquals(Set.of("미래산업"), extractor.extractOrganizations("미래산업(주), 장비 공급", null));
     }
 }

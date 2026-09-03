@@ -39,7 +39,11 @@ public final class DeterministicEntityExtractor {
     /** 앵커 최소 길이. 두 글자짜리는 거의 다 일반 약어(IT·AP·TV·PC)이지 사건 식별자가 아니다. */
     private static final int MIN_ANCHOR_LENGTH = 3;
 
-    private static final Map<String, List<String>> COMPANY_ALIASES = companyAliases();
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
+    private static final Map<String, List<String>> ORGANIZATION_ALIASES = organizationAliases();
+    private static final List<String> KOREAN_POSTPOSITIONS = List.of(
+            "으로부터", "에게서", "이라도", "에서", "에게", "으로", "처럼", "보다", "까지", "부터",
+            "은", "는", "이", "가", "을", "를", "과", "와", "의", "도", "만", "에", "로");
     private static final Set<String> BROAD_TOPIC_WORDS = Set.of(
             "반도체", "제조", "산업", "기술", "시장", "뉴스", "공장", "기업");
     private static final Set<String> BROAD_TECHNICAL_ANCHORS = Set.of("AI", "SK", "LG", "HD");
@@ -56,23 +60,30 @@ public final class DeterministicEntityExtractor {
             "PREMIUM", "EXCLUSIVE", "INTERVIEW", "REPORT", "PRESS", "TECH", "LIVE");
     private static final Pattern TECHNICAL_ANCHOR = Pattern.compile(
             "(?<![A-Za-z0-9])(?:[A-Z]{2,}[A-Z0-9-]*|[A-Za-z]+[0-9][A-Za-z0-9-]*)(?![A-Za-z0-9])");
+
     public Set<String> extract(String title,
                                String summary,
                                String body,
                                List<String> topicKeywords) {
-        String text = String.join("\n", nullToEmpty(title), nullToEmpty(summary), nullToEmpty(body));
-        String normalized = normalize(text);
-        Set<String> entities = new LinkedHashSet<>();
+        return extractWithOrganizations(title, summary, body, topicKeywords).entities();
+    }
 
-        COMPANY_ALIASES.forEach((canonical, aliases) -> {
-            if (aliases.stream().map(DeterministicEntityExtractor::normalize).anyMatch(normalized::contains)) {
-                entities.add(canonical);
-            }
-        });
+    /** 조직 사전은 제목·요약과 본문을 한 번씩만 훑고, 보조 간선용 조직은 제목·요약으로 제한한다. */
+    Extraction extractWithOrganizations(String title,
+                                         String summary,
+                                         String body,
+                                         List<String> topicKeywords) {
+        String headline = String.join("\n", nullToEmpty(title), nullToEmpty(summary));
+        String normalizedHeadline = normalize(headline);
+        String normalizedBody = normalize(nullToEmpty(body));
+        Set<String> entities = new LinkedHashSet<>();
+        Set<String> organizations = new LinkedHashSet<>();
+
+        collectOrganizations(normalizedHeadline, organizations);
+        entities.addAll(organizations);
 
         // 제목·요약이 먼저다. 상한에 걸리더라도 본문 앵커보다 이쪽이 살아남아야 한다.
-        int anchors = collectAnchors(
-                entities, String.join("\n", nullToEmpty(title), nullToEmpty(summary)), false, 0);
+        int anchors = collectAnchors(entities, headline, false, 0);
         collectAnchors(entities, nullToEmpty(body), true, anchors);
 
         if (topicKeywords != null) {
@@ -81,11 +92,66 @@ public final class DeterministicEntityExtractor {
                     .map(String::trim)
                     .filter(value -> value.length() >= 2)
                     .filter(value -> !BROAD_TOPIC_WORDS.contains(normalize(value)))
-                    .filter(value -> normalized.contains(normalize(value)))
+                    .filter(value -> normalizedHeadline.contains(normalize(value))
+                            || normalizedBody.contains(normalize(value)))
                     .map(DeterministicEntityExtractor::canonicalKeyword)
                     .forEach(entities::add);
         }
-        return Collections.unmodifiableSet(new LinkedHashSet<>(entities));
+        return new Extraction(
+                Collections.unmodifiableSet(new LinkedHashSet<>(entities)),
+                Collections.unmodifiableSet(new LinkedHashSet<>(organizations)));
+    }
+
+    /** 제목·요약에 직접 나온 닫힌 조직 사전만 돌려준다. 제품코드와 본문 배경 언급은 포함하지 않는다. */
+    Set<String> extractOrganizations(String title, String summary) {
+        Set<String> organizations = new LinkedHashSet<>();
+        collectOrganizations(
+                normalize(String.join("\n", nullToEmpty(title), nullToEmpty(summary))),
+                organizations);
+        return Collections.unmodifiableSet(organizations);
+    }
+
+    private static void collectOrganizations(String normalized, Set<String> target) {
+        ORGANIZATION_ALIASES.forEach((canonical, aliases) -> {
+            if (aliases.stream()
+                    .anyMatch(alias -> containsAlias(normalized, alias))) {
+                target.add(canonical);
+            }
+        });
+    }
+
+    /** 별칭 양쪽의 문자 경계를 확인하되, 한글 뒤 조사는 조직명에 붙여 쓸 수 있게 허용한다. */
+    private static boolean containsAlias(String text, String alias) {
+        if (alias.isEmpty()) {
+            return false;
+        }
+        int from = 0;
+        while (from <= text.length() - alias.length()) {
+            int index = text.indexOf(alias, from);
+            if (index < 0) {
+                return false;
+            }
+            int end = index + alias.length();
+            boolean leftBoundary = index == 0 || !Character.isLetterOrDigit(text.charAt(index - 1));
+            boolean rightBoundary = end == text.length()
+                    || !Character.isLetterOrDigit(text.charAt(end))
+                    || hasKoreanPostposition(text, end);
+            if (leftBoundary && rightBoundary) {
+                return true;
+            }
+            from = index + 1;
+        }
+        return false;
+    }
+
+    private static boolean hasKoreanPostposition(String text, int from) {
+        return KOREAN_POSTPOSITIONS.stream().anyMatch(postposition -> {
+            if (!text.startsWith(postposition, from)) {
+                return false;
+            }
+            int end = from + postposition.length();
+            return end == text.length() || !Character.isLetterOrDigit(text.charAt(end));
+        });
     }
 
     /**
@@ -130,10 +196,10 @@ public final class DeterministicEntityExtractor {
         return value.chars().anyMatch(Character::isDigit);
     }
 
-    private static Map<String, List<String>> companyAliases() {
+    private static Map<String, List<String>> organizationAliases() {
         Map<String, List<String>> aliases = new LinkedHashMap<>();
         aliases.put("삼성전자", List.of("삼성전자", "samsung electronics"));
-        aliases.put("SK하이닉스", List.of("sk하이닉스", "sk hynix"));
+        aliases.put("SK하이닉스", List.of("sk하이닉스", "sk하닉", "sk hynix"));
         aliases.put("TSMC", List.of("tsmc", "대만반도체"));
         aliases.put("엔비디아", List.of("엔비디아", "nvidia"));
         aliases.put("AMD", List.of("amd"));
@@ -151,7 +217,22 @@ public final class DeterministicEntityExtractor {
         aliases.put("OpenAI", List.of("openai"));
         aliases.put("Anthropic", List.of("anthropic", "앤트로픽"));
         aliases.put("Arm", List.of("arm holdings", "arm홀딩스"));
-        return Map.copyOf(aliases);
+        aliases.put("어플라이드머티어리얼즈",
+                List.of("어플라이드 머티어리얼즈", "어플라이드", "applied materials", "amat"));
+        aliases.put("LG전자", List.of("lg전자", "lg electronics"));
+        aliases.put("DGIST", List.of("dgist", "디지스트", "대구경북과학기술원"));
+        aliases.put("한울반도체", List.of("한울반도체"));
+        aliases.put("KB자산운용", List.of("kb자산운용", "kb운용"));
+        aliases.put("에이블랩스", List.of("에이블랩스"));
+        // "미래산업 육성" 같은 일반 명사구는 제외하고 법인 표기가 붙은 경우만 받는다.
+        aliases.put("미래산업", List.of("미래산업(주)", "미래산업㈜", "미래산업 주식회사"));
+        aliases.put("HPSP", List.of("hpsp"));
+        aliases.put("CXMT", List.of("cxmt", "창신메모리"));
+        aliases.replaceAll((canonical, values) -> values.stream()
+                .map(DeterministicEntityExtractor::normalize)
+                .distinct()
+                .toList());
+        return Collections.unmodifiableMap(aliases);
     }
 
     private static String canonicalKeyword(String value) {
@@ -163,11 +244,14 @@ public final class DeterministicEntityExtractor {
     private static String normalize(String value) {
         return Normalizer.normalize(value, Normalizer.Form.NFKC)
                 .toLowerCase(Locale.ROOT)
-                .replaceAll("\\s+", " ")
+                .transform(normalized -> WHITESPACE.matcher(normalized).replaceAll(" "))
                 .trim();
     }
 
     private static String nullToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    record Extraction(Set<String> entities, Set<String> organizations) {
     }
 }

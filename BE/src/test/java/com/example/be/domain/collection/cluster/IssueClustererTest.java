@@ -132,7 +132,7 @@ class IssueClustererTest {
                 1L, "삼성전자 차세대 메모리 투자 확대", longBody("삼성전자 HBM4 투자"),
                 FetchStatus.FULLTEXT, "전자신문", "0.8", hour(0));
         ClusterArticle second = article(
-                2L, "HBM4 생산라인에 추가 장비 투입", longBody("삼성전자 HBM4 생산라인"),
+                2L, "HBM4 생산라인에 삼성전자 추가 장비 투입", longBody("삼성전자 HBM4 생산라인"),
                 FetchStatus.FULLTEXT, "매일경제", "0.8", hour(47));
 
         ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
@@ -148,13 +148,125 @@ class IssueClustererTest {
                 1L, "삼성전자 차세대 메모리 투자 확대", longBody("삼성전자 HBM4 투자"),
                 FetchStatus.FULLTEXT, "전자신문", "0.8", hour(0));
         ClusterArticle second = article(
-                2L, "HBM4 생산라인에 추가 장비 투입", longBody("삼성전자 HBM4 생산라인"),
+                2L, "HBM4 생산라인에 삼성전자 추가 장비 투입", longBody("삼성전자 HBM4 생산라인"),
                 FetchStatus.FULLTEXT, "매일경제", "0.8", hour(49));
 
         ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
 
         assertEquals(2, plan.issues().size());
         assertFalse(plan.pairScores().getFirst().sameCluster());
+    }
+
+    @Test
+    void joinsWeakTitlePairAtOrganizationWindowBoundary() {
+        ClusterArticle first = article(
+                1L, "DGIST 반도체 결함 초음파 검사 기술 공개", null,
+                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+        ClusterArticle second = article(
+                2L, "DGIST 초소형 광 초음파 센서 개발", null,
+                FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(24));
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
+
+        ClusterPlan.PairScore pair = plan.pairScores().getFirst();
+        assertTrue(pair.titleJaccard() < 0.50);
+        assertTrue(pair.titleJaccard() >= 0.125);
+        assertEquals(1, pair.organizationOverlap());
+        assertTrue(pair.sameCluster());
+        assertEquals(1, plan.issues().size());
+    }
+
+    @Test
+    void doesNotUseOrganizationCorroborationOutsideOneDay() {
+        ClusterArticle first = article(
+                1L, "DGIST 반도체 결함 초음파 검사 기술 공개", null,
+                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+        ClusterArticle second = article(
+                2L, "DGIST 초소형 광 초음파 센서 개발", null,
+                FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(25));
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
+
+        assertEquals(2, plan.issues().size());
+        assertFalse(plan.pairScores().getFirst().sameCluster());
+    }
+
+    @Test
+    void doesNotUseBodyOnlyBackgroundOrganizationsAsEntityEdge() {
+        ClusterArticle factory = article(
+                1L,
+                "일본 신규 공장 투자 후보지 검토",
+                longBody("생산 용수와 부지 인허가를 검토했다. 아마존과 메타 투자는 배경 사례다"),
+                FetchStatus.FULLTEXT, "전자신문", "0.8", hour(0));
+        ClusterArticle powerEquipment = article(
+                2L,
+                "미국 전력설비 업계 주문 급증",
+                longBody("변압기와 개폐장치 납기가 길어졌다. 아마존과 메타 투자는 배경 사례다"),
+                FetchStatus.FULLTEXT, "매일경제", "0.8", hour(7));
+
+        ClusterPlan plan = clusterer.cluster(List.of(factory, powerEquipment), true);
+
+        ClusterPlan.PairScore pair = plan.pairScores().getFirst();
+        assertTrue(plan.contentGroups().isEmpty());
+        assertEquals(0, pair.organizationOverlap());
+        assertEquals(0, pair.entityOverlap());
+        assertFalse(pair.sameCluster());
+        assertEquals(2, plan.issues().size());
+    }
+
+    @Test
+    void doesNotTreatSharedProductCodeAsOrganizationCorroboration() {
+        ClusterArticle first = article(
+                1L, "HBM4 평택 양산 확정", null,
+                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+        ClusterArticle second = article(
+                2L, "HBM4 청주 장비 발주", null,
+                FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(4));
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
+
+        ClusterPlan.PairScore pair = plan.pairScores().getFirst();
+        assertEquals(0, pair.organizationOverlap());
+        assertFalse(pair.sameCluster());
+        assertEquals(2, plan.issues().size());
+    }
+
+    @Test
+    void excludesOrganizationSharedAcrossManyArticlesFromAuxiliaryEdges() {
+        List<String> samsungTitles = List.of(
+                "삼성전자 HBM4 평택 설비 투자 확정",
+                "삼성전자 HBM4 테일러 공장 보조금 신청",
+                "삼성전자 HBM4 파운드리 가격 정책 변경",
+                "삼성전자 HBM4 엑시노스 개발 조직 개편",
+                "삼성전자 HBM4 로봇 사업 인수 검토",
+                "삼성전자 HBM4 노조 임금 협상 타결",
+                "삼성전자 HBM4 스마트폰 출하 목표 조정",
+                "삼성전자 HBM4 디스플레이 지분 매각 추진");
+        List<String> unrelatedTitles = List.of(
+                "롯데 주력 계열사 영업익 반등", "노란봉투법 해석지침 보완 임박",
+                "대한화섬 고성능 섬유 생산 개시", "산업생산 지수 제자리걸음",
+                "가톨릭관동대 피지컬 포럼 개최", "유럽증시 무력충돌 여파 하락",
+                "네이버 컬리 거래액 급증", "넥슨 신작 게임 출시 확정",
+                "조선업 수주 잔량 최대", "은행권 가계대출 증가 둔화",
+                "제주 항공편 결항 속출", "전기차 보조금 기준 개편");
+        List<ClusterArticle> articles = new java.util.ArrayList<>();
+        for (String title : samsungTitles) {
+            articles.add(article(
+                    articles.size() + 1L, title, null,
+                    FetchStatus.METADATA_ONLY, "매체" + articles.size(), "0.8", hour(1)));
+        }
+        for (String title : unrelatedTitles) {
+            articles.add(article(
+                    articles.size() + 1L, title, null,
+                    FetchStatus.METADATA_ONLY, "매체" + articles.size(), "0.8", hour(2)));
+        }
+
+        ClusterPlan plan = clusterer.cluster(articles, true);
+
+        assertEquals(20, plan.issues().size());
+        assertTrue(plan.pairScores().stream()
+                .filter(score -> score.leftArticleId() <= 8 && score.rightArticleId() <= 8)
+                .allMatch(score -> score.organizationOverlap() == 0));
     }
 
     @Test
@@ -408,7 +520,7 @@ class IssueClustererTest {
                 1L, "삼성전자 차세대 메모리 투자 확대", longBody("삼성전자 HBM4 투자"),
                 FetchStatus.FULLTEXT, "전자신문", "0.8", hour(0));
         ClusterArticle second = article(
-                2L, "HBM4 생산라인에 추가 장비 투입", longBody("삼성전자 HBM4 생산라인"),
+                2L, "HBM4 생산라인에 삼성전자 추가 장비 투입", longBody("삼성전자 HBM4 생산라인"),
                 FetchStatus.FULLTEXT, "매일경제", "0.8", hour(47));
 
         ClusterPlan plan = clusterer.cluster(List.of(first, second));

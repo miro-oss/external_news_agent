@@ -2,6 +2,7 @@ package com.example.be.domain.collection.cluster;
 
 import com.example.be.domain.collection.entity.FetchStatus;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
@@ -26,13 +27,33 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class IssueClustererRealGoldenExportTest {
 
     @Test
-    void exportsRealCollectionFeaturesForRatioAndThresholdSweep() throws IOException {
+    void exportsFixtureFeaturesForRatioAndThresholdSweep() throws IOException {
+        export(load(), Map.of(), "fixture-fragment",
+                Path.of("build/reports/clusters/pairs.v2.json"));
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "CLUSTERS_V2_REPLAY_ARTICLES", matches = ".+")
+    void exportsFullBodyReplayFeaturesForRatioAndThresholdSweep() throws IOException {
         RealGoldenDataset dataset = load();
+        String replayPath = System.getenv("CLUSTERS_V2_REPLAY_ARTICLES");
+        String configuredOutput = System.getenv("CLUSTERS_V2_REPLAY_OUTPUT");
+        Path outputPath = Path.of(configuredOutput == null || configuredOutput.isBlank()
+                ? "build/reports/clusters/pairs.v2.fullbody.json"
+                : configuredOutput);
+        export(dataset, loadReplayArticles(dataset, Path.of(replayPath)),
+                "run-3862-versioned-fulltext", outputPath);
+    }
+
+    private void export(RealGoldenDataset dataset,
+                        Map<Long, ReplayArticle> replayArticles,
+                        String bodySource,
+                        Path outputPath) throws IOException {
         IssueClusteringProperties configuredProperties = new IssueClusteringProperties();
         double configuredCommonEntityRatio = configuredProperties.getCommonEntityDocumentRatio();
         validate(dataset, configuredCommonEntityRatio);
         List<GoldenArticle> articles = dataset.articles().stream()
-                .map(this::toGoldenArticle)
+                .map(source -> toGoldenArticle(source, replayArticles))
                 .toList();
 
         List<RatioEvaluation> evaluations = dataset.commonEntityDocumentRatioCandidates().stream()
@@ -48,23 +69,33 @@ class IssueClustererRealGoldenExportTest {
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("datasetVersion", dataset.datasetVersion());
         output.put("articleCount", articles.size());
+        output.put("postHocRelabeledSourceArticleIds",
+                dataset.postHocRelabeledSourceArticleIds());
         output.put("configuredTitleJaccardThreshold",
                 configuredProperties.getTitleJaccardThreshold());
         output.put("configuredEntityTimeWindowHours",
                 configuredProperties.getEntityTimeWindow().toHours());
         output.put("configuredEntityOverlapThreshold",
                 configuredProperties.getEntityOverlapThreshold());
+        output.put("configuredBreakingTimeWindowHours",
+                configuredProperties.getBreakingTimeWindow().toHours());
+        output.put("configuredOrganizationTimeWindowHours",
+                configuredProperties.getOrganizationTimeWindow().toHours());
+        output.put("configuredOrganizationTitleJaccardThreshold",
+                configuredProperties.getOrganizationTitleJaccardThreshold());
         output.put("configuredMinArticleContentLength",
                 configuredProperties.getMinArticleContentLength());
         output.put("configuredCommonEntityDocumentRatio",
                 configuredProperties.getCommonEntityDocumentRatio());
+        output.put("bodySource", bodySource);
         output.put("articles", configured.articles());
         output.put("pairEvaluations", evaluations.stream().map(evaluation -> Map.of(
                 "commonEntityDocumentRatio", evaluation.commonEntityDocumentRatio(),
                 "pairs", evaluation.pairs())).toList());
 
-        Path outputPath = Path.of("build/reports/clusters/pairs.v2.json");
-        Files.createDirectories(outputPath.getParent());
+        if (outputPath.getParent() != null) {
+            Files.createDirectories(outputPath.getParent());
+        }
         Files.writeString(outputPath, new ObjectMapper().writerWithDefaultPrettyPrinter()
                 .writeValueAsString(output) + System.lineSeparator());
 
@@ -90,18 +121,19 @@ class IssueClustererRealGoldenExportTest {
         }
         List<Map<String, Object>> exportedArticles = articles.stream().map(article -> {
             RealGoldenArticle source = article.source();
+            ClusterArticle clustered = article.article();
             Map<String, Object> value = new LinkedHashMap<>();
-            value.put("articleId", article.article().articleId());
+            value.put("articleId", clustered.articleId());
             value.put("sourceRunId", source.sourceRunId());
             value.put("sourceArticleId", source.sourceArticleId());
-            value.put("topicId", article.article().topicId());
-            value.put("title", article.article().title());
+            value.put("topicId", clustered.topicId());
+            value.put("title", clustered.title());
             value.put("expectedIssueId", source.expectedIssueId());
             value.put("split", source.split());
             value.put("fixedContentGroupId",
-                    contentGroupByArticle.get(article.article().articleId()));
+                    contentGroupByArticle.get(clustered.articleId()));
             value.put("fixedContentGroupRepresentativeId",
-                    contentGroupRepresentativeByArticle.get(article.article().articleId()));
+                    contentGroupRepresentativeByArticle.get(clustered.articleId()));
             return value;
         }).toList();
 
@@ -112,6 +144,8 @@ class IssueClustererRealGoldenExportTest {
             value.put("topicId", score.topicId());
             value.put("titleJaccard", score.titleJaccard());
             value.put("entityOverlap", score.entityOverlap());
+            value.put("organizationOverlap", score.organizationOverlap());
+            value.put("breakingPair", score.breakingPair());
             value.put("hoursApart", score.hoursApart());
             return value;
         }).toList();
@@ -134,6 +168,11 @@ class IssueClustererRealGoldenExportTest {
     private void validate(RealGoldenDataset dataset, double configuredCommonEntityRatio) {
         assertEquals("clusters.v2", dataset.datasetVersion());
         assertEquals(List.of(3862L), dataset.sourceRuns());
+        assertTrue(dataset.articles().stream()
+                .map(RealGoldenArticle::sourceArticleId)
+                .collect(Collectors.toSet())
+                .containsAll(dataset.postHocRelabeledSourceArticleIds()),
+                "사후 정정한 sourceArticleId는 fixture에 있어야 한다.");
         assertTrue(dataset.commonEntityDocumentRatioCandidates().stream()
                 .anyMatch(candidate -> close(candidate, configuredCommonEntityRatio)),
                 "프로덕션 common entity ratio가 사전 고정 후보에 포함돼야 한다: "
@@ -165,14 +204,41 @@ class IssueClustererRealGoldenExportTest {
                 .collect(Collectors.toSet()));
     }
 
-    private GoldenArticle toGoldenArticle(RealGoldenArticle source) {
+    private Map<Long, ReplayArticle> loadReplayArticles(RealGoldenDataset dataset,
+                                                        Path replayPath) throws IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        Map<Long, ReplayArticle> result = new HashMap<>();
+        for (String line : Files.readAllLines(replayPath)) {
+            if (line.isBlank()) {
+                continue;
+            }
+            ReplayArticle replayArticle = mapper.readValue(line, ReplayArticle.class);
+            assertTrue(result.putIfAbsent(replayArticle.id(), replayArticle) == null,
+                    "replay sourceArticleId 중복: " + replayArticle.id());
+        }
+        Set<Long> fixtureSourceArticleIds = dataset.articles().stream()
+                .map(RealGoldenArticle::sourceArticleId)
+                .collect(Collectors.toSet());
+        assertEquals(fixtureSourceArticleIds, result.keySet(),
+                "replay 입력은 clusters.v2의 sourceArticleId와 정확히 일치해야 한다.");
+        return result;
+    }
+
+    private GoldenArticle toGoldenArticle(RealGoldenArticle source,
+                                          Map<Long, ReplayArticle> replayArticles) {
         OffsetDateTime publishedAt = OffsetDateTime.parse(source.publishedAt());
+        ReplayArticle replayArticle = replayArticles.get(source.sourceArticleId());
+        String title = replayArticle == null ? source.title() : replayArticle.title();
+        String summary = replayArticle != null && replayArticle.versioned() == 1
+                ? null
+                : source.summary();
+        String body = replayArticle == null ? source.body() : replayArticle.body();
         ClusterArticle article = new ClusterArticle(
                 source.articleId(),
                 source.topicId(),
-                source.title(),
-                source.summary(),
-                source.body(),
+                title,
+                summary,
+                body,
                 source.fetchStatus(),
                 source.articleId(),
                 source.publisher(),
@@ -195,6 +261,7 @@ class IssueClustererRealGoldenExportTest {
             String datasetVersion,
             String description,
             List<Long> sourceRuns,
+            List<Long> postHocRelabeledSourceArticleIds,
             List<Double> commonEntityDocumentRatioCandidates,
             List<RealGoldenArticle> articles
     ) {
@@ -219,6 +286,9 @@ class IssueClustererRealGoldenExportTest {
     }
 
     private record GoldenArticle(ClusterArticle article, RealGoldenArticle source) {
+    }
+
+    private record ReplayArticle(long id, int versioned, String title, String body) {
     }
 
     private record RatioEvaluation(

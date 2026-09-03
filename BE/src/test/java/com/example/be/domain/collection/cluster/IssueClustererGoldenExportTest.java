@@ -36,7 +36,8 @@ class IssueClustererGoldenExportTest {
         assertEquals(200, goldenArticles.size());
 
         IssueClusteringProperties properties = new IssueClusteringProperties();
-        IssueClusterer clusterer = new IssueClusterer(properties, new BreakingNewsDetector());
+        BreakingNewsDetector breakingNewsDetector = new BreakingNewsDetector();
+        IssueClusterer clusterer = new IssueClusterer(properties, breakingNewsDetector);
         ClusterPlan plan = clusterer.cluster(
                 goldenArticles.stream().map(GoldenArticle::article).toList(), true);
 
@@ -78,6 +79,8 @@ class IssueClustererGoldenExportTest {
                 pair.put("split", first.split().equals(second.split()) ? first.split() : "CROSS");
                 pair.put("titleJaccard", score.titleJaccard());
                 pair.put("entityOverlap", score.entityOverlap());
+                pair.put("organizationOverlap", score.organizationOverlap());
+                pair.put("breakingPair", score.breakingPair());
                 pair.put("hoursApart", score.hoursApart());
                 pair.put("expectedSameIssue", expected);
                 pair.put("predictedSameIssue", predicted);
@@ -97,13 +100,14 @@ class IssueClustererGoldenExportTest {
                 .filter(values -> values.stream().distinct().count() > 1)
                 .toList();
         List<Map<String, Object>> exportedArticles = goldenArticles.stream().map(article -> {
+            ClusterArticle clustered = article.article();
             Map<String, Object> value = new LinkedHashMap<>();
-            value.put("articleId", article.article().articleId());
-            value.put("topicId", article.article().topicId());
-            value.put("title", article.article().title());
+            value.put("articleId", clustered.articleId());
+            value.put("topicId", clustered.topicId());
+            value.put("title", clustered.title());
             value.put("expectedIssueId", article.issueKey());
             value.put("split", article.split());
-            value.put("predictedClusterId", predictedClusterByArticle.get(article.article().articleId()));
+            value.put("predictedClusterId", predictedClusterByArticle.get(clustered.articleId()));
             return value;
         }).toList();
 
@@ -113,7 +117,13 @@ class IssueClustererGoldenExportTest {
         output.put("configuredTitleJaccardThreshold", properties.getTitleJaccardThreshold());
         output.put("configuredEntityTimeWindowHours", properties.getEntityTimeWindow().toHours());
         output.put("configuredEntityOverlapThreshold", properties.getEntityOverlapThreshold());
+        output.put("configuredBreakingTimeWindowHours", properties.getBreakingTimeWindow().toHours());
+        output.put("configuredOrganizationTimeWindowHours",
+                properties.getOrganizationTimeWindow().toHours());
+        output.put("configuredOrganizationTitleJaccardThreshold",
+                properties.getOrganizationTitleJaccardThreshold());
         output.put("configuredCommonEntityDocumentRatio", properties.getCommonEntityDocumentRatio());
+        output.put("bodySource", "synthetic-fixture");
         output.put("precision", precision);
         output.put("recall", recall);
         output.put("articles", exportedArticles);

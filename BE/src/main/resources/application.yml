@@ -63,6 +63,9 @@ news:
     # P1-1 골든 클러스터셋 홀드아웃 스윕에서 고정한 균등 자카드 기준이다.
     title-jaccard-threshold: 0.50
     entity-time-window: 48h
+    # 같은 조직명 + 약한 제목 겹침은 한 뉴스 주기 안에서만 보조 간선으로 쓴다.
+    organization-time-window: 24h
+    organization-title-jaccard-threshold: 0.125
     # 속보는 마커를 제거한 핵심구와 엔티티를 더 짧은 시간창에서만 비교한다.
     breaking-time-window: 6h
     entity-overlap-threshold: 2
