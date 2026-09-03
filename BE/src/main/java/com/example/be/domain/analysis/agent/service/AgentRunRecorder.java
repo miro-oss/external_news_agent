@@ -8,6 +8,8 @@ import com.example.be.domain.analysis.agent.dto.AgentExploreRequest;
 import com.example.be.domain.analysis.agent.dto.AgentExploreResponse;
 import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
 import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
+import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyRequest;
+import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
@@ -255,6 +257,64 @@ public class AgentRunRecorder {
                 .agentTask(AgentTask.INSIGHT)
                 .targetType(AgentTargetType.ISSUE)
                 .targetId(issueId)
+                .status(AgentRunStatus.FAILED)
+                .failureCode(failureCode)
+                .failureMessage(truncate(failureMessage))
+                .timeoutPhase(timeoutPhase)
+                .llmPlan(request.plan())
+                .inputTokens(usage == null ? null : usage.inputTokens())
+                .outputTokens(usage == null ? null : usage.outputTokens())
+                .costUsd(usage == null ? null : usage.costUsd())
+                .credits(usage == null ? null : usage.credits())
+                .requestHash(hash(request))
+                .startedAt(startedAt)
+                .finishedAt(now())
+                .build());
+    }
+
+    @Transactional
+    public void recordKeywordStrategySuccess(Long runId,
+                                             Long topicId,
+                                             AgentKeywordStrategyRequest request,
+                                             AgentKeywordStrategyResponse response,
+                                             LocalDateTime startedAt) {
+        AgentKeywordStrategyResponse.Meta meta = response.meta();
+        repository.insertIfAbsent(AgentRun.builder()
+                .collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey())
+                .agentTask(AgentTask.KEYWORD_STRATEGY)
+                .targetType(AgentTargetType.TOPIC)
+                .targetId(topicId)
+                .status(meta.mock() ? AgentRunStatus.MOCK : AgentRunStatus.SUCCESS)
+                .promptVersion(meta.promptVersion())
+                .llmProvider(meta.provider())
+                .llmModel(meta.model())
+                .llmPlan(request.plan())
+                .inputTokens(meta.inputTokens())
+                .outputTokens(meta.outputTokens())
+                .costUsd(meta.costUsd())
+                .credits(meta.credits())
+                .requestHash(hash(request))
+                .startedAt(startedAt)
+                .finishedAt(now())
+                .build());
+    }
+
+    @Transactional
+    public void recordKeywordStrategyFailure(Long runId,
+                                             Long topicId,
+                                             AgentKeywordStrategyRequest request,
+                                             String failureCode,
+                                             String failureMessage,
+                                             AgentClientException.Usage usage,
+                                             AgentTimeoutPhase timeoutPhase,
+                                             LocalDateTime startedAt) {
+        repository.insertIfAbsent(AgentRun.builder()
+                .collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey())
+                .agentTask(AgentTask.KEYWORD_STRATEGY)
+                .targetType(AgentTargetType.TOPIC)
+                .targetId(topicId)
                 .status(AgentRunStatus.FAILED)
                 .failureCode(failureCode)
                 .failureMessage(truncate(failureMessage))

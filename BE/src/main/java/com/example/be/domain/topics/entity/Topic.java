@@ -24,7 +24,10 @@ import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 @Entity
@@ -142,5 +145,49 @@ public class Topic {
 
     public int getLinkedSourceCount() {
         return sources.size();
+    }
+
+    public void applyKeywordChanges(List<TopicKeywordChange> changes) {
+        LinkedHashMap<String, String> required = keywordMap(requiredKeywords);
+        LinkedHashMap<String, String> optional = keywordMap(optionalKeywords);
+        LinkedHashMap<String, String> excluded = keywordMap(excludedKeywords);
+
+        for (TopicKeywordChange change : changes) {
+            Map<String, String> target = switch (change.bucket()) {
+                case REQUIRED -> required;
+                case OPTIONAL -> optional;
+                case EXCLUDED -> excluded;
+            };
+            String normalized = normalizeKeyword(change.keyword());
+            if (change.action() == TopicKeywordChangeAction.ADD) {
+                target.putIfAbsent(normalized, change.keyword());
+            } else {
+                target.remove(normalized);
+            }
+        }
+
+        this.requiredKeywords = List.copyOf(required.values());
+        this.optionalKeywords = List.copyOf(optional.values());
+        this.excludedKeywords = List.copyOf(excluded.values());
+    }
+
+    private static List<String> keywordsOrEmpty(List<String> values) {
+        return values == null ? List.of() : values;
+    }
+
+    private static LinkedHashMap<String, String> keywordMap(List<String> values) {
+        LinkedHashMap<String, String> result = new LinkedHashMap<>();
+        for (String value : keywordsOrEmpty(values)) {
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            String trimmed = value.trim();
+            result.putIfAbsent(normalizeKeyword(trimmed), trimmed);
+        }
+        return result;
+    }
+
+    private static String normalizeKeyword(String value) {
+        return value.trim().toLowerCase(Locale.ROOT);
     }
 }

@@ -63,6 +63,8 @@ public class CollectionRunWarning {
     public static final String CODE_LLM_SELF_CRITIQUE_FAILED = "LLM_SELF_CRITIQUE_FAILED";
     /** 추가 조사 Agent 호출 또는 승인된 행동 실행에 실패해 기존 분석으로 보고서를 만들었다. */
     public static final String CODE_LLM_INVESTIGATION_FAILED = "LLM_INVESTIGATION_FAILED";
+    /** 수집 전략가 키워드 제안 생성에 실패해 기존 topic 키워드를 유지했다. */
+    public static final String CODE_LLM_KEYWORD_STRATEGY_FAILED = "LLM_KEYWORD_STRATEGY_FAILED";
 
     public static final int MAX_CODE_LENGTH = 50;
     public static final int MAX_MESSAGE_LENGTH = 1000;

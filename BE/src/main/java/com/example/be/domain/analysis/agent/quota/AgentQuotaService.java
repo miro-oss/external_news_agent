@@ -39,9 +39,7 @@ public class AgentQuotaService {
         releaseExpiredReservations();
         Optional<String> existingStatus = repository.findStatusByIdempotencyKey(idempotencyKey);
         if (existingStatus.isPresent()) {
-            throw new IllegalStateException(
-                    "이미 사용된 quota idempotencyKey는 재사용할 수 없습니다. key="
-                            + idempotencyKey + " status=" + existingStatus.get());
+            throw new DuplicateQuotaReservationException(idempotencyKey, existingStatus.get());
         }
         return createReservation(runId, idempotencyKey, task, plan);
     }
@@ -195,7 +193,9 @@ public class AgentQuotaService {
             return;
         }
 
-        boolean analysisTask = task == AgentTask.ANALYZE || task == AgentTask.SELF_CRITIQUE;
+        boolean analysisTask = task == AgentTask.ANALYZE
+                || task == AgentTask.SELF_CRITIQUE
+                || task == AgentTask.KEYWORD_STRATEGY;
         boolean insightTask = task == AgentTask.INSIGHT;
         boolean investigationTask = task == AgentTask.INVESTIGATE;
         BigDecimal workUsed = usage.paidAnalysisDailyUsed()

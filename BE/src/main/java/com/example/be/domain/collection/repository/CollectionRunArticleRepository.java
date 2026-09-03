@@ -155,6 +155,19 @@ public interface CollectionRunArticleRepository
             @Param("runId") Long runId,
             @Param("articleIds") Collection<Long> articleIds);
 
+    @Query("""
+            SELECT observation
+            FROM CollectionRunArticle observation
+            JOIN FETCH observation.article article
+            LEFT JOIN FETCH article.source
+            JOIN FETCH observation.topic
+            WHERE observation.run.id = :runId
+              AND observation.topic.id = :topicId
+            ORDER BY observation.id DESC
+            """)
+    List<CollectionRunArticle> findKeywordStrategyObservations(@Param("runId") Long runId,
+                                                               @Param("topicId") Long topicId);
+
     interface ArticleFetchStatus {
 
         Long getArticleId();

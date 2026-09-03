@@ -5,8 +5,10 @@ import com.example.be.domain.analysis.agent.investigation.IssueInvestigationOrch
 import com.example.be.domain.collection.cluster.IssueClusteringService;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.collection.entity.CollectionRunItem;
+import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.reports.service.ReportCreationService;
+import com.example.be.domain.topics.service.strategy.TopicKeywordStrategyOrchestrator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,6 +32,7 @@ public class CollectionRunExecutionService {
     private final ArticleAnalysisPipeline analysisPipeline;
     private final IssueInvestigationOrchestrator investigationOrchestrator;
     private final ReportCreationService reportCreationService;
+    private final TopicKeywordStrategyOrchestrator keywordStrategyOrchestrator;
     private final CollectionResultWriter resultWriter;
 
     public void executeRun(Long runId) {
@@ -77,8 +80,7 @@ public class CollectionRunExecutionService {
                         runId, exception.getMessage(), exception);
                 resultWriter.addAgentWarning(
                         runId,
-                        com.example.be.domain.collection.entity.CollectionRunWarning
-                                .CODE_LLM_INVESTIGATION_FAILED,
+                        CollectionRunWarning.CODE_LLM_INVESTIGATION_FAILED,
                         "추가 조사 단계 실패로 기존 분석을 유지했습니다.");
             }
             // M5 보고서는 findings를 모두 저장한 뒤 만든다. 생성과 reportId 연결은 별도 짧은 트랜잭션이다.
@@ -87,6 +89,16 @@ public class CollectionRunExecutionService {
             } catch (RuntimeException exception) {
                 log.error("보고서를 생성하지 못했다. runId={} error={}", runId, exception.getMessage(), exception);
                 resultWriter.addReportGenerationFailedWarning(runId, exception.getMessage());
+            }
+            try {
+                keywordStrategyOrchestrator.strategize(runId);
+            } catch (RuntimeException exception) {
+                log.error("수집 전략가 키워드 제안에 실패했다. runId={} error={}",
+                        runId, exception.getMessage(), exception);
+                resultWriter.addAgentWarning(
+                        runId,
+                        CollectionRunWarning.CODE_LLM_KEYWORD_STRATEGY_FAILED,
+                        "수집 전략가 키워드 제안 생성에 실패해 기존 키워드를 유지했습니다.");
             }
             resultWriter.finishRun(runId);
         } catch (RuntimeException exception) {

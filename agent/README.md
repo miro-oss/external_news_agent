@@ -1,10 +1,74 @@
 # External News Agent
 
 Spring Boot가 내부 HTTP로 호출하는 stateless FastAPI 에이전트입니다. 기사 분석(`/v1/analyze`),
-이슈 조사 제안(`/v1/explore`), run 보고서 작성(`/v1/report`)을 제공하며, 기본 Mock 모드에서는 외부 LLM 없이 결정적인 결과를
-반환합니다. 근거 검증(`/v1/verify-evidence`)은 숫자·날짜·기업명 왜곡을 먼저 차단하고,
+이슈 조사 제안(`/v1/explore`), 수집 키워드 제안(`/v1/keyword-strategy`), run 보고서 작성(`/v1/report`)을
+제공하며, 기본 Mock 모드에서는 외부 LLM 없이 결정적인 결과를 반환합니다. 근거 검증
+(`/v1/verify-evidence`)은 숫자·날짜·기업명 왜곡을 먼저 차단하고,
 단일 문장에서 직접 확인되는 주장은 rule-only로 확정합니다. 복합 주장, 인과·전망 및 의미상
 애매한 표현만 provider에 위임하고 근거 연결 상태를 `grounded` / `weak` / `ungrounded`로 반환합니다.
+
+## `/v1/keyword-strategy` 수집 키워드 제안 계약
+
+P2-7 수집 전략가는 scheduled run 하나가 끝날 때 해당 주제의 현재 required / optional / excluded
+키워드와 이번 실행의 키워드 hit 통계, 최신 기사 관측 최대 20건을 받습니다. 응답은 요약과 최대 12건의
+`ADD` / `REMOVE` 제안만 반환합니다. 같은 버킷의 중복 제안, 이미 존재하는 키워드 추가, 존재하지 않는
+키워드 제거는 스키마 검증에서 거부됩니다.
+
+Agent는 키워드를 직접 변경하지 않습니다. Spring은 제안을 `PENDING` 상태로 별도 저장하고, 운영자가
+승인 API를 호출한 경우에만 주제 키워드에 반영합니다. 반려하거나 Agent 호출·검증·quota 처리가 실패하면
+기존 키워드를 그대로 유지합니다. 주제별 검토 대기 제안이 이미 있으면 다음 scheduled run의 새 제안은
+건너뜁니다.
+
+```json
+{
+  "idempotencyKey": "run:42:topic:7:keyword-strategy",
+  "plan": "FREE",
+  "target": {"type": "TOPIC", "id": 7},
+  "topic": {
+    "name": "HBM",
+    "queryText": "HBM 반도체",
+    "requiredKeywords": ["HBM"],
+    "optionalKeywords": ["SK하이닉스"],
+    "excludedKeywords": ["광고"]
+  },
+  "run": {
+    "id": 42,
+    "triggerType": "SCHEDULED",
+    "scannedCount": 30,
+    "newCount": 8,
+    "updatedCount": 2
+  },
+  "currentKeywordStats": [
+    {"bucket": "REQUIRED", "keyword": "HBM", "articleMatchCount": 10}
+  ],
+  "articles": []
+}
+```
+
+```json
+{
+  "summary": "반복 노출된 새 표현을 선택 키워드 후보로 올립니다.",
+  "proposals": [
+    {
+      "bucket": "OPTIONAL",
+      "action": "ADD",
+      "keyword": "HBM4",
+      "reason": "이번 주기 신규 기사에서 반복 등장했습니다."
+    }
+  ],
+  "meta": {
+    "provider": "gemini",
+    "model": "gemini-2.5-flash",
+    "promptVersion": "keyword-strategy.ko.v1",
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "costUsd": 0,
+    "credits": 0,
+    "mock": false,
+    "truncated": false
+  }
+}
+```
 
 ## `/v1/explore` 조사 제안 계약
 

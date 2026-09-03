@@ -10,6 +10,7 @@ from app.api.v1.evidence import router as evidence_router
 from app.api.v1.explore import router as explore_router
 from app.api.v1.health import router as health_router
 from app.api.v1.insight import router as insight_router
+from app.api.v1.keyword_strategy import router as keyword_strategy_router
 from app.api.v1.report import router as report_router
 from app.core.errors import AgentError
 from app.core.security import require_agent_token
@@ -49,6 +50,11 @@ def create_app() -> FastAPI:
     )
     application.include_router(
         insight_router,
+        prefix="/v1",
+        dependencies=[Depends(require_agent_token)],
+    )
+    application.include_router(
+        keyword_strategy_router,
         prefix="/v1",
         dependencies=[Depends(require_agent_token)],
     )

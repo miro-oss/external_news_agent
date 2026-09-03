@@ -7,5 +7,6 @@ public enum AgentTask {
     REPORT,
     EXPLORE,
     INSIGHT,
-    INVESTIGATE
+    INVESTIGATE,
+    KEYWORD_STRATEGY
 }
