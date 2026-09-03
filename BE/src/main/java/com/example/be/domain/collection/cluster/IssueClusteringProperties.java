@@ -10,8 +10,12 @@ public class IssueClusteringProperties implements InitializingBean {
 
     private double titleJaccardThreshold = 0.50;
     private Duration entityTimeWindow = Duration.ofHours(48);
+    /** 공유 조직명과 약한 제목 겹침을 함께 요구하는 보조 간선은 한 뉴스 주기 안에서만 허용한다. */
+    private Duration organizationTimeWindow = Duration.ofHours(24);
     private Duration breakingTimeWindow = Duration.ofHours(6);
     private int entityOverlapThreshold = 2;
+    /** 공유 조직명이 있을 때만 쓰는 보조 제목 기준. 전역 제목 기준을 낮추지 않는다. */
+    private double organizationTitleJaccardThreshold = 0.125;
     private int simhashHammingThreshold = 3;
     private int minArticleContentLength = 200;
     /**
@@ -33,10 +37,16 @@ public class IssueClusteringProperties implements InitializingBean {
                 || entityTimeWindow == null
                 || entityTimeWindow.isZero()
                 || entityTimeWindow.isNegative()
+                || organizationTimeWindow == null
+                || organizationTimeWindow.isZero()
+                || organizationTimeWindow.isNegative()
                 || breakingTimeWindow == null
                 || breakingTimeWindow.isZero()
                 || breakingTimeWindow.isNegative()
                 || entityOverlapThreshold <= 0
+                || !Double.isFinite(organizationTitleJaccardThreshold)
+                || organizationTitleJaccardThreshold <= 0
+                || organizationTitleJaccardThreshold > 1
                 || !Double.isFinite(commonEntityDocumentRatio)
                 || commonEntityDocumentRatio <= 0
                 || commonEntityDocumentRatio > 1
@@ -80,6 +90,14 @@ public class IssueClusteringProperties implements InitializingBean {
         this.entityTimeWindow = entityTimeWindow;
     }
 
+    public Duration getOrganizationTimeWindow() {
+        return organizationTimeWindow;
+    }
+
+    public void setOrganizationTimeWindow(Duration organizationTimeWindow) {
+        this.organizationTimeWindow = organizationTimeWindow;
+    }
+
     public Duration getBreakingTimeWindow() {
         return breakingTimeWindow;
     }
@@ -94,6 +112,14 @@ public class IssueClusteringProperties implements InitializingBean {
 
     public void setEntityOverlapThreshold(int entityOverlapThreshold) {
         this.entityOverlapThreshold = entityOverlapThreshold;
+    }
+
+    public double getOrganizationTitleJaccardThreshold() {
+        return organizationTitleJaccardThreshold;
+    }
+
+    public void setOrganizationTitleJaccardThreshold(double organizationTitleJaccardThreshold) {
+        this.organizationTitleJaccardThreshold = organizationTitleJaccardThreshold;
     }
 
     public int getSimhashHammingThreshold() {

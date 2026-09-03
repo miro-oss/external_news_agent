@@ -181,9 +181,12 @@ public class IssueClusterer {
 
         Map<Long, Set<String>> titleTokens = new HashMap<>();
         Map<Long, Set<String>> entities = new HashMap<>();
+        Map<Long, Set<String>> organizations = new HashMap<>();
         unique.forEach(article -> {
             String coreTitle = breakingNewsDetector.coreTitle(article.title());
             titleTokens.put(article.articleId(), TitleTokenizer.tokens(coreTitle));
+            organizations.put(article.articleId(),
+                    entityExtractor.extractOrganizations(coreTitle, article.summary()));
             entities.put(article.articleId(), entityExtractor.extract(
                     coreTitle, article.summary(),
                     ArticleBodyCleaner.withoutTrailingBoilerplate(article.body()),
@@ -206,23 +209,29 @@ public class IssueClusterer {
                         entities.get(first.articleId()),
                         entities.get(second.articleId()),
                         commonEntities);
+                int organizationOverlap = intersectionSize(
+                        organizations.get(first.articleId()), organizations.get(second.articleId()));
                 double hoursApart = hoursApart(first.eventTime(), second.eventTime());
                 boolean breakingPair = breakingNewsDetector.isBreaking(first)
                         || breakingNewsDetector.isBreaking(second);
                 boolean titleMatches = jaccard >= properties.getTitleJaccardThreshold();
                 boolean enoughEntities = entityOverlap >= properties.getEntityOverlapThreshold();
+                boolean organizationTitleMatches = organizationOverlap >= 1
+                        && jaccard >= properties.getOrganizationTitleJaccardThreshold();
                 boolean matches = breakingPair
                         ? within(first.eventTime(), second.eventTime(), properties.getBreakingTimeWindow())
-                        && (titleMatches || enoughEntities)
+                        && (titleMatches || enoughEntities || organizationTitleMatches)
                         : titleMatches || (enoughEntities
-                        && within(first.eventTime(), second.eventTime(), properties.getEntityTimeWindow()));
+                        && within(first.eventTime(), second.eventTime(), properties.getEntityTimeWindow()))
+                        || (organizationTitleMatches
+                        && within(first.eventTime(), second.eventTime(), properties.getOrganizationTimeWindow()));
                 if (matches) {
                     union.join(first.articleId(), second.articleId());
                 }
                 if (includePairScores) {
                     pairScores.add(new ClusterPlan.PairScore(
                             first.articleId(), second.articleId(), topicId,
-                            jaccard, entityOverlap, hoursApart, matches));
+                            jaccard, entityOverlap, organizationOverlap, hoursApart, matches));
                 }
             }
         }

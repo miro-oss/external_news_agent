@@ -138,4 +138,26 @@ class DeterministicEntityExtractorTest {
 
         assertEquals(Set.of(), entities);
     }
+
+    @Test
+    @DisplayName("제목·요약 조직 추출은 약칭을 정규화하고 제품코드는 제외한다")
+    void extractsOrganizationsWithoutTechnicalAnchors() {
+        Set<String> organizations = extractor.extractOrganizations(
+                "SK하닉·AMAT·DGIST 공동 발표",
+                "LG전자와 KB운용도 참여하고 HBM4를 공개했다.");
+
+        assertEquals(Set.of(
+                "SK하이닉스", "어플라이드머티어리얼즈", "DGIST", "LG전자", "KB자산운용"),
+                organizations);
+        assertFalse(organizations.contains("HBM4"));
+    }
+
+    @Test
+    @DisplayName("짧은 영문 조직 약칭은 다른 영단어 내부에서 매칭하지 않는다")
+    void requiresWordBoundariesForShortAsciiAliases() {
+        Set<String> organizations = extractor.extractOrganizations(
+                "Dramatic industry outlook", null);
+
+        assertFalse(organizations.contains("어플라이드머티어리얼즈"));
+    }
 }

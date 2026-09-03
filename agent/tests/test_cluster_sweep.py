@@ -102,6 +102,51 @@ def test_fixed_content_group_preserves_cross_topic_java_representative() -> None
     assert unions[4387].root(2) == 1
 
 
+def test_sweep_applies_fixed_organization_corroboration_rule() -> None:
+    articles = [
+        _article(1, "CALIBRATION", "DGIST 반도체 검사 기술", "calibration-event"),
+        _article(2, "CALIBRATION", "DGIST 초음파 센서 개발", "calibration-event"),
+        _article(3, "HOLDOUT", "AMAT 메모리 병목 해법", "holdout-event"),
+        _article(4, "HOLDOUT", "어플라이드 3D 공정 공개", "holdout-event"),
+    ]
+    result = sweep(
+        {
+            "datasetVersion": "test.organization-rule",
+            "articleCount": 4,
+            "configuredEntityOverlapThreshold": 2,
+            "configuredCommonEntityDocumentRatio": 0.10,
+            "configuredTitleJaccardThreshold": 0.50,
+            "configuredEntityTimeWindowHours": 48,
+            "configuredOrganizationTitleJaccardThreshold": 0.125,
+            "configuredOrganizationTimeWindowHours": 24,
+            "articles": articles,
+            "pairs": [
+                _pair(
+                    1,
+                    2,
+                    "CALIBRATION",
+                    entity_overlap=0,
+                    title_jaccard=0.125,
+                    organization_overlap=1,
+                ),
+                _pair(
+                    3,
+                    4,
+                    "HOLDOUT",
+                    entity_overlap=0,
+                    title_jaccard=0.125,
+                    organization_overlap=1,
+                ),
+            ],
+        }
+    )
+
+    assert result["selected"]["title_jaccard_threshold"] == 0.50
+    assert result["configured"]["calibrationMetrics"]["recall"] == 1.0
+    assert result["configured"]["holdoutMetrics"]["recall"] == 1.0
+    assert result["decisionGatePassed"] is True
+
+
 def _article(
     article_id: int,
     split: str,
@@ -124,6 +169,7 @@ def _pair(
     split: str,
     entity_overlap: int = 1,
     title_jaccard: float = 0.0,
+    organization_overlap: int = 0,
 ) -> dict[str, object]:
     return {
         "leftArticleId": left,
@@ -131,6 +177,7 @@ def _pair(
         "topicId": 1,
         "titleJaccard": title_jaccard,
         "entityOverlap": entity_overlap,
+        "organizationOverlap": organization_overlap,
         "hoursApart": 1.0,
         "split": split,
     }

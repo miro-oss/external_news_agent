@@ -1,6 +1,6 @@
 {
   "datasetVersion": "clusters.v2",
-  "description": "run 3862에서 사람이 사건 단위로 다시 라벨링한 실수집 hard case. 제목·요약과 최대 120자의 본문 관측 조각을 보존하며 SimHash 결과는 원문 재확인이 필요한 조건부 측정이다.",
+  "description": "run 3862에서 사람이 사건 단위로 다시 라벨링한 실수집 hard case. 저장소에는 제목·요약과 최대 120자의 본문 조각만 보존하고, 실본문은 clusters.v2-export.sql로 로컬 재현한다.",
   "sourceRuns": [
     3862
   ],
@@ -790,7 +790,7 @@
       "sourceRunId": 3862,
       "sourceArticleId": 2410,
       "topicId": 4387,
-      "expectedIssueId": "applied-3d-scaling",
+      "expectedIssueId": "k-npu-government-contracts",
       "split": "HOLDOUT",
       "title": "'K-NPU' 리벨·퓨리·딥엑스, 정부계약 시험대…독자 생존력 입증 변수",
       "summary": "국산 인공지능(AI) 반도체 산업 경쟁이 정부 지원과 공공 레퍼런스 확보를 넘어 해외 고객·파트너로... 공공기관별 계약 건수와 계약금액, 납품 장비의 실제 가동률과 추론 성능, ",

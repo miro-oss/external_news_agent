@@ -1,6 +1,6 @@
 # `clusters.v2` measurement
 
-Measured 2026-09-03 for issue #140.
+Measured 2026-09-03 for issues #140, #141, and #144.
 
 ## Dataset
 
@@ -22,6 +22,10 @@ Its `sourceRuns` metadata names only run 3862, which is the run represented by f
 The earlier note that DGIST issues 419 and 573 were one split issue was incorrect: the issues
 belong to topics 4386 and 4387 respectively. The v2 positive case instead uses source articles
 2514, 2546, and 2547, which were split inside topic 4386.
+
+Source article 2410 was also relabeled during the full-body replay. Its K-NPU public-procurement
+story is unrelated to the Applied Materials 3D-scaling announcement and now has the independent
+label `k-npu-government-contracts`.
 
 ## Precommitted grid and gate
 
@@ -96,6 +100,46 @@ The fixture precision gate now passes, while the recall gate still fails and
 not as a source-faithful final threshold decision; full-body fingerprints or a fresh real
 collection are still required before changing production thresholds.
 
+## Full-body replay and issue #144
+
+The local run 3862 rows were still available, so the 56 fixture IDs were replayed with their full
+stored bodies. Ten articles had been refreshed after run 3862; for those, the earliest later
+`news_article_versions` row restores the title and body that existed immediately before that
+refresh. Version rows do not retain summaries, so the replay omits the summary for those ten
+articles instead of mixing states. The committed `clusters.v2-export.sql` records this extraction
+without committing any article body.
+
+The source-faithful replay contained 48 usable full bodies. SimHash formed one two-article group,
+and both articles were correctly labeled `sk-japan-factory`; there were no mixed content groups.
+After the #141 fix, the remaining failure was under-merging: almost every sampled missed positive
+pair still shared an explicit organization in its title or summary (DGIST, Applied Materials,
+SK hynix, or LG Electronics). This rejects the local-NLI/embedding condition that the misses must
+mostly lack usable title/entity overlap.
+
+Issue #144 therefore preserves the global title Jaccard threshold and adds one conservative edge:
+
+- a known organization must appear in both title/summary fields;
+- title Jaccard must be at least 0.125; and
+- publication times must be no more than 24 hours apart.
+
+Product codes and body-only background mentions cannot satisfy this edge. The organization names
+come from a closed alias map, and short ASCII aliases require word boundaries. When sweep candidates
+tie exactly, the evaluator retains the configured title threshold rather than reporting a
+meaningless stricter candidate.
+
+| Final evaluation | Jaccard | Entity window | Org title/window | Precision | Recall | ARI | V-measure |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| v1 calibration | 0.50 | 48h | 0.125 / 24h | 1.0000 | 0.9750 | 0.9871 | 0.9962 |
+| **v1 holdout** | 0.50 | 48h | 0.125 / 24h | **1.0000** | **1.0000** | 1.0000 | 1.0000 |
+| v2 fixture calibration | 0.50 | 48h | 0.125 / 24h | 1.0000 | 0.9024 | 0.9417 | 0.9751 |
+| **v2 fixture holdout** | 0.50 | 48h | 0.125 / 24h | **1.0000** | **1.0000** | 1.0000 | 1.0000 |
+| v2 full-body calibration | 0.50 | 48h | 0.125 / 24h | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
+| **v2 full-body holdout** | 0.50 | 48h | 0.125 / 24h | **1.0000** | **1.0000** | 1.0000 | 1.0000 |
+
+Both v2 paths pass the precommitted holdout precision/recall gate. The configured global values
+remain 0.50, 48h, and common-entity ratio 0.10. On this decision table, clusters.v2 is finalized
+without an embedding or local-NLI stage.
+
 ## Reproduction
 
 ```bash
@@ -109,5 +153,23 @@ uv run --group dev python -m app.eval.cluster_sweep \
   --java-pairs ../BE/build/reports/clusters/pairs.v2.json
 ```
 
-The second command intentionally exits with status 1 while the gate fails. Its JSON output contains
-`decisionGatePassed: false`.
+Before issue #144, the second command intentionally exited with status 1 because the gate failed.
+It now exits with status 0 and emits `decisionGatePassed: true`.
+
+For a source-faithful replay, run `clusters.v2-export.sql` through SQL*Plus with
+`NLS_LANG=AMERICAN_AMERICA.AL32UTF8`, save the JSONL outside the repository, then run:
+
+```bash
+cd BE
+CLUSTERS_V2_REPLAY_ARTICLES=/private/tmp/clusters-v2-run3862-fullbody.jsonl \
+CLUSTERS_V2_REPLAY_OUTPUT=build/reports/clusters/pairs.v2.fullbody.json \
+./gradlew test --tests '*IssueClustererRealGoldenExportTest'
+
+cd ../agent
+uv run --group dev python -m app.eval.cluster_sweep \
+  --golden ../BE/src/test/resources/golden/clusters.v2.json \
+  --java-pairs ../BE/build/reports/clusters/pairs.v2.fullbody.json
+```
+
+After issue #144, both the ordinary fixture command and this full-body command exit with status 0
+and emit `decisionGatePassed: true`.

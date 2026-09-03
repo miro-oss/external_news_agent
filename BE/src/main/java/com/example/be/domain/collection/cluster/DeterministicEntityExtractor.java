@@ -39,7 +39,7 @@ public final class DeterministicEntityExtractor {
     /** 앵커 최소 길이. 두 글자짜리는 거의 다 일반 약어(IT·AP·TV·PC)이지 사건 식별자가 아니다. */
     private static final int MIN_ANCHOR_LENGTH = 3;
 
-    private static final Map<String, List<String>> COMPANY_ALIASES = companyAliases();
+    private static final Map<String, List<String>> ORGANIZATION_ALIASES = organizationAliases();
     private static final Set<String> BROAD_TOPIC_WORDS = Set.of(
             "반도체", "제조", "산업", "기술", "시장", "뉴스", "공장", "기업");
     private static final Set<String> BROAD_TECHNICAL_ANCHORS = Set.of("AI", "SK", "LG", "HD");
@@ -64,11 +64,7 @@ public final class DeterministicEntityExtractor {
         String normalized = normalize(text);
         Set<String> entities = new LinkedHashSet<>();
 
-        COMPANY_ALIASES.forEach((canonical, aliases) -> {
-            if (aliases.stream().map(DeterministicEntityExtractor::normalize).anyMatch(normalized::contains)) {
-                entities.add(canonical);
-            }
-        });
+        collectOrganizations(normalized, entities);
 
         // 제목·요약이 먼저다. 상한에 걸리더라도 본문 앵커보다 이쪽이 살아남아야 한다.
         int anchors = collectAnchors(
@@ -86,6 +82,54 @@ public final class DeterministicEntityExtractor {
                     .forEach(entities::add);
         }
         return Collections.unmodifiableSet(new LinkedHashSet<>(entities));
+    }
+
+    /** 제목·요약에 직접 나온 닫힌 조직 사전만 돌려준다. 제품코드와 본문 배경 언급은 포함하지 않는다. */
+    Set<String> extractOrganizations(String title, String summary) {
+        Set<String> organizations = new LinkedHashSet<>();
+        collectOrganizations(
+                normalize(String.join("\n", nullToEmpty(title), nullToEmpty(summary))),
+                organizations);
+        return Collections.unmodifiableSet(organizations);
+    }
+
+    private static void collectOrganizations(String normalized, Set<String> target) {
+        ORGANIZATION_ALIASES.forEach((canonical, aliases) -> {
+            if (aliases.stream()
+                    .map(DeterministicEntityExtractor::normalize)
+                    .anyMatch(alias -> containsAlias(normalized, alias))) {
+                target.add(canonical);
+            }
+        });
+    }
+
+    /** 짧은 영문 약칭은 단어 경계를 확인해 {@code AMAT}가 다른 영단어 내부에서 잡히지 않게 한다. */
+    private static boolean containsAlias(String text, String alias) {
+        if (alias.isEmpty()) {
+            return false;
+        }
+        if (!alias.chars().allMatch(value -> value < 128)) {
+            return text.contains(alias);
+        }
+        int from = 0;
+        while (from <= text.length() - alias.length()) {
+            int index = text.indexOf(alias, from);
+            if (index < 0) {
+                return false;
+            }
+            int end = index + alias.length();
+            boolean leftBoundary = index == 0 || !isAsciiWord(text.charAt(index - 1));
+            boolean rightBoundary = end == text.length() || !isAsciiWord(text.charAt(end));
+            if (leftBoundary && rightBoundary) {
+                return true;
+            }
+            from = index + 1;
+        }
+        return false;
+    }
+
+    private static boolean isAsciiWord(char value) {
+        return value < 128 && Character.isLetterOrDigit(value);
     }
 
     /**
@@ -130,10 +174,10 @@ public final class DeterministicEntityExtractor {
         return value.chars().anyMatch(Character::isDigit);
     }
 
-    private static Map<String, List<String>> companyAliases() {
+    private static Map<String, List<String>> organizationAliases() {
         Map<String, List<String>> aliases = new LinkedHashMap<>();
         aliases.put("삼성전자", List.of("삼성전자", "samsung electronics"));
-        aliases.put("SK하이닉스", List.of("sk하이닉스", "sk hynix"));
+        aliases.put("SK하이닉스", List.of("sk하이닉스", "sk하닉", "sk hynix"));
         aliases.put("TSMC", List.of("tsmc", "대만반도체"));
         aliases.put("엔비디아", List.of("엔비디아", "nvidia"));
         aliases.put("AMD", List.of("amd"));
@@ -151,6 +195,16 @@ public final class DeterministicEntityExtractor {
         aliases.put("OpenAI", List.of("openai"));
         aliases.put("Anthropic", List.of("anthropic", "앤트로픽"));
         aliases.put("Arm", List.of("arm holdings", "arm홀딩스"));
+        aliases.put("어플라이드머티어리얼즈",
+                List.of("어플라이드 머티어리얼즈", "어플라이드", "applied materials", "amat"));
+        aliases.put("LG전자", List.of("lg전자", "lg electronics"));
+        aliases.put("DGIST", List.of("dgist", "디지스트", "대구경북과학기술원"));
+        aliases.put("한울반도체", List.of("한울반도체"));
+        aliases.put("KB자산운용", List.of("kb자산운용", "kb운용"));
+        aliases.put("에이블랩스", List.of("에이블랩스"));
+        aliases.put("미래산업", List.of("미래산업"));
+        aliases.put("HPSP", List.of("hpsp"));
+        aliases.put("CXMT", List.of("cxmt", "창신메모리"));
         return Map.copyOf(aliases);
     }
 

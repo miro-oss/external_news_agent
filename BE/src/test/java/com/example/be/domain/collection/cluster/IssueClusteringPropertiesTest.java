@@ -31,6 +31,22 @@ class IssueClusteringPropertiesTest {
     }
 
     @Test
+    void rejectsMissingOrganizationTimeWindow() {
+        IssueClusteringProperties properties = new IssueClusteringProperties();
+        properties.setOrganizationTimeWindow(Duration.ZERO);
+
+        assertThrows(IllegalStateException.class, properties::afterPropertiesSet);
+    }
+
+    @Test
+    void rejectsOutOfRangeOrganizationTitleJaccardThreshold() {
+        IssueClusteringProperties properties = new IssueClusteringProperties();
+        properties.setOrganizationTitleJaccardThreshold(0);
+
+        assertThrows(IllegalStateException.class, properties::afterPropertiesSet);
+    }
+
+    @Test
     void rejectsNonPositiveMinimumArticleContentLength() {
         IssueClusteringProperties properties = new IssueClusteringProperties();
         properties.setMinArticleContentLength(0);

@@ -54,6 +54,12 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
     configured_ratio = float(java_output["configuredCommonEntityDocumentRatio"])
     configured_title_threshold = float(java_output["configuredTitleJaccardThreshold"])
     configured_time_window = int(java_output["configuredEntityTimeWindowHours"])
+    configured_organization_title_threshold = float(
+        java_output.get("configuredOrganizationTitleJaccardThreshold", 1.0)
+    )
+    configured_organization_time_window = int(
+        java_output.get("configuredOrganizationTimeWindowHours", 0)
+    )
     pair_evaluations = java_output.get("pairEvaluations") or [
         {
             "commonEntityDocumentRatio": configured_ratio,
@@ -72,6 +78,8 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
                 threshold,
                 hours,
                 entity_overlap_threshold,
+                configured_organization_title_threshold,
+                configured_organization_time_window,
             ),
         )
         for evaluation in pair_evaluations
@@ -80,6 +88,7 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
     ]
     selected = _select(
         calibration,
+        configured_title_threshold,
         configured_time_window,
         configured_ratio,
     )
@@ -91,6 +100,8 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         selected.title_jaccard_threshold,
         selected.time_window_hours,
         entity_overlap_threshold,
+        configured_organization_title_threshold,
+        configured_organization_time_window,
     )
     configured_pairs = _pairs_for_ratio(pair_evaluations, configured_ratio)
     configured_calibration = _evaluate_rule(
@@ -100,6 +111,8 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         configured_title_threshold,
         configured_time_window,
         entity_overlap_threshold,
+        configured_organization_title_threshold,
+        configured_organization_time_window,
     )
     configured_holdout = _evaluate_rule(
         articles,
@@ -108,6 +121,8 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         configured_title_threshold,
         configured_time_window,
         entity_overlap_threshold,
+        configured_organization_title_threshold,
+        configured_organization_time_window,
     )
     baseline_threshold, baseline_calibration = _select_tfidf_threshold(
         articles, "CALIBRATION", True
@@ -125,6 +140,8 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         "selected": asdict(selected),
         "holdout": asdict(holdout),
         "configuredEntityOverlapThreshold": entity_overlap_threshold,
+        "configuredOrganizationTitleJaccardThreshold": configured_organization_title_threshold,
+        "configuredOrganizationTimeWindowHours": configured_organization_time_window,
         "configured": {
             "titleJaccardThreshold": configured_title_threshold,
             "timeWindowHours": configured_time_window,
@@ -160,6 +177,8 @@ def _evaluate_rule(
     threshold: float,
     time_window_hours: int,
     entity_overlap_threshold: int,
+    organization_title_jaccard_threshold: float = 1.0,
+    organization_time_window_hours: int = 0,
 ) -> Metrics:
     selected = [article for article in articles if article["split"] == split]
     selected_ids_by_topic = _selected_ids_by_topic(selected)
@@ -175,6 +194,11 @@ def _evaluate_rule(
         matches = float(pair["titleJaccard"]) >= threshold or (
             int(pair["entityOverlap"]) >= entity_overlap_threshold
             and float(pair["hoursApart"]) <= time_window_hours
+        ) or (
+            organization_time_window_hours > 0
+            and int(pair.get("organizationOverlap", 0)) >= 1
+            and float(pair["titleJaccard"]) >= organization_title_jaccard_threshold
+            and float(pair["hoursApart"]) <= organization_time_window_hours
         )
         if matches:
             unions[topic_id].join(left, right)
@@ -313,6 +337,7 @@ def _metrics(expected: list[str], predicted: list[str]) -> Metrics:
 
 def _select(
     candidates: list[Candidate],
+    configured_title_threshold: float,
     configured_time_window: int,
     configured_ratio: float,
 ) -> Candidate:
@@ -323,6 +348,7 @@ def _select(
             key=lambda candidate: _candidate_rank(
                 candidate,
                 False,
+                configured_title_threshold,
                 configured_time_window,
                 configured_ratio,
             ),
@@ -332,6 +358,7 @@ def _select(
         key=lambda candidate: _candidate_rank(
             candidate,
             True,
+            configured_title_threshold,
             configured_time_window,
             configured_ratio,
         ),
@@ -341,6 +368,7 @@ def _select(
 def _candidate_rank(
     candidate: Candidate,
     precision_gate_passed: bool,
+    configured_title_threshold: float,
     configured_time_window: int,
     configured_ratio: float,
 ) -> tuple[float, ...]:
@@ -349,6 +377,7 @@ def _candidate_rank(
             candidate.metrics.recall,
             candidate.metrics.precision,
             candidate.metrics.adjusted_rand,
+            -abs(candidate.title_jaccard_threshold - configured_title_threshold),
             candidate.title_jaccard_threshold,
             -abs(candidate.time_window_hours - configured_time_window),
             -abs(candidate.common_entity_document_ratio - configured_ratio),
@@ -357,6 +386,7 @@ def _candidate_rank(
         candidate.metrics.precision,
         candidate.metrics.recall,
         candidate.metrics.adjusted_rand,
+        -abs(candidate.title_jaccard_threshold - configured_title_threshold),
         candidate.title_jaccard_threshold,
         -abs(candidate.time_window_hours - configured_time_window),
         -abs(candidate.common_entity_document_ratio - configured_ratio),

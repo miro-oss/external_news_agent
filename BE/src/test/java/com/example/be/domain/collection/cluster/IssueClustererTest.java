@@ -158,6 +158,57 @@ class IssueClustererTest {
     }
 
     @Test
+    void joinsWeakTitlePairWhenOrganizationCorroboratesWithinOneDay() {
+        ClusterArticle first = article(
+                1L, "DGIST 반도체 결함 초음파 검사 기술 공개", null,
+                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+        ClusterArticle second = article(
+                2L, "DGIST 초소형 광 초음파 센서 개발", null,
+                FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(23));
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
+
+        ClusterPlan.PairScore pair = plan.pairScores().getFirst();
+        assertTrue(pair.titleJaccard() < 0.50);
+        assertTrue(pair.titleJaccard() >= 0.125);
+        assertEquals(1, pair.organizationOverlap());
+        assertTrue(pair.sameCluster());
+        assertEquals(1, plan.issues().size());
+    }
+
+    @Test
+    void doesNotUseOrganizationCorroborationOutsideOneDay() {
+        ClusterArticle first = article(
+                1L, "DGIST 반도체 결함 초음파 검사 기술 공개", null,
+                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+        ClusterArticle second = article(
+                2L, "DGIST 초소형 광 초음파 센서 개발", null,
+                FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(25));
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
+
+        assertEquals(2, plan.issues().size());
+        assertFalse(plan.pairScores().getFirst().sameCluster());
+    }
+
+    @Test
+    void doesNotTreatSharedProductCodeAsOrganizationCorroboration() {
+        ClusterArticle first = article(
+                1L, "삼성전자 HBM4 평택 P5 양산 투자 확정", null,
+                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+        ClusterArticle second = article(
+                2L, "SK하이닉스 HBM4 청주 M15X 장비 발주", null,
+                FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(4));
+
+        ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
+
+        ClusterPlan.PairScore pair = plan.pairScores().getFirst();
+        assertEquals(0, pair.organizationOverlap());
+        assertFalse(pair.sameCluster());
+        assertEquals(2, plan.issues().size());
+    }
+
+    @Test
     void breakingTitleMatchIsLimitedToSixHours() {
         ClusterArticle breaking = article(
                 1L, "[속보] 삼성전자 HBM4 증설 발표", null,
