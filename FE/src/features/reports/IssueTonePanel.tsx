@@ -20,7 +20,11 @@ export function IssueTonePanel({ distribution, articleCount }: {
         <>
           <div className="issue-tone-bar" aria-hidden="true">
             {tones.map((tone) => (
-              <span key={tone.key} className={`issue-tone-${tone.key}`} style={{ flexGrow: tone.count }} />
+              <span
+                key={tone.key}
+                className={`issue-tone-${tone.key}`}
+                style={{ flexGrow: tone.count, minWidth: tone.count > 0 ? 2 : 0 }}
+              />
             ))}
           </div>
           <ul className="issue-tone-legend">

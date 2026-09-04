@@ -3225,15 +3225,15 @@ body.modal-open {
 }
 
 .issue-tone-optimistic {
-  background: #287b69;
+  background: var(--success-strong);
 }
 
 .issue-tone-neutral {
-  background: #909aa6;
+  background: var(--fg-3);
 }
 
 .issue-tone-pessimistic {
-  background: #ba6549;
+  background: var(--danger);
 }
 
 .issue-tone-legend {

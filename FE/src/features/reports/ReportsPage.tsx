@@ -501,6 +501,7 @@ function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect }: {
   const title = daily ? finding.articleTitle : issueInfo?.title || finding.articleTitle
   const summary = limitText(daily ? finding.summary : issueInfo?.summary || finding.summary, 120)
   const relatedArticles = issue.data?.articles ?? []
+  const relatedArticleCount = issue.data ? relatedArticles.length : issueInfo?.articleCount ?? 1
   const visibleRelatedArticles = relatedArticles.slice(0, visibleRelatedCount)
   const investigationReason = finding.investigation
     ? investigationReasonText(finding.investigation)
@@ -549,7 +550,7 @@ function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect }: {
               : issue.isLoading && issueId !== null
               ? '관련 기사 확인 중'
               : issueInfo
-                ? `관련 ${issueInfo.articleCount}건 · 매체 ${issueInfo.publisherCount}곳`
+                ? `관련 ${relatedArticleCount}건 · 매체 ${issueInfo.publisherCount}곳`
                 : issueId === null
                   ? '관련 1건 · 매체 1곳'
                   : '관련 기사 정보는 자세히에서 확인'}
@@ -593,7 +594,7 @@ function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect }: {
           )}
 
           {issue.data?.toneDistribution && (
-            <IssueTonePanel distribution={issue.data.toneDistribution} articleCount={issue.data.articleCount} />
+            <IssueTonePanel distribution={issue.data.toneDistribution} articleCount={relatedArticleCount} />
           )}
 
           <section className="issue-related-articles">
@@ -602,7 +603,7 @@ function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect }: {
               <span>
                 {issue.data && relatedArticles.length > RELATED_ARTICLE_BATCH_SIZE
                   ? `${visibleRelatedArticles.length} / ${relatedArticles.length}건`
-                  : `${relatedArticles.length || issueInfo?.articleCount || 1}건`}
+                  : `${relatedArticleCount}건`}
               </span>
             </div>
             {issue.isLoading && <p className="issue-detail-state">관련 기사를 불러오는 중입니다.</p>}

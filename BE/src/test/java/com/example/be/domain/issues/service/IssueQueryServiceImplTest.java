@@ -1,10 +1,10 @@
 package com.example.be.domain.issues.service;
 
 import com.example.be.domain.analysis.entity.AnalysisSource;
-import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.repository.FindingRepository;
+import com.example.be.domain.analysis.repository.FindingToneSnapshot;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
@@ -38,18 +38,18 @@ class IssueQueryServiceImplTest {
             issueRepository, membershipRepository, findingRepository, new IssueToneCalculator());
 
     @Test
-    void loadsLatestOwnFindingsOnceAndUsesThemForToneAndSummary() {
+    void loadsNarrowToneSnapshotsAndOnlyFetchesRepresentativeSummaryWhenMissing() {
         NewsIssue issue = issue();
         Article representative = article(10);
         Article member = article(11);
         when(issueRepository.findById(88L)).thenReturn(Optional.of(issue));
         when(membershipRepository.findByIssueIdOrderByJoinedAtAsc(88L)).thenReturn(List.of(
                 membership(representative, IssueArticleRole.REPRESENTATIVE), membership(member, IssueArticleRole.MEMBER)));
-        when(findingRepository.findLatestByArticleIds(List.of(10L, 11L))).thenReturn(List.of(
-                Finding.builder().id(100L).article(representative).summary("대표 기사 요약")
-                        .sentiment(Sentiment.NEGATIVE).analysisSource(AnalysisSource.LLM)
-                        .keyPoints(List.of(new FindingKeyPoint("전문가는 부정적으로 평가했다.", List.of(0),
-                                "grounded", null, "OPINION", "전문가"))).build()));
+        when(findingRepository.findLatestToneByArticleIds(List.of(10L, 11L))).thenReturn(List.of(
+                new FindingToneSnapshot(100L, 10L, AnalysisSource.LLM, Sentiment.NEGATIVE,
+                        List.of(new FindingKeyPoint("전문가는 부정적으로 평가했다.", List.of(0),
+                                "grounded", null, "OPINION", "전문가")), List.of())));
+        when(findingRepository.findLatestSummaryByArticleId(10L)).thenReturn(Optional.of("대표 기사 요약"));
 
         var result = service.getIssue(88L);
 
@@ -58,8 +58,23 @@ class IssueQueryServiceImplTest {
         assertEquals(1, result.getToneDistribution().analyzedArticleCount());
         assertEquals(1, result.getToneDistribution().sampleCount());
         assertEquals(1, result.getToneDistribution().pessimisticCount());
-        verify(findingRepository).findLatestByArticleIds(List.of(10L, 11L));
-        verify(findingRepository, never()).findFirstByArticleIdOrderByIdDesc(10L);
+        verify(findingRepository).findLatestToneByArticleIds(List.of(10L, 11L));
+        verify(findingRepository).findLatestSummaryByArticleId(10L);
+        verify(findingRepository, never()).findLatestByArticleIds(anyList());
+    }
+
+    @Test
+    void existingIssueSummarySkipsSummaryQuery() {
+        NewsIssue issue = NewsIssue.builder().id(88L).title("HBM 이슈").summary("저장된 이슈 요약")
+                .status(IssueStatus.EMERGING).topic(Topic.builder().id(1L).name("반도체").build()).build();
+        when(issueRepository.findById(88L)).thenReturn(Optional.of(issue));
+        when(membershipRepository.findByIssueIdOrderByJoinedAtAsc(88L))
+                .thenReturn(List.of(membership(article(10), IssueArticleRole.REPRESENTATIVE)));
+        when(findingRepository.findLatestToneByArticleIds(List.of(10L))).thenReturn(List.of());
+
+        assertEquals("저장된 이슈 요약", service.getIssue(88L).getSummary());
+
+        verify(findingRepository, never()).findLatestSummaryByArticleId(10L);
     }
 
     @Test
@@ -71,7 +86,7 @@ class IssueQueryServiceImplTest {
 
         assertNull(result.getRepresentativeArticleId());
         assertEquals(0, result.getToneDistribution().sampleCount());
-        verify(findingRepository, never()).findLatestByArticleIds(anyList());
+        verify(findingRepository, never()).findLatestToneByArticleIds(anyList());
     }
 
     @Test
@@ -80,12 +95,12 @@ class IssueQueryServiceImplTest {
         var memberships = LongStream.rangeClosed(1, 1001)
                 .mapToObj(id -> membership(article(id), IssueArticleRole.MEMBER)).toList();
         when(membershipRepository.findByIssueIdOrderByJoinedAtAsc(88L)).thenReturn(memberships);
-        when(findingRepository.findLatestByArticleIds(anyList())).thenReturn(List.of());
+        when(findingRepository.findLatestToneByArticleIds(anyList())).thenReturn(List.of());
 
         assertEquals(1001, service.getIssue(88L).getArticles().size());
 
-        verify(findingRepository).findLatestByArticleIds(LongStream.rangeClosed(1, 900).boxed().toList());
-        verify(findingRepository).findLatestByArticleIds(LongStream.rangeClosed(901, 1001).boxed().toList());
+        verify(findingRepository).findLatestToneByArticleIds(LongStream.rangeClosed(1, 900).boxed().toList());
+        verify(findingRepository).findLatestToneByArticleIds(LongStream.rangeClosed(901, 1001).boxed().toList());
     }
 
     private NewsIssue issue() {

@@ -14,8 +14,6 @@ import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.articles.service.ArticleQueryService;
-import com.example.be.domain.issues.entity.IssueArticle;
-import com.example.be.domain.issues.service.IssueToneCalculator;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
@@ -26,12 +24,15 @@ import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.repository.ArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.service.IssueToneCalculator;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
 import jakarta.persistence.EntityManager;
+import org.hibernate.Session;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -356,8 +357,24 @@ class FindingRepositoryIntegrationTests {
         assertEquals(article.getId(), response.getContent().get(0).getId());
     }
 
-    private Finding finding() {
-        return finding(run);
+    @Test
+    void toneProjectionConvertsStructuredClobsWithoutLoadingFindingOrArticleEntities() {
+        Finding saved = findingRepository.save(finding());
+        Long articleId = article.getId();
+        flushAndClear();
+
+        var found = findingRepository.findLatestToneByArticleIds(List.of(articleId));
+
+        assertEquals(1, found.size());
+        assertEquals(saved.getId(), found.getFirst().id());
+        assertEquals(articleId, found.getFirst().articleId());
+        assertEquals(AnalysisSource.LLM, found.getFirst().analysisSource());
+        assertEquals(Sentiment.NEGATIVE, found.getFirst().sentiment());
+        assertEquals("OPINION", found.getFirst().effectiveKeyPoints().getFirst().claimType());
+        assertEquals(List.of(0), found.getFirst().effectiveKeyPoints().getFirst().evidence());
+        assertEquals(0, entityManager.unwrap(Session.class).getStatistics().getEntityCount());
+        assertEquals(saved.getSummary(), findingRepository.findLatestSummaryByArticleId(articleId).orElseThrow());
+        assertEquals(0, entityManager.unwrap(Session.class).getStatistics().getEntityCount());
     }
 
     @Test
@@ -377,17 +394,21 @@ class FindingRepositoryIntegrationTests {
         Long articleId = article.getId();
         flushAndClear();
 
-        List<Finding> found = findingRepository.findLatestByArticleIds(List.of(articleId));
+        List<FindingToneSnapshot> found = findingRepository.findLatestToneByArticleIds(List.of(articleId));
 
         assertEquals(1, found.size());
-        assertEquals(latest.getId(), found.getFirst().getId());
-        assertEquals(AnalysisSource.STUB, found.getFirst().getAnalysisSource());
-        assertTrue(found.getFirst().getEffectiveKeyPoints().isEmpty());
+        assertEquals(latest.getId(), found.getFirst().id());
+        assertEquals(AnalysisSource.STUB, found.getFirst().analysisSource());
+        assertTrue(found.getFirst().effectiveKeyPoints().isEmpty());
         var tone = new IssueToneCalculator().calculate(
-                List.of(IssueArticle.builder().article(found.getFirst().getArticle()).build()),
+                List.of(IssueArticle.builder().article(Article.builder().id(articleId).build()).build()),
                 found);
         assertEquals(0, tone.sampleCount());
         assertNull(tone.neutralPercent());
+    }
+
+    private Finding finding() {
+        return finding(run);
     }
 
     private Finding finding(CollectionRun findingRun) {

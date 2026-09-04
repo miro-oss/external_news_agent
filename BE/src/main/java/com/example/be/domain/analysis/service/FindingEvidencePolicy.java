@@ -27,7 +27,7 @@ public final class FindingEvidencePolicy {
         return StringUtils.hasText(finding.getSummary()) ? finding.getSummary().trim() : "";
     }
 
-    private static boolean isSupported(FindingKeyPoint point) {
+    public static boolean isSupported(FindingKeyPoint point) {
         return point != null
                 && StringUtils.hasText(point.text())
                 && point.evidence() != null

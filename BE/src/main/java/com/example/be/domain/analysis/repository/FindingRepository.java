@@ -28,6 +28,28 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
     Optional<Finding> findFirstByArticleIdOrderByIdDesc(Long articleId);
 
     @Query("""
+            SELECT new com.example.be.domain.analysis.repository.FindingToneSnapshot(
+                finding.id, finding.article.id, finding.analysisSource, finding.sentiment,
+                finding.keyPoints, finding.analysisSections)
+            FROM Finding finding
+            WHERE finding.article.id IN :articleIds
+              AND finding.id = (
+                  SELECT MAX(latest.id) FROM Finding latest
+                  WHERE latest.article.id = finding.article.id
+              )
+            """)
+    List<FindingToneSnapshot> findLatestToneByArticleIds(@Param("articleIds") Collection<Long> articleIds);
+
+    @Query("""
+            SELECT finding.summary FROM Finding finding
+            WHERE finding.article.id = :articleId
+              AND finding.id = (
+                  SELECT MAX(latest.id) FROM Finding latest WHERE latest.article.id = :articleId
+              )
+            """)
+    Optional<String> findLatestSummaryByArticleId(@Param("articleId") Long articleId);
+
+    @Query("""
             SELECT finding
             FROM Finding finding
             JOIN FETCH finding.article article

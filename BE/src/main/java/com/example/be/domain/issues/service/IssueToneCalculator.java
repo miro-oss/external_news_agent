@@ -1,8 +1,9 @@
 package com.example.be.domain.issues.service;
 
 import com.example.be.domain.analysis.entity.AnalysisSource;
-import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
+import com.example.be.domain.analysis.repository.FindingToneSnapshot;
+import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.issues.dto.res.IssueResDTO;
 import com.example.be.domain.issues.entity.IssueArticle;
@@ -18,22 +19,22 @@ import java.util.Map;
 @Component
 public class IssueToneCalculator {
 
-    public IssueResDTO.ToneDistribution calculate(List<IssueArticle> memberships, List<Finding> findings) {
-        Map<Long, Finding> latestByArticle = new HashMap<>();
-        for (Finding finding : findings) {
-            latestByArticle.merge(finding.getArticle().getId(), finding, this::newer);
+    public IssueResDTO.ToneDistribution calculate(List<IssueArticle> memberships, List<FindingToneSnapshot> findings) {
+        Map<Long, FindingToneSnapshot> latestByArticle = new HashMap<>();
+        for (FindingToneSnapshot finding : findings) {
+            latestByArticle.merge(finding.articleId(), finding, this::newer);
         }
 
         int analyzedArticleCount = 0;
-        Map<ContentKey, Finding> latestByContent = new HashMap<>();
+        Map<ContentKey, FindingToneSnapshot> latestByContent = new HashMap<>();
         for (IssueArticle membership : memberships) {
             Article article = membership.getArticle();
             // 멤버에 대표 분석을 복제하지 않고 해당 기사에 저장된 분석만 사용한다.
-            Finding finding = latestByArticle.get(article.getId());
+            FindingToneSnapshot finding = latestByArticle.get(article.getId());
             if (finding == null) {
                 continue;
             }
-            if (AnalysisSource.isLlmDerived(finding.getAnalysisSource())) {
+            if (AnalysisSource.isLlmDerived(finding.analysisSource())) {
                 analyzedArticleCount++;
             }
             ContentKey key = article.getContentGroup() == null
@@ -45,14 +46,14 @@ public class IssueToneCalculator {
         int optimistic = 0;
         int neutral = 0;
         int pessimistic = 0;
-        for (Finding finding : latestByContent.values()) {
+        for (FindingToneSnapshot finding : latestByContent.values()) {
             // 최신 분석이 STUB이거나 견해가 사라졌으면 과거의 견해로 되돌아가지 않는다.
-            if (!AnalysisSource.isLlmDerived(finding.getAnalysisSource())
-                    || finding.getSentiment() == null
-                    || finding.getEffectiveKeyPoints().stream().noneMatch(this::isGroundedOpinion)) {
+            if (!AnalysisSource.isLlmDerived(finding.analysisSource())
+                    || finding.sentiment() == null
+                    || finding.effectiveKeyPoints().stream().noneMatch(this::isGroundedOpinion)) {
                 continue;
             }
-            switch (finding.getSentiment()) {
+            switch (finding.sentiment()) {
                 case POSITIVE -> optimistic++;
                 case NEUTRAL -> neutral++;
                 case NEGATIVE -> pessimistic++;
@@ -66,16 +67,16 @@ public class IssueToneCalculator {
     }
 
     private boolean isGroundedOpinion(FindingKeyPoint point) {
-        return "OPINION".equals(point.claimType())
+        // 비율에는 근거가 확인된 견해만 포함하므로 보고서에서 허용하는 weak은 제외한다.
+        return FindingEvidencePolicy.isSupported(point)
+                && "OPINION".equals(point.claimType())
                 && "grounded".equals(point.groundedness())
                 && StringUtils.hasText(point.attributedTo())
-                && StringUtils.hasText(point.text())
-                && !point.evidence().isEmpty()
                 && point.evidence().stream().allMatch(index -> index >= 0);
     }
 
-    private Finding newer(Finding left, Finding right) {
-        return left.getId() >= right.getId() ? left : right;
+    private FindingToneSnapshot newer(FindingToneSnapshot left, FindingToneSnapshot right) {
+        return left.id() >= right.id() ? left : right;
     }
 
     private BigDecimal percent(int count, int total) {

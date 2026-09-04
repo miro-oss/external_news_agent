@@ -22,7 +22,26 @@ Percent는 0~100에서 소수 둘째 자리 HALF_UP이며 합이 반올림으로
 이는 분석된 기사 전체의 논조이며 개별 견해 방향이나 모든 매체의 의견 분포를 뜻하지 않는다.
 DAILY 보고서에서도 조회 시점의 현재 이슈 분석을 사용한다. 추가 LLM 호출·DB 변경은 없다.
 
-## 검증 (2026-09-04)
+## PR #159 리뷰 반영
+
+- 논조 조회는 `FindingToneSnapshot` 생성자 projection으로 id·articleId·analysisSource·sentiment와
+  keyPoints·analysisSections만 읽는다. Finding의 6개 CLOB 중 집계에 필요한 2개만 가져오며,
+  이 조회에서 Finding·Article 엔티티를 적재하지 않는다. 관련 기사 목록의 기존 조회와는 별개다.
+- 이슈 요약이 비어 있을 때만 대표 기사의 최신 summary를 단건 스칼라로 읽는다.
+  엔티티와 projection은 동일한 구조화 분석 평탄화 함수를 사용한다.
+- 공통 `FindingEvidencePolicy.isSupported`에 text·evidence·null 판정을 위임한다.
+  논조는 확인된 견해만 세므로 보고서에서 허용하는 weak는 추가 조건으로 제외한다.
+  저장 JSON의 null key point와 null section을 무시하고 구조화 분석 우선 규칙을 유지한다.
+- 카드 상단·관련 기사 제목·분석 범위의 기사 수는 현재 `articles.length`로 통일한다.
+  빈 멤버 목록은 과거 스냅샷 건수로 되돌아가지 않고 0건으로 표시한다.
+- 논조는 기존 색상 토큰을 사용하고, 양수 막대만 최소 2px을 표시한다. 실제 비율은 범례 숫자로 유지한다.
+
+후속 검증: BE 일반 742개 통과·조건부 112개 제외, Oracle 2개 통과, FE lint/build 통과.
+Oracle에서 projection의 구조화 CLOB 변환과 영속성 컨텍스트의 엔티티 0건, 최신 STUB 유지,
+스칼라 요약 조회를 확인했다. 브라우저에서는 스냅샷 3건/현재 4건 및 현재 0건의 일관된 기사 수,
+9999:1:0 표본에서 2px/0px 구간 구분을 확인했다.
+
+## 최초 구현 검증 (2026-09-04)
 
 - 백엔드 일반 테스트 739개 통과, 조건부 테스트 111개 제외.
 - Oracle: 최신 STUB 분석이 과거 OPINION을 되살리지 않는 실제 조회·JSON 변환 테스트 1개 통과.
@@ -40,6 +59,7 @@ DAILY 보고서에서도 조회 시점의 현재 이슈 분석을 사용한다. 
 cd BE
 ./gradlew test
 ./gradlew test -Dnews.integration.db=true --tests '*FindingRepositoryIntegrationTests.latestFindingForToneDoesNotFallBackToOlderOpinionAfterStubReplacement'
+./gradlew test -Dnews.integration.db=true --tests '*FindingRepositoryIntegrationTests.toneProjectionConvertsStructuredClobsWithoutLoadingFindingOrArticleEntities'
 cd ../FE
 pnpm lint
 pnpm build

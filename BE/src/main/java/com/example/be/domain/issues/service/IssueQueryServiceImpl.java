@@ -1,7 +1,7 @@
 package com.example.be.domain.issues.service;
 
-import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
+import com.example.be.domain.analysis.repository.FindingToneSnapshot;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.issues.dto.res.IssueResDTO;
 import com.example.be.domain.issues.entity.IssueArticle;
@@ -37,9 +37,9 @@ public class IssueQueryServiceImpl implements IssueQueryService {
         NewsIssue issue = issueRepository.findById(issueId)
                 .orElseThrow(() -> new IssueException(IssueErrorCode.ISSUE_NOT_FOUND));
         List<IssueArticle> memberships = issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(issueId);
-        List<Finding> latestFindings = OracleInClause.batches(memberships.stream()
+        List<FindingToneSnapshot> latestFindings = OracleInClause.batches(memberships.stream()
                         .map(value -> value.getArticle().getId()).distinct().toList()).stream()
-                .flatMap(ids -> findingRepository.findLatestByArticleIds(ids).stream())
+                .flatMap(ids -> findingRepository.findLatestToneByArticleIds(ids).stream())
                 .toList();
         IssueArticle representative = memberships.stream()
                 .filter(value -> value.getRole() == IssueArticleRole.REPRESENTATIVE)
@@ -47,10 +47,7 @@ public class IssueQueryServiceImpl implements IssueQueryService {
                 .orElse(null);
         String summary = issue.getSummary();
         if (!StringUtils.hasText(summary) && representative != null) {
-            summary = latestFindings.stream()
-                    .filter(finding -> finding.getArticle().getId().equals(representative.getArticle().getId()))
-                    .findFirst()
-                    .map(Finding::getSummary)
+            summary = findingRepository.findLatestSummaryByArticleId(representative.getArticle().getId())
                     .orElse(null);
         }
 

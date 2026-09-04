@@ -1,12 +1,16 @@
 package com.example.be.domain.issues.service;
 
+import com.example.be.domain.analysis.converter.FindingAnalysisSectionListConverter;
+import com.example.be.domain.analysis.converter.FindingKeyPointListConverter;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingAnalysisBullet;
 import com.example.be.domain.analysis.entity.FindingAnalysisSection;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.Sentiment;
+import com.example.be.domain.analysis.repository.FindingToneSnapshot;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.issues.dto.res.IssueResDTO;
 import com.example.be.domain.issues.entity.ContentGroup;
 import com.example.be.domain.issues.entity.IssueArticle;
 import org.junit.jupiter.api.Test;
@@ -31,7 +35,7 @@ class IssueToneCalculatorTest {
         Finding repeatedOpinions = finding(1, positive, Sentiment.POSITIVE,
                 opinion(), opinion(), point("FORECAST", "grounded", null, List.of(0)));
 
-        var result = calculator.calculate(memberships(positive, neutral, negative, factOnly, unanalyzedMember),
+        var result = calculate(memberships(positive, neutral, negative, factOnly, unanalyzedMember),
                 List.of(repeatedOpinions, finding(2, neutral, Sentiment.NEUTRAL, opinion()),
                         finding(3, negative, Sentiment.NEGATIVE, opinion()),
                         finding(4, factOnly, Sentiment.POSITIVE, point("FACT", "grounded", null, List.of(0)))));
@@ -54,7 +58,7 @@ class IssueToneCalculatorTest {
         Finding reused = Finding.builder().id(30L).article(reprint).analysisSource(AnalysisSource.REUSED)
                 .sentiment(Sentiment.NEGATIVE).keyPoints(List.of(opinion())).build();
 
-        var result = calculator.calculate(memberships(original, reprint, standalone), List.of(
+        var result = calculate(memberships(original, reprint, standalone), List.of(
                 reused, finding(10, original, Sentiment.NEGATIVE, opinion()),
                 finding(21, standalone, Sentiment.POSITIVE, opinion()),
                 finding(20, original, Sentiment.POSITIVE, opinion())));
@@ -75,7 +79,7 @@ class IssueToneCalculatorTest {
         Finding stub = Finding.builder().id(20L).article(reprint).analysisSource(AnalysisSource.STUB)
                 .sentiment(Sentiment.POSITIVE).keyPoints(List.of(opinion())).build();
 
-        var result = calculator.calculate(memberships(original, reprint, removedOpinion), List.of(
+        var result = calculate(memberships(original, reprint, removedOpinion), List.of(
                 finding(10, original, Sentiment.POSITIVE, opinion()),
                 finding(11, reprint, Sentiment.POSITIVE, opinion()), stub,
                 finding(12, removedOpinion, Sentiment.POSITIVE, opinion()),
@@ -91,7 +95,7 @@ class IssueToneCalculatorTest {
     @Test
     void excludesWeakUnattributedAndUnsupportedOpinionsAndUnrelatedFindings() {
         Article article = article(1, null);
-        var result = calculator.calculate(memberships(article), List.of(
+        var result = calculate(memberships(article), List.of(
                 finding(1, article, Sentiment.POSITIVE,
                         point("OPINION", "weak", "기자", List.of(0)),
                         point("OPINION", "ungrounded", "기자", List.of(0)),
@@ -118,7 +122,7 @@ class IssueToneCalculatorTest {
                                 "grounded", BigDecimal.ONE, null, "OPINION", "애널리스트")))))
                 .build();
 
-        var result = calculator.calculate(memberships(article), List.of(structured));
+        var result = calculate(memberships(article), List.of(structured));
 
         assertEquals(1, result.sampleCount());
         assertEquals(new BigDecimal("100.00"), result.neutralPercent());
@@ -127,10 +131,43 @@ class IssueToneCalculatorTest {
 
     @Test
     void emptyIssueHasNoPercentageInsteadOfPretendingToBeNeutral() {
-        var result = calculator.calculate(List.of(), List.of());
+        var result = calculate(List.of(), List.of());
         assertEquals(0, result.analyzedArticleCount());
         assertEquals(0, result.sampleCount());
         assertNull(result.neutralPercent());
+    }
+
+    @Test
+    void nullKeyPointFromStoredJsonIsIgnored() {
+        Article article = article(1, null);
+        var points = new FindingKeyPointListConverter().convertToEntityAttribute("[null]");
+        points.add(opinion());
+        Finding finding = Finding.builder().id(1L).article(article).analysisSource(AnalysisSource.LLM)
+                .sentiment(Sentiment.POSITIVE).keyPoints(points).build();
+
+        var result = calculate(memberships(article), List.of(finding));
+
+        assertEquals(1, result.sampleCount());
+        assertEquals(1, result.optimisticCount());
+    }
+
+    @Test
+    void nullStructuredSectionIsIgnoredWithoutRevivingLegacyOpinion() {
+        Article article = article(1, null);
+        var sections = new FindingAnalysisSectionListConverter().convertToEntityAttribute("[null]");
+        Finding finding = Finding.builder().id(1L).article(article).analysisSource(AnalysisSource.LLM)
+                .sentiment(Sentiment.POSITIVE).keyPoints(List.of(opinion())).analysisSections(sections).build();
+
+        var result = calculate(memberships(article), List.of(finding));
+
+        assertEquals(0, result.sampleCount());
+        assertNull(result.optimisticPercent());
+    }
+
+    private IssueResDTO.ToneDistribution calculate(List<IssueArticle> memberships, List<Finding> findings) {
+        return calculator.calculate(memberships, findings.stream().map(finding -> new FindingToneSnapshot(
+                finding.getId(), finding.getArticle().getId(), finding.getAnalysisSource(), finding.getSentiment(),
+                finding.getKeyPoints(), finding.getAnalysisSections())).toList());
     }
 
     private Article article(long id, Long contentGroupId) {
