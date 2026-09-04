@@ -257,15 +257,20 @@ def _evaluate_rule(
         if article["split"] == split
         and int(article.get("sourceArticleId", -1)) not in excluded_source_article_ids
     ]
-    selected_ids_by_topic = _selected_ids_by_topic(selected)
+    selected_ids = {int(article["articleId"]) for article in selected}
     unions = _topic_unions(selected, include_fixed_content_groups=True)
+    voting_ids_by_topic = {
+        topic_id: set(union.parents) & selected_ids for topic_id, union in unions.items()
+    }
 
     for pair in pairs:
         left = int(pair["leftArticleId"])
         right = int(pair["rightArticleId"])
         topic_id = int(pair["topicId"])
-        selected_ids = selected_ids_by_topic.get(topic_id, set())
-        if left not in selected_ids or right not in selected_ids:
+        # Java includes global content representatives as proxies in each observed topic.
+        # A proxy may vote here only when its source article is in the selected split.
+        voting_ids = voting_ids_by_topic.get(topic_id, set())
+        if left not in voting_ids or right not in voting_ids:
             continue
         hours_apart = float(pair["hoursApart"])
         title_matches = float(pair["titleJaccard"]) >= threshold
