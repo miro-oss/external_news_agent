@@ -143,8 +143,17 @@ P1-7 자기 검증도 새 엔드포인트를 만들지 않고 `/v1/analyze`를 �
 선택 주장에 대한 구조화 생성은 한 번이며 schema repair는 수행하지 않습니다. 공통 provider
 재시도에 따라 실제 호출 시도는 늘어날 수 있습니다. 새 사실과 새 근거 문장 번호는 추가할 수 없습니다.
 자기 검증은 선택된 bullet 한 건만 유지·수정·기각하며 `summaryKo`는 최초 검증 값을 그대로 보존합니다.
+`self-critique.ko.v2`의 `KEEP`은 서버가 선택한 원본 bullet 전체를 반환합니다. 모델이 다시 작성한
+본문·근거·신뢰도·판정 이유는 반영하지 않으며 `revisedClaimCount`는 0입니다. 모델 출력의 JSON
+Schema와 대상 `claimId` 검증은 그대로 수행합니다. `REVISE`는 기존 근거 번호의 부분집합만
+사용할 수 있고, `REJECT`는 `ungrounded`, 빈 근거, `confidence=0`이어야 합니다.
+Spring은 신뢰도 `0.60`과 `0.6`처럼 값이 같은 JSON 숫자를 동일하게 비교하되 실제 값 변경과
+나머지 bullet 필드 변경은 계속 수정 건수에 포함합니다.
 규칙으로 이미 확정된 경우 `self-critique.rules.v1` 응답을 비용 0으로 반환합니다. 실패하거나 quota가
 부족하면 Spring은 최초 근거 검증 결과를 유지하고 `SELF_CRITIQUE / ISSUE` 감사 행과 경고를 남깁니다.
+자기 검증의 provider 출력 계약 실패도 다른 구조화 호출과 동일하게 오류 응답의 `details.usage`와
+`details.truncated`를 반환하므로 관측된 사용량을 실패 감사·quota 정산에 전달할 수 있습니다.
+이전 실패에 저장되지 않은 사용량을 복원하는 기능은 아닙니다.
 
 ## `/v1/verify-evidence` 배치 계약
 

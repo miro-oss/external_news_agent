@@ -12,6 +12,8 @@ import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -185,12 +187,15 @@ class AgentClientTest {
         server.verify();
     }
 
-    @Test
-    void preservesUsageFromFailedReportContract() {
+    @ParameterizedTest
+    @ValueSource(strings = {"report", "selfCritique"})
+    void preservesUsageFromFailedReportAndSelfCritiqueContracts(String task) {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         AgentClient client = new AgentClient(builder, properties());
-        server.expect(requestTo("http://127.0.0.1:8088/v1/report"))
+        server.expect(requestTo("http://127.0.0.1:8088/v1/"
+                        + ("report".equals(task) ? "report" : "analyze")))
+                .andExpect(method(HttpMethod.POST))
                 .andRespond(withStatus(HttpStatus.BAD_GATEWAY)
                         .contentType(MediaType.APPLICATION_JSON)
                         .body("""
@@ -199,8 +204,15 @@ class AgentClientTest {
 
         AgentClientException exception = assertThrows(
                 AgentClientException.class,
-                () -> client.report(reportRequest()));
+                () -> {
+                    if ("report".equals(task)) {
+                        client.report(reportRequest());
+                    } else {
+                        client.selfCritique(selfCritiqueRequest());
+                    }
+                });
 
+        assertEquals("SCHEMA_VIOLATION", exception.getCode());
         assertEquals(30L, exception.getUsage().inputTokens());
         assertEquals(15L, exception.getUsage().outputTokens());
         assertEquals(0, new java.math.BigDecimal("0.25").compareTo(exception.getUsage().costUsd()));

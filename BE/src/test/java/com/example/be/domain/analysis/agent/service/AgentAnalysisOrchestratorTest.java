@@ -38,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
@@ -188,8 +189,9 @@ class AgentAnalysisOrchestratorTest {
         verify(client).selfCritique(any());
     }
 
-    @Test
-    void keepsVerifiedDraftWhenSelfCritiqueFails() {
+    @ParameterizedTest
+    @ValueSource(strings = {"PROVIDER_UNAVAILABLE", "SCHEMA_VIOLATION"})
+    void keepsVerifiedDraftAndPreservesUsageWhenSelfCritiqueFails(String failureCode) {
         Article representative = article();
         Article member = issueMember(representative, 11L, "같은 이슈 기사", "같은 결론");
         AnalysisContext context = new AnalysisContext(
@@ -211,21 +213,25 @@ class AgentAnalysisOrchestratorTest {
                 AgentTask.SELF_CRITIQUE,
                 AgentPlan.FREE)).thenReturn(selfCritiqueReservation);
         when(client.analyze(any())).thenReturn(highSensitivityIssueResponse());
-        when(client.selfCritique(any())).thenThrow(
-                new AgentClientException("PROVIDER_UNAVAILABLE", "down"));
+        AgentClientException.Usage usage = new AgentClientException.Usage(
+                30L, 15L, new BigDecimal("0.25"), new BigDecimal("0.5"));
+        AgentClientException failure = new AgentClientException(
+                failureCode, "자기 검증 실패", null, usage);
+        when(client.selfCritique(any())).thenThrow(failure);
 
         AnalysisResult result = orchestrator.analyze(context);
 
         assertEquals("최초 근거 검증을 마친 한국어 요약입니다.", result.summary());
         assertEquals("핵심 주장", result.keyPoints().getFirst().text());
         verify(recorder).recordSelfCritiqueFailure(
-                eq(42L), eq(88L), any(), eq("PROVIDER_UNAVAILABLE"),
-                any(), any(), any(), any(LocalDateTime.class));
+                eq(42L), eq(88L), any(), eq(failureCode),
+                eq("자기 검증 실패"), eq(usage), isNull(), any(LocalDateTime.class));
+        verify(quotaService).completeFailure(selfCritiqueReservation, failure);
         verify(resultWriter).addAgentWarning(
                 42L,
                 com.example.be.domain.collection.entity.CollectionRunWarning
                         .CODE_LLM_SELF_CRITIQUE_FAILED,
-                "자기 검증 실패로 최초 검증 결과를 유지했습니다. code=PROVIDER_UNAVAILABLE");
+                "자기 검증 실패로 최초 검증 결과를 유지했습니다. code=" + failureCode);
     }
 
     @Test
@@ -261,6 +267,109 @@ class AgentAnalysisOrchestratorTest {
         verify(recorder).recordSelfCritiqueFailure(
                 eq(42L), eq(88L), any(), eq("SCHEMA_VIOLATION"),
                 any(), any(), any(), any(LocalDateTime.class));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("selfCritiqueConfidenceCases")
+    void countsSelfCritiqueChangesByConfidenceValueInsteadOfDecimalScale(
+            String description,
+            boolean secondUnsupported,
+            String firstConfidence,
+            String secondConfidence,
+            int targetCount,
+            int revisedCount,
+            boolean accepted) {
+        Article representative = article();
+        Article member = issueMember(representative, 11L, "같은 이슈 기사", "같은 결론");
+        AnalysisContext context = new AnalysisContext(
+                42L,
+                representative,
+                AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, member)),
+                true);
+        when(quotaService.reserve(
+                42L, "run:42:issue:88:self-critique", AgentTask.SELF_CRITIQUE, AgentPlan.FREE))
+                .thenReturn(new QuotaReservation(
+                        3L, 42L, "run:42:issue:88:self-critique",
+                        AgentTask.SELF_CRITIQUE, AgentPlan.FREE, BigDecimal.ONE));
+        AgentAnalyzeResponse source = highSensitivityIssueResponse();
+        when(client.analyze(any())).thenReturn(new AgentAnalyzeResponse(
+                source.sentences(),
+                List.of(new AgentAnalyzeResponse.Section("핵심", List.of(
+                        new AgentAnalyzeResponse.Bullet(
+                                "첫 번째 핵심 주장", List.of(1), "grounded", new BigDecimal("0.60")),
+                        new AgentAnalyzeResponse.Bullet(
+                                "두 번째 핵심 주장", List.of(1), "grounded", new BigDecimal("0.80"))))),
+                source.summaryKo(), source.classification(), source.entities(),
+                source.perspectiveTags(), source.crossSource(),
+                source.promoteCandidates(), source.memberStances(),
+                source.meta()));
+        when(client.verifyEvidence(any())).thenReturn(new AgentEvidenceResponse(
+                List.of(
+                        new AgentEvidenceResponse.Result("0:0", "grounded", List.of(1), "검증 결과"),
+                        new AgentEvidenceResponse.Result(
+                                "0:1", secondUnsupported ? "ungrounded" : "grounded",
+                                secondUnsupported ? List.of() : List.of(1), "검증 결과")),
+                evidenceResponse("grounded", List.of(1)).meta()));
+        when(client.selfCritique(any())).thenAnswer(invocation -> {
+            AgentAnalyzeRequest request = invocation.getArgument(0);
+            AgentAnalyzeRequest.PreviousFindingPayload previous = request.previousFinding();
+            List<AgentAnalyzeRequest.PreviousBulletPayload> bullets =
+                    previous.sections().getFirst().bullets();
+            assertEquals(new BigDecimal("0.60"), bullets.getFirst().confidence());
+            assertEquals(secondUnsupported ? BigDecimal.ZERO : new BigDecimal("0.80"),
+                    bullets.get(1).confidence());
+            return new AgentSelfCritiqueResponse(
+                    List.of(new AgentSelfCritiqueResponse.Section("핵심", List.of(
+                            selfCritiqueBulletWithConfidence(bullets.getFirst(), firstConfidence),
+                            selfCritiqueBulletWithConfidence(bullets.get(1), secondConfidence)))),
+                    previous.summaryKo(), targetCount, revisedCount, List.of(),
+                    selfCritiqueResponse().meta());
+        });
+
+        AnalysisResult result = orchestrator.analyze(context);
+
+        if (accepted) {
+            verify(recorder).recordSelfCritiqueSuccess(
+                    eq(42L), eq(88L), any(), any(), any(LocalDateTime.class));
+            assertEquals(0, new BigDecimal(firstConfidence).compareTo(
+                    result.analysisSections().getFirst().bullets().getFirst().confidence()));
+            assertEquals(0, new BigDecimal(secondConfidence).compareTo(
+                    result.analysisSections().getFirst().bullets().get(1).confidence()));
+        } else {
+            verify(recorder).recordSelfCritiqueFailure(
+                    eq(42L), eq(88L), any(), eq("SCHEMA_VIOLATION"),
+                    any(), any(), any(), any(LocalDateTime.class));
+            assertEquals(new BigDecimal("0.60"),
+                    result.analysisSections().getFirst().bullets().getFirst().confidence());
+        }
+    }
+
+    private static Stream<Arguments> selfCritiqueConfidenceCases() {
+        return Stream.of(
+                Arguments.of("KEEP 0.60 to 0.6 and unsupported 0 to 0.0",
+                        true, "0.6", "0.0", 1, 0, true),
+                Arguments.of("rules-only response with no selected claim",
+                        true, "0.6", "0.0", 0, 0, true),
+                Arguments.of("one real confidence revision and one scale-only change",
+                        true, "0.7", "0.0", 1, 1, true),
+                Arguments.of("scale changes on two grounded claims",
+                        false, "0.6", "0.8", 1, 0, true),
+                Arguments.of("real confidence change with revised count zero",
+                        true, "0.7", "0.0", 1, 0, false),
+                Arguments.of("scale-only changes with revised count one",
+                        true, "0.6", "0.0", 1, 1, false),
+                Arguments.of("two real confidence changes exceed one-claim limit",
+                        false, "0.7", "0.9", 1, 1, false));
+    }
+
+    private static AgentSelfCritiqueResponse.Bullet selfCritiqueBulletWithConfidence(
+            AgentAnalyzeRequest.PreviousBulletPayload original,
+            String confidence) {
+        return new AgentSelfCritiqueResponse.Bullet(
+                original.text(), original.evidenceSentenceIds(), original.groundedness(),
+                new BigDecimal(confidence), original.groundingReason(),
+                original.claimType(), original.attributedTo());
     }
 
     @Test
