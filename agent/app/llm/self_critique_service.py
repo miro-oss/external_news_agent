@@ -29,7 +29,7 @@ from app.schemas.analyze import (
 )
 from app.schemas.evidence import EvidenceSentence
 
-PROMPT_VERSION = "self-critique.ko.v1"
+PROMPT_VERSION = "self-critique.ko.v2"
 RULES_PROMPT_VERSION = "self-critique.rules.v1"
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md"
 SYSTEM_INSTRUCTION = _PROMPT_PATH.read_text(encoding="utf-8").strip()
@@ -98,12 +98,18 @@ class ArticleSelfCritiqueService:
             input_tag="self-critique",
             schema_violation_message="Provider 자기 검증 출력이 Agent 계약을 위반했습니다.",
             logger=logger,
-            include_failure_details=False,
         )
         output = result.output
-        revised = _safe_revision(output.revision, bullet, sentences)
+        original = ReviewedBullet.model_validate(bullet.model_dump())
+        # KEEP is a decision to retain the verified draft. The provider's copies
+        # of its fields are unused; only REVISE/REJECT can propose new values.
+        revised = (
+            original
+            if output.revision.action == "KEEP"
+            else _safe_revision(output.revision, bullet, sentences)
+        )
         sections = _replace_target(previous.sections, claim_id, revised)
-        changed = revised != ReviewedBullet.model_validate(bullet.model_dump())
+        changed = revised != original
         return SelfCritiqueResponse(
             sections=sections,
             summary_ko=previous.summary_ko,
@@ -179,20 +185,15 @@ def _validated_output(
     revision = output.revision
     if revision.claim_id != claim_id:
         raise ValueError("revision.claimId가 검토 대상과 일치하지 않습니다.")
+    if revision.action == "KEEP":
+        # The caller copies the original bullet; no revision field supplies KEEP values.
+        return output
     if not set(revision.evidence_sentence_ids) <= set(original.evidence_sentence_ids):
         raise ValueError("자기 검증은 새로운 evidenceSentenceIds를 추가할 수 없습니다.")
     if revision.action == "REJECT" and (
         revision.groundedness != "ungrounded" or revision.confidence != 0
     ):
         raise ValueError("REJECT 결과는 ungrounded, confidence=0이어야 합니다.")
-    if revision.action == "KEEP" and (
-        revision.text != original.text
-        or revision.evidence_sentence_ids != original.evidence_sentence_ids
-        or revision.groundedness != original.groundedness
-        or revision.confidence != original.confidence
-        or revision.grounding_reason != original.grounding_reason
-    ):
-        raise ValueError("KEEP 결과는 기존 주장 값을 바꿀 수 없습니다.")
     return output
 
 

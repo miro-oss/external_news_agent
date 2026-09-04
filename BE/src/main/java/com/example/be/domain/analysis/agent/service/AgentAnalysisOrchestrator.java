@@ -346,7 +346,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                         responseSection.bullets().get(bulletIndex),
                         originalBullet,
                         original.sections().size());
-                if (!bullet.equals(originalBullet)) {
+                if (!sameSelfCritiqueBullet(bullet, originalBullet)) {
                     changedBullets++;
                 }
                 bullets.add(bullet);
@@ -364,6 +364,19 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 original,
                 original.summary(),
                 List.copyOf(sections));
+    }
+
+    private boolean sameSelfCritiqueBullet(FindingAnalysisBullet reviewed,
+                                           FindingAnalysisBullet original) {
+        // JSON 왕복에서 0.60이 0.6으로 바뀌어도 주장 신뢰도는 바뀌지 않는다.
+        return normalizedConfidence(reviewed).equals(normalizedConfidence(original));
+    }
+
+    private FindingAnalysisBullet normalizedConfidence(FindingAnalysisBullet bullet) {
+        return bullet.confidence() == null ? bullet : new FindingAnalysisBullet(
+                bullet.text(), bullet.evidence(), bullet.groundedness(),
+                bullet.confidence().stripTrailingZeros(), bullet.groundingReason(),
+                bullet.claimType(), bullet.attributedTo());
     }
 
     private FindingAnalysisBullet toSelfCritiquedBullet(
