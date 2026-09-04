@@ -100,15 +100,16 @@ class ArticleSelfCritiqueService:
             logger=logger,
         )
         output = result.output
+        original = ReviewedBullet.model_validate(bullet.model_dump())
         # KEEP is a decision to retain the verified draft. The provider's copies
         # of its fields are unused; only REVISE/REJECT can propose new values.
         revised = (
-            ReviewedBullet.model_validate(bullet.model_dump())
+            original
             if output.revision.action == "KEEP"
             else _safe_revision(output.revision, bullet, sentences)
         )
         sections = _replace_target(previous.sections, claim_id, revised)
-        changed = revised != ReviewedBullet.model_validate(bullet.model_dump())
+        changed = revised != original
         return SelfCritiqueResponse(
             sections=sections,
             summary_ko=previous.summary_ko,
@@ -185,6 +186,7 @@ def _validated_output(
     if revision.claim_id != claim_id:
         raise ValueError("revision.claimId가 검토 대상과 일치하지 않습니다.")
     if revision.action == "KEEP":
+        # The caller copies the original bullet; no revision field supplies KEEP values.
         return output
     if not set(revision.evidence_sentence_ids) <= set(original.evidence_sentence_ids):
         raise ValueError("자기 검증은 새로운 evidenceSentenceIds를 추가할 수 없습니다.")

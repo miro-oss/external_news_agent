@@ -369,13 +369,14 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
     private boolean sameSelfCritiqueBullet(FindingAnalysisBullet reviewed,
                                            FindingAnalysisBullet original) {
         // JSON 왕복에서 0.60이 0.6으로 바뀌어도 주장 신뢰도는 바뀌지 않는다.
-        return reviewed.confidence().compareTo(original.confidence()) == 0
-                && Objects.equals(reviewed.text(), original.text())
-                && Objects.equals(reviewed.evidence(), original.evidence())
-                && Objects.equals(reviewed.groundedness(), original.groundedness())
-                && Objects.equals(reviewed.groundingReason(), original.groundingReason())
-                && Objects.equals(reviewed.claimType(), original.claimType())
-                && Objects.equals(reviewed.attributedTo(), original.attributedTo());
+        return normalizedConfidence(reviewed).equals(normalizedConfidence(original));
+    }
+
+    private FindingAnalysisBullet normalizedConfidence(FindingAnalysisBullet bullet) {
+        return bullet.confidence() == null ? bullet : new FindingAnalysisBullet(
+                bullet.text(), bullet.evidence(), bullet.groundedness(),
+                bullet.confidence().stripTrailingZeros(), bullet.groundingReason(),
+                bullet.claimType(), bullet.attributedTo());
     }
 
     private FindingAnalysisBullet toSelfCritiquedBullet(

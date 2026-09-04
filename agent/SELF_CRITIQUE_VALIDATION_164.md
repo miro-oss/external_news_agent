@@ -1,5 +1,21 @@
 # 자기 검증 KEEP 실패 회귀 검증
 
+## PR #167 리뷰 반영
+
+신뢰도만 `stripTrailingZeros()`로 정규화한 `FindingAnalysisBullet`을 만들어 record의 전체 필드
+동등성을 비교한다. 필드가 추가되면 생성자 호출도 수정해야 하므로 비교에서 새 필드가 조용히
+빠지는 것을 막으며, nullable confidence도 기존 값으로 보존한다. 이 정규화는 자기 검증 비교에만
+적용하고 응답·저장 값이나 record의 전역 동등성은 바꾸지 않는다.
+
+KEEP 원본 복제본은 한 번 생성해 재사용한다. 조기 반환 시 provider의 나머지 revision 필드를
+사용하지 않는 이유를 주석으로 명시하고, v1 프롬프트는 과거 실행 추적용으로 보존한다.
+AgentClient 오류 테스트는 엔드포인트와 호출 함수를 함께 전달해 문자열 오타의 묵시적 fallback을 제거했다.
+
+리뷰 수정 후 Python 자기 검증 20건과 Ruff, Java orchestrator 36건·client 11건이 통과했다.
+일반 분석 실패 사용량 누락은 [#168](https://github.com/miro-oss/external_news_agent/issues/168),
+자기 검증 action 감사는 [#169](https://github.com/miro-oss/external_news_agent/issues/169)로 추적한다.
+이 리뷰 반영으로 실제 수집이나 유료 provider 호출을 추가하지 않았다.
+
 - 작업: [#164](https://github.com/miro-oss/external_news_agent/issues/164)
 - 기준: 2026-09-04, 수정 전 `44298d2`, 로컬 실행 `4483`
 - 내부 계약 정본: [Agent README](README.md#v1analyze-자기-검증-계약),

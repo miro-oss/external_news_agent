@@ -13,7 +13,8 @@ import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -26,6 +27,8 @@ import java.net.http.HttpConnectTimeoutException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -188,13 +191,13 @@ class AgentClientTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"report", "selfCritique"})
-    void preservesUsageFromFailedReportAndSelfCritiqueContracts(String task) {
+    @MethodSource("failedContracts")
+    void preservesUsageFromFailedReportAndSelfCritiqueContracts(
+            String endpoint, Consumer<AgentClient> invoke) {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         AgentClient client = new AgentClient(builder, properties());
-        server.expect(requestTo("http://127.0.0.1:8088/v1/"
-                        + ("report".equals(task) ? "report" : "analyze")))
+        server.expect(requestTo("http://127.0.0.1:8088/v1/" + endpoint))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withStatus(HttpStatus.BAD_GATEWAY)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -204,13 +207,7 @@ class AgentClientTest {
 
         AgentClientException exception = assertThrows(
                 AgentClientException.class,
-                () -> {
-                    if ("report".equals(task)) {
-                        client.report(reportRequest());
-                    } else {
-                        client.selfCritique(selfCritiqueRequest());
-                    }
-                });
+                () -> invoke.accept(client));
 
         assertEquals("SCHEMA_VIOLATION", exception.getCode());
         assertEquals(30L, exception.getUsage().inputTokens());
@@ -218,6 +215,12 @@ class AgentClientTest {
         assertEquals(0, new java.math.BigDecimal("0.25").compareTo(exception.getUsage().costUsd()));
         assertEquals(0, new java.math.BigDecimal("2").compareTo(exception.getUsage().credits()));
         server.verify();
+    }
+
+    private static Stream<Arguments> failedContracts() {
+        return Stream.of(
+                Arguments.of("report", (Consumer<AgentClient>) client -> client.report(reportRequest())),
+                Arguments.of("analyze", (Consumer<AgentClient>) client -> client.selfCritique(selfCritiqueRequest())));
     }
 
     @Test
@@ -278,7 +281,7 @@ class AgentClientTest {
         return properties;
     }
 
-    private AgentReportRequest reportRequest() {
+    private static AgentReportRequest reportRequest() {
         OffsetDateTime startedAt = OffsetDateTime.parse("2026-08-10T09:00:00+09:00");
         return new AgentReportRequest(
                 "run:42:report",
@@ -306,7 +309,7 @@ class AgentClientTest {
                 List.of("STUB 2건 제외"));
     }
 
-    private AgentAnalyzeRequest request() {
+    private static AgentAnalyzeRequest request() {
         return new AgentAnalyzeRequest(
                 "run:42:article:10",
                 AgentPlan.FREE,
@@ -318,7 +321,7 @@ class AgentClientTest {
                 null);
     }
 
-    private AgentAnalyzeRequest selfCritiqueRequest() {
+    private static AgentAnalyzeRequest selfCritiqueRequest() {
         AgentAnalyzeRequest source = request();
         return new AgentAnalyzeRequest(
                 "run:42:issue:88:self-critique",
