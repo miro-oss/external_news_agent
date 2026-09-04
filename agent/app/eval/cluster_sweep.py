@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ _TIME_WINDOWS = (24, 48, 72)
 _ORGANIZATION_JACCARD_THRESHOLDS = (0.10, 0.125, 0.15, 0.20)
 _ORGANIZATION_TIME_WINDOWS = (12, 24, 48)
 _TITLE_ORGANIZATION_RULE_VERSION = "title-organization-conflict-v1"
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,9 +81,17 @@ class UnionFind:
 
 
 def validate_clustering_metadata(java_output: dict[str, Any]) -> None:
+    version = java_output.get("clusteringRuleVersion", "legacy")
+    if version not in ("legacy", _TITLE_ORGANIZATION_RULE_VERSION):
+        raise ValueError(f"Unsupported clusteringRuleVersion: {version!r}")
+    if version == "legacy":
+        _LOGGER.warning(
+            "Legacy clustering export: title organization conflict checks use only supplied "
+            "profiles; missing titleOrganizations leave those articles unguarded."
+        )
     _validate_title_organizations(
         java_output["articles"],
-        required=java_output.get("clusteringRuleVersion") == _TITLE_ORGANIZATION_RULE_VERSION,
+        required=version == _TITLE_ORGANIZATION_RULE_VERSION,
     )
 
 
@@ -245,6 +255,13 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
     return {
         "datasetVersion": java_output["datasetVersion"],
         "clusteringRuleVersion": java_output.get("clusteringRuleVersion", "legacy"),
+        "titleOrganizationGuard": {
+            "implementationVersion": _TITLE_ORGANIZATION_RULE_VERSION,
+            "metadataComplete": all("titleOrganizations" in article for article in articles),
+            "profiledArticleCount": sum(
+                bool(article.get("titleOrganizations")) for article in articles
+            ),
+        },
         "articleCount": java_output["articleCount"],
         "bodySource": java_output.get("bodySource", "unspecified"),
         "selectionSplit": "CALIBRATION",
@@ -265,12 +282,14 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
             "holdoutMetrics": asdict(configured_holdout),
         },
         "tfidfCharWbBaseline": {
+            "usesTitleOrganizationGuard": False,
             "includesFixedContentGroups": True,
             "threshold": baseline_threshold,
             "calibrationMetrics": asdict(baseline_calibration),
             "metrics": asdict(baseline_holdout),
         },
         "tfidfCharWbStandaloneBaseline": {
+            "usesTitleOrganizationGuard": False,
             "includesFixedContentGroups": False,
             "threshold": standalone_threshold,
             "calibrationMetrics": asdict(standalone_calibration),

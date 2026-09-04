@@ -1,6 +1,12 @@
 import pytest
 
-from app.eval.cluster_sweep import _evaluate_rule, _evaluate_tfidf, _topic_unions, sweep
+from app.eval.cluster_sweep import (
+    _evaluate_rule,
+    _evaluate_tfidf,
+    _topic_unions,
+    sweep,
+    validate_clustering_metadata,
+)
 
 
 def test_sweep_uses_exported_entity_threshold_and_calibrates_tfidf() -> None:
@@ -12,6 +18,7 @@ def test_sweep_uses_exported_entity_threshold_and_calibrates_tfidf() -> None:
     ]
     for article in articles:
         article["titleOrganizations"] = []
+    articles[0]["titleOrganizations"] = ["Samsung"]
     result = sweep(
         {
             "datasetVersion": "test.v1",
@@ -33,10 +40,19 @@ def test_sweep_uses_exported_entity_threshold_and_calibrates_tfidf() -> None:
     assert result["holdout"]["recall"] == 1.0
     assert result["decisionGatePassed"] is True
     assert result["clusteringRuleVersion"] == "title-organization-conflict-v1"
+    assert result["titleOrganizationGuard"] == {
+        "implementationVersion": "title-organization-conflict-v1",
+        "metadataComplete": True,
+        "profiledArticleCount": 1,
+    }
     assert "calibrationMetrics" in result["tfidfCharWbBaseline"]
+    assert result["tfidfCharWbBaseline"]["usesTitleOrganizationGuard"] is False
+    assert result["tfidfCharWbStandaloneBaseline"]["usesTitleOrganizationGuard"] is False
 
 
-def test_sweep_selects_ratio_output_and_exposes_content_group_false_positive() -> None:
+def test_sweep_selects_ratio_output_and_exposes_content_group_false_positive(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     articles = [
         _article(1, "CALIBRATION", "same event first", "calibration-event"),
         _article(2, "CALIBRATION", "same event second", "calibration-event"),
@@ -91,6 +107,10 @@ def test_sweep_selects_ratio_output_and_exposes_content_group_false_positive() -
     assert result["decisionGatePassed"] is False
     assert result["tfidfCharWbBaseline"]["includesFixedContentGroups"] is True
     assert result["tfidfCharWbStandaloneBaseline"]["includesFixedContentGroups"] is False
+    assert result["clusteringRuleVersion"] == "legacy"
+    assert result["titleOrganizationGuard"]["metadataComplete"] is False
+    assert result["titleOrganizationGuard"]["profiledArticleCount"] == 0
+    assert "missing titleOrganizations leave those articles unguarded" in caplog.text
 
 
 def test_fixed_content_group_preserves_cross_topic_java_representative() -> None:
@@ -358,6 +378,22 @@ def test_direct_rule_replay_rejects_malformed_title_organizations() -> None:
         _evaluate_rule([article], [], "HOLDOUT", 0.50, 48, 2)
 
 
+@pytest.mark.parametrize("version", ["unknown-rule-v2", None, 1])
+def test_sweep_rejects_unsupported_rule_versions(version: object) -> None:
+    with pytest.raises(ValueError, match="Unsupported clusteringRuleVersion"):
+        sweep({"clusteringRuleVersion": version, "articles": []})
+
+
+def test_explicit_legacy_version_warns_when_metadata_is_optional(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    validate_clustering_metadata(
+        {"clusteringRuleVersion": "legacy", "articles": [_article(1, "HOLDOUT", "Report")]}
+    )
+
+    assert "Legacy clustering export" in caplog.text
+
+
 @pytest.mark.parametrize("with_metadata", [False, True])
 def test_title_organization_conflict_blocks_direct_merge_only_with_metadata(
     with_metadata: bool,
@@ -420,7 +456,7 @@ def test_title_organization_metadata_keeps_canonical_alias_pair() -> None:
     assert no_positive_evidence.recall == 0.0
 
 
-def test_title_organization_guard_preserves_forced_groups_and_each_member_profile() -> None:
+def test_mixed_fixed_group_keeps_new_single_vendor_followup_separate() -> None:
     articles = [
         _article(1, "HOLDOUT", "Samsung original report", "forced-event"),
         _article(2, "HOLDOUT", "SK Hynix syndicated title", "forced-event"),
@@ -433,6 +469,8 @@ def test_title_organization_guard_preserves_forced_groups_and_each_member_profil
         article["fixedContentGroupId"] = "content-a"
         article["fixedContentGroupRepresentativeId"] = 1
 
+    # Preserve the mixed legacy group without allowing a matching single-vendor
+    # follow-up to expand it. Java locks the same three-article policy down.
     union = _topic_unions(articles, include_fixed_content_groups=True)[1]
     metrics = _evaluate_rule(
         articles, [_pair(1, 3, "HOLDOUT", title_jaccard=0.90)], "HOLDOUT", 0.50, 48, 2
@@ -464,6 +502,30 @@ def test_title_organization_guard_retains_cross_topic_proxy_profile() -> None:
 
     assert metrics.precision == 1.0
     assert metrics.adjusted_rand == 1.0
+
+
+@pytest.mark.parametrize("new_profile", [[], ["Samsung", "SK Hynix"]])
+def test_mixed_fixed_group_accepts_unknown_or_all_overlapping_profile_when_title_matches(
+    new_profile: list[str],
+) -> None:
+    articles = [
+        _article(1, "HOLDOUT", "Samsung original", "forced-event"),
+        _article(2, "HOLDOUT", "SK Hynix syndicated title", "forced-event"),
+        _article(3, "HOLDOUT", "Coverage", "forced-event"),
+    ]
+    articles[0]["titleOrganizations"] = ["Samsung"]
+    articles[1]["titleOrganizations"] = ["SK Hynix"]
+    articles[2]["titleOrganizations"] = new_profile
+    for article in articles[:2]:
+        article["fixedContentGroupId"] = "content-a"
+        article["fixedContentGroupRepresentativeId"] = 1
+
+    metrics = _evaluate_rule(
+        articles, [_pair(1, 3, "HOLDOUT", title_jaccard=0.90)], "HOLDOUT", 0.50, 48, 2
+    )
+
+    assert metrics.precision == 1.0
+    assert metrics.recall == 1.0
 
 
 def test_tfidf_baseline_does_not_use_title_organization_guard() -> None:

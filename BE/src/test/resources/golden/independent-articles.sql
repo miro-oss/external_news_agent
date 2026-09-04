@@ -7,6 +7,11 @@
 -- The sentinel prevents SQL*Plus trimspool from removing source whitespace.
 -- 900 characters also fit SQL VARCHAR2(4000) with four-byte UTF-8 characters.
 -- Join chunks before JSON parsing; never truncate FULLTEXT to fixture fragments.
+-- Requires application-written KST-local collected_at/observed_at values:
+-- CollectionResultWriter explicitly supplies LocalDateTime.now(ApiTimeZone.ZONE)
+-- for both fields; IssueClusteringLoader interprets them in the same Asia/Seoul zone.
+-- TIMESTAMP columns do not retain writer/default provenance. Audit imported or
+-- DEFAULT SYSTIMESTAMP rows before using this query; do not assume DB time is KST.
 whenever sqlerror exit failure rollback
 set pagesize 0 feedback off heading off verify off echo off trimspool on
 set linesize 32767 long 1000000 longchunksize 32767

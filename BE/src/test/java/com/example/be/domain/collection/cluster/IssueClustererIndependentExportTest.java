@@ -11,8 +11,10 @@ import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
@@ -91,7 +93,7 @@ class IssueClustererIndependentExportTest {
             Files.createDirectories(outputPath.getParent());
         }
         Files.writeString(outputPath, MAPPER.writerWithDefaultPrettyPrinter()
-                .writeValueAsString(output) + System.lineSeparator());
+                .writeValueAsString(output) + System.lineSeparator(), StandardOpenOption.CREATE_NEW);
     }
 
     private RatioEvaluation evaluate(Dataset dataset, double ratio) {
@@ -105,8 +107,8 @@ class IssueClustererIndependentExportTest {
                     .filter(article -> article.split().equals(split)).toList();
             IssueClusteringProperties properties = new IssueClusteringProperties();
             properties.setCommonEntityDocumentRatio(ratio);
-            ClusterPlan plan = new IssueClusterer(properties, new BreakingNewsDetector())
-                    .cluster(articles.stream().map(GoldenArticle::article).toList(), true);
+            IssueClusterer clusterer = new IssueClusterer(properties, new BreakingNewsDetector());
+            ClusterPlan plan = clusterer.cluster(articles.stream().map(GoldenArticle::article).toList(), true);
             Map<Long, Long> issueRepresentativeByArticle = new HashMap<>();
             plan.issues().forEach(issue -> issue.articleIds().forEach(articleId ->
                     issueRepresentativeByArticle.put(articleId, issue.representativeArticleId())));
@@ -130,8 +132,7 @@ class IssueClustererIndependentExportTest {
                 value.put("sourceId", article.sourceId());
                 value.put("topicId", article.topicId());
                 value.put("title", article.title());
-                value.put("titleOrganizations", new DeterministicEntityExtractor()
-                        .extractTitleOrganizations(new BreakingNewsDetector().coreTitle(article.title()))
+                value.put("titleOrganizations", clusterer.titleOrganizations(article.title())
                         .stream().sorted().toList());
                 value.put("expectedIssueId", source.expectedIssueId());
                 value.put("split", source.split());
@@ -376,6 +377,46 @@ class IssueClustererIndependentExportTest {
                 }
             }
         }
+    }
+
+    @Test
+    void exportsContentGroupsAndRepresentativesWithinEachSplit(@TempDir Path directory) throws IOException {
+        ObjectNode input = syntheticInput();
+        String body = "A synthetic report describes a laboratory experiment with detailed observations. ".repeat(5);
+        for (int index : List.of(0, 1, 40, 41)) {
+            articleAt(input, index).put("body", body);
+            articleAt(input, index).put("fetchStatus", "FULLTEXT");
+        }
+        Path output = directory.resolve("content-groups.json");
+        export(MAPPER.writeValueAsBytes(input), output);
+        JsonNode result = MAPPER.readTree(Files.readAllBytes(output));
+        Map<Long, JsonNode> articlesById = new HashMap<>();
+        result.path("articles").forEach(article -> articlesById.put(article.path("articleId").asLong(), article));
+        for (long representativeId : List.of(1L, 41L)) {
+            JsonNode representative = articlesById.get(representativeId);
+            String groupId = representative.path("fixedContentGroupId").asString();
+            assertFalse(groupId.isBlank());
+            for (long articleId : List.of(representativeId, representativeId + 1)) {
+                JsonNode article = articlesById.get(articleId);
+                assertEquals(groupId, article.path("fixedContentGroupId").asString());
+                assertEquals(representativeId, article.path("fixedContentGroupRepresentativeId").asLong());
+                assertEquals(representative.path("split").asString(), article.path("split").asString());
+            }
+        }
+        assertFalse(articlesById.get(1L).path("fixedContentGroupId").asString()
+                .equals(articlesById.get(41L).path("fixedContentGroupId").asString()));
+        assertEquals(4, articlesById.values().stream()
+                .filter(article -> !article.path("fixedContentGroupId").isNull()).count());
+    }
+
+    @Test
+    void neverOverwritesExistingFeatureOutput(@TempDir Path directory) throws IOException {
+        Path output = directory.resolve("pairs.json");
+        String original = "Previously exported evaluation features must remain immutable.";
+        Files.writeString(output, original);
+        assertThrows(FileAlreadyExistsException.class,
+                () -> export(MAPPER.writeValueAsBytes(syntheticInput()), output));
+        assertEquals(original, Files.readString(output));
     }
 
     @Test
