@@ -151,7 +151,8 @@ P1-7 자기 검증도 새 엔드포인트를 만들지 않고 `/v1/analyze`를 �
 P1-5부터 기사 하나의 검증 대상 bullet을 `claims[]` 한 요청으로 묶습니다. 분석 응답은 최대 16개
 section × 3개 bullet로 제한되어 배치 상한 50건 안에 들어옵니다. `claimId`는 요청 안에서
 유일하며 응답 `results[]`가 같은 ID를 정확히 한 번씩 반환합니다. 규칙으로 확정하지 못한 주장만
-한 번의 provider 구조화 출력에 묶으므로 기사당 검증 HTTP 요청은 1회입니다. 다만 schema repair나
+한 번의 provider 구조화 출력에 묶으므로 기사당 검증 HTTP 요청은 최대 1회입니다. 비LLM 결과,
+검증 대상 없음 또는 quota 부족이면 HTTP 요청 없이 처리합니다. 다만 schema repair나
 provider 재시도가 발생하면 실제 provider 시도는 늘어날 수 있습니다. 층별 책임은
 [예산·재시도·실패 경계](../AGENT_BOUNDARIES.md#5-예산재시도실패-책임)를 따릅니다.
 

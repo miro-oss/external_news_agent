@@ -4,7 +4,8 @@
 
 Spring이 업무 상태·실행·예산을 소유하고, Python은 전달받은 입력에서 판단 결과를 반환한다.
 현재도 `AgentClient`가 FastAPI를 HTTP로 호출한다. M13은 이 경계의 실제 구현과 교체 조건을
-기록하는 문서화 작업이다. 런타임·제품 API·DB 스키마를 변경하지 않는다.
+기록한다. PR #161 후속 리뷰에서 발견한 조사 실패 복구의 quota 정산 오류도 함께 보정한다.
+제품 API와 DB 스키마는 변경하지 않는다.
 
 ## 1. 적용 범위와 정본
 
@@ -87,6 +88,9 @@ provider 캐시, plan별 semaphore·circuit breaker·pacing 상태는 프로세�
 `GET /v1/health`는 별도 인증 없는 헬스 체크이며 판단 호출이 아니다.
 `SELF_CRITIQUE`와 `INVESTIGATE`는 Spring 감사 구분이다. 별도 `/v1/self-critique`나
 `/v1/investigate` 엔드포인트는 없다.
+`AgentTask.EXPLORE`는 enum과 기존 DB 제약에 남아 있는 미사용 값이다. 현재 `/v1/explore` 호출은
+반드시 `INVESTIGATE`로 예약·감사한다. 조사 예산·사용량 집계가 이 task를 기준으로 하므로
+경로 이름을 보고 `EXPLORE`로 바꾸면 조사 상한에서 누락된다.
 
 교체 구현이 유지해야 하는 사항:
 
@@ -104,7 +108,7 @@ provider 캐시, plan별 semaphore·circuit breaker·pacing 상태는 프로세�
    `inputTokens`, `outputTokens`, `costUsd`, `credits`, `mock`, `truncated`를 전달한다.
    Spring의 도메인 검증을 우회하지 않는다. Mock/Stub을 실제 LLM 성공으로 기록하지 않고
    `truncated` 표시를 보존한다. 현재 분석 캐시는 입력 잘림 여부를 보존해 재사용하며,
-   인사이트는 잘린 응답을 거절한다. task별 정책을 동일하게 취급하지 않는다.
+   인사이트와 키워드 전략은 잘린 응답을 거절한다. task별 정책을 동일하게 취급하지 않는다.
 5. **오류**: 정의된 Agent/입력 검증/예상 밖 오류 handler는 `{error:{code,message,details}}`를 반환한다.
    입력 오류는 `422 SCHEMA_VIOLATION`, 예상 밖 오류는 `500 INTERNAL_ERROR`다.
    기본 FastAPI 404/405까지 같은 형식이라는 보장은 없다. [AgentErrorResponse](BE/src/main/java/com/example/be/domain/analysis/agent/dto/AgentErrorResponse.java)의
@@ -115,6 +119,28 @@ provider 캐시, plan별 semaphore·circuit breaker·pacing 상태는 프로세�
    [application.yml](BE/src/main/resources/application.yml), [AgentProperties](BE/src/main/java/com/example/be/domain/analysis/agent/config/AgentProperties.java),
    [Python Settings](agent/app/core/config.py)를 함께 확인한다. provider timeout은 별개이며
    pacing·재시도·repair가 전체 시간을 늘릴 수 있다. Spring read timeout은 provider 작업 취소를 보장하지 않는다.
+
+현재 내부 오류 handler가 반환하는 HTTP 상태와 코드 조합은 다음과 같다.
+
+| HTTP | `error.code` | 원인 / 코드 근거 |
+|---|---|---|
+| 401 | `UNAUTHORIZED` | [security.py](agent/app/core/security.py)의 토큰 미설정·누락·불일치 |
+| 413 | `INPUT_TOO_LARGE` | [evidence_service.py](agent/app/llm/evidence_service.py)의 근거 검증 입력 한도 |
+| 422 | `SCHEMA_VIOLATION` | [main.py](agent/app/main.py)의 요청 스키마 검증 |
+| 429 | `BUDGET_EXCEEDED` | [guarded_provider.py](agent/app/llm/guarded_provider.py)의 응답 후 credits hard cap 초과 |
+| 429 | `PROVIDER_UNAVAILABLE` | [explore_service.py](agent/app/llm/explore_service.py)의 PAID PydanticAI upstream 429 |
+| 502 | `SCHEMA_VIOLATION` | [structured_call.py](agent/app/llm/structured_call.py)의 최종 출력 검증 실패, PAID Explore 출력 위반 |
+| 503 | `API_KEY_MISSING` | [router.py](agent/app/llm/router.py)의 provider 필수 설정 누락 |
+| 503 | `PROVIDER_UNAVAILABLE` | Gemini/일반 Mindlogic 오류, 동시성·서킷 차단, PAID Explore의 기타 provider 오류 |
+| 500 | `INTERNAL_ERROR` | 예상 밖 예외·보고서 응답 조립 실패 |
+
+`SCHEMA_VIOLATION`은 요청 위반(422)과 provider 출력 위반(502)에 모두 쓰인다. Gemini의
+upstream 429도 내부 HTTP 응답은 503이고 `details.rateLimited=true`로 구분한다. 일반 Mindlogic의
+upstream 429는 503으로 변환되며 이 표시가 없어 공통 rate-limit 재시도 대상이 아니다.
+프록시/어댑터는 HTTP 상태만으로 POST를 재시도하지 않는다. 특히 `429 BUDGET_EXCEEDED`는
+이미 provider 호출 후 발생한다. 오류 본문을 해석하지 못하면 Spring은 401을 `UNAUTHORIZED`,
+그 외는 `AGENT_HTTP_<status>`로 기록한다. 후자는 quota 해제 목록에 없어 소비 처리되므로
+HTTP 상태와 오류 본문·usage를 함께 보존해야 한다.
 
 `meta.costUsd=0`만으로 실비 무료라고 판단하지 않는다. 현재 Gemini 어댑터는 비용·credits를
 0으로 두며 `outputTokens`에는 candidate와 thinking 토큰을 합친다. Mindlogic은 관측된
@@ -154,8 +180,14 @@ sequenceDiagram
 
 Guard는 같은 run의 정규화 중복 질의, 비허용 소스, 이슈 밖 기사, 허용되지 않은 이력 엔티티·기간을
 거절한다. Executor는 검색 직전에도 소스의 활성 상태와 주제 연결을 다시 확인한다.
-원문 문장 수가 늘어난 것과 검증된 근거가 늘어난 것을 구분한다. 최대 3 step, 이슈/일 제한,
-조사 일일 예산 15%는 Spring이 적용한다. 기타 종료 상태는 `MAX_STEPS`, `BUDGET_LIMIT`, `REJECTED`, `FAILED`다.
+원문 문장 수가 늘어난 것과 검증된 근거가 늘어난 것을 구분한다. 최대 3 step, 이슈/일 제한과
+조사 예산은 Spring이 적용한다. `news.agent.investigation.daily-budget-percent`는 기본 15이며,
+상한은 FREE의 전체 일일 호출 한도 또는 PAID의 전체 일일 credits 한도에 이 비율을 곱한다.
+[application.yml](BE/src/main/resources/application.yml) 기본값에서 FREE는 1,500 × 15% = 225,
+PAID는 90 × 15% = 13.5 credits다. PAID의 기준액은 보고서 예약 20을 뺀 70이 아니며,
+별도의 `workBudget`·전체 일/월 quota 검사도 함께 통과해야 한다. 실제 허용 횟수는 진행 중 예약까지
+포함한 사용량과 요청당 예약량에 의해 결정된다.
+기타 종료 상태는 `MAX_STEPS`, `BUDGET_LIMIT`, `REJECTED`, `FAILED`다.
 보고서의 `investigation`에는 이 감사에서 만든 상태·사유·단계·기사/근거 증가량을 노출한다.
 
 멱등성과 복구의 보장 범위는 다음과 같다.
@@ -165,10 +197,15 @@ Guard는 같은 run의 정규화 중복 질의, 비허용 소스, 이슈 밖 기
 - 조사 quota 예약 직후, in-flight 기록 전에 중단됐다면 기존 active 예약을 재사용할 수 있다.
   step 실행권은 DB의 `markInFlight` CAS로 획득한다.
 - in-flight step에 완료 감사가 있으면 Spring이 그 감사에서 정산·step 상태를 복원한다.
+  실패 감사의 `failureCode`뿐 아니라 `timeoutPhase`와 관측 usage도 정산에 전달한다.
+  `PROVIDER_UNAVAILABLE`라도 `READ`이면 예약량을 소비하며, 연결 실패는 기존 해제 정책을 유지한다.
   감사가 없으면 결과를 알 수 없으므로 예약을 보수적으로 정산하고 `FAILED`로 끝내며 재호출하지 않는다.
   네트워크 호출·외부 부작용·여러 DB 쓰기의 원자적 exactly-once 보장은 아니다.
 - 전체 run과 조사 step 복구는 다르다. [CollectionRunReaper](BE/src/main/java/com/example/be/domain/collection/service/command/CollectionRunReaper.java)는
-  기동 시 남은 run을 abort하는 **단일 Spring 인스턴스 전제**다. 분산 owner/heartbeat나 전체 run 자동 재개는 없다.
+  기본 활성화되며 기동 시 남은 run을 abort하는 **단일 Spring 인스턴스 전제**다.
+  `news.collection.reap-on-startup=false`이면 자동 정리를 하지 않아 유실 run은 수동 정리가 필요하다.
+  정리되지 않은 진행 중 run은 주제 충돌 검사로 다음 수집을 막을 수 있다.
+  이 설정을 끄는 것만으로 분산 owner/heartbeat나 전체 run 자동 재개가 구현되지는 않는다.
 - DAILY의 오래된 PENDING 예약은 저장 finding 기반 대체 보고서로 완료한다. 복구 시 LLM 호출을
   반복하지 않는다. 날짜/원본 run/선택 finding 보존은 [일일 보고서 문서](BE/DAILY_REPORTS.md)를 따른다.
 
@@ -178,13 +215,25 @@ Guard는 같은 run의 정규화 중복 질의, 비허용 소스, 이슈 밖 기
 |---|---|
 | Spring quota | 호출 전에 DB 예약으로 일/월 및 task 예산 검사. 성공·실패 뒤 정산하고 감사 보존 |
 | Spring `AgentClient` | 자체 POST 재시도 루프 없음. 연결 실패와 read timeout을 구분해 호출자에게 전달 |
-| Python 구조화 호출 | [structured_call.py](agent/app/llm/structured_call.py)의 schema repair 최대 1회. 자기 검증은 schema repair 0회, PAID Explore는 PydanticAI 자체 출력 retry 0회. 공통 provider 재시도는 별도 적용 |
+| Python 구조화 호출 | [structured_call.py](agent/app/llm/structured_call.py)의 schema repair는 `AGENT_SCHEMA_REPAIR_ATTEMPTS`(허용 0~1, 기본 1). 자기 검증은 설정과 무관하게 schema repair 0회, PAID Explore는 PydanticAI 자체 출력 retry 0회. 공통 provider 재시도는 별도 적용 |
 | Python provider 보호 | [guarded_provider.py](agent/app/llm/guarded_provider.py)의 동시성·서킷·응답 후 hard cap, [rate_limit_provider.py](agent/app/llm/rate_limit_provider.py)의 pacing·명시적인 재시도 가능 rate-limit 오류 처리 |
 | provider별 처리 | [Gemini](agent/app/llm/gemini_provider.py)의 ServerError 재시도는 별도. 일반 [Mindlogic](agent/app/llm/mindlogic_provider.py) 429와 [PAID Explore](agent/app/llm/explore_service.py) 429의 오류 매핑은 같지 않음 |
 
 따라서 “Python은 repair만 수행한다”, “모든 429를 재시도한다”, “Agent HTTP 한 번이면 provider도
 한 번이다”는 모두 일반 규칙으로 쓸 수 없다. HTTP 어댑터나 프록시에 자동 POST 재시도를 추가하면
 내부 재시도와 겹쳐 비용·시간이 늘고 결과 불명 요청이 반복될 수 있다.
+
+앱 코드가 명시적으로 시도하는 횟수의 상한은 설정에 따라 계산한다. `S`는 schema repair 횟수
+(`AGENT_SCHEMA_REPAIR_ATTEMPTS`, 0~1, 기본 1), `R`은 공통 rate-limit 재시도 횟수
+(`AGENT_RATE_LIMIT_RETRY_ATTEMPTS`, 0~3, 기본 2), `P`는 Gemini ServerError 재시도 횟수
+(`AGENT_PROVIDER_RETRY_ATTEMPTS`, 0~3, 기본 1)다. schema·rate-limit 두 층의 상한은
+`(1 + S) × (1 + R)`로 기본 6회지만, Gemini의 앱 코드 `generate_content` 호출은
+`(1 + S) × (1 + R) × (1 + P)`까지 늘어 **기본 최대 12회**다. 자기 검증은 `S=0`이므로
+기본 최대 6회, PAID Explore는 schema repair·Gemini 재시도가 없어 기본 최대 3회다.
+일반 Mindlogic 구조화 경로는 upstream 429를 재시도 가능 표시 없이 변환하므로 현재 명시적 시도는
+`1 + S`(기본 최대 2회)다. 규칙만으로 끝나거나 quota·서킷이 차단하면 실제 provider 시도는 0회일 수 있다.
+이 값은 각 재시도 조건을 순서대로 만족하는 최악 경로의 상한이며, 매 호출의 과금 횟수나
+SDK 내부 재시도까지 포함한 네트워크 전송 상한을 뜻하지 않는다.
 
 Python hard cap은 응답의 실제 사용량을 받은 **뒤** 초과를 검출하는 2차 방어다. 이미 발생한
 provider 비용을 되돌리거나 Spring의 durable 예약을 대신하지 않는다. 현재 quota 실패 처리는
@@ -195,6 +244,10 @@ provider 비용을 되돌리거나 Spring의 durable 예약을 대신하지 않�
   이는 애플리케이션 quota 정책이며 실제 provider가 과금하지 않았다는 증명은 아니다.
 - `BUDGET_EXCEEDED`에 실제 credits가 있으면 관측 사용량 정산 경로로 보낸다. 기타 실패는
   예약량 소비가 기본이다. usage 누락·실제 사용량이 예약 상한을 넘는 경우도 감사와 함께 처리한다.
+- `UNAUTHORIZED`도 예약량 소비 대상이다. 정상 Spring 기동에서는 활성 Agent의 빈 토큰을
+  `AgentProperties.afterPropertiesSet`이 거절하지만, 양쪽의 비어 있지 않은 토큰이 다르거나
+  대상 Python의 토큰이 미설정이면 호출 시 401이 발생할 수 있다. 이때 LLM 미호출이어도
+  quota는 소비된다. 인증 오류를 반복 호출로 확인하지 말고 §6의 연결 검증에서 차단한다.
 - rule-only 근거 검증/자기 검증은 해당 task의 provider 미호출 계약을 검사한 뒤 0으로 정산한다.
 
 대체 처리도 Spring 도메인별로 결정한다. 분석 비활성화·예산 부족·실패에는 Stub을 사용하고,
@@ -224,11 +277,16 @@ plan을 바꾸지 않는다. 자기 검증 실패는 최초 검증 결과를 유
    Java/Pydantic 입력·출력과 관련 테스트를 함께 변경할 범위를 확정한다.
 2. 위 표에서 교체할 경계를 고르고 입력 snapshot·결과·오류·usage·timeout 변환을 구현한다.
    상태·실행권·quota·감사는 기존 Spring 서비스에 남긴다. 수집 서비스 분리는 별도 부작용 계약이 필요하다.
+   `news.agent.enabled=true`에서 base URL이 HTTPS 또는 허용된 loopback HTTP가 아니면
+   `AgentClient` 생성자 검증으로 **Spring 컨텍스트 초기화가 실패**한다. 사내 호스트도 예외가 아니다.
+   활성 Spring의 빈 토큰도 기동 실패 조건이다. URL과 양쪽 토큰 설정은 교체 전에 확인한다.
 3. 비밀값 없이 준비된 fixture/Mock으로 §7의 계약 검증을 수행한다. 근거 번호, 오류 사용량,
    거절된 제안 미실행, 결과 불명 step 미재호출을 함께 확인한다.
 4. 호환된 구현을 연결하고 실패/복구를 확인한다. 같은 snapshot을 새 구현과 비교할 때도
    실제 수집·provider 호출을 양쪽에서 중복 실행하지 않는다. LLM 모델 변경의 품질·실비 측정은
    계약 테스트 결과와 분리해 기록한다.
+   인증 없는 `/v1/health` 성공만으로 연결 검증을 끝내지 않는다. fixture/Mock의 인증된 POST와
+   토큰 불일치 401을 확인하고, 401이 Spring의 예약 소비로 연결됨을 검사한 뒤 실제 호출을 허용한다.
 5. 문제가 있으면 기존 endpoint/구현으로 되돌린다. 저장된 감사·조사 상태를 지우거나
    idempotencyKey를 바꿔 결과 불명 호출을 다시 보내는 것을 rollback으로 사용하지 않는다.
 
@@ -258,11 +316,14 @@ plan을 바꾸지 않는다. 자기 검증 실패는 최초 검증 결과를 유
 | `AgentClientTest`, Python `test_api.py` | 인증·내부 JSON·오류 usage·HTTPS·timeout 변환 |
 | `AgentQuotaServiceTest`, `test_guarded_provider.py`, `test_router.py` | Spring 예약/정산과 Python process-local 보호 분리 |
 | `IssueInvestigation*Test`, `test_explore_service.py` | 허용/중복 가드, 신규 근거 기준, 최대 step·예산 종료, 중단 후 미재호출 |
+| [IssueInvestigationQuotaRecoveryTest](BE/src/test/java/com/example/be/domain/analysis/agent/investigation/IssueInvestigationQuotaRecoveryTest.java) | 실제 quota service를 통한 READ 예약 소비·CONNECT 해제·예산 초과 관측 사용량 정산, 실시간/복구 정책 일치, Agent 미재호출 |
 | 분석·근거·보고서·인사이트·키워드 테스트 | snapshot·검증 결과·대체 정책·기존 키워드 보존 |
 | Reaper·DAILY 복구 테스트 | 전체 run abort와 저장 근거 기반 보고서 복구의 차이 |
 
-2026-09-04 검증 결과: 위 BE 테스트 **110개**, Agent 테스트 **143개** 통과(실패·skip 0).
-문서의 로컬 파일/디렉터리 링크와 README 연결도 확인했다. 신규 런타임 코드가 없으므로
+2026-09-04 PR 리뷰 반영 검증: 위 BE 테스트 **123개**, Agent 테스트 **143개** 통과(실패·skip 0).
+BE에는 조사 quota 복구/실시간 정산 회귀 13개를 추가했다. 기존 코드에서 READ timeout 복구와
+예산 초과의 관측 credits 복구 3개 실패를 재현한 뒤 수정했다. 최초 문서화 검증은 BE 110개였다.
+Python 변경 파일 Ruff와 문서 로컬 링크·앵커도 확인했다.
 실제 provider 호출·Oracle 데이터 변경·브라우저 검증은 수행하지 않았다.
 
 M13 완료는 현재 소유권·HTTP 교체 조건·복구 한계를 문서화하고 위 검증을 통과했다는 뜻이다.
