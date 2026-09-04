@@ -13,6 +13,7 @@ _JACCARD_THRESHOLDS = tuple(round(0.40 + step * 0.05, 2) for step in range(8))
 _TIME_WINDOWS = (24, 48, 72)
 _ORGANIZATION_JACCARD_THRESHOLDS = (0.10, 0.125, 0.15, 0.20)
 _ORGANIZATION_TIME_WINDOWS = (12, 24, 48)
+_TITLE_ORGANIZATION_RULE_VERSION = "title-organization-conflict-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,8 +35,17 @@ class Candidate:
 
 
 class UnionFind:
-    def __init__(self, values: list[int]) -> None:
+    def __init__(
+        self,
+        values: list[int],
+        title_organizations: dict[int, frozenset[str]] | None = None,
+    ) -> None:
         self.parents = {value: value for value in values}
+        organizations = title_organizations or {}
+        self.organization_profiles = {
+            value: {organizations[value]} if organizations.get(value) else set()
+            for value in values
+        }
 
     def root(self, value: int) -> int:
         parent = self.parents[value]
@@ -49,10 +59,50 @@ class UnionFind:
         left_root = self.root(left)
         right_root = self.root(right)
         if left_root != right_root:
-            self.parents[max(left_root, right_root)] = min(left_root, right_root)
+            kept_root = min(left_root, right_root)
+            merged_root = max(left_root, right_root)
+            self.parents[merged_root] = kept_root
+            self.organization_profiles[kept_root].update(
+                self.organization_profiles.pop(merged_root)
+            )
+
+    def can_join(self, left: int, right: int) -> bool:
+        left_root = self.root(left)
+        right_root = self.root(right)
+        if left_root == right_root:
+            return True
+        return all(
+            not left_organizations.isdisjoint(right_organizations)
+            for left_organizations in self.organization_profiles[left_root]
+            for right_organizations in self.organization_profiles[right_root]
+        )
+
+
+def validate_clustering_metadata(java_output: dict[str, Any]) -> None:
+    _validate_title_organizations(
+        java_output["articles"],
+        required=java_output.get("clusteringRuleVersion") == _TITLE_ORGANIZATION_RULE_VERSION,
+    )
+
+
+def _validate_title_organizations(
+    articles: list[dict[str, Any]], *, required: bool = False
+) -> None:
+    for article in articles:
+        if "titleOrganizations" not in article and not required:
+            continue
+        organizations = article.get("titleOrganizations")
+        if not isinstance(organizations, list) or any(
+            not isinstance(value, str) or not value.strip() for value in organizations
+        ):
+            raise ValueError(
+                f"Article {article.get('articleId')} titleOrganizations must be a list "
+                "of nonempty strings (an empty list is allowed)"
+            )
 
 
 def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
+    validate_clustering_metadata(java_output)
     articles = java_output["articles"]
     entity_overlap_threshold = int(java_output["configuredEntityOverlapThreshold"])
     configured_ratio = float(java_output["configuredCommonEntityDocumentRatio"])
@@ -194,6 +244,7 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         }
     return {
         "datasetVersion": java_output["datasetVersion"],
+        "clusteringRuleVersion": java_output.get("clusteringRuleVersion", "legacy"),
         "articleCount": java_output["articleCount"],
         "bodySource": java_output.get("bodySource", "unspecified"),
         "selectionSplit": "CALIBRATION",
@@ -263,7 +314,16 @@ def _evaluate_rule(
         topic_id: set(union.parents) & selected_ids for topic_id, union in unions.items()
     }
 
-    for pair in pairs:
+    # The conflict guard is component-dependent: match Java's ascending article-id
+    # traversal even when an exported pair list arrives in another order.
+    for pair in sorted(
+        pairs,
+        key=lambda pair: (
+            int(pair["topicId"]),
+            min(int(pair["leftArticleId"]), int(pair["rightArticleId"])),
+            max(int(pair["leftArticleId"]), int(pair["rightArticleId"])),
+        ),
+    ):
         left = int(pair["leftArticleId"])
         right = int(pair["rightArticleId"])
         topic_id = int(pair["topicId"])
@@ -293,7 +353,7 @@ def _evaluate_rule(
                     and hours_apart <= organization_time_window_hours
                 )
             )
-        if matches:
+        if matches and unions[topic_id].can_join(left, right):
             unions[topic_id].join(left, right)
     expected = [f"{article['topicId']}:{article['expectedIssueId']}" for article in selected]
     predicted = [
@@ -315,7 +375,14 @@ def _selected_ids_by_topic(
 def _topic_unions(
     selected: list[dict[str, Any]], include_fixed_content_groups: bool
 ) -> dict[int, UnionFind]:
+    _validate_title_organizations(selected)
     selected_ids_by_topic = _selected_ids_by_topic(selected)
+    # Include all selected topics so a global content representative retains its
+    # title organization profile when it votes as a proxy in another topic.
+    title_organizations = {
+        int(article["articleId"]): frozenset(article.get("titleOrganizations") or [])
+        for article in selected
+    }
     representative_by_group: dict[str, int] = {}
     for article in selected:
         group_id = article.get("fixedContentGroupId")
@@ -335,7 +402,7 @@ def _topic_unions(
             for article in topic_articles
             if include_fixed_content_groups and article.get("fixedContentGroupId") is not None
         }
-        union = UnionFind(sorted(article_ids | proxy_ids))
+        union = UnionFind(sorted(article_ids | proxy_ids), title_organizations)
         if include_fixed_content_groups:
             for article in topic_articles:
                 group_id = article.get("fixedContentGroupId")

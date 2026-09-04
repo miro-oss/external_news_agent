@@ -68,6 +68,7 @@ class IssueClustererRealGoldenExportTest {
 
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("datasetVersion", dataset.datasetVersion());
+        output.put("clusteringRuleVersion", "title-organization-conflict-v1");
         output.put("articleCount", articles.size());
         output.put("postHocRelabeledSourceArticleIds",
                 dataset.postHocRelabeledSourceArticleIds());
@@ -128,6 +129,9 @@ class IssueClustererRealGoldenExportTest {
             value.put("sourceArticleId", source.sourceArticleId());
             value.put("topicId", clustered.topicId());
             value.put("title", clustered.title());
+            value.put("titleOrganizations", new DeterministicEntityExtractor()
+                    .extractTitleOrganizations(new BreakingNewsDetector().coreTitle(clustered.title()))
+                    .stream().sorted().toList());
             value.put("expectedIssueId", source.expectedIssueId());
             value.put("split", source.split());
             value.put("fixedContentGroupId",

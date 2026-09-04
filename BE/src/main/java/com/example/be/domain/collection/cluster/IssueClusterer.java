@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -167,8 +168,25 @@ public class IssueClusterer {
             }
         }
         List<ClusterArticle> unique = List.copyOf(byId.values());
-        UnionFind union = new UnionFind(byId.keySet());
 
+        Map<Long, Set<String>> titleTokens = new HashMap<>();
+        Map<Long, Set<String>> entities = new HashMap<>();
+        Map<Long, Set<String>> organizations = new HashMap<>();
+        Map<Long, Set<String>> titleOrganizations = new HashMap<>();
+        unique.forEach(article -> {
+            String coreTitle = breakingNewsDetector.coreTitle(article.title());
+            titleTokens.put(article.articleId(), TitleTokenizer.tokens(coreTitle));
+            titleOrganizations.put(article.articleId(), entityExtractor.extractTitleOrganizations(coreTitle));
+            DeterministicEntityExtractor.Extraction extraction = entityExtractor.extractWithOrganizations(
+                    coreTitle, article.summary(),
+                    ArticleBodyCleaner.withoutTrailingBoilerplate(article.body()),
+                    article.topicKeywords());
+            organizations.put(article.articleId(), extraction.organizations());
+            entities.put(article.articleId(), extraction.entities());
+        });
+
+        UnionFind union = new UnionFind(byId.keySet(), titleOrganizations);
+        // 저장된 멤버십과 동일 본문은 보존한다. 새 규칙 간선에만 조직 충돌 방어를 적용한다.
         Map<Long, List<ClusterArticle>> byExistingIssue = unique.stream()
                 .filter(article -> article.existingIssueId() != null)
                 .collect(Collectors.groupingBy(ClusterArticle::existingIssueId));
@@ -179,24 +197,11 @@ public class IssueClusterer {
                         article -> contentGrouping.contentKeyByArticle().get(article.articleId())));
         byContent.values().forEach(component -> joinAll(union, component));
 
-        Map<Long, Set<String>> titleTokens = new HashMap<>();
-        Map<Long, Set<String>> entities = new HashMap<>();
-        Map<Long, Set<String>> organizations = new HashMap<>();
-        unique.forEach(article -> {
-            String coreTitle = breakingNewsDetector.coreTitle(article.title());
-            titleTokens.put(article.articleId(), TitleTokenizer.tokens(coreTitle));
-            DeterministicEntityExtractor.Extraction extraction = entityExtractor.extractWithOrganizations(
-                    coreTitle, article.summary(),
-                    ArticleBodyCleaner.withoutTrailingBoilerplate(article.body()),
-                    article.topicKeywords());
-            organizations.put(article.articleId(), extraction.organizations());
-            entities.put(article.articleId(), extraction.entities());
-        });
-
         // 같은 본문 중복군에서는 대표만 사건 유사도 투표에 참여한다.
         List<ClusterArticle> voting = unique.stream()
                 .filter(article -> contentGrouping.representativeByArticle().get(article.articleId())
                         .equals(article.articleId()))
+                .sorted(Comparator.comparingLong(ClusterArticle::articleId))
                 .toList();
         Set<String> commonEntities = commonEntities(voting, entities);
         Set<String> commonOrganizations = commonOrganizations(voting, organizations);
@@ -223,7 +228,8 @@ public class IssueClusterer {
                         && jaccard >= properties.getOrganizationTitleJaccardThreshold();
                 boolean matches = matchesIssue(
                         first, second, breakingPair,
-                        titleMatches, enoughEntities, organizationTitleMatches);
+                        titleMatches, enoughEntities, organizationTitleMatches)
+                        && union.canJoin(first.articleId(), second.articleId());
                 if (matches) {
                     union.join(first.articleId(), second.articleId());
                 }
@@ -430,9 +436,22 @@ public class IssueClusterer {
     private static final class UnionFind {
 
         private final Map<Long, Long> parents = new HashMap<>();
+        private final Map<Long, Set<Set<String>>> organizationProfiles = new HashMap<>();
 
         private UnionFind(Collection<Long> values) {
-            values.forEach(value -> parents.put(value, value));
+            this(values, Map.of());
+        }
+
+        private UnionFind(Collection<Long> values, Map<Long, Set<String>> titleOrganizations) {
+            values.forEach(value -> {
+                parents.put(value, value);
+                Set<Set<String>> profiles = new HashSet<>();
+                Set<String> organizations = titleOrganizations.getOrDefault(value, Set.of());
+                if (!organizations.isEmpty()) {
+                    profiles.add(Set.copyOf(organizations));
+                }
+                organizationProfiles.put(value, profiles);
+            });
         }
 
         private long root(long value) {
@@ -446,11 +465,31 @@ public class IssueClusterer {
             return root;
         }
 
+        /** 조직 미상·복수 조직 기사가 서로 다른 업체 사이에 전이 경로를 만들지 못하게 한다. */
+        private boolean canJoin(long left, long right) {
+            long leftRoot = root(left);
+            long rightRoot = root(right);
+            if (leftRoot == rightRoot) {
+                return true;
+            }
+            for (Set<String> leftProfile : organizationProfiles.get(leftRoot)) {
+                for (Set<String> rightProfile : organizationProfiles.get(rightRoot)) {
+                    if (Collections.disjoint(leftProfile, rightProfile)) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
         private void join(long left, long right) {
             long leftRoot = root(left);
             long rightRoot = root(right);
             if (leftRoot != rightRoot) {
-                parents.put(Math.max(leftRoot, rightRoot), Math.min(leftRoot, rightRoot));
+                long retained = Math.min(leftRoot, rightRoot);
+                long removed = Math.max(leftRoot, rightRoot);
+                parents.put(removed, retained);
+                organizationProfiles.get(retained).addAll(organizationProfiles.remove(removed));
             }
         }
     }

@@ -105,6 +105,9 @@ class IssueClustererGoldenExportTest {
             value.put("articleId", clustered.articleId());
             value.put("topicId", clustered.topicId());
             value.put("title", clustered.title());
+            value.put("titleOrganizations", new DeterministicEntityExtractor()
+                    .extractTitleOrganizations(breakingNewsDetector.coreTitle(clustered.title()))
+                    .stream().sorted().toList());
             value.put("expectedIssueId", article.issueKey());
             value.put("split", article.split());
             value.put("predictedClusterId", predictedClusterByArticle.get(clustered.articleId()));
@@ -113,6 +116,7 @@ class IssueClustererGoldenExportTest {
 
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("datasetVersion", dataset.datasetVersion());
+        output.put("clusteringRuleVersion", "title-organization-conflict-v1");
         output.put("articleCount", goldenArticles.size());
         output.put("configuredTitleJaccardThreshold", properties.getTitleJaccardThreshold());
         output.put("configuredEntityTimeWindowHours", properties.getEntityTimeWindow().toHours());

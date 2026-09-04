@@ -42,6 +42,11 @@ public final class DeterministicEntityExtractor {
 
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private static final Map<String, List<String>> ORGANIZATION_ALIASES = organizationAliases();
+    /** 충돌 판정 전용이다. 이 별칭만으로 긍정 병합 근거를 추가하지 않는다. */
+    private static final Map<String, List<String>> TITLE_CONFLICT_ALIASES = Map.of(
+            "한화세미텍", List.of("한화세미텍", "hanwha semitech"),
+            "디엠에스", List.of("디엠에스", "dms"),
+            "한미반도체", List.of("한미반도체", "hanmi semiconductor"));
     private static final List<String> KOREAN_POSTPOSITIONS = List.of(
             "으로부터", "에게서", "이라도", "에서", "에게", "으로", "처럼", "보다", "까지", "부터",
             "은", "는", "이", "가", "을", "를", "과", "와", "의", "도", "만", "에", "로");
@@ -140,6 +145,19 @@ public final class DeterministicEntityExtractor {
         collectOrganizations(
                 normalize(String.join("\n", nullToEmpty(title), nullToEmpty(summary))),
                 organizations);
+        return Collections.unmodifiableSet(organizations);
+    }
+
+    /** 제목에 명시된 조직만 비교한다. 요약·본문의 배경 언급은 제목 간 충돌을 해소하지 않는다. */
+    Set<String> extractTitleOrganizations(String title) {
+        String normalized = normalize(nullToEmpty(title));
+        Set<String> organizations = new LinkedHashSet<>();
+        collectOrganizations(normalized, organizations);
+        TITLE_CONFLICT_ALIASES.forEach((canonical, aliases) -> {
+            if (aliases.stream().anyMatch(alias -> containsAlias(normalized, alias))) {
+                organizations.add(canonical);
+            }
+        });
         return Collections.unmodifiableSet(organizations);
     }
 

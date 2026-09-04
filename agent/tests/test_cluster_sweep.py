@@ -1,4 +1,6 @@
-from app.eval.cluster_sweep import _evaluate_rule, _topic_unions, sweep
+import pytest
+
+from app.eval.cluster_sweep import _evaluate_rule, _evaluate_tfidf, _topic_unions, sweep
 
 
 def test_sweep_uses_exported_entity_threshold_and_calibrates_tfidf() -> None:
@@ -8,9 +10,12 @@ def test_sweep_uses_exported_entity_threshold_and_calibrates_tfidf() -> None:
         _article(3, "HOLDOUT", "bravo"),
         _article(4, "HOLDOUT", "zulu"),
     ]
+    for article in articles:
+        article["titleOrganizations"] = []
     result = sweep(
         {
             "datasetVersion": "test.v1",
+            "clusteringRuleVersion": "title-organization-conflict-v1",
             "articleCount": 4,
             "configuredEntityOverlapThreshold": 1,
             "configuredCommonEntityDocumentRatio": 0.10,
@@ -27,6 +32,7 @@ def test_sweep_uses_exported_entity_threshold_and_calibrates_tfidf() -> None:
     assert result["selected"]["metrics"]["recall"] == 1.0
     assert result["holdout"]["recall"] == 1.0
     assert result["decisionGatePassed"] is True
+    assert result["clusteringRuleVersion"] == "title-organization-conflict-v1"
     assert "calibrationMetrics" in result["tfidfCharWbBaseline"]
 
 
@@ -318,6 +324,159 @@ def test_sweep_requires_every_organization_corroboration_predicate() -> None:
     assert result["configured"]["calibrationMetrics"]["recall"] == 1.0
     assert result["configured"]["holdoutMetrics"]["recall"] == 1.0
     assert result["decisionGatePassed"] is True
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {},
+        {"titleOrganizations": None},
+        {"titleOrganizations": "Samsung"},
+        {"titleOrganizations": [""]},
+        {"titleOrganizations": [" "]},
+        {"titleOrganizations": ["Samsung", 1]},
+        {"titleOrganizations": [["Samsung"]]},
+    ],
+)
+def test_sweep_rejects_missing_or_malformed_versioned_title_organizations(
+    metadata: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="titleOrganizations must be a list of nonempty strings"):
+        sweep(
+            {
+                "clusteringRuleVersion": "title-organization-conflict-v1",
+                "articles": [{**_article(1, "HOLDOUT", "Report"), **metadata}],
+            }
+        )
+
+
+def test_direct_rule_replay_rejects_malformed_title_organizations() -> None:
+    article = _article(1, "HOLDOUT", "Report")
+    article["titleOrganizations"] = "Samsung"
+
+    with pytest.raises(ValueError, match="titleOrganizations"):
+        _evaluate_rule([article], [], "HOLDOUT", 0.50, 48, 2)
+
+
+@pytest.mark.parametrize("with_metadata", [False, True])
+def test_title_organization_conflict_blocks_direct_merge_only_with_metadata(
+    with_metadata: bool,
+) -> None:
+    articles = [
+        _article(1, "HOLDOUT", "Samsung exhibit announcement", "event-a"),
+        _article(2, "HOLDOUT", "SK Hynix exhibit announcement", "event-b"),
+    ]
+    if with_metadata:
+        articles[0]["titleOrganizations"] = ["Samsung"]
+        articles[1]["titleOrganizations"] = ["SK Hynix"]
+
+    metrics = _evaluate_rule(
+        articles, [_pair(1, 2, "HOLDOUT", title_jaccard=0.90)], "HOLDOUT", 0.50, 48, 2
+    )
+
+    assert metrics.precision == (1.0 if with_metadata else 0.0)
+
+
+@pytest.mark.parametrize("bridge_organizations", [[], ["Samsung", "SK Hynix"]])
+def test_title_organization_profiles_block_unknown_and_multi_organization_bridges(
+    bridge_organizations: list[str],
+) -> None:
+    articles = [
+        _article(1, "HOLDOUT", "Samsung exhibit announcement", "event-a"),
+        _article(2, "HOLDOUT", "Exhibit announcement coverage", "event-a"),
+        _article(3, "HOLDOUT", "SK Hynix exhibit announcement", "event-b"),
+    ]
+    articles[0]["titleOrganizations"] = ["Samsung"]
+    articles[1]["titleOrganizations"] = bridge_organizations
+    articles[2]["titleOrganizations"] = ["SK Hynix"]
+    # The input order must not choose the bridge's component before article 1 does.
+    pairs = [
+        _pair(2, 3, "HOLDOUT", title_jaccard=0.90),
+        _pair(1, 2, "HOLDOUT", title_jaccard=0.90),
+    ]
+
+    metrics = _evaluate_rule(list(reversed(articles)), pairs, "HOLDOUT", 0.50, 48, 2)
+
+    assert metrics.precision == 1.0
+    assert metrics.recall == 1.0
+
+
+def test_title_organization_metadata_keeps_canonical_alias_pair() -> None:
+    articles = [
+        _article(1, "HOLDOUT", "AMAT unveils memory process", "same-event"),
+        _article(2, "HOLDOUT", "어플라이드 메모리 공정 공개", "same-event"),
+    ]
+    for article in articles:
+        article["titleOrganizations"] = ["Applied Materials"]
+
+    matches = _evaluate_rule(
+        articles, [_pair(1, 2, "HOLDOUT", title_jaccard=0.50)], "HOLDOUT", 0.50, 48, 2
+    )
+    no_positive_evidence = _evaluate_rule(
+        articles, [_pair(1, 2, "HOLDOUT")], "HOLDOUT", 0.50, 48, 2
+    )
+
+    assert matches.recall == 1.0
+    assert no_positive_evidence.recall == 0.0
+
+
+def test_title_organization_guard_preserves_forced_groups_and_each_member_profile() -> None:
+    articles = [
+        _article(1, "HOLDOUT", "Samsung original report", "forced-event"),
+        _article(2, "HOLDOUT", "SK Hynix syndicated title", "forced-event"),
+        _article(3, "HOLDOUT", "Samsung separate report", "other-event"),
+    ]
+    articles[0]["titleOrganizations"] = ["Samsung"]
+    articles[1]["titleOrganizations"] = ["SK Hynix"]
+    articles[2]["titleOrganizations"] = ["Samsung"]
+    for article in articles[:2]:
+        article["fixedContentGroupId"] = "content-a"
+        article["fixedContentGroupRepresentativeId"] = 1
+
+    union = _topic_unions(articles, include_fixed_content_groups=True)[1]
+    metrics = _evaluate_rule(
+        articles, [_pair(1, 3, "HOLDOUT", title_jaccard=0.90)], "HOLDOUT", 0.50, 48, 2
+    )
+
+    assert union.root(1) == union.root(2)
+    assert union.can_join(1, 2) is True
+    assert union.can_join(1, 3) is False
+    assert metrics.precision == 1.0
+    assert metrics.recall == 1.0
+
+
+def test_title_organization_guard_retains_cross_topic_proxy_profile() -> None:
+    articles = [
+        _article(1, "HOLDOUT", "Samsung global representative", "event-a", topic_id=2),
+        _article(2, "HOLDOUT", "Local syndicated copy", "event-a"),
+        _article(3, "HOLDOUT", "SK Hynix separate report", "event-b"),
+    ]
+    articles[0]["titleOrganizations"] = ["Samsung"]
+    articles[1]["titleOrganizations"] = []
+    articles[2]["titleOrganizations"] = ["SK Hynix"]
+    for article in articles[:2]:
+        article["fixedContentGroupId"] = "content-a"
+        article["fixedContentGroupRepresentativeId"] = 1
+
+    metrics = _evaluate_rule(
+        articles, [_pair(1, 3, "HOLDOUT", title_jaccard=0.90)], "HOLDOUT", 0.50, 48, 2
+    )
+
+    assert metrics.precision == 1.0
+    assert metrics.adjusted_rand == 1.0
+
+
+def test_tfidf_baseline_does_not_use_title_organization_guard() -> None:
+    articles = [
+        _article(1, "HOLDOUT", "Identical exhibit announcement", "event-a"),
+        _article(2, "HOLDOUT", "Identical exhibit announcement", "event-b"),
+    ]
+    articles[0]["titleOrganizations"] = ["Samsung"]
+    articles[1]["titleOrganizations"] = ["SK Hynix"]
+
+    metrics = _evaluate_tfidf(articles, "HOLDOUT", 0.50, include_fixed_content_groups=True)
+
+    assert metrics.precision == 0.0
 
 
 def _article(

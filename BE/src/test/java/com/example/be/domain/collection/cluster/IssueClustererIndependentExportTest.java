@@ -65,6 +65,7 @@ class IssueClustererIndependentExportTest {
 
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("datasetVersion", dataset.version());
+        output.put("clusteringRuleVersion", "title-organization-conflict-v1");
         output.put("goldenSha256", sha256(goldenBytes));
         output.put("sourceRuns", dataset.sourceRuns());
         output.put("articleCount", dataset.articles().size());
@@ -106,6 +107,9 @@ class IssueClustererIndependentExportTest {
             properties.setCommonEntityDocumentRatio(ratio);
             ClusterPlan plan = new IssueClusterer(properties, new BreakingNewsDetector())
                     .cluster(articles.stream().map(GoldenArticle::article).toList(), true);
+            Map<Long, Long> issueRepresentativeByArticle = new HashMap<>();
+            plan.issues().forEach(issue -> issue.articleIds().forEach(articleId ->
+                    issueRepresentativeByArticle.put(articleId, issue.representativeArticleId())));
             Map<Long, String> contentGroupByArticle = new HashMap<>();
             Map<Long, Long> representativeByArticle = new HashMap<>();
             for (int index = 0; index < plan.contentGroups().size(); index++) {
@@ -126,11 +130,16 @@ class IssueClustererIndependentExportTest {
                 value.put("sourceId", article.sourceId());
                 value.put("topicId", article.topicId());
                 value.put("title", article.title());
+                value.put("titleOrganizations", new DeterministicEntityExtractor()
+                        .extractTitleOrganizations(new BreakingNewsDetector().coreTitle(article.title()))
+                        .stream().sorted().toList());
                 value.put("expectedIssueId", source.expectedIssueId());
                 value.put("split", source.split());
                 value.put("observedAt", article.observedAt() == null ? null : article.observedAt().toString());
                 value.put("fixedContentGroupId", contentGroupByArticle.get(article.articleId()));
                 value.put("fixedContentGroupRepresentativeId", representativeByArticle.get(article.articleId()));
+                // Actual Java membership supports regression inspection without reconstructing pair unions.
+                value.put("configuredIssueRepresentativeId", issueRepresentativeByArticle.get(article.articleId()));
                 exportedArticles.add(value);
             }
             plan.pairScores().forEach(score -> {
