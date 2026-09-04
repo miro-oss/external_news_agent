@@ -86,6 +86,20 @@ def _protocol() -> dict[str, Any]:
     }
 
 
+def _verify_protocol(saved: dict[str, Any], stage: str) -> None:
+    current = _protocol()
+    changed = sorted(
+        key for key in saved.keys() | current.keys()
+        if key not in saved or key not in current or saved[key] != current[key]
+    )
+    if changed:
+        raise ValueError(
+            f"{stage} protocol or evaluation code changed: {', '.join(changed)}. "
+            "Use the original code revision matching the recorded hashes; "
+            "do not edit the manifest/seal or reuse an exposed holdout."
+        )
+
+
 def _reject_prediction_keys(value: Any) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
@@ -183,8 +197,7 @@ def _verify_prepared(pack: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     ):
         if _sha(pack / name) != manifest[key]:
             raise ValueError(f"Prepared file changed: {name}")
-    if manifest["protocol"] != _protocol():
-        raise ValueError("Precommitted protocol or evaluation code changed")
+    _verify_protocol(manifest["protocol"], "Precommitted")
     snapshot = _read(pack / "snapshot.json")
     _validate_snapshot(snapshot)
     if manifest["datasetVersion"] != snapshot["datasetVersion"] or manifest["articleCount"] != len(
@@ -363,10 +376,20 @@ def _verify_java(golden: dict[str, Any], java: dict[str, Any], golden_hash: str)
                 or pair["split"] != expected[left]["split"]
             ):
                 raise ValueError("Java pair topic/split differs from sealed articles")
-            for field in ("hoursApart", "titleJaccard", "entityOverlap", "organizationOverlap"):
+            for field in ("hoursApart", "titleJaccard"):
                 value = pair.get(field)
-                if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                if (
+                    not isinstance(value, (int, float)) or isinstance(value, bool)
+                    or not math.isfinite(value) or value < 0
+                    or (field == "titleJaccard" and value > 1)
+                ):
                     raise ValueError(f"Java pair has invalid {field}")
+            for field in ("entityOverlap", "organizationOverlap"):
+                value = pair.get(field)
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                    raise ValueError(f"Java pair has invalid {field}")
+            if not isinstance(pair.get("breakingPair"), bool):
+                raise ValueError("Java pair has invalid breakingPair")
 
 
 def evaluate(pack: Path, java_pairs: Path) -> dict[str, Any]:
@@ -383,8 +406,7 @@ def evaluate(pack: Path, java_pairs: Path) -> dict[str, Any]:
     ):
         if _sha(pack / name) != seal["files"].get(name):
             raise ValueError(f"Sealed file changed: {name}")
-    if seal["protocol"] != _protocol():
-        raise ValueError("Sealed protocol or evaluation code changed")
+    _verify_protocol(seal["protocol"], "Sealed")
     snapshot, _ = _verify_prepared(pack)
     labels, _ = _labels(pack, snapshot["articles"])
     golden = _read(pack / "golden.json")

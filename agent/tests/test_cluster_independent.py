@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from app.eval import cluster_independent
 from app.eval.cluster_independent import (
     LABEL_FIELDS,
     RATIOS,
@@ -195,8 +196,28 @@ def test_freeze_rejects_changed_precommitted_grid(tmp_path: Path) -> None:
     manifest = json.loads((pack / "manifest.json").read_text())
     manifest["protocol"]["recallGate"] = 0.5
     _write_json(pack / "manifest.json", manifest)
-    with pytest.raises(ValueError, match="Precommitted protocol"):
+    with pytest.raises(ValueError, match="Precommitted protocol.*recallGate"):
         freeze(pack)
+
+
+@pytest.mark.parametrize("sealed", [False, True])
+def test_changed_source_hash_reports_exact_keys_and_preserves_original_pack(
+    tmp_path: Path, monkeypatch, sealed: bool
+) -> None:
+    pack = _prepare(tmp_path)
+    _label(pack)
+    if sealed:
+        freeze(pack)
+    original = {path.name: path.read_bytes() for path in pack.iterdir()}
+    changed = {**cluster_independent._protocol(), "sweepSha256": "changed"}
+    monkeypatch.setattr(cluster_independent, "_protocol", lambda: changed)
+    with pytest.raises(ValueError, match="code changed: sweepSha256") as failure:
+        if sealed:
+            evaluate(pack, tmp_path / "not-even-read.json")
+        else:
+            freeze(pack)
+    assert "original code revision" in str(failure.value)
+    assert {path.name: path.read_bytes() for path in pack.iterdir()} == original
 
 
 @pytest.mark.parametrize("all_same", [False, True])
@@ -238,7 +259,8 @@ def test_evaluate_rejects_sealed_file_tampering(tmp_path: Path, name: str) -> No
 
 @pytest.mark.parametrize(
     "case",
-    ["hash", "title", "source", "label", "ratio", "split", "df", "extra", "missing", "grid"],
+    ["hash", "title", "source", "label", "ratio", "split", "df", "extra", "missing", "grid",
+     "representative", "content_group"],
 )
 def test_evaluate_rejects_mismatched_java_input(tmp_path: Path, case: str) -> None:
     pack = _prepare(tmp_path)
@@ -263,6 +285,13 @@ def test_evaluate_rejects_mismatched_java_input(tmp_path: Path, case: str) -> No
         java["articles"].append(java["articles"][0])
     elif case == "grid":
         del java["configuredOrganizationTitleJaccardThreshold"]
+    elif case == "representative":
+        java["articles"][0]["fixedContentGroupId"] = "CALIBRATION:content-0"
+        java["articles"][0]["fixedContentGroupRepresentativeId"] = 21
+    elif case == "content_group":
+        for index in (0, 20):
+            java["articles"][index]["fixedContentGroupId"] = "leaked-group"
+            java["articles"][index]["fixedContentGroupRepresentativeId"] = index + 1
     else:
         java["articles"].pop()
     java_path = tmp_path / "java.json"
@@ -270,6 +299,47 @@ def test_evaluate_rejects_mismatched_java_input(tmp_path: Path, case: str) -> No
     with pytest.raises(ValueError):
         evaluate(pack, java_path)
     assert not (pack / "report.json").exists()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("titleJaccard", 2.0), ("titleJaccard", -0.1), ("titleJaccard", True),
+    ("titleJaccard", float("nan")), ("titleJaccard", float("inf")),
+    ("hoursApart", -1), ("hoursApart", True), ("hoursApart", float("inf")),
+    ("entityOverlap", 1.5), ("entityOverlap", 2.0), ("entityOverlap", True),
+    ("organizationOverlap", 1.5), ("organizationOverlap", -1),
+    ("breakingPair", None), ("breakingPair", 0), ("breakingPair", "false"),
+])
+def test_evaluate_rejects_invalid_pair_features_before_consuming_holdout(
+    tmp_path: Path, field: str, value
+) -> None:
+    pack = _prepare(tmp_path)
+    _label(pack)
+    freeze(pack)
+    java = _java_output(pack)
+    pair = java["pairEvaluations"][0]["pairs"][0]
+    if value is None:
+        pair.pop(field)
+    else:
+        pair[field] = value
+    java_path = tmp_path / "java.json"
+    _write_json(java_path, java)
+    with pytest.raises(ValueError, match=f"invalid {field}"):
+        evaluate(pack, java_path)
+    assert not (pack / "report.json").exists()
+
+
+@pytest.mark.parametrize("jaccard,breaking", [(0, False), (1.0, True)])
+def test_java_pair_feature_boundaries_remain_valid(tmp_path: Path, jaccard, breaking):
+    pack = _prepare(tmp_path)
+    _label(pack)
+    freeze(pack)
+    java = _java_output(pack)
+    java["pairEvaluations"][0]["pairs"][0].update(
+        titleJaccard=jaccard, breakingPair=breaking, hoursApart=0.5,
+        entityOverlap=0, organizationOverlap=0,
+    )
+    golden = json.loads((pack / "golden.json").read_text())
+    cluster_independent._verify_java(golden, java, java["goldenSha256"])
 
 
 def test_evaluate_reports_real_sweep_once_and_never_overwrites_freeze(tmp_path: Path) -> None:
