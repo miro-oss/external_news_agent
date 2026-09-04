@@ -26,7 +26,8 @@ public class IssueController {
     private final IssueQueryService issueQueryService;
 
     @GetMapping("/{issueId}")
-    @Operation(summary = "이슈 상세 조회", description = "대표 분석과 출처가 보존된 관련 기사를 조회합니다.")
+    @Operation(summary = "이슈 상세 조회", description = "대표 분석과 출처가 보존된 관련 기사, "
+            + "견해 포함 기사의 논조 분포(toneDistribution)를 조회합니다. 논조는 조회 시점의 최신 분석 기준입니다.")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "200", description = "성공입니다."),

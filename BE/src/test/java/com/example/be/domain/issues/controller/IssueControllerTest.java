@@ -11,8 +11,10 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.util.List;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -38,6 +40,8 @@ class IssueControllerTest {
                 .independentContentCount(2)
                 .entities(List.of("SK하이닉스", "HBM4"))
                 .crossSource(IssueCrossSource.empty())
+                .toneDistribution(new IssueResDTO.ToneDistribution(3, 2, 1, 0, 1,
+                        new BigDecimal("50.00"), new BigDecimal("0.00"), new BigDecimal("50.00")))
                 .representativeArticleId(1024L)
                 .articles(List.of(IssueResDTO.Article.builder()
                         .id(1024L)
@@ -51,7 +55,29 @@ class IssueControllerTest {
                 .andExpect(jsonPath("$.result.articleCount").value(3))
                 .andExpect(jsonPath("$.result.independentContentCount").value(2))
                 .andExpect(jsonPath("$.result.representativeArticleId").value(1024))
-                .andExpect(jsonPath("$.result.crossSource.conflicts").isArray());
+                .andExpect(jsonPath("$.result.crossSource.conflicts").isArray())
+                .andExpect(jsonPath("$.result.toneDistribution.analyzedArticleCount").value(3))
+                .andExpect(jsonPath("$.result.toneDistribution.sampleCount").value(2))
+                .andExpect(jsonPath("$.result.toneDistribution.optimisticCount").value(1))
+                .andExpect(jsonPath("$.result.toneDistribution.neutralCount").value(0))
+                .andExpect(jsonPath("$.result.toneDistribution.pessimisticCount").value(1))
+                .andExpect(jsonPath("$.result.toneDistribution.optimisticPercent").value(50.0))
+                .andExpect(jsonPath("$.result.toneDistribution.neutralPercent").value(0.0))
+                .andExpect(jsonPath("$.result.toneDistribution.pessimisticPercent").value(50.0));
+    }
+
+    @Test
+    void emptyToneSampleReturnsExplicitNullPercentages() throws Exception {
+        when(issueQueryService.getIssue(88L)).thenReturn(IssueResDTO.Detail.builder().id(88L)
+                .toneDistribution(new IssueResDTO.ToneDistribution(0, 0, 0, 0, 0, null, null, null))
+                .build());
+
+        mockMvc.perform(get("/api/news/issues/88"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.toneDistribution.sampleCount").value(0))
+                .andExpect(jsonPath("$.result.toneDistribution.optimisticPercent").value(nullValue()))
+                .andExpect(jsonPath("$.result.toneDistribution.neutralPercent").value(nullValue()))
+                .andExpect(jsonPath("$.result.toneDistribution.pessimisticPercent").value(nullValue()));
     }
 
     @Test

@@ -149,19 +149,7 @@ public class Finding {
 
     /** A1 구조화 section이 있으면 여기서 기존 공개 key point 형태로 평탄화한다. */
     public List<FindingKeyPoint> getEffectiveKeyPoints() {
-        if (analysisSections == null || analysisSections.isEmpty()) {
-            return keyPoints == null ? List.of() : keyPoints;
-        }
-        return analysisSections.stream()
-                .flatMap(section -> section.bullets().stream())
-                .map(bullet -> new FindingKeyPoint(
-                        bullet.text(),
-                        bullet.evidence(),
-                        bullet.groundedness(),
-                        bullet.groundingReason(),
-                        bullet.claimType(),
-                        bullet.attributedTo()))
-                .toList();
+        return FindingKeyPoint.effectivePoints(keyPoints, analysisSections);
     }
 
     /** 같은 run에서 전문을 새로 확보했을 때 식별자와 연결은 유지하고 분석 결과만 교체한다. */
