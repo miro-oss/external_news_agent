@@ -82,7 +82,7 @@ def _label(pack: Path) -> list[dict]:
 
 def _java_output(pack: Path) -> dict:
     golden = json.loads((pack / "golden.json").read_text())
-    articles = golden["articles"]
+    articles = [{**article, "titleOrganizations": []} for article in golden["articles"]]
     pairs = [
         {
             "leftArticleId": left["articleId"],
@@ -99,6 +99,7 @@ def _java_output(pack: Path) -> dict:
     ]
     return {
         "datasetVersion": golden["datasetVersion"],
+        "clusteringRuleVersion": "title-organization-conflict-v1",
         "goldenSha256": (pack / "golden.sha256").read_text().strip(),
         "articleCount": len(articles),
         "documentFrequencyScope": "SPLIT",
@@ -259,8 +260,11 @@ def test_evaluate_rejects_sealed_file_tampering(tmp_path: Path, name: str) -> No
 
 @pytest.mark.parametrize(
     "case",
-    ["hash", "title", "source", "label", "ratio", "split", "df", "extra", "missing", "grid",
-     "representative", "content_group"],
+    [
+        "hash", "title", "source", "label", "ratio", "split", "df", "extra", "missing", "grid",
+        "missing-organizations", "string-organizations",
+        "blank-organization", "invalid-organization", "representative", "content_group",
+    ],
 )
 def test_evaluate_rejects_mismatched_java_input(tmp_path: Path, case: str) -> None:
     pack = _prepare(tmp_path)
@@ -285,6 +289,14 @@ def test_evaluate_rejects_mismatched_java_input(tmp_path: Path, case: str) -> No
         java["articles"].append(java["articles"][0])
     elif case == "grid":
         del java["configuredOrganizationTitleJaccardThreshold"]
+    elif case == "missing-organizations":
+        del java["articles"][0]["titleOrganizations"]
+    elif case == "string-organizations":
+        java["articles"][0]["titleOrganizations"] = "Samsung"
+    elif case == "blank-organization":
+        java["articles"][0]["titleOrganizations"] = [" "]
+    elif case == "invalid-organization":
+        java["articles"][0]["titleOrganizations"] = [1]
     elif case == "representative":
         java["articles"][0]["fixedContentGroupId"] = "CALIBRATION:content-0"
         java["articles"][0]["fixedContentGroupRepresentativeId"] = 21
@@ -354,6 +366,7 @@ def test_evaluate_reports_real_sweep_once_and_never_overwrites_freeze(tmp_path: 
     _write_json(java_path, _java_output(pack))
     assert main(["evaluate", "--pack", str(pack), "--java-pairs", str(java_path)]) == 0
     result = json.loads((pack / "report.json").read_text())
+    assert result["clusteringRuleVersion"] == "title-organization-conflict-v1"
     assert result["holdout"]["precision"] == result["holdout"]["recall"] == 1.0
     assert len(result["candidates"]) == 4 * 8 * 3 * 4 * 3
     with pytest.raises(FileExistsError):

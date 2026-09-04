@@ -305,6 +305,7 @@ def freeze(pack: Path) -> dict[str, Any]:
 
 
 def _verify_java(golden: dict[str, Any], java: dict[str, Any], golden_hash: str) -> None:
+    cluster_sweep.validate_clustering_metadata(java)
     if java.get("goldenSha256") != golden_hash:
         raise ValueError("Java output goldenSha256 does not match the sealed golden file")
     if java.get("datasetVersion") != golden["datasetVersion"]:

@@ -78,6 +78,7 @@ public record ClusterPlan(
             int organizationOverlap,
             boolean breakingPair,
             double hoursApart,
+            // 해당 간선 처리 시점의 컴포넌트 상태에 의존한다. 위 피처만으로 재현할 수 없다.
             boolean sameCluster
     ) {
     }
