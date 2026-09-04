@@ -106,6 +106,13 @@ Java 특성을 추출하고 판정표를 한 번 실행했다. 예측 후 라벨
 golden SHA-256: `1fdc3d58e05d30b136012ce2b1b64eb5983b23c04baa9db20510a76a79ec7bfb`.
 세부 hash는 summary의 `independentValidation`과 pack의 `seal.json`을 참조한다.
 
+`sweepSha256`와 `packToolSha256`는 주석을 포함한 소스 전체를 봉인한다. 규칙을 바꾼 후에도
+같은 pack을 새 독립 검증으로 소비하지 못하게 하는 감사 경계이므로 hash는 유지한다.
+코드가 달라지면 오류에 변경된 protocol 키를 표시한다. 과거 결과의 재현 환경을 조사할 때는
+manifest/seal의 hash와 일치하는 원래 코드 revision을 별도 checkout에서 확인한다.
+manifest/seal을 새 hash로 덮거나 기존 `report.json`을 삭제해 holdout을 재사용하지 않는다.
+아래 명령은 새 표본·새 pack용이며 이미 소비된 #162 pack의 재평가 절차가 아니다.
+
 1. `independent-readiness.sql`에 KST 기준 시각과 24 또는 48시간을 전달해 수집 통계를 확인한다.
 2. `independent-articles.sql`에 같은 시각·창·최초 관측 하한·두 주제 ID를 전달한다.
    SQL*Plus를 `NLS_LANG=AMERICAN_AMERICA.AL32UTF8`로 실행하고 출력은 Git 밖에 둔다.
@@ -125,3 +132,25 @@ golden SHA-256: `1fdc3d58e05d30b136012ce2b1b64eb5983b23c04baa9db20510a76a79ec7bf
 원문 chunk의 공백·유니코드·누락 검증, 라벨/입력 변조, split 누수, 양성 쌍 부재, Java DF 분리를
 검사했다. 기존 Python sweep에서 다른 주제의 전역 대표 proxy 간선이 빠지던 평가 오류도 합성
 테스트로 재현해 고쳤다. 제품 API 작업은 없으며 운영 클러스터 규칙은 이번 측정에서 조정하지 않았다.
+
+## 5. PR #165 리뷰 후 검증 도구 보강
+
+- Java pair 입력에서 Jaccard의 0~1 범위, 정수 overlap, 필수 boolean `breakingPair`를 검사한다.
+  잘못된 특성은 holdout 소비 전에 거절하며 원래 경계값은 허용한다.
+- SQL chunk는 LF/CRLF만 구분자로 사용해 JSON 문자열의 U+0085/U+2028/U+2029를 보존한다.
+  snapshot 생성은 순수 함수로 분리하고 같은 원문의 주제별 ID, 원본 ID 순서, 키워드 병합,
+  원문 필드 whitelist, 실행 provenance 및 입력 불변성을 검사한다.
+- Java exporter는 기존 출력을 덮어쓰지 않는다. 합성 본문으로 같은 split 안의 콘텐츠 그룹과
+  대표 ID를 실제 생성하고, 다른 split의 동일 본문이 같은 그룹을 공유하지 않는지 검사한다.
+- 시각 가정은 현재 저장 경로를 확인했다. `CollectionResultWriter`가 `collected_at`과
+  `observed_at`을 모두 `LocalDateTime.now(ApiTimeZone.ZONE)`으로 명시적으로 채우고,
+  `IssueClusteringLoader`는 같은 서울 시간대로 해석한다. SQL에도 이 전제를 명시했다.
+  읽기 전용 DB 점검에서 원본 159건의 수집 시각은 모두 최초 실행 구간 안에 있고,
+  표본 160행의 `observedAt`은 현재 `collected_at +09:00` 표기와 일치했다.
+  선택한 네 실행의 관측 160건 역시 모두 실행 구간 안이며 누락 시각은 없었다.
+  이는 이번 표본에서 9시간 불일치의 증거가 없다는 확인이다. TIMESTAMP에는 작성 주체나
+  DEFAULT 사용 이력이 없으므로 과거 모든 행의 DEFAULT 미사용까지 입증한 것은 아니다.
+
+보강 후 Python snapshot/independent/sweep 테스트 74개와 Java 합성 테스트 7개가 통과했다.
+실제 frozen export 테스트는 환경 변수를 주지 않아 건너뛰었다. 봉인된 #162 원문·라벨·hash·
+holdout 결과는 수정하거나 재평가하지 않았다.
