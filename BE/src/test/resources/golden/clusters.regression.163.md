@@ -33,7 +33,7 @@ Java 클러스터 테스트 91개와 별도 실제 입력 재생 1개, Python �
 PR 리뷰 반영 후에는 Java 클러스터 테스트 94개가 통과했고, 외부 원문 경로가 필요한 재생
 2개는 생략됐다. Python 검증 도구 테스트 72개와 Ruff·diff 공백 검사가 통과했다.
 
-#162 원문 160건의 제목·요약·본문을 그대로 읽어 현재 기본 설정으로 Java 클러스터를 재실행했다.
+이슈 #162 원문 160건의 제목·요약·본문을 그대로 읽어 현재 기본 설정으로 Java 클러스터를 재실행했다.
 봉인 자료 옆의 별도 `cluster-regression-163` 디렉터리에 결과를 보관한다.
 
 | 원본 기사 쌍 | 기대 관계 | 실제 Java 최종 이슈 |
@@ -68,7 +68,7 @@ TF-IDF 두 비교군은 의도적으로 제목 조직 충돌 가드를 사용하
 `usesTitleOrganizationGuard: false`를 기록한다. 규칙과 비교군은 사용하는 신호가 다르므로
 점수 차이를 임계값 규칙 자체의 개선이나 가드 단독 효과로 해석하지 않는다.
 
-#162 pack의 봉인과 당시 결과는 유효하게 보존된다. 다만 `cluster_sweep.py`와
+이슈 #162 pack의 봉인과 당시 결과는 유효하게 보존된다. 다만 `cluster_sweep.py`와
 `cluster_independent.py` 코드 해시가 달라져 이 수정본으로 기존 pack을 재평가하면
 `Sealed protocol or evaluation code changed`로 거절된다. 당시 수치의 재현은 봉인 당시
 커밋 `6fa8b9ccdc12e8857fdaa48763664b81eda41277`의 평가 코드와 원본 pack으로 수행하고,
