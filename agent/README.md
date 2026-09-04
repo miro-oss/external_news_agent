@@ -7,6 +7,10 @@ Spring Boot가 내부 HTTP로 호출하는 stateless FastAPI 에이전트입니�
 단일 문장에서 직접 확인되는 주장은 rule-only로 확정합니다. 복합 주장, 인과·전망 및 의미상
 애매한 표현만 provider에 위임하고 근거 연결 상태를 `grounded` / `weak` / `ungrounded`로 반환합니다.
 
+Spring의 상태·실행·예산 책임과 Python의 판단 책임, HTTP 어댑터 교체 절차는
+[M13 에이전트 경계](../AGENT_BOUNDARIES.md)에 정리되어 있습니다. `stateless`의 범위,
+provider 재시도와 조사 중단 복구의 보장도 이 문서를 기준으로 확인합니다.
+
 ## `/v1/keyword-strategy` 수집 키워드 제안 계약
 
 P2-7 수집 전략가는 scheduled run 하나가 끝날 때 해당 주제의 현재 required / optional / excluded
@@ -136,7 +140,8 @@ P1-7 자기 검증도 새 엔드포인트를 만들지 않고 `/v1/analyze`를 �
 ```
 
 검토 질문은 `이 요약에서 원문 문장으로 확인되지 않는 표현은 무엇인가?` 하나로 고정합니다.
-provider 호출은 대상 주장당 최대 한 번이며 새 사실과 새 근거 문장 번호를 추가할 수 없습니다.
+선택 주장에 대한 구조화 생성은 한 번이며 schema repair는 수행하지 않습니다. 공통 provider
+재시도에 따라 실제 호출 시도는 늘어날 수 있습니다. 새 사실과 새 근거 문장 번호는 추가할 수 없습니다.
 자기 검증은 선택된 bullet 한 건만 유지·수정·기각하며 `summaryKo`는 최초 검증 값을 그대로 보존합니다.
 규칙으로 이미 확정된 경우 `self-critique.rules.v1` 응답을 비용 0으로 반환합니다. 실패하거나 quota가
 부족하면 Spring은 최초 근거 검증 결과를 유지하고 `SELF_CRITIQUE / ISSUE` 감사 행과 경고를 남깁니다.
@@ -146,7 +151,9 @@ provider 호출은 대상 주장당 최대 한 번이며 새 사실과 새 근�
 P1-5부터 기사 하나의 검증 대상 bullet을 `claims[]` 한 요청으로 묶습니다. 분석 응답은 최대 16개
 section × 3개 bullet로 제한되어 배치 상한 50건 안에 들어옵니다. `claimId`는 요청 안에서
 유일하며 응답 `results[]`가 같은 ID를 정확히 한 번씩 반환합니다. 규칙으로 확정하지 못한 주장만
-한 번의 provider 구조화 출력에 묶이므로 기사당 검증 HTTP 호출과 provider 호출은 각각 최대 1회입니다.
+한 번의 provider 구조화 출력에 묶으므로 기사당 검증 HTTP 요청은 1회입니다. 다만 schema repair나
+provider 재시도가 발생하면 실제 provider 시도는 늘어날 수 있습니다. 층별 책임은
+[예산·재시도·실패 경계](../AGENT_BOUNDARIES.md#5-예산재시도실패-책임)를 따릅니다.
 
 ```json
 {
