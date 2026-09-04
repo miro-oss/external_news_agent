@@ -126,6 +126,50 @@ class IssueClustererOrganizationConflictTest {
         assertEquals(1, plan.issues().getFirst().independentContentCount());
     }
 
+    @Test
+    void preservesMixedStoredIssueButKeepsNewSingleVendorFollowUpSeparate() {
+        List<ClusterArticle> articles = List.of(
+                article(1L, "한화세미텍 첨단 패키징 장비 공개", null, 100L, null),
+                article(2L, "디엠에스 첨단 패키징 장비 공개", null, 100L, null),
+                article(3L, "한화세미텍 첨단 패키징 장비 공개"));
+
+        assertStableMembershipsAcrossPermutations(articles, Set.of(Set.of(1L, 2L), Set.of(3L)));
+        ClusterPlan plan = clusterer.cluster(articles, true);
+        ClusterPlan.PairScore followUp = plan.pairScores().stream()
+                .filter(score -> score.leftArticleId() == 1L && score.rightArticleId() == 3L)
+                .findFirst().orElseThrow();
+        assertEquals(1.0, followUp.titleJaccard());
+        assertFalse(followUp.sameCluster(), "A strong pair must not expand an already mixed issue.");
+        assertEquals(100L, plan.issues().stream().filter(issue -> issue.articleIds().contains(1L))
+                .findFirst().orElseThrow().existingIssueId());
+    }
+
+    @Test
+    void preservesMixedContentGroupButKeepsNewSingleVendorFollowUpSeparate() {
+        List<ClusterArticle> articles = List.of(
+                article(1L, "한화세미텍 첨단 패키징 장비 공개", null, null, 10L),
+                article(2L, "디엠에스 첨단 패키징 장비 공개", null, null, 10L),
+                article(3L, "한화세미텍 첨단 패키징 장비 공개"));
+
+        assertStableMembershipsAcrossPermutations(articles, Set.of(Set.of(1L, 2L), Set.of(3L)));
+    }
+
+    @Test
+    void mixedForcedGroupsStillAcceptUnknownOrAllOverlappingProfilesWhenTitlesMatch() {
+        for (boolean existingIssue : List.of(true, false)) {
+            Long issueId = existingIssue ? 100L : null;
+            Long contentId = existingIssue ? null : 10L;
+            for (String title : List.of("첨단 패키징 장비 공개", "한화세미텍 디엠에스 첨단 패키징 장비 공개")) {
+                List<ClusterArticle> articles = List.of(
+                        article(1L, "한화세미텍 첨단 패키징 장비 공개", null, issueId, contentId),
+                        article(2L, "디엠에스 첨단 패키징 장비 공개", null, issueId, contentId),
+                        article(3L, title));
+
+                assertStableMembershipsAcrossPermutations(articles, Set.of(Set.of(1L, 2L, 3L)));
+            }
+        }
+    }
+
     private void assertStableMembershipsAcrossPermutations(List<ClusterArticle> articles,
                                                            Set<Set<Long>> expected) {
         for (List<Integer> order : List.of(

@@ -129,8 +129,7 @@ class IssueClustererRealGoldenExportTest {
             value.put("sourceArticleId", source.sourceArticleId());
             value.put("topicId", clustered.topicId());
             value.put("title", clustered.title());
-            value.put("titleOrganizations", new DeterministicEntityExtractor()
-                    .extractTitleOrganizations(new BreakingNewsDetector().coreTitle(clustered.title()))
+            value.put("titleOrganizations", clusterer.titleOrganizations(clustered.title())
                     .stream().sorted().toList());
             value.put("expectedIssueId", source.expectedIssueId());
             value.put("split", source.split());

@@ -105,8 +105,8 @@ class IssueClustererIndependentExportTest {
                     .filter(article -> article.split().equals(split)).toList();
             IssueClusteringProperties properties = new IssueClusteringProperties();
             properties.setCommonEntityDocumentRatio(ratio);
-            ClusterPlan plan = new IssueClusterer(properties, new BreakingNewsDetector())
-                    .cluster(articles.stream().map(GoldenArticle::article).toList(), true);
+            IssueClusterer clusterer = new IssueClusterer(properties, new BreakingNewsDetector());
+            ClusterPlan plan = clusterer.cluster(articles.stream().map(GoldenArticle::article).toList(), true);
             Map<Long, Long> issueRepresentativeByArticle = new HashMap<>();
             plan.issues().forEach(issue -> issue.articleIds().forEach(articleId ->
                     issueRepresentativeByArticle.put(articleId, issue.representativeArticleId())));
@@ -130,8 +130,7 @@ class IssueClustererIndependentExportTest {
                 value.put("sourceId", article.sourceId());
                 value.put("topicId", article.topicId());
                 value.put("title", article.title());
-                value.put("titleOrganizations", new DeterministicEntityExtractor()
-                        .extractTitleOrganizations(new BreakingNewsDetector().coreTitle(article.title()))
+                value.put("titleOrganizations", clusterer.titleOrganizations(article.title())
                         .stream().sorted().toList());
                 value.put("expectedIssueId", source.expectedIssueId());
                 value.put("split", source.split());

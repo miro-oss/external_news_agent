@@ -42,7 +42,11 @@ public final class DeterministicEntityExtractor {
 
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private static final Map<String, List<String>> ORGANIZATION_ALIASES = organizationAliases();
-    /** 충돌 판정 전용이다. 이 별칭만으로 긍정 병합 근거를 추가하지 않는다. */
+    /**
+     * 충돌 판정 전용이다. 이 별칭만으로 긍정 병합 근거를 추가하지 않는다.
+     * 긍정 병합에도 쓸 별칭은 ORGANIZATION_ALIASES, 충돌에만 쓸 별칭은 이 맵에 추가한다.
+     * vendorConflictAliasesDoNotCreateNewPositiveOrganizationEdges 테스트가 이 구분을 검증한다.
+     */
     private static final Map<String, List<String>> TITLE_CONFLICT_ALIASES = Map.of(
             "한화세미텍", List.of("한화세미텍", "hanwha semitech"),
             "디엠에스", List.of("디엠에스", "dms"),

@@ -36,6 +36,11 @@ public class IssueClusterer {
         return cluster(rawArticles, false);
     }
 
+    /** 클러스터링과 오프라인 export가 같은 인스턴스의 전처리·추출기 설정을 공유한다. */
+    Set<String> titleOrganizations(String title) {
+        return entityExtractor.extractTitleOrganizations(breakingNewsDetector.coreTitle(title));
+    }
+
     /** pair score는 오프라인 측정 전용이다. 프로덕션에서는 O(n²) 진단 목록을 보관하지 않는다. */
     public ClusterPlan cluster(List<ClusterArticle> rawArticles, boolean includePairScores) {
         List<ClusterArticle> articles = deduplicate(rawArticles);
@@ -176,7 +181,7 @@ public class IssueClusterer {
         unique.forEach(article -> {
             String coreTitle = breakingNewsDetector.coreTitle(article.title());
             titleTokens.put(article.articleId(), TitleTokenizer.tokens(coreTitle));
-            titleOrganizations.put(article.articleId(), entityExtractor.extractTitleOrganizations(coreTitle));
+            titleOrganizations.put(article.articleId(), titleOrganizations(article.title()));
             DeterministicEntityExtractor.Extraction extraction = entityExtractor.extractWithOrganizations(
                     coreTitle, article.summary(),
                     ArticleBodyCleaner.withoutTrailingBoilerplate(article.body()),
@@ -187,6 +192,8 @@ public class IssueClusterer {
 
         UnionFind union = new UnionFind(byId.keySet(), titleOrganizations);
         // 저장된 멤버십과 동일 본문은 보존한다. 새 규칙 간선에만 조직 충돌 방어를 적용한다.
+        // 이미 업체가 섞인 그룹도 프로파일을 보존한다. 한 업체의 후속 기사는 다른 기존 업체와
+        // 충돌하므로 별도 이슈로 남긴다. 과거 과병합을 늘리면서 정상화한 것으로 취급하지 않는다.
         Map<Long, List<ClusterArticle>> byExistingIssue = unique.stream()
                 .filter(article -> article.existingIssueId() != null)
                 .collect(Collectors.groupingBy(ClusterArticle::existingIssueId));
