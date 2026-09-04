@@ -178,11 +178,10 @@ export function ReportsPage() {
                 audience={activeAudience}
                 defaultAudience={audienceSetting.data?.audience}
                 onAudienceSelect={setAudienceOverride}
-                onEvidenceSelect={(articleId, sentences) => {
+                onEvidenceSelect={(articleId, runId, sentences) => {
                   setEvidenceSelection({
                     articleId,
-                    runId: activeReportData.findings?.find((finding) => finding.articleId === articleId)?.runId
-                      ?? activeReportData.runId,
+                    runId,
                     sentences,
                   })
                 }}
@@ -216,7 +215,7 @@ function ReportListItem({ report, active, onSelect }: {
       onClick={onSelect}
     >
       <span className="report-list-date">{report.reportScope === 'DAILY'
-        ? `${report.reportDate} · 일일 통합` : `${formatShortDate(report.generatedAt)} · 실행별`}</span>
+        ? `${report.reportDate ?? '집계일 미상'} · 일일 통합` : `${formatShortDate(report.generatedAt)} · 실행별`}</span>
       <strong>{report.title}</strong>
       <span className="report-list-meta">
         분석 {report.findingCount}건
@@ -233,7 +232,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
   audience: Audience
   defaultAudience?: Audience
   onAudienceSelect: (audience: Audience) => void
-  onEvidenceSelect: (articleId: number, sentences: number[]) => void
+  onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
 }) {
   const [filters, setFilters] = useState<ReportFindingFilters>(DEFAULT_REPORT_FINDING_FILTERS)
   const findings = useMemo(
@@ -260,7 +259,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
       <header className="report-document-header">
         <h2>{report.title}</h2>
         {report.reportScope === 'DAILY' && <p className="muted">
-          {report.reportDate} · 한국 시간 기준 · 수집 {report.sourceRunIds.length}회 통합
+          {report.reportDate ?? '집계일 미상'} · 한국 시간 기준 · 수집 {report.sourceRunIds.length}회 통합
         </p>}
         <time dateTime={report.generatedAt}>{formatFullDate(report.generatedAt)}</time>
         <div className="report-ai-context">
@@ -311,6 +310,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
                 finding={finding}
                 key={finding.id}
                 audience={audience}
+                daily={report.reportScope === 'DAILY'}
                 reportDate={report.reportScope === 'DAILY' ? report.reportDate : null}
                 onEvidenceSelect={onEvidenceSelect}
               />
@@ -480,11 +480,12 @@ function ReportStat({ value, label, tone }: { value: number; label: string; tone
   )
 }
 
-function IssueCard({ finding, audience, reportDate, onEvidenceSelect }: {
+function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect }: {
   finding: ReportFinding
   audience: Audience
+  daily: boolean
   reportDate: string | null
-  onEvidenceSelect: (articleId: number, sentences: number[]) => void
+  onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
 }) {
   const [open, setOpen] = useState(false)
   const [visibleRelatedCount, setVisibleRelatedCount] = useState(RELATED_ARTICLE_BATCH_SIZE)
@@ -496,8 +497,8 @@ function IssueCard({ finding, audience, reportDate, onEvidenceSelect }: {
   const keyPoints = useMemo(() => normalizeKeyPoints(finding.keyPoints), [finding.keyPoints])
   const perspective = perspectiveFor(finding, audience)
   // 일일 보고서는 이후 갱신된 이슈 제목 대신 저장된 근거 분석을 보여준다.
-  const title = reportDate ? finding.articleTitle : issueInfo?.title || finding.articleTitle
-  const summary = limitText(reportDate ? finding.summary : issueInfo?.summary || finding.summary, 120)
+  const title = daily ? finding.articleTitle : issueInfo?.title || finding.articleTitle
+  const summary = limitText(daily ? finding.summary : issueInfo?.summary || finding.summary, 120)
   const relatedArticles = issue.data?.articles ?? []
   const visibleRelatedArticles = relatedArticles.slice(0, visibleRelatedCount)
   const investigationReason = finding.investigation
@@ -533,15 +534,15 @@ function IssueCard({ finding, audience, reportDate, onEvidenceSelect }: {
             {SENSITIVITY_LEVEL_LABELS[finding.sensitivity.level]} · {finding.sensitivity.score.toFixed(1)}
           </span>
           <span>{finding.category}</span>
-          {reportDate
-            ? <time dateTime={reportDate}>{reportDate} 집계</time>
+          {daily
+            ? <time dateTime={reportDate ?? undefined}>{reportDate ?? '집계일 미상'} 집계</time>
             : issueInfo && <time dateTime={issueInfo.lastSeenAt}>{formatShortDate(issueInfo.lastSeenAt)}</time>}
         </div>
         <h4>{title}</h4>
         <p className="issue-card-summary">{summary}</p>
         <div className="issue-card-footer">
           <span className="issue-source-count">
-            {reportDate && '현재 '}
+            {daily && '현재 '}
             {issue.isError && issueId !== null
               ? '관련 기사 상세 불러오기 실패'
               : issue.isLoading && issueId !== null
@@ -567,7 +568,7 @@ function IssueCard({ finding, audience, reportDate, onEvidenceSelect }: {
               <button
                 type="button"
                 className="text-button"
-                onClick={() => onEvidenceSelect(finding.articleId, [perspective.evidenceSentenceIds[0]])}
+                onClick={() => onEvidenceSelect(finding.articleId, finding.runId, [perspective.evidenceSentenceIds[0]])}
               >
                 관점 근거 확인
               </button>
@@ -576,17 +577,18 @@ function IssueCard({ finding, audience, reportDate, onEvidenceSelect }: {
 
           <SensitivityAxes
             sensitivity={finding.sensitivity}
-            onEvidenceSelect={(evidence) => onEvidenceSelect(finding.articleId, evidence)}
+            onEvidenceSelect={(evidence) => onEvidenceSelect(finding.articleId, finding.runId, evidence)}
           />
 
           <KeyPointList
             points={keyPoints}
             articleTitle={finding.articleTitle}
-            onEvidenceSelect={(sentenceId) => onEvidenceSelect(finding.articleId, [sentenceId])}
+            onEvidenceSelect={(sentenceId) => onEvidenceSelect(finding.articleId, finding.runId, [sentenceId])}
           />
 
           {issue.data && (
-            <CrossSourcePanel issue={issue.data} onEvidenceSelect={onEvidenceSelect} />
+            <CrossSourcePanel issue={issue.data} onEvidenceSelect={(articleId, sentences) =>
+              onEvidenceSelect(articleId, finding.runId, sentences)} />
           )}
 
           <section className="issue-related-articles">
@@ -612,7 +614,7 @@ function IssueCard({ finding, audience, reportDate, onEvidenceSelect }: {
                     <li key={article.id}>
                       <div><strong>{article.title}</strong><span>{article.publisher || '매체 미상'} · {formatShortDate(article.publishedAt)}</span></div>
                       <div className="issue-article-actions">
-                        <button type="button" className="text-button" onClick={() => onEvidenceSelect(article.id, [])}>본문 보기</button>
+                        <button type="button" className="text-button" onClick={() => onEvidenceSelect(article.id, finding.runId, [])}>본문 보기</button>
                         <a href={article.canonicalUrl} target="_blank" rel="noreferrer" aria-label={`${article.title} 원문 열기`}>원문 ↗</a>
                       </div>
                     </li>
@@ -630,7 +632,7 @@ function IssueCard({ finding, audience, reportDate, onEvidenceSelect }: {
               </>
             ) : !issue.isLoading && (
               <div className="issue-legacy-actions">
-                <button type="button" className="text-button" onClick={() => onEvidenceSelect(finding.articleId, [])}>대표 기사 본문 보기</button>
+                <button type="button" className="text-button" onClick={() => onEvidenceSelect(finding.articleId, finding.runId, [])}>대표 기사 본문 보기</button>
                 <a href={finding.canonicalUrl} target="_blank" rel="noreferrer">원문 열기 ↗</a>
               </div>
             )}

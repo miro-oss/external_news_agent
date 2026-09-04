@@ -42,6 +42,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -85,16 +86,16 @@ public class AgentReportOrchestrator {
     private ReportDocument generate(GenerationContext context, List<Finding> representativeFindings,
                                     ReportSourceStats sourceStats, LocalDateTime generatedAt) {
         if (!properties.isEnabled()) {
-            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
+            return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
-        List<Finding> eligible = context.daily() ? representativeFindings : eligibleFindings(representativeFindings);
+        List<Finding> eligible = eligibleFindings(representativeFindings, context.daily());
         if (eligible.isEmpty()) {
-            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
+            return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
 
         ReservationSelection selection = reserve(context);
         if (selection == null) {
-            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
+            return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
 
         LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
@@ -128,8 +129,14 @@ public class AgentReportOrchestrator {
             completeFailureSafely(selection.reservation(), exception, code);
             log.warn("Agent 보고서 생성에 실패해 안전한 fallback을 사용한다. runId={} code={} error={}",
                     context.runId(), code, exception.getMessage());
-            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
+            return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
+    }
+
+    private ReportDocument fallback(GenerationContext context, List<Finding> findings,
+                                    LocalDateTime generatedAt, ReportSourceStats sourceStats) {
+        return context.daily() ? fallbackGenerator.generateDaily(findings, context.date(), sourceStats)
+                : fallbackGenerator.generate(findings, generatedAt, sourceStats);
     }
 
     private AgentReportRequest request(GenerationContext context,
@@ -160,9 +167,16 @@ public class AgentReportOrchestrator {
                         sourceStats.paywalled(),
                         sourceStats.stubExcluded()),
                 context.daily()
-                        ? List.of(context.date() + " 한국 시간 하루 동안 시작한 수집 실행의 이슈를 통합했습니다.",
-                                "같은 이슈는 최신 분석 1건으로 모으고 중요도 상위 이슈의 검증된 근거만 담았습니다.")
+                        ? dailySourceNotes(context.date(), sourceStats)
                         : ReportSourceNotes.from(sourceStats));
+    }
+
+    private List<String> dailySourceNotes(LocalDate date, ReportSourceStats stats) {
+        List<String> notes = new ArrayList<>(List.of(
+                date + " 한국 시간 하루 동안 시작한 수집 실행의 이슈를 통합했습니다.",
+                "같은 이슈는 최신 분석 1건으로 모으고 중요도 상위 이슈의 검증된 근거만 담았습니다."));
+        notes.addAll(ReportSourceNotes.from(stats));
+        return notes;
     }
 
     private ReservationSelection reserve(GenerationContext context) {
@@ -290,12 +304,12 @@ public class AgentReportOrchestrator {
         return new AgentReportRequest.SensitivityAxisPayload(axis.score(), axis.evidenceSentenceIds());
     }
 
-    private List<Finding> eligibleFindings(List<Finding> findings) {
-        return ReportFindingOrder.sort(findings.stream()
-                        .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
-                        .filter(FindingEvidencePolicy::hasSupportedEvidence)
-                        .toList())
-                .stream()
+    private List<Finding> eligibleFindings(List<Finding> findings, boolean preserveOrder) {
+        List<Finding> eligible = findings.stream()
+                .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
+                .filter(FindingEvidencePolicy::hasSupportedEvidence)
+                .toList();
+        return (preserveOrder ? eligible : ReportFindingOrder.sort(eligible)).stream()
                 .limit(MAX_REPORT_FINDINGS)
                 .toList();
     }

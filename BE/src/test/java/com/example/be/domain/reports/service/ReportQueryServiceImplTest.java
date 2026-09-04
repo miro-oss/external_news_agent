@@ -100,7 +100,7 @@ class ReportQueryServiceImplTest {
         GeneralException exception = assertThrows(GeneralException.class,
                 () -> service.getReports("2026-08-18", "2026-08-17", 0, 20));
 
-        assertEquals("from은 to보다 이후일 수 없습니다.", exception.getMessage());
+        assertEquals("from은 to보다 이전이어야 합니다.", exception.getMessage());
     }
 
     @Test
@@ -261,12 +261,18 @@ class ReportQueryServiceImplTest {
         assertEquals(List.of(2L, 1L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
         assertEquals(List.of(43L, 42L), detail.getFindings().stream().map(ReportResDTO.Finding::getRunId).toList());
         assertEquals(2, service.getReport(70L, false).getSummaryStats().getFindingCount());
+        var count = mock(FindingRepository.DailyReportCount.class);
+        when(count.getReportId()).thenReturn(70L);
+        when(count.getFindingCount()).thenReturn(2L);
+        when(count.getHighSensitivityCount()).thenReturn(1L);
+        when(findingRepository.countForDailyReports(eq(List.of(70L)), any())).thenReturn(List.of(count));
         var summary = service.getReports(null, null, 0, 20).getContent().getFirst();
         assertEquals(2, summary.getFindingCount());
         assertEquals(1, summary.getHighSensitivityCount());
         verify(findingRepository, never()).findForReportByRunId(any());
-        verify(investigationRepository).findTraces(42L);
-        verify(investigationRepository).findTraces(43L);
+        verify(investigationRepository).findTraces(List.of(43L, 42L));
+        verify(investigationRepository, never()).findTraces(any(Long.class));
+        verify(findingRepository, times(2)).findForReportByIdIn(anyCollection());
     }
 
     private Finding finding(Long id, SensitivityLevel sensitivityLevel, Relevance relevance) {
@@ -277,6 +283,7 @@ class ReportQueryServiceImplTest {
                 .canonicalUrl("https://example.com/" + id)
                 .build();
         return Finding.builder()
+                .run(CollectionRun.builder().id(42L).build())
                 .id(id)
                 .article(article)
                 .changeType(ChangeType.NEW)

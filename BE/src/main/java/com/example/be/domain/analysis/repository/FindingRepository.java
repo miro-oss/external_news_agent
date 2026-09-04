@@ -120,6 +120,25 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             """)
     List<Finding> findForReportByIdIn(@Param("ids") Collection<Long> ids);
 
+    @Query(value = """
+            SELECT report.id AS reportId, COUNT(finding.id) AS findingCount,
+                   SUM(CASE WHEN finding.sensitivity_score >= :highThreshold THEN 1 ELSE 0 END) AS highSensitivityCount
+            FROM news_reports report
+            CROSS APPLY JSON_TABLE(report.report_reflected_finding_ids, '$[*]'
+                COLUMNS (finding_id NUMBER PATH '$')) selected
+            JOIN news_findings finding ON finding.id = selected.finding_id
+            WHERE report.id IN (:reportIds) AND report.report_scope = 'DAILY'
+            GROUP BY report.id
+            """, nativeQuery = true)
+    List<DailyReportCount> countForDailyReports(@Param("reportIds") Collection<Long> reportIds,
+                                               @Param("highThreshold") BigDecimal highThreshold);
+
+    interface DailyReportCount {
+        Long getReportId();
+        long getFindingCount();
+        long getHighSensitivityCount();
+    }
+
     @Query("""
             SELECT finding FROM Finding finding
             JOIN FETCH finding.run run

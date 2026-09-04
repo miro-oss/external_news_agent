@@ -97,6 +97,8 @@ class ReportOracleIntegrationTests {
                 .triggerType(TriggerType.MANUAL).startedAt(date.plusDays(1).atStartOfDay()).build());
         entityManager.flush();
         assertTrue(dailyRepository.findDueDates(date, date.plusDays(1)).isEmpty());
+        assertTrue(dailyRepository.findBlockedDates(date.plusDays(10).atStartOfDay()).stream()
+                .anyMatch(blocked -> blocked.date().equals(date) && blocked.pendingRunCount() == 1));
         jdbcTemplate.update("UPDATE news_collection_runs SET status = 'PARTIAL' WHERE id = ?", last.getId());
         assertEquals(List.of(date), dailyRepository.findDueDates(date, date.plusDays(1)));
         assertEquals(List.of(first.getId(), last.getId()), dailyRepository.findSourceRunIds(date));
@@ -122,6 +124,8 @@ class ReportOracleIntegrationTests {
                 com.example.be.domain.reports.entity.ReportScope.DAILY);
         assertEquals(List.of(reserved.reportId()), page.getContent().stream().map(ReportResDTO.Summary::getId).toList());
         assertTrue(dailyRepository.findDueDates(date, date.plusDays(1)).isEmpty());
+        assertTrue(dailyRepository.findBlockedDates(date.plusDays(10).atStartOfDay()).stream()
+                .noneMatch(blocked -> blocked.date().equals(date)));
     }
 
     @Test
@@ -241,5 +245,32 @@ class ReportOracleIntegrationTests {
         assertNull(withoutFindings.getFindings());
         assertEquals(1, withoutFindings.getSummaryStats().getFindingCount());
         assertEquals(1, withoutFindings.getSummaryStats().getBySensitivityLevel().get("high"));
+
+        // 별도 날짜로 묶어 실제 수집 데이터와 독립적으로 DAILY 집계 SQL을 검증한다.
+        var date = java.time.LocalDate.of(1998, 2, 5);
+        jdbcTemplate.update("UPDATE news_collection_runs SET started_at = ?, scanned_count = 99 WHERE id = ?",
+                java.sql.Timestamp.valueOf(date.atTime(1, 0)), run.getId());
+        entityManager.persist(com.example.be.domain.collection.entity.CollectionRunItem.builder()
+                .run(entityManager.getReference(CollectionRun.class, run.getId())).topic(topic).source(source)
+                .status(com.example.be.domain.collection.entity.RunItemStatus.SUCCESS).scannedCount(40).build());
+        CollectionRun other = runRepository.save(CollectionRun.builder().status(RunStatus.SUCCESS)
+                .triggerType(TriggerType.MANUAL).startedAt(date.atTime(2, 0)).scannedCount(7).build());
+        entityManager.flush();
+        assertEquals(47, dailyRepository.sourceStats(date).collected());
+
+        var daily = dailyPersistence.reserve(date, List.of(run.getId(), other.getId()), List.of(finding.getId()), now);
+        persistence.complete(daily.reportId(), new com.example.be.domain.reports.service.ReportDocument(
+                "일일 보고서", "본문", "fallback", null, null, null, null, null, null,
+                ReportStatus.FALLBACK, List.of(finding.getId()), List.of()), now);
+        entityManager.flush();
+        var count = findingRepository.countForDailyReports(List.of(daily.reportId()), java.math.BigDecimal.valueOf(70))
+                .getFirst();
+        assertEquals(daily.reportId(), count.getReportId());
+        assertEquals(1, count.getFindingCount());
+        assertEquals(1, count.getHighSensitivityCount());
+
+        var investigations = new com.example.be.domain.analysis.agent.investigation.IssueInvestigationJdbcRepository(jdbcTemplate);
+        // 멀티 run 조회의 빈 결과도 유효하며 null run으로 조인하지 않는다.
+        assertTrue(investigations.findTraces(List.of(run.getId(), other.getId())).isEmpty());
     }
 }

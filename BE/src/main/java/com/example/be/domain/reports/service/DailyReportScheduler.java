@@ -28,6 +28,10 @@ public class DailyReportScheduler {
         }
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
         creationService.recoverInterrupted(now.minusMinutes(30));
+        for (var blocked : repository.findBlockedDates(now.minusHours(24))) {
+            log.warn("일일 보고서 집계 보류: 24시간 이상 미종료 실행. date={} pendingRunCount={} outsideBackfillWindow={}",
+                    blocked.date(), blocked.pendingRunCount(), blocked.date().isBefore(now.toLocalDate().minusDays(7)));
+        }
         // 기동하지 못한 날도 복구하되 오래된 전체 이력을 한꺼번에 유료 호출하지 않는다.
         for (var date : repository.findDueDates(now.toLocalDate().minusDays(7), now.toLocalDate())) {
             try {

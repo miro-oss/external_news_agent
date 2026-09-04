@@ -30,6 +30,20 @@ class ReportControllerTest {
     private ReportQueryService reportQueryService;
 
     @Test
+    void invertedPeriodMatchesNotionErrorEnvelope() throws Exception {
+        when(reportQueryService.getReports("2026-09-03", "2026-09-01", 0, 20))
+                .thenThrow(new com.example.be.global.apiPayload.exception.GeneralException(
+                        com.example.be.global.apiPayload.code.GeneralErrorCode.BAD_REQUEST,
+                        "from은 to보다 이전이어야 합니다."));
+        mockMvc.perform(get("/api/news/reports").param("from", "2026-09-03").param("to", "2026-09-01"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.isSuccess").value(false))
+                .andExpect(jsonPath("$.code").value("COMMON400"))
+                .andExpect(jsonPath("$.message").value("from은 to보다 이전이어야 합니다."))
+                .andExpect(jsonPath("$.result").isMap());
+    }
+
+    @Test
     void dailyFilterAndNullableRunIdFollowContract() throws Exception {
         var scope = com.example.be.domain.reports.entity.ReportScope.DAILY;
         var date = java.time.LocalDate.of(2026, 9, 3);

@@ -25,6 +25,22 @@ class ReportGeneratorTest {
             com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
 
     @Test
+    void dailyRendersItsOwnTitleAndExclusionsWithoutEditingClaimText() {
+        var date = java.time.LocalDate.of(2026, 9, 1);
+        var empty = generator.generateDaily(List.of(), date, new ReportSourceStats(118, 0, 0, 0, 2, 3));
+        assertEquals("2026-09-01 일일 통합 뉴스 보고서", empty.title());
+        assertTrue(empty.markdownBody().contains("이 날 수집 실행에서 기사 118건"));
+        assertTrue(empty.markdownBody().contains("임시 응답 분석 2건 제외, 근거 부족 분석 3건 제외"));
+        assertEquals(1, empty.markdownBody().lines().filter(line -> line.startsWith("# ")).count());
+
+        Finding low = finding(2L, "기사", "이번 실행 결과", SensitivityLevel.LOW, Relevance.WATCH, "기업");
+        Finding high = finding(1L, "기사", "중요 내용", SensitivityLevel.HIGH, Relevance.IMPORTANT, "정책");
+        var daily = generator.generateDaily(List.of(low, high), date, ReportSourceStats.empty());
+        assertEquals(List.of(2L, 1L), daily.reflectedFindingIds());
+        assertTrue(daily.markdownBody().contains("이번 실행 결과"));
+    }
+
+    @Test
     void buildsDeterministicMarkdownFromFindingsInPriorityOrder() {
         Finding low = finding(2L, "일반 기사", "일반 요약", SensitivityLevel.LOW, Relevance.WATCH, "기업");
         Finding high = finding(1L, "중요 기사", "중요 요약", SensitivityLevel.HIGH, Relevance.IMPORTANT, "정책");

@@ -79,6 +79,18 @@ class AgentReportOrchestratorTest {
     }
 
     @Test
+    void dailyWithoutSupportedEvidenceFallsBackBeforeReservingQuota() {
+        var date = java.time.LocalDate.of(2026, 9, 1);
+        Finding unsupported = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "근거 없음");
+        org.springframework.test.util.ReflectionTestUtils.setField(unsupported, "keyPoints", List.of());
+        var stats = com.example.be.domain.reports.service.ReportSourceStats.empty();
+        orchestrator.generateDaily(77L, date, List.of(unsupported), stats, date.plusDays(1).atStartOfDay());
+        verify(fallback).generateDaily(List.of(unsupported), date, stats);
+        org.mockito.Mockito.verifyNoInteractions(client, recorder, planService);
+        verify(quotaService, never()).reserve(any(), any(), any(), any());
+    }
+
+    @Test
     void excludesStubAndIncludesReusedFindingInAgentRequest() {
         Finding llm = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "실제 LLM 요약");
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT_BLOCKED, "STUB 요약");

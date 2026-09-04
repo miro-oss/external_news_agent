@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
@@ -35,6 +36,15 @@ public class ReportGenerator {
     public ReportDocument generate(List<Finding> findings,
                                    LocalDateTime generatedAt,
                                    ReportSourceStats sourceStats) {
+        return generate(findings, generatedAt, sourceStats, null);
+    }
+
+    public ReportDocument generateDaily(List<Finding> findings, LocalDate date, ReportSourceStats sourceStats) {
+        return generate(findings, date.atStartOfDay(), sourceStats, date);
+    }
+
+    private ReportDocument generate(List<Finding> findings, LocalDateTime generatedAt,
+                                    ReportSourceStats sourceStats, LocalDate reportDate) {
         int actualStubCount = (int) findings.stream()
                 .filter(finding -> finding.getAnalysisSource() == AnalysisSource.STUB)
                 .count();
@@ -49,18 +59,19 @@ public class ReportGenerator {
                 sourceStats.paywalled(),
                 Math.max(sourceStats.stubExcluded(), actualStubCount),
                 Math.max(sourceStats.evidenceExcluded(), actualEvidenceExcluded));
-        List<Finding> ordered = ReportFindingOrder.sort(findings.stream()
+        List<Finding> eligible = findings.stream()
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
                 .filter(FindingEvidencePolicy::hasSupportedEvidence)
-                .toList());
+                .toList();
+        List<Finding> ordered = reportDate == null ? ReportFindingOrder.sort(eligible) : eligible;
         List<Finding> excluded = ReportFindingOrder.sort(findings.stream()
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
                 .filter(finding -> !FindingEvidencePolicy.hasSupportedEvidence(finding))
                 .toList());
-        String title = title(ordered, generatedAt);
+        String title = reportDate == null ? title(ordered, generatedAt) : reportDate + " 일일 통합 뉴스 보고서";
         return new ReportDocument(
                 title,
-                markdown(title, ordered, excluded, effectiveStats),
+                markdown(title, ordered, excluded, effectiveStats, reportDate),
                 MODEL_NAME,
                 null,
                 null,
@@ -86,11 +97,13 @@ public class ReportGenerator {
     private String markdown(String title,
                             List<Finding> findings,
                             List<Finding> excluded,
-                            ReportSourceStats sourceStats) {
+                            ReportSourceStats sourceStats,
+                            LocalDate reportDate) {
         StringBuilder body = new StringBuilder("# ").append(ReportMarkdown.text(title)).append("\n\n");
         body.append("## 오늘의 핵심\n\n");
         if (findings.isEmpty()) {
-            body.append("- 이번 실행에서 기사 ").append(sourceStats.collected())
+            body.append(reportDate == null ? "- 이번 실행에서 기사 " : "- 이 날 수집 실행에서 기사 ")
+                    .append(sourceStats.collected())
                     .append(sourceStats.evidenceExcluded() > 0
                             ? "건을 관측했지만 근거가 확인된 분석 결과가 없어 기사 내용을 요약하지 않았습니다.\n"
                             : "건을 관측했지만 분석 결과가 없어 기사 내용을 요약하지 않았습니다.\n");

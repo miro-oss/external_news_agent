@@ -76,7 +76,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         LocalDateTime parsedFrom = parseDateTime(from, false);
         LocalDateTime parsedTo = parseDateTime(to, true);
         if (parsedFrom != null && parsedTo != null && parsedFrom.isAfter(parsedTo)) {
-            throw badRequest("from은 to보다 이후일 수 없습니다.");
+            throw badRequest("from은 to보다 이전이어야 합니다.");
         }
 
         Page<NewsReport> reports = reportRepository.findAll(
@@ -87,11 +87,11 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 PageRequest.of(page, size, Sort.by(
                         Sort.Order.desc("generatedAt"), Sort.Order.desc("id"))));
         Map<Long, FindingRepository.ReportCount> counts = countsByRun(reports.getContent());
-        Map<Long, List<Finding>> dailyFindings = dailyFindings(reports.getContent());
+        Map<Long, FindingRepository.DailyReportCount> dailyCounts = dailyCounts(reports.getContent());
         Map<Long, String> deliveryStatuses = deliveryStatuses(reports.getContent());
         List<ReportResDTO.Summary> content = reports.getContent().stream()
                 .map(report -> toSummary(report, report.getRunId() == null ? null : counts.get(report.getRunId()),
-                        dailyFindings.getOrDefault(report.getId(), List.of()),
+                        dailyCounts.get(report.getId()),
                         deliveryStatuses.getOrDefault(report.getId(), DELIVERY_STATUS_NOT_SENT)))
                 .toList();
         return PageResponse.of(content, page, size, reports.getTotalElements());
@@ -120,7 +120,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     private ReportResDTO.Summary toSummary(NewsReport report,
                                            FindingRepository.ReportCount count,
-                                           List<Finding> dailyFindings, String deliveryStatus) {
+                                           FindingRepository.DailyReportCount dailyCount, String deliveryStatus) {
         return ReportResDTO.Summary.builder()
                 .id(report.getId())
                 .runId(report.getRunId())
@@ -129,11 +129,11 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .title(report.getTitle())
                 .generatedAt(toOffset(report.getGeneratedAt()))
                 .modelName(report.getModelName())
-                .findingCount(report.getReportScope() == ReportScope.DAILY ? dailyFindings.size()
+                .findingCount(report.getReportScope() == ReportScope.DAILY
+                        ? dailyCount == null ? 0 : dailyCount.getFindingCount()
                         : count == null ? 0 : count.getFindingCount())
                 .highSensitivityCount(report.getReportScope() == ReportScope.DAILY
-                        ? dailyFindings.stream().filter(f -> f.getSensitivity().getScore()
-                                .compareTo(sensitivityCalculator.highThreshold()) >= 0).count()
+                        ? dailyCount == null ? 0 : dailyCount.getHighSensitivityCount()
                         : count == null ? 0 : count.getHighSensitivityCount())
                 .deliveryStatus(deliveryStatus)
                 .build();
@@ -170,8 +170,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         Map<Long, Map<Long, InvestigationTrace>> tracesByRun = new LinkedHashMap<>();
         if (includeFindings) {
             if (daily) {
-                findings.stream().map(f -> f.getRun().getId()).distinct()
-                        .forEach(id -> tracesByRun.put(id, investigationsByIssue(id)));
+                tracesByRun.putAll(investigationRepository.findTraces(
+                        findings.stream().map(f -> f.getRun().getId()).distinct().toList()));
             } else {
                 tracesByRun.put(runId, investigationsByIssue(runId));
             }
@@ -292,7 +292,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         return ReportResDTO.Finding.builder()
                 .id(finding.getId())
                 .articleId(finding.getArticle().getId())
-                .runId(finding.getRun() == null ? null : finding.getRun().getId())
+                .runId(finding.getRun().getId())
                 .issueId(issueId)
                 .issue(toIssueSummary(issue))
                 .articleTitle(finding.getArticle().getTitle())
@@ -380,16 +380,12 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         return report.getReportScope() == ReportScope.DAILY ? report.getSourceRunIds() : List.of(report.getRunId());
     }
 
-    private Map<Long, List<Finding>> dailyFindings(List<NewsReport> reports) {
+    private Map<Long, FindingRepository.DailyReportCount> dailyCounts(List<NewsReport> reports) {
         List<Long> ids = reports.stream().filter(r -> r.getReportScope() == ReportScope.DAILY)
-                .flatMap(r -> r.getReflectedFindingIds().stream()).distinct().toList();
-        Map<Long, Finding> byId = OracleInClause.batches(ids).stream()
-                .flatMap(batch -> findingRepository.findForReportByIdIn(batch).stream())
-                .collect(Collectors.toMap(Finding::getId, Function.identity()));
-        Map<Long, List<Finding>> result = new LinkedHashMap<>();
-        reports.stream().filter(r -> r.getReportScope() == ReportScope.DAILY).forEach(r -> result.put(r.getId(),
-                r.getReflectedFindingIds().stream().filter(byId::containsKey).map(byId::get).toList()));
-        return result;
+                .map(NewsReport::getId).toList();
+        return OracleInClause.batches(ids).stream()
+                .flatMap(batch -> findingRepository.countForDailyReports(batch, sensitivityCalculator.highThreshold()).stream())
+                .collect(Collectors.toMap(FindingRepository.DailyReportCount::getReportId, Function.identity()));
     }
 
     private Map<String, Long> orderedCounts(List<Finding> findings,

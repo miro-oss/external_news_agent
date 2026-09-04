@@ -3,7 +3,6 @@ package com.example.be.domain.reports.service;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.reports.entity.NewsReport;
-import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import lombok.RequiredArgsConstructor;
@@ -48,8 +47,7 @@ public class ReportPersistenceService {
     public Long complete(Long reportId, ReportDocument document, LocalDateTime generatedAt) {
         NewsReport report = reportRepository.findByIdForUpdate(reportId)
                 .orElseThrow(() -> new IllegalStateException("완료할 보고서가 없습니다. reportId=" + reportId));
-        if (report.getReportScope() == ReportScope.DAILY
-                && report.getReportStatus() != ReportStatus.PENDING) {
+        if (report.getReportStatus() != ReportStatus.PENDING) {
             return report.getId();
         }
         report.complete(

@@ -23,6 +23,23 @@ class DailyReportSelectorTest {
     private final Topic topic = Topic.builder().id(1L).build();
 
     @Test
+    void countsLatestIssueExclusionsBeforeTopNWithoutCountingLegacyOrOldFindings() {
+        Finding supported = finding(1, 1, "grounded");
+        Finding withdrawn = finding(2, 2, "ungrounded");
+        Finding stub = finding(3, 2, "grounded");
+        org.springframework.test.util.ReflectionTestUtils.setField(stub, "analysisSource", AnalysisSource.STUB);
+        Finding selected = finding(4, 1, "grounded");
+        Finding legacy = finding(5, 1, "ungrounded");
+        NewsIssue changed = issue(10, 100);
+        var result = selector.selectWithStats(List.of(supported, withdrawn, stub, selected, legacy),
+                List.of(link(supported, changed), link(withdrawn, changed), link(stub, issue(20, 90)),
+                        link(selected, issue(30, 80))), 1);
+        assertEquals(List.of(selected), result.findings());
+        assertEquals(new ReportSourceStats(118, 1, 2, 0, 1, 1),
+                result.applyTo(new ReportSourceStats(118, 1, 2, 0, 0, 0)));
+    }
+
+    @Test
     void selectsLatestPerIssueBeforeRankingAndDoesNotResurrectUnsupportedClaims() {
         Finding old = finding(1, 1, "grounded");
         Finding latest = finding(2, 2, "weak");

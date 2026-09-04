@@ -49,8 +49,9 @@ public class DailyReportCreationService {
             return null;
         }
         List<Long> sourceRunIds = dailyRepository.findSourceRunIds(date);
-        List<Finding> selected = selector.select(date, maxIssues);
-        ReportSourceStats stats = dailyRepository.sourceStats(date);
+        DailyReportSelector.Selection selection = selector.selectWithStats(date, maxIssues);
+        List<Finding> selected = selection.findings();
+        ReportSourceStats stats = selection.applyTo(dailyRepository.sourceStats(date));
         ReportPersistenceService.Reservation reservation = dailyPersistence.reserve(
                 date, sourceRunIds, selected.stream().map(Finding::getId).toList(), now);
         if (!reservation.owner()) {
@@ -61,9 +62,9 @@ public class DailyReportCreationService {
             document = orchestrator.generateDaily(reservation.reportId(), date, selected, stats, now);
         } catch (RuntimeException exception) {
             log.error("일일 보고서 생성 실패. date={}", date, exception);
-            document = fallbackGenerator.generate(selected, now, stats);
+            document = fallbackGenerator.generateDaily(selected, date, stats);
         }
-        return persistence.complete(reservation.reportId(), dailyDocument(date, sourceRunIds, document), now);
+        return persistence.complete(reservation.reportId(), document, now);
     }
 
     /** 예약 뒤 프로세스가 중단되면 저장된 근거로 복구한다. 불확실한 LLM 호출을 반복하지 않는다. */
@@ -73,24 +74,14 @@ public class DailyReportCreationService {
             try {
                 List<Finding> findings = ReportFindings.load(report, findingRepository);
                 LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
-                ReportDocument fallback = fallbackGenerator.generate(findings, now,
-                        dailyRepository.sourceStats(report.getReportDate()));
-                persistence.complete(report.getId(),
-                        dailyDocument(report.getReportDate(), report.getSourceRunIds(), fallback), now);
+                ReportSourceStats stats = selector.selectWithStats(report.getReportDate(), maxIssues)
+                        .applyTo(dailyRepository.sourceStats(report.getReportDate()));
+                ReportDocument fallback = fallbackGenerator.generateDaily(findings, report.getReportDate(), stats);
+                persistence.complete(report.getId(), fallback, now);
             } catch (RuntimeException exception) {
                 log.error("중단된 일일 보고서 복구 실패. reportId={}", report.getId(), exception);
             }
         }
     }
 
-    private ReportDocument dailyDocument(LocalDate date, List<Long> runIds, ReportDocument document) {
-        String title = date + " 일일 통합 뉴스 보고서";
-        String body = document.markdownBody().replaceFirst("^# [^\\n]*\\n", "")
-                .replace("이번 실행", "집계일");
-        String markdown = "# " + title + "\n\n" + "한국 시간 " + date + " · 수집 " + runIds.size()
-                + "회 · 주요 이슈 " + document.reflectedFindingIds().size() + "건\n\n" + body.strip();
-        return new ReportDocument(title, markdown, document.modelName(), document.promptVersion(),
-                document.llmProvider(), document.inputTokens(), document.outputTokens(), document.costUsd(),
-                document.credits(), document.status(), document.reflectedFindingIds(), document.excludedFindingIds());
-    }
 }

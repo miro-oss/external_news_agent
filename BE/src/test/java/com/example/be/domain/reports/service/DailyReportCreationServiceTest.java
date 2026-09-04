@@ -8,6 +8,7 @@ import com.example.be.domain.reports.repository.DailyReportJdbcRepository;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.global.config.ApiTimeZone;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDate;
@@ -31,6 +32,12 @@ class DailyReportCreationServiceTest {
     private final DailyReportCreationService service = new DailyReportCreationService(
             daily, reports, findings, selector, reservation, persistence, orchestrator, fallback);
     private final LocalDate date = LocalDate.of(2026, 8, 1);
+
+    @BeforeEach
+    void selectionStats() {
+        when(selector.selectWithStats(date, 10)).thenReturn(new DailyReportSelector.Selection(List.of(), 2, 3));
+        when(daily.sourceStats(date)).thenReturn(ReportSourceStats.empty());
+    }
 
     @Test
     void existingOrContendedReservationDoesNotInvokeAgentAgain() {
@@ -64,14 +71,14 @@ class DailyReportCreationServiceTest {
                 .thenReturn(new ReportPersistenceService.Reservation(77L, true));
         when(orchestrator.generateDaily(eq(77L), eq(date), anyList(), any(), any()))
                 .thenThrow(new IllegalStateException("provider unavailable"));
-        when(fallback.generate(anyList(), any(), any())).thenReturn(
-                new ReportDocument("기존 제목", "# 기존 제목\n\n근거 없음", "safe-fallback-report-v1"));
+        when(fallback.generateDaily(anyList(), any(), any())).thenReturn(
+                new ReportDocument("2026-08-01 일일 통합 뉴스 보고서", "# 일일 보고서\n\n이번 실행이라는 인용문", "safe-fallback-report-v1"));
         service.generate(date);
         ArgumentCaptor<ReportDocument> document = ArgumentCaptor.forClass(ReportDocument.class);
         verify(persistence).complete(eq(77L), document.capture(), any());
         assertEquals("2026-08-01 일일 통합 뉴스 보고서", document.getValue().title());
-        assertTrue(document.getValue().markdownBody().contains("수집 2회"));
-        assertFalse(document.getValue().markdownBody().contains("기존 제목"));
+        assertEquals("# 일일 보고서\n\n이번 실행이라는 인용문", document.getValue().markdownBody());
+        verify(fallback).generateDaily(List.of(), date, new ReportSourceStats(0, 0, 0, 0, 2, 3));
     }
 
     @Test
@@ -81,7 +88,7 @@ class DailyReportCreationServiceTest {
                 .sourceRunIds(List.of(1L, 2L)).reportStatus(ReportStatus.PENDING).build();
         when(reports.findByReportScopeAndReportStatusAndGeneratedAtBefore(
                 ReportScope.DAILY, ReportStatus.PENDING, cutoff)).thenReturn(List.of(pending));
-        when(fallback.generate(anyList(), any(), any())).thenReturn(new ReportDocument("복구", "근거 없음", "fallback"));
+        when(fallback.generateDaily(anyList(), any(), any())).thenReturn(new ReportDocument("복구", "근거 없음", "fallback"));
         service.recoverInterrupted(cutoff);
         verify(persistence).complete(eq(77L), any(), any());
         verifyNoInteractions(orchestrator, reservation);

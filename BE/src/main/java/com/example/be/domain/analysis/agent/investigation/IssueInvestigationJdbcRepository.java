@@ -1,14 +1,17 @@
 package com.example.be.domain.analysis.agent.investigation;
 
+import com.example.be.global.database.OracleInClause;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -129,6 +132,24 @@ public class IssueInvestigationJdbcRepository {
                 rs.getLong("issue_id"), trace(rs)), runId).forEach(entry ->
                 traces.put(entry.getKey(), entry.getValue()));
         return Map.copyOf(traces);
+    }
+
+    public Map<Long, Map<Long, InvestigationTrace>> findTraces(Collection<Long> runIds) {
+        Map<Long, Map<Long, InvestigationTrace>> result = new LinkedHashMap<>();
+        NamedParameterJdbcTemplate namedJdbc = new NamedParameterJdbcTemplate(jdbcTemplate);
+        for (var batch : OracleInClause.batches(runIds)) {
+            namedJdbc.query("""
+                    SELECT collection_run_id, issue_id, termination_reason, next_step, added_article_count,
+                           evidence_count_before, evidence_count_current, first_action_reason, rejection_reason
+                    FROM news_issue_investigations
+                    WHERE collection_run_id IN (:runIds) AND status <> 'IN_PROGRESS'
+                    ORDER BY id ASC
+                    """, Map.of("runIds", batch), rs -> {
+                result.computeIfAbsent(rs.getLong("collection_run_id"), ignored -> new LinkedHashMap<>())
+                        .put(rs.getLong("issue_id"), trace(rs));
+            });
+        }
+        return result;
     }
 
     private IssueInvestigationState state(ResultSet rs, int rowNum) throws SQLException {

@@ -339,7 +339,8 @@ def test_mock_report_is_deterministic_and_keeps_structured_sections() -> None:
     assert response.markdown_body.startswith("# 2026-08-10 HBM 뉴스 모니터링 보고서")
 
 
-def test_daily_report_uses_collection_date_and_keeps_evidence_references() -> None:
+@pytest.mark.parametrize("mock", [True, False])
+def test_daily_report_uses_collection_date_and_keeps_evidence_references(mock: bool) -> None:
     payload = request().model_dump(by_alias=True, mode="json")
     payload["run"].update(
         id=None,
@@ -349,8 +350,13 @@ def test_daily_report_uses_collection_date_and_keeps_evidence_references() -> No
         startedAt="2026-08-10T00:00:00+09:00",
         finishedAt="2026-08-11T00:00:00+09:00",
     )
-    response = ReportWriterService(Settings()).write(ReportRequest.model_validate(payload))
+    provider = None if mock else FakeProvider(provider_response(valid_output()))
+    response = ReportWriterService(Settings(AGENT_MOCK=mock), provider).write(
+        ReportRequest.model_validate(payload)
+    )
     assert response.title == "2026-08-10 일일 통합 뉴스 보고서"
+    assert response.markdown_body.startswith(f"# {response.title}\n")
+    assert sum(line.startswith("# ") for line in response.markdown_body.splitlines()) == 1
     assert response.important_events[0].source_finding_ids == [501]
     assert response.source_notes == request().source_notes
 
