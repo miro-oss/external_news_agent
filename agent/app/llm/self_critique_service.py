@@ -92,7 +92,7 @@ class ArticleSelfCritiqueService:
             prompt=prompt,
             response_schema=SelfCritiqueOutput.model_json_schema(by_alias=True),
             validate=lambda response: _validated_output(response, claim_id, bullet),
-            # P1-7 비용 계약은 대상 주장당 provider +1회다.
+            # 선택 주장 구조화 생성은 1회이며 schema repair는 없다. Provider 재시도는 별도다.
             repair_attempts=0,
             task_name="자기 검증",
             input_tag="self-critique",

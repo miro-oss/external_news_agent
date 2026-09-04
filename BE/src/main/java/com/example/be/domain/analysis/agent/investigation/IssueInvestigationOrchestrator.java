@@ -187,7 +187,7 @@ public class IssueInvestigationOrchestrator {
 
         quotaService.findActiveReservation(stepKey).ifPresent(reservation -> {
             if (audit.getStatus() == AgentRunStatus.FAILED) {
-                completeFailure(reservation, audit.getFailureCode());
+                completeFailure(reservation, failureFromAudit(audit));
             } else {
                 completeSuccess(reservation, audit.getCredits());
             }
@@ -289,12 +289,7 @@ public class IssueInvestigationOrchestrator {
                     request.idempotencyKey(), recordException);
         }
         if (clientException != null) {
-            try {
-                quotaService.completeFailure(reservation, clientException);
-            } catch (RuntimeException settleException) {
-                log.error("조사 실패 quota 정산에 실패했다. key={}",
-                        request.idempotencyKey(), settleException);
-            }
+            completeFailure(reservation, clientException);
         } else {
             completeFailure(reservation, code);
         }
@@ -374,6 +369,21 @@ public class IssueInvestigationOrchestrator {
         return exception.isConnectTimeout() ? AgentTimeoutPhase.CONNECT : AgentTimeoutPhase.READ;
     }
 
+    private AgentClientException failureFromAudit(AgentRun audit) {
+        // 복구에도 실시간 실패 정산과 같은 정책을 적용할 수 있도록 timeout과 관측 사용량을 보존한다.
+        AgentClientException.TimeoutPhase phase = switch (audit.getTimeoutPhase()) {
+            case CONNECT -> AgentClientException.TimeoutPhase.CONNECT;
+            case READ -> AgentClientException.TimeoutPhase.READ;
+            case null -> AgentClientException.TimeoutPhase.NONE;
+        };
+        return new AgentClientException(
+                audit.getFailureCode(), audit.getFailureMessage(), null,
+                new AgentClientException.Usage(
+                        audit.getInputTokens(), audit.getOutputTokens(),
+                        audit.getCostUsd(), audit.getCredits()),
+                phase);
+    }
+
     private void completeSuccess(QuotaReservation reservation, BigDecimal credits) {
         try {
             quotaService.completeSuccess(reservation, credits);
@@ -385,6 +395,14 @@ public class IssueInvestigationOrchestrator {
     private void completeFailure(QuotaReservation reservation, String failureCode) {
         try {
             quotaService.completeFailure(reservation, failureCode);
+        } catch (RuntimeException exception) {
+            log.error("조사 실패 quota 정산에 실패했다. key={}", reservation.idempotencyKey(), exception);
+        }
+    }
+
+    private void completeFailure(QuotaReservation reservation, AgentClientException failure) {
+        try {
+            quotaService.completeFailure(reservation, failure);
         } catch (RuntimeException exception) {
             log.error("조사 실패 quota 정산에 실패했다. key={}", reservation.idempotencyKey(), exception);
         }
