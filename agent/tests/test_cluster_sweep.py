@@ -1,4 +1,4 @@
-from app.eval.cluster_sweep import _topic_unions, sweep
+from app.eval.cluster_sweep import _evaluate_rule, _topic_unions, sweep
 
 
 def test_sweep_uses_exported_entity_threshold_and_calibrates_tfidf() -> None:
@@ -100,6 +100,66 @@ def test_fixed_content_group_preserves_cross_topic_java_representative() -> None
 
     assert unions[4386].root(1) == 1
     assert unions[4387].root(2) == 1
+
+
+def test_rule_uses_cross_topic_content_representative_pairs() -> None:
+    articles = [
+        _article(1, "HOLDOUT", "global representative", "event-a", topic_id=2),
+        _article(2, "HOLDOUT", "local syndicated copy", "event-a"),
+        _article(3, "HOLDOUT", "independent follow-up", "event-a"),
+    ]
+    for article in articles[:2]:
+        article["fixedContentGroupId"] = "content-a"
+        article["fixedContentGroupRepresentativeId"] = 1
+
+    metrics = _evaluate_rule(
+        articles,
+        [_pair(1, 3, "HOLDOUT", title_jaccard=0.50)],
+        "HOLDOUT",
+        threshold=0.50,
+        time_window_hours=48,
+        entity_overlap_threshold=2,
+    )
+
+    assert metrics.precision == 1.0
+    assert metrics.recall == 1.0
+
+
+def test_rule_excludes_unrelated_topic_ids_and_other_split_proxies() -> None:
+    articles = [
+        _article(1, "HOLDOUT", "global representative", "event-a", topic_id=2),
+        _article(2, "HOLDOUT", "local syndicated copy", "event-a"),
+        _article(3, "HOLDOUT", "independent follow-up", "event-a"),
+        _article(4, "HOLDOUT", "unrelated other topic", "event-b", topic_id=2),
+        _article(5, "HOLDOUT", "unrelated local article", "event-c"),
+        _article(6, "CALIBRATION", "other split representative", "event-d", topic_id=2),
+        _article(7, "HOLDOUT", "other split content copy", "event-d"),
+    ]
+    for article in articles[:2]:
+        article["fixedContentGroupId"] = "content-a"
+        article["fixedContentGroupRepresentativeId"] = 1
+    for article in articles[5:]:
+        article["fixedContentGroupId"] = "content-d"
+        article["fixedContentGroupRepresentativeId"] = 6
+
+    metrics = _evaluate_rule(
+        articles,
+        [
+            _pair(1, 3, "HOLDOUT", title_jaccard=0.50),
+            _pair(1, 4, "HOLDOUT", title_jaccard=0.50),
+            _pair(4, 5, "HOLDOUT", title_jaccard=0.50),
+            _pair(6, 3, "CROSS", title_jaccard=0.50),
+            _pair(999, 3, "HOLDOUT", title_jaccard=0.50),
+            {**_pair(2, 3, "HOLDOUT", title_jaccard=0.50), "topicId": 99},
+        ],
+        "HOLDOUT",
+        threshold=0.50,
+        time_window_hours=48,
+        entity_overlap_threshold=2,
+    )
+
+    assert metrics.precision == 1.0
+    assert metrics.recall == 1.0
 
 
 def test_sweep_reports_post_hoc_relabel_sensitivity() -> None:

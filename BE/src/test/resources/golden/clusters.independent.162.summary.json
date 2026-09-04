@@ -1,0 +1,260 @@
+{
+  "datasetVersion": "clusters.independent.162.v1",
+  "articleCount": 160,
+  "selectionSplit": "CALIBRATION",
+  "validationSplit": "HOLDOUT",
+  "selected": {
+    "title_jaccard_threshold": 0.4,
+    "time_window_hours": 48,
+    "common_entity_document_ratio": 0.1,
+    "organization_title_jaccard_threshold": 0.2,
+    "organization_time_window_hours": 12,
+    "metrics": {
+      "precision": 0.9705882352941176,
+      "recall": 0.12643678160919541,
+      "adjusted_rand": 0.20866267447607967,
+      "v_measure": 0.9056943029138118
+    }
+  },
+  "holdout": {
+    "precision": 0.38461538461538464,
+    "recall": 0.5357142857142857,
+    "adjusted_rand": 0.442005192425168,
+    "v_measure": 0.9662920705163522
+  },
+  "configured": {
+    "titleJaccardThreshold": 0.5,
+    "timeWindowHours": 48,
+    "commonEntityDocumentRatio": 0.1,
+    "organizationTitleJaccardThreshold": 0.125,
+    "organizationTimeWindowHours": 24,
+    "calibrationMetrics": {
+      "precision": 0.9,
+      "recall": 0.06896551724137931,
+      "adjusted_rand": 0.1177409061901723,
+      "v_measure": 0.8901360016741439
+    },
+    "holdoutMetrics": {
+      "precision": 0.4166666666666667,
+      "recall": 0.35714285714285715,
+      "adjusted_rand": 0.3795405458472413,
+      "v_measure": 0.964132380063461
+    }
+  },
+  "tfidfCharWbBaseline": {
+    "includesFixedContentGroups": true,
+    "threshold": 0.45,
+    "calibrationMetrics": {
+      "precision": 1.0,
+      "recall": 0.07662835249042145,
+      "adjusted_rand": 0.13214513629318989,
+      "v_measure": 0.8945937385797279
+    },
+    "metrics": {
+      "precision": 0.46153846153846156,
+      "recall": 0.21428571428571427,
+      "adjusted_rand": 0.2886860407352211,
+      "v_measure": 0.9618674243499298
+    }
+  },
+  "tfidfCharWbStandaloneBaseline": {
+    "includesFixedContentGroups": false,
+    "threshold": 0.45,
+    "calibrationMetrics": {
+      "precision": 1.0,
+      "recall": 0.07662835249042145,
+      "adjusted_rand": 0.13214513629318989,
+      "v_measure": 0.8945937385797279
+    },
+    "metrics": {
+      "precision": 0.46153846153846156,
+      "recall": 0.21428571428571427,
+      "adjusted_rand": 0.2886860407352211,
+      "v_measure": 0.9618674243499298
+    }
+  },
+  "precisionGate": 0.9,
+  "precisionGatePassed": false,
+  "recallGate": 0.85,
+  "recallGatePassed": false,
+  "decisionGatePassed": false,
+  "independentValidation": {
+    "goldenSha256": "1fdc3d58e05d30b136012ce2b1b64eb5983b23c04baa9db20510a76a79ec7bfb",
+    "sealSha256": "0bd30e98cc15760f074b492534895c6bd36fc3dc76eccd506147c2f7bd388ff3",
+    "javaOutputSha256": "073d2c28b6ae9d69a9fe606a518c48fe9587a02ed91d9df51c86bf3a22f583c6",
+    "coverage": {
+      "CALIBRATION": {
+        "topicArticleCounts": {
+          "4386": 40,
+          "4387": 40
+        },
+        "positivePairs": 261,
+        "negativePairs": 1299
+      },
+      "HOLDOUT": {
+        "topicArticleCounts": {
+          "4386": 40,
+          "4387": 40
+        },
+        "positivePairs": 28,
+        "negativePairs": 1532
+      }
+    },
+    "documentFrequencyScope": "SPLIT"
+  },
+  "referenceLabelStatus": "AI_BLIND_REFERENCE_HUMAN_REVIEW_PENDING",
+  "observationWindow": {
+    "from": "2026-09-02T13:10:00+09:00",
+    "to": "2026-09-04T13:10:00+09:00"
+  },
+  "sourceRuns": [
+    4014,
+    4015,
+    4454,
+    4455
+  ],
+  "topicArticleCounts": {
+    "4386": 80,
+    "4387": 80
+  },
+  "uniqueSourceArticleCount": 159,
+  "referenceEventCount": 108,
+  "documentFrequencyByTopic": [
+    {
+      "minimumArticles": 20,
+      "documentFrequencyActive": true,
+      "articleCount": 40,
+      "votingRepresentativeCount": 40,
+      "topicId": 4386,
+      "split": "CALIBRATION"
+    },
+    {
+      "minimumArticles": 20,
+      "documentFrequencyActive": true,
+      "articleCount": 40,
+      "votingRepresentativeCount": 40,
+      "topicId": 4387,
+      "split": "CALIBRATION"
+    },
+    {
+      "minimumArticles": 20,
+      "documentFrequencyActive": true,
+      "articleCount": 40,
+      "votingRepresentativeCount": 40,
+      "topicId": 4386,
+      "split": "HOLDOUT"
+    },
+    {
+      "minimumArticles": 20,
+      "documentFrequencyActive": true,
+      "articleCount": 40,
+      "votingRepresentativeCount": 40,
+      "topicId": 4387,
+      "split": "HOLDOUT"
+    }
+  ],
+  "diagnostics": {
+    "configured": {
+      "tp": 10,
+      "fp": 14,
+      "fn": 18,
+      "incorrectDirectEdges": [
+        {
+          "leftAnnotationId": 122,
+          "rightAnnotationId": 128,
+          "leftSourceArticleId": 3797,
+          "rightSourceArticleId": 3771,
+          "titleJaccard": 0.5,
+          "entityOverlap": 0,
+          "organizationOverlap": 0,
+          "hoursApart": 14.816666666666666
+        },
+        {
+          "leftAnnotationId": 122,
+          "rightAnnotationId": 145,
+          "leftSourceArticleId": 3797,
+          "rightSourceArticleId": 3738,
+          "titleJaccard": 0.5,
+          "entityOverlap": 0,
+          "organizationOverlap": 0,
+          "hoursApart": 0.0
+        },
+        {
+          "leftAnnotationId": 128,
+          "rightAnnotationId": 129,
+          "leftSourceArticleId": 3771,
+          "rightSourceArticleId": 3739,
+          "titleJaccard": 0.6363636363636364,
+          "entityOverlap": 0,
+          "organizationOverlap": 0,
+          "hoursApart": 16.533333333333335
+        }
+      ]
+    },
+    "selected": {
+      "tp": 15,
+      "fp": 24,
+      "fn": 13,
+      "incorrectDirectEdges": [
+        {
+          "leftAnnotationId": 108,
+          "rightAnnotationId": 128,
+          "leftSourceArticleId": 3813,
+          "rightSourceArticleId": 3771,
+          "titleJaccard": 0.4166666666666667,
+          "entityOverlap": 0,
+          "organizationOverlap": 0,
+          "hoursApart": 16.75
+        },
+        {
+          "leftAnnotationId": 108,
+          "rightAnnotationId": 142,
+          "leftSourceArticleId": 3813,
+          "rightSourceArticleId": 3803,
+          "titleJaccard": 0.4166666666666667,
+          "entityOverlap": 0,
+          "organizationOverlap": 0,
+          "hoursApart": 1.1666666666666667
+        },
+        {
+          "leftAnnotationId": 122,
+          "rightAnnotationId": 128,
+          "leftSourceArticleId": 3797,
+          "rightSourceArticleId": 3771,
+          "titleJaccard": 0.5,
+          "entityOverlap": 0,
+          "organizationOverlap": 0,
+          "hoursApart": 14.816666666666666
+        },
+        {
+          "leftAnnotationId": 122,
+          "rightAnnotationId": 145,
+          "leftSourceArticleId": 3797,
+          "rightSourceArticleId": 3738,
+          "titleJaccard": 0.5,
+          "entityOverlap": 0,
+          "organizationOverlap": 0,
+          "hoursApart": 0.0
+        },
+        {
+          "leftAnnotationId": 128,
+          "rightAnnotationId": 129,
+          "leftSourceArticleId": 3771,
+          "rightSourceArticleId": 3739,
+          "titleJaccard": 0.6363636363636364,
+          "entityOverlap": 0,
+          "organizationOverlap": 0,
+          "hoursApart": 16.533333333333335
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "AI reference labels have not been human validated.",
+    "The four source runs were PARTIAL and span two daily scheduler cycles, not three cycles.",
+    "Runs 4014/4015 precede PR147 merge; all four follow PR145 merge, but deployment commit per run is not recorded.",
+    "Current text snapshot at 2026-09-04T13:12:40+09:00, not historical per-run replay; export retains timestamp precision to seconds.",
+    "Holdout has 28 positive same-topic pairs; calibration has 261 due a large event.",
+    "Off-topic and low-information source rows remain included."
+  ]
+}
