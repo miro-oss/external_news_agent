@@ -432,6 +432,17 @@ export interface IssueArticle {
   joinedAt: string
 }
 
+export interface IssueToneDistribution {
+  analyzedArticleCount: number
+  sampleCount: number
+  optimisticCount: number
+  neutralCount: number
+  pessimisticCount: number
+  optimisticPercent: number | null
+  neutralPercent: number | null
+  pessimisticPercent: number | null
+}
+
 export interface IssueDetail {
   id: number
   title: string
@@ -454,6 +465,7 @@ export interface IssueDetail {
     missingStakeholders: string[]
   }
   representativeArticleId: number | null
+  toneDistribution?: IssueToneDistribution
   articles: IssueArticle[]
 }
 

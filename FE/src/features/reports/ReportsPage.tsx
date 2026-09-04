@@ -33,6 +33,7 @@ import { formatFullDate, formatShortDate } from '../../lib/datetime'
 import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { MutationStatus } from '../settings/MutationStatus'
+import { IssueTonePanel } from './IssueTonePanel'
 
 type ReportScopeTab = 'ALL' | 'DAILY' | 'RUN'
 
@@ -589,6 +590,10 @@ function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect }: {
           {issue.data && (
             <CrossSourcePanel issue={issue.data} onEvidenceSelect={(articleId, sentences) =>
               onEvidenceSelect(articleId, finding.runId, sentences)} />
+          )}
+
+          {issue.data?.toneDistribution && (
+            <IssueTonePanel distribution={issue.data.toneDistribution} articleCount={issue.data.articleCount} />
           )}
 
           <section className="issue-related-articles">

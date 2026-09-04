@@ -12,6 +12,7 @@ import com.example.be.domain.issues.exception.code.IssueErrorCode;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.global.config.ApiTimeZone;
+import com.example.be.global.database.OracleInClause;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,20 +30,26 @@ public class IssueQueryServiceImpl implements IssueQueryService {
     private final NewsIssueRepository issueRepository;
     private final IssueArticleRepository issueArticleRepository;
     private final FindingRepository findingRepository;
+    private final IssueToneCalculator toneCalculator;
 
     @Override
     public IssueResDTO.Detail getIssue(Long issueId) {
         NewsIssue issue = issueRepository.findById(issueId)
                 .orElseThrow(() -> new IssueException(IssueErrorCode.ISSUE_NOT_FOUND));
         List<IssueArticle> memberships = issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(issueId);
+        List<Finding> latestFindings = OracleInClause.batches(memberships.stream()
+                        .map(value -> value.getArticle().getId()).distinct().toList()).stream()
+                .flatMap(ids -> findingRepository.findLatestByArticleIds(ids).stream())
+                .toList();
         IssueArticle representative = memberships.stream()
                 .filter(value -> value.getRole() == IssueArticleRole.REPRESENTATIVE)
                 .findFirst()
                 .orElse(null);
         String summary = issue.getSummary();
         if (!StringUtils.hasText(summary) && representative != null) {
-            summary = findingRepository.findFirstByArticleIdOrderByIdDesc(
-                            representative.getArticle().getId())
+            summary = latestFindings.stream()
+                    .filter(finding -> finding.getArticle().getId().equals(representative.getArticle().getId()))
+                    .findFirst()
                     .map(Finding::getSummary)
                     .orElse(null);
         }
@@ -63,6 +70,7 @@ public class IssueQueryServiceImpl implements IssueQueryService {
                 .topicName(issue.getTopic().getName())
                 .entities(issue.getEntities())
                 .crossSource(issue.getCrossSource())
+                .toneDistribution(toneCalculator.calculate(memberships, latestFindings))
                 .representativeArticleId(representative == null ? null : representative.getArticle().getId())
                 .articles(memberships.stream().map(this::toArticle).toList())
                 .build();

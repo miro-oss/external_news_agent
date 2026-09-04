@@ -3198,12 +3198,74 @@ body.modal-open {
   margin-top: 0.65rem;
 }
 
+.issue-tone-panel,
 .issue-cross-source {
   display: grid;
   gap: 0.65rem;
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--line);
+}
+
+.issue-tone-panel .issue-detail-heading {
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.issue-tone-bar {
+  display: flex;
+  height: 0.55rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line-soft);
+}
+
+.issue-tone-bar > span {
+  flex-basis: 0;
+}
+
+.issue-tone-optimistic {
+  background: #287b69;
+}
+
+.issue-tone-neutral {
+  background: #909aa6;
+}
+
+.issue-tone-pessimistic {
+  background: #ba6549;
+}
+
+.issue-tone-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  font-size: 0.75rem;
+}
+
+.issue-tone-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.issue-tone-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+}
+
+.issue-tone-panel p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.issue-tone-coverage {
+  color: var(--fg-3);
+  font-size: 0.7rem;
 }
 
 .issue-cross-source-group {

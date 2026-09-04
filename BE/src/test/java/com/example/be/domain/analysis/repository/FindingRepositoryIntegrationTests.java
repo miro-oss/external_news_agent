@@ -14,6 +14,8 @@ import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.articles.service.ArticleQueryService;
+import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.service.IssueToneCalculator;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
@@ -356,6 +358,36 @@ class FindingRepositoryIntegrationTests {
 
     private Finding finding() {
         return finding(run);
+    }
+
+    @Test
+    void latestFindingForToneDoesNotFallBackToOlderOpinionAfterStubReplacement() {
+        findingRepository.save(finding());
+        CollectionRun latestRun = runRepository.save(CollectionRun.builder()
+                .status(RunStatus.SUCCESS).triggerType(TriggerType.MANUAL)
+                .startedAt(LocalDateTime.now()).finishedAt(LocalDateTime.now()).build());
+        Finding replacement = finding(latestRun);
+        replacement.replaceAnalysis(Finding.builder()
+                .changeType(ChangeType.UPDATED).summary("임시 분석")
+                .keyPoints(List.of()).sections(List.of())
+                .sentiment(Sentiment.NEUTRAL).analysisSource(AnalysisSource.STUB)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.LOW))
+                .relevance(Relevance.REFERENCE).category("정책").analyzedAt(LocalDateTime.now()).build());
+        Finding latest = findingRepository.save(replacement);
+        Long articleId = article.getId();
+        flushAndClear();
+
+        List<Finding> found = findingRepository.findLatestByArticleIds(List.of(articleId));
+
+        assertEquals(1, found.size());
+        assertEquals(latest.getId(), found.getFirst().getId());
+        assertEquals(AnalysisSource.STUB, found.getFirst().getAnalysisSource());
+        assertTrue(found.getFirst().getEffectiveKeyPoints().isEmpty());
+        var tone = new IssueToneCalculator().calculate(
+                List.of(IssueArticle.builder().article(found.getFirst().getArticle()).build()),
+                found);
+        assertEquals(0, tone.sampleCount());
+        assertNull(tone.neutralPercent());
     }
 
     private Finding finding(CollectionRun findingRun) {
