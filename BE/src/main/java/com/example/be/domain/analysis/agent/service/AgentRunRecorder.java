@@ -1,5 +1,6 @@
 package com.example.be.domain.analysis.agent.service;
 
+import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeRequest;
 import com.example.be.domain.analysis.agent.dto.AgentAnalyzeResponse;
 import com.example.be.domain.analysis.agent.dto.AgentEvidenceRequest;
@@ -13,7 +14,6 @@ import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
-import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.entity.AgentRun;
 import com.example.be.domain.analysis.agent.entity.AgentRunStatus;
 import com.example.be.domain.analysis.agent.entity.AgentTargetType;
@@ -340,8 +340,8 @@ public class AgentRunRecorder {
                 .collectionRunId(runId)
                 .idempotencyKey(request.idempotencyKey())
                 .agentTask(AgentTask.REPORT)
-                .targetType(AgentTargetType.RUN)
-                .targetId(runId)
+                .targetType(request.run().reportId() == null ? AgentTargetType.RUN : AgentTargetType.REPORT)
+                .targetId(request.run().reportId() == null ? runId : request.run().reportId())
                 .status(meta.mock() ? AgentRunStatus.MOCK : AgentRunStatus.SUCCESS)
                 .promptVersion(meta.promptVersion())
                 .llmProvider(meta.provider())
@@ -369,8 +369,8 @@ public class AgentRunRecorder {
                 .collectionRunId(runId)
                 .idempotencyKey(request.idempotencyKey())
                 .agentTask(AgentTask.REPORT)
-                .targetType(AgentTargetType.RUN)
-                .targetId(runId)
+                .targetType(request.run().reportId() == null ? AgentTargetType.RUN : AgentTargetType.REPORT)
+                .targetId(request.run().reportId() == null ? runId : request.run().reportId())
                 .status(AgentRunStatus.FAILED)
                 .failureCode(failureCode)
                 .failureMessage(truncate(failureMessage))

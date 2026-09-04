@@ -339,6 +339,45 @@ def test_mock_report_is_deterministic_and_keeps_structured_sections() -> None:
     assert response.markdown_body.startswith("# 2026-08-10 HBM 뉴스 모니터링 보고서")
 
 
+@pytest.mark.parametrize("mock", [True, False])
+def test_daily_report_uses_collection_date_and_keeps_evidence_references(mock: bool) -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["run"].update(
+        id=None,
+        reportScope="DAILY",
+        reportId=77,
+        reportDate="2026-08-10",
+        startedAt="2026-08-10T00:00:00+09:00",
+        finishedAt="2026-08-11T00:00:00+09:00",
+    )
+    provider = None if mock else FakeProvider(provider_response(valid_output()))
+    response = ReportWriterService(Settings(AGENT_MOCK=mock), provider).write(
+        ReportRequest.model_validate(payload)
+    )
+    assert response.title == "2026-08-10 일일 통합 뉴스 보고서"
+    assert response.markdown_body.startswith(f"# {response.title}\n")
+    assert sum(line.startswith("# ") for line in response.markdown_body.splitlines()) == 1
+    assert response.important_events[0].source_finding_ids == [501]
+    assert response.source_notes == request().source_notes
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        {"id": None},
+        {"reportScope": "DAILY", "reportId": 77, "reportDate": "2026-08-10"},
+        {"id": None, "reportScope": "DAILY", "reportDate": "2026-08-10"},
+        {"id": None, "reportScope": "DAILY", "reportId": 77},
+        {"reportScope": "RUN", "reportDate": "2026-08-10"},
+    ],
+)
+def test_rejects_mixed_run_and_daily_context(context: dict) -> None:
+    payload = request().model_dump(by_alias=True, mode="json")
+    payload["run"].update(context)
+    with pytest.raises(ValidationError):
+        ReportRequest.model_validate(payload)
+
+
 def test_mock_report_preserves_source_notes_order_wording_and_duplicates() -> None:
     payload = request().model_dump(by_alias=True, mode="json")
     payload["sourceNotes"] = ["첫 줄  두 칸\n유지", "중복 메모", "중복 메모"]

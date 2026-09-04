@@ -5,7 +5,7 @@ import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
-import com.example.be.domain.reports.service.ReportFindingOrder;
+import com.example.be.domain.reports.service.ReportFindings;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.HtmlUtils;
@@ -29,8 +29,7 @@ public class NotificationRenderer {
     }
 
     public RenderedNotification render(NewsReport report, NotificationChannel channel) {
-        List<Finding> findings = ReportFindingOrder.sort(
-                findingRepository.findForReportByRunId(report.getRun().getId()));
+        List<Finding> findings = ReportFindings.load(report, findingRepository);
         return channel.getChannelType() == ChannelType.EMAIL
                 ? renderEmail(report, findings)
                 : renderTelegram(report, findings, channel.getMaxLength());
@@ -55,7 +54,7 @@ public class NotificationRenderer {
         String subject = "[반도체 뉴스] " + report.getGeneratedAt().format(SUBJECT_TIME) + " 보고서";
         StringBuilder html = new StringBuilder("<html><body>")
                 .append("<h2>").append(escape(report.getTitle())).append("</h2>")
-                .append("<p>수집 실행에서 확인한 핵심 요약입니다.</p><ul>");
+                .append("<p>보고서에 포함된 핵심 요약입니다.</p><ul>");
         appendEmailItems(html, findings);
         html.append("</ul></body></html>");
         return new RenderedNotification(subject, null, List.of(html.toString()));
@@ -63,7 +62,7 @@ public class NotificationRenderer {
 
     private void appendEmailItems(StringBuilder html, List<Finding> findings) {
         if (findings.isEmpty()) {
-            html.append("<li>이번 실행에서 전달할 수 있는 분석 요약이 없습니다.</li>");
+            html.append("<li>이 보고서에서 전달할 수 있는 분석 요약이 없습니다.</li>");
             return;
         }
         for (Finding finding : findings) {
@@ -84,7 +83,7 @@ public class NotificationRenderer {
         }
         List<String> blocks = new ArrayList<>();
         if (findings.isEmpty()) {
-            blocks.add("이번 실행에서 전달할 수 있는 분석 요약이 없습니다.");
+            blocks.add("이 보고서에서 전달할 수 있는 분석 요약이 없습니다.");
         } else {
             findings.forEach(finding -> blocks.add(telegramBlock(finding)));
         }

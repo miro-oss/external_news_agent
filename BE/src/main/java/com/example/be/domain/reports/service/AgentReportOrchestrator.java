@@ -23,14 +23,15 @@ import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.service.command.CollectionResultWriter;
-import com.example.be.domain.reports.entity.NewsReport;
-import com.example.be.domain.reports.entity.ReportStatus;
-import com.example.be.global.config.ApiTimeZone;
-import com.example.be.domain.settings.entity.PaidExhaustedAction;
-import com.example.be.domain.settings.service.LlmPlanService;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportScope;
+import com.example.be.domain.reports.entity.ReportStatus;
+import com.example.be.domain.settings.entity.PaidExhaustedAction;
+import com.example.be.domain.settings.service.LlmPlanService;
+import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -38,8 +39,10 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -71,24 +74,35 @@ public class AgentReportOrchestrator {
                                    LocalDateTime generatedAt) {
         List<Finding> representativeFindings = representativeFindings(findings);
         ReportSourceStats sourceStats = sourceStats(run, representativeFindings);
+        return generate(new GenerationContext(run, null, null), representativeFindings, sourceStats, generatedAt);
+    }
+
+    public ReportDocument generateDaily(Long reportId, LocalDate date, List<Finding> findings,
+                                        ReportSourceStats sourceStats, LocalDateTime generatedAt) {
+        return generate(new GenerationContext(null, reportId, date), findings,
+                sourceStats, generatedAt);
+    }
+
+    private ReportDocument generate(GenerationContext context, List<Finding> representativeFindings,
+                                    ReportSourceStats sourceStats, LocalDateTime generatedAt) {
         if (!properties.isEnabled()) {
-            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
+            return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
-        List<Finding> eligible = eligibleFindings(representativeFindings);
+        List<Finding> eligible = eligibleFindings(representativeFindings, context.daily());
         if (eligible.isEmpty()) {
-            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
+            return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
 
-        ReservationSelection selection = reserve(run);
+        ReservationSelection selection = reserve(context);
         if (selection == null) {
-            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
+            return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
 
         LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
         AgentReportRequest request = null;
         try {
             request = request(
-                    run,
+                    context,
                     eligible,
                     generatedAt,
                     sourceStats,
@@ -96,7 +110,7 @@ public class AgentReportOrchestrator {
                     selection.reservation().idempotencyKey());
             AgentReportResponse response = client.report(request);
             ReportDocument document = toDocument(response, request, representativeFindings);
-            recordSuccessSafely(run.getId(), request, response, startedAt);
+            recordSuccessSafely(context.runId(), request, response, startedAt);
             completeSuccessSafely(selection.reservation(), response.meta().credits());
             return document;
         } catch (RuntimeException exception) {
@@ -109,32 +123,42 @@ public class AgentReportOrchestrator {
             AgentClientException.Usage usage = failureUsage(clientException, selection.reservation());
             if (request != null) {
                 recordFailureSafely(
-                        run.getId(), request, code, exception.getMessage(), usage,
+                        context.runId(), request, code, exception.getMessage(), usage,
                         timeoutPhase(clientException), startedAt);
             }
             completeFailureSafely(selection.reservation(), exception, code);
             log.warn("Agent 보고서 생성에 실패해 안전한 fallback을 사용한다. runId={} code={} error={}",
-                    run.getId(), code, exception.getMessage());
-            return fallbackGenerator.generate(representativeFindings, generatedAt, sourceStats);
+                    context.runId(), code, exception.getMessage());
+            return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
     }
 
-    private AgentReportRequest request(CollectionRun run,
+    private ReportDocument fallback(GenerationContext context, List<Finding> findings,
+                                    LocalDateTime generatedAt, ReportSourceStats sourceStats) {
+        return context.daily() ? fallbackGenerator.generateDaily(findings, context.date(), sourceStats)
+                : fallbackGenerator.generate(findings, generatedAt, sourceStats);
+    }
+
+    private AgentReportRequest request(GenerationContext context,
                                        List<Finding> findings,
                                        LocalDateTime generatedAt,
                                        ReportSourceStats sourceStats,
                                        AgentPlan plan,
                                        String idempotencyKey) {
-        LocalDateTime finishedAt = run.getFinishedAt() == null ? generatedAt : run.getFinishedAt();
+        CollectionRun run = context.run();
+        LocalDateTime finishedAt = run == null ? context.date().plusDays(1).atStartOfDay()
+                : run.getFinishedAt() == null ? generatedAt : run.getFinishedAt();
         return new AgentReportRequest(
                 idempotencyKey,
                 plan,
                 new AgentReportRequest.RunPayload(
-                        run.getId(),
-                        toOffset(run.getStartedAt()),
+                        context.runId(),
+                        toOffset(run == null ? context.date().atStartOfDay() : run.getStartedAt()),
                         toOffset(finishedAt),
-                        topics(run, findings)),
-                findings.stream().map(this::findingPayload).toList(),
+                        topics(run, findings),
+                        context.daily() ? ReportScope.DAILY : ReportScope.RUN,
+                        context.reportId(), context.date()),
+                findings.stream().map(finding -> findingPayload(finding, context.daily())).toList(),
                 List.of(),
                 new AgentReportRequest.SourceStatsPayload(
                         sourceStats.collected(),
@@ -142,31 +166,42 @@ public class AgentReportOrchestrator {
                         sourceStats.failed(),
                         sourceStats.paywalled(),
                         sourceStats.stubExcluded()),
-                ReportSourceNotes.from(sourceStats));
+                context.daily()
+                        ? dailySourceNotes(context.date(), sourceStats)
+                        : ReportSourceNotes.from(sourceStats));
     }
 
-    private ReservationSelection reserve(CollectionRun run) {
-        AgentPlan requestedPlan = run.getLlmPlan();
-        String idempotencyKey = "run:" + run.getId() + ":report";
+    private List<String> dailySourceNotes(LocalDate date, ReportSourceStats stats) {
+        List<String> notes = new ArrayList<>(List.of(
+                date + " 한국 시간 하루 동안 시작한 수집 실행의 이슈를 통합했습니다.",
+                "같은 이슈는 최신 분석 1건으로 모으고 중요도 상위 이슈의 검증된 근거만 담았습니다."));
+        notes.addAll(ReportSourceNotes.from(stats));
+        return notes;
+    }
+
+    private ReservationSelection reserve(GenerationContext context) {
+        AgentPlan requestedPlan = context.daily() ? planService.resolveRunPlan(null) : context.run().getLlmPlan();
+        String idempotencyKey = context.daily() ? "daily-report:" + context.reportId()
+                : "run:" + context.runId() + ":report";
         try {
             return new ReservationSelection(
                     requestedPlan,
-                    quotaService.reserve(run.getId(), idempotencyKey, AgentTask.REPORT, requestedPlan));
+                    quotaService.reserve(context.runId(), idempotencyKey, AgentTask.REPORT, requestedPlan));
         } catch (QuotaExceededException exhausted) {
             if (requestedPlan == AgentPlan.PAID
                     && planService.paidExhaustedAction() == PaidExhaustedAction.FALLBACK_FREE) {
                 try {
                     QuotaReservation reservation = quotaService.reserve(
-                            run.getId(), idempotencyKey + ":fallback-free", AgentTask.REPORT, AgentPlan.FREE);
-                    addAgentWarning(run.getId(),
+                            context.runId(), idempotencyKey + ":fallback-free", AgentTask.REPORT, AgentPlan.FREE);
+                    addAgentWarning(context.runId(),
                             CollectionRunWarning.CODE_LLM_FALLBACK_FREE,
                             "PAID quota가 소진되어 보고서를 FREE 플랜으로 생성합니다.");
                     return new ReservationSelection(AgentPlan.FREE, reservation);
                 } catch (QuotaExceededException freeExhausted) {
-                    log.warn("보고서 FREE fallback quota도 소진됐다. runId={}", run.getId());
+                    log.warn("보고서 FREE fallback quota도 소진됐다. runId={}", context.runId());
                 }
             }
-            addAgentWarning(run.getId(),
+            addAgentWarning(context.runId(),
                     CollectionRunWarning.CODE_LLM_QUOTA_EXHAUSTED,
                     "LLM quota가 소진되어 안전한 fallback 보고서를 생성합니다.");
             return null;
@@ -174,6 +209,10 @@ public class AgentReportOrchestrator {
     }
 
     private void addAgentWarning(Long runId, String code, String message) {
+        if (runId == null) {
+            log.warn("일일 보고서 생성 경고. code={} message={}", code, message);
+            return;
+        }
         try {
             resultWriter.addAgentWarning(runId, code, message);
         } catch (RuntimeException exception) {
@@ -221,7 +260,7 @@ public class AgentReportOrchestrator {
         return AgentTimeoutPhase.valueOf(exception.getTimeoutPhase().name());
     }
 
-    private AgentReportRequest.FindingPayload findingPayload(Finding finding) {
+    private AgentReportRequest.FindingPayload findingPayload(Finding finding, boolean compact) {
         FetchStatus fetchStatus = finding.getArticle().getFetchStatus();
         return new AgentReportRequest.FindingPayload(
                 finding.getId(),
@@ -230,8 +269,10 @@ public class AgentReportOrchestrator {
                 finding.getArticle().getCanonicalUrl(),
                 finding.getArticle().getSourceName(),
                 finding.getChangeType().name(),
-                FindingEvidencePolicy.reportSummary(finding),
+                compact ? FindingEvidencePolicy.supportedKeyPoints(finding).getFirst().text()
+                        : FindingEvidencePolicy.reportSummary(finding),
                 FindingEvidencePolicy.supportedKeyPoints(finding).stream()
+                        .limit(compact ? 3 : Long.MAX_VALUE)
                         .map(point -> new AgentReportRequest.KeyPointPayload(
                                 point.text(),
                                 point.evidence().stream().distinct().toList(),
@@ -263,12 +304,12 @@ public class AgentReportOrchestrator {
         return new AgentReportRequest.SensitivityAxisPayload(axis.score(), axis.evidenceSentenceIds());
     }
 
-    private List<Finding> eligibleFindings(List<Finding> findings) {
-        return ReportFindingOrder.sort(findings.stream()
-                        .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
-                        .filter(FindingEvidencePolicy::hasSupportedEvidence)
-                        .toList())
-                .stream()
+    private List<Finding> eligibleFindings(List<Finding> findings, boolean preserveOrder) {
+        List<Finding> eligible = findings.stream()
+                .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
+                .filter(FindingEvidencePolicy::hasSupportedEvidence)
+                .toList();
+        return (preserveOrder ? eligible : ReportFindingOrder.sort(eligible)).stream()
                 .limit(MAX_REPORT_FINDINGS)
                 .toList();
     }
@@ -453,7 +494,7 @@ public class AgentReportOrchestrator {
     }
 
     private List<String> topics(CollectionRun run, List<Finding> findings) {
-        List<String> fromItems = run.getItems() == null ? List.of() : run.getItems().stream()
+        List<String> fromItems = run == null || run.getItems() == null ? List.of() : run.getItems().stream()
                 .map(CollectionRunItem::getTopic)
                 .filter(topic -> topic != null && StringUtils.hasText(topic.getName()))
                 .map(topic -> topic.getName().trim())
@@ -524,6 +565,16 @@ public class AgentReportOrchestrator {
         } catch (RuntimeException exception) {
             log.error("실패한 Agent 보고서의 감사 로그를 기록하지 못했다. runId={} code={}",
                     runId, code, exception);
+        }
+    }
+
+    private record GenerationContext(CollectionRun run, Long reportId, LocalDate date) {
+        boolean daily() {
+            return reportId != null;
+        }
+
+        Long runId() {
+            return run == null ? null : run.getId();
         }
     }
 

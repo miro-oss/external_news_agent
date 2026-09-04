@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.controller;
 
 import com.example.be.domain.reports.dto.res.ReportResDTO;
+import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.service.ReportQueryService;
 import com.example.be.global.apiPayload.ApiResponse;
 import com.example.be.global.apiPayload.PageResponse;
@@ -22,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/news/reports")
-@Tag(name = "보고서", description = "실행 단위 보고서 목록·최신·상세 조회 API")
+@Tag(name = "보고서", description = "실행별·일일 통합 보고서 목록·최신·상세 조회 API")
 public class ReportController {
 
     private final ReportQueryService reportQueryService;
@@ -43,17 +44,24 @@ public class ReportController {
             @Parameter(description = "생성일 상한. ISO-8601 date 또는 datetime")
             @RequestParam(required = false) String to,
             @RequestParam(defaultValue = "" + PageResponse.DEFAULT_PAGE) int page,
-            @RequestParam(defaultValue = "" + PageResponse.DEFAULT_SIZE) int size
+            @RequestParam(defaultValue = "" + PageResponse.DEFAULT_SIZE) int size,
+            @Parameter(description = "RUN 실행별 / DAILY 일일 통합. 생략하면 전체")
+            @RequestParam(required = false) ReportScope reportScope
     ) {
-        return ApiResponse.of(GeneralSuccessCode.OK, reportQueryService.getReports(from, to, page, size));
+        return ApiResponse.of(GeneralSuccessCode.OK, reportScope == null
+                ? reportQueryService.getReports(from, to, page, size)
+                : reportQueryService.getReports(from, to, page, size, reportScope));
     }
 
     @GetMapping("/latest")
     @Operation(summary = "최신 보고서 조회", description = "보고서가 없으면 200과 null을 반환합니다.")
     public ApiResponse<ReportResDTO.Detail> getLatest(
-            @RequestParam(defaultValue = "true") boolean includeFindings
+            @RequestParam(defaultValue = "true") boolean includeFindings,
+            @Parameter(description = "RUN 실행별 / DAILY 일일 통합. 생략하면 전체에서 최신")
+            @RequestParam(required = false) ReportScope reportScope
     ) {
-        ReportResDTO.Detail result = reportQueryService.getLatest(includeFindings);
+        ReportResDTO.Detail result = reportScope == null ? reportQueryService.getLatest(includeFindings)
+                : reportQueryService.getLatest(includeFindings, reportScope);
         return result == null
                 ? ApiResponse.of(GeneralSuccessCode.OK, "생성된 보고서가 없습니다.", null)
                 : ApiResponse.of(GeneralSuccessCode.OK, result);

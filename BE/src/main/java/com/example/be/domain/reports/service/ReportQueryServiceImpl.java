@@ -1,8 +1,8 @@
 package com.example.be.domain.reports.service;
 
-import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.example.be.domain.analysis.agent.investigation.InvestigationTrace;
 import com.example.be.domain.analysis.agent.investigation.IssueInvestigationJdbcRepository;
+import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingCategory;
 import com.example.be.domain.analysis.repository.FindingRepository;
@@ -16,6 +16,7 @@ import com.example.be.domain.notifications.entity.DeliveryStatus;
 import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;
@@ -44,6 +45,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -65,23 +67,31 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     @Override
     public PageResponse<ReportResDTO.Summary> getReports(String from, String to, int page, int size) {
+        return getReports(from, to, page, size, null);
+    }
+
+    @Override
+    public PageResponse<ReportResDTO.Summary> getReports(String from, String to, int page, int size, ReportScope scope) {
         validatePage(page, size);
         LocalDateTime parsedFrom = parseDateTime(from, false);
         LocalDateTime parsedTo = parseDateTime(to, true);
         if (parsedFrom != null && parsedTo != null && parsedFrom.isAfter(parsedTo)) {
-            throw badRequest("from은 to보다 이후일 수 없습니다.");
+            throw badRequest("from은 to보다 이전이어야 합니다.");
         }
 
         Page<NewsReport> reports = reportRepository.findAll(
                 NewsReportSpecification.generatedBetween(parsedFrom, parsedTo)
                         .and((root, query, criteriaBuilder) ->
-                                criteriaBuilder.notEqual(root.get("reportStatus"), ReportStatus.PENDING)),
+                                criteriaBuilder.notEqual(root.get("reportStatus"), ReportStatus.PENDING))
+                        .and((root, query, cb) -> scope == null ? cb.conjunction() : cb.equal(root.get("reportScope"), scope)),
                 PageRequest.of(page, size, Sort.by(
                         Sort.Order.desc("generatedAt"), Sort.Order.desc("id"))));
         Map<Long, FindingRepository.ReportCount> counts = countsByRun(reports.getContent());
+        Map<Long, FindingRepository.DailyReportCount> dailyCounts = dailyCounts(reports.getContent());
         Map<Long, String> deliveryStatuses = deliveryStatuses(reports.getContent());
         List<ReportResDTO.Summary> content = reports.getContent().stream()
-                .map(report -> toSummary(report, counts.get(report.getRun().getId()),
+                .map(report -> toSummary(report, report.getRunId() == null ? null : counts.get(report.getRunId()),
+                        dailyCounts.get(report.getId()),
                         deliveryStatuses.getOrDefault(report.getId(), DELIVERY_STATUS_NOT_SENT)))
                 .toList();
         return PageResponse.of(content, page, size, reports.getTotalElements());
@@ -89,7 +99,14 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     @Override
     public ReportResDTO.Detail getLatest(boolean includeFindings) {
-        return reportRepository.findFirstByReportStatusNotOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING)
+        return getLatest(includeFindings, null);
+    }
+
+    @Override
+    public ReportResDTO.Detail getLatest(boolean includeFindings, ReportScope scope) {
+        return (scope == null
+                ? reportRepository.findFirstByReportStatusNotOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING)
+                : reportRepository.findFirstByReportScopeAndReportStatusNotOrderByGeneratedAtDescIdDesc(scope, ReportStatus.PENDING))
                 .map(report -> toDetail(report, includeFindings))
                 .orElse(null);
     }
@@ -103,15 +120,21 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     private ReportResDTO.Summary toSummary(NewsReport report,
                                            FindingRepository.ReportCount count,
-                                           String deliveryStatus) {
+                                           FindingRepository.DailyReportCount dailyCount, String deliveryStatus) {
         return ReportResDTO.Summary.builder()
                 .id(report.getId())
-                .runId(report.getRun().getId())
+                .runId(report.getRunId())
+                .reportScope(report.getReportScope()).reportDate(report.getReportDate())
+                .sourceRunIds(sourceRunIds(report))
                 .title(report.getTitle())
                 .generatedAt(toOffset(report.getGeneratedAt()))
                 .modelName(report.getModelName())
-                .findingCount(count == null ? 0 : count.getFindingCount())
-                .highSensitivityCount(count == null ? 0 : count.getHighSensitivityCount())
+                .findingCount(report.getReportScope() == ReportScope.DAILY
+                        ? dailyCount == null ? 0 : dailyCount.getFindingCount()
+                        : count == null ? 0 : count.getFindingCount())
+                .highSensitivityCount(report.getReportScope() == ReportScope.DAILY
+                        ? dailyCount == null ? 0 : dailyCount.getHighSensitivityCount()
+                        : count == null ? 0 : count.getHighSensitivityCount())
                 .deliveryStatus(deliveryStatus)
                 .build();
     }
@@ -133,9 +156,10 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     }
 
     private ReportResDTO.Detail toDetail(NewsReport report, boolean includeFindings) {
-        Long runId = report.getRun().getId();
-        List<Finding> findings = includeFindings
-                ? ReportFindingOrder.sort(findingRepository.findForReportByRunId(runId))
+        Long runId = report.getRunId();
+        boolean daily = report.getReportScope() == ReportScope.DAILY;
+        List<Finding> findings = includeFindings || daily
+                ? ReportFindings.load(report, findingRepository)
                 : null;
         Map<Long, Long> issueIdsByArticle = includeFindings
                 ? issueIdsByArticle(findings)
@@ -143,10 +167,16 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         Map<Long, NewsIssue> issuesById = includeFindings
                 ? issuesById(issueIdsByArticle.values())
                 : Map.of();
-        Map<Long, InvestigationTrace> investigationsByIssue = includeFindings
-                ? investigationsByIssue(runId)
-                : Map.of();
-        ReportResDTO.SummaryStats summaryStats = includeFindings
+        Map<Long, Map<Long, InvestigationTrace>> tracesByRun = new LinkedHashMap<>();
+        if (includeFindings) {
+            if (daily) {
+                tracesByRun.putAll(investigationRepository.findTraces(
+                        findings.stream().map(f -> f.getRun().getId()).distinct().toList()));
+            } else {
+                tracesByRun.put(runId, investigationsByIssue(runId));
+            }
+        }
+        ReportResDTO.SummaryStats summaryStats = includeFindings || daily
                 ? toStats(findings)
                 : toStatsFromCounts(findingRepository.countStatsByRunId(
                         runId,
@@ -155,6 +185,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         return ReportResDTO.Detail.builder()
                 .id(report.getId())
                 .runId(runId)
+                .reportScope(report.getReportScope()).reportDate(report.getReportDate())
+                .sourceRunIds(sourceRunIds(report))
                 .title(report.getTitle())
                 .markdownBody(report.getMarkdownBody())
                 .modelName(report.getModelName())
@@ -168,7 +200,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                             NewsIssue issue = issueId == null ? null : issuesById.get(issueId);
                             return toFinding(
                                     finding, issueId, issue,
-                                    issueId == null ? null : investigationsByIssue.get(issueId));
+                                    issueId == null ? null : tracesByRun.getOrDefault(
+                                            daily ? finding.getRun().getId() : runId, Map.of()).get(issueId));
                         })
                         .toList() : null)
                 .build();
@@ -259,6 +292,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         return ReportResDTO.Finding.builder()
                 .id(finding.getId())
                 .articleId(finding.getArticle().getId())
+                .runId(finding.getRun().getId())
                 .issueId(issueId)
                 .issue(toIssueSummary(issue))
                 .articleTitle(finding.getArticle().getTitle())
@@ -334,9 +368,24 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         if (reports.isEmpty()) {
             return Map.of();
         }
-        List<Long> runIds = reports.stream().map(report -> report.getRun().getId()).toList();
+        List<Long> runIds = reports.stream().map(NewsReport::getRunId).filter(Objects::nonNull).toList();
+        if (runIds.isEmpty()) {
+            return Map.of();
+        }
         return findingRepository.countForReports(runIds, sensitivityCalculator.highThreshold()).stream()
                 .collect(Collectors.toMap(FindingRepository.ReportCount::getRunId, Function.identity()));
+    }
+
+    private List<Long> sourceRunIds(NewsReport report) {
+        return report.getReportScope() == ReportScope.DAILY ? report.getSourceRunIds() : List.of(report.getRunId());
+    }
+
+    private Map<Long, FindingRepository.DailyReportCount> dailyCounts(List<NewsReport> reports) {
+        List<Long> ids = reports.stream().filter(r -> r.getReportScope() == ReportScope.DAILY)
+                .map(NewsReport::getId).toList();
+        return OracleInClause.batches(ids).stream()
+                .flatMap(batch -> findingRepository.countForDailyReports(batch, sensitivityCalculator.highThreshold()).stream())
+                .collect(Collectors.toMap(FindingRepository.DailyReportCount::getReportId, Function.identity()));
     }
 
     private Map<String, Long> orderedCounts(List<Finding> findings,

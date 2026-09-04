@@ -100,7 +100,7 @@ class ReportQueryServiceImplTest {
         GeneralException exception = assertThrows(GeneralException.class,
                 () -> service.getReports("2026-08-18", "2026-08-17", 0, 20));
 
-        assertEquals("from은 to보다 이후일 수 없습니다.", exception.getMessage());
+        assertEquals("from은 to보다 이전이어야 합니다.", exception.getMessage());
     }
 
     @Test
@@ -238,6 +238,43 @@ class ReportQueryServiceImplTest {
         assertEquals(List.of(900, 101), ids.getAllValues().stream().map(Collection::size).toList());
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void dailyLoadsSavedFindingsAcrossRunsAndCountsTheSameWithoutDetails() {
+        var date = java.time.LocalDate.of(2026, 9, 3);
+        NewsReport daily = NewsReport.builder().id(70L)
+                .reportScope(com.example.be.domain.reports.entity.ReportScope.DAILY).reportDate(date)
+                .sourceRunIds(List.of(42L, 43L)).reflectedFindingIds(List.of(2L, 1L))
+                .generatedAt(date.plusDays(1).atStartOfDay()).build();
+        Finding first = finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        Finding second = finding(2L, SensitivityLevel.LOW, Relevance.REFERENCE);
+        org.springframework.test.util.ReflectionTestUtils.setField(first, "run", CollectionRun.builder().id(42L).build());
+        org.springframework.test.util.ReflectionTestUtils.setField(second, "run", CollectionRun.builder().id(43L).build());
+        when(reportRepository.findByIdAndReportStatusNot(70L, ReportStatus.PENDING)).thenReturn(Optional.of(daily));
+        when(findingRepository.findForReportByIdIn(List.of(2L, 1L))).thenReturn(List.of(first, second));
+        when(reportRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(daily)));
+
+        var detail = service.getReport(70L, true);
+        assertNull(detail.getRunId());
+        assertEquals(date, detail.getReportDate());
+        assertEquals(List.of(2L, 1L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
+        assertEquals(List.of(43L, 42L), detail.getFindings().stream().map(ReportResDTO.Finding::getRunId).toList());
+        assertEquals(2, service.getReport(70L, false).getSummaryStats().getFindingCount());
+        var count = mock(FindingRepository.DailyReportCount.class);
+        when(count.getReportId()).thenReturn(70L);
+        when(count.getFindingCount()).thenReturn(2L);
+        when(count.getHighSensitivityCount()).thenReturn(1L);
+        when(findingRepository.countForDailyReports(eq(List.of(70L)), any())).thenReturn(List.of(count));
+        var summary = service.getReports(null, null, 0, 20).getContent().getFirst();
+        assertEquals(2, summary.getFindingCount());
+        assertEquals(1, summary.getHighSensitivityCount());
+        verify(findingRepository, never()).findForReportByRunId(any());
+        verify(investigationRepository).findTraces(List.of(43L, 42L));
+        verify(investigationRepository, never()).findTraces(any(Long.class));
+        verify(findingRepository, times(2)).findForReportByIdIn(anyCollection());
+    }
+
     private Finding finding(Long id, SensitivityLevel sensitivityLevel, Relevance relevance) {
         Article article = Article.builder()
                 .id(id + 100)
@@ -246,6 +283,7 @@ class ReportQueryServiceImplTest {
                 .canonicalUrl("https://example.com/" + id)
                 .build();
         return Finding.builder()
+                .run(CollectionRun.builder().id(42L).build())
                 .id(id)
                 .article(article)
                 .changeType(ChangeType.NEW)

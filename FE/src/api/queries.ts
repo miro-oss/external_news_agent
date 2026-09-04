@@ -215,17 +215,17 @@ export function useArticle(articleId: number | null, runId?: number) {
   })
 }
 
-export function useReports() {
+export function useReports(reportScope?: 'RUN' | 'DAILY') {
   return useQuery({
-    queryKey: keys.reports,
-    queryFn: () => getAllPages<ReportSummary>('/reports'),
+    queryKey: [...keys.reports, reportScope ?? 'ALL'],
+    queryFn: () => getAllPages<ReportSummary>('/reports', { reportScope }),
   })
 }
 
-export function useLatestReport() {
+export function useLatestReport(reportScope?: 'RUN' | 'DAILY') {
   return useQuery({
-    queryKey: keys.latestReport,
-    queryFn: () => get<ReportDetail | null>('/reports/latest', { includeFindings: true }),
+    queryKey: [...keys.latestReport, reportScope ?? 'ALL'],
+    queryFn: () => get<ReportDetail | null>('/reports/latest', { includeFindings: true, reportScope }),
   })
 }
 

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
@@ -13,13 +13,23 @@ MAX_REPORT_FINDINGS = 50
 
 
 class ReportRunInput(AgentModel):
-    id: int = Field(gt=0)
+    id: int | None = Field(gt=0)
     started_at: datetime
     finished_at: datetime
     topics: list[NonEmptyString]
+    report_scope: Literal["RUN", "DAILY"] = "RUN"
+    report_id: int | None = Field(default=None, gt=0)
+    report_date: date | None = None
 
     @model_validator(mode="after")
     def validate_time_range(self) -> "ReportRunInput":
+        if self.report_scope == "RUN":
+            if self.id is None or self.report_id is not None or self.report_date is not None:
+                raise ValueError(
+                    "RUN 보고서는 id가 필요하고 일일 보고서 필드를 사용할 수 없습니다."
+                )
+        elif self.id is not None or self.report_id is None or self.report_date is None:
+            raise ValueError("DAILY 보고서는 id=null과 reportId, reportDate가 필요합니다.")
         if self.finished_at < self.started_at:
             raise ValueError("finishedAt은 startedAt보다 빠를 수 없습니다.")
         return self

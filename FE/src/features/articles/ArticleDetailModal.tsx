@@ -34,6 +34,7 @@ export function ArticleDetailModal({
   const appliedInitialEvidence = useRef<string | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
     articleId: number | null
+    runId?: number
     sentences: number[]
   }>({ articleId: null, sentences: [] })
   const [perspectiveSelection, setPerspectiveSelection] = useState<{
@@ -65,7 +66,7 @@ export function ArticleDetailModal({
     const selectionKey = `${runId ?? 'latest'}:${articleId}:${initialEvidence.join(',')}`
     if (appliedInitialEvidence.current === selectionKey) return
     appliedInitialEvidence.current = selectionKey
-    setEvidenceSelection({ articleId, sentences: initialEvidence })
+    setEvidenceSelection({ articleId, runId, sentences: initialEvidence })
 
     const firstSentence = initialEvidence[0]
     requestAnimationFrame(() => {
@@ -76,7 +77,7 @@ export function ArticleDetailModal({
 
   if (articleId === null) return null
 
-  const highlightedSentences = evidenceSelection.articleId === articleId
+  const highlightedSentences = evidenceSelection.articleId === articleId && evidenceSelection.runId === runId
     ? evidenceSelection.sentences
     : []
   const selectedAudience = perspectiveSelection.articleId === articleId
@@ -84,7 +85,7 @@ export function ArticleDetailModal({
     : defaultAudience
 
   const highlightEvidence = (evidence: number[]) => {
-    setEvidenceSelection({ articleId, sentences: evidence })
+    setEvidenceSelection({ articleId, runId, sentences: evidence })
     const firstSentence = evidence[0]
     if (firstSentence === undefined) return
     requestAnimationFrame(() => {

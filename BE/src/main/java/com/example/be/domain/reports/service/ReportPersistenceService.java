@@ -47,6 +47,9 @@ public class ReportPersistenceService {
     public Long complete(Long reportId, ReportDocument document, LocalDateTime generatedAt) {
         NewsReport report = reportRepository.findByIdForUpdate(reportId)
                 .orElseThrow(() -> new IllegalStateException("완료할 보고서가 없습니다. reportId=" + reportId));
+        if (report.getReportStatus() != ReportStatus.PENDING) {
+            return report.getId();
+        }
         report.complete(
                 document.title(),
                 document.markdownBody(),

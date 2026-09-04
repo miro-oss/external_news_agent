@@ -12,9 +12,10 @@ import type {
   TopicKeywordProposalFilter,
   TopicKeywordProposalStatus,
 } from '../../api/types'
+import { Segmented, type SegmentedOption } from '../../components/Segmented'
 import { MutationStatus } from './MutationStatus'
 
-const FILTER_OPTIONS: Array<{ value: TopicKeywordProposalFilter; label: string }> = [
+const FILTER_OPTIONS: ReadonlyArray<SegmentedOption<TopicKeywordProposalFilter>> = [
   { value: 'PENDING', label: '대기 중만' },
   { value: 'ALL', label: '전체' },
   { value: 'APPROVED', label: '승인됨' },
@@ -115,27 +116,17 @@ export function TopicKeywordProposalPanel() {
   return (
     <>
       <div className="proposal-toolbar">
-        <p className="muted">
-          지난 자동 수집을 바탕으로 만든 제안만 보입니다. 승인해야 다음 수집부터 새 키워드가 적용됩니다.
-        </p>
-
-        <div className="field proposal-filter-field">
-          <label htmlFor="proposal-filter">상태</label>
-          <select
-            id="proposal-filter"
-            value={filter}
-            disabled={actionPending}
-            onChange={(event) => changeFilter(event.target.value as TopicKeywordProposalFilter)}
-          >
-            {FILTER_OPTIONS.map((option) => (
-              <option value={option.value} key={option.value}>{option.label}</option>
-            ))}
-          </select>
-        </div>
+        <Segmented
+          label="제안 상태"
+          value={filter}
+          options={FILTER_OPTIONS}
+          onSelect={changeFilter}
+          disabled={actionPending}
+        />
       </div>
 
       {proposals.data.content.length === 0 ? (
-        <p className="muted proposal-empty">{emptyMessage(filter)}</p>
+        <p className="empty-block">{emptyMessage(filter)}</p>
       ) : (
         <div className="proposal-stack">
           {proposals.data.content.map((proposal) => (

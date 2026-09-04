@@ -24,10 +24,12 @@ type PanelKey = 'llm' | 'source' | 'topic' | 'keywordProposals' | 'topics'
  * 쓰는 사람이 계속 더한다. 의존 순서(소스가 있어야 연결한다)는 주제 폼 안에서 "등록된 소스가
  * 없습니다"로 이미 드러나므로, 화면 순서는 의존 순서 대신 손이 가는 빈도를 따른다.
  *
- * <p>상단이 좌우 두 열이다. 왼쪽은 실행, 오른쪽은 실행하기 전에 준비하는 것들(주제·소스 등록,
- * 플랜 확인)이다. 실행과 주제 등록이 여기서 제일 자주 하는 일인데 둘 사이에 사용량 패널이 끼어
- * 있어서, 주제를 하나 만들고 바로 돌려 보려면 매번 그걸 지나 스크롤해야 했다. 같은 줄에 두면
- * 등록하고 실행하는 왕복이 한 화면 안에서 끝난다.
+ * <p>화면 순서는 손이 가는 빈도를 따른다. 위에서부터 실행 · 주제 만들기 · 제안 검토 · 주제 확인,
+ * 그리고 한 번 정해 두면 오래 가는 것들(RSS 소스, LLM 플랜)이 맨 아래다. 전에는 소스와 플랜이
+ * 주제 등록 바로 옆에 쌓여 있어서, 매일 하는 일 사이에 몇 달에 한 번 하는 일이 끼어 있었다.
+ *
+ * <p>상단이 좌우 두 열이다. 왼쪽은 실행, 오른쪽은 주제를 만들고 자동 제안을 검토하는 자리다.
+ * 주제를 하나 만들고 바로 돌려 보는 왕복이 한 화면 안에서 끝난다.
  *
  * <p>주제 목록만 두 열 아래 전체 폭을 쓴다. 검색어와 키워드 조건까지 한 줄에 보여 주므로 절반
  * 폭에서는 열이 서로를 밀어낸다.
@@ -60,12 +62,12 @@ export function SettingsPage() {
         <CollectionRunPanel />
 
         {/*
-          오른쪽은 카드 하나가 아니라 준비 작업 묶음이다. 주제 등록만 두면 접혔을 때 84px짜리
-          띠가 491px 실행 패널 옆에 남아 덜 그려진 화면처럼 보인다. 셋을 쌓으면 열이 채워지고,
-          "왼쪽은 실행 · 오른쪽은 준비"라는 구분도 생긴다.
+          오른쪽은 카드 하나가 아니라 "주제를 만들고 다듬는" 한 묶음이다. 주제 등록만 두면 접혔을 때
+          84px짜리 띠가 491px 실행 패널 옆에 남아 덜 그려진 화면처럼 보인다. 키워드 제안 검토가
+          그 아래에 오면 열이 채워지고, 순서도 손이 가는 차례를 따른다 — 주제를 만들고, 자동 제안을
+          검토하고, 왼쪽에서 돌린다.
 
-          셋 다 접이식이고 접힌 채로 시작한다. 주제 폼은 펼치면 1198px라, 펼친 것을 기본으로
-          삼으면 이번엔 반대쪽이 700px 비었다. 길이를 정하는 쪽은 화면이 아니라 사용자여야 한다.
+          주제 폼은 접힌 채로, 제안 검토는 펼친 채로 시작한다. 볼 것이 있는 쪽이 열려 있어야 한다.
         */}
         <div className="settings-side-stack">
           <CollapsibleSection
@@ -79,37 +81,17 @@ export function SettingsPage() {
           </CollapsibleSection>
 
           <CollapsibleSection
-            id="source"
-            title="RSS 피드 등록"
-            description="검색 provider는 기본 제공됩니다. 여기서는 추가 RSS 주소를 등록합니다."
-            open={open.source}
-            onToggle={() => toggle('source')}
+            id="keyword-proposals"
+            title="키워드 제안 검토"
+            description="지난 자동 수집이 만든 제안입니다. 승인해야 다음 수집부터 키워드에 반영됩니다."
+            count={pendingProposals.data?.totalElements}
+            open={open.keywordProposals}
+            onToggle={() => toggle('keywordProposals')}
           >
-            <SourceForm />
-          </CollapsibleSection>
-
-          <CollapsibleSection
-            id="llm"
-            title="LLM 플랜과 사용량"
-            description="기본 플랜과 사용량, 보고서 예약분을 확인합니다."
-            open={open.llm}
-            onToggle={() => toggle('llm')}
-          >
-            <LlmControlPanel />
+            <TopicKeywordProposalPanel />
           </CollapsibleSection>
         </div>
       </div>
-
-      <CollapsibleSection
-        id="keyword-proposals"
-        title="키워드 제안 검토"
-        description="수집 전략가 제안은 승인 전까지 실제 주제 키워드에 반영되지 않습니다."
-        count={pendingProposals.data?.totalElements}
-        open={open.keywordProposals}
-        onToggle={() => toggle('keywordProposals')}
-      >
-        <TopicKeywordProposalPanel />
-      </CollapsibleSection>
 
       <CollapsibleSection
         id="topics"
@@ -120,6 +102,30 @@ export function SettingsPage() {
         onToggle={() => toggle('topics')}
       >
         <TopicTable />
+      </CollapsibleSection>
+
+      {/*
+        소스와 플랜은 한 번 정해 두면 오래 가는 값이라 매일 지나칠 자리에 있을 이유가 없다.
+        자주 하는 일(실행 · 주제 · 제안 검토 · 주제 확인)을 위로 모으고 아래에 둔다.
+      */}
+      <CollapsibleSection
+        id="source"
+        title="RSS 피드 등록"
+        description="검색 provider는 기본 제공됩니다. 여기서는 추가 RSS 주소를 등록합니다."
+        open={open.source}
+        onToggle={() => toggle('source')}
+      >
+        <SourceForm />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        id="llm"
+        title="LLM 플랜과 사용량"
+        description="기본 플랜과 사용량, 보고서 예약분을 확인합니다."
+        open={open.llm}
+        onToggle={() => toggle('llm')}
+      >
+        <LlmControlPanel />
       </CollapsibleSection>
     </main>
   )

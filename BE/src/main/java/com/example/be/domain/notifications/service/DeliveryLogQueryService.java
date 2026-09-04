@@ -91,7 +91,7 @@ public class DeliveryLogQueryService {
     private NotificationResDTO.DeliveryLog toLog(DeliveryLog log) {
         return NotificationResDTO.DeliveryLog.builder()
                 .id(log.getId()).deliveryBatchId(log.getBatch().getId())
-                .reportId(log.getReport().getId()).runId(log.getReport().getRun().getId())
+                .reportId(log.getReport().getId()).runId(log.getReport().getRunId())
                 .recipientId(log.getRecipient().getId()).recipientName(log.getRecipientName())
                 .channelType(log.getChannelType().name()).address(log.getAddress())
                 .status(log.getStatus().name()).externalMessageId(log.getExternalMessageId())

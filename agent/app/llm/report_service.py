@@ -236,7 +236,11 @@ def _assembled_response(
 ) -> ReportResponse:
     try:
         source_notes = _source_notes(request)
-        title = _truncate_utf8(_single_line(output.title), 500)
+        title = (
+            _deterministic_title(request)
+            if request.run.report_scope == "DAILY"
+            else _truncate_utf8(_single_line(output.title), 500)
+        )
         return ReportResponse(
             title=title,
             executive_summary=output.executive_summary,
@@ -357,6 +361,8 @@ def _deterministic_response(
 
 
 def _deterministic_title(request: ReportRequest) -> str:
+    if request.run.report_scope == "DAILY":
+        return f"{request.run.report_date.isoformat()} 일일 통합 뉴스 보고서"
     day = request.run.finished_at.date().isoformat()
     topics = list(dict.fromkeys(request.run.topics))
     prefix = topics[0] if len(topics) == 1 else "통합" if topics else "반도체"

@@ -27,11 +27,27 @@ import {
   type SensitivityLevel,
 } from '../../api/types'
 import { KeyPointList } from '../../components/KeyPointList'
+import { Segmented, type SegmentedOption } from '../../components/Segmented'
 import { SensitivityAxes } from '../../components/SensitivityAxes'
 import { formatFullDate, formatShortDate } from '../../lib/datetime'
 import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { MutationStatus } from '../settings/MutationStatus'
+
+type ReportScopeTab = 'ALL' | 'DAILY' | 'RUN'
+
+const REPORT_SCOPE_OPTIONS: ReadonlyArray<SegmentedOption<ReportScopeTab>> = [
+  { value: 'ALL', label: '전체' },
+  { value: 'DAILY', label: '일일 통합' },
+  { value: 'RUN', label: '실행별' },
+]
+
+// 이름만으로는 두 보고서의 차이가 서지 않는다. 고른 범위가 무엇을 담는지 한 줄로 붙여 둔다.
+const REPORT_SCOPE_HINTS: Record<ReportScopeTab, string> = {
+  ALL: '하루치 통합본과 실행별 보고서를 모두 보여줍니다.',
+  DAILY: '하루 동안 모인 같은 이슈를 한 장으로 묶었습니다.',
+  RUN: '수집을 실행할 때마다 만들어진 보고서입니다.',
+}
 
 const INVESTIGATION_STATUS_LABELS = {
   CONCLUDED: '결론 도달',
@@ -69,6 +85,8 @@ function investigationReasonText(investigation: ReportInvestigation) {
 }
 
 export function ReportsPage() {
+  const [reportScope, setReportScope] = useState<ReportScopeTab>('ALL')
+  const scopeFilter = reportScope === 'ALL' ? undefined : reportScope
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [audienceOverride, setAudienceOverride] = useState<Audience | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
@@ -76,9 +94,9 @@ export function ReportsPage() {
     runId: number | null
     sentences: number[]
   }>({ articleId: null, runId: null, sentences: [] })
-  const reports = useReports()
+  const reports = useReports(scopeFilter)
   const audienceSetting = useAudienceSetting()
-  const latest = useLatestReport()
+  const latest = useLatestReport(scopeFilter)
   const activeId = selectedId ?? latest.data?.id ?? null
   const selectedReport = useReport(selectedId)
   const activeReport = selectedId === null ? latest : selectedReport
@@ -103,13 +121,25 @@ export function ReportsPage() {
         </div>
       </header>
 
+      <div className="report-scope-bar">
+        <Segmented
+          label="보고서 범위"
+          value={reportScope}
+          options={REPORT_SCOPE_OPTIONS}
+          onSelect={(scope) => { setReportScope(scope); setSelectedId(null) }}
+        />
+        <p className="report-scope-hint">{REPORT_SCOPE_HINTS[reportScope]}</p>
+      </div>
+
       {isInitialLoading && <div className="state-panel" aria-busy="true">최신 보고서를 불러오는 중입니다.</div>}
       {initialError && <div className="state-panel error" role="alert">보고서를 불러오지 못했습니다. {initialError.message}</div>}
       {!isInitialLoading && !initialError && latest.data === null && (
         <div className="state-panel report-empty">
           <span className="empty-mark" aria-hidden="true">⌁</span>
           <strong>아직 생성된 보고서가 없습니다.</strong>
-          <span>수집을 실행하면 분석 완료 후 첫 보고서가 자동으로 만들어집니다.</span>
+          <span>{reportScope === 'DAILY'
+            ? '하루의 수집이 모두 끝나면 다음 날 일일 통합 보고서가 자동으로 만들어집니다.'
+            : '수집을 실행하면 분석 완료 후 첫 보고서가 자동으로 만들어집니다.'}</span>
         </div>
       )}
       {!isInitialLoading && !initialError && latest.data !== null && reports.data?.content.length === 0 && (
@@ -148,10 +178,10 @@ export function ReportsPage() {
                 audience={activeAudience}
                 defaultAudience={audienceSetting.data?.audience}
                 onAudienceSelect={setAudienceOverride}
-                onEvidenceSelect={(articleId, sentences) => {
+                onEvidenceSelect={(articleId, runId, sentences) => {
                   setEvidenceSelection({
                     articleId,
-                    runId: activeReportData.runId,
+                    runId,
                     sentences,
                   })
                 }}
@@ -184,7 +214,8 @@ function ReportListItem({ report, active, onSelect }: {
       aria-pressed={active}
       onClick={onSelect}
     >
-      <span className="report-list-date">{formatShortDate(report.generatedAt)}</span>
+      <span className="report-list-date">{report.reportScope === 'DAILY'
+        ? `${report.reportDate ?? '집계일 미상'} · 일일 통합` : `${formatShortDate(report.generatedAt)} · 실행별`}</span>
       <strong>{report.title}</strong>
       <span className="report-list-meta">
         분석 {report.findingCount}건
@@ -201,12 +232,14 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
   audience: Audience
   defaultAudience?: Audience
   onAudienceSelect: (audience: Audience) => void
-  onEvidenceSelect: (articleId: number, sentences: number[]) => void
+  onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
 }) {
   const [filters, setFilters] = useState<ReportFindingFilters>(DEFAULT_REPORT_FINDING_FILTERS)
   const findings = useMemo(
-    () => selectFindingsForAudience(report.findings ?? [], audience),
-    [audience, report.findings],
+    () => report.reportScope === 'DAILY'
+      ? sortFindingsForAudience(report.findings ?? [], audience)
+      : selectFindingsForAudience(report.findings ?? [], audience),
+    [audience, report.findings, report.reportScope],
   )
   const filteredFindings = useMemo(() => {
     if (filters.sensitivityLevel) {
@@ -225,6 +258,9 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
     <article className="report-document">
       <header className="report-document-header">
         <h2>{report.title}</h2>
+        {report.reportScope === 'DAILY' && <p className="muted">
+          {report.reportDate ?? '집계일 미상'} · 한국 시간 기준 · 수집 {report.sourceRunIds.length}회 통합
+        </p>}
         <time dateTime={report.generatedAt}>{formatFullDate(report.generatedAt)}</time>
         <div className="report-ai-context">
           <span>{generationKind(report.modelName)} · {AUDIENCE_LABELS[audience]} 관점 · 원문 근거 {evidenceCount}문장</span>
@@ -265,11 +301,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
         </div>
         <ReportFindingFilterBar
           filters={filters}
-          audience={audience}
-          defaultAudience={defaultAudience}
           onChange={(key, value) => setFilters((current) => ({ ...current, [key]: value }))}
-          onAudienceSelect={onAudienceSelect}
-          onReset={() => setFilters(EMPTY_REPORT_FINDING_FILTERS)}
         />
         {filteredFindings.length > 0 ? (
           <div className="finding-list">
@@ -278,13 +310,15 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
                 finding={finding}
                 key={finding.id}
                 audience={audience}
+                daily={report.reportScope === 'DAILY'}
+                reportDate={report.reportScope === 'DAILY' ? report.reportDate : null}
                 onEvidenceSelect={onEvidenceSelect}
               />
             ))}
           </div>
         ) : findings.length > 0
-          ? <p className="muted report-findings-empty">조건에 맞는 주요 이슈가 없습니다. 필터를 바꿔보세요.</p>
-          : <p className="muted report-findings-empty">이 보고서에 포함된 주요 이슈가 없습니다.</p>}
+          ? <p className="empty-block">조건에 맞는 주요 이슈가 없습니다. 필터를 바꿔보세요.</p>
+          : <p className="empty-block">이 보고서에 포함된 주요 이슈가 없습니다.</p>}
       </section>
 
       <ReportDisclaimer report={report} audience={audience} />
@@ -300,56 +334,33 @@ const DEFAULT_REPORT_FINDING_FILTERS: ReportFindingFilters = {
   sensitivityLevel: 'high',
 }
 
-const EMPTY_REPORT_FINDING_FILTERS: ReportFindingFilters = {
-  sensitivityLevel: '',
-}
+const SENSITIVITY_FILTERS: ReadonlyArray<SegmentedOption<ReportFindingFilters['sensitivityLevel']>> = [
+  { value: '', label: '전체' },
+  { value: 'high', label: SENSITIVITY_LEVEL_LABELS.high },
+  { value: 'medium', label: SENSITIVITY_LEVEL_LABELS.medium },
+  { value: 'low', label: SENSITIVITY_LEVEL_LABELS.low },
+]
 
+/*
+  관점은 바로 위 "누구의 관점으로 볼까요?"가 소유한다. 같은 값을 두 군데서 바꾸게 두지 않는다.
+  거를 것이 민감도 하나뿐이라 "전체 보기" 버튼도 없앴다 — 첫 칸의 "전체"가 하는 일과 같다.
+*/
 function ReportFindingFilterBar({
   filters,
-  audience,
-  defaultAudience,
   onChange,
-  onAudienceSelect,
-  onReset,
 }: {
   filters: ReportFindingFilters
-  audience: Audience
-  defaultAudience?: Audience
   onChange: <K extends keyof ReportFindingFilters>(key: K, value: ReportFindingFilters[K]) => void
-  onAudienceSelect: (audience: Audience) => void
-  onReset: () => void
 }) {
-  const hasActiveFilters = Boolean(filters.sensitivityLevel)
   return (
-    <div className="report-finding-filter" aria-label="주요 이슈 필터">
-      <label>
-        민감도
-        <select
-          value={filters.sensitivityLevel}
-          onChange={(event) => onChange(
-            'sensitivityLevel',
-            event.target.value as ReportFindingFilters['sensitivityLevel'],
-          )}
-        >
-          <option value="">전체</option>
-          <option value="high">{SENSITIVITY_LEVEL_LABELS.high}</option>
-          <option value="medium">{SENSITIVITY_LEVEL_LABELS.medium}</option>
-          <option value="low">{SENSITIVITY_LEVEL_LABELS.low}</option>
-        </select>
-      </label>
-      <label>
-        관점
-        <select value={audience} onChange={(event) => onAudienceSelect(event.target.value as Audience)}>
-          {AUDIENCES.map((value) => (
-            <option value={value} key={value}>
-              {AUDIENCE_LABELS[value]}{defaultAudience === value ? ' · 내 기본' : ''}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button type="button" disabled={!hasActiveFilters} onClick={onReset}>
-        전체 보기
-      </button>
+    <div className="report-finding-filter">
+      <span className="filter-label" id="finding-sensitivity-label">민감도</span>
+      <Segmented
+        labelledBy="finding-sensitivity-label"
+        value={filters.sensitivityLevel}
+        options={SENSITIVITY_FILTERS}
+        onSelect={(next) => onChange('sensitivityLevel', next)}
+      />
     </div>
   )
 }
@@ -365,20 +376,16 @@ function ReportPerspectiveSelector({ audience, defaultAudience, onSelect }: {
         <div><h3>누구의 관점으로 볼까요?</h3><p>저장된 리포트는 그대로 두고 이슈 순서와 강조만 바꿉니다.</p></div>
         <span>추가 AI 호출 없음</span>
       </div>
-      <div className="report-perspective-tabs" role="group" aria-label="독자 관점">
-        {AUDIENCES.map((item) => (
-          <button
-            type="button"
-            aria-pressed={audience === item}
-            className={audience === item ? 'report-perspective-tab active' : 'report-perspective-tab'}
-            key={item}
-            onClick={() => onSelect(item)}
-          >
-            {AUDIENCE_LABELS[item]}
-            {defaultAudience === item && <small>기본</small>}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        label="독자 관점"
+        className="report-perspective-options"
+        value={audience}
+        options={AUDIENCES.map((item) => ({
+          value: item,
+          label: <>{AUDIENCE_LABELS[item]}{defaultAudience === item && <small>기본</small>}</>,
+        }))}
+        onSelect={onSelect}
+      />
       <p className="report-perspective-note">화면에서 보는 관점만 바뀌며, 발송할 보고서 본문은 중립 원본을 유지합니다.</p>
     </section>
   )
@@ -473,10 +480,12 @@ function ReportStat({ value, label, tone }: { value: number; label: string; tone
   )
 }
 
-function IssueCard({ finding, audience, onEvidenceSelect }: {
+function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect }: {
   finding: ReportFinding
   audience: Audience
-  onEvidenceSelect: (articleId: number, sentences: number[]) => void
+  daily: boolean
+  reportDate: string | null
+  onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
 }) {
   const [open, setOpen] = useState(false)
   const [visibleRelatedCount, setVisibleRelatedCount] = useState(RELATED_ARTICLE_BATCH_SIZE)
@@ -487,8 +496,9 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
   const issueInfo = finding.issue ?? issue.data
   const keyPoints = useMemo(() => normalizeKeyPoints(finding.keyPoints), [finding.keyPoints])
   const perspective = perspectiveFor(finding, audience)
-  const title = issueInfo?.title || finding.articleTitle
-  const summary = limitText(issueInfo?.summary || finding.summary, 120)
+  // 일일 보고서는 이후 갱신된 이슈 제목 대신 저장된 근거 분석을 보여준다.
+  const title = daily ? finding.articleTitle : issueInfo?.title || finding.articleTitle
+  const summary = limitText(daily ? finding.summary : issueInfo?.summary || finding.summary, 120)
   const relatedArticles = issue.data?.articles ?? []
   const visibleRelatedArticles = relatedArticles.slice(0, visibleRelatedCount)
   const investigationReason = finding.investigation
@@ -524,12 +534,15 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
             {SENSITIVITY_LEVEL_LABELS[finding.sensitivity.level]} · {finding.sensitivity.score.toFixed(1)}
           </span>
           <span>{finding.category}</span>
-          {issueInfo && <time dateTime={issueInfo.lastSeenAt}>{formatShortDate(issueInfo.lastSeenAt)}</time>}
+          {daily
+            ? <time dateTime={reportDate ?? undefined}>{reportDate ?? '집계일 미상'} 집계</time>
+            : issueInfo && <time dateTime={issueInfo.lastSeenAt}>{formatShortDate(issueInfo.lastSeenAt)}</time>}
         </div>
         <h4>{title}</h4>
         <p className="issue-card-summary">{summary}</p>
         <div className="issue-card-footer">
           <span className="issue-source-count">
+            {daily && '현재 '}
             {issue.isError && issueId !== null
               ? '관련 기사 상세 불러오기 실패'
               : issue.isLoading && issueId !== null
@@ -555,7 +568,7 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
               <button
                 type="button"
                 className="text-button"
-                onClick={() => onEvidenceSelect(finding.articleId, [perspective.evidenceSentenceIds[0]])}
+                onClick={() => onEvidenceSelect(finding.articleId, finding.runId, [perspective.evidenceSentenceIds[0]])}
               >
                 관점 근거 확인
               </button>
@@ -564,17 +577,18 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
 
           <SensitivityAxes
             sensitivity={finding.sensitivity}
-            onEvidenceSelect={(evidence) => onEvidenceSelect(finding.articleId, evidence)}
+            onEvidenceSelect={(evidence) => onEvidenceSelect(finding.articleId, finding.runId, evidence)}
           />
 
           <KeyPointList
             points={keyPoints}
             articleTitle={finding.articleTitle}
-            onEvidenceSelect={(sentenceId) => onEvidenceSelect(finding.articleId, [sentenceId])}
+            onEvidenceSelect={(sentenceId) => onEvidenceSelect(finding.articleId, finding.runId, [sentenceId])}
           />
 
           {issue.data && (
-            <CrossSourcePanel issue={issue.data} onEvidenceSelect={onEvidenceSelect} />
+            <CrossSourcePanel issue={issue.data} onEvidenceSelect={(articleId, sentences) =>
+              onEvidenceSelect(articleId, finding.runId, sentences)} />
           )}
 
           <section className="issue-related-articles">
@@ -600,7 +614,7 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
                     <li key={article.id}>
                       <div><strong>{article.title}</strong><span>{article.publisher || '매체 미상'} · {formatShortDate(article.publishedAt)}</span></div>
                       <div className="issue-article-actions">
-                        <button type="button" className="text-button" onClick={() => onEvidenceSelect(article.id, [])}>본문 보기</button>
+                        <button type="button" className="text-button" onClick={() => onEvidenceSelect(article.id, finding.runId, [])}>본문 보기</button>
                         <a href={article.canonicalUrl} target="_blank" rel="noreferrer" aria-label={`${article.title} 원문 열기`}>원문 ↗</a>
                       </div>
                     </li>
@@ -618,7 +632,7 @@ function IssueCard({ finding, audience, onEvidenceSelect }: {
               </>
             ) : !issue.isLoading && (
               <div className="issue-legacy-actions">
-                <button type="button" className="text-button" onClick={() => onEvidenceSelect(finding.articleId, [])}>대표 기사 본문 보기</button>
+                <button type="button" className="text-button" onClick={() => onEvidenceSelect(finding.articleId, finding.runId, [])}>대표 기사 본문 보기</button>
                 <a href={finding.canonicalUrl} target="_blank" rel="noreferrer">원문 열기 ↗</a>
               </div>
             )}

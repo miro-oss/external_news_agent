@@ -13,6 +13,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -108,6 +109,50 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             ORDER BY finding.id ASC
             """)
     List<Finding> findForReportByRunId(@Param("runId") Long runId);
+
+    @Query("""
+            SELECT finding FROM Finding finding
+            JOIN FETCH finding.run
+            JOIN FETCH finding.article article
+            JOIN FETCH article.topic
+            JOIN FETCH article.source
+            WHERE finding.id IN :ids
+            """)
+    List<Finding> findForReportByIdIn(@Param("ids") Collection<Long> ids);
+
+    @Query(value = """
+            SELECT report.id AS reportId, COUNT(finding.id) AS findingCount,
+                   SUM(CASE WHEN finding.sensitivity_score >= :highThreshold THEN 1 ELSE 0 END) AS highSensitivityCount
+            FROM news_reports report
+            CROSS APPLY JSON_TABLE(report.report_reflected_finding_ids, '$[*]'
+                COLUMNS (finding_id NUMBER PATH '$')) selected
+            JOIN news_findings finding ON finding.id = selected.finding_id
+            WHERE report.id IN (:reportIds) AND report.report_scope = 'DAILY'
+            GROUP BY report.id
+            """, nativeQuery = true)
+    List<DailyReportCount> countForDailyReports(@Param("reportIds") Collection<Long> reportIds,
+                                               @Param("highThreshold") BigDecimal highThreshold);
+
+    interface DailyReportCount {
+        Long getReportId();
+        long getFindingCount();
+        long getHighSensitivityCount();
+    }
+
+    @Query("""
+            SELECT finding FROM Finding finding
+            JOIN FETCH finding.run run
+            JOIN FETCH finding.article article
+            JOIN FETCH article.topic
+            JOIN FETCH article.source
+            WHERE run.startedAt >= :since AND run.startedAt < :before
+              AND run.status NOT IN (com.example.be.domain.collection.entity.RunStatus.PENDING,
+                                     com.example.be.domain.collection.entity.RunStatus.RUNNING)
+            ORDER BY run.startedAt DESC, finding.id DESC
+            """)
+    List<Finding> findDailyReportCandidates(
+            @Param("since") LocalDateTime since,
+            @Param("before") LocalDateTime before);
 
     @Query("""
             SELECT finding.category AS category,

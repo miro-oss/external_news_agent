@@ -30,6 +30,19 @@ class ReportPersistenceServiceTest {
             new ReportPersistenceService(runRepository, reportRepository);
 
     @Test
+    void completedRunAndDailyReportsCannotBeOverwrittenByLateCompletion() {
+        for (var scope : com.example.be.domain.reports.entity.ReportScope.values()) {
+            NewsReport report = NewsReport.builder().id(17L).reportScope(scope).title("완료된 보고서")
+                    .reportStatus(ReportStatus.GENERATED).markdownBody("저장된 본문").build();
+            when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
+            assertEquals(17L, service.complete(17L, new ReportDocument("뒤늦은 결과", "대체 본문", "fallback"),
+                    LocalDateTime.now()));
+            assertEquals("저장된 본문", report.getMarkdownBody());
+            assertEquals(ReportStatus.GENERATED, report.getReportStatus());
+        }
+    }
+
+    @Test
     void reservesPendingReportBeforeAgentCall() {
         CollectionRun run = mock(CollectionRun.class);
         LocalDateTime generatedAt = LocalDateTime.of(2026, 8, 21, 9, 0);

@@ -44,6 +44,11 @@ springdoc:
     path: /v3/api-docs
 
 news:
+  reports:
+    daily:
+      enabled: true
+      max-issues: 10
+      poll-interval-ms: 300000
   collection:
     # 조합별 선착순 상한 대신 주제 전체 후보를 IDF topicFit으로 정렬해 고른다.
     topic-article-limit: 300

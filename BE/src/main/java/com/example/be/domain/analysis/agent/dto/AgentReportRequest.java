@@ -1,8 +1,10 @@
 package com.example.be.domain.analysis.agent.dto;
 
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.reports.entity.ReportScope;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -20,8 +22,15 @@ public record AgentReportRequest(
             Long id,
             OffsetDateTime startedAt,
             OffsetDateTime finishedAt,
-            List<String> topics
+            List<String> topics,
+            ReportScope reportScope,
+            Long reportId,
+            LocalDate reportDate
     ) {
+        public RunPayload(Long id, OffsetDateTime startedAt, OffsetDateTime finishedAt, List<String> topics) {
+            this(id, startedAt, finishedAt, topics,
+                    ReportScope.RUN, null, null);
+        }
     }
 
     public record FindingPayload(

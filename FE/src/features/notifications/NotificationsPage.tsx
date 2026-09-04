@@ -13,6 +13,7 @@ import {
   useUpdateNotificationChannel,
 } from '../../api/queries'
 import type { DeliveryStatus, GroupPerspective, NotificationChannelType } from '../../api/types'
+import { Segmented, type SegmentedOption } from '../../components/Segmented'
 import { formatMediumDate } from '../../lib/datetime'
 import { MutationStatus } from '../settings/MutationStatus'
 
@@ -21,6 +22,20 @@ const PERSPECTIVES: Array<{ value: GroupPerspective; label: string }> = [
   { value: 'PURCHASING', label: '구매' },
   { value: 'TECHNOLOGY', label: '기술' },
   { value: 'SALES', label: '영업' },
+]
+
+/* 값이 빈 문자열이면 "전체"다. 서버 필터를 지우는 것과 같아서 별도 값을 두지 않는다. */
+const CHANNEL_FILTERS: ReadonlyArray<SegmentedOption<NotificationChannelType | ''>> = [
+  { value: '', label: '전체' },
+  { value: 'EMAIL', label: '메일' },
+  { value: 'TELEGRAM', label: '텔레그램' },
+]
+
+const STATUS_FILTERS: ReadonlyArray<SegmentedOption<DeliveryStatus | ''>> = [
+  { value: '', label: '전체' },
+  { value: 'SENT', label: '성공' },
+  { value: 'FAILED', label: '실패' },
+  { value: 'SKIPPED', label: '건너뜀' },
 ]
 
 export function NotificationsPage() {
@@ -94,18 +109,24 @@ export function NotificationsPage() {
               ))}
             </select>
           </label>
-          <label>전달 방식
-            <select value={logFilters.channelType ?? ''}
-              onChange={(event) => changeLogFilter('channelType', event.target.value as NotificationChannelType | '')}>
-              <option value="">전체</option><option value="EMAIL">메일</option><option value="TELEGRAM">텔레그램</option>
-            </select>
-          </label>
-          <label>상태
-            <select value={logFilters.status ?? ''}
-              onChange={(event) => changeLogFilter('status', event.target.value as DeliveryStatus | '')}>
-              <option value="">전체</option><option value="SENT">성공</option><option value="FAILED">실패</option><option value="SKIPPED">건너뜀</option>
-            </select>
-          </label>
+          <div className="delivery-filter-group">
+            <span className="filter-label" id="delivery-channel-label">전달 방식</span>
+            <Segmented
+              labelledBy="delivery-channel-label"
+              value={logFilters.channelType ?? ''}
+              options={CHANNEL_FILTERS}
+              onSelect={(next) => changeLogFilter('channelType', next)}
+            />
+          </div>
+          <div className="delivery-filter-group">
+            <span className="filter-label" id="delivery-status-label">상태</span>
+            <Segmented
+              labelledBy="delivery-status-label"
+              value={logFilters.status ?? ''}
+              options={STATUS_FILTERS}
+              onSelect={(next) => changeLogFilter('status', next)}
+            />
+          </div>
           {(logFilters.reportId || logFilters.channelType || logFilters.status) && (
             <button type="button" className="text-button" onClick={() => setLogFilters({ page: 0 })}>필터 초기화</button>
           )}
@@ -191,7 +212,7 @@ function RecipientPanel({ channels, recipients }: {
         <MutationStatus error={create.error} success={create.isSuccess ? '수신자를 등록했습니다.' : null} />
       </form>
       <div className="compact-list">
-        {recipients.length === 0 && <p className="muted">등록된 수신자가 없습니다.</p>}
+        {recipients.length === 0 && <p className="empty-block">등록된 수신자가 없습니다.</p>}
         {recipients.map((recipient) => (
           <article key={recipient.id}>
             <div><strong>{recipient.name}</strong><span>{recipient.groupNames?.join(' · ') || '그룹 미지정'}</span></div>
@@ -239,18 +260,22 @@ function GroupPanel({ recipients, groups }: {
             {PERSPECTIVES.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}
           </select></label>
         </div>
-        <fieldset className="member-picker"><legend>수신자 선택</legend>
-          {recipients.map((recipient) => <label key={recipient.id}>
-            <input type="checkbox" checked={selected.includes(recipient.id)} onChange={() => setSelected((current) => current.includes(recipient.id) ? current.filter((id) => id !== recipient.id) : [...current, recipient.id])} />
-            {recipient.name}
-          </label>)}
-          {recipients.length === 0 && <span className="muted">먼저 수신자를 등록해 주세요.</span>}
-        </fieldset>
+        {/* 고를 것이 없는데 상자만 그리면, 빈 테두리 안에서 안내 문구가 두 줄로 접힌다. */}
+        {recipients.length === 0 ? (
+          <p className="member-picker-empty">수신자를 먼저 등록하면 여기서 그룹으로 묶을 수 있습니다.</p>
+        ) : (
+          <fieldset className="member-picker"><legend>수신자 선택</legend>
+            {recipients.map((recipient) => <label key={recipient.id}>
+              <input type="checkbox" checked={selected.includes(recipient.id)} onChange={() => setSelected((current) => current.includes(recipient.id) ? current.filter((id) => id !== recipient.id) : [...current, recipient.id])} />
+              {recipient.name}
+            </label>)}
+          </fieldset>
+        )}
         <button className="primary-button" disabled={create.isPending || !name.trim() || selected.length === 0}>{create.isPending ? '등록 중…' : '그룹 등록'}</button>
         <MutationStatus error={create.error} success={create.isSuccess ? '수신 그룹을 등록했습니다.' : null} />
       </form>
       <div className="compact-list group-list">
-        {groups.length === 0 && <p className="muted">등록된 수신 그룹이 없습니다.</p>}
+        {groups.length === 0 && <p className="empty-block">등록된 수신 그룹이 없습니다.</p>}
         {groups.map((group) => <article key={group.id}>
           <div><strong>{group.name}</strong><span>{perspectiveLabel(group.perspective)} · 활성 {group.activeMemberCount}/{group.memberCount}명</span></div>
           <button type="button" className="text-button danger" onClick={() => remove.mutate(group.id)}>삭제</button>
@@ -277,7 +302,7 @@ function DeliveryLogTable({
         <span><strong>{logs.summary.failedCount}</strong> 실패</span>
         <span><strong>{logs.summary.skippedCount}</strong> 건너뜀</span>
       </div>
-      {logs.content.length === 0 ? <div className="state-panel">조건에 맞는 발송 이력이 없습니다.</div> : (
+      {logs.content.length === 0 ? <p className="empty-block">조건에 맞는 발송 이력이 없습니다.</p> : (
         <div className="table-scroll"><table className="delivery-table"><thead><tr>
           <th>보낸 시각</th><th>보고서</th><th>수신자</th><th>소속 그룹</th><th>전달 방식</th><th>결과</th>
         </tr></thead><tbody>{logs.content.map((log) => {

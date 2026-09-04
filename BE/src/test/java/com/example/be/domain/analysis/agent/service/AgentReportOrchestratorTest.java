@@ -79,6 +79,18 @@ class AgentReportOrchestratorTest {
     }
 
     @Test
+    void dailyWithoutSupportedEvidenceFallsBackBeforeReservingQuota() {
+        var date = java.time.LocalDate.of(2026, 9, 1);
+        Finding unsupported = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "근거 없음");
+        org.springframework.test.util.ReflectionTestUtils.setField(unsupported, "keyPoints", List.of());
+        var stats = com.example.be.domain.reports.service.ReportSourceStats.empty();
+        orchestrator.generateDaily(77L, date, List.of(unsupported), stats, date.plusDays(1).atStartOfDay());
+        verify(fallback).generateDaily(List.of(unsupported), date, stats);
+        org.mockito.Mockito.verifyNoInteractions(client, recorder, planService);
+        verify(quotaService, never()).reserve(any(), any(), any(), any());
+    }
+
+    @Test
     void excludesStubAndIncludesReusedFindingInAgentRequest() {
         Finding llm = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "실제 LLM 요약");
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT_BLOCKED, "STUB 요약");
@@ -355,6 +367,44 @@ class AgentReportOrchestratorTest {
         assertEquals("지원되는 주장", keyPoint.text());
         assertEquals(List.of(0), keyPoint.evidence());
         assertEquals("grounded", keyPoint.groundedness());
+    }
+
+    @Test
+    void dailyUsesReportReservationAndCompactsVerifiedFindingsWithoutLosingClaimMetadata() {
+        java.time.LocalDate date = java.time.LocalDate.of(2026, 8, 21);
+        when(planService.resolveRunPlan(null)).thenReturn(AgentPlan.FREE);
+        QuotaReservation daily = new QuotaReservation(2L, null, "daily-report:77", AgentTask.REPORT,
+                AgentPlan.FREE, BigDecimal.ONE);
+        when(quotaService.reserve(null, "daily-report:77", AgentTask.REPORT, AgentPlan.FREE)).thenReturn(daily);
+        List<FindingKeyPoint> points = List.of(
+                new FindingKeyPoint("내년 양산할 전망이다.", List.of(0), "weak", "전망 유지", "FORECAST", null),
+                new FindingKeyPoint("업계는 긍정적으로 평가했다.", List.of(1), "grounded", null, "OPINION", "업계"),
+                new FindingKeyPoint("확인된 생산 계획", List.of(2), "grounded"),
+                new FindingKeyPoint("긴 부가 근거", List.of(3), "grounded"));
+        Finding finding = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT,
+                "길게 작성된 분석 요약이다. ".repeat(20), points);
+        when(client.report(any())).thenReturn(response(List.of(501L)));
+        orchestrator.generate(run(), List.of(finding), date.atTime(9, 3));
+        orchestrator.generateDaily(77L, date, List.of(finding),
+                com.example.be.domain.reports.service.ReportSourceStats.empty(), date.plusDays(1).atStartOfDay());
+        ArgumentCaptor<AgentReportRequest> requests = ArgumentCaptor.forClass(AgentReportRequest.class);
+        verify(client, org.mockito.Mockito.times(2)).report(requests.capture());
+        AgentReportRequest normal = requests.getAllValues().getFirst();
+        AgentReportRequest compact = requests.getAllValues().getLast();
+        assertEquals(com.example.be.domain.reports.entity.ReportScope.DAILY, compact.run().reportScope());
+        org.junit.jupiter.api.Assertions.assertNull(compact.run().id());
+        assertEquals(77L, compact.run().reportId());
+        assertEquals(date, compact.run().reportDate());
+        assertEquals(date.atStartOfDay(), compact.run().startedAt().toLocalDateTime());
+        assertEquals(date.plusDays(1).atStartOfDay(), compact.run().finishedAt().toLocalDateTime());
+        assertEquals(3, compact.findings().getFirst().keyPoints().size());
+        assertEquals("FORECAST", compact.findings().getFirst().keyPoints().getFirst().claimType());
+        assertEquals("weak", compact.findings().getFirst().keyPoints().getFirst().groundedness());
+        assertEquals("업계", compact.findings().getFirst().keyPoints().get(1).attributedTo());
+        tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
+        assertTrue(mapper.writeValueAsBytes(compact).length < mapper.writeValueAsBytes(normal).length);
+        verify(recorder).recordReportSuccess(eq(null), eq(compact), any(), any());
+        verify(quotaService).completeSuccess(daily, BigDecimal.ZERO);
     }
 
     private AgentProperties enabledProperties() {
