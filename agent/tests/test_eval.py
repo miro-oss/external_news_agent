@@ -548,7 +548,7 @@ def test_live_eval_resumes_successful_analyses_from_checkpoint(
         rate_limit_retry_attempts=0,
     )
     settings = eval_settings().model_copy(
-        update={"gemini_api_key": "test-key", "gemini_model": "configured-gemini"}
+        update={"openai_api_key": "test-key", "openai_model": "configured-openai"}
     )
     first_analysis = JsonSequenceProvider(
         [case.replay for case in dataset.cases],
@@ -666,7 +666,7 @@ class JsonSequenceProvider:
             )
         return ProviderResponse(
             text=json.dumps(next(self._payloads), ensure_ascii=False),
-            provider="gemini",
-            model="configured-gemini",
+            provider="openai",
+            model="configured-openai",
             usage=ProviderUsage(),
         )

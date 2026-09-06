@@ -254,7 +254,7 @@ def _provider_meta(
 
 
 def _provider_name(plan: str) -> str:
-    return "gemini" if plan == "FREE" else "mindlogic-claude"
+    return "openai" if plan == "FREE" else "mindlogic-claude"
 
 
 def _evidence_prompt(claims: list[EvidenceClaim]) -> str:

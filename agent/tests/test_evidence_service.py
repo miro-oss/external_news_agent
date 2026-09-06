@@ -244,7 +244,7 @@ def test_non_mock_verifier_resolves_direct_claim_without_provider() -> None:
 
     assert first_result(response).status == "grounded"
     assert first_result(response).accepted_sentence_ids == [1]
-    assert response.meta.provider == "gemini"
+    assert response.meta.provider == "openai"
     assert response.meta.model == "evidence-rules-v3"
     assert response.meta.prompt_version == "evidence.rules.v3"
     assert response.meta.input_tokens == 0
@@ -527,7 +527,7 @@ def test_non_mock_rule_rejection_keeps_real_provider_meta() -> None:
     )
 
     assert first_result(response).status == "ungrounded"
-    assert response.meta.provider == "gemini"
+    assert response.meta.provider == "openai"
     assert response.meta.mock is False
 
 

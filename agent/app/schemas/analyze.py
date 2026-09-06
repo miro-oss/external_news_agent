@@ -321,7 +321,7 @@ class MemberStance(AgentModel):
 
 
 class ResponseMeta(AgentModel):
-    provider: Literal["gemini", "mindlogic-claude", "mock"]
+    provider: Literal["openai", "gemini", "mindlogic-claude", "mock"]
     model: str = Field(min_length=1)
     prompt_version: str = Field(min_length=1, max_length=50)
     input_tokens: int = Field(ge=0)

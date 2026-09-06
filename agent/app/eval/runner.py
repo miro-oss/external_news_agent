@@ -663,7 +663,7 @@ def _eval_config(
     if profile == "replay":
         provider_model = "golden-replay"
     elif plan == "FREE":
-        provider_model = settings.gemini_model
+        provider_model = settings.openai_model
     else:
         provider_model = settings.mindlogic_claude_model
     return EvalConfig(

@@ -4,9 +4,9 @@ from threading import Lock
 from app.core.config import Settings
 from app.core.errors import AgentError
 from app.llm.base import AnalyzeProvider
-from app.llm.gemini_provider import GeminiAnalyzeProvider
 from app.llm.guarded_provider import GuardedAnalyzeProvider, ProviderGuard
 from app.llm.mindlogic_provider import MindlogicAnalyzeProvider
+from app.llm.openai_provider import OpenAIAnalyzeProvider
 from app.llm.rate_limit_provider import (
     PacedRetryProvider,
     ProviderRequestCoordinator,
@@ -27,7 +27,7 @@ def get_analyze_provider(
     apply_request_policy: bool = True,
 ) -> AnalyzeProvider:
     if plan == "FREE":
-        _require(settings.gemini_api_key, settings.gemini_model, provider="Gemini")
+        _require(settings.openai_api_key, settings.openai_model, provider="OpenAI")
     else:
         _require(
             settings.mindlogic_api_key,
@@ -41,7 +41,7 @@ def get_analyze_provider(
         provider = _PROVIDER_CACHE.get(key)
         if provider is None:
             delegate = (
-                GeminiAnalyzeProvider(settings)
+                OpenAIAnalyzeProvider(settings)
                 if plan == "FREE"
                 else MindlogicAnalyzeProvider(settings)
             )
@@ -100,7 +100,7 @@ def _provider_coordinator(
         coordinator = ProviderRequestCoordinator(
             ProviderRequestPolicy(
                 request_interval_seconds=(
-                    settings.gemini_request_interval_seconds if plan == "FREE" else 0.0
+                    settings.openai_request_interval_seconds if plan == "FREE" else 0.0
                 ),
                 rate_limit_retry_attempts=settings.rate_limit_retry_attempts,
                 rate_limit_backoff_seconds=settings.rate_limit_backoff_seconds,

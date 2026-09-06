@@ -260,7 +260,7 @@ def _unchanged_response(
 ) -> SelfCritiqueResponse:
     previous = request.previous_finding
     assert previous is not None
-    provider = "mock" if mock else "gemini" if request.plan == "FREE" else "mindlogic-claude"
+    provider = "mock" if mock else "openai" if request.plan == "FREE" else "mindlogic-claude"
     return SelfCritiqueResponse(
         sections=[
             ReviewedSection(

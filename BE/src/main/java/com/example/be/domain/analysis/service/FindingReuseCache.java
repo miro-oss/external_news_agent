@@ -29,7 +29,7 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class FindingReuseCache {
 
-    private static final String FREE_PROVIDER = "gemini";
+    private static final String FREE_PROVIDER = "openai";
     private static final String PAID_PROVIDER = "mindlogic-claude";
 
     private final FindingRepository findingRepository;

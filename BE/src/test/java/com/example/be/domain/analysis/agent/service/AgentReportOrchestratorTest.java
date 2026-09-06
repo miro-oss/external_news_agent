@@ -112,7 +112,7 @@ class AgentReportOrchestratorTest {
 
         assertEquals("# Agent 보고서", document.markdownBody());
         assertEquals("report.ko.v1", document.promptVersion());
-        assertEquals("gemini", document.llmProvider());
+        assertEquals("openai", document.llmProvider());
         assertEquals(ReportStatus.GENERATED, document.status());
         assertEquals(List.of(501L, 503L), document.reflectedFindingIds());
         assertEquals(List.of(), document.excludedFindingIds());
@@ -496,7 +496,7 @@ class AgentReportOrchestratorTest {
                 List.of("출처 참고"),
                 "# Agent 보고서",
                 new AgentReportResponse.Meta(
-                        mockResponse ? "mock" : "gemini",
+                        mockResponse ? "mock" : "openai",
                         mockResponse ? "deterministic-report" : "configured-model",
                         "report.ko.v1",
                         100L,
