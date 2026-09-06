@@ -53,7 +53,7 @@ class FindingReuseCacheTest {
                 .analysisSections(List.of())
                 .entities(FindingEntities.empty())
                 .promptVersion("analyze.ko.v1")
-                .llmProvider("gemini")
+                .llmProvider("openai")
                 .llmModel("free-model")
                 .inputTokens(100L)
                 .outputTokens(20L)
@@ -67,7 +67,7 @@ class FindingReuseCacheTest {
                 AnalysisSource.LLM,
                 Set.of(inputHash),
                 "analyze.ko.v1",
-                "gemini",
+                "openai",
                 "free-model")).thenReturn(List.of(source));
 
         Map<Long, FindingReuseCache.Lookup> lookups = cache.lookupAll(List.of(article), AgentPlan.FREE);
@@ -194,7 +194,7 @@ class FindingReuseCacheTest {
         String inputHash = FindingReuseCache.inputHash(context);
         when(findingRepository.findReusableSources(
                 Set.of(10L), AnalysisSource.LLM, Set.of(inputHash),
-                "analyze.ko.v1", "gemini", "free-model"))
+                "analyze.ko.v1", "openai", "free-model"))
                 .thenReturn(List.of());
 
         FindingReuseCache.Lookup lookup = cache.lookupContexts(
@@ -203,7 +203,7 @@ class FindingReuseCacheTest {
         assertTrue(lookup.cached().isEmpty());
         verify(findingRepository).findReusableSources(
                 Set.of(10L), AnalysisSource.LLM, Set.of(inputHash),
-                "analyze.ko.v1", "gemini", "free-model");
+                "analyze.ko.v1", "openai", "free-model");
     }
 
     private AgentProperties properties() {

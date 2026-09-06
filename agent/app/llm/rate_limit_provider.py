@@ -19,7 +19,7 @@ class ProviderRequestPolicy:
     rate_limit_backoff_seconds: float = 4.0
     rate_limit_max_backoff_seconds: float = 10.0
     # provider가 직접 알려준 대기 시간에 적용하는 별도 상한. 추측한 backoff보다 크게 둔다.
-    # Gemini 무료 티어는 RPM 초과 시 retryDelay로 20~60초를 돌려주는데, 이걸 backoff 상한으로
+    # provider는 RPM 초과 시 Retry-After로 긴 대기 시간을 돌려주는데, 이걸 backoff 상한으로
     # 깎으면 provider가 기다리라고 한 시간보다 먼저 다시 불러서 429를 한 번 더 받는다.
     rate_limit_max_wait_seconds: float = 60.0
 

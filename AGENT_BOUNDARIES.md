@@ -131,10 +131,10 @@ provider 캐시, plan별 semaphore·circuit breaker·pacing 상태는 프로세�
 | 429 | `PROVIDER_UNAVAILABLE` | [explore_service.py](agent/app/llm/explore_service.py)의 PAID PydanticAI upstream 429 |
 | 502 | `SCHEMA_VIOLATION` | [structured_call.py](agent/app/llm/structured_call.py)의 최종 출력 검증 실패, PAID Explore 출력 위반 |
 | 503 | `API_KEY_MISSING` | [router.py](agent/app/llm/router.py)의 provider 필수 설정 누락 |
-| 503 | `PROVIDER_UNAVAILABLE` | Gemini/일반 Mindlogic 오류, 동시성·서킷 차단, PAID Explore의 기타 provider 오류 |
+| 503 | `PROVIDER_UNAVAILABLE` | OpenAI/일반 Mindlogic 오류, 동시성·서킷 차단, PAID Explore의 기타 provider 오류 |
 | 500 | `INTERNAL_ERROR` | 예상 밖 예외·보고서 응답 조립 실패 |
 
-`SCHEMA_VIOLATION`은 요청 위반(422)과 provider 출력 위반(502)에 모두 쓰인다. Gemini의
+`SCHEMA_VIOLATION`은 요청 위반(422)과 provider 출력 위반(502)에 모두 쓰인다. OpenAI의
 upstream 429도 내부 HTTP 응답은 503이고 `details.rateLimited=true`로 구분한다. 일반 Mindlogic의
 upstream 429는 503으로 변환되며 이 표시가 없어 공통 rate-limit 재시도 대상이 아니다.
 프록시/어댑터는 HTTP 상태만으로 POST를 재시도하지 않는다. 특히 `429 BUDGET_EXCEEDED`는
@@ -142,8 +142,10 @@ upstream 429는 503으로 변환되며 이 표시가 없어 공통 rate-limit �
 그 외는 `AGENT_HTTP_<status>`로 기록한다. 후자는 quota 해제 목록에 없어 소비 처리되므로
 HTTP 상태와 오류 본문·usage를 함께 보존해야 한다.
 
-`meta.costUsd=0`만으로 실비 무료라고 판단하지 않는다. 현재 Gemini 어댑터는 비용·credits를
-0으로 두며 `outputTokens`에는 candidate와 thinking 토큰을 합친다. Mindlogic은 관측된
+`meta.costUsd=0`만으로 실비 무료라고 판단하지 않는다. OpenAI 어댑터는 입력·캐시 입력·출력 토큰별 단가로 예상 USD를 계산하고
+`outputTokens`에는 Responses API의 `output_tokens`를 사용한다. `credits=0`은 Mindlogic
+크레딧을 사용하지 않는다는 뜻이다. 단가 미등록 모델은 경고와 함께 비용 0을 기록하므로
+`OPENAI_*_COST_PER_MILLION` 세 변수를 모두 설정해야 한다. Mindlogic은 관측된
 사용량을 사용하고 credits가 없으면 설정된 환산값을 쓴다. 실비 측정은 별도 최종 안정화 작업이다.
 
 ## 4. Plan–Act–Observe 실행과 복구
@@ -217,7 +219,7 @@ PAID는 90 × 15% = 13.5 credits다. PAID의 기준액은 보고서 예약 20을
 | Spring `AgentClient` | 자체 POST 재시도 루프 없음. 연결 실패와 read timeout을 구분해 호출자에게 전달 |
 | Python 구조화 호출 | [structured_call.py](agent/app/llm/structured_call.py)의 schema repair는 `AGENT_SCHEMA_REPAIR_ATTEMPTS`(허용 0~1, 기본 1). 자기 검증은 설정과 무관하게 schema repair 0회, PAID Explore는 PydanticAI 자체 출력 retry 0회. 공통 provider 재시도는 별도 적용 |
 | Python provider 보호 | [guarded_provider.py](agent/app/llm/guarded_provider.py)의 동시성·서킷·응답 후 hard cap, [rate_limit_provider.py](agent/app/llm/rate_limit_provider.py)의 pacing·명시적인 재시도 가능 rate-limit 오류 처리 |
-| provider별 처리 | [Gemini](agent/app/llm/gemini_provider.py)의 ServerError 재시도는 별도. 일반 [Mindlogic](agent/app/llm/mindlogic_provider.py) 429와 [PAID Explore](agent/app/llm/explore_service.py) 429의 오류 매핑은 같지 않음 |
+| provider별 처리 | [OpenAI](agent/app/llm/openai_provider.py)의 5xx 재시도는 별도. 일반 [Mindlogic](agent/app/llm/mindlogic_provider.py) 429와 [PAID Explore](agent/app/llm/explore_service.py) 429의 오류 매핑은 같지 않음 |
 
 따라서 “Python은 repair만 수행한다”, “모든 429를 재시도한다”, “Agent HTTP 한 번이면 provider도
 한 번이다”는 모두 일반 규칙으로 쓸 수 없다. HTTP 어댑터나 프록시에 자동 POST 재시도를 추가하면
@@ -225,11 +227,11 @@ PAID는 90 × 15% = 13.5 credits다. PAID의 기준액은 보고서 예약 20을
 
 앱 코드가 명시적으로 시도하는 횟수의 상한은 설정에 따라 계산한다. `S`는 schema repair 횟수
 (`AGENT_SCHEMA_REPAIR_ATTEMPTS`, 0~1, 기본 1), `R`은 공통 rate-limit 재시도 횟수
-(`AGENT_RATE_LIMIT_RETRY_ATTEMPTS`, 0~3, 기본 2), `P`는 Gemini ServerError 재시도 횟수
+(`AGENT_RATE_LIMIT_RETRY_ATTEMPTS`, 0~3, 기본 2), `P`는 OpenAI 5xx 재시도 횟수
 (`AGENT_PROVIDER_RETRY_ATTEMPTS`, 0~3, 기본 1)다. schema·rate-limit 두 층의 상한은
-`(1 + S) × (1 + R)`로 기본 6회지만, Gemini의 앱 코드 `generate_content` 호출은
+`(1 + S) × (1 + R)`로 기본 6회지만, OpenAI의 앱 코드 `responses.create` 호출은
 `(1 + S) × (1 + R) × (1 + P)`까지 늘어 **기본 최대 12회**다. 자기 검증은 `S=0`이므로
-기본 최대 6회, PAID Explore는 schema repair·Gemini 재시도가 없어 기본 최대 3회다.
+기본 최대 6회, PAID Explore는 schema repair·OpenAI 재시도가 없어 기본 최대 3회다.
 일반 Mindlogic 구조화 경로는 upstream 429를 재시도 가능 표시 없이 변환하므로 현재 명시적 시도는
 `1 + S`(기본 최대 2회)다. 규칙만으로 끝나거나 quota·서킷이 차단하면 실제 provider 시도는 0회일 수 있다.
 이 값은 각 재시도 조건을 순서대로 만족하는 최악 경로의 상한이며, 매 호출의 과금 횟수나
@@ -308,7 +310,7 @@ plan을 바꾸지 않는다. 자기 검증 실패는 최초 검증 결과를 유
   tests/test_guarded_provider.py tests/test_breaker.py tests/test_explore_service.py \
   tests/test_keyword_strategy_service.py tests/test_report_service.py tests/test_insight_service.py \
   tests/test_evidence_service.py tests/test_analyze_service.py tests/test_self_critique_service.py \
-  tests/test_gemini_provider.py tests/test_mindlogic_provider.py
+  tests/test_openai_provider.py tests/test_mindlogic_provider.py
 ```
 
 | 검증 | 확인할 경계 |

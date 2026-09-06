@@ -47,12 +47,12 @@ export function LlmControlPanel() {
     <div className="llm-panel">
       <div className="llm-panel-heading">
         <span className="muted">현재 기본 플랜</span>
-        <span className={`plan-badge plan-${setting.plan.toLowerCase()}`}>{setting.plan}</span>
+        <span className={`plan-badge plan-${setting.plan.toLowerCase()}`}>{setting.plan === 'FREE' ? 'OpenAI' : 'Claude'}</span>
       </div>
 
       <div className="usage-grid">
         <UsageCard
-          label="FREE · 오늘 호출"
+          label="OpenAI · 오늘 호출"
           used={usage.free.dailyCallsUsed}
           limit={usage.free.dailyCallsLimit}
           unit="회"
@@ -80,7 +80,7 @@ export function LlmControlPanel() {
         <fieldset className="field">
           <legend>기본 플랜</legend>
           <div className="plan-options">
-            <PlanOption value="FREE" current={setting.plan} label="Gemini 무료" />
+            <PlanOption value="FREE" current={setting.plan} label="OpenAI 저비용" />
             <PlanOption value="PAID" current={setting.plan} label="Claude 유료" />
           </div>
         </fieldset>
@@ -92,7 +92,7 @@ export function LlmControlPanel() {
             defaultValue={setting.paidExhaustedAction}
           >
             <option value="STUB">임시 응답으로 계속 — 기본</option>
-            <option value="FALLBACK_FREE">FREE Gemini로 계속</option>
+            <option value="FALLBACK_FREE">OpenAI 저비용 모델로 계속</option>
           </select>
         </div>
         <button type="submit" disabled={updatePlan.isPending}>
@@ -126,7 +126,7 @@ function PlanOption({
       />
       <span>{label}</span>
       <small>
-        {value === 'FREE' ? <>비용 없이<br />호출량 보호</> : '월 3,000 credits 한도'}
+        {value === 'FREE' ? <>API 사용량 과금<br />일일 호출량 제한</> : '월 3,000 credits 한도'}
       </small>
     </label>
   )

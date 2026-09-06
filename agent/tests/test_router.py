@@ -2,9 +2,9 @@ import pytest
 
 from app.core.config import Settings
 from app.core.errors import AgentError
-from app.llm.gemini_provider import GeminiAnalyzeProvider
 from app.llm.guarded_provider import GuardedAnalyzeProvider
 from app.llm.mindlogic_provider import MindlogicAnalyzeProvider
+from app.llm.openai_provider import OpenAIAnalyzeProvider
 from app.llm.rate_limit_provider import PacedRetryProvider
 from app.llm.router import close_analyze_providers, get_analyze_provider
 
@@ -21,8 +21,8 @@ def test_requires_configuration_for_selected_plan_only() -> None:
 
 def test_routes_free_and_paid_to_configured_provider() -> None:
     settings = Settings(
-        GEMINI_API_KEY="gemini-key",
-        GEMINI_MODEL="gemini-model",
+        OPENAI_API_KEY="openai-key",
+        OPENAI_MODEL="gpt-4.1-nano",
         MINDLOGIC_API_KEY="mindlogic-key",
         MINDLOGIC_CLAUDE_MODEL="claude-model",
     )
@@ -35,9 +35,9 @@ def test_routes_free_and_paid_to_configured_provider() -> None:
         assert isinstance(paid, PacedRetryProvider)
         assert isinstance(free.delegate, GuardedAnalyzeProvider)
         assert isinstance(paid.delegate, GuardedAnalyzeProvider)
-        assert isinstance(free.delegate.delegate, GeminiAnalyzeProvider)
+        assert isinstance(free.delegate.delegate, OpenAIAnalyzeProvider)
         assert isinstance(paid.delegate.delegate, MindlogicAnalyzeProvider)
-        assert free.coordinator.policy.request_interval_seconds == 2.0
+        assert free.coordinator.policy.request_interval_seconds == 1.0
         assert paid.coordinator.policy.request_interval_seconds == 0.0
         assert get_analyze_provider(settings, "FREE") is free
         assert get_analyze_provider(settings, "PAID") is paid
@@ -47,8 +47,8 @@ def test_routes_free_and_paid_to_configured_provider() -> None:
 
 def test_analyze_and_report_settings_share_plan_guard() -> None:
     settings = Settings(
-        GEMINI_API_KEY="gemini-key",
-        GEMINI_MODEL="gemini-model",
+        OPENAI_API_KEY="openai-key",
+        OPENAI_MODEL="gpt-4.1-nano",
     )
     report_settings = settings.model_copy(
         update={
@@ -74,8 +74,8 @@ def test_analyze_and_report_settings_share_plan_guard() -> None:
 
 def test_can_skip_default_request_policy_for_live_eval() -> None:
     settings = Settings(
-        GEMINI_API_KEY="gemini-key",
-        GEMINI_MODEL="gemini-model",
+        OPENAI_API_KEY="openai-key",
+        OPENAI_MODEL="gpt-4.1-nano",
     )
 
     try:
@@ -86,7 +86,7 @@ def test_can_skip_default_request_policy_for_live_eval() -> None:
         )
 
         assert isinstance(provider, GuardedAnalyzeProvider)
-        assert isinstance(provider.delegate, GeminiAnalyzeProvider)
+        assert isinstance(provider.delegate, OpenAIAnalyzeProvider)
         assert get_analyze_provider(settings, "FREE") is not provider
     finally:
         close_analyze_providers()

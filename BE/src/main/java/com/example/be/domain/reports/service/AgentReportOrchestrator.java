@@ -56,7 +56,7 @@ import java.util.stream.Collectors;
 public class AgentReportOrchestrator {
 
     private static final int MAX_REPORT_FINDINGS = 50;
-    private static final Set<String> PROVIDER_VALUES = Set.of("gemini", "mindlogic-claude", "mock");
+    private static final Set<String> PROVIDER_VALUES = Set.of("openai", "gemini", "mindlogic-claude", "mock");
 
     private final AgentProperties properties;
     private final AgentClient client;

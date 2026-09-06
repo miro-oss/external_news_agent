@@ -1,3 +1,4 @@
+from decimal import Decimal
 from functools import lru_cache
 
 from pydantic import Field, model_validator
@@ -65,10 +66,10 @@ class Settings(BaseSettings):
         le=3,
         validation_alias="AGENT_PROVIDER_RETRY_ATTEMPTS",
     )
-    gemini_request_interval_seconds: float = Field(
-        default=2.0,
+    openai_request_interval_seconds: float = Field(
+        default=1.0,
         ge=0,
-        validation_alias="GEMINI_REQUEST_INTERVAL_SECONDS",
+        validation_alias="OPENAI_REQUEST_INTERVAL_SECONDS",
     )
     rate_limit_retry_attempts: int = Field(
         default=2,
@@ -155,8 +156,17 @@ class Settings(BaseSettings):
         ge=1,
         validation_alias="AGENT_EVIDENCE_MAX_TOTAL_CHARS",
     )
-    gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="", validation_alias="GEMINI_MODEL")
+    openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
+    openai_model: str = Field(default="gpt-4.1-nano", validation_alias="OPENAI_MODEL")
+    openai_input_cost_per_million: Decimal | None = Field(
+        default=None, ge=0, validation_alias="OPENAI_INPUT_COST_PER_MILLION"
+    )
+    openai_cached_input_cost_per_million: Decimal | None = Field(
+        default=None, ge=0, validation_alias="OPENAI_CACHED_INPUT_COST_PER_MILLION"
+    )
+    openai_output_cost_per_million: Decimal | None = Field(
+        default=None, ge=0, validation_alias="OPENAI_OUTPUT_COST_PER_MILLION"
+    )
     mindlogic_api_key: str = Field(default="", validation_alias="MINDLOGIC_API_KEY")
     mindlogic_base_url: str = Field(
         default="https://factchat-cloud.mindlogic.ai/v1/gateway",
@@ -169,6 +179,15 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_evidence_thresholds(self) -> "Settings":
+        prices = (
+            self.openai_input_cost_per_million,
+            self.openai_cached_input_cost_per_million,
+            self.openai_output_cost_per_million,
+        )
+        if any(price is not None for price in prices) and not all(
+            price is not None for price in prices
+        ):
+            raise ValueError("OpenAI 사용자 지정 토큰 단가는 세 값을 모두 설정해야 합니다.")
         if self.evidence_weak_overlap > self.evidence_grounded_overlap:
             raise ValueError(
                 "AGENT_EVIDENCE_WEAK_OVERLAP은 GROUNDED_OVERLAP보다 클 수 없습니다."

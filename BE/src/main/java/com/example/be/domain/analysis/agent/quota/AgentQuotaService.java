@@ -44,6 +44,27 @@ public class AgentQuotaService {
         return createReservation(runId, idempotencyKey, task, plan);
     }
 
+    @Transactional
+    public QuotaReservation reserveInsight(Long runId,
+                                           String baseKey,
+                                           AgentPlan plan) {
+        repository.lockSingletonSettings();
+        releaseExpiredReservations();
+        String candidate = baseKey;
+        int retry = 0;
+        while (true) {
+            Optional<String> existingStatus = repository.findStatusByIdempotencyKey(candidate);
+            if (existingStatus.isEmpty()) {
+                return createReservation(runId, candidate, AgentTask.INSIGHT, plan);
+            }
+            if (!"RELEASED".equals(existingStatus.get())) {
+                throw new DuplicateQuotaReservationException(candidate, existingStatus.get());
+            }
+            // Preserve each attempt so a late completion cannot settle the retry's reservation.
+            candidate = baseKey + ":retry:" + ++retry;
+        }
+    }
+
     @Transactional(readOnly = true)
     public Optional<QuotaReservation> findActiveReservation(String idempotencyKey) {
         return repository.findByIdempotencyKey(idempotencyKey);

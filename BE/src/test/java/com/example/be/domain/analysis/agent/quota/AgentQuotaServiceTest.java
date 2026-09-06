@@ -9,6 +9,9 @@ import com.example.be.domain.settings.service.LlmPlanService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -75,6 +78,111 @@ class AgentQuotaServiceTest {
                 "run:42:topic:7:keyword-strategy",
                 AgentTask.KEYWORD_STRATEGY,
                 AgentPlan.FREE));
+
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void reservesFirstInsightWithBaseKeyUnderExistingQuotaLock() {
+        String key = "insight:ISSUE:88:first";
+        QuotaReservation reservation = new QuotaReservation(
+                1L, 42L, key, AgentTask.INSIGHT, AgentPlan.FREE, BigDecimal.ONE);
+        when(repository.findByIdempotencyKey(key)).thenReturn(Optional.of(reservation));
+
+        assertEquals(reservation, service.reserveInsight(42L, key, AgentPlan.FREE));
+
+        InOrder order = inOrder(repository);
+        order.verify(repository).lockSingletonSettings();
+        order.verify(repository).releaseExpired(any(LocalDateTime.class), any(LocalDateTime.class));
+        order.verify(repository).findStatusByIdempotencyKey(key);
+        order.verify(repository).insert(eq(42L), eq(key), eq(AgentTask.INSIGHT),
+                eq(AgentPlan.FREE), eq(BigDecimal.ONE), any(LocalDateTime.class));
+    }
+
+    @Test
+    void retriesReleasedInsightWithNewReservationAndPreservesOriginalAttempt() {
+        String key = "insight:ISSUE:88:released";
+        String retryKey = key + ":retry:1";
+        QuotaReservation retryReservation = new QuotaReservation(
+                2L, 42L, retryKey, AgentTask.INSIGHT, AgentPlan.FREE, BigDecimal.ONE);
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of("RELEASED"));
+        when(repository.findByIdempotencyKey(retryKey)).thenReturn(Optional.of(retryReservation));
+
+        assertEquals(retryReservation, service.reserveInsight(42L, key, AgentPlan.FREE));
+
+        verify(repository).insert(eq(42L), eq(retryKey), eq(AgentTask.INSIGHT),
+                eq(AgentPlan.FREE), eq(BigDecimal.ONE), any(LocalDateTime.class));
+        verify(repository, never()).insert(any(), eq(key), any(), any(), any(), any());
+        verify(repository, never()).release(any(), any());
+        verify(repository, never()).consume(any(), any(), any());
+    }
+
+    @Test
+    void skipsAllReleasedInsightAttemptsForSecondRetry() {
+        String key = "insight:ISSUE:88:released-twice";
+        QuotaReservation retryReservation = new QuotaReservation(
+                3L, 42L, key + ":retry:2", AgentTask.INSIGHT, AgentPlan.FREE, BigDecimal.ONE);
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of("RELEASED"));
+        when(repository.findStatusByIdempotencyKey(key + ":retry:1"))
+                .thenReturn(Optional.of("RELEASED"));
+        when(repository.findByIdempotencyKey(key + ":retry:2"))
+                .thenReturn(Optional.of(retryReservation));
+
+        assertEquals(retryReservation, service.reserveInsight(42L, key, AgentPlan.FREE));
+
+        verify(repository).insert(eq(42L), eq(key + ":retry:2"), eq(AgentTask.INSIGHT),
+                eq(AgentPlan.FREE), eq(BigDecimal.ONE), any(LocalDateTime.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"RESERVED", "CONSUMED"})
+    void rejectsInsightWithActiveOrConsumedBaseReservation(String status) {
+        String key = "insight:ISSUE:88:duplicate";
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of(status));
+
+        assertThrows(DuplicateQuotaReservationException.class,
+                () -> service.reserveInsight(42L, key, AgentPlan.FREE));
+
+        verify(repository, never()).findStatusByIdempotencyKey(key + ":retry:1");
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"RESERVED", "CONSUMED"})
+    void rejectsInsightWithActiveOrConsumedRetryReservation(String status) {
+        String key = "insight:ISSUE:88:retry-duplicate";
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of("RELEASED"));
+        when(repository.findStatusByIdempotencyKey(key + ":retry:1"))
+                .thenReturn(Optional.of(status));
+
+        assertThrows(DuplicateQuotaReservationException.class,
+                () -> service.reserveInsight(42L, key, AgentPlan.FREE));
+
+        verify(repository, never()).findStatusByIdempotencyKey(key + ":retry:2");
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(AgentTask.class)
+    void generalReservationStillRejectsReleasedKeysForEveryTask(AgentTask task) {
+        String key = "released:original-contract:" + task;
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of("RELEASED"));
+
+        assertThrows(DuplicateQuotaReservationException.class,
+                () -> service.reserve(42L, key, task, AgentPlan.FREE));
+
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void releasedInsightRetryStillHonorsPaidInsightQuota() {
+        String key = "insight:ISSUE:88:released-over-quota";
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of("RELEASED"));
+        stubUsage(BigDecimal.ZERO, new BigDecimal("11"), BigDecimal.ZERO,
+                new BigDecimal("100"), new BigDecimal("11"));
+
+        assertThrows(QuotaExceededException.class,
+                () -> service.reserveInsight(42L, key, AgentPlan.PAID));
 
         verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
     }

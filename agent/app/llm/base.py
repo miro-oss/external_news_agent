@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Literal, Protocol
 
-ProviderName = Literal["gemini", "mindlogic-claude", "mock"]
+ProviderName = Literal["openai", "gemini", "mindlogic-claude", "mock"]
 
 
 @dataclass(frozen=True, slots=True)

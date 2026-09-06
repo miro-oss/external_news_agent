@@ -94,7 +94,7 @@ def request() -> ReportRequest:
 def provider_response(raw: str, input_tokens: int = 10, output_tokens: int = 5):
     return ProviderResponse(
         text=raw,
-        provider="gemini",
+        provider="openai",
         model="configured-model",
         usage=ProviderUsage(input_tokens=input_tokens, output_tokens=output_tokens),
     )

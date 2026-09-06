@@ -7,6 +7,7 @@ from app.core.config import Settings
 from app.core.evidence import factual_mismatches
 from app.core.parser import parse_json_object
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
+from app.llm.insight_draft import OpenAIInsightDraft
 from app.llm.router import get_analyze_provider
 from app.llm.structured_call import structured_call
 from app.schemas.analyze import ResponseMeta
@@ -29,6 +30,22 @@ SYSTEM_INSTRUCTION = "\n\n".join(
         (_PROMPT_ROOT / f"{_INSIGHT_PROMPT_VERSION}.md").read_text(encoding="utf-8").strip(),
         (_PROMPT_ROOT / f"{_PERSPECTIVE_PROMPT_VERSION}.md").read_text(encoding="utf-8").strip(),
     )
+)
+OPENAI_SYSTEM_INSTRUCTION = SYSTEM_INSTRUCTION.replace(
+    "IMPLICATION은 같은 audience의 FACT id를 하나 이상 basisFactIds로 참조하고, "
+    "성립 조건 assumption과 반증 조건 falsifiedBy를 반드시 쓴다.",
+    "FACT와 IMPLICATION을 factGroups로 묶는다. 각 그룹의 facts는 그 그룹의 모든 "
+    "IMPLICATION을 뒷받침하는 근거다. 필요한 근거가 다르면 그룹을 분리하고, "
+    "여러 사실을 함께 근거로 쓰는 해석은 해당 사실들을 같은 그룹에 넣는다. "
+    "해석과 무관한 사실을 같은 그룹에 섞지 않는다. "
+    "IMPLICATION에는 성립 조건 assumption과 반증 조건 falsifiedBy를 반드시 쓴다.",
+).replace(
+    "facts, implications, watchNext를 빈 배열로 반환한다",
+    "factGroups, watchNext를 빈 배열로 반환한다",
+) + (
+    "\n\n- FACT와 IMPLICATION의 id 및 서로의 참조 번호는 서버가 부여하므로 생성하지 않는다. "
+    "FACT의 findingId와 evidenceSentenceIds는 입력의 실제 원문 식별자를 그대로 사용한다. "
+    "각 그룹은 FACT가 하나 이상 있어야 하며, 해석할 내용이 없으면 implications는 비울 수 있다."
 )
 _INVESTMENT_ADVICE = re.compile(r"(?:매수|매도|목표가)")
 
@@ -57,12 +74,15 @@ class InsightService:
         provider = self._provider or get_analyze_provider(
             self._insight_settings, request.plan
         )
+        use_draft = request.plan == "FREE"
         result = structured_call(
             provider,
-            system_instruction=SYSTEM_INSTRUCTION,
+            system_instruction=OPENAI_SYSTEM_INSTRUCTION if use_draft else SYSTEM_INSTRUCTION,
             prompt=_insight_prompt(request),
-            response_schema=InsightOutput.model_json_schema(by_alias=True),
-            validate=lambda response: _validated_output(response, request),
+            response_schema=(OpenAIInsightDraft if use_draft else InsightOutput).model_json_schema(
+                by_alias=True
+            ),
+            validate=lambda response: _validated_output(response, request, use_draft=use_draft),
             repair_attempts=self._settings.schema_repair_attempts,
             task_name="관점 인사이트",
             input_tag="insight",
@@ -75,8 +95,15 @@ class InsightService:
 def _validated_output(
     provider_response: ProviderResponse,
     request: InsightRequest,
+    *,
+    use_draft: bool = False,
 ) -> InsightOutput:
-    output = InsightOutput.model_validate(parse_json_object(provider_response.text))
+    payload = parse_json_object(provider_response.text)
+    output = (
+        OpenAIInsightDraft.model_validate(payload).to_output()
+        if use_draft
+        else InsightOutput.model_validate(payload)
+    )
     requested = list(request.audiences)
     returned = [insight.audience for insight in output.insights]
     if len(returned) != len(set(returned)) or set(returned) != set(requested):

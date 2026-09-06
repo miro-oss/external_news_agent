@@ -11,6 +11,63 @@ Spring의 상태·실행·예산 책임과 Python의 판단 책임, HTTP 어댑�
 [M13 에이전트 경계](../AGENT_BOUNDARIES.md)에 정리되어 있습니다. `stateless`의 범위,
 provider 재시도와 조사 중단 복구의 보장도 이 문서를 기준으로 확인합니다.
 
+## OpenAI 설정 및 Gemini에서 전환
+
+기존 `FREE` 플랜은 OpenAI 저비용 경로이며 실제 API 요금이 발생합니다. 저장된
+FREE/PAID 값과 일일 호출 한도는 유지하고 PAID는 기존 Mindlogic Claude를 사용합니다.
+Gemini SDK와 런타임 설정은 제거했습니다. 과거 Gemini 분석 결과와 실행 이력은 유지하되,
+새 OpenAI 분석의 재사용 캐시는 provider·모델까지 같아야 일치합니다.
+
+`BE/.env.example`을 보고 실제 `BE/.env`에 다음을 적용하세요.
+
+```dotenv
+OPENAI_API_KEY=발급받은_OpenAI_API_키
+OPENAI_MODEL=gpt-4.1-nano
+OPENAI_REQUEST_INTERVAL_SECONDS=1
+AGENT_INSIGHT_PROMPT_VERSION=insight.ko.v2+perspective.ko.v1
+AGENT_ENABLED=true
+AGENT_MOCK=false
+AGENT_SHARED_SECRET=BE와_agent에_동일하게_설정할_내부_토큰
+```
+
+`AGENT_SHARED_SECRET`이 이미 설정돼 있다면 기존 값을 그대로 사용합니다.
+기존 `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_REQUEST_INTERVAL_SECONDS`는 더 이상 사용하지
+않습니다. Spring은 `BE`에서 실행하면 `.env`를 읽지만 Python Settings는 자동으로 읽지 않으므로
+agent는 아래처럼 명시적으로 환경변수를 로드해야 합니다.
+
+```bash
+# 저장소 루트에서, 기존 agent 프로세스 종료 후 실행
+cd agent
+uv sync --frozen
+uv run --env-file ../BE/.env uvicorn app.main:app --host 127.0.0.1 --port 8088
+```
+
+BE도 재시작해야 `OPENAI_MODEL`이 분석 캐시 조건에 반영됩니다. 셸이나 실행 도구에서
+환경변수를 따로 주입 중이면 같은 값으로 갱신하세요. 설정 화면의 **OpenAI 저비용**을 선택하면
+기존 FREE 경로로 호출합니다. `AGENT_MOCK=true`이면 키가 있어도 실제 LLM을 호출하지 않습니다.
+이전 `.env.example`에서 복사한 `AGENT_INSIGHT_PROMPT_VERSION=insight.ko.v1+perspective.ko.v1`은
+위의 v2 값으로 갱신하거나 해당 변수를 제거해 현재 기본값을 사용하세요. v1로 남아 있으면
+agent가 인사이트를 생성해도 BE의 응답 버전 검증에서 거절됩니다.
+
+기본 `gpt-4.1-nano`는 별도 추론 단계 없이 구조화 출력이 가능한 저비용 모델입니다.
+2026-09-07 확인 기준 100만 토큰당 입력 $0.10 / 캐시 입력 $0.025 / 출력 $0.40입니다.
+`gpt-4o-mini`로 바꾸면 입력 $0.15 / 캐시 입력 $0.075 / 출력 $0.60을 자동 적용합니다.
+예를 들어 캐시 없이 입력 5,000 + 출력 1,000 토큰의 nano 호출은 약 $0.0009입니다.
+한 기사에 분석·검증·조사 등 여러 호출이 발생할 수 있습니다.
+[GPT-4.1 nano](https://developers.openai.com/api/docs/models/gpt-4.1-nano),
+[GPT-4o mini](https://developers.openai.com/api/docs/models/gpt-4o-mini).
+
+다른 모델이나 변경된 단가를 쓰면 `OPENAI_INPUT_COST_PER_MILLION`,
+`OPENAI_CACHED_INPUT_COST_PER_MILLION`, `OPENAI_OUTPUT_COST_PER_MILLION`을 모두 설정하세요.
+단가를 모르는 모델은 로그에 경고하고 `costUsd=0`을 기록합니다. 예상 비용은 표준 API 단가 기준이며
+계정별 할인·세금·최종 청구 금액과 다를 수 있습니다. GPT-5 계열처럼 `temperature=0`을
+지원하지 않는 추론 모델 전환은 별도 호출 옵션 조정이 필요합니다.
+
+OpenAI 호출은 Responses API의 `store=false`와 strict JSON Schema를 사용합니다.
+SDK 자동 재시도는 끄고 5xx는 `AGENT_PROVIDER_RETRY_ATTEMPTS`, 429는 기존 공유 coordinator의
+설정을 따릅니다. `insufficient_quota`는 반복 호출하지 않으며, 토큰 상한으로 잘린 출력은
+기존 schema repair로 넘깁니다. 콘텐츠 거절·빈 응답·실패 응답은 성공 결과로 저장하지 않습니다.
+
 ## `/v1/keyword-strategy` 수집 키워드 제안 계약
 
 P2-7 수집 전략가는 scheduled run 하나가 끝날 때 해당 주제의 현재 required / optional / excluded
@@ -61,8 +118,8 @@ Agent는 키워드를 직접 변경하지 않습니다. Spring은 제안을 `PEN
     }
   ],
   "meta": {
-    "provider": "gemini",
-    "model": "gemini-2.5-flash",
+    "provider": "openai",
+    "model": "gpt-4.1-nano",
     "promptVersion": "keyword-strategy.ko.v1",
     "inputTokens": 0,
     "outputTokens": 0,
@@ -196,7 +253,7 @@ provider 재시도가 발생하면 실제 provider 시도는 늘어날 수 있�
     }
   ],
   "meta": {
-    "provider": "gemini",
+    "provider": "openai",
     "model": "evidence-rules-v3",
     "promptVersion": "evidence.rules.v3",
     "inputTokens": 0,
@@ -214,8 +271,10 @@ provider 재시도가 발생하면 실제 provider 시도는 늘어날 수 있�
 `FACT`는 전체 사실·강도 검증, `FORECAST`는 전망 한정 표현 유지, `OPINION`은 발화 주체 귀속을
 검증합니다.
 
-`meta.outputTokens`는 provider 과금 기준 출력 토큰입니다. Gemini는 화면에 반환된 candidate
-토큰과 내부 thinking 토큰을 합산하고, Mindlogic Claude는 completion 토큰을 사용합니다.
+`meta.outputTokens`는 provider 과금 기준 출력 토큰입니다. OpenAI는 Responses API의
+`output_tokens`, Mindlogic Claude는 completion 토큰을 사용합니다. OpenAI `costUsd`는
+입력·캐시 입력·출력 토큰과 모델 단가로 계산한 예상 USD이며 최종 청구 금액은 아닙니다.
+`credits=0`은 Mindlogic 크레딧을 사용하지 않는다는 뜻이고 무료라는 뜻이 아닙니다.
 
 ## `/v1/analyze` 교차 출처 계약
 
@@ -320,6 +379,16 @@ LLM finding을 최대 50건까지 받습니다.
 `AGENT_INSIGHT_MAX_OUTPUT_TOKENS`(기본 8192)와
 `AGENT_INSIGHT_PROVIDER_TIMEOUT_SECONDS`(기본 60초)를 별도로 사용합니다. Spring의
 `AGENT_INSIGHT_TIMEOUT` 기본값은 네트워크·직렬화 여유를 포함해 75초입니다.
+
+OpenAI 인사이트 생성에서는 모델이 FACT/IMPLICATION의 ID나 참조 번호를 만들지 않습니다.
+모델은 근거 사실과 그 사실들로부터 도출한 해석을 `factGroups`로 묶어 반환합니다. Agent가
+동일 사실의 중복을 제거하고 `f1`, `f2`, `i1` 등의 고유 ID와 그룹에 따른 `basisFactIds`를
+부여합니다. ID 중복이나 잘못된 참조 번호 생성을 방지하며, 외부 API 응답과
+`insight.ko.v2+perspective.ko.v1` 버전은 유지합니다.
+이후 기존 원문 근거 검증을 적용하고, 해석이 제거되더라도 남은 ID를 다시 매기지 않습니다.
+스키마 검증 실패로 사용량 예약이 해제된 인사이트는 같은 입력으로 재시도할 수 있습니다.
+BE는 이전 예약을 보존하고 새 시도 키를 발급하며, 진행 중이거나 이미 정산된 예약은 중복 실행하지
+않습니다. 이 재시도 처리를 적용하려면 BE도 재기동해야 합니다.
 
 Mock 근거 검증의 어휘 겹침 임계값은 `AGENT_EVIDENCE_GROUNDED_OVERLAP`(기본 0.6)과
 `AGENT_EVIDENCE_WEAK_OVERLAP`(기본 0.2)로 조정할 수 있습니다.

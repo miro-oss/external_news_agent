@@ -61,7 +61,7 @@ def provider_response(
 ) -> ProviderResponse:
     return ProviderResponse(
         text=raw,
-        provider="gemini",
+        provider="openai",
         model="configured-model",
         usage=ProviderUsage(input_tokens=input_tokens, output_tokens=output_tokens),
     )
@@ -349,7 +349,7 @@ def test_downgrades_bullet_when_numeric_fact_is_not_in_evidence(caplog) -> None:
     bullet = response.sections[0].bullets[0]
     assert bullet.groundedness == "ungrounded"
     assert bullet.confidence == 0
-    assert "provider=gemini model=configured-model" in caplog.text
+    assert "provider=openai model=configured-model" in caplog.text
     assert "2027" in caplog.text
 
 
