@@ -24,6 +24,7 @@ Gemini SDK와 런타임 설정은 제거했습니다. 과거 Gemini 분석 결�
 OPENAI_API_KEY=발급받은_OpenAI_API_키
 OPENAI_MODEL=gpt-4.1-nano
 OPENAI_REQUEST_INTERVAL_SECONDS=1
+AGENT_INSIGHT_PROMPT_VERSION=insight.ko.v2+perspective.ko.v1
 AGENT_ENABLED=true
 AGENT_MOCK=false
 AGENT_SHARED_SECRET=BE와_agent에_동일하게_설정할_내부_토큰
@@ -44,6 +45,9 @@ uv run --env-file ../BE/.env uvicorn app.main:app --host 127.0.0.1 --port 8088
 BE도 재시작해야 `OPENAI_MODEL`이 분석 캐시 조건에 반영됩니다. 셸이나 실행 도구에서
 환경변수를 따로 주입 중이면 같은 값으로 갱신하세요. 설정 화면의 **OpenAI 저비용**을 선택하면
 기존 FREE 경로로 호출합니다. `AGENT_MOCK=true`이면 키가 있어도 실제 LLM을 호출하지 않습니다.
+이전 `.env.example`에서 복사한 `AGENT_INSIGHT_PROMPT_VERSION=insight.ko.v1+perspective.ko.v1`은
+위의 v2 값으로 갱신하거나 해당 변수를 제거해 현재 기본값을 사용하세요. v1로 남아 있으면
+agent가 인사이트를 생성해도 BE의 응답 버전 검증에서 거절됩니다.
 
 기본 `gpt-4.1-nano`는 별도 추론 단계 없이 구조화 출력이 가능한 저비용 모델입니다.
 2026-09-07 확인 기준 100만 토큰당 입력 $0.10 / 캐시 입력 $0.025 / 출력 $0.40입니다.
