@@ -380,6 +380,16 @@ LLM finding을 최대 50건까지 받습니다.
 `AGENT_INSIGHT_PROVIDER_TIMEOUT_SECONDS`(기본 60초)를 별도로 사용합니다. Spring의
 `AGENT_INSIGHT_TIMEOUT` 기본값은 네트워크·직렬화 여유를 포함해 75초입니다.
 
+OpenAI 인사이트 생성에서는 모델이 FACT/IMPLICATION의 ID나 참조 번호를 만들지 않습니다.
+모델은 근거 사실과 그 사실들로부터 도출한 해석을 `factGroups`로 묶어 반환합니다. Agent가
+동일 사실의 중복을 제거하고 `f1`, `f2`, `i1` 등의 고유 ID와 그룹에 따른 `basisFactIds`를
+부여합니다. ID 중복이나 잘못된 참조 번호 생성을 방지하며, 외부 API 응답과
+`insight.ko.v2+perspective.ko.v1` 버전은 유지합니다.
+이후 기존 원문 근거 검증을 적용하고, 해석이 제거되더라도 남은 ID를 다시 매기지 않습니다.
+스키마 검증 실패로 사용량 예약이 해제된 인사이트는 같은 입력으로 재시도할 수 있습니다.
+BE는 이전 예약을 보존하고 새 시도 키를 발급하며, 진행 중이거나 이미 정산된 예약은 중복 실행하지
+않습니다. 이 재시도 처리를 적용하려면 BE도 재기동해야 합니다.
+
 Mock 근거 검증의 어휘 겹침 임계값은 `AGENT_EVIDENCE_GROUNDED_OVERLAP`(기본 0.6)과
 `AGENT_EVIDENCE_WEAK_OVERLAP`(기본 0.2)로 조정할 수 있습니다.
 실제 모드의 rule-only `grounded` 판정은 단일 문장 기준으로 최소 0.8 overlap을 요구하며,

@@ -7,7 +7,6 @@ import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
 import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentTargetType;
-import com.example.be.domain.analysis.agent.entity.AgentTask;
 import com.example.be.domain.analysis.agent.entity.AgentTimeoutPhase;
 import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
 import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
@@ -109,8 +108,8 @@ public class InsightService {
                 missing);
         QuotaReservation reservation;
         try {
-            reservation = quotaService.reserve(
-                    snapshot.runId(), idempotencyKey, AgentTask.INSIGHT, plan);
+            reservation = quotaService.reserveInsight(
+                    snapshot.runId(), idempotencyKey, plan);
         } catch (QuotaExceededException exception) {
             throw new LlmException(LlmErrorCode.QUOTA_EXHAUSTED, Map.of(
                     "plan", exception.getPlan().name(),
@@ -134,7 +133,7 @@ public class InsightService {
         }
 
         AgentInsightRequest request = new AgentInsightRequest(
-                idempotencyKey,
+                reservation.idempotencyKey(),
                 plan,
                 missing.stream().map(Enum::name).toList(),
                 new AgentInsightRequest.TargetPayload(targetType.name(), targetId),

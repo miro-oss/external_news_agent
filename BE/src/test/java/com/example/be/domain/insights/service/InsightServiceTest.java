@@ -105,10 +105,11 @@ class InsightServiceTest {
     }
 
     @Test
-    void generatesAllMissingAudiencesInOneCallAndSettlesQuota() {
+    void generatesAllMissingAudiencesAndUsesRetryReservationKeyForCallAndAudit() {
         InsightInputAssembler.Snapshot snapshot = snapshot();
         QuotaReservation reservation = new QuotaReservation(
-                1L, 42L, "reservation", AgentTask.INSIGHT, AgentPlan.PAID, BigDecimal.ONE);
+                2L, 42L, "insight:ISSUE:88:released:retry:1",
+                AgentTask.INSIGHT, AgentPlan.PAID, BigDecimal.ONE);
         AgentInsightResponse response = response();
         NewsInsight saved = entity(Audience.CHIP_MAKER);
         when(inputAssembler.assemble(88L)).thenReturn(snapshot);
@@ -117,8 +118,8 @@ class InsightServiceTest {
                 .thenReturn(List.of());
         when(planService.get()).thenReturn(new LlmSettingDTO.PlanResponse(
                 AgentPlan.PAID, true, PaidExhaustedAction.STUB));
-        when(quotaService.reserve(
-                eq(42L), any(), eq(AgentTask.INSIGHT), eq(AgentPlan.PAID)))
+        when(quotaService.reserveInsight(
+                eq(42L), any(), eq(AgentPlan.PAID)))
                 .thenReturn(reservation);
         when(agentClient.insight(any())).thenReturn(response);
         when(persistenceService.saveGenerated(
@@ -137,6 +138,7 @@ class InsightServiceTest {
         ArgumentCaptor<AgentInsightRequest> requestCaptor =
                 ArgumentCaptor.forClass(AgentInsightRequest.class);
         verify(agentClient).insight(requestCaptor.capture());
+        assertEquals(reservation.idempotencyKey(), requestCaptor.getValue().idempotencyKey());
         assertEquals(List.of("CHIP_MAKER"), requestCaptor.getValue().audiences());
         assertEquals(1, requestCaptor.getValue().findings().size());
         InOrder finalization = org.mockito.Mockito.inOrder(
@@ -148,7 +150,8 @@ class InsightServiceTest {
                 response,
                 snapshot.articleIdsByFinding());
         finalization.verify(runRecorder).recordInsightSuccess(
-                eq(42L), eq(88L), any(), eq(response), any(LocalDateTime.class));
+                eq(42L), eq(88L), eq(requestCaptor.getValue()), eq(response),
+                any(LocalDateTime.class));
         finalization.verify(quotaService).completeSuccess(reservation, BigDecimal.ONE);
     }
 
@@ -165,7 +168,7 @@ class InsightServiceTest {
                 .thenReturn(List.of(chip));
         when(planService.get()).thenReturn(new LlmSettingDTO.PlanResponse(
                 AgentPlan.FREE, true, PaidExhaustedAction.STUB));
-        when(quotaService.reserve(any(), any(), any(), any())).thenReturn(reservation);
+        when(quotaService.reserveInsight(any(), any(), any())).thenReturn(reservation);
         when(agentClient.insight(any())).thenReturn(infraResponse);
         when(persistenceService.saveGenerated(any(), any(), any(), any(), any()))
                 .thenReturn(List.of(infra));
@@ -198,7 +201,7 @@ class InsightServiceTest {
                 .thenReturn(List.of(), List.of(chip));
         when(planService.get()).thenReturn(new LlmSettingDTO.PlanResponse(
                 AgentPlan.FREE, true, PaidExhaustedAction.STUB));
-        when(quotaService.reserve(any(), any(), any(), any()))
+        when(quotaService.reserveInsight(any(), any(), any()))
                 .thenReturn(chipReservation, infraReservation);
         when(agentClient.insight(any()))
                 .thenReturn(response(Audience.CHIP_MAKER), response(Audience.IT_INFRA));
@@ -213,8 +216,8 @@ class InsightServiceTest {
                 "ISSUE", 88L, List.of("CHIP_MAKER", "IT_INFRA")));
 
         ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
-        verify(quotaService, times(2)).reserve(
-                eq(42L), keyCaptor.capture(), eq(AgentTask.INSIGHT), eq(AgentPlan.FREE));
+        verify(quotaService, times(2)).reserveInsight(
+                eq(42L), keyCaptor.capture(), eq(AgentPlan.FREE));
         List<String> keys = keyCaptor.getAllValues();
         assertNotEquals(keys.get(0), keys.get(1));
         assertTrue(keys.get(0).endsWith(":CHIP_MAKER"));
@@ -239,7 +242,7 @@ class InsightServiceTest {
                 .thenAnswer(ignored -> persisted.get() ? List.of(chip) : List.of());
         when(planService.get()).thenReturn(new LlmSettingDTO.PlanResponse(
                 AgentPlan.FREE, true, PaidExhaustedAction.STUB));
-        when(quotaService.reserve(any(), any(), any(), any())).thenReturn(reservation);
+        when(quotaService.reserveInsight(any(), any(), any())).thenReturn(reservation);
         when(agentClient.insight(any())).thenAnswer(ignored -> {
             providerStarted.countDown();
             if (!allowProviderCompletion.await(2, TimeUnit.SECONDS)) {
@@ -272,7 +275,7 @@ class InsightServiceTest {
         }
 
         verify(agentClient, times(1)).insight(any());
-        verify(quotaService, times(1)).reserve(any(), any(), any(), any());
+        verify(quotaService, times(1)).reserveInsight(any(), any(), any());
     }
 
     @Test
@@ -366,7 +369,7 @@ class InsightServiceTest {
                 .thenReturn(List.of());
         when(planService.get()).thenReturn(new LlmSettingDTO.PlanResponse(
                 AgentPlan.PAID, true, PaidExhaustedAction.STUB));
-        when(quotaService.reserve(any(), any(), any(), any())).thenReturn(reservation);
+        when(quotaService.reserveInsight(any(), any(), any())).thenReturn(reservation);
         when(agentClient.insight(any())).thenReturn(response);
         when(persistenceService.saveGenerated(any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("database unavailable"));
@@ -411,7 +414,7 @@ class InsightServiceTest {
                 .thenReturn(List.of());
         when(planService.get()).thenReturn(new LlmSettingDTO.PlanResponse(
                 AgentPlan.FREE, true, PaidExhaustedAction.STUB));
-        when(quotaService.reserve(any(), any(), any(), any())).thenReturn(reservation);
+        when(quotaService.reserveInsight(any(), any(), any())).thenReturn(reservation);
         when(agentClient.insight(any())).thenReturn(response);
 
         assertThrows(GeneralException.class, () -> service.create(request));

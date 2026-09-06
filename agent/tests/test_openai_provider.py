@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.errors import AgentError
+from app.llm.insight_draft import OpenAIInsightDraft
 from app.llm.openai_provider import OpenAIAnalyzeProvider, _retry_after_header_seconds
 from app.llm.rate_limit_provider import (
     PacedRetryProvider,
@@ -18,7 +19,6 @@ from app.llm.rate_limit_provider import (
 from app.schemas.analyze import AnalyzeOutput, SelfCritiqueOutput
 from app.schemas.evidence import EvidenceBatchOutput
 from app.schemas.explore import ExploreProposal
-from app.schemas.insight import InsightOutput
 from app.schemas.keyword_strategy import KeywordStrategyOutput
 from app.schemas.report import ReportOutput
 
@@ -75,7 +75,7 @@ def generate(provider, schema=None):
         SelfCritiqueOutput,
         EvidenceBatchOutput,
         ExploreProposal,
-        InsightOutput,
+        OpenAIInsightDraft,
         KeywordStrategyOutput,
         ReportOutput,
     ],
