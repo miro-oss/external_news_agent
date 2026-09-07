@@ -9,7 +9,7 @@ from app.schemas.analyze import Audience
 
 AUDIENCE_ORDER = get_args(Audience)
 _AXES = ("customerMove", "dealSignal", "competitorThreat", "industryShift")
-ANALYZE_WIRE_VERSION = "analyze.ko.v10+perspective.ko.v1+sensitivity.ko.v2"
+ANALYZE_WIRE_VERSION = "analyze.ko.v11+perspective.ko.v1+sensitivity.ko.v2"
 EXPLORE_WIRE_VERSION = "explore.ko.v2"
 REPORT_WIRE_VERSION = "report.ko.v1.5"
 EVIDENCE_WIRE_VERSION = "evidence.ko.v3"
@@ -35,10 +35,21 @@ class OpenAIOutputContract:
     wrapped: bool
     analysis: bool
     evidence_keys: tuple[str, ...] = ()
+    promotion_conflict: bool = False
 
     def instructions(self, original: str) -> str:
         if self.analysis:
             original += "\n\n" + _ANALYZE_INSTRUCTION
+        if self.promotion_conflict:
+            original += (
+                "\n\nOpenAI 승격 제안은 promoteCandidates 배열 대신 promotionConflict를 사용한다. "
+                "실제 충돌로 승격할 필요가 없으면 null이다. 필요하면 사전 허용된 articleId 하나, "
+                "그 기사와 실제로 충돌하는 otherArticleIds, 구체적인 충돌 text를 함께 쓴다. "
+                "otherArticleIds에 선택한 articleId 자신을 넣지 않는다. 서버가 이 관측을 "
+                "crossSource.conflicts와 promoteCandidates로 변환한다. "
+                "동일 충돌을 중복 작성하지 않는다. "
+                "승격을 위해 존재하지 않는 충돌이나 근거를 만들지 않는다."
+            )
         if self.evidence_keys:
             original += (
                 "\n\nOpenAI results는 배열 대신 JSON Schema의 항목 키를 가진 객체다. "
@@ -73,6 +84,8 @@ class OpenAIOutputContract:
                 value["perspectiveTags"] = [
                     {"audience": audience, **tags[audience]} for audience in AUDIENCE_ORDER
                 ]
+            if self.promotion_conflict:
+                _public_promotion(value)
         if self.evidence_keys and isinstance(value, dict):
             results = value.get("results")
             if isinstance(results, dict) and set(results) == set(self.evidence_keys):
@@ -83,6 +96,7 @@ class OpenAIOutputContract:
 def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
     schema = deepcopy(response_schema)
     analysis = schema.get("title") == "AnalyzeOutput"
+    promotion_conflict = analysis and "promotionConflict" in schema.get("properties", {})
     if analysis:
         _constrain_analysis(schema)
         _preserve_analysis_string_lengths(schema)
@@ -105,7 +119,43 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
             "$defs": definitions,
         }
     return OpenAIOutputContract(
-        schema=schema, wrapped=wrapped, analysis=analysis, evidence_keys=evidence_keys
+        schema=schema,
+        wrapped=wrapped,
+        analysis=analysis,
+        evidence_keys=evidence_keys,
+        promotion_conflict=promotion_conflict,
+    )
+
+
+def _public_promotion(value: dict[str, Any]) -> None:
+    if "promotionConflict" not in value or "promoteCandidates" in value:
+        return
+    promotion = value["promotionConflict"]
+    cross_source = value.get("crossSource")
+    if not isinstance(cross_source, dict) or not isinstance(cross_source.get("conflicts"), list):
+        return
+    if promotion is None:
+        value.pop("promotionConflict")
+        value["promoteCandidates"] = []
+        return
+    if (
+        not isinstance(promotion, dict)
+        or set(promotion) != {"articleId", "otherArticleIds", "text"}
+        or type(promotion["articleId"]) is not int
+        or not isinstance(promotion["otherArticleIds"], list)
+        or not promotion["otherArticleIds"]
+        or any(type(item) is not int for item in promotion["otherArticleIds"])
+        or not isinstance(promotion["text"], str)
+    ):
+        # Leave malformed data intact for the bounded repair and semantic validators.
+        return
+    value.pop("promotionConflict")
+    value["promoteCandidates"] = [promotion["articleId"]]
+    cross_source["conflicts"].append(
+        {
+            "articleIds": [promotion["articleId"], *promotion["otherArticleIds"]],
+            "text": promotion["text"],
+        }
     )
 
 
