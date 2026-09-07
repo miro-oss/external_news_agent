@@ -153,7 +153,9 @@ public class AgentClient {
                     errorCode(error, exception),
                     errorMessage(error, exception),
                     exception,
-                    error == null ? null : error.usage());
+                    error == null ? null : error.usage(),
+                    AgentClientException.TimeoutPhase.NONE,
+                    error == null ? null : error.executionMetadata());
         } catch (RestClientException exception) {
             AgentClientException.TimeoutPhase timeoutPhase = timeoutPhase(exception);
             throw new AgentClientException(

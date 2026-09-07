@@ -12,6 +12,7 @@ import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
 import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
 import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.agent.service.AgentRunRecorder;
+import com.example.be.domain.analysis.agent.service.InsightAuditContext;
 import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.insights.dto.InsightDTO;
 import com.example.be.domain.insights.entity.NewsInsight;
@@ -84,6 +85,7 @@ public class InsightService {
                                                Long targetId,
                                                List<Audience> audiences,
                                                InsightInputAssembler.Snapshot snapshot) {
+        LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
         Map<Audience, NewsInsight> byAudience = new HashMap<>();
         persistenceService.findCached(
                         targetType,
@@ -96,8 +98,7 @@ public class InsightService {
                 .filter(audience -> !byAudience.containsKey(audience))
                 .toList();
         if (missing.isEmpty()) {
-            return result(true, targetType, targetId, snapshot.inputHash(),
-                    properties.getInsightPromptVersion(), audiences, byAudience);
+            return cachedResult(targetType, targetId, audiences, snapshot, byAudience, startedAt);
         }
         AgentPlan plan = planService.get().plan();
         String idempotencyKey = idempotencyKey(
@@ -124,8 +125,7 @@ public class InsightService {
             if (concurrentlySaved.size() == audiences.size()) {
                 concurrentlySaved.forEach(
                         insight -> byAudience.put(insight.getAudience(), insight));
-                return result(true, targetType, targetId, snapshot.inputHash(),
-                        properties.getInsightPromptVersion(), audiences, byAudience);
+                return cachedResult(targetType, targetId, audiences, snapshot, byAudience, startedAt);
             }
             throw new GeneralException(
                     GeneralErrorCode.CONFLICT,
@@ -139,7 +139,10 @@ public class InsightService {
                 new AgentInsightRequest.TargetPayload(targetType.name(), targetId),
                 snapshot.topic(),
                 snapshot.findings());
-        LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
+        InsightAuditContext auditContext = InsightAuditContext.capture(
+                snapshot.inputHash(), snapshot.findings(), audiences.size(),
+                audiences.size() - missing.size(), true, properties.getInsightPromptVersion(),
+                plan == AgentPlan.FREE ? properties.getFreeModel() : properties.getPaidModel());
         AgentInsightResponse response = null;
         List<NewsInsight> saved;
         boolean validated = false;
@@ -157,7 +160,8 @@ public class InsightService {
             RuntimeException recordedException = validated
                     ? persistenceFailure(exception, response)
                     : exception;
-            recordFailure(snapshot.runId(), targetId, request, recordedException, startedAt);
+            recordFailure(snapshot.runId(), targetId, request, recordedException,
+                    response, auditContext, startedAt);
             if (validated) {
                 quotaService.completeFailure(reservation, "SCHEMA_VIOLATION");
             } else {
@@ -168,11 +172,31 @@ public class InsightService {
                     "관점 인사이트 생성에 실패했습니다.");
         }
 
-        recordSuccess(snapshot.runId(), targetId, request, response, startedAt);
+        recordSuccess(snapshot.runId(), targetId, request, response, auditContext, startedAt);
         quotaService.completeSuccess(reservation, response.meta().credits());
         saved.forEach(insight -> byAudience.put(insight.getAudience(), insight));
         return result(false, targetType, targetId, snapshot.inputHash(),
                 response.meta().promptVersion(), audiences, byAudience);
+    }
+
+    private InsightDTO.Result cachedResult(AgentTargetType targetType,
+                                            Long targetId,
+                                            List<Audience> audiences,
+                                            InsightInputAssembler.Snapshot snapshot,
+                                            Map<Audience, NewsInsight> byAudience,
+                                            LocalDateTime startedAt) {
+        InsightDTO.Result result = result(true, targetType, targetId, snapshot.inputHash(),
+                properties.getInsightPromptVersion(), audiences, byAudience);
+        try {
+            runRecorder.recordInsightCacheHit(snapshot.runId(), targetId,
+                    InsightAuditContext.capture(snapshot.inputHash(), snapshot.findings(),
+                            audiences.size(), audiences.size(), false,
+                            properties.getInsightPromptVersion(), null), startedAt);
+        } catch (RuntimeException exception) {
+            log.warn("인사이트 캐시 감사 기록에 실패했습니다. targetId={} error={}",
+                    targetId, exception.getMessage());
+        }
+        return result;
     }
 
     public InsightDTO.Result get(String targetTypeValue, Long targetIdValue, String audienceValue) {
@@ -395,9 +419,10 @@ public class InsightService {
                                Long targetId,
                                AgentInsightRequest request,
                                AgentInsightResponse response,
+                               InsightAuditContext auditContext,
                                LocalDateTime startedAt) {
         try {
-            runRecorder.recordInsightSuccess(runId, targetId, request, response, startedAt);
+            runRecorder.recordInsightSuccess(runId, targetId, request, response, auditContext, startedAt);
         } catch (RuntimeException exception) {
             log.warn("인사이트 Agent 성공 감사 기록에 실패했습니다. targetId={} error={}",
                     targetId, exception.getMessage());
@@ -408,9 +433,20 @@ public class InsightService {
                                Long targetId,
                                AgentInsightRequest request,
                                RuntimeException exception,
+                               AgentInsightResponse response,
+                               InsightAuditContext auditContext,
                                LocalDateTime startedAt) {
         AgentClientException clientException = exception instanceof AgentClientException value
                 ? value : null;
+        AgentInsightResponse.Meta meta = response == null ? null : response.meta();
+        AgentClientException.Usage usage = meta == null
+                ? (clientException == null ? null : clientException.getUsage())
+                : new AgentClientException.Usage(meta.inputTokens(), meta.outputTokens(),
+                        meta.costUsd(), meta.credits());
+        AgentClientException.ExecutionMetadata metadata = meta == null
+                ? (clientException == null ? null : clientException.getExecutionMetadata())
+                : new AgentClientException.ExecutionMetadata(
+                        meta.provider(), meta.model(), meta.promptVersion(), "RESPONSE");
         try {
             runRecorder.recordInsightFailure(
                     runId,
@@ -418,8 +454,10 @@ public class InsightService {
                     request,
                     clientException == null ? "SCHEMA_VIOLATION" : clientException.getCode(),
                     exception.getMessage(),
-                    clientException == null ? null : clientException.getUsage(),
+                    usage,
                     timeoutPhase(clientException),
+                    auditContext,
+                    metadata,
                     startedAt);
         } catch (RuntimeException recorderException) {
             log.warn("인사이트 Agent 실패 감사 기록에 실패했습니다. targetId={} error={}",

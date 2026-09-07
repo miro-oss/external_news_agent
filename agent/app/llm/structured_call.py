@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 
 from pydantic import ValidationError
 
@@ -29,19 +30,37 @@ def structured_call[OutputT](
     schema_violation_message: str,
     logger: logging.Logger,
     include_failure_details: bool = True,
+    failure_prompt_version: str | None = None,
 ) -> StructuredCallResult[OutputT]:
     """구조화 provider 호출의 검증·1회 repair 계약을 모든 엔드포인트에 적용한다."""
     usage = ProviderUsage()
     truncated = False
     current_prompt = prompt
     last_error: Exception | None = None
+    last_response: ProviderResponse | None = None
 
     for attempt in range(1, repair_attempts + 2):
-        response = provider.generate(
-            system_instruction=system_instruction,
-            prompt=current_prompt,
-            response_schema=response_schema,
-        )
+        try:
+            response = provider.generate(
+                system_instruction=system_instruction,
+                prompt=current_prompt,
+                response_schema=response_schema,
+            )
+        except AgentError as error:
+            if failure_prompt_version is not None and include_failure_details:
+                details = dict(error.details) if isinstance(error.details, dict) else {}
+                if last_response is not None:
+                    details["usage"] = _accumulated_failure_usage(usage, details.get("usage"))
+                if truncated:
+                    details["truncated"] = True
+                details["executionMetadata"] = _execution_metadata(
+                    last_response,
+                    failure_prompt_version,
+                    _provider_failure_usage_completeness(last_response, details.get("usage")),
+                )
+                error.details = details
+            raise
+        last_response = response
         usage += response.usage
         truncated = truncated or response.truncated
         try:
@@ -61,6 +80,8 @@ def structured_call[OutputT](
                     usage,
                     truncated,
                     include_failure_details=include_failure_details,
+                    response=response,
+                    failure_prompt_version=failure_prompt_version,
                 ) from error
             current_prompt = _repair_prompt(
                 prompt,
@@ -117,6 +138,8 @@ def _schema_violation(
     truncated: bool,
     *,
     include_failure_details: bool,
+    response: ProviderResponse,
+    failure_prompt_version: str | None,
 ) -> AgentError:
     details = None
     if include_failure_details:
@@ -129,9 +152,74 @@ def _schema_violation(
             },
             "truncated": truncated,
         }
+        if failure_prompt_version is not None:
+            details["executionMetadata"] = _execution_metadata(
+                response, failure_prompt_version, "COMPLETE"
+            )
     return AgentError(
         status_code=502,
         code="SCHEMA_VIOLATION",
         message=message,
         details=details,
     )
+
+
+def _execution_metadata(
+    response: ProviderResponse | None, prompt_version: str, usage_completeness: str
+) -> dict[str, str | None]:
+    # After a repair-call failure this is the last received response's identity,
+    # not a claim that the failed attempt returned a response. Never infer routing identity.
+    return {
+        "provider": response.provider if response is not None else None,
+        "model": response.model if response is not None else None,
+        "promptVersion": prompt_version,
+        "source": "AGENT_ERROR",
+        "usageCompleteness": usage_completeness,
+    }
+
+
+def _provider_failure_usage_completeness(
+    previous_response: ProviderResponse | None, failure_usage: object
+) -> str:
+    # Even a populated failure usage object does not prove that every failed attempt
+    # was billed and reported. Report known amounts conservatively as a lower bound.
+    if previous_response is not None:
+        return "PARTIAL"
+    if isinstance(failure_usage, dict) and any(
+        _known_usage_value(failure_usage.get(key), integer) is not None
+        for key, integer in (
+            ("inputTokens", True), ("outputTokens", True), ("costUsd", False), ("credits", False)
+        )
+    ):
+        return "PARTIAL"
+    return "UNKNOWN"
+
+
+def _known_usage_value(value: object, integer: bool) -> Decimal | None:
+    if not isinstance(value, bool) and isinstance(value, (int, float, str, Decimal)):
+        try:
+            parsed = Decimal(str(value))
+            if parsed.is_finite() and parsed >= 0 and (not integer or parsed == int(parsed)):
+                return parsed
+        except (InvalidOperation, ValueError, OverflowError):
+            pass
+    return None
+
+
+def _accumulated_failure_usage(
+    previous: ProviderUsage, failure_usage: object
+) -> dict[str, int | float]:
+    current = failure_usage if isinstance(failure_usage, dict) else {}
+    totals: dict[str, int | float] = {}
+    for key, known, integer in (
+        ("inputTokens", previous.input_tokens, True),
+        ("outputTokens", previous.output_tokens, True),
+        ("costUsd", previous.cost_usd, False),
+        ("credits", previous.credits, False),
+    ):
+        additional = _known_usage_value(current.get(key), integer)
+        if additional is None:
+            additional = Decimal(0)
+        total = Decimal(known) + additional
+        totals[key] = int(total) if integer else float(total)
+    return totals

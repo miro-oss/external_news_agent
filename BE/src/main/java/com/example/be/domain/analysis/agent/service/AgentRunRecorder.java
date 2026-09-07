@@ -26,10 +26,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -219,6 +222,7 @@ public class AgentRunRecorder {
                                      Long issueId,
                                      AgentInsightRequest request,
                                      AgentInsightResponse response,
+                                     InsightAuditContext context,
                                      LocalDateTime startedAt) {
         AgentInsightResponse.Meta meta = response.meta();
         repository.insertIfAbsent(AgentRun.builder()
@@ -237,6 +241,9 @@ public class AgentRunRecorder {
                 .costUsd(meta.costUsd())
                 .credits(meta.credits())
                 .requestHash(hash(request))
+                .actionPayload(objectMapper.writeValueAsString(context.withMetadataSource("RESPONSE")
+                        .withUsageCompleteness(usageCompleteness(
+                                meta.inputTokens(), meta.outputTokens(), meta.costUsd(), meta.credits()))))
                 .startedAt(startedAt)
                 .finishedAt(now())
                 .build());
@@ -250,6 +257,8 @@ public class AgentRunRecorder {
                                      String failureMessage,
                                      AgentClientException.Usage usage,
                                      AgentTimeoutPhase timeoutPhase,
+                                     InsightAuditContext context,
+                                     AgentClientException.ExecutionMetadata metadata,
                                      LocalDateTime startedAt) {
         repository.insertIfAbsent(AgentRun.builder()
                 .collectionRunId(runId)
@@ -261,12 +270,46 @@ public class AgentRunRecorder {
                 .failureCode(failureCode)
                 .failureMessage(truncate(failureMessage))
                 .timeoutPhase(timeoutPhase)
+                .promptVersion(metadata == null ? null : validFailureMetadata(metadata.promptVersion(), 50))
+                .llmProvider(metadata == null ? null : validFailureMetadata(metadata.provider(), 30))
+                .llmModel(metadata == null ? null : validFailureMetadata(metadata.model(), 100))
                 .llmPlan(request.plan())
                 .inputTokens(usage == null ? null : usage.inputTokens())
                 .outputTokens(usage == null ? null : usage.outputTokens())
                 .costUsd(usage == null ? null : usage.costUsd())
                 .credits(usage == null ? null : usage.credits())
                 .requestHash(hash(request))
+                .actionPayload(objectMapper.writeValueAsString(context.withMetadataSource(
+                        metadata == null ? "UNAVAILABLE" : metadata.source())
+                        .withUsageCompleteness(failureUsageCompleteness(usage, metadata))))
+                .startedAt(startedAt)
+                .finishedAt(now())
+                .build());
+    }
+
+    @Transactional
+    public void recordInsightCacheHit(Long runId,
+                                      Long issueId,
+                                      InsightAuditContext context,
+                                      LocalDateTime startedAt) {
+        repository.insertIfAbsent(AgentRun.builder()
+                .collectionRunId(runId)
+                // 같은 캐시를 다시 조회한 생성 요청도 각각 한 건으로 센다.
+                .idempotencyKey("insight-cache:" + UUID.randomUUID())
+                .agentTask(AgentTask.INSIGHT)
+                .targetType(AgentTargetType.ISSUE)
+                .targetId(issueId)
+                .status(AgentRunStatus.REUSED)
+                .promptVersion(context.expectedPromptVersion())
+                // FREE를 넣으면 legacy quota가 무호출 캐시도 1회로 계산한다.
+                .llmPlan(null)
+                .inputTokens(0L)
+                .outputTokens(0L)
+                .costUsd(BigDecimal.ZERO)
+                .credits(BigDecimal.ZERO)
+                .requestHash(context.inputHash())
+                .actionPayload(objectMapper.writeValueAsString(context.withMetadataSource("CACHE")
+                        .withUsageCompleteness("COMPLETE")))
                 .startedAt(startedAt)
                 .finishedAt(now())
                 .build());
@@ -503,6 +546,41 @@ public class AgentRunRecorder {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256을 사용할 수 없습니다.", exception);
         }
+    }
+
+    private String failureUsageCompleteness(AgentClientException.Usage usage,
+                                            AgentClientException.ExecutionMetadata metadata) {
+        if (metadata == null) {
+            // 과거 오류의 usage 숫자만으로 repair 등 전체 시도 관측 여부를 추정하지 않는다.
+            return "UNKNOWN";
+        }
+        if ("AGENT_ERROR".equals(metadata.source())) {
+            return metadata.usageCompleteness();
+        }
+        if (!"RESPONSE".equals(metadata.source()) || usage == null) {
+            return "UNKNOWN";
+        }
+        return usageCompleteness(usage.inputTokens(), usage.outputTokens(), usage.costUsd(), usage.credits());
+    }
+
+    private String usageCompleteness(Long inputTokens,
+                                     Long outputTokens,
+                                     BigDecimal costUsd,
+                                     BigDecimal credits) {
+        int known = (inputTokens == null ? 0 : 1) + (outputTokens == null ? 0 : 1)
+                + (costUsd == null ? 0 : 1) + (credits == null ? 0 : 1);
+        return known == 4 ? "COMPLETE" : known == 0 ? "UNKNOWN" : "PARTIAL";
+    }
+
+    private String validFailureMetadata(String value, int maxBytes) {
+        if (value == null || value.isBlank()
+                || value.getBytes(StandardCharsets.UTF_8).length > maxBytes
+                || value.codePoints().anyMatch(codePoint -> Character.isISOControl(codePoint)
+                        || (codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE))) {
+            // 잘못된 메타 한 필드 때문에 유효한 오류 사용량 전체가 저장 실패하지 않게 한다.
+            return null;
+        }
+        return value;
     }
 
     private String truncate(String message) {
