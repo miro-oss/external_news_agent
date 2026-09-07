@@ -576,6 +576,22 @@ def test_live_eval_resumes_successful_analyses_from_checkpoint(
     saved = json.loads(checkpoint.read_text(encoding="utf-8"))
     assert len(saved["analyses"]) == 6
     assert saved["report"] is None
+    assert saved["analyzePromptVersion"] == first.analyze_prompt_version
+    assert first.analyze_prompt_version == "analyze.ko.v7+perspective.ko.v1+sensitivity.ko.v2"
+
+    old_checkpoint = tmp_path / "old-contract.checkpoint.json"
+    old_saved = {**saved, "analyzePromptVersion": eval_runner.ANALYZE_PROMPT_VERSION}
+    old_checkpoint.write_text(json.dumps(old_saved), encoding="utf-8")
+    with pytest.raises(CheckpointError):
+        run_evaluation(
+            dataset,
+            profile="live",
+            settings=settings,
+            live_policy=policy,
+            checkpoint_path=old_checkpoint,
+            resume=True,
+        )
+    assert first_analysis.call_count == 7
 
     incompatible_settings = settings.model_copy(update={"max_sentences": 199})
     with pytest.raises(CheckpointError, match="config"):

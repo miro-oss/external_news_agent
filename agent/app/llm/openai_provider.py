@@ -14,6 +14,7 @@ from app.core.config import Settings
 from app.core.errors import AgentError
 from app.core.safecast import safe_int
 from app.llm.base import ProviderResponse, ProviderUsage
+from app.llm.openai_contract import output_contract
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,13 @@ _MODEL_ALIASES = {
     "gpt-4.1-nano-2025-04-14": "gpt-4.1-nano",
     "gpt-4o-mini-2024-07-18": "gpt-4o-mini",
 }
-_ERROR_CODES = {"insufficient_quota", "rate_limit_exceeded", "invalid_api_key"}
+_ERROR_CODES = {
+    "insufficient_quota",
+    "rate_limit_exceeded",
+    "invalid_api_key",
+    "invalid_json_schema",
+    "invalid_request_error",
+}
 
 
 class OpenAIAnalyzeProvider:
@@ -64,10 +71,11 @@ class OpenAIAnalyzeProvider:
         response_schema: dict[str, Any],
     ) -> ProviderResponse:
         try:
+            contract = output_contract(response_schema)
             response = self._create_response(
-                system_instruction=system_instruction,
+                system_instruction=contract.instructions(system_instruction),
                 prompt=prompt,
-                response_schema=response_schema,
+                response_schema=contract.schema,
             )
             usage = self._usage(response.usage)
             truncated = (
@@ -86,7 +94,7 @@ class OpenAIAnalyzeProvider:
             if not text.strip() and not truncated:
                 raise _output_error(usage, truncated)
             return ProviderResponse(
-                text=text,
+                text=contract.public_text(text),
                 provider="openai",
                 model=self._model,
                 usage=usage,
@@ -97,9 +105,11 @@ class OpenAIAnalyzeProvider:
         except Exception as exc:
             details = _provider_error_details(exc)
             logger.warning(
-                "OpenAI provider 호출에 실패했습니다. model=%s statusCode=%s errorType=%s",
+                "OpenAI provider 호출에 실패했습니다. model=%s statusCode=%s "
+                "providerStatus=%s errorType=%s",
                 self._model,
                 details["providerStatusCode"],
+                details["providerStatus"],
                 type(exc).__name__,
             )
             raise AgentError(
@@ -197,6 +207,8 @@ def _output_error(usage: ProviderUsage, truncated: bool) -> AgentError:
 def _provider_error_details(error: Exception) -> dict[str, object]:
     status = error.status_code if isinstance(error, APIStatusError) else 0
     code = getattr(error, "code", None)
+    if code is None:
+        code = getattr(error, "type", None)
     safe_code = code if isinstance(code, str) and code in _ERROR_CODES else "UNKNOWN"
     details: dict[str, object] = {
         "provider": "openai",

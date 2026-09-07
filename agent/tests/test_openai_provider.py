@@ -95,13 +95,15 @@ def test_all_task_schemas_use_responses_strict_contract(output_model):
     assert str(requests[0].url) == "https://api.openai.com/v1/responses"
     payload = json.loads(requests[0].content)
     assert payload["model"] == "gpt-4.1-nano"
-    assert payload["instructions"] == "Return JSON only."
+    assert payload["instructions"].startswith("Return JSON only.")
     assert payload["input"] == "기사 본문"
     assert payload["store"] is False
     assert payload["max_output_tokens"] == 4096
     assert payload["temperature"] == 0
     assert payload["text"]["format"]["type"] == "json_schema"
     assert payload["text"]["format"]["strict"] is True
+    assert payload["text"]["format"]["schema"]["type"] == "object"
+    assert "anyOf" not in payload["text"]["format"]["schema"]
     assert_strict(payload["text"]["format"]["schema"])
     assert schema == original
     assert result.provider == "openai"
@@ -115,6 +117,8 @@ def test_all_task_schemas_use_responses_strict_contract(output_model):
 def assert_strict(schema):
     if isinstance(schema, dict):
         assert "default" not in schema
+        assert "oneOf" not in schema
+        assert "discriminator" not in schema
         if schema.get("type") == "object":
             assert schema["additionalProperties"] is False
             assert set(schema["required"]) == set(schema["properties"])
@@ -251,7 +255,31 @@ def test_errors_are_sanitized_and_retries_are_bounded(status, code, retryable, c
     assert error.value.details["rateLimited"] is (status == 429)
     assert error.value.details["retryable"] is retryable
     assert error.value.details["retryAfterSeconds"] == 3.5
+    if code == "invalid_json_schema":
+        assert error.value.details["providerStatus"] == "invalid_json_schema"
+        assert "providerStatus=invalid_json_schema" in caplog.text
     assert "private-upstream-text" not in str(error.value.details) + caplog.text
+
+
+def test_request_error_without_code_keeps_only_the_allowlisted_type(caplog):
+    def handler(_):
+        return httpx2.Response(
+            400,
+            json={
+                "error": {
+                    "code": None,
+                    "type": "invalid_request_error",
+                    "message": "private-schema-details",
+                }
+            },
+        )
+
+    with client_for(handler) as client:
+        with pytest.raises(AgentError) as error:
+            generate(OpenAIAnalyzeProvider(Settings(), client))
+    assert error.value.details["providerStatus"] == "invalid_request_error"
+    assert error.value.details["retryable"] is False
+    assert "private-schema-details" not in caplog.text + str(error.value.details)
 
 
 def test_shared_rate_limit_policy_retries_openai_429_then_succeeds():
