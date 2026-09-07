@@ -138,7 +138,9 @@ class CollectionRunConcurrencyIntegrationTests {
         try {
             Future<Outcome> left = executor.submit(atBarrier(barrier, first));
             Future<Outcome> right = executor.submit(atBarrier(barrier, second));
-            return List.of(left.get(), right.get());
+            return List.of(
+                    left.get(10, TimeUnit.SECONDS),
+                    right.get(10, TimeUnit.SECONDS));
         } finally {
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS),
