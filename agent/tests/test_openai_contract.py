@@ -23,12 +23,15 @@ from app.schemas.analyze import AnalyzeOutput
 from app.schemas.explore import ExploreProposal
 
 
-def wire_analysis():
+def wire_analysis(*, request_bound=False):
     payload = json.loads(valid_output())
     payload["perspectiveTags"] = {
         tag["audience"]: {key: value for key, value in tag.items() if key != "audience"}
         for tag in payload["perspectiveTags"]
     }
+    if request_bound:
+        payload.pop("promoteCandidates")
+        payload["promotionConflict"] = None
     return payload
 
 
@@ -138,7 +141,7 @@ def test_explore_uses_an_object_root_and_returns_the_original_public_proposal(pr
 def test_analysis_wire_conversion_preserves_evidence_and_public_contract():
     original_schema = AnalyzeOutput.model_json_schema(by_alias=True)
     before = deepcopy(original_schema)
-    wire = wire_analysis()
+    wire = wire_analysis(request_bound=True)
 
     def handler(request):
         payload = json.loads(request.content)
@@ -199,7 +202,9 @@ def test_repair_after_wire_conversion_accumulates_usage():
         calls.append(request)
         return httpx2.Response(
             200,
-            json=response_body('{"partial":' if len(calls) == 1 else json.dumps(wire_analysis())),
+            json=response_body(
+                '{"partial":' if len(calls) == 1 else json.dumps(wire_analysis(request_bound=True))
+            ),
         )
 
     with client_for(handler) as client:
@@ -226,7 +231,7 @@ def test_wrapping_keeps_refs_and_does_not_mutate_schema_or_hide_extra_fields():
 @pytest.mark.parametrize("endpoint", ["analyze", "explore"])
 def test_http_routes_with_openai_transport_keep_the_public_response(endpoint, monkeypatch):
     wire = (
-        wire_analysis()
+        wire_analysis(request_bound=True)
         if endpoint == "analyze"
         else {
             "result": {"action": "CONCLUDE", "reason": "현재 근거로 조사 완료"},

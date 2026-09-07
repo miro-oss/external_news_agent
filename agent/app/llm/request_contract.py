@@ -49,7 +49,35 @@ def analysis_schema(
     known_ids = [request.article.id, *(member.id for member in request.issue_members)]
     definitions["SoleSourceObservation"]["properties"]["articleId"] = _integer_choices(known_ids)
     _array_choices(definitions["ConflictObservation"]["properties"]["articleIds"], known_ids)
-    _array_choices(schema["properties"]["promoteCandidates"], sorted(promotion_eligible_ids))
+    # JSON Schema cannot express a subset relationship between two sibling arrays.
+    # A single optional conflict owns its promoted member, so conversion cannot
+    # produce a promotion without that member's actual conflict observation.
+    conflict_text = definitions["ConflictObservation"]["properties"]["text"]
+    promotions = [{"type": "null"}]
+    member_ids = {member.id for member in request.issue_members}
+    for member_id in sorted(promotion_eligible_ids & member_ids):
+        promotions.append(
+            _object(
+                {
+                    "articleId": {"type": "integer", "const": member_id},
+                    "otherArticleIds": {
+                        "type": "array",
+                        "items": _integer_choices(
+                            [value for value in known_ids if value != member_id]
+                        ),
+                        "minItems": 1,
+                    },
+                    "text": deepcopy(conflict_text),
+                }
+            )
+        )
+    del schema["properties"]["promoteCandidates"]
+    schema["properties"]["promotionConflict"] = (
+        promotions[0] if len(promotions) == 1 else {"anyOf": promotions}
+    )
+    schema["required"] = [
+        "promotionConflict" if key == "promoteCandidates" else key for key in schema["required"]
+    ]
     if not request.issue_members:
         for prop in definitions["CrossSource"]["properties"].values():
             prop["maxItems"] = 0

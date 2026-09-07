@@ -51,6 +51,8 @@ def test_analysis_sentence_bounds_survive_wire_conversion():
         OpenAIJsonSchemaTransformer(contract.schema, strict=True).walk()
     )
     wire = wire_analysis()
+    wire.pop("promoteCandidates")
+    wire["promotionConflict"] = None
     validator.validate(wire)
     for target in (
         wire["sections"][0]["bullets"][0],
