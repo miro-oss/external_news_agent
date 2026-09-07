@@ -9,8 +9,11 @@ from app.schemas.analyze import Audience
 
 AUDIENCE_ORDER = get_args(Audience)
 _AXES = ("customerMove", "dealSignal", "competitorThreat", "industryShift")
-ANALYZE_WIRE_VERSION = "analyze.ko.v8+perspective.ko.v1+sensitivity.ko.v2"
+ANALYZE_WIRE_VERSION = "analyze.ko.v9+perspective.ko.v1+sensitivity.ko.v2"
 EXPLORE_WIRE_VERSION = "explore.ko.v2"
+REPORT_WIRE_VERSION = "report.ko.v1.5"
+EVIDENCE_WIRE_VERSION = "evidence.ko.v3"
+SELF_CRITIQUE_WIRE_VERSION = "self-critique.ko.v3"
 _ANALYZE_INSTRUCTION = """
 OpenAI 출력 형식 보충:
 - perspectiveTags는 배열이 아니라 CHIP_MAKER, EQUIPMENT_MAKER, MARKET_INVESTOR,
@@ -22,6 +25,7 @@ OpenAI 출력 형식 보충:
   적어도 한 축은 원문에 근거해 판정해야 한다. 계약을 채우기 위한 근거·신호는 만들지 않는다.
 - bullet text에는 목록 번호(1., 2., 3.)나 근거 번호([1])를 붙이지 않는다.
   근거 번호는 evidenceSentenceIds에만 기록한다. 기사에 나오는 실제 숫자는 그대로 보존한다.
+- OPINION은 원문 발언자를 attributedTo에 명시하고, FACT/FORECAST는 null을 사용한다.
 """.strip()
 
 
@@ -30,10 +34,17 @@ class OpenAIOutputContract:
     schema: dict[str, Any]
     wrapped: bool
     analysis: bool
+    evidence_keys: tuple[str, ...] = ()
 
     def instructions(self, original: str) -> str:
         if self.analysis:
             original += "\n\n" + _ANALYZE_INSTRUCTION
+        if self.evidence_keys:
+            original += (
+                "\n\nOpenAI results는 배열 대신 JSON Schema의 항목 키를 가진 객체다. "
+                "각 항목의 고정 claimId와 그 주장에 제공된 문장 번호만 사용한다. "
+                "근거가 없으면 ungrounded와 빈 acceptedSentenceIds로 판정한다."
+            )
         if self.wrapped:
             original += (
                 "\n\n출력은 result 키 하나를 가진 객체로 감싸세요. 제안은 result 안에 넣으세요."
@@ -41,7 +52,7 @@ class OpenAIOutputContract:
         return original
 
     def public_text(self, raw: str) -> str:
-        if not (self.wrapped or self.analysis):
+        if not (self.wrapped or self.analysis or self.evidence_keys):
             return raw
         try:
             value = json.loads(raw)
@@ -62,6 +73,10 @@ class OpenAIOutputContract:
                 value["perspectiveTags"] = [
                     {"audience": audience, **tags[audience]} for audience in AUDIENCE_ORDER
                 ]
+        if self.evidence_keys and isinstance(value, dict):
+            results = value.get("results")
+            if isinstance(results, dict) and set(results) == set(self.evidence_keys):
+                value["results"] = [results[key] for key in self.evidence_keys]
         return json.dumps(value, ensure_ascii=False)
 
 
@@ -70,6 +85,12 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
     analysis = schema.get("title") == "AnalyzeOutput"
     if analysis:
         _constrain_analysis(schema)
+    results = schema.get("properties", {}).get("results", {})
+    evidence_keys = (
+        tuple(results["properties"])
+        if schema.get("title") == "EvidenceBatchOutput" and results.get("type") == "object"
+        else ()
+    )
     wrapped = schema.get("type") != "object"
     if wrapped:
         # Keep #/$defs references at the document root.
@@ -82,7 +103,9 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
             "additionalProperties": False,
             "$defs": definitions,
         }
-    return OpenAIOutputContract(schema=schema, wrapped=wrapped, analysis=analysis)
+    return OpenAIOutputContract(
+        schema=schema, wrapped=wrapped, analysis=analysis, evidence_keys=evidence_keys
+    )
 
 
 def _object(properties: dict[str, Any]) -> dict[str, Any]:
@@ -96,6 +119,23 @@ def _object(properties: dict[str, Any]) -> dict[str, Any]:
 
 def _constrain_analysis(schema: dict[str, Any]) -> None:
     definitions = schema["$defs"]
+    bullet = definitions["EvidenceBullet"]["properties"]
+    attribution = next(item for item in bullet["attributedTo"]["anyOf"] if item["type"] == "string")
+    definitions["EvidenceBullet"] = {
+        "anyOf": [
+            _object(
+                {
+                    **deepcopy(bullet),
+                    "claimType": {"type": "string", "enum": kinds},
+                    "attributedTo": deepcopy(speaker),
+                }
+            )
+            for kinds, speaker in (
+                (["FACT", "FORECAST"], {"type": "null"}),
+                (["OPINION"], attribution),
+            )
+        ]
+    }
     axis = definitions["SensitivityAxis"]["properties"]
     score = next(item for item in axis["score"]["anyOf"] if item["type"] == "integer")
     available = _object(

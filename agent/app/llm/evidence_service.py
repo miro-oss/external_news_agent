@@ -13,6 +13,8 @@ from app.core.evidence import (
 )
 from app.core.parser import parse_json_object
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
+from app.llm.openai_contract import EVIDENCE_WIRE_VERSION
+from app.llm.request_contract import evidence_schema
 from app.llm.router import get_analyze_provider
 from app.llm.structured_call import structured_call
 from app.schemas.analyze import ResponseMeta
@@ -91,7 +93,7 @@ class EvidenceVerifierService:
             provider,
             system_instruction=SYSTEM_INSTRUCTION,
             prompt=_evidence_prompt(unresolved),
-            response_schema=EvidenceBatchOutput.model_json_schema(by_alias=True),
+            response_schema=evidence_schema(unresolved, openai=request.plan == "FREE"),
             validate=lambda response: _validated_output(response, unresolved),
             repair_attempts=self._settings.schema_repair_attempts,
             task_name="근거 배치 판정",
@@ -243,7 +245,9 @@ def _provider_meta(
     return ResponseMeta(
         provider=provider_response.provider,
         model=provider_response.model,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=(
+            EVIDENCE_WIRE_VERSION if provider_response.provider == "openai" else PROMPT_VERSION
+        ),
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
         cost_usd=float(usage.cost_usd),

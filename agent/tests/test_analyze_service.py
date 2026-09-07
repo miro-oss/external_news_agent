@@ -152,7 +152,7 @@ def test_generates_korean_analysis_from_english_article_with_sentence_ssot() -> 
         "Yield improved.",
     ]
     assert response.sections[0].bullets[0].evidence_sentence_ids == [1]
-    assert response.meta.prompt_version == ("analyze.ko.v8+perspective.ko.v1+sensitivity.ko.v2")
+    assert response.meta.prompt_version == ("analyze.ko.v9+perspective.ko.v1+sensitivity.ko.v2")
     assert len(provider.prompts) == 1
 
 

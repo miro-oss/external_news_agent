@@ -15,6 +15,8 @@ from app.core.report_grounding import (
     report_claim_policy_violation,
 )
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
+from app.llm.openai_contract import REPORT_WIRE_VERSION
+from app.llm.request_contract import report_schema
 from app.llm.router import get_analyze_provider
 from app.llm.structured_call import structured_call
 from app.schemas.report import (
@@ -58,7 +60,7 @@ class ReportWriterService:
             )
 
         provider = self._provider or get_analyze_provider(self._report_settings, request.plan)
-        response_schema = ReportOutput.model_json_schema(by_alias=True)
+        response_schema = report_schema(request)
         prompt = _report_prompt(request)
         result = structured_call(
             provider,
@@ -258,7 +260,11 @@ def _assembled_response(
             meta=ReportResponseMeta(
                 provider=provider_response.provider,
                 model=provider_response.model,
-                prompt_version=PROMPT_VERSION,
+                prompt_version=(
+                    REPORT_WIRE_VERSION
+                    if provider_response.provider == "openai"
+                    else PROMPT_VERSION
+                ),
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
                 cost_usd=float(usage.cost_usd),

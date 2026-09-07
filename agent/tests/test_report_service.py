@@ -137,7 +137,7 @@ def test_generates_structured_report_and_deterministic_markdown() -> None:
     assert "STUB 분석 3건" in response.markdown_body
     assert "페이월" in response.markdown_body
     assert "수집 실패 1건" in response.markdown_body
-    assert response.meta.prompt_version == "report.ko.v1.4"
+    assert response.meta.prompt_version == "report.ko.v1.5"
     assert response.meta.mock is False
 
 

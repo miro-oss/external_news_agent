@@ -13,6 +13,8 @@ from app.core.evidence import (
 from app.core.parser import parse_json_object
 from app.core.sentences import split_sentences_with_meta
 from app.llm.base import AnalyzeProvider, ProviderResponse
+from app.llm.openai_contract import SELF_CRITIQUE_WIRE_VERSION
+from app.llm.request_contract import critique_schema
 from app.llm.router import get_analyze_provider
 from app.llm.structured_call import structured_call
 from app.schemas.analyze import (
@@ -90,7 +92,7 @@ class ArticleSelfCritiqueService:
             provider,
             system_instruction=SYSTEM_INSTRUCTION,
             prompt=prompt,
-            response_schema=SelfCritiqueOutput.model_json_schema(by_alias=True),
+            response_schema=critique_schema(claim_id, bullet, openai=request.plan == "FREE"),
             validate=lambda response: _validated_output(response, claim_id, bullet),
             # 선택 주장 구조화 생성은 1회이며 schema repair는 없다. Provider 재시도는 별도다.
             repair_attempts=0,
@@ -119,7 +121,11 @@ class ArticleSelfCritiqueService:
             meta=ResponseMeta(
                 provider=result.response.provider,
                 model=result.response.model,
-                prompt_version=PROMPT_VERSION,
+                prompt_version=(
+                    SELF_CRITIQUE_WIRE_VERSION
+                    if result.response.provider == "openai"
+                    else PROMPT_VERSION
+                ),
                 input_tokens=result.usage.input_tokens,
                 output_tokens=result.usage.output_tokens,
                 cost_usd=float(result.usage.cost_usd),
