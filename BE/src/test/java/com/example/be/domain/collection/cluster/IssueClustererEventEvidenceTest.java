@@ -104,6 +104,17 @@ class IssueClustererEventEvidenceTest {
         assertTrue(clusterer.titleOrganizations("국내 주가, 급등세").isEmpty());
     }
 
+    @Test
+    void multipleTitleCluesCanCorroborateAnEventWithOnlyBackgroundSnippets() {
+        ClusterPlan plan = clusterer.cluster(List.of(
+                article(1, "백운상의, 백운포럼 개최…제조 AX·일상 AI 논의",
+                        "부대 전시에서는 반도체 장비와 기업 기술을 소개한다.", 0),
+                article(2, "지역 리더가 띄운 백운포럼, 올해는 제조 AX·생활 AI 논의",
+                        "기술 전시가 함께 열리고 방문객을 맞는다.", 1)), true);
+        assertEquals(1, plan.issues().size());
+        assertTrue(plan.pairScores().getFirst().eventTextMatch());
+    }
+
     private ClusterArticle article(long id, String title, String summary, int hours) {
         OffsetDateTime time = OffsetDateTime.parse("2026-09-07T10:00:00+09:00").plusHours(hours);
         return new ClusterArticle(id, 7L, title, summary, null, FetchStatus.METADATA_ONLY,

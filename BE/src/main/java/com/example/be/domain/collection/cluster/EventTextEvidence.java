@@ -70,6 +70,7 @@ final class EventTextEvidence {
         boolean eventMatch = (title >= 0.45)
                 || (title >= 0.30 && !terms.isEmpty())
                 || (title >= 0.20 && terms.size() >= 2)
+                || (title >= 0.15 && terms.size() >= 3)
                 || (title >= 0.05 && lead >= 0.20 && reciprocalLeadClues);
         return new Evidence(title, lead, eventMatch, organizationSupported);
     }
