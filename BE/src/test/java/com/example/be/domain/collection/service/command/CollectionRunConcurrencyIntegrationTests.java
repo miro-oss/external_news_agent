@@ -1,7 +1,6 @@
 package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.collection.dto.req.CollectionRunReqDTO;
-import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.exception.RunException;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
@@ -9,14 +8,19 @@ import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
+import com.example.be.global.config.ApiTimeZone;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -24,6 +28,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -52,6 +57,12 @@ class CollectionRunConcurrencyIntegrationTests {
     @Autowired
     private SourceRepository sourceRepository;
 
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     /** 실행이 실제로 도는 것까지는 볼 필요가 없다. 수집은 대역으로 막는다. */
     @MockitoBean
     private CollectionRunAsyncService runAsyncService;
@@ -61,26 +72,31 @@ class CollectionRunConcurrencyIntegrationTests {
 
     @BeforeEach
     void setUp() {
-        source = sourceRepository.save(Source.builder()
-                .sourceKind(Source.KIND_FEED)
-                .name("동시성 테스트 소스")
-                .urlTemplate("https://example.com/concurrency-" + UUID.randomUUID())
-                .language("ko")
-                .active(true)
-                .build());
+        // 준비 중 실패하면 소스만 커밋되는 부분 fixture를 남기지 않는다.
+        transactionTemplate.executeWithoutResult(status -> {
+            source = sourceRepository.save(Source.builder()
+                    .sourceKind(Source.KIND_FEED)
+                    .name("동시성 테스트 소스")
+                    .urlTemplate("https://example.com/concurrency-" + UUID.randomUUID())
+                    .language("ko")
+                    .active(true)
+                    .build());
 
-        Topic newTopic = Topic.builder()
-                .name("동시성 테스트 주제 " + UUID.randomUUID())
-                .queryText("HBM")
-                .requiredKeywords(List.of())
-                .optionalKeywords(List.of())
-                .excludedKeywords(List.of())
-                .batchSize(10)
-                .intervalMinutes(60)
-                .active(true)
-                .build();
-        newTopic.replaceSources(List.of(source));
-        topic = topicRepository.save(newTopic);
+            Topic newTopic = Topic.builder()
+                    .name("동시성 테스트 주제 " + UUID.randomUUID())
+                    .queryText("HBM")
+                    .requiredKeywords(List.of())
+                    .optionalKeywords(List.of())
+                    .excludedKeywords(List.of())
+                    .batchSize(10)
+                    .intervalMinutes(60)
+                    // 수동 실행은 허용하되 같은 DB의 스케줄러가 fixture를 수집하지 않게 한다.
+                    .lastCollectedAt(LocalDateTime.now(ApiTimeZone.ZONE))
+                    .active(true)
+                    .build();
+            newTopic.replaceSources(List.of(source));
+            topic = topicRepository.save(newTopic);
+        });
     }
 
     @Test
@@ -122,9 +138,13 @@ class CollectionRunConcurrencyIntegrationTests {
         try {
             Future<Outcome> left = executor.submit(atBarrier(barrier, first));
             Future<Outcome> right = executor.submit(atBarrier(barrier, second));
-            return List.of(left.get(), right.get());
+            return List.of(
+                    left.get(10, TimeUnit.SECONDS),
+                    right.get(10, TimeUnit.SECONDS));
         } finally {
             executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS),
+                    "동시 요청이 종료되기 전에 fixture를 정리할 수 없습니다");
         }
     }
 
@@ -161,13 +181,27 @@ class CollectionRunConcurrencyIntegrationTests {
     }
 
     /**
-     * 커밋되는 테스트라 남는다. 다음 실행이 "이미 수집 중"에 걸리지 않게 지운다.
+     * assertion 실패나 실행의 종료 상태와 관계없이 이번 fixture만 정리한다.
      */
-    @org.junit.jupiter.api.AfterEach
+    @AfterEach
     void tearDown() {
-        List<CollectionRun> runs = runRepository.findInProgressByTopicIds(
-                List.of(topic.getId()), RunStatus.IN_PROGRESS_STATUSES);
-        runs.forEach(run -> runRepository.findById(run.getId())
-                .ifPresent(found -> runRepository.delete(found)));
+        transactionTemplate.executeWithoutResult(status -> {
+            if (topic != null && topic.getId() != null) {
+                Long topicId = topic.getId();
+                List<Long> runIds = jdbcTemplate.queryForList(
+                        "SELECT DISTINCT run_id FROM news_collection_run_items WHERE topic_id = ?",
+                        Long.class, topicId);
+                for (Long runId : runIds) {
+                    jdbcTemplate.update("DELETE FROM news_collection_run_warnings WHERE run_id = ?", runId);
+                    jdbcTemplate.update("DELETE FROM news_collection_run_items WHERE run_id = ?", runId);
+                    jdbcTemplate.update("DELETE FROM news_collection_runs WHERE id = ?", runId);
+                }
+                jdbcTemplate.update("DELETE FROM news_topic_sources WHERE topic_id = ?", topicId);
+                jdbcTemplate.update("DELETE FROM news_topics WHERE id = ?", topicId);
+            }
+            if (source != null && source.getId() != null) {
+                jdbcTemplate.update("DELETE FROM news_sources WHERE id = ?", source.getId());
+            }
+        });
     }
 }
