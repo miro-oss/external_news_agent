@@ -541,6 +541,74 @@ def test_tfidf_baseline_does_not_use_title_organization_guard() -> None:
     assert metrics.precision == 0.0
 
 
+@pytest.mark.parametrize(
+    "breaking,hours,expected_recall",
+    [
+        (False, 24, 1.0),
+        (False, 24.01, 0.0),
+        (True, 6, 1.0),
+        (True, 6.01, 0.0),
+    ],
+)
+def test_event_text_replay_preserves_runtime_time_windows(breaking, hours, expected_recall):
+    articles = [_article(1, "HOLDOUT", "first"), _article(2, "HOLDOUT", "second")]
+    pair = {
+        **_pair(1, 2, "HOLDOUT", entity_overlap=0, hours_apart=hours, breaking_pair=breaking),
+        "eventTextMatch": True,
+    }
+    metrics = _evaluate_rule(articles, [pair], "HOLDOUT", 0.5, 48, 2, 0.125, 24, 6)
+    assert metrics.recall == expected_recall
+
+
+@pytest.mark.parametrize("edge", ["entity", "organization", "lexical"])
+def test_event_text_replay_preserves_background_and_organization_guards(edge):
+    articles = [_article(1, "HOLDOUT", "first", "a"), _article(2, "HOLDOUT", "second", "b")]
+    pair = _pair(1, 2, "HOLDOUT", entity_overlap=2, title_jaccard=0.2, organization_overlap=1)
+    pair.update(entityTitleSupported=False, organizationTitleSupported=False)
+    if edge == "entity":
+        pair["organizationOverlap"] = 0
+    elif edge == "organization":
+        pair["entityOverlap"] = 0
+    else:
+        pair["eventTextMatch"] = True
+        articles[0]["titleOrganizations"] = ["Samsung"]
+        articles[1]["titleOrganizations"] = ["SK Hynix"]
+    metrics = _evaluate_rule(articles, [pair], "HOLDOUT", 0.5, 48, 2, 0.125, 24, 6)
+    assert metrics.precision == 1.0
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("eventTextMatch", None),
+        ("entityTitleSupported", 1),
+        ("organizationTitleSupported", "true"),
+        ("titleTextSimilarity", float("nan")),
+        ("titleTextSimilarity", True),
+        ("leadTextSimilarity", 1.01),
+    ],
+)
+def test_event_text_metadata_rejects_missing_or_invalid_features(field, value):
+    article = {**_article(1, "HOLDOUT", "first"), "titleOrganizations": []}
+    pair = {
+        **_pair(1, 2, "HOLDOUT"),
+        "eventTextMatch": True,
+        "entityTitleSupported": False,
+        "organizationTitleSupported": False,
+        "titleTextSimilarity": 0.4,
+        "leadTextSimilarity": 0.2,
+    }
+    output = {
+        "clusteringRuleVersion": "event-text-evidence-v2",
+        "articles": [article],
+        "pairEvaluations": [{"pairs": [pair]}],
+    }
+    validate_clustering_metadata(output)
+    pair[field] = value
+    with pytest.raises(ValueError, match="Event evidence"):
+        validate_clustering_metadata(output)
+
+
 def _article(
     article_id: int,
     split: str,

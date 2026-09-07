@@ -67,7 +67,7 @@ class IssueClustererIndependentExportTest {
 
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("datasetVersion", dataset.version());
-        output.put("clusteringRuleVersion", "title-organization-conflict-v1");
+        output.put("clusteringRuleVersion", IssueClusterer.RULE_VERSION);
         output.put("goldenSha256", sha256(goldenBytes));
         output.put("sourceRuns", dataset.sourceRuns());
         output.put("articleCount", dataset.articles().size());
@@ -150,6 +150,11 @@ class IssueClustererIndependentExportTest {
                 value.put("topicId", score.topicId());
                 value.put("split", split);
                 value.put("titleJaccard", score.titleJaccard());
+                value.put("titleTextSimilarity", score.titleTextSimilarity());
+                value.put("leadTextSimilarity", score.leadTextSimilarity());
+                value.put("eventTextMatch", score.eventTextMatch());
+                value.put("entityTitleSupported", score.entityTitleSupported());
+                value.put("organizationTitleSupported", score.organizationTitleSupported());
                 value.put("entityOverlap", score.entityOverlap());
                 value.put("organizationOverlap", score.organizationOverlap());
                 value.put("breakingPair", score.breakingPair());

@@ -78,6 +78,11 @@ class IssueClustererGoldenExportTest {
                 pair.put("topicId", first.article().topicId());
                 pair.put("split", first.split().equals(second.split()) ? first.split() : "CROSS");
                 pair.put("titleJaccard", score.titleJaccard());
+                pair.put("titleTextSimilarity", score.titleTextSimilarity());
+                pair.put("leadTextSimilarity", score.leadTextSimilarity());
+                pair.put("eventTextMatch", score.eventTextMatch());
+                pair.put("entityTitleSupported", score.entityTitleSupported());
+                pair.put("organizationTitleSupported", score.organizationTitleSupported());
                 pair.put("entityOverlap", score.entityOverlap());
                 pair.put("organizationOverlap", score.organizationOverlap());
                 pair.put("breakingPair", score.breakingPair());
@@ -115,7 +120,7 @@ class IssueClustererGoldenExportTest {
 
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("datasetVersion", dataset.datasetVersion());
-        output.put("clusteringRuleVersion", "title-organization-conflict-v1");
+        output.put("clusteringRuleVersion", IssueClusterer.RULE_VERSION);
         output.put("articleCount", goldenArticles.size());
         output.put("configuredTitleJaccardThreshold", properties.getTitleJaccardThreshold());
         output.put("configuredEntityTimeWindowHours", properties.getEntityTimeWindow().toHours());
