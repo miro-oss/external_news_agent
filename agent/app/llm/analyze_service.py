@@ -13,6 +13,7 @@ from app.core.parser import parse_json_object
 from app.core.sentences import split_sentences_with_meta
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.openai_contract import ANALYZE_WIRE_VERSION
+from app.llm.request_contract import analysis_schema
 from app.llm.router import get_analyze_provider
 from app.llm.structured_call import structured_call
 from app.schemas.analyze import (
@@ -70,7 +71,7 @@ class ArticleAnalyzeService:
         sentences = split.sentences or [request.article.title]
         provider = self._provider or get_analyze_provider(self._settings, request.plan)
         member_stances, promotion_eligible_ids = _member_stances(request)
-        response_schema = AnalyzeOutput.model_json_schema(by_alias=True)
+        response_schema = analysis_schema(request, len(sentences), promotion_eligible_ids)
         prompt = _analysis_prompt(request, sentences, promotion_eligible_ids)
         result = structured_call(
             provider,
