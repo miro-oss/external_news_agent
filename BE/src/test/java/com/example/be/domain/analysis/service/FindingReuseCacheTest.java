@@ -113,7 +113,7 @@ class FindingReuseCacheTest {
 
         verify(findingRepository).findReusableSources(
                 Set.of(10L), AnalysisSource.LLM, Set.of(inputHash),
-                "analyze.ko.v9+perspective.ko.v1+sensitivity.ko.v2", "openai", "gpt-4.1-nano");
+                "analyze.ko.v10+perspective.ko.v1+sensitivity.ko.v2", "openai", "gpt-4.1-nano");
         verify(findingRepository).findReusableSources(
                 Set.of(10L), AnalysisSource.LLM, Set.of(inputHash),
                 "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2", "mindlogic-claude", "paid-model");
