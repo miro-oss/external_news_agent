@@ -90,6 +90,20 @@ class IssueClustererEventEvidenceTest {
                 clusterer.cluster(articles.reversed(), true).pairScores());
     }
 
+    @Test
+    void differentStockSubjectsCannotJoinThroughGenericPriceHeadlines() {
+        for (String ending : List.of("급등세... 왜?", "연일 급등세로 상승 마감하며 투자자 관심 집중")) {
+            ClusterPlan plan = clusterer.cluster(List.of(
+                    article(1, "가온소재 주가, " + ending, null, 0),
+                    article(2, "주가, " + ending, null, 0),
+                    article(3, "누리정밀 주가, " + ending, null, 1)), true);
+            assertFalse(plan.issues().stream().anyMatch(issue ->
+                    issue.articleIds().contains(1L) && issue.articleIds().contains(3L)));
+        }
+        assertEquals(java.util.Set.of("가온소재"), clusterer.titleOrganizations("가온소재 주가, 급등세"));
+        assertTrue(clusterer.titleOrganizations("국내 주가, 급등세").isEmpty());
+    }
+
     private ClusterArticle article(long id, String title, String summary, int hours) {
         OffsetDateTime time = OffsetDateTime.parse("2026-09-07T10:00:00+09:00").plusHours(hours);
         return new ClusterArticle(id, 7L, title, summary, null, FetchStatus.METADATA_ONLY,
