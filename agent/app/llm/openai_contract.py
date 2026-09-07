@@ -9,7 +9,7 @@ from app.schemas.analyze import Audience
 
 AUDIENCE_ORDER = get_args(Audience)
 _AXES = ("customerMove", "dealSignal", "competitorThreat", "industryShift")
-ANALYZE_WIRE_VERSION = "analyze.ko.v7+perspective.ko.v1+sensitivity.ko.v2"
+ANALYZE_WIRE_VERSION = "analyze.ko.v8+perspective.ko.v1+sensitivity.ko.v2"
 EXPLORE_WIRE_VERSION = "explore.ko.v2"
 _ANALYZE_INSTRUCTION = """
 OpenAI 출력 형식 보충:

@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from pathlib import Path
 
 from app.core.config import Settings
@@ -45,6 +46,8 @@ SYSTEM_INSTRUCTION = "\n\n".join(
 )
 
 logger = logging.getLogger(__name__)
+_CITATION_MARKER = r"\[\s*([1-9]\d*(?:\s*,\s*[1-9]\d*)*)\s*\]"
+_TRAILING_CITATIONS = re.compile(r"(?<=[.!?。])(?:\s*" + _CITATION_MARKER + r")+\s*$")
 
 
 class ArticleAnalyzeService:
@@ -206,6 +209,11 @@ def _verified_sections(response: AnalyzeResponse) -> list[Section]:
             evidence_text = "\n".join(
                 response.sentences[sentence_id - 1] for sentence_id in bullet.evidence_sentence_ids
             )
+            if response.meta.provider == "openai":
+                text = _without_duplicate_citations(
+                    bullet.text, bullet.evidence_sentence_ids, evidence_text
+                )
+                bullet = bullet.model_copy(update={"text": text})
             mismatches = (
                 factual_mismatches(bullet.text, evidence_text)
                 if bullet.claim_type == "FACT"
@@ -224,6 +232,25 @@ def _verified_sections(response: AnalyzeResponse) -> list[Section]:
             bullets.append(bullet)
         sections.append(section.model_copy(update={"bullets": bullets}))
     return sections
+
+
+def _without_duplicate_citations(text: str, evidence_ids: list[int], evidence_text: str) -> str:
+    """Remove only appended references already represented by evidenceSentenceIds."""
+    suffix = _TRAILING_CITATIONS.search(text)
+    if suffix is None:
+        return text
+
+    def referenced_ids(value: str) -> set[int]:
+        return {
+            int(number)
+            for marker in re.findall(_CITATION_MARKER, value)
+            for number in marker.split(",")
+        }
+
+    citations = referenced_ids(suffix.group())
+    if not citations.issubset(evidence_ids) or citations & referenced_ids(evidence_text):
+        return text
+    return text[: suffix.start()].rstrip()
 
 
 def _analysis_prompt(
