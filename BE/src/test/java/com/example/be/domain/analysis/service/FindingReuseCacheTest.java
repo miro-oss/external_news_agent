@@ -99,7 +99,7 @@ class FindingReuseCacheTest {
     }
 
     @Test
-    void usesOpenAiV7AndPaidV6EvenWithLegacySharedConfiguration() {
+    void usesOpenAiV8AndPaidV6EvenWithLegacySharedConfiguration() {
         AgentProperties defaults = new AgentProperties();
         defaults.setAnalysisPromptVersion("analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2");
         defaults.setFreeModel("gpt-4.1-nano");
@@ -113,7 +113,7 @@ class FindingReuseCacheTest {
 
         verify(findingRepository).findReusableSources(
                 Set.of(10L), AnalysisSource.LLM, Set.of(inputHash),
-                "analyze.ko.v7+perspective.ko.v1+sensitivity.ko.v2", "openai", "gpt-4.1-nano");
+                "analyze.ko.v8+perspective.ko.v1+sensitivity.ko.v2", "openai", "gpt-4.1-nano");
         verify(findingRepository).findReusableSources(
                 Set.of(10L), AnalysisSource.LLM, Set.of(inputHash),
                 "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2", "mindlogic-claude", "paid-model");
