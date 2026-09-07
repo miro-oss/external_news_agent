@@ -1,0 +1,308 @@
+{
+  "measurementDate": "2026-09-07",
+  "relatedIssue": 162,
+  "codeRevision": "f89bca2c2efec829b1a79cf268dce0dfa53fe442",
+  "scope": "Prediction-blind, AI-labeled offline replay at Java code defaults; not human-adjudicated ground truth or live incremental-run accuracy.",
+  "sampling": {
+    "observationWindowEnd": "2026-09-07T08:55:00+09:00",
+    "lookbackHours": 48,
+    "firstSeenSince": "2026-09-04T16:04:39+09:00",
+    "textSnapshotTimes": [
+      "2026-09-07T08:59:46+09:00"
+    ],
+    "textSemantics": "current-snapshot; not historical per-run replay",
+    "candidateCounts": {
+      "4386": 224,
+      "4387": 177
+    },
+    "samplePerTopic": 80,
+    "sampling": "lowest SHA-256(seed:topicId:sourceArticleId), without replacement per topic",
+    "samplingSeed": "independent-20260907-v1",
+    "articleIdMapping": "sourceArticleId * (maxTopicId + 1) + topicId; preserves source-ID order",
+    "sqlChunksSha256": "a8eea615300893e5fffcffff74387b715a30fdaa1e8ae01516744308471832c4",
+    "articleCount": 160,
+    "uniqueSourceArticleCount": 158,
+    "sourceRunIds": [
+      4635,
+      4636,
+      4861,
+      4862
+    ],
+    "selectedObservationCountsByRun": {
+      "4861": 42,
+      "4635": 40,
+      "4636": 40,
+      "4862": 71
+    },
+    "fetchStatusCounts": {
+      "FETCH_FAILED": 23,
+      "FULLTEXT": 136,
+      "ROBOTS_DISALLOWED": 1
+    },
+    "nonemptyBodiesBelow400Characters": 27
+  },
+  "annotation": {
+    "annotator": "Codex AI (single annotator; no human review)",
+    "method": "All titles and summary excerpts reviewed; full text/longer excerpts checked for ambiguous and multi-article events. Body was retained losslessly for Java replay; not every article body was read in full.",
+    "predictionExposureBeforeFreeze": false,
+    "eventCount": 119,
+    "confidenceCounts": {
+      "HIGH": 106,
+      "MEDIUM": 52,
+      "LOW": 2
+    },
+    "splitCounts": {
+      "CALIBRATION": {
+        "4386": 40,
+        "4387": 40
+      },
+      "HOLDOUT": {
+        "4387": 40,
+        "4386": 40
+      }
+    },
+    "old162SourceIdOverlap": 0,
+    "old162ExactTitleOverlap": 0,
+    "old162ExactLongBodyOverlap": 0,
+    "noveltyLimit": "First-seen and exact-content checks do not prove all underlying events are absent from prior datasets."
+  },
+  "sealedAt": "2026-09-07T09:05:49+09:00",
+  "evaluation": {
+    "datasetVersion": "clusters.independent.20260907.v1",
+    "clusteringRuleVersion": "title-organization-conflict-v1",
+    "titleOrganizationGuard": {
+      "implementationVersion": "title-organization-conflict-v1",
+      "metadataComplete": true,
+      "profiledArticleCount": 15
+    },
+    "articleCount": 160,
+    "bodySource": "frozen-independent-golden",
+    "selectionSplit": "CALIBRATION",
+    "validationSplit": "HOLDOUT",
+    "selected": {
+      "title_jaccard_threshold": 0.4,
+      "time_window_hours": 48,
+      "common_entity_document_ratio": 0.05,
+      "organization_title_jaccard_threshold": 0.2,
+      "organization_time_window_hours": 12,
+      "metrics": {
+        "precision": 1.0,
+        "recall": 0.16279069767441862,
+        "adjusted_rand": 0.2772462165974155,
+        "v_measure": 0.9606815248165725
+      }
+    },
+    "holdout": {
+      "precision": 1.0,
+      "recall": 0.39473684210526316,
+      "adjusted_rand": 0.5630636046651437,
+      "v_measure": 0.9691858292747157
+    },
+    "configuredEntityOverlapThreshold": 2,
+    "configuredBreakingTimeWindowHours": 6,
+    "configuredOrganizationTitleJaccardThreshold": 0.125,
+    "configuredOrganizationTimeWindowHours": 24,
+    "configured": {
+      "titleJaccardThreshold": 0.5,
+      "timeWindowHours": 48,
+      "commonEntityDocumentRatio": 0.1,
+      "organizationTitleJaccardThreshold": 0.125,
+      "organizationTimeWindowHours": 24,
+      "calibrationMetrics": {
+        "precision": 0.2857142857142857,
+        "recall": 0.046511627906976744,
+        "adjusted_rand": 0.0764812767633642,
+        "v_measure": 0.9450565031686042
+      },
+      "holdoutMetrics": {
+        "precision": 1.0,
+        "recall": 0.3157894736842105,
+        "adjusted_rand": 0.476981055204726,
+        "v_measure": 0.9643170520509192
+      }
+    },
+    "tfidfCharWbBaseline": {
+      "usesTitleOrganizationGuard": false,
+      "includesFixedContentGroups": true,
+      "threshold": 0.4,
+      "calibrationMetrics": {
+        "precision": 1.0,
+        "recall": 0.18604651162790697,
+        "adjusted_rand": 0.3107831895907074,
+        "v_measure": 0.962699766027311
+      },
+      "metrics": {
+        "precision": 1.0,
+        "recall": 0.42105263157894735,
+        "adjusted_rand": 0.5896685239399376,
+        "v_measure": 0.9712484536543939
+      }
+    },
+    "tfidfCharWbStandaloneBaseline": {
+      "usesTitleOrganizationGuard": false,
+      "includesFixedContentGroups": false,
+      "threshold": 0.4,
+      "calibrationMetrics": {
+        "precision": 1.0,
+        "recall": 0.18604651162790697,
+        "adjusted_rand": 0.3107831895907074,
+        "v_measure": 0.962699766027311
+      },
+      "metrics": {
+        "precision": 1.0,
+        "recall": 0.42105263157894735,
+        "adjusted_rand": 0.5896685239399376,
+        "v_measure": 0.9712484536543939
+      }
+    },
+    "precisionGate": 0.9,
+    "precisionGatePassed": true,
+    "recallGate": 0.85,
+    "recallGatePassed": false,
+    "decisionGatePassed": false,
+    "postHocRelabelSensitivity": null,
+    "independentValidation": {
+      "goldenSha256": "a0d893504defdc4a1c171577477baf6891413dbc065ff074a2616470399e3a4e",
+      "sealSha256": "13675d8cf4bd43af2e7e22cbcff4b6588887506fbc757149a6d11b8dbc00eea8",
+      "javaOutputSha256": "05b2d5a3cabd56054033dc403130b976717046f5656f78f3e78785a6a6d2437c",
+      "coverage": {
+        "CALIBRATION": {
+          "topicArticleCounts": {
+            "4386": 40,
+            "4387": 40
+          },
+          "positivePairs": 43,
+          "negativePairs": 1517
+        },
+        "HOLDOUT": {
+          "topicArticleCounts": {
+            "4386": 40,
+            "4387": 40
+          },
+          "positivePairs": 38,
+          "negativePairs": 1522
+        }
+      },
+      "documentFrequencyScope": "SPLIT"
+    }
+  },
+  "selectionMetricTieCount": 15,
+  "configuredConfusion": {
+    "CALIBRATION": {
+      "TP": 2,
+      "FP": 5,
+      "FN": 41,
+      "TN": 1512
+    },
+    "HOLDOUT": {
+      "TP": 12,
+      "FP": 0,
+      "FN": 26,
+      "TN": 1522
+    }
+  },
+  "selectedConfusion": {
+    "CALIBRATION": {
+      "TP": 7,
+      "FP": 0,
+      "FN": 36,
+      "TN": 1517
+    },
+    "HOLDOUT": {
+      "TP": 15,
+      "FP": 0,
+      "FN": 23,
+      "TN": 1522
+    }
+  },
+  "configuredHoldoutMissesByEvent": {
+    "ulsan-forum-2026": 10,
+    "debt-2030-projection": 3,
+    "korea-brand-value": 2,
+    "asan-mobility-rd": 1,
+    "gumi-taiwan-delegation": 1,
+    "lutnick-target-tariff": 1,
+    "kif-growth-fund-report": 1,
+    "igi-expo-training": 2,
+    "iksan-semiconductor-meeting": 5
+  },
+  "timestampAudit": [
+    {
+      "kind": "firstSeenAudit",
+      "articleCount": 158,
+      "firstRunStartMin": "2026-09-05T05:56:07",
+      "firstRunStartMax": "2026-09-06T11:26:16",
+      "collectedOutsideFirstRun": 0,
+      "missingCollectedAt": 0
+    },
+    {
+      "kind": "runObservationAudit",
+      "runId": 4635,
+      "status": "PARTIAL",
+      "startedAt": "2026-09-05T11:26:13",
+      "finishedAt": "2026-09-05T12:02:50",
+      "rawObservationRowCount": 40,
+      "uniqueArticleCount": 40,
+      "observedOutsideRun": 0
+    },
+    {
+      "kind": "runObservationAudit",
+      "runId": 4636,
+      "status": "PARTIAL",
+      "startedAt": "2026-09-05T11:26:13",
+      "finishedAt": "2026-09-05T12:01:47",
+      "rawObservationRowCount": 40,
+      "uniqueArticleCount": 40,
+      "observedOutsideRun": 0
+    },
+    {
+      "kind": "runObservationAudit",
+      "runId": 4861,
+      "status": "PARTIAL",
+      "startedAt": "2026-09-06T11:26:16",
+      "finishedAt": "2026-09-06T12:08:38",
+      "rawObservationRowCount": 42,
+      "uniqueArticleCount": 42,
+      "observedOutsideRun": 0
+    },
+    {
+      "kind": "runObservationAudit",
+      "runId": 4862,
+      "status": "PARTIAL",
+      "startedAt": "2026-09-06T11:26:16",
+      "finishedAt": "2026-09-06T12:25:03",
+      "rawObservationRowCount": 73,
+      "uniqueArticleCount": 71,
+      "observedOutsideRun": 0
+    }
+  ],
+  "verification": {
+    "pythonTestsPassed": 100,
+    "javaTestsPassed": 97,
+    "javaTestsSkipped": 1,
+    "javaFailures": 0,
+    "sealAndCodeHashesUnchanged": true,
+    "savedJavaConfiguredMetricsMatchReport": true,
+    "evaluationExitCode": 1,
+    "exitReason": "Recall gate not met; evaluation completed successfully."
+  },
+  "artifactHashes": {
+    "preregistration.json": "5168643a200364007e5c8639711378690a6796bcec593c6ad65f337cc2d23ebc",
+    "label-audit.json": "931c8407d770b6a41caca7e72a246930af7191029613feb2e446dbcecc6f8327",
+    "audit-seal.json": "a30be47459d6f47b8eef44e7e97a6d1a378935b93cfeebf0f7770cd9b86eae42",
+    "code-provenance.json": "a97fefbcbca30a2e317231d6f0d95749709b83708a42ee2d7e04cae07fa90f7f",
+    "pack/report.json": "4824cb8f3f8e686649bda7e81ba84a93d24e308b056694c3ab57279c14256d28",
+    "diagnostics.json": "0d218a19aee6f3ef46e1614513277f21c60c19e69a79c3e9175b100d9b07fe1c",
+    "timestamp-audit.sql": "3bed945cfaeb7da40c2589018e82f955f2a61ff1164c82eb87c1617c23d2414f",
+    "timestamp-audit.jsonl": "fc8c69709ef8096e966421da4dc2671312f655d64730a115135503c73248872b",
+    "java-test.log": "71331bd3bee6dd13bdbb7cadafee41f4fd29235f58533510f6f9dd5c6ed24d8e"
+  },
+  "decision": {
+    "qualityGatePassed": false,
+    "precisionEvidenceLimitedToSmallHoldout": true,
+    "embeddingReviewTriggerMetOnSelectedHoldout": true,
+    "embeddingAdoptionApproved": false,
+    "productionConfigurationChanged": false,
+    "nextScheduledWork": "Step 2: cost of 10 normal runs; distinguish providers/models before and after OpenAI switch. A11 week observation and deferred-feature audit remain later steps."
+  }
+}
