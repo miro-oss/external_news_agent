@@ -3,7 +3,7 @@ spring:
     name: BE
   # 대괄호가 들어 있어 YAML에서 흐름 시퀀스로 읽히지 않도록 따옴표로 감싼다
   config:
-    import: "optional:file:.env[.properties]"
+    import: "${NEWS_CONFIG_IMPORT:optional:file:.env[.properties]}"
 
   datasource:
     url: ${SPRING_DATASOURCE_URL}

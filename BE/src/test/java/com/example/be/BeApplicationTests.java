@@ -7,9 +7,13 @@ import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.test.context.TestPropertySource;
 
 import javax.sql.DataSource;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * 애플리케이션 컨텍스트가 뜨는지만 본다. 빈 배선이 깨지면 여기서 먼저 걸린다.
@@ -38,8 +42,36 @@ import javax.sql.DataSource;
 })
 class BeApplicationTests {
 
+    @Autowired
+    private ConfigurableEnvironment environment;
+
     @Test
     void contextLoads() {
+    }
+
+    @Test
+    void testContextCannotInheritApplicationConfigurationOrStartBackgroundWork() {
+        assertEquals("", environment.getProperty("spring.config.import"));
+        assertEquals("classpath:/application.yml", environment.getProperty("spring.config.location"));
+        assertTrue(environment.getPropertySources().stream()
+                .noneMatch(source -> source.getName().contains(".env")));
+        for (String property : new String[]{"news.collection.reap-on-startup",
+                "news.collection.scheduler.enabled", "news.reports.daily.enabled", "news.agent.enabled"}) {
+            assertEquals("false", environment.getProperty(property), property);
+        }
+    }
+
+    @Test
+    void datasourceTargetsOnlyTheSelectedTestMode() {
+        if (Boolean.getBoolean("news.integration.db")) {
+            assertEquals("news_test", environment.getProperty("spring.datasource.username"));
+            assertTrue(environment.getRequiredProperty("spring.datasource.url")
+                    .matches("jdbc:oracle:thin:@127\\.0\\.0\\.1:[0-9]+/FREEPDB1"));
+        } else {
+            assertEquals("news_test_disabled", environment.getProperty("spring.datasource.username"));
+            assertEquals("jdbc:oracle:thin:@127.0.0.1:1/FREEPDB1",
+                    environment.getProperty("spring.datasource.url"));
+        }
     }
 
     @TestConfiguration

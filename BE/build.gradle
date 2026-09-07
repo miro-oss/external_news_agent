@@ -40,18 +40,66 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    def databaseIntegration = System.getProperty('news.integration.db', 'false') == 'true'
+    def liveReportMeasurement = System.getProperty('news.reports.daily.measure', 'false') == 'true'
+    // Test workers never inherit application credentials, Spring JSON/config overrides or JVM options.
+    def isolatedEnvironment = [:]
+    ['PATH', 'HOME', 'JAVA_HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL'].each { key ->
+        if (System.getenv(key) != null) {
+            isolatedEnvironment[key] = System.getenv(key)
+        }
+    }
+    System.getenv().findAll { key, value -> key.startsWith('CLUSTERS_') }.each { key, value ->
+        isolatedEnvironment[key] = value ? file(value).absolutePath : value
+    }
+    isolatedEnvironment['NEWS_CONFIG_IMPORT'] = ''
+    isolatedEnvironment['SPRING_DATASOURCE_URL'] = databaseIntegration ?
+            System.getenv('NEWS_TEST_DB_URL') ?: '' : 'jdbc:oracle:thin:@127.0.0.1:1/FREEPDB1'
+    isolatedEnvironment['SPRING_DATASOURCE_USERNAME'] = databaseIntegration ?
+            System.getenv('NEWS_TEST_DB_USERNAME') ?: '' : 'news_test_disabled'
+    isolatedEnvironment['SPRING_DATASOURCE_PASSWORD'] = databaseIntegration ?
+            System.getenv('NEWS_TEST_DB_PASSWORD') ?: '' : 'disabled'
+    setEnvironment(isolatedEnvironment)
+    systemProperty 'spring.config.location', 'classpath:/application.yml'
+    systemProperty 'news.collection.scheduler.enabled', 'false'
+    systemProperty 'news.collection.reap-on-startup', 'false'
+    systemProperty 'news.reports.daily.enabled', 'false'
+    systemProperty 'news.agent.enabled', 'false'
+    systemProperty 'news.reports.daily.measure', 'false'
+    systemProperty 'news.integration.db', databaseIntegration.toString()
+    // Live provider measurement is a separate operational workflow, never an ordinary test.
+    exclude '**/DailyReportMeasurementIntegrationTests.class'
+
+    doFirst {
+        if (liveReportMeasurement) {
+            throw new GradleException('Live daily-report measurement is not allowed in test. Use a separately reviewed operational measurement workflow.')
+        }
+        if (databaseIntegration) {
+            def validation = providers.exec {
+                commandLine 'python3', file('scripts/test-db.py').absolutePath, '--validate'
+                ignoreExitValue = true
+            }
+            if (validation.result.get().exitValue != 0) {
+                throw new GradleException('Isolated test DB validation failed. Run: python3 scripts/test-db.py')
+            }
+        }
+        // Even an accidental optional .env import cannot reach the application working directory.
+        def workerDirectory = java.nio.file.Files.createTempDirectory(temporaryDir.toPath(), 'worker-')
+        java.nio.file.Files.createSymbolicLink(workerDirectory.resolve('build'), layout.buildDirectory.get().asFile.toPath())
+        workingDir workerDirectory.toFile()
+    }
     // External replay fixtures/output paths are intentionally outside the repository.
     // Every requested export must execute, even if the preceding test inputs were unchanged.
     def externalClusterReplay = System.getenv('CLUSTERS_INDEPENDENT_GOLDEN') ||
             System.getenv('CLUSTERS_V2_REPLAY_ARTICLES')
-    outputs.upToDateWhen { !externalClusterReplay }
+    inputs.property('databaseIntegration', databaseIntegration)
+    inputs.property('liveReportMeasurement', liveReportMeasurement)
+    outputs.upToDateWhen { !externalClusterReplay && !databaseIntegration && !liveReportMeasurement }
     outputs.doNotCacheIf('External cluster replay produces an explicitly requested artifact') {
         externalClusterReplay as boolean
     }
-    systemProperty 'news.integration.db', System.getProperty('news.integration.db', 'false')
+    outputs.doNotCacheIf('A disposable Oracle database must be tested on every integration run') {
+        databaseIntegration
+    }
     systemProperty 'news.integration.mailpit', System.getProperty('news.integration.mailpit', 'false')
-    systemProperty 'news.collection.scheduler.enabled',
-            System.getProperty('news.collection.scheduler.enabled', 'false')
-    systemProperty 'news.reports.daily.measure', System.getProperty('news.reports.daily.measure', 'false')
-    systemProperty 'news.reports.daily.measure-date', System.getProperty('news.reports.daily.measure-date', '')
 }
