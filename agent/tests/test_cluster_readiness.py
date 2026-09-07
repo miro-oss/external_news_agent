@@ -171,6 +171,7 @@ def test_cli_preserves_manifest_and_reports_provenance(tmp_path: Path, monkeypat
     result = json.loads(output.read_text())
     assert result["status"] == "READY_FOR_SNAPSHOT"
     assert hashlib.sha256(before).hexdigest() in json.dumps(result)
+    assert result["queryExecuted"] is True
     assert result["predictionsRead"] is False
     assert result["rawArticleTextRead"] is False
     assert result["normalRunCostMeasurementStarted"] is False
@@ -199,6 +200,52 @@ def test_code_change_during_query_cannot_report_ready(tmp_path: Path, monkeypatc
     monkeypatch.setattr(readiness.subprocess, "run", run)
     assert readiness.main(args) == 2
     assert json.loads(output.read_text())["status"] == "FROZEN_CODE_MISMATCH"
+
+
+@pytest.mark.parametrize("error,reason", [
+    (FileNotFoundError("docker unavailable"), "QUERY_FAILED"),
+    (subprocess.TimeoutExpired("docker", 60), "QUERY_TIMEOUT"),
+])
+def test_unfinished_query_is_not_recorded_as_executed(
+    tmp_path: Path, monkeypatch, error: Exception, reason: str,
+) -> None:
+    _, _, output, args = cli_files(tmp_path)
+
+    def run(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(readiness.subprocess, "run", run)
+    assert readiness.main(args) == 2
+    result = json.loads(output.read_text())
+    assert result["status"] == "QUERY_FAILED"
+    assert result["reasonCodes"] == [reason]
+    assert result["queryExecuted"] is False
+
+
+@pytest.mark.parametrize("remove_manifest,reason", [
+    (False, "PREREGISTRATION_CHANGED_DURING_QUERY"),
+    (True, "PREREGISTRATION_UNREADABLE_AFTER_QUERY"),
+])
+def test_concurrent_integrity_failures_preserve_all_query_evidence(
+    tmp_path: Path, monkeypatch, remove_manifest: bool, reason: str,
+) -> None:
+    _, manifest, output, args = cli_files(tmp_path)
+
+    def run(*args, **kwargs):
+        (tmp_path / FROZEN_FILE).write_text("class Changed {}", encoding="utf-8")
+        if remove_manifest:
+            manifest.unlink()
+        else:
+            manifest.write_text(manifest.read_text() + "\n", encoding="utf-8")
+        raise subprocess.TimeoutExpired("docker", 60)
+
+    monkeypatch.setattr(readiness.subprocess, "run", run)
+    assert readiness.main(args) == 2
+    result = json.loads(output.read_text())
+    assert result["status"] == "INVALID_PREREGISTRATION"
+    assert result["reasonCodes"] == ["QUERY_TIMEOUT", "FROZEN_CODE_MISMATCH", reason]
+    assert result["hashMismatches"][0]["phase"] == "AFTER_QUERY"
+    assert result["queryExecuted"] is False
 
 
 def test_optimized_python_still_enforces_frozen_code(tmp_path: Path) -> None:

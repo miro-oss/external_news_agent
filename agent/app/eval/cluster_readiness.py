@@ -376,13 +376,13 @@ def main(argv: list[str] | None = None) -> int:
         else:
             try:
                 sql = build_sql(pr, now)
-                record["queryExecuted"] = True
                 result = subprocess.run(
                     ["docker", "exec", "-i", "-e", "NLS_LANG=.AL32UTF8", "oracle-free",
                      "sqlplus", "-s", "/", "as", "sysdba"],
                     input=sql, text=True, encoding="utf-8", capture_output=True, timeout=60,
                     check=False,
                 )
+                record["queryExecuted"] = True
                 if result.returncode != 0:
                     raise ValueError(f"Oracle metadata query exited with code {result.returncode}")
                 if result.stderr.strip():
@@ -401,7 +401,8 @@ def main(argv: list[str] | None = None) -> int:
             record["frozenClusterFilesVerified"] = len(pr["runtimeFilesSha256"]) - len(mismatches)
             if mismatches:
                 record.update(
-                    status="FROZEN_CODE_MISMATCH", reasonCodes=["FROZEN_CODE_MISMATCH"],
+                    status="FROZEN_CODE_MISMATCH",
+                    reasonCodes=[*record["reasonCodes"], "FROZEN_CODE_MISMATCH"],
                     hashMismatches=[{**item, "phase": "AFTER_QUERY"} for item in mismatches],
                 )
             try:
@@ -410,10 +411,12 @@ def main(argv: list[str] | None = None) -> int:
                 ).hexdigest()
                 if current_preregistration_hash != record["preregistrationSha256"]:
                     record.update(status="INVALID_PREREGISTRATION",
-                                  reasonCodes=["PREREGISTRATION_CHANGED_DURING_QUERY"])
+                                  reasonCodes=[*record["reasonCodes"],
+                                               "PREREGISTRATION_CHANGED_DURING_QUERY"])
             except OSError:
                 record.update(status="INVALID_PREREGISTRATION",
-                              reasonCodes=["PREREGISTRATION_UNREADABLE_AFTER_QUERY"])
+                              reasonCodes=[*record["reasonCodes"],
+                                           "PREREGISTRATION_UNREADABLE_AFTER_QUERY"])
     if _output_path_conflicts(args.output, args.preregistration, args.repo_root):
         print(json.dumps({"status": "INVALID_PREREGISTRATION",
                           "reasonCodes": ["OUTPUT_PATH_CONFLICT"]}))
