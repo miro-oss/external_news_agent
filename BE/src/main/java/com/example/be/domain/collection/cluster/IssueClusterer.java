@@ -24,6 +24,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class IssueClusterer {
 
+    static final String RULE_VERSION = "event-text-evidence-v2";
+
     private static final OffsetDateTime UNKNOWN_EVENT_TIME = OffsetDateTime.parse("1970-01-01T00:00:00Z");
     /** 조직 하나가 대형 주제 전체를 다시 연결하지 못하게 하되 소규모 보도자료 사건군은 남긴다. */
     private static final int MAX_COMMON_ORGANIZATION_DOCUMENT_FREQUENCY = 8;
@@ -178,10 +180,12 @@ public class IssueClusterer {
         Map<Long, Set<String>> entities = new HashMap<>();
         Map<Long, Set<String>> organizations = new HashMap<>();
         Map<Long, Set<String>> titleOrganizations = new HashMap<>();
+        Map<Long, Set<String>> titleEntities = new HashMap<>();
         unique.forEach(article -> {
             String coreTitle = breakingNewsDetector.coreTitle(article.title());
             titleTokens.put(article.articleId(), TitleTokenizer.tokens(coreTitle));
             titleOrganizations.put(article.articleId(), titleOrganizations(article.title()));
+            titleEntities.put(article.articleId(), entityExtractor.extract(coreTitle, null, null, List.of()));
             DeterministicEntityExtractor.Extraction extraction = entityExtractor.extractWithOrganizations(
                     coreTitle, article.summary(),
                     ArticleBodyCleaner.withoutTrailingBoilerplate(article.body()),
@@ -212,6 +216,7 @@ public class IssueClusterer {
                 .toList();
         Set<String> commonEntities = commonEntities(voting, entities);
         Set<String> commonOrganizations = commonOrganizations(voting, organizations);
+        EventTextEvidence eventEvidence = new EventTextEvidence(voting, breakingNewsDetector);
         for (int left = 0; left < voting.size(); left++) {
             for (int right = left + 1; right < voting.size(); right++) {
                 ClusterArticle first = voting.get(left);
@@ -230,12 +235,24 @@ public class IssueClusterer {
                 boolean breakingPair = breakingNewsDetector.isBreaking(first)
                         || breakingNewsDetector.isBreaking(second);
                 boolean titleMatches = jaccard >= properties.getTitleJaccardThreshold();
-                boolean enoughEntities = entityOverlap >= properties.getEntityOverlapThreshold();
+                boolean entityTitleSupported = discriminativeOverlap(
+                        titleEntities.get(first.articleId()), titleEntities.get(second.articleId()),
+                        commonEntities) >= 1;
+                Set<String> pairTitleOrganizations = new HashSet<>(titleOrganizations.get(first.articleId()));
+                pairTitleOrganizations.addAll(titleOrganizations.get(second.articleId()));
+                EventTextEvidence.Evidence evidence = eventEvidence.compare(
+                        first.articleId(), second.articleId(), pairTitleOrganizations);
+                boolean enoughEntities = entityOverlap >= properties.getEntityOverlapThreshold()
+                        && entityTitleSupported;
                 boolean organizationTitleMatches = organizationOverlap >= 1
-                        && jaccard >= properties.getOrganizationTitleJaccardThreshold();
-                boolean matches = matchesIssue(
+                        && jaccard >= properties.getOrganizationTitleJaccardThreshold()
+                        && evidence.organizationSupported();
+                boolean lexicalMatch = evidence.eventMatch() && within(
+                        first.eventTime(), second.eventTime(), breakingPair
+                                ? properties.getBreakingTimeWindow() : properties.getOrganizationTimeWindow());
+                boolean matches = (matchesIssue(
                         first, second, breakingPair,
-                        titleMatches, enoughEntities, organizationTitleMatches)
+                        titleMatches, enoughEntities, organizationTitleMatches) || lexicalMatch)
                         && union.canJoin(first.articleId(), second.articleId());
                 if (matches) {
                     union.join(first.articleId(), second.articleId());
@@ -244,7 +261,8 @@ public class IssueClusterer {
                     pairScores.add(new ClusterPlan.PairScore(
                             first.articleId(), second.articleId(), topicId,
                             jaccard, entityOverlap, organizationOverlap,
-                            breakingPair, hoursApart, matches));
+                            breakingPair, hoursApart, evidence.titleSimilarity(), evidence.leadSimilarity(),
+                            evidence.eventMatch(), entityTitleSupported, evidence.organizationSupported(), matches));
                 }
             }
         }

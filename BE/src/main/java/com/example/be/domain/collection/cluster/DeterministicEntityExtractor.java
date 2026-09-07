@@ -34,6 +34,11 @@ import java.util.regex.Pattern;
  * 실측(run 3859)에서 관측 303건 중 274건이 이슈 하나로 묶였다 — 이슈 #118.
  */
 public final class DeterministicEntityExtractor {
+    private static final Pattern STOCK_HEADLINE_SUBJECT = Pattern.compile(
+            "^([a-z0-9가-힣&.-]{2,40})\\s+주가\\s*[,，:：]");
+    private static final Set<String> GENERAL_STOCK_SUBJECTS = Set.of(
+            "오늘", "내일", "어제", "현재", "전체", "평균", "국내", "해외", "한국", "미국",
+            "중국", "일본", "반도체", "기업", "회사", "관련", "종목", "주요", "코스피", "코스닥");
 
     /** 기사 하나가 만들 수 있는 패턴 앵커 상한. 보일러플레이트가 많은 기사가 다리를 놓지 못하게 막는다. */
     static final int MAX_ANCHORS_PER_ARTICLE = 20;
@@ -162,6 +167,15 @@ public final class DeterministicEntityExtractor {
                 organizations.add(canonical);
             }
         });
+        // The explicit "<subject> 주가," headline names the traded company even when
+        // it is outside the alias dictionary. Keep it as a conflict profile only;
+        // it must not become a positive entity-overlap vote from body background.
+        if (organizations.isEmpty()) {
+            Matcher stockSubject = STOCK_HEADLINE_SUBJECT.matcher(normalized);
+            if (stockSubject.find() && !GENERAL_STOCK_SUBJECTS.contains(stockSubject.group(1))) {
+                organizations.add(stockSubject.group(1));
+            }
+        }
         return Collections.unmodifiableSet(organizations);
     }
 

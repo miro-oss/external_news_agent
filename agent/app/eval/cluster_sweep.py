@@ -15,6 +15,7 @@ _TIME_WINDOWS = (24, 48, 72)
 _ORGANIZATION_JACCARD_THRESHOLDS = (0.10, 0.125, 0.15, 0.20)
 _ORGANIZATION_TIME_WINDOWS = (12, 24, 48)
 _TITLE_ORGANIZATION_RULE_VERSION = "title-organization-conflict-v1"
+_EVENT_TEXT_RULE_VERSION = "event-text-evidence-v2"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -82,7 +83,7 @@ class UnionFind:
 
 def validate_clustering_metadata(java_output: dict[str, Any]) -> None:
     version = java_output.get("clusteringRuleVersion", "legacy")
-    if version not in ("legacy", _TITLE_ORGANIZATION_RULE_VERSION):
+    if version not in ("legacy", _TITLE_ORGANIZATION_RULE_VERSION, _EVENT_TEXT_RULE_VERSION):
         raise ValueError(f"Unsupported clusteringRuleVersion: {version!r}")
     if version == "legacy":
         _LOGGER.warning(
@@ -91,8 +92,29 @@ def validate_clustering_metadata(java_output: dict[str, Any]) -> None:
         )
     _validate_title_organizations(
         java_output["articles"],
-        required=version == _TITLE_ORGANIZATION_RULE_VERSION,
+        required=version != "legacy",
     )
+    if version == _EVENT_TEXT_RULE_VERSION:
+        evaluations = java_output.get("pairEvaluations") or [
+            {"pairs": java_output.get("pairs", [])}
+        ]
+        for evaluation in evaluations:
+            for pair in evaluation["pairs"]:
+                for field in (
+                    "eventTextMatch",
+                    "entityTitleSupported",
+                    "organizationTitleSupported",
+                ):
+                    if not isinstance(pair.get(field), bool):
+                        raise ValueError(f"Event evidence requires boolean {field}")
+                for field in ("titleTextSimilarity", "leadTextSimilarity"):
+                    value = pair.get(field)
+                    if (
+                        isinstance(value, bool)
+                        or not isinstance(value, (int, float))
+                        or not 0 <= value <= 1
+                    ):
+                        raise ValueError(f"Event evidence requires 0..1 {field}")
 
 
 def _validate_title_organizations(
@@ -353,22 +375,29 @@ def _evaluate_rule(
             continue
         hours_apart = float(pair["hoursApart"])
         title_matches = float(pair["titleJaccard"]) >= threshold
-        enough_entities = int(pair["entityOverlap"]) >= entity_overlap_threshold
+        enough_entities = int(pair["entityOverlap"]) >= entity_overlap_threshold and pair.get(
+            "entityTitleSupported", True
+        )
         organization_matches = (
             organization_time_window_hours > 0
             and int(pair.get("organizationOverlap", 0)) >= 1
             and float(pair["titleJaccard"]) >= organization_title_jaccard_threshold
+            and pair.get("organizationTitleSupported", True)
         )
         if bool(pair.get("breakingPair", False)):
             matches = hours_apart <= breaking_time_window_hours and (
-                title_matches or enough_entities or organization_matches
+                title_matches
+                or enough_entities
+                or organization_matches
+                or pair.get("eventTextMatch", False)
             )
         else:
             matches = (
                 title_matches
                 or (enough_entities and hours_apart <= time_window_hours)
+                or (organization_matches and hours_apart <= organization_time_window_hours)
                 or (
-                    organization_matches
+                    pair.get("eventTextMatch", False)
                     and hours_apart <= organization_time_window_hours
                 )
             )
