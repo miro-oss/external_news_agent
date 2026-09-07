@@ -40,6 +40,14 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // External replay fixtures/output paths are intentionally outside the repository.
+    // Every requested export must execute, even if the preceding test inputs were unchanged.
+    def externalClusterReplay = System.getenv('CLUSTERS_INDEPENDENT_GOLDEN') ||
+            System.getenv('CLUSTERS_V2_REPLAY_ARTICLES')
+    outputs.upToDateWhen { !externalClusterReplay }
+    outputs.doNotCacheIf('External cluster replay produces an explicitly requested artifact') {
+        externalClusterReplay as boolean
+    }
     systemProperty 'news.integration.db', System.getProperty('news.integration.db', 'false')
     systemProperty 'news.integration.mailpit', System.getProperty('news.integration.mailpit', 'false')
     systemProperty 'news.collection.scheduler.enabled',

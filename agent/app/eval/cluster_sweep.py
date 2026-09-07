@@ -15,7 +15,7 @@ _TIME_WINDOWS = (24, 48, 72)
 _ORGANIZATION_JACCARD_THRESHOLDS = (0.10, 0.125, 0.15, 0.20)
 _ORGANIZATION_TIME_WINDOWS = (12, 24, 48)
 _TITLE_ORGANIZATION_RULE_VERSION = "title-organization-conflict-v1"
-_EVENT_TEXT_RULE_VERSION = "event-text-evidence-v2"
+_EVENT_TEXT_RULE_VERSIONS = ("event-text-evidence-v2", "event-text-evidence-v3")
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -83,7 +83,7 @@ class UnionFind:
 
 def validate_clustering_metadata(java_output: dict[str, Any]) -> None:
     version = java_output.get("clusteringRuleVersion", "legacy")
-    if version not in ("legacy", _TITLE_ORGANIZATION_RULE_VERSION, _EVENT_TEXT_RULE_VERSION):
+    if version not in ("legacy", _TITLE_ORGANIZATION_RULE_VERSION, *_EVENT_TEXT_RULE_VERSIONS):
         raise ValueError(f"Unsupported clusteringRuleVersion: {version!r}")
     if version == "legacy":
         _LOGGER.warning(
@@ -94,7 +94,7 @@ def validate_clustering_metadata(java_output: dict[str, Any]) -> None:
         java_output["articles"],
         required=version != "legacy",
     )
-    if version == _EVENT_TEXT_RULE_VERSION:
+    if version in _EVENT_TEXT_RULE_VERSIONS:
         evaluations = java_output.get("pairEvaluations") or [
             {"pairs": java_output.get("pairs", [])}
         ]

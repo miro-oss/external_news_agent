@@ -588,7 +588,8 @@ def test_event_text_replay_preserves_background_and_organization_guards(edge):
         ("leadTextSimilarity", 1.01),
     ],
 )
-def test_event_text_metadata_rejects_missing_or_invalid_features(field, value):
+@pytest.mark.parametrize("version", ["event-text-evidence-v2", "event-text-evidence-v3"])
+def test_event_text_metadata_rejects_missing_or_invalid_features(field, value, version):
     article = {**_article(1, "HOLDOUT", "first"), "titleOrganizations": []}
     pair = {
         **_pair(1, 2, "HOLDOUT"),
@@ -599,7 +600,7 @@ def test_event_text_metadata_rejects_missing_or_invalid_features(field, value):
         "leadTextSimilarity": 0.2,
     }
     output = {
-        "clusteringRuleVersion": "event-text-evidence-v2",
+        "clusteringRuleVersion": version,
         "articles": [article],
         "pairEvaluations": [{"pairs": [pair]}],
     }

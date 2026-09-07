@@ -24,7 +24,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class IssueClusterer {
 
-    static final String RULE_VERSION = "event-text-evidence-v2";
+    static final String RULE_VERSION = "event-text-evidence-v3";
+
+    private static final double MIN_ENTITY_TITLE_SUPPORT_JACCARD = 0.10;
 
     private static final OffsetDateTime UNKNOWN_EVENT_TIME = OffsetDateTime.parse("1970-01-01T00:00:00Z");
     /** 조직 하나가 대형 주제 전체를 다시 연결하지 못하게 하되 소규모 보도자료 사건군은 남긴다. */
@@ -217,6 +219,7 @@ public class IssueClusterer {
         Set<String> commonEntities = commonEntities(voting, entities);
         Set<String> commonOrganizations = commonOrganizations(voting, organizations);
         EventTextEvidence eventEvidence = new EventTextEvidence(voting, breakingNewsDetector);
+        FocalEventEvidence focalEvidence = new FocalEventEvidence(voting, breakingNewsDetector);
         for (int left = 0; left < voting.size(); left++) {
             for (int right = left + 1; right < voting.size(); right++) {
                 ClusterArticle first = voting.get(left);
@@ -242,12 +245,17 @@ public class IssueClusterer {
                 pairTitleOrganizations.addAll(titleOrganizations.get(second.articleId()));
                 EventTextEvidence.Evidence evidence = eventEvidence.compare(
                         first.articleId(), second.articleId(), pairTitleOrganizations);
+                boolean eventMatch = evidence.eventMatch()
+                        || focalEvidence.matches(first.articleId(), second.articleId());
+                // One shared acronym in otherwise unrelated headlines is only background evidence.
+                entityTitleSupported = entityTitleSupported
+                        && (jaccard >= MIN_ENTITY_TITLE_SUPPORT_JACCARD || eventMatch);
                 boolean enoughEntities = entityOverlap >= properties.getEntityOverlapThreshold()
                         && entityTitleSupported;
                 boolean organizationTitleMatches = organizationOverlap >= 1
                         && jaccard >= properties.getOrganizationTitleJaccardThreshold()
                         && evidence.organizationSupported();
-                boolean lexicalMatch = evidence.eventMatch() && within(
+                boolean lexicalMatch = eventMatch && within(
                         first.eventTime(), second.eventTime(), breakingPair
                                 ? properties.getBreakingTimeWindow() : properties.getOrganizationTimeWindow());
                 boolean matches = (matchesIssue(
@@ -262,7 +270,7 @@ public class IssueClusterer {
                             first.articleId(), second.articleId(), topicId,
                             jaccard, entityOverlap, organizationOverlap,
                             breakingPair, hoursApart, evidence.titleSimilarity(), evidence.leadSimilarity(),
-                            evidence.eventMatch(), entityTitleSupported, evidence.organizationSupported(), matches));
+                            eventMatch, entityTitleSupported, evidence.organizationSupported(), matches));
                 }
             }
         }
