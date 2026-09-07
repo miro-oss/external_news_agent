@@ -33,3 +33,7 @@ agent/*.checkpoint.json
 
 # Docs
 docs/
+
+# Documentation and evaluation reports stay local. Existing tracked files are unaffected.
+*.md
+BE/src/test/resources/golden/clusters.*.summary.json
