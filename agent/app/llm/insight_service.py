@@ -88,6 +88,7 @@ class InsightService:
             input_tag="insight",
             schema_violation_message="Provider 인사이트 출력이 Agent 계약을 위반했습니다.",
             logger=logger,
+            failure_prompt_version=PROMPT_VERSION,
         )
         return _assembled_response(result.response, result.output, request, result.usage)
 

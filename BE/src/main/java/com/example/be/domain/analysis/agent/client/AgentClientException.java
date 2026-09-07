@@ -7,6 +7,7 @@ public class AgentClientException extends RuntimeException {
     private final String code;
     private final Usage usage;
     private final TimeoutPhase timeoutPhase;
+    private final ExecutionMetadata executionMetadata;
 
     public AgentClientException(String code, String message) {
         this(code, message, null, null, TimeoutPhase.NONE);
@@ -25,10 +26,20 @@ public class AgentClientException extends RuntimeException {
                                 Throwable cause,
                                 Usage usage,
                                 TimeoutPhase timeoutPhase) {
+        this(code, message, cause, usage, timeoutPhase, null);
+    }
+
+    public AgentClientException(String code,
+                                String message,
+                                Throwable cause,
+                                Usage usage,
+                                TimeoutPhase timeoutPhase,
+                                ExecutionMetadata executionMetadata) {
         super(message, cause);
         this.code = code;
         this.usage = usage;
         this.timeoutPhase = timeoutPhase;
+        this.executionMetadata = executionMetadata;
     }
 
     public String getCode() {
@@ -37,6 +48,10 @@ public class AgentClientException extends RuntimeException {
 
     public Usage getUsage() {
         return usage;
+    }
+
+    public ExecutionMetadata getExecutionMetadata() {
+        return executionMetadata;
     }
 
     public boolean isConnectTimeout() {
@@ -61,5 +76,15 @@ public class AgentClientException extends RuntimeException {
                         Long outputTokens,
                         BigDecimal costUsd,
                         BigDecimal credits) {
+    }
+
+    public record ExecutionMetadata(String provider,
+                                    String model,
+                                    String promptVersion,
+                                    String source,
+                                    String usageCompleteness) {
+        public ExecutionMetadata(String provider, String model, String promptVersion, String source) {
+            this(provider, model, promptVersion, source, "UNKNOWN");
+        }
     }
 }

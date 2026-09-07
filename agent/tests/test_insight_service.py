@@ -438,6 +438,13 @@ def test_repeated_group_without_fact_fails_after_one_repair() -> None:
         InsightService(Settings(AGENT_MOCK=False), provider).generate(request())
 
     assert error.value.code == "SCHEMA_VIOLATION"
+    assert error.value.details["executionMetadata"] == {
+        "provider": "openai",
+        "model": "gpt-4.1-nano",
+        "promptVersion": PROMPT_VERSION,
+        "source": "AGENT_ERROR",
+        "usageCompleteness": "COMPLETE",
+    }
     assert len(provider.prompts) == 2
 
 

@@ -31,6 +31,7 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
@@ -214,13 +215,38 @@ class AgentClientTest {
         assertEquals(15L, exception.getUsage().outputTokens());
         assertEquals(0, new java.math.BigDecimal("0.25").compareTo(exception.getUsage().costUsd()));
         assertEquals(0, new java.math.BigDecimal("2").compareTo(exception.getUsage().credits()));
+        assertNull(exception.getExecutionMetadata());
         server.verify();
     }
 
     private static Stream<Arguments> failedContracts() {
         return Stream.of(
                 Arguments.of("report", (Consumer<AgentClient>) client -> client.report(reportRequest())),
+                Arguments.of("insight", (Consumer<AgentClient>) client -> client.insight(insightRequest())),
                 Arguments.of("analyze", (Consumer<AgentClient>) client -> client.selfCritique(selfCritiqueRequest())));
+    }
+
+    @Test
+    void preservesInsightFailureExecutionMetadataAlongsideUsage() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/insight"))
+                .andRespond(withStatus(HttpStatus.BAD_GATEWAY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"error":{"code":"SCHEMA_VIOLATION","message":"출력 오류","details":{"usage":{"inputTokens":30,"outputTokens":15,"costUsd":0.25,"credits":2},"executionMetadata":{"provider":"openai","model":"observed-model","promptVersion":"insight.ko.v2","source":"AGENT_ERROR","usageCompleteness":"PARTIAL"}}}}
+                                """));
+
+        AgentClientException exception = assertThrows(AgentClientException.class,
+                () -> client.insight(insightRequest()));
+
+        assertEquals(new AgentClientException.ExecutionMetadata(
+                "openai", "observed-model", "insight.ko.v2", "AGENT_ERROR", "PARTIAL"),
+                exception.getExecutionMetadata());
+        assertEquals(30L, exception.getUsage().inputTokens());
+        assertEquals(AgentClientException.TimeoutPhase.NONE, exception.getTimeoutPhase());
+        server.verify();
     }
 
     @Test
@@ -359,7 +385,7 @@ class AgentClientTest {
                                 1, "HBM4 양산 일정이 앞당겨졌다.")))));
     }
 
-    private AgentInsightRequest insightRequest() {
+    private static AgentInsightRequest insightRequest() {
         return new AgentInsightRequest(
                 "insight:issue:88:test",
                 AgentPlan.FREE,

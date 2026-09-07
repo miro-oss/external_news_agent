@@ -11,6 +11,7 @@ import com.example.be.domain.analysis.agent.entity.AgentTask;
 import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
 import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.agent.service.AgentRunRecorder;
+import com.example.be.domain.analysis.agent.service.InsightAuditContext;
 import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.insights.dto.InsightDTO;
 import com.example.be.domain.insights.entity.InsightFact;
@@ -46,6 +47,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -101,7 +103,14 @@ class InsightServiceTest {
         assertTrue(result.cached());
         assertEquals(List.of(Audience.CHIP_MAKER),
                 result.insights().stream().map(InsightDTO.AudienceInsight::audience).toList());
-        verifyNoInteractions(agentClient, quotaService, runRecorder, planService);
+        ArgumentCaptor<InsightAuditContext> audit = ArgumentCaptor.forClass(InsightAuditContext.class);
+        verify(runRecorder).recordInsightCacheHit(eq(42L), eq(88L), audit.capture(), any());
+        assertEquals("FULL", audit.getValue().cacheOutcome());
+        assertEquals(1, audit.getValue().cachedAudienceCount());
+        assertEquals(1, audit.getValue().selectedCurrentFindingCount());
+        assertEquals(0, audit.getValue().submittedCurrentFindingCount());
+        assertFalse(audit.getValue().agentRequestIssued());
+        verifyNoInteractions(agentClient, quotaService, planService);
     }
 
     @Test
@@ -151,6 +160,8 @@ class InsightServiceTest {
                 snapshot.articleIdsByFinding());
         finalization.verify(runRecorder).recordInsightSuccess(
                 eq(42L), eq(88L), eq(requestCaptor.getValue()), eq(response),
+                eq(InsightAuditContext.capture(snapshot.inputHash(), snapshot.findings(),
+                        1, 0, true, properties.getInsightPromptVersion(), properties.getPaidModel())),
                 any(LocalDateTime.class));
         finalization.verify(quotaService).completeSuccess(reservation, BigDecimal.ONE);
     }
@@ -184,6 +195,15 @@ class InsightServiceTest {
         assertEquals(List.of("IT_INFRA"), requestCaptor.getValue().audiences());
         assertEquals(List.of(Audience.CHIP_MAKER, Audience.IT_INFRA),
                 result.insights().stream().map(InsightDTO.AudienceInsight::audience).toList());
+        ArgumentCaptor<InsightAuditContext> audit = ArgumentCaptor.forClass(InsightAuditContext.class);
+        verify(runRecorder).recordInsightSuccess(eq(42L), eq(88L), any(), eq(infraResponse),
+                audit.capture(), any());
+        assertEquals("PARTIAL", audit.getValue().cacheOutcome());
+        assertEquals(2, audit.getValue().requestedAudienceCount());
+        assertEquals(1, audit.getValue().cachedAudienceCount());
+        assertEquals(1, audit.getValue().generationAudienceCount());
+        assertEquals(1, audit.getValue().submittedCurrentFindingCount());
+        verify(runRecorder, never()).recordInsightCacheHit(any(), any(), any(), any());
         verify(agentClient, never()).analyze(any());
     }
 
@@ -276,6 +296,8 @@ class InsightServiceTest {
 
         verify(agentClient, times(1)).insight(any());
         verify(quotaService, times(1)).reserveInsight(any(), any(), any());
+        verify(runRecorder, times(1)).recordInsightSuccess(any(), any(), any(), any(), any(), any());
+        verify(runRecorder, times(1)).recordInsightCacheHit(any(), any(), any(), any());
     }
 
     @Test
@@ -385,10 +407,117 @@ class InsightServiceTest {
                 eq("인사이트 저장에 실패했습니다."),
                 any(AgentClientException.Usage.class),
                 eq(null),
+                any(InsightAuditContext.class),
+                eq(new AgentClientException.ExecutionMetadata(
+                        response.meta().provider(), response.meta().model(),
+                        response.meta().promptVersion(), "RESPONSE")),
                 any(LocalDateTime.class));
         verify(quotaService).completeFailure(reservation, "SCHEMA_VIOLATION");
         verify(quotaService, never()).completeSuccess(any(), any());
-        verify(runRecorder, never()).recordInsightSuccess(any(), any(), any(), any(), any());
+        verify(runRecorder, never()).recordInsightSuccess(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void recordsFullCacheAfterReservationRaceWithoutSubmittingSelectedHistory() {
+        InsightInputAssembler.Snapshot base = snapshot();
+        InsightInputAssembler.Snapshot historySnapshot = new InsightInputAssembler.Snapshot(
+                base.issueId(), base.runId(), base.inputHash(), base.topic(),
+                List.of(base.findings().getFirst(), new AgentInsightRequest.FindingPayload(
+                        502L, "과거 기사", "https://example.com/history", "과거 요약",
+                        AgentInsightRequest.FindingRole.HISTORY, "2026-09-01",
+                        List.of(new AgentInsightRequest.SentencePayload(1, "과거 근거")))),
+                Map.of(501L, 10L, 502L, 11L));
+        NewsInsight cached = entity(Audience.CHIP_MAKER);
+        when(inputAssembler.assemble(88L)).thenReturn(historySnapshot);
+        when(persistenceService.findCached(any(), any(), any(), any(), anyCollection()))
+                .thenReturn(List.of(), List.of(cached));
+        when(persistenceService.toDto(cached)).thenReturn(dto(Audience.CHIP_MAKER));
+        when(planService.get()).thenReturn(new LlmSettingDTO.PlanResponse(
+                AgentPlan.FREE, true, PaidExhaustedAction.STUB));
+        when(quotaService.reserveInsight(any(), any(), any()))
+                .thenThrow(new IllegalStateException("another process completed"));
+
+        InsightDTO.Result result = service.create(new InsightDTO.CreateRequest(
+                "ISSUE", 88L, List.of("CHIP_MAKER")));
+
+        assertTrue(result.cached());
+        ArgumentCaptor<InsightAuditContext> audit = ArgumentCaptor.forClass(InsightAuditContext.class);
+        verify(runRecorder).recordInsightCacheHit(eq(42L), eq(88L), audit.capture(), any());
+        assertEquals("FULL", audit.getValue().cacheOutcome());
+        assertEquals(1, audit.getValue().selectedHistoryFindingCount());
+        assertEquals(0, audit.getValue().submittedHistoryFindingCount());
+        assertEquals(0, audit.getValue().generationAudienceCount());
+        assertFalse(audit.getValue().agentRequestIssued());
+        verifyNoInteractions(agentClient);
+        verify(quotaService, never()).completeSuccess(any(), any());
+    }
+
+    @Test
+    void cacheAuditFailureDoesNotFailCachedResultOrChargeQuota() {
+        NewsInsight cached = entity(Audience.CHIP_MAKER);
+        when(inputAssembler.assemble(88L)).thenReturn(snapshot());
+        when(persistenceService.findCached(any(), any(), any(), any(), anyCollection()))
+                .thenReturn(List.of(cached));
+        when(persistenceService.toDto(cached)).thenReturn(dto(Audience.CHIP_MAKER));
+        doThrow(new IllegalStateException("audit unavailable")).when(runRecorder)
+                .recordInsightCacheHit(any(), any(), any(), any());
+
+        assertTrue(service.create(new InsightDTO.CreateRequest(
+                "ISSUE", 88L, List.of("CHIP_MAKER"))).cached());
+
+        verifyNoInteractions(agentClient, quotaService, planService);
+    }
+
+    @Test
+    void preservesAgentErrorMetadataAndUsageSeparatelyFromConfiguredModel() {
+        properties.setFreeModel("configured-model");
+        AgentClientException.Usage usage = new AgentClientException.Usage(
+                120L, 20L, new BigDecimal("0.03"), BigDecimal.ZERO);
+        AgentClientException.ExecutionMetadata metadata = new AgentClientException.ExecutionMetadata(
+                "openai", "observed-model", properties.getInsightPromptVersion(), "AGENT_ERROR");
+        AgentClientException error = new AgentClientException("SCHEMA_VIOLATION", "invalid output",
+                null, usage, AgentClientException.TimeoutPhase.NONE, metadata);
+        prepareAgentFailure(error);
+
+        assertThrows(GeneralException.class, () -> service.create(new InsightDTO.CreateRequest(
+                "ISSUE", 88L, List.of("CHIP_MAKER"))));
+
+        ArgumentCaptor<InsightAuditContext> audit = ArgumentCaptor.forClass(InsightAuditContext.class);
+        verify(runRecorder).recordInsightFailure(eq(42L), eq(88L), any(), eq("SCHEMA_VIOLATION"),
+                eq("invalid output"), eq(usage), eq(null), audit.capture(), eq(metadata), any());
+        assertEquals("configured-model", audit.getValue().configuredModel());
+        assertEquals("MISS", audit.getValue().cacheOutcome());
+        assertTrue(audit.getValue().agentRequestIssued());
+        verify(quotaService).completeFailure(any(), eq(error));
+    }
+
+    @Test
+    void leavesUnobservedTimeoutUsageAndIdentityUnknownEvenWhenFailureAuditFails() {
+        AgentClientException error = new AgentClientException("PROVIDER_UNAVAILABLE", "read timeout",
+                null, null, AgentClientException.TimeoutPhase.READ);
+        prepareAgentFailure(error);
+        doThrow(new IllegalStateException("audit unavailable")).when(runRecorder)
+                .recordInsightFailure(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+
+        assertThrows(GeneralException.class, () -> service.create(new InsightDTO.CreateRequest(
+                "ISSUE", 88L, List.of("CHIP_MAKER"))));
+
+        verify(runRecorder).recordInsightFailure(eq(42L), eq(88L), any(), eq("PROVIDER_UNAVAILABLE"),
+                eq("read timeout"), eq(null),
+                eq(com.example.be.domain.analysis.agent.entity.AgentTimeoutPhase.READ),
+                any(InsightAuditContext.class), eq(null), any());
+        verify(quotaService).completeFailure(any(), eq(error));
+    }
+
+    private void prepareAgentFailure(AgentClientException error) {
+        when(inputAssembler.assemble(88L)).thenReturn(snapshot());
+        when(persistenceService.findCached(any(), any(), any(), any(), anyCollection()))
+                .thenReturn(List.of());
+        when(planService.get()).thenReturn(new LlmSettingDTO.PlanResponse(
+                AgentPlan.FREE, true, PaidExhaustedAction.STUB));
+        when(quotaService.reserveInsight(any(), any(), any())).thenReturn(new QuotaReservation(
+                1L, 42L, "reservation", AgentTask.INSIGHT, AgentPlan.FREE, BigDecimal.ONE));
+        when(agentClient.insight(any())).thenThrow(error);
     }
 
     @Test
@@ -422,6 +551,12 @@ class InsightServiceTest {
         verify(quotaService).completeFailure(
                 eq(reservation), any(AgentClientException.class));
         verify(persistenceService, never()).saveGenerated(any(), any(), any(), any(), any());
+        verify(runRecorder).recordInsightFailure(eq(42L), eq(88L), any(), eq("SCHEMA_VIOLATION"),
+                any(), eq(new AgentClientException.Usage(response.meta().inputTokens(),
+                        response.meta().outputTokens(), response.meta().costUsd(), response.meta().credits())),
+                eq(null), any(InsightAuditContext.class),
+                eq(new AgentClientException.ExecutionMetadata(response.meta().provider(),
+                        response.meta().model(), response.meta().promptVersion(), "RESPONSE")), any());
     }
 
     private AgentInsightResponse withInsight(AgentInsightResponse response,
