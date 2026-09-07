@@ -26,7 +26,7 @@ public class AgentProperties implements InitializingBean {
     private String analysisPromptVersion =
             "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2";
     private String freeAnalysisPromptVersion =
-            "analyze.ko.v9+perspective.ko.v1+sensitivity.ko.v2";
+            "analyze.ko.v10+perspective.ko.v1+sensitivity.ko.v2";
     private String insightPromptVersion = "insight.ko.v2+perspective.ko.v1";
     private String freeModel = "";
     private String paidModel = "";

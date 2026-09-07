@@ -9,7 +9,7 @@ from app.schemas.analyze import Audience
 
 AUDIENCE_ORDER = get_args(Audience)
 _AXES = ("customerMove", "dealSignal", "competitorThreat", "industryShift")
-ANALYZE_WIRE_VERSION = "analyze.ko.v9+perspective.ko.v1+sensitivity.ko.v2"
+ANALYZE_WIRE_VERSION = "analyze.ko.v10+perspective.ko.v1+sensitivity.ko.v2"
 EXPLORE_WIRE_VERSION = "explore.ko.v2"
 REPORT_WIRE_VERSION = "report.ko.v1.5"
 EVIDENCE_WIRE_VERSION = "evidence.ko.v3"
@@ -85,6 +85,7 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
     analysis = schema.get("title") == "AnalyzeOutput"
     if analysis:
         _constrain_analysis(schema)
+        _preserve_analysis_string_lengths(schema)
     results = schema.get("properties", {}).get("results", {})
     evidence_keys = (
         tuple(results["properties"])
@@ -115,6 +116,29 @@ def _object(properties: dict[str, Any]) -> dict[str, Any]:
         "required": list(properties),
         "additionalProperties": False,
     }
+
+
+def _preserve_analysis_string_lengths(node: Any) -> None:
+    # The SDK strips minLength/maxLength in strict mode. A supported pattern
+    # preserves those bounds and requests trimmed strings, matching AgentModel.
+    # Avoid lookarounds: the SDK also removes patterns that contain them.
+    if isinstance(node, list):
+        for child in node:
+            _preserve_analysis_string_lengths(child)
+    elif isinstance(node, dict):
+        minimum = node.get("minLength", 0)
+        maximum = node.get("maxLength")
+        if node.get("type") == "string" and minimum >= 1 and "pattern" not in node:
+            upper = "" if maximum is None else str(maximum - 2)
+            if maximum == 1:
+                pattern = r"^\S$"
+            elif minimum == 1:
+                pattern = rf"^\S(?:[\s\S]{{0,{upper}}}\S)?$"
+            else:
+                pattern = rf"^\S[\s\S]{{{minimum - 2},{upper}}}\S$"
+            node["pattern"] = pattern
+        for child in node.values():
+            _preserve_analysis_string_lengths(child)
 
 
 def _constrain_analysis(schema: dict[str, Any]) -> None:
