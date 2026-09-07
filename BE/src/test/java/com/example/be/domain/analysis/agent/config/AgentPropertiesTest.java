@@ -19,6 +19,9 @@ class AgentPropertiesTest {
         assertEquals(
                 "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2",
                 properties.getAnalysisPromptVersion());
+        assertEquals(
+                "analyze.ko.v7+perspective.ko.v1+sensitivity.ko.v2",
+                properties.getFreeAnalysisPromptVersion());
         assertEquals("insight.ko.v2+perspective.ko.v1", properties.getInsightPromptVersion());
         assertEquals(30, properties.getInsightHistory().getDays());
         assertEquals(6, properties.getInsightHistory().getLimit());

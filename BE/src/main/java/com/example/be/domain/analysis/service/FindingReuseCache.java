@@ -86,7 +86,8 @@ public class FindingReuseCache {
     }
 
     private Optional<CacheContract> contract(AgentPlan plan) {
-        String promptVersion = properties.getAnalysisPromptVersion();
+        String promptVersion = plan == AgentPlan.FREE
+                ? properties.getFreeAnalysisPromptVersion() : properties.getAnalysisPromptVersion();
         String model = plan == AgentPlan.FREE ? properties.getFreeModel() : properties.getPaidModel();
         if (!StringUtils.hasText(promptVersion) || !StringUtils.hasText(model)) {
             return Optional.empty();

@@ -11,6 +11,7 @@ from app.core.evidence import (
 from app.core.parser import parse_json_object
 from app.core.sentences import split_sentences_with_meta
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
+from app.llm.openai_contract import ANALYZE_WIRE_VERSION
 from app.llm.router import get_analyze_provider
 from app.llm.structured_call import structured_call
 from app.schemas.analyze import (
@@ -183,7 +184,9 @@ def _assembled_response(
         meta=ResponseMeta(
             provider=provider_response.provider,
             model=provider_response.model,
-            prompt_version=PROMPT_VERSION,
+            prompt_version=(
+                ANALYZE_WIRE_VERSION if provider_response.provider == "openai" else PROMPT_VERSION
+            ),
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
             cost_usd=float(usage.cost_usd),
