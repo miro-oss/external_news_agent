@@ -577,7 +577,7 @@ def test_live_eval_resumes_successful_analyses_from_checkpoint(
     assert len(saved["analyses"]) == 6
     assert saved["report"] is None
     assert saved["analyzePromptVersion"] == first.analyze_prompt_version
-    assert first.analyze_prompt_version == "analyze.ko.v7+perspective.ko.v1+sensitivity.ko.v2"
+    assert first.analyze_prompt_version == eval_runner.ANALYZE_WIRE_VERSION
 
     old_checkpoint = tmp_path / "old-contract.checkpoint.json"
     old_saved = {**saved, "analyzePromptVersion": eval_runner.ANALYZE_PROMPT_VERSION}
