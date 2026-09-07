@@ -99,6 +99,42 @@ class FindingReuseCacheTest {
     }
 
     @Test
+    void usesOpenAiV7AndPaidV6EvenWithLegacySharedConfiguration() {
+        AgentProperties defaults = new AgentProperties();
+        defaults.setAnalysisPromptVersion("analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2");
+        defaults.setFreeModel("gpt-4.1-nano");
+        defaults.setPaidModel("paid-model");
+        FindingReuseCache defaultCache = new FindingReuseCache(findingRepository, defaults);
+        Article article = article(10L, "본문");
+        String inputHash = FindingReuseCache.inputHash(article);
+
+        defaultCache.lookupAll(List.of(article), AgentPlan.FREE);
+        defaultCache.lookupAll(List.of(article), AgentPlan.PAID);
+
+        verify(findingRepository).findReusableSources(
+                Set.of(10L), AnalysisSource.LLM, Set.of(inputHash),
+                "analyze.ko.v7+perspective.ko.v1+sensitivity.ko.v2", "openai", "gpt-4.1-nano");
+        verify(findingRepository).findReusableSources(
+                Set.of(10L), AnalysisSource.LLM, Set.of(inputHash),
+                "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2", "mindlogic-claude", "paid-model");
+    }
+
+    @Test
+    void disablesOnlyFreeReuseWhenItsPromptContractIsNotConfigured() {
+        properties.setFreeAnalysisPromptVersion(" ");
+        Article article = article(10L, "본문");
+
+        FindingReuseCache.Lookup lookup = cache.lookupAll(List.of(article), AgentPlan.FREE).get(10L);
+
+        assertTrue(lookup.cached().isEmpty());
+        verifyNoInteractions(findingRepository);
+        cache.lookupAll(List.of(article), AgentPlan.PAID);
+        verify(findingRepository).findReusableSources(
+                Set.of(10L), AnalysisSource.LLM, Set.of(FindingReuseCache.inputHash(article)),
+                "analyze.ko.v1", "mindlogic-claude", "paid-model");
+    }
+
+    @Test
     void disablesReuseWhenCurrentModelIsNotConfigured() {
         properties.setFreeModel("");
         Article article = article(10L, "본문");
@@ -209,6 +245,7 @@ class FindingReuseCacheTest {
     private AgentProperties properties() {
         AgentProperties value = new AgentProperties();
         value.setAnalysisPromptVersion("analyze.ko.v1");
+        value.setFreeAnalysisPromptVersion("analyze.ko.v1");
         value.setFreeModel("free-model");
         value.setPaidModel("paid-model");
         return value;

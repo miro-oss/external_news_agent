@@ -17,6 +17,7 @@ from app.core.errors import AgentError
 from app.core.parser import parse_json_object
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.guarded_provider import run_guarded
+from app.llm.openai_contract import EXPLORE_WIRE_VERSION
 from app.llm.pydantic_ai_mindlogic import (
     MindlogicUsageOpenAIChatModel,
     extract_mindlogic_cost_usd,
@@ -212,7 +213,7 @@ def _response_meta(response: ProviderResponse, usage: ProviderUsage) -> Response
     return ResponseMeta(
         provider=response.provider,
         model=response.model,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=EXPLORE_WIRE_VERSION if response.provider == "openai" else PROMPT_VERSION,
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
         cost_usd=float(usage.cost_usd),

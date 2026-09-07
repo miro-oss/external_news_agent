@@ -37,6 +37,7 @@ from app.eval.scorer import (
 from app.llm.analyze_service import PROMPT_VERSION as ANALYZE_PROMPT_VERSION
 from app.llm.analyze_service import ArticleAnalyzeService
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
+from app.llm.openai_contract import ANALYZE_WIRE_VERSION
 from app.llm.report_service import PROMPT_VERSION as REPORT_PROMPT_VERSION
 from app.llm.report_service import ReportWriterService
 from app.llm.router import get_analyze_provider
@@ -277,6 +278,9 @@ def run_evaluation(
 
     source_settings = settings or Settings()
     execution_settings = source_settings.model_copy(update={"mock": False})
+    analyze_prompt_version = (
+        ANALYZE_WIRE_VERSION if profile == "live" and plan == "FREE" else ANALYZE_PROMPT_VERSION
+    )
     selected_live_policy = live_policy or default_live_policy(plan) if profile == "live" else None
     selected_claim_dataset = claim_dataset or load_claim_dataset(_DEFAULT_CLAIM_DATASET)
     selected_sensitivity_scoring = sensitivity_scoring or load_sensitivity_scoring_config()
@@ -292,7 +296,7 @@ def run_evaluation(
         LiveCheckpointStore(
             checkpoint_path,
             dataset=dataset,
-            analyze_prompt_version=ANALYZE_PROMPT_VERSION,
+            analyze_prompt_version=analyze_prompt_version,
             report_prompt_version=REPORT_PROMPT_VERSION,
             plan=plan,
             config=config.to_dict(),
@@ -471,7 +475,7 @@ def run_evaluation(
         dataset_version=dataset.version,
         baseline_prompt_version=dataset.baseline_prompt_version,
         claim_labels_version=selected_claim_dataset.version,
-        analyze_prompt_version=ANALYZE_PROMPT_VERSION,
+        analyze_prompt_version=analyze_prompt_version,
         report_prompt_version=REPORT_PROMPT_VERSION,
         profile=profile,
         plan=plan,
