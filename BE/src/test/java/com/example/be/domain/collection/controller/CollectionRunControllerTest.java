@@ -27,6 +27,7 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -90,6 +91,24 @@ class CollectionRunControllerTest {
                 .andExpect(jsonPath("$.result.runId").value(42))
                 .andExpect(jsonPath("$.result.targetTopicIds").doesNotExist())
                 .andExpect(jsonPath("$.result.targetCombinationCount").doesNotExist());
+    }
+
+    @Test
+    void startRunAcceptsOptionalDeliverySelectionWithoutChangingTheResponseEnvelope() throws Exception {
+        when(runCommandService.startManualRun(any())).thenReturn(new CollectionRunStartResult(GeneralSuccessCode.COLLECTION_QUEUED, createdRun()));
+        mockMvc.perform(post("/api/news/runs").contentType(MediaType.APPLICATION_JSON).content("""
+                {"topicIds":[1,2],"delivery":{"enabled":true,"mode":"TOPIC","run":false,"daily":true,
+                "groupIds":[3],"recipientIds":[7],"channelIds":[2]}}
+                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.result.runId").value(42));
+        var capture = org.mockito.ArgumentCaptor.forClass(CollectionRunReqDTO.Create.class);
+        verify(runCommandService).startManualRun(capture.capture());
+        var delivery = capture.getValue().getDelivery();
+        org.junit.jupiter.api.Assertions.assertEquals("TOPIC", delivery.getMode());
+        org.junit.jupiter.api.Assertions.assertEquals(Boolean.FALSE, delivery.getRun());
+        org.junit.jupiter.api.Assertions.assertEquals(Boolean.TRUE, delivery.getDaily());
+        org.junit.jupiter.api.Assertions.assertEquals(List.of(3L), delivery.getGroupIds());
     }
 
     @Test

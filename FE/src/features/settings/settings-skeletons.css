@@ -1,15 +1,8 @@
 .settings-skeleton-field {
   display: grid;
   align-content: start;
-  gap: .65rem;
+  gap: .45rem;
   min-width: 0;
-}
-
-.collection-run-skeleton,
-.collection-run-skeleton-content {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
 }
 
 .settings-skeleton-audience {
@@ -25,7 +18,7 @@
 }
 
 .settings-skeleton-run-button {
-  margin-top: 1.25rem;
+  margin-top: 0;
 }
 
 .settings-skeleton-topic-table td {
@@ -34,19 +27,23 @@
 }
 
 .settings-skeleton-proposal {
+  box-sizing: border-box;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: .65rem 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  padding: .85rem 1rem;
+  gap: .6rem;
   align-items: start;
 }
 
 .settings-skeleton-proposal-body {
   display: grid;
+  grid-template-rows: 1.5rem repeat(2, 1.65rem);
   gap: .4rem;
 }
 
 .settings-skeleton-keyword-row {
-  gap: .65rem;
+  gap: .35rem;
   overflow: hidden;
 }
 

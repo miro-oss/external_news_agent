@@ -43,6 +43,9 @@ public class CollectionRunController {
             description = """
                     수집 요청을 대기열에 저장합니다. topicIds를 주면 해당 주제만, 생략하면 활성화된 모든 주제를 대상으로 실행합니다.
                     응답은 PENDING으로 즉시 반환됩니다. 같은 주제는 순서대로, 다른 주제는 실행 상한 안에서 병렬 처리됩니다. 진행 상황은 수집 실행 상세 조회로 폴링합니다.
+                    delivery를 생략하면 기존 주제별 자동 전달 정책을 유지합니다. ONCE는 이번 실행만, TOPIC은 실제 실행 대상 주제의 이후 정책까지 적용합니다.
+                    전달 설정과 그룹을 펼친 수신 대상·주소는 실행 접수와 같은 트랜잭션에 저장합니다. 같은 idempotencyKey로 기존 실행을 반환할 때 전달 설정을 변경하지 않습니다.
+                    delivery.enabled=false는 해당 실행의 자동 전달을 막으며 TOPIC이면 선택된 주제 정책도 끕니다. daily=true는 같은 날 다른 주제도 포함하는 일일 통합 보고서 전달입니다.
                     """
     )
     @ApiResponses({
@@ -84,12 +87,33 @@ public class CollectionRunController {
                             """))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "400",
-                    description = "대상 조합이 하나도 없는 경우",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                    description = "대상 조합이 없거나 전달 설정이 올바르지 않은 경우",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = {
+                            @ExampleObject(name = "실행 대상 없음", value = """
                             {
                               "isSuccess": false,
                               "code": "RUN400",
                               "message": "실행할 수집 조합이 없습니다. 주제에 소스를 연결해 주세요.",
+                              "result": {}
+                            }
+                            """),
+                            @ExampleObject(name = "연결된 전달 대상 없음", value = """
+                            {
+                              "isSuccess": false,
+                              "code": "COMMON400",
+                              "message": "선택한 대상에 연결된 수신 채널이 없습니다.",
+                              "result": {}
+                            }
+                            """)
+                    })),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "404",
+                    description = "선택한 그룹·수신자·채널을 찾을 수 없거나 그룹·채널이 비활성인 경우",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                            {
+                              "isSuccess": false,
+                              "code": "GROUP404",
+                              "message": "수신 그룹을 찾을 수 없습니다.",
                               "result": {}
                             }
                             """)))

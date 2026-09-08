@@ -10,6 +10,7 @@ export type DeliveryPolicy = {
   recipientIds: number[]
   channelIds: number[]
 }
+export type CollectionRunDelivery = DeliveryPolicy & { mode: 'ONCE' | 'TOPIC' }
 export type TelegramConnection = { status: 'CONNECTED' | 'WAITING' | 'EXPIRED' | 'DISCONNECTED'; expiresAt: string | null }
 export type TelegramLink = { url: string; expiresAt: string }
 export type AutoDelivery = { id: number; recipientName: string; channelType: string; status: string; attempts: number; message: string | null }

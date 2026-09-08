@@ -92,9 +92,7 @@ export function TopicForm() {
       </div>
 
       <div className="field">
-        <label htmlFor="topic-query">
-          검색 키워드
-        </label>
+        <label htmlFor="topic-query">검색 키워드</label>
         <input
           id="topic-query"
           value={form.queryText}
@@ -106,11 +104,10 @@ export function TopicForm() {
           pattern={'.*\\S.*'}
           title="검색 키워드를 입력하세요."
           aria-invalid={queryMissing || undefined}
-          aria-describedby="topic-query-hint"
+          aria-describedby={queryMissing ? 'topic-query-hint topic-query-error' : 'topic-query-hint'}
         />
-        {queryMissing
-          ? <p className="error" id="topic-query-hint">검색 키워드를 입력해 주세요.</p>
-          : <p className="hint" id="topic-query-hint">공백이나 쉼표로 구분합니다. 기본적으로 입력한 키워드를 모두 포함한 기사를 모읍니다.</p>}
+        <p id="topic-query-hint" className="topic-query-hint">공백·쉼표로 구분</p>
+        {queryMissing && <p className="error" id="topic-query-error">검색 키워드를 입력해 주세요.</p>}
       </div>
 
       <div className="topic-advanced">
@@ -142,30 +139,29 @@ export function TopicForm() {
         )}
       </div>
 
-      <div className="field">
-        {/*
-          #70에서는 이 두 칸이 뜻을 알 수 없다는 말에 숫자 입력 옆에 설명을 붙였는데, #76이
-          아예 고를 것을 줄여 버렸다. 설명이 필요 없게 만든 쪽이 낫다 — 수집 건수는 화면에서
-          빠졌고 주기는 정해진 보기 중에서 고른다. #76 것을 그대로 쓴다.
-        */}
-        <label htmlFor="topic-interval">수집 주기</label>
-        <select
-          id="topic-interval"
-          value={form.intervalMinutes}
-          onChange={(event) => update('intervalMinutes', event.target.value)}
-        >
-          {COLLECTION_INTERVALS.map((interval) => (
-            <option key={interval.value} value={interval.value}>
-              {interval.label}
-            </option>
-          ))}
-        </select>
-        <p className="hint">
-          새로운 기사를 확인할 주기입니다. 수집 건수는 검색 결과와 중복 여부에 맞춰 시스템이 관리합니다.
-        </p>
-      </div>
-
       <div className="topic-form-footer">
+        <div className="field">
+          {/*
+            #70에서는 이 두 칸이 뜻을 알 수 없다는 말에 숫자 입력 옆에 설명을 붙였는데, #76이
+            아예 고를 것을 줄여 버렸다. 설명이 필요 없게 만든 쪽이 낫다 — 수집 건수는 화면에서
+            빠졌고 주기는 정해진 보기 중에서 고른다. #76 것을 그대로 쓴다.
+          */}
+          <label htmlFor="topic-interval">수집 주기</label>
+          <select
+            id="topic-interval"
+            value={form.intervalMinutes}
+            onChange={(event) => update('intervalMinutes', event.target.value)}
+          >
+            {COLLECTION_INTERVALS.map((interval) => (
+              <option key={interval.value} value={interval.value}>
+                {interval.label}
+              </option>
+            ))}
+          </select>
+          <p className="hint">
+            새 기사를 확인하는 주기입니다.
+          </p>
+        </div>
         {sources.isPending && <TopicSourcesSkeleton />}
         {sources.isError && <p className="error">활성 수집 소스를 불러오지 못했습니다.</p>}
         {!sources.isPending && !sources.isError && activeSources.length === 0 && (

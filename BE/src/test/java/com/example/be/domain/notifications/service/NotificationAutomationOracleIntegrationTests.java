@@ -36,6 +36,56 @@ class NotificationAutomationOracleIntegrationTests {
     @Autowired ReportDeliveryOutboxStore outbox;
     @Autowired TelegramConnectionService connections;
     @Autowired NotificationManagementService management;
+    @Autowired CollectionRunDeliveryService runDelivery;
+    @Autowired RunDeliverySnapshotStore runSnapshots;
+
+    @Test
+    void oneTimeDeliverySurvivesReloadAndLaterPolicyAndGroupEdits() {
+        var topic = topic(); var run = run(topic);
+        var original = recipient(true); var replacement = recipient(true);
+        var group = NotificationGroup.builder().name("접수 스냅샷 그룹 " + System.nanoTime()).active(true)
+                .members(new ArrayList<>(List.of(original))).createdAt(now()).build();
+        em.persist(group); em.flush();
+        var selection = new com.example.be.domain.collection.dto.req.CollectionRunReqDTO.Delivery();
+        selection.setMode("ONCE"); selection.setEnabled(true); selection.setGroupIds(List.of(group.getId()));
+        selection.setChannelIds(List.of(2L));
+        runDelivery.save(run.getId(), List.of(topic.getId()), runDelivery.prepare(selection));
+        String originalAddress = original.getDestinations().getFirst().getAddress();
+        group.getMembers().clear(); group.getMembers().add(replacement);
+        automation.savePolicy(topic.getId(), new ReportNotificationAutomationService.Policy(true, true, true,
+                List.of(), List.of(replacement.getId()), List.of(2L)));
+        em.flush(); em.clear();
+
+        var reloaded = new RunDeliverySnapshotStore(jdbc).find(run.getId()).orElseThrow();
+        assertEquals(List.of(original.getId()), reloaded.targets().stream().map(RunDeliverySnapshotStore.Target::recipientId).toList());
+        assertEquals(originalAddress, reloaded.targets().getFirst().address());
+        var reserved = reports.reserve(run.getId(), now());
+        reports.complete(reserved.reportId(), new ReportDocument("한 번만 전달", "## 핵심 요약\n접수 당시 선택", "fallback"), now());
+        assertEquals(1, outbox.deliveries(reserved.reportId()).size());
+        assertEquals(original.getId(), jdbc.queryForObject("SELECT recipient_id FROM report_notification_outbox WHERE report_id=?", Long.class, reserved.reportId()));
+        assertEquals(originalAddress, jdbc.queryForObject("SELECT address FROM report_notification_outbox WHERE report_id=?", String.class, reserved.reportId()));
+    }
+
+    @Test
+    void explicitRunOffDoesNotChangeTopicPolicyAndSuppressesBothReportScopes() {
+        var topic = topic(); var run = run(topic); var recipient = recipient(true);
+        var existing = new ReportNotificationAutomationService.Policy(true, true, true, List.of(), List.of(recipient.getId()), List.of(2L));
+        automation.savePolicy(topic.getId(), existing);
+        var selection = new com.example.be.domain.collection.dto.req.CollectionRunReqDTO.Delivery();
+        selection.setMode("ONCE"); selection.setEnabled(false);
+        runDelivery.save(run.getId(), List.of(topic.getId()), runDelivery.prepare(selection));
+        em.flush(); em.clear();
+        assertEquals(existing, automation.policy(topic.getId()));
+        assertFalse(runSnapshots.find(run.getId()).orElseThrow().enabled());
+        var reserved = reports.reserve(run.getId(), now());
+        reports.complete(reserved.reportId(), new ReportDocument("전달 안 함", "## 요약\n저장만 합니다.", "fallback"), now());
+        assertTrue(outbox.deliveries(reserved.reportId()).isEmpty());
+        var daily = NewsReport.builder().title("일일 통합").markdownBody("요약").modelName("fallback")
+                .reportStatus(ReportStatus.FALLBACK).reportScope(ReportScope.DAILY)
+                .reportDate(java.time.LocalDate.of(1997, 2, 5)).sourceRunIds(List.of(run.getId())).generatedAt(now()).build();
+        em.persist(daily); em.flush(); automation.enqueueCompletedReport(daily);
+        assertTrue(outbox.deliveries(daily.getId()).isEmpty());
+    }
 
     @Test void reportCompletionQueuesOnceAcrossGroupAndIndividualThenRetriesOnlyFailure() {
         var topic=topic(); var run=run(topic);

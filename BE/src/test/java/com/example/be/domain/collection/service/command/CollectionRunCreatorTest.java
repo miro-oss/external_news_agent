@@ -6,6 +6,9 @@ import com.example.be.domain.collection.entity.*;
 import com.example.be.domain.collection.exception.RunException;
 import com.example.be.domain.collection.exception.code.RunErrorCode;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.notifications.service.CollectionRunDeliveryService;
+import com.example.be.domain.notifications.service.RunDeliverySnapshotStore;
+import com.example.be.domain.notifications.service.ReportNotificationAutomationService;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
@@ -17,6 +20,11 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -30,6 +38,7 @@ import static org.mockito.Mockito.*;
 class CollectionRunCreatorTest {
     @Mock private TopicRepository topicRepository;
     @Mock private CollectionRunRepository runRepository;
+    @Mock private CollectionRunDeliveryService delivery;
     @InjectMocks private CollectionRunCreator creator;
 
     @Test
@@ -66,11 +75,72 @@ class CollectionRunCreatorTest {
         when(runRepository.findInProgressByOptionalIdempotencyKey("same", RunStatus.IN_PROGRESS_STATUSES))
                 .thenReturn(Optional.of(CollectionRun.builder().id(5L).status(RunStatus.PENDING)
                         .triggerType(TriggerType.MANUAL).idempotencyKey("same").build()));
-        var result = creator.create(request(List.of(1L)), "same", AgentPlan.FREE);
+        var replay = request(List.of(1L));
+        replay.setDelivery(new CollectionRunReqDTO.Delivery());
+        var result = creator.create(replay, "same", AgentPlan.FREE);
         assertEquals(GeneralSuccessCode.COLLECTION_ALREADY_RUNNING, result.successCode());
         assertEquals(5L, result.response().getRunId());
         assertEquals("PENDING", result.response().getStatus());
         verify(runRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(delivery);
+    }
+
+    @Test
+    void validatesDeliveryBeforeCreatingRunAndSavesTheSnapshotInsideItsCreationBoundary() {
+        var request = request(List.of(1L));
+        request.setDelivery(new CollectionRunReqDTO.Delivery());
+        var prepared = new CollectionRunDeliveryService.Prepared(
+                new ReportNotificationAutomationService.Policy(false, true, false, List.of(), List.of(), List.of()),
+                new RunDeliverySnapshotStore.Snapshot("ONCE", false, true, false, List.of()));
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L))).thenReturn(List.of(target(1L)));
+        when(delivery.prepare(request.getDelivery())).thenReturn(prepared);
+        when(runRepository.saveAndFlush(any())).thenReturn(CollectionRun.builder().id(42L).status(RunStatus.PENDING).triggerType(TriggerType.MANUAL).build());
+
+        creator.create(request, "delivery", AgentPlan.FREE);
+
+        var order = inOrder(delivery, runRepository);
+        order.verify(runRepository).findInProgressByOptionalIdempotencyKey("delivery", RunStatus.IN_PROGRESS_STATUSES);
+        order.verify(delivery).prepare(request.getDelivery());
+        order.verify(runRepository).saveAndFlush(any());
+        order.verify(delivery).save(42L, List.of(1L), prepared);
+    }
+
+    @Test
+    void failedDeliveryValidationDoesNotCreateAQueuedRun() {
+        var request = request(List.of(1L));
+        request.setDelivery(new CollectionRunReqDTO.Delivery());
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L))).thenReturn(List.of(target(1L)));
+        when(delivery.prepare(request.getDelivery())).thenThrow(new IllegalArgumentException("invalid selection"));
+        assertThrows(IllegalArgumentException.class, () -> creator.create(request, "invalid-delivery", AgentPlan.FREE));
+        verify(runRepository, never()).saveAndFlush(any());
+        verify(delivery, never()).save(any(), any(), any());
+    }
+
+    @Test
+    void snapshotFailureRollsBackTheCreationTransactionInsteadOfCommittingTheRun() {
+        var request = request(List.of(1L));
+        request.setDelivery(new CollectionRunReqDTO.Delivery());
+        var prepared = new CollectionRunDeliveryService.Prepared(
+                new ReportNotificationAutomationService.Policy(false, true, false, List.of(), List.of(), List.of()),
+                new RunDeliverySnapshotStore.Snapshot("TOPIC", false, true, false, List.of()));
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L))).thenReturn(List.of(target(1L)));
+        when(delivery.prepare(request.getDelivery())).thenReturn(prepared);
+        when(runRepository.saveAndFlush(any())).thenReturn(CollectionRun.builder().id(42L).status(RunStatus.PENDING).build());
+        doThrow(new DataIntegrityViolationException("snapshot failure")).when(delivery).save(42L, List.of(1L), prepared);
+        var transactions = mock(PlatformTransactionManager.class);
+        var status = new SimpleTransactionStatus();
+        when(transactions.getTransaction(any())).thenReturn(status);
+        var proxy = new ProxyFactory(creator);
+        var transactionAdvice = new TransactionInterceptor();
+        transactionAdvice.setTransactionManager(transactions);
+        transactionAdvice.setTransactionAttributeSource(new AnnotationTransactionAttributeSource());
+        proxy.addAdvice(transactionAdvice);
+
+        assertThrows(DataIntegrityViolationException.class,
+                () -> ((CollectionRunCreator) proxy.getProxy()).create(request, "atomic-delivery", AgentPlan.FREE));
+
+        verify(transactions).rollback(status);
+        verify(transactions, never()).commit(any());
     }
 
     @Test

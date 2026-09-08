@@ -178,7 +178,7 @@ class TopicCommandServiceImplTest {
         request.setIntervalMinutes(720);
 
         Topic topic = existingTopic();
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
 
         TopicResDTO.Updated result = topicCommandService.updateTopic(1L, request);
 
@@ -196,7 +196,7 @@ class TopicCommandServiceImplTest {
     void updateTopicClearsKeywordsOnEmptyArray() {
         TopicReqDTO.Update request = new TopicReqDTO.Update();
         request.setRequiredKeywords(List.of());
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(existingTopic()));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(existingTopic()));
 
         TopicResDTO.Updated result = topicCommandService.updateTopic(1L, request);
 
@@ -207,7 +207,7 @@ class TopicCommandServiceImplTest {
     void updateTopicRejectsDuplicatedName() {
         TopicReqDTO.Update request = new TopicReqDTO.Update();
         request.setName("DRAM");
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(existingTopic()));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(existingTopic()));
         when(topicRepository.existsByNameAndIdNot("DRAM", 1L)).thenReturn(true);
 
         TopicException exception = assertThrows(TopicException.class,
@@ -218,7 +218,7 @@ class TopicCommandServiceImplTest {
 
     @Test
     void updateTopicRejectsMissingTopic() {
-        when(topicRepository.findById(99L)).thenReturn(Optional.empty());
+        when(topicRepository.lockByIds(List.of(99L))).thenReturn(List.of());
 
         TopicException exception = assertThrows(TopicException.class,
                 () -> topicCommandService.updateTopic(99L, new TopicReqDTO.Update()));
@@ -233,7 +233,7 @@ class TopicCommandServiceImplTest {
 
         assertEquals("COMMON400", exception.getCode().getCode());
         assertEquals("active 값은 필수입니다.", exception.getMessage());
-        verify(topicRepository, never()).findById(any());
+        verify(topicRepository, never()).lockByIds(any());
     }
 
     @Test
@@ -241,7 +241,7 @@ class TopicCommandServiceImplTest {
         TopicReqDTO.Activation request = new TopicReqDTO.Activation();
         request.setActive(false);
         Topic topic = existingTopic();
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
 
         TopicResDTO.Activated result = topicCommandService.updateActivation(1L, request);
 
@@ -255,7 +255,7 @@ class TopicCommandServiceImplTest {
     void replaceSourcesReportsAddedAndRemovedCounts() {
         Topic topic = existingTopic();
         topic.replaceSources(List.of(feedSource()));
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
         when(sourceRepository.findAllById(List.of(2L))).thenReturn(List.of(searchSource()));
 
         TopicResDTO.SourcesLinked result = topicCommandService.replaceSources(1L, sourceLink(List.of(2L)));
@@ -271,7 +271,7 @@ class TopicCommandServiceImplTest {
     void replaceSourcesCountsKeptSourceAsNeitherAddedNorRemoved() {
         Topic topic = existingTopic();
         topic.replaceSources(List.of(feedSource()));
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
         when(sourceRepository.findAllById(List.of(1L, 2L))).thenReturn(List.of(feedSource(), searchSource()));
 
         TopicResDTO.SourcesLinked result = topicCommandService.replaceSources(1L, sourceLink(List.of(1L, 2L)));
@@ -285,7 +285,7 @@ class TopicCommandServiceImplTest {
     void replaceSourcesClearsAllLinksOnEmptyArray() {
         Topic topic = existingTopic();
         topic.replaceSources(List.of(feedSource(), searchSource()));
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
 
         TopicResDTO.SourcesLinked result = topicCommandService.replaceSources(1L, sourceLink(List.of()));
 
@@ -298,7 +298,7 @@ class TopicCommandServiceImplTest {
 
     @Test
     void replaceSourcesRejectsOmittedSourceIds() {
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(existingTopic()));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(existingTopic()));
 
         GeneralException exception = assertThrows(GeneralException.class,
                 () -> topicCommandService.replaceSources(1L, new TopicReqDTO.SourceLink()));
@@ -312,7 +312,7 @@ class TopicCommandServiceImplTest {
     void replaceSourcesRejectsNullSourceId() {
         Topic topic = existingTopic();
         topic.replaceSources(List.of(feedSource()));
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
 
         GeneralException exception = assertThrows(GeneralException.class,
                 () -> topicCommandService.replaceSources(1L, sourceLink(Arrays.asList(1L, null))));
@@ -325,7 +325,7 @@ class TopicCommandServiceImplTest {
     @Test
     void replaceSourcesRejectsUnknownSourceId() {
         Topic topic = existingTopic();
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
         when(sourceRepository.findAllById(List.of(1L, 99L))).thenReturn(List.of(feedSource()));
 
         TopicException exception = assertThrows(TopicException.class,
@@ -344,7 +344,7 @@ class TopicCommandServiceImplTest {
                 .intervalMinutes(60)
                 .active(true)
                 .build();
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
         when(sourceRepository.findAllById(List.of(2L))).thenReturn(List.of(searchSource()));
 
         TopicException exception = assertThrows(TopicException.class,
@@ -355,7 +355,7 @@ class TopicCommandServiceImplTest {
 
     @Test
     void replaceSourcesRejectsMissingTopic() {
-        when(topicRepository.findById(99L)).thenReturn(Optional.empty());
+        when(topicRepository.lockByIds(List.of(99L))).thenReturn(List.of());
 
         TopicException exception = assertThrows(TopicException.class,
                 () -> topicCommandService.replaceSources(99L, sourceLink(List.of(1L))));
@@ -371,7 +371,7 @@ class TopicCommandServiceImplTest {
     void deleteTopicUnlinksSourcesAndDeactivatesInsteadOfRemovingRow() {
         Topic topic = existingTopic();
         topic.replaceSources(List.of(feedSource(), searchSource()));
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
         when(collectionRunRepository.findInProgressByTopicIds(any(), any())).thenReturn(List.of());
 
         TopicResDTO.Deleted result = topicCommandService.deleteTopic(1L);
@@ -385,7 +385,7 @@ class TopicCommandServiceImplTest {
 
     @Test
     void deleteTopicRejectsMissingTopic() {
-        when(topicRepository.findById(99L)).thenReturn(Optional.empty());
+        when(topicRepository.lockByIds(List.of(99L))).thenReturn(List.of());
 
         TopicException exception = assertThrows(TopicException.class,
                 () -> topicCommandService.deleteTopic(99L));
@@ -400,7 +400,7 @@ class TopicCommandServiceImplTest {
     @Test
     void deleteTopicRejectsWhileCollecting() {
         Topic topic = existingTopic();
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
         when(collectionRunRepository.findInProgressByTopicIds(any(), any()))
                 .thenReturn(List.of(CollectionRun.builder().build()));
 
@@ -428,7 +428,7 @@ class TopicCommandServiceImplTest {
     void updateTopicDropsNullAndBlankKeywords() {
         TopicReqDTO.Update request = new TopicReqDTO.Update();
         request.setRequiredKeywords(Arrays.asList("HBM", null, " "));
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(existingTopic()));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(existingTopic()));
 
         TopicResDTO.Updated result = topicCommandService.updateTopic(1L, request);
 
@@ -439,7 +439,7 @@ class TopicCommandServiceImplTest {
     void updateTopicSkipsDuplicateCheckWhenNameIsUnchanged() {
         TopicReqDTO.Update request = new TopicReqDTO.Update();
         request.setName("HBM");
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(existingTopic()));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(existingTopic()));
 
         TopicResDTO.Updated result = topicCommandService.updateTopic(1L, request);
 
@@ -453,7 +453,7 @@ class TopicCommandServiceImplTest {
         request.setQueryText("  ");
         Topic topic = existingTopic();
         topic.replaceSources(List.of(searchSource()));
-        when(topicRepository.findById(1L)).thenReturn(Optional.of(topic));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
 
         TopicException exception = assertThrows(TopicException.class,
                 () -> topicCommandService.updateTopic(1L, request));

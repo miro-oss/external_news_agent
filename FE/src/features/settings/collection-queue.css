@@ -1,8 +1,16 @@
 .settings-page .settings-top-row {
-  --settings-top-card-height: 32rem;
+  --settings-top-card-height: 36rem;
+  --settings-control-height: 3.25rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
   gap: 1rem;
+  row-gap: 1.4rem;
+  margin-bottom: 1.4rem;
+}
+
+/* Only the row owns outside spacing; the taller card can change independently. */
+.settings-page .settings-top-row > * {
+  margin-bottom: 0;
 }
 
 .settings-page .collection-run-panel,
@@ -22,6 +30,14 @@
   border: 1px solid var(--line);
 }
 
+.settings-page .collection-run-panel {
+  justify-content: space-between;
+}
+
+.collection-run-top {
+  min-width: 0;
+}
+
 .topic-registration-heading h2 {
   margin-bottom: .3rem;
 }
@@ -31,21 +47,33 @@
 }
 
 .settings-page .topic-registration-card > form {
-  display: grid;
+  display: flex;
   flex: 1;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: auto auto auto minmax(min-content, 1fr);
-  align-content: start;
-  gap: 1rem;
+  flex-direction: column;
+  gap: .75rem;
 }
 
 .settings-page .topic-registration-card > form > * {
-  grid-column: 1 / -1;
+  flex: none;
+  width: 100%;
   min-width: 0;
 }
 
-.settings-page .topic-registration-card > form > .field:nth-child(-n + 2) {
-  grid-column: auto;
+.settings-page .topic-registration-card :is(input, select, .topic-advanced-toggle),
+.settings-page .collection-run-controls select,
+.settings-page .collection-topic-picker .group-recipient-trigger {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--settings-control-height);
+}
+
+.topic-query-hint {
+  margin: .3rem 0 0;
+  color: var(--fg-3);
+  font-size: .72rem;
+  line-height: 1.5;
 }
 
 .settings-page .topic-registration-card > form > .field,
@@ -57,6 +85,12 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+  margin-top: auto;
+  gap: 0.85rem;
+}
+
+.settings-page .topic-registration-card .topic-form-footer > * {
+  margin: 0;
 }
 
 .settings-page .topic-registration-card .topic-form-footer > button[type='submit'] {
@@ -66,19 +100,16 @@
   font-size: 1rem;
 }
 
-.settings-page .topic-registration-card .topic-form-footer > .error:first-child {
-  margin: 0 0 .75rem;
-}
-
 .settings-page .collection-run-controls {
   grid-template-columns: 8.5rem minmax(0, 1fr);
   align-items: start;
   gap: 1.25rem;
 }
 
-.collection-topic-picker {
+.settings-page .collection-topic-picker {
   box-sizing: border-box;
   grid-template-columns: minmax(0, 1fr);
+  gap: .45rem;
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -88,14 +119,6 @@
   color: var(--fg-2);
   font-size: .86rem;
   font-weight: 600;
-}
-
-.collection-topic-picker .group-recipient-trigger {
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  height: 3.25rem;
 }
 
 .collection-topic-picker :is(.group-recipient-value, .group-recipient-placeholder) {
@@ -110,9 +133,28 @@
   opacity: .7;
 }
 
+.collection-run-summary {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .collection-run-footer {
-  margin-top: auto;
-  padding-top: 1.5rem;
+  margin-top: 0;
+  padding-top: 1rem;
+}
+
+.settings-page .run-audience-setting {
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+.collection-run-footer .collection-run-button {
+  margin-top: 0;
+}
+
+.collection-run-usage {
+  margin-top: 1rem;
 }
 
 .run-usage-summary {
@@ -121,7 +163,7 @@
   justify-content: space-between;
   gap: .75rem;
   min-height: 1.5rem;
-  padding-top: 1rem;
+  padding-top: .75rem;
   border-top: 1px solid var(--line);
   color: var(--fg-3);
   font-size: .78rem;
@@ -142,7 +184,7 @@
 
 @media (min-width: 901px) and (max-width: 1100px) {
   .settings-page .settings-top-row {
-    --settings-top-card-height: 35rem;
+    --settings-top-card-height: 37rem;
   }
 }
 
@@ -154,13 +196,8 @@
 }
 
 @media (max-width: 600px) {
-  .settings-page .collection-run-controls,
-  .settings-page .topic-registration-card > form {
+  .settings-page .collection-run-controls {
     grid-template-columns: minmax(0, 1fr);
     gap: 1rem;
-  }
-
-  .settings-page .topic-registration-card > form {
-    grid-template-rows: none;
   }
 }

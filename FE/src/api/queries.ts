@@ -16,6 +16,7 @@ import {
 import { saveRecipientEmail } from '../lib/recipientEmail'
 import { cacheDeletedNotificationRecipient, notificationRecipientsKey } from './notificationRecipientCache'
 import { cacheDeletedNotificationGroup, notificationGroupsKey } from './notificationGroupCache'
+import type { CollectionRunDelivery } from './notificationConnections'
 import type {
   ArticleDetail,
   ArticleFilters,
@@ -180,10 +181,14 @@ export function useCreateTopic() {
 
 export function useSetTopicActivation() {
   const refresh = useRefreshOnSuccess()
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ topicId, active }: { topicId: number; active: boolean }) =>
       patch<TopicActivation>(`/topics/${topicId}/activation`, { active }),
-    onSuccess: refresh,
+    onSuccess: async () => {
+      refresh()
+      await queryClient.invalidateQueries({ queryKey: ['topic-keyword-proposals'] })
+    },
   })
 }
 
@@ -420,13 +425,22 @@ export function useReplaceRecipientDestinations() {
 
 export function useCreateNotificationGroup() {
   const refresh = useRefreshNotifications()
+  const client = useQueryClient()
   return useMutation({
     mutationFn: (body: {
       name: string
       perspective?: GroupPerspective
       recipientIds: number[]
     }) => notificationPost<NotificationGroup>('/groups', body),
-    onSuccess: refresh,
+    onSuccess: async group => {
+      await client.cancelQueries({ queryKey: keys.notificationGroups })
+      client.setQueryData<PageResult<NotificationGroup>>(keys.notificationGroups, previous => previous && {
+        ...previous,
+        content: [group, ...previous.content.filter(item => item.id !== group.id)],
+        totalElements: previous.totalElements + (previous.content.some(item => item.id === group.id) ? 0 : 1),
+      })
+      refresh()
+    },
   })
 }
 
@@ -513,16 +527,18 @@ export function useUpdateAudienceSetting() {
 export function useStartCollectionRun() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (request: { idempotencyKey: string; topicIds?: number[]; plan?: LlmPlan }) =>
+    mutationFn: (request: { idempotencyKey: string; topicIds?: number[]; plan?: LlmPlan; delivery?: CollectionRunDelivery }) =>
       post<CollectionRunCreated>('/runs', {
         idempotencyKey: request.idempotencyKey,
         // 빈 배열을 그대로 보내면 서버가 "전체 활성 주제"로 읽는다.
         ...(request.topicIds?.length ? { topicIds: request.topicIds } : {}),
         ...(request.plan ? { plan: request.plan } : {}),
+        ...(request.delivery ? { delivery: request.delivery } : {}),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.llmUsage })
       void queryClient.invalidateQueries({ queryKey: ['collection-queue'] })
+      void queryClient.invalidateQueries({ queryKey: ['delivery-policy'] })
     },
   })
 }

@@ -1,6 +1,7 @@
 package com.example.be.domain.topics.entity;
 
 import com.example.be.domain.topics.converter.TopicKeywordChangeListConverter;
+import com.example.be.domain.topics.converter.TopicKeywordAppliedChangeListConverter;
 import com.example.be.global.converter.StringListJsonConverter;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
@@ -62,6 +63,11 @@ public class TopicKeywordProposal {
     @Column(name = "changes_json", nullable = false)
     private List<TopicKeywordChange> changes;
 
+    @Convert(converter = TopicKeywordAppliedChangeListConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "applied_changes_json")
+    private List<TopicKeywordAppliedChange> appliedChanges;
+
     @Builder.Default
     @Convert(converter = StringListJsonConverter.class)
     @JdbcTypeCode(SqlTypes.CLOB)
@@ -100,9 +106,10 @@ public class TopicKeywordProposal {
                 && normalized(baselineExcludedKeywords).equals(normalized(topic.getExcludedKeywords()));
     }
 
-    public void approve(LocalDateTime reviewedAt) {
+    public void approve(LocalDateTime reviewedAt, List<TopicKeywordAppliedChange> appliedChanges) {
         this.status = TopicKeywordProposalStatus.APPROVED;
         this.reviewedAt = reviewedAt;
+        this.appliedChanges = List.copyOf(appliedChanges);
     }
 
     public void reject(LocalDateTime reviewedAt) {

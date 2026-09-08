@@ -11,6 +11,7 @@ import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.exception.RunException;
 import com.example.be.domain.collection.exception.code.RunErrorCode;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.notifications.service.CollectionRunDeliveryService;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
@@ -45,6 +46,7 @@ public class CollectionRunCreator {
 
     private final TopicRepository topicRepository;
     private final CollectionRunRepository runRepository;
+    private final CollectionRunDeliveryService delivery;
 
     @Transactional
     public CollectionRunStartResult create(CollectionRunReqDTO.Create request,
@@ -73,6 +75,8 @@ public class CollectionRunCreator {
                     CollectionRunConverter.toAlreadyRunning(alreadyRunning.get()));
         }
 
+        var preparedDelivery = request.getDelivery() == null ? null : delivery.prepare(request.getDelivery());
+
         CollectionRun run = CollectionRun.builder()
                 .status(RunStatus.PENDING)
                 .triggerType(TriggerType.MANUAL)
@@ -93,6 +97,7 @@ public class CollectionRunCreator {
         });
 
         CollectionRun saved = saveRun(run);
+        if (preparedDelivery != null) delivery.save(saved.getId(), targetTopicIds, preparedDelivery);
 
         return new CollectionRunStartResult(
                 GeneralSuccessCode.COLLECTION_QUEUED,

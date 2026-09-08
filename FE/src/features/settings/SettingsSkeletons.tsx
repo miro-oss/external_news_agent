@@ -3,24 +3,29 @@ import './settings-skeletons.css'
 
 export function CollectionRunSkeleton() {
   return (
-    <section className="collection-run-panel" aria-labelledby="collection-run-title">
-      <div className="collection-run-heading">
-        <div>
-          <h2 id="collection-run-title">수집 실행</h2>
-          <p className="muted">주제를 여러 개 골라 한 번에 수집할 수 있습니다.</p>
+    <section className="collection-run-panel" aria-labelledby="collection-run-title" aria-busy="true">
+      <div className="collection-run-top">
+        <div className="collection-run-heading">
+          <div>
+            <h2 id="collection-run-title">수집 실행</h2>
+            <p className="muted">주제를 여러 개 골라 한 번에 수집할 수 있습니다.</p>
+          </div>
         </div>
+        <SkeletonRegion label="수집 실행 정보를 불러오는 중" contentClassName="collection-run-controls">
+          <SettingFieldSkeleton />
+          <SettingFieldSkeleton />
+        </SkeletonRegion>
       </div>
-      <SkeletonRegion label="수집 실행 정보를 불러오는 중" className="collection-run-skeleton" contentClassName="collection-run-skeleton-content">
-        <div className="collection-run-controls">
-          <SettingFieldSkeleton />
-          <SettingFieldSkeleton />
-        </div>
-        <div className="run-audience-setting"><AudienceSkeletonContent /></div>
-        <div className="collection-run-footer">
+      <div className="collection-delivery-trigger" aria-hidden="true"><Skeleton width="10rem" height="2.5rem" /><Skeleton width="3rem" /></div>
+      <div className="run-audience-setting" aria-hidden="true"><AudienceSkeletonContent /></div>
+      <div className="collection-run-summary" aria-hidden="true">
+        <div className="collection-run-usage">
           <div className="run-usage-summary"><Skeleton width="5rem" height=".75rem" /><Skeleton width="6rem" height="1rem" /></div>
+        </div>
+        <div className="collection-run-footer">
           <Skeleton className="settings-skeleton-run-button" height="3.4rem" />
         </div>
-      </SkeletonRegion>
+      </div>
     </section>
   )
 }
@@ -48,8 +53,8 @@ function AudienceSkeletonContent() {
 export function SettingFieldSkeleton() {
   return (
     <div className="settings-skeleton-field">
-      <Skeleton width="5rem" />
-      <Skeleton className="skeleton-control" />
+      <Skeleton width="5rem" height="1.29rem" />
+      <Skeleton className="skeleton-control" height="var(--settings-control-height, 3.25rem)" />
     </div>
   )
 }
@@ -79,7 +84,7 @@ export function TopicTableSkeleton() {
               <tr key={row}>
                 {Array.from({ length: 7 }, (_, column) => (
                   <td key={column}>
-                    {column === 6 ? <div className="settings-skeleton-management-actions"><Skeleton height="1.875rem" /><Skeleton height="1.875rem" /></div>
+                    {column === 6 ? <div className="settings-skeleton-management-actions"><Skeleton height="1.875rem" /></div>
                       : <SkeletonText lines={column === 2 || column === 5 ? 2 : 1} />}
                   </td>
                 ))}

@@ -51,13 +51,18 @@ public class ReportDeliveryOutboxStore {
 
     @Transactional(readOnly = true)
     public boolean destinationStillActive(Work work) {
+        return destinationStillActive(work.recipientId(), work.channelId(), work.address());
+    }
+
+    @Transactional(readOnly = true)
+    public boolean destinationStillActive(Long recipientId, Long channelId, String address) {
         Integer count = jdbc.queryForObject("""
                 SELECT COUNT(*) FROM notification_recipient_destinations d
                 JOIN notification_recipients r ON r.id=d.recipient_id
                 JOIN notification_channels c ON c.id=d.channel_id
                 WHERE r.id=? AND c.id=? AND r.active_yn='Y' AND c.active_yn='Y'
                   AND d.use_yn='Y' AND d.address=? AND (c.channel_type='EMAIL' OR d.onboarded_yn='Y')
-                """, Integer.class, work.recipientId(), work.channelId(), work.address());
+                """, Integer.class, recipientId, channelId, address);
         return count != null && count > 0;
     }
 

@@ -26,6 +26,8 @@ public class ReportNotificationAutomationService {
     private final NotificationManagementService management;
     private final NotificationDeliveryPlanService plans;
     private final NotificationRenderer renderer;
+    private final RunDeliverySnapshotStore runDeliveries;
+    private final ReportDeliveryOutboxStore outbox;
     private static final LongListJsonConverter IDS = new LongListJsonConverter();
 
     public record Policy(boolean enabled, boolean run, boolean daily, List<Long> groupIds,
@@ -74,10 +76,27 @@ public class ReportNotificationAutomationService {
         List<Long> runIds = report.getReportScope() == ReportScope.DAILY ? report.getSourceRunIds()
                 : report.getRunId() == null ? List.of() : List.of(report.getRunId());
         if (runIds.isEmpty()) return;
-        Set<Long> topicIds = new LinkedHashSet<>();
-        runIds.forEach(id -> topicIds.addAll(jdbc.queryForList(
-                "SELECT DISTINCT topic_id FROM news_collection_run_items WHERE run_id=?", Long.class, id)));
         Map<String, NotificationDeliveryPlanService.PreparedTarget> targets = new LinkedHashMap<>();
+        Set<Long> topicIds = new LinkedHashSet<>();
+        // DAILY merges several requests. Prefer the latest eligible captured destination.
+        for (Long runId : runIds.stream().distinct().sorted(Comparator.reverseOrder()).toList()) {
+            var explicit = runDeliveries.find(runId);
+            if (explicit.isEmpty()) {
+                topicIds.addAll(jdbc.queryForList("SELECT DISTINCT topic_id FROM news_collection_run_items WHERE run_id=?", Long.class, runId));
+                continue;
+            }
+            var snapshot = explicit.get();
+            if (!snapshot.enabled() || (report.getReportScope() == ReportScope.DAILY ? !snapshot.daily() : !snapshot.run())) continue;
+            for (var saved : snapshot.targets()) {
+                var channel = optionalChannel(saved.channelId());
+                if (channel == null) continue;
+                if (report.getReportScope() == ReportScope.DAILY
+                        && !outbox.destinationStillActive(saved.recipientId(), saved.channelId(), saved.address())) continue;
+                targets.putIfAbsent(saved.recipientId() + ":" + saved.channelId(),
+                        new NotificationDeliveryPlanService.PreparedTarget(saved.recipientId(), saved.recipientName(), channel,
+                                null, saved.address(), true));
+            }
+        }
         for (Long topicId : topicIds) {
             Policy policy = policy(topicId);
             if (!policy.enabled() || (report.getReportScope() == ReportScope.DAILY ? !policy.daily() : !policy.run())) continue;

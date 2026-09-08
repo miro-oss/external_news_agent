@@ -3,7 +3,6 @@ import type { TopicRelatedKeyword, TopicSurgeKeyword } from '../../api/types'
 import { useSetTopicActivation, useTopics } from '../../api/queries'
 import { ApiError } from '../../api/client'
 import { MutationStatus } from './MutationStatus'
-import { TopicDeliverySettings } from '../notifications/TopicDeliverySettings'
 import { TopicTableSkeleton } from './SettingsSkeletons'
 
 /** 오프셋이 붙은 ISO-8601을 그대로 보여 주면 열이 넘친다. 날짜와 분까지만 남긴다. */
@@ -50,7 +49,6 @@ function relatedKeywordTitle(keyword: TopicRelatedKeyword) {
 export function TopicTable() {
   const [showInactive, setShowInactive] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
-  const [deliveryTopicId, setDeliveryTopicId] = useState<number | null>(null)
   const topics = useTopics(!showInactive)
   const activation = useSetTopicActivation()
 
@@ -75,7 +73,7 @@ export function TopicTable() {
       <div className="topic-list-toolbar">
         <span className="muted">{showInactive ? '중지한 주제' : '수집 중인 주제'} · {topics.data.totalElements}개</span>
         <button type="button" className="ghost-button topic-visibility-toggle" aria-pressed={showInactive}
-          onClick={() => { setShowInactive((value) => !value); setSuccess(null); setDeliveryTopicId(null); activation.reset() }}>
+          onClick={() => { setShowInactive((value) => !value); setSuccess(null); activation.reset() }}>
           {showInactive ? '수집 중인 주제 보기' : '중지한 주제 보기'}
         </button>
       </div>
@@ -131,20 +129,11 @@ export function TopicTable() {
                     onClick={() => setActive(topic.id, !topic.active)}>
                     {activation.isPending && activation.variables?.topicId === topic.id ? '처리 중…' : topic.active ? '수집 중지' : '수집 재개'}
                   </button>
-                    <button type="button" className="ghost-button topic-management-action"
-                      aria-expanded={deliveryTopicId === topic.id} aria-controls="topic-delivery-settings"
-                      onClick={() => setDeliveryTopicId((current) => current === topic.id ? null : topic.id)}>자동 전달</button>
                   </div></td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-      {topics.data.content.some((topic) => topic.id === deliveryTopicId) && deliveryTopicId !== null && (
-        <div id="topic-delivery-settings" className="topic-delivery-settings">
-          <h3>{topics.data.content.find((topic) => topic.id === deliveryTopicId)?.name}</h3>
-          <TopicDeliverySettings key={deliveryTopicId} topicId={deliveryTopicId} />
         </div>
       )}
     </>
