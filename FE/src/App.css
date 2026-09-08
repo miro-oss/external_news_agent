@@ -2675,31 +2675,35 @@ body.modal-open {
   display: grid;
   grid-template-columns: minmax(230px, 0.32fr) minmax(0, 1fr);
   align-items: start;
-  gap: 1.5rem;
+  gap: 0;
+  border-radius: var(--radius);
+  background: var(--line-soft);
+  box-shadow: var(--shadow-sm);
 }
 
 .report-list {
   min-width: 0;
   position: sticky;
   top: 5.5rem;
-  padding: 1.5rem;
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  padding: 1.5rem 0 1.5rem 1rem;
 }
 
 .report-list-scroll {
   max-height: calc(100dvh - 13rem);
+  padding-block: var(--radius-sm);
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  direction: rtl;
 }
 
 .report-list-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 0.85rem 0.85rem;
+  padding: 0 1.35rem 0.25rem;
   color: var(--fg-3);
   font-size: 0.82rem;
   font-weight: 600;
@@ -2710,16 +2714,18 @@ body.modal-open {
 }
 
 .report-list-item {
+  position: relative;
   display: flex;
   width: 100%;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.35rem;
-  padding: 0.85rem 0.85rem;
+  padding: 1rem 1.5rem 1rem 0.85rem;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg);
   text-align: left;
+  direction: ltr;
   transition: background var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
 }
 
@@ -2733,14 +2739,47 @@ body.modal-open {
 }
 
 .report-list-item:hover:not(.active) {
-  background: var(--line-soft);
+  background: color-mix(in srgb, var(--surface) 65%, var(--line-soft));
   color: var(--fg);
 }
 
 .report-list-item.active {
-  background: var(--primary-weak);
+  z-index: 1;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  background: var(--surface);
   color: var(--primary-strong);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+/* 선택한 행의 흰 면이 본문으로 이어지며 위아래 모서리만 부드럽게 돌아간다. */
+.report-list-item::before,
+.report-list-item::after {
+  position: absolute;
+  right: 0;
+  width: var(--radius-sm);
+  height: var(--radius-sm);
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-1) var(--ease-out);
+}
+
+.report-list-item::before {
+  top: calc(-1 * var(--radius-sm));
+  background: radial-gradient(circle at top left, transparent calc(var(--radius-sm) - 0.5px), var(--surface) var(--radius-sm));
+}
+
+.report-list-item::after {
+  bottom: calc(-1 * var(--radius-sm));
+  background: radial-gradient(circle at bottom left, transparent calc(var(--radius-sm) - 0.5px), var(--surface) var(--radius-sm));
+}
+
+.report-list-item.active::before,
+.report-list-item.active::after {
+  opacity: 1;
+}
+
+.report-list-item:focus-visible {
+  outline-offset: -3px;
 }
 
 .report-list-item strong {
@@ -2771,10 +2810,9 @@ body.modal-open {
 .report-detail-shell {
   min-width: 0;
   margin: 0;
-  padding: 1.5rem;
-  border-radius: var(--radius);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--primary-weak) 45%, var(--surface)), var(--surface) 14rem);
-  box-shadow: var(--shadow-sm);
+  padding: 1.5rem clamp(2rem, 3.5vw, 3.5rem);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--surface);
 }
 
 .report-detail-state {
@@ -4073,6 +4111,9 @@ body.modal-open {
 
   .report-workspace {
     grid-template-columns: 1fr;
+    gap: 1.5rem;
+    background: transparent;
+    box-shadow: none;
   }
 
   /*
@@ -4087,7 +4128,11 @@ body.modal-open {
   .report-list-scroll {
     display: flex;
     max-height: none;
+    padding-block: 0;
     overflow-x: auto;
+    direction: ltr;
+    scrollbar-gutter: auto;
+    scrollbar-width: auto;
     scroll-snap-type: x proximity;
     scroll-padding-left: 0.6rem;
   }
@@ -4098,7 +4143,23 @@ body.modal-open {
 
   .report-list-item {
     min-width: 210px;
+    padding: 0.85rem;
     scroll-snap-align: start;
+  }
+
+  .report-list-item.active {
+    border-radius: var(--radius-sm);
+    background: var(--primary-weak);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent);
+  }
+
+  .report-list-item:hover:not(.active) {
+    background: var(--line-soft);
+  }
+
+  .report-list-item::before,
+  .report-list-item::after {
+    display: none;
   }
 
   .report-list-item + .report-list-item {
@@ -4113,6 +4174,9 @@ body.modal-open {
   .report-detail-shell,
   .report-list {
     padding: 1.5rem;
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
   }
 
   .report-stat-row {
