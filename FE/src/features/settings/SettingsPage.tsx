@@ -4,21 +4,18 @@ import { useTopicKeywordProposals, useTopics } from '../../api/queries'
 import { TopicTable } from './TopicTable'
 import { SourceForm } from './SourceForm'
 import { TopicForm } from './TopicForm'
-import { LlmControlPanel } from './LlmControlPanel'
 import { CollectionRunPanel } from './CollectionRunPanel'
 import { TopicKeywordProposalPanel } from './TopicKeywordProposalPanel'
 import './settings-refinement.css'
 
-type PanelKey = 'llm' | 'source' | 'topic' | 'keywordProposals' | 'topics'
+type PanelKey = 'source' | 'keywordProposals' | 'topics'
 
 /** 수집 실행, 주제 등록, 제안 검토와 주제 관리를 기존 접이식 카드로 구성한다. */
 export function SettingsPage() {
   const topics = useTopics(true)
   const pendingProposals = useTopicKeywordProposals('PENDING')
   const [open, setOpen] = useState<Record<PanelKey, boolean>>({
-    llm: false,
     source: false,
-    topic: false,
     keywordProposals: false,
     topics: true,
   })
@@ -39,18 +36,13 @@ export function SettingsPage() {
       <div className="settings-top-row">
         <CollectionRunPanel />
 
-        <div className="settings-side-stack">
-          <CollapsibleSection
-            id="topic"
-            title="수집 주제 등록"
-            description="무엇을 모을지 정하면 활성 수집 소스가 자동으로 연결됩니다."
-            open={open.topic}
-            onToggle={() => toggle('topic')}
-          >
-            <TopicForm />
-          </CollapsibleSection>
-
-        </div>
+        <section id="topic" className="topic-registration-card" aria-labelledby="topic-registration-title">
+          <header className="topic-registration-heading">
+            <h2 id="topic-registration-title">수집 주제 등록</h2>
+            <p className="muted">무엇을 모을지 정하면 수집 소스가 자동으로 연결됩니다.</p>
+          </header>
+          <TopicForm />
+        </section>
       </div>
 
       <CollapsibleSection
@@ -75,10 +67,6 @@ export function SettingsPage() {
         <TopicTable />
       </CollapsibleSection>
 
-      {/*
-        소스와 플랜은 한 번 정해 두면 오래 가는 값이라 매일 지나칠 자리에 있을 이유가 없다.
-        자주 하는 일(실행 · 주제 · 제안 검토 · 주제 확인)을 위로 모으고 아래에 둔다.
-      */}
       <CollapsibleSection
         id="source"
         title="RSS 피드 등록"
@@ -87,16 +75,6 @@ export function SettingsPage() {
         onToggle={() => toggle('source')}
       >
         <SourceForm />
-      </CollapsibleSection>
-
-      <CollapsibleSection
-        id="llm"
-        title="LLM 플랜과 사용량"
-        description="기본 플랜과 사용량, 보고서 예약분을 확인합니다."
-        open={open.llm}
-        onToggle={() => toggle('llm')}
-      >
-        <LlmControlPanel />
       </CollapsibleSection>
     </main>
   )

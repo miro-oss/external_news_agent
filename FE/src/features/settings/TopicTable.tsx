@@ -74,7 +74,7 @@ export function TopicTable() {
     <>
       <div className="topic-list-toolbar">
         <span className="muted">{showInactive ? '중지한 주제' : '수집 중인 주제'} · {topics.data.totalElements}개</span>
-        <button type="button" className="secondary-button" aria-pressed={showInactive}
+        <button type="button" className="ghost-button topic-visibility-toggle" aria-pressed={showInactive}
           onClick={() => { setShowInactive((value) => !value); setSuccess(null); setDeliveryTopicId(null); activation.reset() }}>
           {showInactive ? '수집 중인 주제 보기' : '중지한 주제 보기'}
         </button>
@@ -111,11 +111,11 @@ export function TopicTable() {
                   <td className="topic-name-cell"><strong className="topic-name-scroll" title={topic.name}
                     tabIndex={topic.name.length > 24 ? 0 : undefined}>{topic.name}</strong></td>
                   <td>{topic.queryText ?? '—'}</td>
-                  <td>
+                  <td className="topic-conditions-cell">
                     <div className="topic-condition-lines">
-                      {topic.requiredKeywords.length > 0 && <span><small>모두</small> {formatKeywords(topic.requiredKeywords)}</span>}
-                      {topic.optionalKeywords.length > 0 && <span><small>하나 이상</small> {formatKeywords(topic.optionalKeywords)}</span>}
-                      {topic.excludedKeywords.length > 0 && <span><small>제외</small> {formatKeywords(topic.excludedKeywords)}</span>}
+                      {topic.requiredKeywords.length > 0 && <span className="topic-condition-row"><small>모두</small><span>{formatKeywords(topic.requiredKeywords)}</span></span>}
+                      {topic.optionalKeywords.length > 0 && <span className="topic-condition-row"><small>하나 이상</small><span>{formatKeywords(topic.optionalKeywords)}</span></span>}
+                      {topic.excludedKeywords.length > 0 && <span className="topic-condition-row"><small>제외</small><span>{formatKeywords(topic.excludedKeywords)}</span></span>}
                       {topic.requiredKeywords.length + topic.optionalKeywords.length + topic.excludedKeywords.length === 0 && '—'}
                     </div>
                   </td>
@@ -127,7 +127,7 @@ export function TopicTable() {
                     renderTitle={relatedKeywordTitle} /></td>
                   <td><div className="topic-condition-lines"><span>{formatInterval(topic.intervalMinutes)}</span>
                     <small title="마지막 수집">{formatCollectedAt(topic.lastCollectedAt)}</small></div></td>
-                  <td><div className="topic-management-actions"><button type="button" className="secondary-button topic-management-action" disabled={activation.isPending}
+                  <td><div className="topic-management-actions"><button type="button" className="ghost-button topic-management-action" disabled={activation.isPending}
                     onClick={() => setActive(topic.id, !topic.active)}>
                     {activation.isPending && activation.variables?.topicId === topic.id ? '처리 중…' : topic.active ? '수집 중지' : '수집 재개'}
                   </button>

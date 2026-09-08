@@ -38,6 +38,8 @@ let recipientProfileError = false;
 let recipientDeleteError = false;
 let loadingDelayMs = 0;
 let loadingPath = '/api/';
+let usageCalls = 12;
+let usageLimit = 100;
 const deliveryLogFixtures = ['SENT', 'FAILED', 'SKIPPED'].map((status, i) => ({
     id: i + 1, deliveryBatchId: 'fixture-batch', reportId: 17, runId: 148,
     recipientId: i === 1 ? 2 : 1, recipientName: i === 1 ? '이구독' : '김수신',
@@ -90,7 +92,18 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 recipientDeleteError = false;
                                 loadingDelayMs = 0;
                                 loadingPath = '/api/';
+                                usageCalls = 12;
+                                usageLimit = 100;
                                 return json(res, { reset: true });
+                            }
+                            if (path === '/__qa/usage') {
+                                const used = Number(body.used ?? url.searchParams.get('used') ?? 12);
+                                const limit = Number(body.limit ?? url.searchParams.get('limit') ?? 100);
+                                if (![used, limit].every(value => Number.isSafeInteger(value) && value >= 0))
+                                    return json(res, { error: 'Use nonnegative integer used and limit values.' }, 400);
+                                usageCalls = used;
+                                usageLimit = limit;
+                                return json(res, { used, limit });
                             }
                             if (path === '/__qa/loading') {
                                 const delay = Number(body.delayMs ?? url.searchParams.get('delayMs') ?? 0);
@@ -223,7 +236,16 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         let result;
                         let status = 200;
                         let match;
-                        if (path === '/api/settings/llm-plan') {
+                        if (path === '/api/usage/llm') {
+                            const resetAt = '2026-09-09T00:00:00+09:00';
+                            result = { currentPlan: plan.plan,
+                                free: { dailyCallsUsed: usageCalls, dailyCallsLimit: usageLimit, dailyCallsRemaining: Math.max(0, usageLimit - usageCalls), resetAt },
+                                paid: { dailyCreditsUsed: 0, dailyCreditsLimit: 100, dailyCreditsRemaining: 100,
+                                    analysisCreditsRemaining: 80, insightCreditsUsed: 0, insightCreditsCap: 20, insightCreditsRemaining: 20,
+                                    reportReserve: 20, monthlyCreditsUsed: 0, monthlyCreditsLimit: 3000, monthlyCreditsRemaining: 3000,
+                                    dailyResetAt: resetAt, monthlyResetAt: '2026-10-01T00:00:00+09:00' } };
+                        }
+                        else if (path === '/api/settings/llm-plan') {
                             if (method === 'PUT')
                                 plan = { ...plan, ...body };
                             result = plan;

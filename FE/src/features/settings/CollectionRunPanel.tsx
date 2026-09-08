@@ -4,7 +4,6 @@ import './collection-queue.css'
 import {
   useAudienceSetting,
   useCombinations,
-  useLlmPlan,
   useStartCollectionRun,
   useUpdateAudienceSetting,
 } from '../../api/queries'
@@ -12,12 +11,12 @@ import {
   AUDIENCES,
   AUDIENCE_LABELS,
   type Audience,
-  type LlmPlan,
 } from '../../api/types'
 import { Segmented, type SegmentedOption } from '../../components/Segmented'
 import { MutationStatus } from './MutationStatus'
-import { SkeletonRegion } from '../../components/Skeleton'
-import { AudienceSettingSkeleton, CollectionRunSkeleton, SettingFieldSkeleton } from './SettingsSkeletons'
+import { LlmUsageSummary } from './LlmUsageSummary'
+import { CollectionTopicPicker } from './CollectionTopicPicker'
+import { AudienceSettingSkeleton, CollectionRunSkeleton } from './SettingsSkeletons'
 
 type RunScope = 'SELECTED' | 'ALL'
 
@@ -28,13 +27,11 @@ const AUDIENCE_OPTIONS: ReadonlyArray<SegmentedOption<Audience>> = AUDIENCES.map
 
 export function CollectionRunPanel() {
   const combinations = useCombinations()
-  const planQuery = useLlmPlan()
   const startRun = useStartCollectionRun()
   const [scope, setScope] = useState<RunScope>('SELECTED')
   const [selectedTopicIds, setSelectedTopicIds] = useState<number[] | null>(null)
   const queue = useCollectionQueue()
   const progress = useCollectionProgress(startRun.data?.runId)
-  const [runOverride, setRunOverride] = useState<'DEFAULT' | LlmPlan>('DEFAULT')
   const pendingRunKey = useRef<string | null>(null)
 
   if (combinations.isPending) {
@@ -60,7 +57,6 @@ export function CollectionRunPanel() {
   const targetCombinations = scope === 'ALL'
     ? activeCombinations
     : activeCombinations.filter((combination) => effectiveTopicIds.includes(combination.topicId))
-  const setting = planQuery.data
 
   function resetRequestState() {
     pendingRunKey.current = null
@@ -72,15 +68,9 @@ export function CollectionRunPanel() {
     setScope(nextScope)
   }
 
-  function toggleTopic(topicId: number) {
+  function selectTopics(topicIds: number[]) {
     resetRequestState()
-    setSelectedTopicIds(effectiveTopicIds.includes(topicId)
-      ? effectiveTopicIds.filter((id) => id !== topicId) : [...effectiveTopicIds, topicId])
-  }
-
-  function changeRunOverride(value: 'DEFAULT' | LlmPlan) {
-    resetRequestState()
-    setRunOverride(value)
+    setSelectedTopicIds(topicIds)
   }
 
   function runNow() {
@@ -92,7 +82,6 @@ export function CollectionRunPanel() {
       {
         idempotencyKey,
         ...(scope === 'SELECTED' ? { topicIds: effectiveTopicIds } : {}),
-        ...(runOverride === 'DEFAULT' ? {} : { plan: runOverride }),
       },
     )
   }
@@ -125,54 +114,31 @@ export function CollectionRunPanel() {
           </select>
         </div>
 
-        <fieldset className="run-topic-selection" disabled={scope === 'ALL' || startRun.isPending}>
-          <legend>수집할 주제</legend>
-          <div className="run-topic-options">
-            {activeTopics.length === 0 && <span className="muted">활성 주제가 없습니다.</span>}
-            {activeTopics.map((topic) => (
-              <label key={topic.id}>
-                <input type="checkbox" checked={scope === 'ALL' || effectiveTopicIds.includes(topic.id)}
-                  onChange={() => toggleTopic(topic.id)} />
-                <span>{topic.name}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-
-        {planQuery.isPending && <SkeletonRegion label="실행 플랜 설정을 불러오는 중"><SettingFieldSkeleton /></SkeletonRegion>}
-        {setting?.allowRunOverride && (
-          <div className="field">
-            <label htmlFor="run-plan">이번 실행 플랜</label>
-            <select
-              id="run-plan"
-              value={runOverride}
-              disabled={startRun.isPending}
-              onChange={(event) => changeRunOverride(event.target.value as 'DEFAULT' | LlmPlan)}
-            >
-              <option value="DEFAULT">기본 설정 사용 ({setting.plan})</option>
-              <option value="FREE">이번 실행만 FREE</option>
-              <option value="PAID">이번 실행만 PAID</option>
-            </select>
-          </div>
-        )}
+        <CollectionTopicPicker topics={activeTopics}
+          selected={scope === 'ALL' ? activeTopics.map(topic => topic.id) : effectiveTopicIds}
+          disabled={scope === 'ALL' || startRun.isPending} onChange={selectTopics} />
       </div>
 
       <DefaultAudienceSetting />
 
-      <button className="collection-run-button" type="button" onClick={runNow} disabled={!canRun}>
-        {startRun.isPending
-          ? '실행 요청 중…'
-          : scope === 'ALL' ? '모든 활성 주제 수집' : '선택 주제 수집'}
-      </button>
-      <MutationStatus error={startRun.error} success={startRun.data ? '수집 요청을 접수했습니다.' : null} />
-      {progress.data && <p className="hint" role="status">
-        {progress.data.status === 'PENDING' ? '준비가 끝나면 자동으로 수집합니다.'
-          : progress.data.status === 'RUNNING' ? '선택한 주제를 수집하고 있습니다.'
-          : progress.data.status === 'FAILED' ? '수집을 완료하지 못했습니다. 다시 요청할 수 있습니다.'
-          : progress.data.status === 'PARTIAL' ? '수집을 마쳤습니다. 일부 출처를 가져오지 못했습니다.'
-          : '수집을 마쳤습니다.'}
-        {progress.data.reportId && <> <a href={`#/reports?reportId=${progress.data.reportId}`}>보고서 보기</a></>}
-      </p>}
+      <div className="collection-run-footer">
+        <LlmUsageSummary />
+
+        <button className="collection-run-button" type="button" onClick={runNow} disabled={!canRun}>
+          {startRun.isPending
+            ? '실행 요청 중…'
+            : scope === 'ALL' ? '모든 활성 주제 수집' : '선택 주제 수집'}
+        </button>
+        <MutationStatus error={startRun.error} success={startRun.data ? '수집 요청을 접수했습니다.' : null} />
+        {progress.data && <p className="hint" role="status">
+          {progress.data.status === 'PENDING' ? '준비가 끝나면 자동으로 수집합니다.'
+            : progress.data.status === 'RUNNING' ? '선택한 주제를 수집하고 있습니다.'
+            : progress.data.status === 'FAILED' ? '수집을 완료하지 못했습니다. 다시 요청할 수 있습니다.'
+            : progress.data.status === 'PARTIAL' ? '수집을 마쳤습니다. 일부 출처를 가져오지 못했습니다.'
+            : '수집을 마쳤습니다.'}
+          {progress.data.reportId && <> <a href={`#/reports?reportId=${progress.data.reportId}`}>보고서 보기</a></>}
+        </p>}
+      </div>
     </section>
   )
 }

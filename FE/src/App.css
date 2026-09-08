@@ -4381,8 +4381,13 @@ body.modal-open {
 .report-reading-content { display: grid; gap: 1.25rem; margin-top: 1.25rem; }
 .report-reading-content > .card,
 .report-reading-content > .collapsible { margin: 0; }
+.report-sharing-section {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
 .report-delivery-panel.report-share-card {
-  margin: 1.5rem 0 0;
+  margin: 0;
   padding: 1.5rem;
   border: 0;
   border-radius: var(--radius);

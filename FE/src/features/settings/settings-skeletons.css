@@ -5,8 +5,11 @@
   min-width: 0;
 }
 
-.settings-skeleton-topic-options {
-  flex-wrap: wrap;
+.collection-run-skeleton,
+.collection-run-skeleton-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
 }
 
 .settings-skeleton-audience {
@@ -33,20 +36,27 @@
 .settings-skeleton-proposal {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 1.25rem;
+  gap: .65rem 1rem;
   align-items: start;
 }
 
-.settings-skeleton-usage {
-  min-height: 6.5rem;
-  justify-content: center;
-  gap: .75rem;
+.settings-skeleton-proposal-body {
+  display: grid;
+  gap: .4rem;
 }
 
-.settings-skeleton-plan-options {
+.settings-skeleton-keyword-row {
+  gap: .65rem;
+  overflow: hidden;
+}
+
+.settings-skeleton-proposal-actions {
+  gap: .4rem;
+}
+
+.settings-skeleton-management-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: .7rem;
+  gap: .3rem;
 }
 
 .settings-skeleton-source-status {

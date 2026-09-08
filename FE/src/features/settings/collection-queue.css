@@ -1,9 +1,166 @@
-.settings-page .settings-top-row { grid-template-columns: minmax(0, 1fr); }
-.settings-page .collection-run-controls { grid-template-columns: minmax(140px, .7fr) minmax(0, 2fr) minmax(180px, .8fr); }
-@media (max-width: 700px) { .settings-page .collection-run-controls { grid-template-columns: minmax(0, 1fr); } }
-.run-topic-selection { min-width: 0; margin: 0; padding: 0; border: 0; }
-.run-topic-selection legend { margin-bottom: .55rem; font-weight: 600; }
-.run-topic-options { display: flex; flex-wrap: wrap; gap: .5rem 1rem; max-height: 12rem; overflow-y: auto; }
-.run-topic-options label { display: inline-flex; align-items: center; gap: .45rem; padding: .35rem 0; cursor: pointer; }
-.run-topic-options input { width: 1rem; height: 1rem; accent-color: var(--primary); }
-.run-topic-selection:disabled { opacity: .65; }
+.settings-page .settings-top-row {
+  --settings-top-card-height: 32rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 1rem;
+}
+
+.settings-page .collection-run-panel,
+.settings-page .topic-registration-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: var(--settings-top-card-height);
+  padding: 1.5rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-page .topic-registration-card {
+  border: 1px solid var(--line);
+}
+
+.topic-registration-heading h2 {
+  margin-bottom: .3rem;
+}
+
+.topic-registration-heading {
+  margin-bottom: 1.25rem;
+}
+
+.settings-page .topic-registration-card > form {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto auto auto minmax(min-content, 1fr);
+  align-content: start;
+  gap: 1rem;
+}
+
+.settings-page .topic-registration-card > form > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.settings-page .topic-registration-card > form > .field:nth-child(-n + 2) {
+  grid-column: auto;
+}
+
+.settings-page .topic-registration-card > form > .field,
+.settings-page .topic-registration-card > form > .topic-advanced {
+  margin: 0;
+}
+
+.settings-page .topic-registration-card .topic-form-footer {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.settings-page .topic-registration-card .topic-form-footer > button[type='submit'] {
+  width: 100%;
+  min-height: 3.4rem;
+  padding: .95rem;
+  font-size: 1rem;
+}
+
+.settings-page .topic-registration-card .topic-form-footer > .error:first-child {
+  margin: 0 0 .75rem;
+}
+
+.settings-page .collection-run-controls {
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  align-items: start;
+  gap: 1.25rem;
+}
+
+.collection-topic-picker {
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.collection-topic-picker > span {
+  color: var(--fg-2);
+  font-size: .86rem;
+  font-weight: 600;
+}
+
+.collection-topic-picker .group-recipient-trigger {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 3.25rem;
+}
+
+.collection-topic-picker :is(.group-recipient-value, .group-recipient-placeholder) {
+  flex: 1 1 0%;
+  width: 0;
+  min-width: 0;
+}
+
+.collection-topic-picker .group-recipient-trigger:disabled {
+  background: var(--surface-sunken);
+  color: var(--fg-3);
+  opacity: .7;
+}
+
+.collection-run-footer {
+  margin-top: auto;
+  padding-top: 1.5rem;
+}
+
+.run-usage-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .75rem;
+  min-height: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  color: var(--fg-3);
+  font-size: .78rem;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.run-usage-summary strong {
+  color: var(--fg-2);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.run-usage-unavailable {
+  color: var(--fg-3);
+  font-size: .72rem;
+}
+
+@media (min-width: 901px) and (max-width: 1100px) {
+  .settings-page .settings-top-row {
+    --settings-top-card-height: 35rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .settings-page .settings-top-row {
+    --settings-top-card-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .settings-page .collection-run-controls,
+  .settings-page .topic-registration-card > form {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+  }
+
+  .settings-page .topic-registration-card > form {
+    grid-template-rows: none;
+  }
+}

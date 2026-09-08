@@ -10,20 +10,16 @@ export function CollectionRunSkeleton() {
           <p className="muted">주제를 여러 개 골라 한 번에 수집할 수 있습니다.</p>
         </div>
       </div>
-      <SkeletonRegion label="수집 실행 정보를 불러오는 중">
+      <SkeletonRegion label="수집 실행 정보를 불러오는 중" className="collection-run-skeleton" contentClassName="collection-run-skeleton-content">
         <div className="collection-run-controls">
           <SettingFieldSkeleton />
-          <div className="settings-skeleton-field">
-            <Skeleton width="6rem" />
-            <div className="skeleton-row settings-skeleton-topic-options">
-              <Skeleton width="7rem" height="2.75rem" />
-              <Skeleton width="8rem" height="2.75rem" />
-            </div>
-          </div>
           <SettingFieldSkeleton />
         </div>
         <div className="run-audience-setting"><AudienceSkeletonContent /></div>
-        <Skeleton className="settings-skeleton-run-button" height="3.4rem" />
+        <div className="collection-run-footer">
+          <div className="run-usage-summary"><Skeleton width="5rem" height=".75rem" /><Skeleton width="6rem" height="1rem" /></div>
+          <Skeleton className="settings-skeleton-run-button" height="3.4rem" />
+        </div>
       </SkeletonRegion>
     </section>
   )
@@ -83,7 +79,8 @@ export function TopicTableSkeleton() {
               <tr key={row}>
                 {Array.from({ length: 7 }, (_, column) => (
                   <td key={column}>
-                    {column === 6 ? <Skeleton height="2.5rem" /> : <SkeletonText lines={column === 2 || column === 5 ? 2 : 1} />}
+                    {column === 6 ? <div className="settings-skeleton-management-actions"><Skeleton height="1.875rem" /><Skeleton height="1.875rem" /></div>
+                      : <SkeletonText lines={column === 2 || column === 5 ? 2 : 1} />}
                   </td>
                 ))}
               </tr>
@@ -102,12 +99,15 @@ export function KeywordProposalsSkeleton() {
       <div className="proposal-stack">
         {Array.from({ length: 2 }, (_, index) => (
           <div key={index} className="proposal-card settings-skeleton-proposal">
-            <div className="skeleton-stack">
-              <Skeleton width="min(70%, 20rem)" height="1.2rem" />
-              <SkeletonText lines={2} />
-              <div className="skeleton-row"><Skeleton width="5rem" height="1.6rem" /><Skeleton width="6rem" height="1.6rem" /></div>
+            <div className="settings-skeleton-proposal-body">
+              <Skeleton width="min(70%, 12rem)" height="1.1rem" />
+              {[0, 1].map(row => <div className="skeleton-row settings-skeleton-keyword-row" key={row}>
+                <Skeleton width="4rem" height=".75rem" />
+                <Skeleton width={row ? '4.5rem' : '5.5rem'} height="1.6rem" />
+                <Skeleton width={row ? '5.5rem' : '4rem'} height="1.6rem" />
+              </div>)}
             </div>
-            <div className="skeleton-row"><Skeleton width="4rem" height="2.7rem" /><Skeleton width="4rem" height="2.7rem" /></div>
+            <div className="skeleton-row settings-skeleton-proposal-actions"><Skeleton width="3rem" height="1.875rem" /><Skeleton width="3rem" height="1.875rem" /></div>
           </div>
         ))}
       </div>
@@ -115,27 +115,11 @@ export function KeywordProposalsSkeleton() {
   )
 }
 
-export function LlmControlSkeleton() {
+export function LlmUsageSummarySkeleton() {
   return (
-    <SkeletonRegion label="LLM 설정과 사용량을 불러오는 중" className="llm-panel">
-      <div className="llm-panel-heading"><Skeleton width="7rem" /><Skeleton width="4rem" height="1.6rem" /></div>
-      <div className="usage-grid">
-        {Array.from({ length: 3 }, (_, index) => (
-          <div key={index} className="usage-card settings-skeleton-usage">
-            <Skeleton width="60%" height="0.9rem" />
-            <Skeleton width="75%" height="1.6rem" />
-            <Skeleton height="0.4rem" />
-          </div>
-        ))}
-      </div>
-      <div className="skeleton-stack">
-        <Skeleton width="5rem" />
-        <div className="settings-skeleton-plan-options">
-          <Skeleton height="6.5rem" /><Skeleton height="6.5rem" />
-        </div>
-        <SettingFieldSkeleton />
-        <Skeleton width="10rem" height="3rem" />
-      </div>
+    <SkeletonRegion label="오늘 호출 사용량을 불러오는 중" contentClassName="run-usage-summary">
+      <Skeleton width="5rem" height=".75rem" />
+      <Skeleton width="6rem" height="1rem" />
     </SkeletonRegion>
   )
 }

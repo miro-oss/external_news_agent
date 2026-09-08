@@ -121,7 +121,6 @@ export function TopicForm() {
         </button>
         {conditionsOpen && (
           <div id="topic-advanced-conditions" className="topic-advanced-fields">
-            <p className="hint">검색 결과와 RSS 기사의 제목·요약에 아래 조건을 적용합니다.</p>
             <div className="field">
               <label htmlFor="topic-required">모두 포함</label>
               <input id="topic-required" value={form.requiredKeywords ?? baseKeywords.join(', ')}
@@ -166,19 +165,21 @@ export function TopicForm() {
         </p>
       </div>
 
-      {sources.isPending && <TopicSourcesSkeleton />}
-      {sources.isError && <p className="error">활성 수집 소스를 불러오지 못했습니다.</p>}
-      {!sources.isPending && !sources.isError && activeSources.length === 0 && (
-        <p className="error topic-source-error">
-          활성 수집 소스가 없습니다. 먼저 소스를 등록하거나 활성화하세요.
-        </p>
-      )}
+      <div className="topic-form-footer">
+        {sources.isPending && <TopicSourcesSkeleton />}
+        {sources.isError && <p className="error">활성 수집 소스를 불러오지 못했습니다.</p>}
+        {!sources.isPending && !sources.isError && activeSources.length === 0 && (
+          <p className="error topic-source-error">
+            활성 수집 소스가 없습니다. 먼저 소스를 등록하거나 활성화하세요.
+          </p>
+        )}
 
-      <button type="submit" disabled={isPending || sources.isPending || sources.isError || activeSources.length === 0}>
-        {isPending ? '등록 중…' : '주제 등록'}
-      </button>
-      {validation && <p className="error" role="alert">{validation}</p>}
-      <FormStatus error={error} successMessage={done} />
+        <button type="submit" disabled={isPending || sources.isPending || sources.isError || activeSources.length === 0}>
+          {isPending ? '등록 중…' : '주제 등록'}
+        </button>
+        {validation && <p className="error" role="alert">{validation}</p>}
+        <FormStatus error={error} successMessage={done} />
+      </div>
     </form>
   )
 }

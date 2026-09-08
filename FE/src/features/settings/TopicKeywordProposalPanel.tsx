@@ -18,7 +18,6 @@ import { KeywordProposalsSkeleton } from './SettingsSkeletons'
 
 const FILTER_OPTIONS: ReadonlyArray<SegmentedOption<TopicKeywordProposalFilter>> = [
   { value: 'PENDING', label: '대기 중만' },
-  { value: 'ALL', label: '전체' },
   { value: 'APPROVED', label: '승인됨' },
   { value: 'REJECTED', label: '반려됨' },
 ]
@@ -40,20 +39,12 @@ const ACTION_LABELS: Record<TopicKeywordChangeAction, string> = {
   REMOVE: '제거',
 }
 
-function formatDateTime(value: string | null) {
-  if (!value) return '—'
-
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return value
-
-  return parsed.toLocaleString('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+const PREVIEW_GROUPS = [
+  { action: 'ADD', excluded: false, label: '추천 키워드', tone: 'add' },
+  { action: 'ADD', excluded: true, label: '제외할 키워드', tone: 'remove' },
+  { action: 'REMOVE', excluded: false, label: '제거 제안', tone: 'remove' },
+  { action: 'REMOVE', excluded: true, label: '제외 해제', tone: 'add' },
+] as const
 
 function emptyMessage(filter: TopicKeywordProposalFilter) {
   if (filter === 'PENDING') return '검토 대기 중인 키워드 제안이 없습니다.'
@@ -168,28 +159,33 @@ function ProposalCard({
 }) {
   return (
     <article className={expanded ? 'proposal-card proposal-review-card expanded' : 'proposal-card proposal-review-card'}>
+      <button type="button" className="proposal-card-toggle" aria-expanded={expanded}
+        aria-label={`${proposal.topicName} 변경 상세 ${expanded ? '접기' : '보기'}`}
+        aria-controls={`proposal-detail-${proposal.id}`} onClick={onToggle} />
       <div className="proposal-header">
         <div className="proposal-title-row">
-          <h3><button type="button" className="proposal-detail-toggle" aria-expanded={expanded}
-            aria-controls={`proposal-detail-${proposal.id}`} onClick={onToggle}>
-            {proposal.topicName}<span>{expanded ? '상세 접기' : '변경 상세'}</span>
-          </button></h3>
-          <span className={`status-pill proposal-status proposal-status-${proposal.status.toLowerCase()}`}>
-            {STATUS_LABELS[proposal.status]}
+          <div className="proposal-title-group">
+            <h3>{proposal.topicName}</h3>
+            <span className={`status-pill proposal-status proposal-status-${proposal.status.toLowerCase()}`}>
+              {STATUS_LABELS[proposal.status]}
+            </span>
+          </div>
+          <span className="proposal-detail-label" aria-hidden="true">
+            {expanded ? '상세 접기' : '변경 상세'}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
           </span>
         </div>
-        <p className="proposal-summary">{proposal.summary}</p>
         <div className="proposal-change-preview">
-          {proposal.changes.map((change, index) => (
-            <span className="proposal-keyword-chip" key={`${change.bucket}-${change.keyword}-${index}`}>
-              {change.action === 'ADD' ? '+' : '−'} {change.keyword}
-            </span>
-          ))}
+          {PREVIEW_GROUPS.map(group => {
+            const keywords = [...new Set(proposal.changes.filter(change => change.action === group.action && (change.bucket === 'EXCLUDED') === group.excluded).map(change => change.keyword))]
+            return keywords.length > 0 && <div className="proposal-preview-row" key={group.label}>
+              <span className="proposal-preview-label">{group.label}</span>
+              <div className="proposal-preview-keywords">
+                {keywords.map(keyword => <span className={`proposal-change-chip proposal-change-${group.tone}`} key={keyword}>{keyword}</span>)}
+              </div>
+            </div>
+          })}
         </div>
-        <p className="proposal-meta">
-          제안 {formatDateTime(proposal.createdAt)}
-          {proposal.reviewedAt && ` · 검토 ${formatDateTime(proposal.reviewedAt)}`}
-        </p>
       </div>
 
       {expanded && <div className="proposal-grid" id={`proposal-detail-${proposal.id}`}>
@@ -208,10 +204,10 @@ function ProposalCard({
             <ul className="proposal-change-list">
               {proposal.changes.map((change, index) => (
                 <li className="proposal-change-item" key={`${proposal.id}-${change.bucket}-${change.keyword}-${index}`}>
-                  <strong>
-                    {BUCKET_LABELS[change.bucket]} · {ACTION_LABELS[change.action]} · {change.keyword}
-                  </strong>
-                  <p>{change.reason}</p>
+                  <div className="proposal-change-title">
+                    <span className={`proposal-change-kind proposal-change-${change.action.toLowerCase()}`}>{BUCKET_LABELS[change.bucket]} · {ACTION_LABELS[change.action]}</span>
+                    <strong>{change.keyword}</strong>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -221,7 +217,7 @@ function ProposalCard({
 
       {proposal.status === 'PENDING' && (
         <div className="proposal-actions">
-          <button type="button" className="secondary-button" disabled={isActing} onClick={onReject}>
+          <button type="button" className="secondary-button proposal-reject-button" disabled={isActing} onClick={onReject}>
             {isActing ? '처리 중…' : '반려'}
           </button>
           <button type="button" disabled={isActing} onClick={onApprove}>

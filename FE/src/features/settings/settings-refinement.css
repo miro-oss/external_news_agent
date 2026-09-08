@@ -16,10 +16,6 @@
   animation: collapsible-in var(--dur-2) var(--ease-out);
 }
 
-.settings-page .topic-advanced-fields > .hint {
-  margin-bottom: 1rem;
-}
-
 .settings-page .topic-advanced-fields .field:last-child {
   margin-bottom: 0;
 }
@@ -28,9 +24,25 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  gap: 0.4rem 0.65rem;
+  margin-bottom: 0.65rem;
+}
+
+.settings-page .topic-list-toolbar > .muted {
+  font-size: 0.82rem;
+}
+
+.settings-page .topic-visibility-toggle {
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.settings-page .topic-visibility-toggle:hover:not(:disabled),
+.settings-page .topic-visibility-toggle[aria-pressed='true'] {
+  background: var(--primary-weak);
 }
 
 .settings-page .topic-management-table {
@@ -55,15 +67,39 @@
   font-size: 0.76rem;
 }
 
-.settings-page .topic-management-action {
-  padding: 0.6rem 0.75rem;
+.settings-page .topic-management-table .topic-conditions-cell {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.settings-page .topic-condition-row {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.settings-page .topic-condition-row > small {
   white-space: nowrap;
-  font-size: 0.82rem;
+}
+
+.settings-page .topic-condition-row > span {
+  min-width: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .topic-management-action {
+  padding: 0.4rem 0.65rem;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .settings-page .topic-management-actions {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.3rem;
 }
 
 .settings-page .topic-delivery-settings {
@@ -72,10 +108,48 @@
 }
 
 .settings-page .proposal-review-card {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 0.9rem 1.25rem;
+  gap: 0.65rem 1rem;
+}
+
+.settings-page #keyword-proposals.open > h2 > .collapsible-trigger {
+  padding-bottom: 0.65rem;
+}
+
+.settings-page #keyword-proposals > .collapsible-body {
+  padding-top: 0;
+}
+
+.settings-page .proposal-toolbar {
+  margin-bottom: 0.65rem;
+}
+
+/* One native button covers the card; review actions sit above it as sibling controls. */
+.settings-page .proposal-card-toggle {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border-radius: inherit;
+  background: transparent;
+}
+
+.settings-page .proposal-card-toggle:hover {
+  background: transparent;
+}
+
+.settings-page .proposal-card-toggle:active:not(:disabled) {
+  transform: none;
+}
+
+.settings-page .proposal-card-toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
 }
 
 .settings-page .proposal-review-card .proposal-header {
@@ -84,52 +158,223 @@
 }
 
 .settings-page .proposal-review-card .proposal-title-row h3 {
-  flex: 1;
   min-width: 0;
   margin: 0;
-}
-
-.settings-page .proposal-detail-toggle {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.65rem;
-  max-width: 100%;
-  padding: 0.25rem 0;
-  background: transparent;
-  color: var(--fg);
-  text-align: left;
   overflow-wrap: anywhere;
 }
 
-.settings-page .proposal-detail-toggle span {
-  flex-shrink: 0;
+.settings-page .proposal-title-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.settings-page .proposal-detail-label {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.25rem 0;
   color: var(--primary-strong);
   font-size: 0.78rem;
   font-weight: 600;
 }
 
-.settings-page .proposal-detail-toggle:hover {
-  color: var(--primary-strong);
+.settings-page .proposal-detail-label svg {
+  transition: transform var(--dur-2) var(--ease-out);
+}
+
+.settings-page .proposal-review-card.expanded .proposal-detail-label svg {
+  transform: rotate(180deg);
+}
+
+.settings-page .proposal-review-card .proposal-status-pending {
+  background: var(--warning-weak);
+  color: var(--warning-strong);
+}
+
+.settings-page .proposal-review-card .proposal-status-approved {
+  background: var(--success-weak);
+  color: var(--success-strong);
+}
+
+.settings-page .proposal-review-card .proposal-status-rejected {
+  background: var(--danger-weak);
+  color: var(--danger-strong);
 }
 
 .settings-page .proposal-change-preview {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.settings-page .proposal-preview-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.settings-page .proposal-preview-label {
+  flex: none;
+  min-width: 4.65rem;
+  color: var(--fg-3);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.settings-page .proposal-preview-keywords {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-  margin-top: 0.6rem;
+  min-width: 0;
 }
 
 .settings-page .proposal-review-card .proposal-grid {
+  display: flex;
+  flex-wrap: wrap;
   grid-column: 1 / -1;
   grid-row: 2;
+  width: fit-content;
+  max-width: 100%;
+  align-items: flex-start;
+  gap: 0.65rem;
   animation: collapsible-in var(--dur-2) var(--ease-out);
 }
 
+.settings-page .proposal-change-chip {
+  box-sizing: border-box;
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.24rem 0.5rem;
+  border-radius: var(--radius-xs);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.5;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .proposal-change-add {
+  background: var(--primary-weak);
+  color: var(--primary-strong);
+}
+
+.settings-page .proposal-change-remove {
+  background: var(--danger-weak);
+  color: var(--danger-strong);
+}
+
+.settings-page .proposal-review-card .proposal-section {
+  box-sizing: border-box;
+  flex: 0 1 auto;
+  width: max-content;
+  max-width: min(100%, 28rem);
+  min-width: 0;
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+}
+
+.settings-page .proposal-review-card .proposal-section h4 {
+  margin: 0 0 0.6rem;
+  font-size: 0.84rem;
+}
+
+.settings-page .proposal-keyword-group {
+  display: grid;
+  grid-template-columns: 6.25rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.settings-page .proposal-keyword-group + .proposal-keyword-group {
+  margin-top: 0.5rem;
+}
+
+.settings-page .proposal-keyword-group > strong {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 0.76rem;
+}
+
+.settings-page .proposal-keyword-chip {
+  box-sizing: border-box;
+  max-width: 100%;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .proposal-review-card .proposal-empty {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.settings-page .proposal-review-card .proposal-change-list {
+  gap: 0;
+}
+
+.settings-page .proposal-review-card .proposal-change-item {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.settings-page .proposal-change-item + .proposal-change-item {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--line-soft);
+}
+
+.settings-page .proposal-change-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.45rem;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .proposal-change-title > strong {
+  min-width: 0;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.settings-page .proposal-change-kind {
+  padding: 0.12rem 0.35rem;
+  border-radius: 5px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 .settings-page .proposal-review-card .proposal-actions {
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
   grid-column: 2;
   grid-row: 1;
   margin-top: 0;
+  gap: 0.4rem;
+}
+
+.settings-page .proposal-actions > button {
+  pointer-events: auto;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.settings-page .proposal-reject-button:not(:disabled) {
+  background: var(--danger-weak);
+  color: var(--danger-strong);
+}
+
+.settings-page .proposal-reject-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 18%, var(--surface));
+  color: var(--danger-strong);
 }
 
 @media (max-width: 600px) {
@@ -140,6 +385,9 @@
   .settings-page .proposal-review-card .proposal-actions {
     grid-column: 1;
     grid-row: auto;
-    justify-content: flex-start;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
   }
+
 }

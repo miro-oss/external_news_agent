@@ -346,7 +346,9 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
           : <p className="empty-block">이 보고서에 포함된 주요 이슈가 없습니다.</p>}
       </section>
 
-      <ReportSharePanel reportId={report.id} />
+      <div className="report-sharing-section">
+        <ReportSharePanel reportId={report.id} />
+      </div>
       <ReportDisclaimer report={report} audience={audience} />
     </article>
   )
