@@ -2674,19 +2674,34 @@ body.modal-open {
 .report-workspace {
   display: grid;
   grid-template-columns: minmax(230px, 0.32fr) minmax(0, 1fr);
-  min-height: 620px;
-  overflow: hidden;
+  align-items: start;
+  gap: 1.5rem;
+}
+
+.report-list {
+  min-width: 0;
+  position: sticky;
+  top: 5.5rem;
+  padding: 1.5rem;
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
 
-.report-list {
-  max-height: calc(100vh - 180px);
+.report-list-scroll {
+  max-height: calc(100dvh - 13rem);
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 0.6rem;
-  background: var(--surface-sunken);
+  scrollbar-gutter: stable;
+}
+
+.report-list-connection {
+  position: absolute;
+  right: -1.5rem;
+  width: 1.5rem;
+  height: 2px;
+  background: var(--primary);
+  pointer-events: none;
 }
 
 .report-list-heading {
@@ -2732,8 +2747,9 @@ body.modal-open {
 }
 
 .report-list-item.active {
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  background: var(--primary-weak);
+  color: var(--primary-strong);
+  box-shadow: inset -3px 0 var(--primary);
 }
 
 .report-list-item strong {
@@ -2764,7 +2780,10 @@ body.modal-open {
 .report-detail-shell {
   min-width: 0;
   margin: 0;
+  padding: 1.5rem;
+  border-radius: var(--radius);
   background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .report-detail-state {
@@ -2775,7 +2794,7 @@ body.modal-open {
 .report-document {
   max-width: 860px;
   margin: 0 auto;
-  padding: 3rem clamp(1.5rem, 5vw, 3.5rem) 5rem;
+  padding: 0;
 }
 
 .report-document-header {
@@ -2845,7 +2864,7 @@ body.modal-open {
 
 .report-stat-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.5rem;
   margin-top: 1.5rem;
 }
@@ -2878,10 +2897,10 @@ body.modal-open {
 
 .report-perspective {
   margin: 1.5rem 0;
-  padding: 1.15rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
+  padding: 1.5rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .report-perspective-heading {
@@ -3018,10 +3037,9 @@ body.modal-open {
 
 .issue-card {
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: var(--surface);
-  box-shadow: 0 3px 12px rgba(25, 31, 40, 0.04);
+  box-shadow: var(--shadow-sm);
 }
 
 .issue-card-primary {
@@ -4071,6 +4089,10 @@ body.modal-open {
     넘길 때마다 매번 걸려서 오히려 답답하다.
   */
   .report-list {
+    position: static;
+  }
+
+  .report-list-scroll {
     display: flex;
     max-height: none;
     overflow-x: auto;
@@ -4078,7 +4100,8 @@ body.modal-open {
     scroll-padding-left: 0.6rem;
   }
 
-  .report-list-heading {
+  .report-list-heading,
+  .report-list-connection {
     display: none;
   }
 
@@ -4093,8 +4116,12 @@ body.modal-open {
   }
 
   .report-document {
-    padding-right: 1.25rem;
-    padding-left: 1.25rem;
+    padding: 0;
+  }
+
+  .report-detail-shell,
+  .report-list {
+    padding: 1.5rem;
   }
 
   .report-stat-row {
@@ -4248,3 +4275,36 @@ body.modal-open {
     align-items: stretch;
   }
 }
+
+/* 보고서의 읽기 구획은 수집 설정의 card/collapsible 토큰을 그대로 따른다. */
+.report-reading-content { margin-top: 1.5rem; }
+.report-delivery-panel.report-share-card {
+  margin: 1.5rem 0 0;
+  padding: 1.5rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.report-reading-content h3 { margin: 0 0 1rem; font-size: 1.1rem; letter-spacing: -0.03em; }
+.report-reading-content h4 { margin: 0 0 0.65rem; font-size: 1rem; line-height: 1.5; }
+.report-reading-content p,
+.report-reading-content li { color: var(--fg-2); font-size: 0.92rem; line-height: 1.8; }
+.report-reading-content ul { margin: 0; padding-left: 1.2rem; }
+.report-summary-card li + li { margin-top: 0.7rem; }
+.report-event-list { display: grid; gap: 1rem; }
+.report-event-card { min-width: 0; padding: 1.5rem; border-radius: var(--radius); background: var(--surface-sunken); }
+.report-event-card + .report-event-card { margin-top: 1rem; }
+.report-event-list > .report-event-card + .report-event-card { margin-top: 0; }
+.report-event-card p { margin: 0; }
+.report-event-card .report-event-significance { margin-top: 0.65rem; }
+.report-event-sources { display: grid; gap: 0.3rem; margin-top: 0.8rem; }
+.report-event-sources:empty { display: none; }
+.report-event-sources .text-button { padding: 0.2rem 0; text-align: left; white-space: normal; overflow-wrap: anywhere; font-size: 0.8rem; }
+.report-markdown-text a { color: var(--primary-strong); overflow-wrap: anywhere; }
+.report-markdown-text p + p { margin-top: 0.75rem; }
+.report-issue-description { margin: 0.25rem 0 0; color: var(--fg-3); font-size: 0.8rem; font-weight: 500; }
+.issue-tone-explanation { color: var(--fg-3); font-size: 0.76rem; line-height: 1.65; }
+.issue-tone-explanation summary { cursor: pointer; }
+.collection-keyword-match { padding: 0; background: var(--warning-weak); color: inherit; font-weight: 700; box-shadow: inset 0 -2px var(--warning); }
+.sentence-list p.highlighted .collection-keyword-match { background: var(--warning-weak); }

@@ -77,7 +77,7 @@ class TopicCommandServiceImplTest {
         TopicResDTO.Created result = topicCommandService.createTopic(request);
 
         assertEquals(Topic.DEFAULT_BATCH_SIZE, result.getBatchSize());
-        assertEquals(Topic.DEFAULT_INTERVAL_MINUTES, result.getIntervalMinutes());
+        assertEquals(1440, result.getIntervalMinutes());
         assertTrue(result.isActive());
         assertEquals(List.of(), result.getRequiredKeywords());
         assertEquals(List.of(), result.getSources());

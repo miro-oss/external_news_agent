@@ -1,14 +1,15 @@
 import { useState } from 'react'
 import { useCreateTopic, useSources } from '../../api/queries'
 import { FormStatus } from './FormStatus'
+import { baseTopicKeywords, buildTopicKeywordInput } from './topicKeywordInput'
 
 const EMPTY = {
   name: '',
   queryText: '',
-  requiredKeywords: '',
+  requiredKeywords: null as string | null,
   optionalKeywords: '',
   excludedKeywords: '',
-  intervalMinutes: '60',
+  intervalMinutes: '1440',
 }
 
 const COLLECTION_INTERVALS = [
@@ -17,48 +18,49 @@ const COLLECTION_INTERVALS = [
   { value: '1440', label: '24시간마다' },
 ] as const
 
-/** 쉼표로 나눠 받는다. 빈 칸은 필터 없음이고, 빈 문자열은 필터에 넣지 않는다. */
-function toKeywords(value: string): string[] | undefined {
-  const items = value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-  return items.length > 0 ? items : undefined
-}
-
 export function TopicForm() {
   const [form, setForm] = useState(EMPTY)
   const [done, setDone] = useState<string | null>(null)
   const [queryTouched, setQueryTouched] = useState(false)
+  const [conditionsOpen, setConditionsOpen] = useState(false)
+  const [validation, setValidation] = useState<string | null>(null)
   const sources = useSources()
   const { mutate, isPending, error, reset } = useCreateTopic()
 
   const activeSources = sources.data?.content ?? []
-  /** SEARCH 소스를 연결하면 검색어가 필수다(TOPIC400). 보내기 전에 화면에서 먼저 알려 준다. */
-  const needsQueryText = activeSources.some((source) => source.sourceKind === 'SEARCH')
+  const baseKeywords = baseTopicKeywords(form.queryText)
+  const keywordInput = buildTopicKeywordInput(form)
+  const hasFeedSource = activeSources.some((source) => source.sourceKind === 'FEED')
   /**
    * 필수라는 사실을 라벨에 길게 적어 두는 대신 한 번 만졌다가 비운 순간에만 말한다. 아직
    * 손대지 않은 칸에 빨간 글씨를 띄우면 잘못한 것이 없는데 혼나는 것처럼 읽힌다.
    */
-  const queryMissing = needsQueryText && queryTouched && form.queryText.trim().length === 0
+  const queryMissing = queryTouched && baseKeywords.length === 0
 
   function update<K extends keyof typeof EMPTY>(key: K, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }))
     setDone(null)
     reset()
+    setValidation(null)
   }
 
   function submit(event: React.FormEvent) {
     event.preventDefault()
     const intervalMinutes = Number(form.intervalMinutes)
+    if (baseKeywords.length === 0) {
+      setQueryTouched(true)
+      return
+    }
+    if (hasFeedSource && keywordInput.requiredKeywords.length === 0 && keywordInput.optionalKeywords.length === 0) {
+      setValidation('RSS 기사도 주제에 맞게 모을 수 있도록 모두 포함 또는 하나 이상 포함 조건을 입력해 주세요.')
+      setConditionsOpen(true)
+      return
+    }
 
     mutate(
       {
         name: form.name.trim(),
-        queryText: form.queryText.trim() || undefined,
-        requiredKeywords: toKeywords(form.requiredKeywords),
-        optionalKeywords: toKeywords(form.optionalKeywords),
-        excludedKeywords: toKeywords(form.excludedKeywords),
+        ...keywordInput,
         intervalMinutes,
         sourceIds: activeSources.map((source) => source.id),
       },
@@ -66,6 +68,8 @@ export function TopicForm() {
         onSuccess: (created) => {
           setForm(EMPTY)
           setQueryTouched(false)
+          setConditionsOpen(false)
+          setValidation(null)
           setDone(`"${created.name}"을(를) 등록했습니다.`)
         },
       },
@@ -88,7 +92,7 @@ export function TopicForm() {
 
       <div className="field">
         <label htmlFor="topic-query">
-          검색어{needsQueryText && <span className="required"> 필수</span>}
+          검색 키워드
         </label>
         <input
           id="topic-query"
@@ -97,48 +101,45 @@ export function TopicForm() {
           onBlur={() => setQueryTouched(true)}
           placeholder="HBM 반도체"
           maxLength={500}
-          required={needsQueryText}
-          pattern={needsQueryText ? '.*\\S.*' : undefined}
-          title="검색어에는 공백이 아닌 문자를 입력하세요."
+          required
+          pattern={'.*\\S.*'}
+          title="검색 키워드를 입력하세요."
           aria-invalid={queryMissing || undefined}
           aria-describedby="topic-query-hint"
         />
         {queryMissing
-          ? <p className="error" id="topic-query-hint">검색어를 입력해 주세요.</p>
-          : <p className="hint" id="topic-query-hint">검색 소스에 넘길 질의어입니다.</p>}
+          ? <p className="error" id="topic-query-hint">검색 키워드를 입력해 주세요.</p>
+          : <p className="hint" id="topic-query-hint">공백이나 쉼표로 구분합니다. 기본적으로 입력한 키워드를 모두 포함한 기사를 모읍니다.</p>}
       </div>
 
-      <div className="field">
-        <label htmlFor="topic-required">필수 키워드</label>
-        <input
-          id="topic-required"
-          value={form.requiredKeywords}
-          onChange={(event) => update('requiredKeywords', event.target.value)}
-          placeholder="HBM"
-        />
-        <p className="hint">쉼표로 구분합니다. 모두 포함된 기사만 통과합니다(AND).</p>
-      </div>
-
-      <div className="field">
-        <label htmlFor="topic-optional">선택 키워드</label>
-        <input
-          id="topic-optional"
-          value={form.optionalKeywords}
-          onChange={(event) => update('optionalKeywords', event.target.value)}
-          placeholder="SK하이닉스, 삼성전자, 마이크론"
-        />
-        <p className="hint">하나라도 포함되면 통과합니다(OR).</p>
-      </div>
-
-      <div className="field">
-        <label htmlFor="topic-excluded">제외 키워드</label>
-        <input
-          id="topic-excluded"
-          value={form.excludedKeywords}
-          onChange={(event) => update('excludedKeywords', event.target.value)}
-          placeholder="광고, 채용"
-        />
-        <p className="hint">하나라도 포함되면 제외합니다(NOT).</p>
+      <div className="topic-advanced">
+        <button type="button" className="secondary-button topic-advanced-toggle"
+          aria-expanded={conditionsOpen} aria-controls="topic-advanced-conditions"
+          onClick={() => setConditionsOpen((open) => !open)}>
+          상세 기사 조건 {conditionsOpen ? '접기' : '설정'}
+        </button>
+        {conditionsOpen && (
+          <div id="topic-advanced-conditions" className="topic-advanced-fields">
+            <p className="hint">검색 결과와 RSS 기사의 제목·요약에 아래 조건을 적용합니다.</p>
+            <div className="field">
+              <label htmlFor="topic-required">모두 포함</label>
+              <input id="topic-required" value={form.requiredKeywords ?? baseKeywords.join(', ')}
+                onChange={(event) => update('requiredKeywords', event.target.value)} placeholder="HBM, 반도체" />
+              <p className="hint">기본값은 검색 키워드입니다. 다른 조건이 필요하면 수정하거나 비울 수 있습니다.</p>
+            </div>
+            <div className="field">
+              <label htmlFor="topic-optional">하나 이상 포함</label>
+              <input id="topic-optional" value={form.optionalKeywords}
+                onChange={(event) => update('optionalKeywords', event.target.value)} placeholder="SK하이닉스, 삼성전자, 마이크론" />
+            </div>
+            <div className="field">
+              <label htmlFor="topic-excluded">제외</label>
+              <input id="topic-excluded" value={form.excludedKeywords}
+                onChange={(event) => update('excludedKeywords', event.target.value)} placeholder="광고, 채용" />
+              <p className="hint">각 조건은 쉼표로 구분합니다. 제외 키워드가 들어간 기사는 모으지 않습니다.</p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="field">
@@ -175,6 +176,7 @@ export function TopicForm() {
       <button type="submit" disabled={isPending || sources.isPending || sources.isError || activeSources.length === 0}>
         {isPending ? '등록 중…' : '주제 등록'}
       </button>
+      {validation && <p className="error" role="alert">{validation}</p>}
       <FormStatus error={error} successMessage={done} />
     </form>
   )

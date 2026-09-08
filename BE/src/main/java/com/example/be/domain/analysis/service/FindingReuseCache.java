@@ -138,7 +138,7 @@ public class FindingReuseCache {
         if (context.selfCritiqueEligible()) {
             fields.add("self-critique-eligible");
         }
-        appendTopic(fields, article.getTopic());
+        appendTopic(fields, context.topic());
         return ArticleHasher.analysisInputHash(fields.toArray(String[]::new));
     }
 

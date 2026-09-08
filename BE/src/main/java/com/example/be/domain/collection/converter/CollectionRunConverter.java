@@ -29,6 +29,7 @@ public class CollectionRunConverter {
                 .targetTopicIds(targetTopicIds)
                 .targetCombinationCount(targetCombinationCount)
                 .llmPlan(run.getLlmPlan().name())
+                .queuedAt(toOffset(run.getQueuedAt()))
                 .startedAt(toOffset(run.getStartedAt()))
                 .build();
     }
@@ -40,6 +41,7 @@ public class CollectionRunConverter {
                 .triggerType(run.getTriggerType().name())
                 .idempotencyKey(run.getIdempotencyKey())
                 .llmPlan(run.getLlmPlan().name())
+                .queuedAt(toOffset(run.getQueuedAt()))
                 .startedAt(toOffset(run.getStartedAt()))
                 .build();
     }
@@ -49,6 +51,7 @@ public class CollectionRunConverter {
                 .runId(run.getId())
                 .status(run.getStatus().name())
                 .triggerType(run.getTriggerType().name())
+                .queuedAt(toOffset(run.getQueuedAt()))
                 .startedAt(toOffset(run.getStartedAt()))
                 .finishedAt(toOffset(run.getFinishedAt()))
                 .scannedCount(run.getScannedCount())
@@ -70,6 +73,7 @@ public class CollectionRunConverter {
                 .status(run.getStatus().name())
                 .triggerType(run.getTriggerType().name())
                 .idempotencyKey(run.getIdempotencyKey())
+                .queuedAt(toOffset(run.getQueuedAt()))
                 .startedAt(toOffset(run.getStartedAt()))
                 .finishedAt(toOffset(run.getFinishedAt()))
                 .scannedCount(run.getScannedCount())

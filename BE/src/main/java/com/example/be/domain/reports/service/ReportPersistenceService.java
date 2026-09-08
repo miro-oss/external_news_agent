@@ -4,6 +4,8 @@ import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
+import com.example.be.domain.reports.entity.ReportCollectionContext;
+import com.example.be.domain.notifications.service.ReportNotificationAutomationService;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,7 @@ public class ReportPersistenceService {
 
     private final CollectionRunRepository runRepository;
     private final NewsReportRepository reportRepository;
+    private final ReportNotificationAutomationService notificationAutomation;
 
     @Transactional
     public Reservation reserve(Long runId, LocalDateTime generatedAt) {
@@ -33,6 +36,7 @@ public class ReportPersistenceService {
 
         NewsReport report = reportRepository.save(NewsReport.builder()
                 .run(run)
+                .collectionContexts(java.util.List.of(ReportCollectionContext.from(run)))
                 .title(PENDING_TITLE)
                 .markdownBody(PENDING_BODY)
                 .modelName(PENDING_MODEL)
@@ -50,9 +54,11 @@ public class ReportPersistenceService {
         if (report.getReportStatus() != ReportStatus.PENDING) {
             return report.getId();
         }
+        String title = ReportTitles.forReport(report, document.title(), generatedAt);
         report.complete(
-                document.title(),
-                document.markdownBody(),
+                title,
+                document.title().equals(title) ? document.markdownBody()
+                        : ReportTitles.alignMarkdownTitle(document.markdownBody(), title),
                 document.modelName(),
                 document.promptVersion(),
                 document.llmProvider(),
@@ -64,6 +70,8 @@ public class ReportPersistenceService {
                 document.excludedFindingIds(),
                 document.status(),
                 generatedAt);
+        report.recordStructuredContent(document.structuredContent());
+        notificationAutomation.enqueueCompletedReport(report);
         return report.getId();
     }
 

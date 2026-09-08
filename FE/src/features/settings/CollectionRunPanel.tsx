@@ -1,4 +1,6 @@
 import { useRef, useState } from 'react'
+import { useCollectionProgress, useCollectionQueue } from '../../api/collectionQueue'
+import './collection-queue.css'
 import {
   useAudienceSetting,
   useCombinations,
@@ -27,7 +29,9 @@ export function CollectionRunPanel() {
   const planQuery = useLlmPlan()
   const startRun = useStartCollectionRun()
   const [scope, setScope] = useState<RunScope>('SELECTED')
-  const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null)
+  const [selectedTopicIds, setSelectedTopicIds] = useState<number[] | null>(null)
+  const queue = useCollectionQueue()
+  const progress = useCollectionProgress(startRun.data?.runId)
   const [runOverride, setRunOverride] = useState<'DEFAULT' | LlmPlan>('DEFAULT')
   const pendingRunKey = useRef<string | null>(null)
 
@@ -49,10 +53,11 @@ export function CollectionRunPanel() {
       { id: combination.topicId, name: combination.topicName },
     ])).values(),
   ).sort((left, right) => left.name.localeCompare(right.name, 'ko'))
-  const effectiveTopic = activeTopics.find((topic) => topic.id === selectedTopicId) ?? activeTopics[0]
+  const effectiveTopicIds = (selectedTopicIds ?? activeTopics.slice(0, 1).map((topic) => topic.id))
+    .filter((id) => activeTopics.some((topic) => topic.id === id))
   const targetCombinations = scope === 'ALL'
     ? activeCombinations
-    : activeCombinations.filter((combination) => combination.topicId === effectiveTopic?.id)
+    : activeCombinations.filter((combination) => effectiveTopicIds.includes(combination.topicId))
   const setting = planQuery.data
 
   function resetRequestState() {
@@ -65,9 +70,10 @@ export function CollectionRunPanel() {
     setScope(nextScope)
   }
 
-  function changeTopic(topicId: number) {
+  function toggleTopic(topicId: number) {
     resetRequestState()
-    setSelectedTopicId(topicId)
+    setSelectedTopicIds(effectiveTopicIds.includes(topicId)
+      ? effectiveTopicIds.filter((id) => id !== topicId) : [...effectiveTopicIds, topicId])
   }
 
   function changeRunOverride(value: 'DEFAULT' | LlmPlan) {
@@ -76,16 +82,16 @@ export function CollectionRunPanel() {
   }
 
   function runNow() {
-    if (scope === 'SELECTED' && !effectiveTopic) return
+    if (scope === 'SELECTED' && effectiveTopicIds.length === 0) return
+    if (progress.data && !['PENDING', 'RUNNING'].includes(progress.data.status)) pendingRunKey.current = null
     const idempotencyKey = pendingRunKey.current ?? `manual-${crypto.randomUUID()}`
     pendingRunKey.current = idempotencyKey
     startRun.mutate(
       {
         idempotencyKey,
-        ...(scope === 'SELECTED' ? { topicIds: [effectiveTopic.id] } : {}),
+        ...(scope === 'SELECTED' ? { topicIds: effectiveTopicIds } : {}),
         ...(runOverride === 'DEFAULT' ? {} : { plan: runOverride }),
       },
-      { onSuccess: () => { pendingRunKey.current = null } },
     )
   }
 
@@ -96,9 +102,11 @@ export function CollectionRunPanel() {
       <div className="collection-run-heading">
         <div>
           <h2 id="collection-run-title">수집 실행</h2>
-          <p className="muted">기본은 주제 하나만 실행합니다. 실행 전에 대상 규모를 확인해 주세요.</p>
+          <p className="muted">주제를 여러 개 골라 한 번에 수집할 수 있습니다.</p>
         </div>
-        <span className="run-default-badge">선택 주제 기본</span>
+        {queue.data && (queue.data.pending > 0 || queue.data.running > 0) && (
+          <span className="run-default-badge">수집 중 {queue.data.running} · 대기 {queue.data.pending}</span>
+        )}
       </div>
 
       <div className="collection-run-controls">
@@ -115,20 +123,19 @@ export function CollectionRunPanel() {
           </select>
         </div>
 
-        <div className="field">
-          <label htmlFor="run-topic">수집할 주제</label>
-          <select
-            id="run-topic"
-            value={effectiveTopic?.id ?? ''}
-            disabled={scope === 'ALL' || activeTopics.length === 0 || startRun.isPending}
-            onChange={(event) => changeTopic(Number(event.target.value))}
-          >
-            {activeTopics.length === 0 && <option value="">활성 주제 없음</option>}
+        <fieldset className="run-topic-selection" disabled={scope === 'ALL' || startRun.isPending}>
+          <legend>수집할 주제</legend>
+          <div className="run-topic-options">
+            {activeTopics.length === 0 && <span className="muted">활성 주제가 없습니다.</span>}
             {activeTopics.map((topic) => (
-              <option value={topic.id} key={topic.id}>{topic.name}</option>
+              <label key={topic.id}>
+                <input type="checkbox" checked={scope === 'ALL' || effectiveTopicIds.includes(topic.id)}
+                  onChange={() => toggleTopic(topic.id)} />
+                <span>{topic.name}</span>
+              </label>
             ))}
-          </select>
-        </div>
+          </div>
+        </fieldset>
 
         {setting?.allowRunOverride && (
           <div className="field">
@@ -154,12 +161,15 @@ export function CollectionRunPanel() {
           ? '실행 요청 중…'
           : scope === 'ALL' ? '모든 활성 주제 수집' : '선택 주제 수집'}
       </button>
-      <MutationStatus
-        error={startRun.error}
-        success={startRun.data
-          ? `실행 #${startRun.data.runId}을 ${startRun.data.llmPlan} 플랜으로 시작했습니다.`
-          : null}
-      />
+      <MutationStatus error={startRun.error} success={startRun.data ? '수집 요청을 접수했습니다.' : null} />
+      {progress.data && <p className="hint" role="status">
+        {progress.data.status === 'PENDING' ? '준비가 끝나면 자동으로 수집합니다.'
+          : progress.data.status === 'RUNNING' ? '선택한 주제를 수집하고 있습니다.'
+          : progress.data.status === 'FAILED' ? '수집을 완료하지 못했습니다. 다시 요청할 수 있습니다.'
+          : progress.data.status === 'PARTIAL' ? '수집을 마쳤습니다. 일부 출처를 가져오지 못했습니다.'
+          : '수집을 마쳤습니다.'}
+        {progress.data.reportId && <> <a href={`#/reports?reportId=${progress.data.reportId}`}>보고서 보기</a></>}
+      </p>}
     </section>
   )
 }

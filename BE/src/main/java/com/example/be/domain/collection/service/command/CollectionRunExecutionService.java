@@ -125,7 +125,7 @@ public class CollectionRunExecutionService {
         List<CollectionBatch> batches = items.stream()
                 .map(item -> collectionExecutor.collect(
                         item.getId(),
-                        item.getTopic(),
+                        item.collectionTopic(),
                         item.getSource(),
                         item.getRun().isForceRefresh()))
                 .toList();

@@ -49,7 +49,7 @@ public class Topic {
      * provider 허용 범위를 넘는 요청을 보내지 않는다.
      */
     public static final int DEFAULT_BATCH_SIZE = 100;
-    public static final int DEFAULT_INTERVAL_MINUTES = 60;
+    public static final int DEFAULT_INTERVAL_MINUTES = 1440;
     public static final Set<Integer> ALLOWED_INTERVAL_MINUTES = Set.of(60, 720, 1440);
     public static final int MIN_BATCH_SIZE = 1;
     public static final int MAX_BATCH_SIZE = 300;

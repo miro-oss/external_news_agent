@@ -47,12 +47,12 @@ public class NotificationDeliveryPlanService {
     public PreparedDelivery prepare(Long reportId, NotificationReqDTO.Send request) {
         NewsReport report = findReport(reportId);
         List<NotificationChannel> channels = resolveChannels(request.getChannelIds());
-        List<NotificationGroup> groups = request.getGroupIds().stream().filter(Objects::nonNull).distinct()
+        List<NotificationGroup> groups = (request.getGroupIds() == null ? List.<Long>of() : request.getGroupIds()).stream().filter(Objects::nonNull).distinct()
                 .map(id -> managementService.findGroup(id, true)).toList();
-        List<PreparedTarget> targets = resolveTargets(groups, channels);
+        List<PreparedTarget> targets = resolveTargets(groups, channels, request.getRecipientIds());
         if (targets.isEmpty()) {
             throw new NotificationException(NotificationErrorCode.DELIVERY_NO_TARGET,
-                    Map.of("groupIds", request.getGroupIds()));
+                    Map.of("groupIds", request.getGroupIds() == null ? List.of() : request.getGroupIds()));
         }
 
         Map<Long, RenderedNotification> renderedByChannel = new LinkedHashMap<>();
@@ -98,9 +98,17 @@ public class NotificationDeliveryPlanService {
 
     private List<PreparedTarget> resolveTargets(List<NotificationGroup> groups,
                                                 List<NotificationChannel> channels) {
+        return resolveTargets(groups, channels, List.of());
+    }
+
+    public List<PreparedTarget> resolveTargets(List<NotificationGroup> groups,
+                                                List<NotificationChannel> channels, List<Long> recipientIds) {
         Map<String, PreparedTarget> targets = new LinkedHashMap<>();
-        for (NotificationGroup group : groups) {
-            for (NotificationRecipient recipient : group.getMembers()) {
+        List<NotificationRecipient> recipients = new java.util.ArrayList<>();
+        groups.forEach(group -> recipients.addAll(group.getMembers()));
+        if (recipientIds != null) recipientIds.stream().filter(Objects::nonNull).distinct()
+                .map(managementService::findRecipient).forEach(recipients::add);
+        for (NotificationRecipient recipient : recipients) {
                 if (!recipient.isActive()) {
                     continue;
                 }
@@ -117,7 +125,6 @@ public class NotificationDeliveryPlanService {
                                 destination.getAddress(), destination.isOnboarded()));
                     }
                 }
-            }
         }
         return List.copyOf(targets.values());
     }

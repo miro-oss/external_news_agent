@@ -23,7 +23,7 @@ public class CollectionRunResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
             "runId", "status", "triggerType", "idempotencyKey",
-            "llmPlan", "targetTopicIds", "targetCombinationCount", "startedAt"
+            "llmPlan", "targetTopicIds", "targetCombinationCount", "queuedAt", "startedAt"
     })
     @Schema(name = "CollectionRunCreateResponse", description = "수동 수집 실행 시작 결과")
     public static class Created {
@@ -49,7 +49,10 @@ public class CollectionRunResDTO {
         @Schema(description = "대상 주제 × 소스 조합 수", example = "6")
         private final Integer targetCombinationCount;
 
-        @Schema(description = "시작 시각", example = "2026-08-10T10:00:00+09:00")
+        @Schema(description = "요청 접수 시각", example = "2026-08-10T10:00:00+09:00")
+        private final OffsetDateTime queuedAt;
+
+        @Schema(description = "실제 시작 시각. PENDING이면 null 또는 생략", nullable = true)
         private final OffsetDateTime startedAt;
     }
 
@@ -57,7 +60,7 @@ public class CollectionRunResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "runId", "status", "triggerType", "startedAt", "finishedAt",
+            "runId", "status", "triggerType", "queuedAt", "startedAt", "finishedAt",
             "scannedCount", "newCount", "updatedCount", "skippedCount", "warningCount", "reportId", "llmPlan"
     })
     @Schema(name = "CollectionRunSummaryResponse", description = "수집 실행 내역 목록 항목")
@@ -72,7 +75,10 @@ public class CollectionRunResDTO {
         @Schema(description = "실행 트리거", example = "MANUAL")
         private final String triggerType;
 
-        @Schema(description = "시작 시각", example = "2026-08-10T10:00:00+09:00")
+        @Schema(description = "요청 접수 시각", example = "2026-08-10T10:00:00+09:00")
+        private final OffsetDateTime queuedAt;
+
+        @Schema(description = "실제 시작 시각. PENDING이면 null 또는 생략", nullable = true)
         private final OffsetDateTime startedAt;
 
         @Schema(description = "종료 시각", example = "2026-08-10T10:03:12+09:00")
@@ -104,7 +110,7 @@ public class CollectionRunResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "runId", "status", "triggerType", "idempotencyKey", "startedAt", "finishedAt",
+            "runId", "status", "triggerType", "idempotencyKey", "queuedAt", "startedAt", "finishedAt",
             "scannedCount", "newCount", "updatedCount", "skippedCount", "reportId", "llmPlan",
             "coverage", "breakdown", "warnings"
     })
@@ -123,7 +129,10 @@ public class CollectionRunResDTO {
         @Schema(description = "중복 실행 방지 키", example = "2026-08-10-manual-001")
         private final String idempotencyKey;
 
-        @Schema(description = "시작 시각", example = "2026-08-10T10:00:00+09:00")
+        @Schema(description = "요청 접수 시각", example = "2026-08-10T10:00:00+09:00")
+        private final OffsetDateTime queuedAt;
+
+        @Schema(description = "실제 시작 시각. PENDING이면 null 또는 생략", nullable = true)
         private final OffsetDateTime startedAt;
 
         @Schema(description = "종료 시각", example = "2026-08-10T10:03:12+09:00")

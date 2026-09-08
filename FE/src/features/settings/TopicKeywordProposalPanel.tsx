@@ -29,8 +29,8 @@ const STATUS_LABELS: Record<TopicKeywordProposalStatus, string> = {
 }
 
 const BUCKET_LABELS: Record<TopicKeywordBucket, string> = {
-  REQUIRED: '필수',
-  OPTIONAL: '선택',
+  REQUIRED: '모두 포함',
+  OPTIONAL: '하나 이상 포함',
   EXCLUDED: '제외',
 }
 
@@ -65,6 +65,7 @@ export function TopicKeywordProposalPanel() {
   const [filter, setFilter] = useState<TopicKeywordProposalFilter>('PENDING')
   const [success, setSuccess] = useState<string | null>(null)
   const [actingIds, setActingIds] = useState<Set<number>>(() => new Set())
+  const [selectedId, setSelectedId] = useState<number | null>(null)
   const proposals = useTopicKeywordProposals(filter)
   const approve = useApproveTopicKeywordProposal()
   const reject = useRejectTopicKeywordProposal()
@@ -78,6 +79,7 @@ export function TopicKeywordProposalPanel() {
   function changeFilter(next: TopicKeywordProposalFilter) {
     resetFeedback()
     setActingIds(new Set())
+    setSelectedId(null)
     setFilter(next)
   }
 
@@ -134,6 +136,8 @@ export function TopicKeywordProposalPanel() {
               key={proposal.id}
               proposal={proposal}
               isActing={actingIds.has(proposal.id)}
+              expanded={selectedId === proposal.id}
+              onToggle={() => setSelectedId((current) => current === proposal.id ? null : proposal.id)}
               onApprove={() => review(proposal.id, 'approve')}
               onReject={() => review(proposal.id, 'reject')}
             />
@@ -149,35 +153,49 @@ export function TopicKeywordProposalPanel() {
 function ProposalCard({
   proposal,
   isActing,
+  expanded,
+  onToggle,
   onApprove,
   onReject,
 }: {
   proposal: TopicKeywordProposal
   isActing: boolean
+  expanded: boolean
+  onToggle: () => void
   onApprove: () => void
   onReject: () => void
 }) {
   return (
-    <article className="proposal-card">
+    <article className={expanded ? 'proposal-card proposal-review-card expanded' : 'proposal-card proposal-review-card'}>
       <div className="proposal-header">
         <div className="proposal-title-row">
-          <h3>{proposal.topicName}</h3>
+          <h3><button type="button" className="proposal-detail-toggle" aria-expanded={expanded}
+            aria-controls={`proposal-detail-${proposal.id}`} onClick={onToggle}>
+            {proposal.topicName}<span>{expanded ? '상세 접기' : '변경 상세'}</span>
+          </button></h3>
           <span className={`status-pill proposal-status proposal-status-${proposal.status.toLowerCase()}`}>
             {STATUS_LABELS[proposal.status]}
           </span>
         </div>
         <p className="proposal-summary">{proposal.summary}</p>
+        <div className="proposal-change-preview">
+          {proposal.changes.map((change, index) => (
+            <span className="proposal-keyword-chip" key={`${change.bucket}-${change.keyword}-${index}`}>
+              {change.action === 'ADD' ? '+' : '−'} {change.keyword}
+            </span>
+          ))}
+        </div>
         <p className="proposal-meta">
-          자동 수집 #{proposal.collectionRunId} · 제안 {formatDateTime(proposal.createdAt)}
+          제안 {formatDateTime(proposal.createdAt)}
           {proposal.reviewedAt && ` · 검토 ${formatDateTime(proposal.reviewedAt)}`}
         </p>
       </div>
 
-      <div className="proposal-grid">
+      {expanded && <div className="proposal-grid" id={`proposal-detail-${proposal.id}`}>
         <section className="proposal-section">
           <h4>현재 키워드</h4>
-          <KeywordGroup label="필수" keywords={proposal.currentKeywords.requiredKeywords} />
-          <KeywordGroup label="선택" keywords={proposal.currentKeywords.optionalKeywords} />
+          <KeywordGroup label="모두 포함" keywords={proposal.currentKeywords.requiredKeywords} />
+          <KeywordGroup label="하나 이상 포함" keywords={proposal.currentKeywords.optionalKeywords} />
           <KeywordGroup label="제외" keywords={proposal.currentKeywords.excludedKeywords} />
         </section>
 
@@ -198,7 +216,7 @@ function ProposalCard({
             </ul>
           )}
         </section>
-      </div>
+      </div>}
 
       {proposal.status === 'PENDING' && (
         <div className="proposal-actions">

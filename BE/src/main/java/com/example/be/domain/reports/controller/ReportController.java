@@ -54,7 +54,7 @@ public class ReportController {
     }
 
     @GetMapping("/latest")
-    @Operation(summary = "최신 보고서 조회", description = "보고서가 없으면 200과 null을 반환합니다.")
+    @Operation(summary = "최신 보고서 조회", description = "저장된 보고서 구조·수집 조건·고유 기사 통계를 함께 조회합니다. 보고서가 없으면 200과 null을 반환합니다.")
     public ApiResponse<ReportResDTO.Detail> getLatest(
             @RequestParam(defaultValue = "true") boolean includeFindings,
             @Parameter(description = "RUN 실행별 / DAILY 일일 통합. 생략하면 전체에서 최신")
@@ -68,7 +68,7 @@ public class ReportController {
     }
 
     @GetMapping("/{reportId}")
-    @Operation(summary = "보고서 상세 조회", description = "마크다운 본문과 근거 findings를 조회합니다.")
+    @Operation(summary = "보고서 상세 조회", description = "마크다운과 구조화 본문, 실행 접수 당시 수집 조건, 고유 기사 통계 및 근거 findings를 조회합니다. 이전 보고서의 structuredContent는 null일 수 있습니다.")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다."),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(

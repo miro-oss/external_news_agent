@@ -56,7 +56,7 @@ class BeApplicationTests {
         assertTrue(environment.getPropertySources().stream()
                 .noneMatch(source -> source.getName().contains(".env")));
         for (String property : new String[]{"news.collection.reap-on-startup",
-                "news.collection.scheduler.enabled", "news.reports.daily.enabled", "news.agent.enabled"}) {
+                "news.collection.scheduler.enabled", "news.scheduling.enabled", "news.reports.daily.enabled", "news.agent.enabled"}) {
             assertEquals("false", environment.getProperty(property), property);
         }
     }

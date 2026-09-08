@@ -27,7 +27,8 @@ class ReportPersistenceServiceTest {
     private final CollectionRunRepository runRepository = mock(CollectionRunRepository.class);
     private final NewsReportRepository reportRepository = mock(NewsReportRepository.class);
     private final ReportPersistenceService service =
-            new ReportPersistenceService(runRepository, reportRepository);
+            new ReportPersistenceService(runRepository, reportRepository,
+                    mock(com.example.be.domain.notifications.service.ReportNotificationAutomationService.class));
 
     @Test
     void completedRunAndDailyReportsCannotBeOverwrittenByLateCompletion() {

@@ -59,7 +59,7 @@ public class CollectionRunQueryServiceImpl implements CollectionRunQueryService 
                         toLocalDateTime(from),
                         toLocalDateTime(to)),
                 PageRequest.of(page, size, Sort.by(
-                        Sort.Order.desc("startedAt"),
+                        Sort.Order.desc("queuedAt"),
                         Sort.Order.desc("id")))
         );
 

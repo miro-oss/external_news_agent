@@ -1,0 +1,145 @@
+/* Settings keeps the shared surfaces, spacing, button states and motion tokens. */
+.settings-page .topic-advanced {
+  margin-bottom: 1.25rem;
+}
+
+.settings-page .topic-advanced-toggle {
+  width: 100%;
+  text-align: left;
+}
+
+.settings-page .topic-advanced-fields {
+  margin-top: 0.8rem;
+  padding: 1rem 1.05rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  animation: collapsible-in var(--dur-2) var(--ease-out);
+}
+
+.settings-page .topic-advanced-fields > .hint {
+  margin-bottom: 1rem;
+}
+
+.settings-page .topic-advanced-fields .field:last-child {
+  margin-bottom: 0;
+}
+
+.settings-page .topic-list-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.settings-page .topic-management-table {
+  min-width: 1060px;
+}
+
+.settings-page .topic-management-table .topic-name-column { width: 16%; }
+.settings-page .topic-management-table .topic-query-column { width: 12%; }
+.settings-page .topic-management-table .topic-conditions-column { width: 17%; }
+.settings-page .topic-management-table .topic-surge-column { width: 15%; }
+.settings-page .topic-management-table .topic-related-column { width: 14%; }
+.settings-page .topic-management-table .topic-schedule-column { width: 15%; }
+.settings-page .topic-management-table .topic-actions-column { width: 11%; }
+
+.settings-page .topic-condition-lines {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.settings-page .topic-condition-lines small {
+  color: var(--fg-3);
+  font-size: 0.76rem;
+}
+
+.settings-page .topic-management-action {
+  padding: 0.6rem 0.75rem;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.settings-page .topic-management-actions {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.settings-page .topic-delivery-settings {
+  margin-top: 1.25rem;
+  animation: collapsible-in var(--dur-2) var(--ease-out);
+}
+
+.settings-page .proposal-review-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.9rem 1.25rem;
+}
+
+.settings-page .proposal-review-card .proposal-header {
+  min-width: 0;
+  margin: 0;
+}
+
+.settings-page .proposal-review-card .proposal-title-row h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.settings-page .proposal-detail-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  max-width: 100%;
+  padding: 0.25rem 0;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .proposal-detail-toggle span {
+  flex-shrink: 0;
+  color: var(--primary-strong);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.settings-page .proposal-detail-toggle:hover {
+  color: var(--primary-strong);
+}
+
+.settings-page .proposal-change-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+
+.settings-page .proposal-review-card .proposal-grid {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  animation: collapsible-in var(--dur-2) var(--ease-out);
+}
+
+.settings-page .proposal-review-card .proposal-actions {
+  grid-column: 2;
+  grid-row: 1;
+  margin-top: 0;
+}
+
+@media (max-width: 600px) {
+  .settings-page .proposal-review-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-page .proposal-review-card .proposal-actions {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-start;
+  }
+}

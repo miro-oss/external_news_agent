@@ -40,7 +40,7 @@ class CollectionRunReaperTest {
     @Test
     void reapClosesEveryRunLeftInProgress() {
         when(runRepository.findIdsByStatusInAndStartedAtBefore(
-                eq(RunStatus.IN_PROGRESS_STATUSES), any(LocalDateTime.class))).thenReturn(List.of(41L, 42L));
+                eq(java.util.Set.of(RunStatus.RUNNING)), any(LocalDateTime.class))).thenReturn(List.of(41L, 42L));
 
         reaper.reapInterruptedRuns();
 
@@ -51,7 +51,7 @@ class CollectionRunReaperTest {
     @Test
     void reapDoesNothingWhenNoRunIsLeftInProgress() {
         when(runRepository.findIdsByStatusInAndStartedAtBefore(
-                eq(RunStatus.IN_PROGRESS_STATUSES), any(LocalDateTime.class))).thenReturn(List.of());
+                eq(java.util.Set.of(RunStatus.RUNNING)), any(LocalDateTime.class))).thenReturn(List.of());
 
         reaper.reapInterruptedRuns();
 
@@ -64,7 +64,7 @@ class CollectionRunReaperTest {
     @Test
     void reapKeepsClosingAfterOneRunFails() {
         when(runRepository.findIdsByStatusInAndStartedAtBefore(
-                eq(RunStatus.IN_PROGRESS_STATUSES), any(LocalDateTime.class))).thenReturn(List.of(41L, 42L, 43L));
+                eq(java.util.Set.of(RunStatus.RUNNING)), any(LocalDateTime.class))).thenReturn(List.of(41L, 42L, 43L));
         doThrow(new IllegalStateException("닫을 수 없다"))
                 .when(resultWriter).abortRun(eq(42L), anyString(), anyString());
 
@@ -79,14 +79,14 @@ class CollectionRunReaperTest {
      * 여기에 끝난 실행이 섞이면 이력을 덮어쓴다.
      */
     @Test
-    void reapOnlyLooksAtInProgressStatuses() {
+    void reapPreservesPendingRequestsAcrossRestart() {
         when(runRepository.findIdsByStatusInAndStartedAtBefore(
-                eq(RunStatus.IN_PROGRESS_STATUSES), any(LocalDateTime.class))).thenReturn(List.of());
+                eq(java.util.Set.of(RunStatus.RUNNING)), any(LocalDateTime.class))).thenReturn(List.of());
 
         reaper.reapInterruptedRuns();
 
         verify(runRepository).findIdsByStatusInAndStartedAtBefore(
-                eq(RunStatus.IN_PROGRESS_STATUSES), any(LocalDateTime.class));
+                eq(java.util.Set.of(RunStatus.RUNNING)), any(LocalDateTime.class));
         verify(runRepository, never()).findAll();
         verify(resultWriter, never()).abortRun(any(), anyString(), anyString());
     }

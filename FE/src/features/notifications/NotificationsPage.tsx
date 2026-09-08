@@ -16,6 +16,9 @@ import type { DeliveryStatus, GroupPerspective, NotificationChannelType } from '
 import { Segmented, type SegmentedOption } from '../../components/Segmented'
 import { formatMediumDate } from '../../lib/datetime'
 import { MutationStatus } from '../settings/MutationStatus'
+import { useEmailReadiness } from '../../api/notificationConnections'
+import { TelegramConnectionCard } from './TelegramConnectionCard'
+import './notifications-refinement.css'
 
 const PERSPECTIVES: Array<{ value: GroupPerspective; label: string }> = [
   { value: 'EXECUTIVE', label: '경영진' },
@@ -159,11 +162,12 @@ export function NotificationsPage() {
 function ChannelCard({ channel }: { channel: NonNullable<ReturnType<typeof useNotificationChannels>['data']>[number] }) {
   const update = useUpdateNotificationChannel()
   const isEmail = channel.channelType === 'EMAIL'
+  const readiness = useEmailReadiness()
   return (
     <article className="channel-card" data-active={channel.active}>
       <div className="channel-card-title">
         <span className={`channel-mark ${channel.channelType.toLowerCase()}`}>{isEmail ? '✉' : '↗'}</span>
-        <div><strong>{channel.name}</strong><span>{isEmail ? '완성된 분석 보고서를 메일로 전달합니다.' : '중요한 변화를 짧게 바로 알립니다.'}</span></div>
+        <div><strong>{channel.name}</strong><span>{isEmail ? '완성된 보고서의 핵심 요약을 전달합니다.' : '보고서의 핵심 요약을 짧게 전달합니다.'}</span></div>
         <span className="channel-state">{channel.active ? '사용 중' : '꺼짐'}</span>
       </div>
       <button
@@ -172,6 +176,7 @@ function ChannelCard({ channel }: { channel: NonNullable<ReturnType<typeof useNo
         disabled={update.isPending}
         onClick={() => update.mutate({ channelId: channel.id, body: { active: !channel.active } })}
       >{channel.active ? '사용 중지' : '사용하기'}</button>
+      {isEmail && readiness.data && <p className="email-readiness">{readiness.data.message}</p>}
       <MutationStatus error={update.error} success={update.isSuccess ? '채널 상태를 바꿨습니다.' : null} />
     </article>
   )
@@ -185,16 +190,15 @@ function RecipientPanel({ channels, recipients }: {
   const remove = useDeleteNotificationRecipient()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [telegram, setTelegram] = useState('')
 
   function submit(event: FormEvent) {
     event.preventDefault()
     const destinations = channels.flatMap((channel) => {
-      const address = channel.channelType === 'EMAIL' ? email.trim() : telegram.trim()
+      const address = channel.channelType === 'EMAIL' ? email.trim() : ''
       return address ? [{ channelId: channel.id, address, use: true }] : []
     })
     create.mutate({ name: name.trim(), email: email.trim() || undefined, destinations }, {
-      onSuccess: () => { setName(''); setEmail(''); setTelegram('') },
+      onSuccess: () => { setName(''); setEmail('') },
     })
   }
 
@@ -202,13 +206,12 @@ function RecipientPanel({ channels, recipients }: {
     <section className="notification-card-stack">
       <div className="section-heading"><h2>수신자</h2><span>{recipients.length}명</span></div>
       <form className="notification-form" onSubmit={submit}>
-        <div className="notification-form-heading"><strong>새 수신자 등록</strong><span>메일이나 텔레그램 중 하나 이상 입력해 주세요.</span></div>
+        <div className="notification-form-heading"><strong>새 수신자 등록</strong><span>수신자를 등록한 뒤 텔레그램을 연결할 수 있습니다.</span></div>
         <div className="notification-form-grid">
           <label className="form-field-wide">이름<input required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} placeholder="예: 홍길동" /></label>
           <label>메일 주소<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="user@example.com" /></label>
-          <label>텔레그램 Chat ID<input value={telegram} onChange={(event) => setTelegram(event.target.value)} placeholder="예: 123456789" /></label>
         </div>
-        <button className="primary-button" disabled={create.isPending || !name.trim() || (!email.trim() && !telegram.trim())}>{create.isPending ? '등록 중…' : '수신자 등록'}</button>
+        <button className="primary-button" disabled={create.isPending || !name.trim()}>{create.isPending ? '등록 중…' : '수신자 등록'}</button>
         <MutationStatus error={create.error} success={create.isSuccess ? '수신자를 등록했습니다.' : null} />
       </form>
       <div className="compact-list">
@@ -217,13 +220,14 @@ function RecipientPanel({ channels, recipients }: {
           <article key={recipient.id}>
             <div><strong>{recipient.name}</strong><span>{recipient.groupNames?.join(' · ') || '그룹 미지정'}</span></div>
             <div className="destination-badges">
-              {recipient.destinations.map((destination) => (
+              {recipient.destinations.filter((destination) => destination.channelType === 'EMAIL').map((destination) => (
                 <span key={destination.channelId} data-ready={destination.onboarded}>
                   {destination.channelType === 'EMAIL' ? '메일' : destination.onboarded ? '텔레그램 준비됨' : '텔레그램 /start 필요'}
                 </span>
               ))}
             </div>
             <button type="button" className="text-button danger" onClick={() => remove.mutate(recipient.id)}>삭제</button>
+            <TelegramConnectionCard recipientId={recipient.id} recipientName={recipient.name} />
           </article>
         ))}
       </div>

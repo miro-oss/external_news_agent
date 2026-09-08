@@ -62,7 +62,7 @@ class ReportQueryServiceImplTest {
             reportRepository, findingRepository, issueArticleRepository,
             newsIssueRepository, deliveryLogRepository,
             com.example.be.domain.analysis.service.SensitivityCalculator.defaults(),
-            investigationRepository);
+            investigationRepository, mock(com.example.be.domain.collection.repository.CollectionRunArticleRepository.class));
 
     @Test
     void latestReturnsNullWhenNoReportExists() {

@@ -4,6 +4,8 @@ import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import com.example.be.domain.reports.entity.ReportContent;
+import com.example.be.domain.reports.entity.ReportCollectionContext;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -37,6 +39,7 @@ public class ReportResDTO {
         @Schema(description = "DAILY 집계일 (Asia/Seoul). RUN은 null", nullable = true)
         private final LocalDate reportDate;
         private final List<Long> sourceRunIds;
+        @Schema(description = "수집 시점 주제명과 생성 시각(RUN) 또는 집계일(DAILY)을 포함한 제목. 스냅샷이 없는 이전 보고서는 저장된 기존 제목을 유지", example = "HBM 시장 · 2026-09-08 10:00 리포트")
         private final String title;
         private final OffsetDateTime generatedAt;
         private final String modelName;
@@ -50,7 +53,7 @@ public class ReportResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
             "id", "runId", "reportScope", "reportDate", "sourceRunIds", "title", "markdownBody", "modelName", "promptVersion", "llmProvider",
-            "generatedAt", "summaryStats", "findings"
+            "generatedAt", "structuredContent", "collectionContexts", "articleStats", "summaryStats", "findings"
     })
     @Schema(name = "ReportDetailResponse", description = "보고서 상세")
     public static class Detail {
@@ -62,13 +65,21 @@ public class ReportResDTO {
         @Schema(description = "DAILY 집계일 (Asia/Seoul). RUN은 null", nullable = true)
         private final LocalDate reportDate;
         private final List<Long> sourceRunIds;
+        @Schema(description = "수집 시점 주제명과 생성 시각(RUN) 또는 집계일(DAILY)을 포함한 제목. 스냅샷이 없는 이전 보고서는 저장된 기존 제목을 유지", example = "HBM 시장 · 2026-09-08 10:00 리포트")
         private final String title;
+        @Schema(description = "원본 Markdown 보고서. structuredContent가 null인 이전 보고서의 본문 렌더링에도 사용")
         private final String markdownBody;
         private final String modelName;
         private final String promptVersion;
         private final String llmProvider;
         private final OffsetDateTime generatedAt;
         private final SummaryStats summaryStats;
+        @Schema(description = "화면과 알림이 함께 사용하는 저장된 핵심 요약·중요 이벤트·관찰 항목·수집 참고. 구조화 저장 이전 보고서는 null이며 markdownBody로 표시. includeFindings와 관계없이 반환", nullable = true)
+        private final ReportContent structuredContent;
+        @Schema(description = "보고서에 포함된 실행별 접수 시점 수집 조건. 이후 주제를 편집해도 변경되지 않음. 이전 보고서 자체에 저장된 문맥이 없으면 [], 새 보고서가 스냅샷 없는 이전 실행을 참조하면 해당 topics가 []. includeFindings와 관계없이 반환", requiredMode = Schema.RequiredMode.REQUIRED)
+        private final List<ReportCollectionContext> collectionContexts;
+        @Schema(description = "RUN은 runId, DAILY는 sourceRunIds 전체에서 관측한 고유 articleId 집계. 동일 기사의 소스·실행 중복을 제거하며 분석 결과 수인 summaryStats와 다름. includeFindings=false에도 반환. 관측 데이터가 없으면 모든 수가 0", requiredMode = Schema.RequiredMode.REQUIRED)
+        private final ArticleStats articleStats;
 
         @JsonInclude(JsonInclude.Include.NON_NULL)
         private final List<Finding> findings;
@@ -85,6 +96,19 @@ public class ReportResDTO {
         private final long updatedCount;
         private final Map<String, Long> bySensitivityLevel;
         private final Map<String, Long> byCategory;
+    }
+
+    @Getter
+    @Builder
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @Schema(name = "ReportArticleStatistics", description = "보고서 범위의 중복 제거 기사 수. totalCount = newCount + existingCount")
+    public static class ArticleStats {
+        @Schema(description = "보고서 범위에서 관측한 고유 articleId 수. 분석 포함 여부와 무관", minimum = "0", example = "12")
+        private final long totalCount;
+        @Schema(description = "범위 내 관측 중 하나라도 NEW인 고유 기사 수. 같은 기사에 NEW와 UPDATED/UNCHANGED가 함께 있으면 신규로 한 번만 집계", minimum = "0", example = "4")
+        private final long newCount;
+        @Schema(description = "NEW 관측 없이 UPDATED 또는 UNCHANGED로 관측된 고유 기사 수. totalCount에서 newCount를 뺀 값", minimum = "0", example = "8")
+        private final long existingCount;
     }
 
     @Getter

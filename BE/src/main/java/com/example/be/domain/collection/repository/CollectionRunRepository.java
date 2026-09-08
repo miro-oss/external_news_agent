@@ -15,9 +15,18 @@ import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 
 public interface CollectionRunRepository
         extends JpaRepository<CollectionRun, Long>, JpaSpecificationExecutor<CollectionRun> {
+
+    long countByStatus(RunStatus status);
+
+    @Query("SELECT run.id FROM CollectionRun run WHERE run.status = :status ORDER BY run.id")
+    List<Long> findQueueIds(@Param("status") RunStatus status, Pageable pageable);
+
+    @Query("SELECT DISTINCT item.topic.id FROM CollectionRunItem item WHERE item.run.status = :status")
+    List<Long> findTopicIdsByRunStatus(@Param("status") RunStatus status);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT run FROM CollectionRun run WHERE run.id = :runId")

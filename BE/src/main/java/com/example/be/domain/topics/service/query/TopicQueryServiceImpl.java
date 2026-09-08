@@ -45,7 +45,7 @@ public class TopicQueryServiceImpl implements TopicQueryService {
 
         Page<Topic> topics = topicRepository.findAll(
                 TopicSpecification.filter(active, keyword),
-                PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "id"))
+                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id"))
         );
         List<Topic> content = topics.getContent();
         Map<Long, TopicTrendJdbcRepository.TopicTrendSnapshot> trendSnapshots = content.isEmpty()

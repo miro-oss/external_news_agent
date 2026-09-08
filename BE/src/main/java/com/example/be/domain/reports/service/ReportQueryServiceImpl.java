@@ -9,6 +9,7 @@ import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.collection.entity.ChangeType;
+import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
@@ -64,6 +65,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     private final DeliveryLogRepository deliveryLogRepository;
     private final SensitivityCalculator sensitivityCalculator;
     private final IssueInvestigationJdbcRepository investigationRepository;
+    private final CollectionRunArticleRepository runArticleRepository;
 
     @Override
     public PageResponse<ReportResDTO.Summary> getReports(String from, String to, int page, int size) {
@@ -194,6 +196,10 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .llmProvider(report.getLlmProvider())
                 .generatedAt(toOffset(report.getGeneratedAt()))
                 .summaryStats(summaryStats)
+                .structuredContent(report.getStructuredContent())
+                .collectionContexts(report.getCollectionContexts())
+                .articleStats(ReportArticleStatistics.count(OracleInClause.batches(sourceRunIds(report)).stream()
+                        .flatMap(ids -> runArticleRepository.findReportArticleObservations(ids).stream()).toList()))
                 .findings(includeFindings ? findings.stream()
                         .map(finding -> {
                             Long issueId = issueIdsByArticle.get(finding.getArticle().getId());

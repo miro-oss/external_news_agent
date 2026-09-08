@@ -54,13 +54,13 @@ class NotificationRendererTest {
     }
 
     @Test
-    void telegramSplitsAtConfiguredSafeLength() {
+    void telegramKeepsOneConciseMessageAtConfiguredSafeLength() {
         NewsReport report = report("# 내부 보고서");
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(finding(), finding()));
 
         RenderedNotification rendered = renderer.render(report, channel(ChannelType.TELEGRAM, 120));
 
-        assertTrue(rendered.chunks().size() >= 2);
+        org.junit.jupiter.api.Assertions.assertEquals(1, rendered.chunks().size());
         assertTrue(rendered.chunks().stream().allMatch(chunk -> chunk.length() <= 120));
         assertTrue(rendered.chunks().stream().noneMatch(chunk -> chunk.contains("원문 전체 내용")));
     }
@@ -92,6 +92,37 @@ class NotificationRendererTest {
         assertTrue(email.subject().startsWith("[속보 후속]"));
         assertTrue(email.chunks().getFirst().contains("&#39;&lt;HBM4&gt;&#39;"));
         assertTrue(telegram.chunks().getFirst().contains("&#39;&lt;HBM4&gt;&#39;"));
+    }
+
+    @Test
+    void decodesLegacyEntitiesWithoutTurningTextIntoMarkup() {
+        Finding finding = Finding.builder().id(1L).article(Article.builder().id(1L)
+                .title("억대 연봉&middot;자사주까지&hellip;").canonicalUrl("https://example.com/article").build())
+                .summary("연봉&amp;middot;자사주&hellip; &lsquo;인재 경쟁&rsquo; &lt;b&gt;문자&lt;/b&gt;").build();
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(finding));
+        String body = renderer.render(report(""), channel(ChannelType.TELEGRAM, 3500)).chunks().getFirst();
+        assertTrue(body.contains("연봉·자사주… ‘인재 경쟁’"));
+        assertTrue(body.contains("&lt;b&gt;문자&lt;/b&gt;"));
+        assertFalse(body.contains("&amp;middot;"));
+        assertFalse(body.contains("<b>문자</b>"));
+    }
+
+    @Test
+    void structuredReportSummaryWinsOverIndividualArticles() {
+        NewsReport report = report("## 요약\n과거 요약");
+        var content = new com.example.be.domain.reports.entity.ReportContent(
+                List.of("오늘 보고서의 결론입니다."), List.of(), List.of(), List.of());
+        org.springframework.test.util.ReflectionTestUtils.setField(report, "structuredContent", content);
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(java.util.Collections.nCopies(30, finding()));
+        for (ChannelType type : ChannelType.values()) {
+            var message = renderer.render(report, channel(type,3500));
+            org.junit.jupiter.api.Assertions.assertEquals(1,message.chunks().size());
+            String body = message.chunks().getFirst();
+            assertTrue(body.contains("오늘 보고서의 결론입니다."));
+            assertFalse(body.contains("검증된 핵심 요약"));
+            assertFalse(body.contains("HBM 공급 계약 확대"));
+            assertTrue(body.length()<1500);
+        }
     }
 
     private NewsReport report(String markdown) {

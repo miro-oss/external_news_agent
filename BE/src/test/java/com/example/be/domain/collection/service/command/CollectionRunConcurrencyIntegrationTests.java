@@ -52,6 +52,9 @@ class CollectionRunConcurrencyIntegrationTests {
     private CollectionRunRepository runRepository;
 
     @Autowired
+    private CollectionRunQueueClaimer queueClaimer;
+
+    @Autowired
     private TopicRepository topicRepository;
 
     @Autowired
@@ -100,7 +103,7 @@ class CollectionRunConcurrencyIntegrationTests {
     }
 
     @Test
-    void createsOnlyOneRunWhenTwoRequestsHitTheSameTopic() throws Exception {
+    void queuesBothRequestsWhenDifferentKeysHitTheSameTopic() throws Exception {
         List<Outcome> outcomes = runConcurrently(
                 () -> start(null),
                 () -> start(null));
@@ -108,9 +111,9 @@ class CollectionRunConcurrencyIntegrationTests {
         long created = outcomes.stream().filter(Outcome::created).count();
         long rejected = outcomes.stream().filter(outcome -> outcome.conflict).count();
 
-        assertEquals(1, created, "같은 주제로 실행이 둘 만들어졌다");
-        assertEquals(1, rejected, "지는 요청은 RUN409여야 한다");
-        assertEquals(1, inProgressRunCount());
+        assertEquals(2, created, "서로 다른 요청은 모두 대기 접수해야 한다");
+        assertEquals(0, rejected, "같은 주제여도 요청을 거절하지 않는다");
+        assertEquals(2, inProgressRunCount());
     }
 
     /**
@@ -129,6 +132,28 @@ class CollectionRunConcurrencyIntegrationTests {
         assertEquals(1, outcomes.stream().map(outcome -> outcome.runId).distinct().count(),
                 "두 요청이 같은 실행을 가리켜야 한다");
         assertEquals(1, inProgressRunCount());
+    }
+
+    @Test
+    void concurrentDispatchersReserveOnlyOneRunForTheSameTopic() throws Exception {
+        Outcome first = start("first-" + UUID.randomUUID());
+        Outcome second = start("second-" + UUID.randomUUID());
+        List<Outcome> claims = runConcurrently(this::claimOne, this::claimOne);
+        List<Long> claimedIds = claims.stream().map(Outcome::runId).filter(java.util.Objects::nonNull).toList();
+        assertEquals(1, claimedIds.size());
+        Long claimed = claimedIds.getFirst();
+        assertTrue(List.of(first.runId(), second.runId()).contains(claimed));
+        assertEquals(RunStatus.RUNNING, runRepository.findById(claimed).orElseThrow().getStatus());
+        transactionTemplate.executeWithoutResult(status ->
+                runRepository.findById(claimed).orElseThrow().fail(LocalDateTime.now(ApiTimeZone.ZONE)));
+        List<Long> next = queueClaimer.claimAvailable();
+        assertEquals(1, next.size());
+        assertTrue(!next.getFirst().equals(claimed));
+    }
+
+    private Outcome claimOne() {
+        List<Long> ids = queueClaimer.claimAvailable();
+        return new Outcome(ids.isEmpty() ? null : ids.getFirst(), "CLAIM", false);
     }
 
     private List<Outcome> runConcurrently(Callable<Outcome> first, Callable<Outcome> second) throws Exception {

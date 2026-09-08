@@ -48,7 +48,7 @@ class CollectionRunControllerTest {
     void startRunRespondsWithCreatedEnvelope() throws Exception {
         when(runCommandService.startManualRun(any(CollectionRunReqDTO.Create.class)))
                 .thenReturn(new CollectionRunStartResult(
-                        GeneralSuccessCode.COLLECTION_STARTED,
+                        GeneralSuccessCode.COLLECTION_QUEUED,
                         createdRun()));
 
         mockMvc.perform(post("/api/news/runs")
@@ -64,9 +64,9 @@ class CollectionRunControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.isSuccess").value(true))
                 .andExpect(jsonPath("$.code").value("COMMON201"))
-                .andExpect(jsonPath("$.message").value("수집을 시작했습니다."))
+                .andExpect(jsonPath("$.message").value("수집 요청을 접수했습니다."))
                 .andExpect(jsonPath("$.result.runId").value(42))
-                .andExpect(jsonPath("$.result.status").value("RUNNING"))
+                .andExpect(jsonPath("$.result.status").value("PENDING"))
                 .andExpect(jsonPath("$.result.llmPlan").value("PAID"))
                 .andExpect(jsonPath("$.result.targetTopicIds[0]").value(1))
                 .andExpect(jsonPath("$.result.targetCombinationCount").value(6));
@@ -171,13 +171,13 @@ class CollectionRunControllerTest {
     private CollectionRunResDTO.Created createdRun() {
         return CollectionRunResDTO.Created.builder()
                 .runId(42L)
-                .status("RUNNING")
+                .status("PENDING")
                 .triggerType("MANUAL")
                 .idempotencyKey("2026-08-10-manual-001")
                 .llmPlan("PAID")
                 .targetTopicIds(List.of(1L, 2L))
                 .targetCombinationCount(6)
-                .startedAt(OffsetDateTime.of(2026, 8, 10, 10, 0, 0, 0, ZoneOffset.ofHours(9)))
+                .queuedAt(OffsetDateTime.of(2026, 8, 10, 10, 0, 0, 0, ZoneOffset.ofHours(9)))
                 .build();
     }
 

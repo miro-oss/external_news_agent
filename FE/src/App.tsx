@@ -20,7 +20,7 @@ const NAV_OPTIONS: ReadonlyArray<SegmentedOption<Page>> = [
 ]
 
 function hashValue() {
-  return window.location.hash.replace(/^#\/?/, '')
+  return window.location.hash.replace(/^#\/?/, '').split('?')[0]
 }
 
 /**

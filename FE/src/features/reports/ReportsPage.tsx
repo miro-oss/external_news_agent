@@ -1,20 +1,14 @@
-import { useCallback, useId, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
-import Markdown from 'react-markdown'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   useLatestReport,
   useAudienceSetting,
   useIssue,
-  useNotificationChannels,
-  useNotificationGroups,
-  usePreviewNotification,
   useReport,
   useReports,
-  useSendNotification,
 } from '../../api/queries'
 import {
   AUDIENCES,
   AUDIENCE_LABELS,
-  CHANGE_TYPE_LABELS,
   SENSITIVITY_LEVEL_LABELS,
   type Audience,
   type AudienceRelevance,
@@ -22,86 +16,88 @@ import {
   type IssueDetail,
   type ReportDetail,
   type ReportFinding,
-  type ReportInvestigation,
   type ReportSummary,
   type SensitivityLevel,
 } from '../../api/types'
 import { KeyPointList } from '../../components/KeyPointList'
 import { Segmented, type SegmentedOption } from '../../components/Segmented'
-import { SensitivityAxes } from '../../components/SensitivityAxes'
 import { formatFullDate, formatShortDate } from '../../lib/datetime'
 import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
-import { MutationStatus } from '../settings/MutationStatus'
+import { ReportSharePanel } from '../notifications/ReportSharePanel'
+import { ReportReadingContent } from './ReportReadingContent'
 import { IssueTonePanel } from './IssueTonePanel'
 
-type ReportScopeTab = 'ALL' | 'DAILY' | 'RUN'
+type ReportScopeTab = 'DAILY' | 'RUN'
 
 const REPORT_SCOPE_OPTIONS: ReadonlyArray<SegmentedOption<ReportScopeTab>> = [
-  { value: 'ALL', label: '전체' },
-  { value: 'DAILY', label: '일일 통합' },
   { value: 'RUN', label: '실행별' },
+  { value: 'DAILY', label: '일일 통합' },
 ]
 
 // 이름만으로는 두 보고서의 차이가 서지 않는다. 고른 범위가 무엇을 담는지 한 줄로 붙여 둔다.
 const REPORT_SCOPE_HINTS: Record<ReportScopeTab, string> = {
-  ALL: '하루치 통합본과 실행별 보고서를 모두 보여줍니다.',
   DAILY: '하루 동안 모인 같은 이슈를 한 장으로 묶었습니다.',
   RUN: '수집을 실행할 때마다 만들어진 보고서입니다.',
 }
 
-const INVESTIGATION_STATUS_LABELS = {
-  CONCLUDED: '결론 도달',
-  NO_NEW_EVIDENCE: '새 근거 없음',
-  MAX_STEPS: '3단계 종료',
-  BUDGET_LIMIT: '이번 실행 예산 도달',
-  REJECTED: '안전 기준으로 생략',
-  FAILED: '기존 분석 유지',
-} as const
-
-function investigationReasonText(investigation: ReportInvestigation) {
-  const rejectionReason = investigation.rejectionReason?.trim()
-  if (rejectionReason) {
-    if (investigation.status === 'BUDGET_LIMIT') {
-      return '이번 실행에 배정된 추가 조사 예산을 모두 사용했습니다.'
-    }
-    if (rejectionReason.includes('이미 수행한 검색')) {
-      return '이미 확인한 검색과 겹쳐 추가 검색을 생략했습니다.'
-    }
-    if (rejectionReason.includes('허용 소스')) {
-      return '사용 가능한 출처 범위를 벗어나 추가 검색을 생략했습니다.'
-    }
-    if (rejectionReason.includes('본문 미확보 기사')) {
-      return '이번 실행에서 확인할 수 있는 본문 대상이 없어 생략했습니다.'
-    }
-    if (rejectionReason.includes('엔티티') || rejectionReason.includes('과거 비교')) {
-      return '이 이슈와 직접 관련된 비교 대상이 아니어서 생략했습니다.'
-    }
-    return '조사 제안이 안전 기준을 충족하지 않아 생략했습니다.'
-  }
-  if (investigation.status === 'FAILED') {
-    return '추가 조사 중 오류가 발생해 기존 분석 결과를 유지했습니다.'
-  }
-  return investigation.reason?.trim() || null
+function reportIdFromHash() {
+  const value = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('reportId')
+  const id = Number(value)
+  return value && Number.isSafeInteger(id) && id > 0 ? id : null
 }
 
 export function ReportsPage() {
-  const [reportScope, setReportScope] = useState<ReportScopeTab>('ALL')
-  const scopeFilter = reportScope === 'ALL' ? undefined : reportScope
-  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [reportScope, setReportScope] = useState<ReportScopeTab>('RUN')
+  const [selectedId, setSelectedId] = useState<number | null>(reportIdFromHash)
   const [audienceOverride, setAudienceOverride] = useState<Audience | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
     articleId: number | null
     runId: number | null
     sentences: number[]
   }>({ articleId: null, runId: null, sentences: [] })
+  const selectedReport = useReport(selectedId)
+  const scopeFilter = selectedReport.data?.reportScope ?? reportScope
   const reports = useReports(scopeFilter)
   const audienceSetting = useAudienceSetting()
   const latest = useLatestReport(scopeFilter)
   const activeId = selectedId ?? latest.data?.id ?? null
-  const selectedReport = useReport(selectedId)
   const activeReport = selectedId === null ? latest : selectedReport
   const activeReportData = activeReport.data
+  const reportListRef = useRef<HTMLElement>(null)
+  const [connectorTop, setConnectorTop] = useState<number | null>(null)
+  useEffect(() => {
+    const list = reportListRef.current
+    const scroll = list?.querySelector<HTMLElement>('.report-list-scroll')
+    if (!list || !scroll) return
+    function syncConnector() {
+      const item = scroll?.querySelector<HTMLElement>('.report-list-item.active')
+      if (!item || !list || !scroll) { setConnectorTop(null); return }
+      const itemBounds = item.getBoundingClientRect()
+      const scrollBounds = scroll.getBoundingClientRect()
+      const center = itemBounds.top + itemBounds.height / 2
+      setConnectorTop(center >= scrollBounds.top && center <= scrollBounds.bottom
+        ? center - list.getBoundingClientRect().top : null)
+    }
+    syncConnector()
+    scroll.addEventListener('scroll', syncConnector, { passive: true })
+    const observer = new ResizeObserver(syncConnector)
+    observer.observe(list)
+    return () => { scroll.removeEventListener('scroll', syncConnector); observer.disconnect() }
+  }, [activeId, reports.data?.content.length])
+  useEffect(() => {
+    const sync = () => {
+      setSelectedId(reportIdFromHash())
+      setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
+    }
+    window.addEventListener('hashchange', sync)
+    return () => window.removeEventListener('hashchange', sync)
+  }, [])
+  function selectReport(id: number) {
+    setSelectedId(id)
+    setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
+    window.history.replaceState(null, '', `#/reports?reportId=${id}`)
+  }
   const isInitialLoading = latest.isPending || reports.isPending
   const initialError = latest.isError ? latest.error : reports.isError ? reports.error : null
   const activeAudience = audienceOverride ?? audienceSetting.data?.audience ?? 'CHIP_MAKER'
@@ -114,22 +110,18 @@ export function ReportsPage() {
       <header className="page-header report-header">
         <div>
           <h1>뉴스 리포트</h1>
-          <p className="muted">같은 사건을 묶은 주요 이슈와 원문 근거를 한 장에서 읽습니다.</p>
-        </div>
-        <div className="summary-count" aria-live="polite">
-          <strong>{reports.data?.totalElements ?? 0}</strong>
-          <span>생성 완료</span>
+          <p className="muted">주요 소식과 관련 기사를 한곳에서 확인합니다.</p>
         </div>
       </header>
 
       <div className="report-scope-bar">
         <Segmented
           label="보고서 범위"
-          value={reportScope}
+          value={scopeFilter}
           options={REPORT_SCOPE_OPTIONS}
-          onSelect={(scope) => { setReportScope(scope); setSelectedId(null) }}
+          onSelect={(scope) => { setReportScope(scope); setSelectedId(null); window.history.replaceState(null, '', '#/reports') }}
         />
-        <p className="report-scope-hint">{REPORT_SCOPE_HINTS[reportScope]}</p>
+        <p className="report-scope-hint">{REPORT_SCOPE_HINTS[scopeFilter]}</p>
       </div>
 
       {isInitialLoading && <div className="state-panel" aria-busy="true">최신 보고서를 불러오는 중입니다.</div>}
@@ -138,7 +130,7 @@ export function ReportsPage() {
         <div className="state-panel report-empty">
           <span className="empty-mark" aria-hidden="true">⌁</span>
           <strong>아직 생성된 보고서가 없습니다.</strong>
-          <span>{reportScope === 'DAILY'
+          <span>{scopeFilter === 'DAILY'
             ? '하루의 수집이 모두 끝나면 다음 날 일일 통합 보고서가 자동으로 만들어집니다.'
             : '수집을 실행하면 분석 완료 후 첫 보고서가 자동으로 만들어집니다.'}</span>
         </div>
@@ -152,19 +144,21 @@ export function ReportsPage() {
 
       {reports.data && reports.data.content.length > 0 && activeId !== null && (
         <div className="report-workspace">
-          <aside className="report-list" aria-label="생성된 보고서">
+          <aside className="report-list" aria-label="생성된 보고서" ref={reportListRef}>
             <div className="report-list-heading">
               <span>생성된 보고서</span>
-              <strong>{reports.data.content.length}</strong>
             </div>
+            <div className="report-list-scroll">
             {reports.data.content.map((report) => (
               <ReportListItem
                 key={report.id}
                 report={report}
                 active={report.id === activeId}
-                onSelect={() => setSelectedId(report.id === latest.data?.id ? null : report.id)}
+                onSelect={() => selectReport(report.id)}
               />
             ))}
+            </div>
+            {connectorTop !== null && <span className="report-list-connection" style={{ top: connectorTop }} aria-hidden="true" />}
           </aside>
 
           <section className="report-detail-shell" aria-live="polite">
@@ -197,6 +191,7 @@ export function ReportsPage() {
         runId={evidenceSelection.runId ?? undefined}
         defaultAudience={activeAudience}
         initialEvidence={evidenceSelection.sentences}
+        collectionContexts={activeReportData?.collectionContexts ?? []}
         onClose={closeArticle}
       />
     </main>
@@ -253,8 +248,6 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
       return levelDifference || perspectiveDifference || right.sensitivity.score - left.sensitivity.score
     })
   }, [audience, filters, findings])
-  const stats = useMemo(() => summarizeFindings(findings), [findings])
-  const evidenceCount = useMemo(() => countEvidenceSentences(report.findings ?? []), [report.findings])
   return (
     <article className="report-document">
       <header className="report-document-header">
@@ -263,20 +256,14 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
           {report.reportDate ?? '집계일 미상'} · 한국 시간 기준 · 수집 {report.sourceRunIds.length}회 통합
         </p>}
         <time dateTime={report.generatedAt}>{formatFullDate(report.generatedAt)}</time>
-        <div className="report-ai-context">
-          <span>{generationKind(report.modelName)} · {AUDIENCE_LABELS[audience]} 관점 · 원문 근거 {evidenceCount}문장</span>
-          <details>
-            <summary aria-label="관점 적용 방식 안내">ⓘ</summary>
-            <p>‘{AUDIENCE_LABELS[audience]}’ 관점으로 중요도를 다시 매긴 결과입니다. 같은 이슈도 관점에 따라 순서와 강조가 달라집니다.</p>
-          </details>
-        </div>
-        <div className="report-stat-row" aria-label="보고서 요약 통계">
-          <ReportStat value={findings.length} label="전체 이슈" />
-          <ReportStat value={stats.newCount} label={CHANGE_TYPE_LABELS.NEW} />
-          <ReportStat value={stats.updatedCount} label={CHANGE_TYPE_LABELS.UPDATED} />
-          <ReportStat value={stats.highSensitivityCount} label={SENSITIVITY_LEVEL_LABELS.high} tone="danger" />
-        </div>
+        {report.articleStats && <div className="report-stat-row" aria-label="수집 기사 통계">
+          <ReportStat value={report.articleStats.totalCount} label="전체 기사" />
+          <ReportStat value={report.articleStats.newCount} label="신규 기사" />
+          <ReportStat value={report.articleStats.existingCount} label="기존 기사" />
+        </div>}
       </header>
+
+      <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect} />
 
       <ReportPerspectiveSelector
         audience={audience}
@@ -284,15 +271,9 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
         onSelect={onAudienceSelect}
       />
 
-      <ReportDeliveryActions key={report.id} reportId={report.id} />
-
-      <section className="markdown-report" aria-label="마크다운 보고서 본문">
-        <MarkdownBody markdown={report.markdownBody} />
-      </section>
-
       <section className="report-findings">
         <div className="section-heading report-section-heading">
-          <h3>주요 이슈</h3>
+          <div><h3>주요 이슈</h3><p className="report-issue-description">여러 기사를 하나로 묶은 것</p></div>
           <span>
             {filteredFindings.length === findings.length
               ? `${findings.length}건`
@@ -323,6 +304,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
       </section>
 
       <ReportDisclaimer report={report} audience={audience} />
+      <ReportSharePanel reportId={report.id} />
     </article>
   )
 }
@@ -374,8 +356,7 @@ function ReportPerspectiveSelector({ audience, defaultAudience, onSelect }: {
   return (
     <section className="report-perspective" aria-label="리포트 관점 선택">
       <div className="report-perspective-heading">
-        <div><h3>누구의 관점으로 볼까요?</h3><p>저장된 리포트는 그대로 두고 이슈 순서와 강조만 바꿉니다.</p></div>
-        <span>추가 AI 호출 없음</span>
+        <div><h3>누구의 관점으로 볼까요?</h3><p>아래 이슈의 순서와 관점별 설명을 바꿉니다.</p></div>
       </div>
       <Segmented
         label="독자 관점"
@@ -387,89 +368,8 @@ function ReportPerspectiveSelector({ audience, defaultAudience, onSelect }: {
         }))}
         onSelect={onSelect}
       />
-      <p className="report-perspective-note">화면에서 보는 관점만 바뀌며, 발송할 보고서 본문은 중립 원본을 유지합니다.</p>
     </section>
   )
-}
-
-function ReportDeliveryActions({ reportId }: { reportId: number }) {
-  const channels = useNotificationChannels()
-  const groups = useNotificationGroups()
-  const preview = usePreviewNotification()
-  const send = useSendNotification()
-  const activeChannels = channels.data?.filter((channel) => channel.active) ?? []
-  const activeGroups = groups.data?.content.filter((group) => group.active) ?? []
-  const [channelId, setChannelId] = useState<number | null>(null)
-  const [groupId, setGroupId] = useState<number | null>(null)
-  const selectedChannelId = channelId ?? activeChannels[0]?.id ?? null
-  const selectedGroupId = groupId ?? activeGroups[0]?.id ?? null
-  const [idempotencyKey, setIdempotencyKey] = useState(() => newDeliveryIdempotencyKey(reportId))
-
-  function changeGroup(nextGroupId: number) {
-    send.reset()
-    setIdempotencyKey(newDeliveryIdempotencyKey(reportId))
-    setGroupId(nextGroupId)
-  }
-
-  function changeChannel(nextChannelId: number) {
-    preview.reset()
-    send.reset()
-    setIdempotencyKey(newDeliveryIdempotencyKey(reportId))
-    setChannelId(nextChannelId)
-  }
-
-  return (
-    <section className="report-delivery-panel" aria-label="보고서 발송">
-      <div className="report-delivery-heading">
-        <div><h3>보고서 전달</h3><p>채널에 보일 내용을 먼저 확인한 뒤 수신 그룹으로 보냅니다.</p></div>
-        <span>{activeGroups.length}개 그룹 · {activeChannels.length}개 채널</span>
-      </div>
-      <div className="report-delivery-controls">
-        <label>수신 그룹<select value={selectedGroupId ?? ''} onChange={(event) => changeGroup(Number(event.target.value))}>
-          {activeGroups.length === 0 && <option value="">활성 그룹 없음</option>}
-          {activeGroups.map((group) => <option value={group.id} key={group.id}>{group.name} · {group.activeMemberCount}명</option>)}
-        </select></label>
-        <label>채널<select value={selectedChannelId ?? ''} onChange={(event) => changeChannel(Number(event.target.value))}>
-          {activeChannels.length === 0 && <option value="">활성 채널 없음</option>}
-          {activeChannels.map((channel) => <option value={channel.id} key={channel.id}>{channel.name}</option>)}
-        </select></label>
-        <div className="report-delivery-buttons">
-          <button type="button" className="secondary-button" disabled={selectedChannelId === null || preview.isPending}
-            onClick={() => selectedChannelId !== null && preview.mutate({ reportId, channelId: selectedChannelId })}>
-            {preview.isPending ? '준비 중…' : '미리보기'}
-          </button>
-          <button type="button" className="primary-button" disabled={selectedChannelId === null || selectedGroupId === null || send.isPending}
-            onClick={() => selectedChannelId !== null && selectedGroupId !== null && send.mutate({
-              reportId,
-              groupIds: [selectedGroupId],
-              channelIds: [selectedChannelId],
-              idempotencyKey,
-            })}>
-            {send.isPending ? '발송 중…' : '발송하기'}
-          </button>
-        </div>
-      </div>
-      <MutationStatus
-        error={preview.error ?? send.error}
-        success={send.data && send.data.failedCount === 0
-          ? `발송 ${send.data.sentCount}건 성공 · ${send.data.skippedCount}건 건너뜀`
-          : null}
-        warning={send.data && send.data.failedCount > 0
-          ? `발송 ${send.data.sentCount}건 성공 · ${send.data.failedCount}건 실패 · ${send.data.skippedCount}건 건너뜀`
-          : null}
-      />
-      {preview.data && (
-        <div className="notification-preview">
-          <div><strong>{preview.data.channelType === 'EMAIL' ? preview.data.subject : '텔레그램 메시지'}</strong><span>{preview.data.chunkCount}개 조각</span></div>
-          {preview.data.chunks.map((chunk) => <pre key={chunk.seq}>{chunk.body}</pre>)}
-        </div>
-      )}
-    </section>
-  )
-}
-
-function newDeliveryIdempotencyKey(reportId: number) {
-  return `r${reportId}-${globalThis.crypto.randomUUID()}`
 }
 
 function ReportStat({ value, label, tone }: { value: number; label: string; tone?: 'danger' }) {
@@ -503,9 +403,6 @@ function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect }: {
   const relatedArticles = issue.data?.articles ?? []
   const relatedArticleCount = issue.data ? relatedArticles.length : issueInfo?.articleCount ?? 1
   const visibleRelatedArticles = relatedArticles.slice(0, visibleRelatedCount)
-  const investigationReason = finding.investigation
-    ? investigationReasonText(finding.investigation)
-    : null
 
   function toggleOpen() {
     if (open) setVisibleRelatedCount(RELATED_ARTICLE_BATCH_SIZE)
@@ -577,11 +474,6 @@ function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect }: {
             )}
           </section>
 
-          <SensitivityAxes
-            sensitivity={finding.sensitivity}
-            onEvidenceSelect={(evidence) => onEvidenceSelect(finding.articleId, finding.runId, evidence)}
-          />
-
           <KeyPointList
             points={keyPoints}
             articleTitle={finding.articleTitle}
@@ -644,22 +536,6 @@ function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect }: {
             )}
           </section>
 
-          <div className="issue-reference-meta">
-            <span>{CHANGE_TYPE_LABELS[finding.changeType]}</span>
-            {issueInfo && <span>독립 원문 {issueInfo.independentContentCount}건</span>}
-            {finding.intent && <span>발표 맥락 · {finding.intent}</span>}
-            {finding.investigation && (
-              <>
-                <span>
-                  추가 조사 · {INVESTIGATION_STATUS_LABELS[finding.investigation.status]}
-                  {' · '}{finding.investigation.stepCount}단계
-                  {' · '}기사 +{finding.investigation.addedArticleCount}
-                  {' · '}근거 +{finding.investigation.addedEvidenceCount}
-                </span>
-                {investigationReason && <span>조사 사유 · {investigationReason}</span>}
-              </>
-            )}
-          </div>
         </div>
       )}
     </article>
@@ -824,30 +700,12 @@ function selectFindingsForAudience(findings: ReportFinding[], audience: Audience
   })
 }
 
-function summarizeFindings(findings: ReportFinding[]) {
-  return {
-    newCount: findings.filter((finding) => finding.changeType === 'NEW').length,
-    updatedCount: findings.filter((finding) => finding.changeType === 'UPDATED').length,
-    highSensitivityCount: findings.filter((finding) => finding.sensitivity.level === 'high').length,
-  }
-}
-
 function perspectiveRank(finding: ReportFinding, audience: Audience) {
   return PERSPECTIVE_RANK[perspectiveFor(finding, audience)?.relevance ?? 'none']
 }
 
 function perspectiveFor(finding: ReportFinding, audience: Audience) {
   return (finding.perspectiveTags ?? []).find((tag) => tag.audience === audience)
-}
-
-function countEvidenceSentences(findings: ReportFinding[]) {
-  return new Set(findings.flatMap((finding) => finding.keyPoints.flatMap((point) =>
-    point.evidence.map((sentenceId) => `${finding.articleId}:${sentenceId}`),
-  ))).size
-}
-
-function generationKind(modelName: string) {
-  return modelName.toLowerCase().includes('stub') ? '자동 생성' : 'AI 생성'
 }
 
 function generationMeta(report: ReportDetail) {
@@ -863,27 +721,3 @@ function limitText(value: string, limit: number) {
 }
 
 const RELATED_ARTICLE_BATCH_SIZE = 8
-
-/** 서버가 만든 마크다운을 HTML 주입 없이 표준 문법으로 렌더링한다. */
-function MarkdownBody({ markdown }: { markdown: string }) {
-  const lines = markdown.split(/\r?\n/)
-  const firstContentLine = lines.findIndex((line) => line.trim().length > 0)
-  if (firstContentLine >= 0 && lines[firstContentLine].trim().startsWith('# ')) {
-    lines.splice(firstContentLine, 1)
-  }
-  return (
-    <Markdown
-      components={{
-        // 문서 제목이 이미 페이지 헤더의 h2다. 본문 제목은 한 단계씩 낮춰야 바깥 구조와 어긋나지 않는다.
-        h1: ({ children }) => <h2>{children}</h2>,
-        h2: ({ children }) => <h3>{children}</h3>,
-        h3: ({ children }) => <h4>{children}</h4>,
-        a: ({ href, children }) => (
-          <a href={href} target="_blank" rel="noreferrer">{children}</a>
-        ),
-      }}
-    >
-      {lines.join('\n')}
-    </Markdown>
-  )
-}

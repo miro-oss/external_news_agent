@@ -8,7 +8,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "test": "node --experimental-strip-types --test tests/*.test.ts tests/*.test.mjs",
+    "preview": "vite preview",
+    "preview:refactor": "node scripts/refactor-preview.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

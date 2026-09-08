@@ -9,6 +9,7 @@ import {
   notificationPost,
   notificationPut,
   post,
+  patch,
 } from './client'
 import type {
   ArticleDetail,
@@ -38,6 +39,7 @@ import type {
   Source,
   SourceCreateRequest,
   TopicCreated,
+  TopicActivation,
   TopicCreateRequest,
   TopicKeywordProposal,
   TopicKeywordProposalFilter,
@@ -117,10 +119,10 @@ export function useSources() {
 }
 
 /** 설정 화면의 등록 주제 목록과 주제 등록 후 캐시 갱신에 쓰는 주제 목록. */
-export function useTopics() {
+export function useTopics(active?: boolean) {
   return useQuery({
-    queryKey: keys.topics,
-    queryFn: () => getAllPages<TopicSummary>('/topics'),
+    queryKey: [...keys.topics, active ?? 'all'],
+    queryFn: () => getAllPages<TopicSummary>('/topics', { active }),
   })
 }
 
@@ -167,6 +169,15 @@ export function useCreateTopic() {
   const refresh = useRefreshOnSuccess()
   return useMutation({
     mutationFn: (body: TopicCreateRequest) => post<TopicCreated>('/topics', body),
+    onSuccess: refresh,
+  })
+}
+
+export function useSetTopicActivation() {
+  const refresh = useRefreshOnSuccess()
+  return useMutation({
+    mutationFn: ({ topicId, active }: { topicId: number; active: boolean }) =>
+      patch<TopicActivation>(`/topics/${topicId}/activation`, { active }),
     onSuccess: refresh,
   })
 }
@@ -458,6 +469,7 @@ export function useStartCollectionRun() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.llmUsage })
+      void queryClient.invalidateQueries({ queryKey: ['collection-queue'] })
     },
   })
 }

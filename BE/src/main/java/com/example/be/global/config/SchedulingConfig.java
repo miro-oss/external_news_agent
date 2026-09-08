@@ -4,9 +4,9 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-/** 테스트에서는 실행 이력과 외부 수집을 건드리지 않도록 스케줄러를 명시적으로 끈다. */
+/** 정기 수집을 꺼도 수동 요청 대기열은 처리한다. 테스트는 전체 background 작업을 별도로 끈다. */
 @Configuration
 @EnableScheduling
-@ConditionalOnProperty(name = "news.collection.scheduler.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "news.scheduling.enabled", havingValue = "true", matchIfMissing = true)
 public class SchedulingConfig {
 }

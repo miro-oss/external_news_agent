@@ -15,7 +15,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 기동 시 진행 중으로 남아 있는 실행을 닫는다.
+ * 기동 시 중단된 실행을 닫는다. PENDING 요청은 유지하여 대기열에서 실행한다.
  *
  * <p>실행 행은 RUNNING으로 커밋된 뒤 {@code @Async}로 수집이 돈다. 그 사이에 프로세스가 죽으면
  * <b>그 행을 닫아 줄 주체가 아무도 없다.</b> 남은 RUNNING 실행은 주제 충돌 검사에 걸려
@@ -48,7 +48,7 @@ public class CollectionRunReaper {
     @EventListener(ApplicationReadyEvent.class)
     public void reapInterruptedRuns() {
         List<Long> interruptedRunIds =
-                runRepository.findIdsByStatusInAndStartedAtBefore(RunStatus.IN_PROGRESS_STATUSES, startedBefore);
+                runRepository.findIdsByStatusInAndStartedAtBefore(java.util.Set.of(RunStatus.RUNNING), startedBefore);
         if (interruptedRunIds.isEmpty()) {
             return;
         }
