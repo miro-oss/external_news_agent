@@ -31,7 +31,7 @@
 }
 
 .settings-page .collection-run-panel {
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 
 .collection-run-top {
@@ -135,18 +135,24 @@
 
 .collection-run-summary {
   display: flex;
+  flex: 1 0 auto;
   flex-direction: column;
   min-width: 0;
 }
 
 .collection-run-footer {
   margin-top: 0;
-  padding-top: 1rem;
+  padding-top: calc(1rem + 1.2px);
 }
 
-.settings-page .run-audience-setting {
+.settings-page .run-audience-setting,
+.settings-page .run-audience-setting.state-panel {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  justify-content: center;
   margin-top: 1rem;
-  padding: 1rem 0;
+  padding: calc(1.25rem - 1.8px) 0 calc(1.25rem + 1.8px);
   border-bottom: 1px solid var(--line);
 }
 
@@ -159,7 +165,7 @@
 }
 
 .collection-run-usage {
-  margin-top: 1rem;
+  margin-top: calc(1rem - 1.2px);
 }
 
 .run-usage-summary {

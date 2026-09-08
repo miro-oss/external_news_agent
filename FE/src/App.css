@@ -264,6 +264,21 @@ main {
   padding: clamp(1.5rem, 3.2vw, 2.25rem) var(--gutter) 6rem;
 }
 
+@keyframes page-enter {
+  from { opacity: .15; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app-shell > :is(.settings-page, .reports-page, .notifications-page) {
+    animation: page-enter 420ms cubic-bezier(.22, 1, .36, 1);
+  }
+
+  .app-shell > .reports-page:has(.modal-backdrop) {
+    animation-duration: 0s;
+  }
+}
+
 /* =============================================================================
    타이포그래피 · 공통 텍스트
    ============================================================================= */
@@ -2701,7 +2716,8 @@ body.modal-open {
   background: transparent;
   color: var(--fg-2);
   text-align: left;
-  transition: background var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+  transition: background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
 }
 
 /* 목록 항목은 자리를 지키는 줄이다. 눌러서 크기가 변하면 옆줄까지 흔들려 보인다. */
@@ -2764,6 +2780,17 @@ body.modal-open {
   max-width: 860px;
   margin: 0 auto;
   padding: 0;
+}
+
+@keyframes report-document-in {
+  from { opacity: .25; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .report-document-enter {
+    animation: report-document-in var(--dur-2) var(--ease-out);
+  }
 }
 
 .report-document-header {

@@ -2,20 +2,19 @@ import { useState } from 'react'
 import { CollapsibleSection } from '../../components/CollapsibleSection'
 import { useTopicKeywordProposals, useTopics } from '../../api/queries'
 import { TopicTable } from './TopicTable'
-import { SourceForm } from './SourceForm'
+import { SourceRegistration } from './SourceRegistration'
 import { TopicForm } from './TopicForm'
 import { CollectionRunPanel } from './CollectionRunPanel'
 import { TopicKeywordProposalPanel } from './TopicKeywordProposalPanel'
 import './settings-refinement.css'
 
-type PanelKey = 'source' | 'keywordProposals' | 'topics'
+type PanelKey = 'keywordProposals' | 'topics'
 
 /** 수집 실행, 주제 등록, 제안 검토와 주제 관리를 기존 접이식 카드로 구성한다. */
 export function SettingsPage() {
   const topics = useTopics(true)
   const pendingProposals = useTopicKeywordProposals('PENDING')
   const [open, setOpen] = useState<Record<PanelKey, boolean>>({
-    source: false,
     keywordProposals: false,
     topics: true,
   })
@@ -67,15 +66,7 @@ export function SettingsPage() {
         <TopicTable />
       </CollapsibleSection>
 
-      <CollapsibleSection
-        id="source"
-        title="RSS 피드 등록"
-        description="검색 provider는 기본 제공됩니다. 여기서는 추가 RSS 주소를 등록합니다."
-        open={open.source}
-        onToggle={() => toggle('source')}
-      >
-        <SourceForm />
-      </CollapsibleSection>
+      <SourceRegistration />
     </main>
   )
 }

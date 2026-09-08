@@ -1,0 +1,68 @@
+.source-registration-entry {
+  margin-top: .25rem;
+}
+
+.source-registration-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .5rem .25rem;
+  border-radius: var(--radius-xs);
+  color: var(--fg-3);
+  font-size: .84rem;
+  font-weight: 500;
+}
+
+.source-registration-trigger:hover:not(:disabled) {
+  background: transparent;
+  color: var(--fg);
+}
+
+.source-registration-trigger > svg {
+  flex: none;
+  transition: transform var(--dur-2) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+
+.source-registration-trigger:hover:not(:disabled) > svg {
+  color: var(--primary-strong);
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .source-registration-trigger:hover:not(:disabled) > svg {
+    transform: translateX(2px);
+  }
+}
+
+.recipient-selection-dialog.source-registration-dialog {
+  height: fit-content;
+  max-height: calc(100dvh - 2rem);
+}
+
+.source-registration-dialog[open] {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.source-registration-form {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  gap: 1rem;
+}
+
+.source-registration-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: .2rem;
+}
+
+.source-registration-body fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.source-registration-body .field-row > .field {
+  margin-bottom: 0;
+}

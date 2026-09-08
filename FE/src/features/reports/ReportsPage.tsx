@@ -80,6 +80,7 @@ export function ReportsPage() {
     return () => window.removeEventListener('hashchange', sync)
   }, [])
   function selectReport(id: number) {
+    if (id === activeId) return
     setSelectedId(id)
     setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
     window.history.replaceState(null, '', `#/reports?reportId=${id}`)
@@ -266,7 +267,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
     }
   }
   return (
-    <article className="report-document" data-report-scope={report.reportScope}>
+    <article className="report-document report-document-enter" data-report-scope={report.reportScope}>
       <header className="report-document-header">
         <div className="report-title-row">
           <h2><ReportKeywordText text={report.title} terms={highlightTerms} /></h2>
