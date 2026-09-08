@@ -2655,23 +2655,38 @@ body.modal-open {
 }
 
 .segmented.report-scope-tabs {
-  padding: 0.25rem;
-  border-radius: var(--radius-sm);
-  background: var(--primary-weak);
+  gap: 1.25rem;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .report-scope-tabs .segmented-thumb {
-  border-radius: var(--radius-xs);
-  box-shadow: var(--hairline);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.report-scope-tabs .segmented-thumb::after {
+  position: absolute;
+  right: 0.25rem;
+  bottom: 0;
+  left: 0.25rem;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--primary);
+  content: '';
 }
 
 .report-scope-tabs .segmented-option {
-  border-radius: var(--radius-xs);
+  padding: 0.5rem 0.25rem 0.8rem;
+  border-radius: 0;
+  font-size: 0.94rem;
 }
 
 .report-scope-tabs .segmented-option.active,
 .report-scope-tabs .segmented-option.active:hover {
-  color: var(--primary-strong);
+  color: var(--fg);
 }
 
 .report-scope-hint {
