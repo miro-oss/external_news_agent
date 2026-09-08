@@ -214,13 +214,7 @@ body {
   white-space: nowrap;
 }
 
-/*
-  내비게이션도 세그먼트 컨트롤이다. 다만 여기 알약은 흰색이 아니라 짙은 색이다 — 반투명 유리판
-  위라서 흰 알약은 배경에 녹고, 지금 보고 있는 화면은 화면에서 가장 확실한 표시여야 한다.
-
-  트랙에 회색 면을 깔지 않는다. 내비게이션 줄 자체가 이미 한 겹 떠 있는 판이라, 그 위에 면을
-  하나 더 깔면 판이 둘로 보인다. 좁은 화면(600px 아래)에서는 로고와 줄이 나뉘므로 그때만 깐다.
-*/
+/* 내비게이션의 선택 면은 보고서 목록과 같은 회색을 사용한다. */
 /*
   .segmented(0,1,0)를 이기려고 클래스를 겹쳐 쓴다. 공통 규칙이 이 파일 아래쪽 "버튼·입력"에 있어서,
   한 클래스로 쓰면 순서에서 밀려 알약 모양 트랙과 각진 알약이 섞인다.
@@ -235,7 +229,7 @@ body {
 
 .segmented-nav .segmented-thumb {
   border-radius: 10px;
-  background: var(--fg);
+  background: var(--line-soft);
   box-shadow: none;
 }
 
@@ -248,18 +242,13 @@ body {
 }
 
 .segmented-nav .segmented-option:hover:not(.active) {
-  background: var(--bg);
+  background: var(--surface-sunken);
   color: var(--fg-2);
 }
 
-/*
-  손이 올라가도 흰 글자를 지킨다. 공통 hover 규칙(.segmented-option:hover:not(:disabled))이
-  글자를 --fg로 되돌리는데, 그 밑에는 짙은 알약이 깔려 있어서 지금 보고 있는 화면의 이름이
-  마우스를 올리는 순간 사라진다. 클래스를 겹쳐 세 개짜리 hover 규칙을 넘긴다.
-*/
 .segmented.segmented-nav .segmented-option.active,
 .segmented.segmented-nav .segmented-option.active:hover {
-  color: #fff;
+  color: var(--fg);
 }
 
 /*
@@ -2673,7 +2662,7 @@ body.modal-open {
 
 .report-workspace {
   display: grid;
-  grid-template-columns: minmax(230px, 0.32fr) minmax(0, 1fr);
+  grid-template-columns: clamp(230px, 22vw, 280px) minmax(0, 1fr);
   align-items: start;
   gap: 0;
   border-radius: var(--radius);
@@ -2690,22 +2679,28 @@ body.modal-open {
 
 .report-list-scroll {
   max-height: calc(100dvh - 13rem);
-  padding-block: var(--radius-sm);
+  padding-block: var(--radius-xs);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
   direction: rtl;
+}
+
+.report-list:hover .report-list-scroll,
+.report-list:focus-within .report-list-scroll {
+  scrollbar-color: var(--fg-4) transparent;
 }
 
 .report-list-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 1.35rem 0.25rem;
+  padding: 0 1rem 0.65rem calc(1rem + 10px);
   color: var(--fg-3);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 600;
 }
 
@@ -2719,11 +2714,11 @@ body.modal-open {
   width: 100%;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.35rem;
-  padding: 1rem 1.5rem 1rem 0.85rem;
+  gap: 0.5rem;
+  padding: 1rem 1.5rem 1rem 1rem;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg);
+  color: var(--fg-2);
   text-align: left;
   direction: ltr;
   transition: background var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
@@ -2755,8 +2750,8 @@ body.modal-open {
 .report-list-item::after {
   position: absolute;
   right: 0;
-  width: var(--radius-sm);
-  height: var(--radius-sm);
+  width: var(--radius-xs);
+  height: var(--radius-xs);
   content: '';
   opacity: 0;
   pointer-events: none;
@@ -2764,13 +2759,13 @@ body.modal-open {
 }
 
 .report-list-item::before {
-  top: calc(-1 * var(--radius-sm));
-  background: radial-gradient(circle at top left, transparent calc(var(--radius-sm) - 0.5px), var(--surface) var(--radius-sm));
+  top: calc(-1 * var(--radius-xs));
+  background: radial-gradient(circle at top left, transparent calc(var(--radius-xs) - 0.5px), var(--surface) var(--radius-xs));
 }
 
 .report-list-item::after {
-  bottom: calc(-1 * var(--radius-sm));
-  background: radial-gradient(circle at bottom left, transparent calc(var(--radius-sm) - 0.5px), var(--surface) var(--radius-sm));
+  bottom: calc(-1 * var(--radius-xs));
+  background: radial-gradient(circle at bottom left, transparent calc(var(--radius-xs) - 0.5px), var(--surface) var(--radius-xs));
 }
 
 .report-list-item.active::before,
@@ -2783,28 +2778,26 @@ body.modal-open {
 }
 
 .report-list-item strong {
-  font-size: 0.9rem;
-  font-weight: 700;
-  line-height: 1.45;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.5;
   letter-spacing: -0.02em;
 }
 
-.report-list-date,
-.report-list-meta {
+.report-list-item.active strong {
+  font-weight: 700;
+}
+
+.report-list-date {
   color: var(--fg-3);
   font-size: 0.74rem;
-  font-weight: 500;
-}
-
-.report-list-meta {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.report-list-meta em {
-  color: var(--danger);
-  font-style: normal;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .report-detail-shell {
@@ -4133,6 +4126,7 @@ body.modal-open {
     direction: ltr;
     scrollbar-gutter: auto;
     scrollbar-width: auto;
+    scrollbar-color: var(--fg-4) transparent;
     scroll-snap-type: x proximity;
     scroll-padding-left: 0.6rem;
   }
@@ -4292,7 +4286,7 @@ body.modal-open {
     gap: 0.25rem;
     padding: 0.25rem;
     border-radius: 13px;
-    background: var(--bg);
+    background: transparent;
   }
 
   /* 링크마다 글자 수가 달라도(알림 관리 · 리포트 · 수집 설정) 칸은 같아야 묶음으로 읽힌다. */
@@ -4302,7 +4296,7 @@ body.modal-open {
   }
 
   .segmented-nav .segmented-option:hover:not(.active) {
-    background: var(--line);
+    background: var(--surface-sunken);
   }
 
   .report-ai-context,

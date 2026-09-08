@@ -188,15 +188,10 @@ function ReportListItem({ report, active, onSelect }: {
       aria-pressed={active}
       onClick={onSelect}
     >
-      <span className="report-list-date">{report.reportScope === 'DAILY'
-        ? `${report.reportDate ?? '집계일 미상'} · 일일 통합` : `${formatShortDate(report.generatedAt)} · 실행별`}</span>
-      <strong>{report.title}</strong>
-      <span className="report-list-meta">
-        분석 {report.findingCount}건
-        {report.highSensitivityCount > 0 && (
-          <em>{SENSITIVITY_LEVEL_LABELS.high} {report.highSensitivityCount}</em>
-        )}
-      </span>
+      <strong title={report.title}>{report.title}</strong>
+      <time className="report-list-date" dateTime={report.reportScope === 'DAILY' ? report.reportDate ?? undefined : report.generatedAt}>
+        {report.reportScope === 'DAILY' ? report.reportDate ?? '집계일 미상' : formatShortDate(report.generatedAt)}
+      </time>
     </button>
   )
 }
