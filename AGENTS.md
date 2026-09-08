@@ -86,6 +86,12 @@ When creating a branch, commit, or PR, always ask for or infer the issue number 
 - If Notion and local docs conflict, state the conflict explicitly and ask for a decision before implementing the conflicting behavior.
 - Do not invent API shapes from local assumptions when a Notion endpoint spec exists.
 
+## Local Documentation and Screenshots
+
+- Never stage, commit, or push generated documentation, validation reports, or UI screenshots. Keep `docs/` and local screenshot artifacts untracked, even when they are useful for review.
+- Never use `git add -f` to bypass documentation or screenshot ignore rules.
+- Verify the staged file list before every commit and exclude those artifacts. Existing application assets, runtime prompts, and repository instruction/template files are not generated documentation.
+
 ## Secrets and Environment Files
 
 - Do not open, read, print, summarize, or quote real secret files such as `.env`, `.env.*`, `application-secret.*`, or credential JSON files.

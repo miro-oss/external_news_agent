@@ -34,6 +34,15 @@ agent/*.checkpoint.json
 # Docs
 docs/
 
+# Local UI verification captures (application image assets stay trackable)
+screenshots/
+**/screenshots/
+**/screenshot*.png
+**/Screenshot*.png
+**/screenshot*.jpg
+**/Screenshot*.jpg
+**/codex-clipboard-*.png
+
 # Documentation and evaluation reports stay local. Existing tracked files are unaffected.
 *.md
 BE/src/test/resources/golden/clusters.*.summary.json
