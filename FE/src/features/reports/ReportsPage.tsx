@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   useLatestReport,
   useAudienceSetting,
@@ -64,27 +64,6 @@ export function ReportsPage() {
   const activeId = selectedId ?? latest.data?.id ?? null
   const activeReport = selectedId === null ? latest : selectedReport
   const activeReportData = activeReport.data
-  const reportListRef = useRef<HTMLElement>(null)
-  const [connectorTop, setConnectorTop] = useState<number | null>(null)
-  useEffect(() => {
-    const list = reportListRef.current
-    const scroll = list?.querySelector<HTMLElement>('.report-list-scroll')
-    if (!list || !scroll) return
-    function syncConnector() {
-      const item = scroll?.querySelector<HTMLElement>('.report-list-item.active')
-      if (!item || !list || !scroll) { setConnectorTop(null); return }
-      const itemBounds = item.getBoundingClientRect()
-      const scrollBounds = scroll.getBoundingClientRect()
-      const center = itemBounds.top + itemBounds.height / 2
-      setConnectorTop(center >= scrollBounds.top && center <= scrollBounds.bottom
-        ? center - list.getBoundingClientRect().top : null)
-    }
-    syncConnector()
-    scroll.addEventListener('scroll', syncConnector, { passive: true })
-    const observer = new ResizeObserver(syncConnector)
-    observer.observe(list)
-    return () => { scroll.removeEventListener('scroll', syncConnector); observer.disconnect() }
-  }, [activeId, reports.data?.content.length])
   useEffect(() => {
     const sync = () => {
       setSelectedId(reportIdFromHash())
@@ -144,7 +123,7 @@ export function ReportsPage() {
 
       {reports.data && reports.data.content.length > 0 && activeId !== null && (
         <div className="report-workspace">
-          <aside className="report-list" aria-label="생성된 보고서" ref={reportListRef}>
+          <aside className="report-list" aria-label="생성된 보고서">
             <div className="report-list-heading">
               <span>생성된 보고서</span>
             </div>
@@ -158,7 +137,6 @@ export function ReportsPage() {
               />
             ))}
             </div>
-            {connectorTop !== null && <span className="report-list-connection" style={{ top: connectorTop }} aria-hidden="true" />}
           </aside>
 
           <section className="report-detail-shell" aria-live="polite">

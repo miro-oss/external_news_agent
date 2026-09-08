@@ -2695,20 +2695,11 @@ body.modal-open {
   scrollbar-gutter: stable;
 }
 
-.report-list-connection {
-  position: absolute;
-  right: -1.5rem;
-  width: 1.5rem;
-  height: 2px;
-  background: var(--primary);
-  pointer-events: none;
-}
-
 .report-list-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 0.75rem 0.6rem;
+  padding: 0 0.85rem 0.85rem;
   color: var(--fg-3);
   font-size: 0.82rem;
   font-weight: 600;
@@ -2749,7 +2740,7 @@ body.modal-open {
 .report-list-item.active {
   background: var(--primary-weak);
   color: var(--primary-strong);
-  box-shadow: inset -3px 0 var(--primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent);
 }
 
 .report-list-item strong {
@@ -2782,7 +2773,7 @@ body.modal-open {
   margin: 0;
   padding: 1.5rem;
   border-radius: var(--radius);
-  background: var(--surface);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--primary-weak) 45%, var(--surface)), var(--surface) 14rem);
   box-shadow: var(--shadow-sm);
 }
 
@@ -2798,6 +2789,7 @@ body.modal-open {
 }
 
 .report-document-header {
+  padding-top: 1rem;
   padding-bottom: 1.75rem;
   border-bottom: 1px solid var(--line);
 }
@@ -4100,8 +4092,7 @@ body.modal-open {
     scroll-padding-left: 0.6rem;
   }
 
-  .report-list-heading,
-  .report-list-connection {
+  .report-list-heading {
     display: none;
   }
 

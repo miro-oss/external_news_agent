@@ -18,11 +18,18 @@
 - 두 주제 선택 후 수집을 접수했다. 두 번 클릭해 같은 idempotencyKey/topicIds를 전송하고 하나의 대기 요청으로 유지하는 것을 fixture 요청 로그에서 확인했다.
 - 주제별 그룹·개인·이메일+Telegram 자동 전달 선택을 저장했다. 삭제·중지된 기존 선택은 경고와 해제 버튼으로 표시하며 잘못된 활성 설정의 저장을 막는다. 자동 전달 끄기는 기존 선택이 없어졌어도 가능하다.
 - Telegram 연결 → 링크/Start 안내 → CONNECTED 상태 전환을 확인했다. 모의 링크만 사용했으며 외부 메시지를 발송하지 않았다.
-- 보고서 실행별 기본, 일일 통합 전환, 목록 선택 연결선, 구조화·기존 markdown 표시, 접힌 기타 분석, 하단 공유와 요약 미리보기를 확인했다.
+- 보고서 실행별 기본, 일일 통합 전환, 목록 선택 표시, 구조화·기존 markdown 표시, 접힌 기타 분석, 하단 공유와 요약 미리보기를 확인했다.
 - 앱 내 기사 원문에서 `반도체`, `HBM4`, `첨단 패키징`만 mark로 표시하고 전체 원문 문자열을 유지했다. 수집 키워드 태그는 추가하지 않았다.
 - 모바일 390px에서 보고서 레일의 min-width 문제를 수정했다. 설정·보고서 모두 document scrollWidth와 clientWidth가 379px(스크롤바 제외)로 같아 페이지 가로 넘침이 없다.
 
 재현 명령과 단계는 [모의 화면 안내](preview-qa.md)를 참고한다.
+
+### 보고서 여백과 선택 표현 보완
+
+- 보고서 제목의 카드 상단 간격을 24px에서 40px로 늘렸다. 목록 제목의 상단 간격은 36px에서 24px로 줄이고 목록 항목의 텍스트와 가로 정렬을 맞췄다.
+- 목록과 본문 사이 연결선 및 위치 추적 코드를 제거했다. 선택 항목에는 옅은 테두리를 적용하고 본문 상단에는 같은 테마 색상의 은은한 배경을 적용했다. 기존 카드 모서리·그림자·버튼 모션은 유지했다.
+- CUA에서 1440px 데스크톱과 390px 모바일을 확인했다. 다른 목록 항목 선택 시 선택 표시와 본문 제목이 함께 바뀌고 연결선 요소는 존재하지 않는다. 두 화면 모두 문서 너비와 뷰포트 너비가 같아 가로 넘침이 없다.
+- 보완 후 `cd FE && pnpm lint && pnpm build && pnpm test` 재실행: lint·build 및 테스트 11개 통과.
 
 ## 운영 확인과 한계
 
@@ -39,6 +46,6 @@
 | ![수정 전](screenshots/settings-before.png) | ![수정 후](screenshots/settings-after.png) |
 
 ![제안 검토](screenshots/keyword-review.png)
-![보고서](screenshots/reports-desktop.png)
+![보고서](screenshots/reports-polished-desktop.png)
 ![원문 강조](screenshots/article-keywords.png)
-![모바일 보고서](screenshots/reports-mobile.png)
+![모바일 보고서](screenshots/reports-polished-mobile.png)
