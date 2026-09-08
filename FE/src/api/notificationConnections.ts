@@ -18,6 +18,7 @@ export type DeliveryTargets = { groupIds: number[]; recipientIds: number[]; chan
 export function useTelegramConnection(recipientId: number) {
   return useQuery({ queryKey: ['telegram-connection', recipientId],
     queryFn: () => notificationGet<TelegramConnection>(`/recipients/${recipientId}/telegram`),
+    refetchOnWindowFocus: true,
     refetchInterval: (query) => query.state.data?.status === 'WAITING' ? 3000 : false,
   })
 }

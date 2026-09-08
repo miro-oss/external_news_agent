@@ -57,7 +57,7 @@ export function TopicTable() {
 
   if (topics.error || !topics.data) {
     const reason = topics.error instanceof ApiError
-      ? `${topics.error.message} (${topics.error.code})`
+      ? topics.error.message
       : '주제 목록을 불러오지 못했습니다.'
     return <p className="error">{reason}</p>
   }

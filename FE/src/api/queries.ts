@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  ApiError,
   apiGet,
   apiPut,
   get,
@@ -11,6 +12,7 @@ import {
   post,
   patch,
 } from './client'
+import { saveRecipientEmail } from '../lib/recipientEmail'
 import type {
   ArticleDetail,
   ArticleFilters,
@@ -357,6 +359,24 @@ export function useDeleteNotificationRecipient() {
   return useMutation({
     mutationFn: (recipientId: number) => notificationDelete(`/recipients/${recipientId}`),
     onSuccess: refresh,
+  })
+}
+
+export function useUpdateNotificationRecipientEmail() {
+  const refresh = useRefreshNotifications()
+  return useMutation({
+    mutationFn: ({ recipientId, email, emailChannelId }: { recipientId: number; email: string; emailChannelId: number }) =>
+      saveRecipientEmail(email, emailChannelId, {
+        loadRecipient: async () => {
+          const recipients = await getAllNotificationPages<NotificationRecipient>('/recipients')
+          const recipient = recipients.content.find((item) => item.id === recipientId)
+          if (!recipient) throw new ApiError('RECIPIENT404', '수신자를 찾을 수 없습니다.', 404)
+          return recipient
+        },
+        replaceDestinations: (destinations) => notificationPut(`/recipients/${recipientId}/destinations`, { destinations }),
+        updateProfile: (email) => notificationPatch(`/recipients/${recipientId}`, { email }),
+      }),
+    onSettled: refresh,
   })
 }
 

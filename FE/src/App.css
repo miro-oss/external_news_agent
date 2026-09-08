@@ -3535,7 +3535,17 @@ body.modal-open {
    ============================================================================= */
 .notifications-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.5rem;
+}
+
+.notifications-page > .page-header {
+  margin-bottom: 0;
+}
+
+.notifications-page > section,
+.notification-split > .notification-card-stack {
+  margin-bottom: 0;
 }
 
 .notification-section,
@@ -3548,6 +3558,7 @@ body.modal-open {
 
 .notification-section,
 .notification-card-stack {
+  min-width: 0;
   padding: clamp(1.15rem, 2vw, 1.75rem);
 }
 
@@ -3556,6 +3567,22 @@ body.modal-open {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+}
+
+.notification-split {
+  align-items: start;
+}
+
+.notification-panel-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.notification-panel-heading > span {
+  color: var(--fg-3);
+  font-size: 0.82rem;
+  font-weight: 500;
 }
 
 .channel-card {
@@ -3627,6 +3654,7 @@ body.modal-open {
 
 .notification-card-stack {
   align-content: start;
+  padding-bottom: 1rem;
 }
 
 .notification-form {
@@ -3738,6 +3766,10 @@ body.modal-open {
   border-top: 1px solid var(--line);
 }
 
+.notification-card-stack .compact-list article:last-child {
+  padding-bottom: 0;
+}
+
 .group-list article { grid-template-columns: minmax(0, 1fr) auto; }
 
 .text-button {
@@ -3820,11 +3852,39 @@ body.modal-open {
 }
 
 .delivery-summary span {
-  padding: 0.55rem 0.75rem;
-  border-radius: 10px;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
   background: var(--bg);
   color: var(--fg-2);
-  font-size: 0.82rem;
+  font-size: 0.74rem;
+}
+
+/* 발송 이력에서만 같은 상태 색을 쓴다. 요약은 옅은 면, 작은 표 배지는 진한 면으로 구분한다. */
+.notifications-page .delivery-log-shell .sent {
+  --delivery-state-color: var(--success-strong);
+  --delivery-state-background: var(--success-weak);
+}
+
+.notifications-page .delivery-log-shell .failed {
+  --delivery-state-color: var(--danger-strong);
+  --delivery-state-background: var(--danger-weak);
+}
+
+.notifications-page .delivery-log-shell .skipped {
+  --delivery-state-color: var(--warning-strong);
+  --delivery-state-background: var(--warning-weak);
+}
+
+.notifications-page .delivery-summary > span {
+  background: var(--delivery-state-background, var(--bg));
+  color: var(--delivery-state-color, var(--fg-2));
+}
+
+.notifications-page .delivery-table .delivery-status {
+  flex-shrink: 0;
+  background: var(--delivery-state-color, var(--fg-2));
+  color: var(--surface);
+  white-space: nowrap;
 }
 
 .delivery-table {

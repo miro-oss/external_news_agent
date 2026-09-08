@@ -44,7 +44,7 @@ async function request<T>(path: string, init?: RequestInit, base = BASE): Promis
     envelope = await response.json()
   } catch {
     // 봉투가 아닌 응답(프록시 오류, 502 HTML 등)은 서버가 준 사유가 없다.
-    throw new ApiError('NETWORK', `서버에 연결하지 못했습니다. (HTTP ${response.status})`, response.status)
+    throw new ApiError('NETWORK', '서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.', response.status)
   }
 
   if (!envelope.isSuccess) {

@@ -24,17 +24,37 @@
 .delivery-choice-list input,
 .delivery-toggle input,
 .delivery-scope input { width: 1rem; height: 1rem; flex: none; }
-.telegram-connection { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; grid-column: 1 / -1; }
-.telegram-connection .connection-label { color: var(--fg-3); font-size: .8rem; }
-.telegram-connection .connection-label[data-connected='true'] { color: var(--success-strong); }
-.telegram-link-actions { width: 100%; padding: 1rem; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface-sunken); }
-.telegram-link-actions p { margin: 0 0 .8rem; }
-.telegram-link-actions a { display: inline-flex; align-items: center; text-decoration: none; margin-right: .6rem; }
+.compact-list .recipient-row { grid-template-columns: minmax(0, 1fr) auto; }
+.recipient-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; }
+.recipient-name-row strong { overflow-wrap: anywhere; }
+.compact-list .recipient-name-row .recipient-channel-tag { padding: .15rem .4rem; border-radius: 999px; font-size: .65rem; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.compact-list .recipient-name-row .recipient-channel-tag.email { color: var(--success-strong); background: var(--success-weak); }
+.compact-list .recipient-name-row .recipient-channel-tag.telegram { color: var(--primary-strong); background: var(--primary-weak); }
+.recipient-actions { display: flex; align-items: center; gap: .25rem; }
+.recipient-actions [aria-expanded='true'] { color: var(--primary); background: var(--primary-weak); }
+.recipient-settings { display: grid; grid-column: 1 / -1; gap: 1.1rem; padding: 1.1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunken); animation: collapsible-in var(--dur-2) var(--ease-out); }
+.recipient-email-form { display: grid; gap: .4rem; }
+.recipient-email-form label,
+.telegram-connection-heading strong { font-size: .84rem; color: var(--fg-2); }
+.recipient-email-form label { font-weight: 700; }
+.recipient-email-fields { display: flex; align-items: center; gap: .5rem; }
+.recipient-email-fields input { flex: 1; min-width: 0; width: 100%; background: var(--surface); }
+.recipient-email-fields button { flex: none; }
+.recipient-email-form > p { margin: .2rem 0 0; font-size: .8rem; line-height: 1.6; }
+.telegram-connection { display: grid; gap: .6rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.telegram-connection-heading { display: flex; align-items: center; gap: .6rem; }
+.telegram-connection .connection-label { color: var(--success-strong); font-size: .78rem; }
+.telegram-connection .connection-label[data-waiting='true'] { color: var(--fg-3); }
+.telegram-connection p { margin: 0; font-size: .8rem; line-height: 1.65; }
+.telegram-connection > button { justify-self: start; }
+.telegram-connected { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
+.telegram-link-actions { display: grid; gap: .6rem; }
+.telegram-link-buttons { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.telegram-link-actions a { display: inline-flex; align-items: center; text-decoration: none; }
 .report-share-actions { display: flex; flex-wrap: wrap; gap: .65rem; }
 .report-message-preview,
 .auto-delivery-status { padding: 1.1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunken); }
 .report-message-preview p { white-space: pre-line; overflow-wrap: anywhere; color: var(--fg-2); line-height: 1.7; }
 .auto-delivery-status summary { cursor: pointer; font-weight: 700; color: var(--fg-2); }
 .auto-delivery-status li + li { margin-top: .6rem; }
-.channel-card .email-readiness { margin: 0; color: var(--fg-3); font-size: .8rem; line-height: 1.6; }
 @media(max-width: 640px) { .delivery-target-picker { grid-template-columns: minmax(0, 1fr); } }

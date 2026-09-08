@@ -29,9 +29,20 @@ const fixture = JSON.parse(readFileSync(new URL('../tests/fixtures/refactor-repo
 const now = () => new Date().toISOString();
 const disabledPolicy = () => ({ enabled: false, run: true, daily: false, channelIds: [], groupIds: [], recipientIds: [] });
 const initialChannels = [{ id: 1, channelType: 'EMAIL', name: '이메일', config: {}, maxLength: 20000, active: true, tokenConfigured: false }, { id: 2, channelType: 'TELEGRAM', name: '텔레그램', config: {}, maxLength: 4096, active: true, tokenConfigured: true }, { id: 3, channelType: 'EMAIL', name: '사용 중지한 메일', config: {}, maxLength: 20000, active: false, tokenConfigured: false }];
-const initialRecipients = [{ id: 1, name: '김수신', email: 'reader@example.invalid', phone: null, memo: '검증용 수신자', active: true, groupNames: ['반도체 전략팀'], destinations: [{ channelId: 1, channelType: 'EMAIL', address: 'reader@example.invalid', use: true, onboarded: true }, { channelId: 2, channelType: 'TELEGRAM', address: null, use: true, onboarded: false }] }, { id: 2, name: '이구독', email: 'reviewer@example.invalid', phone: null, memo: null, active: true, groupNames: ['반도체 전략팀'], destinations: [{ channelId: 1, channelType: 'EMAIL', address: 'reviewer@example.invalid', use: true, onboarded: true }, { channelId: 2, channelType: 'TELEGRAM', address: 'fixture-chat-2', use: true, onboarded: true }] }, { id: 3, name: '중지한 수신자', email: 'paused@example.invalid', phone: null, memo: null, active: false, groupNames: [], destinations: [] }];
+const initialRecipients = [{ id: 1, name: '김수신', email: 'reader@example.invalid', phone: null, memo: '검증용 수신자', active: true, groupNames: ['반도체 전략팀'], destinations: [{ channelId: 1, channelType: 'EMAIL', address: 'reader@example.invalid', use: true, onboarded: true }, { channelId: 2, channelType: 'TELEGRAM', address: null, use: false, onboarded: false }] }, { id: 2, name: '이구독', email: 'reviewer@example.invalid', phone: null, memo: null, active: true, groupNames: ['반도체 전략팀'], destinations: [{ channelId: 1, channelType: 'EMAIL', address: 'reviewer@example.invalid', use: true, onboarded: true }, { channelId: 2, channelType: 'TELEGRAM', address: 'fixture-chat-2', use: true, onboarded: true }] }, { id: 3, name: '중지한 수신자', email: 'paused@example.invalid', phone: null, memo: null, active: false, groupNames: [], destinations: [] }];
 const initialGroups = [{ id: 1, name: '반도체 전략팀', perspective: 'TECHNOLOGY', active: true, memberCount: 2, activeMemberCount: 2, members: [{ recipientId: 1, name: '김수신', active: true }, { recipientId: 2, name: '이구독', active: true }] }, { id: 2, name: '사용 중지한 그룹', perspective: null, active: false, memberCount: 1, activeMemberCount: 0, members: [{ recipientId: 3, name: '중지한 수신자', active: false }] }];
 let topics, proposals, channels, recipients, groups, requests, runs, policies, telegram, readiness, audience, plan, autoDeliveries, sendCache;
+let telegramLinkError = false;
+let showDeliveryLogs = false;
+let recipientProfileError = false;
+const deliveryLogFixtures = ['SENT', 'FAILED', 'SKIPPED'].map((status, i) => ({
+    id: i + 1, deliveryBatchId: 'fixture-batch', reportId: 17, runId: 148,
+    recipientId: i === 1 ? 2 : 1, recipientName: i === 1 ? '이구독' : '김수신',
+    channelType: i === 2 ? 'TELEGRAM' : 'EMAIL', address: i === 2 ? 'fixture-chat' : 'reader@example.invalid',
+    status, externalMessageId: status === 'SENT' ? 'fixture-message' : null,
+    chunkSeq: 1, chunkCount: 1, errorMessage: status === 'FAILED' ? '메일 서버에 연결하지 못했습니다.' : status === 'SKIPPED' ? '수신 설정이 꺼져 있습니다.' : null,
+    sentAt: '2026-09-08T12:30:00+09:00',
+}));
 function reset() { topics = structuredClone(initialTopics); proposals = structuredClone(initialProposals); channels = structuredClone(initialChannels); recipients = structuredClone(initialRecipients); groups = structuredClone(initialGroups); requests = []; runs = []; policies = { 31: { enabled: true, run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1, 2] } }; telegram = { 1: { status: 'DISCONNECTED', expiresAt: null }, 2: { status: 'CONNECTED', expiresAt: null }, 3: { status: 'DISCONNECTED', expiresAt: null } }; readiness = { mode: 'LOCAL_CAPTURE', configured: false, message: '로컬 검증 모드입니다. 이메일은 실제 수신함으로 전달되지 않습니다.' }; audience = { audience: 'CHIP_MAKER' }; plan = { plan: 'FREE', paidExhaustedAction: 'FALLBACK_FREE', allowRunOverride: true }; autoDeliveries = []; sendCache = {}; }
 reset();
 // Saved report fixtures use only example.invalid links and synthetic recipients.
@@ -53,7 +64,22 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         if (path.startsWith('/__qa/')) {
                             if (path === '/__qa/reset') {
                                 reset();
+                                telegramLinkError = false;
+                                showDeliveryLogs = false;
+                                recipientProfileError = false;
                                 return json(res, { reset: true });
+                            }
+                            if (path === '/__qa/telegram-link-error') {
+                                telegramLinkError = body.enabled ?? url.searchParams.get('enabled') === 'true';
+                                return json(res, { enabled: telegramLinkError });
+                            }
+                            if (path === '/__qa/delivery-logs') {
+                                showDeliveryLogs = body.enabled ?? url.searchParams.get('enabled') === 'true';
+                                return json(res, { enabled: showDeliveryLogs });
+                            }
+                            if (path === '/__qa/recipient-profile-error') {
+                                recipientProfileError = body.enabled ?? url.searchParams.get('enabled') === 'true';
+                                return json(res, { enabled: recipientProfileError });
                             }
                             if (path === '/__qa/requests')
                                 return json(res, requests);
@@ -79,6 +105,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                     if (d) {
                                         d.onboarded = status === 'CONNECTED';
                                         d.address = d.onboarded ? `fixture-chat-${id}` : null;
+                                        d.use = d.onboarded;
                                     }
                                 }
                                 return json(res, telegram[id]);
@@ -180,6 +207,28 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         }
                         else if (path === '/api/notifications/recipients')
                             result = page(recipients);
+                        else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)\/destinations$/)) && method === 'PUT') {
+                            const recipient = recipients.find(r => r.id === Number(match[1]));
+                            if (!recipient) return json(res, { isSuccess: false, code: 'RECIPIENT404', message: '수신자를 찾을 수 없습니다.', result: {} }, 404);
+                            if (body.destinations.some(d => d.use && !d.address?.trim()))
+                                return json(res, { isSuccess: false, code: 'RECIPIENT400', message: '수신 주소 없이 해당 채널을 활성화할 수 없습니다.', result: {} }, 400);
+                            if (body.destinations.some(d => d.address && recipients.some(r => r.id !== recipient.id && r.destinations.some(existing => existing.channelId === d.channelId && existing.address === d.address.trim()))))
+                                return json(res, { isSuccess: false, code: 'RECIPIENT409', message: '이미 등록된 수신 주소입니다.', result: {} }, 409);
+                            recipient.destinations = body.destinations.map(d => {
+                                const type = channels.find(c => c.id === d.channelId)?.channelType;
+                                const address = d.address?.trim() || null;
+                                const old = recipient.destinations.find(existing => existing.channelId === d.channelId && existing.address === address);
+                                return { ...d, address, channelType: type, onboarded: type === 'EMAIL' || Boolean(old?.onboarded) };
+                            });
+                            result = { recipientId: recipient.id, destinations: recipient.destinations };
+                        }
+                        else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)$/)) && method === 'PATCH') {
+                            if (recipientProfileError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: {} }, 500);
+                            const recipient = recipients.find(r => r.id === Number(match[1]));
+                            if (!recipient) return json(res, { isSuccess: false, code: 'RECIPIENT404', message: '수신자를 찾을 수 없습니다.', result: {} }, 404);
+                            if (body.email !== undefined && body.email !== null) recipient.email = body.email.trim() || null;
+                            result = { id: recipient.id, name: recipient.name, phone: recipient.phone, email: recipient.email, memo: recipient.memo, active: recipient.active };
+                        }
                         else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)$/)) && method === 'DELETE') {
                             recipients = recipients.filter(r => r.id !== Number(match[1]));
                             result = null;
@@ -187,6 +236,8 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)\/telegram(\/link)?$/))) {
                             const id = Number(match[1]);
                             if (match[2]) {
+                                if (telegramLinkError)
+                                    return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: {} }, 500);
                                 const expiresAt = new Date(Date.now() + 600000).toISOString();
                                 telegram[id] = { status: 'WAITING', expiresAt };
                                 result = { url: `http://127.0.0.1:${port}/__qa/telegram?recipientId=${id}&status=CONNECTED`, expiresAt };
@@ -215,8 +266,11 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         }
                         else if (path === '/api/notifications/email-readiness')
                             result = readiness;
-                        else if (path === '/api/notifications/delivery-logs')
-                            result = { ...page([]), summary: { sentCount: 0, failedCount: 0, skippedCount: 0 } };
+                        else if (path === '/api/notifications/delivery-logs') {
+                            const entries = (showDeliveryLogs ? deliveryLogFixtures : []).filter(log =>
+                                ['reportId', 'channelType', 'status'].every(key => !url.searchParams.get(key) || String(log[key]) === url.searchParams.get(key)));
+                            result = { ...page(entries), summary: { sentCount: entries.filter(log => log.status === 'SENT').length, failedCount: entries.filter(log => log.status === 'FAILED').length, skippedCount: entries.filter(log => log.status === 'SKIPPED').length } };
+                        }
                         else if (path.endsWith('/auto-deliveries/retry')) {
                             result = { queuedCount: autoDeliveries.filter(d => d.status === 'FAILED').length };
                             autoDeliveries = autoDeliveries.map(d => d.status === 'FAILED' ? { ...d, status: 'PENDING' } : d);

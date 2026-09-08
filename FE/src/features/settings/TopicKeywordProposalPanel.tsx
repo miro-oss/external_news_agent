@@ -107,7 +107,7 @@ export function TopicKeywordProposalPanel() {
 
   if (proposals.error || !proposals.data) {
     const reason = proposals.error instanceof ApiError
-      ? `${proposals.error.message} (${proposals.error.code})`
+      ? proposals.error.message
       : '키워드 제안을 불러오지 못했습니다.'
     return <p className="error">{reason}</p>
   }

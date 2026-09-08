@@ -7,6 +7,7 @@ import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +22,7 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class TelegramConnectionService {
     private final JdbcTemplate jdbc;
     private final NotificationChannelRepository channels;
@@ -39,6 +41,7 @@ public class TelegramConnectionService {
         String token=Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         LocalDateTime expires=now.plusMinutes(10);
         jdbc.update("INSERT INTO telegram_connection_tokens(token_hash,recipient_id,created_at,expires_at) VALUES(?,?,?,?)",hash(token),recipientId,now,expires);
+        log.info("텔레그램 연결 링크를 발급했습니다. 유효기간=10분");
         return new Link("https://t.me/"+username+"?start="+token,expires.atZone(ApiTimeZone.ZONE).toOffsetDateTime());
     }
     @Transactional(readOnly=true)
@@ -64,27 +67,46 @@ public class TelegramConnectionService {
     @Transactional
     public void accept(TelegramConnectionAdapter.Update update) {
         var message=update.message();
-        if(message==null || message.chat()==null || message.from()==null || message.from().bot()
-                || !"private".equals(message.chat().type()) || message.chat().id()!=message.from().id()
-                || message.text()==null || !message.text().matches("^/start(?:@[A-Za-z0-9_]+)? [A-Za-z0-9_-]{43}$")) return;
+        if(message==null || message.text()==null) return;
+        if(!message.text().matches("^/start(?:@[A-Za-z0-9_]+)? [A-Za-z0-9_-]{43}$")) {
+            if(message.text().startsWith("/start")) log.info("텔레그램 연결 요청 미처리. reason=START_PAYLOAD_INVALID");
+            return;
+        }
+        if(message.chat()==null || message.from()==null || message.from().bot()
+                || !"private".equals(message.chat().type()) || message.chat().id()!=message.from().id()) {
+            log.info("텔레그램 연결 요청 미처리. reason=CHAT_OR_SENDER_INVALID");
+            return;
+        }
         String token=message.text().substring(message.text().lastIndexOf(' ')+1);
         String digest=hash(token);
         List<Long> owners=jdbc.queryForList("SELECT recipient_id FROM telegram_connection_tokens WHERE token_hash=?",Long.class,digest);
-        if(owners.isEmpty()) return;
+        if(owners.isEmpty()) {
+            log.info("텔레그램 연결 요청 미처리. reason=LINK_NOT_FOUND");
+            return;
+        }
         Long recipientId=owners.getFirst(); lockRecipient(recipientId);
-        if(!management.findRecipient(recipientId).isActive()) return;
+        if(!management.findRecipient(recipientId).isActive()) {
+            log.info("텔레그램 연결 요청 미처리. reason=RECIPIENT_INACTIVE");
+            return;
+        }
         // One-time claim. A second update, a replaced link or an expired link cannot overwrite a binding.
+        // The random nonce cannot predate issuance; Telegram's independent clock must not reject it.
         LocalDateTime now=now();
-        LocalDateTime messageAt=LocalDateTime.ofEpochSecond(message.date(),0,java.time.ZoneOffset.UTC)
-                .atOffset(java.time.ZoneOffset.UTC).atZoneSameInstant(ApiTimeZone.ZONE).toLocalDateTime();
-        if(jdbc.update("UPDATE telegram_connection_tokens SET consumed_at=? WHERE token_hash=? AND consumed_at IS NULL AND expires_at>? AND created_at<=?",
-                now,digest,now,messageAt.plusSeconds(1))!=1) return;
+        if(jdbc.update("UPDATE telegram_connection_tokens SET consumed_at=? WHERE token_hash=? AND consumed_at IS NULL AND expires_at>?",
+                now,digest,now)!=1) {
+            log.info("텔레그램 연결 요청 미처리. reason=LINK_EXPIRED_REPLACED_OR_USED");
+            return;
+        }
         var channel=channels.findByChannelType(ChannelType.TELEGRAM).orElseThrow();
         String address=Long.toString(message.chat().id());
         Integer taken=jdbc.queryForObject("SELECT COUNT(*) FROM notification_recipient_destinations WHERE channel_id=? AND address=? AND recipient_id<>?",Integer.class,channel.getId(),address,recipientId);
-        if(taken!=null && taken>0) return; // Never steal a chat from another recipient.
+        if(taken!=null && taken>0) {
+            log.info("텔레그램 연결 요청 미처리. reason=CHAT_ALREADY_LINKED");
+            return; // Never steal a chat from another recipient.
+        }
         jdbc.update("DELETE FROM notification_recipient_destinations WHERE recipient_id=? AND channel_id=?",recipientId,channel.getId());
         jdbc.update("INSERT INTO notification_recipient_destinations(recipient_id,channel_id,address,use_yn,onboarded_yn) VALUES(?,?,?,'Y','Y')",recipientId,channel.getId(),address);
+        log.info("텔레그램 연결 요청 처리 완료.");
     }
     @Transactional
     public Long claimPolling() {

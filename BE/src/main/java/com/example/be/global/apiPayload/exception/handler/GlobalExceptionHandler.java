@@ -10,6 +10,8 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.Map;
 
@@ -36,6 +38,11 @@ public class GlobalExceptionHandler {
     })
     public ResponseEntity<ApiResponse<Map<String, Object>>> handleBadRequest(Exception exception) {
         return failure(GeneralErrorCode.BAD_REQUEST, GeneralErrorCode.BAD_REQUEST.getMessage());
+    }
+
+    @ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})
+    public ResponseEntity<ApiResponse<Map<String, Object>>> handleNotFound(Exception exception) {
+        return failure(GeneralErrorCode.NOT_FOUND, GeneralErrorCode.NOT_FOUND.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

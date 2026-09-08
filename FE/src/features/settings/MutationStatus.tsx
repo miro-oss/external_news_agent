@@ -6,7 +6,7 @@ export function MutationStatus({ error, success, warning = null }: {
   warning?: string | null
 }) {
   if (error) {
-    let message = error instanceof ApiError ? `${error.message} (${error.code})` : '요청에 실패했습니다.'
+    let message = error instanceof ApiError ? error.message : '요청에 실패했습니다.'
     if (error instanceof ApiError && error.code === 'QUOTA429' && isQuotaDetails(error.details)) {
       message += ` · 일 잔량 ${error.details.dailyRemaining ?? '-'}, 월 잔량 ${error.details.monthlyRemaining ?? '-'}`
     }
