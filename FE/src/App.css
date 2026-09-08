@@ -2666,7 +2666,7 @@ body.modal-open {
   align-items: start;
   gap: 0;
   border-radius: var(--radius);
-  background: var(--line-soft);
+  background: color-mix(in srgb, var(--primary-weak) 45%, var(--surface));
   box-shadow: var(--shadow-sm);
 }
 
@@ -2726,7 +2726,7 @@ body.modal-open {
 }
 
 .report-list-item:hover:not(.active) {
-  background: color-mix(in srgb, var(--surface) 65%, var(--line-soft));
+  background: color-mix(in srgb, var(--primary-weak) 70%, var(--surface));
   color: var(--fg);
 }
 
