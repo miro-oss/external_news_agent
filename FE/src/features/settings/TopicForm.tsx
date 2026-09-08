@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useCreateTopic, useSources } from '../../api/queries'
 import { FormStatus } from './FormStatus'
 import { baseTopicKeywords, buildTopicKeywordInput } from './topicKeywordInput'
+import { TopicSourcesSkeleton } from './SettingsSkeletons'
 
 const EMPTY = {
   name: '',
@@ -165,7 +166,7 @@ export function TopicForm() {
         </p>
       </div>
 
-      {sources.isPending && <p className="muted">활성 수집 소스를 확인하는 중…</p>}
+      {sources.isPending && <TopicSourcesSkeleton />}
       {sources.isError && <p className="error">활성 수집 소스를 불러오지 못했습니다.</p>}
       {!sources.isPending && !sources.isError && activeSources.length === 0 && (
         <p className="error topic-source-error">

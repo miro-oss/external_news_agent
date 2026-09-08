@@ -64,6 +64,18 @@ public class NewsReport {
     @Column(name = "source_run_ids", nullable = false)
     private List<Long> sourceRunIds = List.of();
 
+    @Column(name = "source_report_count")
+    private Long sourceReportCount;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    public void hide(LocalDateTime now) {
+        if (deletedAt == null) {
+            deletedAt = now;
+        }
+    }
+
     public Long getRunId() {
         return run == null ? null : run.getId();
     }

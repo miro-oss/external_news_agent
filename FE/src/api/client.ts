@@ -72,6 +72,10 @@ export function patch<T>(path: string, body: unknown) {
   return request<T>(path, { method: 'PATCH', body: JSON.stringify(body) })
 }
 
+export function remove<T>(path: string) {
+  return request<T>(path, { method: 'DELETE' })
+}
+
 const NOTIFICATIONS_BASE = '/api/notifications'
 
 export function notificationGet<T>(path: string, params?: Record<string, string | number | boolean | undefined>) {

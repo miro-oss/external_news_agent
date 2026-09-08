@@ -4,6 +4,7 @@ import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;
 import com.example.be.domain.reports.service.ReportQueryService;
+import com.example.be.domain.reports.service.ReportCommandService;
 import com.example.be.global.apiPayload.PageResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +18,7 @@ import java.util.Map;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -28,6 +30,34 @@ class ReportControllerTest {
 
     @MockitoBean
     private ReportQueryService reportQueryService;
+
+    @MockitoBean
+    private ReportCommandService reportCommandService;
+
+    @Test
+    void deletionReturnsCommonSuccessEnvelope() throws Exception {
+        when(reportCommandService.deleteReport(17L)).thenReturn(new ReportResDTO.Deleted(17L, true));
+
+        mockMvc.perform(delete("/api/news/reports/17"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true))
+                .andExpect(jsonPath("$.code").value("COMMON200"))
+                .andExpect(jsonPath("$.message").value("삭제되었습니다."))
+                .andExpect(jsonPath("$.result.id").value(17))
+                .andExpect(jsonPath("$.result.deleted").value(true));
+    }
+
+    @Test
+    void deletionOfMissingReportUsesReportNotFound() throws Exception {
+        when(reportCommandService.deleteReport(99L))
+                .thenThrow(new ReportException(ReportErrorCode.REPORT_NOT_FOUND));
+
+        mockMvc.perform(delete("/api/news/reports/99"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("REPORT404"))
+                .andExpect(jsonPath("$.message").value("보고서를 찾을 수 없습니다."))
+                .andExpect(jsonPath("$.result").isMap());
+    }
 
     @Test
     void invertedPeriodMatchesNotionErrorEnvelope() throws Exception {
@@ -48,13 +78,14 @@ class ReportControllerTest {
         var scope = com.example.be.domain.reports.entity.ReportScope.DAILY;
         var date = java.time.LocalDate.of(2026, 9, 3);
         var detail = ReportResDTO.Detail.builder().id(77L).reportScope(scope).reportDate(date)
-                .sourceRunIds(List.of(42L, 43L)).build();
+                .sourceRunIds(List.of(42L, 43L)).sourceReportCount(1L).build();
         when(reportQueryService.getLatest(true, scope)).thenReturn(detail);
         mockMvc.perform(get("/api/news/reports/latest").param("reportScope", "DAILY"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.result.reportScope").value("DAILY"))
                 .andExpect(jsonPath("$.result.runId").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.result.reportDate").value("2026-09-03"))
-                .andExpect(jsonPath("$.result.sourceRunIds[1]").value(43));
+                .andExpect(jsonPath("$.result.sourceRunIds[1]").value(43))
+                .andExpect(jsonPath("$.result.sourceReportCount").value(1));
         when(reportQueryService.getReports(null, null, 0, 20, scope))
                 .thenReturn(PageResponse.of(List.of(), 0, 20, 0));
         mockMvc.perform(get("/api/news/reports").param("reportScope", "DAILY"))

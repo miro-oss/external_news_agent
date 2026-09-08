@@ -16,6 +16,8 @@ import {
 } from '../../api/types'
 import { Segmented, type SegmentedOption } from '../../components/Segmented'
 import { MutationStatus } from './MutationStatus'
+import { SkeletonRegion } from '../../components/Skeleton'
+import { AudienceSettingSkeleton, CollectionRunSkeleton, SettingFieldSkeleton } from './SettingsSkeletons'
 
 type RunScope = 'SELECTED' | 'ALL'
 
@@ -36,7 +38,7 @@ export function CollectionRunPanel() {
   const pendingRunKey = useRef<string | null>(null)
 
   if (combinations.isPending) {
-    return <section className="collection-run-panel state-panel">수집 실행 정보를 불러오는 중입니다.</section>
+    return <CollectionRunSkeleton />
   }
   if (combinations.error || !combinations.data) {
     return (
@@ -137,6 +139,7 @@ export function CollectionRunPanel() {
           </div>
         </fieldset>
 
+        {planQuery.isPending && <SkeletonRegion label="실행 플랜 설정을 불러오는 중"><SettingFieldSkeleton /></SkeletonRegion>}
         {setting?.allowRunOverride && (
           <div className="field">
             <label htmlFor="run-plan">이번 실행 플랜</label>
@@ -186,7 +189,7 @@ function DefaultAudienceSetting() {
   }
 
   if (audienceQuery.isPending) {
-    return <div className="run-audience-setting state-panel">기본 관점을 불러오는 중입니다.</div>
+    return <AudienceSettingSkeleton />
   }
   if (audienceQuery.error || !audienceQuery.data) {
     return (

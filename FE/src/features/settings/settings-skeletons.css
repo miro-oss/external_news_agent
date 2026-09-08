@@ -1,0 +1,64 @@
+.settings-skeleton-field {
+  display: grid;
+  align-content: start;
+  gap: .65rem;
+  min-width: 0;
+}
+
+.settings-skeleton-topic-options {
+  flex-wrap: wrap;
+}
+
+.settings-skeleton-audience {
+  display: grid;
+  gap: .5rem;
+}
+
+.settings-skeleton-segments {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .35rem;
+  margin-top: .3rem;
+}
+
+.settings-skeleton-run-button {
+  margin-top: 1.25rem;
+}
+
+.settings-skeleton-topic-table td {
+  height: 4.5rem;
+  box-sizing: border-box;
+}
+
+.settings-skeleton-proposal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.settings-skeleton-usage {
+  min-height: 6.5rem;
+  justify-content: center;
+  gap: .75rem;
+}
+
+.settings-skeleton-plan-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .7rem;
+}
+
+.settings-skeleton-source-status {
+  margin: 0 0 1rem;
+}
+
+@media (max-width: 600px) {
+  .settings-skeleton-segments {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-skeleton-proposal {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

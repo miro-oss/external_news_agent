@@ -4,6 +4,7 @@ import { useAutoDeliveries, useRetryAutoDeliveries, useShareReport, type Deliver
 import { DeliveryTargetPicker } from './DeliveryTargetPicker'
 import { useDeliveryTargetAvailability } from './useDeliveryTargetAvailability'
 import { MutationStatus } from '../settings/MutationStatus'
+import { MessagePreviewSkeleton } from './NotificationSkeletons'
 import './notifications-refinement.css'
 
 const LABELS: Record<string, string> = { PENDING: '전달 대기', PROCESSING: '전달 중', SENT: '전달됨', FAILED: '전달 실패', SKIPPED: '전달 제외', UNKNOWN: '수신 확인 필요' }
@@ -18,8 +19,10 @@ export function ReportSharePanel({ reportId }: { reportId: number }) {
   function change(next: DeliveryTargets) { setTargets(next); setRequestKey(`r${reportId}-${crypto.randomUUID()}`); send.reset(); preview.reset() }
   const canSend = availability.valid && targets.channelIds.length > 0 && (targets.groupIds.length > 0 || targets.recipientIds.length > 0)
   return <section className="report-delivery-panel report-share-card" aria-label="보고서 공유">
-    <div className="section-heading"><h3>다른 사람에게 공유</h3></div>
-    <p className="muted">이 보고서의 핵심 요약을 추가로 전달할 수 있습니다.</p>
+    <div className="report-share-heading">
+      <h3>다른 사람에게 공유</h3>
+      <p className="muted">이 보고서의 핵심 요약을 추가로 전달할 수 있습니다.</p>
+    </div>
     {!!deliveries.data?.length && <details className="auto-delivery-status"><summary>자동 전달 상태</summary>
       <ul>{deliveries.data.map((delivery) => <li key={delivery.id}>{delivery.recipientName} · {delivery.channelType === 'EMAIL' ? '이메일' : '텔레그램'} · {LABELS[delivery.status] ?? delivery.status}{delivery.message && <p className="muted">{delivery.message}</p>}</li>)}</ul>
       {deliveries.data.some((delivery) => delivery.status === 'FAILED') && <button className="secondary-button" type="button" disabled={retry.isPending} onClick={() => retry.mutate()}>실패한 대상만 다시 전달</button>}
@@ -33,6 +36,7 @@ export function ReportSharePanel({ reportId }: { reportId: number }) {
     <MutationStatus error={send.error ?? preview.error ?? deliveries.error}
       success={send.data && !send.data.failedCount ? `${send.data.sentCount}명에게 전달했습니다.${send.data.skippedCount ? ` ${send.data.skippedCount}명은 연결 상태를 확인해 주세요.` : ''}` : null}
       warning={send.data?.failedCount ? `${send.data.sentCount}명 전달 · ${send.data.failedCount}명 실패. 발송 이력에서 확인해 주세요.` : null} />
+    {preview.isPending && !preview.data && <MessagePreviewSkeleton />}
     {preview.data && <div className="report-message-preview"><strong>{preview.data.subject ?? '텔레그램 요약'}</strong>{preview.data.chunks.map((chunk) => <p key={chunk.seq}>{plainPreview(chunk.body)}</p>)}</div>}
   </section>
 }

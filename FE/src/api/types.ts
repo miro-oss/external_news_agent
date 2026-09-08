@@ -352,6 +352,7 @@ export interface ReportSummary {
   reportScope: 'RUN' | 'DAILY'
   reportDate: string | null
   sourceRunIds: number[]
+  sourceReportCount?: number | null
   title: string
   generatedAt: string
   modelName: string
@@ -415,6 +416,7 @@ export interface ReportDetail {
   reportScope: 'RUN' | 'DAILY'
   reportDate: string | null
   sourceRunIds: number[]
+  sourceReportCount?: number | null
   title: string
   markdownBody: string
   modelName: string

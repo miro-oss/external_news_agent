@@ -14,6 +14,7 @@ import { collectionKeywords, highlightKeywordParts } from '../reports/reportRead
 import { formatMediumDate } from '../../lib/datetime'
 import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { scrollIntoViewGently } from '../../lib/motion'
+import { ArticleDetailSkeleton, ArticleInsightSkeleton } from './ArticleSkeletons'
 
 interface Props {
   articleId: number | null
@@ -108,7 +109,7 @@ export function ArticleDetailModal({
         aria-label={article.data ? undefined : '기사 상세'}
       >
         <button ref={closeButton} type="button" className="modal-close" aria-label="본문보기 닫기" onClick={onClose}>×</button>
-        {article.isPending && <div className="modal-state">기사를 불러오는 중입니다.</div>}
+        {article.isPending && <ArticleDetailSkeleton />}
         {article.isError && <div className="modal-state error" role="alert">{article.error.message}</div>}
         {article.data && (
           <>
@@ -329,6 +330,7 @@ function PerspectiveInsight({
         </button>
       </div>
       {error && <p className="perspective-insight-error" role="alert">{error.message}</p>}
+      {stored.isPending && !insight && <ArticleInsightSkeleton />}
       {insight && (
         <InsightContents
           insight={insight}

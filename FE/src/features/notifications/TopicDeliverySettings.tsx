@@ -3,11 +3,12 @@ import { useDeliveryPolicy, useSaveDeliveryPolicy, type DeliveryPolicy } from '.
 import { DeliveryTargetPicker } from './DeliveryTargetPicker'
 import { useDeliveryTargetAvailability } from './useDeliveryTargetAvailability'
 import { MutationStatus } from '../settings/MutationStatus'
+import { DeliveryPolicySkeleton } from './NotificationSkeletons'
 import './notifications-refinement.css'
 
 export function TopicDeliverySettings({ topicId }: { topicId: number }) {
   const policy = useDeliveryPolicy(topicId)
-  if (policy.isPending) return <p className="muted">자동 전달 설정을 불러오는 중입니다.</p>
+  if (policy.isPending) return <DeliveryPolicySkeleton />
   if (policy.error) return <p role="alert">{policy.error.message}</p>
   return policy.data ? <PolicyForm key={topicId} topicId={topicId} initial={policy.data} /> : null
 }

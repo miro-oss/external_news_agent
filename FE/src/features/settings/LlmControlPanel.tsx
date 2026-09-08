@@ -9,6 +9,7 @@ import {
   type PaidExhaustedAction,
 } from '../../api/types'
 import { MutationStatus } from './MutationStatus'
+import { LlmControlSkeleton } from './SettingsSkeletons'
 
 export function LlmControlPanel() {
   const planQuery = useLlmPlan()
@@ -17,7 +18,7 @@ export function LlmControlPanel() {
   const [saved, setSaved] = useState(false)
 
   if (planQuery.isPending || usageQuery.isPending) {
-    return <div className="llm-panel state-panel">LLM 설정과 사용량을 불러오는 중입니다.</div>
+    return <LlmControlSkeleton />
   }
   if (planQuery.error || usageQuery.error || !planQuery.data || !usageQuery.data) {
     return (

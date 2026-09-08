@@ -4,6 +4,7 @@ import { useSetTopicActivation, useTopics } from '../../api/queries'
 import { ApiError } from '../../api/client'
 import { MutationStatus } from './MutationStatus'
 import { TopicDeliverySettings } from '../notifications/TopicDeliverySettings'
+import { TopicTableSkeleton } from './SettingsSkeletons'
 
 /** 오프셋이 붙은 ISO-8601을 그대로 보여 주면 열이 넘친다. 날짜와 분까지만 남긴다. */
 function formatCollectedAt(value: string | null) {
@@ -53,7 +54,7 @@ export function TopicTable() {
   const topics = useTopics(!showInactive)
   const activation = useSetTopicActivation()
 
-  if (topics.isPending) return <p className="muted">불러오는 중…</p>
+  if (topics.isPending) return <TopicTableSkeleton />
 
   if (topics.error || !topics.data) {
     const reason = topics.error instanceof ApiError

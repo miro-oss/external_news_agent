@@ -66,7 +66,7 @@ class ReportQueryServiceImplTest {
 
     @Test
     void latestReturnsNullWhenNoReportExists() {
-        when(reportRepository.findFirstByReportStatusNotOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
+        when(reportRepository.findFirstByReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
                 .thenReturn(Optional.empty());
 
         assertNull(service.getLatest(true));

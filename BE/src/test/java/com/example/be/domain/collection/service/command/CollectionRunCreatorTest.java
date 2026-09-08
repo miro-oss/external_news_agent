@@ -52,6 +52,10 @@ class CollectionRunCreatorTest {
         assertTrue(saved.getValue().isForceRefresh());
         assertEquals(2, saved.getValue().getItems().size());
         assertTrue(saved.getValue().getItems().stream().allMatch(item -> item.getStatus() == RunItemStatus.PENDING));
+        assertTrue(saved.getValue().getItems().stream().allMatch(item -> item.getTopicSnapshot() != null));
+        var snapshot = saved.getValue().getItems().getFirst().getTopicSnapshot();
+        assertEquals("주제 1", snapshot.topicName());
+        assertEquals(List.of("HBM"), snapshot.requiredKeywords());
         assertEquals("HBM 1", saved.getValue().getItems().getFirst().collectionTopic().getQueryText());
         verify(runRepository, never()).findInProgressByTopicIds(any(), any());
     }
@@ -101,6 +105,11 @@ class CollectionRunCreatorTest {
         assertEquals(now, saved.getValue().getQueuedAt());
         assertNull(saved.getValue().getStartedAt());
         assertNull(topic.getLastCollectedAt());
+        var snapshot = saved.getValue().getItems().getFirst().getTopicSnapshot();
+        assertNotNull(snapshot);
+        assertEquals("주제 1", snapshot.topicName());
+        assertEquals("HBM 1", snapshot.queryText());
+        assertEquals(List.of("HBM"), snapshot.requiredKeywords());
     }
 
     @Test

@@ -22,11 +22,15 @@ public class ReportResDTO {
     private ReportResDTO() {
     }
 
+    @Schema(name = "ReportDeletedResponse", description = "보고서 삭제 결과. 원문과 발송 이력은 보존")
+    public record Deleted(Long id, boolean deleted) {
+    }
+
     @Getter
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "id", "runId", "reportScope", "reportDate", "sourceRunIds", "title", "generatedAt", "modelName", "findingCount", "highSensitivityCount",
+            "id", "runId", "reportScope", "reportDate", "sourceRunIds", "sourceReportCount", "title", "generatedAt", "modelName", "findingCount", "highSensitivityCount",
             "deliveryStatus"
     })
     @Schema(name = "ReportSummaryResponse", description = "보고서 목록 항목")
@@ -39,6 +43,8 @@ public class ReportResDTO {
         @Schema(description = "DAILY 집계일 (Asia/Seoul). RUN은 null", nullable = true)
         private final LocalDate reportDate;
         private final List<Long> sourceRunIds;
+        @Schema(description = "DAILY 생성 시점에 sourceRunIds에 대해 생성 완료된 RUN 보고서 수. 이후 삭제해도 유지. RUN은 null", nullable = true, minimum = "0")
+        private final Long sourceReportCount;
         @Schema(description = "수집 시점 주제명과 생성 시각(RUN) 또는 집계일(DAILY)을 포함한 제목. 스냅샷이 없는 이전 보고서는 저장된 기존 제목을 유지", example = "HBM 시장 · 2026-09-08 10:00 리포트")
         private final String title;
         private final OffsetDateTime generatedAt;
@@ -52,7 +58,7 @@ public class ReportResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "id", "runId", "reportScope", "reportDate", "sourceRunIds", "title", "markdownBody", "modelName", "promptVersion", "llmProvider",
+            "id", "runId", "reportScope", "reportDate", "sourceRunIds", "sourceReportCount", "title", "markdownBody", "modelName", "promptVersion", "llmProvider",
             "generatedAt", "structuredContent", "collectionContexts", "articleStats", "summaryStats", "findings"
     })
     @Schema(name = "ReportDetailResponse", description = "보고서 상세")
@@ -65,6 +71,8 @@ public class ReportResDTO {
         @Schema(description = "DAILY 집계일 (Asia/Seoul). RUN은 null", nullable = true)
         private final LocalDate reportDate;
         private final List<Long> sourceRunIds;
+        @Schema(description = "DAILY 생성 시점에 sourceRunIds에 대해 생성 완료된 RUN 보고서 수. 이후 삭제해도 유지. RUN은 null", nullable = true, minimum = "0")
+        private final Long sourceReportCount;
         @Schema(description = "수집 시점 주제명과 생성 시각(RUN) 또는 집계일(DAILY)을 포함한 제목. 스냅샷이 없는 이전 보고서는 저장된 기존 제목을 유지", example = "HBM 시장 · 2026-09-08 10:00 리포트")
         private final String title;
         @Schema(description = "원본 Markdown 보고서. structuredContent가 null인 이전 보고서의 본문 렌더링에도 사용")

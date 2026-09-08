@@ -1,0 +1,31 @@
+.report-skeleton-list { position: static; }
+
+.report-skeleton-list-item {
+  box-sizing: border-box;
+  display: grid;
+  align-content: center;
+  gap: .65rem;
+  min-height: 6.5rem;
+  padding: 1rem 1.5rem;
+}
+
+.report-skeleton-list-item:first-child {
+  background: color-mix(in srgb, var(--primary-weak) 70%, transparent);
+}
+
+.report-skeleton-title { height: clamp(1.95rem, 5.2vw, 2.66rem); }
+.report-skeleton-stats { margin-top: .1rem; }
+.report-skeleton-stats > div { gap: .55rem; }
+.report-skeleton-summary { gap: 1.5rem; }
+.report-related-skeleton { gap: 0; }
+.report-related-skeleton > div { gap: .7rem; padding: 1rem 0; border-top: 1px solid var(--line-soft); }
+
+@media (max-width: 900px) {
+  .report-skeleton-list-item {
+    flex: 0 0 210px;
+    min-height: 6.2rem;
+    padding: .85rem;
+    border-radius: var(--radius-sm);
+  }
+  .report-skeleton-list-item + .report-skeleton-list-item { margin-left: .35rem; }
+}

@@ -35,6 +35,9 @@ let topics, proposals, channels, recipients, groups, requests, runs, policies, t
 let telegramLinkError = false;
 let showDeliveryLogs = false;
 let recipientProfileError = false;
+let recipientDeleteError = false;
+let loadingDelayMs = 0;
+let loadingPath = '/api/';
 const deliveryLogFixtures = ['SENT', 'FAILED', 'SKIPPED'].map((status, i) => ({
     id: i + 1, deliveryBatchId: 'fixture-batch', reportId: 17, runId: 148,
     recipientId: i === 1 ? 2 : 1, recipientName: i === 1 ? '이구독' : '김수신',
@@ -46,8 +49,23 @@ const deliveryLogFixtures = ['SENT', 'FAILED', 'SKIPPED'].map((status, i) => ({
 function reset() { topics = structuredClone(initialTopics); proposals = structuredClone(initialProposals); channels = structuredClone(initialChannels); recipients = structuredClone(initialRecipients); groups = structuredClone(initialGroups); requests = []; runs = []; policies = { 31: { enabled: true, run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1, 2] } }; telegram = { 1: { status: 'DISCONNECTED', expiresAt: null }, 2: { status: 'CONNECTED', expiresAt: null }, 3: { status: 'DISCONNECTED', expiresAt: null } }; readiness = { mode: 'LOCAL_CAPTURE', configured: false, message: '로컬 검증 모드입니다. 이메일은 실제 수신함으로 전달되지 않습니다.' }; audience = { audience: 'CHIP_MAKER' }; plan = { plan: 'FREE', paidExhaustedAction: 'FALLBACK_FREE', allowRunOverride: true }; autoDeliveries = []; sendCache = {}; }
 reset();
 // Saved report fixtures use only example.invalid links and synthetic recipients.
-const reports = Array.from({ length: 12 }, (_, i) => ({ ...structuredClone(fixture.report), id: 17 - i, title: i === 0 ? fixture.report.title : `HBM 시장 · 이전 ${i}회 리포트`, structuredContent: i === 1 ? null : fixture.report.structuredContent, findingCount: 3, highSensitivityCount: 3, deliveryStatus: 'NOT_SENT' }));
-reports.push({ ...structuredClone(fixture.report), id: 117, reportScope: 'DAILY', reportDate: '2026-09-08', title: 'HBM 시장 · 2026-09-08 일일 통합 리포트', findingCount: 3, highSensitivityCount: 3, deliveryStatus: 'NOT_SENT' });
+const initialReports = Array.from({ length: 12 }, (_, i) => ({ ...structuredClone(fixture.report), id: 17 - i, title: i === 0 ? fixture.report.title : `HBM 시장 · 이전 ${i}회 리포트`, structuredContent: i === 1 ? null : fixture.report.structuredContent, findingCount: 3, highSensitivityCount: 3, deliveryStatus: 'NOT_SENT' }));
+initialReports[1].markdownBody += '\n\n## 기사별 분석\n- 반도체 기업의 신규 투자\n\n## 보고서 제외\n- 중복 기사';
+initialReports[1].markdownBody = initialReports[1].markdownBody.replace('수집 또는 분석 제외 사항이 없습니다.', '본문을 확인하지 못한 기사 1건은 분석에서 제외했습니다.');
+for (const [index, level, score] of [[2, 'medium', 50], [3, 'low', 20]]) {
+    initialReports[index].highSensitivityCount = 0;
+    initialReports[index].findings = initialReports[index].findings.map((finding, n) => ({ ...finding, category: n === 0 ? '공급망' : '기업', sensitivity: { ...finding.sensitivity, level, score } }));
+}
+initialReports[4].collectionContexts = [];
+initialReports.push({ ...structuredClone(fixture.report), id: 117, runId: null, sourceRunIds: [42, 43, 44], sourceReportCount: 2, reportScope: 'DAILY', reportDate: '2026-09-08', title: 'HBM 시장 · 2026-09-08 일일 통합 리포트', findingCount: 3, highSensitivityCount: 3, deliveryStatus: 'NOT_SENT' });
+initialReports.at(-1).collectionContexts.push({ ...structuredClone(fixture.report.collectionContexts[0]), runId: 43,
+    topics: [{ ...structuredClone(fixture.report.collectionContexts[0].topics[0]), topicName: 'AI 인프라', topicId: 2 }] },
+    { ...structuredClone(fixture.report.collectionContexts[0]), runId: 44 });
+initialReports.push({ ...structuredClone(initialReports.at(-1)), id: 116, reportDate: '2026-09-07', title: '이전 일일 통합 보고서', collectionContexts: [], structuredContent: null,
+    markdownBody: fixture.report.markdownBody.replace('수집 또는 분석 제외 사항이 없습니다.', '본문을 확인하지 못한 기사 1건은 분석에서 제외했습니다.'),
+    findings: structuredClone(fixture.report.findings).map((finding, index) => ({ ...finding, issue: { ...finding.issue, topicName: index === 1 ? 'AI 인프라' : 'HBM 시장' } })) });
+let reports = structuredClone(initialReports);
+let reportDeleteError = false;
 const json = (res, value, status = 200) => { res.statusCode = status; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
 const server = await createServer({ root, configFile: false, envDir: emptyEnvDir, plugins: [react(), { name: 'isolated-qa-fixtures', configureServer(server) {
                 server.middlewares.use(async (req, res, next) => {
@@ -64,10 +82,28 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         if (path.startsWith('/__qa/')) {
                             if (path === '/__qa/reset') {
                                 reset();
+                                reports = structuredClone(initialReports);
+                                reportDeleteError = false;
                                 telegramLinkError = false;
                                 showDeliveryLogs = false;
                                 recipientProfileError = false;
+                                recipientDeleteError = false;
+                                loadingDelayMs = 0;
+                                loadingPath = '/api/';
                                 return json(res, { reset: true });
+                            }
+                            if (path === '/__qa/loading') {
+                                const delay = Number(body.delayMs ?? url.searchParams.get('delayMs') ?? 0);
+                                const prefix = body.path ?? url.searchParams.get('path') ?? '/api/';
+                                if (!Number.isFinite(delay) || delay < 0 || delay > 30000 || !prefix.startsWith('/api/'))
+                                    return json(res, { error: 'Use delayMs 0–30000 and an /api/ path prefix.' }, 400);
+                                loadingDelayMs = delay;
+                                loadingPath = prefix;
+                                return json(res, { delayMs: loadingDelayMs, path: loadingPath });
+                            }
+                            if (path === '/__qa/report-delete-error') {
+                                reportDeleteError = body.enabled ?? false;
+                                return json(res, { enabled: reportDeleteError });
                             }
                             if (path === '/__qa/telegram-link-error') {
                                 telegramLinkError = body.enabled ?? url.searchParams.get('enabled') === 'true';
@@ -80,6 +116,62 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             if (path === '/__qa/recipient-profile-error') {
                                 recipientProfileError = body.enabled ?? url.searchParams.get('enabled') === 'true';
                                 return json(res, { enabled: recipientProfileError });
+                            }
+                            if (path === '/__qa/recipient-delete-error') {
+                                recipientDeleteError = body.enabled ?? url.searchParams.get('enabled') === 'true';
+                                return json(res, { enabled: recipientDeleteError });
+                            }
+                            if (path === '/__qa/recipients') {
+                                const count = Math.max(0, Math.min(500, Number(body.count ?? url.searchParams.get('count') ?? 80)));
+                                recipients = count <= 2 ? structuredClone(initialRecipients.filter(r => r.active).slice(0, count)) : [
+                                    ...structuredClone(initialRecipients),
+                                    ...Array.from({ length: count - 2 }, (_, i) => ({ id: 1000 + i, name: `검증 수신자 ${String(i + 1).padStart(3, '0')}`, email: `reader-${i + 1}@example.invalid`, phone: null, memo: null, active: true, groupNames: [], destinations: [] })),
+                                ];
+                                return json(res, { activeCount: recipients.filter(r => r.active).length });
+                            }
+                            if (path === '/__qa/groups') {
+                                const count = Number(body.count ?? url.searchParams.get('count') ?? 80);
+                                if (!Number.isInteger(count) || count < 0 || count > 1000)
+                                    return json(res, { error: 'Use an integer count from 0 to 1000.' }, 400);
+                                const members = recipients.filter(r => r.active).slice(0, 2)
+                                    .map(r => ({ recipientId: r.id, name: r.name, active: true }));
+                                groups = Array.from({ length: count }, (_, i) => ({
+                                    ...structuredClone(initialGroups[0]), id: i + 1,
+                                    name: i === 0 ? initialGroups[0].name : `검증 수신 그룹 ${String(i + 1).padStart(3, '0')}`,
+                                    active: true, memberCount: members.length, activeMemberCount: members.length,
+                                    members: structuredClone(members),
+                                }));
+                                for (const recipient of recipients)
+                                    recipient.groupNames = groups.filter(group => group.members.some(member => member.recipientId === recipient.id)).map(group => group.name);
+                                return json(res, { activeCount: groups.length });
+                            }
+                            if (path === '/__qa/findings') {
+                                const count = Number(body.count ?? url.searchParams.get('count') ?? 8);
+                                const mediumCount = Number(body.mediumCount ?? url.searchParams.get('mediumCount') ?? 0);
+                                if (!Number.isInteger(count) || count < 0 || count > 1000
+                                    || !Number.isInteger(mediumCount) || mediumCount < 0 || mediumCount > count)
+                                    return json(res, { error: 'Use an integer count from 0 to 1000 and mediumCount from 0 to count.' }, 400);
+                                reports = reports.map(report => {
+                                    const copy = structuredClone(report);
+                                    copy.findings = Array.from({ length: count }, (_, i) => {
+                                        const finding = structuredClone(fixture.report.findings[i % fixture.report.findings.length]);
+                                        const uniqueId = report.id * 10000 + i + 1;
+                                        const medium = i >= count - mediumCount;
+                                        const title = `검증 이슈 ${String(i + 1).padStart(3, '0')} · ${finding.articleTitle}`;
+                                        const summary = `검증 ${i + 1}번째 이슈입니다. ${finding.summary}`;
+                                        return {
+                                            ...finding, id: 5000000 + uniqueId, articleId: 10000000 + uniqueId,
+                                            issueId: 15000000 + uniqueId, articleTitle: title, summary,
+                                            canonicalUrl: `https://example.invalid/qa/reports/${report.id}/articles/${i + 1}`,
+                                            issue: { ...finding.issue, id: 15000000 + uniqueId, title, summary },
+                                            sensitivity: { ...finding.sensitivity, level: medium ? 'medium' : 'high', score: medium ? 50 : 82 },
+                                        };
+                                    });
+                                    copy.findingCount = count;
+                                    copy.highSensitivityCount = count - mediumCount;
+                                    return copy;
+                                });
+                                return json(res, { reportCount: reports.length, count, highCount: count - mediumCount, mediumCount });
                             }
                             if (path === '/__qa/requests')
                                 return json(res, requests);
@@ -126,6 +218,8 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             return json(res, { error: 'Unknown QA endpoint' }, 404);
                         }
                         requests.push({ method, path, query: Object.fromEntries(url.searchParams), body, at: now() });
+                        if (method === 'GET' && loadingDelayMs > 0 && path.startsWith(loadingPath))
+                            await new Promise(resolve => setTimeout(resolve, loadingDelayMs));
                         let result;
                         let status = 200;
                         let match;
@@ -188,8 +282,17 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         }
                         else if (path === '/api/news/reports/latest')
                             result = reports.find(r => r.reportScope === (url.searchParams.get('reportScope') || 'RUN')) || null;
-                        else if ((match = path.match(/^\/api\/news\/reports\/(\d+)$/)))
-                            result = reports.find(r => r.id === Number(match[1]));
+                        else if ((match = path.match(/^\/api\/news\/reports\/(\d+)$/))) {
+                            const id = Number(match[1]);
+                            if (method === 'DELETE') {
+                                if (reportDeleteError) return json(res, { isSuccess: false, code: 'COMMON500', message: '보고서를 삭제하지 못했습니다. 다시 시도해 주세요.', result: {} }, 500);
+                                reports = reports.filter(r => r.id !== id);
+                                result = { id, deleted: true };
+                            } else {
+                                result = reports.find(r => r.id === id);
+                                if (!result) return json(res, { isSuccess: false, code: 'REPORT404', message: '보고서를 찾을 수 없습니다.', result: {} }, 404);
+                            }
+                        }
                         else if (path.startsWith('/api/news/articles/'))
                             result = fixture.article;
                         else if (path.startsWith('/api/news/issues/'))
@@ -201,7 +304,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             Object.assign(result, body);
                         }
                         else if (path === '/api/notifications/recipients' && method === 'POST') {
-                            const id = Math.max(...recipients.map(r => r.id)) + 1;
+                            const id = Math.max(0, ...recipients.map(r => r.id)) + 1;
                             result = { id, ...body, active: true, phone: null, memo: body.memo || null, groupNames: [], destinations: body.destinations.map(d => ({ ...d, channelType: channels.find(c => c.id === d.channelId)?.channelType, onboarded: d.channelId === 1 })) };
                             recipients.push(result);
                         }
@@ -230,8 +333,17 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             result = { id: recipient.id, name: recipient.name, phone: recipient.phone, email: recipient.email, memo: recipient.memo, active: recipient.active };
                         }
                         else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)$/)) && method === 'DELETE') {
-                            recipients = recipients.filter(r => r.id !== Number(match[1]));
-                            result = null;
+                            if (recipientDeleteError) return json(res, { isSuccess: false, code: 'COMMON500', message: '수신자를 삭제하지 못했습니다. 다시 시도해 주세요.', result: {} }, 500);
+                            const recipient = recipients.find(r => r.id === Number(match[1]));
+                            if (!recipient) return json(res, { isSuccess: false, code: 'RECIPIENT404', message: '수신자를 찾을 수 없습니다.', result: {} }, 404);
+                            const removedGroups = groups.filter(g => g.members?.some(member => member.recipientId === recipient.id));
+                            for (const group of removedGroups) {
+                                group.members = group.members.filter(member => member.recipientId !== recipient.id);
+                                group.memberCount = group.members.length;
+                                group.activeMemberCount = group.members.filter(member => member.active).length;
+                            }
+                            Object.assign(recipient, { active: false, destinations: [], groupNames: [] });
+                            result = { id: recipient.id, active: false, deletedAt: now(), removedGroupCount: removedGroups.length };
                         }
                         else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)\/telegram(\/link)?$/))) {
                             const id = Number(match[1]);
@@ -250,7 +362,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         }
                         else if (path === '/api/notifications/groups' && method === 'POST') {
                             const members = recipients.filter(r => body.recipientIds.includes(r.id));
-                            result = { id: Math.max(...groups.map(g => g.id)) + 1, name: body.name, perspective: body.perspective || null, active: true, memberCount: members.length, activeMemberCount: members.filter(r => r.active).length, members: members.map(r => ({ recipientId: r.id, name: r.name, active: r.active })) };
+                            result = { id: Math.max(0, ...groups.map(g => g.id)) + 1, name: body.name, perspective: body.perspective || null, active: true, memberCount: members.length, activeMemberCount: members.filter(r => r.active).length, members: members.map(r => ({ recipientId: r.id, name: r.name, active: r.active })) };
                             groups.push(result);
                         }
                         else if (path === '/api/notifications/groups')

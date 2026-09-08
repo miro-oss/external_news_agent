@@ -85,6 +85,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 NewsReportSpecification.generatedBetween(parsedFrom, parsedTo)
                         .and((root, query, criteriaBuilder) ->
                                 criteriaBuilder.notEqual(root.get("reportStatus"), ReportStatus.PENDING))
+                        .and((root, query, cb) -> cb.isNull(root.get("deletedAt")))
                         .and((root, query, cb) -> scope == null ? cb.conjunction() : cb.equal(root.get("reportScope"), scope)),
                 PageRequest.of(page, size, Sort.by(
                         Sort.Order.desc("generatedAt"), Sort.Order.desc("id"))));
@@ -107,8 +108,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     @Override
     public ReportResDTO.Detail getLatest(boolean includeFindings, ReportScope scope) {
         return (scope == null
-                ? reportRepository.findFirstByReportStatusNotOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING)
-                : reportRepository.findFirstByReportScopeAndReportStatusNotOrderByGeneratedAtDescIdDesc(scope, ReportStatus.PENDING))
+                ? reportRepository.findFirstByReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING)
+                : reportRepository.findFirstByReportScopeAndReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(scope, ReportStatus.PENDING))
                 .map(report -> toDetail(report, includeFindings))
                 .orElse(null);
     }
@@ -128,6 +129,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .runId(report.getRunId())
                 .reportScope(report.getReportScope()).reportDate(report.getReportDate())
                 .sourceRunIds(sourceRunIds(report))
+                .sourceReportCount(report.getSourceReportCount())
                 .title(report.getTitle())
                 .generatedAt(toOffset(report.getGeneratedAt()))
                 .modelName(report.getModelName())
@@ -189,6 +191,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .runId(runId)
                 .reportScope(report.getReportScope()).reportDate(report.getReportDate())
                 .sourceRunIds(sourceRunIds(report))
+                .sourceReportCount(report.getSourceReportCount())
                 .title(report.getTitle())
                 .markdownBody(report.getMarkdownBody())
                 .modelName(report.getModelName())

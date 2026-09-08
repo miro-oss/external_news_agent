@@ -12,11 +12,11 @@ type Page = (typeof PAGES)[number]
 
 const DEFAULT_PAGE: Page = 'reports'
 
-/* 화면 순서는 PAGES가 아니라 여기서 정한다 — 왼쪽부터 알림 · 리포트 · 설정. */
+/* 왼쪽부터 수집 설정 · 리포트 · 알림 관리 순서로 표시한다. */
 const NAV_OPTIONS: ReadonlyArray<SegmentedOption<Page>> = [
-  { value: 'notifications', label: '알림 관리' },
-  { value: 'reports', label: '리포트' },
   { value: 'settings', label: '수집 설정' },
+  { value: 'reports', label: '리포트' },
+  { value: 'notifications', label: '알림 관리' },
 ]
 
 function hashValue() {

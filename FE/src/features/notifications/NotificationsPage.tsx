@@ -1,4 +1,4 @@
-import { type FormEvent, useMemo, useState } from 'react'
+import { type FormEvent, type ReactNode, useMemo, useState } from 'react'
 import {
   type DeliveryLogFilters,
   useCreateNotificationGroup,
@@ -13,10 +13,13 @@ import {
 } from '../../api/queries'
 import type { DeliveryStatus, GroupPerspective, NotificationChannelType } from '../../api/types'
 import { Segmented, type SegmentedOption } from '../../components/Segmented'
+import { Skeleton, SkeletonRegion } from '../../components/Skeleton'
 import { formatMediumDate } from '../../lib/datetime'
 import { MutationStatus } from '../settings/MutationStatus'
 import { TelegramConnectionCard } from './TelegramConnectionCard'
 import { RecipientEmailForm } from './RecipientEmailForm'
+import { GroupRecipientPicker } from './GroupRecipientPicker'
+import { DeliveryLogSkeleton, NotificationPanelSkeleton } from './NotificationSkeletons'
 import './notifications-refinement.css'
 
 const PERSPECTIVES: Array<{ value: GroupPerspective; label: string }> = [
@@ -66,6 +69,8 @@ export function NotificationsPage() {
 
   const pending = channels.isPending || recipients.isPending || groups.isPending
   const error = channels.error ?? recipients.error ?? groups.error
+  const activeRecipients = (recipients.data?.content ?? []).filter(recipient => recipient.active)
+  const activeGroups = (groups.data?.content ?? []).filter(group => group.active)
 
   return (
     <main className="notifications-page">
@@ -74,19 +79,22 @@ export function NotificationsPage() {
           <h1>알림 관리</h1>
           <p className="muted">이메일과 텔레그램으로 알림을 받을 사람과 그룹을 관리합니다.</p>
         </div>
-        <div className="summary-count" aria-live="polite">
-          <strong>{recipients.data?.totalElements ?? 0}</strong>
-          <span>명 · 그룹 {groups.data?.totalElements ?? 0}개</span>
-        </div>
+        {recipients.isPending || groups.isPending ? <SkeletonRegion label="수신자와 그룹 수를 불러오는 중입니다." className="summary-count">
+          <Skeleton width="6.5rem" height="1.4rem" />
+        </SkeletonRegion> : recipients.data && groups.data ? <div className="summary-count" aria-live="polite">
+          <strong>{activeRecipients.length}</strong>
+          <span>명 · 그룹 {activeGroups.length}개</span>
+        </div> : null}
       </header>
 
-      {pending && <div className="state-panel" aria-busy="true">알림 설정을 불러오는 중입니다.</div>}
       {error && <div className="state-panel error" role="alert">{error.message}</div>}
 
-      {channels.data && recipients.data && (
+      {(pending || (recipients.data && (channels.data || groups.data))) && (
         <section className="notification-split">
-          <RecipientPanel channels={channels.data} recipients={recipients.data.content} />
-          <GroupPanel recipients={recipients.data.content} groups={groups.data?.content ?? []} />
+          {channels.data && recipients.data ? <RecipientPanel channels={channels.data} recipients={activeRecipients} />
+            : (channels.isPending || recipients.isPending) && <NotificationPanelSkeleton kind="recipient" />}
+          {recipients.data && groups.data ? <GroupPanel recipients={activeRecipients} groups={activeGroups} />
+            : (recipients.isPending || groups.isPending) && <NotificationPanelSkeleton kind="group" />}
         </section>
       )}
 
@@ -94,13 +102,13 @@ export function NotificationsPage() {
         <div className="section-heading"><h2>발송 이력</h2><span>언제 누구에게 어떤 보고서를 보냈는지 확인합니다.</span></div>
         <div className="delivery-filter-bar">
           <label>보고서
-            <select value={logFilters.reportId ?? ''}
+            {reports.isPending ? <SkeletonRegion label="보고서 목록을 불러오는 중입니다."><Skeleton className="skeleton-control" /></SkeletonRegion> : <select value={logFilters.reportId ?? ''}
               onChange={(event) => changeLogFilter('reportId', event.target.value)}>
               <option value="">전체 보고서</option>
               {(reports.data?.content ?? []).map((report) => (
                 <option value={report.id} key={report.id}>{report.title}</option>
               ))}
-            </select>
+            </select>}
           </label>
           <div className="delivery-filter-group">
             <span className="filter-label" id="delivery-channel-label">전달 방식</span>
@@ -124,7 +132,7 @@ export function NotificationsPage() {
             <button type="button" className="text-button" onClick={() => setLogFilters({ page: 0 })}>필터 초기화</button>
           )}
         </div>
-        {logs.isPending && <div className="state-panel" aria-busy="true">발송 이력을 불러오는 중입니다.</div>}
+        {logs.isPending && <DeliveryLogSkeleton />}
         {logs.isError && <div className="state-panel error" role="alert">{logs.error.message}</div>}
         {logs.data && (
           <>
@@ -173,48 +181,50 @@ function RecipientPanel({ channels, recipients }: {
   return (
     <section className="notification-card-stack">
       <div className="section-heading notification-panel-heading"><h2>수신자</h2><span>{recipients.length}명</span></div>
-      <form className="notification-form" onSubmit={submit}>
+      <form className="notification-form recipient-create-form" onSubmit={submit}>
         <div className="notification-form-heading"><strong>새 수신자 등록</strong><span>텔레그램은 등록 후 수신자의 설정에서 연결할 수 있습니다.</span></div>
         <div className="notification-form-grid">
-          <label>이름<input required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} placeholder="예: 홍길동" /></label>
-          <label>메일 주소<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="user@example.com" /></label>
+          <label>이름<input required maxLength={100} value={name} onChange={(event) => { create.reset(); setName(event.target.value) }} placeholder="예: 홍길동" /></label>
+          <label>메일 주소<input type="email" value={email} onChange={(event) => { create.reset(); setEmail(event.target.value) }} placeholder="user@example.com" /></label>
         </div>
         <button className="primary-button" disabled={create.isPending || !name.trim()}>{create.isPending ? '등록 중…' : '수신자 등록'}</button>
-        <MutationStatus error={create.error} success={create.isSuccess ? '수신자를 등록했습니다.' : null} />
+        <MutationStatus error={create.error} success={null} />
       </form>
-      <div className="compact-list">
-        {recipients.length === 0 && <p className="empty-block">등록된 수신자가 없습니다.</p>}
-        {recipients.map((recipient) => (
-          <article key={recipient.id} className="recipient-row">
-            <div>
-              <div className="recipient-name-row">
-                <strong>{recipient.name}</strong>
-                {(['EMAIL', 'TELEGRAM'] as const).filter((type) => recipient.active && recipient.destinations.some((destination) =>
-                  destination.channelType === type && destination.use && destination.onboarded && destination.address?.trim()
-                  && channels.some((channel) => channel.id === destination.channelId && channel.active),
-                )).map((type) => <span key={type} className={`recipient-channel-tag ${type.toLowerCase()}`}>{type === 'EMAIL' ? '이메일' : '텔레그램'}</span>)}
+      <SavedNotificationList title="등록된 수신자">
+        <div className="compact-list">
+          {recipients.length === 0 && <p className="notification-list-empty">등록된 수신자가 없습니다.</p>}
+          {recipients.map((recipient) => (
+            <article key={recipient.id} className="recipient-row">
+              <div>
+                <div className="recipient-name-row">
+                  <strong>{recipient.name}</strong>
+                  {(['EMAIL', 'TELEGRAM'] as const).filter((type) => recipient.active && recipient.destinations.some((destination) =>
+                    destination.channelType === type && destination.use && destination.onboarded && destination.address?.trim()
+                    && channels.some((channel) => channel.id === destination.channelId && channel.active),
+                  )).map((type) => <span key={type} className={`recipient-channel-tag ${type.toLowerCase()}`}>{type === 'EMAIL' ? '이메일' : '텔레그램'}</span>)}
+                </div>
+                <span>{recipient.groupNames?.join(' · ') || '그룹 미지정'}</span>
               </div>
-              <span>{recipient.groupNames?.join(' · ') || '그룹 미지정'}</span>
-            </div>
-            <div className="recipient-actions">
-              <button type="button" className="text-button" aria-label={`${recipient.name} 수신 설정`}
-                aria-expanded={settingsRecipientId === recipient.id} aria-controls={`recipient-settings-${recipient.id}`}
-                onClick={() => setSettingsRecipientId((current) => current === recipient.id ? null : recipient.id)}>설정</button>
-              <button type="button" className="text-button danger" disabled={remove.isPending} onClick={() => remove.mutate(recipient.id)}>삭제</button>
-            </div>
-            {settingsRecipientId === recipient.id && (
-              <div className="recipient-settings" id={`recipient-settings-${recipient.id}`}>
-                <RecipientEmailForm recipient={recipient} emailChannelId={
-                  (channels.find((channel) => channel.channelType === 'EMAIL' && channel.active)
-                    ?? channels.find((channel) => channel.channelType === 'EMAIL'))?.id
-                } />
-                <TelegramConnectionCard recipientId={recipient.id} recipientName={recipient.name} />
+              <div className="recipient-actions">
+                <button type="button" className="text-button" aria-label={`${recipient.name} 수신 설정`}
+                  aria-expanded={settingsRecipientId === recipient.id} aria-controls={`recipient-settings-${recipient.id}`}
+                  onClick={() => setSettingsRecipientId((current) => current === recipient.id ? null : recipient.id)}>설정</button>
+                <button type="button" className="text-button danger" aria-label={`${recipient.name} 삭제`} disabled={remove.isPending} onClick={() => remove.mutate(recipient.id)}>삭제</button>
               </div>
-            )}
-          </article>
-        ))}
-      </div>
-      <MutationStatus error={remove.error} success={remove.isSuccess ? '수신자를 비활성화했습니다.' : null} />
+              {settingsRecipientId === recipient.id && (
+                <div className="recipient-settings" id={`recipient-settings-${recipient.id}`}>
+                  <RecipientEmailForm recipient={recipient} emailChannelId={
+                    (channels.find((channel) => channel.channelType === 'EMAIL' && channel.active)
+                      ?? channels.find((channel) => channel.channelType === 'EMAIL'))?.id
+                  } />
+                  <TelegramConnectionCard recipientId={recipient.id} recipientName={recipient.name} />
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      </SavedNotificationList>
+      <MutationStatus error={remove.error} success={null} />
     </section>
   )
 }
@@ -228,10 +238,11 @@ function GroupPanel({ recipients, groups }: {
   const [name, setName] = useState('')
   const [perspective, setPerspective] = useState<GroupPerspective>('EXECUTIVE')
   const [selected, setSelected] = useState<number[]>([])
+  const selectedRecipients = selected.filter(id => recipients.some(recipient => recipient.id === id))
 
   function submit(event: FormEvent) {
     event.preventDefault()
-    create.mutate({ name: name.trim(), perspective, recipientIds: selected }, {
+    create.mutate({ name: name.trim(), perspective, recipientIds: selectedRecipients }, {
       onSuccess: () => { setName(''); setSelected([]) },
     })
   }
@@ -242,35 +253,38 @@ function GroupPanel({ recipients, groups }: {
       <form className="notification-form" onSubmit={submit}>
         <div className="notification-form-heading"><strong>새 그룹 등록</strong><span>같은 보고서를 받을 사람을 묶습니다.</span></div>
         <div className="notification-form-grid">
-          <label>그룹명<input required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} placeholder="예: 경영진 브리핑" /></label>
-          <label>보고서 관점<select value={perspective} onChange={(event) => setPerspective(event.target.value as GroupPerspective)}>
+          <label>그룹명<input required maxLength={100} value={name} onChange={(event) => { create.reset(); setName(event.target.value) }} placeholder="예: 경영진 브리핑" /></label>
+          <label>보고서 관점<select value={perspective} onChange={(event) => { create.reset(); setPerspective(event.target.value as GroupPerspective) }}>
             {PERSPECTIVES.map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}
           </select></label>
         </div>
-        {/* 고를 것이 없는데 상자만 그리면, 빈 테두리 안에서 안내 문구가 두 줄로 접힌다. */}
-        {recipients.length === 0 ? (
-          <p className="member-picker-empty">수신자를 먼저 등록하면 여기서 그룹으로 묶을 수 있습니다.</p>
-        ) : (
-          <fieldset className="member-picker"><legend>수신자 선택</legend>
-            {recipients.map((recipient) => <label key={recipient.id}>
-              <input type="checkbox" checked={selected.includes(recipient.id)} onChange={() => setSelected((current) => current.includes(recipient.id) ? current.filter((id) => id !== recipient.id) : [...current, recipient.id])} />
-              {recipient.name}
-            </label>)}
-          </fieldset>
-        )}
-        <button className="primary-button" disabled={create.isPending || !name.trim() || selected.length === 0}>{create.isPending ? '등록 중…' : '그룹 등록'}</button>
-        <MutationStatus error={create.error} success={create.isSuccess ? '수신 그룹을 등록했습니다.' : null} />
+        <GroupRecipientPicker recipients={recipients} selected={selectedRecipients} disabled={create.isPending}
+          onChange={ids => { create.reset(); setSelected(ids) }} />
+        <button className="primary-button" disabled={create.isPending || !name.trim() || selectedRecipients.length === 0}>{create.isPending ? '등록 중…' : '그룹 등록'}</button>
+        <MutationStatus error={create.error} success={null} />
       </form>
-      <div className="compact-list group-list">
-        {groups.length === 0 && <p className="empty-block">등록된 수신 그룹이 없습니다.</p>}
-        {groups.map((group) => <article key={group.id}>
-          <div><strong>{group.name}</strong><span>{perspectiveLabel(group.perspective)} · 활성 {group.activeMemberCount}/{group.memberCount}명</span></div>
-          <button type="button" className="text-button danger" onClick={() => remove.mutate(group.id)}>삭제</button>
-        </article>)}
-      </div>
-      <MutationStatus error={remove.error} success={remove.isSuccess ? '수신 그룹을 삭제했습니다.' : null} />
+      <SavedNotificationList title="등록된 수신 그룹">
+        <div className="compact-list group-list">
+          {groups.length === 0 && <p className="notification-list-empty">등록된 수신 그룹이 없습니다.</p>}
+          {groups.map((group) => <article key={group.id}>
+            <div><strong>{group.name}</strong><span>{perspectiveLabel(group.perspective)} · {group.memberCount}명</span></div>
+            <button type="button" className="text-button danger" aria-label={`${group.name} 삭제`} disabled={remove.isPending} onClick={() => remove.mutate(group.id)}>삭제</button>
+          </article>)}
+        </div>
+      </SavedNotificationList>
+      <MutationStatus error={remove.error} success={null} />
     </section>
   )
+}
+
+function SavedNotificationList({ title, children }: { title: string; children: ReactNode }) {
+  return <details className="notification-saved-list">
+    <summary>
+      <span>{title}</span>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+    </summary>
+    {children}
+  </details>
 }
 
 function DeliveryLogTable({
@@ -303,10 +317,9 @@ function DeliveryLogTable({
             <td className="delivery-report" title={reportTitles.get(log.reportId)}>
               {reportTitles.get(log.reportId) ?? `보고서 #${log.reportId}`}
             </td>
-            {/* 주소까지 같이 보여야 같은 이름이 여럿일 때 어디로 나갔는지가 갈린다. */}
             <td className="delivery-recipient">
               <strong>{log.recipientName}</strong>
-              <span title={log.address}>{log.address}</span>
+              {log.channelType === 'EMAIL' && <span title={log.address}>{log.address}</span>}
             </td>
             <td className="delivery-group" title={groupNames.join(' · ') || undefined}>
               {groupNames.length > 0 ? groupNames.join(' · ') : <span className="muted-cell">그룹 미지정</span>}

@@ -11,8 +11,11 @@ import {
   notificationPut,
   post,
   patch,
+  remove,
 } from './client'
 import { saveRecipientEmail } from '../lib/recipientEmail'
+import { cacheDeletedNotificationRecipient, notificationRecipientsKey } from './notificationRecipientCache'
+import { cacheDeletedNotificationGroup, notificationGroupsKey } from './notificationGroupCache'
 import type {
   ArticleDetail,
   ArticleFilters,
@@ -65,8 +68,8 @@ const keys = {
   llmUsage: ['usage', 'llm'] as const,
   audience: ['settings', 'audience'] as const,
   notificationChannels: ['notifications', 'channels'] as const,
-  notificationRecipients: ['notifications', 'recipients'] as const,
-  notificationGroups: ['notifications', 'groups'] as const,
+  notificationRecipients: notificationRecipientsKey,
+  notificationGroups: notificationGroupsKey,
   deliveryLogs: (filters: DeliveryLogFilters) => ['notifications', 'delivery-logs', filters] as const,
 }
 
@@ -250,6 +253,24 @@ export function useReport(reportId: number | null) {
   })
 }
 
+export function useDeleteReport() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (reportId: number) => remove<{ id: number; deleted: boolean }>(`/reports/${reportId}`),
+    onSuccess: async (_, reportId) => {
+      await client.cancelQueries({ queryKey: ['reports'] })
+      client.setQueriesData<PageResult<ReportSummary>>({ queryKey: keys.reports }, current => current ? {
+        ...current,
+        content: current.content.filter(report => report.id !== reportId),
+        totalElements: Math.max(0, current.totalElements - Number(current.content.some(report => report.id === reportId))),
+      } : current)
+      client.setQueriesData<ReportDetail | null>({ queryKey: keys.latestReport }, current => current?.id === reportId ? null : current)
+      client.removeQueries({ queryKey: keys.report(reportId), exact: true })
+      void client.invalidateQueries({ queryKey: ['reports'] })
+    },
+  })
+}
+
 export function useIssue(issueId: number | null, enabled = true) {
   return useQuery({
     queryKey: keys.issue(issueId),
@@ -355,10 +376,16 @@ export function useCreateNotificationRecipient() {
 }
 
 export function useDeleteNotificationRecipient() {
+  const client = useQueryClient()
   const refresh = useRefreshNotifications()
   return useMutation({
-    mutationFn: (recipientId: number) => notificationDelete(`/recipients/${recipientId}`),
-    onSuccess: refresh,
+    mutationFn: (recipientId: number) => notificationDelete<{
+      id: number; active: false; deletedAt: string; removedGroupCount: number
+    }>(`/recipients/${recipientId}`),
+    onSuccess: async (_, recipientId) => {
+      await cacheDeletedNotificationRecipient(client, recipientId)
+      refresh()
+    },
   })
 }
 
@@ -404,10 +431,16 @@ export function useCreateNotificationGroup() {
 }
 
 export function useDeleteNotificationGroup() {
+  const client = useQueryClient()
   const refresh = useRefreshNotifications()
   return useMutation({
-    mutationFn: (groupId: number) => notificationDelete(`/groups/${groupId}`),
-    onSuccess: refresh,
+    mutationFn: (groupId: number) => notificationDelete<{
+      id: number; deletedAt: string; removedMemberCount: number
+    }>(`/groups/${groupId}`),
+    onSuccess: async (_, groupId) => {
+      await cacheDeletedNotificationGroup(client, groupId)
+      refresh()
+    },
   })
 }
 

@@ -7,6 +7,7 @@ import com.example.be.domain.reports.entity.ReportCollectionContext;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.reports.repository.DailyReportJdbcRepository;
 import com.example.be.domain.reports.repository.NewsReportRepository;
+import com.example.be.global.database.OracleInClause;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +35,8 @@ public class DailyReportPersistenceService {
         }
         NewsReport report = reportRepository.saveAndFlush(NewsReport.builder()
                 .reportScope(ReportScope.DAILY).reportDate(date).sourceRunIds(sourceRunIds)
+                .sourceReportCount(OracleInClause.batches(sourceRunIds).stream()
+                        .mapToLong(ids -> reportRepository.countCompletedSourceReports(ids, now)).sum())
                 .collectionContexts(runRepository.findAllById(sourceRunIds).stream()
                         .sorted(java.util.Comparator.comparing(run -> sourceRunIds.indexOf(run.getId())))
                         .map(ReportCollectionContext::from).toList())

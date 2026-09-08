@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useDisconnectTelegram, useTelegramConnection, useTelegramLink } from '../../api/notificationConnections'
 import { MutationStatus } from '../settings/MutationStatus'
+import { TelegramConnectionSkeleton } from './NotificationSkeletons'
 
 export function TelegramConnectionCard({ recipientId, recipientName }: { recipientId: number; recipientName: string }) {
   const connection = useTelegramConnection(recipientId)
@@ -34,7 +35,7 @@ export function TelegramConnectionCard({ recipientId, recipientName }: { recipie
       {connected && <span className="connection-label">연결됨</span>}
       {waiting && <span className="connection-label" data-waiting="true" role="status">연결 확인 중</span>}
     </div>
-    {connection.isPending ? <p className="muted">연결 상태를 확인하는 중입니다.</p>
+    {connection.isPending ? <TelegramConnectionSkeleton />
       : connection.isError ? <button type="button" className="text-button" disabled={connection.isFetching} onClick={() => { void connection.refetch() }}>연결 상태 다시 확인</button>
       : connected ? <div className="telegram-connected">
         <p className="muted">{recipientName}님의 텔레그램으로 보고서를 받을 수 있습니다.</p>

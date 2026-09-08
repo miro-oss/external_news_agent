@@ -14,6 +14,7 @@ import type {
 } from '../../api/types'
 import { Segmented, type SegmentedOption } from '../../components/Segmented'
 import { MutationStatus } from './MutationStatus'
+import { KeywordProposalsSkeleton } from './SettingsSkeletons'
 
 const FILTER_OPTIONS: ReadonlyArray<SegmentedOption<TopicKeywordProposalFilter>> = [
   { value: 'PENDING', label: '대기 중만' },
@@ -102,7 +103,7 @@ export function TopicKeywordProposalPanel() {
   }
 
   if (proposals.isPending) {
-    return <p className="muted">키워드 제안을 불러오는 중…</p>
+    return <KeywordProposalsSkeleton />
   }
 
   if (proposals.error || !proposals.data) {
