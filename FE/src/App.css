@@ -2654,6 +2654,26 @@ body.modal-open {
   margin-bottom: clamp(1rem, 2vw, 1.35rem);
 }
 
+.segmented.report-scope-tabs {
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+  background: var(--primary-weak);
+}
+
+.report-scope-tabs .segmented-thumb {
+  border-radius: var(--radius-xs);
+  box-shadow: var(--hairline);
+}
+
+.report-scope-tabs .segmented-option {
+  border-radius: var(--radius-xs);
+}
+
+.report-scope-tabs .segmented-option.active,
+.report-scope-tabs .segmented-option.active:hover {
+  color: var(--primary-strong);
+}
+
 .report-scope-hint {
   margin: 0;
   color: var(--fg-3);

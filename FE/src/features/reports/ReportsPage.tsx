@@ -95,6 +95,7 @@ export function ReportsPage() {
 
       <div className="report-scope-bar">
         <Segmented
+          className="report-scope-tabs"
           label="보고서 범위"
           value={scopeFilter}
           options={REPORT_SCOPE_OPTIONS}
