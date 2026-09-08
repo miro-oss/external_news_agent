@@ -80,8 +80,9 @@ public class NotificationReqDTO {
 
     @Getter @Setter @NoArgsConstructor
     public static class Send {
-        @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+        @Schema(description = "그룹 또는 개별 수신자 중 하나 이상을 지정합니다.")
         private List<Long> groupIds;
+        private List<Long> recipientIds;
         private List<Long> channelIds;
         private String idempotencyKey;
     }

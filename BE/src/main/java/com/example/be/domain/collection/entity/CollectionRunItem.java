@@ -2,6 +2,10 @@ package com.example.be.domain.collection.entity;
 
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
+import com.example.be.domain.collection.converter.CollectionTopicSnapshotConverter;
+import jakarta.persistence.Convert;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -43,6 +47,29 @@ public class CollectionRunItem {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "topic_id", nullable = false)
     private Topic topic;
+
+    @Convert(converter = CollectionTopicSnapshotConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "topic_snapshot")
+    private CollectionTopicSnapshot topicSnapshot;
+
+    public void captureTopicSnapshot() {
+        if (topicSnapshot == null) topicSnapshot = CollectionTopicSnapshot.capture(topic);
+    }
+
+    /** 대기 중 설정을 수정해도 접수한 조건으로 수집한다. 원본 Topic을 변경하지 않는다. */
+    public Topic collectionTopic() {
+        if (topicSnapshot == null) return topic;
+        return Topic.builder().id(topicSnapshot.topicId()).name(topicSnapshot.topicName())
+                .queryText(topicSnapshot.queryText()).requiredKeywords(topicSnapshot.requiredKeywords())
+                .optionalKeywords(topicSnapshot.optionalKeywords()).excludedKeywords(topicSnapshot.excludedKeywords())
+                .batchSize(topicSnapshot.batchSize()).intervalMinutes(topicSnapshot.intervalMinutes())
+                .active(true).sources(java.util.List.of(source)).build();
+    }
+
+    public void markRunning() { this.status = RunItemStatus.RUNNING; }
+
+    public void markPending() { this.status = RunItemStatus.PENDING; }
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "source_id", nullable = false)

@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -28,6 +29,21 @@ class NotificationControllerTest {
     @MockitoBean private NotificationManagementService managementService;
     @MockitoBean private NotificationDeliveryService deliveryService;
     @MockitoBean private DeliveryLogQueryService logQueryService;
+
+    @Test
+    void unavailableConnectionRouteReturnsNotFoundRatherThanInternalError() throws Exception {
+        // This slice intentionally loads only the older controller, reproducing a server
+        // that has not yet loaded the new connection endpoints used by the frontend.
+        mockMvc.perform(get("/api/notifications/recipients/1/telegram"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("COMMON404"))
+                .andExpect(jsonPath("$.message").value("리소스를 찾을 수 없습니다."));
+        mockMvc.perform(post("/api/notifications/recipients/1/telegram/link")
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("COMMON404"))
+                .andExpect(jsonPath("$.message").value("리소스를 찾을 수 없습니다."));
+    }
 
     @Test
     void channelListUsesNotificationPrefixAndHidesSecrets() throws Exception {

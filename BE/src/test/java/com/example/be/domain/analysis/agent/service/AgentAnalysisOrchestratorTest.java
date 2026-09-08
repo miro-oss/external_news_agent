@@ -97,6 +97,23 @@ class AgentAnalysisOrchestratorTest {
     }
 
     @Test
+    void sendsQueuedTopicConditionsInsteadOfCurrentArticleTopic() {
+        when(client.analyze(any())).thenReturn(response(List.of(1)));
+        Topic queued = Topic.builder().name("접수한 주제").queryText("HBM4")
+                .requiredKeywords(List.of("HBM4")).optionalKeywords(List.of("삼성전자"))
+                .excludedKeywords(List.of("광고")).build();
+
+        orchestrator.analyze(new AnalysisContext(42L, article(), AgentPlan.FREE, null, false, queued));
+
+        ArgumentCaptor<AgentAnalyzeRequest> captor = ArgumentCaptor.forClass(AgentAnalyzeRequest.class);
+        verify(client).analyze(captor.capture());
+        assertEquals("접수한 주제", captor.getValue().topic().name());
+        assertEquals("HBM4", captor.getValue().topic().queryText());
+        assertEquals(List.of("HBM4"), captor.getValue().topic().requiredKeywords());
+        assertEquals(List.of("삼성전자"), captor.getValue().topic().optionalKeywords());
+    }
+
+    @Test
     void mapsOneBasedAgentEvidenceToZeroBasedPublicContractAndRecordsMockRun() {
         when(client.analyze(any())).thenReturn(response(List.of(1)));
 

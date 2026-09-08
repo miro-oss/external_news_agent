@@ -45,6 +45,7 @@ public class TopicController {
                     새 수집 주제를 등록합니다. 설정 화면의 주제 등록 폼에 대응합니다.
                     sourceIds를 함께 보내면 등록과 동시에 소스 연결까지 끝납니다.
                     주제명은 중복할 수 없고, SEARCH 소스를 연결하려면 queryText가 필요합니다.
+                    수집 주기를 생략하면 24시간(1440분)마다 수집합니다.
                     """
     )
     @ApiResponses({
@@ -64,7 +65,7 @@ public class TopicController {
                                 "optionalKeywords": ["SK하이닉스", "삼성전자", "마이크론"],
                                 "excludedKeywords": ["광고", "채용"],
                                 "batchSize": 100,
-                                "intervalMinutes": 60,
+                                "intervalMinutes": 1440,
                                 "active": true,
                                 "sources": [
                                   { "id": 1, "name": "ETNews 반도체", "sourceKind": "FEED" },
@@ -117,7 +118,7 @@ public class TopicController {
     @Operation(
             summary = "수집 주제 목록 조회",
             description = """
-                    등록된 수집 주제를 목록으로 조회합니다.
+                    등록된 수집 주제를 최근 등록순(ID 내림차순)으로 정렬한 뒤 페이지 단위로 조회합니다.
                     실제 수집은 주제에 연결된 소스와의 조합으로 실행되므로 연결된 소스 수를 함께 내려줍니다.
                     최근 7일 기사×이슈 관측을 SQL로 집계한 급상승 키워드와 연관 키워드도 포함합니다.
                     """

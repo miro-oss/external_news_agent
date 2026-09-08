@@ -27,7 +27,7 @@ public class TopicKeywordProposalQueryServiceImpl implements TopicKeywordProposa
     @Override
     public PageResponse<TopicKeywordProposalResDTO.Item> getKeywordProposals(String status, int page, int size) {
         validatePaging(page, size);
-        Page<TopicKeywordProposal> proposals = proposalRepository.findPageByStatus(
+        Page<TopicKeywordProposal> proposals = proposalRepository.findActiveTopicPageByStatus(
                 parseStatus(status),
                 PageRequest.of(page, size));
 

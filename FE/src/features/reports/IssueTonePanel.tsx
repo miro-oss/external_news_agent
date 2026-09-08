@@ -14,7 +14,7 @@ export function IssueTonePanel({ distribution, articleCount }: {
     <section className="issue-tone-panel" aria-label="견해 포함 기사 논조">
       <div className="issue-detail-heading">
         <h5>견해 포함 기사 논조</h5>
-        <span>현재 기준 · 표본 {distribution.sampleCount}건</span>
+        <span>의견이 확인된 기사 {distribution.sampleCount}건</span>
       </div>
       {distribution.sampleCount > 0 ? (
         <>
@@ -31,12 +31,12 @@ export function IssueTonePanel({ distribution, articleCount }: {
             {tones.map((tone) => (
               <li key={tone.key}>
                 <span className={`issue-tone-dot issue-tone-${tone.key}`} aria-hidden="true" />
-                <span>{tone.label} <strong>{tone.percent?.toFixed(2)}%</strong> · {tone.count}건</span>
+                <span>{tone.label} <strong>{tone.count}건</strong>{distribution.sampleCount > 1 && ` · ${tone.percent?.toFixed(0)}%`}</span>
               </li>
             ))}
           </ul>
           <p className="issue-detail-state">
-            발화 주체와 근거가 확인된 견해를 포함한 기사의 전체 논조입니다. 같은 원문은 한 번만 집계합니다.
+            의견이 확인된 기사의 전체 분위기를 분류했습니다. 같은 내용의 전재 기사는 한 번만 셉니다.
           </p>
         </>
       ) : (
@@ -47,8 +47,11 @@ export function IssueTonePanel({ distribution, articleCount }: {
         </p>
       )}
       <p className="issue-tone-coverage">
-        관련 {articleCount}건 중 직접 분석 {distribution.analyzedArticleCount}건 · 전체 매체의 의견 비율은 아닙니다.
+        관련 기사 {articleCount}건 중 분석 결과가 있는 {distribution.analyzedArticleCount}건을 확인했습니다.
       </p>
+      <details className="issue-tone-explanation"><summary>집계 기준</summary>
+        <p>분석한 기사 중 누가 말했는지와 원문 근거가 확인된 의견이 있는 기사만 포함합니다. 개별 의견의 찬반이나 언론사 전체의 여론을 나타내는 수치는 아닙니다. 보고서 작성 후 새 분석이 추가되면 이 분포도 달라질 수 있습니다.</p>
+      </details>
     </section>
   )
 }

@@ -7,18 +7,21 @@ import {
   type ArticleAnalysis,
   type Audience,
   type AudienceInsight,
+  type ReportCollectionContext,
 } from '../../api/types'
 import { KeyPointList } from '../../components/KeyPointList'
-import { SensitivityAxes } from '../../components/SensitivityAxes'
+import { collectionKeywords, highlightKeywordParts } from '../reports/reportReading'
 import { formatMediumDate } from '../../lib/datetime'
 import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { scrollIntoViewGently } from '../../lib/motion'
+import { ArticleDetailSkeleton, ArticleInsightSkeleton } from './ArticleSkeletons'
 
 interface Props {
   articleId: number | null
   runId?: number
   defaultAudience?: Audience
   initialEvidence?: number[]
+  collectionContexts?: ReportCollectionContext[]
   onClose: () => void
 }
 
@@ -27,6 +30,7 @@ export function ArticleDetailModal({
   runId,
   defaultAudience = 'CHIP_MAKER',
   initialEvidence,
+  collectionContexts = [],
   onClose,
 }: Props) {
   const article = useArticle(articleId, runId)
@@ -83,6 +87,7 @@ export function ArticleDetailModal({
   const selectedAudience = perspectiveSelection.articleId === articleId
     ? perspectiveSelection.audience
     : defaultAudience
+  const keywords = collectionKeywords(collectionContexts, runId ?? null, article.data?.topicId)
 
   const highlightEvidence = (evidence: number[]) => {
     setEvidenceSelection({ articleId, runId, sentences: evidence })
@@ -104,7 +109,7 @@ export function ArticleDetailModal({
         aria-label={article.data ? undefined : '기사 상세'}
       >
         <button ref={closeButton} type="button" className="modal-close" aria-label="본문보기 닫기" onClick={onClose}>×</button>
-        {article.isPending && <div className="modal-state">기사를 불러오는 중입니다.</div>}
+        {article.isPending && <ArticleDetailSkeleton />}
         {article.isError && <div className="modal-state error" role="alert">{article.error.message}</div>}
         {article.data && (
           <>
@@ -166,7 +171,9 @@ export function ArticleDetailModal({
                       className={highlightedSentences.includes(sentence.index) ? 'highlighted' : undefined}
                       key={sentence.index}
                     >
-                      <span>{sentence.text}</span>
+                      <span>{highlightKeywordParts(sentence.text, keywords).map((part, index) => part.matched
+                        ? <mark className="collection-keyword-match" key={index}>{part.text}</mark>
+                        : part.text)}</span>
                     </p>
                   ))}
                 </div>
@@ -219,7 +226,6 @@ function AnalysisPanel({
       </div>
       <p className="analysis-summary">{analysis.summary}</p>
       {analysis.intent && <p className="intent">의도 · {analysis.intent}</p>}
-      <SensitivityAxes sensitivity={analysis.sensitivity} onEvidenceSelect={onEvidenceSelect} />
       <div className="perspective-tabs" role="tablist" aria-label="독자 관점별 분석">
         {AUDIENCES.map((audience) => {
           const tag = perspectiveTags.find((item) => item.audience === audience)
@@ -324,6 +330,7 @@ function PerspectiveInsight({
         </button>
       </div>
       {error && <p className="perspective-insight-error" role="alert">{error.message}</p>}
+      {stored.isPending && !insight && <ArticleInsightSkeleton />}
       {insight && (
         <InsightContents
           insight={insight}

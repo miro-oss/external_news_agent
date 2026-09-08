@@ -62,11 +62,11 @@ class ReportQueryServiceImplTest {
             reportRepository, findingRepository, issueArticleRepository,
             newsIssueRepository, deliveryLogRepository,
             com.example.be.domain.analysis.service.SensitivityCalculator.defaults(),
-            investigationRepository);
+            investigationRepository, mock(com.example.be.domain.collection.repository.CollectionRunArticleRepository.class));
 
     @Test
     void latestReturnsNullWhenNoReportExists() {
-        when(reportRepository.findFirstByReportStatusNotOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
+        when(reportRepository.findFirstByReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
                 .thenReturn(Optional.empty());
 
         assertNull(service.getLatest(true));

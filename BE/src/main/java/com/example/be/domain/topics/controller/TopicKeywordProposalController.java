@@ -34,8 +34,9 @@ public class TopicKeywordProposalController {
     @Operation(
             summary = "키워드 제안 목록 조회",
             description = """
-                    수집 전략가가 만든 topic 키워드 제안을 조회합니다.
-                    status를 생략하면 전체를, PENDING을 주면 검토 대기 제안만 반환합니다.
+                    활성 수집 주제에 대해 수집 전략가가 만든 키워드 제안을 조회합니다.
+                    status를 생략하면 모든 검토 상태를, PENDING을 주면 검토 대기 제안만 반환합니다.
+                    비활성 주제의 제안은 목록과 전체 건수에서 제외합니다.
                     """
     )
     @ApiResponses({
@@ -110,8 +111,10 @@ public class TopicKeywordProposalController {
     @Operation(
             summary = "키워드 제안 승인",
             description = """
-                    검토 대기 상태의 키워드 제안을 승인하고 현재 topic 키워드에 반영합니다.
-                    승인 전까지는 실제 topic 키워드가 절대 변경되지 않습니다.
+                    검토 대기 또는 반려 상태의 키워드 제안을 승인하고 현재 주제 키워드에 반영합니다.
+                    대기 제안은 생성 당시 키워드와 일치해야 하며, 반려 제안의 재승인은 현재 키워드에 적용합니다.
+                    이미 승인된 제안을 다시 승인하면 키워드나 검토 시각을 바꾸지 않고 현재 결과를 반환합니다.
+                    실제 변경만 저장하며 주제별 잠금 안에서 상태와 키워드를 함께 반영합니다.
                     """
     )
     @ApiResponses({
@@ -161,16 +164,8 @@ public class TopicKeywordProposalController {
                             """))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "409",
-                    description = "이미 검토가 끝났거나 생성 후 주제 키워드가 변경된 경우",
+                    description = "대기 제안 생성 후 주제 키워드가 변경된 경우",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = {
-                            @ExampleObject(name = "이미 검토됨", value = """
-                                    {
-                                      "isSuccess": false,
-                                      "code": "TOPIC409",
-                                      "message": "이미 검토가 끝난 키워드 제안입니다.",
-                                      "result": {}
-                                    }
-                                    """),
                             @ExampleObject(name = "오래된 제안", value = """
                                     {
                                       "isSuccess": false,
@@ -191,7 +186,15 @@ public class TopicKeywordProposalController {
     @PostMapping("/{proposalId}/reject")
     @Operation(
             summary = "키워드 제안 반려",
-            description = "검토 대기 상태의 키워드 제안을 반려하고 topic 키워드는 그대로 유지합니다."
+            description = """
+                    대기 또는 승인 상태의 제안을 반려합니다. 대기 제안은 키워드를 변경하지 않습니다.
+                    승인 제안은 그 승인에서 실제로 바뀐 키워드만 되돌리며, 이후 수동 수정이나 다른 제안의 승인으로
+                    같은 키워드가 변경·채택되었다면 해당 키워드는 유지합니다. 다른 주제 설정은 복원하지 않습니다.
+                    변경 기록 도입 전 승인 건은 생성 당시 키워드와 제안으로 실제 변경을 재구성하되,
+                    현재 값이 예상과 다르거나 이후 승인·변경 기록이 있으면 해당 키워드를 유지합니다.
+                    이전 이관으로 생성 당시 키워드가 모두 빈 배열인 승인 건도 키워드를 유지합니다.
+                    이미 반려된 제안을 다시 반려하면 키워드나 검토 시각을 바꾸지 않고 현재 결과를 반환합니다.
+                    """
     )
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -235,17 +238,6 @@ public class TopicKeywordProposalController {
                               "isSuccess": false,
                               "code": "TOPIC404",
                               "message": "키워드 제안을 찾을 수 없습니다.",
-                              "result": {}
-                            }
-                            """))),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                    responseCode = "409",
-                    description = "이미 검토가 끝난 제안인 경우",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
-                            {
-                              "isSuccess": false,
-                              "code": "TOPIC409",
-                              "message": "이미 검토가 끝난 키워드 제안입니다.",
                               "result": {}
                             }
                             """)))

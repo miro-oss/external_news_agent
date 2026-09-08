@@ -1,6 +1,7 @@
 package com.example.be.domain.topics.entity;
 
 import com.example.be.domain.sources.entity.Source;
+import com.example.be.domain.topics.converter.TopicKeywordRevisionMapConverter;
 import com.example.be.global.converter.StringListJsonConverter;
 import com.example.be.global.converter.YnBooleanConverter;
 import jakarta.persistence.Column;
@@ -20,18 +21,19 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 @Entity
 @Table(name = "news_topics")
+// Collection workers may update only lastCollectedAt without holding the keyword review lock.
+@DynamicUpdate
 @Getter
 @Builder
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
@@ -49,7 +51,7 @@ public class Topic {
      * provider 허용 범위를 넘는 요청을 보내지 않는다.
      */
     public static final int DEFAULT_BATCH_SIZE = 100;
-    public static final int DEFAULT_INTERVAL_MINUTES = 60;
+    public static final int DEFAULT_INTERVAL_MINUTES = 1440;
     public static final Set<Integer> ALLOWED_INTERVAL_MINUTES = Set.of(60, 720, 1440);
     public static final int MIN_BATCH_SIZE = 1;
     public static final int MAX_BATCH_SIZE = 300;
@@ -81,6 +83,12 @@ public class Topic {
     @JdbcTypeCode(SqlTypes.CLOB)
     @Column(name = "excluded_keywords")
     private List<String> excludedKeywords;
+
+    @Builder.Default
+    @Convert(converter = TopicKeywordRevisionMapConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "keyword_revisions_json", nullable = false)
+    private Map<String, Long> keywordRevisions = Map.of();
 
     @Column(name = "batch_size", nullable = false)
     private int batchSize;
@@ -116,9 +124,11 @@ public class Topic {
                        boolean active) {
         this.name = name;
         this.queryText = queryText;
-        this.requiredKeywords = requiredKeywords;
-        this.optionalKeywords = optionalKeywords;
-        this.excludedKeywords = excludedKeywords;
+        TopicKeywordReviewState keywords = keywordReviewState();
+        keywords.replace(TopicKeywordBucket.REQUIRED, requiredKeywords);
+        keywords.replace(TopicKeywordBucket.OPTIONAL, optionalKeywords);
+        keywords.replace(TopicKeywordBucket.EXCLUDED, excludedKeywords);
+        saveKeywordReviewState(keywords);
         this.batchSize = batchSize;
         this.intervalMinutes = intervalMinutes;
         this.active = active;
@@ -147,47 +157,27 @@ public class Topic {
         return sources.size();
     }
 
-    public void applyKeywordChanges(List<TopicKeywordChange> changes) {
-        LinkedHashMap<String, String> required = keywordMap(requiredKeywords);
-        LinkedHashMap<String, String> optional = keywordMap(optionalKeywords);
-        LinkedHashMap<String, String> excluded = keywordMap(excludedKeywords);
-
-        for (TopicKeywordChange change : changes) {
-            Map<String, String> target = switch (change.bucket()) {
-                case REQUIRED -> required;
-                case OPTIONAL -> optional;
-                case EXCLUDED -> excluded;
-            };
-            String normalized = normalizeKeyword(change.keyword());
-            if (change.action() == TopicKeywordChangeAction.ADD) {
-                target.putIfAbsent(normalized, change.keyword());
-            } else {
-                target.remove(normalized);
-            }
-        }
-
-        this.requiredKeywords = List.copyOf(required.values());
-        this.optionalKeywords = List.copyOf(optional.values());
-        this.excludedKeywords = List.copyOf(excluded.values());
+    public List<TopicKeywordAppliedChange> applyKeywordChanges(List<TopicKeywordChange> changes) {
+        TopicKeywordReviewState state = keywordReviewState();
+        List<TopicKeywordAppliedChange> applied = state.apply(changes);
+        saveKeywordReviewState(state);
+        return applied;
     }
 
-    private static List<String> keywordsOrEmpty(List<String> values) {
-        return values == null ? List.of() : values;
+    public void reverseKeywordChanges(List<TopicKeywordAppliedChange> changes) {
+        TopicKeywordReviewState state = keywordReviewState();
+        state.reverse(changes);
+        saveKeywordReviewState(state);
     }
 
-    private static LinkedHashMap<String, String> keywordMap(List<String> values) {
-        LinkedHashMap<String, String> result = new LinkedHashMap<>();
-        for (String value : keywordsOrEmpty(values)) {
-            if (value == null || value.isBlank()) {
-                continue;
-            }
-            String trimmed = value.trim();
-            result.putIfAbsent(normalizeKeyword(trimmed), trimmed);
-        }
-        return result;
+    private TopicKeywordReviewState keywordReviewState() {
+        return new TopicKeywordReviewState(requiredKeywords, optionalKeywords, excludedKeywords, keywordRevisions);
     }
 
-    private static String normalizeKeyword(String value) {
-        return value.trim().toLowerCase(Locale.ROOT);
+    private void saveKeywordReviewState(TopicKeywordReviewState state) {
+        requiredKeywords = state.keywords(TopicKeywordBucket.REQUIRED);
+        optionalKeywords = state.keywords(TopicKeywordBucket.OPTIONAL);
+        excludedKeywords = state.keywords(TopicKeywordBucket.EXCLUDED);
+        keywordRevisions = state.revisions();
     }
 }

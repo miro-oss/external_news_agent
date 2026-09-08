@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react'
+import { useCollectionProgress, useCollectionQueue } from '../../api/collectionQueue'
+import './collection-queue.css'
 import {
   useAudienceSetting,
   useCombinations,
-  useLlmPlan,
   useStartCollectionRun,
   useUpdateAudienceSetting,
 } from '../../api/queries'
@@ -10,10 +11,14 @@ import {
   AUDIENCES,
   AUDIENCE_LABELS,
   type Audience,
-  type LlmPlan,
 } from '../../api/types'
 import { Segmented, type SegmentedOption } from '../../components/Segmented'
 import { MutationStatus } from './MutationStatus'
+import { LlmUsageSummary } from './LlmUsageSummary'
+import { CollectionTopicPicker } from './CollectionTopicPicker'
+import { AudienceSettingSkeleton, CollectionRunSkeleton } from './SettingsSkeletons'
+import type { CollectionRunDelivery } from '../../api/notificationConnections'
+import { CollectionDeliveryPicker } from './CollectionDeliveryPicker'
 
 type RunScope = 'SELECTED' | 'ALL'
 
@@ -24,15 +29,16 @@ const AUDIENCE_OPTIONS: ReadonlyArray<SegmentedOption<Audience>> = AUDIENCES.map
 
 export function CollectionRunPanel() {
   const combinations = useCombinations()
-  const planQuery = useLlmPlan()
   const startRun = useStartCollectionRun()
   const [scope, setScope] = useState<RunScope>('SELECTED')
-  const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null)
-  const [runOverride, setRunOverride] = useState<'DEFAULT' | LlmPlan>('DEFAULT')
+  const [selectedTopicIds, setSelectedTopicIds] = useState<number[] | null>(null)
+  const [delivery, setDelivery] = useState<CollectionRunDelivery>()
+  const queue = useCollectionQueue()
+  const progress = useCollectionProgress(startRun.data?.runId)
   const pendingRunKey = useRef<string | null>(null)
 
   if (combinations.isPending) {
-    return <section className="collection-run-panel state-panel">수집 실행 정보를 불러오는 중입니다.</section>
+    return <CollectionRunSkeleton />
   }
   if (combinations.error || !combinations.data) {
     return (
@@ -49,11 +55,11 @@ export function CollectionRunPanel() {
       { id: combination.topicId, name: combination.topicName },
     ])).values(),
   ).sort((left, right) => left.name.localeCompare(right.name, 'ko'))
-  const effectiveTopic = activeTopics.find((topic) => topic.id === selectedTopicId) ?? activeTopics[0]
+  const effectiveTopicIds = (selectedTopicIds ?? activeTopics.slice(0, 1).map((topic) => topic.id))
+    .filter((id) => activeTopics.some((topic) => topic.id === id))
   const targetCombinations = scope === 'ALL'
     ? activeCombinations
-    : activeCombinations.filter((combination) => combination.topicId === effectiveTopic?.id)
-  const setting = planQuery.data
+    : activeCombinations.filter((combination) => effectiveTopicIds.includes(combination.topicId))
 
   function resetRequestState() {
     pendingRunKey.current = null
@@ -65,27 +71,23 @@ export function CollectionRunPanel() {
     setScope(nextScope)
   }
 
-  function changeTopic(topicId: number) {
+  function selectTopics(topicIds: number[]) {
     resetRequestState()
-    setSelectedTopicId(topicId)
-  }
-
-  function changeRunOverride(value: 'DEFAULT' | LlmPlan) {
-    resetRequestState()
-    setRunOverride(value)
+    setSelectedTopicIds(topicIds)
   }
 
   function runNow() {
-    if (scope === 'SELECTED' && !effectiveTopic) return
+    if (scope === 'SELECTED' && effectiveTopicIds.length === 0) return
+    if (progress.data && !['PENDING', 'RUNNING'].includes(progress.data.status)) pendingRunKey.current = null
     const idempotencyKey = pendingRunKey.current ?? `manual-${crypto.randomUUID()}`
     pendingRunKey.current = idempotencyKey
     startRun.mutate(
       {
         idempotencyKey,
-        ...(scope === 'SELECTED' ? { topicIds: [effectiveTopic.id] } : {}),
-        ...(runOverride === 'DEFAULT' ? {} : { plan: runOverride }),
+        ...(scope === 'SELECTED' ? { topicIds: effectiveTopicIds } : {}),
+        ...(delivery ? { delivery } : {}),
       },
-      { onSuccess: () => { pendingRunKey.current = null } },
+      { onSuccess: () => { if (delivery?.mode === 'ONCE') setDelivery(undefined) } },
     )
   }
 
@@ -93,73 +95,63 @@ export function CollectionRunPanel() {
 
   return (
     <section className="collection-run-panel" aria-labelledby="collection-run-title">
-      <div className="collection-run-heading">
-        <div>
-          <h2 id="collection-run-title">수집 실행</h2>
-          <p className="muted">기본은 주제 하나만 실행합니다. 실행 전에 대상 규모를 확인해 주세요.</p>
-        </div>
-        <span className="run-default-badge">선택 주제 기본</span>
-      </div>
-
-      <div className="collection-run-controls">
-        <div className="field">
-          <label htmlFor="run-scope">실행 범위</label>
-          <select
-            id="run-scope"
-            value={scope}
-            disabled={startRun.isPending}
-            onChange={(event) => changeScope(event.target.value as RunScope)}
-          >
-            <option value="SELECTED">선택 주제</option>
-            <option value="ALL">모든 활성 주제</option>
-          </select>
+      <div className="collection-run-top">
+        <div className="collection-run-heading">
+          <div>
+            <h2 id="collection-run-title">수집 실행</h2>
+            <p className="muted">주제를 여러 개 골라 한 번에 수집할 수 있습니다.</p>
+          </div>
+          {queue.data && (queue.data.pending > 0 || queue.data.running > 0) && (
+            <span className="run-default-badge">수집 중 {queue.data.running} · 대기 {queue.data.pending}</span>
+          )}
         </div>
 
-        <div className="field">
-          <label htmlFor="run-topic">수집할 주제</label>
-          <select
-            id="run-topic"
-            value={effectiveTopic?.id ?? ''}
-            disabled={scope === 'ALL' || activeTopics.length === 0 || startRun.isPending}
-            onChange={(event) => changeTopic(Number(event.target.value))}
-          >
-            {activeTopics.length === 0 && <option value="">활성 주제 없음</option>}
-            {activeTopics.map((topic) => (
-              <option value={topic.id} key={topic.id}>{topic.name}</option>
-            ))}
-          </select>
-        </div>
-
-        {setting?.allowRunOverride && (
+        <div className="collection-run-controls">
           <div className="field">
-            <label htmlFor="run-plan">이번 실행 플랜</label>
+            <label htmlFor="run-scope">실행 범위</label>
             <select
-              id="run-plan"
-              value={runOverride}
+              id="run-scope"
+              value={scope}
               disabled={startRun.isPending}
-              onChange={(event) => changeRunOverride(event.target.value as 'DEFAULT' | LlmPlan)}
+              onChange={(event) => changeScope(event.target.value as RunScope)}
             >
-              <option value="DEFAULT">기본 설정 사용 ({setting.plan})</option>
-              <option value="FREE">이번 실행만 FREE</option>
-              <option value="PAID">이번 실행만 PAID</option>
+              <option value="SELECTED">선택 주제</option>
+              <option value="ALL">모든 활성 주제</option>
             </select>
           </div>
-        )}
+
+          <CollectionTopicPicker topics={activeTopics}
+            selected={scope === 'ALL' ? activeTopics.map(topic => topic.id) : effectiveTopicIds}
+            disabled={scope === 'ALL' || startRun.isPending} onChange={selectTopics} />
+        </div>
       </div>
 
-      <DefaultAudienceSetting />
+      <CollectionDeliveryPicker value={delivery} disabled={startRun.isPending}
+        onChange={value => { resetRequestState(); setDelivery(value) }} />
 
-      <button className="collection-run-button" type="button" onClick={runNow} disabled={!canRun}>
-        {startRun.isPending
-          ? '실행 요청 중…'
-          : scope === 'ALL' ? '모든 활성 주제 수집' : '선택 주제 수집'}
-      </button>
-      <MutationStatus
-        error={startRun.error}
-        success={startRun.data
-          ? `실행 #${startRun.data.runId}을 ${startRun.data.llmPlan} 플랜으로 시작했습니다.`
-          : null}
-      />
+      <div className="collection-run-summary">
+        <DefaultAudienceSetting />
+        <div className="collection-run-usage">
+          <LlmUsageSummary />
+        </div>
+
+        <div className="collection-run-footer">
+          <button className="collection-run-button" type="button" onClick={runNow} disabled={!canRun}>
+            {startRun.isPending
+              ? '실행 요청 중…'
+              : scope === 'ALL' ? '모든 활성 주제 수집' : '선택 주제 수집'}
+          </button>
+          <MutationStatus error={startRun.error} success={startRun.data ? '수집 요청을 접수했습니다.' : null} />
+          {progress.data && <p className="hint" role="status">
+            {progress.data.status === 'PENDING' ? '준비가 끝나면 자동으로 수집합니다.'
+              : progress.data.status === 'RUNNING' ? '선택한 주제를 수집하고 있습니다.'
+              : progress.data.status === 'FAILED' ? '수집을 완료하지 못했습니다. 다시 요청할 수 있습니다.'
+              : progress.data.status === 'PARTIAL' ? '수집을 마쳤습니다. 일부 출처를 가져오지 못했습니다.'
+              : '수집을 마쳤습니다.'}
+            {progress.data.reportId && <> <a href={`#/reports?reportId=${progress.data.reportId}`}>보고서 보기</a></>}
+          </p>}
+        </div>
+      </div>
     </section>
   )
 }
@@ -167,16 +159,14 @@ export function CollectionRunPanel() {
 function DefaultAudienceSetting() {
   const audienceQuery = useAudienceSetting()
   const updateAudience = useUpdateAudienceSetting()
-  const [saved, setSaved] = useState(false)
 
   function selectAudience(next: Audience) {
     if (next === audienceQuery.data?.audience) return
-    setSaved(false)
-    updateAudience.mutate(next, { onSuccess: () => setSaved(true) })
+    updateAudience.mutate(next)
   }
 
   if (audienceQuery.isPending) {
-    return <div className="run-audience-setting state-panel">기본 관점을 불러오는 중입니다.</div>
+    return <AudienceSettingSkeleton />
   }
   if (audienceQuery.error || !audienceQuery.data) {
     return (
@@ -192,7 +182,7 @@ function DefaultAudienceSetting() {
     <div className="run-audience-setting">
       <div className="run-audience-copy">
         <h3>내 기본 관점</h3>
-        <p>기사와 리포트를 처음 열 때 이 관점으로 맞춰 둡니다. 고르면 바로 저장됩니다.</p>
+        <p>기사와 리포트를 처음 볼 때 사용할 관점입니다.</p>
       </div>
       <Segmented
         label="기본 관점"
@@ -203,7 +193,7 @@ function DefaultAudienceSetting() {
       />
       <MutationStatus
         error={updateAudience.error}
-        success={saved ? '기본 관점을 저장했습니다.' : null}
+        success={null}
       />
     </div>
   )

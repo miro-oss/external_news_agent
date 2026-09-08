@@ -4,6 +4,8 @@ import com.example.be.domain.notifications.channel.NotificationSenderRegistry;
 import com.example.be.domain.notifications.dto.req.NotificationReqDTO;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
+import com.example.be.domain.notifications.entity.NotificationRecipient;
+import com.example.be.domain.notifications.entity.RecipientDestination;
 import com.example.be.domain.notifications.exception.NotificationException;
 import com.example.be.domain.notifications.repository.NotificationChannelRepository;
 import com.example.be.domain.notifications.repository.NotificationGroupRepository;
@@ -19,6 +21,9 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -111,5 +116,84 @@ class NotificationManagementServiceTest {
         assertEquals("RECIPIENT400", exception.getCode().getCode());
         assertEquals(List.of(existing), group.getMembers());
         verify(recipientRepository, never()).findAllById(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void emailAddressAndBasicEmailCanBeEditedWhileKeepingTelegramConnection() {
+        var recipient = recipientWithEmailAndTelegram();
+        var destinations = new NotificationReqDTO.DestinationsUpdate();
+        destinations.setDestinations(List.of(destination(1L, "synthetic-chat", true),
+                destination(2L, " new@invalid.test ", false)));
+
+        var updatedDestinations = service.replaceDestinations(7L, destinations).getDestinations();
+
+        assertEquals("old@invalid.test", recipient.getEmail());
+        var telegram = updatedDestinations.stream().filter(d -> d.getChannelId().equals(1L)).findFirst().orElseThrow();
+        assertEquals("synthetic-chat", telegram.getAddress());
+        assertTrue(telegram.isUse());
+        assertTrue(telegram.isOnboarded());
+        var email = updatedDestinations.stream().filter(d -> d.getChannelId().equals(2L)).findFirst().orElseThrow();
+        assertEquals("new@invalid.test", email.getAddress());
+        assertFalse(email.isUse());
+        assertTrue(email.isOnboarded());
+
+        var basic = new NotificationReqDTO.RecipientUpdate();
+        basic.setEmail(" new@invalid.test ");
+        assertEquals("new@invalid.test", service.updateRecipient(7L, basic).getEmail());
+        assertEquals("기존 수신자", recipient.getName());
+        assertEquals(2, recipient.getDestinations().size());
+    }
+
+    @Test
+    void duplicateEmailDoesNotRemoveExistingEmailOrTelegramConnection() {
+        var recipient = recipientWithEmailAndTelegram();
+        var original = List.copyOf(recipient.getDestinations());
+        when(destinationRepository.existsByChannelIdAndAddressAndRecipientIdNot(2L, "taken@invalid.test", 7L))
+                .thenReturn(true);
+        var request = new NotificationReqDTO.DestinationsUpdate();
+        request.setDestinations(List.of(destination(1L, "synthetic-chat", true),
+                destination(2L, "taken@invalid.test", false)));
+
+        var error = assertThrows(NotificationException.class, () -> service.replaceDestinations(7L, request));
+
+        assertEquals("RECIPIENT409", error.getCode().getCode());
+        assertEquals(original, recipient.getDestinations());
+        assertEquals("old@invalid.test", recipient.getEmail());
+        verify(recipientRepository, never()).flush();
+    }
+
+    @Test
+    void omittedBasicEmailKeepsValueAndEmptyEmailClearsOnlyBasicInformation() {
+        var recipient = recipientWithEmailAndTelegram();
+        var original = List.copyOf(recipient.getDestinations());
+        assertEquals("old@invalid.test", service.updateRecipient(7L, new NotificationReqDTO.RecipientUpdate()).getEmail());
+
+        var request = new NotificationReqDTO.RecipientUpdate();
+        request.setEmail("");
+
+        assertNull(service.updateRecipient(7L, request).getEmail());
+        assertEquals(original, recipient.getDestinations());
+    }
+
+    private NotificationRecipient recipientWithEmailAndTelegram() {
+        var telegram = NotificationChannel.builder().id(1L).channelType(ChannelType.TELEGRAM).active(false).build();
+        var email = NotificationChannel.builder().id(2L).channelType(ChannelType.EMAIL).active(true).build();
+        var recipient = NotificationRecipient.builder().id(7L).name("기존 수신자")
+                .email("old@invalid.test").active(true).build();
+        recipient.replaceDestinations(List.of(
+                RecipientDestination.builder().channel(telegram).address("synthetic-chat").use(true).onboarded(true).build(),
+                RecipientDestination.builder().channel(email).address("old@invalid.test").use(false).onboarded(true).build()));
+        when(recipientRepository.findById(7L)).thenReturn(Optional.of(recipient));
+        when(channelRepository.findById(1L)).thenReturn(Optional.of(telegram));
+        when(channelRepository.findById(2L)).thenReturn(Optional.of(email));
+        return recipient;
+    }
+
+    private NotificationReqDTO.DestinationInput destination(Long channelId, String address, boolean use) {
+        var destination = new NotificationReqDTO.DestinationInput();
+        destination.setChannelId(channelId);
+        destination.setAddress(address);
+        destination.setUse(use);
+        return destination;
     }
 }

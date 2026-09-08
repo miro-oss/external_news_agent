@@ -1,0 +1,578 @@
+/* Settings keeps the shared surfaces, spacing, button states and motion tokens. */
+.settings-page .topic-advanced {
+  margin-bottom: 1.25rem;
+}
+
+.settings-page .topic-advanced-toggle {
+  width: 100%;
+  text-align: left;
+}
+
+.settings-page .topic-advanced-fields {
+  margin-top: 0.8rem;
+  padding: 1rem 1.05rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  animation: collapsible-in var(--dur-2) var(--ease-out);
+}
+
+.settings-page .topic-advanced-fields .field:last-child {
+  margin-bottom: 0;
+}
+
+.settings-page .topic-list-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.65rem;
+  margin-bottom: 0.65rem;
+}
+
+.settings-page .topic-list-toolbar > .muted {
+  font-size: 0.82rem;
+}
+
+.settings-page .topic-visibility-toggle {
+  margin-left: auto;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-xs);
+  background: var(--primary-weak);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.settings-page .topic-visibility-toggle:hover:not(:disabled),
+.settings-page .topic-visibility-toggle[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--primary) 8%, var(--primary-weak));
+}
+
+.settings-page .topic-management-table {
+  min-width: 1060px;
+}
+
+.settings-page .topic-management-table .topic-name-column { width: 16%; }
+.settings-page .topic-management-table .topic-query-column { width: 12%; }
+.settings-page .topic-management-table .topic-conditions-column { width: 17%; }
+.settings-page .topic-management-table .topic-surge-column { width: 15%; }
+.settings-page .topic-management-table .topic-related-column { width: 14%; }
+.settings-page .topic-management-table .topic-schedule-column { width: 15%; }
+.settings-page .topic-management-table .topic-actions-column { width: 11%; }
+
+.settings-page .topic-condition-lines {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.settings-page .topic-condition-lines small {
+  color: var(--fg-3);
+  font-size: 0.76rem;
+}
+
+.settings-page .topic-management-table .topic-conditions-cell {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.settings-page .topic-condition-row {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.settings-page .topic-condition-row > small {
+  white-space: nowrap;
+}
+
+.settings-page .topic-condition-row > span {
+  min-width: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .topic-management-action {
+  padding: 0.4rem 0.65rem;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.settings-page .topic-management-actions {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.settings-page .proposal-review-card {
+  box-sizing: border-box;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  width: 100%;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  gap: 0.6rem;
+  transition: transform var(--dur-2) var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .settings-page .proposal-review-card:hover {
+    transform: scale(1.012);
+  }
+}
+
+.settings-page .proposal-stack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  align-items: stretch;
+  gap: 1rem;
+}
+
+.settings-page #keyword-proposals.open > h2 > .collapsible-trigger {
+  padding-bottom: 0.75rem;
+}
+
+.settings-page #keyword-proposals > h2 > .collapsible-trigger:focus-visible {
+  outline-offset: -3px;
+}
+
+.settings-page #keyword-proposals > .collapsible-body {
+  padding-top: 0.5rem;
+}
+
+.settings-page .proposal-toolbar {
+  margin-bottom: 0.85rem;
+}
+
+/* One native button opens the detail dialog; review controls remain separate siblings. */
+.settings-page .proposal-card-toggle {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border-radius: inherit;
+  background: transparent;
+}
+
+.settings-page .proposal-card-toggle:hover {
+  background: transparent;
+}
+
+.settings-page .proposal-card-toggle:active:not(:disabled) {
+  transform: none;
+}
+
+.settings-page .proposal-card-toggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.settings-page .proposal-review-card .proposal-header {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  margin: 0;
+  gap: 0.5rem;
+}
+
+.settings-page .proposal-review-card .proposal-title-row {
+  display: block;
+  min-width: 0;
+  margin: 0;
+}
+
+.settings-page .proposal-review-card .proposal-title-row h3 {
+  display: -webkit-box;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.settings-page .proposal-title-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.settings-page .proposal-detail-label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.15rem;
+  color: var(--fg-3);
+  font-size: 0.76rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.settings-page .proposal-detail-label > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-page .proposal-detail-label > svg {
+  flex: none;
+}
+
+.settings-page .proposal-review-card:hover .proposal-detail-label {
+  color: var(--primary-strong);
+}
+
+.settings-page .proposal-change-preview {
+  display: grid;
+  align-content: start;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.settings-page .proposal-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.settings-page .proposal-preview-label {
+  flex: none;
+  width: auto;
+  color: var(--fg-3);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.settings-page .proposal-preview-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  flex: 1;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.settings-page .proposal-change-chip {
+  box-sizing: border-box;
+  display: inline-block;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 10rem;
+  padding: 0.24rem 0.5rem;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.settings-page .proposal-recommended-row {
+  align-items: baseline;
+}
+
+.settings-page .proposal-recommended-row .proposal-change-chip {
+  max-width: 100%;
+  overflow: visible;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .proposal-secondary-preview {
+  display: grid;
+  align-items: center;
+  min-width: 0;
+  gap: 0.65rem;
+}
+
+.settings-page .proposal-secondary-group {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 0.35rem;
+}
+
+.settings-page .proposal-secondary-group > .proposal-preview-label {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 65%;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.settings-page .proposal-overflow-keywords {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.settings-page .proposal-overflow-visible,
+.settings-page .proposal-overflow-measure {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.65rem;
+}
+
+.settings-page .proposal-overflow-keywords .proposal-change-chip {
+  flex: none;
+  max-width: 8rem;
+}
+
+.settings-page .proposal-overflow-measure,
+.settings-page .proposal-overflow-count-measure {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.settings-page .proposal-preview-more {
+  flex: none;
+  color: var(--fg-3);
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+:is(.settings-page, .proposal-detail-dialog) .proposal-change-add {
+  background: var(--primary-weak);
+  color: var(--primary-strong);
+}
+
+:is(.settings-page, .proposal-detail-dialog) .proposal-change-remove {
+  background: color-mix(in srgb, var(--primary-weak) 45%, var(--line));
+  color: var(--fg-2);
+}
+
+.settings-page .proposal-review-card .proposal-empty {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.settings-page .proposal-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.settings-page .proposal-review-card .proposal-actions {
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 1.875rem;
+  margin-top: 0;
+  gap: 0.4rem;
+}
+
+.settings-page .proposal-actions > button {
+  pointer-events: auto;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+:is(.settings-page, .proposal-detail-dialog) .proposal-reject-button:not(:disabled) {
+  background: var(--danger-weak);
+  color: var(--danger-strong);
+}
+
+:is(.settings-page, .proposal-detail-dialog) .proposal-reject-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 18%, var(--surface));
+  color: var(--danger-strong);
+}
+
+.recipient-selection-dialog.proposal-detail-dialog {
+  width: min(40rem, calc(100vw - 2rem));
+  height: fit-content;
+  max-height: min(42rem, calc(100dvh - 2rem));
+}
+
+.recipient-selection-dialog.proposal-detail-dialog[open] {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 1.25rem;
+}
+
+.proposal-detail-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.proposal-detail-topic {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.proposal-detail-topic h3 {
+  min-width: 0;
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.proposal-detail-dialog .proposal-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+}
+
+.proposal-detail-dialog .proposal-section {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.proposal-detail-dialog .proposal-section + .proposal-section {
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.proposal-detail-dialog .proposal-section h4 {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+}
+
+.proposal-detail-dialog .proposal-keyword-group {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.proposal-detail-dialog .proposal-keyword-group > strong {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 0.8rem;
+}
+
+.proposal-detail-dialog .proposal-keyword-chip {
+  box-sizing: border-box;
+  max-width: 100%;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.proposal-detail-dialog .proposal-empty {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.proposal-detail-dialog .proposal-change-list {
+  gap: 0;
+}
+
+.proposal-detail-dialog .proposal-change-item {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.proposal-detail-dialog .proposal-change-item + .proposal-change-item {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line-soft);
+}
+
+.proposal-detail-dialog .proposal-change-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.proposal-detail-dialog .proposal-change-title > strong {
+  min-width: 0;
+  margin: 0;
+  font-size: 0.84rem;
+}
+
+.proposal-detail-dialog .proposal-change-kind {
+  flex: none;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.proposal-detail-footer {
+  display: grid;
+  justify-items: end;
+  gap: 0.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.proposal-detail-footer > .error {
+  justify-self: stretch;
+  margin: 0;
+}
+
+.proposal-detail-footer .proposal-actions {
+  flex-direction: row;
+  align-items: center;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recipient-selection-dialog.proposal-detail-dialog::backdrop {
+    animation: none;
+  }
+}
+
+@media (max-width: 1100px) {
+  .settings-page .proposal-stack {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .recipient-selection-dialog.proposal-detail-dialog {
+    width: calc(100vw - 1.5rem);
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  .proposal-detail-dialog .proposal-keyword-group {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
+  }
+
+  .proposal-detail-footer .proposal-actions,
+  .proposal-detail-footer > button {
+    width: 100%;
+  }
+
+  .proposal-detail-footer .proposal-actions > button {
+    flex: 1;
+  }
+}

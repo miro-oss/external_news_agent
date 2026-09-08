@@ -10,6 +10,9 @@ import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.collection.repository.CollectionRunItemRepository;
+import com.example.be.domain.collection.entity.CollectionRunItem;
+import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.collection.scoring.TopicFitScorer;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
@@ -42,6 +45,7 @@ class ArticleAnalysisPipelineTest {
 
     private final CollectionRunArticleRepository runArticleRepository = mock(CollectionRunArticleRepository.class);
     private final CollectionRunRepository runRepository = mock(CollectionRunRepository.class);
+    private final CollectionRunItemRepository runItemRepository = mock(CollectionRunItemRepository.class);
     private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
     private final ArticleAnalysisOrchestrator orchestrator = mock(ArticleAnalysisOrchestrator.class);
     private final FindingReuseCache reuseCache = mock(FindingReuseCache.class);
@@ -50,7 +54,7 @@ class ArticleAnalysisPipelineTest {
     private Map<String, Double> topicWeights = Map.of();
     private final ArticleAnalysisPipeline pipeline =
             new ArticleAnalysisPipeline(
-                    runArticleRepository, runRepository, issueArticleRepository,
+                    runArticleRepository, runRepository, runItemRepository, issueArticleRepository,
                     orchestrator, reuseCache, findingWriter, selectionProperties,
                     new TopicFitScorer((language, keywords) -> topicWeights));
 
@@ -100,6 +104,33 @@ class ArticleAnalysisPipelineTest {
         ArgumentCaptor<AnalysisContext> captor = ArgumentCaptor.forClass(AnalysisContext.class);
         verify(orchestrator).analyze(captor.capture());
         assertEquals(AgentPlan.PAID, captor.getValue().plan());
+    }
+
+    @Test
+    void selectsAndAnalyzesWithQueuedTopicSnapshotAfterLiveKeywordsChange() {
+        Topic topic = Topic.builder().id(7L).name("메모리").queryText("HBM")
+                .requiredKeywords(List.of()).optionalKeywords(List.of("HBM"))
+                .excludedKeywords(List.of()).batchSize(100).intervalMinutes(1440).active(true).build();
+        CollectionRunItem item = CollectionRunItem.builder().topic(topic)
+                .source(Source.builder().id(1L).build()).build();
+        item.captureTopicSnapshot();
+        topic.update("메모리", "DRAM", List.of(), List.of("DRAM"), List.of(), 100, 1440, true);
+        Article queuedMatch = Article.builder().id(10L).title("HBM 공급 확대").topic(topic).build();
+        Article liveMatch = Article.builder().id(11L).title("DRAM 공급 확대").topic(topic).build();
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(item));
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
+                observation(liveMatch, topic, ChangeType.NEW), observation(queuedMatch, topic, ChangeType.NEW)));
+        when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
+        selectionProperties.setIssueLimitPerRun(1);
+
+        pipeline.analyze(42L);
+
+        ArgumentCaptor<AnalysisContext> captor = ArgumentCaptor.forClass(AnalysisContext.class);
+        verify(orchestrator).analyze(captor.capture());
+        assertEquals(10L, captor.getValue().article().getId());
+        assertEquals("HBM", captor.getValue().topic().getQueryText());
+        assertEquals(List.of("HBM"), captor.getValue().topic().getOptionalKeywords());
+        assertEquals("DRAM", topic.getQueryText());
     }
 
     @Test

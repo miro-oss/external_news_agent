@@ -131,6 +131,13 @@ export interface TopicCreated extends Topic {
   sources: TopicSourceBrief[]
 }
 
+export interface TopicActivation {
+  id: number
+  name: string
+  active: boolean
+  nextScheduledAt: string | null
+}
+
 export const TOPIC_KEYWORD_PROPOSAL_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const
 export type TopicKeywordProposalStatus = (typeof TOPIC_KEYWORD_PROPOSAL_STATUSES)[number]
 export type TopicKeywordProposalFilter = TopicKeywordProposalStatus | 'ALL'
@@ -345,6 +352,7 @@ export interface ReportSummary {
   reportScope: 'RUN' | 'DAILY'
   reportDate: string | null
   sourceRunIds: number[]
+  sourceReportCount?: number | null
   title: string
   generatedAt: string
   modelName: string
@@ -408,6 +416,7 @@ export interface ReportDetail {
   reportScope: 'RUN' | 'DAILY'
   reportDate: string | null
   sourceRunIds: number[]
+  sourceReportCount?: number | null
   title: string
   markdownBody: string
   modelName: string
@@ -415,7 +424,31 @@ export interface ReportDetail {
   llmProvider: string | null
   generatedAt: string
   summaryStats: ReportSummaryStats
+  structuredContent?: ReportContent | null
+  collectionContexts?: ReportCollectionContext[]
+  articleStats?: { totalCount: number; newCount: number; existingCount: number }
   findings?: ReportFinding[]
+}
+
+export interface ReportCollectionContext {
+  runId: number
+  topics: Array<{
+    topicId: number
+    topicName: string
+    queryText: string | null
+    requiredKeywords: string[]
+    optionalKeywords: string[]
+    excludedKeywords: string[]
+    batchSize: number
+    intervalMinutes: number
+  }>
+}
+
+export interface ReportContent {
+  executiveSummary: string[]
+  importantEvents: Array<{ title: string; summaryKo: string; significance: string | null; sourceFindingIds: number[] }>
+  watchItems: Array<{ topic: string; reason: string; sourceFindingIds: number[] }>
+  sourceNotes: string[]
 }
 
 export interface IssueArticle {
@@ -612,5 +645,6 @@ export interface CollectionRunCreated {
   llmPlan: LlmPlan
   targetTopicIds?: number[]
   targetCombinationCount?: number
-  startedAt: string
+  queuedAt: string
+  startedAt?: string | null
 }

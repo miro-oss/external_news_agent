@@ -10,17 +10,17 @@ const PAGES = ['reports', 'notifications', 'settings'] as const
 
 type Page = (typeof PAGES)[number]
 
-const DEFAULT_PAGE: Page = 'reports'
+const DEFAULT_PAGE: Page = 'settings'
 
-/* 화면 순서는 PAGES가 아니라 여기서 정한다 — 왼쪽부터 알림 · 리포트 · 설정. */
+/* 왼쪽부터 수집 설정 · 리포트 · 알림 관리 순서로 표시한다. */
 const NAV_OPTIONS: ReadonlyArray<SegmentedOption<Page>> = [
-  { value: 'notifications', label: '알림 관리' },
-  { value: 'reports', label: '리포트' },
   { value: 'settings', label: '수집 설정' },
+  { value: 'reports', label: '리포트' },
+  { value: 'notifications', label: '알림 관리' },
 ]
 
 function hashValue() {
-  return window.location.hash.replace(/^#\/?/, '')
+  return window.location.hash.replace(/^#\/?/, '').split('?')[0]
 }
 
 /**
@@ -30,7 +30,7 @@ function hashValue() {
 function pageFromHash(): Page {
   const value = hashValue()
   // P1-3 이전 북마크는 기사 화면을 가리킨다. 화면을 없애더라도 리포트로 이어 줘야 한다.
-  if (value === 'articles') return DEFAULT_PAGE
+  if (value === 'articles') return 'reports'
   return PAGES.includes(value as Page) ? (value as Page) : DEFAULT_PAGE
 }
 
@@ -110,8 +110,8 @@ function App() {
   return (
     <div className="app-shell">
       <nav className="app-nav" aria-label="주요 화면" data-scrolled={scrolled}>
-        {/* 로고는 홈으로 가는 길이다. 통합된 리포트를 제품의 첫 화면으로 쓴다. */}
-        <button type="button" className="app-logo" onClick={() => go('reports')}>
+        {/* 로고는 첫 화면인 수집 설정으로 돌아간다. */}
+        <button type="button" className="app-logo" onClick={() => go(DEFAULT_PAGE)}>
           <strong>News Signal Desk</strong>
         </button>
         <Segmented

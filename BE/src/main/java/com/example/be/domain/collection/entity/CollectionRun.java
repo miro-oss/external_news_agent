@@ -62,7 +62,11 @@ public class CollectionRun {
     @Column(name = "force_refresh_yn", nullable = false, length = 1)
     private boolean forceRefresh;
 
-    @Column(name = "started_at", nullable = false)
+    @Builder.Default
+    @Column(name = "queued_at", nullable = false)
+    private LocalDateTime queuedAt = LocalDateTime.now(com.example.be.global.config.ApiTimeZone.ZONE);
+
+    @Column(name = "started_at")
     private LocalDateTime startedAt;
 
     @Column(name = "finished_at")
@@ -112,7 +116,19 @@ public class CollectionRun {
     }
 
     public void start() {
+        start(LocalDateTime.now(com.example.be.global.config.ApiTimeZone.ZONE));
+    }
+
+    public void start(LocalDateTime now) {
         this.status = RunStatus.RUNNING;
+        this.startedAt = now;
+        items.forEach(CollectionRunItem::markRunning);
+    }
+
+    public void returnToQueue() {
+        this.status = RunStatus.PENDING;
+        this.startedAt = null;
+        items.forEach(CollectionRunItem::markPending);
     }
 
     /**

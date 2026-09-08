@@ -69,6 +69,7 @@ public class EmailNotificationSender implements NotificationSender {
         mail.setProperty("mail.smtp.starttls.enable", String.valueOf(startTls));
         mail.setProperty("mail.smtp.connectiontimeout", String.valueOf(properties.getConnectTimeout().toMillis()));
         mail.setProperty("mail.smtp.timeout", String.valueOf(properties.getReadTimeout().toMillis()));
+        mail.setProperty("mail.smtp.writetimeout", String.valueOf(properties.getReadTimeout().toMillis()));
 
         Authenticator authenticator = StringUtils.hasText(username)
                 ? new Authenticator() {
@@ -99,7 +100,11 @@ public class EmailNotificationSender implements NotificationSender {
                         transport.sendMessage(message, message.getAllRecipients());
                         return message.getMessageID();
                     } catch (MessagingException exception) {
-                        throw new NotificationTransportException("메일 전송에 실패했습니다.", exception);
+                        if (exception instanceof jakarta.mail.SendFailedException failed
+                                && (failed.getValidSentAddresses() == null || failed.getValidSentAddresses().length == 0)) {
+                            throw new NotificationTransportException("메일 주소가 거절되었습니다. 수신 주소와 발신 주소를 확인해 주세요.", true);
+                        }
+                        throw new NotificationTransportException("메일 전송 결과를 확인하지 못했습니다. 발송 이력과 수신함을 확인해 주세요.");
                     }
                 }
 
@@ -113,7 +118,10 @@ public class EmailNotificationSender implements NotificationSender {
                 }
             };
         } catch (MessagingException exception) {
-            throw new NotificationTransportException("메일 서버 연결에 실패했습니다.", exception);
+            if (exception instanceof jakarta.mail.AuthenticationFailedException) {
+                throw new NotificationTransportException("메일 서버 인증에 실패했습니다. 관리자에게 메일 연결 설정 확인을 요청해 주세요.", true);
+            }
+            throw new NotificationTransportException("메일 서버에 연결하지 못했습니다. 메일 연결 설정과 서버 상태를 확인해 주세요.", true);
         }
     }
 

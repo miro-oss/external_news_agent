@@ -151,7 +151,7 @@ public class TopicCommandServiceImpl implements TopicCommandService {
     }
 
     private Topic getTopic(Long topicId) {
-        return topicRepository.findById(topicId)
+        return topicRepository.lockByIds(List.of(topicId)).stream().findFirst()
                 .orElseThrow(() -> new TopicException(TopicErrorCode.TOPIC_NOT_FOUND));
     }
 

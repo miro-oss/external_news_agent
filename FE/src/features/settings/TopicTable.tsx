@@ -1,6 +1,9 @@
+import { useState } from 'react'
 import type { TopicRelatedKeyword, TopicSurgeKeyword } from '../../api/types'
-import { useTopics } from '../../api/queries'
+import { useSetTopicActivation, useTopics } from '../../api/queries'
 import { ApiError } from '../../api/client'
+import { MutationStatus } from './MutationStatus'
+import { TopicTableSkeleton } from './SettingsSkeletons'
 
 /** 오프셋이 붙은 ISO-8601을 그대로 보여 주면 열이 넘친다. 날짜와 분까지만 남긴다. */
 function formatCollectedAt(value: string | null) {
@@ -20,7 +23,7 @@ function formatCollectedAt(value: string | null) {
 
 /** 저장된 분 값을 설정 화면에서 쓰는 주기 표현으로 바꾼다. 기존 사용자 지정 값도 읽을 수 있게 남긴다. */
 function formatInterval(minutes: number) {
-  if (minutes === 1440) return '매일 한 번'
+  if (minutes === 1440) return '24시간마다'
   if (minutes % 1440 === 0) return `${minutes / 1440}일마다`
   if (minutes % 60 === 0) return `${minutes / 60}시간마다`
   return `${minutes}분마다`
@@ -44,95 +47,97 @@ function relatedKeywordTitle(keyword: TopicRelatedKeyword) {
 }
 
 export function TopicTable() {
-  const topics = useTopics()
+  const [showInactive, setShowInactive] = useState(false)
+  const [success, setSuccess] = useState<string | null>(null)
+  const topics = useTopics(!showInactive)
+  const activation = useSetTopicActivation()
 
-  if (topics.isPending) return <p className="muted">불러오는 중…</p>
+  if (topics.isPending) return <TopicTableSkeleton />
 
   if (topics.error || !topics.data) {
     const reason = topics.error instanceof ApiError
-      ? `${topics.error.message} (${topics.error.code})`
+      ? topics.error.message
       : '주제 목록을 불러오지 못했습니다.'
     return <p className="error">{reason}</p>
   }
 
-  if (topics.data.content.length === 0) {
-    return <p className="muted">등록된 수집 주제가 없습니다. 위에서 새 주제를 등록해 주세요.</p>
+  function setActive(topicId: number, active: boolean) {
+    setSuccess(null)
+    activation.mutate({ topicId, active }, {
+      onSuccess: (topic) => setSuccess(`"${topic.name}" 수집을 ${active ? '재개' : '중지'}했습니다.`),
+    })
   }
 
   return (
-    <div className="table-scroll">
-      <table className="topic-table">
-        <colgroup>
-          <col className="topic-name-column" />
-          <col className="topic-query-column" />
-          <col className="topic-required-column" />
-          <col className="topic-optional-column" />
-          <col className="topic-excluded-column" />
-          <col className="topic-surge-column" />
-          <col className="topic-related-column" />
-          <col className="topic-interval-column" />
-          <col className="topic-collected-column" />
-          <col className="topic-status-column" />
-        </colgroup>
-        <thead>
-          <tr>
-            <th>주제</th>
-            <th>검색어</th>
-            <th title="모두 포함되어야 하는 AND 조건입니다.">필수 키워드</th>
-            <th title="하나라도 포함되면 통과하는 OR 조건입니다.">선택 키워드</th>
-            <th title="하나라도 포함되면 제외하는 NOT 조건입니다.">제외 키워드</th>
-            <th title="최근 7일 동안 지난주보다 많이 언급된 키워드입니다.">지난주 급상승</th>
-            <th title="최근 7일 이 주제 이슈에서 반복 등장한 연관 키워드입니다.">연관 키워드</th>
-            <th title="새로운 기사를 다시 확인하는 주기입니다.">수집 주기</th>
-            <th>마지막 수집</th>
-            <th>상태</th>
-          </tr>
-        </thead>
-        <tbody>
-          {topics.data.content.map((topic) => (
-            <tr key={topic.id}>
-              <td className="topic-name-cell">
-                <strong
-                  className="topic-name-scroll"
-                  title={topic.name}
-                  tabIndex={topic.name.length > 24 ? 0 : undefined}
-                >
-                  {topic.name}
-                </strong>
-              </td>
-              <td>{topic.queryText ?? '—'}</td>
-              <td>{formatKeywords(topic.requiredKeywords)}</td>
-              <td>{formatKeywords(topic.optionalKeywords)}</td>
-              <td>{formatKeywords(topic.excludedKeywords)}</td>
-              <td className="topic-signal-cell">
-                <KeywordSignalList
-                  items={topic.surgeKeywords ?? []}
-                  emptyLabel="—"
-                  renderLabel={(keyword) => `${keyword.keyword} ${formatSignedDelta(keyword.deltaIssueCount)}`}
-                  renderTitle={surgeKeywordTitle}
-                  variant={(keyword) => keyword.burst ? 'burst' : 'neutral'}
-                />
-              </td>
-              <td className="topic-signal-cell">
-                <KeywordSignalList
-                  items={topic.relatedKeywords ?? []}
-                  emptyLabel="—"
-                  renderLabel={(keyword) => `${keyword.keyword} ${keyword.sharePercent.toFixed(0)}%`}
-                  renderTitle={relatedKeywordTitle}
-                />
-              </td>
-              <td>{formatInterval(topic.intervalMinutes)}</td>
-              <td>{formatCollectedAt(topic.lastCollectedAt)}</td>
-              <td>
-                <span className={topic.active ? 'dot-on' : 'dot-off'}>
-                  {topic.active ? '활성' : '비활성'}
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <div className="topic-list-toolbar">
+        <span className="muted">{showInactive ? '중지한 주제' : '수집 중인 주제'} · {topics.data.totalElements}개</span>
+        <button type="button" className="ghost-button topic-visibility-toggle" aria-pressed={showInactive}
+          onClick={() => { setShowInactive((value) => !value); setSuccess(null); activation.reset() }}>
+          {showInactive ? '수집 중인 주제 보기' : '중지한 주제 보기'}
+        </button>
+      </div>
+      <MutationStatus error={activation.error} success={success} />
+      {topics.data.content.length === 0 ? (
+        <p className="empty-block">{showInactive ? '중지한 수집 주제가 없습니다.' : '수집 중인 주제가 없습니다. 새 주제를 등록하거나 중지한 주제를 다시 시작해 주세요.'}</p>
+      ) : (
+        <div className="table-scroll">
+          <table className="topic-table topic-management-table">
+            <colgroup>
+              <col className="topic-name-column" />
+              <col className="topic-query-column" />
+              <col className="topic-conditions-column" />
+              <col className="topic-surge-column" />
+              <col className="topic-related-column" />
+              <col className="topic-schedule-column" />
+              <col className="topic-actions-column" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>주제</th>
+                <th>검색 키워드</th>
+                <th>기사 조건</th>
+                <th title="최근 7일에 전주보다 언급이 늘어난 키워드입니다. 숫자는 관련 주제 묶음의 증가 건수입니다.">지난주 대비 증가</th>
+                <th title="최근 7일에 함께 등장한 키워드와 비중입니다.">연관 키워드</th>
+                <th>수집 일정</th>
+                <th>관리</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topics.data.content.map((topic) => (
+                <tr key={topic.id}>
+                  <td className="topic-name-cell"><strong className="topic-name-scroll" title={topic.name}
+                    tabIndex={topic.name.length > 24 ? 0 : undefined}>{topic.name}</strong></td>
+                  <td>{topic.queryText ?? '—'}</td>
+                  <td className="topic-conditions-cell">
+                    <div className="topic-condition-lines">
+                      {topic.requiredKeywords.length > 0 && <span className="topic-condition-row"><small>모두</small><span>{formatKeywords(topic.requiredKeywords)}</span></span>}
+                      {topic.optionalKeywords.length > 0 && <span className="topic-condition-row"><small>하나 이상</small><span>{formatKeywords(topic.optionalKeywords)}</span></span>}
+                      {topic.excludedKeywords.length > 0 && <span className="topic-condition-row"><small>제외</small><span>{formatKeywords(topic.excludedKeywords)}</span></span>}
+                      {topic.requiredKeywords.length + topic.optionalKeywords.length + topic.excludedKeywords.length === 0 && '—'}
+                    </div>
+                  </td>
+                  <td className="topic-signal-cell"><KeywordSignalList items={topic.surgeKeywords ?? []} emptyLabel="—"
+                    renderLabel={(keyword) => `${keyword.keyword} ${formatSignedDelta(keyword.deltaIssueCount)}`}
+                    isEmphasized={(keyword) => keyword.deltaIssueCount > 50}
+                    renderTitle={surgeKeywordTitle} /></td>
+                  <td className="topic-signal-cell"><KeywordSignalList items={topic.relatedKeywords ?? []} emptyLabel="—"
+                    renderLabel={(keyword) => `${keyword.keyword} ${keyword.sharePercent.toFixed(0)}%`}
+                    renderTitle={relatedKeywordTitle} /></td>
+                  <td><div className="topic-condition-lines"><span>{formatInterval(topic.intervalMinutes)}</span>
+                    <small title="마지막 수집">{formatCollectedAt(topic.lastCollectedAt)}</small></div></td>
+                  <td><div className="topic-management-actions"><button type="button" className="ghost-button topic-management-action" disabled={activation.isPending}
+                    onClick={() => setActive(topic.id, !topic.active)}>
+                    {activation.isPending && activation.variables?.topicId === topic.id ? '처리 중…' : topic.active ? '수집 중지' : '수집 재개'}
+                  </button>
+                  </div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -141,13 +146,13 @@ function KeywordSignalList<T extends TopicSurgeKeyword | TopicRelatedKeyword>({
   emptyLabel,
   renderLabel,
   renderTitle,
-  variant,
+  isEmphasized,
 }: {
   items: T[]
   emptyLabel: string
   renderLabel: (item: T) => string
   renderTitle: (item: T) => string
-  variant?: (item: T) => 'burst' | 'neutral'
+  isEmphasized?: (item: T) => boolean
 }) {
   if (items.length === 0) {
     return <span className="topic-signal-empty">{emptyLabel}</span>
@@ -157,7 +162,7 @@ function KeywordSignalList<T extends TopicSurgeKeyword | TopicRelatedKeyword>({
     <div className="topic-signal-list">
       {items.map((item) => (
         <span
-          className={variant?.(item) === 'burst' ? 'topic-signal-chip burst' : 'topic-signal-chip'}
+          className={`topic-signal-chip${isEmphasized?.(item) ? ' is-emphasized' : ''}`}
           key={renderLabel(item)}
           title={renderTitle(item)}
         >

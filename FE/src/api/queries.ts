@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  ApiError,
   apiGet,
   apiPut,
   get,
@@ -9,7 +10,13 @@ import {
   notificationPost,
   notificationPut,
   post,
+  patch,
+  remove,
 } from './client'
+import { saveRecipientEmail } from '../lib/recipientEmail'
+import { cacheDeletedNotificationRecipient, notificationRecipientsKey } from './notificationRecipientCache'
+import { cacheDeletedNotificationGroup, notificationGroupsKey } from './notificationGroupCache'
+import type { CollectionRunDelivery } from './notificationConnections'
 import type {
   ArticleDetail,
   ArticleFilters,
@@ -38,6 +45,7 @@ import type {
   Source,
   SourceCreateRequest,
   TopicCreated,
+  TopicActivation,
   TopicCreateRequest,
   TopicKeywordProposal,
   TopicKeywordProposalFilter,
@@ -61,8 +69,8 @@ const keys = {
   llmUsage: ['usage', 'llm'] as const,
   audience: ['settings', 'audience'] as const,
   notificationChannels: ['notifications', 'channels'] as const,
-  notificationRecipients: ['notifications', 'recipients'] as const,
-  notificationGroups: ['notifications', 'groups'] as const,
+  notificationRecipients: notificationRecipientsKey,
+  notificationGroups: notificationGroupsKey,
   deliveryLogs: (filters: DeliveryLogFilters) => ['notifications', 'delivery-logs', filters] as const,
 }
 
@@ -117,10 +125,10 @@ export function useSources() {
 }
 
 /** 설정 화면의 등록 주제 목록과 주제 등록 후 캐시 갱신에 쓰는 주제 목록. */
-export function useTopics() {
+export function useTopics(active?: boolean) {
   return useQuery({
-    queryKey: keys.topics,
-    queryFn: () => getAllPages<TopicSummary>('/topics'),
+    queryKey: [...keys.topics, active ?? 'all'],
+    queryFn: () => getAllPages<TopicSummary>('/topics', { active }),
   })
 }
 
@@ -168,6 +176,19 @@ export function useCreateTopic() {
   return useMutation({
     mutationFn: (body: TopicCreateRequest) => post<TopicCreated>('/topics', body),
     onSuccess: refresh,
+  })
+}
+
+export function useSetTopicActivation() {
+  const refresh = useRefreshOnSuccess()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ topicId, active }: { topicId: number; active: boolean }) =>
+      patch<TopicActivation>(`/topics/${topicId}/activation`, { active }),
+    onSuccess: async () => {
+      refresh()
+      await queryClient.invalidateQueries({ queryKey: ['topic-keyword-proposals'] })
+    },
   })
 }
 
@@ -234,6 +255,24 @@ export function useReport(reportId: number | null) {
     queryKey: keys.report(reportId),
     queryFn: () => get<ReportDetail>(`/reports/${reportId}`, { includeFindings: true }),
     enabled: reportId !== null,
+  })
+}
+
+export function useDeleteReport() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (reportId: number) => remove<{ id: number; deleted: boolean }>(`/reports/${reportId}`),
+    onSuccess: async (_, reportId) => {
+      await client.cancelQueries({ queryKey: ['reports'] })
+      client.setQueriesData<PageResult<ReportSummary>>({ queryKey: keys.reports }, current => current ? {
+        ...current,
+        content: current.content.filter(report => report.id !== reportId),
+        totalElements: Math.max(0, current.totalElements - Number(current.content.some(report => report.id === reportId))),
+      } : current)
+      client.setQueriesData<ReportDetail | null>({ queryKey: keys.latestReport }, current => current?.id === reportId ? null : current)
+      client.removeQueries({ queryKey: keys.report(reportId), exact: true })
+      void client.invalidateQueries({ queryKey: ['reports'] })
+    },
   })
 }
 
@@ -342,10 +381,34 @@ export function useCreateNotificationRecipient() {
 }
 
 export function useDeleteNotificationRecipient() {
+  const client = useQueryClient()
   const refresh = useRefreshNotifications()
   return useMutation({
-    mutationFn: (recipientId: number) => notificationDelete(`/recipients/${recipientId}`),
-    onSuccess: refresh,
+    mutationFn: (recipientId: number) => notificationDelete<{
+      id: number; active: false; deletedAt: string; removedGroupCount: number
+    }>(`/recipients/${recipientId}`),
+    onSuccess: async (_, recipientId) => {
+      await cacheDeletedNotificationRecipient(client, recipientId)
+      refresh()
+    },
+  })
+}
+
+export function useUpdateNotificationRecipientEmail() {
+  const refresh = useRefreshNotifications()
+  return useMutation({
+    mutationFn: ({ recipientId, email, emailChannelId }: { recipientId: number; email: string; emailChannelId: number }) =>
+      saveRecipientEmail(email, emailChannelId, {
+        loadRecipient: async () => {
+          const recipients = await getAllNotificationPages<NotificationRecipient>('/recipients')
+          const recipient = recipients.content.find((item) => item.id === recipientId)
+          if (!recipient) throw new ApiError('RECIPIENT404', '수신자를 찾을 수 없습니다.', 404)
+          return recipient
+        },
+        replaceDestinations: (destinations) => notificationPut(`/recipients/${recipientId}/destinations`, { destinations }),
+        updateProfile: (email) => notificationPatch(`/recipients/${recipientId}`, { email }),
+      }),
+    onSettled: refresh,
   })
 }
 
@@ -362,21 +425,36 @@ export function useReplaceRecipientDestinations() {
 
 export function useCreateNotificationGroup() {
   const refresh = useRefreshNotifications()
+  const client = useQueryClient()
   return useMutation({
     mutationFn: (body: {
       name: string
       perspective?: GroupPerspective
       recipientIds: number[]
     }) => notificationPost<NotificationGroup>('/groups', body),
-    onSuccess: refresh,
+    onSuccess: async group => {
+      await client.cancelQueries({ queryKey: keys.notificationGroups })
+      client.setQueryData<PageResult<NotificationGroup>>(keys.notificationGroups, previous => previous && {
+        ...previous,
+        content: [group, ...previous.content.filter(item => item.id !== group.id)],
+        totalElements: previous.totalElements + (previous.content.some(item => item.id === group.id) ? 0 : 1),
+      })
+      refresh()
+    },
   })
 }
 
 export function useDeleteNotificationGroup() {
+  const client = useQueryClient()
   const refresh = useRefreshNotifications()
   return useMutation({
-    mutationFn: (groupId: number) => notificationDelete(`/groups/${groupId}`),
-    onSuccess: refresh,
+    mutationFn: (groupId: number) => notificationDelete<{
+      id: number; deletedAt: string; removedMemberCount: number
+    }>(`/groups/${groupId}`),
+    onSuccess: async (_, groupId) => {
+      await cacheDeletedNotificationGroup(client, groupId)
+      refresh()
+    },
   })
 }
 
@@ -449,15 +527,18 @@ export function useUpdateAudienceSetting() {
 export function useStartCollectionRun() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (request: { idempotencyKey: string; topicIds?: number[]; plan?: LlmPlan }) =>
+    mutationFn: (request: { idempotencyKey: string; topicIds?: number[]; plan?: LlmPlan; delivery?: CollectionRunDelivery }) =>
       post<CollectionRunCreated>('/runs', {
         idempotencyKey: request.idempotencyKey,
         // 빈 배열을 그대로 보내면 서버가 "전체 활성 주제"로 읽는다.
         ...(request.topicIds?.length ? { topicIds: request.topicIds } : {}),
         ...(request.plan ? { plan: request.plan } : {}),
+        ...(request.delivery ? { delivery: request.delivery } : {}),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: keys.llmUsage })
+      void queryClient.invalidateQueries({ queryKey: ['collection-queue'] })
+      void queryClient.invalidateQueries({ queryKey: ['delivery-policy'] })
     },
   })
 }

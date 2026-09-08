@@ -6,6 +6,7 @@ import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
+import com.example.be.domain.reports.entity.ReportContent;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -81,7 +82,11 @@ public class ReportGenerator {
                 null,
                 ReportStatus.FALLBACK,
                 ordered.stream().map(Finding::getId).toList(),
-                excluded.stream().map(Finding::getId).toList());
+                excluded.stream().map(Finding::getId).toList(),
+                new ReportContent(ordered.stream().limit(3).map(FindingEvidencePolicy::reportSummary).toList(),
+                        ordered.stream().limit(5).map(finding -> new ReportContent.ImportantEvent(
+                                finding.getArticle().getTitle(), FindingEvidencePolicy.reportSummary(finding),
+                                null, List.of(finding.getId()))).toList(), List.of(), ReportSourceNotes.from(effectiveStats)));
     }
 
     private String title(List<Finding> findings, LocalDateTime generatedAt) {

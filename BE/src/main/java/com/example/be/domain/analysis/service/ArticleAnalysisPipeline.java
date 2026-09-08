@@ -8,6 +8,7 @@ import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.collection.scoring.TopicFitScorer;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
@@ -38,6 +39,7 @@ public class ArticleAnalysisPipeline {
 
     private final CollectionRunArticleRepository runArticleRepository;
     private final CollectionRunRepository runRepository;
+    private final CollectionRunItemRepository runItemRepository;
     private final IssueArticleRepository issueArticleRepository;
     private final ArticleAnalysisOrchestrator orchestrator;
     private final FindingReuseCache reuseCache;
@@ -63,15 +65,25 @@ public class ArticleAnalysisPipeline {
             return;
         }
         AgentPlan plan = plan(runId);
-        analyzeTargets(runId, investigationTargets(runId, refreshedArticleIds), plan, true, true);
+        analyzeTargets(runId, investigationTargets(runId, refreshedArticleIds, snapshotTopics(runId)), plan, true, true);
     }
 
     private void analyze(Long runId, Set<Long> refreshedArticleIds, boolean clustered) {
         AgentPlan plan = plan(runId);
-        List<Target> targets = targets(runId, refreshedArticleIds, clustered);
+        List<Target> targets = targets(runId, refreshedArticleIds, clustered, snapshotTopics(runId));
         // coverage의 분모는 이슈다. 클러스터링 실패 시 기사 단위 degrade 결과를 이슈 수로 가장하지 않는다.
         findingWriter.recordTargetCount(runId, clustered ? targets.size() : 0);
         analyzeTargets(runId, targets, plan, clustered, false);
+    }
+
+    private Map<Long, Topic> snapshotTopics(Long runId) {
+        Map<Long, Topic> topics = new LinkedHashMap<>();
+        runItemRepository.findExecutionItemsByRunId(runId).forEach(item -> {
+            if (item.getTopicSnapshot() != null) {
+                topics.putIfAbsent(item.getTopicSnapshot().topicId(), item.collectionTopic());
+            }
+        });
+        return Map.copyOf(topics);
     }
 
     private AgentPlan plan(Long runId) {
@@ -151,7 +163,8 @@ public class ArticleAnalysisPipeline {
                         plan,
                         issues.getOrDefault(
                                 target.article().getId(), IssueAnalysisContext.empty()),
-                        selfCritiqueTargets.contains(target.article().getId()))));
+                        selfCritiqueTargets.contains(target.article().getId()),
+                        target.topicOverride())));
         return Map.copyOf(contexts);
     }
 
@@ -225,17 +238,17 @@ public class ArticleAnalysisPipeline {
         return Map.copyOf(result);
     }
 
-    private List<Target> targets(Long runId, Set<Long> refreshedArticleIds, boolean clustered) {
+    private List<Target> targets(Long runId, Set<Long> refreshedArticleIds, boolean clustered, Map<Long, Topic> snapshotTopics) {
         Map<Long, Target> byArticleId = new LinkedHashMap<>();
         if (!clustered) {
-            addUnclusteredTargets(byArticleId, runId, refreshedArticleIds);
+            addUnclusteredTargets(byArticleId, runId, refreshedArticleIds, snapshotTopics);
             return prioritized(byArticleId.values());
         }
         for (CollectionRunArticle observation :
                 runArticleRepository.findRepresentativeAnalysisTargetsByRunId(runId)) {
-            addTarget(byArticleId, observation, observation.getChangeType());
+            addTarget(byArticleId, observation, observation.getChangeType(), snapshotTopics);
         }
-        addMissingRepresentatives(byArticleId, issueArticleRepository.findRepresentativesForRun(runId));
+        addMissingRepresentatives(byArticleId, issueArticleRepository.findRepresentativesForRun(runId), snapshotTopics);
         if (!refreshedArticleIds.isEmpty()) {
             for (List<Long> articleIds : OracleInClause.batches(refreshedArticleIds)) {
                 for (CollectionRunArticle observation :
@@ -245,32 +258,32 @@ public class ArticleAnalysisPipeline {
                     ChangeType changeType = observation.getChangeType() == ChangeType.UNCHANGED
                             ? ChangeType.UPDATED
                             : observation.getChangeType();
-                    addTarget(byArticleId, observation, changeType);
+                    addTarget(byArticleId, observation, changeType, snapshotTopics);
                 }
                 addMissingRepresentatives(byArticleId,
                         issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(
-                                runId, articleIds));
+                                runId, articleIds), snapshotTopics);
             }
         }
         return prioritized(byArticleId.values());
     }
 
-    private List<Target> investigationTargets(Long runId, Set<Long> refreshedArticleIds) {
+    private List<Target> investigationTargets(Long runId, Set<Long> refreshedArticleIds, Map<Long, Topic> snapshotTopics) {
         Map<Long, Target> byArticleId = new LinkedHashMap<>();
         for (List<Long> articleIds : OracleInClause.batches(refreshedArticleIds)) {
             for (CollectionRunArticle observation :
                     runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
                             runId, articleIds)) {
-                addTarget(byArticleId, observation, ChangeType.UPDATED);
+                addTarget(byArticleId, observation, ChangeType.UPDATED, snapshotTopics);
             }
             addMissingRepresentatives(byArticleId,
                     issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(
-                            runId, articleIds));
+                            runId, articleIds), snapshotTopics);
         }
         return prioritized(byArticleId.values());
     }
 
-    private void addMissingRepresentatives(Map<Long, Target> targets, List<IssueArticle> memberships) {
+    private void addMissingRepresentatives(Map<Long, Target> targets, List<IssueArticle> memberships, Map<Long, Topic> snapshotTopics) {
         if (memberships == null) {
             return;
         }
@@ -279,18 +292,19 @@ public class ArticleAnalysisPipeline {
             Topic topic = membership.getIssue() == null
                     ? article.getTopic()
                     : membership.getIssue().getTopic();
+            Topic snapshot = topicSnapshot(snapshotTopics, topic);
             targets.merge(
                     article.getId(),
-                    new Target(article, ChangeType.UPDATED, topicFit(topic, article)),
+                    new Target(article, ChangeType.UPDATED, topicFit(snapshot == null ? topic : snapshot, article), snapshot),
                     this::preserveObservedChangeType);
         });
     }
 
     private void addUnclusteredTargets(Map<Long, Target> targets,
                                        Long runId,
-                                       Set<Long> refreshedArticleIds) {
+                                       Set<Long> refreshedArticleIds, Map<Long, Topic> snapshotTopics) {
         runArticleRepository.findUnclusteredAnalysisTargetsByRunId(runId)
-                .forEach(observation -> addTarget(targets, observation, observation.getChangeType()));
+                .forEach(observation -> addTarget(targets, observation, observation.getChangeType(), snapshotTopics));
         if (!refreshedArticleIds.isEmpty()) {
             for (List<Long> articleIds : OracleInClause.batches(refreshedArticleIds)) {
                 runArticleRepository.findUnclusteredAnalysisTargetsByRunIdAndArticleIdIn(runId, articleIds)
@@ -299,19 +313,25 @@ public class ArticleAnalysisPipeline {
                                 observation,
                                 observation.getChangeType() == ChangeType.UNCHANGED
                                         ? ChangeType.UPDATED
-                                        : observation.getChangeType()));
+                                        : observation.getChangeType(), snapshotTopics));
             }
         }
     }
 
     private void addTarget(Map<Long, Target> byArticleId,
                            CollectionRunArticle observation,
-                           ChangeType changeType) {
+                           ChangeType changeType, Map<Long, Topic> snapshotTopics) {
+        Topic observedTopic = observation.getTopic() == null ? observation.getArticle().getTopic() : observation.getTopic();
+        Topic snapshot = topicSnapshot(snapshotTopics, observedTopic);
         Target candidate = new Target(
                 observation.getArticle(),
                 changeType,
-                topicFit(observation.getTopic(), observation.getArticle()));
+                topicFit(snapshot == null ? observedTopic : snapshot, observation.getArticle()), snapshot);
         byArticleId.merge(observation.getArticle().getId(), candidate, this::preferUpdated);
+    }
+
+    private Topic topicSnapshot(Map<Long, Topic> snapshotTopics, Topic topic) {
+        return topic == null || topic.getId() == null ? null : snapshotTopics.get(topic.getId());
     }
 
     private List<Target> prioritized(Collection<Target> targets) {
@@ -350,7 +370,8 @@ public class ArticleAnalysisPipeline {
                 || right.changeType() == ChangeType.UPDATED
                 ? ChangeType.UPDATED
                 : right.changeType();
-        return new Target(left.article(), changeType, Math.max(left.topicFit(), right.topicFit()));
+        Target stronger = left.topicFit() >= right.topicFit() ? left : right;
+        return new Target(left.article(), changeType, stronger.topicFit(), stronger.topicOverride());
     }
 
     /** 이슈 대표 보충은 topicFit만 보강하며, 이번 run에서 직접 관측한 NEW/UPDATED 판정은 바꾸지 않는다. */
@@ -358,13 +379,14 @@ public class ArticleAnalysisPipeline {
         return new Target(
                 existing.article(),
                 existing.changeType(),
-                Math.max(existing.topicFit(), representative.topicFit()));
+                Math.max(existing.topicFit(), representative.topicFit()),
+                existing.topicOverride() == null ? representative.topicOverride() : existing.topicOverride());
     }
 
     private String messageOf(RuntimeException exception) {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
     }
 
-    private record Target(Article article, ChangeType changeType, double topicFit) {
+    private record Target(Article article, ChangeType changeType, double topicFit, Topic topicOverride) {
     }
 }

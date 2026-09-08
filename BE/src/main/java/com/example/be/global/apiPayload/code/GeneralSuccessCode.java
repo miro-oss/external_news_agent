@@ -14,6 +14,7 @@ public enum GeneralSuccessCode implements BaseSuccessCode {
     UPDATED(HttpStatus.OK, "COMMON200", "수정되었습니다."),
     DELETED(HttpStatus.OK, "COMMON200", "삭제되었습니다."),
     LINKED(HttpStatus.OK, "COMMON200", "연결되었습니다."),
+    COLLECTION_QUEUED(HttpStatus.CREATED, "COMMON201", "수집 요청을 접수했습니다."),
     COLLECTION_STARTED(HttpStatus.CREATED, "COMMON201", "수집을 시작했습니다."),
     COLLECTION_ALREADY_RUNNING(HttpStatus.OK, "COMMON200", "이미 진행 중인 수집입니다.");
 

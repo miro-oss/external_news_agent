@@ -97,14 +97,16 @@ class TopicKeywordProposalControllerTest {
     }
 
     @Test
-    void returnsConflictWhenProposalWasAlreadyReviewed() throws Exception {
-        when(commandService.reject(1L))
-                .thenThrow(new TopicException(TopicErrorCode.KEYWORD_PROPOSAL_ALREADY_REVIEWED));
-
-        mockMvc.perform(post("/api/news/topics/keyword-proposals/1/reject"))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("TOPIC409"))
-                .andExpect(jsonPath("$.message").value("이미 검토가 끝난 키워드 제안입니다."));
+    void repeatReviewReturnsTheExistingResultWithoutNewResponseFields() throws Exception {
+        when(commandService.reject(1L)).thenReturn(proposal("REJECTED"));
+        for (int retry = 0; retry < 2; retry++) {
+            mockMvc.perform(post("/api/news/topics/keyword-proposals/1/reject"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value("COMMON200"))
+                    .andExpect(jsonPath("$.message").value("수정되었습니다."))
+                    .andExpect(jsonPath("$.result.status").value("REJECTED"))
+                    .andExpect(jsonPath("$.result.appliedChanges").doesNotExist());
+        }
     }
 
     @Test

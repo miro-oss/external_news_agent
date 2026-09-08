@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.reports.entity.ReportStatus;
+import com.example.be.domain.reports.entity.ReportContent;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashSet;
@@ -19,12 +20,21 @@ public record ReportDocument(
         BigDecimal credits,
         ReportStatus status,
         List<Long> reflectedFindingIds,
-        List<Long> excludedFindingIds
+        List<Long> excludedFindingIds,
+        ReportContent structuredContent
 ) {
 
     public ReportDocument {
         reflectedFindingIds = normalizedIds(reflectedFindingIds);
         excludedFindingIds = normalizedIds(excludedFindingIds);
+    }
+
+    public ReportDocument(String title,
+                          String markdownBody, String modelName, String promptVersion, String llmProvider,
+                          Long inputTokens, Long outputTokens, BigDecimal costUsd, BigDecimal credits,
+                          ReportStatus status, List<Long> reflectedFindingIds, List<Long> excludedFindingIds) {
+        this(title, markdownBody, modelName, promptVersion, llmProvider, inputTokens, outputTokens,
+                costUsd, credits, status, reflectedFindingIds, excludedFindingIds, null);
     }
 
     public ReportDocument(String title,

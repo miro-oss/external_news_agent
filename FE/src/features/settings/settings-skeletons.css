@@ -1,0 +1,71 @@
+.settings-skeleton-field {
+  display: grid;
+  align-content: start;
+  gap: .45rem;
+  min-width: 0;
+}
+
+.settings-skeleton-audience {
+  display: grid;
+  gap: .5rem;
+}
+
+.settings-skeleton-segments {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .35rem;
+  margin-top: .3rem;
+}
+
+.settings-skeleton-run-button {
+  margin-top: 0;
+}
+
+.settings-skeleton-topic-table td {
+  height: 4.5rem;
+  box-sizing: border-box;
+}
+
+.settings-skeleton-proposal {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  padding: .85rem 1rem;
+  gap: .6rem;
+  align-items: start;
+}
+
+.settings-skeleton-proposal-body {
+  display: grid;
+  grid-template-rows: 1.5rem repeat(2, 1.65rem);
+  gap: .4rem;
+}
+
+.settings-skeleton-keyword-row {
+  gap: .35rem;
+  overflow: hidden;
+}
+
+.settings-skeleton-proposal-actions {
+  gap: .4rem;
+}
+
+.settings-skeleton-management-actions {
+  display: grid;
+  gap: .3rem;
+}
+
+.settings-skeleton-source-status {
+  margin: 0 0 1rem;
+}
+
+@media (max-width: 600px) {
+  .settings-skeleton-segments {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-skeleton-proposal {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

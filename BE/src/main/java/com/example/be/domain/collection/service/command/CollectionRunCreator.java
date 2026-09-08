@@ -10,27 +10,22 @@ import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.exception.RunException;
 import com.example.be.domain.collection.exception.code.RunErrorCode;
-import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.notifications.service.CollectionRunDeliveryService;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.task.TaskRejectedException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
-import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -51,9 +46,7 @@ public class CollectionRunCreator {
 
     private final TopicRepository topicRepository;
     private final CollectionRunRepository runRepository;
-    private final CollectionRunItemRepository runItemRepository;
-    private final CollectionRunAsyncService runAsyncService;
-    private final CollectionResultWriter resultWriter;
+    private final CollectionRunDeliveryService delivery;
 
     @Transactional
     public CollectionRunStartResult create(CollectionRunReqDTO.Create request,
@@ -82,28 +75,32 @@ public class CollectionRunCreator {
                     CollectionRunConverter.toAlreadyRunning(alreadyRunning.get()));
         }
 
-        validateNoTopicConflict(targetTopicIds);
+        var preparedDelivery = request.getDelivery() == null ? null : delivery.prepare(request.getDelivery());
 
         CollectionRun run = CollectionRun.builder()
-                .status(RunStatus.RUNNING)
+                .status(RunStatus.PENDING)
                 .triggerType(TriggerType.MANUAL)
                 .idempotencyKey(idempotencyKey)
                 .forceRefresh(Boolean.TRUE.equals(request.getForceRefresh()))
                 .llmPlan(llmPlan)
-                .startedAt(LocalDateTime.now(ApiTimeZone.ZONE))
+                .queuedAt(LocalDateTime.now(ApiTimeZone.ZONE))
                 .build();
 
-        targets.forEach(target -> run.addItem(CollectionRunItem.builder()
+        targets.forEach(target -> {
+            CollectionRunItem item = CollectionRunItem.builder()
                 .topic(target.getTopic())
                 .source(target.getSource())
-                .status(RunItemStatus.RUNNING)
-                .build()));
+                .status(RunItemStatus.PENDING)
+                .build();
+            item.captureTopicSnapshot();
+            run.addItem(item);
+        });
 
         CollectionRun saved = saveRun(run);
-        scheduleAfterCommit(saved.getId());
+        if (preparedDelivery != null) delivery.save(saved.getId(), targetTopicIds, preparedDelivery);
 
         return new CollectionRunStartResult(
-                GeneralSuccessCode.COLLECTION_STARTED,
+                GeneralSuccessCode.COLLECTION_QUEUED,
                 CollectionRunConverter.toCreated(saved, targetTopicIds, targets.size()));
     }
 
@@ -130,21 +127,23 @@ public class CollectionRunCreator {
         }
 
         CollectionRun run = CollectionRun.builder()
-                .status(RunStatus.RUNNING)
+                .status(RunStatus.PENDING)
                 .triggerType(TriggerType.SCHEDULED)
                 .forceRefresh(false)
                 .llmPlan(llmPlan)
-                .startedAt(now)
+                .queuedAt(now)
                 .build();
-        targets.forEach(target -> run.addItem(CollectionRunItem.builder()
+        targets.forEach(target -> {
+            CollectionRunItem item = CollectionRunItem.builder()
                 .topic(target.getTopic())
                 .source(target.getSource())
-                .status(RunItemStatus.RUNNING)
-                .build()));
+                .status(RunItemStatus.PENDING)
+                .build();
+            item.captureTopicSnapshot();
+            run.addItem(item);
+        });
 
         CollectionRun saved = saveRun(run);
-        lockedTopics.getFirst().recordCollectionStartedAt(now);
-        scheduleAfterCommit(saved.getId());
         return true;
     }
 
@@ -173,27 +172,6 @@ public class CollectionRunCreator {
         return exception;
     }
 
-    private void validateNoTopicConflict(List<Long> targetTopicIds) {
-        List<CollectionRun> conflicts =
-                runRepository.findInProgressByTopicIds(targetTopicIds, RunStatus.IN_PROGRESS_STATUSES);
-        if (conflicts.isEmpty()) {
-            return;
-        }
-
-        // conflictRunId는 단수라 가장 먼저 시작한 실행을 대표로 내보내고,
-        // conflictTopicIds는 충돌한 실행 전부에서 모은다.
-        CollectionRun conflict = conflicts.stream()
-                .min(Comparator.comparing(CollectionRun::getId))
-                .orElseThrow();
-        List<Long> conflictRunIds = conflicts.stream().map(CollectionRun::getId).toList();
-        List<Long> conflictTopicIds =
-                runItemRepository.findTopicIdsByRunIdInAndTopicIdIn(conflictRunIds, targetTopicIds);
-
-        throw new RunException(RunErrorCode.RUN_IN_PROGRESS, Map.of(
-                "conflictRunId", conflict.getId(),
-                "conflictTopicIds", conflictTopicIds));
-    }
-
     private List<Long> normalizeTopicIds(List<Long> topicIds) {
         if (topicIds == null || topicIds.isEmpty()) {
             return List.of();
@@ -209,30 +187,4 @@ public class CollectionRunCreator {
                         List::copyOf));
     }
 
-    private void scheduleAfterCommit(Long runId) {
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            dispatch(runId);
-            return;
-        }
-
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                dispatch(runId);
-            }
-        });
-    }
-
-    /**
-     * 실행 행은 이미 RUNNING으로 커밋돼 있다. 스레드풀이 작업을 거절하면 아무도 그 행을 닫지 않아
-     * 영원히 RUNNING으로 남고, 그 주제는 충돌 검사에 걸려 다시 실행할 수도 없게 된다.
-     */
-    private void dispatch(Long runId) {
-        try {
-            runAsyncService.execute(runId);
-        } catch (TaskRejectedException exception) {
-            log.error("수집 실행을 시작하지 못했다. 실행을 실패로 닫는다. runId={}", runId, exception);
-            resultWriter.failRun(runId);
-        }
-    }
 }

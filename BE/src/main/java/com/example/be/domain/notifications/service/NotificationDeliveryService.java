@@ -316,7 +316,8 @@ public class NotificationDeliveryService {
     }
 
     private void validateSendRequest(NotificationReqDTO.Send request) {
-        if (request == null || request.getGroupIds() == null || request.getGroupIds().isEmpty()) {
+        if (request == null || ((request.getGroupIds() == null || request.getGroupIds().isEmpty())
+                && (request.getRecipientIds() == null || request.getRecipientIds().isEmpty()))) {
             throw new NotificationException(NotificationErrorCode.DELIVERY_NO_TARGET,
                     Map.of("groupIds", List.of()));
         }

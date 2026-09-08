@@ -1,6 +1,8 @@
 package com.example.be.domain.reports.entity;
 
 import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.domain.reports.converter.ReportContentConverter;
+import com.example.be.domain.reports.converter.ReportCollectionContextConverter;
 import com.example.be.global.converter.LongListJsonConverter;
 import com.example.be.global.converter.YnBooleanConverter;
 import jakarta.persistence.Column;
@@ -62,6 +64,18 @@ public class NewsReport {
     @Column(name = "source_run_ids", nullable = false)
     private List<Long> sourceRunIds = List.of();
 
+    @Column(name = "source_report_count")
+    private Long sourceReportCount;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    public void hide(LocalDateTime now) {
+        if (deletedAt == null) {
+            deletedAt = now;
+        }
+    }
+
     public Long getRunId() {
         return run == null ? null : run.getId();
     }
@@ -72,6 +86,19 @@ public class NewsReport {
     @JdbcTypeCode(SqlTypes.CLOB)
     @Column(name = "markdown_body", nullable = false)
     private String markdownBody;
+
+    @Convert(converter = ReportContentConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "structured_content")
+    private ReportContent structuredContent;
+
+    @Builder.Default
+    @Convert(converter = ReportCollectionContextConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "collection_contexts", nullable = false)
+    private List<ReportCollectionContext> collectionContexts = List.of();
+
+    public void recordStructuredContent(ReportContent content) { this.structuredContent = content; }
 
     @Column(name = "model_name", nullable = false, length = MAX_MODEL_NAME_LENGTH)
     private String modelName;

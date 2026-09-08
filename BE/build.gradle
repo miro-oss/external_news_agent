@@ -62,6 +62,7 @@ tasks.named('test') {
     setEnvironment(isolatedEnvironment)
     systemProperty 'spring.config.location', 'classpath:/application.yml'
     systemProperty 'news.collection.scheduler.enabled', 'false'
+    systemProperty 'news.scheduling.enabled', 'false'
     systemProperty 'news.collection.reap-on-startup', 'false'
     systemProperty 'news.reports.daily.enabled', 'false'
     systemProperty 'news.agent.enabled', 'false'

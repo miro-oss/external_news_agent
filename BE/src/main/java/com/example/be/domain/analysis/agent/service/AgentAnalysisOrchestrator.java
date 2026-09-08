@@ -159,7 +159,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                                         AgentPlan plan,
                                         String idempotencyKey) {
         Article article = context.article();
-        Topic topic = article.getTopic();
+        Topic topic = context.topic();
         return new AgentAnalyzeRequest(
                 idempotencyKey,
                 plan,
@@ -647,7 +647,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 .orElseThrow();
         // 승격 호출은 해당 기사 자체만 분석한다. 이슈 멤버를 다시 보내 교차 비교를 재귀 실행하지 않는다.
         AnalysisContext promotedContext = new AnalysisContext(
-                context.runId(), article, context.plan());
+                context.runId(), article, context.plan(), null, false, context.topicOverride());
         String idempotencyKey = "run:" + context.runId()
                 + ":issue:" + context.issue().issueId()
                 + ":promotion:article:" + articleId;

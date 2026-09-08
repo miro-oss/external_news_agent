@@ -1,0 +1,220 @@
+.delivery-policy-card,
+.report-share-card { display: grid; gap: 1rem; padding: clamp(1.15rem, 2vw, 1.75rem); }
+.delivery-policy-card > .muted,
+.report-share-card > .muted { margin: 0; }
+.delivery-policy-card > button { justify-self: start; }
+.delivery-target-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.delivery-target-picker fieldset,
+.delivery-scope { min-width: 0; margin: 0; padding: 1.1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunken); }
+.delivery-target-picker .delivery-channel-options,
+.delivery-target-picker .delivery-unavailable { grid-column: 1 / -1; }
+.delivery-unavailable { padding: 1.1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunken); }
+.delivery-unavailable p { margin: 0 0 .6rem; font-size: .86rem; color: var(--fg-2); }
+.delivery-unavailable ul { margin: 0; padding: 0; list-style: none; }
+.delivery-unavailable li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; font-size: .82rem; }
+.delivery-unavailable li + li { margin-top: .4rem; }
+.delivery-unavailable span { overflow-wrap: anywhere; }
+.delivery-target-picker legend,
+.delivery-scope legend { font-size: .82rem; font-weight: 700; color: var(--fg-2); padding: 0 .35rem; }
+.delivery-choice-list { display: grid; align-content: start; gap: .6rem; max-height: 12rem; overflow: auto; }
+.delivery-choice-list label,
+.delivery-toggle,
+.delivery-scope label { display: flex; align-items: center; gap: .5rem; font-size: .86rem; color: var(--fg-2); }
+.delivery-scope label + label { margin-top: .6rem; }
+.delivery-choice-list input,
+.delivery-toggle input,
+.delivery-scope input { width: 1rem; height: 1rem; flex: none; }
+
+/* 공유 대상은 흰 카드 안에서 고르고, 선택한 항목에만 테마의 블루 톤을 더한다. */
+.report-share-heading { display: grid; gap: .4rem; }
+.report-share-card .report-share-heading h3,
+.report-share-card .report-share-heading p { margin: 0; }
+.report-share-card .report-share-heading p { font-size: .86rem; line-height: 1.6; }
+.report-share-card .delivery-target-picker { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+.report-share-card .delivery-channel-options { grid-column: auto; }
+.report-share-card .delivery-target-picker fieldset {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 10rem;
+  min-height: 0;
+  padding: .9rem;
+  border-color: color-mix(in srgb, var(--primary) 16%, var(--surface));
+  background: var(--surface);
+}
+.report-share-card .delivery-target-picker legend {
+  box-sizing: border-box;
+  flex: none;
+  float: left;
+  width: 100%;
+  margin: 0;
+  padding: .15rem .6rem .65rem;
+  color: var(--fg-3);
+  font-size: .8rem;
+  font-weight: 600;
+}
+.report-share-card .delivery-choice-list {
+  clear: both;
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  gap: .25rem;
+  padding: .15rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scroll-padding-block: .4rem;
+  scrollbar-width: thin;
+}
+.report-share-card .delivery-choice-list label {
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  margin: 0;
+  padding: .6rem;
+  gap: .65rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
+}
+.report-share-card .delivery-choice-list label:has(input:checked) { color: var(--primary-strong); background: var(--primary-weak); }
+.report-share-card .delivery-choice-name { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.report-share-card .delivery-choice-count { flex: none; font-size: .75rem; }
+.report-share-card .delivery-choice-list > p { margin: .6rem; font-size: .82rem; line-height: 1.6; }
+:is(.report-share-card .delivery-choice-list, .member-choice-list) input {
+  appearance: none;
+  display: grid;
+  place-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  box-shadow: none;
+  border: 1.5px solid color-mix(in srgb, var(--primary) 25%, var(--line));
+  border-radius: 7px;
+  background: var(--surface);
+  cursor: inherit;
+}
+:is(.report-share-card .delivery-choice-list, .member-choice-list) input::after {
+  content: '';
+  width: .3rem;
+  height: .55rem;
+  border: solid var(--surface);
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg);
+  opacity: 0;
+  transition: opacity var(--dur-1) var(--ease-out);
+}
+:is(.report-share-card .delivery-choice-list, .member-choice-list) input:checked { border-color: var(--primary); background: var(--primary); }
+:is(.report-share-card .delivery-choice-list, .member-choice-list) input:checked::after { opacity: 1; }
+:is(.report-share-card .delivery-choice-list, .member-choice-list) input:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.report-share-card .delivery-choice-list label:has(input:disabled) { opacity: .55; cursor: default; }
+@media (hover: hover) {
+  :is(.report-share-card .delivery-choice-list, .member-choice-list) label:has(input:not(:checked):not(:disabled)):hover {
+    background: color-mix(in srgb, var(--primary-weak) 55%, var(--surface));
+  }
+}
+@media (forced-colors: active) {
+  :is(.report-share-card .delivery-choice-list, .member-choice-list) input { appearance: auto; }
+  :is(.report-share-card .delivery-choice-list, .member-choice-list) input::after { content: none; }
+}
+.compact-list .recipient-row { grid-template-columns: minmax(0, 1fr) auto; }
+.recipient-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; }
+.recipient-name-row strong { overflow-wrap: anywhere; }
+.compact-list .recipient-name-row .recipient-channel-tag { padding: .15rem .4rem; border-radius: 999px; font-size: .65rem; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.compact-list .recipient-name-row .recipient-channel-tag.email { color: var(--success-strong); background: var(--success-weak); }
+.compact-list .recipient-name-row .recipient-channel-tag.telegram { color: var(--primary-strong); background: var(--primary-weak); }
+.recipient-actions { display: flex; align-items: center; gap: .25rem; }
+.recipient-actions [aria-expanded='true'] { color: var(--primary); background: var(--primary-weak); }
+.recipient-settings { display: grid; grid-column: 1 / -1; gap: 1.1rem; padding: 1.1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunken); animation: collapsible-in var(--dur-2) var(--ease-out); }
+.recipient-email-form { display: grid; gap: .4rem; }
+.recipient-email-form label,
+.telegram-connection-heading strong { font-size: .84rem; color: var(--fg-2); }
+.recipient-email-form label { font-weight: 700; }
+.recipient-email-fields { display: flex; align-items: center; gap: .5rem; }
+.recipient-email-fields input { flex: 1; min-width: 0; width: 100%; background: var(--surface); }
+.recipient-email-fields button { flex: none; }
+.recipient-email-form > p { margin: .2rem 0 0; font-size: .8rem; line-height: 1.6; }
+.telegram-connection { display: grid; gap: .6rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.telegram-connection-heading { display: flex; align-items: center; gap: .6rem; }
+.telegram-connection .connection-label { color: var(--success-strong); font-size: .78rem; }
+.telegram-connection .connection-label[data-waiting='true'] { color: var(--fg-3); }
+.telegram-connection p { margin: 0; font-size: .8rem; line-height: 1.65; }
+.telegram-connection > button { justify-self: start; }
+.telegram-connected { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
+.telegram-link-actions { display: grid; gap: .6rem; }
+.telegram-link-buttons { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.telegram-link-actions a { display: inline-flex; align-items: center; text-decoration: none; }
+.report-share-actions { display: flex; flex-wrap: wrap; gap: .65rem; }
+.report-message-preview,
+.auto-delivery-status { padding: 1.1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunken); }
+.report-message-preview p { white-space: pre-line; overflow-wrap: anywhere; color: var(--fg-2); line-height: 1.7; }
+.auto-delivery-status summary { cursor: pointer; font-weight: 700; color: var(--fg-2); }
+.auto-delivery-status li + li { margin-top: .6rem; }
+
+.group-recipient-picker { display: grid; gap: .4rem; min-width: 0; }
+.group-recipient-picker > span { color: var(--fg-2); font-size: .82rem; font-weight: 700; }
+.group-recipient-trigger {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  width: 100%;
+  height: 3rem;
+  padding: .75rem .9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-2);
+  font-size: .9rem;
+  font-weight: 500;
+  text-align: left;
+}
+.group-recipient-trigger:hover:not(:disabled) { background: var(--primary-weak); color: var(--primary-strong); }
+.group-recipient-value,
+.group-recipient-placeholder { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-recipient-placeholder { color: var(--fg-3); }
+.group-recipient-count { flex: none; color: var(--primary-strong); font-size: .8rem; font-weight: 650; }
+.group-recipient-trigger svg { flex: none; color: var(--fg-3); }
+.recipient-selection-dialog {
+  box-sizing: border-box;
+  width: min(32rem, calc(100vw - 2rem));
+  height: min(38rem, calc(100dvh - 2rem));
+  max-width: none;
+  max-height: none;
+  margin: auto;
+  padding: 1.5rem;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: var(--shadow-lg);
+}
+.recipient-selection-dialog[open] { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 1rem; animation: card-in var(--dur-2) var(--ease-out); }
+.recipient-selection-dialog::backdrop { background: rgba(25, 31, 40, .32); backdrop-filter: blur(3px); animation: backdrop-in var(--dur-2) var(--ease-out); }
+.recipient-selection-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.recipient-selection-heading h2 { margin: 0; font-size: 1.2rem; letter-spacing: -.03em; }
+.recipient-selection-heading p { margin: .35rem 0 0; color: var(--fg-3); font-size: .84rem; line-height: 1.6; }
+.recipient-selection-heading .recipient-selection-close { flex: none; width: 2rem; height: 2rem; padding: 0; border-radius: 50%; font-size: 1.5rem; line-height: 1; }
+.recipient-selection-search { display: grid; gap: .75rem; }
+.recipient-selection-meta { display: flex; justify-content: space-between; gap: 1rem; color: var(--fg-3); font-size: .8rem; }
+.recipient-selection-meta > div { display: flex; align-items: center; gap: .5rem; }
+.recipient-selection-meta > span { align-self: center; flex: none; color: var(--primary-strong); font-weight: 600; }
+.recipient-selection-meta .text-button { padding: .2rem .3rem; color: var(--primary-strong); font-size: .78rem; }
+.recipient-selection-meta .text-button:disabled { background: transparent; color: var(--fg-4); }
+.recipient-selection-list { min-height: 0; margin: 0 -.75rem; padding: .25rem; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.recipient-selection-list label { min-height: 3.25rem; padding: .65rem .75rem; gap: .9rem; }
+.recipient-selection-list label:has(input:checked) { background: color-mix(in srgb, var(--primary-weak) 65%, var(--surface)); }
+.recipient-selection-list label > span { flex: 1; }
+.recipient-selection-list label strong { font-size: .9rem; font-weight: 600; }
+.recipient-selection-empty { margin: 2.5rem 0; text-align: center; color: var(--fg-3); font-size: .86rem; }
+.recipient-selection-actions { display: flex; justify-content: flex-end; gap: .6rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+@media(max-width: 600px) {
+  .recipient-selection-dialog { width: calc(100vw - 1.5rem); height: min(38rem, calc(100dvh - 1.5rem)); padding: 1.25rem; }
+  .recipient-selection-actions > button { flex: 1; }
+}
+@media(max-width: 640px) {
+  .delivery-target-picker,
+  .report-share-card .delivery-target-picker { grid-template-columns: minmax(0, 1fr); }
+}

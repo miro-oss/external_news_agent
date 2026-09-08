@@ -354,7 +354,14 @@ public class AgentReportOrchestrator {
                 meta.credits(),
                 meta.mock() ? ReportStatus.MOCK : ReportStatus.GENERATED,
                 coverage.reflectedFindingIds(),
-                coverage.excludedFindingIds());
+                coverage.excludedFindingIds(),
+                new com.example.be.domain.reports.entity.ReportContent(response.executiveSummary(),
+                        response.importantEvents().stream().map(event ->
+                                new com.example.be.domain.reports.entity.ReportContent.ImportantEvent(
+                                        event.title(), event.summaryKo(), event.significance(), event.sourceFindingIds())).toList(),
+                        response.watchItems().stream().map(item ->
+                                new com.example.be.domain.reports.entity.ReportContent.WatchItem(
+                                        item.topic(), item.reason(), item.sourceFindingIds())).toList(), response.sourceNotes()));
     }
 
     private CoverageAppendResult appendCoverage(AgentReportResponse response,
@@ -495,7 +502,7 @@ public class AgentReportOrchestrator {
 
     private List<String> topics(CollectionRun run, List<Finding> findings) {
         List<String> fromItems = run == null || run.getItems() == null ? List.of() : run.getItems().stream()
-                .map(CollectionRunItem::getTopic)
+                .map(CollectionRunItem::collectionTopic)
                 .filter(topic -> topic != null && StringUtils.hasText(topic.getName()))
                 .map(topic -> topic.getName().trim())
                 .distinct()

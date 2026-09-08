@@ -214,13 +214,7 @@ body {
   white-space: nowrap;
 }
 
-/*
-  내비게이션도 세그먼트 컨트롤이다. 다만 여기 알약은 흰색이 아니라 짙은 색이다 — 반투명 유리판
-  위라서 흰 알약은 배경에 녹고, 지금 보고 있는 화면은 화면에서 가장 확실한 표시여야 한다.
-
-  트랙에 회색 면을 깔지 않는다. 내비게이션 줄 자체가 이미 한 겹 떠 있는 판이라, 그 위에 면을
-  하나 더 깔면 판이 둘로 보인다. 좁은 화면(600px 아래)에서는 로고와 줄이 나뉘므로 그때만 깐다.
-*/
+/* 내비게이션의 선택 면은 보고서 목록과 같은 회색을 사용한다. */
 /*
   .segmented(0,1,0)를 이기려고 클래스를 겹쳐 쓴다. 공통 규칙이 이 파일 아래쪽 "버튼·입력"에 있어서,
   한 클래스로 쓰면 순서에서 밀려 알약 모양 트랙과 각진 알약이 섞인다.
@@ -235,7 +229,7 @@ body {
 
 .segmented-nav .segmented-thumb {
   border-radius: 10px;
-  background: var(--fg);
+  background: var(--line-soft);
   box-shadow: none;
 }
 
@@ -248,18 +242,13 @@ body {
 }
 
 .segmented-nav .segmented-option:hover:not(.active) {
-  background: var(--bg);
+  background: var(--surface-sunken);
   color: var(--fg-2);
 }
 
-/*
-  손이 올라가도 흰 글자를 지킨다. 공통 hover 규칙(.segmented-option:hover:not(:disabled))이
-  글자를 --fg로 되돌리는데, 그 밑에는 짙은 알약이 깔려 있어서 지금 보고 있는 화면의 이름이
-  마우스를 올리는 순간 사라진다. 클래스를 겹쳐 세 개짜리 hover 규칙을 넘긴다.
-*/
 .segmented.segmented-nav .segmented-option.active,
 .segmented.segmented-nav .segmented-option.active:hover {
-  color: #fff;
+  color: var(--fg);
 }
 
 /*
@@ -273,6 +262,21 @@ main {
   box-sizing: border-box;
   margin: 0 auto;
   padding: clamp(1.5rem, 3.2vw, 2.25rem) var(--gutter) 6rem;
+}
+
+@keyframes page-enter {
+  from { opacity: .15; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app-shell > :is(.settings-page, .reports-page, .notifications-page) {
+    animation: page-enter 420ms cubic-bezier(.22, 1, .36, 1);
+  }
+
+  .app-shell > .reports-page:has(.modal-backdrop) {
+    animation-duration: 0s;
+  }
 }
 
 /* =============================================================================
@@ -920,9 +924,9 @@ tbody tr:hover td {
   white-space: nowrap;
 }
 
-.topic-signal-chip.burst {
-  background: color-mix(in srgb, var(--danger) 14%, var(--surface-sunken));
-  color: var(--danger-strong);
+.topic-signal-chip.is-emphasized {
+  background: var(--primary-weak);
+  color: var(--primary-strong);
 }
 
 .topic-signal-empty {
@@ -1837,59 +1841,6 @@ tbody tr:hover td {
   box-shadow: var(--shadow-sm);
 }
 
-/* 카드가 세로 flex라 뼈대 줄도 flex item이다. 기본 flex-shrink에 맡기면 높이가 눌린다. */
-.skeleton-line {
-  height: 0.72rem;
-  flex: none;
-  border-radius: 999px;
-}
-
-.skeleton-line-kicker {
-  width: 42%;
-  height: 0.6rem;
-  margin-bottom: 0.5rem;
-}
-
-.skeleton-line-title {
-  height: 1.05rem;
-}
-
-.skeleton-line-title-short {
-  width: 62%;
-  margin-bottom: 0.5rem;
-}
-
-.skeleton-line-body-short {
-  width: 78%;
-}
-
-/* 배지 줄은 카드 바닥에 붙는다. 실제 카드의 .article-meta가 margin-top: auto로 앉는 자리다. */
-.skeleton-badges {
-  display: flex;
-  gap: 0.35rem;
-  margin-top: auto;
-  padding-top: 1.1rem;
-}
-
-.skeleton-badges span {
-  width: 3.4rem;
-  height: 1.1rem;
-  border-radius: 6px;
-}
-
-.skeleton-line,
-.skeleton-badges span {
-  background: linear-gradient(100deg, #eef0f3 20%, #f7f8fa 40%, #eef0f3 60%);
-  background-size: 200% 100%;
-  animation: shimmer 1.3s infinite linear;
-}
-
-@keyframes shimmer {
-  to {
-    background-position-x: -200%;
-  }
-}
-
 .pagination {
   display: flex;
   align-items: center;
@@ -2645,6 +2596,8 @@ body.modal-open {
   padding: 5rem 2rem;
 }
 
+.reports-page > .page-header { margin-bottom: 1.4rem; }
+
 .empty-mark {
   margin-bottom: 0.5rem;
   color: var(--fg-4);
@@ -2665,6 +2618,41 @@ body.modal-open {
   margin-bottom: clamp(1rem, 2vw, 1.35rem);
 }
 
+.segmented.report-scope-tabs {
+  gap: 1.25rem;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.report-scope-tabs .segmented-thumb {
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.report-scope-tabs .segmented-thumb::after {
+  position: absolute;
+  right: 0.25rem;
+  bottom: 0;
+  left: 0.25rem;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--primary);
+  content: '';
+}
+
+.report-scope-tabs .segmented-option {
+  padding: 0.5rem 0.25rem 0.8rem;
+  border-radius: 0;
+  font-size: 0.94rem;
+}
+
+.report-scope-tabs .segmented-option.active,
+.report-scope-tabs .segmented-option.active:hover {
+  color: var(--fg);
+}
+
 .report-scope-hint {
   margin: 0;
   color: var(--fg-3);
@@ -2673,29 +2661,41 @@ body.modal-open {
 
 .report-workspace {
   display: grid;
-  grid-template-columns: minmax(230px, 0.32fr) minmax(0, 1fr);
-  min-height: 620px;
-  overflow: hidden;
+  grid-template-columns: clamp(230px, 22vw, 280px) minmax(0, 1fr);
+  align-items: start;
+  gap: 0;
   border-radius: var(--radius);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--primary-weak) 45%, var(--surface));
   box-shadow: var(--shadow-sm);
 }
 
 .report-list {
-  max-height: calc(100vh - 180px);
+  min-width: 0;
+  position: sticky;
+  top: 5.5rem;
+  padding: 1.5rem 0;
+}
+
+.report-list-scroll {
+  max-height: calc(100dvh - 13rem);
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 0.6rem;
-  background: var(--surface-sunken);
+  scrollbar-width: none;
+}
+
+/* 선택 면이 본문 경계에 닿도록 스크롤바 공간을 없앤다. 스크롤 동작은 유지한다. */
+.report-list-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .report-list-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 0.75rem 0.6rem;
+  padding: 0 1.5rem 1.25rem;
   color: var(--fg-3);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 600;
 }
 
@@ -2706,15 +2706,18 @@ body.modal-open {
 .report-list-item {
   display: flex;
   width: 100%;
+  min-height: 6.5rem;
   flex-direction: column;
   align-items: flex-start;
+  justify-content: center;
   gap: 0.35rem;
-  padding: 0.85rem 0.85rem;
-  border-radius: var(--radius-sm);
+  padding: 1rem 1.5rem;
+  border-radius: 0;
   background: transparent;
-  color: var(--fg);
+  color: var(--fg-2);
   text-align: left;
-  transition: background var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+  transition: background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
 }
 
 /* 목록 항목은 자리를 지키는 줄이다. 눌러서 크기가 변하면 옆줄까지 흔들려 보인다. */
@@ -2722,48 +2725,49 @@ body.modal-open {
   transform: none;
 }
 
-.report-list-item + .report-list-item {
-  margin-top: 0.2rem;
-}
-
 .report-list-item:hover:not(.active) {
-  background: var(--line-soft);
+  background: color-mix(in srgb, var(--primary-weak) 70%, var(--surface));
   color: var(--fg);
 }
 
 .report-list-item.active {
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  background: var(--primary-weak);
+  color: var(--primary-strong);
+  box-shadow: inset -3px 0 var(--primary);
+}
+
+.report-list-item:focus-visible {
+  outline-offset: -3px;
 }
 
 .report-list-item strong {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
   font-size: 0.9rem;
-  font-weight: 700;
-  line-height: 1.45;
+  font-weight: 600;
+  line-height: 1.5;
   letter-spacing: -0.02em;
 }
 
-.report-list-date,
-.report-list-meta {
+.report-list-item.active strong {
+  font-weight: 700;
+}
+
+.report-list-date {
   color: var(--fg-3);
   font-size: 0.74rem;
-  font-weight: 500;
-}
-
-.report-list-meta {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.report-list-meta em {
-  color: var(--danger);
-  font-style: normal;
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .report-detail-shell {
   min-width: 0;
   margin: 0;
+  padding: 1.5rem clamp(2rem, 3.5vw, 3.5rem);
+  border-radius: 0 var(--radius) var(--radius) 0;
   background: var(--surface);
 }
 
@@ -2775,10 +2779,22 @@ body.modal-open {
 .report-document {
   max-width: 860px;
   margin: 0 auto;
-  padding: 3rem clamp(1.5rem, 5vw, 3.5rem) 5rem;
+  padding: 0;
+}
+
+@keyframes report-document-in {
+  from { opacity: .25; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .report-document-enter {
+    animation: report-document-in var(--dur-2) var(--ease-out);
+  }
 }
 
 .report-document-header {
+  padding-top: 1rem;
   padding-bottom: 1.75rem;
   border-bottom: 1px solid var(--line);
 }
@@ -2795,6 +2811,32 @@ body.modal-open {
   color: var(--fg-3);
   font-size: 0.84rem;
 }
+
+.report-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.report-title-row h2 { min-width: 0; word-break: keep-all; overflow-wrap: anywhere; }
+.report-title-row .report-delete-button { display: inline-flex; align-items: center; flex: none; gap: .3rem; margin-top: .3rem; padding: .4rem; color: var(--fg-3); font-size: .76rem; }
+.report-delete-button:hover:not(:disabled) { color: var(--danger-strong); background: var(--danger-weak); }
+.report-delete-confirm { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .85rem; margin: .5rem 0 1rem; padding: 1rem; border-radius: var(--radius-sm); background: var(--surface-sunken); }
+.report-delete-confirm strong { color: var(--fg-2); font-size: .86rem; }
+.report-delete-confirm p { margin: .3rem 0 0; color: var(--fg-3); font-size: .78rem; line-height: 1.6; }
+.report-delete-confirm .field-error { flex-basis: 100%; color: var(--danger-strong); }
+.report-delete-actions { display: flex; gap: .5rem; }
+.report-delete-actions button { padding: .55rem .85rem; font-size: .8rem; }
+.report-collection-context { display: grid; gap: .45rem; margin-top: 1.1rem; }
+.report-collection-context p { display: flex; align-items: baseline; gap: .65rem; margin: 0; font-size: .82rem; line-height: 1.65; }
+.report-collection-context p > span:first-child { flex: none; min-width: 3.75rem; color: var(--fg-3); }
+.report-collection-context strong { color: var(--primary-strong); font-weight: 650; overflow-wrap: anywhere; }
+.report-context-keywords { color: var(--fg-2); overflow-wrap: anywhere; }
+.report-collection-context .report-context-unavailable { color: var(--fg-3); font-size: .76rem; }
+.report-daily-summary { margin: 1.1rem 0 0; color: var(--fg-2); font-size: .86rem; line-height: 1.7; }
+.report-daily-summary .report-daily-date { display: block; margin-bottom: .55rem; color: var(--fg-3); font-size: .78rem; }
+.report-daily-summary strong { color: var(--primary-strong); }
+.report-daily-summary p { margin: .4rem 0 0; }
+.report-daily-topics,
+.report-daily-keywords { display: flex; align-items: baseline; gap: .65rem; overflow-wrap: anywhere; }
+.report-daily-topics > span,
+.report-daily-keywords > span { flex: none; color: var(--fg-3); font-size: .8rem; }
+.report-daily-summary .report-daily-keywords { font-size: .82rem; }
 
 .report-ai-context {
   display: flex;
@@ -2845,7 +2887,7 @@ body.modal-open {
 
 .report-stat-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.5rem;
   margin-top: 1.5rem;
 }
@@ -2876,49 +2918,34 @@ body.modal-open {
   color: var(--danger);
 }
 
-.report-perspective {
-  margin: 1.5rem 0;
-  padding: 1.15rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
+.report-finding-controls {
+  display: grid;
+  gap: .75rem;
+  margin: 1rem 0 1.25rem;
 }
 
-.report-perspective-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.report-perspective-heading h3 {
+.report-finding-controls > .report-perspective,
+.report-finding-controls > .report-finding-filter {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  align-items: center;
+  gap: .75rem;
   margin: 0;
-  font-size: 0.95rem;
-  letter-spacing: -0.02em;
 }
 
-.report-perspective-heading p,
-.report-perspective-note {
-  margin: 0.25rem 0 0;
-  color: var(--fg-3);
-  font-size: 0.76rem;
-  line-height: 1.55;
+.report-finding-controls .segmented {
+  display: flex;
+  min-width: 0;
 }
 
-.report-perspective-heading > span {
-  flex-shrink: 0;
-  padding: 0.22rem 0.5rem;
-  border-radius: 999px;
-  background: var(--success-weak);
-  color: var(--success-strong);
-  font-size: 0.7rem;
-  font-weight: 700;
+.report-finding-controls .segmented-option {
+  flex: 1;
+  min-width: 0;
 }
 
 /* 네 관점은 대등하다. 폭을 균등하게 나누고, "기본"은 라벨 옆에 작은 표식으로만 붙인다. */
 .report-perspective-options {
   display: flex;
-  margin-top: 0.85rem;
 }
 
 .report-perspective-options .segmented-option {
@@ -2982,7 +3009,7 @@ body.modal-open {
 }
 
 .report-findings {
-  margin: 0;
+  margin: 1.5rem 0 0;
   padding-top: 1.75rem;
   border-top: 1px solid var(--line);
 }
@@ -2999,29 +3026,22 @@ body.modal-open {
   font-weight: 600;
 }
 
-/*
-  관점 셀렉트와 "전체 보기" 버튼이 빠지고 민감도 하나만 남았다. 셋을 담던 회색 바도 걷어낸다 —
-  이제 라벨 하나와 세그먼트 하나뿐이라, 면을 깔면 알약이 놓일 회색 트랙과 색이 겹친다.
-*/
-.report-finding-filter {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.7rem;
-  margin: 0.9rem 0 1rem;
-}
-
 .finding-list {
   display: grid;
   gap: 0.75rem;
 }
 
+.report-issue-pagination { gap: .65rem; margin-top: 1.25rem; }
+.report-issue-pagination button { padding: .55rem .85rem; font-size: .82rem; }
+.report-issue-pagination > span { min-width: 3.25rem; text-align: center; font-variant-numeric: tabular-nums; }
+.report-issue-pagination strong { color: var(--fg); }
+.finding-list .issue-card-primary { scroll-margin-top: 7.5rem; }
+
 .issue-card {
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: var(--surface);
-  box-shadow: 0 3px 12px rgba(25, 31, 40, 0.04);
+  box-shadow: var(--shadow-sm);
 }
 
 .issue-card-primary {
@@ -3041,6 +3061,7 @@ body.modal-open {
 
 .issue-card-topline {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
   color: var(--fg-3);
@@ -3496,7 +3517,17 @@ body.modal-open {
    ============================================================================= */
 .notifications-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.5rem;
+}
+
+.notifications-page > .page-header {
+  margin-bottom: 0;
+}
+
+.notifications-page > section,
+.notification-split > .notification-card-stack {
+  margin-bottom: 0;
 }
 
 .notification-section,
@@ -3509,6 +3540,7 @@ body.modal-open {
 
 .notification-section,
 .notification-card-stack {
+  min-width: 0;
   padding: clamp(1.15rem, 2vw, 1.75rem);
 }
 
@@ -3517,6 +3549,23 @@ body.modal-open {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
+}
+
+.notification-split {
+  align-items: start;
+}
+
+.notification-panel-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0;
+}
+
+.notification-panel-heading > span {
+  color: var(--fg-3);
+  font-size: 0.82rem;
+  font-weight: 500;
 }
 
 .channel-card {
@@ -3586,12 +3635,17 @@ body.modal-open {
   justify-self: start;
 }
 
-.notification-card-stack {
-  align-content: start;
+.notification-split > .notification-card-stack {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 1rem;
 }
 
 .notification-form {
-  display: grid;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 21.25rem;
   gap: 1rem;
   margin: 1rem 0 1.25rem;
   padding: 1.1rem;
@@ -3618,6 +3672,10 @@ body.modal-open {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
+}
+
+.recipient-create-form .notification-form-grid {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .form-field-wide {
@@ -3650,40 +3708,62 @@ body.modal-open {
 }
 
 .notification-form > button {
-  justify-self: start;
+  align-self: flex-start;
+  margin-top: auto;
 }
 
-.member-picker {
+.member-choice-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.55rem;
-  margin: 0;
-  padding: 0.8rem;
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  align-content: start;
+  gap: .4rem;
+  overflow: auto;
+  padding: .3rem;
 }
 
-.member-picker legend {
-  padding: 0 0.25rem;
-  color: var(--fg-2);
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
-.member-picker label {
+.member-choice-list label {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  font-weight: 600;
-}
-
-.member-picker input { width: auto; }
-
-.member-picker-empty {
+  gap: .55rem;
+  max-width: 100%;
+  min-height: 2.75rem;
   margin: 0;
-  color: var(--fg-3);
-  font-size: 0.82rem;
+  padding: .6rem .75rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
 }
+
+.member-choice-list label > span { min-width: 0; overflow-wrap: anywhere; }
+.member-choice-list label:has(input:checked) { color: var(--primary-strong); background: var(--primary-weak); }
+.member-choice-list label:has(input:disabled) { cursor: default; opacity: .55; }
+
+.notification-saved-list { align-self: stretch; border-top: 1px solid var(--line); }
+.notification-saved-list > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  min-height: 2.75rem;
+  padding: .1rem .25rem;
+  border-radius: var(--radius-xs);
+  list-style: none;
+  color: var(--fg-2);
+  font-size: .86rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
+}
+.notification-saved-list > summary::-webkit-details-marker { display: none; }
+.notification-saved-list > summary:hover { color: var(--primary-strong); background: var(--surface-sunken); }
+.notification-saved-list > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.notification-saved-list > summary svg { flex: none; color: var(--fg-3); transition: transform var(--dur-2) var(--ease-out); }
+.notification-saved-list[open] > summary svg { transform: rotate(180deg); }
+.notification-saved-list > .compact-list { max-height: 28rem; overflow: auto; padding: .25rem; }
+.notification-saved-list > .compact-list > article:first-child { border-top: 0; }
+.notification-saved-list .notification-list-empty { margin: .4rem 0 .6rem; color: var(--fg-3); font-size: .84rem; line-height: 1.6; }
 
 .compact-list {
   display: grid;
@@ -3697,6 +3777,10 @@ body.modal-open {
   gap: 0.75rem;
   padding: 0.8rem 0;
   border-top: 1px solid var(--line);
+}
+
+.notification-card-stack .compact-list article:last-child {
+  padding-bottom: 0;
 }
 
 .group-list article { grid-template-columns: minmax(0, 1fr) auto; }
@@ -3781,11 +3865,39 @@ body.modal-open {
 }
 
 .delivery-summary span {
-  padding: 0.55rem 0.75rem;
-  border-radius: 10px;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
   background: var(--bg);
   color: var(--fg-2);
-  font-size: 0.82rem;
+  font-size: 0.74rem;
+}
+
+/* 발송 이력에서만 같은 상태 색을 쓴다. 요약은 옅은 면, 작은 표 배지는 진한 면으로 구분한다. */
+.notifications-page .delivery-log-shell .sent {
+  --delivery-state-color: var(--success-strong);
+  --delivery-state-background: var(--success-weak);
+}
+
+.notifications-page .delivery-log-shell .failed {
+  --delivery-state-color: var(--danger-strong);
+  --delivery-state-background: var(--danger-weak);
+}
+
+.notifications-page .delivery-log-shell .skipped {
+  --delivery-state-color: var(--warning-strong);
+  --delivery-state-background: var(--warning-weak);
+}
+
+.notifications-page .delivery-summary > span {
+  background: var(--delivery-state-background, var(--bg));
+  color: var(--delivery-state-color, var(--fg-2));
+}
+
+.notifications-page .delivery-table .delivery-status {
+  flex-shrink: 0;
+  background: var(--delivery-state-color, var(--fg-2));
+  color: var(--surface);
+  white-space: nowrap;
 }
 
 .delivery-table {
@@ -3937,6 +4049,14 @@ body.modal-open {
 }
 
 /* 열 하나가 400px 아래로 내려가면 주제 폼의 소스 체크리스트부터 눌린다. 그 전에 한 단으로 편다. */
+@media (max-width: 1100px) {
+  .report-finding-controls > .report-perspective,
+  .report-finding-controls > .report-finding-filter {
+    grid-template-columns: minmax(0, 1fr);
+    gap: .5rem;
+  }
+}
+
 @media (max-width: 900px) {
   .settings-top-row {
     grid-template-columns: minmax(0, 1fr);
@@ -3946,6 +4066,9 @@ body.modal-open {
   .report-delivery-controls {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .notification-form { min-height: 0; }
+  .notification-saved-list { align-self: stretch; }
 }
 
 @media (max-width: 860px) {
@@ -3980,8 +4103,7 @@ body.modal-open {
     gap: 0.75rem;
   }
 
-  .filter-bar,
-  .report-finding-filter {
+  .filter-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -4063,6 +4185,9 @@ body.modal-open {
 
   .report-workspace {
     grid-template-columns: 1fr;
+    gap: 1.5rem;
+    background: transparent;
+    box-shadow: none;
   }
 
   /*
@@ -4071,11 +4196,21 @@ body.modal-open {
     넘길 때마다 매번 걸려서 오히려 답답하다.
   */
   .report-list {
+    position: static;
+  }
+
+  .report-list-scroll {
     display: flex;
     max-height: none;
     overflow-x: auto;
+    scrollbar-width: auto;
+    scrollbar-color: var(--fg-4) transparent;
     scroll-snap-type: x proximity;
     scroll-padding-left: 0.6rem;
+  }
+
+  .report-list-scroll::-webkit-scrollbar {
+    display: block;
   }
 
   .report-list-heading {
@@ -4084,7 +4219,22 @@ body.modal-open {
 
   .report-list-item {
     min-width: 210px;
+    min-height: 0;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    padding: 0.85rem;
+    border-radius: var(--radius-sm);
     scroll-snap-align: start;
+  }
+
+  .report-list-item.active {
+    border-radius: var(--radius-sm);
+    background: var(--primary-weak);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent);
+  }
+
+  .report-list-item:hover:not(.active) {
+    background: var(--line-soft);
   }
 
   .report-list-item + .report-list-item {
@@ -4093,8 +4243,15 @@ body.modal-open {
   }
 
   .report-document {
-    padding-right: 1.25rem;
-    padding-left: 1.25rem;
+    padding: 0;
+  }
+
+  .report-detail-shell,
+  .report-list {
+    padding: 1.5rem;
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
   }
 
   .report-stat-row {
@@ -4102,12 +4259,12 @@ body.modal-open {
   }
 
   /* 관점 라벨 넷이 한 줄에 들어가지 않는다. 두 칸씩 접고 트랙 모서리를 면에 맞춘다. */
-  .report-perspective-options {
+  .report-finding-controls .segmented {
     flex-wrap: wrap;
     border-radius: var(--radius-sm);
   }
 
-  .report-perspective-options .segmented-option {
+  .report-finding-controls .segmented-option {
     flex: 1 0 calc(50% - 0.15rem);
   }
 
@@ -4171,7 +4328,6 @@ body.modal-open {
   }
 
   .notification-form-grid,
-  .report-finding-filter,
   .sensitivity-axis-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -4210,7 +4366,7 @@ body.modal-open {
     gap: 0.25rem;
     padding: 0.25rem;
     border-radius: 13px;
-    background: var(--bg);
+    background: transparent;
   }
 
   /* 링크마다 글자 수가 달라도(알림 관리 · 리포트 · 수집 설정) 칸은 같아야 묶음으로 읽힌다. */
@@ -4220,11 +4376,10 @@ body.modal-open {
   }
 
   .segmented-nav .segmented-option:hover:not(.active) {
-    background: var(--line);
+    background: var(--surface-sunken);
   }
 
   .report-ai-context,
-  .report-perspective-heading,
   .report-section-heading {
     align-items: flex-start;
     flex-direction: column;
@@ -4248,3 +4403,54 @@ body.modal-open {
     align-items: stretch;
   }
 }
+
+/* 보고서의 읽기 구획은 수집 설정의 card/collapsible 토큰을 그대로 따른다. */
+.report-reading-content { display: grid; gap: 1.25rem; margin-top: 1.25rem; }
+.report-reading-content > .card,
+.report-reading-content > .collapsible { margin: 0; }
+.report-sharing-section {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
+.report-delivery-panel.report-share-card {
+  margin: 0;
+  padding: 1.5rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.report-reading-content h3 { margin: 0 0 1rem; font-size: 1.1rem; letter-spacing: -0.03em; }
+.report-reading-content h4 { margin: 0 0 0.65rem; font-size: 1rem; line-height: 1.5; }
+.report-reading-content p,
+.report-reading-content li { color: var(--fg-2); font-size: 0.92rem; line-height: 1.8; }
+.report-reading-content ul { margin: 0; padding-left: 1.2rem; }
+.report-summary-card li + li { margin-top: 0.7rem; }
+.report-event-list { display: grid; gap: 1rem; }
+.report-event-card { min-width: 0; padding: 1.5rem; border-radius: var(--radius); background: var(--surface-sunken); }
+.report-event-card + .report-event-card { margin-top: 1rem; }
+.report-reading-content > .collapsible > .collapsible-body > .report-event-card {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.report-event-list > .report-event-card + .report-event-card { margin-top: 0; }
+.report-event-card p { margin: 0; }
+.report-event-card .report-event-significance { margin-top: 0.65rem; }
+.report-event-sources { display: grid; gap: 0.3rem; margin-top: 0.8rem; }
+.report-event-sources:empty { display: none; }
+.report-event-sources .text-button { padding: 0.2rem 0; text-align: left; white-space: normal; overflow-wrap: anywhere; font-size: 0.8rem; }
+.report-markdown-text a { color: var(--primary-strong); overflow-wrap: anywhere; }
+.report-markdown-text p + p { margin-top: 0.75rem; }
+.report-issue-description { margin: 0.25rem 0 0; color: var(--fg-3); font-size: 0.8rem; font-weight: 500; }
+.issue-card-topline .issue-category-tag { display: inline-flex; align-items: center; flex: none; white-space: nowrap; padding: .2rem .55rem; border-radius: 999px; font-size: .72rem; line-height: 1.4; font-weight: 650; color: var(--fg-2); background: var(--surface-sunken); }
+.issue-card-topline .category-supply { color: var(--success-strong); background: var(--success-weak); }
+.issue-card-topline .category-company { color: var(--primary-strong); background: var(--primary-weak); }
+.issue-card-topline .category-policy { color: var(--warning-strong); background: var(--warning-weak); }
+.issue-card-topline .category-technology { color: #6550a2; background: #f0edfb; }
+.issue-card-topline .category-market { color: #88602c; background: #f8f0e3; }
+.issue-tone-explanation { color: var(--fg-3); font-size: 0.76rem; line-height: 1.65; }
+.issue-tone-explanation summary { cursor: pointer; }
+.collection-keyword-match { padding: 0; background: var(--warning-weak); color: inherit; font-weight: 700; box-shadow: inset 0 -2px var(--warning); }
+.sentence-list p.highlighted .collection-keyword-match { background: var(--warning-weak); }

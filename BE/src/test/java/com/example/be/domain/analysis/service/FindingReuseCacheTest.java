@@ -169,6 +169,21 @@ class FindingReuseCacheTest {
     }
 
     @Test
+    void hashesQueuedTopicInsteadOfLiveTopicAndPreservesItForMemberAnalysis() {
+        Article article = article(10L, "본문");
+        Topic queued = Topic.builder().name("접수한 주제").queryText("HBM4")
+                .requiredKeywords(List.of("HBM4")).optionalKeywords(List.of()).excludedKeywords(List.of()).build();
+        AnalysisContext queuedContext = new AnalysisContext(42L, article, AgentPlan.FREE, null, false, queued);
+        String snapshotHash = FindingReuseCache.inputHash(queuedContext);
+        assertTrue(!snapshotHash.equals(FindingReuseCache.inputHash(article)));
+
+        article.getTopic().update("변경한 주제", "DRAM", List.of("DRAM"), List.of(), List.of(), 100, 1440, true);
+
+        assertEquals(snapshotHash, FindingReuseCache.inputHash(queuedContext));
+        assertEquals(queued, queuedContext.withArticle(article(11L, "멤버 기사")).topic());
+    }
+
+    @Test
     void keepsIssueSnapshotOutOfPrimaryFindingHash() {
         Article representative = article(10L, "대표 본문");
         Article originalMember = article(11L, "양산 일정은 9월이다.");

@@ -29,6 +29,19 @@ public interface CollectionRunArticleRepository
             """)
     List<Long> findArticleIdsByRunId(@Param("runId") Long runId);
 
+    /** 보고서 기사 통계는 finding이나 주제×소스 행이 아닌 고유 기사 관측으로 계산한다. */
+    @Query("""
+            SELECT observation.article.id AS articleId, observation.changeType AS changeType
+            FROM CollectionRunArticle observation
+            WHERE observation.run.id IN :runIds
+            """)
+    List<ReportArticleObservation> findReportArticleObservations(@Param("runIds") Collection<Long> runIds);
+
+    interface ReportArticleObservation {
+        Long getArticleId();
+        ChangeType getChangeType();
+    }
+
     /**
      * 한 기사가 실행을 거치며 어떻게 바뀌어 왔는지. 최신 관측이 마지막이다.
      */

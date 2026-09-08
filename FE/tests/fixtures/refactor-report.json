@@ -1,0 +1,442 @@
+{
+  "report": {
+    "id": 17,
+    "runId": 42,
+    "reportScope": "RUN",
+    "reportDate": null,
+    "sourceRunIds": [
+      42
+    ],
+    "title": "HBM 시장 · 2026-09-08 10:00 리포트",
+    "generatedAt": "2026-09-08T10:00:00+09:00",
+    "modelName": "fixture",
+    "promptVersion": "fixture",
+    "llmProvider": null,
+    "markdownBody": "# 기존 보고서\n\n## 경영진 요약\n- HBM4 공급 준비가 진행되고 있다.\n\n## 중요 이벤트\n### HBM4 공급 준비\n첨단 패키징 투자가 검토 중이다.\n\n### 데이터센터 공급망\n관련 업계가 계획을 확인하고 있다.\n\n## 관찰 항목\n- HBM4 양산 일정 확인\n\n## 수집 및 출처 참고\n- 수집 또는 분석 제외 사항이 없습니다.\n\n## 기타 분석 이슈\n- 장비 공급 일정",
+    "findings": [
+      {
+        "id": 501,
+        "articleId": 1024,
+        "runId": 42,
+        "issueId": 88,
+        "issue": {
+          "id": 88,
+          "title": "HBM4 공급 준비와 첨단 패키징 투자",
+          "summary": "반도체 기업이 HBM4 공급 확대에 맞춰 첨단 패키징 생산 준비를 진행하고 있다.",
+          "lastSeenAt": "2026-09-08T09:55:00+09:00",
+          "articleCount": 3,
+          "publisherCount": 2,
+          "independentContentCount": 2,
+          "topicName": "HBM 시장",
+          "entities": [
+            "HBM4"
+          ]
+        },
+        "articleTitle": "HBM4 공급 준비와 첨단 패키징 투자",
+        "canonicalUrl": "https://example.invalid/news/0",
+        "changeType": "NEW",
+        "summary": "반도체 기업이 HBM4 공급 확대에 맞춰 첨단 패키징 생산 준비를 진행하고 있다.",
+        "keyPoints": [
+          {
+            "text": "반도체 기업이 HBM4 공급 확대에 맞춰 첨단 패키징 생산 준비를 진행하고 있다.",
+            "evidence": [
+              0
+            ],
+            "groundedness": "grounded",
+            "groundingReason": "원문에서 확인했습니다.",
+            "claimType": "FACT",
+            "attributedTo": null
+          }
+        ],
+        "intent": null,
+        "sentiment": "positive",
+        "sensitivity": {
+          "score": 82,
+          "level": "high",
+          "axes": {
+            "customerMove": {
+              "score": 2,
+              "evidenceSentenceIds": [
+                0
+              ]
+            },
+            "dealSignal": {
+              "score": 2,
+              "evidenceSentenceIds": [
+                0
+              ]
+            },
+            "competitorThreat": {
+              "score": 2,
+              "evidenceSentenceIds": [
+                0
+              ]
+            },
+            "industryShift": {
+              "score": 2,
+              "evidenceSentenceIds": [
+                0
+              ]
+            }
+          }
+        },
+        "relevance": "important",
+        "category": "제품/공정",
+        "perspectiveTags": [
+          {
+            "audience": "CHIP_MAKER",
+            "relevance": "high",
+            "hook": "HBM4 생산 계획과 첨단 패키징 대응에 영향을 줍니다.",
+            "evidenceSentenceIds": [
+              0
+            ]
+          },
+          {
+            "audience": "EQUIPMENT_MAKER",
+            "relevance": "medium",
+            "hook": "첨단 패키징 장비의 준비 일정을 확인할 필요가 있습니다.",
+            "evidenceSentenceIds": [
+              0
+            ]
+          }
+        ],
+        "investigation": {
+          "status": "FAILED",
+          "stepCount": 1,
+          "addedArticleCount": 0,
+          "addedEvidenceCount": 0,
+          "reason": "추가 조사 실패",
+          "rejectionReason": null
+        }
+      },
+      {
+        "id": 502,
+        "articleId": 1025,
+        "runId": 42,
+        "issueId": 89,
+        "issue": {
+          "id": 89,
+          "title": "AI 데이터센터 투자 계획 발표",
+          "summary": "기업이 AI 데이터센터 투자 계획을 발표하고 공급망을 점검하고 있다.",
+          "lastSeenAt": "2026-09-08T09:55:00+09:00",
+          "articleCount": 3,
+          "publisherCount": 2,
+          "independentContentCount": 2,
+          "topicName": "HBM 시장",
+          "entities": [
+            "HBM4"
+          ]
+        },
+        "articleTitle": "AI 데이터센터 투자 계획 발표",
+        "canonicalUrl": "https://example.invalid/news/1",
+        "changeType": "NEW",
+        "summary": "기업이 AI 데이터센터 투자 계획을 발표하고 공급망을 점검하고 있다.",
+        "keyPoints": [
+          {
+            "text": "기업이 AI 데이터센터 투자 계획을 발표하고 공급망을 점검하고 있다.",
+            "evidence": [
+              0
+            ],
+            "groundedness": "grounded",
+            "groundingReason": "원문에서 확인했습니다.",
+            "claimType": "FACT",
+            "attributedTo": null
+          }
+        ],
+        "intent": null,
+        "sentiment": "positive",
+        "sensitivity": {
+          "score": 82,
+          "level": "high",
+          "axes": {
+            "customerMove": {
+              "score": 2,
+              "evidenceSentenceIds": [
+                0
+              ]
+            },
+            "dealSignal": {
+              "score": 2,
+              "evidenceSentenceIds": [
+                0
+              ]
+            },
+            "competitorThreat": {
+              "score": 2,
+              "evidenceSentenceIds": [
+                0
+              ]
+            },
+            "industryShift": {
+              "score": 2,
+              "evidenceSentenceIds": [
+                0
+              ]
+            }
+          }
+        },
+        "relevance": "important",
+        "category": "제품/공정",
+        "perspectiveTags": [
+          {
+            "audience": "CHIP_MAKER",
+            "relevance": "high",
+            "hook": "HBM4 생산 계획과 첨단 패키징 대응에 영향을 줍니다.",
+            "evidenceSentenceIds": [
+              0
+            ]
+          },
+          {
+            "audience": "EQUIPMENT_MAKER",
+            "relevance": "medium",
+            "hook": "첨단 패키징 장비의 준비 일정을 확인할 필요가 있습니다.",
+            "evidenceSentenceIds": [
+              0
+            ]
+          }
+        ],
+        "investigation": {
+          "status": "FAILED",
+          "stepCount": 1,
+          "addedArticleCount": 0,
+          "addedEvidenceCount": 0,
+          "reason": "추가 조사 실패",
+          "rejectionReason": null
+        }
+      },
+      {
+        "id": 503,
+        "articleId": 1026,
+        "runId": 42,
+        "issueId": 90,
+        "issue": {
+          "id": 90,
+          "title": "장비 업계의 공급 일정 확인",
+          "summary": "장비 업계가 반도체 생산 일정에 맞춰 납품 계획을 검토하고 있다.",
+          "lastSeenAt": "2026-09-08T09:55:00+09:00",
+          "articleCount": 3,
+          "publisherCount": 2,
+          "independentContentCount": 2,
+          "topicName": "HBM 시장",
+          "entities": [
+            "HBM4"
+          ]
+        },
+        "articleTitle": "장비 업계의 공급 일정 확인",
+        "canonicalUrl": "https://example.invalid/news/2",
+        "changeType": "NEW",
+        "summary": "장비 업계가 반도체 생산 일정에 맞춰 납품 계획을 검토하고 있다.",
+        "keyPoints": [
+          {
+            "text": "장비 업계가 반도체 생산 일정에 맞춰 납품 계획을 검토하고 있다.",
+            "evidence": [
+              0
+            ],
+            "groundedness": "grounded",
+            "groundingReason": "원문에서 확인했습니다.",
+            "claimType": "FACT",
+            "attributedTo": null
+          }
+        ],
+        "intent": null,
+        "sentiment": "positive",
+        "sensitivity": {
+          "score": 82,
+          "level": "high",
+          "axes": {
+            "customerMove": {
+              "score": 2,
+              "evidenceSentenceIds": [
+                0
+              ]
+            },
+            "dealSignal": {
+              "score": 2,
+              "evidenceSentenceIds": [
+                0
+              ]
+            },
+            "competitorThreat": {
+              "score": 2,
+              "evidenceSentenceIds": [
+                0
+              ]
+            },
+            "industryShift": {
+              "score": 2,
+              "evidenceSentenceIds": [
+                0
+              ]
+            }
+          }
+        },
+        "relevance": "important",
+        "category": "제품/공정",
+        "perspectiveTags": [
+          {
+            "audience": "CHIP_MAKER",
+            "relevance": "high",
+            "hook": "HBM4 생산 계획과 첨단 패키징 대응에 영향을 줍니다.",
+            "evidenceSentenceIds": [
+              0
+            ]
+          },
+          {
+            "audience": "EQUIPMENT_MAKER",
+            "relevance": "medium",
+            "hook": "첨단 패키징 장비의 준비 일정을 확인할 필요가 있습니다.",
+            "evidenceSentenceIds": [
+              0
+            ]
+          }
+        ],
+        "investigation": {
+          "status": "FAILED",
+          "stepCount": 1,
+          "addedArticleCount": 0,
+          "addedEvidenceCount": 0,
+          "reason": "추가 조사 실패",
+          "rejectionReason": null
+        }
+      }
+    ],
+    "summaryStats": {
+      "findingCount": 3,
+      "newCount": 3,
+      "updatedCount": 0,
+      "bySensitivityLevel": {
+        "high": 3
+      },
+      "byCategory": {
+        "제품/공정": 3
+      }
+    },
+    "articleStats": {
+      "totalCount": 12,
+      "newCount": 7,
+      "existingCount": 5
+    },
+    "structuredContent": {
+      "executiveSummary": [
+        "HBM4 공급 확대를 위한 생산 준비와 첨단 패키징 투자가 이어지고 있다.",
+        "AI 데이터센터 수요 변화에 따라 업계가 공급망 계획을 점검하고 있다."
+      ],
+      "importantEvents": [
+        {
+          "title": "HBM4 공급 준비와 첨단 패키징",
+          "summaryKo": "반도체 기업이 HBM4 공급 확대에 맞춰 첨단 패키징 생산 준비를 진행하고 있다.",
+          "significance": "계획이 확정되면 후속 장비 발주와 생산 일정에 영향을 줄 수 있다.",
+          "sourceFindingIds": [
+            501
+          ]
+        },
+        {
+          "title": "데이터센터 투자와 공급망 점검",
+          "summaryKo": "기업이 AI 데이터센터 투자 계획을 발표하고 공급망을 점검하고 있다.",
+          "significance": null,
+          "sourceFindingIds": [
+            502
+          ]
+        }
+      ],
+      "watchItems": [
+        {
+          "topic": "양산 일정과 발주 확정 여부",
+          "reason": "현재 발표된 준비 계획이 실제 발주로 이어지는지 확인한다.",
+          "sourceFindingIds": [
+            501
+          ]
+        }
+      ],
+      "sourceNotes": [
+        "수집 또는 분석 제외 사항이 없습니다."
+      ]
+    },
+    "collectionContexts": [
+      {
+        "runId": 42,
+        "topics": [
+          {
+            "topicId": 1,
+            "topicName": "HBM 시장",
+            "queryText": "HBM 반도체",
+            "requiredKeywords": [
+              "HBM"
+            ],
+            "optionalKeywords": [
+              "HBM4",
+              "첨단 패키징"
+            ],
+            "excludedKeywords": [
+              "채용"
+            ],
+            "batchSize": 100,
+            "intervalMinutes": 1440
+          }
+        ]
+      }
+    ]
+  },
+  "article": {
+    "id": 1024,
+    "analysisArticleId": 1024,
+    "issueId": 88,
+    "title": "HBM4 공급 준비와 첨단 패키징 투자",
+    "publisher": "검증용 매체",
+    "canonicalUrl": "https://example.invalid/news/0",
+    "language": "ko",
+    "publishedAt": "2026-09-08T09:00:00+09:00",
+    "fetchedAt": "2026-09-08T09:20:00+09:00",
+    "fetchStatus": "OK",
+    "topicId": 1,
+    "topicName": "HBM 시장",
+    "sourceId": 1,
+    "sourceName": "검증용 소스",
+    "bodyText": "HBM4 공급 준비와 첨단 패키징 투자 계획을 검토한다.",
+    "sentences": [
+      {
+        "index": 0,
+        "text": "반도체 기업은 HBM4 공급 준비와 첨단 패키징 투자 계획을 검토 중이라고 밝혔다."
+      },
+      {
+        "index": 1,
+        "text": "현재 계획은 확정된 발주를 의미하지 않으며 생산 일정은 추후 발표될 예정이다."
+      }
+    ],
+    "relatedArticles": [],
+    "analysis": null
+  },
+  "issue": {
+    "id": 88,
+    "title": "HBM4 공급 준비와 첨단 패키징 투자",
+    "summary": "반도체 기업이 HBM4 공급 확대에 맞춰 첨단 패키징 생산 준비를 진행하고 있다.",
+    "articleCount": 3,
+    "publisherCount": 2,
+    "independentContentCount": 2,
+    "crossSource": {
+      "consensus": [],
+      "soleSource": [],
+      "conflicts": [],
+      "missingStakeholders": []
+    },
+    "articles": [
+      {
+        "id": 1024,
+        "title": "HBM4 공급 준비와 첨단 패키징 투자",
+        "publisher": "검증용 매체",
+        "canonicalUrl": "https://example.invalid/news/0",
+        "publishedAt": "2026-09-08T09:00:00+09:00"
+      }
+    ],
+    "toneDistribution": {
+      "sampleCount": 1,
+      "analyzedArticleCount": 1,
+      "optimisticCount": 1,
+      "neutralCount": 0,
+      "pessimisticCount": 0,
+      "optimisticPercent": 100,
+      "neutralPercent": 0,
+      "pessimisticPercent": 0
+    }
+  }
+}

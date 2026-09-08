@@ -41,27 +41,30 @@ public class CollectionRunController {
     @Operation(
             summary = "수동 수집 실행",
             description = """
-                    수집을 직접 실행합니다. topicIds를 주면 해당 주제만, 생략하면 활성화된 모든 주제를 대상으로 실행합니다.
-                    응답은 즉시 반환되고 수집은 비동기로 진행됩니다. 진행 상황은 수집 실행 상세 조회로 폴링합니다.
+                    수집 요청을 대기열에 저장합니다. topicIds를 주면 해당 주제만, 생략하면 활성화된 모든 주제를 대상으로 실행합니다.
+                    응답은 PENDING으로 즉시 반환됩니다. 같은 주제는 순서대로, 다른 주제는 실행 상한 안에서 병렬 처리됩니다. 진행 상황은 수집 실행 상세 조회로 폴링합니다.
+                    delivery를 생략하면 기존 주제별 자동 전달 정책을 유지합니다. ONCE는 이번 실행만, TOPIC은 실제 실행 대상 주제의 이후 정책까지 적용합니다.
+                    전달 설정과 그룹을 펼친 수신 대상·주소는 실행 접수와 같은 트랜잭션에 저장합니다. 같은 idempotencyKey로 기존 실행을 반환할 때 전달 설정을 변경하지 않습니다.
+                    delivery.enabled=false는 해당 실행의 자동 전달을 막으며 TOPIC이면 선택된 주제 정책도 끕니다. daily=true는 같은 날 다른 주제도 포함하는 일일 통합 보고서 전달입니다.
                     """
     )
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "201",
-                    description = "수집을 시작했습니다.",
+                    description = "수집 요청을 접수했습니다.",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
                             {
                               "isSuccess": true,
                               "code": "COMMON201",
-                              "message": "수집을 시작했습니다.",
+                              "message": "수집 요청을 접수했습니다.",
                               "result": {
                                 "runId": 42,
-                                "status": "RUNNING",
+                                "status": "PENDING",
                                 "triggerType": "MANUAL",
                                 "idempotencyKey": "2026-08-10-manual-001",
                                 "targetTopicIds": [1, 2],
                                 "targetCombinationCount": 6,
-                                "startedAt": "2026-08-10T10:00:00+09:00"
+                                "queuedAt": "2026-08-10T10:00:00+09:00"
                               }
                             }
                             """))),
@@ -75,35 +78,42 @@ public class CollectionRunController {
                               "message": "이미 진행 중인 수집입니다.",
                               "result": {
                                 "runId": 42,
-                                "status": "RUNNING",
+                                "status": "PENDING",
                                 "triggerType": "MANUAL",
                                 "idempotencyKey": "2026-08-10-manual-001",
-                                "startedAt": "2026-08-10T10:00:00+09:00"
-                              }
-                            }
-                            """))),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                    responseCode = "409",
-                    description = "다른 run이 같은 주제를 이미 수집 중인 경우",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
-                            {
-                              "isSuccess": false,
-                              "code": "RUN409",
-                              "message": "이미 실행 중인 수집이 있습니다.",
-                              "result": {
-                                "conflictRunId": 41,
-                                "conflictTopicIds": [1]
+                                "queuedAt": "2026-08-10T10:00:00+09:00"
                               }
                             }
                             """))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "400",
-                    description = "대상 조합이 하나도 없는 경우",
-                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                    description = "대상 조합이 없거나 전달 설정이 올바르지 않은 경우",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = {
+                            @ExampleObject(name = "실행 대상 없음", value = """
                             {
                               "isSuccess": false,
                               "code": "RUN400",
                               "message": "실행할 수집 조합이 없습니다. 주제에 소스를 연결해 주세요.",
+                              "result": {}
+                            }
+                            """),
+                            @ExampleObject(name = "연결된 전달 대상 없음", value = """
+                            {
+                              "isSuccess": false,
+                              "code": "COMMON400",
+                              "message": "선택한 대상에 연결된 수신 채널이 없습니다.",
+                              "result": {}
+                            }
+                            """)
+                    })),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "404",
+                    description = "선택한 그룹·수신자·채널을 찾을 수 없거나 그룹·채널이 비활성인 경우",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                            {
+                              "isSuccess": false,
+                              "code": "GROUP404",
+                              "message": "수신 그룹을 찾을 수 없습니다.",
                               "result": {}
                             }
                             """)))
@@ -120,7 +130,7 @@ public class CollectionRunController {
     @GetMapping
     @Operation(
             summary = "수집 실행 내역 조회",
-            description = "수집 실행 이력을 최신순으로 조회합니다. 수동 실행과 스케줄 실행이 모두 포함됩니다."
+            description = "수집 실행 이력을 접수 시각 최신순으로 조회합니다. 수동 실행과 스케줄 실행이 모두 포함됩니다."
     )
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -137,6 +147,7 @@ public class CollectionRunController {
                                     "runId": 42,
                                     "status": "SUCCESS",
                                     "triggerType": "MANUAL",
+                                    "queuedAt": "2026-08-10T10:00:00+09:00",
                                     "startedAt": "2026-08-10T10:00:00+09:00",
                                     "finishedAt": "2026-08-10T10:03:12+09:00",
                                     "scannedCount": 128,
@@ -198,7 +209,7 @@ public class CollectionRunController {
     @GetMapping("/{runId}")
     @Operation(
             summary = "수집 실행 상세 조회",
-            description = "수집 실행 1건의 진행 상황과 결과를 조회합니다. 단계별 coverage, 조합별 breakdown과 warnings를 포함합니다."
+            description = "수집 실행 1건의 대기·진행 상황과 결과를 조회합니다. queuedAt은 접수 시각이며 PENDING의 startedAt은 null입니다. 단계별 coverage, 조합별 breakdown과 warnings를 포함합니다."
     )
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -214,6 +225,7 @@ public class CollectionRunController {
                                 "status": "PARTIAL",
                                 "triggerType": "MANUAL",
                                 "idempotencyKey": "2026-08-10-manual-001",
+                                "queuedAt": "2026-08-10T10:00:00+09:00",
                                 "startedAt": "2026-08-10T10:00:00+09:00",
                                 "finishedAt": "2026-08-10T10:03:12+09:00",
                                 "scannedCount": 128,
