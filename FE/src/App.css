@@ -2674,31 +2674,27 @@ body.modal-open {
   min-width: 0;
   position: sticky;
   top: 5.5rem;
-  padding: 1.5rem 0 1.5rem 1rem;
+  padding: 1.5rem 0;
 }
 
 .report-list-scroll {
   max-height: calc(100dvh - 13rem);
-  padding-block: var(--radius-xs);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-  direction: rtl;
+  scrollbar-width: none;
 }
 
-.report-list:hover .report-list-scroll,
-.report-list:focus-within .report-list-scroll {
-  scrollbar-color: var(--fg-4) transparent;
+/* 선택 면이 본문 경계에 닿도록 스크롤바 공간을 없앤다. 스크롤 동작은 유지한다. */
+.report-list-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .report-list-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 1rem 0.65rem calc(1rem + 10px);
+  padding: 0 1.5rem 1.25rem;
   color: var(--fg-3);
   font-size: 0.78rem;
   font-weight: 600;
@@ -2709,18 +2705,18 @@ body.modal-open {
 }
 
 .report-list-item {
-  position: relative;
   display: flex;
   width: 100%;
+  min-height: 6.5rem;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.5rem;
-  padding: 1rem 1.5rem 1rem 1rem;
-  border-radius: var(--radius-sm);
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 1rem 1.5rem;
+  border-radius: 0;
   background: transparent;
   color: var(--fg-2);
   text-align: left;
-  direction: ltr;
   transition: background var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
 }
 
@@ -2729,48 +2725,15 @@ body.modal-open {
   transform: none;
 }
 
-.report-list-item + .report-list-item {
-  margin-top: 0.2rem;
-}
-
 .report-list-item:hover:not(.active) {
   background: color-mix(in srgb, var(--surface) 65%, var(--line-soft));
   color: var(--fg);
 }
 
 .report-list-item.active {
-  z-index: 1;
-  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-  background: var(--surface);
+  background: var(--primary-weak);
   color: var(--primary-strong);
-}
-
-/* 선택한 행의 흰 면이 본문으로 이어지며 위아래 모서리만 부드럽게 돌아간다. */
-.report-list-item::before,
-.report-list-item::after {
-  position: absolute;
-  right: 0;
-  width: var(--radius-xs);
-  height: var(--radius-xs);
-  content: '';
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--dur-1) var(--ease-out);
-}
-
-.report-list-item::before {
-  top: calc(-1 * var(--radius-xs));
-  background: radial-gradient(circle at top left, transparent calc(var(--radius-xs) - 0.5px), var(--surface) var(--radius-xs));
-}
-
-.report-list-item::after {
-  bottom: calc(-1 * var(--radius-xs));
-  background: radial-gradient(circle at bottom left, transparent calc(var(--radius-xs) - 0.5px), var(--surface) var(--radius-xs));
-}
-
-.report-list-item.active::before,
-.report-list-item.active::after {
-  opacity: 1;
+  box-shadow: inset -3px 0 var(--primary);
 }
 
 .report-list-item:focus-visible {
@@ -2784,7 +2747,7 @@ body.modal-open {
   -webkit-line-clamp: 2;
   word-break: keep-all;
   overflow-wrap: anywhere;
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   font-weight: 600;
   line-height: 1.5;
   letter-spacing: -0.02em;
@@ -4121,14 +4084,15 @@ body.modal-open {
   .report-list-scroll {
     display: flex;
     max-height: none;
-    padding-block: 0;
     overflow-x: auto;
-    direction: ltr;
-    scrollbar-gutter: auto;
     scrollbar-width: auto;
     scrollbar-color: var(--fg-4) transparent;
     scroll-snap-type: x proximity;
     scroll-padding-left: 0.6rem;
+  }
+
+  .report-list-scroll::-webkit-scrollbar {
+    display: block;
   }
 
   .report-list-heading {
@@ -4137,7 +4101,11 @@ body.modal-open {
 
   .report-list-item {
     min-width: 210px;
+    min-height: 0;
+    justify-content: flex-start;
+    gap: 0.5rem;
     padding: 0.85rem;
+    border-radius: var(--radius-sm);
     scroll-snap-align: start;
   }
 
@@ -4149,11 +4117,6 @@ body.modal-open {
 
   .report-list-item:hover:not(.active) {
     background: var(--line-soft);
-  }
-
-  .report-list-item::before,
-  .report-list-item::after {
-    display: none;
   }
 
   .report-list-item + .report-list-item {
