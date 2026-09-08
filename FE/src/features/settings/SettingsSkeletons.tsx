@@ -17,8 +17,8 @@ export function CollectionRunSkeleton() {
         </SkeletonRegion>
       </div>
       <div className="collection-delivery-trigger" aria-hidden="true"><Skeleton width="10rem" height="2.5rem" /><Skeleton width="3rem" /></div>
-      <div className="run-audience-setting" aria-hidden="true"><AudienceSkeletonContent /></div>
       <div className="collection-run-summary" aria-hidden="true">
+        <div className="run-audience-setting"><AudienceSkeletonContent /></div>
         <div className="collection-run-usage">
           <div className="run-usage-summary"><Skeleton width="5rem" height=".75rem" /><Skeleton width="6rem" height="1rem" /></div>
         </div>

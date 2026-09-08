@@ -129,9 +129,8 @@ export function CollectionRunPanel() {
       <CollectionDeliveryPicker value={delivery} disabled={startRun.isPending}
         onChange={value => { resetRequestState(); setDelivery(value) }} />
 
-      <DefaultAudienceSetting />
-
       <div className="collection-run-summary">
+        <DefaultAudienceSetting />
         <div className="collection-run-usage">
           <LlmUsageSummary />
         </div>

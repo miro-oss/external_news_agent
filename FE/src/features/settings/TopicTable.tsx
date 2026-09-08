@@ -119,6 +119,7 @@ export function TopicTable() {
                   </td>
                   <td className="topic-signal-cell"><KeywordSignalList items={topic.surgeKeywords ?? []} emptyLabel="—"
                     renderLabel={(keyword) => `${keyword.keyword} ${formatSignedDelta(keyword.deltaIssueCount)}`}
+                    isEmphasized={(keyword) => keyword.deltaIssueCount > 50}
                     renderTitle={surgeKeywordTitle} /></td>
                   <td className="topic-signal-cell"><KeywordSignalList items={topic.relatedKeywords ?? []} emptyLabel="—"
                     renderLabel={(keyword) => `${keyword.keyword} ${keyword.sharePercent.toFixed(0)}%`}
@@ -145,11 +146,13 @@ function KeywordSignalList<T extends TopicSurgeKeyword | TopicRelatedKeyword>({
   emptyLabel,
   renderLabel,
   renderTitle,
+  isEmphasized,
 }: {
   items: T[]
   emptyLabel: string
   renderLabel: (item: T) => string
   renderTitle: (item: T) => string
+  isEmphasized?: (item: T) => boolean
 }) {
   if (items.length === 0) {
     return <span className="topic-signal-empty">{emptyLabel}</span>
@@ -159,7 +162,7 @@ function KeywordSignalList<T extends TopicSurgeKeyword | TopicRelatedKeyword>({
     <div className="topic-signal-list">
       {items.map((item) => (
         <span
-          className="topic-signal-chip"
+          className={`topic-signal-chip${isEmphasized?.(item) ? ' is-emphasized' : ''}`}
           key={renderLabel(item)}
           title={renderTitle(item)}
         >

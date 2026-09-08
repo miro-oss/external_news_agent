@@ -106,7 +106,7 @@ export function TopicForm() {
           aria-invalid={queryMissing || undefined}
           aria-describedby={queryMissing ? 'topic-query-hint topic-query-error' : 'topic-query-hint'}
         />
-        <p id="topic-query-hint" className="topic-query-hint">공백·쉼표로 구분</p>
+        <p id="topic-query-hint" className="topic-query-hint">공백이나 쉼표로 구분합니다.</p>
         {queryMissing && <p className="error" id="topic-query-error">검색 키워드를 입력해 주세요.</p>}
       </div>
 

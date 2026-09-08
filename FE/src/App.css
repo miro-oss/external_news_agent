@@ -909,9 +909,9 @@ tbody tr:hover td {
   white-space: nowrap;
 }
 
-.topic-signal-chip.burst {
-  background: color-mix(in srgb, var(--danger) 14%, var(--surface-sunken));
-  color: var(--danger-strong);
+.topic-signal-chip.is-emphasized {
+  background: var(--primary-weak);
+  color: var(--primary-strong);
 }
 
 .topic-signal-empty {

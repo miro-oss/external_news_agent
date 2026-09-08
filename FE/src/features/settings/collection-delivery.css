@@ -5,9 +5,9 @@
   justify-content: space-between;
   gap: 1rem;
   width: 100%;
-  height: var(--settings-control-height, 3.25rem);
+  min-height: 5rem;
   margin-top: 1rem;
-  padding: .2rem .9rem .2rem 1.25rem;
+  padding: 1rem .9rem 1rem 1.25rem;
   border: 1.5px solid transparent;
   border-radius: var(--radius-sm);
   background: var(--bg);

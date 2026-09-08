@@ -33,16 +33,18 @@
 }
 
 .settings-page .topic-visibility-toggle {
+  margin-left: auto;
   padding: 0.35rem 0.6rem;
   border-radius: var(--radius-xs);
-  background: transparent;
+  background: var(--primary-weak);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 12%, transparent);
   font-size: 0.78rem;
   line-height: 1.4;
 }
 
 .settings-page .topic-visibility-toggle:hover:not(:disabled),
 .settings-page .topic-visibility-toggle[aria-pressed='true'] {
-  background: var(--primary-weak);
+  background: color-mix(in srgb, var(--primary) 8%, var(--primary-weak));
 }
 
 .settings-page .topic-management-table {
