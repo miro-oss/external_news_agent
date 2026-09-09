@@ -110,7 +110,7 @@ pnpm install --frozen-lockfile
 pnpm preview:refactor
 ```
 
-**http://127.0.0.1:5187**에서 화면을 확인할 수 있습니다. 저장소의 데모 데이터를 사용하며, Backend·DB·API 키 없이 실행됩니다. 변경한 데모 상태는 서버를 다시 시작하면 초기화됩니다.
+[로컬 데모 화면](http://127.0.0.1:5187)에서 확인할 수 있습니다. 저장소의 데모 데이터를 사용하며, Backend·DB·API 키 없이 실행됩니다. 변경한 데모 상태는 서버를 다시 시작하면 초기화됩니다.
 
 <details>
 <summary><strong>전체 서비스 로컬 실행</strong></summary>
@@ -172,9 +172,9 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-- 웹 화면: **http://localhost:5173**
-- 서버 상태: **http://localhost:8080/actuator/health**
-- Swagger UI: **http://localhost:8080/swagger-ui.html**
+- [웹 화면](http://localhost:5173)
+- [서버 상태](http://localhost:8080/actuator/health)
+- [Swagger UI](http://localhost:8080/swagger-ui.html)
 
 첫 실행 후 **수집 설정**에서 주제를 등록합니다. Frontend의 `/api` 요청은 기본적으로 `localhost:8080`으로 전달됩니다.
 
