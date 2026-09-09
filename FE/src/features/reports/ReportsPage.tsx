@@ -32,6 +32,7 @@ import { IssueTonePanel } from './IssueTonePanel'
 import { collectionHighlightTerms, collectionKeywords } from './reportReading'
 import { ReportKeywordText } from './ReportKeywordText'
 import { categoryTone, dailyReportTopics, defaultSensitivity } from './reportDisplay'
+import { reportDisplayTitle } from './reportTitle'
 import { ReportDetailSkeleton, ReportWorkspaceSkeleton, RelatedArticlesSkeleton } from './ReportSkeletons'
 
 type ReportScopeTab = 'DAILY' | 'RUN'
@@ -213,7 +214,7 @@ function ReportListItem({ report, active, onSelect, disabled }: {
       disabled={disabled}
       onClick={onSelect}
     >
-      <strong title={report.title}>{report.title}</strong>
+      <strong title={report.title}>{reportDisplayTitle(report)}</strong>
       <time className="report-list-date" dateTime={report.reportScope === 'DAILY' ? report.reportDate ?? undefined : report.generatedAt}>
         {report.reportScope === 'DAILY' ? report.reportDate ?? '집계일 미상' : formatShortDate(report.generatedAt)}
       </time>
@@ -270,7 +271,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
     <article className="report-document report-document-enter" data-report-scope={report.reportScope}>
       <header className="report-document-header">
         <div className="report-title-row">
-          <h2><ReportKeywordText text={report.title} terms={highlightTerms} /></h2>
+          <h2 title={report.title}><ReportKeywordText text={reportDisplayTitle(report)} terms={highlightTerms} /></h2>
           <button type="button" className="text-button report-delete-button" aria-label="이 보고서 삭제" aria-expanded={confirmDelete}
             onClick={() => { setConfirmDelete(value => !value); setDeleteError('') }} disabled={deleting}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6" /></svg>
