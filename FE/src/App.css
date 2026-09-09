@@ -2660,24 +2660,31 @@ body.modal-open {
 }
 
 .report-workspace {
+  --report-list-surface: color-mix(in srgb, var(--primary-weak) 45%, var(--surface));
   display: grid;
   grid-template-columns: clamp(230px, 22vw, 280px) minmax(0, 1fr);
   align-items: start;
   gap: 0;
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--primary-weak) 45%, var(--surface));
+  background: var(--report-list-surface);
   box-shadow: var(--shadow-sm);
 }
 
 .report-list {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   position: sticky;
-  top: 5.5rem;
-  padding: 1.5rem 0;
+  top: 4rem;
+  max-height: calc(100dvh - 5rem);
+  padding: 0 0 0.75rem;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: var(--report-list-surface);
 }
 
 .report-list-scroll {
-  max-height: calc(100dvh - 13rem);
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -2690,13 +2697,17 @@ body.modal-open {
 }
 
 .report-list-heading {
+  box-sizing: border-box;
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
-  padding: 0 1.5rem 1.25rem;
-  color: var(--fg-3);
-  font-size: 0.78rem;
-  font-weight: 600;
+  min-height: 3.25rem;
+  padding: 0.9rem 1.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--primary) 10%, var(--line-soft));
+  color: var(--fg-2);
+  font-size: 0.8rem;
+  font-weight: 650;
 }
 
 .report-list-heading strong {
@@ -4197,6 +4208,7 @@ body.modal-open {
   */
   .report-list {
     position: static;
+    max-height: none;
   }
 
   .report-list-scroll {
@@ -4452,5 +4464,10 @@ body.modal-open {
 .issue-card-topline .category-market { color: #88602c; background: #f8f0e3; }
 .issue-tone-explanation { color: var(--fg-3); font-size: 0.76rem; line-height: 1.65; }
 .issue-tone-explanation summary { cursor: pointer; }
-.collection-keyword-match { padding: 0; background: var(--warning-weak); color: inherit; font-weight: 700; box-shadow: inset 0 -2px var(--warning); }
-.sentence-list p.highlighted .collection-keyword-match { background: var(--warning-weak); }
+.collection-keyword-match {
+  padding: 0;
+  background: var(--primary-weak);
+  color: var(--primary-strong);
+  font-weight: 700;
+  box-shadow: inset 0 -2px var(--primary);
+}
