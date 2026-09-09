@@ -10,6 +10,9 @@ import com.example.be.domain.notifications.exception.NotificationException;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDateTime;
@@ -19,6 +22,8 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.argThat;
 import static org.mockito.Mockito.mock;
@@ -27,6 +32,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(OutputCaptureExtension.class)
 class NotificationDeliveryServiceTest {
 
     private static final LocalDateTime REQUESTED_AT = LocalDateTime.of(2026, 8, 27, 10, 0);
@@ -105,7 +111,7 @@ class NotificationDeliveryServiceTest {
     }
 
     @Test
-    void unexpectedSenderFailureIsPersistedBeforeAllFailedResponse() {
+    void unexpectedSenderFailureIsPersistedBeforeAllFailedResponse(CapturedOutput output) {
         NotificationChannel channel = channel(1L, ChannelType.EMAIL);
         NotificationDeliveryPlanService.PreparedTarget target = target(channel, true);
         NotificationSender sender = mock(NotificationSender.class);
@@ -114,7 +120,7 @@ class NotificationDeliveryServiceTest {
         when(senderRegistry.get(ChannelType.EMAIL)).thenReturn(sender);
         when(sender.isConfigured(channel)).thenReturn(true);
         when(sender.openSession(channel)).thenReturn(session);
-        when(session.send(any(), any(), any())).thenThrow(new RuntimeException("adapter crashed"));
+        when(session.send(any(), any(), any())).thenThrow(new RuntimeException("synthetic-secret-in-transport-uri"));
 
         NotificationException exception = assertThrows(NotificationException.class,
                 () -> service.send(17L, request(null)));
@@ -123,6 +129,12 @@ class NotificationDeliveryServiceTest {
         verify(persistenceService).record(argThat(record -> record.status() == DeliveryStatus.FAILED
                 && "알림 전송 중 예상하지 못한 오류가 발생했습니다.".equals(record.errorMessage())));
         verify(persistenceService).complete("batch-id");
+        assertTrue(output.getOut().contains("reportId=17 batchId=batch-id"));
+        assertTrue(output.getOut().contains("channelType=EMAIL status=FAILED"));
+        assertTrue(output.getOut().contains("알림 전송 중 예상하지 못한 오류가 발생했습니다."));
+        assertFalse(output.getAll().contains("synthetic-secret-in-transport-uri"));
+        assertFalse(output.getAll().contains(target.address()));
+        assertFalse(output.getAll().contains(target.recipientName()));
     }
 
     @Test

@@ -76,6 +76,7 @@ const keys = {
 
 export type DeliveryLogFilters = {
   reportId?: string
+  deliveryBatchId?: string
   channelType?: string
   status?: string
   page?: number
@@ -338,6 +339,7 @@ export function useDeliveryLogs(filters: DeliveryLogFilters = {}) {
     queryKey: keys.deliveryLogs(filters),
     queryFn: () => notificationGet<DeliveryLogPage>('/delivery-logs', {
       reportId: filters.reportId,
+      deliveryBatchId: filters.deliveryBatchId,
       channelType: filters.channelType,
       status: filters.status,
       page: filters.page ?? 0,
@@ -478,7 +480,7 @@ export function useSendNotification() {
       channelIds,
       idempotencyKey,
     }),
-    onSuccess: refresh,
+    onSettled: refresh,
   })
 }
 

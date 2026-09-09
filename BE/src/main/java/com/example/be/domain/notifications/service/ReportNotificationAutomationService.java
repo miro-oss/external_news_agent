@@ -10,6 +10,7 @@ import com.example.be.global.apiPayload.exception.GeneralException;
 import com.example.be.global.config.ApiTimeZone;
 import com.example.be.global.converter.LongListJsonConverter;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +21,7 @@ import java.util.*;
 /** Saves one delivery per report/recipient/channel in the report-completion transaction. */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ReportNotificationAutomationService {
     private final JdbcTemplate jdbc;
     private final TopicRepository topics;
@@ -107,6 +109,7 @@ public class ReportNotificationAutomationService {
             plans.resolveTargets(groups, channels, recipientIds).forEach(target ->
                     targets.putIfAbsent(target.recipientId() + ":" + target.channel().getId(), target));
         }
+        int queuedCount = 0;
         for (var target : targets.values()) {
             Integer exists = jdbc.queryForObject("SELECT COUNT(*) FROM report_notification_outbox WHERE report_id=? AND recipient_id=? AND channel_id=?",
                     Integer.class, report.getId(), target.recipientId(), target.channel().getId());
@@ -119,7 +122,10 @@ public class ReportNotificationAutomationService {
             jdbc.update("INSERT INTO report_notification_outbox(report_id,recipient_id,channel_id,batch_id,recipient_name,address,subject,body,available_at) VALUES(?,?,?,?,?,?,?,?,?)",
                     report.getId(), target.recipientId(), target.channel().getId(), batchId, target.recipientName(), target.address(),
                     message.subject(), String.join("\n", message.chunks()), now);
+            queuedCount++;
         }
+        log.info("보고서 자동 전달 예약. reportId={} reportScope={} targetCount={} queuedCount={}",
+                report.getId(), report.getReportScope(), targets.size(), queuedCount);
     }
 
     private NotificationGroup optionalGroup(Long id) { try { return management.findGroup(id, true); } catch (com.example.be.domain.notifications.exception.NotificationException ex) { return null; } }

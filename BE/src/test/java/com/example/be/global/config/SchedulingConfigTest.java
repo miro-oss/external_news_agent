@@ -6,6 +6,7 @@ import com.example.be.domain.collection.service.command.CollectionRunQueueDispat
 import com.example.be.domain.collection.service.schedule.CollectionScheduler;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 
 import java.util.List;
@@ -43,6 +44,9 @@ class SchedulingConfigTest {
         new ApplicationContextRunner()
                 .withUserConfiguration(SchedulingConfig.class)
                 .withPropertyValues("news.scheduling.enabled=false")
-                .run(context -> assertTrue(context.getBeansOfType(ScheduledAnnotationBeanPostProcessor.class).isEmpty()));
+                .run(context -> {
+                    assertTrue(context.getBeansOfType(ScheduledAnnotationBeanPostProcessor.class).isEmpty());
+                    assertTrue(context.getBeansOfType(TaskScheduler.class).isEmpty());
+                });
     }
 }

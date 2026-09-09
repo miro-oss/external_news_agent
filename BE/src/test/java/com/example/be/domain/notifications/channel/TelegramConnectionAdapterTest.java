@@ -12,6 +12,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.io.IOException;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -23,6 +25,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
 
 @ExtendWith(OutputCaptureExtension.class)
 class TelegramConnectionAdapterTest {
@@ -32,12 +35,12 @@ class TelegramConnectionAdapterTest {
 
     @Test
     void resolvesBotUsernameFromTelegramResponsesWithoutSendingMessages(CapturedOutput output) {
-        server.expect(requestTo("https://telegram.invalid/botsynthetic-token/getWebhookInfo"))
+        server.expect(requestTo("https://telegram.invalid/bot123456:synthetic-token/getWebhookInfo"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("""
                         {"ok":true,"result":{"url":"","has_custom_certificate":false,"pending_update_count":0}}
                         """, MediaType.APPLICATION_JSON));
-        server.expect(requestTo("https://telegram.invalid/botsynthetic-token/getMe"))
+        server.expect(requestTo("https://telegram.invalid/bot123456:synthetic-token/getMe"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("""
                         {"ok":true,"result":{"id":123,"is_bot":true,"first_name":"Example",
@@ -54,7 +57,7 @@ class TelegramConnectionAdapterTest {
 
     @Test
     void preservesExistingWebhookWithoutTryingToCreateAConnection(CapturedOutput output) {
-        server.expect(requestTo("https://telegram.invalid/botsynthetic-token/getWebhookInfo"))
+        server.expect(requestTo("https://telegram.invalid/bot123456:synthetic-token/getWebhookInfo"))
                 .andRespond(withSuccess("""
                         {"ok":true,"result":{"url":"https://existing.invalid/private-webhook/synthetic-secret",
                         "pending_update_count":2,"allowed_updates":["callback_query"]}}
@@ -74,12 +77,12 @@ class TelegramConnectionAdapterTest {
 
     @Test
     void emptyUpdateFilterAllowsMessagesAndMissingPendingCountStaysUnknown(CapturedOutput output) {
-        server.expect(requestTo("https://telegram.invalid/botsynthetic-token/getWebhookInfo"))
+        server.expect(requestTo("https://telegram.invalid/bot123456:synthetic-token/getWebhookInfo"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("""
                         {"ok":true,"result":{"url":"","allowed_updates":[]}}
                         """, MediaType.APPLICATION_JSON));
-        server.expect(requestTo("https://telegram.invalid/botsynthetic-token/getMe"))
+        server.expect(requestTo("https://telegram.invalid/bot123456:synthetic-token/getMe"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("""
                         {"ok":true,"result":{"username":"example_bot"}}
@@ -93,8 +96,8 @@ class TelegramConnectionAdapterTest {
     }
 
     @Test
-    void upstreamFailureDoesNotExposeTokenOrRemoteResponse() {
-        server.expect(requestTo("https://telegram.invalid/botsynthetic-token/getWebhookInfo"))
+    void upstreamFailureLogsOperationAndStatusWithoutExposingTokenOrRemoteResponse(CapturedOutput output) {
+        server.expect(requestTo("https://telegram.invalid/bot123456:synthetic-token/getWebhookInfo"))
                 .andRespond(withStatus(HttpStatus.UNAUTHORIZED).contentType(MediaType.APPLICATION_JSON)
                         .body("{\"ok\":false,\"description\":\"synthetic upstream detail\"}"));
 
@@ -103,13 +106,44 @@ class TelegramConnectionAdapterTest {
         assertEquals("텔레그램 연결 서버에 접속하지 못했습니다. 잠시 후 다시 시도해 주세요.", error.getMessage());
         assertFalse(error.getMessage().contains("synthetic"));
         assertNull(error.getCause());
+        assertTrue(output.getOut().contains("operation=getWebhookInfo httpStatus=401"));
+        assertFalse(output.getAll().contains("synthetic"));
+        assertFalse(output.getAll().contains("telegram.invalid"));
+        server.verify();
+    }
+
+    @Test
+    void botIdentityTransportFailureLogsOnlyOperationAndExceptionType(CapturedOutput output) {
+        server.expect(requestTo("https://telegram.invalid/bot123456:synthetic-token/getWebhookInfo"))
+                .andRespond(withSuccess("{\"ok\":true,\"result\":{\"url\":\"\"}}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://telegram.invalid/bot123456:synthetic-token/getMe"))
+                .andRespond(withException(new IOException("synthetic-private-detail")));
+
+        var error = assertThrows(NotificationTransportException.class, () -> adapter().botUsername());
+
+        assertEquals("텔레그램 연결 서버에 접속하지 못했습니다. 잠시 후 다시 시도해 주세요.", error.getMessage());
+        assertNull(error.getCause());
+        assertTrue(output.getOut().contains("operation=getMe type=ResourceAccessException"));
+        assertFalse(output.getAll().contains("synthetic"));
+        assertFalse(output.getAll().contains("telegram.invalid"));
+        server.verify();
+    }
+
+    @Test
+    void missingBotTokenLogsConfigurationFailureWithoutCallingTelegram(CapturedOutput output) {
+        var adapter = new TelegramConnectionAdapter(builder.build(), new NotificationProperties());
+
+        var error = assertThrows(NotificationTransportException.class, adapter::botUsername);
+
+        assertEquals("텔레그램 연결 설정이 준비되지 않았습니다.", error.getMessage());
+        assertTrue(output.getOut().contains("reason=BOT_TOKEN_MISSING"));
         server.verify();
     }
 
     @Test
     void readsPrivateStartUpdateAndPreservesSenderAndMessageTime(CapturedOutput output) {
         server.expect(request -> {
-            assertEquals("/botsynthetic-token/getUpdates", request.getURI().getPath());
+            assertEquals("/bot123456:synthetic-token/getUpdates", request.getURI().getPath());
             assertNull(request.getURI().getRawQuery());
         }).andExpect(method(HttpMethod.POST))
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
@@ -145,7 +179,7 @@ class TelegramConnectionAdapterTest {
     void requestBoundaryLogsOnlyBooleansOnceEvenWithExtraBasePathAndQuery(CapturedOutput output) {
         builder.baseUrl("https://telegram.invalid/private-prefix?private-query=synthetic-query");
         server.expect(times(2), request -> {
-            assertEquals("/private-prefix/botsynthetic-token/getUpdates", request.getURI().getPath());
+            assertEquals("/private-prefix/bot123456:synthetic-token/getUpdates", request.getURI().getPath());
             assertEquals("private-query=synthetic-query", request.getURI().getRawQuery());
         }).andRespond(withSuccess("{\"ok\":true,\"result\":[]}", MediaType.APPLICATION_JSON));
         var adapter = adapter();
@@ -165,7 +199,7 @@ class TelegramConnectionAdapterTest {
 
     @Test
     void receptionConflictLogsOnlyHttpStatusWithoutBotOrMessageDetails(CapturedOutput output) {
-        server.expect(request -> assertEquals("/botsynthetic-token/getUpdates", request.getURI().getPath()))
+        server.expect(request -> assertEquals("/bot123456:synthetic-token/getUpdates", request.getURI().getPath()))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withStatus(HttpStatus.CONFLICT).contentType(MediaType.APPLICATION_JSON)
                         .body("{\"ok\":false,\"description\":\"synthetic-private-detail\"}"));
@@ -181,7 +215,7 @@ class TelegramConnectionAdapterTest {
 
     private TelegramConnectionAdapter adapter() {
         var properties = new NotificationProperties();
-        properties.getTelegram().setBotToken("synthetic-token");
+        properties.getTelegram().setBotToken("123456:synthetic-token");
         return new TelegramConnectionAdapter(builder.build(), properties);
     }
 }

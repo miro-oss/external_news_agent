@@ -5,11 +5,15 @@ import com.example.be.domain.notifications.entity.*;
 import com.example.be.domain.notifications.exception.NotificationTransportException;
 import com.example.be.domain.notifications.repository.NotificationChannelRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import java.util.Optional;
 import java.util.List;
 import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
 
+@ExtendWith(OutputCaptureExtension.class)
 class ReportDeliveryWorkerTest {
     private final ReportDeliveryOutboxStore store=mock(ReportDeliveryOutboxStore.class);
     private final NotificationChannelRepository channels=mock(NotificationChannelRepository.class);
@@ -48,6 +52,28 @@ class ReportDeliveryWorkerTest {
         ready();when(session.send(any(),any(),any())).thenThrow(new NotificationTransportException("일시 거절",true));
         worker.deliver(work);
         verify(store).finish(work,"EMAIL","FAILED",null,"일시 거절",true);
+    }
+    @Test void authenticationFailureIsLoggedWithoutRecipientOrTransportDetails(CapturedOutput output) {
+        ready();
+        String message="메일 서버 인증에 실패했습니다. 관리자에게 메일 연결 설정 확인을 요청해 주세요.";
+        when(sender.openSession(any())).thenThrow(new NotificationTransportException(message,true));
+        worker.deliver(work);
+        verify(store).finish(work,"EMAIL","FAILED",null,message,true);
+        assertTrue(output.getOut().contains("reportId=2 deliveryId=1 batchId=batch"));
+        assertTrue(output.getOut().contains("channelType=EMAIL status=FAILED"));
+        assertTrue(output.getOut().contains(message));
+        assertFalse(output.getAll().contains(work.address()));
+        assertFalse(output.getAll().contains(work.name()));
+        verifyNoInteractions(session);
+    }
+    @Test void unexpectedTransportFailureLogsSafeFallbackAndPreservesUnknownStatus(CapturedOutput output) {
+        ready();
+        when(session.send(any(),any(),any())).thenThrow(new IllegalStateException("synthetic-provider-secret"));
+        worker.deliver(work);
+        verify(store).finish(eq(work),eq("EMAIL"),eq("UNKNOWN"),isNull(),anyString(),eq(false));
+        assertTrue(output.getOut().contains("status=UNKNOWN"));
+        assertFalse(output.getAll().contains("synthetic-provider-secret"));
+        assertFalse(output.getAll().contains(work.address()));
     }
     @Test void persistenceFailureAfterSendDoesNotTurnSuccessIntoResend() {
         ready();when(session.send(any(),any(),any())).thenReturn("message-id");

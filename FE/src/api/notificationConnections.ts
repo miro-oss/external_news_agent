@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { notificationDelete, notificationGet, notificationPost, notificationPut } from './client'
-import type { NotificationSendBatch } from './types'
+import { reportShareOptions } from './reportShare'
 
 export type DeliveryPolicy = {
   enabled: boolean
@@ -51,9 +51,7 @@ export function useEmailReadiness() {
 }
 export function useShareReport(reportId: number) {
   const client = useQueryClient()
-  return useMutation({ mutationFn: (body: DeliveryTargets & { idempotencyKey: string }) => notificationPost<NotificationSendBatch>(`/reports/${reportId}/send`, body),
-    onSuccess: () => { void client.invalidateQueries({ queryKey: ['notifications'] }); void client.invalidateQueries({ queryKey: ['reports'] }) },
-  })
+  return useMutation(reportShareOptions(client, reportId))
 }
 export function useAutoDeliveries(reportId: number) {
   return useQuery({ queryKey: ['auto-deliveries', reportId], queryFn: () => notificationGet<AutoDelivery[]>(`/reports/${reportId}/auto-deliveries`),
