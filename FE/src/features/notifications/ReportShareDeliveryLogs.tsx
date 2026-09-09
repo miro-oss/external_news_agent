@@ -1,6 +1,12 @@
 import { useState } from 'react'
 import { useDeliveryLogs } from '../../api/queries'
 
+const LOG_STATUS_LABELS: Record<string, string> = {
+  SENT: '전달됨',
+  FAILED: '전달 실패',
+  SKIPPED: '전달 제외',
+}
+
 export function ReportShareDeliveryLogs({ reportId, deliveryBatchId }: { reportId: number; deliveryBatchId: string }) {
   const [page, setPage] = useState(0)
   const logs = useDeliveryLogs({ reportId: String(reportId), deliveryBatchId, page })
@@ -13,7 +19,7 @@ export function ReportShareDeliveryLogs({ reportId, deliveryBatchId }: { reportI
     {logs.isError && <p className="error" role="alert">발송 결과를 불러오지 못했습니다. 결과 새로고침을 눌러 다시 확인해 주세요.</p>}
     {logs.data && <>
       {logs.data.content.length ? <ul>{logs.data.content.map((log) => <li key={log.id}>
-        <strong>{log.recipientName} · {log.channelType === 'EMAIL' ? '이메일' : '텔레그램'} · {{ SENT: '전달됨', FAILED: '전달 실패', SKIPPED: '전달 제외' }[log.status]}</strong>
+        <strong>{log.recipientName} · {log.channelType === 'EMAIL' ? '이메일' : '텔레그램'} · {LOG_STATUS_LABELS[log.status] ?? log.status}</strong>
         {log.errorMessage && <p>{log.errorMessage}</p>}
       </li>)}</ul> : <p className="muted">저장된 발송 결과가 없습니다. 잠시 후 결과를 새로고침해 주세요.</p>}
       {logs.data.totalPages > 1 && <div className="pagination" aria-label="공유 발송 결과 페이지 이동">
