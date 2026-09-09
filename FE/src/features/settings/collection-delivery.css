@@ -15,7 +15,7 @@
   text-align: left;
 }
 .collection-delivery-trigger > span:first-child { display: grid; gap: .2rem; min-width: 0; }
-.collection-delivery-trigger strong { font-size: .84rem; font-weight: 600; }
+.collection-delivery-trigger strong { font-size: .94rem; font-weight: 600; }
 .collection-delivery-trigger small { overflow: hidden; color: var(--fg-3); font-size: .74rem; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .collection-delivery-trigger:hover:not(:disabled) { background: var(--primary-weak); }
 .collection-delivery-edit { display: flex; flex: none; align-items: center; gap: .25rem; color: var(--primary-strong); font-size: .8rem; }
