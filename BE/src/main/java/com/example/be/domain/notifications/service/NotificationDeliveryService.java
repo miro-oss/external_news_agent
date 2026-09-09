@@ -19,6 +19,7 @@ import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +34,7 @@ import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class NotificationDeliveryService {
 
     private final NewsReportRepository reportRepository;
@@ -97,6 +99,9 @@ public class NotificationDeliveryService {
         List<NotificationResDTO.SendResult> results = deliver(batch, plan);
         persistenceService.complete(batch.id());
         NotificationResDTO.SendBatch response = summarize(batch, results);
+        log.info("보고서 발송 완료. reportId={} batchId={} targetCount={} sentCount={} failedCount={} skippedCount={}",
+                reportId, batch.id(), response.getTargetCount(), response.getSentCount(),
+                response.getFailedCount(), response.getSkippedCount());
         if (response.getFailedCount() == response.getTargetCount()) {
             throw new NotificationException(NotificationErrorCode.DELIVERY_FAILED,
                     Map.of("deliveryBatchId", batch.id(), "targetCount", response.getTargetCount(),
@@ -246,6 +251,12 @@ public class NotificationDeliveryService {
                         Integer chunkCount,
                         String error,
                         LocalDateTime sentAt) {
+        if (status != DeliveryStatus.SENT) {
+            // Only public failure messages and internal IDs; transport exceptions can contain credentials.
+            log.warn("보고서 발송 결과. reportId={} batchId={} recipientId={} channelId={} channelType={} status={} reason={}",
+                    reportId, batch.id(), target.recipientId(), target.channel().getId(),
+                    target.channelType(), status, error);
+        }
         persistenceService.record(new NotificationDeliveryPersistenceService.LogRecord(
                 batch.id(), reportId, target.recipientId(), target.recipientName(), target.channel().getId(),
                 target.channelType(), target.address(), status, externalMessageId, chunkSeq, chunkCount, error, sentAt));

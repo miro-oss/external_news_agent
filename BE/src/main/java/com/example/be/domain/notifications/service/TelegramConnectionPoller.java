@@ -19,7 +19,7 @@ public class TelegramConnectionPoller {
 
     private enum ReceptionState { EMPTY, RECEIVED }
 
-    @Scheduled(fixedDelayString="${news.notifications.telegram.connection-poll-ms:3000}")
+    @Scheduled(fixedDelayString="${news.notifications.telegram.connection-poll-ms:3000}", scheduler="telegramConnectionScheduler")
     public void poll() {
         if(!adapter.configured()) {
             resetReceptionState();

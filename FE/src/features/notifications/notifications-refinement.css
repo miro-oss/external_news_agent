@@ -151,6 +151,11 @@
 .report-message-preview p { white-space: pre-line; overflow-wrap: anywhere; color: var(--fg-2); line-height: 1.7; }
 .auto-delivery-status summary { cursor: pointer; font-weight: 700; color: var(--fg-2); }
 .auto-delivery-status li + li { margin-top: .6rem; }
+.report-share-result { padding: 1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunken); }
+.report-share-result-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
+.report-share-result ul { display: grid; gap: .8rem; margin: .8rem 0 0; padding: 0; list-style: none; }
+.report-share-result li { font-size: .84rem; line-height: 1.6; overflow-wrap: anywhere; }
+.report-share-result li p { margin: .25rem 0 0; color: var(--fg-2); }
 
 .group-recipient-picker { display: grid; gap: .4rem; min-width: 0; }
 .group-recipient-picker > span { color: var(--fg-2); font-size: .82rem; font-weight: 700; }

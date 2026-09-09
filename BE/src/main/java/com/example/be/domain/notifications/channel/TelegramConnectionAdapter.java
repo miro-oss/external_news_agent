@@ -30,30 +30,53 @@ public class TelegramConnectionAdapter {
     }
     public boolean configured() { return StringUtils.hasText(properties.getTelegram().getBotToken()); }
     public String botUsername() {
-        if (!configured()) throw new NotificationTransportException("텔레그램 연결 설정이 준비되지 않았습니다.");
+        if (!configured()) {
+            log.warn("텔레그램 연결 확인 실패. reason=BOT_TOKEN_MISSING");
+            throw new NotificationTransportException("텔레그램 연결 설정이 준비되지 않았습니다.");
+        }
+        String operation = "getWebhookInfo";
         try {
-            WebhookResponse webhook=client.get().uri("/bot{token}/getWebhookInfo",token()).retrieve().body(WebhookResponse.class);
-            if (webhook == null || !webhook.ok() || webhook.result() == null) throw unavailable();
+            // Preserve ':' as shown in Telegram's documented URL instead of template-encoding it.
+            WebhookResponse webhook=client.get().uri(uri -> uri.pathSegment("bot" + token(), "getWebhookInfo").build())
+                    .retrieve().body(WebhookResponse.class);
+            if (webhook == null || !webhook.ok() || webhook.result() == null) {
+                log.warn("텔레그램 연결 확인 실패. operation={} reason=INVALID_RESPONSE", operation);
+                throw unavailable();
+            }
             boolean hasWebhook = StringUtils.hasText(webhook.result().url());
             List<String> allowedUpdates = webhook.result().allowedUpdates();
             boolean acceptsMessage = allowedUpdates == null || allowedUpdates.isEmpty() || allowedUpdates.contains("message");
             log.info("텔레그램 연결 수신 설정. hasWebhook={} pendingUpdateCount={} acceptsMessage={}",
                     hasWebhook, webhook.result().pendingUpdateCount() == null ? "UNKNOWN" : webhook.result().pendingUpdateCount(), acceptsMessage);
             if (hasWebhook) throw new NotificationTransportException("이 봇은 다른 연결 서비스를 사용 중입니다. 관리자에게 연결 설정 확인을 요청해 주세요.");
-            MeResponse response=client.get().uri("/bot{token}/getMe",token()).retrieve().body(MeResponse.class);
+            operation = "getMe";
+            MeResponse response=client.get().uri(uri -> uri.pathSegment("bot" + token(), "getMe").build())
+                    .retrieve().body(MeResponse.class);
             if (response == null || !response.ok() || response.result() == null
-                    || response.result().username() == null || !response.result().username().matches("[A-Za-z0-9_]{5,32}")) throw unavailable();
+                    || response.result().username() == null || !response.result().username().matches("[A-Za-z0-9_]{5,32}")) {
+                log.warn("텔레그램 연결 확인 실패. operation={} reason=INVALID_RESPONSE", operation);
+                throw unavailable();
+            }
             return response.result().username();
-        } catch (RestClientException error) { throw unavailable(); }
+        } catch (RestClientResponseException error) {
+            log.warn("텔레그램 연결 확인 실패. operation={} httpStatus={}", operation, error.getStatusCode().value());
+            throw unavailable();
+        } catch (RestClientException error) {
+            log.warn("텔레그램 연결 확인 실패. operation={} type={}", operation, error.getClass().getSimpleName());
+            throw unavailable();
+        }
     }
     public List<Update> updates(long offset) {
         try {
-            UpdatesResponse response=client.post().uri("/bot{token}/getUpdates",token())
+            UpdatesResponse response=client.post().uri(uri -> uri.pathSegment("bot" + token(), "getUpdates").build())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Map.of("offset",offset,"timeout",0,"limit",100,"allowed_updates",List.of("message")))
                     .httpRequest(this::logReceptionRequestOnce)
                     .retrieve().body(UpdatesResponse.class);
-            if (response==null || !response.ok() || response.result()==null) throw unavailable();
+            if (response==null || !response.ok() || response.result()==null) {
+                log.warn("텔레그램 연결 업데이트 조회 실패. reason=INVALID_RESPONSE");
+                throw unavailable();
+            }
             return response.result();
         } catch (RestClientResponseException error) {
             log.warn("텔레그램 연결 업데이트 조회 실패. httpStatus={}", error.getStatusCode().value());
@@ -66,7 +89,7 @@ public class TelegramConnectionAdapter {
     private void logReceptionRequestOnce(ClientHttpRequest request) {
         if (!receptionRequestLogged.compareAndSet(false, true)) return;
         log.info("텔레그램 연결 수신 요청 형식. expectedPath={} hasQuery={} isPost={} isJson={}",
-                ("/bot" + token() + "/getUpdates").equals(request.getURI().getPath()),
+                ("/bot" + token() + "/getUpdates").equals(request.getURI().getRawPath()),
                 request.getURI().getRawQuery() != null,
                 HttpMethod.POST.equals(request.getMethod()),
                 MediaType.APPLICATION_JSON.isCompatibleWith(request.getHeaders().getContentType()));
