@@ -179,7 +179,7 @@ function RecipientPanel({ channels, recipients }: {
   }
 
   return (
-    <section className="notification-card-stack">
+    <section className="notification-card-stack" tabIndex={-1}>
       <div className="section-heading notification-panel-heading"><h2>수신자</h2><span>{recipients.length}명</span></div>
       <form className="notification-form recipient-create-form" onSubmit={submit}>
         <div className="notification-form-heading"><strong>새 수신자 등록</strong><span>텔레그램은 등록 후 수신자의 설정에서 연결할 수 있습니다.</span></div>
@@ -248,7 +248,7 @@ function GroupPanel({ recipients, groups }: {
   }
 
   return (
-    <section className="notification-card-stack">
+    <section className="notification-card-stack" tabIndex={-1}>
       <div className="section-heading notification-panel-heading"><h2>수신 그룹</h2><span>{groups.length}개</span></div>
       <form className="notification-form" onSubmit={submit}>
         <div className="notification-form-heading"><strong>새 그룹 등록</strong><span>같은 보고서를 받을 사람을 묶습니다.</span></div>

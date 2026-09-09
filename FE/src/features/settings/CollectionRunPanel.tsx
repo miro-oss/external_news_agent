@@ -94,7 +94,7 @@ export function CollectionRunPanel() {
   const canRun = targetCombinations.length > 0 && !startRun.isPending
 
   return (
-    <section className="collection-run-panel" aria-labelledby="collection-run-title">
+    <section className="collection-run-panel" aria-labelledby="collection-run-title" tabIndex={-1}>
       <div className="collection-run-top">
         <div className="collection-run-heading">
           <div>

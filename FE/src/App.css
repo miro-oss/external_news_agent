@@ -1176,7 +1176,7 @@ tbody tr:hover td {
 .collection-run-panel {
   margin-bottom: 0.7rem;
   padding: 1.5rem;
-  border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--line));
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
@@ -1187,6 +1187,16 @@ tbody tr:hover td {
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.settings-top-row > :is(.collection-run-panel, .topic-registration-card),
+.notification-split > .notification-card-stack {
+  transition: border-color var(--dur-1) var(--ease-out);
+}
+
+.settings-top-row > :is(.collection-run-panel, .topic-registration-card):focus-within,
+.notification-split > .notification-card-stack:focus-within {
+  border-color: color-mix(in srgb, var(--primary) 24%, var(--line));
 }
 
 .collection-run-heading h2 {
@@ -3650,6 +3660,7 @@ body.modal-open {
   display: flex;
   flex-direction: column;
   padding-bottom: 1rem;
+  border: 1px solid var(--line);
 }
 
 .notification-form {
