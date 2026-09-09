@@ -45,4 +45,6 @@ screenshots/
 
 # Documentation and evaluation reports stay local. Existing tracked files are unaffected.
 *.md
+# Public repository introduction requested for the project handoff.
+!/README.md
 BE/src/test/resources/golden/clusters.*.summary.json
