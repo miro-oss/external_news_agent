@@ -9,6 +9,7 @@ import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.notifications.service.ReportNotificationAutomationService;
@@ -186,11 +187,14 @@ class ReportPersistenceServiceTest {
         verify(run).attachReport(17L);
     }
 
-    @Test
-    void completesReservedReportWithAgentMetadata() {
+    @ParameterizedTest
+    @EnumSource(ReportScope.class)
+    void completesReservedReportWithAgentMetadata(ReportScope scope) {
         LocalDateTime generatedAt = LocalDateTime.of(2026, 8, 21, 9, 0);
         NewsReport report = NewsReport.builder()
                 .id(17L)
+                .reportScope(scope)
+                .reportDate(scope == ReportScope.DAILY ? generatedAt.toLocalDate().minusDays(1) : null)
                 .title("보고서 생성 중")
                 .markdownBody("생성 중")
                 .modelName("pending-report-v1")
@@ -205,7 +209,9 @@ class ReportPersistenceServiceTest {
 
         assertEquals(17L, service.complete(17L, document, generatedAt));
 
-        assertEquals("# 보고서", report.getMarkdownBody());
+        String expectedTitle = scope == ReportScope.DAILY ? "2026-08-20 일일 통합 뉴스 보고서" : "보고서";
+        assertEquals(expectedTitle, report.getTitle());
+        assertEquals("# " + expectedTitle, report.getMarkdownBody());
         assertEquals("report.ko.v1", report.getPromptVersion());
         assertEquals("gemini", report.getLlmProvider());
         assertEquals(100L, report.getInputTokens());

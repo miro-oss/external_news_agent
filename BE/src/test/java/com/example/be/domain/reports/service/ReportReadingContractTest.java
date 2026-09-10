@@ -48,7 +48,13 @@ class ReportReadingContractTest {
         assertEquals(contexts, stored);
         NewsReport report = NewsReport.builder().collectionContexts(stored).reportScope(ReportScope.DAILY)
                 .reportDate(LocalDate.of(2026, 9, 8)).build();
-        assertEquals("HBM 시장 · 2026-09-08 일일 통합 리포트", ReportTitles.forReport(report, "모호한 제목", LocalDateTime.now()));
+        var generatedAt = LocalDateTime.of(2026, 9, 9, 10, 0);
+        assertEquals("2026-09-08 일일 통합 뉴스 보고서", ReportTitles.forReport(report, "모호한 제목", generatedAt));
+        assertEquals("2026-09-08 일일 통합 뉴스 보고서", ReportTitles.forReport(
+                NewsReport.builder().reportScope(ReportScope.DAILY).reportDate(report.getReportDate()).build(),
+                "모호한 제목", generatedAt));
+        assertEquals("HBM 시장 · 2026-09-09 10:00 리포트", ReportTitles.forReport(
+                NewsReport.builder().collectionContexts(stored).build(), "모호한 제목", generatedAt));
     }
 
     @Test

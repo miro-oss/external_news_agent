@@ -59,8 +59,20 @@ test('invalid generation dates omit the date without hiding the subject', () => 
   assert.equal(runTitle('리포트', ''), '뉴스 리포트')
 })
 
-test('daily titles are returned byte-for-byte including spacing, length, and date text', () => {
+test('daily titles use the aggregation day even when saved titles include long topic names', () => {
+  const title = 'MEASURE9-반도체-HBM4-글로벌 공급망 및 수출 규제-20260901 외 12개 주제 · 2026-09-08 일일 통합 리포트'
+  assert.equal(reportDisplayTitle({
+    reportScope: 'DAILY', title, reportDate: '2026-09-08', generatedAt,
+  }), '2026-09-08 일일 통합 뉴스 보고서')
+  assert.equal(reportDisplayTitle({
+    reportScope: 'DAILY', title: '2026-09-08 일일 통합 뉴스 보고서', reportDate: '2026-09-08', generatedAt: 'invalid',
+  }), '2026-09-08 일일 통합 뉴스 보고서')
+})
+
+test('legacy daily reports without an aggregation day preserve the saved title', () => {
   for (const title of ['2026-09-09 일일 통합 리포트', '  뉴스\u00a0통합\n리포트  ', '반도체'.repeat(20), '']) {
-    assert.equal(reportDisplayTitle({ reportScope: 'DAILY', title, generatedAt: 'invalid' }), title)
+    for (const reportDate of [null, undefined]) {
+      assert.equal(reportDisplayTitle({ reportScope: 'DAILY', title, reportDate, generatedAt }), title)
+    }
   }
 })
