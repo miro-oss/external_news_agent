@@ -5,6 +5,7 @@ import com.example.be.domain.collection.connector.dto.res.FetchResult;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
+import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
@@ -16,11 +17,13 @@ import com.example.be.domain.collection.robots.RobotsDecision;
 import com.example.be.domain.collection.robots.RobotsPolicyService;
 import com.example.be.domain.notifications.service.ReportNotificationAutomationService;
 import com.example.be.domain.reports.repository.NewsReportRepository;
+import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
+import com.example.be.domain.topics.service.strategy.TopicKeywordStrategyOrchestrator;
 import com.example.be.global.config.ApiTimeZone;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -44,7 +48,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -57,6 +64,7 @@ import static org.mockito.Mockito.when;
 class CollectionNoChangeReportIntegrationTests {
 
     @Autowired private CollectionRunExecutionService executionService;
+    @Autowired private CollectionResultWriter resultWriter;
     @Autowired private CollectionRunRepository runRepository;
     @Autowired private CollectionRunArticleRepository observationRepository;
     @Autowired private NewsReportRepository reportRepository;
@@ -67,6 +75,7 @@ class CollectionNoChangeReportIntegrationTests {
     @MockitoBean private FeedClient feedClient;
     @MockitoBean private RobotsPolicyService robotsPolicyService;
     @MockitoBean private ReportNotificationAutomationService notificationAutomation;
+    @MockitoBean private TopicKeywordStrategyOrchestrator keywordStrategyOrchestrator;
 
     private Topic topic;
     private Source source;
@@ -149,6 +158,36 @@ class CollectionNoChangeReportIntegrationTests {
                 "테스트 피드 응답 실패".equals(warning.getMessage())));
         assertNotNull(run.getReportId());
         assertTrue(reportRepository.findByRunId(run.getId()).isPresent());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void unchangedCollectionWithKeywordStrategyFailureCreatesDiagnosticReport(boolean recordsWarningInternally) {
+        when(feedClient.fetch(any())).thenReturn(new FeedFetch(FetchResult.ok(List.of()), true, "v1", null));
+        if (recordsWarningInternally) {
+            doAnswer(invocation -> {
+                resultWriter.addAgentWarning(invocation.getArgument(0),
+                        CollectionRunWarning.CODE_LLM_KEYWORD_STRATEGY_FAILED, "키워드 제안 예산 부족");
+                return null;
+            }).when(keywordStrategyOrchestrator).strategize(anyLong());
+        } else {
+            doThrow(new IllegalStateException("키워드 전략 실행 실패"))
+                    .when(keywordStrategyOrchestrator).strategize(anyLong());
+        }
+
+        CollectionRun run = execute(TriggerType.SCHEDULED);
+
+        assertEquals(RunStatus.PARTIAL, run.getStatus());
+        assertNotNull(run.getFinishedAt());
+        assertEquals(RunItemStatus.SKIPPED, run.getItems().getFirst().getStatus());
+        assertEquals(0, run.getNewCount());
+        assertEquals(0, run.getUpdatedCount());
+        assertTrue(run.getWarnings().stream().anyMatch(warning ->
+                CollectionRunWarning.CODE_LLM_KEYWORD_STRATEGY_FAILED.equals(warning.getCode())));
+        assertNotNull(run.getReportId());
+        assertEquals(ReportStatus.FALLBACK,
+                reportRepository.findByRunId(run.getId()).orElseThrow().getReportStatus());
+        verify(notificationAutomation).enqueueCompletedReport(any());
     }
 
     private void givenArticle(String title) {
