@@ -99,7 +99,7 @@ public class CollectionRunExecutionService {
             }
             // M5 보고서는 findings를 모두 저장한 뒤 만든다. 생성과 reportId 연결은 별도 짧은 트랜잭션이다.
             try {
-                reportCreationService.generate(runId);
+                reportCreationService.generate(runId, !refreshedArticleIds.isEmpty());
             } catch (RuntimeException exception) {
                 log.error("보고서를 생성하지 못했다. runId={} error={}", runId, exception.getMessage(), exception);
                 resultWriter.addReportGenerationFailedWarning(runId, exception.getMessage());
