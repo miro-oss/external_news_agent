@@ -15,7 +15,10 @@ _TIME_WINDOWS = (24, 48, 72)
 _ORGANIZATION_JACCARD_THRESHOLDS = (0.10, 0.125, 0.15, 0.20)
 _ORGANIZATION_TIME_WINDOWS = (12, 24, 48)
 _TITLE_ORGANIZATION_RULE_VERSION = "title-organization-conflict-v1"
-_EVENT_TEXT_RULE_VERSIONS = ("event-text-evidence-v2", "event-text-evidence-v3")
+_EVENT_CONFLICT_RULE_VERSION = "event-text-evidence-v4"
+_EVENT_TEXT_RULE_VERSIONS = (
+    "event-text-evidence-v2", "event-text-evidence-v3", _EVENT_CONFLICT_RULE_VERSION,
+)
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -42,8 +45,11 @@ class UnionFind:
         self,
         values: list[int],
         title_organizations: dict[int, frozenset[str]] | None = None,
+        event_conflicts: dict[int, frozenset[int]] | None = None,
     ) -> None:
         self.parents = {value: value for value in values}
+        self.member_ids = {value: {value} for value in values}
+        self.event_conflicts = event_conflicts or {}
         organizations = title_organizations or {}
         self.organization_profiles = {
             value: {organizations[value]} if organizations.get(value) else set()
@@ -65,6 +71,7 @@ class UnionFind:
             kept_root = min(left_root, right_root)
             merged_root = max(left_root, right_root)
             self.parents[merged_root] = kept_root
+            self.member_ids[kept_root].update(self.member_ids.pop(merged_root))
             self.organization_profiles[kept_root].update(
                 self.organization_profiles.pop(merged_root)
             )
@@ -74,6 +81,13 @@ class UnionFind:
         right_root = self.root(right)
         if left_root == right_root:
             return True
+        if any(
+            not self.event_conflicts.get(article_id, frozenset()).isdisjoint(
+                self.member_ids[right_root]
+            )
+            for article_id in self.member_ids[left_root]
+        ):
+            return False
         return all(
             not left_organizations.isdisjoint(right_organizations)
             for left_organizations in self.organization_profiles[left_root]
@@ -94,6 +108,9 @@ def validate_clustering_metadata(java_output: dict[str, Any]) -> None:
         java_output["articles"],
         required=version != "legacy",
     )
+    _validate_event_conflicts(
+        java_output["articles"], required=version == _EVENT_CONFLICT_RULE_VERSION
+    )
     if version in _EVENT_TEXT_RULE_VERSIONS:
         evaluations = java_output.get("pairEvaluations") or [
             {"pairs": java_output.get("pairs", [])}
@@ -107,6 +124,10 @@ def validate_clustering_metadata(java_output: dict[str, Any]) -> None:
                 ):
                     if not isinstance(pair.get(field), bool):
                         raise ValueError(f"Event evidence requires boolean {field}")
+                if version == _EVENT_CONFLICT_RULE_VERSION and not isinstance(
+                    pair.get("specificEventMatch"), bool
+                ):
+                    raise ValueError("Event evidence requires boolean specificEventMatch")
                 for field in ("titleTextSimilarity", "leadTextSimilarity"):
                     value = pair.get(field)
                     if (
@@ -131,6 +152,45 @@ def _validate_title_organizations(
                 f"Article {article.get('articleId')} titleOrganizations must be a list "
                 "of nonempty strings (an empty list is allowed)"
             )
+
+
+def _validate_event_conflicts(
+    articles: list[dict[str, Any]], *, required: bool = False
+) -> None:
+    field = "eventConflictingArticleIds"
+    if not required and not any(field in article for article in articles):
+        return
+    by_id: dict[int, dict[str, Any]] = {}
+    for article in articles:
+        article_id = article.get("articleId")
+        if (
+            isinstance(article_id, bool)
+            or not isinstance(article_id, int)
+            or article_id in by_id
+        ):
+            raise ValueError(f"{field} requires unique integer articleId values")
+        by_id[article_id] = article
+    for article_id, article in by_id.items():
+        if field not in article and not required:
+            continue
+        conflicts = article.get(field)
+        if not isinstance(conflicts, list) or any(
+            isinstance(value, bool) or not isinstance(value, int) for value in conflicts
+        ):
+            raise ValueError(f"Article {article_id} {field} must be a list of integer IDs")
+        if conflicts != sorted(set(conflicts)):
+            raise ValueError(f"Article {article_id} {field} must be sorted without duplicates")
+        for other_id in conflicts:
+            if other_id == article_id:
+                raise ValueError(f"Article {article_id} {field} must not reference itself")
+            other = by_id.get(other_id)
+            if other is None or other.get("split") != article.get("split"):
+                raise ValueError(
+                    f"Article {article_id} {field} references unknown or cross-split ID"
+                )
+            other_conflicts = other.get(field)
+            if not isinstance(other_conflicts, list) or article_id not in other_conflicts:
+                raise ValueError(f"Article {article_id} {field} must be symmetric")
 
 
 def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
@@ -284,6 +344,15 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
                 bool(article.get("titleOrganizations")) for article in articles
             ),
         },
+        "eventConflictGuard": {
+            "implementationVersion": _EVENT_CONFLICT_RULE_VERSION,
+            "metadataComplete": all(
+                "eventConflictingArticleIds" in article for article in articles
+            ),
+            "conflictedArticleCount": sum(
+                bool(article.get("eventConflictingArticleIds")) for article in articles
+            ),
+        },
         "articleCount": java_output["articleCount"],
         "bodySource": java_output.get("bodySource", "unspecified"),
         "selectionSplit": "CALIBRATION",
@@ -305,6 +374,7 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         },
         "tfidfCharWbBaseline": {
             "usesTitleOrganizationGuard": False,
+            "usesEventConflictGuard": False,
             "includesFixedContentGroups": True,
             "threshold": baseline_threshold,
             "calibrationMetrics": asdict(baseline_calibration),
@@ -312,6 +382,7 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         },
         "tfidfCharWbStandaloneBaseline": {
             "usesTitleOrganizationGuard": False,
+            "usesEventConflictGuard": False,
             "includesFixedContentGroups": False,
             "threshold": standalone_threshold,
             "calibrationMetrics": asdict(standalone_calibration),
@@ -390,6 +461,7 @@ def _evaluate_rule(
                 or enough_entities
                 or organization_matches
                 or pair.get("eventTextMatch", False)
+                or pair.get("specificEventMatch", False)
             )
         else:
             matches = (
@@ -400,6 +472,7 @@ def _evaluate_rule(
                     pair.get("eventTextMatch", False)
                     and hours_apart <= organization_time_window_hours
                 )
+                or (pair.get("specificEventMatch", False) and hours_apart <= time_window_hours)
             )
         if matches and unions[topic_id].can_join(left, right):
             unions[topic_id].join(left, right)
@@ -431,6 +504,10 @@ def _topic_unions(
         int(article["articleId"]): frozenset(article.get("titleOrganizations") or [])
         for article in selected
     }
+    event_conflicts = {
+        int(article["articleId"]): frozenset(article.get("eventConflictingArticleIds") or [])
+        for article in selected
+    }
     representative_by_group: dict[str, int] = {}
     for article in selected:
         group_id = article.get("fixedContentGroupId")
@@ -450,7 +527,7 @@ def _topic_unions(
             for article in topic_articles
             if include_fixed_content_groups and article.get("fixedContentGroupId") is not None
         }
-        union = UnionFind(sorted(article_ids | proxy_ids), title_organizations)
+        union = UnionFind(sorted(article_ids | proxy_ids), title_organizations, event_conflicts)
         if include_fixed_content_groups:
             for article in topic_articles:
                 group_id = article.get("fixedContentGroupId")

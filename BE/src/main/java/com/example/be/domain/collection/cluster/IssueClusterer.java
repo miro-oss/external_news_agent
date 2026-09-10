@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -24,7 +25,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class IssueClusterer {
 
-    static final String RULE_VERSION = "event-text-evidence-v3";
+    static final String RULE_VERSION = "event-text-evidence-v4";
 
     private static final double MIN_ENTITY_TITLE_SUPPORT_JACCARD = 0.10;
 
@@ -43,6 +44,27 @@ public class IssueClusterer {
     /** 클러스터링과 오프라인 export가 같은 인스턴스의 전처리·추출기 설정을 공유한다. */
     Set<String> titleOrganizations(String title) {
         return entityExtractor.extractTitleOrganizations(breakingNewsDetector.coreTitle(title));
+    }
+
+    /** Export all profiles, including non-voting content proxies, without consulting labels. */
+    Map<Long, List<Long>> eventConflictingArticleIds(List<ClusterArticle> articles) {
+        BiPredicate<Long, Long> conflicts = eventConflicts(articles);
+        List<Long> ids = articles.stream().map(ClusterArticle::articleId).distinct().sorted().toList();
+        Map<Long, List<Long>> result = new LinkedHashMap<>();
+        for (long id : ids) {
+            result.put(id, ids.stream().filter(other -> other != id && conflicts.test(id, other)).toList());
+        }
+        return result;
+    }
+
+    private BiPredicate<Long, Long> eventConflicts(List<ClusterArticle> articles) {
+        return eventConflicts(articles, new SpecificEventEvidence(articles, breakingNewsDetector));
+    }
+
+    private BiPredicate<Long, Long> eventConflicts(List<ClusterArticle> articles,
+                                                  SpecificEventEvidence specific) {
+        EventScopeEvidence scope = new EventScopeEvidence(articles, breakingNewsDetector);
+        return (left, right) -> scope.conflicts(left, right) || specific.conflicts(left, right);
     }
 
     /** pair score는 오프라인 측정 전용이다. 프로덕션에서는 O(n²) 진단 목록을 보관하지 않는다. */
@@ -196,8 +218,9 @@ public class IssueClusterer {
             entities.put(article.articleId(), extraction.entities());
         });
 
-        UnionFind union = new UnionFind(byId.keySet(), titleOrganizations);
-        // 저장된 멤버십과 동일 본문은 보존한다. 새 규칙 간선에만 조직 충돌 방어를 적용한다.
+        SpecificEventEvidence specificEvidence = new SpecificEventEvidence(unique, breakingNewsDetector);
+        UnionFind union = new UnionFind(byId.keySet(), titleOrganizations, eventConflicts(unique, specificEvidence));
+        // 저장된 멤버십과 동일 본문은 보존한다. 새 규칙 간선에만 조직·사건 충돌 방어를 적용한다.
         // 이미 업체가 섞인 그룹도 프로파일을 보존한다. 한 업체의 후속 기사는 다른 기존 업체와
         // 충돌하므로 별도 이슈로 남긴다. 과거 과병합을 늘리면서 정상화한 것으로 취급하지 않는다.
         Map<Long, List<ClusterArticle>> byExistingIssue = unique.stream()
@@ -245,8 +268,10 @@ public class IssueClusterer {
                 pairTitleOrganizations.addAll(titleOrganizations.get(second.articleId()));
                 EventTextEvidence.Evidence evidence = eventEvidence.compare(
                         first.articleId(), second.articleId(), pairTitleOrganizations);
+                boolean specificMatch = specificEvidence.matches(first.articleId(), second.articleId());
                 boolean eventMatch = evidence.eventMatch()
-                        || focalEvidence.matches(first.articleId(), second.articleId());
+                        || focalEvidence.matches(first.articleId(), second.articleId())
+                        || specificMatch;
                 // One shared acronym in otherwise unrelated headlines is only background evidence.
                 entityTitleSupported = entityTitleSupported
                         && (jaccard >= MIN_ENTITY_TITLE_SUPPORT_JACCARD || eventMatch);
@@ -258,9 +283,13 @@ public class IssueClusterer {
                 boolean lexicalMatch = eventMatch && within(
                         first.eventTime(), second.eventTime(), breakingPair
                                 ? properties.getBreakingTimeWindow() : properties.getOrganizationTimeWindow());
+                // A concrete release identity is stronger than organization/title wording.
+                // Reuse the entity window so the next day's collection can connect late reports.
+                boolean specificIdentityMatch = specificMatch && within(first.eventTime(), second.eventTime(),
+                        breakingPair ? properties.getBreakingTimeWindow() : properties.getEntityTimeWindow());
                 boolean matches = (matchesIssue(
                         first, second, breakingPair,
-                        titleMatches, enoughEntities, organizationTitleMatches) || lexicalMatch)
+                        titleMatches, enoughEntities, organizationTitleMatches) || lexicalMatch || specificIdentityMatch)
                         && union.canJoin(first.articleId(), second.articleId());
                 if (matches) {
                     union.join(first.articleId(), second.articleId());
@@ -270,7 +299,7 @@ public class IssueClusterer {
                             first.articleId(), second.articleId(), topicId,
                             jaccard, entityOverlap, organizationOverlap,
                             breakingPair, hoursApart, evidence.titleSimilarity(), evidence.leadSimilarity(),
-                            eventMatch, entityTitleSupported, evidence.organizationSupported(), matches));
+                            eventMatch, specificMatch, entityTitleSupported, evidence.organizationSupported(), matches));
                 }
             }
         }
@@ -466,18 +495,24 @@ public class IssueClusterer {
     ) {
     }
 
-    private static final class UnionFind {
+    static final class UnionFind {
 
         private final Map<Long, Long> parents = new HashMap<>();
         private final Map<Long, Set<Set<String>>> organizationProfiles = new HashMap<>();
+        private final Map<Long, Set<Long>> members = new HashMap<>();
+        private final BiPredicate<Long, Long> eventConflicts;
+        private final Set<ComponentPair> rejectedEventMerges = new HashSet<>();
 
         private UnionFind(Collection<Long> values) {
-            this(values, Map.of());
+            this(values, Map.of(), (left, right) -> false);
         }
 
-        private UnionFind(Collection<Long> values, Map<Long, Set<String>> titleOrganizations) {
+        UnionFind(Collection<Long> values, Map<Long, Set<String>> titleOrganizations,
+                          BiPredicate<Long, Long> eventConflicts) {
+            this.eventConflicts = eventConflicts;
             values.forEach(value -> {
                 parents.put(value, value);
+                members.put(value, new HashSet<>(Set.of(value)));
                 Set<Set<String>> profiles = new HashSet<>();
                 Set<String> organizations = titleOrganizations.getOrDefault(value, Set.of());
                 if (!organizations.isEmpty()) {
@@ -499,11 +534,15 @@ public class IssueClusterer {
         }
 
         /** 조직 미상·복수 조직 기사가 서로 다른 업체 사이에 전이 경로를 만들지 못하게 한다. */
-        private boolean canJoin(long left, long right) {
+        boolean canJoin(long left, long right) {
             long leftRoot = root(left);
             long rightRoot = root(right);
             if (leftRoot == rightRoot) {
                 return true;
+            }
+            ComponentPair pair = new ComponentPair(Math.min(leftRoot, rightRoot), Math.max(leftRoot, rightRoot));
+            if (rejectedEventMerges.contains(pair)) {
+                return false;
             }
             for (Set<String> leftProfile : organizationProfiles.get(leftRoot)) {
                 for (Set<String> rightProfile : organizationProfiles.get(rightRoot)) {
@@ -512,10 +551,22 @@ public class IssueClusterer {
                     }
                 }
             }
+            // Unknown intermediate articles cannot erase explicit event conflicts. Forced saved
+            // membership still retains every member profile for subsequent candidate merges.
+            for (long leftMember : members.get(leftRoot)) {
+                for (long rightMember : members.get(rightRoot)) {
+                    if (eventConflicts.test(leftMember, rightMember)) {
+                        // Membership only grows, so a rejected pair remains incompatible while
+                        // its roots survive. A changed root gets a fresh check; IDs are never reused.
+                        rejectedEventMerges.add(pair);
+                        return false;
+                    }
+                }
+            }
             return true;
         }
 
-        private void join(long left, long right) {
+        void join(long left, long right) {
             long leftRoot = root(left);
             long rightRoot = root(right);
             if (leftRoot != rightRoot) {
@@ -523,7 +574,10 @@ public class IssueClusterer {
                 long removed = Math.max(leftRoot, rightRoot);
                 parents.put(removed, retained);
                 organizationProfiles.get(retained).addAll(organizationProfiles.remove(removed));
+                members.get(retained).addAll(members.remove(removed));
             }
         }
+
+        private record ComponentPair(long left, long right) {}
     }
 }

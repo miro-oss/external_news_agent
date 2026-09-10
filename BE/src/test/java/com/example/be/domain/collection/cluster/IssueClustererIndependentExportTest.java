@@ -109,9 +109,12 @@ class IssueClustererIndependentExportTest {
             properties.setCommonEntityDocumentRatio(ratio);
             IssueClusterer clusterer = new IssueClusterer(properties, new BreakingNewsDetector());
             ClusterPlan plan = clusterer.cluster(articles.stream().map(GoldenArticle::article).toList(), true);
-            Map<Long, Long> issueRepresentativeByArticle = new HashMap<>();
+            Map<Long, List<Long>> eventConflicts = clusterer.eventConflictingArticleIds(
+                    articles.stream().map(GoldenArticle::article).toList());
+            Map<ArticleTopicKey, Long> issueRepresentativeByArticle = new HashMap<>();
             plan.issues().forEach(issue -> issue.articleIds().forEach(articleId ->
-                    issueRepresentativeByArticle.put(articleId, issue.representativeArticleId())));
+                    issueRepresentativeByArticle.put(new ArticleTopicKey(articleId, issue.topicId()),
+                            issue.representativeArticleId())));
             Map<Long, String> contentGroupByArticle = new HashMap<>();
             Map<Long, Long> representativeByArticle = new HashMap<>();
             for (int index = 0; index < plan.contentGroups().size(); index++) {
@@ -134,13 +137,15 @@ class IssueClustererIndependentExportTest {
                 value.put("title", article.title());
                 value.put("titleOrganizations", clusterer.titleOrganizations(article.title())
                         .stream().sorted().toList());
+                value.put("eventConflictingArticleIds", eventConflicts.get(article.articleId()));
                 value.put("expectedIssueId", source.expectedIssueId());
                 value.put("split", source.split());
                 value.put("observedAt", article.observedAt() == null ? null : article.observedAt().toString());
                 value.put("fixedContentGroupId", contentGroupByArticle.get(article.articleId()));
                 value.put("fixedContentGroupRepresentativeId", representativeByArticle.get(article.articleId()));
                 // Actual Java membership supports regression inspection without reconstructing pair unions.
-                value.put("configuredIssueRepresentativeId", issueRepresentativeByArticle.get(article.articleId()));
+                value.put("configuredIssueRepresentativeId", issueRepresentativeByArticle.get(
+                        new ArticleTopicKey(article.articleId(), article.topicId())));
                 exportedArticles.add(value);
             }
             plan.pairScores().forEach(score -> {
@@ -153,6 +158,7 @@ class IssueClustererIndependentExportTest {
                 value.put("titleTextSimilarity", score.titleTextSimilarity());
                 value.put("leadTextSimilarity", score.leadTextSimilarity());
                 value.put("eventTextMatch", score.eventTextMatch());
+                value.put("specificEventMatch", score.specificEventMatch());
                 value.put("entityTitleSupported", score.entityTitleSupported());
                 value.put("organizationTitleSupported", score.organizationTitleSupported());
                 value.put("entityOverlap", score.entityOverlap());
@@ -415,6 +421,55 @@ class IssueClustererIndependentExportTest {
     }
 
     @Test
+    void exportedMembershipKeepsTheTopicOfGlobalContentRepresentatives(@TempDir Path directory) throws IOException {
+        ObjectNode input = syntheticInput();
+        String shared = "A laboratory documented a controlled experiment with detailed independent measurements. ".repeat(9);
+        for (int index : List.of(0, 20)) {
+            articleAt(input, index).put("body", shared);
+            articleAt(input, index).put("fetchStatus", "FULLTEXT");
+            articleAt(input, index).put("reliabilityScore", 0.5);
+        }
+        String title = "새빛연구원 미래공장 기술교육 솔루션 공개";
+        articleAt(input, 0).put("title", title);
+        articleAt(input, 1).put("title", title);
+        articleAt(input, 1).put("body", "Rainfall replenishes mountain rivers and wetlands. Forest wildlife depends on seasonal migration routes. ".repeat(9));
+        articleAt(input, 1).put("fetchStatus", "FULLTEXT");
+        articleAt(input, 1).put("reliabilityScore", 0.99);
+        Path output = directory.resolve("pairs.json");
+        export(MAPPER.writeValueAsBytes(input), output);
+        JsonNode result = MAPPER.readTree(Files.readAllBytes(output));
+        Map<Long, JsonNode> rows = new HashMap<>();
+        result.path("articles").forEach(article -> rows.put(article.path("articleId").asLong(), article));
+        assertEquals(2L, rows.get(1L).path("configuredIssueRepresentativeId").asLong());
+        assertEquals(2L, rows.get(2L).path("configuredIssueRepresentativeId").asLong());
+        assertEquals(1L, rows.get(21L).path("fixedContentGroupRepresentativeId").asLong());
+        assertEquals(1L, rows.get(21L).path("configuredIssueRepresentativeId").asLong());
+    }
+
+    @Test
+    void exportsExplicitEventConflictsWithinTheirOwnSplit(@TempDir Path directory) throws IOException {
+        ObjectNode input = syntheticInput();
+        for (int offset : List.of(0, 40)) {
+            articleAt(input, offset).put("title", "ETF 리밸런싱 앞두고 비중 조정");
+            articleAt(input, offset + 1).put("title", "코스피 상승 마감");
+        }
+        Path output = directory.resolve("pairs.json");
+        export(MAPPER.writeValueAsBytes(input), output);
+        JsonNode result = MAPPER.readTree(Files.readAllBytes(output));
+        assertEquals(IssueClusterer.RULE_VERSION, result.path("clusteringRuleVersion").asString());
+        Map<Long, JsonNode> rows = new HashMap<>();
+        result.path("articles").forEach(article -> rows.put(article.path("articleId").asLong(), article));
+        for (long offset : List.of(0L, 40L)) {
+            JsonNode first = rows.get(offset + 1).path("eventConflictingArticleIds");
+            JsonNode second = rows.get(offset + 2).path("eventConflictingArticleIds");
+            assertEquals(1, first.size());
+            assertEquals(offset + 2, first.get(0).asLong());
+            assertEquals(1, second.size());
+            assertEquals(offset + 1, second.get(0).asLong());
+        }
+    }
+
+    @Test
     void neverOverwritesExistingFeatureOutput(@TempDir Path directory) throws IOException {
         Path output = directory.resolve("pairs.json");
         String original = "Previously exported evaluation features must remain immutable.";
@@ -525,6 +580,9 @@ class IssueClustererIndependentExportTest {
     }
 
     private record SourceTopicKey(long sourceArticleId, long topicId) {
+    }
+
+    private record ArticleTopicKey(long articleId, long topicId) {
     }
 
     private record RatioEvaluation(double ratio, List<Map<String, Object>> articles,

@@ -81,6 +81,7 @@ class IssueClustererGoldenExportTest {
                 pair.put("titleTextSimilarity", score.titleTextSimilarity());
                 pair.put("leadTextSimilarity", score.leadTextSimilarity());
                 pair.put("eventTextMatch", score.eventTextMatch());
+                pair.put("specificEventMatch", score.specificEventMatch());
                 pair.put("entityTitleSupported", score.entityTitleSupported());
                 pair.put("organizationTitleSupported", score.organizationTitleSupported());
                 pair.put("entityOverlap", score.entityOverlap());
@@ -104,6 +105,10 @@ class IssueClustererGoldenExportTest {
         List<List<String>> mixedClusters = issueKeysByPredictedCluster.values().stream()
                 .filter(values -> values.stream().distinct().count() > 1)
                 .toList();
+        Map<Long, List<Long>> eventConflicts = new HashMap<>();
+        goldenArticles.stream().map(GoldenArticle::split).distinct().forEach(split ->
+                eventConflicts.putAll(clusterer.eventConflictingArticleIds(goldenArticles.stream()
+                        .filter(article -> article.split().equals(split)).map(GoldenArticle::article).toList())));
         List<Map<String, Object>> exportedArticles = goldenArticles.stream().map(article -> {
             ClusterArticle clustered = article.article();
             Map<String, Object> value = new LinkedHashMap<>();
@@ -112,6 +117,7 @@ class IssueClustererGoldenExportTest {
             value.put("title", clustered.title());
             value.put("titleOrganizations", clusterer.titleOrganizations(clustered.title())
                     .stream().sorted().toList());
+            value.put("eventConflictingArticleIds", eventConflicts.get(clustered.articleId()));
             value.put("expectedIssueId", article.issueKey());
             value.put("split", article.split());
             value.put("predictedClusterId", predictedClusterByArticle.get(clustered.articleId()));

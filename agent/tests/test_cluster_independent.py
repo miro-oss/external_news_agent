@@ -354,6 +354,67 @@ def test_java_pair_feature_boundaries_remain_valid(tmp_path: Path, jaccard, brea
     cluster_independent._verify_java(golden, java, java["goldenSha256"])
 
 
+@pytest.mark.parametrize("case", ["missing", "asymmetric", "cross-split", "proxy-missing"])
+def test_v4_conflict_metadata_is_rejected_before_consuming_holdout(tmp_path: Path, case: str):
+    pack = _prepare(tmp_path)
+    _label(pack)
+    freeze(pack)
+    java = _java_output(pack)
+    _add_v4_metadata(java)
+    if case == "missing":
+        del java["articles"][0]["eventConflictingArticleIds"]
+    elif case == "asymmetric":
+        java["articles"][0]["eventConflictingArticleIds"] = [2]
+    elif case == "cross-split":
+        java["articles"][0]["eventConflictingArticleIds"] = [21]
+        java["articles"][20]["eventConflictingArticleIds"] = [1]
+    else:
+        # Article 41 is the global representative in another topic. Its source
+        # row must carry conflicts even when it appears only as a proxy locally.
+        for index in (0, 40):
+            java["articles"][index].update(
+                fixedContentGroupId="CALIBRATION:proxy",
+                fixedContentGroupRepresentativeId=41,
+            )
+        del java["articles"][40]["eventConflictingArticleIds"]
+    java_path = tmp_path / "java.json"
+    _write_json(java_path, java)
+
+    with pytest.raises(ValueError, match="eventConflictingArticleIds"):
+        evaluate(pack, java_path)
+
+    assert not (pack / "report.json").exists()
+
+
+def test_v4_verification_accepts_symmetric_conflicts_with_other_topic_source(tmp_path: Path):
+    pack = _prepare(tmp_path)
+    _label(pack)
+    freeze(pack)
+    java = _java_output(pack)
+    _add_v4_metadata(java)
+    java["articles"][0]["eventConflictingArticleIds"] = [41]
+    java["articles"][40]["eventConflictingArticleIds"] = [1]
+    golden = json.loads((pack / "golden.json").read_text())
+
+    cluster_independent._verify_java(golden, java, java["goldenSha256"])
+
+
+def _add_v4_metadata(java: dict) -> None:
+    java["clusteringRuleVersion"] = "event-text-evidence-v4"
+    for article in java["articles"]:
+        article["eventConflictingArticleIds"] = []
+    for evaluation in java["pairEvaluations"]:
+        for pair in evaluation["pairs"]:
+            pair.update(
+                eventTextMatch=True,
+                specificEventMatch=False,
+                entityTitleSupported=True,
+                organizationTitleSupported=False,
+                titleTextSimilarity=1.0,
+                leadTextSimilarity=0.0,
+            )
+
+
 def test_evaluate_reports_real_sweep_once_and_never_overwrites_freeze(tmp_path: Path) -> None:
     pack = _prepare(tmp_path)
     _label(pack)

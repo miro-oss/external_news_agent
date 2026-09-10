@@ -120,6 +120,11 @@ class IssueClustererRealGoldenExportTest {
                 contentGroupRepresentativeByArticle.put(articleId, group.representativeArticleId());
             });
         }
+        Map<Long, List<Long>> eventConflicts = new HashMap<>();
+        articles.stream().map(article -> article.source().split()).distinct().forEach(split ->
+                eventConflicts.putAll(clusterer.eventConflictingArticleIds(articles.stream()
+                        .filter(article -> article.source().split().equals(split))
+                        .map(GoldenArticle::article).toList())));
         List<Map<String, Object>> exportedArticles = articles.stream().map(article -> {
             RealGoldenArticle source = article.source();
             ClusterArticle clustered = article.article();
@@ -131,6 +136,7 @@ class IssueClustererRealGoldenExportTest {
             value.put("title", clustered.title());
             value.put("titleOrganizations", clusterer.titleOrganizations(clustered.title())
                     .stream().sorted().toList());
+            value.put("eventConflictingArticleIds", eventConflicts.get(clustered.articleId()));
             value.put("expectedIssueId", source.expectedIssueId());
             value.put("split", source.split());
             value.put("fixedContentGroupId",
@@ -149,6 +155,7 @@ class IssueClustererRealGoldenExportTest {
                 value.put("titleTextSimilarity", score.titleTextSimilarity());
                 value.put("leadTextSimilarity", score.leadTextSimilarity());
                 value.put("eventTextMatch", score.eventTextMatch());
+                value.put("specificEventMatch", score.specificEventMatch());
                 value.put("entityTitleSupported", score.entityTitleSupported());
                 value.put("organizationTitleSupported", score.organizationTitleSupported());
             value.put("entityOverlap", score.entityOverlap());

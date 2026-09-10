@@ -560,6 +560,55 @@ def test_event_text_replay_preserves_runtime_time_windows(breaking, hours, expec
     assert metrics.recall == expected_recall
 
 
+@pytest.mark.parametrize(
+    "specific,breaking,hours,expected_recall",
+    [
+        (True, False, 24.1, 1.0),
+        (True, False, 48.0, 1.0),
+        (True, False, 48.1, 0.0),
+        (False, False, 24.0, 1.0),
+        (False, False, 24.1, 0.0),
+        (False, False, 48.0, 0.0),
+        (True, True, 6.0, 1.0),
+        (True, True, 6.01, 0.0),
+    ],
+)
+def test_specific_event_replay_extends_only_strong_nonbreaking_time_window(
+    specific, breaking, hours, expected_recall,
+):
+    articles = [_article(1, "HOLDOUT", "first"), _article(2, "HOLDOUT", "second")]
+    pair = {
+        **_pair(1, 2, "HOLDOUT", entity_overlap=0, hours_apart=hours, breaking_pair=breaking),
+        "eventTextMatch": True,
+        "specificEventMatch": specific,
+    }
+
+    metrics = _evaluate_rule(articles, [pair], "HOLDOUT", 0.5, 48, 2, 0.125, 24, 6)
+
+    assert metrics.recall == expected_recall
+
+
+@pytest.mark.parametrize(
+    "specific,hours,entity_window,expected_recall",
+    [(True, 30, 24, 0.0), (True, 48.1, 72, 1.0), (False, 48.1, 72, 0.0)],
+)
+def test_specific_event_replay_uses_exported_evidence_and_candidate_entity_window(
+    specific, hours, entity_window, expected_recall,
+):
+    articles = [_article(1, "HOLDOUT", "first"), _article(2, "HOLDOUT", "second")]
+    pair = {
+        **_pair(1, 2, "HOLDOUT", entity_overlap=0, hours_apart=hours),
+        "eventTextMatch": True,
+        "specificEventMatch": specific,
+    }
+
+    metrics = _evaluate_rule(articles, [pair], "HOLDOUT", 0.5, entity_window, 2, 0.125, 24, 6)
+
+    # Python replays the boolean supplied by Java. Widening the candidate window
+    # cannot manufacture specific evidence Java rejected beyond its own 48h cap.
+    assert metrics.recall == expected_recall
+
+
 @pytest.mark.parametrize("edge", ["entity", "organization", "lexical"])
 def test_event_text_replay_preserves_background_and_organization_guards(edge):
     articles = [_article(1, "HOLDOUT", "first", "a"), _article(2, "HOLDOUT", "second", "b")]
@@ -588,12 +637,19 @@ def test_event_text_replay_preserves_background_and_organization_guards(edge):
         ("leadTextSimilarity", 1.01),
     ],
 )
-@pytest.mark.parametrize("version", ["event-text-evidence-v2", "event-text-evidence-v3"])
+@pytest.mark.parametrize(
+    "version", ["event-text-evidence-v2", "event-text-evidence-v3", "event-text-evidence-v4"]
+)
 def test_event_text_metadata_rejects_missing_or_invalid_features(field, value, version):
-    article = {**_article(1, "HOLDOUT", "first"), "titleOrganizations": []}
+    article = {
+        **_article(1, "HOLDOUT", "first"),
+        "titleOrganizations": [],
+        "eventConflictingArticleIds": [],
+    }
     pair = {
         **_pair(1, 2, "HOLDOUT"),
         "eventTextMatch": True,
+        "specificEventMatch": False,
         "entityTitleSupported": False,
         "organizationTitleSupported": False,
         "titleTextSimilarity": 0.4,
@@ -608,6 +664,266 @@ def test_event_text_metadata_rejects_missing_or_invalid_features(field, value, v
     pair[field] = value
     with pytest.raises(ValueError, match="Event evidence"):
         validate_clustering_metadata(output)
+
+
+@pytest.mark.parametrize("value", ["missing", None, 0, 1, "true", [], {}])
+def test_v4_specific_event_metadata_requires_boolean(value):
+    pair = {
+        **_pair(1, 2, "HOLDOUT"),
+        "eventTextMatch": True,
+        "specificEventMatch": False,
+        "entityTitleSupported": False,
+        "organizationTitleSupported": False,
+        "titleTextSimilarity": 0.4,
+        "leadTextSimilarity": 0.2,
+    }
+    output = {
+        "clusteringRuleVersion": "event-text-evidence-v4",
+        "articles": [_conflict_article(1, "HOLDOUT", "first")],
+        "pairs": [pair],
+    }
+    validate_clustering_metadata(output)
+    if value == "missing":
+        del pair["specificEventMatch"]
+    else:
+        pair["specificEventMatch"] = value
+
+    with pytest.raises(ValueError, match="boolean specificEventMatch"):
+        validate_clustering_metadata(output)
+
+
+@pytest.mark.parametrize("version", ["event-text-evidence-v2", "event-text-evidence-v3"])
+def test_older_event_pairs_default_to_no_specific_evidence(version):
+    articles = [
+        {**_article(1, "HOLDOUT", "first"), "titleOrganizations": []},
+        {**_article(2, "HOLDOUT", "second"), "titleOrganizations": []},
+    ]
+    pair = {
+        **_pair(1, 2, "HOLDOUT", entity_overlap=0, hours_apart=24.1),
+        "eventTextMatch": True,
+        "entityTitleSupported": False,
+        "organizationTitleSupported": False,
+        "titleTextSimilarity": 0.4,
+        "leadTextSimilarity": 0.2,
+    }
+    validate_clustering_metadata({
+        "clusteringRuleVersion": version, "articles": articles, "pairs": [pair],
+    })
+
+    metrics = _evaluate_rule(articles, [pair], "HOLDOUT", 0.5, 48, 2, 0.125, 24, 6)
+
+    assert metrics.recall == 0.0
+
+
+@pytest.mark.parametrize(
+    "conflicts",
+    [None, "2", [True], [2.0], ["2"], [2, 2], [3, 2], [1], [999], [4]],
+)
+def test_event_conflict_metadata_rejects_invalid_ids_and_cross_split_references(conflicts):
+    articles = [
+        _conflict_article(1, "HOLDOUT", "first", conflicts=[2, 3]),
+        _conflict_article(2, "HOLDOUT", "second", conflicts=[1]),
+        _conflict_article(3, "HOLDOUT", "third", conflicts=[1]),
+        _conflict_article(4, "CALIBRATION", "other split", conflicts=[]),
+    ]
+    output = {"clusteringRuleVersion": "event-text-evidence-v4", "articles": articles}
+    validate_clustering_metadata(output)
+    articles[0]["eventConflictingArticleIds"] = conflicts
+
+    with pytest.raises(ValueError, match="eventConflictingArticleIds"):
+        validate_clustering_metadata(output)
+
+
+@pytest.mark.parametrize("case", ["missing", "asymmetric", "invalid-id", "duplicate-id"])
+def test_event_conflict_metadata_fails_closed_before_any_sweep(case):
+    articles = [
+        _conflict_article(1, "HOLDOUT", "first", conflicts=[2]),
+        _conflict_article(2, "HOLDOUT", "second", conflicts=[1]),
+    ]
+    if case == "missing":
+        del articles[1]["eventConflictingArticleIds"]
+    elif case == "asymmetric":
+        articles[1]["eventConflictingArticleIds"] = []
+    elif case == "invalid-id":
+        articles[1]["articleId"] = "2"
+    else:
+        articles[1]["articleId"] = 1
+
+    with pytest.raises(ValueError, match="eventConflictingArticleIds"):
+        sweep({"clusteringRuleVersion": "event-text-evidence-v4", "articles": articles})
+
+
+@pytest.mark.parametrize("version", ["legacy", "event-text-evidence-v2", "event-text-evidence-v3"])
+def test_older_event_exports_remain_valid_without_conflict_metadata(version):
+    validate_clustering_metadata({
+        "clusteringRuleVersion": version,
+        "articles": [{**_article(1, "HOLDOUT", "first"), "titleOrganizations": []}],
+        "pairs": [],
+    })
+
+
+def test_event_conflict_v4_requires_metadata_even_without_pairs_or_conflicts():
+    with pytest.raises(ValueError, match="eventConflictingArticleIds"):
+        validate_clustering_metadata({
+            "clusteringRuleVersion": "event-text-evidence-v4",
+            "articles": [{**_article(1, "HOLDOUT", "first"), "titleOrganizations": []}],
+            "pairs": [],
+        })
+
+
+@pytest.mark.parametrize("edge", ["title", "entity", "organization", "event", "specific"])
+def test_event_conflict_guard_vetoes_every_runtime_match_path(edge):
+    articles = [
+        _conflict_article(1, "HOLDOUT", "Domestic exports", "domestic", conflicts=[2]),
+        _conflict_article(2, "HOLDOUT", "Foreign exports", "foreign", conflicts=[1]),
+    ]
+    pair = _pair(1, 2, "HOLDOUT", entity_overlap=0)
+    if edge == "title":
+        pair["titleJaccard"] = 0.9
+    elif edge == "entity":
+        pair.update(entityOverlap=2, entityTitleSupported=True)
+    elif edge == "organization":
+        pair.update(titleJaccard=0.2, organizationOverlap=1, organizationTitleSupported=True)
+    elif edge == "event":
+        pair["eventTextMatch"] = True
+    else:
+        pair.update(eventTextMatch=True, specificEventMatch=True, hoursApart=30)
+
+    metrics = _evaluate_rule(articles, [pair], "HOLDOUT", 0.5, 48, 2, 0.125, 24, 6)
+
+    assert metrics.precision == 1.0
+    assert metrics.adjusted_rand == 1.0
+
+
+def test_event_conflict_guard_blocks_unknown_bridge_in_java_article_order():
+    articles = [
+        _conflict_article(1, "HOLDOUT", "January exports", "january", conflicts=[3]),
+        _conflict_article(2, "HOLDOUT", "Export report", "january", conflicts=[]),
+        _conflict_article(3, "HOLDOUT", "February exports", "february", conflicts=[1]),
+    ]
+    pairs = [
+        {**_pair(2, 3, "HOLDOUT"), "eventTextMatch": True},
+        {**_pair(1, 2, "HOLDOUT"), "eventTextMatch": True},
+    ]
+
+    metrics = _evaluate_rule(list(reversed(articles)), pairs, "HOLDOUT", 0.5, 48, 2, 0.125, 24)
+
+    assert metrics.precision == metrics.recall == metrics.adjusted_rand == 1.0
+
+
+def test_forced_content_group_retains_internal_conflicts_and_nonvoting_member_veto():
+    articles = [
+        _conflict_article(1, "HOLDOUT", "January export report", "fixed", conflicts=[2]),
+        _conflict_article(2, "HOLDOUT", "February syndicated title", "fixed", conflicts=[1, 3]),
+        _conflict_article(3, "HOLDOUT", "January follow-up", "separate", conflicts=[2]),
+    ]
+    for article in articles[:2]:
+        article.update(fixedContentGroupId="content-a", fixedContentGroupRepresentativeId=1)
+
+    union = _topic_unions(articles, include_fixed_content_groups=True)[1]
+    metrics = _evaluate_rule(
+        articles, [_pair(1, 3, "HOLDOUT", title_jaccard=0.9)], "HOLDOUT", 0.5, 48, 2
+    )
+
+    # The representative itself does not conflict with article 3. Its forced
+    # nonvoting member must still veto expansion, as in Java's component guard.
+    assert union.root(1) == union.root(2)
+    assert union.can_join(1, 2) is True
+    assert union.can_join(1, 3) is False
+    assert union.can_join(3, 1) is False
+    assert metrics.precision == metrics.recall == 1.0
+
+
+@pytest.mark.parametrize("conflicting_member", [1, 2])
+def test_event_conflict_guard_keeps_cross_topic_proxy_and_nonvoting_profiles(conflicting_member):
+    articles = [
+        _conflict_article(1, "HOLDOUT", "Global representative", "fixed", topic_id=2),
+        _conflict_article(2, "HOLDOUT", "Local syndicated title", "fixed"),
+        _conflict_article(3, "HOLDOUT", "Separate local report", "separate"),
+    ]
+    articles[conflicting_member - 1]["eventConflictingArticleIds"] = [3]
+    articles[2]["eventConflictingArticleIds"] = [conflicting_member]
+    for article in articles[:2]:
+        article.update(fixedContentGroupId="content-a", fixedContentGroupRepresentativeId=1)
+    validate_clustering_metadata({
+        "clusteringRuleVersion": "event-text-evidence-v4", "articles": articles,
+    })
+
+    metrics = _evaluate_rule(
+        articles, [_pair(1, 3, "HOLDOUT", title_jaccard=0.9)], "HOLDOUT", 0.5, 48, 2
+    )
+
+    assert metrics.precision == metrics.adjusted_rand == 1.0
+
+
+@pytest.mark.parametrize("include_fixed_groups", [False, True])
+def test_tfidf_baselines_remain_unguarded_with_explicit_event_conflicts(include_fixed_groups):
+    articles = [
+        _conflict_article(1, "HOLDOUT", "Identical event report", "a", conflicts=[2]),
+        _conflict_article(2, "HOLDOUT", "Identical event report", "b", conflicts=[1]),
+    ]
+
+    metrics = _evaluate_tfidf(articles, "HOLDOUT", 0.5, include_fixed_groups)
+
+    assert metrics.precision == 0.0
+
+
+def test_sweep_v4_reports_conflict_guard_and_unguarded_baselines():
+    articles = [
+        _conflict_article(1, "CALIBRATION", "Calibration report", "same"),
+        _conflict_article(2, "CALIBRATION", "Calibration report", "same"),
+        _conflict_article(3, "HOLDOUT", "Identical event report", "a", conflicts=[4]),
+        _conflict_article(4, "HOLDOUT", "Identical event report", "b", conflicts=[3]),
+    ]
+    pairs = [
+        {
+            **_pair(left, right, split, title_jaccard=1.0),
+            "eventTextMatch": True,
+            "specificEventMatch": False,
+            "entityTitleSupported": True,
+            "organizationTitleSupported": True,
+            "titleTextSimilarity": 1.0,
+            "leadTextSimilarity": 0.0,
+        }
+        for left, right, split in [(1, 2, "CALIBRATION"), (3, 4, "HOLDOUT")]
+    ]
+
+    result = sweep({
+        "datasetVersion": "synthetic-event-v4",
+        "clusteringRuleVersion": "event-text-evidence-v4",
+        "articleCount": 4,
+        "configuredEntityOverlapThreshold": 2,
+        "configuredCommonEntityDocumentRatio": 0.1,
+        "configuredTitleJaccardThreshold": 0.5,
+        "configuredEntityTimeWindowHours": 48,
+        "articles": articles,
+        "pairs": pairs,
+    })
+
+    assert result["holdout"]["precision"] == result["holdout"]["recall"] == 1.0
+    assert result["eventConflictGuard"] == {
+        "implementationVersion": "event-text-evidence-v4",
+        "metadataComplete": True,
+        "conflictedArticleCount": 2,
+    }
+    for field in ("tfidfCharWbBaseline", "tfidfCharWbStandaloneBaseline"):
+        assert result[field]["usesEventConflictGuard"] is False
+        assert result[field]["metrics"]["precision"] == 0.0
+
+
+def _conflict_article(
+    article_id: int,
+    split: str,
+    title: str,
+    issue_id: str | None = None,
+    topic_id: int = 1,
+    conflicts: list[int] | None = None,
+) -> dict[str, object]:
+    return {
+        **_article(article_id, split, title, issue_id, topic_id),
+        "titleOrganizations": [],
+        "eventConflictingArticleIds": conflicts or [],
+    }
 
 
 def _article(
