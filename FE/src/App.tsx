@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import './App.css'
+import bistelligenceLogo from './assets/bistelligence-logo.png'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { Segmented, type SegmentedOption } from './components/Segmented'
 import { ReportsPage } from './features/reports/ReportsPage'
@@ -111,7 +112,19 @@ function App() {
     <div className="app-shell">
       <nav className="app-nav" aria-label="주요 화면" data-scrolled={scrolled}>
         {/* 로고는 첫 화면인 수집 설정으로 돌아간다. */}
-        <button type="button" className="app-logo" onClick={() => go(DEFAULT_PAGE)}>
+        <button
+          type="button"
+          className="app-logo"
+          aria-label="BISTelligence News Signal Desk · 수집 설정으로 이동"
+          onClick={() => go(DEFAULT_PAGE)}
+        >
+          <img
+            className="app-logo-wordmark"
+            src={bistelligenceLogo}
+            alt="BISTelligence"
+            width={2000}
+            height={340}
+          />
           <strong>News Signal Desk</strong>
         </button>
         <Segmented

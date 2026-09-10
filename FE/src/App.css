@@ -190,10 +190,15 @@ body {
   background: rgba(255, 255, 255, 0.86);
 }
 
-/* 로고는 홈으로 가는 버튼이다. 글자 모양은 안쪽 strong이 그대로 정하고, 여기서는 button이
-   기본으로 얹는 색·여백만 걷어낸다. */
+/* 회사 로고 아래 서비스명을 보조로 둔다. 이미지 비율과 44px 클릭 영역을 함께 유지한다. */
 .app-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
   flex-shrink: 0;
+  min-height: 44px;
   padding: 0;
   border-radius: 8px;
   background: transparent;
@@ -203,14 +208,21 @@ body {
 
 .app-logo:hover {
   background: transparent;
-  opacity: 0.6;
+  opacity: 0.8;
 }
 
-.app-nav strong {
-  flex-shrink: 0;
-  font-size: 1.06rem;
-  font-weight: 800;
-  letter-spacing: -0.035em;
+.app-logo-wordmark {
+  display: block;
+  width: 168px;
+  height: auto;
+}
+
+.app-logo strong {
+  color: var(--fg-3);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.035em;
   white-space: nowrap;
 }
 
@@ -4110,8 +4122,8 @@ body.modal-open {
     gap: 0.75rem;
   }
 
-  .app-nav strong {
-    font-size: 0.95rem;
+  .app-logo-wordmark {
+    width: 152px;
   }
 
   .segmented-nav .segmented-option {
