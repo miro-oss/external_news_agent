@@ -61,6 +61,8 @@ public interface CollectionRunArticleRepository
 
     long countByRunIdAndChangeType(Long runId, ChangeType changeType);
 
+    boolean existsByRunIdAndChangeTypeIn(Long runId, Collection<ChangeType> changeTypes);
+
     /** run 커버리지는 기사×주제 관측을 분모로 삼는다. */
     @Query("""
             SELECT observation.article.id AS articleId,

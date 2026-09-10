@@ -20,6 +20,7 @@ import java.util.Set;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doThrow;
@@ -48,6 +49,7 @@ class CollectionRunExecutionServiceTest {
     void createsReportAfterAnalysisBeforeClosingRun() {
         when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
         when(contentEnricher.enrich(42L)).thenReturn(Set.of());
+        when(reportCreationService.generate(42L, false)).thenReturn(17L);
 
         service.executeRun(42L);
 
@@ -58,9 +60,29 @@ class CollectionRunExecutionServiceTest {
         order.verify(analysisPipeline).analyze(42L, Set.of());
         order.verify(investigationOrchestrator).investigate(42L);
         order.verify(hypothesisTracker).track(42L);
-        order.verify(reportCreationService).generate(42L);
+        order.verify(reportCreationService).generate(42L, false);
         order.verify(keywordStrategyOrchestrator).strategize(42L);
         order.verify(resultWriter).finishRun(42L);
+        verify(reportCreationService, times(1)).generate(42L, false);
+        verify(resultWriter, never()).failRun(42L);
+    }
+
+    @Test
+    void finishesUnchangedRunAndContinuesKeywordStrategyWhenReportIsSkipped() {
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
+        when(contentEnricher.enrich(42L)).thenReturn(Set.of());
+        when(reportCreationService.generate(42L, false)).thenReturn(null);
+
+        service.executeRun(42L);
+
+        InOrder order = inOrder(reportCreationService, keywordStrategyOrchestrator, resultWriter);
+        order.verify(reportCreationService).generate(42L, false);
+        order.verify(keywordStrategyOrchestrator).strategize(42L);
+        order.verify(reportCreationService).generate(42L, false);
+        order.verify(resultWriter).finishRun(42L);
+        verify(reportCreationService, times(2)).generate(42L, false);
+        verify(resultWriter, never()).addReportGenerationFailedWarning(
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any());
         verify(resultWriter, never()).failRun(42L);
     }
 
@@ -68,33 +90,70 @@ class CollectionRunExecutionServiceTest {
     void recordsWarningAndFinishesRunWhenReportGenerationFails() {
         when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
         when(contentEnricher.enrich(42L)).thenReturn(Set.of());
-        when(reportCreationService.generate(42L)).thenThrow(new IllegalStateException("report failure"));
+        when(reportCreationService.generate(42L, false)).thenThrow(new IllegalStateException("report failure"));
 
         service.executeRun(42L);
 
         InOrder order = inOrder(reportCreationService, resultWriter);
-        order.verify(reportCreationService).generate(42L);
+        order.verify(reportCreationService).generate(42L, false);
         order.verify(resultWriter).addReportGenerationFailedWarning(42L, "report failure");
         order.verify(resultWriter).finishRun(42L);
+        verify(reportCreationService, times(1)).generate(42L, false);
         verify(resultWriter, never()).failRun(42L);
     }
 
     @Test
-    void recordsWarningAndFinishesRunWhenKeywordStrategyFails() {
+    void rechecksSkippedReportAfterRecordingKeywordStrategyFailure() {
         when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
         when(contentEnricher.enrich(42L)).thenReturn(Set.of());
+        when(reportCreationService.generate(42L, false)).thenReturn(null, 17L);
         doThrow(new IllegalStateException("strategy failure"))
                 .when(keywordStrategyOrchestrator).strategize(42L);
 
         service.executeRun(42L);
 
-        InOrder order = inOrder(keywordStrategyOrchestrator, resultWriter);
+        InOrder order = inOrder(reportCreationService, keywordStrategyOrchestrator, resultWriter);
+        order.verify(reportCreationService).generate(42L, false);
         order.verify(keywordStrategyOrchestrator).strategize(42L);
         order.verify(resultWriter).addAgentWarning(
                 42L,
                 "LLM_KEYWORD_STRATEGY_FAILED",
                 "수집 전략가 키워드 제안 생성에 실패해 기존 키워드를 유지했습니다.");
+        order.verify(reportCreationService).generate(42L, false);
         order.verify(resultWriter).finishRun(42L);
+        verify(reportCreationService, times(2)).generate(42L, false);
+        verify(resultWriter, never()).failRun(42L);
+    }
+
+    @Test
+    void doesNotRegenerateExistingReportWhenKeywordStrategyFails() {
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
+        when(contentEnricher.enrich(42L)).thenReturn(Set.of());
+        when(reportCreationService.generate(42L, false)).thenReturn(17L);
+        doThrow(new IllegalStateException("strategy failure"))
+                .when(keywordStrategyOrchestrator).strategize(42L);
+
+        service.executeRun(42L);
+
+        verify(reportCreationService, times(1)).generate(42L, false);
+        verify(resultWriter).addAgentWarning(42L, "LLM_KEYWORD_STRATEGY_FAILED",
+                "수집 전략가 키워드 제안 생성에 실패해 기존 키워드를 유지했습니다.");
+        verify(resultWriter).finishRun(42L);
+        verify(resultWriter, never()).failRun(42L);
+    }
+
+    @Test
+    void diagnosticReportFailureRecordsWarningWithoutFurtherRetries() {
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
+        when(contentEnricher.enrich(42L)).thenReturn(Set.of());
+        when(reportCreationService.generate(42L, false))
+                .thenReturn(null).thenThrow(new IllegalStateException("diagnostic report failure"));
+
+        service.executeRun(42L);
+
+        verify(reportCreationService, times(2)).generate(42L, false);
+        verify(resultWriter).addReportGenerationFailedWarning(42L, "diagnostic report failure");
+        verify(resultWriter).finishRun(42L);
         verify(resultWriter, never()).failRun(42L);
     }
 
@@ -113,7 +172,7 @@ class CollectionRunExecutionServiceTest {
                 42L,
                 "HYPOTHESIS_TRACKING_FAILED",
                 "가설 추적에 실패해 기존 관련 기사 연결을 유지했습니다.");
-        order.verify(reportCreationService).generate(42L);
+        order.verify(reportCreationService).generate(42L, false);
         order.verify(resultWriter).finishRun(42L);
         verify(resultWriter, never()).failRun(42L);
     }
@@ -129,7 +188,7 @@ class CollectionRunExecutionServiceTest {
 
         verify(resultWriter).addIssueClusteringFailedWarning(42L, "cluster failure");
         verify(analysisPipeline).analyzeWithoutClustering(42L, Set.of(10L));
-        verify(reportCreationService).generate(42L);
+        verify(reportCreationService).generate(42L, true);
         verify(resultWriter).finishRun(42L);
         verify(resultWriter, never()).failRun(42L);
     }

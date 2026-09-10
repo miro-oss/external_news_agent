@@ -147,6 +147,7 @@ export function CollectionRunPanel() {
               : progress.data.status === 'RUNNING' ? '선택한 주제를 수집하고 있습니다.'
               : progress.data.status === 'FAILED' ? '수집을 완료하지 못했습니다. 다시 요청할 수 있습니다.'
               : progress.data.status === 'PARTIAL' ? '수집을 마쳤습니다. 일부 출처를 가져오지 못했습니다.'
+              : progress.data.reportId === null ? '수집을 마쳤습니다. 새로 분석할 기사나 변경 사항이 없어 보고서를 생성하지 않았습니다.'
               : '수집을 마쳤습니다.'}
             {progress.data.reportId && <> <a href={`#/reports?reportId=${progress.data.reportId}`}>보고서 보기</a></>}
           </p>}

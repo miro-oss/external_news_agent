@@ -109,6 +109,8 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
 
     Optional<Finding> findByRunIdAndArticleId(Long runId, Long articleId);
 
+    boolean existsByRunId(Long runId);
+
     @Query("""
             SELECT finding
             FROM Finding finding

@@ -82,7 +82,7 @@ class ReportManagementOracleIntegrationTests {
         assertEquals(List.of(earlier.getId()), page.getContent().stream().map(value -> value.getId()).toList());
         assertThrows(ReportException.class, () -> queries.getReport(latest.getId(), false));
         assertThrows(ReportException.class, () -> deliveryPlans.requireReport(latest.getId()));
-        var retry = persistence.reserve(latest.getRunId(), now.plusHours(1));
+        var retry = persistence.reserve(latest.getRunId(), now.plusHours(1), false);
         assertFalse(retry.owner());
         assertEquals(latest.getId(), retry.reportId());
         LocalDateTime deletedAt = hidden.getDeletedAt();
