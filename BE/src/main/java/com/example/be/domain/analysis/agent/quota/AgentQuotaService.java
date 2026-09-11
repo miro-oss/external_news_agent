@@ -129,6 +129,15 @@ public class AgentQuotaService {
         BigDecimal observedCredits = exception.getUsage() == null
                 ? null
                 : exception.getUsage().credits();
+        if (reservation.task() == AgentTask.REPORT_CHANGES && exception.getUsage() != null) {
+            // A schema-repair failure can still incur provider charges. Keep known exposure
+            // in the work budget, including a guard-reported charge above the reservation.
+            BigDecimal units = reservation.plan() == AgentPlan.FREE ? BigDecimal.ONE
+                    : observedCredits == null || observedCredits.signum() < 0
+                    ? reservation.reservedUnits() : observedCredits;
+            settleObservedFailure(reservation, units);
+            return;
+        }
         if ("BUDGET_EXCEEDED".equals(exception.getCode()) && observedCredits != null) {
             settleObservedFailure(reservation, nonNegative(observedCredits));
             return;
@@ -216,7 +225,8 @@ public class AgentQuotaService {
 
         boolean analysisTask = task == AgentTask.ANALYZE
                 || task == AgentTask.SELF_CRITIQUE
-                || task == AgentTask.KEYWORD_STRATEGY;
+                || task == AgentTask.KEYWORD_STRATEGY
+                || task == AgentTask.REPORT_CHANGES;
         boolean insightTask = task == AgentTask.INSIGHT;
         boolean investigationTask = task == AgentTask.INVESTIGATE;
         BigDecimal workUsed = usage.paidAnalysisDailyUsed()

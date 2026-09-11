@@ -48,7 +48,7 @@ class DailyReportCreationServiceTest {
 
         when(reports.findByReportScopeAndReportDate(ReportScope.DAILY, date)).thenReturn(Optional.empty());
         when(daily.findDueDates(date, date.plusDays(1))).thenReturn(List.of(date));
-        when(reservation.reserve(eq(date), anyList(), anyList(), any()))
+        when(reservation.reserveWithSnapshot(eq(date), anyList(), anyList(), any(), isNull()))
                 .thenReturn(new ReportPersistenceService.Reservation(77L, false));
         assertEquals(77L, service.generate(date));
         verifyNoInteractions(orchestrator);
@@ -67,7 +67,7 @@ class DailyReportCreationServiceTest {
         when(daily.findDueDates(date, date.plusDays(1))).thenReturn(List.of(date));
         when(daily.findSourceRunIds(date)).thenReturn(List.of(1L, 2L));
         when(daily.sourceStats(date)).thenReturn(ReportSourceStats.empty());
-        when(reservation.reserve(eq(date), eq(List.of(1L, 2L)), anyList(), any()))
+        when(reservation.reserveWithSnapshot(eq(date), eq(List.of(1L, 2L)), anyList(), any(), isNull()))
                 .thenReturn(new ReportPersistenceService.Reservation(77L, true));
         when(orchestrator.generateDaily(eq(77L), eq(date), anyList(), any(), any()))
                 .thenThrow(new IllegalStateException("provider unavailable"));
@@ -90,7 +90,7 @@ class DailyReportCreationServiceTest {
                 ReportScope.DAILY, ReportStatus.PENDING, cutoff)).thenReturn(List.of(pending));
         when(fallback.generateDaily(anyList(), any(), any())).thenReturn(new ReportDocument("복구", "근거 없음", "fallback"));
         service.recoverInterrupted(cutoff);
-        verify(persistence).complete(eq(77L), any(), any());
+        verify(persistence).completeRecovered(eq(77L), any(), any());
         verifyNoInteractions(orchestrator, reservation);
     }
 }

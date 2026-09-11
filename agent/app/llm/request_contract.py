@@ -12,6 +12,7 @@ from app.schemas.analyze import (
 )
 from app.schemas.evidence import EvidenceBatchOutput, EvidenceClaim
 from app.schemas.report import ReportOutput, ReportRequest
+from app.schemas.report_changes import ReportChangesOutput, ReportChangesRequest
 
 
 def _integer_choices(ids: list[int]) -> dict[str, Any]:
@@ -95,6 +96,36 @@ def report_schema(request: ReportRequest) -> dict[str, Any]:
             definitions[name]["properties"]["sourceFindingIds"]["items"] = {
                 "$ref": "#/$defs/AllowedFindingId"
             }
+    return schema
+
+
+def report_changes_schema(request: ReportChangesRequest) -> dict[str, Any]:
+    schema = ReportChangesOutput.model_json_schema(by_alias=True)
+    if request.plan != "FREE":
+        return schema
+    props = schema["$defs"].pop("ReportChangeAssessment")["properties"]
+    entries = {}
+    for index, candidate in enumerate(request.candidates):
+        fields = {
+            **deepcopy(props),
+            "candidateId": {"type": "string", "const": candidate.id},
+            "type": {
+                "type": "string",
+                "enum": ["UPDATED", "UNCHANGED", "UNDETERMINED"]
+                + (["REFUTATION"] if candidate.relation == "REFUTES" else []),
+            },
+        }
+        for name, claims in (
+            ("previousClaimIds", candidate.previous), ("currentClaimIds", candidate.current),
+        ):
+            fields[name] = {
+                "type": "array",
+                "items": {"type": "string", "enum": [claim.id for claim in claims]}
+                if claims else {"type": "string"},
+                "maxItems": len(claims),
+            }
+        entries[f"candidate{index}"] = _object(fields)
+    schema["properties"]["items"] = _object(entries)
     return schema
 
 

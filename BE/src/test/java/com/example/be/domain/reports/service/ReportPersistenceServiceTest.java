@@ -45,7 +45,17 @@ class ReportPersistenceServiceTest {
     private final FindingRepository findingRepository = mock(FindingRepository.class);
     private final ReportPersistenceService service =
             new ReportPersistenceService(runRepository, reportRepository,
-                    notificationAutomation, observationRepository, findingRepository);
+                    notificationAutomation, observationRepository, findingRepository,
+                    mock(org.springframework.context.ApplicationEventPublisher.class));
+
+    @org.junit.jupiter.api.Test
+    void lateRecoveryMustNotInvalidateTheAlreadyCompletedOriginalSnapshot() {
+        NewsReport report = NewsReport.builder().id(101L).reportStatus(ReportStatus.GENERATED).build();
+        when(reportRepository.findByIdForUpdate(101L)).thenReturn(java.util.Optional.of(report));
+        service.completeRecovered(101L, new ReportDocument("복구", "실시간 근거", "fallback"), LocalDateTime.now());
+        org.junit.jupiter.api.Assertions.assertTrue(report.isComparisonInputUsable());
+        verifyNoInteractions(notificationAutomation);
+    }
 
     @ParameterizedTest
     @EnumSource(value = RunItemStatus.class, names = {"SUCCESS", "SKIPPED"})

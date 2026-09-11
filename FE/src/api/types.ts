@@ -346,6 +346,54 @@ export interface ArticleFilters {
   size: number
 }
 
+export type ReportChangesStatus = 'PENDING' | 'RUNNING' | 'READY' | 'FAILED' | 'NO_BASELINE' | 'UNAVAILABLE' | 'NOT_APPLICABLE'
+export type ReportChangeType = 'NEWLY_INCLUDED' | 'UPDATED' | 'REFUTATION' | 'UNCHANGED' | 'UNDETERMINED'
+
+export interface ReportChangeEvidence {
+  findingId: number
+  articleId: number
+  runId: number
+  articleTitle: string
+  canonicalUrl: string
+  sentenceIndex: number
+  text: string
+}
+
+export interface ReportChangeClaim {
+  id: string
+  text: string
+  evidence: ReportChangeEvidence[]
+}
+
+export interface ReportChangeSide {
+  issueId: number
+  topicId: number
+  title: string
+  summary: string
+  claims: ReportChangeClaim[]
+}
+
+export interface ReportChangeItem {
+  id: string
+  type: ReportChangeType
+  title: string
+  summary: string
+  previous: ReportChangeSide | null
+  current: ReportChangeSide
+}
+
+export interface ReportChanges {
+  reportId: number
+  reportDate: string | null
+  baseReportId: number | null
+  baseReportDate: string | null
+  status: ReportChangesStatus
+  message: string
+  scopeChanged: boolean
+  notes: string[]
+  items: ReportChangeItem[]
+}
+
 export interface ReportSummary {
   id: number
   runId: number | null

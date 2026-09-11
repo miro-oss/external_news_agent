@@ -14,6 +14,8 @@ import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyRequest;
 import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentReportChangesRequest;
+import com.example.be.domain.analysis.agent.dto.AgentReportChangesResponse;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.global.config.RestClientFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -117,6 +119,10 @@ public class AgentClient {
 
     public AgentReportResponse report(AgentReportRequest request) {
         return post(reportClient, "/v1/report", request, AgentReportResponse.class);
+    }
+
+    public AgentReportChangesResponse reportChanges(AgentReportChangesRequest request) {
+        return post(reportClient, "/v1/report-changes", request, AgentReportChangesResponse.class);
     }
 
     public AgentInsightResponse insight(AgentInsightRequest request) {

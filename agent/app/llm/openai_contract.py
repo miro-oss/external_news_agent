@@ -36,6 +36,7 @@ class OpenAIOutputContract:
     analysis: bool
     evidence_keys: tuple[str, ...] = ()
     promotion_conflict: bool = False
+    report_change_keys: tuple[str, ...] = ()
 
     def instructions(self, original: str) -> str:
         if self.analysis:
@@ -56,6 +57,12 @@ class OpenAIOutputContract:
                 "각 항목의 고정 claimId와 그 주장에 제공된 문장 번호만 사용한다. "
                 "근거가 없으면 ungrounded와 빈 acceptedSentenceIds로 판정한다."
             )
+        if self.report_change_keys:
+            original += (
+                "\n\nOpenAI REPORT_CHANGES items는 배열 대신 JSON Schema의 candidate 키를 "
+                "가진 객체다. 고정 candidateId를 각각 정확히 한 번 사용한다. "
+                "previousClaimIds와 currentClaimIds에는 각 방향에 허용된 ID만 넣는다."
+            )
         if self.wrapped:
             original += (
                 "\n\n출력은 result 키 하나를 가진 객체로 감싸세요. 제안은 result 안에 넣으세요."
@@ -63,7 +70,7 @@ class OpenAIOutputContract:
         return original
 
     def public_text(self, raw: str) -> str:
-        if not (self.wrapped or self.analysis or self.evidence_keys):
+        if not (self.wrapped or self.analysis or self.evidence_keys or self.report_change_keys):
             return raw
         try:
             value = json.loads(raw)
@@ -90,6 +97,10 @@ class OpenAIOutputContract:
             results = value.get("results")
             if isinstance(results, dict) and set(results) == set(self.evidence_keys):
                 value["results"] = [results[key] for key in self.evidence_keys]
+        if self.report_change_keys and isinstance(value, dict):
+            items = value.get("items")
+            if isinstance(items, dict) and set(items) == set(self.report_change_keys):
+                value["items"] = [items[key] for key in self.report_change_keys]
         return json.dumps(value, ensure_ascii=False)
 
 
@@ -104,6 +115,12 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
     evidence_keys = (
         tuple(results["properties"])
         if schema.get("title") == "EvidenceBatchOutput" and results.get("type") == "object"
+        else ()
+    )
+    changes = schema.get("properties", {}).get("items", {})
+    report_change_keys = (
+        tuple(changes["properties"])
+        if schema.get("title") == "ReportChangesOutput" and changes.get("type") == "object"
         else ()
     )
     wrapped = schema.get("type") != "object"
@@ -124,6 +141,7 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
         analysis=analysis,
         evidence_keys=evidence_keys,
         promotion_conflict=promotion_conflict,
+        report_change_keys=report_change_keys,
     )
 
 

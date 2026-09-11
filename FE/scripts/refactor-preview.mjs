@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
+import { reportChangesFixture, reportChangesVariants } from './report-changes-fixtures.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const portFlag = process.argv.indexOf('--port');
 const port = Number(portFlag >= 0 ? process.argv[portFlag + 1] : 5187);
@@ -152,6 +153,7 @@ initialReports.push({ ...structuredClone(initialReports.at(-1)), id: 116, report
     findings: structuredClone(fixture.report.findings).map((finding, index) => ({ ...finding, issue: { ...finding.issue, topicName: index === 1 ? 'AI 인프라' : 'HBM 시장' } })) });
 let reports = structuredClone(initialReports);
 let reportDeleteError = false;
+let reportChangesVariant = 'ready';
 const json = (res, value, status = 200) => { res.statusCode = status; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
 const server = await createServer({ root, configFile: false, envDir: emptyEnvDir, plugins: [react(), { name: 'isolated-qa-fixtures', configureServer(server) {
                 server.middlewares.use(async (req, res, next) => {
@@ -170,6 +172,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 reset();
                                 reports = structuredClone(initialReports);
                                 reportDeleteError = false;
+                                reportChangesVariant = 'ready';
                                 telegramLinkError = false;
                                 showDeliveryLogs = false;
                                 recipientProfileError = false;
@@ -201,6 +204,12 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             if (path === '/__qa/report-delete-error') {
                                 reportDeleteError = body.enabled ?? false;
                                 return json(res, { enabled: reportDeleteError });
+                            }
+                            if (path === '/__qa/report-changes') {
+                                const variant = body.variant ?? url.searchParams.get('variant') ?? 'ready';
+                                if (!reportChangesVariants.includes(variant)) return json(res, { variants: reportChangesVariants }, 400);
+                                reportChangesVariant = variant;
+                                return json(res, { variant });
                             }
                             if (path === '/__qa/telegram-link-error') {
                                 telegramLinkError = body.enabled ?? url.searchParams.get('enabled') === 'true';
@@ -415,6 +424,20 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         }
                         else if (path === '/api/news/reports/latest')
                             result = reports.find(r => r.reportScope === (url.searchParams.get('reportScope') || 'RUN')) || null;
+                        else if ((match = path.match(/^\/api\/news\/reports\/(\d+)\/changes$/))) {
+                            const id = Number(match[1]);
+                            const report = reports.find(r => r.id === id);
+                            if (!report) return json(res, { isSuccess: false, code: 'REPORT404', message: '보고서를 찾을 수 없습니다.', result: {} }, 404);
+                            if (reportChangesVariant === 'error') return json(res, { isSuccess: false, code: 'COMMON500', message: '비교 결과를 불러오지 못했습니다.', result: {} }, 500);
+                            const variant = report.reportScope !== 'DAILY' ? 'not-applicable' : id === 116 ? 'unavailable'
+                                : !reports.some(r => r.id === 116) ? 'unavailable' : reportChangesVariant;
+                            result = reportChangesFixture(id, variant);
+                            result.reportDate = report.reportDate ?? null;
+                            if (variant === 'not-applicable' || variant === 'unavailable') {
+                                result.baseReportId = null;
+                                result.baseReportDate = null;
+                            }
+                        }
                         else if ((match = path.match(/^\/api\/news\/reports\/(\d+)$/))) {
                             const id = Number(match[1]);
                             if (method === 'DELETE') {

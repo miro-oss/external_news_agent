@@ -28,6 +28,7 @@ import { prefersReducedMotion } from '../../lib/motion'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { ReportSharePanel } from '../notifications/ReportSharePanel'
 import { ReportReadingContent } from './ReportReadingContent'
+import { ReportChangesPanel } from './ReportChangesPanel'
 import { IssueTonePanel } from './IssueTonePanel'
 import { collectionHighlightTerms, collectionKeywords } from './reportReading'
 import { ReportKeywordText } from './ReportKeywordText'
@@ -307,6 +308,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
       </header>
 
       <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect} />
+      {report.reportScope === 'DAILY' && <ReportChangesPanel reportId={report.id} />}
 
       <section className="report-findings">
         <div className="section-heading report-section-heading">

@@ -9,6 +9,7 @@ import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
 import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentReportChangesRequest;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import org.junit.jupiter.api.Test;
@@ -42,6 +43,27 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
 class AgentClientTest {
+
+    @Test
+    void postsReportChangesWithSharedAuthenticationAndPreservesResponseReferences() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/report-changes"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
+                .andExpect(jsonPath("$.reportId").value(101))
+                .andExpect(jsonPath("$.baseReportId").value(100))
+                .andRespond(withSuccess("""
+                        {"items":[],"meta":{"provider":"mock","model":"mock-v1",
+                        "promptVersion":"report-changes.ko.v1","inputTokens":0,"outputTokens":0,
+                        "costUsd":0,"credits":0,"mock":true,"truncated":false}}
+                        """, MediaType.APPLICATION_JSON));
+        var response = client.reportChanges(new AgentReportChangesRequest("report-changes:101:v1", AgentPlan.FREE, 101, 100, List.of()));
+        assertEquals(List.of(), response.items());
+        assertEquals("report-changes.ko.v1", response.meta().promptVersion());
+        server.verify();
+    }
 
     @Test
     void sendsTokenAndReadsMockAnalyzeContract() {
