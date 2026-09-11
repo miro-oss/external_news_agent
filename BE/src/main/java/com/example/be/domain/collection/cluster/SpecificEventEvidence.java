@@ -48,7 +48,8 @@ final class SpecificEventEvidence {
     private static final Pattern VERSION = Pattern.compile("(?<![a-z0-9])v([0-9]+(?:\\.[0-9]+)+)");
     private static final Pattern INSTITUTE = Pattern.compile("[가-힣]{2,}(?:연구원|연구소)");
     private static final Pattern BACKGROUND_START = Pattern.compile("^(?:한편|앞서|과거|일례로|관련\\s*소식)");
-    private static final Set<String> COUNTRIES = Set.of("한국", "미국", "중국", "일본", "프랑스", "독일", "영국", "캐나다", "호주", "인도");
+    // Consume longer country names first so Indonesia does not also identify India.
+    private static final Pattern COUNTRIES = Pattern.compile("인도네시아|프랑스|캐나다|한국|미국|중국|일본|독일|영국|호주|인도");
     private static final Set<String> POLICY_DOMAINS = Set.of("방산", "군사정보", "안보", "반도체", "인공지능", "양자", "우주", "원자력", "교역");
     private static final Set<String> PROJECT_GENERAL = Set.of("발전소", "발전설비", "대미투자", "대미", "투자", "규모", "건설사", "국내", "참여", "주목", "유력", "추진", "계획", "프로젝트", "사업", "전력", "가스터빈", "복합화력", "가스복합화력", "후보", "정부", "건설", "동부", "서부", "남부", "북부");
 
@@ -88,6 +89,12 @@ final class SpecificEventEvidence {
         Profile b = profiles.get(right);
         if (a == null || b == null) {
             return false;
+        }
+        if (a.primary().contains("정상회담") && b.primary().contains("정상회담")
+                && summitOverview(a) && summitOverview(b)
+                && (!countries(a.title()).equals(countries(b.title()))
+                || different(day(a.lead(), a.time()), day(b.lead(), b.time())))) {
+            return true;
         }
         Statistics x = a.statistics();
         Statistics y = b.statistics();
@@ -199,19 +206,24 @@ final class SpecificEventEvidence {
     private static boolean sameSummit(Profile a, Profile b) {
         Set<String> left = countries(a.title());
         Set<String> right = countries(b.title());
-        if (left.size() != 2 || !left.equals(right) || individualAgreement(a.title()) || individualAgreement(b.title())
-                || !a.title().matches(".*(?:협력|합의|채택|교역).*")
-                || !b.title().matches(".*(?:협력|합의|채택|교역).*")
-                || !a.primary().contains("정상회담") || !b.primary().contains("정상회담")) {
+        if (!summitOverview(a) || !summitOverview(b) || !left.equals(right)) {
             return false;
         }
         LocalDate first = day(a.lead(), a.time());
         LocalDate second = day(b.lead(), b.time());
         if ((first == null && DAY.matcher(a.lead()).find()) || (second == null && DAY.matcher(b.lead()).find())
-                || different(first, second) || !a.time().toLocalDate().equals(b.time().toLocalDate())) {
+                || different(first, second)
+                || ((first == null || second == null)
+                && !a.time().toLocalDate().equals(b.time().toLocalDate()))) {
             return false;
         }
         return intersection(domains(a.text()), domains(b.text())).size() >= 3;
+    }
+
+    private static boolean summitOverview(Profile profile) {
+        return profile.primary().contains("정상회담") && countries(profile.title()).size() == 2
+                && !individualAgreement(profile.title())
+                && profile.title().matches(".*(?:협력|합의|채택|교역).*");
     }
 
     private static boolean individualAgreement(String title) {
@@ -303,7 +315,10 @@ final class SpecificEventEvidence {
                 .replaceAll("(?:韓|한)\\s*[·ㆍ-]?\\s*(?:日|일)(?![가-힣])", "한국 일본")
                 .replace("우리나라", "한국");
         Set<String> result = new HashSet<>();
-        COUNTRIES.stream().filter(expanded::contains).forEach(result::add);
+        Matcher country = COUNTRIES.matcher(expanded);
+        while (country.find()) {
+            result.add(country.group());
+        }
         return result;
     }
 

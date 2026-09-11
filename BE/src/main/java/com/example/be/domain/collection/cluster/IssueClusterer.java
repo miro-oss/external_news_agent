@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class IssueClusterer {
 
-    static final String RULE_VERSION = "event-text-evidence-v4";
+    static final String RULE_VERSION = "event-text-evidence-v5";
 
     private static final double MIN_ENTITY_TITLE_SUPPORT_JACCARD = 0.10;
 
@@ -58,11 +58,11 @@ public class IssueClusterer {
     }
 
     private BiPredicate<Long, Long> eventConflicts(List<ClusterArticle> articles) {
-        return eventConflicts(articles, new SpecificEventEvidence(articles, breakingNewsDetector));
+        return eventConflicts(articles, new StrongEventEvidence(articles, breakingNewsDetector));
     }
 
     private BiPredicate<Long, Long> eventConflicts(List<ClusterArticle> articles,
-                                                  SpecificEventEvidence specific) {
+                                                  StrongEventEvidence specific) {
         EventScopeEvidence scope = new EventScopeEvidence(articles, breakingNewsDetector);
         return (left, right) -> scope.conflicts(left, right) || specific.conflicts(left, right);
     }
@@ -218,7 +218,7 @@ public class IssueClusterer {
             entities.put(article.articleId(), extraction.entities());
         });
 
-        SpecificEventEvidence specificEvidence = new SpecificEventEvidence(unique, breakingNewsDetector);
+        StrongEventEvidence specificEvidence = new StrongEventEvidence(unique, breakingNewsDetector);
         UnionFind union = new UnionFind(byId.keySet(), titleOrganizations, eventConflicts(unique, specificEvidence));
         // 저장된 멤버십과 동일 본문은 보존한다. 새 규칙 간선에만 조직·사건 충돌 방어를 적용한다.
         // 이미 업체가 섞인 그룹도 프로파일을 보존한다. 한 업체의 후속 기사는 다른 기존 업체와

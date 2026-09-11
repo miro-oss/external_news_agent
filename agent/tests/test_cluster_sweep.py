@@ -638,7 +638,10 @@ def test_event_text_replay_preserves_background_and_organization_guards(edge):
     ],
 )
 @pytest.mark.parametrize(
-    "version", ["event-text-evidence-v2", "event-text-evidence-v3", "event-text-evidence-v4"]
+    "version", [
+        "event-text-evidence-v2", "event-text-evidence-v3",
+        "event-text-evidence-v4", "event-text-evidence-v5",
+    ]
 )
 def test_event_text_metadata_rejects_missing_or_invalid_features(field, value, version):
     article = {
@@ -667,7 +670,8 @@ def test_event_text_metadata_rejects_missing_or_invalid_features(field, value, v
 
 
 @pytest.mark.parametrize("value", ["missing", None, 0, 1, "true", [], {}])
-def test_v4_specific_event_metadata_requires_boolean(value):
+@pytest.mark.parametrize("version", ["event-text-evidence-v4", "event-text-evidence-v5"])
+def test_specific_event_metadata_requires_boolean(value, version):
     pair = {
         **_pair(1, 2, "HOLDOUT"),
         "eventTextMatch": True,
@@ -678,7 +682,7 @@ def test_v4_specific_event_metadata_requires_boolean(value):
         "leadTextSimilarity": 0.2,
     }
     output = {
-        "clusteringRuleVersion": "event-text-evidence-v4",
+        "clusteringRuleVersion": version,
         "articles": [_conflict_article(1, "HOLDOUT", "first")],
         "pairs": [pair],
     }
@@ -735,7 +739,8 @@ def test_event_conflict_metadata_rejects_invalid_ids_and_cross_split_references(
 
 
 @pytest.mark.parametrize("case", ["missing", "asymmetric", "invalid-id", "duplicate-id"])
-def test_event_conflict_metadata_fails_closed_before_any_sweep(case):
+@pytest.mark.parametrize("version", ["event-text-evidence-v4", "event-text-evidence-v5"])
+def test_event_conflict_metadata_fails_closed_before_any_sweep(case, version):
     articles = [
         _conflict_article(1, "HOLDOUT", "first", conflicts=[2]),
         _conflict_article(2, "HOLDOUT", "second", conflicts=[1]),
@@ -750,7 +755,7 @@ def test_event_conflict_metadata_fails_closed_before_any_sweep(case):
         articles[1]["articleId"] = 1
 
     with pytest.raises(ValueError, match="eventConflictingArticleIds"):
-        sweep({"clusteringRuleVersion": "event-text-evidence-v4", "articles": articles})
+        sweep({"clusteringRuleVersion": version, "articles": articles})
 
 
 @pytest.mark.parametrize("version", ["legacy", "event-text-evidence-v2", "event-text-evidence-v3"])
@@ -868,7 +873,8 @@ def test_tfidf_baselines_remain_unguarded_with_explicit_event_conflicts(include_
     assert metrics.precision == 0.0
 
 
-def test_sweep_v4_reports_conflict_guard_and_unguarded_baselines():
+@pytest.mark.parametrize("version", ["event-text-evidence-v4", "event-text-evidence-v5"])
+def test_sweep_reports_conflict_guard_and_unguarded_baselines(version):
     articles = [
         _conflict_article(1, "CALIBRATION", "Calibration report", "same"),
         _conflict_article(2, "CALIBRATION", "Calibration report", "same"),
@@ -890,7 +896,7 @@ def test_sweep_v4_reports_conflict_guard_and_unguarded_baselines():
 
     result = sweep({
         "datasetVersion": "synthetic-event-v4",
-        "clusteringRuleVersion": "event-text-evidence-v4",
+        "clusteringRuleVersion": version,
         "articleCount": 4,
         "configuredEntityOverlapThreshold": 2,
         "configuredCommonEntityDocumentRatio": 0.1,

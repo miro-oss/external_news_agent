@@ -122,6 +122,50 @@ class SpecificEventEvidenceTest {
     }
 
     @Test
+    void sameExplicitSummitDayMatchesAcrossMidnightWithin48Hours() {
+        var first = article(1, "韓佛 정상회담, 협력문건 채택", "방산, AI, 양자, 반도체 협력을 추진한다.",
+                "한국과 프랑스 정상은 12일 정상회담을 열었다.", "2026-10-12T23:50:00+09:00");
+        var second = article(2, "한·프, 방산 협력과 교역 확대", first.summary(), first.body(),
+                "2026-10-13T00:10:00+09:00");
+        assertMatch(first, second);
+        assertNoMatch(first, article(2, second.title(), second.summary(), second.body().replace("12일", "13일"),
+                "2026-10-13T00:10:00+09:00"));
+        assertMatch(first, article(2, second.title(), second.summary(), second.body(),
+                "2026-10-14T23:50:00+09:00"));
+        assertNoMatch(first, article(2, second.title(), second.summary(), second.body(),
+                "2026-10-14T23:51:00+09:00"));
+    }
+
+    @Test
+    void summitMissingEitherExplicitDayKeepsSamePublicationDayFallback() {
+        String title = "한국·프랑스 정상회담, 협력문건 채택";
+        String summary = "방산, AI, 양자, 반도체 협력을 추진한다.";
+        String dated = "한국과 프랑스 정상은 12일 정상회담을 열었다.";
+        String undated = "한국과 프랑스 정상은 정상회담을 열었다.";
+        var first = article(1, title, summary, undated, "2026-10-12T23:50:00+09:00");
+        assertMatch(first, article(2, title, summary, undated, "2026-10-12T23:55:00+09:00"));
+        assertMatch(first, article(2, title, summary, dated, "2026-10-12T23:55:00+09:00"));
+        assertNoMatch(first, article(2, title, summary, undated, "2026-10-13T00:10:00+09:00"));
+        assertNoMatch(first, article(2, title, summary, dated, "2026-10-13T00:10:00+09:00"));
+        assertNoMatch(article(1, title, summary, dated, "2026-10-12T23:50:00+09:00"),
+                article(2, title, summary, undated, "2026-10-13T00:10:00+09:00"));
+    }
+
+    @Test
+    void summitCountriesDistinguishIndiaFromIndonesiaAndKeepDomesticAlias() {
+        String summary = "방산, AI, 양자, 반도체 협력을 추진한다.";
+        var indonesia = article(1, "한국·인도네시아 정상회담, 협력문건 채택", summary,
+                "한국과 인도네시아 정상은 12일 정상회담을 열었다.");
+        assertMatch(indonesia, article(2, "우리나라와 인도네시아, 방산 협력과 교역 확대", summary,
+                indonesia.body()));
+        assertNoMatch(indonesia, article(2, "한국·인도 정상회담, 협력문건 채택", summary,
+                "한국과 인도 정상은 12일 정상회담을 열었다."));
+        var india = article(1, "한국·인도 정상회담, 협력문건 채택", summary,
+                "한국과 인도 정상은 12일 정상회담을 열었다.");
+        assertMatch(india, article(2, "우리나라와 인도, 방산 협력과 교역 확대", summary, india.body()));
+    }
+
+    @Test
     void projectProposalNeedsNameAndTwoCapacityClues() {
         var first = article(1, "해외 투자 후보, 동부 발전소 건설 유력", null,
                 "새울시 청솔 발전소 건설 방안을 검토한다. 2.6GW 가스터빈과 5.8GW 복합화력 설비를 짓는 계획이다.");
@@ -218,6 +262,11 @@ class SpecificEventEvidenceTest {
 
     private static ClusterArticle article(long id, String title, String summary, String body) {
         OffsetDateTime time = OffsetDateTime.parse("2026-10-12T12:00:00+09:00").plusMinutes(id);
+        return article(id, title, summary, body, time.toString());
+    }
+
+    private static ClusterArticle article(long id, String title, String summary, String body, String timestamp) {
+        OffsetDateTime time = OffsetDateTime.parse(timestamp);
         return new ClusterArticle(id, 1, title, summary, body,
                 body == null ? FetchStatus.METADATA_ONLY : FetchStatus.FULLTEXT,
                 id, "fixture-" + id, new BigDecimal("0.8"), time, time, List.of(), null, null, null, true);

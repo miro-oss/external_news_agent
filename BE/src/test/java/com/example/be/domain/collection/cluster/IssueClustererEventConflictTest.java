@@ -134,6 +134,19 @@ class IssueClustererEventConflictTest {
         assertFalse(together(plan, 1, 2));
     }
 
+    @Test
+    void summitCountryAndDayConflictsOverrideSharedHeadlineWords() {
+        ClusterArticle first = fullText(1, 1, "한국 인도 협력 확대 합의",
+                "20일 정상회담에서 방산 반도체 우주 협력에 합의했다.");
+        for (ClusterArticle second : List.of(
+                fullText(2, 1, "한국 인도네시아 협력 확대 합의", first.body()),
+                fullText(2, 1, first.title(), "19일 정상회담에서 방산 반도체 우주 협력에 합의했다."))) {
+            assertFalse(together(clusterer.cluster(List.of(first, second)), 1, 2));
+        }
+        assertTrue(together(clusterer.cluster(List.of(first,
+                fullText(2, 1, "인도 한국 우주 반도체 협력 확대", first.body()))), 1, 2));
+    }
+
     private static ClusterArticle statistics(long id, String title, long hours) {
         OffsetDateTime time = OffsetDateTime.parse("2026-10-21T10:00:00+09:00").plusHours(hours);
         String summary = "한국은행이 발표한 3분기 잠정 통계다. 수출 디플레이터는 18.7% 상승했다.";

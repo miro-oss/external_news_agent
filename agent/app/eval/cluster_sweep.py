@@ -16,8 +16,9 @@ _ORGANIZATION_JACCARD_THRESHOLDS = (0.10, 0.125, 0.15, 0.20)
 _ORGANIZATION_TIME_WINDOWS = (12, 24, 48)
 _TITLE_ORGANIZATION_RULE_VERSION = "title-organization-conflict-v1"
 _EVENT_CONFLICT_RULE_VERSION = "event-text-evidence-v4"
+_EVENT_CONFLICT_RULE_VERSIONS = (_EVENT_CONFLICT_RULE_VERSION, "event-text-evidence-v5")
 _EVENT_TEXT_RULE_VERSIONS = (
-    "event-text-evidence-v2", "event-text-evidence-v3", _EVENT_CONFLICT_RULE_VERSION,
+    "event-text-evidence-v2", "event-text-evidence-v3", *_EVENT_CONFLICT_RULE_VERSIONS,
 )
 _LOGGER = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def validate_clustering_metadata(java_output: dict[str, Any]) -> None:
         required=version != "legacy",
     )
     _validate_event_conflicts(
-        java_output["articles"], required=version == _EVENT_CONFLICT_RULE_VERSION
+        java_output["articles"], required=version in _EVENT_CONFLICT_RULE_VERSIONS
     )
     if version in _EVENT_TEXT_RULE_VERSIONS:
         evaluations = java_output.get("pairEvaluations") or [
@@ -124,7 +125,7 @@ def validate_clustering_metadata(java_output: dict[str, Any]) -> None:
                 ):
                     if not isinstance(pair.get(field), bool):
                         raise ValueError(f"Event evidence requires boolean {field}")
-                if version == _EVENT_CONFLICT_RULE_VERSION and not isinstance(
+                if version in _EVENT_CONFLICT_RULE_VERSIONS and not isinstance(
                     pair.get("specificEventMatch"), bool
                 ):
                     raise ValueError("Event evidence requires boolean specificEventMatch")
