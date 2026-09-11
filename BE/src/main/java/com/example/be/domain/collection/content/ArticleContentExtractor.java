@@ -112,7 +112,7 @@ public final class ArticleContentExtractor {
     }
 
     /**
-     * 아는 자리에 없으면 문단 블록 중 매체 푸터를 제외한 본문이 가장 긴 곳을 고른다.
+     * 아는 자리에 없으면 직접 자식 문단에서 매체 푸터를 제외한 본문이 가장 긴 블록을 고른다.
      */
     private static String fromDensestBlock(Document document) {
         Element best = null;
@@ -124,8 +124,13 @@ public final class ArticleContentExtractor {
                 continue;
             }
 
-            int length = ArticleBodyCleaner.withoutTrailingBoilerplate(textOf(candidate)).length();
-            if (length >= MIN_BODY_LENGTH && length > bestLength) {
+            // 전체 본문으로 수용 여부를 판단하고, 직접 문단으로만 블록 간 길이를 비교한다.
+            if (ArticleBodyCleaner.withoutTrailingBoilerplate(textOf(candidate)).length() < MIN_BODY_LENGTH) {
+                continue;
+            }
+
+            int length = ArticleBodyCleaner.withoutTrailingBoilerplate(textOf(paragraphs)).length();
+            if (length > bestLength) {
                 best = candidate;
                 bestLength = length;
             }
@@ -143,6 +148,10 @@ public final class ArticleContentExtractor {
             return element.text().strip();
         }
 
+        return textOf(paragraphs);
+    }
+
+    private static String textOf(Elements paragraphs) {
         return paragraphs.stream()
                 .map(Element::text)
                 .map(String::strip)

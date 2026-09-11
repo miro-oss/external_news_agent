@@ -113,6 +113,37 @@ class ArticleContentExtractorTest {
     }
 
     @Test
+    void selectsNestedArticleWithoutCountingItsTextForOuterWrapper() {
+        String paragraph = "합성 연구소가 실험 결과와 향후 일정을 발표했다. ".repeat(5);
+        String html = """
+                <html><body><div>
+                  <p>배너 안내</p><p>구독 안내</p>
+                  <section><p>%s</p><p>%s</p></section>
+                </div></body></html>
+                """.formatted(paragraph, paragraph);
+
+        String body = ArticleContentExtractor.extract(html, "https://example.com/1");
+
+        assertEquals(String.join("\n\n", paragraph.strip(), paragraph.strip()), body);
+    }
+
+    @Test
+    void acceptsNestedArticleWhenDirectParagraphsAloneAreShort() {
+        String firstParagraph = "A".repeat(80);
+        String nestedParagraph = "B".repeat(80);
+        String lastParagraph = "C".repeat(80);
+        String html = """
+                <html><body><div>
+                  <p>%s</p><section><p>%s</p></section><p>%s</p>
+                </div></body></html>
+                """.formatted(firstParagraph, nestedParagraph, lastParagraph);
+
+        String body = ArticleContentExtractor.extract(html, "https://example.com/1");
+
+        assertEquals(String.join("\n\n", firstParagraph, nestedParagraph, lastParagraph), body);
+    }
+
+    @Test
     void rejectsShortArticlePaddedByPublisherFooter() {
         String html = """
                 <html><body><article><p>합성 연구소가 새 실험 일정을 발표했다.</p><p>%s</p><p>%s</p></article></body></html>
