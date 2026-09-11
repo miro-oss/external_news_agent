@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.reports.comparison.ReportComparisonSnapshot;
+import lombok.extern.slf4j.Slf4j;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
@@ -19,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class DailyReportSelector {
@@ -77,10 +80,20 @@ public class DailyReportSelector {
                     return score == null ? BigDecimal.ZERO : score;
                 }).reversed().thenComparing(f -> issueByArticle.get(f.getArticle().getId()).getId()))
                 .limit(limit).toList();
-        return new Selection(selected, stubExcluded, evidenceExcluded);
+        ReportComparisonSnapshot snapshot = null;
+        try {
+            snapshot = ReportComparisonSnapshot.capture(selected, issueByArticle);
+        } catch (RuntimeException exception) {
+            log.warn("일일 보고서 비교 입력을 보존할 수 없어 비교를 제공하지 않습니다.", exception);
+        }
+        return new Selection(selected, stubExcluded, evidenceExcluded, snapshot);
     }
 
-    public record Selection(List<Finding> findings, int stubExcluded, int evidenceExcluded) {
+    public record Selection(List<Finding> findings, int stubExcluded, int evidenceExcluded,
+                            ReportComparisonSnapshot comparisonSnapshot) {
+        public Selection(List<Finding> findings, int stubExcluded, int evidenceExcluded) {
+            this(findings, stubExcluded, evidenceExcluded, null);
+        }
         public ReportSourceStats applyTo(ReportSourceStats sourceStats) {
             return new ReportSourceStats(sourceStats.collected(), sourceStats.blocked(), sourceStats.failed(),
                     sourceStats.paywalled(), stubExcluded, evidenceExcluded);

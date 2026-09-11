@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.reports.comparison.ReportCompleted;
+import org.springframework.context.ApplicationEventPublisher;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
@@ -31,6 +33,7 @@ public class ReportPersistenceService {
     private final ReportNotificationAutomationService notificationAutomation;
     private final CollectionRunArticleRepository observationRepository;
     private final FindingRepository findingRepository;
+    private final ApplicationEventPublisher events;
 
     @Transactional
     public Reservation reserve(Long runId, LocalDateTime generatedAt, boolean hasRefreshedArticles) {
@@ -72,6 +75,16 @@ public class ReportPersistenceService {
     }
 
     @Transactional
+    public Long completeRecovered(Long reportId, ReportDocument document, LocalDateTime generatedAt) {
+        NewsReport report = reportRepository.findByIdForUpdate(reportId)
+                .orElseThrow(() -> new IllegalStateException("복구할 보고서가 없습니다. reportId=" + reportId));
+        if (report.getReportStatus() != ReportStatus.PENDING) return report.getId();
+        // Flag travels in the report completion write itself, without a separate fallible comparison DB write.
+        report.invalidateComparisonInput();
+        return complete(reportId, document, generatedAt);
+    }
+
+    @Transactional
     public Long complete(Long reportId, ReportDocument document, LocalDateTime generatedAt) {
         NewsReport report = reportRepository.findByIdForUpdate(reportId)
                 .orElseThrow(() -> new IllegalStateException("완료할 보고서가 없습니다. reportId=" + reportId));
@@ -96,6 +109,7 @@ public class ReportPersistenceService {
                 generatedAt);
         report.recordStructuredContent(document.structuredContent());
         notificationAutomation.enqueueCompletedReport(report);
+        events.publishEvent(new ReportCompleted(reportId));
         return report.getId();
     }
 

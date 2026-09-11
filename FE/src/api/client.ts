@@ -53,7 +53,7 @@ async function request<T>(path: string, init?: RequestInit, base = BASE): Promis
   return envelope.result
 }
 
-export function get<T>(path: string, params?: Record<string, string | number | boolean | undefined>) {
+export function get<T>(path: string, params?: Record<string, string | number | boolean | undefined>, signal?: AbortSignal) {
   const query = new URLSearchParams()
   Object.entries(params ?? {}).forEach(([key, value]) => {
     if (value !== undefined && value !== '') {
@@ -61,7 +61,7 @@ export function get<T>(path: string, params?: Record<string, string | number | b
     }
   })
   const suffix = query.toString()
-  return request<T>(suffix ? `${path}?${suffix}` : path)
+  return request<T>(suffix ? `${path}?${suffix}` : path, { signal })
 }
 
 export function post<T>(path: string, body: unknown) {

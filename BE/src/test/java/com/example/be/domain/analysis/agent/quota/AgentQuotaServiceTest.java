@@ -207,6 +207,52 @@ class AgentQuotaServiceTest {
     }
 
     @Test
+    void releasesOverCapReportComparisonFailureForActualAuditUsageSettlement() {
+        QuotaReservation reservation = reservation(AgentTask.REPORT_CHANGES, AgentPlan.PAID);
+        var failure = new AgentClientException("SCHEMA_VIOLATION", "invalid output", null,
+                new AgentClientException.Usage(100L, 25L, BigDecimal.ONE, new BigDecimal("6")));
+        service.completeFailure(reservation, failure);
+        verify(repository).release(eq(reservation), any(LocalDateTime.class));
+        verify(repository, never()).consume(any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "1", "5"})
+    void knownReportComparisonFailureChargesWithinReservationAreConsumed(String credits) {
+        QuotaReservation reservation = reservation(AgentTask.REPORT_CHANGES, AgentPlan.PAID);
+        var actual = new BigDecimal(credits);
+        var failure = new AgentClientException("SCHEMA_VIOLATION", "invalid output", null,
+                new AgentClientException.Usage(100L, 25L, BigDecimal.ONE, actual));
+
+        service.completeFailure(reservation, failure);
+
+        verify(repository).consume(eq(reservation), eq(actual), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test
+    void knownFreeReportComparisonFailureConsumesOneCallRegardlessOfCredits() {
+        QuotaReservation reservation = new QuotaReservation(
+                1L, null, "report-changes:101:v1", AgentTask.REPORT_CHANGES,
+                AgentPlan.FREE, BigDecimal.ONE);
+        var failure = new AgentClientException("SCHEMA_VIOLATION", "invalid output", null,
+                new AgentClientException.Usage(100L, 25L, BigDecimal.ONE, new BigDecimal("6")));
+
+        service.completeFailure(reservation, failure);
+
+        verify(repository).consume(eq(reservation), eq(BigDecimal.ONE), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test
+    void reportComparisonCannotConsumePaidReportReserve() {
+        stubUsage(BigDecimal.ZERO, new BigDecimal("70"), new BigDecimal("70"), new BigDecimal("100"));
+        assertThrows(QuotaExceededException.class, () -> service.reserve(
+                null, "report-changes:101:v1", AgentTask.REPORT_CHANGES, AgentPlan.PAID));
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void selfCritiqueCannotConsumePaidReportReserve() {
         stubUsage(BigDecimal.ZERO, new BigDecimal("70"), new BigDecimal("70"),
                 new BigDecimal("100"));

@@ -33,6 +33,9 @@ public interface NewsReportRepository
 
     Optional<NewsReport> findByReportScopeAndReportDate(ReportScope scope, LocalDate date);
 
+    Optional<NewsReport> findFirstByReportScopeAndReportDateBeforeAndReportStatusNotAndDeletedAtIsNullOrderByReportDateDescIdDesc(
+            ReportScope scope, LocalDate before, ReportStatus status);
+
     List<NewsReport> findByReportScopeAndReportStatusAndGeneratedAtBefore(
             ReportScope scope, ReportStatus status, LocalDateTime before);
 

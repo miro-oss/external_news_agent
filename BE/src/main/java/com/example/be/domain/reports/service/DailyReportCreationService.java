@@ -52,8 +52,8 @@ public class DailyReportCreationService {
         DailyReportSelector.Selection selection = selector.selectWithStats(date, maxIssues);
         List<Finding> selected = selection.findings();
         ReportSourceStats stats = selection.applyTo(dailyRepository.sourceStats(date));
-        ReportPersistenceService.Reservation reservation = dailyPersistence.reserve(
-                date, sourceRunIds, selected.stream().map(Finding::getId).toList(), now);
+        ReportPersistenceService.Reservation reservation = dailyPersistence.reserveWithSnapshot(
+                date, sourceRunIds, selected.stream().map(Finding::getId).toList(), now, selection.comparisonSnapshot());
         if (!reservation.owner()) {
             return reservation.reportId();
         }
@@ -77,7 +77,7 @@ public class DailyReportCreationService {
                 ReportSourceStats stats = selector.selectWithStats(report.getReportDate(), maxIssues)
                         .applyTo(dailyRepository.sourceStats(report.getReportDate()));
                 ReportDocument fallback = fallbackGenerator.generateDaily(findings, report.getReportDate(), stats);
-                persistence.complete(report.getId(), fallback, now);
+                persistence.completeRecovered(report.getId(), fallback, now);
             } catch (RuntimeException exception) {
                 log.error("중단된 일일 보고서 복구 실패. reportId={}", report.getId(), exception);
             }

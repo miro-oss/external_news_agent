@@ -27,6 +27,11 @@ public class SchedulingConfig {
         return scheduler("report-delivery-");
     }
 
+    @Bean
+    public ThreadPoolTaskScheduler reportComparisonScheduler() {
+        return scheduler("report-comparison-");
+    }
+
     private ThreadPoolTaskScheduler scheduler(String threadNamePrefix) {
         // 보고서 생성·SMTP 전송의 긴 대기가 텔레그램 수신을 막지 않도록 실행 경로를 분리한다.
         // 각 경로는 한 스레드만 사용해 동일한 폴러의 실행이 겹치지 않게 한다.

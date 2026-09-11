@@ -100,6 +100,15 @@ public class NewsReport {
 
     public void recordStructuredContent(ReportContent content) { this.structuredContent = content; }
 
+    @Builder.Default
+    @Convert(converter = YnBooleanConverter.class)
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "comparison_input_usable_yn", nullable = false, length = 1)
+    private boolean comparisonInputUsable = true;
+
+    /** Recovery which used live findings cannot attest to the original detached generation input. */
+    public void invalidateComparisonInput() { this.comparisonInputUsable = false; }
+
     @Column(name = "model_name", nullable = false, length = MAX_MODEL_NAME_LENGTH)
     private String modelName;
 

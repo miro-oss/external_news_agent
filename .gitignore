@@ -47,4 +47,5 @@ screenshots/
 *.md
 # Public repository introduction requested for the project handoff.
 !/README.md
+!agent/app/prompts/report-changes.ko.v1.md
 BE/src/test/resources/golden/clusters.*.summary.json
