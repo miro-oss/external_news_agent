@@ -3,7 +3,10 @@ package com.example.be.domain.collection.content;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
+import org.jsoup.nodes.TextNode;
 import org.jsoup.select.Elements;
+import org.jsoup.select.NodeVisitor;
 import org.springframework.util.StringUtils;
 
 import java.io.ByteArrayInputStream;
@@ -140,15 +143,59 @@ public final class ArticleContentExtractor {
     }
 
     /**
-     * 문단을 줄바꿈으로 잇는다. Jsoup의 {@code text()}는 전부 한 줄로 붙여서 문장 분할(M4 §3)이 어려워진다.
+     * DOM 순서대로 텍스트를 읽고 문단·블록과 {@code br}의 경계를 보존한다.
+     * 사진 설명만 {@code p}인 기사도 있어 자손 문단만 읽으면 실제 본문을 잃는다.
      */
     private static String textOf(Element element) {
-        Elements paragraphs = element.select("p");
-        if (paragraphs.isEmpty()) {
-            return element.text().strip();
+        BodyTextVisitor visitor = new BodyTextVisitor();
+        element.traverse(visitor);
+        return visitor.text.toString().strip();
+    }
+
+    private static final class BodyTextVisitor implements NodeVisitor {
+        private final StringBuilder text = new StringBuilder();
+
+        @Override
+        public void head(Node node, int depth) {
+            if (node instanceof TextNode textNode) {
+                // Jsoup의 공백 정규화는 HTML 들여쓰기를 접되 인라인 요소 사이의 실제 공백은 남긴다.
+                String value = textNode.text();
+                if (text.isEmpty() || Character.isWhitespace(text.charAt(text.length() - 1))) {
+                    value = value.stripLeading();
+                }
+                text.append(value);
+            } else if (node instanceof Element child) {
+                if (child.normalName().equals("br")) {
+                    lineBreak(1, true);
+                } else if (child.isBlock()) {
+                    lineBreak(2, false);
+                }
+            }
         }
 
-        return textOf(paragraphs);
+        @Override
+        public void tail(Node node, int depth) {
+            if (node instanceof Element child && child.isBlock()) {
+                lineBreak(2, false);
+            }
+        }
+
+        private void lineBreak(int count, boolean additive) {
+            while (!text.isEmpty() && text.charAt(text.length() - 1) == ' ') {
+                text.setLength(text.length() - 1);
+            }
+            if (text.isEmpty()) {
+                return;
+            }
+            int existing = 0;
+            for (int index = text.length() - 1; index >= 0 && text.charAt(index) == '\n'; index--) {
+                existing++;
+            }
+            int target = additive ? Math.min(2, existing + count) : count;
+            while (existing++ < target) {
+                text.append('\n');
+            }
+        }
     }
 
     private static String textOf(Elements paragraphs) {

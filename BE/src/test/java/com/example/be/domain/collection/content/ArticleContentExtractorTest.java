@@ -38,6 +38,48 @@ class ArticleContentExtractorTest {
         assertFalse(body.contains("회사 소개"));
     }
 
+    @Test
+    void readsDirectArticleTextInsteadOfFallingBackToUnrelatedHeadlines() {
+        String firstParagraph = "합성 연구소가 새 관측 장비를 공개하고 다음 달 실험 일정을 안내했다. ".repeat(4).strip();
+        String secondParagraph = "실험팀은 측정 정밀도를 확인한 뒤 지역 연구 기관에 장비를 제공할 예정이다. ".repeat(4).strip();
+        String unrelatedHeadline = "관련 없는 다른 지역의 행사 소식을 모은 공통 헤드라인이다. ".repeat(5);
+        String html = """
+                <html><body>
+                  <div itemprop="articleBody"><article>
+                    <div><p>합성 장비 사진 설명</p></div>
+                    %s<br><br>
+                    %s
+                  </article></div>
+                  <div><p>오늘의 헤드라인</p><p>%s</p><p>%s</p></div>
+                </body></html>
+                """.formatted(firstParagraph, secondParagraph, unrelatedHeadline, unrelatedHeadline);
+
+        String body = ArticleContentExtractor.extract(html, "https://example.com/1");
+
+        assertEquals(String.join("\n\n", "합성 장비 사진 설명", firstParagraph, secondParagraph), body);
+        assertFalse(body.contains("헤드라인"));
+    }
+
+    @Test
+    void preservesMixedTextOrderInlineSpacingAndLineBreaks() {
+        String html = """
+                <html><body><article>
+                  합성 연구<em>소</em>가 <strong>새 장비</strong>를 공개했다.<br>
+                  <span>첫</span><span>실험</span> 결과를 발표했다.
+                  <p>%s</p>
+                  <section>다음 <a href="/plan">실험 일정</a>을 안내했다.<br><br>후속 관측을 준비한다.</section>
+                  마지막 안내를 덧붙였다.
+                </article></body></html>
+                """.formatted(PARAGRAPH);
+
+        String body = ArticleContentExtractor.extract(html, "https://example.com/1");
+
+        assertEquals(String.join("\n\n",
+                "합성 연구소가 새 장비를 공개했다.\n첫실험 결과를 발표했다.",
+                PARAGRAPH.strip(), "다음 실험 일정을 안내했다.", "후속 관측을 준비한다.",
+                "마지막 안내를 덧붙였다."), body);
+    }
+
     /**
      * 스크립트를 남기면 본문에 자바스크립트가 섞여 들어간다. M4의 문장 분할이 그대로 오염된다.
      */
