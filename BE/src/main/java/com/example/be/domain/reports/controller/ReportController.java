@@ -52,7 +52,7 @@ public class ReportController {
     }
 
     @GetMapping
-    @Operation(summary = "보고서 목록 조회", description = "본문 없이 생성 시각과 집계값을 페이징 조회합니다.")
+    @Operation(summary = "보고서 목록 조회", description = "본문 없이 생성 시각·집계값·저장된 수집 조건을 페이징 조회합니다. collectionStartedAt은 RUN 원본 실행의 시작 시각(Asia/Seoul)이며 DAILY 또는 기록이 없으면 null입니다. from/to는 기존 생성일 기준을 유지합니다.")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다."),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(

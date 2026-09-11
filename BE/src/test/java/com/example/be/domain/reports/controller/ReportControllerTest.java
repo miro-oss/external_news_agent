@@ -1,6 +1,8 @@
 package com.example.be.domain.reports.controller;
 
 import com.example.be.domain.reports.dto.res.ReportResDTO;
+import com.example.be.domain.collection.entity.CollectionTopicSnapshot;
+import com.example.be.domain.reports.entity.ReportCollectionContext;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;
 import com.example.be.domain.reports.service.ReportQueryService;
@@ -101,6 +103,10 @@ class ReportControllerTest {
                 .runId(42L)
                 .title("반도체 뉴스 보고서")
                 .generatedAt(OffsetDateTime.parse("2026-08-18T10:03:12+09:00"))
+                .collectionStartedAt(OffsetDateTime.parse("2026-08-18T10:00:00+09:00"))
+                .collectionContexts(List.of(new ReportCollectionContext(42L, List.of(
+                        new CollectionTopicSnapshot(29L, "HBM 시장", "HBM 반도체", List.of("HBM"),
+                                List.of("삼성전자"), List.of("채용"), 100, 1440)))))
                 .modelName("stub-report-v1")
                 .findingCount(17)
                 .highSensitivityCount(3)
@@ -113,6 +119,16 @@ class ReportControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("COMMON200"))
                 .andExpect(jsonPath("$.result.content[0].runId").value(42))
+                .andExpect(jsonPath("$.result.content[0].collectionStartedAt").value("2026-08-18T10:00:00+09:00"))
+                .andExpect(jsonPath("$.result.content[0].collectionContexts[0].runId").value(42))
+                .andExpect(jsonPath("$.result.content[0].collectionContexts[0].topics[0].topicId").value(29))
+                .andExpect(jsonPath("$.result.content[0].collectionContexts[0].topics[0].topicName").value("HBM 시장"))
+                .andExpect(jsonPath("$.result.content[0].collectionContexts[0].topics[0].queryText").value("HBM 반도체"))
+                .andExpect(jsonPath("$.result.content[0].collectionContexts[0].topics[0].requiredKeywords[0]").value("HBM"))
+                .andExpect(jsonPath("$.result.content[0].collectionContexts[0].topics[0].optionalKeywords[0]").value("삼성전자"))
+                .andExpect(jsonPath("$.result.content[0].collectionContexts[0].topics[0].excludedKeywords[0]").value("채용"))
+                .andExpect(jsonPath("$.result.content[0].collectionContexts[0].topics[0].batchSize").value(100))
+                .andExpect(jsonPath("$.result.content[0].collectionContexts[0].topics[0].intervalMinutes").value(1440))
                 .andExpect(jsonPath("$.result.content[0].highSensitivityCount").value(3))
                 .andExpect(jsonPath("$.result.content[0].deliveryStatus").value("NOT_SENT"));
     }

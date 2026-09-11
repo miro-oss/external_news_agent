@@ -403,6 +403,8 @@ export interface ReportSummary {
   sourceReportCount?: number | null
   title: string
   generatedAt: string
+  collectionStartedAt?: string | null
+  collectionContexts?: ReportCollectionContext[]
   modelName: string
   findingCount: number
   highSensitivityCount: number

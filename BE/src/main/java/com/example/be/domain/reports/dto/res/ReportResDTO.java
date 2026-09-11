@@ -30,7 +30,7 @@ public class ReportResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "id", "runId", "reportScope", "reportDate", "sourceRunIds", "sourceReportCount", "title", "generatedAt", "modelName", "findingCount", "highSensitivityCount",
+            "id", "runId", "reportScope", "reportDate", "sourceRunIds", "sourceReportCount", "title", "generatedAt", "collectionStartedAt", "collectionContexts", "modelName", "findingCount", "highSensitivityCount",
             "deliveryStatus"
     })
     @Schema(name = "ReportSummaryResponse", description = "보고서 목록 항목")
@@ -48,6 +48,10 @@ public class ReportResDTO {
         @Schema(description = "수집 시점 주제명과 생성 시각(RUN) 또는 집계일(DAILY)을 포함한 제목. 스냅샷이 없는 이전 보고서는 저장된 기존 제목을 유지", example = "HBM 시장 · 2026-09-08 10:00 리포트")
         private final String title;
         private final OffsetDateTime generatedAt;
+        @Schema(description = "RUN 원본 수집 실행의 시작 시각 (Asia/Seoul). DAILY 또는 시작 시각 기록이 없으면 null이며 생성 시각으로 대체하지 않음", nullable = true, example = "2026-09-08T10:00:00+09:00")
+        private final OffsetDateTime collectionStartedAt;
+        @Schema(description = "보고서 상세와 동일한 저장된 실행별 수집 조건. 현재 주제 설정에서 복원하지 않으며 기록이 없는 이전 보고서는 []")
+        private final List<ReportCollectionContext> collectionContexts;
         private final String modelName;
         private final long findingCount;
         private final long highSensitivityCount;

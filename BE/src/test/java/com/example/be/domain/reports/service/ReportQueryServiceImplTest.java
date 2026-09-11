@@ -14,12 +14,15 @@ import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.domain.collection.entity.CollectionTopicSnapshot;
 import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportCollectionContext;
+import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.topics.entity.Topic;
@@ -27,10 +30,13 @@ import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -93,6 +99,74 @@ class ReportQueryServiceImplTest {
         ReportResDTO.Summary summary = result.getContent().getFirst();
         assertEquals(0, summary.getFindingCount());
         assertEquals("NOT_SENT", summary.getDeliveryStatus());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void listUsesSourceRunStartWithKoreanOffsetAndKeepsMissingDatesNull() {
+        LocalDateTime generatedAt = LocalDateTime.of(2026, 9, 9, 0, 5);
+        NewsReport run = NewsReport.builder().id(17L)
+                .run(CollectionRun.builder().id(42L)
+                        .startedAt(LocalDateTime.of(2026, 9, 8, 23, 55)).build())
+                .generatedAt(generatedAt).build();
+        NewsReport missingStart = NewsReport.builder().id(16L)
+                .run(CollectionRun.builder().id(41L).build()).generatedAt(generatedAt).build();
+        NewsReport missingRun = NewsReport.builder().id(15L).generatedAt(generatedAt).build();
+        NewsReport daily = NewsReport.builder().id(14L).reportScope(ReportScope.DAILY)
+                .reportDate(LocalDate.of(2026, 9, 8)).sourceRunIds(List.of(42L, 41L))
+                .generatedAt(generatedAt).build();
+        when(reportRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(run, missingStart, missingRun, daily),
+                        PageRequest.of(1, 4), 12));
+
+        var result = service.getReports(null, null, 1, 4);
+
+        assertEquals(List.of(17L, 16L, 15L, 14L),
+                result.getContent().stream().map(ReportResDTO.Summary::getId).toList());
+        assertEquals(OffsetDateTime.parse("2026-09-08T23:55:00+09:00"),
+                result.getContent().getFirst().getCollectionStartedAt());
+        assertEquals(OffsetDateTime.parse("2026-09-09T00:05:00+09:00"),
+                result.getContent().getFirst().getGeneratedAt());
+        result.getContent().subList(1, 4).forEach(summary -> assertNull(summary.getCollectionStartedAt()));
+        assertEquals(List.of(), result.getContent().get(2).getSourceRunIds());
+        assertEquals(daily.getReportDate(), result.getContent().getLast().getReportDate());
+        assertEquals(12, result.getTotalElements());
+        assertEquals(1, result.getPage());
+        assertEquals(4, result.getSize());
+        assertEquals(3, result.getTotalPages());
+        var pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(reportRepository).findAll(any(Specification.class), pageable.capture());
+        assertEquals(Sort.by(Sort.Order.desc("generatedAt"), Sort.Order.desc("id")),
+                pageable.getValue().getSort());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void listReturnsSavedCollectionContextsForBothScopesAndEmptyContextsForLegacyReports() {
+        var snapshot = new CollectionTopicSnapshot(29L, "접수 당시 HBM 시장", "HBM 반도체",
+                List.of("HBM"), List.of("삼성전자"), List.of("채용"), 100, 1440);
+        List<ReportCollectionContext> contexts = List.of(
+                new ReportCollectionContext(42L, List.of(snapshot)));
+        CollectionRun run = CollectionRun.builder().id(42L).build();
+        LocalDateTime generatedAt = LocalDateTime.of(2026, 9, 9, 0, 5);
+        NewsReport runReport = NewsReport.builder().id(17L).run(run)
+                .collectionContexts(contexts).generatedAt(generatedAt).build();
+        NewsReport dailyReport = NewsReport.builder().id(16L).reportScope(ReportScope.DAILY)
+                .collectionContexts(contexts).generatedAt(generatedAt).build();
+        NewsReport legacyReport = NewsReport.builder().id(15L).run(run)
+                .generatedAt(generatedAt).build();
+        when(reportRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(runReport, dailyReport, legacyReport)));
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING))
+                .thenReturn(Optional.of(runReport));
+
+        var summaries = service.getReports(null, null, 0, 20).getContent();
+
+        assertEquals(contexts, summaries.get(0).getCollectionContexts());
+        assertEquals(contexts, summaries.get(1).getCollectionContexts());
+        assertEquals(List.of(), summaries.get(2).getCollectionContexts());
+        assertEquals(service.getReport(17L, false).getCollectionContexts(),
+                summaries.getFirst().getCollectionContexts());
     }
 
     @Test
