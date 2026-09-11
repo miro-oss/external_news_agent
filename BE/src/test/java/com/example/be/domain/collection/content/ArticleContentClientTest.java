@@ -80,6 +80,21 @@ class ArticleContentClientTest {
         assertEquals(FetchStatus.FETCH_FAILED, client.fetch(ARTICLE_URL, null).status());
     }
 
+    @Test
+    void reportsFailureWhenSuccessfulPageContainsOnlyPublisherFooter() {
+        String notice = "Copyright © SYNTHETIC TEST PUBLISHER. All rights reserved. ".repeat(3);
+        String html = """
+                <html><body><div><p>%s</p><p>%s</p></div></body></html>
+                """.formatted(notice, notice);
+        server.expect(requestTo(ARTICLE_URL)).andRespond(withSuccess(html, MediaType.TEXT_HTML));
+
+        ArticleContentResult result = client.fetch(ARTICLE_URL, null);
+
+        assertEquals(FetchStatus.FETCH_FAILED, result.status());
+        assertNull(result.body());
+        server.verify();
+    }
+
     /**
      * 짧은 기사도 정상 응답이다. 이걸 FULLTEXT_BLOCKED로 적으면 실행 상세에 없는 페이월이 보고된다.
      */
