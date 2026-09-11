@@ -42,7 +42,10 @@ public class ReportComparisonPersistence {
         var result = new ReportChanges(reportId, report.getReportDate(), baseline == null ? null : baseline.getId(),
                 baseline == null ? null : baseline.getReportDate(), status, status.message, false, List.of(), List.of());
         ComparisonWork work = status != ReportChanges.Status.PENDING ? null : new ComparisonWork(reportId,
-                report.getReportDate(), baseline.getId(), baseline.getReportDate(), previous, current, identityLinks(current, now));
+                report.getReportDate(), baseline.getId(), baseline.getReportDate(), previous, current,
+                // DAILY captured_at and generatedAt share the reserved generation timestamp.
+                // Delayed registration must not import relationships created after that immutable input.
+                identityLinks(current, report.getGeneratedAt()));
         comparisons.insert(result, work, now);
     }
 
@@ -58,7 +61,7 @@ public class ReportComparisonPersistence {
         }
     }
 
-    private List<ComparisonWork.IdentityLink> identityLinks(ReportComparisonSnapshot current, LocalDateTime now) {
+    private List<ComparisonWork.IdentityLink> identityLinks(ReportComparisonSnapshot current, LocalDateTime capturedAt) {
         List<ComparisonWork.IdentityLink> result = new ArrayList<>();
         for (var issue : current.issues()) {
             long currentId = issue.side().issueId();
@@ -68,7 +71,7 @@ public class ReportComparisonPersistence {
             boolean ambiguous = false;
             while (!pending.isEmpty()) {
                 long target = pending.removeFirst();
-                var parents = comparisons.mergeParents(target, now);
+                var parents = comparisons.mergeParents(target, capturedAt);
                 if (parents.size() > 100 || visited.size() > 100) { ambiguous = true; break; }
                 for (var parent : parents) {
                     if (!visited.add(parent.previousIssueId())) { ambiguous = true; continue; }
@@ -76,7 +79,7 @@ public class ReportComparisonPersistence {
                     pending.add(parent.previousIssueId());
                 }
             }
-            var refutations = comparisons.refutedIssues(currentId, now);
+            var refutations = comparisons.refutedIssues(currentId, capturedAt);
             if (refutations.size() > 100) ambiguous = true;
             else result.addAll(refutations);
             if (ambiguous) result.add(new ComparisonWork.IdentityLink(currentId, currentId, "AMBIGUOUS"));

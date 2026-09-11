@@ -9,6 +9,8 @@ import com.example.be.domain.analysis.agent.entity.AgentTargetType;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
 import com.example.be.domain.analysis.agent.entity.AgentTimeoutPhase;
 import com.example.be.domain.analysis.agent.repository.AgentRunJdbcRepository;
+import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
+import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,7 @@ import java.util.HexFormat;
 public class ReportComparisonRunRecorder {
     private final AgentRunJdbcRepository repository;
     private final ObjectMapper mapper;
+    private final AgentQuotaService quota;
 
     @Transactional
     public void success(AgentReportChangesRequest request, AgentReportChangesResponse response, LocalDateTime startedAt) {
@@ -37,10 +40,11 @@ public class ReportComparisonRunRecorder {
     }
 
     @Transactional
-    public void failure(AgentReportChangesRequest request, AgentClientException exception, LocalDateTime startedAt) {
+    public void failure(AgentReportChangesRequest request, AgentClientException exception,
+                        LocalDateTime startedAt, QuotaReservation reservation) {
         var usage = exception.getUsage();
         var execution = exception.getExecutionMetadata();
-        repository.insertIfAbsent(base(request, startedAt)
+        boolean inserted = repository.insertIfAbsent(base(request, startedAt)
                 .status(AgentRunStatus.FAILED).failureCode(bounded(exception.getCode(), 100))
                 .failureMessage("보고서 변화 비교 Agent 호출 또는 검증에 실패했습니다.")
                 .promptVersion(execution == null || bounded(execution.promptVersion(), 50) == null
@@ -53,6 +57,10 @@ public class ReportComparisonRunRecorder {
                 .outputTokens(usage == null ? null : usage.outputTokens())
                 .costUsd(usage == null ? null : usage.costUsd()).credits(usage == null ? null : usage.credits())
                 .build());
+        if (!inserted) throw new IllegalStateException("비교 실패 사용량이 새 감사 기록으로 저장되지 않았습니다.");
+        // Over-cap settlement relies on this audit row after releasing the reservation.
+        // The insert and settlement must commit together, or both must roll back.
+        quota.completeFailure(reservation, exception);
     }
 
     private AgentRun.AgentRunBuilder base(AgentReportChangesRequest request, LocalDateTime startedAt) {

@@ -59,8 +59,7 @@ public class AgentReportComparisonAnalyzer implements ReportComparisonAnalyzer {
             return List.copyOf(response.items());
         } catch (RuntimeException error) {
             AgentClientException failure = asFailure(error, response, reservation);
-            safely(() -> recorder.failure(request, failure, startedAt), reportId);
-            safely(() -> quota.completeFailure(reservation, failure), reportId);
+            safely(() -> recorder.failure(request, failure, startedAt, reservation), reportId);
             throw failure;
         }
     }

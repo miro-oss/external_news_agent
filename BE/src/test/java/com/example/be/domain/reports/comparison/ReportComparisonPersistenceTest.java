@@ -7,6 +7,7 @@ import com.example.be.domain.reports.repository.NewsReportRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import static com.example.be.domain.reports.comparison.ComparisonFixtures.*;
@@ -22,7 +23,7 @@ class ReportComparisonPersistenceTest {
 
     private NewsReport report(long id, LocalDate date, List<Long> reflected) {
         return NewsReport.builder().id(id).reportScope(ReportScope.DAILY).reportStatus(ReportStatus.GENERATED)
-                .reportDate(date).reflectedFindingIds(reflected).build();
+                .reportDate(date).generatedAt(date.plusDays(1).atStartOfDay()).reflectedFindingIds(reflected).build();
     }
 
     @Test void enqueueFreezesChronologicalBaselineAndOnlyFinalReflectedInputs() {
@@ -43,6 +44,39 @@ class ReportComparisonPersistenceTest {
         when(comparisons.find(101)).thenReturn(Optional.of(new ReportComparisonRepository.Job(101, ReportChanges.Status.PENDING, work.getValue(), null)));
         persistence.enqueue(101);
         verify(comparisons, times(1)).insert(any(), any(), any());
+    }
+
+    @Test void delayedAndRecoveredEnqueueUsesCapturedTimeForMergeAndRefutationHistory() {
+        LocalDate capturedDate = LocalDate.of(2020, 1, 10);
+        var current = report(101, capturedDate, List.of(20L));
+        var baseline = report(100, capturedDate.minusDays(1), List.of(10L));
+        LocalDateTime capturedAt = current.getGeneratedAt();
+        var existingMerge = new ComparisonWork.IdentityLink(1, 2, "MERGED");
+        var laterMerge = new ComparisonWork.IdentityLink(99, 2, "MERGED");
+        var laterRefutation = new ComparisonWork.IdentityLink(98, 2, "REFUTES");
+        when(reports.findByIdForUpdate(101L)).thenReturn(Optional.of(current));
+        when(reports.findFirstByReportScopeAndReportDateBeforeAndReportStatusNotAndDeletedAtIsNullOrderByReportDateDescIdDesc(
+                ReportScope.DAILY, capturedDate, ReportStatus.PENDING)).thenReturn(Optional.of(baseline));
+        when(comparisons.findInput(101)).thenReturn(Optional.of(snapshot(side(2, 20, "현재"))));
+        when(comparisons.findInput(100)).thenReturn(Optional.of(snapshot(side(1, 10, "과거"))));
+        // Model a delayed registration after both relationships were added to the live issue graph.
+        when(comparisons.mergeParents(eq(2L), any())).thenAnswer(invocation ->
+                invocation.<LocalDateTime>getArgument(1).isAfter(capturedAt)
+                        ? List.of(existingMerge, laterMerge) : List.of(existingMerge));
+        when(comparisons.refutedIssues(eq(2L), any())).thenAnswer(invocation ->
+                invocation.<LocalDateTime>getArgument(1).isAfter(capturedAt)
+                        ? List.of(laterRefutation) : List.of());
+
+        persistence.enqueue(101);
+        // Simulate missing-job recovery after the initial registration did not persist.
+        persistence.enqueue(101);
+
+        var work = ArgumentCaptor.forClass(ComparisonWork.class);
+        verify(comparisons, times(2)).insert(any(), work.capture(), any());
+        work.getAllValues().forEach(value -> assertEquals(List.of(existingMerge), value.links()));
+        verify(comparisons, times(2)).mergeParents(2L, capturedAt);
+        verify(comparisons, times(2)).mergeParents(1L, capturedAt);
+        verify(comparisons, times(2)).refutedIssues(2L, capturedAt);
     }
 
     @Test void missingOrIncompleteHistoricalInputIsUnavailable() {

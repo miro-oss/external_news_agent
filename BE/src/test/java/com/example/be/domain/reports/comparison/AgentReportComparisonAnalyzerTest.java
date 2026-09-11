@@ -61,7 +61,7 @@ class AgentReportComparisonAnalyzerTest {
         when(client.reportChanges(any())).thenReturn(response(new ComparisonAssessment("issue-88", "UPDATED", "잘못된 근거", List.of("new"), List.of("old"))));
         assertThrows(AgentClientException.class, () -> analyzer.analyze(101, 100, candidates));
         var failure = ArgumentCaptor.forClass(AgentClientException.class);
-        verify(quota).completeFailure(eq(reservation), failure.capture());
+        verify(recorder).failure(any(), failure.capture(), any(), eq(reservation));
         assertEquals(new BigDecimal("1"), failure.getValue().getUsage().credits());
         assertEquals("openai", failure.getValue().getExecutionMetadata().provider());
         assertEquals("test-model", failure.getValue().getExecutionMetadata().model());
@@ -88,9 +88,23 @@ class AgentReportComparisonAnalyzerTest {
                 null, AgentClientException.TimeoutPhase.READ));
         assertThrows(AgentClientException.class, () -> analyzer.analyze(101, 100, candidates));
         var failure = ArgumentCaptor.forClass(AgentClientException.class);
-        verify(quota).completeFailure(eq(reservation), failure.capture());
+        verify(recorder).failure(any(), failure.capture(), any(), eq(reservation));
         assertEquals(reservation.reservedUnits(), failure.getValue().getUsage().credits());
         assertTrue(failure.getValue().isReadTimeout());
+        verify(client, times(1)).reportChanges(any());
+    }
+
+    @Test
+    void failedAuditCannotTriggerStandaloneReservationRelease() {
+        var providerFailure = new AgentClientException("SCHEMA_VIOLATION", "invalid output", null,
+                new AgentClientException.Usage(10L, 5L, new BigDecimal("0.001"), new BigDecimal("6")));
+        when(client.reportChanges(any())).thenThrow(providerFailure);
+        doThrow(new IllegalStateException("audit unavailable")).when(recorder).failure(any(), any(), any(), any());
+
+        var failure = assertThrows(AgentClientException.class, () -> analyzer.analyze(101, 100, candidates));
+
+        assertEquals(new BigDecimal("6"), failure.getUsage().credits());
+        verify(quota, never()).completeFailure(any(), any(AgentClientException.class));
         verify(client, times(1)).reportChanges(any());
     }
 
@@ -132,8 +146,8 @@ class AgentReportComparisonAnalyzerTest {
         assertNull(failure.getUsage().inputTokens());
         assertNull(failure.getUsage().costUsd());
         assertEquals(reservation.reservedUnits(), failure.getUsage().credits());
-        verify(quota).completeFailure(reservation, failure);
-        verify(recorder).failure(any(), eq(failure), any());
+        verify(recorder).failure(any(), eq(failure), any(), eq(reservation));
+        verify(quota, never()).completeFailure(any(), any(AgentClientException.class));
     }
 
     @Test
@@ -159,7 +173,7 @@ class AgentReportComparisonAnalyzerTest {
         var failure = assertThrows(AgentClientException.class, () -> analyzer.analyze(101, 100, candidates));
         assertNull(failure.getUsage().costUsd());
         assertEquals(reservation.reservedUnits(), failure.getUsage().credits());
-        verify(quota).completeFailure(reservation, failure);
+        verify(recorder).failure(any(), eq(failure), any(), eq(reservation));
     }
 
     private AgentReportChangesResponse response(ComparisonAssessment... items) {
