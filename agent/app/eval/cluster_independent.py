@@ -11,6 +11,7 @@ import json
 import math
 import re
 from collections import Counter, defaultdict
+from itertools import combinations
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,24 @@ RATIOS = [0.05, 0.10, 0.15, 0.20]
 SPLITS = ("CALIBRATION", "HOLDOUT")
 MIN_TOPICS = 2
 MIN_ARTICLES_PER_TOPIC_SPLIT = 20
+MIN_POSITIVE_PAIRS_PER_SPLIT = 30
+MIN_MULTI_ARTICLE_EVENTS_PER_SPLIT = 10
+MIN_MULTI_ARTICLE_EVENTS_PER_TOPIC_SPLIT = 3
+
+
+def _runtime_sources() -> dict[str, str]:
+    root = Path(__file__).resolve().parents[3]
+    directory = root / "BE/src/main/java/com/example/be/domain/collection/cluster"
+    paths = [*directory.glob("*.java"), root / (
+        "BE/src/main/java/com/example/be/domain/collection/content/ArticleBodyCleaner.java"
+    )]
+    if len(paths) < 2:
+        raise ValueError("Cluster Java sources are required to freeze the evaluation protocol")
+    for path in paths:
+        if any(item.is_symlink() for item in (path, *path.parents)
+               if item.is_relative_to(root)):
+            raise ValueError("Runtime source paths must not contain symbolic links")
+    return {str(path.relative_to(root)): _sha(path) for path in sorted(paths)}
 
 
 def _sha(path: Path) -> str:
@@ -80,6 +99,13 @@ def _protocol() -> dict[str, Any]:
         "recallGate": 0.85,
         "minimumTopicsPerSplit": MIN_TOPICS,
         "minimumArticlesPerTopicPerSplit": MIN_ARTICLES_PER_TOPIC_SPLIT,
+        "minimumUniqueSourcePositivePairsPerSplit": MIN_POSITIVE_PAIRS_PER_SPLIT,
+        "minimumMultiArticleEventsPerSplit": MIN_MULTI_ARTICLE_EVENTS_PER_SPLIT,
+        "minimumMultiArticleEventsPerTopicPerSplit": MIN_MULTI_ARTICLE_EVENTS_PER_TOPIC_SPLIT,
+        "selectionPolicy": "retain-configured-calibration-tie-v1",
+        "selectionFrozenBeforeHoldout": True,
+        "requireEveryTopicQualityGate": True,
+        "runtimeSourcesSha256": _runtime_sources(),
         "documentFrequencyScope": "SPLIT",
         "sweepSha256": _sha(Path(cluster_sweep.__file__)),
         "packToolSha256": _sha(Path(__file__)),
@@ -132,6 +158,8 @@ def _validate_snapshot(snapshot: dict[str, Any]) -> None:
     if not isinstance(articles, list) or not articles:
         raise ValueError("articles must be a nonempty list")
     article_ids = set()
+    source_topic_ids = set()
+    source_content = {}
     for article in articles:
         if not isinstance(article, dict) or set(article) != ARTICLE_FIELDS:
             raise ValueError("Article fields must exactly match the blind raw-article whitelist")
@@ -141,6 +169,18 @@ def _validate_snapshot(snapshot: dict[str, Any]) -> None:
         if article_id in article_ids:
             raise ValueError(f"Duplicate articleId: {article_id}")
         article_ids.add(article_id)
+        source_topic = article["sourceArticleId"], article["topicId"]
+        if source_topic in source_topic_ids:
+            raise ValueError("Snapshot repeats a source article within the same topic")
+        source_topic_ids.add(source_topic)
+        content = {field: article[field] for field in (
+            "title", "summary", "body", "fetchStatus", "sourceId", "publisher",
+            "reliabilityScore", "publishedAt",
+        )}
+        source_id = article["sourceArticleId"]
+        if source_id in source_content and source_content[source_id] != content:
+            raise ValueError("The same sourceArticleId must retain the same source content")
+        source_content[source_id] = content
         if not isinstance(article["title"], str) or not article["title"].strip():
             raise ValueError(f"Article {article_id} has no title")
         for field in ("summary", "body"):
@@ -236,6 +276,10 @@ def _labels(pack: Path, articles: list[dict[str, Any]]) -> tuple[dict[int, Any],
     source_splits: dict[int, set[str]] = defaultdict(set)
     populations: dict[str, Counter] = {split: Counter() for split in SPLITS}
     truth_counts: dict[str, Counter] = {split: Counter() for split in SPLITS}
+    source_issues: dict[int, set[str]] = defaultdict(set)
+    truth_sources: dict[str, dict[tuple[int, str], set[int]]] = defaultdict(
+        lambda: defaultdict(set)
+    )
     for article in articles:
         label = result[article["articleId"]]
         split, issue_id = label["split"], label["expectedIssueId"]
@@ -243,10 +287,14 @@ def _labels(pack: Path, articles: list[dict[str, Any]]) -> tuple[dict[int, Any],
         source_splits[article["sourceArticleId"]].add(split)
         populations[split][article["topicId"]] += 1
         truth_counts[split][article["topicId"], issue_id] += 1
+        source_issues[article["sourceArticleId"]].add(issue_id)
+        truth_sources[split][article["topicId"], issue_id].add(article["sourceArticleId"])
     if any(len(splits) != 1 for splits in issue_splits.values()):
         raise ValueError("The same expectedIssueId cannot cross splits, including across topics")
     if any(len(splits) != 1 for splits in source_splits.values()):
         raise ValueError("The same sourceArticleId cannot cross splits")
+    if any(len(issues) != 1 for issues in source_issues.values()):
+        raise ValueError("The same sourceArticleId must have one expectedIssueId across topics")
     coverage = {}
     for split in SPLITS:
         counts = populations[split]
@@ -262,7 +310,19 @@ def _labels(pack: Path, articles: list[dict[str, Any]]) -> tuple[dict[int, Any],
         coverage[split] = {
             "topicArticleCounts": dict(counts),
             "positivePairs": positive_pairs,
+            "uniqueSourcePositivePairs": len({
+                pair for sources in truth_sources[split].values()
+                for pair in combinations(sorted(sources), 2)
+            }),
             "negativePairs": negative_pairs,
+            "multiArticleEvents": len({
+                issue for (_, issue), count in truth_counts[split].items() if count >= 2
+            }),
+            "topicMultiArticleEvents": {
+                topic: sum(count >= 2 for (event_topic, _), count
+                           in truth_counts[split].items() if event_topic == topic)
+                for topic in counts
+            },
         }
     return result, coverage
 
@@ -306,6 +366,8 @@ def freeze(pack: Path) -> dict[str, Any]:
 
 def _verify_java(golden: dict[str, Any], java: dict[str, Any], golden_hash: str) -> None:
     cluster_sweep.validate_clustering_metadata(java)
+    if java.get("runtimeSourcesSha256") != _runtime_sources():
+        raise ValueError("Java output runtimeSourcesSha256 differs from frozen runtime sources")
     if java.get("goldenSha256") != golden_hash:
         raise ValueError("Java output goldenSha256 does not match the sealed golden file")
     if java.get("datasetVersion") != golden["datasetVersion"]:
@@ -393,7 +455,7 @@ def _verify_java(golden: dict[str, Any], java: dict[str, Any], golden_hash: str)
                 raise ValueError("Java pair has invalid breakingPair")
 
 
-def evaluate(pack: Path, java_pairs: Path) -> dict[str, Any]:
+def _verified_input(pack: Path, java_pairs: Path) -> tuple[dict, dict, str]:
     if (pack / "report.json").exists():
         raise FileExistsError("This holdout has already been evaluated; report.json is immutable")
     seal = _read(pack / "seal.json")
@@ -409,7 +471,9 @@ def evaluate(pack: Path, java_pairs: Path) -> dict[str, Any]:
             raise ValueError(f"Sealed file changed: {name}")
     _verify_protocol(seal["protocol"], "Sealed")
     snapshot, _ = _verify_prepared(pack)
-    labels, _ = _labels(pack, snapshot["articles"])
+    labels, coverage = _labels(pack, snapshot["articles"])
+    if json.loads(json.dumps(coverage)) != seal.get("coverage"):
+        raise ValueError("Sealed coverage differs from the frozen source articles and labels")
     golden = _read(pack / "golden.json")
     if golden != {
         **snapshot,
@@ -423,20 +487,89 @@ def evaluate(pack: Path, java_pairs: Path) -> dict[str, Any]:
         raise ValueError("golden.sha256 differs")
     java = _read(java_pairs)
     _verify_java(golden, java, golden_hash)
+    return java, seal, golden_hash
+
+
+def select(pack: Path, java_pairs: Path) -> dict[str, Any]:
+    """Freeze a CAL-only decision in a distinct step before any holdout metrics."""
+    if (pack / "selection.json").exists():
+        raise FileExistsError("CALIBRATION selection is already frozen; never overwrite it")
+    java, seal, golden_hash = _verified_input(pack, java_pairs)
+    record = {
+        "schemaVersion": 1,
+        "goldenSha256": golden_hash,
+        "sealSha256": _sha(pack / "seal.json"),
+        "javaOutputSha256": _sha(java_pairs),
+        "protocol": seal["protocol"],
+        "selection": cluster_sweep.select_calibration(java),
+    }
+    _write(pack / "selection.json", record)
+    return record
+
+
+def _sample_adequacy(coverage: dict) -> dict:
+    splits = {}
+    for split in SPLITS:
+        values = coverage[split]
+        reasons = []
+        if values["uniqueSourcePositivePairs"] < MIN_POSITIVE_PAIRS_PER_SPLIT:
+            reasons.append("INSUFFICIENT_POSITIVE_PAIRS")
+        if values["multiArticleEvents"] < MIN_MULTI_ARTICLE_EVENTS_PER_SPLIT:
+            reasons.append("INSUFFICIENT_DISTINCT_MULTI_ARTICLE_EVENTS")
+        if any(count < MIN_MULTI_ARTICLE_EVENTS_PER_TOPIC_SPLIT
+               for count in values["topicMultiArticleEvents"].values()):
+            reasons.append("INSUFFICIENT_MULTI_ARTICLE_EVENTS_PER_TOPIC")
+        splits[split] = {"passed": not reasons, "reasonCodes": reasons, **values}
+    return {
+        "passed": all(value["passed"] for value in splits.values()),
+        "splits": splits,
+        "interpretation": "Minimum coverage guard only; article pairs are not independent trials.",
+    }
+
+
+def evaluate(pack: Path, java_pairs: Path) -> dict[str, Any]:
+    java, seal, golden_hash = _verified_input(pack, java_pairs)
+    if not (pack / "selection.json").exists():
+        raise ValueError("Freeze CALIBRATION selection with the select command before evaluate")
+    selected = _read(pack / "selection.json")
+    expected = {
+        "schemaVersion": 1,
+        "goldenSha256": golden_hash,
+        "sealSha256": _sha(pack / "seal.json"),
+        "javaOutputSha256": _sha(java_pairs),
+        "protocol": seal["protocol"],
+        "selection": cluster_sweep.select_calibration(java),
+    }
+    if selected != expected:
+        raise ValueError("Frozen CALIBRATION selection or its input changed")
+    adequacy = _sample_adequacy(seal["coverage"])
     # Reserve the only report before touching the holdout so concurrent invocations
     # cannot both evaluate it. A failed computation leaves an explicit failed report.
     with (pack / "report.json").open("x", encoding="utf-8") as output:
         try:
             result = {
-                **cluster_sweep.sweep(java),
+                **cluster_sweep.sweep(java, selection=selected["selection"]),
                 "independentValidation": {
                     "goldenSha256": golden_hash,
                     "sealSha256": _sha(pack / "seal.json"),
                     "javaOutputSha256": _sha(java_pairs),
+                    "selectionSha256": _sha(pack / "selection.json"),
                     "coverage": seal["coverage"],
                     "documentFrequencyScope": "SPLIT",
                 },
+                "sampleAdequacy": adequacy,
             }
+            result["metricGatePassed"] = result["decisionGatePassed"]
+            result["perTopicGatePassed"] = all(
+                topic["qualityGatePassed"]
+                for name in ("calibrationTopicMetrics", "holdoutTopicMetrics")
+                for topic in result[name].values()
+            )
+            result["decisionGatePassed"] = (
+                result["metricGatePassed"] and adequacy["passed"] and result["perTopicGatePassed"]
+            )
+            result["independentAcceptance"] = result["decisionGatePassed"]
+            result["evaluationScope"] = "SEALED_INDEPENDENT_EVALUATION"
         except Exception:
             json.dump({"status": "FAILED", "holdoutConsumed": True}, output)
             raise
@@ -453,6 +586,9 @@ def main(argv: list[str] | None = None) -> int:
     prepare_parser.add_argument("--output-dir", type=Path, required=True)
     freeze_parser = commands.add_parser("freeze")
     freeze_parser.add_argument("--pack", type=Path, required=True)
+    select_parser = commands.add_parser("select")
+    select_parser.add_argument("--pack", type=Path, required=True)
+    select_parser.add_argument("--java-pairs", type=Path, required=True)
     evaluate_parser = commands.add_parser("evaluate")
     evaluate_parser.add_argument("--pack", type=Path, required=True)
     evaluate_parser.add_argument("--java-pairs", type=Path, required=True)
@@ -461,6 +597,8 @@ def main(argv: list[str] | None = None) -> int:
         result = prepare(args.snapshot, args.output_dir)
     elif args.command == "freeze":
         result = freeze(args.pack)
+    elif args.command == "select":
+        result = select(args.pack, args.java_pairs)
     else:
         result = evaluate(args.pack, args.java_pairs)
     print(json.dumps(result, ensure_ascii=False, indent=2))

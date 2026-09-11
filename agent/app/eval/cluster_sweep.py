@@ -1,6 +1,8 @@
 import argparse
+import hashlib
 import json
 import logging
+from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,7 @@ _EVENT_CONFLICT_RULE_VERSIONS = (_EVENT_CONFLICT_RULE_VERSION, "event-text-evide
 _EVENT_TEXT_RULE_VERSIONS = (
     "event-text-evidence-v2", "event-text-evidence-v3", *_EVENT_CONFLICT_RULE_VERSIONS,
 )
+SELECTION_POLICY_VERSION = "retain-configured-calibration-tie-v1"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -194,9 +197,62 @@ def _validate_event_conflicts(
                 raise ValueError(f"Article {article_id} {field} must be symmetric")
 
 
-def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
+def _calibration_input(java_output: dict[str, Any]) -> dict[str, Any]:
+    # Deliberately discard HOLDOUT before validation, hashing, feature preparation,
+    # or threshold selection. A malformed/unseen HOLDOUT cannot affect this step.
+    articles = [
+        article for article in java_output["articles"] if article.get("split") == "CALIBRATION"
+    ]
+    article_ids = {article["articleId"] for article in articles}
+    result = {
+        key: value for key, value in java_output.items()
+        if key in (
+            "configuredEntityOverlapThreshold", "configuredCommonEntityDocumentRatio",
+            "configuredTitleJaccardThreshold", "configuredEntityTimeWindowHours",
+            "configuredBreakingTimeWindowHours", "configuredOrganizationTitleJaccardThreshold",
+            "configuredOrganizationTimeWindowHours", "clusteringRuleVersion",
+        )
+    }
+    result.update(articles=articles, articleCount=len(articles))
+    evaluations = java_output.get("pairEvaluations") or [{
+        "commonEntityDocumentRatio": java_output["configuredCommonEntityDocumentRatio"],
+        "pairs": java_output["pairs"],
+    }]
+    result["pairEvaluations"] = [
+        {
+            "commonEntityDocumentRatio": evaluation["commonEntityDocumentRatio"],
+            "pairs": [
+                pair for pair in evaluation["pairs"]
+                if pair.get("split", "CALIBRATION") == "CALIBRATION"
+                and pair["leftArticleId"] in article_ids
+                and pair["rightArticleId"] in article_ids
+            ],
+        }
+        for evaluation in evaluations
+    ]
+    return result
+
+
+def _calibration_gate(metrics: Metrics) -> bool:
+    return metrics.precision >= 0.90 and metrics.recall >= 0.85
+
+
+def _candidate_from_record(record: dict[str, Any]) -> Candidate:
+    return Candidate(**{**record, "metrics": Metrics(**record["metrics"])})
+
+
+def select_calibration(java_output: dict[str, Any]) -> dict[str, Any]:
+    """Select and describe a policy using CALIBRATION data exclusively.
+
+    This JSON-serializable record can be sealed before a separate HOLDOUT run.
+    An incumbent tied on calibration quality is retained in its entirety; the
+    record exposes ambiguity instead of claiming a shorter time window is better.
+    """
+    java_output = _calibration_input(java_output)
     validate_clustering_metadata(java_output)
     articles = java_output["articles"]
+    if not articles:
+        raise ValueError("CALIBRATION articles are required for configuration selection")
     entity_overlap_threshold = int(java_output["configuredEntityOverlapThreshold"])
     configured_ratio = float(java_output["configuredCommonEntityDocumentRatio"])
     configured_title_threshold = float(java_output["configuredTitleJaccardThreshold"])
@@ -220,12 +276,7 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         if "configuredOrganizationTimeWindowHours" in java_output
         else (configured_organization_time_window,)
     )
-    pair_evaluations = java_output.get("pairEvaluations") or [
-        {
-            "commonEntityDocumentRatio": configured_ratio,
-            "pairs": java_output["pairs"],
-        }
-    ]
+    pair_evaluations = java_output["pairEvaluations"]
     calibration = [
         Candidate(
             title_jaccard_threshold=threshold,
@@ -234,14 +285,8 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
             organization_title_jaccard_threshold=organization_threshold,
             organization_time_window_hours=organization_hours,
             metrics=_evaluate_rule(
-                articles,
-                evaluation["pairs"],
-                "CALIBRATION",
-                threshold,
-                hours,
-                entity_overlap_threshold,
-                organization_threshold,
-                organization_hours,
+                articles, evaluation["pairs"], "CALIBRATION", threshold, hours,
+                entity_overlap_threshold, organization_threshold, organization_hours,
                 configured_breaking_time_window,
             ),
         )
@@ -251,54 +296,137 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         for organization_threshold in organization_title_candidates
         for organization_hours in organization_time_candidates
     ]
-    selected = _select(
-        calibration,
-        configured_time_window,
-        configured_ratio,
-    )
-    selected_pairs = _pairs_for_ratio(pair_evaluations, selected.common_entity_document_ratio)
-    holdout = _evaluate_rule(
-        articles,
-        selected_pairs,
-        "HOLDOUT",
-        selected.title_jaccard_threshold,
-        selected.time_window_hours,
-        entity_overlap_threshold,
-        selected.organization_title_jaccard_threshold,
-        selected.organization_time_window_hours,
-        configured_breaking_time_window,
-    )
     configured_pairs = _pairs_for_ratio(pair_evaluations, configured_ratio)
-    configured_calibration = _evaluate_rule(
-        articles,
-        configured_pairs,
-        "CALIBRATION",
-        configured_title_threshold,
-        configured_time_window,
-        entity_overlap_threshold,
-        configured_organization_title_threshold,
-        configured_organization_time_window,
+    configured_metrics = _evaluate_rule(
+        articles, configured_pairs, "CALIBRATION", configured_title_threshold,
+        configured_time_window, entity_overlap_threshold,
+        configured_organization_title_threshold, configured_organization_time_window,
         configured_breaking_time_window,
     )
-    configured_holdout = _evaluate_rule(
-        articles,
-        configured_pairs,
-        "HOLDOUT",
-        configured_title_threshold,
-        configured_time_window,
-        entity_overlap_threshold,
-        configured_organization_title_threshold,
-        configured_organization_time_window,
-        configured_breaking_time_window,
+    incumbent = Candidate(
+        configured_title_threshold, configured_time_window, configured_ratio,
+        configured_organization_title_threshold, configured_organization_time_window,
+        configured_metrics,
     )
+    if incumbent not in calibration:
+        # The deployed configuration remains a legitimate candidate even when a
+        # deployment uses a value outside the predeclared search grid.
+        calibration.append(incumbent)
+    selected = _select(calibration, configured_time_window, configured_ratio)
+    ties = _selection_metric_ties(calibration, selected)
+    retained_incumbent = incumbent in ties
+    if retained_incumbent:
+        selected = incumbent
+    gate_passed = _calibration_gate(selected.metrics)
+    if not gate_passed:
+        status = "CALIBRATION_FAILED"
+    elif retained_incumbent:
+        status = "RETAINED_CONFIGURED_IN_CALIBRATION_TIE" if len(ties) > 1 else (
+            "RETAINED_CONFIGURED_CALIBRATION_BEST"
+        )
+    else:
+        status = "SELECTED_CALIBRATION_BEST" if len(ties) == 1 else (
+            "SELECTED_AMBIGUOUS_CALIBRATION_BEST"
+        )
+    tie_configurations = [_candidate_configuration(candidate) for candidate in ties]
+    unidentified = [
+        key for key in _candidate_configuration(selected)
+        if len({configuration[key] for configuration in tie_configurations}) > 1
+    ]
     baseline_threshold, baseline_calibration = _select_tfidf_threshold(
         articles, "CALIBRATION", True
     )
-    baseline_holdout = _evaluate_tfidf(articles, "HOLDOUT", baseline_threshold, True)
     standalone_threshold, standalone_calibration = _select_tfidf_threshold(
         articles, "CALIBRATION", False
     )
-    standalone_holdout = _evaluate_tfidf(articles, "HOLDOUT", standalone_threshold, False)
+    return {
+        "selectionPolicyVersion": SELECTION_POLICY_VERSION,
+        "calibrationInputSha256": hashlib.sha256(
+            json.dumps(java_output, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()
+        ).hexdigest(),
+        "selectionSplit": "CALIBRATION",
+        "selectionStatus": status,
+        "selectionTieCount": len(ties),
+        "unidentifiedParameters": unidentified,
+        "calibrationGatePassed": gate_passed,
+        "calibrationTopicMetrics": _topic_metrics(
+            articles, _pairs_for_ratio(pair_evaluations, selected.common_entity_document_ratio),
+            "CALIBRATION", selected, entity_overlap_threshold, configured_breaking_time_window,
+        ),
+        "selected": asdict(selected),
+        "configuredEntityOverlapThreshold": entity_overlap_threshold,
+        "configuredBreakingTimeWindowHours": configured_breaking_time_window,
+        "configuredOrganizationTitleJaccardThreshold": configured_organization_title_threshold,
+        "configuredOrganizationTimeWindowHours": configured_organization_time_window,
+        "configured": {
+            **_candidate_configuration(incumbent),
+            "calibrationMetrics": asdict(configured_metrics),
+        },
+        "tfidfCharWbBaseline": {
+            "usesTitleOrganizationGuard": False,
+            "usesEventConflictGuard": False,
+            "includesFixedContentGroups": True,
+            "threshold": baseline_threshold,
+            "calibrationMetrics": asdict(baseline_calibration),
+        },
+        "tfidfCharWbStandaloneBaseline": {
+            "usesTitleOrganizationGuard": False,
+            "usesEventConflictGuard": False,
+            "includesFixedContentGroups": False,
+            "threshold": standalone_threshold,
+            "calibrationMetrics": asdict(standalone_calibration),
+        },
+        "selectionMetricTies": tie_configurations,
+        "candidates": [asdict(candidate) for candidate in calibration],
+    }
+
+
+def sweep(
+    java_output: dict[str, Any], *, selection: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    # Recompute only CALIBRATION to reject a stale or edited saved selection before
+    # any HOLDOUT metric or TF-IDF feature is evaluated.
+    validate_clustering_metadata(java_output)
+    current_selection = select_calibration(java_output)
+    if selection is not None and selection != current_selection:
+        raise ValueError(
+            "Frozen calibration selection differs from current CALIBRATION policy/input"
+        )
+    selection = current_selection
+    articles = java_output["articles"]
+    selected = _candidate_from_record(selection["selected"])
+    configured = selection["configured"]
+    entity_overlap_threshold = selection["configuredEntityOverlapThreshold"]
+    breaking_time_window = selection["configuredBreakingTimeWindowHours"]
+    pair_evaluations = java_output.get("pairEvaluations") or [{
+        "commonEntityDocumentRatio": configured["commonEntityDocumentRatio"],
+        "pairs": java_output["pairs"],
+    }]
+    selected_pairs = _pairs_for_ratio(pair_evaluations, selected.common_entity_document_ratio)
+    configured_pairs = _pairs_for_ratio(pair_evaluations, configured["commonEntityDocumentRatio"])
+
+    def holdout_metrics(
+        candidate: Candidate, pairs: list[dict[str, Any]],
+        excluded_ids: frozenset[int] = frozenset(),
+    ) -> Metrics:
+        return _evaluate_rule(
+            articles, pairs, "HOLDOUT", candidate.title_jaccard_threshold,
+            candidate.time_window_hours, entity_overlap_threshold,
+            candidate.organization_title_jaccard_threshold,
+            candidate.organization_time_window_hours, breaking_time_window, excluded_ids,
+        )
+
+    incumbent = Candidate(
+        configured["titleJaccardThreshold"], configured["timeWindowHours"],
+        configured["commonEntityDocumentRatio"], configured["organizationTitleJaccardThreshold"],
+        configured["organizationTimeWindowHours"], Metrics(**configured["calibrationMetrics"]),
+    )
+    holdout = holdout_metrics(selected, selected_pairs)
+    configured_holdout = holdout_metrics(incumbent, configured_pairs)
+    baseline = selection["tfidfCharWbBaseline"]
+    standalone = selection["tfidfCharWbStandaloneBaseline"]
+    baseline_holdout = _evaluate_tfidf(articles, "HOLDOUT", baseline["threshold"], True)
+    standalone_holdout = _evaluate_tfidf(articles, "HOLDOUT", standalone["threshold"], False)
     post_hoc_relabel_ids = frozenset(
         int(value) for value in java_output.get("postHocRelabeledSourceArticleIds", [])
     )
@@ -307,35 +435,15 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         post_hoc_relabel_sensitivity = {
             "excludedSourceArticleIds": sorted(post_hoc_relabel_ids),
             "selectedHoldoutMetrics": asdict(
-                _evaluate_rule(
-                    articles,
-                    selected_pairs,
-                    "HOLDOUT",
-                    selected.title_jaccard_threshold,
-                    selected.time_window_hours,
-                    entity_overlap_threshold,
-                    selected.organization_title_jaccard_threshold,
-                    selected.organization_time_window_hours,
-                    configured_breaking_time_window,
-                    post_hoc_relabel_ids,
-                )
+                holdout_metrics(selected, selected_pairs, post_hoc_relabel_ids)
             ),
             "configuredHoldoutMetrics": asdict(
-                _evaluate_rule(
-                    articles,
-                    configured_pairs,
-                    "HOLDOUT",
-                    configured_title_threshold,
-                    configured_time_window,
-                    entity_overlap_threshold,
-                    configured_organization_title_threshold,
-                    configured_organization_time_window,
-                    configured_breaking_time_window,
-                    post_hoc_relabel_ids,
-                )
+                holdout_metrics(incumbent, configured_pairs, post_hoc_relabel_ids)
             ),
         }
+    holdout_gate_passed = _calibration_gate(holdout)
     return {
+        **selection,
         "datasetVersion": java_output["datasetVersion"],
         "clusteringRuleVersion": java_output.get("clusteringRuleVersion", "legacy"),
         "titleOrganizationGuard": {
@@ -356,50 +464,24 @@ def sweep(java_output: dict[str, Any]) -> dict[str, Any]:
         },
         "articleCount": java_output["articleCount"],
         "bodySource": java_output.get("bodySource", "unspecified"),
-        "selectionSplit": "CALIBRATION",
         "validationSplit": "HOLDOUT",
-        "selected": asdict(selected),
+        "evaluationScope": "METRIC_COMPARISON_ONLY",
+        "independentAcceptance": False,
         "holdout": asdict(holdout),
-        "configuredEntityOverlapThreshold": entity_overlap_threshold,
-        "configuredBreakingTimeWindowHours": configured_breaking_time_window,
-        "configuredOrganizationTitleJaccardThreshold": configured_organization_title_threshold,
-        "configuredOrganizationTimeWindowHours": configured_organization_time_window,
-        "configured": {
-            "titleJaccardThreshold": configured_title_threshold,
-            "timeWindowHours": configured_time_window,
-            "commonEntityDocumentRatio": configured_ratio,
-            "organizationTitleJaccardThreshold": configured_organization_title_threshold,
-            "organizationTimeWindowHours": configured_organization_time_window,
-            "calibrationMetrics": asdict(configured_calibration),
-            "holdoutMetrics": asdict(configured_holdout),
-        },
-        "tfidfCharWbBaseline": {
-            "usesTitleOrganizationGuard": False,
-            "usesEventConflictGuard": False,
-            "includesFixedContentGroups": True,
-            "threshold": baseline_threshold,
-            "calibrationMetrics": asdict(baseline_calibration),
-            "metrics": asdict(baseline_holdout),
-        },
-        "tfidfCharWbStandaloneBaseline": {
-            "usesTitleOrganizationGuard": False,
-            "usesEventConflictGuard": False,
-            "includesFixedContentGroups": False,
-            "threshold": standalone_threshold,
-            "calibrationMetrics": asdict(standalone_calibration),
-            "metrics": asdict(standalone_holdout),
-        },
+        "holdoutTopicMetrics": _topic_metrics(
+            articles, selected_pairs, "HOLDOUT", selected,
+            entity_overlap_threshold, breaking_time_window,
+        ),
+        "configured": {**configured, "holdoutMetrics": asdict(configured_holdout)},
+        "tfidfCharWbBaseline": {**baseline, "metrics": asdict(baseline_holdout)},
+        "tfidfCharWbStandaloneBaseline": {**standalone, "metrics": asdict(standalone_holdout)},
         "precisionGate": 0.90,
         "precisionGatePassed": holdout.precision >= 0.90,
         "recallGate": 0.85,
         "recallGatePassed": holdout.recall >= 0.85,
-        "decisionGatePassed": holdout.precision >= 0.90 and holdout.recall >= 0.85,
-        "selectionMetricTies": [
-            _candidate_configuration(candidate)
-            for candidate in _selection_metric_ties(calibration, selected)
-        ],
+        "holdoutGatePassed": holdout_gate_passed,
+        "decisionGatePassed": selection["calibrationGatePassed"] and holdout_gate_passed,
         "postHocRelabelSensitivity": post_hoc_relabel_sensitivity,
-        "candidates": [asdict(candidate) for candidate in calibration],
     }
 
 
@@ -414,7 +496,9 @@ def _evaluate_rule(
     organization_time_window_hours: int = 0,
     breaking_time_window_hours: int = 0,
     excluded_source_article_ids: frozenset[int] = frozenset(),
+    *, topic_id: int | None = None,
 ) -> Metrics:
+    scoring_topic_id = topic_id
     selected = [
         article
         for article in articles
@@ -482,7 +566,52 @@ def _evaluate_rule(
         f"{article['topicId']}:{unions[int(article['topicId'])].root(int(article['articleId']))}"
         for article in selected
     ]
+    if scoring_topic_id is not None:
+        indices = [
+            index for index, article in enumerate(selected)
+            if int(article["topicId"]) == scoring_topic_id
+        ]
+        expected = [expected[index] for index in indices]
+        predicted = [predicted[index] for index in indices]
     return _metrics(expected, predicted)
+
+
+def _topic_metrics(
+    articles: list[dict[str, Any]], pairs: list[dict[str, Any]], split: str,
+    candidate: Candidate, entity_overlap_threshold: int, breaking_time_window_hours: int,
+) -> dict[str, Any]:
+    result = {}
+    topics = sorted({int(article["topicId"]) for article in articles if article["split"] == split})
+    for topic_id in topics:
+        topic_articles = [
+            article for article in articles
+            if article["split"] == split and int(article["topicId"]) == topic_id
+        ]
+        truth_counts = Counter(article["expectedIssueId"] for article in topic_articles)
+        positive_pairs = sum(count * (count - 1) // 2 for count in truth_counts.values())
+        article_count = len(topic_articles)
+        # Keep the full split here: global content representatives can be proxies
+        # from another topic. Only the scored rows are restricted to this topic.
+        metrics = _evaluate_rule(
+            articles, pairs, split, candidate.title_jaccard_threshold,
+            candidate.time_window_hours, entity_overlap_threshold,
+            candidate.organization_title_jaccard_threshold,
+            candidate.organization_time_window_hours, breaking_time_window_hours,
+            topic_id=topic_id,
+        )
+        result[str(topic_id)] = {
+            "metrics": asdict(metrics),
+            "articleCount": article_count,
+            "uniqueSourceArticleCount": len({
+                article.get("sourceArticleId", article["articleId"]) for article in topic_articles
+            }),
+            "positivePairs": positive_pairs,
+            "negativePairs": article_count * (article_count - 1) // 2 - positive_pairs,
+            "multiArticleEvents": sum(count >= 2 for count in truth_counts.values()),
+            "truthEventCount": len(truth_counts),
+            "qualityGatePassed": _calibration_gate(metrics),
+        }
+    return result
 
 
 def _selected_ids_by_topic(
@@ -626,7 +755,7 @@ def _select(
     configured_time_window: int,
     configured_ratio: float,
 ) -> Candidate:
-    passing = [candidate for candidate in candidates if candidate.metrics.precision >= 0.90]
+    passing = [candidate for candidate in candidates if _calibration_gate(candidate.metrics)]
     if not passing:
         return max(
             candidates,
@@ -680,12 +809,12 @@ def _candidate_rank(
 def _selection_metric_ties(
     candidates: list[Candidate], selected: Candidate
 ) -> list[Candidate]:
-    precision_gate_passed = any(candidate.metrics.precision >= 0.90 for candidate in candidates)
+    precision_gate_passed = any(_calibration_gate(candidate.metrics) for candidate in candidates)
     selected_rank = _selection_metric_rank(selected, precision_gate_passed)
     return [
         candidate
         for candidate in candidates
-        if (not precision_gate_passed or candidate.metrics.precision >= 0.90)
+        if (not precision_gate_passed or _calibration_gate(candidate.metrics))
         and _selection_metric_rank(candidate, precision_gate_passed) == selected_rank
     ]
 

@@ -12,6 +12,7 @@ from app.eval.cluster_independent import (
     freeze,
     main,
     prepare,
+    select,
 )
 
 
@@ -103,6 +104,7 @@ def _java_output(pack: Path) -> dict:
         "goldenSha256": (pack / "golden.sha256").read_text().strip(),
         "articleCount": len(articles),
         "documentFrequencyScope": "SPLIT",
+        "runtimeSourcesSha256": cluster_independent._runtime_sources(),
         "articles": articles,
         "configuredEntityOverlapThreshold": 2,
         "configuredCommonEntityDocumentRatio": 0.10,
@@ -425,10 +427,163 @@ def test_evaluate_reports_real_sweep_once_and_never_overwrites_freeze(tmp_path: 
         freeze(pack)
     java_path = tmp_path / "java.json"
     _write_json(java_path, _java_output(pack))
-    assert main(["evaluate", "--pack", str(pack), "--java-pairs", str(java_path)]) == 0
+    assert main(["select", "--pack", str(pack), "--java-pairs", str(java_path)]) == 0
+    assert main(["evaluate", "--pack", str(pack), "--java-pairs", str(java_path)]) == 1
     result = json.loads((pack / "report.json").read_text())
     assert result["clusteringRuleVersion"] == "title-organization-conflict-v1"
     assert result["holdout"]["precision"] == result["holdout"]["recall"] == 1.0
+    assert result["metricGatePassed"] is True
+    assert result["sampleAdequacy"]["passed"] is False
+    assert result["independentAcceptance"] is False
     assert len(result["candidates"]) == 4 * 8 * 3 * 4 * 3
     with pytest.raises(FileExistsError):
         evaluate(pack, java_path)
+
+
+def test_evaluate_requires_separate_calibration_freeze(tmp_path: Path) -> None:
+    pack = _prepare(tmp_path)
+    _label(pack)
+    freeze(pack)
+    java_path = tmp_path / "java.json"
+    _write_json(java_path, _java_output(pack))
+    with pytest.raises(ValueError, match="select command"):
+        evaluate(pack, java_path)
+    assert not (pack / "report.json").exists()
+    select(pack, java_path)
+    with pytest.raises(FileExistsError, match="already frozen"):
+        select(pack, java_path)
+
+
+@pytest.mark.parametrize("case", ["selection", "java", "runtime"])
+def test_changed_frozen_selection_is_rejected_before_holdout(tmp_path: Path, case: str) -> None:
+    pack = _prepare(tmp_path)
+    _label(pack)
+    freeze(pack)
+    java_path = tmp_path / "java.json"
+    java = _java_output(pack)
+    _write_json(java_path, java)
+    select(pack, java_path)
+    if case == "selection":
+        record = json.loads((pack / "selection.json").read_text())
+        record["selection"]["selected"]["organization_time_window_hours"] = 99
+        _write_json(pack / "selection.json", record)
+    else:
+        if case == "java":
+            java["pairEvaluations"][0]["pairs"][-1]["hoursApart"] = 24
+        else:
+            java["runtimeSourcesSha256"] = {}
+        _write_json(java_path, java)
+    with pytest.raises(ValueError, match="selection|runtimeSourcesSha256"):
+        evaluate(pack, java_path)
+    assert not (pack / "report.json").exists()
+
+
+def test_many_positive_pairs_from_one_event_do_not_prove_coverage(tmp_path: Path) -> None:
+    pack = _prepare(tmp_path)
+    labels = _label(pack)
+    for label in labels:
+        label["expectedIssueId"] = f"one-large-event-{label['split']}"
+    # Preserve negative examples so the structurally valid corpus can be sealed.
+    for label in labels:
+        if int(label["articleId"]) % 20 == 0:
+            label["expectedIssueId"] = f"singleton-{label['articleId']}"
+    _write_labels(pack, labels)
+    seal = freeze(pack)
+    adequacy = cluster_independent._sample_adequacy(seal["coverage"])
+    assert adequacy["passed"] is False
+    for value in adequacy["splits"].values():
+        assert value["positivePairs"] > 300
+        assert value["multiArticleEvents"] == 1
+        assert "INSUFFICIENT_DISTINCT_MULTI_ARTICLE_EVENTS" in value["reasonCodes"]
+
+
+def test_changed_java_sources_invalidate_prepared_protocol(tmp_path: Path, monkeypatch) -> None:
+    pack = _prepare(tmp_path)
+    _label(pack)
+    sources = cluster_independent._runtime_sources()
+    changed = {**sources, next(iter(sources)): "0" * 64}
+    monkeypatch.setattr(cluster_independent, "_runtime_sources", lambda: changed)
+    with pytest.raises(ValueError, match="runtimeSourcesSha256"):
+        freeze(pack)
+    assert not (pack / "golden.json").exists()
+
+
+def test_snapshot_repeated_source_topic_cannot_inflate_sample(tmp_path: Path) -> None:
+    snapshot = _snapshot()
+    snapshot["articles"][1]["sourceArticleId"] = snapshot["articles"][0]["sourceArticleId"]
+    with pytest.raises(ValueError, match="repeats a source article"):
+        _prepare(tmp_path, snapshot)
+
+
+def test_failed_holdout_computation_still_consumes_single_attempt(tmp_path: Path, monkeypatch):
+    pack = _prepare(tmp_path)
+    _label(pack)
+    freeze(pack)
+    java_path = tmp_path / "java.json"
+    _write_json(java_path, _java_output(pack))
+    select(pack, java_path)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("Injected evaluation failure")
+
+    monkeypatch.setattr(cluster_independent.cluster_sweep, "sweep", fail)
+    with pytest.raises(RuntimeError, match="Injected"):
+        evaluate(pack, java_path)
+    assert json.loads((pack / "report.json").read_text()) == {
+        "status": "FAILED", "holdoutConsumed": True,
+    }
+    with pytest.raises(FileExistsError, match="already been evaluated"):
+        evaluate(pack, java_path)
+
+
+def test_seal_coverage_cannot_be_edited_to_pass_quality(tmp_path: Path) -> None:
+    pack = _prepare(tmp_path)
+    _label(pack)
+    seal = freeze(pack)
+    for split in ("CALIBRATION", "HOLDOUT"):
+        seal["coverage"][split]["positivePairs"] = 30
+        seal["coverage"][split]["uniqueSourcePositivePairs"] = 30
+    _write_json(pack / "seal.json", seal)
+    with pytest.raises(ValueError, match="Sealed coverage differs"):
+        select(pack, tmp_path / "unread-java.json")
+    assert not (pack / "selection.json").exists()
+    assert not (pack / "report.json").exists()
+
+
+def _repeated_source_topics(tmp_path: Path) -> Path:
+    snapshot = _snapshot()
+    originals = snapshot["articles"][:40]
+    snapshot["articles"] = [
+        {**article, "articleId": index + (topic - 1) * 40 + 1, "topicId": topic}
+        for topic in (1, 2, 3) for index, article in enumerate(originals)
+    ]
+    return _prepare(tmp_path, snapshot)
+
+
+def test_same_source_pairs_in_three_topics_do_not_inflate_coverage(tmp_path: Path) -> None:
+    pack = _repeated_source_topics(tmp_path)
+    labels = _label(pack)
+    for label in labels:
+        index = (int(label["articleId"]) - 1) % 40
+        label["expectedIssueId"] = f"event-{index // 2}"
+    _write_labels(pack, labels)
+    seal = freeze(pack)
+    for values in seal["coverage"].values():
+        assert values["positivePairs"] == 30
+        assert values["uniqueSourcePositivePairs"] == 10
+        assert values["multiArticleEvents"] == 10
+    assert cluster_independent._sample_adequacy(seal["coverage"])["passed"] is False
+
+
+def test_same_source_requires_same_event_across_topics(tmp_path: Path) -> None:
+    pack = _repeated_source_topics(tmp_path)
+    _label(pack)
+    with pytest.raises(ValueError, match="one expectedIssueId across topics"):
+        freeze(pack)
+
+
+def test_same_source_requires_consistent_content_across_topics(tmp_path: Path) -> None:
+    snapshot = _snapshot()
+    snapshot["articles"][40]["sourceArticleId"] = snapshot["articles"][0]["sourceArticleId"]
+    with pytest.raises(ValueError, match="same source content"):
+        _prepare(tmp_path, snapshot)
