@@ -11,6 +11,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.net.URISyntaxException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,6 +41,10 @@ class IssueClustererIndependentExportTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final List<String> SPLITS = List.of("CALIBRATION", "HOLDOUT");
     private static final List<Double> RATIOS = List.of(0.05, 0.10, 0.15, 0.20);
+    private static final Path CLUSTER_SOURCE_DIRECTORY = Path.of(
+            "BE/src/main/java/com/example/be/domain/collection/cluster");
+    private static final Path BODY_CLEANER_SOURCE = Path.of(
+            "BE/src/main/java/com/example/be/domain/collection/content/ArticleBodyCleaner.java");
 
     @Test
     @EnabledIfEnvironmentVariable(named = "CLUSTERS_INDEPENDENT_GOLDEN", matches = ".+")
@@ -56,6 +62,8 @@ class IssueClustererIndependentExportTest {
     }
 
     private void export(byte[] goldenBytes, Path outputPath) throws IOException {
+        Path repositoryRoot = repositoryRoot();
+        Map<String, String> runtimeSourcesSha256 = runtimeSourcesSha256(repositoryRoot);
         IssueClusteringProperties configuredProperties = new IssueClusteringProperties();
         Dataset dataset = load(goldenBytes, configuredProperties.getCommonEntityDocumentRatio());
         List<RatioEvaluation> evaluations = dataset.ratios().stream()
@@ -69,6 +77,7 @@ class IssueClustererIndependentExportTest {
         output.put("datasetVersion", dataset.version());
         output.put("clusteringRuleVersion", IssueClusterer.RULE_VERSION);
         output.put("goldenSha256", sha256(goldenBytes));
+        output.put("runtimeSourcesSha256", runtimeSourcesSha256);
         output.put("sourceRuns", dataset.sourceRuns());
         output.put("articleCount", dataset.articles().size());
         output.put("documentFrequencyScope", "SPLIT");
@@ -89,11 +98,62 @@ class IssueClustererIndependentExportTest {
         output.put("pairEvaluations", evaluations.stream().map(value -> Map.of(
                 "commonEntityDocumentRatio", value.ratio(), "pairs", value.pairs())).toList());
 
+        require(runtimeSourcesSha256.equals(runtimeSourcesSha256(repositoryRoot)),
+                "Runtime source files changed during feature export.");
         if (outputPath.getParent() != null) {
             Files.createDirectories(outputPath.getParent());
         }
         Files.writeString(outputPath, MAPPER.writerWithDefaultPrettyPrinter()
                 .writeValueAsString(output) + System.lineSeparator(), StandardOpenOption.CREATE_NEW);
+    }
+
+    private Path repositoryRoot() {
+        try {
+            // Gradle deliberately isolates the test worker cwd from application .env files.
+            // Locate only the source tree associated with this compiled test class.
+            Path classes = Path.of(getClass().getProtectionDomain().getCodeSource().getLocation().toURI())
+                    .toAbsolutePath().normalize();
+            require(classes.endsWith(Path.of("build/classes/java/test")),
+                    "Independent export requires Gradle test classes from build/classes/java/test.");
+            Path backendRoot = classes.getParent().getParent().getParent().getParent();
+            require(backendRoot.getFileName().toString().equals("BE")
+                            && Files.isRegularFile(backendRoot.resolve("build.gradle")),
+                    "Independent export class location must belong to the BE Gradle project.");
+            return backendRoot.getParent();
+        } catch (URISyntaxException exception) {
+            throw new IllegalStateException("Independent export class location is not a valid file URI.", exception);
+        }
+    }
+
+    /** Source provenance after Gradle compilation; this is not a bytecode attestation. */
+    private Map<String, String> runtimeSourcesSha256(Path repositoryRoot) throws IOException {
+        Path root = repositoryRoot.toAbsolutePath().normalize();
+        Path clusterDirectory = root.resolve(CLUSTER_SOURCE_DIRECTORY);
+        requireSafeSourcePath(root, clusterDirectory);
+        Map<String, String> hashes = new TreeMap<>();
+        try (var sources = Files.list(clusterDirectory)) {
+            for (Path source : sources.filter(path -> path.getFileName().toString().endsWith(".java"))
+                    .sorted().toList()) {
+                addSourceHash(root, source, hashes);
+            }
+        }
+        require(!hashes.isEmpty(), "Cluster runtime source directory contains no Java files.");
+        addSourceHash(root, root.resolve(BODY_CLEANER_SOURCE), hashes);
+        return new LinkedHashMap<>(hashes);
+    }
+
+    private void addSourceHash(Path root, Path source, Map<String, String> hashes) throws IOException {
+        requireSafeSourcePath(root, source);
+        require(Files.isRegularFile(source), "Required runtime source is missing: " + root.relativize(source));
+        hashes.put(root.relativize(source).toString().replace('\\', '/'), sha256(Files.readAllBytes(source)));
+    }
+
+    private void requireSafeSourcePath(Path root, Path source) {
+        require(source.startsWith(root), "Runtime source must stay inside the repository.");
+        for (Path component = source; component != null && component.startsWith(root);
+             component = component.getParent()) {
+            require(!Files.isSymbolicLink(component), "Runtime sources must not follow symbolic links.");
+        }
     }
 
     private RatioEvaluation evaluate(Dataset dataset, double ratio) {
@@ -367,6 +427,8 @@ class IssueClustererIndependentExportTest {
         JsonNode result = MAPPER.readTree(Files.readAllBytes(output));
         assertEquals(80, result.path("articleCount").asInt());
         assertEquals(sha256(bytes), result.path("goldenSha256").asString());
+        assertEquals(MAPPER.valueToTree(runtimeSourcesSha256(repositoryRoot())),
+                result.path("runtimeSourcesSha256"));
         assertEquals("SPLIT", result.path("documentFrequencyScope").asString());
         assertEquals(4, result.path("pairEvaluations").size());
         Map<Long, String> splitById = new HashMap<>();
@@ -388,6 +450,41 @@ class IssueClustererIndependentExportTest {
                 }
             }
         }
+    }
+
+    @Test
+    void fingerprintsEveryClusterSourceAndBodyCleaner(@TempDir Path root) throws IOException {
+        Path clusterDirectory = Files.createDirectories(root.resolve(CLUSTER_SOURCE_DIRECTORY));
+        Path cleaner = root.resolve(BODY_CLEANER_SOURCE);
+        Files.createDirectories(cleaner.getParent());
+        Files.writeString(clusterDirectory.resolve("Zeta.java"), "class Zeta {}\n");
+        Files.writeString(clusterDirectory.resolve("Alpha.java"), "class Alpha {}\n");
+        Files.writeString(clusterDirectory.resolve("ignored.txt"), "not a Java runtime source");
+        Files.writeString(cleaner, "class ArticleBodyCleaner {}\n");
+
+        Map<String, String> hashes = runtimeSourcesSha256(root);
+        assertEquals(List.of(CLUSTER_SOURCE_DIRECTORY + "/Alpha.java", CLUSTER_SOURCE_DIRECTORY + "/Zeta.java",
+                BODY_CLEANER_SOURCE.toString()), new ArrayList<>(hashes.keySet()));
+        assertTrue(hashes.values().stream().allMatch(value -> value.matches("[0-9a-f]{64}")));
+        assertEquals(sha256(Files.readAllBytes(cleaner)), hashes.get(BODY_CLEANER_SOURCE.toString()));
+        String previous = hashes.get(CLUSTER_SOURCE_DIRECTORY + "/Alpha.java");
+        Files.writeString(clusterDirectory.resolve("Alpha.java"), "class Alpha { int changed; }\n");
+        assertFalse(previous.equals(runtimeSourcesSha256(root).get(CLUSTER_SOURCE_DIRECTORY + "/Alpha.java")));
+
+        Files.delete(cleaner);
+        IllegalArgumentException missing = assertThrows(IllegalArgumentException.class,
+                () -> runtimeSourcesSha256(root));
+        assertTrue(missing.getMessage().contains("Required runtime source is missing"));
+    }
+
+    @Test
+    void runtimeFingerprintRejectsSourceSymlinks(@TempDir Path root) throws IOException {
+        Path clusterDirectory = Files.createDirectories(root.resolve(CLUSTER_SOURCE_DIRECTORY));
+        Path external = Files.writeString(root.resolve("unrelated-source.txt"), "unrelated content");
+        Files.createSymbolicLink(clusterDirectory.resolve("Linked.java"), external);
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> runtimeSourcesSha256(root));
+        assertTrue(failure.getMessage().contains("symbolic links"));
     }
 
     @Test

@@ -1,9 +1,15 @@
+import copy
+import json
+from itertools import combinations
+
 import pytest
 
+from app.eval import cluster_sweep
 from app.eval.cluster_sweep import (
     _evaluate_rule,
     _evaluate_tfidf,
     _topic_unions,
+    select_calibration,
     sweep,
     validate_clustering_metadata,
 )
@@ -969,3 +975,190 @@ def _pair(
         "hoursApart": hours_apart,
         "split": split,
     }
+
+
+@pytest.fixture
+def selection_export(monkeypatch: pytest.MonkeyPatch) -> dict:
+    # A bounded real grid covers threshold/time tradeoffs without mocking scores.
+    monkeypatch.setattr(cluster_sweep, "_JACCARD_THRESHOLDS", (0.50, 0.75))
+    monkeypatch.setattr(cluster_sweep, "_TIME_WINDOWS", (24, 48))
+    monkeypatch.setattr(cluster_sweep, "_ORGANIZATION_JACCARD_THRESHOLDS", (0.10, 0.125))
+    monkeypatch.setattr(cluster_sweep, "_ORGANIZATION_TIME_WINDOWS", (12, 24, 48))
+    return {
+        "datasetVersion": "selection-synthetic-v1",
+        "articleCount": 6,
+        "configuredEntityOverlapThreshold": 2,
+        "configuredCommonEntityDocumentRatio": 0.10,
+        "configuredTitleJaccardThreshold": 0.50,
+        "configuredEntityTimeWindowHours": 48,
+        "configuredOrganizationTitleJaccardThreshold": 0.125,
+        "configuredOrganizationTimeWindowHours": 24,
+        "articles": [
+            _article(1, "CALIBRATION", "Aster processor announced", "release"),
+            _article(2, "CALIBRATION", "Aster processor launch", "release"),
+            _article(3, "CALIBRATION", "Boreal market forecast", "forecast"),
+            _article(4, "HOLDOUT", "Cedar summit announced", "summit"),
+            _article(5, "HOLDOUT", "Cedar summit opening", "summit"),
+            _article(6, "HOLDOUT", "Dune investment forecast", "investment"),
+        ],
+        "pairs": [
+            _pair(1, 2, "CALIBRATION", entity_overlap=2),
+            _pair(4, 5, "HOLDOUT", entity_overlap=2),
+        ],
+    }
+
+
+def test_selection_discards_holdout_before_validation_features_and_hashing(
+    selection_export: dict,
+) -> None:
+    expected = select_calibration(selection_export)
+    changed = copy.deepcopy(selection_export)
+    changed["articles"][3:] = [{
+        "articleId": 999, "split": "HOLDOUT", "title": None,
+        "titleOrganizations": False, "expectedIssueId": ["different", "labels"],
+    }]
+    changed["articleCount"] = 4
+    changed["pairs"][1:] = [{
+        "leftArticleId": 999, "rightArticleId": 998, "split": "HOLDOUT",
+        "titleJaccard": float("nan"), "arbitraryHoldoutFeature": object(),
+    }]
+    changed["postHocRelabeledSourceArticleIds"] = [999]
+    assert select_calibration(changed) == expected
+    assert select_calibration({
+        **selection_export,
+        "articles": selection_export["articles"][:3],
+        "pairs": selection_export["pairs"][:1],
+    }) == expected
+    # The frozen record contains JSON data only and survives disk serialization.
+    assert json.loads(json.dumps(expected)) == expected
+
+
+def test_selection_retains_entire_incumbent_when_calibration_cannot_identify_parameters(
+    selection_export: dict,
+) -> None:
+    result = select_calibration(selection_export)
+    assert result["selected"]["title_jaccard_threshold"] == 0.50
+    assert result["selected"]["time_window_hours"] == 48
+    assert result["selected"]["organization_title_jaccard_threshold"] == 0.125
+    assert result["selected"]["organization_time_window_hours"] == 24
+    assert result["selectionStatus"] == "RETAINED_CONFIGURED_IN_CALIBRATION_TIE"
+    assert result["selectionTieCount"] == 24
+    assert set(result["unidentifiedParameters"]) == {
+        "titleJaccardThreshold", "timeWindowHours", "organizationTitleJaccardThreshold",
+        "organizationTimeWindowHours",
+    }
+    assert result["calibrationGatePassed"] is True
+
+
+def test_selection_changes_incumbent_only_when_calibration_evidence_supports_change(
+    selection_export: dict,
+) -> None:
+    selection_export["pairs"][0] = _pair(
+        1, 2, "CALIBRATION", entity_overlap=0, organization_overlap=1,
+        title_jaccard=0.125, hours_apart=36,
+    )
+    result = select_calibration(selection_export)
+    assert result["configured"]["calibrationMetrics"]["recall"] == 0.0
+    assert result["selected"]["organization_time_window_hours"] == 48
+    assert result["selected"]["metrics"]["recall"] == 1.0
+    assert result["selectionStatus"] == "SELECTED_AMBIGUOUS_CALIBRATION_BEST"
+    assert "organizationTimeWindowHours" not in result["unidentifiedParameters"]
+
+
+def test_calibration_recall_failure_prevents_acceptance_even_when_holdout_passes(
+    selection_export: dict,
+) -> None:
+    selection_export["pairs"] = selection_export["pairs"][1:]
+    selection = select_calibration(selection_export)
+    assert selection["selected"]["metrics"]["precision"] == 1.0
+    assert selection["selected"]["metrics"]["recall"] == 0.0
+    assert selection["selectionStatus"] == "CALIBRATION_FAILED"
+    assert selection["calibrationGatePassed"] is False
+    result = sweep(selection_export, selection=selection)
+    assert result["holdoutGatePassed"] is True
+    assert result["decisionGatePassed"] is False
+
+
+@pytest.mark.parametrize("change", ["calibration_article", "calibration_pair", "config", "record"])
+def test_frozen_selection_rejects_stale_input_or_edited_record_before_holdout_metrics(
+    selection_export: dict, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    selection = select_calibration(selection_export)
+    if change == "calibration_article":
+        selection_export["articles"][0]["title"] = "Different calibration report"
+    elif change == "calibration_pair":
+        selection_export["pairs"][0]["hoursApart"] = 2
+    elif change == "config":
+        selection_export["configuredOrganizationTimeWindowHours"] = 12
+    else:
+        selection["selected"]["organization_time_window_hours"] = 12
+    original = cluster_sweep._evaluate_rule
+
+    def calibration_only(articles, pairs, split, *args, **kwargs):
+        assert split == "CALIBRATION", "stale selection must fail before HOLDOUT evaluation"
+        assert all(article["split"] == "CALIBRATION" for article in articles)
+        return original(articles, pairs, split, *args, **kwargs)
+
+    monkeypatch.setattr(cluster_sweep, "_evaluate_rule", calibration_only)
+    with pytest.raises(ValueError, match="Frozen calibration selection differs"):
+        sweep(selection_export, selection=selection)
+
+
+
+def test_topic_metrics_expose_failure_hidden_by_overall_recall(selection_export: dict) -> None:
+    calibration = [
+        _article(article_id, "CALIBRATION", f"Aster release article {article_id}", "release")
+        for article_id in range(11, 16)
+    ] + [
+        _article(16, "CALIBRATION", "Boreal report", "other"),
+        _article(21, "CALIBRATION", "Cedar council opening", "council", topic_id=2),
+        _article(22, "CALIBRATION", "Cedar council ceremony", "council", topic_id=2),
+        _article(23, "CALIBRATION", "Dune report", "other-topic", topic_id=2),
+    ]
+    selection_export["articles"] = calibration + selection_export["articles"][3:]
+    selection_export["articleCount"] = len(selection_export["articles"])
+    selection_export["pairs"] = [
+        _pair(left, right, "CALIBRATION", entity_overlap=2)
+        for left, right in combinations(range(11, 16), 2)
+    ] + selection_export["pairs"][1:]
+    result = sweep(selection_export)
+    assert result["calibrationGatePassed"] is True
+    first = result["calibrationTopicMetrics"]["1"]
+    second = result["calibrationTopicMetrics"]["2"]
+    assert first["metrics"]["recall"] == 1.0
+    assert first["positivePairs"] == 10
+    assert first["multiArticleEvents"] == 1
+    assert first["articleCount"] == first["uniqueSourceArticleCount"] == 6
+    assert second["metrics"]["recall"] == 0.0
+    assert second["qualityGatePassed"] is False
+    assert second["positivePairs"] == 1
+    assert second["negativePairs"] == 2
+    assert result["holdoutTopicMetrics"]["1"]["metrics"]["recall"] == 1.0
+
+
+def test_topic_scoring_preserves_other_topic_content_representative_proxy() -> None:
+    articles = [
+        _article(1, "CALIBRATION", "global representative", "event-a", topic_id=2),
+        _article(2, "CALIBRATION", "local syndicated copy", "event-a"),
+        _article(3, "CALIBRATION", "independent follow-up", "event-a"),
+    ]
+    for article in articles[:2]:
+        article["fixedContentGroupId"] = "content-a"
+        article["fixedContentGroupRepresentativeId"] = 1
+    result = _evaluate_rule(
+        articles, [_pair(1, 3, "CALIBRATION", title_jaccard=0.50)], "CALIBRATION",
+        threshold=0.50, time_window_hours=48, entity_overlap_threshold=2, topic_id=1,
+    )
+    assert result.precision == result.recall == 1.0
+
+
+def test_fixed_selection_cannot_be_replaced_after_unfavorable_holdout(
+    selection_export: dict,
+) -> None:
+    selection = select_calibration(selection_export)
+    selection_export["articles"][4]["expectedIssueId"] = "different-holdout-event"
+    result = sweep(selection_export, selection=selection)
+    assert result["selected"] == selection["selected"]
+    assert result["calibrationInputSha256"] == selection["calibrationInputSha256"]
+    assert result["holdout"]["precision"] == 0.0
+    assert result["decisionGatePassed"] is False
