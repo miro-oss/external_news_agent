@@ -1,6 +1,5 @@
 package com.example.be.domain.reports.service;
 
-import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
@@ -42,10 +41,9 @@ class ReportPersistenceServiceTest {
     private final ReportNotificationAutomationService notificationAutomation =
             mock(ReportNotificationAutomationService.class);
     private final CollectionRunArticleRepository observationRepository = mock(CollectionRunArticleRepository.class);
-    private final FindingRepository findingRepository = mock(FindingRepository.class);
     private final ReportPersistenceService service =
             new ReportPersistenceService(runRepository, reportRepository,
-                    notificationAutomation, observationRepository, findingRepository,
+                    notificationAutomation, observationRepository,
                     mock(org.springframework.context.ApplicationEventPublisher.class));
 
     @org.junit.jupiter.api.Test
@@ -58,15 +56,12 @@ class ReportPersistenceServiceTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = RunItemStatus.class, names = {"SUCCESS", "SKIPPED"})
-    void skipsHealthyUnchangedOrNotModifiedCollectionWithoutReservingReport(RunItemStatus itemStatus) {
+    @EnumSource(RunItemStatus.class)
+    void skipsRunWithoutNewArticlesRegardlessOfCollectionStatus(RunItemStatus itemStatus) {
         CollectionRun run = runWithItem(itemStatus);
-        if (itemStatus == RunItemStatus.SUCCESS) {
-            run.getItems().getFirst().recordResult(itemStatus, 12, 0, 0);
-        }
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
 
-        var reservation = service.reserve(42L, LocalDateTime.now(), false);
+        var reservation = service.reserve(42L, LocalDateTime.now());
 
         assertFalse(reservation.owner());
         assertNull(reservation.reportId());
@@ -76,23 +71,31 @@ class ReportPersistenceServiceTest {
     }
 
     @Test
-    void skipsSuccessfulCollectionThatReturnsNoArticles() {
+    void skipsUpdatedOnlyCollectionWithWarnings() {
         CollectionRun run = runWithItem(RunItemStatus.SUCCESS);
+        run.getItems().getFirst().recordResult(RunItemStatus.SUCCESS, 167, 0, 4);
+        run.addWarning(CollectionRunWarning.builder()
+                .code(CollectionRunWarning.CODE_LLM_QUOTA_EXHAUSTED).message("분석 예산 부족").build());
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
+        when(observationRepository.existsByRunIdAndChangeTypeIn(
+                org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.anyCollection()))
+                .thenAnswer(invocation -> invocation.<java.util.Collection<ChangeType>>getArgument(1)
+                        .contains(ChangeType.UPDATED));
 
-        assertNull(service.reserve(42L, LocalDateTime.now(), false).reportId());
+        var reservation = service.reserve(42L, LocalDateTime.now());
 
+        assertFalse(reservation.owner());
+        assertNull(reservation.reportId());
         verify(reportRepository, never()).save(any());
+        verifyNoInteractions(notificationAutomation);
     }
 
     @Test
-    void retainsReportForChangedObservationsBeforeRunCountersAreFinalized() {
+    void retainsReportForNewObservationBeforeRunCountersAreFinalized() {
         CollectionRun run = runWithItem(RunItemStatus.SUCCESS);
         prepareReservation(run);
-        when(observationRepository.existsByRunIdAndChangeTypeIn(
-                42L, List.of(ChangeType.NEW, ChangeType.UPDATED))).thenReturn(true);
 
-        var reservation = service.reserve(42L, LocalDateTime.now(), false);
+        var reservation = service.reserve(42L, LocalDateTime.now());
 
         assertTrue(reservation.owner());
         assertEquals(17L, reservation.reportId());
@@ -104,55 +107,27 @@ class ReportPersistenceServiceTest {
     }
 
     @Test
-    void retainsReportWhenUnchangedArticleHasNewlyAvailableFullText() {
-        prepareReservation(runWithItem(RunItemStatus.SUCCESS));
-
-        var reservation = service.reserve(42L, LocalDateTime.now(), true);
-
-        assertTrue(reservation.owner());
-        assertEquals(17L, reservation.reportId());
-    }
-
-    @Test
-    void retainsReportForCurrentRunFindingsWithoutChangedObservations() {
-        prepareReservation(runWithItem(RunItemStatus.SUCCESS));
-        when(findingRepository.existsByRunId(42L)).thenReturn(true);
-
-        var reservation = service.reserve(42L, LocalDateTime.now(), false);
-
-        assertTrue(reservation.owner());
-        assertEquals(17L, reservation.reportId());
-    }
-
-    @ParameterizedTest
-    @EnumSource(value = RunItemStatus.class, names = {"SUCCESS", "SKIPPED"}, mode = EnumSource.Mode.EXCLUDE)
-    void retainsDiagnosticReportWhenCollectionDidNotCompleteCleanly(RunItemStatus itemStatus) {
-        prepareReservation(runWithItem(itemStatus));
-
-        var reservation = service.reserve(42L, LocalDateTime.now(), false);
-
-        assertTrue(reservation.owner());
-        assertEquals(17L, reservation.reportId());
-    }
-
-    @Test
-    void retainsDiagnosticReportForWarningsEvenWhenItemsWereSkipped() {
-        CollectionRun run = runWithItem(RunItemStatus.SKIPPED);
+    void retainsReportForNewObservationDespiteFailedSourceAndWarnings() {
+        CollectionRun run = runWithItem(RunItemStatus.SUCCESS);
+        run.addItem(CollectionRunItem.builder().status(RunItemStatus.FAILED).build());
         run.addWarning(CollectionRunWarning.builder()
-                .code(CollectionRunWarning.CODE_ROBOTS_DISALLOWED).message("수집 차단").build());
+                .code(CollectionRunWarning.CODE_FEED_UNREADABLE).message("일부 소스 수집 실패").build());
         prepareReservation(run);
 
-        var reservation = service.reserve(42L, LocalDateTime.now(), false);
+        var reservation = service.reserve(42L, LocalDateTime.now());
 
         assertTrue(reservation.owner());
         assertEquals(17L, reservation.reportId());
     }
 
     @Test
-    void doesNotTreatRunWithoutCollectionItemsAsHealthyUnchangedCollection() {
-        prepareReservation(CollectionRun.builder().id(42L).build());
+    void skipsRunWithoutCollectionItemsOrNewObservations() {
+        when(runRepository.findByIdForUpdate(42L))
+                .thenReturn(Optional.of(CollectionRun.builder().id(42L).build()));
 
-        assertTrue(service.reserve(42L, LocalDateTime.now(), false).owner());
+        assertNull(service.reserve(42L, LocalDateTime.now()).reportId());
+
+        verify(reportRepository, never()).save(any());
     }
 
     private CollectionRun runWithItem(RunItemStatus status) {
@@ -164,6 +139,7 @@ class ReportPersistenceServiceTest {
     private void prepareReservation(CollectionRun run) {
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(reportRepository.save(any())).thenReturn(NewsReport.builder().id(17L).build());
+        when(observationRepository.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
     }
 
     @Test
@@ -186,8 +162,9 @@ class ReportPersistenceServiceTest {
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(reportRepository.findByRunId(42L)).thenReturn(Optional.empty());
         when(reportRepository.save(any())).thenReturn(NewsReport.builder().id(17L).build());
+        when(observationRepository.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
 
-        ReportPersistenceService.Reservation reservation = service.reserve(42L, generatedAt, false);
+        ReportPersistenceService.Reservation reservation = service.reserve(42L, generatedAt);
 
         assertEquals(17L, reservation.reportId());
         assertTrue(reservation.owner());
@@ -242,13 +219,13 @@ class ReportPersistenceServiceTest {
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(reportRepository.findByRunId(42L)).thenReturn(Optional.of(existing));
 
-        ReportPersistenceService.Reservation reservation = service.reserve(42L, LocalDateTime.now(), false);
+        ReportPersistenceService.Reservation reservation = service.reserve(42L, LocalDateTime.now());
 
         assertEquals(17L, reservation.reportId());
         assertFalse(reservation.owner());
         verify(reportRepository, never()).save(any());
         assertEquals(17L, run.getReportId());
-        verifyNoInteractions(observationRepository, findingRepository);
+        verifyNoInteractions(observationRepository);
     }
 
     @Test
@@ -257,7 +234,7 @@ class ReportPersistenceServiceTest {
 
         IllegalStateException exception = assertThrows(
                 IllegalStateException.class,
-                () -> service.reserve(42L, LocalDateTime.now(), false));
+                () -> service.reserve(42L, LocalDateTime.now()));
 
         assertEquals("보고서를 만들 수집 실행이 없습니다. runId=42", exception.getMessage());
     }

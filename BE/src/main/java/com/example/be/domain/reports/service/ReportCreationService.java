@@ -20,11 +20,10 @@ public class ReportCreationService {
     private final AgentReportOrchestrator reportOrchestrator;
     private final ReportPersistenceService persistenceService;
 
-    /** Agent HTTP 호출 동안 DB 잠금을 잡지 않는다. 정상 수집에 변화가 없으면 보고서 없이 null을 반환한다. */
-    public Long generate(Long runId, boolean hasRefreshedArticles) {
+    /** Agent HTTP 호출 동안 DB 잠금을 잡지 않는다. 신규 기사가 없으면 보고서 없이 null을 반환한다. */
+    public Long generate(Long runId) {
         LocalDateTime generatedAt = LocalDateTime.now(ApiTimeZone.ZONE);
-        ReportPersistenceService.Reservation reservation = persistenceService.reserve(
-                runId, generatedAt, hasRefreshedArticles);
+        ReportPersistenceService.Reservation reservation = persistenceService.reserve(runId, generatedAt);
         if (!reservation.owner()) {
             return reservation.reportId();
         }

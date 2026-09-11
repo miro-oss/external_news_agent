@@ -1,5 +1,8 @@
 package com.example.be.domain.collection.service.command;
 
+import com.example.be.domain.analysis.repository.FindingRepository;
+import com.example.be.domain.collection.content.ArticleContentClient;
+import com.example.be.domain.collection.content.ArticleContentResult;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.collection.connector.dto.res.FetchResult;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -17,7 +20,6 @@ import com.example.be.domain.collection.robots.RobotsDecision;
 import com.example.be.domain.collection.robots.RobotsPolicyService;
 import com.example.be.domain.notifications.service.ReportNotificationAutomationService;
 import com.example.be.domain.reports.repository.NewsReportRepository;
-import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
@@ -68,11 +70,13 @@ class CollectionNoChangeReportIntegrationTests {
     @Autowired private CollectionRunRepository runRepository;
     @Autowired private CollectionRunArticleRepository observationRepository;
     @Autowired private NewsReportRepository reportRepository;
+    @Autowired private FindingRepository findingRepository;
     @Autowired private TopicRepository topicRepository;
     @Autowired private SourceRepository sourceRepository;
     @Autowired private EntityManager entityManager;
 
     @MockitoBean private FeedClient feedClient;
+    @MockitoBean private ArticleContentClient contentClient;
     @MockitoBean private RobotsPolicyService robotsPolicyService;
     @MockitoBean private ReportNotificationAutomationService notificationAutomation;
     @MockitoBean private TopicKeywordStrategyOrchestrator keywordStrategyOrchestrator;
@@ -98,7 +102,7 @@ class CollectionNoChangeReportIntegrationTests {
 
     @ParameterizedTest
     @EnumSource(TriggerType.class)
-    void unchangedCollectionKeepsHistoryWithoutAnotherReportOrDelivery(TriggerType triggerType) {
+    void unchangedAndUpdatedOnlyCollectionKeepsHistoryWithoutAnotherReportOrDelivery(TriggerType triggerType) {
         givenArticle("HBM 양산 일정 발표");
         CollectionRun first = execute(triggerType);
         assertNotNull(first.getReportId());
@@ -118,10 +122,11 @@ class CollectionNoChangeReportIntegrationTests {
 
         givenArticle("HBM 양산 일정 변경 발표");
         CollectionRun updated = execute(triggerType);
-        assertNotNull(updated.getReportId());
+        assertSkippedReport(updated);
+        assertEquals(0, updated.getNewCount());
         assertEquals(1, updated.getUpdatedCount());
         assertEquals(1, observationRepository.countByRunIdAndChangeType(updated.getId(), ChangeType.UPDATED));
-        verify(notificationAutomation).enqueueCompletedReport(any());
+        assertTrue(findingRepository.existsByRunId(updated.getId()));
     }
 
     @Test
@@ -146,7 +151,7 @@ class CollectionNoChangeReportIntegrationTests {
     }
 
     @Test
-    void failedFeedRetainsFailureAndDiagnosticReport() {
+    void failedFeedRetainsFailureWithoutReport() {
         when(feedClient.fetch(any())).thenReturn(new FeedFetch(
                 FetchResult.unreadable("테스트 피드 응답 실패"), false, null, null));
 
@@ -156,13 +161,12 @@ class CollectionNoChangeReportIntegrationTests {
         assertEquals(RunItemStatus.FAILED, run.getItems().getFirst().getStatus());
         assertTrue(run.getWarnings().stream().anyMatch(warning ->
                 "테스트 피드 응답 실패".equals(warning.getMessage())));
-        assertNotNull(run.getReportId());
-        assertTrue(reportRepository.findByRunId(run.getId()).isPresent());
+        assertNoReport(run);
     }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void unchangedCollectionWithKeywordStrategyFailureCreatesDiagnosticReport(boolean recordsWarningInternally) {
+    void unchangedCollectionWithKeywordStrategyFailureKeepsWarningWithoutReport(boolean recordsWarningInternally) {
         when(feedClient.fetch(any())).thenReturn(new FeedFetch(FetchResult.ok(List.of()), true, "v1", null));
         if (recordsWarningInternally) {
             doAnswer(invocation -> {
@@ -184,9 +188,45 @@ class CollectionNoChangeReportIntegrationTests {
         assertEquals(0, run.getUpdatedCount());
         assertTrue(run.getWarnings().stream().anyMatch(warning ->
                 CollectionRunWarning.CODE_LLM_KEYWORD_STRATEGY_FAILED.equals(warning.getCode())));
+        assertNoReport(run);
+    }
+
+    @Test
+    void newlyAvailableFullTextAndReanalysisDoNotCreateReportWithoutNewArticles() {
+        givenArticle("HBM 양산 일정 발표");
+        CollectionRun first = execute(TriggerType.SCHEDULED);
+        assertNotNull(first.getReportId());
+        clearInvocations(notificationAutomation);
+        source = sourceRepository.findById(source.getId()).orElseThrow();
+        source.update(source.getName(), source.getUrlTemplate(), source.getCountry(), source.getLanguage(),
+                new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 10, true), source.getReliabilityScore(), true);
+        when(contentClient.fetch(articleUrl, null)).thenReturn(
+                ArticleContentResult.fullText("HBM 양산 일정에 대한 상세 내용을 새 본문으로 확보했다."));
+
+        CollectionRun refreshed = execute(TriggerType.SCHEDULED);
+
+        assertSkippedReport(refreshed);
+        assertEquals(0, refreshed.getNewCount());
+        assertEquals(0, refreshed.getUpdatedCount());
+        assertEquals(1, observationRepository.countByRunIdAndChangeType(refreshed.getId(), ChangeType.UNCHANGED));
+        assertTrue(findingRepository.existsByRunId(refreshed.getId()));
+        verify(contentClient).fetch(articleUrl, null);
+    }
+
+    @Test
+    void newArticleStillCreatesReportWhenKeywordStrategyFails() {
+        givenArticle("HBM 양산 일정 발표");
+        doThrow(new IllegalStateException("키워드 전략 실행 실패"))
+                .when(keywordStrategyOrchestrator).strategize(anyLong());
+
+        CollectionRun run = execute(TriggerType.SCHEDULED);
+
+        assertEquals(RunStatus.PARTIAL, run.getStatus());
+        assertEquals(1, run.getNewCount());
+        assertTrue(run.getWarnings().stream().anyMatch(warning ->
+                CollectionRunWarning.CODE_LLM_KEYWORD_STRATEGY_FAILED.equals(warning.getCode())));
         assertNotNull(run.getReportId());
-        assertEquals(ReportStatus.FALLBACK,
-                reportRepository.findByRunId(run.getId()).orElseThrow().getReportStatus());
+        assertTrue(reportRepository.findByRunId(run.getId()).isPresent());
         verify(notificationAutomation).enqueueCompletedReport(any());
     }
 
@@ -211,6 +251,11 @@ class CollectionNoChangeReportIntegrationTests {
         assertEquals(RunStatus.SUCCESS, run.getStatus());
         assertNotNull(run.getFinishedAt());
         assertTrue(run.getWarnings().isEmpty());
+        assertNoReport(run);
+    }
+
+    private void assertNoReport(CollectionRun run) {
+        assertNotNull(run.getFinishedAt());
         assertNull(run.getReportId());
         assertTrue(reportRepository.findByRunId(run.getId()).isEmpty());
         verify(notificationAutomation, never()).enqueueCompletedReport(any());

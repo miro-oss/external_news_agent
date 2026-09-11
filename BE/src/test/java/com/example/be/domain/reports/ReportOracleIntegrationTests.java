@@ -210,8 +210,10 @@ class ReportOracleIntegrationTests {
                 .build());
         entityManager.flush();
 
-        Long firstId = creationService.generate(run.getId(), false);
-        Long secondId = creationService.generate(run.getId(), false);
+        entityManager.persist(com.example.be.domain.collection.entity.CollectionRunArticle.observe(
+                run, article, topic, source, ChangeType.NEW, now));
+        Long firstId = creationService.generate(run.getId());
+        Long secondId = creationService.generate(run.getId());
         entityManager.flush();
         entityManager.clear();
 

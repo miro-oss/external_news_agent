@@ -32,7 +32,6 @@ class NotificationAutomationOracleIntegrationTests {
     @Autowired EntityManager em;
     @Autowired JdbcTemplate jdbc;
     @Autowired ReportNotificationAutomationService automation;
-    // 전달 테스트는 새 본문을 확보한 실행을 가정해 reserve의 hasRefreshedArticles=true로 보고서를 만든다.
     @Autowired ReportPersistenceService reports;
     @Autowired ReportDeliveryOutboxStore outbox;
     @Autowired TelegramConnectionService connections;
@@ -60,7 +59,7 @@ class NotificationAutomationOracleIntegrationTests {
         var reloaded = new RunDeliverySnapshotStore(jdbc).find(run.getId()).orElseThrow();
         assertEquals(List.of(original.getId()), reloaded.targets().stream().map(RunDeliverySnapshotStore.Target::recipientId).toList());
         assertEquals(originalAddress, reloaded.targets().getFirst().address());
-        var reserved = reports.reserve(run.getId(), now(), true);
+        var reserved = reports.reserve(run.getId(), now());
         reports.complete(reserved.reportId(), new ReportDocument("한 번만 전달", "## 핵심 요약\n접수 당시 선택", "fallback"), now());
         assertEquals(1, outbox.deliveries(reserved.reportId()).size());
         assertEquals(original.getId(), jdbc.queryForObject("SELECT recipient_id FROM report_notification_outbox WHERE report_id=?", Long.class, reserved.reportId()));
@@ -78,7 +77,7 @@ class NotificationAutomationOracleIntegrationTests {
         em.flush(); em.clear();
         assertEquals(existing, automation.policy(topic.getId()));
         assertFalse(runSnapshots.find(run.getId()).orElseThrow().enabled());
-        var reserved = reports.reserve(run.getId(), now(), true);
+        var reserved = reports.reserve(run.getId(), now());
         reports.complete(reserved.reportId(), new ReportDocument("전달 안 함", "## 요약\n저장만 합니다.", "fallback"), now());
         assertTrue(outbox.deliveries(reserved.reportId()).isEmpty());
         var daily = NewsReport.builder().title("일일 통합").markdownBody("요약").modelName("fallback")
@@ -96,7 +95,7 @@ class NotificationAutomationOracleIntegrationTests {
         em.persist(group); em.flush();
         automation.savePolicy(topic.getId(),new ReportNotificationAutomationService.Policy(true,true,false,
                 List.of(group.getId()),List.of(recipient.getId()),List.of(2L)));
-        var reserved=reports.reserve(run.getId(),now(), true);
+        var reserved=reports.reserve(run.getId(),now());
         reports.complete(reserved.reportId(),new ReportDocument("테스트 요약","## 핵심 요약\n- 저장된 보고서 요약","fallback"),now());
         reports.complete(reserved.reportId(),new ReportDocument("중복 이벤트","중복","fallback"),now());
         assertEquals(1,outbox.deliveries(reserved.reportId()).size());
@@ -137,7 +136,7 @@ class NotificationAutomationOracleIntegrationTests {
     @Test void dailyPolicyDoesNotQueueRunAndUnknownIsNotResent() {
         var topic=topic(); var run=run(topic);var recipient=recipient(true);
         automation.savePolicy(topic.getId(),new ReportNotificationAutomationService.Policy(true,false,true,List.of(),List.of(recipient.getId()),List.of(2L)));
-        var reserved=reports.reserve(run.getId(),now(), true);
+        var reserved=reports.reserve(run.getId(),now());
         reports.complete(reserved.reportId(),new ReportDocument("실행","요약","fallback"),now());
         assertTrue(outbox.deliveries(reserved.reportId()).isEmpty());
         var daily=NewsReport.builder().title("일일 통합").markdownBody("## 요약\n일일 요약").modelName("fallback")
@@ -174,7 +173,7 @@ class NotificationAutomationOracleIntegrationTests {
         var first=recipient(true); var second=recipient(true);
         automation.savePolicy(topic.getId(),new ReportNotificationAutomationService.Policy(true,true,false,
                 List.of(),List.of(first.getId(),second.getId()),List.of(2L)));
-        var reserved=reports.reserve(run.getId(),now(), true);
+        var reserved=reports.reserve(run.getId(),now());
         reports.complete(reserved.reportId(),new ReportDocument("요약","## 요약\n짧은 보고서","fallback"),now());
         var claimed=outbox.claim();
         assertEquals(1,claimed.size());
@@ -279,7 +278,15 @@ class NotificationAutomationOracleIntegrationTests {
                 .urlTemplate("https://example.invalid/feed").language("ko").active(true).build();em.persist(source);
         var run=CollectionRun.builder().status(RunStatus.SUCCESS).triggerType(TriggerType.MANUAL).startedAt(now()).build();
         run.addItem(CollectionRunItem.builder().topic(topic).source(source).status(RunItemStatus.SUCCESS).build());
-        em.persist(run);em.flush();return run;
+        em.persist(run);
+        // 보고서 생성 조건을 충족하는 신규 기사 관측을 저장한다.
+        var article = Article.builder().topic(topic).source(source)
+                .urlHash(java.util.UUID.randomUUID().toString().replace("-", "").repeat(2))
+                .canonicalUrl("https://example.invalid/news/" + System.nanoTime()).title("신규 알림 기사")
+                .fetchStatus(FetchStatus.METADATA_ONLY).collectedAt(now()).build();
+        em.persist(article);
+        em.persist(CollectionRunArticle.observe(run, article, topic, source, ChangeType.NEW, now()));
+        em.flush();return run;
     }
     private NotificationRecipient recipient(boolean withEmail) {
         var recipient=NotificationRecipient.builder().name("테스트 수신자 "+System.nanoTime()).active(true).build();

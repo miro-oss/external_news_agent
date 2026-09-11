@@ -2,10 +2,8 @@ package com.example.be.domain.reports.service;
 
 import com.example.be.domain.reports.comparison.ReportCompleted;
 import org.springframework.context.ApplicationEventPublisher;
-import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
-import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.reports.entity.NewsReport;
@@ -32,18 +30,19 @@ public class ReportPersistenceService {
     private final NewsReportRepository reportRepository;
     private final ReportNotificationAutomationService notificationAutomation;
     private final CollectionRunArticleRepository observationRepository;
-    private final FindingRepository findingRepository;
     private final ApplicationEventPublisher events;
 
     @Transactional
-    public Reservation reserve(Long runId, LocalDateTime generatedAt, boolean hasRefreshedArticles) {
+    public Reservation reserve(Long runId, LocalDateTime generatedAt) {
         CollectionRun run = lockedRun(runId);
         NewsReport existing = reportRepository.findByRunId(runId).orElse(null);
         if (existing != null) {
             run.attachReport(existing.getId());
             return new Reservation(existing.getId(), false);
         }
-        if (canSkipUnchangedRun(run, hasRefreshedArticles)) {
+        // 화면의 신규 기사 통계와 같은 NEW 관측을 기준으로 한다. 기존 기사 변경·재분석·경고는
+        // 수집 이력에 남기되 보고서 생성 사유로 사용하지 않는다. 집계는 finish 전이라 관측을 조회한다.
+        if (!observationRepository.existsByRunIdAndChangeTypeIn(runId, List.of(ChangeType.NEW))) {
             return new Reservation(null, false);
         }
 
@@ -58,20 +57,6 @@ public class ReportPersistenceService {
                 .build());
         run.attachReport(report.getId());
         return new Reservation(report.getId(), true);
-    }
-
-    private boolean canSkipUnchangedRun(CollectionRun run, boolean hasRefreshedArticles) {
-        if (hasRefreshedArticles || run.getItems().isEmpty() || !run.getWarnings().isEmpty()) {
-            return false;
-        }
-        if (run.getItems().stream().anyMatch(item -> item.getStatus() != RunItemStatus.SUCCESS
-                && item.getStatus() != RunItemStatus.SKIPPED)) {
-            return false;
-        }
-        // run의 집계는 finish 때 채워지며 추가 조사 건수는 item 집계에도 없으므로 관측을 확인한다.
-        return !observationRepository.existsByRunIdAndChangeTypeIn(
-                run.getId(), List.of(ChangeType.NEW, ChangeType.UPDATED))
-                && !findingRepository.existsByRunId(run.getId());
     }
 
     @Transactional
@@ -119,7 +104,7 @@ public class ReportPersistenceService {
                         "보고서를 만들 수집 실행이 없습니다. runId=" + runId));
     }
 
-    /** 변화 없는 실행을 생략하면 reportId는 null이며 owner는 false다. */
+    /** 신규 기사 없는 실행을 생략하면 reportId는 null이며 owner는 false다. */
     public record Reservation(Long reportId, boolean owner) {
     }
 }

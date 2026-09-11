@@ -5,8 +5,6 @@ import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 
@@ -30,22 +28,20 @@ class ReportCreationServiceTest {
 
     @Test
     void describesMissingRunInGenerationFailure() {
-        when(persistenceService.reserve(org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(false)))
+        when(persistenceService.reserve(org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new ReportPersistenceService.Reservation(17L, true));
         when(runRepository.findReportContextById(42L)).thenReturn(java.util.Optional.empty());
 
-        IllegalStateException exception = assertThrows(IllegalStateException.class, () -> service.generate(42L, false));
+        IllegalStateException exception = assertThrows(IllegalStateException.class, () -> service.generate(42L));
 
         assertEquals("보고서를 만들 수집 실행이 없습니다. runId=42", exception.getMessage());
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void createsOneReportAndConnectsItToLockedRun(boolean hasRefreshedArticles) {
+    @Test
+    void createsOneReportAndConnectsItToLockedRun() {
         CollectionRun run = mock(CollectionRun.class);
         Finding finding = mock(Finding.class);
-        when(persistenceService.reserve(org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.eq(hasRefreshedArticles)))
+        when(persistenceService.reserve(org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new ReportPersistenceService.Reservation(17L, true));
         when(runRepository.findReportContextById(42L)).thenReturn(java.util.Optional.of(run));
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(finding));
@@ -60,7 +56,7 @@ class ReportCreationServiceTest {
                 org.mockito.ArgumentMatchers.any()))
                 .thenReturn(17L);
 
-        Long reportId = service.generate(42L, hasRefreshedArticles);
+        Long reportId = service.generate(42L);
 
         assertEquals(17L, reportId);
         verify(reportOrchestrator).generate(
@@ -74,12 +70,11 @@ class ReportCreationServiceTest {
     }
 
     @Test
-    void unchangedRunReturnsNoReportWithoutGeneratingOrCompletingOne() {
-        when(persistenceService.reserve(org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.eq(false)))
+    void runWithoutNewArticlesReturnsNoReportWithoutGeneratingOrCompletingOne() {
+        when(persistenceService.reserve(org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new ReportPersistenceService.Reservation(null, false));
 
-        assertNull(service.generate(42L, false));
+        assertNull(service.generate(42L));
 
         verifyNoInteractions(runRepository, findingRepository, reportOrchestrator);
         verify(persistenceService, never()).complete(
@@ -88,10 +83,10 @@ class ReportCreationServiceTest {
 
     @Test
     void reusesExistingReportWithoutGeneratingAgain() {
-        when(persistenceService.reserve(org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(false)))
+        when(persistenceService.reserve(org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new ReportPersistenceService.Reservation(17L, false));
 
-        assertEquals(17L, service.generate(42L, false));
+        assertEquals(17L, service.generate(42L));
 
         verify(reportOrchestrator, never()).generate(
                 org.mockito.ArgumentMatchers.any(),

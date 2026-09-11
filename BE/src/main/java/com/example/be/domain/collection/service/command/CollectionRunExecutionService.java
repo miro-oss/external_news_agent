@@ -98,9 +98,8 @@ public class CollectionRunExecutionService {
                         "가설 추적에 실패해 기존 관련 기사 연결을 유지했습니다.");
             }
             // M5 보고서는 findings를 모두 저장한 뒤 만든다. 생성과 reportId 연결은 별도 짧은 트랜잭션이다.
-            boolean reportSkipped = false;
             try {
-                reportSkipped = reportCreationService.generate(runId, !refreshedArticleIds.isEmpty()) == null;
+                reportCreationService.generate(runId);
             } catch (RuntimeException exception) {
                 log.error("보고서를 생성하지 못했다. runId={} error={}", runId, exception.getMessage(), exception);
                 resultWriter.addReportGenerationFailedWarning(runId, exception.getMessage());
@@ -114,16 +113,6 @@ public class CollectionRunExecutionService {
                         runId,
                         CollectionRunWarning.CODE_LLM_KEYWORD_STRATEGY_FAILED,
                         "수집 전략가 키워드 제안 생성에 실패해 기존 키워드를 유지했습니다.");
-            }
-            // 보고서 예산을 먼저 확보하되, 생략한 실행은 전략가가 남긴 경고까지 확인한다.
-            if (reportSkipped) {
-                try {
-                    reportCreationService.generate(runId, !refreshedArticleIds.isEmpty());
-                } catch (RuntimeException exception) {
-                    log.error("생략한 실행의 진단 보고서를 생성하지 못했다. runId={} error={}",
-                            runId, exception.getMessage(), exception);
-                    resultWriter.addReportGenerationFailedWarning(runId, exception.getMessage());
-                }
             }
             resultWriter.finishRun(runId);
         } catch (RuntimeException exception) {
