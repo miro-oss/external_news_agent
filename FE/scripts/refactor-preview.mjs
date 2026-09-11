@@ -144,6 +144,9 @@ for (const [index, level, score] of [[2, 'medium', 50], [3, 'low', 20]]) {
     initialReports[index].findings = initialReports[index].findings.map((finding, n) => ({ ...finding, category: n === 0 ? '공급망' : '기업', sensitivity: { ...finding.sensitivity, level, score } }));
 }
 initialReports[4].collectionContexts = [];
+initialReports.forEach((report, index) => {
+    report.collectionStartedAt = index === 4 ? null : `2026-09-${String(8 - Math.floor(index / 2)).padStart(2, '0')}T${index % 2 ? '08' : '09'}:00:00+09:00`;
+});
 initialReports.push({ ...structuredClone(fixture.report), id: 117, runId: null, sourceRunIds: [42, 43, 44], sourceReportCount: 2, reportScope: 'DAILY', reportDate: '2026-09-08', title: 'HBM 시장 · 2026-09-08 일일 통합 리포트', findingCount: 3, highSensitivityCount: 3, deliveryStatus: 'NOT_SENT' });
 initialReports.at(-1).collectionContexts.push({ ...structuredClone(fixture.report.collectionContexts[0]), runId: 43,
     topics: [{ ...structuredClone(fixture.report.collectionContexts[0].topics[0]), topicName: 'AI 인프라', topicId: 2 }] },
@@ -154,6 +157,27 @@ initialReports.push({ ...structuredClone(initialReports.at(-1)), id: 116, report
 let reports = structuredClone(initialReports);
 let reportDeleteError = false;
 let reportChangesVariant = 'ready';
+// This scenario includes a matching report beyond the API's first 100 items.
+function reportFilterFixtures() {
+    const result = Array.from({ length: 105 }, (_, index) => {
+        const report = structuredClone(initialReports[0]);
+        const topic = structuredClone(report.collectionContexts[0].topics[0]);
+        const day = new Date(Date.UTC(2026, 8, 11 - Math.floor(index / 3))).toISOString().slice(0, 10);
+        topic.topicId = index === 104 ? 212 : index % 2 ? 29 : 31;
+        topic.topicName = index === 104 ? '장기 보관 수집' : index % 2 ? 'HBM 시장 동향' : 'AI 데이터센터 투자';
+        topic.queryText = index === 104 ? '보관 검색' : topic.topicName;
+        topic.requiredKeywords = [index % 2 ? 'HBM' : '데이터센터'];
+        topic.optionalKeywords = [index === 104 ? '두번째페이지키워드' : index % 2 ? 'SK하이닉스' : '엔비디아'];
+        topic.excludedKeywords = ['채용'];
+        return { ...report, id: 2000 + index, runId: 3000 + index, sourceRunIds: [3000 + index],
+            title: `${topic.topicName} · ${day} 리포트`, collectionStartedAt: `${day}T23:50:00+09:00`,
+            generatedAt: `${new Date(Date.parse(`${day}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)}T00:10:00+09:00`,
+            collectionContexts: [{ runId: 3000 + index, topics: [topic] }] };
+    });
+    result[4].collectionStartedAt = null;
+    result[4].collectionContexts = [];
+    return [...result, ...structuredClone(initialReports.filter(report => report.reportScope === 'DAILY'))];
+}
 const json = (res, value, status = 200) => { res.statusCode = status; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
 const server = await createServer({ root, configFile: false, envDir: emptyEnvDir, plugins: [react(), { name: 'isolated-qa-fixtures', configureServer(server) {
                 server.middlewares.use(async (req, res, next) => {
@@ -182,6 +206,10 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 usageCalls = 12;
                                 usageLimit = 100;
                                 return json(res, { reset: true });
+                            }
+                            if (path === '/__qa/report-filters') {
+                                reports = reportFilterFixtures();
+                                return json(res, { count: reports.length });
                             }
                             if (path === '/__qa/usage') {
                                 const used = Number(body.used ?? url.searchParams.get('used') ?? 12);
@@ -420,7 +448,20 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             result = runs.find(r => r.runId === Number(match[1]));
                         else if (path === '/api/news/reports') {
                             const scope = url.searchParams.get('reportScope');
-                            result = page(reports.filter(r => !scope || r.reportScope === scope));
+                            const filtered = reports.filter(r => !scope || r.reportScope === scope);
+                            const pageNumber = Number(url.searchParams.get('page') || 0);
+                            const size = Number(url.searchParams.get('size') || 20);
+                            const summaries = filtered.slice(pageNumber * size, (pageNumber + 1) * size).map(report => ({
+                                id: report.id, runId: report.runId, reportScope: report.reportScope,
+                                reportDate: report.reportDate ?? null, sourceRunIds: report.sourceRunIds,
+                                sourceReportCount: report.sourceReportCount ?? null, title: report.title,
+                                generatedAt: report.generatedAt, modelName: report.modelName,
+                                findingCount: report.findingCount, highSensitivityCount: report.highSensitivityCount,
+                                deliveryStatus: report.deliveryStatus, collectionStartedAt: report.collectionStartedAt ?? null,
+                                collectionContexts: report.collectionContexts ?? [],
+                            }));
+                            result = { content: summaries, page: pageNumber, size, totalElements: filtered.length,
+                                totalPages: Math.ceil(filtered.length / size), hasNext: (pageNumber + 1) * size < filtered.length };
                         }
                         else if (path === '/api/news/reports/latest')
                             result = reports.find(r => r.reportScope === (url.searchParams.get('reportScope') || 'RUN')) || null;

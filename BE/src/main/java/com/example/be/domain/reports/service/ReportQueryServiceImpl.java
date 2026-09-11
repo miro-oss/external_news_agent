@@ -132,6 +132,9 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .sourceReportCount(report.getSourceReportCount())
                 .title(report.getTitle())
                 .generatedAt(toOffset(report.getGeneratedAt()))
+                .collectionStartedAt(report.getReportScope() == ReportScope.RUN && report.getRun() != null
+                        ? toOffset(report.getRun().getStartedAt()) : null)
+                .collectionContexts(report.getCollectionContexts())
                 .modelName(report.getModelName())
                 .findingCount(report.getReportScope() == ReportScope.DAILY
                         ? dailyCount == null ? 0 : dailyCount.getFindingCount()
@@ -386,7 +389,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     }
 
     private List<Long> sourceRunIds(NewsReport report) {
-        return report.getReportScope() == ReportScope.DAILY ? report.getSourceRunIds() : List.of(report.getRunId());
+        return report.getReportScope() == ReportScope.DAILY ? report.getSourceRunIds()
+                : report.getRunId() == null ? List.of() : List.of(report.getRunId());
     }
 
     private Map<Long, FindingRepository.DailyReportCount> dailyCounts(List<NewsReport> reports) {
@@ -442,7 +446,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     }
 
     private OffsetDateTime toOffset(LocalDateTime value) {
-        return value.atZone(ApiTimeZone.ZONE).toOffsetDateTime();
+        return value == null ? null : value.atZone(ApiTimeZone.ZONE).toOffsetDateTime();
     }
 
     private void validatePage(int page, int size) {

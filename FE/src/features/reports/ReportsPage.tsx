@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
-  useLatestReport,
   useAudienceSetting,
   useIssue,
   useReport,
@@ -35,6 +34,8 @@ import { ReportKeywordText } from './ReportKeywordText'
 import { categoryTone, dailyReportTopics, defaultSensitivity } from './reportDisplay'
 import { reportDisplayTitle } from './reportTitle'
 import { ReportDetailSkeleton, ReportWorkspaceSkeleton, RelatedArticlesSkeleton } from './ReportSkeletons'
+import { ReportFiltersBar } from './ReportFiltersBar'
+import { DEFAULT_REPORT_FILTERS, filterReports, reportFilterDate, reportTopicOptions, type ReportFilters } from './reportFilters'
 
 type ReportScopeTab = 'DAILY' | 'RUN'
 
@@ -49,15 +50,52 @@ const REPORT_SCOPE_HINTS: Record<ReportScopeTab, string> = {
   RUN: '수집을 실행할 때마다 만들어진 보고서입니다.',
 }
 
+const collectionClock = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+})
+
 function reportIdFromHash() {
   const value = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('reportId')
   const id = Number(value)
   return value && Number.isSafeInteger(id) && id > 0 ? id : null
 }
 
+function useReportFilterClock() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    let timer: number
+    const day = 24 * 60 * 60 * 1000
+    const kstOffset = 9 * 60 * 60 * 1000
+    function scheduleMidnight() {
+      const current = Date.now()
+      const nextMidnight = (Math.floor((current + kstOffset) / day) + 1) * day - kstOffset
+      timer = window.setTimeout(refresh, nextMidnight - current + 50)
+    }
+    function refresh() {
+      window.clearTimeout(timer)
+      setNow(new Date())
+      scheduleMidnight()
+    }
+    function handleVisibility() {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    scheduleMidnight()
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [])
+  return now
+}
+
 export function ReportsPage() {
   const [reportScope, setReportScope] = useState<ReportScopeTab>('RUN')
   const [selectedId, setSelectedId] = useState<number | null>(reportIdFromHash)
+  const [filters, setFilters] = useState<ReportFilters>(DEFAULT_REPORT_FILTERS)
+  const filterNow = useReportFilterClock()
   const [audienceOverride, setAudienceOverride] = useState<Audience | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
     articleId: number | null
@@ -68,14 +106,20 @@ export function ReportsPage() {
   const scopeFilter = selectedReport.data?.reportScope ?? reportScope
   const reports = useReports(scopeFilter)
   const audienceSetting = useAudienceSetting()
-  const latest = useLatestReport(scopeFilter)
-  const activeId = selectedId ?? latest.data?.id ?? null
-  const activeReport = selectedId === null ? latest : selectedReport
+  const filteredReports = useMemo(() => filterReports(reports.data?.content ?? [], filters, filterNow), [reports.data?.content, filters, filterNow])
+  const topicOptions = useMemo(() => reportTopicOptions(reports.data?.content ?? []), [reports.data?.content])
+  // A direct link may refer to DAILY while the default RUN list is still loading.
+  const isResolvingSelection = selectedId !== null && selectedReport.isPending
+    && !reports.data?.content.some(report => report.id === selectedId)
+  const activeId = isResolvingSelection ? null
+    : filteredReports.find(report => report.id === selectedId)?.id ?? filteredReports[0]?.id ?? null
+  const activeReport = useReport(activeId)
   const activeReportData = activeReport.data
   const removeReport = useDeleteReport()
   useEffect(() => {
     const sync = () => {
       setSelectedId(reportIdFromHash())
+      setFilters(DEFAULT_REPORT_FILTERS)
       setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
     }
     window.addEventListener('hashchange', sync)
@@ -83,12 +127,29 @@ export function ReportsPage() {
   }, [])
   function selectReport(id: number) {
     if (id === activeId) return
+    setReportScope(scopeFilter)
     setSelectedId(id)
     setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
     window.history.replaceState(null, '', `#/reports?reportId=${id}`)
   }
+  function changeFilters(nextFilters: ReportFilters) {
+    const matches = filterReports(reports.data?.content ?? [], nextFilters, filterNow)
+    const nextId = matches.find(report => report.id === activeId)?.id ?? matches[0]?.id ?? null
+    setReportScope(scopeFilter)
+    setFilters(nextFilters)
+    setSelectedId(nextId)
+    setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
+    window.history.replaceState(null, '', nextId === null ? '#/reports' : `#/reports?reportId=${nextId}`)
+  }
+  function changeScope(scope: ReportScopeTab) {
+    setReportScope(scope)
+    setSelectedId(null)
+    setFilters(DEFAULT_REPORT_FILTERS)
+    setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
+    window.history.replaceState(null, '', '#/reports')
+  }
   async function deleteReport(id: number) {
-    const nextId = reports.data?.content.find(report => report.id !== id)?.id ?? null
+    const nextId = filteredReports.find(report => report.id !== id)?.id ?? null
     const currentHash = window.location.hash
     await removeReport.mutateAsync(id)
     if (window.location.hash !== currentHash) return
@@ -97,9 +158,9 @@ export function ReportsPage() {
     setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
     window.history.replaceState(null, '', nextId === null ? '#/reports' : `#/reports?reportId=${nextId}`)
   }
-  const isInitialLoading = latest.isPending || reports.isPending
-  const initialError = latest.isError ? latest.error : reports.isError ? reports.error : null
-  const hasWorkspace = !!reports.data?.content.length && activeId !== null
+  const isInitialLoading = reports.isPending || isResolvingSelection
+  const initialError = reports.isError ? reports.error : null
+  const hasWorkspace = filteredReports.length > 0 && activeId !== null
   const activeAudience = audienceOverride ?? audienceSetting.data?.audience ?? 'CHIP_MAKER'
   const closeArticle = useCallback(() => {
     setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
@@ -121,14 +182,29 @@ export function ReportsPage() {
           value={scopeFilter}
           options={REPORT_SCOPE_OPTIONS}
           disabled={removeReport.isPending}
-          onSelect={(scope) => { setReportScope(scope); setSelectedId(null); window.history.replaceState(null, '', '#/reports') }}
+          onSelect={changeScope}
         />
         <p className="report-scope-hint">{REPORT_SCOPE_HINTS[scopeFilter]}</p>
       </div>
 
+      <ReportFiltersBar
+        filters={filters}
+        topicOptions={topicOptions}
+        scope={scopeFilter}
+        totalCount={reports.data?.content.length ?? 0}
+        resultCount={filteredReports.length}
+        loading={isInitialLoading}
+        disabled={removeReport.isPending}
+        onChange={changeFilters}
+        onReset={() => changeFilters(DEFAULT_REPORT_FILTERS)}
+      />
+
       {isInitialLoading && !hasWorkspace && !initialError && <ReportWorkspaceSkeleton daily={scopeFilter === 'DAILY'} />}
       {initialError && <div className="state-panel error" role="alert">보고서를 불러오지 못했습니다. {initialError.message}</div>}
-      {!isInitialLoading && !initialError && latest.data === null && !reports.data?.content.length && (
+      {selectedReport.isError && !reports.data?.content.some(report => report.id === selectedId) && (
+        <div className="state-panel error" role="alert">선택한 보고서를 불러오지 못했습니다. {selectedReport.error.message}</div>
+      )}
+      {!isInitialLoading && !initialError && !reports.data?.content.length && (
         <div className="state-panel report-empty">
           <span className="empty-mark" aria-hidden="true">⌁</span>
           <strong>표시할 보고서가 없습니다.</strong>
@@ -137,21 +213,24 @@ export function ReportsPage() {
             : '수집을 실행하면 분석 완료 후 첫 보고서가 자동으로 만들어집니다.'}</span>
         </div>
       )}
-      {!isInitialLoading && !initialError && latest.data !== null && reports.data?.content.length === 0 && (
-        <div className="state-panel report-empty">
-          <strong>최신 보고서는 있지만 아카이브 목록이 비어 있습니다.</strong>
-          <span>잠시 후 새로고침해 보고, 계속되면 보고서 목록 API 상태를 확인해 주세요.</span>
+      {!isInitialLoading && !initialError && !!reports.data?.content.length && filteredReports.length === 0 && (
+        <div className="state-panel report-empty report-filter-empty" role="status">
+          <span className="empty-mark" aria-hidden="true">⌕</span>
+          <strong>조건에 맞는 보고서가 없습니다.</strong>
+          <span>검색어, 수집 주제 또는 기간을 변경해 보세요.</span>
+          <button type="button" className="text-button" onClick={() => changeFilters(DEFAULT_REPORT_FILTERS)}>필터 초기화</button>
         </div>
       )}
 
-      {reports.data && reports.data.content.length > 0 && activeId !== null && (
+      {hasWorkspace && !initialError && (
         <div className="report-workspace">
           <aside className="report-list" aria-label="생성된 보고서">
             <div className="report-list-heading">
               <span>생성된 보고서</span>
+              <strong>{filteredReports.length.toLocaleString()}</strong>
             </div>
             <div className="report-list-scroll">
-            {reports.data.content.map((report) => (
+            {filteredReports.map((report) => (
               <ReportListItem
                 key={report.id}
                 report={report}
@@ -207,6 +286,13 @@ function ReportListItem({ report, active, onSelect, disabled }: {
   onSelect: () => void
   disabled: boolean
 }) {
+  const topicNames = [...new Set((report.collectionContexts ?? [])
+    .flatMap(context => context.topics.map(topic => topic.topicName.trim())).filter(Boolean))]
+  const filterDate = reportFilterDate(report)
+  const collectionTime = report.collectionStartedAt && filterDate && report.reportScope === 'RUN'
+    ? collectionClock.format(new Date(report.collectionStartedAt))
+    : null
+  const dateLabel = report.reportScope === 'DAILY' ? '집계일' : '수집일'
   return (
     <button
       type="button"
@@ -216,9 +302,12 @@ function ReportListItem({ report, active, onSelect, disabled }: {
       onClick={onSelect}
     >
       <strong title={report.reportScope === 'DAILY' ? reportDisplayTitle(report) : report.title}>{reportDisplayTitle(report)}</strong>
-      <time className="report-list-date" dateTime={report.reportScope === 'DAILY' ? report.reportDate ?? undefined : report.generatedAt}>
-        {report.reportScope === 'DAILY' ? report.reportDate ?? '집계일 미상' : formatShortDate(report.generatedAt)}
-      </time>
+      <span className="report-list-topics" title={topicNames.join(' · ')}>{topicNames.length ? topicNames.join(' · ') : '수집 주제 기록 없음'}</span>
+      {filterDate ? (
+        <time className="report-list-date" dateTime={report.reportScope === 'DAILY' ? filterDate : report.collectionStartedAt ?? undefined}>
+          {dateLabel} {filterDate}{collectionTime ? ` ${collectionTime}` : ''}
+        </time>
+      ) : <span className="report-list-date">{dateLabel} 기록 없음</span>}
     </button>
   )
 }
