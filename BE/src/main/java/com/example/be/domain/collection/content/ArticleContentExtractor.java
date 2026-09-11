@@ -91,7 +91,8 @@ public final class ArticleContentExtractor {
             body = fromDensestBlock(document);
         }
 
-        return StringUtils.hasText(body) && body.length() >= MIN_BODY_LENGTH ? body : null;
+        // 저장 원문은 유지하되, 매체 푸터가 본문 확보 기준을 채우지는 못하게 한다.
+        return ArticleBodyCleaner.withoutTrailingBoilerplate(body).length() >= MIN_BODY_LENGTH ? body : null;
     }
 
     private static String fromKnownSelectors(Document document) {
@@ -102,7 +103,7 @@ public final class ArticleContentExtractor {
             }
 
             String text = textOf(element);
-            if (text.length() >= MIN_BODY_LENGTH) {
+            if (ArticleBodyCleaner.withoutTrailingBoilerplate(text).length() >= MIN_BODY_LENGTH) {
                 return text;
             }
         }
@@ -111,7 +112,7 @@ public final class ArticleContentExtractor {
     }
 
     /**
-     * 아는 자리에 없으면 {@code <p>}가 가장 많이 모인 블록을 본문으로 본다. 기사 본문은 대개 문단의 덩어리다.
+     * 아는 자리에 없으면 직접 자식 문단에서 매체 푸터를 제외한 본문이 가장 긴 블록을 고른다.
      */
     private static String fromDensestBlock(Document document) {
         Element best = null;
@@ -123,7 +124,12 @@ public final class ArticleContentExtractor {
                 continue;
             }
 
-            int length = paragraphs.stream().mapToInt(p -> p.text().length()).sum();
+            // 전체 본문으로 수용 여부를 판단하고, 직접 문단으로만 블록 간 길이를 비교한다.
+            if (ArticleBodyCleaner.withoutTrailingBoilerplate(textOf(candidate)).length() < MIN_BODY_LENGTH) {
+                continue;
+            }
+
+            int length = ArticleBodyCleaner.withoutTrailingBoilerplate(textOf(paragraphs)).length();
             if (length > bestLength) {
                 best = candidate;
                 bestLength = length;
@@ -142,6 +148,10 @@ public final class ArticleContentExtractor {
             return element.text().strip();
         }
 
+        return textOf(paragraphs);
+    }
+
+    private static String textOf(Elements paragraphs) {
         return paragraphs.stream()
                 .map(Element::text)
                 .map(String::strip)

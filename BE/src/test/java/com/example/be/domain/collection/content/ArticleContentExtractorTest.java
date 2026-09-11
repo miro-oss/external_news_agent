@@ -2,6 +2,7 @@ package com.example.be.domain.collection.content;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -11,6 +12,11 @@ class ArticleContentExtractorTest {
     /** 본문 판정 임계값(200자)을 넘겨야 실제 기사처럼 취급된다. 페이월 안내문과 구분하는 기준이다. */
     private static final String PARAGRAPH =
             ("삼성전자가 HBM4 양산 일정을 앞당기기로 했다. 업계에 따르면 이번 결정은 고객사 요구를 반영한 것이다. ").repeat(3);
+
+    private static final String PUBLISHER_NOTICE =
+            "대표이사 : 합성 담당자 " + "테스트용 매체의 운영 안내입니다. ".repeat(8);
+    private static final String COPYRIGHT_NOTICE =
+            "무단 전재 및 재배포 금지. " + "테스트용 매체의 저작권 안내입니다. ".repeat(4);
 
     @Test
     void takesArticleBody() {
@@ -67,6 +73,95 @@ class ArticleContentExtractorTest {
 
         assertTrue(body.contains("HBM4 양산 일정"));
         assertFalse(body.contains("짧은 홍보"));
+    }
+
+    @Test
+    void rejectsPublisherFooterOnlyInDensestParagraphBlock() {
+        String html = """
+                <html><body><div><p>%s</p><p>%s</p></div></body></html>
+                """.formatted(PUBLISHER_NOTICE, COPYRIGHT_NOTICE);
+
+        assertNull(ArticleContentExtractor.extract(html, "https://example.com/1"));
+    }
+
+    @Test
+    void skipsPublisherFooterForLaterKnownArticleSelector() {
+        String html = """
+                <html><body>
+                  <article><p>%s</p><p>%s</p></article>
+                  <div class="article-body"><p>%s</p><p>%s</p></div>
+                </body></html>
+                """.formatted(PUBLISHER_NOTICE, COPYRIGHT_NOTICE, PARAGRAPH, PARAGRAPH);
+
+        String body = ArticleContentExtractor.extract(html, "https://example.com/1");
+
+        assertEquals(String.join("\n\n", PARAGRAPH.strip(), PARAGRAPH.strip()), body);
+    }
+
+    @Test
+    void selectsUsableArticleInsteadOfLongerPublisherFooterBlock() {
+        String html = """
+                <html><body>
+                  <div><p>%s</p><p>%s</p></div>
+                  <div><p>%s</p><p>%s</p></div>
+                </body></html>
+                """.formatted(PUBLISHER_NOTICE.repeat(3), COPYRIGHT_NOTICE.repeat(3), PARAGRAPH, PARAGRAPH);
+
+        String body = ArticleContentExtractor.extract(html, "https://example.com/1");
+
+        assertEquals(String.join("\n\n", PARAGRAPH.strip(), PARAGRAPH.strip()), body);
+    }
+
+    @Test
+    void selectsNestedArticleWithoutCountingItsTextForOuterWrapper() {
+        String paragraph = "합성 연구소가 실험 결과와 향후 일정을 발표했다. ".repeat(5);
+        String html = """
+                <html><body><div>
+                  <p>배너 안내</p><p>구독 안내</p>
+                  <section><p>%s</p><p>%s</p></section>
+                </div></body></html>
+                """.formatted(paragraph, paragraph);
+
+        String body = ArticleContentExtractor.extract(html, "https://example.com/1");
+
+        assertEquals(String.join("\n\n", paragraph.strip(), paragraph.strip()), body);
+    }
+
+    @Test
+    void acceptsNestedArticleWhenDirectParagraphsAloneAreShort() {
+        String firstParagraph = "A".repeat(80);
+        String nestedParagraph = "B".repeat(80);
+        String lastParagraph = "C".repeat(80);
+        String html = """
+                <html><body><div>
+                  <p>%s</p><section><p>%s</p></section><p>%s</p>
+                </div></body></html>
+                """.formatted(firstParagraph, nestedParagraph, lastParagraph);
+
+        String body = ArticleContentExtractor.extract(html, "https://example.com/1");
+
+        assertEquals(String.join("\n\n", firstParagraph, nestedParagraph, lastParagraph), body);
+    }
+
+    @Test
+    void rejectsShortArticlePaddedByPublisherFooter() {
+        String html = """
+                <html><body><article><p>합성 연구소가 새 실험 일정을 발표했다.</p><p>%s</p><p>%s</p></article></body></html>
+                """.formatted(PUBLISHER_NOTICE, COPYRIGHT_NOTICE);
+
+        assertNull(ArticleContentExtractor.extract(html, "https://example.com/1"));
+    }
+
+    @Test
+    void preservesOriginalArticleTextWithPublisherFooter() {
+        String html = """
+                <html><body><article><p>%s</p><p>%s</p><p>%s</p><p>%s</p></article></body></html>
+                """.formatted(PARAGRAPH, PARAGRAPH, PUBLISHER_NOTICE, COPYRIGHT_NOTICE);
+
+        String body = ArticleContentExtractor.extract(html, "https://example.com/1");
+
+        assertEquals(String.join("\n\n", PARAGRAPH.strip(), PARAGRAPH.strip(),
+                PUBLISHER_NOTICE.strip(), COPYRIGHT_NOTICE.strip()), body);
     }
 
     /**
