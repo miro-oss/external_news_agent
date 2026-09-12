@@ -104,10 +104,14 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
         IssueContext issueContext = issueContext(article);
         boolean promoted = issueContext.membership() != null
                 && issueContext.membership().getStanceSource() == IssueStanceSource.LLM;
-        Article analyzedArticle = promoted || issueContext.representative() == null
+        // 과거 보고서의 articleId/runId 인용은 현재 대표가 바뀌어도 같은 근거를 가리켜야 한다.
+        Finding requestedRunFinding = runId == null ? null : findFinding(articleId, runId);
+        Article analyzedArticle = requestedRunFinding != null || promoted || issueContext.representative() == null
                 ? article
                 : issueContext.representative().getArticle();
-        Finding finding = findFinding(analyzedArticle.getId(), runId);
+        Finding finding = requestedRunFinding != null
+                ? requestedRunFinding
+                : findFinding(analyzedArticle.getId(), runId);
         Article representativeArticle = issueContext.representative() == null
                 ? null
                 : issueContext.representative().getArticle();
