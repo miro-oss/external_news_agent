@@ -46,7 +46,7 @@ class ArticleQueryServiceIssueTest {
             com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
 
     @Test
-    void memberDetailUsesRepresentativeAnalysisAndLinksIssue() {
+    void memberDetailWithoutRunUsesRepresentativeEvenWhenOwnFindingExists() {
         Topic topic = Topic.builder().id(7L).name("HBM").build();
         Source source = Source.builder().id(9L).name("전자신문").build();
         Article representative = article(101L, "대표 기사", "대표 본문", topic, source);
@@ -69,16 +69,77 @@ class ArticleQueryServiceIssueTest {
                 .thenReturn(List.of(representativeMembership, memberMembership));
         when(findingRepository.findFirstByArticleIdOrderByIdDesc(101L))
                 .thenReturn(Optional.of(finding));
+        when(findingRepository.findFirstByArticleIdOrderByIdDesc(102L))
+                .thenReturn(Optional.of(historicalMemberFinding(member, 42L)));
 
         ArticleResDTO.Detail detail = service.getArticle(102L, null);
 
         assertEquals(88L, detail.getIssueId());
         assertEquals(101L, detail.getAnalysisArticleId());
         assertEquals("대표 분석", detail.getAnalysis().getSummary());
+        assertEquals(42L, detail.getAnalysis().getRunId());
         assertEquals("대표 근거 문장", detail.getBodyText());
         assertEquals(List.of(101L), detail.getRelatedArticles().stream()
                 .map(ArticleResDTO.RelatedArticle::getId)
                 .toList());
+    }
+
+    @Test
+    void requestedRunPreservesMembersOwnHistoricalAnalysisAfterRepresentativeChanges() {
+        Topic topic = Topic.builder().id(7L).name("합성 검증 주제").build();
+        Source source = Source.builder().id(9L).name("합성 검증 소스").build();
+        Article representative = article(101L, "현재 대표 기사", "대표의 현재 본문", topic, source);
+        Article member = article(102L, "과거 대표 기사", "복구 후 달라진 현재 본문", topic, source);
+        stubRuleMemberIssue(member, representative, topic);
+        when(findingRepository.findByRunIdAndArticleId(42L, 102L))
+                .thenReturn(Optional.of(historicalMemberFinding(member, 42L)));
+        // 같은 과거 run에 현재 대표의 분석도 있어야 기존의 own-finding fallback으로 통과하지 않는다.
+        when(findingRepository.findByRunIdAndArticleId(42L, 101L))
+                .thenReturn(Optional.of(finding(representative)));
+
+        ArticleResDTO.Detail detail = service.getArticle(102L, 42L);
+
+        assertEquals(102L, detail.getId());
+        assertEquals(102L, detail.getAnalysisArticleId());
+        assertEquals(42L, detail.getAnalysis().getRunId());
+        assertEquals("멤버의 과거 분석", detail.getAnalysis().getSummary());
+        assertEquals("과거 배경 문장 과거 주장을 뒷받침하는 문장", detail.getBodyText());
+        assertEquals(List.of(0, 1), detail.getSentences().stream()
+                .map(ArticleResDTO.Sentence::getIndex).toList());
+        assertEquals(List.of("과거 배경 문장", "과거 주장을 뒷받침하는 문장"),
+                detail.getSentences().stream().map(ArticleResDTO.Sentence::getText).toList());
+        ArticleResDTO.KeyPoint point = detail.getAnalysis().getKeyPoints().getFirst();
+        assertEquals("멤버의 과거 주장", point.getText());
+        assertEquals(List.of(1), point.getEvidence());
+        assertEquals("과거 주장을 뒷받침하는 문장", detail.getSentences().stream()
+                .filter(sentence -> point.getEvidence().contains(sentence.getIndex()))
+                .findFirst().orElseThrow().getText());
+        assertEquals(88L, detail.getIssueId());
+        assertEquals(List.of(101L), detail.getRelatedArticles().stream()
+                .map(ArticleResDTO.RelatedArticle::getId).toList());
+    }
+
+    @Test
+    void ruleMemberWithoutOwnFindingFallsBackToRepresentativeForRequestedRun() {
+        Topic topic = Topic.builder().id(7L).name("합성 검증 주제").build();
+        Source source = Source.builder().id(9L).name("합성 검증 소스").build();
+        Article representative = article(101L, "대표 기사", "대표의 현재 본문", topic, source);
+        Article member = article(102L, "멤버 기사", "멤버의 현재 본문", topic, source);
+        stubRuleMemberIssue(member, representative, topic);
+        when(findingRepository.findByRunIdAndArticleId(42L, 102L)).thenReturn(Optional.empty());
+        when(findingRepository.findByRunIdAndArticleId(42L, 101L))
+                .thenReturn(Optional.of(finding(representative)));
+        when(findingRepository.findFirstByArticleIdOrderByIdDesc(102L))
+                .thenReturn(Optional.of(historicalMemberFinding(member, 50L)));
+
+        ArticleResDTO.Detail detail = service.getArticle(102L, 42L);
+
+        assertEquals(101L, detail.getAnalysisArticleId());
+        assertEquals(42L, detail.getAnalysis().getRunId());
+        assertEquals("대표 분석", detail.getAnalysis().getSummary());
+        assertEquals("대표 근거 문장", detail.getBodyText());
+        assertEquals(List.of(0), detail.getAnalysis().getKeyPoints().getFirst().getEvidence());
+        assertEquals("대표 근거 문장", detail.getSentences().getFirst().getText());
     }
 
     @Test
@@ -209,6 +270,41 @@ class ArticleQueryServiceIssueTest {
         assertEquals(101L, detail.getAnalysisArticleId());
         assertEquals("대표 기사 분석", detail.getAnalysis().getSummary());
         assertEquals("대표 근거 문장", detail.getBodyText());
+    }
+
+    private void stubRuleMemberIssue(Article member, Article representative, Topic topic) {
+        NewsIssue issue = NewsIssue.builder()
+                .id(88L)
+                .title("합성 검증 이슈")
+                .status(IssueStatus.EMERGING)
+                .topic(topic)
+                .build();
+        IssueArticle memberMembership = membership(2L, issue, member, IssueArticleRole.MEMBER);
+        when(articleRepository.findById(member.getId())).thenReturn(Optional.of(member));
+        when(issueArticleRepository.findByArticleIdOrderByIssueIdAsc(member.getId()))
+                .thenReturn(List.of(memberMembership));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(88L))
+                .thenReturn(List.of(membership(1L, issue, representative, IssueArticleRole.REPRESENTATIVE),
+                        memberMembership));
+    }
+
+    private Finding historicalMemberFinding(Article member, Long runId) {
+        return Finding.builder()
+                .id(502L)
+                .run(CollectionRun.builder().id(runId).build())
+                .article(member)
+                .changeType(ChangeType.NEW)
+                .summary("멤버의 과거 분석")
+                .keyPoints(List.of(new FindingKeyPoint("멤버의 과거 주장", List.of(1), "grounded")))
+                .sentiment(Sentiment.NEUTRAL)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.MEDIUM))
+                .relevance(Relevance.IMPORTANT)
+                .category("기업")
+                .analysisSource(AnalysisSource.LLM)
+                .sections(List.of(new FindingSection(0, "과거 배경 문장"),
+                        new FindingSection(1, "과거 주장을 뒷받침하는 문장")))
+                .analyzedAt(LocalDateTime.of(2026, 8, 10, 10, 2))
+                .build();
     }
 
     private Article article(Long id, String title, String body, Topic topic, Source source) {
