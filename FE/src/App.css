@@ -3975,7 +3975,6 @@ body.modal-open {
   font-weight: 600;
 }
 
-/* 이름 아래에 실제로 나간 주소를 한 줄 더 깐다. 줄바꿈은 막고 넘치면 잘라 표를 지킨다. */
 .delivery-recipient {
   min-width: 0;
 }
@@ -3983,15 +3982,6 @@ body.modal-open {
 .delivery-recipient strong {
   display: block;
   font-weight: 600;
-}
-
-.delivery-recipient span {
-  display: block;
-  overflow: hidden;
-  color: var(--fg-3);
-  font-size: 0.76rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .muted-cell {

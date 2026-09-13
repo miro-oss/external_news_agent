@@ -319,7 +319,6 @@ function DeliveryLogTable({
             </td>
             <td className="delivery-recipient">
               <strong>{log.recipientName}</strong>
-              {log.channelType === 'EMAIL' && <span title={log.address}>{log.address}</span>}
             </td>
             <td className="delivery-group" title={groupNames.join(' · ') || undefined}>
               {groupNames.length > 0 ? groupNames.join(' · ') : <span className="muted-cell">그룹 미지정</span>}
