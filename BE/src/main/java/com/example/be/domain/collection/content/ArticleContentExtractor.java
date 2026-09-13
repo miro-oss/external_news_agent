@@ -27,17 +27,17 @@ public final class ArticleContentExtractor {
             "script, style, noscript, iframe, form, nav, header, footer, aside, "
                     + "figure figcaption, .advertisement, .ad, .banner, .comment, .comments, .related";
 
-    /** 매체가 본문을 표시할 때 흔히 쓰는 자리. 앞에 있는 것부터 본다. */
+    /** 본문 전용 영역. 메타 태그는 표시되는 본문 영역이 아니다. */
     private static final List<String> CONTENT_SELECTORS = List.of(
-            "[itemprop=articleBody]",
-            "article",
+            "[itemprop=articleBody]:not(meta):not(link)",
             "#articleBody",
             ".article-body",
             ".article_body",
             ".news-content",
-            "#newsct_article",
-            "main"
+            "#newsct_article"
     );
+
+    private static final List<String> GENERIC_CONTENT_SELECTORS = List.of("article", "main");
 
     /**
      * 이보다 짧으면 본문을 못 받은 것으로 본다. 페이월은 보통 "로그인하세요" 한 줄만 준다.
@@ -89,25 +89,26 @@ public final class ArticleContentExtractor {
     private static String extract(Document document) {
         document.select(NOISE_SELECTOR).remove();
 
-        String body = fromKnownSelectors(document);
-        if (body == null) {
-            body = fromDensestBlock(document);
+        String body = fromKnownSelectors(document, CONTENT_SELECTORS);
+        // 빈 본문 틀을 받은 페이지에서 주변 키워드·관련기사로 전문 길이를 채우지 않는다.
+        if (body == null && document.select(String.join(", ", CONTENT_SELECTORS)).isEmpty()) {
+            body = fromKnownSelectors(document, GENERIC_CONTENT_SELECTORS);
+            if (body == null) {
+                body = fromDensestBlock(document);
+            }
         }
 
         // 저장 원문은 유지하되, 매체 푸터가 본문 확보 기준을 채우지는 못하게 한다.
         return ArticleBodyCleaner.withoutTrailingBoilerplate(body).length() >= MIN_BODY_LENGTH ? body : null;
     }
 
-    private static String fromKnownSelectors(Document document) {
-        for (String selector : CONTENT_SELECTORS) {
-            Element element = document.selectFirst(selector);
-            if (element == null) {
-                continue;
-            }
-
-            String text = textOf(element);
-            if (ArticleBodyCleaner.withoutTrailingBoilerplate(text).length() >= MIN_BODY_LENGTH) {
-                return text;
+    private static String fromKnownSelectors(Document document, List<String> selectors) {
+        for (String selector : selectors) {
+            for (Element element : document.select(selector)) {
+                String text = textOf(element);
+                if (ArticleBodyCleaner.withoutTrailingBoilerplate(text).length() >= MIN_BODY_LENGTH) {
+                    return text;
+                }
             }
         }
 

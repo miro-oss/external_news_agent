@@ -39,6 +39,53 @@ class ArticleContentExtractorTest {
     }
 
     @Test
+    void rejectsEmptyExplicitBodyInsteadOfUsingSurroundingLinks() {
+        String links = "<a href='/other'>관련 없는 행사와 기업의 다른 기사 목록입니다.</a>".repeat(15);
+        String html = """
+                <html><body><main><article>
+                  <div itemprop="articleBody"><figure><figcaption>사진 설명</figcaption></figure><p></p></div>
+                  <div><p>관련 키워드</p><p>%s</p></div>
+                </article></main></body></html>
+                """.formatted(links);
+
+        assertNull(ArticleContentExtractor.extract(html, "https://example.com/empty"));
+    }
+
+    @Test
+    void prefersExplicitBodyOverEarlierBroadArticle() {
+        String html = """
+                <html><body>
+                  <article><p>%s</p></article>
+                  <div id="articleBody"><p>%s</p></div>
+                </body></html>
+                """.formatted("주변 추천 기사 소식입니다. ".repeat(30), PARAGRAPH.repeat(2));
+
+        assertEquals(PARAGRAPH.repeat(2).strip(), ArticleContentExtractor.extract(html, "https://example.com/explicit"));
+    }
+
+    @Test
+    void triesEveryExplicitBodyBeforeRejectingEmptyPlaceholder() {
+        String html = """
+                <html><body>
+                  <div itemprop="articleBody"><p></p></div>
+                  <div itemprop="articleBody"><p>%s</p></div>
+                </body></html>
+                """.formatted(PARAGRAPH.repeat(2));
+
+        assertEquals(PARAGRAPH.repeat(2).strip(), ArticleContentExtractor.extract(html, "https://example.com/second"));
+    }
+
+    @Test
+    void doesNotTreatMetadataAsAnEmptyVisibleBody() {
+        String html = """
+                <html><head><meta itemprop="articleBody" content="본문 메타 정보"></head>
+                <body><article><p>%s</p></article></body></html>
+                """.formatted(PARAGRAPH.repeat(2));
+
+        assertEquals(PARAGRAPH.repeat(2).strip(), ArticleContentExtractor.extract(html, "https://example.com/metadata"));
+    }
+
+    @Test
     void readsDirectArticleTextInsteadOfFallingBackToUnrelatedHeadlines() {
         String firstParagraph = "합성 연구소가 새 관측 장비를 공개하고 다음 달 실험 일정을 안내했다. ".repeat(4).strip();
         String secondParagraph = "실험팀은 측정 정밀도를 확인한 뒤 지역 연구 기관에 장비를 제공할 예정이다. ".repeat(4).strip();
