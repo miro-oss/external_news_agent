@@ -12,6 +12,8 @@ final class StrongEventEvidence {
     private final ProductEventEvidence product;
     private final NamedEventEvidence named;
     private final StockEventEvidence stock;
+    private final InstitutionalEventEvidence institutional;
+    private final CommercialProductEventEvidence commercial;
     private final Map<Long, OffsetDateTime> times = new HashMap<>();
 
     StrongEventEvidence(List<ClusterArticle> articles, BreakingNewsDetector detector) {
@@ -19,6 +21,8 @@ final class StrongEventEvidence {
         product = new ProductEventEvidence(articles, detector);
         named = new NamedEventEvidence(articles, detector);
         stock = new StockEventEvidence(articles, detector);
+        institutional = new InstitutionalEventEvidence(articles, detector);
+        commercial = new CommercialProductEventEvidence(articles, detector);
         articles.forEach(article -> times.put(article.articleId(), article.eventTime()));
     }
 
@@ -31,11 +35,13 @@ final class StrongEventEvidence {
             return false;
         }
         return specific.matches(left, right) || product.matches(left, right)
-                || named.matches(left, right) || stock.matches(left, right);
+                || named.matches(left, right) || stock.matches(left, right)
+                || institutional.matches(left, right) || commercial.matches(left, right);
     }
 
     boolean conflicts(long left, long right) {
         return specific.conflicts(left, right) || product.conflicts(left, right)
-                || named.conflicts(left, right) || stock.conflicts(left, right);
+                || named.conflicts(left, right) || stock.conflicts(left, right)
+                || institutional.conflicts(left, right) || commercial.conflicts(left, right);
     }
 }

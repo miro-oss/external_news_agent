@@ -22,6 +22,20 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
     @EntityGraph(attributePaths = {"issue", "issue.topic", "article", "article.source", "article.contentGroup"})
     List<IssueArticle> findByIssueIdOrderByJoinedAtAsc(Long issueId);
 
+    /** 최근 조회 범위 밖에서 재관측된 이슈의 멤버를 제한된 ID 배치로 읽는다. */
+    @Query("""
+            SELECT membership
+            FROM IssueArticle membership
+            JOIN FETCH membership.issue issue
+            JOIN FETCH issue.topic
+            JOIN FETCH membership.article article
+            JOIN FETCH article.source
+            LEFT JOIN FETCH article.contentGroup
+            WHERE issue.id IN :issueIds
+            ORDER BY issue.id ASC, membership.joinedAt ASC, membership.id ASC
+            """)
+    List<IssueArticle> findByIssueIdsOrderByIssueIdAscJoinedAtAsc(@Param("issueIds") Collection<Long> issueIds);
+
     @EntityGraph(attributePaths = {"issue", "issue.topic", "article", "article.source", "article.contentGroup"})
     List<IssueArticle> findByArticleIdOrderByIssueIdAsc(Long articleId);
 

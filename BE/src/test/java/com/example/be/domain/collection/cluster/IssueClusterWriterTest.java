@@ -43,6 +43,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -341,6 +342,156 @@ class IssueClusterWriterTest {
     }
 
     @Test
+    void metadataOnlyFollowUpKeepsMembershipAndCountsWithoutClaimingOrEnqueuingWatch() {
+        Topic topic = topic();
+        Article original = article(1L, "[속보] 연구 장비 출시", topic);
+        Article metadata = article(2L, "연구 장비 후속 소식", topic);
+        metadata.applyFullText("요약만 복사된 텍스트", FetchStatus.METADATA_ONLY, LocalDateTime.now());
+        NewsWatch watch = prepareWatchedIssue(topic, original, metadata);
+
+        writer.write(new ClusterPlan(List.of(),
+                List.of(assignment(100L, List.of(), topic, original)), List.of()));
+
+        ArgumentCaptor<IssueArticle> membership = ArgumentCaptor.forClass(IssueArticle.class);
+        verify(issueArticleRepository).save(membership.capture());
+        assertSame(metadata, membership.getValue().getArticle());
+        assertEquals(2, watch.getIssue().getArticleCount());
+        assertEquals(2, watch.getIssue().getPublisherCount());
+        assertNull(watch.getCooldownUntil());
+        verify(watchAlertOutboxRepository, never()).save(any());
+    }
+
+    @Test
+    void whitespaceOnlyFullTextFollowUpDoesNotEnqueueAlert() {
+        Topic topic = topic();
+        Article original = article(1L, "[속보] 연구 장비 출시", topic);
+        Article empty = article(2L, "연구 장비 후속 소식", topic);
+        empty.applyFullText(" \n\t ", FetchStatus.FULLTEXT, LocalDateTime.now());
+        NewsWatch watch = prepareWatchedIssue(topic, original, empty);
+
+        writer.write(new ClusterPlan(List.of(),
+                List.of(assignment(100L, List.of(), topic, original)), List.of()));
+
+        verify(issueArticleRepository).save(any());
+        assertNull(watch.getCooldownUntil());
+        verify(watchAlertOutboxRepository, never()).save(any());
+    }
+
+    @Test
+    void firstVisibleArticleDoesNotInventAFollowUpToHiddenBreakingArticle() {
+        Topic topic = topic();
+        Article hidden = article(1L, "[속보] 본문을 확보하지 못한 제목", topic);
+        hidden.applyFullText(null, FetchStatus.FETCH_FAILED, LocalDateTime.now());
+        Article followUp = article(2L, "확보한 후속 기사의 제목", topic);
+        NewsWatch watch = prepareWatchedIssue(topic, hidden, followUp);
+
+        writer.write(new ClusterPlan(List.of(),
+                List.of(assignment(100L, List.of(), topic, followUp)), List.of()));
+
+        verify(watchAlertOutboxRepository, never()).save(any());
+        assertNull(watch.getCooldownUntil());
+        assertEquals(2, watch.getIssue().getArticleCount());
+        assertEquals(2, watch.getIssue().getPublisherCount());
+    }
+
+    @Test
+    void alertCountsOnlyVisibleMembersWhileIssueKeepsAllCollectedMembers() {
+        Topic topic = topic();
+        Article original = article(1L, "[속보] 연구 장비 출시", topic);
+        Article followUp = article(2L, "연구 장비 후속 소식", topic);
+        Article metadata = article(3L, "메타데이터 기사", topic);
+        metadata.applyFullText("복사된 요약", FetchStatus.METADATA_ONLY, LocalDateTime.now());
+        Article blank = article(4L, "공백 본문 기사", topic);
+        blank.applyFullText(" \n\t ", FetchStatus.FULLTEXT, LocalDateTime.now());
+        Article failed = article(5L, "본문 수집 실패 기사", topic);
+        failed.applyFullText(null, FetchStatus.FETCH_FAILED, LocalDateTime.now());
+        NewsWatch watch = prepareWatchedIssue(topic, original, followUp);
+        NewsIssue issue = watch.getIssue();
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L)).thenReturn(List.of(
+                membership(11L, issue, original, IssueArticleRole.BREAKING),
+                membership(13L, issue, metadata, IssueArticleRole.MEMBER),
+                membership(14L, issue, blank, IssueArticleRole.MEMBER),
+                membership(15L, issue, failed, IssueArticleRole.MEMBER)));
+
+        writer.write(new ClusterPlan(List.of(),
+                List.of(assignment(100L, List.of(), topic, followUp)), List.of()));
+
+        ArgumentCaptor<WatchAlertOutbox> alert = ArgumentCaptor.forClass(WatchAlertOutbox.class);
+        verify(watchAlertOutboxRepository).save(alert.capture());
+        assertEquals(1, alert.getValue().getFollowUpCount());
+        assertEquals(2, alert.getValue().getPublisherCount());
+        assertEquals("연구 장비 출시", alert.getValue().getIssueTitle());
+        assertEquals(5, issue.getArticleCount());
+        assertEquals(5, issue.getPublisherCount());
+        assertEquals(5, issue.getIndependentContentCount());
+    }
+
+    @Test
+    void visiblePublisherCountNormalizesNamesAndUsesSourceFallback() {
+        Topic topic = topic();
+        Article original = article(1L, "[속보] 연구 장비 출시", topic);
+        Article followUp = article(2L, "연구 장비 후속 소식", topic);
+        org.springframework.test.util.ReflectionTestUtils.setField(original, "sourceName", "  News Wire  ");
+        org.springframework.test.util.ReflectionTestUtils.setField(followUp, "sourceName", " ");
+        org.springframework.test.util.ReflectionTestUtils.setField(followUp, "source",
+                Source.builder().id(2L).name("news wire").build());
+        Article hidden = article(3L, "숨긴 다른 매체 기사", topic);
+        hidden.applyFullText(null, FetchStatus.METADATA_ONLY, LocalDateTime.now());
+        NewsWatch watch = prepareWatchedIssue(topic, original, followUp);
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L)).thenReturn(List.of(
+                membership(11L, watch.getIssue(), original, IssueArticleRole.BREAKING),
+                membership(13L, watch.getIssue(), hidden, IssueArticleRole.MEMBER)));
+
+        writer.write(new ClusterPlan(List.of(),
+                List.of(assignment(100L, List.of(), topic, followUp)), List.of()));
+
+        ArgumentCaptor<WatchAlertOutbox> alert = ArgumentCaptor.forClass(WatchAlertOutbox.class);
+        verify(watchAlertOutboxRepository).save(alert.capture());
+        assertEquals(1, alert.getValue().getFollowUpCount());
+        assertEquals(1, alert.getValue().getPublisherCount());
+        assertEquals(3, watch.getIssue().getArticleCount());
+        assertEquals(2, watch.getIssue().getPublisherCount());
+    }
+
+    @Test
+    void visibleFollowUpsUseAvailableTitleInsteadOfHiddenBreakingTitle() {
+        Topic topic = topic();
+        Article hidden = article(1L, "[속보] 본문을 확보하지 못한 제목", topic);
+        hidden.applyFullText(null, FetchStatus.FETCH_FAILED, LocalDateTime.now());
+        Article followUp = article(2L, "확보한 후속 기사의 제목", topic);
+        Article visibleMember = article(3L, "확보한 다른 기사의 제목", topic);
+        NewsWatch watch = prepareWatchedIssue(topic, hidden, followUp);
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L)).thenReturn(List.of(
+                membership(11L, watch.getIssue(), hidden, IssueArticleRole.BREAKING),
+                membership(13L, watch.getIssue(), visibleMember, IssueArticleRole.MEMBER)));
+
+        writer.write(new ClusterPlan(List.of(),
+                List.of(assignment(100L, List.of(), topic, followUp)), List.of()));
+
+        ArgumentCaptor<WatchAlertOutbox> alert = ArgumentCaptor.forClass(WatchAlertOutbox.class);
+        verify(watchAlertOutboxRepository).save(alert.capture());
+        assertEquals(followUp.getTitle(), alert.getValue().getIssueTitle());
+        assertEquals(followUp.getPublishedAt(), alert.getValue().getFirstSeenAt());
+        assertEquals(1, alert.getValue().getFollowUpCount());
+        assertEquals(2, alert.getValue().getPublisherCount());
+        assertEquals(3, watch.getIssue().getArticleCount());
+    }
+
+    private NewsWatch prepareWatchedIssue(Topic topic, Article original, Article followUp) {
+        NewsIssue issue = issue(100L, topic, original.getTitle());
+        NewsWatch watch = NewsWatch.builder().id(50L).watchType(WatchType.BREAKING).issue(issue)
+                .expiresAt(LocalDateTime.now(ApiTimeZone.ZONE).plusHours(24)).active(true).build();
+        when(articleRepository.findAllById(any())).thenReturn(List.of(original, followUp));
+        when(topicRepository.findById(topic.getId())).thenReturn(Optional.of(topic));
+        when(issueRepository.findById(100L)).thenReturn(Optional.of(issue));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L))
+                .thenReturn(List.of(membership(11L, issue, original, IssueArticleRole.REPRESENTATIVE)));
+        when(issueArticleRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(watchRepository.findEligibleForNotification(any(), any())).thenReturn(List.of(watch));
+        return watch;
+    }
+
+    @Test
     void correctionKeepsOriginalArticleAsStanceReferenceEvenWhenItBecomesRepresentative() {
         Topic topic = topic();
         Article original = article(1L, "삼성전자 HBM4 양산 확정", topic);
@@ -473,6 +624,7 @@ class IssueClusterWriterTest {
                 .source(source)
                 .sourceName(source.getName())
                 .fetchStatus(FetchStatus.FULLTEXT)
+                .body("확보한 기사 본문")
                 .publishedAt(OffsetDateTime.parse("2026-08-10T10:00:00+09:00").plusMinutes(id))
                 .build();
     }

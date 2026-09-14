@@ -30,6 +30,18 @@ public class IssueStatusCalculator {
     private final OfficialCorrectionPolicy officialCorrectionPolicy;
 
     public Projection calculate(NewsIssue issue, List<IssueArticle> memberships) {
+        return calculate(issue, memberships, false);
+    }
+
+    /** Read-only delivery view: hidden participants cannot leave a partial conflict behind. */
+    public Projection calculateFromFullText(NewsIssue issue, List<IssueArticle> memberships) {
+        List<IssueArticle> visible = memberships == null ? List.of() : memberships.stream()
+                .filter(value -> value.getArticle().hasFullText()).toList();
+        return calculate(issue, visible, true);
+    }
+
+    private Projection calculate(NewsIssue issue, List<IssueArticle> memberships,
+                                 boolean requireCompleteConflicts) {
         List<IssueArticle> current = memberships == null ? List.of() : List.copyOf(memberships);
         List<IssueArticle> llmRetractions = current.stream()
                 .filter(value -> value.getStance() == IssueStance.RETRACTS)
@@ -46,7 +58,7 @@ public class IssueStatusCalculator {
                 && value.getStanceSource() == IssueStanceSource.LLM)) {
             return new Projection(IssueStatus.DISPUTED, "LLM 확인 반박 기사 관측");
         }
-        if (hasIndependentConflict(issue.getCrossSource(), current)) {
+        if (hasIndependentConflict(issue.getCrossSource(), current, requireCompleteConflicts)) {
             return new Projection(IssueStatus.DISPUTED, "서로 다른 매체·독립 본문 간 교차 출처 충돌");
         }
 
@@ -62,7 +74,8 @@ public class IssueStatusCalculator {
     }
 
     private boolean hasIndependentConflict(IssueCrossSource crossSource,
-                                           List<IssueArticle> memberships) {
+                                           List<IssueArticle> memberships,
+                                           boolean requireCompleteParticipants) {
         if (crossSource == null || crossSource.conflicts().isEmpty()) {
             return false;
         }
@@ -73,6 +86,9 @@ public class IssueStatusCalculator {
                         (left, right) -> left,
                         HashMap::new));
         return crossSource.conflicts().stream().anyMatch(conflict -> {
+            if (requireCompleteParticipants && !byArticleId.keySet().containsAll(conflict.articleIds())) {
+                return false;
+            }
             List<IssueArticle> participants = conflict.articleIds().stream()
                     .map(byArticleId::get)
                     .filter(value -> value != null)

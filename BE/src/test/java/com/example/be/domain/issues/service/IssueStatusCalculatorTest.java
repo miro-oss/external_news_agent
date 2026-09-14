@@ -1,6 +1,7 @@
 package com.example.be.domain.issues.service;
 
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.issues.entity.ContentGroup;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
@@ -66,6 +67,43 @@ class IssueStatusCalculatorTest {
                         IssueStanceSource.RULE, "0.9"));
 
         assertEquals(IssueStatus.DISPUTED, calculator.calculate(issue, memberships).status());
+        assertEquals(IssueStatus.DISPUTED, calculator.calculateFromFullText(issue, memberships).status());
+    }
+
+    @Test
+    void fullTextViewExcludesWholeConflictWhenOneParticipantHasNoBody() {
+        IssueCrossSource crossSource = new IssueCrossSource(List.of(), List.of(),
+                List.of(new IssueCrossSource.Conflict(List.of(1L, 2L, 3L), "두 매체와 세 번째 매체의 충돌")),
+                List.of());
+        NewsIssue issue = issue(crossSource);
+        issue.applyStatus(IssueStatus.DISPUTED);
+        Article hidden = article(3L, "매체C", null);
+        hidden.applyFullText(null, FetchStatus.METADATA_ONLY, LocalDateTime.now());
+        List<IssueArticle> memberships = List.of(
+                membership(1L, issue, article(1L, "매체A", null), IssueStance.SUPPORTS, IssueStanceSource.LLM, "0.9"),
+                membership(2L, issue, article(2L, "매체B", null), IssueStance.SUPPORTS, IssueStanceSource.LLM, "0.9"),
+                membership(3L, issue, hidden, IssueStance.SUPPORTS, IssueStanceSource.LLM, "0.9"));
+
+        assertEquals(IssueStatus.DISPUTED, calculator.calculate(issue, memberships).status());
+        assertEquals(IssueStatus.CORROBORATED, calculator.calculateFromFullText(issue, memberships).status());
+        assertEquals(crossSource, issue.getCrossSource());
+        assertEquals(List.of(1L, 2L, 3L), issue.getCrossSource().conflicts().getFirst().articleIds());
+        assertEquals(IssueStatus.DISPUTED, issue.getStatus());
+    }
+
+    @Test
+    void fullTextViewDoesNotUseHiddenLlmDisputeAsItsOnlyRefutationEvidence() {
+        NewsIssue issue = issue(IssueCrossSource.empty());
+        issue.applyStatus(IssueStatus.DISPUTED);
+        Article hidden = article(2L, "매체B", null);
+        hidden.applyFullText(" \n\t ", FetchStatus.FULLTEXT, LocalDateTime.now());
+        List<IssueArticle> memberships = List.of(
+                membership(1L, issue, article(1L, "매체A", null), IssueStance.SUPPORTS, IssueStanceSource.LLM, "0.9"),
+                membership(2L, issue, hidden, IssueStance.DISPUTES, IssueStanceSource.LLM, "0.9"));
+
+        assertEquals(IssueStatus.DISPUTED, calculator.calculate(issue, memberships).status());
+        assertEquals(IssueStatus.EMERGING, calculator.calculateFromFullText(issue, memberships).status());
+        assertEquals(IssueStatus.DISPUTED, issue.getStatus());
     }
 
     @Test
@@ -103,6 +141,8 @@ class IssueStatusCalculatorTest {
                 .title("기사 " + id)
                 .source(source)
                 .sourceName(publisher)
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .body("확보한 기사 본문")
                 .build();
         article.assignContentGroup(contentGroup);
         return article;

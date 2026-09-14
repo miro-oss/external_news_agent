@@ -112,6 +112,11 @@ public class Article {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    /** 사용자용 결과는 수집에 성공했고 실제 전문이 있는 기사로 제한한다. */
+    public boolean hasFullText() {
+        return fetchStatus == FetchStatus.FULLTEXT && body != null && !body.isBlank();
+    }
+
     /**
      * 이미 있던 기사를 다시 만났을 때 내용이 바뀌었는지 본다. 발행일이나 요약이 조금 달라지는 일은 흔해서,
      * 본문 해시가 같으면 갱신으로 치지 않는다.

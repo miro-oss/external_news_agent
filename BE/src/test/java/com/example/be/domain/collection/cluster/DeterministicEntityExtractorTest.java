@@ -203,4 +203,36 @@ class DeterministicEntityExtractorTest {
                 Set.of("SK하이닉스", "엔비디아", "HBM4"),
                 extractor.canonicalizeEntities(List.of("SK hynix", "NVIDIA", "HBM4")));
     }
+
+    @Test
+    void genericUniversityCategoriesNeverBecomeTitleOrganizationsInEitherSpelling() {
+        for (String generic : List.of("전문", "종합", "국립", "사립", "비수도권", "지역")) {
+            for (String ending : List.of("대", "대학", "대학교")) {
+                String title = generic + ending + " 연구팀의 반도체 교육 확대";
+                assertEquals(Set.of(), DeterministicEntityExtractor.institutionSubjects(title), title);
+                assertEquals(Set.of(), extractor.extractTitleOrganizations(title), title);
+            }
+        }
+    }
+
+    @Test
+    void removingAGenericCategoryKeepsTheNamedUniversitySubject() {
+        assertEquals(Set.of("해솔대"), extractor.extractTitleOrganizations(
+                "해솔대학교 연구팀, 지역대·전문대학 학생 교육 지원"));
+        assertEquals(Set.of("해솔대"), extractor.extractTitleOrganizations(
+                "해솔대 연구팀, 지역대학·전문대 학생 교육 지원"));
+    }
+
+    @Test
+    void namedUniversitiesAndExplicitAliasesKeepTheirAcceptedCanonicalSubjects() {
+        for (String name : List.of("해솔대", "해솔대학", "해솔대학교")) {
+            assertEquals(Set.of("해솔대"), extractor.extractTitleOrganizations(name + " 수시 모집 결과"));
+        }
+        for (String name : List.of("한국기술교육대학교", "한국기술교육대", "한기대", "KOREATECH")) {
+            assertEquals(Set.of("한국기술교육대"), extractor.extractTitleOrganizations(name + " 수시 모집 결과"));
+        }
+        for (String name : List.of("한국에너지공과대학교", "에너지공대", "켄텍", "KENTECH")) {
+            assertEquals(Set.of("한국에너지공과대"), extractor.extractTitleOrganizations(name + " 수시 모집 결과"));
+        }
+    }
 }

@@ -6,6 +6,7 @@ import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.service.ReportFindings;
+import com.example.be.domain.reports.service.ReportReadingContent;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.HtmlUtils;
@@ -26,10 +27,12 @@ public class NotificationRenderer {
     }
 
     public RenderedNotification render(NewsReport report, NotificationChannel channel) {
-        List<Finding> findings = ReportFindings.load(report, findingRepository);
+        ReportFindings.Visible visible = ReportFindings.loadVisible(report, findingRepository);
+        List<Finding> findings = visible.findings();
+        ReportReadingContent content = ReportReadingContent.from(report, visible);
         return channel.getChannelType() == ChannelType.EMAIL
-                ? renderEmail(report, findings)
-                : renderTelegram(report, findings, channel.getMaxLength());
+                ? renderEmail(report, findings, content)
+                : renderTelegram(report, findings, content, channel.getMaxLength());
     }
 
     public RenderedNotification renderBreakingAlert(String issueTitle,
@@ -47,21 +50,22 @@ public class NotificationRenderer {
         return new RenderedNotification(null, "HTML", List.of(body));
     }
 
-    private RenderedNotification renderEmail(NewsReport report, List<Finding> findings) {
+    private RenderedNotification renderEmail(NewsReport report, List<Finding> findings, ReportReadingContent content) {
         String subject = "[뉴스 보고서] " + singleLine(normalize(report.getTitle()));
         StringBuilder html = new StringBuilder("<html><body><h2>")
                 .append(escape(report.getTitle())).append("</h2><h3>핵심 요약</h3><ul>");
-        digest(report, findings).forEach(line -> html.append("<li>").append(escape(line)).append("</li>"));
+        digest(content, findings).forEach(line -> html.append("<li>").append(escape(line)).append("</li>"));
         html.append("</ul>");
         appendReportLink(html, report, true);
         appendSources(html, findings, true);
         return new RenderedNotification(subject, null, List.of(html.append("</body></html>").toString()));
     }
 
-    private RenderedNotification renderTelegram(NewsReport report, List<Finding> findings, int maxLength) {
+    private RenderedNotification renderTelegram(NewsReport report, List<Finding> findings,
+                                                 ReportReadingContent content, int maxLength) {
         StringBuilder body = new StringBuilder("<b>").append(escape(limit(normalize(report.getTitle()), 140)))
                 .append("</b>\n\n");
-        digest(report, findings).forEach(line -> body.append("• ").append(escape(line)).append("\n"));
+        digest(content, findings).forEach(line -> body.append("• ").append(escape(line)).append("\n"));
         appendReportLink(body, report, false);
         appendSources(body, findings, false);
         String rendered = body.toString();
@@ -70,15 +74,15 @@ public class NotificationRenderer {
         return new RenderedNotification(null, "HTML", List.of(rendered));
     }
 
-    private List<String> digest(NewsReport report, List<Finding> findings) {
+    private List<String> digest(ReportReadingContent content, List<Finding> findings) {
         List<String> summary = new ArrayList<>();
-        if (report.getStructuredContent() != null) {
-            report.getStructuredContent().executiveSummary().stream()
+        if (content.structuredContent() != null) {
+            content.structuredContent().executiveSummary().stream()
                     .filter(StringUtils::hasText).limit(3).forEach(summary::add);
         }
-        if (summary.isEmpty() && StringUtils.hasText(report.getMarkdownBody())) {
+        if (summary.isEmpty() && StringUtils.hasText(content.markdownBody())) {
             boolean inSummary = false;
-            for (String line : report.getMarkdownBody().split("\\R")) {
+            for (String line : content.markdownBody().split("\\R")) {
                 if (line.matches("^#{1,6}\\s+.*(핵심 요약|오늘의 핵심|요약).*$")) { inSummary = true; continue; }
                 if (inSummary && line.startsWith("#")) break;
                 if (inSummary && StringUtils.hasText(line)) summary.add(line.replaceFirst("^[-*•]\\s*", ""));

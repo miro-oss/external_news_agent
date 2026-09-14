@@ -1,7 +1,5 @@
 package com.example.be.domain.collection.cluster;
 
-import com.example.be.domain.collection.content.ArticleBodyCleaner;
-
 import java.text.Normalizer;
 import java.time.DateTimeException;
 import java.time.Duration;
@@ -58,8 +56,8 @@ final class SpecificEventEvidence {
     SpecificEventEvidence(List<ClusterArticle> articles, BreakingNewsDetector detector) {
         for (ClusterArticle article : articles) {
             String title = normalize(detector.coreTitle(article.title()));
-            String body = normalize(ArticleBodyCleaner.withoutTrailingBoilerplate(article.body()));
-            String summary = foreground(bounded(normalize(article.summary()), 500));
+            String body = normalize(ArticleEvidenceText.primary(article.body(), null));
+            String summary = foreground(bounded(normalize(ArticleEvidenceText.primary(null, article.summary())), 500));
             String lead = foreground(bounded(body.isBlank() ? summary : body, LEAD_LIMIT));
             String text = title + "\n" + lead + "\n" + summary;
             String primary = title + "\n" + bounded(lead, 350);

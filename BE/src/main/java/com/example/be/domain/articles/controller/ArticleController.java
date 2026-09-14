@@ -31,7 +31,7 @@ public class ArticleController {
     private final ArticleQueryService articleQueryService;
 
     @GetMapping
-    @Operation(summary = "수집 기사 목록 조회", description = "본문 없이 요약과 분류 결과를 페이징 조회합니다.")
+    @Operation(summary = "수집 기사 목록 조회", description = "전문을 확보한 기사의 요약과 분류 결과를 페이징 조회합니다. 본문 미확보 기사는 수집 이력에 보존하며 목록에서 제외합니다.")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "200", description = "성공입니다."),

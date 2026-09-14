@@ -25,6 +25,22 @@ class ReportGeneratorTest {
             com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
 
     @Test
+    void summaryOnlyAndBlankFullTextNeverAppearInFallbackOrItsExclusionTitles() {
+        Finding available = finding(1L, "확보 기사", "확보 요약", SensitivityLevel.HIGH, Relevance.IMPORTANT, "기업");
+        Finding metadata = finding(2L, "숨길 메타 기사", "숨길 메타 요약", SensitivityLevel.HIGH, Relevance.IMPORTANT, "기업");
+        Finding blank = finding(3L, "숨길 빈본문 기사", "숨길 빈본문 요약", SensitivityLevel.HIGH, Relevance.IMPORTANT, "기업");
+        org.springframework.test.util.ReflectionTestUtils.setField(metadata.getArticle(), "fetchStatus",
+                com.example.be.domain.collection.entity.FetchStatus.METADATA_ONLY);
+        org.springframework.test.util.ReflectionTestUtils.setField(blank.getArticle(), "body", " \n\t");
+        var result = generator.generate(List.of(available, metadata, blank), LocalDateTime.of(2026, 9, 15, 10, 0));
+        assertEquals(List.of(1L), result.reflectedFindingIds());
+        assertFalse(result.markdownBody().contains("숨길"));
+        assertFalse(result.structuredContent().toString().contains("숨길"));
+        assertTrue(result.markdownBody().contains("확보 요약"));
+        assertEquals(com.example.be.domain.collection.entity.FetchStatus.METADATA_ONLY, metadata.getArticle().getFetchStatus());
+    }
+
+    @Test
     void dailyRendersItsOwnTitleAndExclusionsWithoutEditingClaimText() {
         var date = java.time.LocalDate.of(2026, 9, 1);
         var empty = generator.generateDaily(List.of(), date, new ReportSourceStats(118, 0, 0, 0, 2, 3));
@@ -123,6 +139,7 @@ class ReportGeneratorTest {
                         .topic(Topic.builder().name("반도체").build())
                         .title("REUSED 기사")
                         .canonicalUrl("https://example.com/reused")
+                        .fetchStatus(com.example.be.domain.collection.entity.FetchStatus.FULLTEXT).body("확보한 본문")
                         .build())
                 .changeType(ChangeType.UPDATED)
                 .summary("재사용된 REUSED 요약")
@@ -287,6 +304,7 @@ class ReportGeneratorTest {
                 .topic(topic)
                 .title(title)
                 .canonicalUrl("https://example.com/" + id)
+                .fetchStatus(com.example.be.domain.collection.entity.FetchStatus.FULLTEXT).body("확보한 본문")
                 .build();
         return Finding.builder()
                 .id(id)

@@ -23,6 +23,17 @@ class DailyReportSelectorTest {
     private final Topic topic = Topic.builder().id(1L).build();
 
     @Test
+    void latestSummaryOnlyFindingCannotResurrectAnOlderFullTextClaim() {
+        Finding old = finding(1, 1, "grounded");
+        Finding latest = finding(2, 2, "grounded");
+        org.springframework.test.util.ReflectionTestUtils.setField(latest.getArticle(), "fetchStatus", FetchStatus.METADATA_ONLY);
+        NewsIssue issue = issue(10, 90);
+        var selected = selector.selectWithStats(List.of(old, latest), List.of(link(old, issue), link(latest, issue)), 10);
+        assertTrue(selected.findings().isEmpty());
+        assertEquals(1, selected.evidenceExcluded());
+    }
+
+    @Test
     void countsLatestIssueExclusionsBeforeTopNWithoutCountingLegacyOrOldFindings() {
         Finding supported = finding(1, 1, "grounded");
         Finding withdrawn = finding(2, 2, "ungrounded");
@@ -95,7 +106,7 @@ class DailyReportSelectorTest {
         return Finding.builder().id(id).analysisSource(AnalysisSource.LLM)
                 .run(CollectionRun.builder().id((long) hour)
                         .startedAt(LocalDate.of(2026, 9, 3).atTime(hour, 0)).build())
-                .article(Article.builder().id(id).topic(topic).build())
+                .article(Article.builder().id(id).topic(topic).fetchStatus(FetchStatus.FULLTEXT).body("확보한 본문").build())
                 .keyPoints(List.of(new FindingKeyPoint("검증 대상 주장", List.of(0), groundedness)))
                 .build();
     }

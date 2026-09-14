@@ -199,7 +199,7 @@ public class IssueClusterWriter {
         List<NewsWatch> eligibleWatches = newIssue
                 ? List.of()
                 : watchRepository.findEligibleForNotification(issue.getId(), now);
-        if (!newArticles.isEmpty()) {
+        if (newArticles.stream().anyMatch(Article::hasFullText)) {
             enqueueAlerts(eligibleWatches, issue, members, now);
         }
         registerBreakingWatch(issue, newArticles, now);
@@ -354,17 +354,22 @@ public class IssueClusterWriter {
         if (watches.isEmpty()) {
             return;
         }
+        List<Article> visibleMembers = members.stream().filter(Article::hasFullText).toList();
+        if (visibleMembers.size() < 2) {
+            return;
+        }
         OffsetDateTime claimedAt = now.atZone(ApiTimeZone.ZONE).toOffsetDateTime();
-        int followUpCount = Math.max(1, issue.getArticleCount() - 1);
-        Article breakingArticle = members.stream()
-                .filter(article -> breakingNewsDetector.hasExplicitMarker(article.getTitle()))
-                .min(Comparator.comparing(
-                        this::eventTime, Comparator.nullsLast(Comparator.naturalOrder())))
-                .orElse(null);
-        String breakingTitle = breakingArticle == null ? issue.getTitle() : issueTitle(breakingArticle);
-        OffsetDateTime breakingAt = breakingArticle == null || eventTime(breakingArticle) == null
+        int followUpCount = visibleMembers.size() - 1;
+        int visiblePublisherCount = publisherCount(visibleMembers);
+        Article titleArticle = visibleMembers.stream()
+                .min(Comparator.comparing((Article article) -> !isBreaking(article))
+                        .thenComparing(this::eventTime, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(Article::getId))
+                .orElseThrow();
+        String breakingTitle = issueTitle(titleArticle);
+        OffsetDateTime breakingAt = eventTime(titleArticle) == null
                 ? issue.getFirstSeenAt()
-                : eventTime(breakingArticle);
+                : eventTime(titleArticle);
         for (NewsWatch watch : watches) {
             if (!watch.isActive() || !watch.getExpiresAt().isAfter(now)) {
                 continue;
@@ -378,7 +383,7 @@ public class IssueClusterWriter {
                     .issueTitle(breakingTitle)
                     .firstSeenAt(breakingAt)
                     .followUpCount(followUpCount)
-                    .publisherCount(issue.getPublisherCount())
+                    .publisherCount(visiblePublisherCount)
                     .queuedAt(claimedAt)
                     .status(WatchAlertDeliveryStatus.PENDING)
                     .attemptCount(0)

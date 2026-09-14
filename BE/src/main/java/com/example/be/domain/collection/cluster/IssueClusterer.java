@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class IssueClusterer {
 
-    static final String RULE_VERSION = "event-text-evidence-v5";
+    static final String RULE_VERSION = "event-text-evidence-v6";
 
     private static final double MIN_ENTITY_TITLE_SUPPORT_JACCARD = 0.10;
 
@@ -44,6 +44,17 @@ public class IssueClusterer {
     /** 클러스터링과 오프라인 export가 같은 인스턴스의 전처리·추출기 설정을 공유한다. */
     Set<String> titleOrganizations(String title) {
         return entityExtractor.extractTitleOrganizations(breakingNewsDetector.coreTitle(title));
+    }
+
+    /** A product's explicit headline maker takes precedence over its manufacturing partners and rivals. */
+    Set<String> titleOrganizations(ClusterArticle article) {
+        String title = breakingNewsDetector.coreTitle(article.title());
+        String subject = new CommercialProductEventEvidence(List.of(article), breakingNewsDetector)
+                .subject(article.articleId());
+        if (subject != null && DeterministicEntityExtractor.mentionsSubject(title, subject)) {
+            return Set.of(subject);
+        }
+        return titleOrganizations(article.title());
     }
 
     /** Export all profiles, including non-voting content proxies, without consulting labels. */
@@ -208,7 +219,7 @@ public class IssueClusterer {
         unique.forEach(article -> {
             String coreTitle = breakingNewsDetector.coreTitle(article.title());
             titleTokens.put(article.articleId(), TitleTokenizer.tokens(coreTitle));
-            titleOrganizations.put(article.articleId(), titleOrganizations(article.title()));
+            titleOrganizations.put(article.articleId(), titleOrganizations(article));
             titleEntities.put(article.articleId(), entityExtractor.extract(coreTitle, null, null, List.of()));
             DeterministicEntityExtractor.Extraction extraction = entityExtractor.extractWithOrganizations(
                     coreTitle, article.summary(),
@@ -363,7 +374,10 @@ public class IssueClusterer {
 
     private ClusterArticle representative(Collection<ClusterArticle> articles) {
         return articles.stream().min(Comparator
-                        .comparing(breakingNewsDetector::isBreaking)
+                        // A usable full-text member must represent a mixed issue, even
+                        // when a summary-only member has a stronger source or no breaking marker.
+                        .comparing((ClusterArticle article) -> !article.hasFullText())
+                        .thenComparing(breakingNewsDetector::isBreaking)
                         .thenComparing(article -> !hasSubstantialBody(article))
                         .thenComparing(ClusterArticle::reliabilityScore,
                                 Comparator.nullsLast(Comparator.reverseOrder()))

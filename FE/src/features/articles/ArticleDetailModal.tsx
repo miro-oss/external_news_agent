@@ -177,6 +177,12 @@ export function ArticleDetailModal({
                     </p>
                   ))}
                 </div>
+              ) : article.data.bodyText?.trim() ? (
+                <div className="sentence-list">
+                  {article.data.bodyText.split(/\n+/).filter((paragraph) => paragraph.trim()).map((paragraph, index) => (
+                    <p key={index}>{paragraph}</p>
+                  ))}
+                </div>
               ) : (
                 <div className="blocked-body">
                   <strong>본문을 가져올 수 없는 기사입니다.</strong>

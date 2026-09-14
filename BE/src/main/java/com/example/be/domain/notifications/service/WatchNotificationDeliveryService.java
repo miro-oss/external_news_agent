@@ -5,15 +5,18 @@ import com.example.be.domain.notifications.channel.NotificationSenderRegistry;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.notifications.service.WatchAlertOutboxPersistenceService.WatchAlertSnapshot;
+import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 보고서 발송과 같은 텔레그램·이메일 어댑터를 사용해 속보 후속 문구만 전달한다. */
 @Slf4j
@@ -21,13 +24,61 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class WatchNotificationDeliveryService {
 
+    private static final int CLAIM_LIMIT = 100;
+    private static final int MAX_SCAN_BATCHES = 10;
+
     private final NotificationDeliveryPlanService planService;
     private final NotificationSenderRegistry senderRegistry;
     private final NotificationDeliveryPersistenceService persistenceService;
     private final WatchAlertOutboxPersistenceService outboxPersistenceService;
+    private final AtomicBoolean delivering = new AtomicBoolean();
+    private long scanAfterId;
+    private long scanUpToId;
 
     public int deliverPending() {
-        List<WatchAlertSnapshot> alerts = outboxPersistenceService.claimPending();
+        if (!delivering.compareAndSet(false, true)) {
+            return 0;
+        }
+        try {
+            return scanAndDeliver();
+        } finally {
+            delivering.set(false);
+        }
+    }
+
+    private int scanAndDeliver() {
+        LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
+        Map<Long, Set<String>> deliveredRecipientsByChannel = new LinkedHashMap<>();
+        if (scanUpToId == 0) {
+            // Freeze this finite sweep so continuous arrivals cannot prevent revisiting recovered low IDs.
+            scanUpToId = outboxPersistenceService.scanUpperBound();
+            if (scanUpToId == 0) {
+                return 0;
+            }
+        }
+        int claimed = 0;
+        int delivered = 0;
+        // Each repository batch reads at most 100 candidates, including hidden ones.
+        for (int batchCount = 0; batchCount < MAX_SCAN_BATCHES && claimed < CLAIM_LIMIT; batchCount++) {
+            var batch = outboxPersistenceService.claimNextBatch(scanAfterId, scanUpToId, now, CLAIM_LIMIT - claimed);
+            scanAfterId = batch.afterId();
+            claimed += batch.snapshots().size();
+            boolean sweepComplete = batch.exhausted() || scanAfterId >= scanUpToId;
+            if (sweepComplete) {
+                scanAfterId = 0;
+                scanUpToId = 0;
+            }
+            // Deliver each committed batch before scanning more hidden candidates and ageing its lease.
+            delivered += deliverClaimed(batch.snapshots(), deliveredRecipientsByChannel);
+            if (sweepComplete) {
+                break;
+            }
+        }
+        return delivered;
+    }
+
+    private int deliverClaimed(List<WatchAlertSnapshot> alerts,
+                               Map<Long, Set<String>> deliveredRecipientsByChannel) {
         if (alerts.isEmpty()) {
             return 0;
         }
@@ -48,7 +99,7 @@ public class WatchNotificationDeliveryService {
             return 0;
         }
 
-        Map<Long, Integer> deliveredByAlert = deliverBatch(alerts, plans);
+        Map<Long, Integer> deliveredByAlert = deliverBatch(alerts, plans, deliveredRecipientsByChannel);
         int delivered = 0;
         for (WatchAlertSnapshot alert : alerts) {
             Integer alertDeliveries = deliveredByAlert.get(alert.id());
@@ -64,7 +115,8 @@ public class WatchNotificationDeliveryService {
 
     private Map<Long, Integer> deliverBatch(
             List<WatchAlertSnapshot> alerts,
-            Map<Long, NotificationDeliveryPlanService.PreparedWatchDelivery> plans) {
+            Map<Long, NotificationDeliveryPlanService.PreparedWatchDelivery> plans,
+            Map<Long, Set<String>> deliveredRecipientsByChannel) {
         Map<Long, List<ChannelWork>> byChannel = new LinkedHashMap<>();
         for (WatchAlertSnapshot alert : alerts) {
             NotificationDeliveryPlanService.PreparedWatchDelivery plan = plans.get(alert.id());
@@ -81,12 +133,27 @@ public class WatchNotificationDeliveryService {
                                     plan.renderedByChannel().get(channelId))));
         }
         Map<Long, Integer> deliveredByAlert = new LinkedHashMap<>();
-        byChannel.values().forEach(works -> deliverChannel(works, deliveredByAlert));
+        byChannel.forEach((channelId, works) -> deliverChannel(works, deliveredByAlert,
+                deliveredRecipientsByChannel.computeIfAbsent(channelId, ignored -> new HashSet<>())));
         return deliveredByAlert;
     }
 
     private void deliverChannel(List<ChannelWork> works,
-                                Map<Long, Integer> deliveredByAlert) {
+                                Map<Long, Integer> deliveredByAlert,
+                                Set<String> deliveredRecipients) {
+        boolean hasUndeliveredTarget = false;
+        for (ChannelWork work : works) {
+            for (NotificationDeliveryPlanService.PreparedTarget target : work.targets()) {
+                if (deliveredRecipients.contains(recipientKey(work.alert(), target))) {
+                    deliveredByAlert.putIfAbsent(work.alert().id(), 0);
+                } else {
+                    hasUndeliveredTarget = true;
+                }
+            }
+        }
+        if (!hasUndeliveredTarget) {
+            return;
+        }
         NotificationChannel channel = works.getFirst().targets().getFirst().channel();
         NotificationSender sender;
         try {
@@ -100,7 +167,6 @@ public class WatchNotificationDeliveryService {
         }
 
         Map<Long, Boolean> readyByDestination = new LinkedHashMap<>();
-        Set<String> deliveredRecipients = new HashSet<>();
         Map<String, Set<Long>> alertIdsByRecipient = new LinkedHashMap<>();
         for (ChannelWork work : works) {
             for (NotificationDeliveryPlanService.PreparedTarget target : work.targets()) {
@@ -114,6 +180,9 @@ public class WatchNotificationDeliveryService {
                 for (NotificationDeliveryPlanService.PreparedTarget target : work.targets()) {
                     String recipientKey = recipientKey(work.alert(), target);
                     if (deliveredRecipients.contains(recipientKey)) {
+                        // A prior batch already delivered this issue to this recipient on this channel.
+                        alertIdsByRecipient.get(recipientKey)
+                                .forEach(alertId -> deliveredByAlert.putIfAbsent(alertId, 0));
                         continue;
                     }
                     boolean targetReady = readyByDestination.computeIfAbsent(

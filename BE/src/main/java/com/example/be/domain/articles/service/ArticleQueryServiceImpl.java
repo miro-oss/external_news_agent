@@ -35,6 +35,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -127,13 +128,14 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
             finding = findFinding(articleId, runId);
         }
 
-        boolean hasAnalyzedBody = finding != null && StringUtils.hasText(analyzedArticle.getBody());
+        boolean hasAnalyzedBody = finding != null && analyzedArticle.hasFullText();
         List<FindingSection> sections = hasAnalyzedBody ? finding.getSections() : List.of();
         String bodyText = finding == null
-                ? article.getBody()
+                ? article.hasFullText() ? article.getBody() : null
                 : hasAnalyzedBody
-                ? sections.stream().map(FindingSection::text).collect(Collectors.joining(" "))
-                : analyzedArticle.getBody();
+                ? sections.isEmpty() ? analyzedArticle.getBody()
+                : sections.stream().map(FindingSection::text).collect(Collectors.joining(" "))
+                : null;
 
         return ArticleResDTO.Detail.builder()
                 .id(article.getId())
@@ -181,8 +183,14 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                 membership.getIssue().getId());
         IssueArticle representative = issueMemberships.stream()
                 .filter(value -> value.getRole() == IssueArticleRole.REPRESENTATIVE)
+                .filter(value -> value.getArticle().hasFullText())
                 .findFirst()
-                .orElse(null);
+                .orElseGet(() -> issueMemberships.stream()
+                        .filter(value -> value.getArticle().hasFullText())
+                        .min(Comparator.comparing((IssueArticle value) -> value.getArticle().getPublishedAt(),
+                                        Comparator.nullsLast(Comparator.naturalOrder()))
+                                .thenComparing(value -> value.getArticle().getId()))
+                        .orElse(null));
         return new IssueContext(membership, representative, issueMemberships);
     }
 
@@ -193,6 +201,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
         return memberships.stream()
                 .map(IssueArticle::getArticle)
                 .filter(article -> !article.getId().equals(articleId))
+                .filter(Article::hasFullText)
                 .map(article -> ArticleResDTO.RelatedArticle.builder()
                         .id(article.getId())
                         .title(article.getTitle())

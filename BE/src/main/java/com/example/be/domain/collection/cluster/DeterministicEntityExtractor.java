@@ -59,6 +59,17 @@ public final class DeterministicEntityExtractor {
     private static final List<String> KOREAN_POSTPOSITIONS = List.of(
             "으로부터", "에게서", "이라도", "에서", "에게", "으로", "처럼", "보다", "까지", "부터",
             "은", "는", "이", "가", "을", "를", "과", "와", "의", "도", "만", "에", "로");
+    private static final Pattern UNIVERSITY = Pattern.compile(
+            "(?<![가-힣a-z0-9])([가-힣]{2,20}?(?:대학교|대학|대))"
+                    + "(?=(?:은|는|이|가|의|와|과)?(?:[,，·:：\\s]|$))");
+    private static final Pattern ACADEMIC_CONTEXT = Pattern.compile(
+            "학년도|수시|정시|입시|경쟁률|교수|연구팀|학생|청년|교육|실습|대학|캠퍼스");
+    private static final Set<String> GENERAL_INSTITUTIONS = Set.of(
+            "초거대", "차세대", "신세대", "새시대", "교육시대", "반도체시대", "첨단시대",
+            "전문대", "종합대", "국립대", "사립대", "비수도권대", "지역대");
+    private static final Map<String, List<String>> INSTITUTION_ALIASES = Map.of(
+            "한국에너지공과대", List.of("한국에너지공과대학교", "한국에너지공과대", "에너지공대", "켄텍", "kentech"),
+            "한국기술교육대", List.of("한국기술교육대학교", "한국기술교육대", "한기대", "koreatech"));
     private static final Set<String> BROAD_TOPIC_WORDS = Set.of(
             "반도체", "제조", "산업", "기술", "시장", "뉴스", "공장", "기업");
     private static final Set<String> BROAD_TECHNICAL_ANCHORS = Set.of("AI", "SK", "LG", "HD");
@@ -114,7 +125,7 @@ public final class DeterministicEntityExtractor {
         return Collections.unmodifiableSet(canonical);
     }
 
-    /** 조직 사전은 제목·요약과 본문을 한 번씩만 훑고, 보조 간선용 조직은 제목·요약으로 제한한다. */
+    /** 긍정 조직 근거는 제목·요약에 제한하며 본문에서는 기술 앵커와 주제 고유어만 보완한다. */
     Extraction extractWithOrganizations(String title,
                                          String summary,
                                          String body,
@@ -167,6 +178,7 @@ public final class DeterministicEntityExtractor {
                 organizations.add(canonical);
             }
         });
+        organizations.addAll(institutionSubjects(normalized));
         // The explicit "<subject> 주가," headline names the traded company even when
         // it is outside the alias dictionary. Keep it as a conflict profile only;
         // it must not become a positive entity-overlap vote from body background.
@@ -177,6 +189,57 @@ public final class DeterministicEntityExtractor {
             }
         }
         return Collections.unmodifiableSet(organizations);
+    }
+
+    /** Named academic subjects are conflict evidence; they do not add generic positive votes. */
+    static Set<String> institutionSubjects(String text) {
+        String normalized = normalize(nullToEmpty(text));
+        Set<String> institutions = new LinkedHashSet<>();
+        INSTITUTION_ALIASES.forEach((canonical, aliases) -> {
+            if (aliases.stream().anyMatch(alias -> containsAlias(normalized, alias))) {
+                institutions.add(canonical);
+            }
+        });
+        if (ACADEMIC_CONTEXT.matcher(normalized).find()) {
+            Matcher matcher = UNIVERSITY.matcher(normalized);
+            while (matcher.find()) {
+                String name = canonicalSubject(matcher.group(1));
+                if (!GENERAL_INSTITUTIONS.contains(name)) {
+                    institutions.add(name);
+                }
+            }
+        }
+        return Collections.unmodifiableSet(institutions);
+    }
+
+    /** Canonicalize an already identified subject, never an arbitrary surrounding sentence. */
+    static String canonicalSubject(String subject) {
+        String normalized = normalize(nullToEmpty(subject));
+        for (var entry : ORGANIZATION_ALIASES.entrySet()) {
+            if (entry.getValue().contains(normalized)) {
+                return entry.getKey();
+            }
+        }
+        for (var entry : INSTITUTION_ALIASES.entrySet()) {
+            if (entry.getValue().contains(normalized)) {
+                return entry.getKey();
+            }
+        }
+        return normalized.replaceFirst("대학교$|대학$", "대");
+    }
+
+    static boolean mentionsSubject(String text, String canonical) {
+        String normalized = normalize(nullToEmpty(text));
+        List<String> aliases = ORGANIZATION_ALIASES.get(canonical);
+        if (aliases == null) {
+            aliases = INSTITUTION_ALIASES.get(canonical);
+        }
+        if (aliases != null) {
+            return aliases.stream().anyMatch(alias -> containsAlias(normalized, alias));
+        }
+        String subject = normalize(canonical);
+        return containsAlias(normalized, subject) || subject.endsWith("대")
+                && (containsAlias(normalized, subject + "학") || containsAlias(normalized, subject + "학교"));
     }
 
     private static void collectOrganizations(String normalized, Set<String> target) {
@@ -272,6 +335,7 @@ public final class DeterministicEntityExtractor {
         aliases.put("엔비디아", List.of("엔비디아", "nvidia"));
         aliases.put("AMD", List.of("amd"));
         aliases.put("인텔", List.of("인텔", "intel"));
+        aliases.put("후지쓰", List.of("후지쓰", "후지쯔", "fujitsu"));
         aliases.put("마이크론", List.of("마이크론", "micron"));
         aliases.put("브로드컴", List.of("브로드컴", "broadcom"));
         aliases.put("퀄컴", List.of("퀄컴", "qualcomm"));

@@ -1,7 +1,5 @@
 package com.example.be.domain.collection.cluster;
 
-import com.example.be.domain.collection.content.ArticleBodyCleaner;
-
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -39,25 +37,24 @@ final class FocalEventEvidence {
     FocalEventEvidence(List<ClusterArticle> articles, BreakingNewsDetector detector) {
         for (ClusterArticle article : articles) {
             String title = normalize(detector.coreTitle(article.title()));
-            String body = normalize(ArticleBodyCleaner.withoutTrailingBoilerplate(article.body()));
-            String summary = bound(normalize(article.summary()), 700);
-            String lead = bound(body, CONTEXT_LIMIT);
+            ArticleEvidenceText.Selection source = ArticleEvidenceText.select(article.body(), article.summary());
+            String body = normalize(source.text());
+            String lead = bound(body, source.fromSummary() ? 700 : CONTEXT_LIMIT);
             List<Context> contexts = new ArrayList<>(contexts(lead));
-            contexts.addAll(contexts(bound(summary, 700)));
-            List<String> sourceQuotes = new ArrayList<>(quotes(bound(body, CONTEXT_LIMIT)));
             // Search/RSS summaries can concatenate secondary headlines. Only the first
             // quotation may identify the summary's primary report.
-            sourceQuotes.addAll(quotes(bound(summary, 700)).stream().limit(1).toList());
-            if (title.startsWith("[전문]") || bound(body, 1000).contains("연설 전문")) {
+            List<String> sourceQuotes = new ArrayList<>(source.fromSummary()
+                    ? quotes(lead).stream().limit(1).toList() : quotes(lead));
+            if (!source.fromSummary() && (title.startsWith("[전문]") || bound(body, 1000).contains("연설 전문"))) {
                 String transcript = bound(body, QUOTE_LIMIT);
                 for (int offset = 0; offset < transcript.length(); offset += 400) {
                     sourceQuotes.add(bound(transcript.substring(offset), 800));
                 }
             }
             profiles.put(article.articleId(), new Profile(compact(title), specific(title),
-                    bound(body, 350) + " " + summary, contexts, quotes(title).stream().map(quote -> new TitleQuote(words(quote), compact(quote).length())).toList(),
+                    bound(body, 350), contexts, quotes(title).stream().map(quote -> new TitleQuote(words(quote), compact(quote).length())).toList(),
                     sourceQuotes.stream().map(FocalEventEvidence::compact).toList(),
-                    rates(bound(body, 700) + " " + summary),
+                    rates(bound(body, 700)),
                     new DeterministicEntityExtractor().extractOrganizations(bound(body, 350), null),
                     RALLY.matcher(bound(body, 350)).find()));
         }
