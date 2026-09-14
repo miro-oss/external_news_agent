@@ -70,9 +70,10 @@ public class DailyReportSelector {
                 .filter(f -> f.getAnalysisSource() == AnalysisSource.STUB).count();
         int evidenceExcluded = (int) latestByIssue.values().stream()
                 .filter(f -> AnalysisSource.isLlmDerived(f.getAnalysisSource()))
-                .filter(f -> !FindingEvidencePolicy.hasSupportedEvidence(f)).count();
+                .filter(f -> !ReportFindings.hasFullText(f) || !FindingEvidencePolicy.hasSupportedEvidence(f)).count();
         // DAILY는 유효한 이슈에 속한 최신 분석만 집계한다. 레거시 finding을 독립 이슈로 만들지 않는다.
         List<Finding> selected = latestByIssue.values().stream()
+                .filter(ReportFindings::hasFullText)
                 .filter(f -> AnalysisSource.isLlmDerived(f.getAnalysisSource()))
                 .filter(FindingEvidencePolicy::hasSupportedEvidence)
                 .sorted(Comparator.comparing((Finding f) -> {

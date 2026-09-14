@@ -44,6 +44,8 @@ import java.util.Optional;
 import java.util.stream.LongStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -232,6 +234,61 @@ class ReportQueryServiceImplTest {
     }
 
     @Test
+    void detailAndLatestHideUnavailableFindingsAndTheirSavedTextWithIdenticalCounts() {
+        CollectionRun run = CollectionRun.builder().id(42L).build();
+        var stored = new com.example.be.domain.reports.entity.ReportContent(List.of("숨길 저장 요약"),
+                List.of(), List.of(), List.of());
+        NewsReport report = NewsReport.builder().id(17L).run(run).title("보고서")
+                .markdownBody("## 오늘의 핵심\n숨길 저장 요약").structuredContent(stored)
+                .generatedAt(LocalDateTime.of(2026, 9, 15, 10, 0)).build();
+        Finding available = finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        Finding metadata = finding(2L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        Finding blank = finding(3L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        org.springframework.test.util.ReflectionTestUtils.setField(metadata.getArticle(), "fetchStatus",
+                com.example.be.domain.collection.entity.FetchStatus.METADATA_ONLY);
+        org.springframework.test.util.ReflectionTestUtils.setField(blank.getArticle(), "body", " \n\t");
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(reportRepository.findFirstByReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
+                .thenReturn(Optional.of(report));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(metadata, blank, available));
+        when(findingRepository.countWithoutFullTextForReportByRunId(42L)).thenReturn(2L);
+        for (boolean includeFindings : List.of(true, false)) {
+            var detail = service.getReport(17L, includeFindings);
+            var latest = service.getLatest(includeFindings);
+            assertEquals(1, detail.getSummaryStats().getFindingCount());
+            assertEquals(1, latest.getSummaryStats().getFindingCount());
+            assertFalse(detail.getMarkdownBody().contains("숨길"));
+            assertFalse(detail.getStructuredContent().toString().contains("숨길"));
+            assertEquals(detail.getMarkdownBody(), latest.getMarkdownBody());
+            assertTrue(detail.getMarkdownBody().contains("요약 1"));
+            if (includeFindings) assertEquals(List.of(1L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
+            else assertNull(detail.getFindings());
+        }
+        assertEquals(stored, report.getStructuredContent());
+        assertEquals("## 오늘의 핵심\n숨길 저장 요약", report.getMarkdownBody());
+    }
+
+    @Test
+    void dailyVisibilityKeepsSavedSelectionAndFiltersBothFindingCountModes() {
+        NewsReport report = NewsReport.builder().id(17L).reportScope(ReportScope.DAILY)
+                .reportDate(LocalDate.of(2026, 9, 14)).reflectedFindingIds(List.of(2L, 1L))
+                .markdownBody("숨길 저장 기사").generatedAt(LocalDateTime.of(2026, 9, 15, 0, 5)).build();
+        Finding available = finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        Finding missing = finding(2L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        org.springframework.test.util.ReflectionTestUtils.setField(missing.getArticle(), "body", null);
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(findingRepository.findForReportByIdIn(List.of(2L, 1L))).thenReturn(List.of(missing, available));
+        for (boolean includeFindings : List.of(true, false)) {
+            var detail = service.getReport(17L, includeFindings);
+            assertEquals(1, detail.getSummaryStats().getFindingCount());
+            assertFalse(detail.getMarkdownBody().contains("숨길"));
+            if (includeFindings) assertEquals(List.of(1L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
+            else assertNull(detail.getFindings());
+        }
+        assertEquals(List.of(2L, 1L), report.getReflectedFindingIds());
+    }
+
+    @Test
     void detailFindingsUseSamePriorityOrderAsGeneratedMarkdown() {
         CollectionRun run = CollectionRun.builder().id(42L).build();
         NewsReport report = NewsReport.builder().id(17L).run(run).title("보고서")
@@ -355,11 +412,13 @@ class ReportQueryServiceImplTest {
                 .topic(topic(7L))
                 .title("기사 " + id)
                 .canonicalUrl("https://example.com/" + id)
+                .fetchStatus(com.example.be.domain.collection.entity.FetchStatus.FULLTEXT).body("확보한 본문")
                 .build();
         return Finding.builder()
                 .run(CollectionRun.builder().id(42L).build())
                 .id(id)
                 .article(article)
+                .analysisSource(com.example.be.domain.analysis.entity.AnalysisSource.LLM)
                 .changeType(ChangeType.NEW)
                 .summary("요약 " + id)
                 .keyPoints(List.of(

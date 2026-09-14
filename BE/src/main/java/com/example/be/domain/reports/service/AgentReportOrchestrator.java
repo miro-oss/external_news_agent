@@ -85,6 +85,7 @@ public class AgentReportOrchestrator {
 
     private ReportDocument generate(GenerationContext context, List<Finding> representativeFindings,
                                     ReportSourceStats sourceStats, LocalDateTime generatedAt) {
+        representativeFindings = representativeFindings.stream().filter(ReportFindings::hasFullText).toList();
         if (!properties.isEnabled()) {
             return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
@@ -306,6 +307,7 @@ public class AgentReportOrchestrator {
 
     private List<Finding> eligibleFindings(List<Finding> findings, boolean preserveOrder) {
         List<Finding> eligible = findings.stream()
+                .filter(ReportFindings::hasFullText)
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
                 .filter(FindingEvidencePolicy::hasSupportedEvidence)
                 .toList();

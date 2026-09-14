@@ -136,6 +136,21 @@ class AgentReportOrchestratorTest {
     }
 
     @Test
+    void agentNeverReceivesSummaryOnlyOrBlankFullTextEvenWithGroundedLabels() {
+        Finding available = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "확보 기사 요약");
+        Finding metadata = finding(502L, AnalysisSource.LLM, FetchStatus.METADATA_ONLY, "숨길 메타 요약");
+        Finding blank = finding(503L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "숨길 빈 본문 요약");
+        org.springframework.test.util.ReflectionTestUtils.setField(blank.getArticle(), "body", " \n\t");
+        when(client.report(any())).thenReturn(response(List.of(501L)));
+        var document = orchestrator.generate(run(), List.of(available, metadata, blank), LocalDateTime.of(2026, 9, 15, 10, 0));
+        var captor = ArgumentCaptor.forClass(AgentReportRequest.class);
+        verify(client).report(captor.capture());
+        assertEquals(List.of(501L), captor.getValue().findings().stream().map(AgentReportRequest.FindingPayload::id).toList());
+        assertFalse(document.markdownBody().contains("숨길"));
+        assertEquals(List.of(501L), document.reflectedFindingIds());
+    }
+
+    @Test
     void excludesMemberFindingWhenIssueRepresentativeExists() {
         Finding representative = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "대표 요약");
         Finding member = finding(502L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "멤버 요약");
@@ -466,6 +481,7 @@ class AgentReportOrchestratorTest {
                 .canonicalUrl(canonicalUrl)
                 .sourceName("Example")
                 .fetchStatus(fetchStatus)
+                .body(fetchStatus == FetchStatus.FULLTEXT ? "확보한 본문" : null)
                 .build();
         return Finding.builder()
                 .id(id)

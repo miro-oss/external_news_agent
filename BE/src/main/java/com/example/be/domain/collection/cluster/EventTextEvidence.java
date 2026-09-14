@@ -1,7 +1,5 @@
 package com.example.be.domain.collection.cluster;
 
-import com.example.be.domain.collection.content.ArticleBodyCleaner;
-
 import java.text.Normalizer;
 import java.util.HashMap;
 import java.util.List;
@@ -31,12 +29,7 @@ final class EventTextEvidence {
         Map<String, Integer> frequency = new HashMap<>();
         for (ClusterArticle article : voting) {
             String title = detector.coreTitle(article.title());
-            String body = ArticleBodyCleaner.withoutTrailingBoilerplate(article.body());
-            String lead = body.length() >= 400 ? body : article.summary();
-            if (lead == null) {
-                lead = "";
-            }
-            lead = lead.substring(0, Math.min(LEAD_LIMIT, lead.length()));
+            String lead = ArticleEvidenceText.foreground(ArticleEvidenceText.primary(article), LEAD_LIMIT);
             Profile profile = new Profile(grams(title), grams(lead),
                     TitleTokenizer.tokens(title), compact(lead), 0, 0);
             profiles.put(article.articleId(), profile);

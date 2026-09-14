@@ -127,13 +127,14 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
             finding = findFinding(articleId, runId);
         }
 
-        boolean hasAnalyzedBody = finding != null && StringUtils.hasText(analyzedArticle.getBody());
+        boolean hasAnalyzedBody = finding != null && analyzedArticle.hasFullText();
         List<FindingSection> sections = hasAnalyzedBody ? finding.getSections() : List.of();
         String bodyText = finding == null
-                ? article.getBody()
+                ? article.hasFullText() ? article.getBody() : null
                 : hasAnalyzedBody
-                ? sections.stream().map(FindingSection::text).collect(Collectors.joining(" "))
-                : analyzedArticle.getBody();
+                ? sections.isEmpty() ? analyzedArticle.getBody()
+                : sections.stream().map(FindingSection::text).collect(Collectors.joining(" "))
+                : null;
 
         return ArticleResDTO.Detail.builder()
                 .id(article.getId())
@@ -181,6 +182,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                 membership.getIssue().getId());
         IssueArticle representative = issueMemberships.stream()
                 .filter(value -> value.getRole() == IssueArticleRole.REPRESENTATIVE)
+                .filter(value -> value.getArticle().hasFullText())
                 .findFirst()
                 .orElse(null);
         return new IssueContext(membership, representative, issueMemberships);
@@ -193,6 +195,7 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
         return memberships.stream()
                 .map(IssueArticle::getArticle)
                 .filter(article -> !article.getId().equals(articleId))
+                .filter(Article::hasFullText)
                 .map(article -> ArticleResDTO.RelatedArticle.builder()
                         .id(article.getId())
                         .title(article.getTitle())

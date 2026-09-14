@@ -97,7 +97,8 @@ class NotificationRendererTest {
     @Test
     void decodesLegacyEntitiesWithoutTurningTextIntoMarkup() {
         Finding finding = Finding.builder().id(1L).article(Article.builder().id(1L)
-                .title("억대 연봉&middot;자사주까지&hellip;").canonicalUrl("https://example.com/article").build())
+                .title("억대 연봉&middot;자사주까지&hellip;").canonicalUrl("https://example.com/article")
+                .fetchStatus(com.example.be.domain.collection.entity.FetchStatus.FULLTEXT).body("확보한 본문").build())
                 .summary("연봉&amp;middot;자사주&hellip; &lsquo;인재 경쟁&rsquo; &lt;b&gt;문자&lt;/b&gt;").build();
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(finding));
         String body = renderer.render(report(""), channel(ChannelType.TELEGRAM, 3500)).chunks().getFirst();
@@ -123,6 +124,29 @@ class NotificationRendererTest {
             assertFalse(body.contains("HBM 공급 계약 확대"));
             assertTrue(body.length()<1500);
         }
+    }
+
+    @Test
+    void neitherChannelSendsHiddenFindingLinksOrStoredSummaryClaims() {
+        Finding available = finding();
+        Finding hidden = Finding.builder().id(2L)
+                .article(Article.builder().id(2L).title("숨길 기사")
+                        .fetchStatus(com.example.be.domain.collection.entity.FetchStatus.METADATA_ONLY)
+                        .summary("요약만 있음").canonicalUrl("https://example.com/hidden").build())
+                .summary("숨길 기사 요약").build();
+        NewsReport report = report("## 오늘의 핵심\n숨길 과거 요약");
+        var stored = new com.example.be.domain.reports.entity.ReportContent(
+                List.of("숨길 과거 요약"), List.of(), List.of(), List.of());
+        org.springframework.test.util.ReflectionTestUtils.setField(report, "structuredContent", stored);
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(hidden, available));
+        for (ChannelType type : ChannelType.values()) {
+            String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
+            assertFalse(body.contains("숨길"));
+            assertFalse(body.contains("https://example.com/hidden"));
+            assertTrue(body.contains("검증된 핵심 요약"));
+            assertTrue(body.contains("https://example.com/article"));
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(stored, report.getStructuredContent());
     }
 
     private NewsReport report(String markdown) {
@@ -154,8 +178,12 @@ class NotificationRendererTest {
                         .title("HBM 공급 계약 확대")
                         .canonicalUrl("https://example.com/article")
                         .body("원문 전체 내용")
+                        .fetchStatus(com.example.be.domain.collection.entity.FetchStatus.FULLTEXT)
                         .build())
                 .summary("검증된 핵심 요약")
+                .analysisSource(com.example.be.domain.analysis.entity.AnalysisSource.LLM)
+                .keyPoints(List.of(new com.example.be.domain.analysis.entity.FindingKeyPoint(
+                        "검증된 근거", List.of(0), "grounded")))
                 .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(SensitivityLevel.HIGH))
                 .relevance(Relevance.IMPORTANT)
                 .build();

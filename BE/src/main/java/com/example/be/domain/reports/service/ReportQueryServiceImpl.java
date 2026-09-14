@@ -165,9 +165,12 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     private ReportResDTO.Detail toDetail(NewsReport report, boolean includeFindings) {
         Long runId = report.getRunId();
         boolean daily = report.getReportScope() == ReportScope.DAILY;
-        List<Finding> findings = includeFindings || daily
-                ? ReportFindings.load(report, findingRepository)
-                : null;
+        boolean loadFindings = includeFindings || daily
+                || findingRepository.countWithoutFullTextForReportByRunId(runId) > 0;
+        ReportFindings.Visible visible = loadFindings ? ReportFindings.loadVisible(report, findingRepository)
+                : new ReportFindings.Visible(List.of(), false);
+        List<Finding> findings = visible.findings();
+        ReportReadingContent readingContent = ReportReadingContent.from(report, visible);
         Map<Long, Long> issueIdsByArticle = includeFindings
                 ? issueIdsByArticle(findings)
                 : Map.of();
@@ -183,12 +186,9 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 tracesByRun.put(runId, investigationsByIssue(runId));
             }
         }
-        ReportResDTO.SummaryStats summaryStats = includeFindings || daily
-                ? toStats(findings)
-                : toStatsFromCounts(findingRepository.countStatsByRunId(
-                        runId,
-                        sensitivityCalculator.mediumThreshold(),
-                        sensitivityCalculator.highThreshold()));
+        ReportResDTO.SummaryStats summaryStats = loadFindings ? toStats(findings)
+                : toStatsFromCounts(findingRepository.countStatsByRunId(runId,
+                        sensitivityCalculator.mediumThreshold(), sensitivityCalculator.highThreshold()));
         return ReportResDTO.Detail.builder()
                 .id(report.getId())
                 .runId(runId)
@@ -196,13 +196,13 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .sourceRunIds(sourceRunIds(report))
                 .sourceReportCount(report.getSourceReportCount())
                 .title(report.getTitle())
-                .markdownBody(report.getMarkdownBody())
+                .markdownBody(readingContent.markdownBody())
                 .modelName(report.getModelName())
                 .promptVersion(report.getPromptVersion())
                 .llmProvider(report.getLlmProvider())
                 .generatedAt(toOffset(report.getGeneratedAt()))
                 .summaryStats(summaryStats)
-                .structuredContent(report.getStructuredContent())
+                .structuredContent(readingContent.structuredContent())
                 .collectionContexts(report.getCollectionContexts())
                 .articleStats(ReportArticleStatistics.count(OracleInClause.batches(sourceRunIds(report)).stream()
                         .flatMap(ids -> runArticleRepository.findReportArticleObservations(ids).stream()).toList()))

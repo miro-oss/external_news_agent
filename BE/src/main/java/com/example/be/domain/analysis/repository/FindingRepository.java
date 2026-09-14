@@ -151,7 +151,10 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             CROSS APPLY JSON_TABLE(report.report_reflected_finding_ids, '$[*]'
                 COLUMNS (finding_id NUMBER PATH '$')) selected
             JOIN news_findings finding ON finding.id = selected.finding_id
+            JOIN news_articles article ON article.id = finding.article_id
             WHERE report.id IN (:reportIds) AND report.report_scope = 'DAILY'
+              AND article.fetch_status = 'FULLTEXT'
+              AND REGEXP_INSTR(article.body, '[^[:space:]]') > 0
             GROUP BY report.id
             """, nativeQuery = true)
     List<DailyReportCount> countForDailyReports(@Param("reportIds") Collection<Long> reportIds,
@@ -191,6 +194,8 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
                             THEN 1 ELSE 0 END) AS lowSensitivityCount
             FROM Finding finding
             WHERE finding.run.id = :runId
+              AND finding.article.fetchStatus = com.example.be.domain.collection.entity.FetchStatus.FULLTEXT
+              AND function('regexp_instr', finding.article.body, '[^[:space:]]') > 0
             GROUP BY finding.category, finding.changeType
             """)
     List<ReportStatsCount> countStatsByRunId(
@@ -199,12 +204,23 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             @Param("highThreshold") BigDecimal highThreshold);
 
     @Query("""
+            SELECT COUNT(finding) FROM Finding finding
+            WHERE finding.run.id = :runId
+              AND (finding.article.fetchStatus IS NULL
+                OR finding.article.fetchStatus <> com.example.be.domain.collection.entity.FetchStatus.FULLTEXT
+                OR coalesce(function('regexp_instr', finding.article.body, '[^[:space:]]'), 0) = 0)
+            """)
+    long countWithoutFullTextForReportByRunId(@Param("runId") Long runId);
+
+    @Query("""
             SELECT finding.run.id AS runId,
                    COUNT(finding) AS findingCount,
                    SUM(CASE WHEN finding.sensitivity.score >= :highThreshold
                             THEN 1 ELSE 0 END) AS highSensitivityCount
             FROM Finding finding
             WHERE finding.run.id IN :runIds
+              AND finding.article.fetchStatus = com.example.be.domain.collection.entity.FetchStatus.FULLTEXT
+              AND function('regexp_instr', finding.article.body, '[^[:space:]]') > 0
             GROUP BY finding.run.id
             """)
     List<ReportCount> countForReports(

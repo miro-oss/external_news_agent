@@ -264,6 +264,64 @@ class FindingRepositoryIntegrationTests {
     }
 
     @Test
+    void articlePagesAndCountsExcludeMetadataAndEmptyClobsWithoutDeletingCollectionHistory() {
+        findingRepository.save(finding());
+        Article shortBody = articleRepository.save(historyArticle("short", article.getPublishedAt().minusMinutes(1)));
+        shortBody.applyFullText("짧지만 확보한 전문이다.", FetchStatus.FULLTEXT, LocalDateTime.now());
+        findingRepository.save(historyFinding(shortBody));
+        for (FetchStatus status : FetchStatus.values()) {
+            Article hidden = articleRepository.save(historyArticle("hidden-" + status, article.getPublishedAt().plusMinutes(1)));
+            hidden.applyFullText(status == FetchStatus.FULLTEXT ? " \n\t\r " : null,
+                    FetchStatus.FULLTEXT, LocalDateTime.now());
+            hidden.applyFullText(hidden.getBody(), status, LocalDateTime.now());
+            findingRepository.save(historyFinding(hidden));
+            runArticleRepository.save(CollectionRunArticle.observe(
+                    run, hidden, topic, source, ChangeType.NEW, LocalDateTime.now()));
+        }
+        Article nullBody = articleRepository.save(historyArticle("null-body", article.getPublishedAt().plusMinutes(2)));
+        nullBody.applyFullText(null, FetchStatus.FULLTEXT, LocalDateTime.now());
+        findingRepository.save(historyFinding(nullBody));
+        flushAndClear();
+
+        var first = articleQueryService.getArticles(run.getId(), null, null, null, null, null,
+                null, null, null, null, null, null, "PUBLISHED_DESC", 0, 1);
+        var second = articleQueryService.getArticles(run.getId(), null, null, null, null, null,
+                null, null, null, null, null, null, "PUBLISHED_DESC", 1, 1);
+
+        assertEquals(2, first.getTotalElements());
+        assertEquals(2, first.getTotalPages());
+        assertTrue(first.isHasNext());
+        assertEquals(List.of(article.getId()), first.getContent().stream().map(value -> value.getId()).toList());
+        assertEquals(List.of(shortBody.getId()), second.getContent().stream().map(value -> value.getId()).toList());
+        assertEquals(2 + FetchStatus.values().length + 1,
+                jdbcTemplate.queryForObject("SELECT COUNT(*) FROM news_findings WHERE run_id = ?", Integer.class, run.getId()));
+        assertEquals(FetchStatus.values().length,
+                jdbcTemplate.queryForObject("SELECT COUNT(*) FROM news_collection_run_articles WHERE run_id = ?", Integer.class, run.getId()));
+
+        assertEquals(2, findingRepository.countForReports(List.of(run.getId()), new BigDecimal("70"))
+                .getFirst().getFindingCount());
+        assertEquals(2, findingRepository.countStatsByRunId(run.getId(), new BigDecimal("40"), new BigDecimal("70"))
+                .stream().mapToLong(FindingRepository.ReportStatsCount::getFindingCount).sum());
+        assertEquals(FetchStatus.values().length + 1, findingRepository.countWithoutFullTextForReportByRunId(run.getId()));
+
+        var savedReport = com.example.be.domain.reports.entity.NewsReport.builder()
+                .reportScope(com.example.be.domain.reports.entity.ReportScope.DAILY)
+                .reportDate(java.time.LocalDate.of(1997, 3, 14))
+                .sourceRunIds(List.of(run.getId())).sourceReportCount(1L)
+                .title("본문 노출 집계 검증").markdownBody("저장된 원본 보고서")
+                .modelName("synthetic").generatedAt(LocalDateTime.now())
+                .coverageRecorded(true)
+                .reflectedFindingIds(jdbcTemplate.queryForList(
+                        "SELECT id FROM news_findings WHERE run_id = ? ORDER BY id", Long.class, run.getId()))
+                .build();
+        entityManager.persist(savedReport);
+        entityManager.flush();
+        var dailyCount = findingRepository.countForDailyReports(List.of(savedReport.getId()), new BigDecimal("70"));
+        assertEquals(2, dailyCount.getFirst().getFindingCount());
+        assertEquals(1, dailyCount.getFirst().getHighSensitivityCount());
+    }
+
+    @Test
     void filtersByAudienceAndMinimumRelevanceThroughOracleJson() {
         findingRepository.save(finding());
         flushAndClear();

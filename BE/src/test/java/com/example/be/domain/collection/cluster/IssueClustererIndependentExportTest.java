@@ -195,7 +195,7 @@ class IssueClustererIndependentExportTest {
                 value.put("sourceId", article.sourceId());
                 value.put("topicId", article.topicId());
                 value.put("title", article.title());
-                value.put("titleOrganizations", clusterer.titleOrganizations(article.title())
+                value.put("titleOrganizations", clusterer.titleOrganizations(article)
                         .stream().sorted().toList());
                 value.put("eventConflictingArticleIds", eventConflicts.get(article.articleId()));
                 value.put("expectedIssueId", source.expectedIssueId());

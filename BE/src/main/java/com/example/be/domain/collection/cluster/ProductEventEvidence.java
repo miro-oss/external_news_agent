@@ -1,7 +1,5 @@
 package com.example.be.domain.collection.cluster;
 
-import com.example.be.domain.collection.content.ArticleBodyCleaner;
-
 import java.text.Normalizer;
 import java.time.DateTimeException;
 import java.time.Duration;
@@ -60,9 +58,9 @@ final class ProductEventEvidence {
     ProductEventEvidence(List<ClusterArticle> articles, BreakingNewsDetector detector) {
         for (ClusterArticle article : articles) {
             String title = normalize(detector.coreTitle(article.title()));
-            String rawBody = normalize(ArticleBodyCleaner.withoutTrailingBoilerplate(article.body()));
+            String rawBody = normalize(ArticleEvidenceText.primary(article.body(), null));
             String body = foreground(rawBody);
-            String summary = foreground(normalize(article.summary()));
+            String summary = foreground(normalize(ArticleEvidenceText.primary(null, article.summary())));
             // Some fetched bodies contain only captions while the supplied summary contains the article.
             // Only absent/caption bodies permit that fallback; a substantive lead keeps its own focal event.
             boolean summaryFallback = rawBody.isBlank() || captionOnly(rawBody);

@@ -1,7 +1,5 @@
 package com.example.be.domain.collection.cluster;
 
-import com.example.be.domain.collection.content.ArticleBodyCleaner;
-
 import java.text.Normalizer;
 import java.time.DateTimeException;
 import java.time.LocalDate;
@@ -47,8 +45,7 @@ final class NamedEventEvidence {
     NamedEventEvidence(List<ClusterArticle> articles, BreakingNewsDetector detector) {
         for (ClusterArticle article : articles) {
             String rawTitle = detector.coreTitle(article.title()).replaceFirst("^(?:\\s*\\[[^]]+])*\\s*", "");
-            String body = ArticleBodyCleaner.withoutTrailingBoilerplate(article.body());
-            String rawLead = foreground(bound(body.isBlank() ? nullToEmpty(article.summary()) : body, LEAD_LIMIT));
+            String rawLead = foreground(bound(ArticleEvidenceText.primary(article), LEAD_LIMIT));
             String title = normalize(rawTitle);
             String lead = normalize(rawLead);
             profiles.put(article.articleId(), new Profile(

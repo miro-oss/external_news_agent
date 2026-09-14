@@ -187,6 +187,7 @@ class ReportOracleIntegrationTests {
                 .canonicalUrl("https://example.com/articles/" + suffix)
                 .title("Oracle에서 검증하는 M5 기사")
                 .summary("수집 요약")
+                .body("Oracle 통합 테스트 본문")
                 .language("ko")
                 .fetchStatus(FetchStatus.FULLTEXT)
                 .firstSeenRun(run)

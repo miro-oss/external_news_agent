@@ -272,6 +272,56 @@ class ArticleQueryServiceIssueTest {
         assertEquals("대표 근거 문장", detail.getBodyText());
     }
 
+    @Test
+    void fullTextMemberDoesNotBorrowAnEmptyRepresentativesAnalysis() {
+        Topic topic = Topic.builder().id(7L).name("HBM").build();
+        Source source = Source.builder().id(9L).name("검증 소스").build();
+        Article emptyRepresentative = article(101L, "요약 대표", null, topic, source);
+        Article member = article(102L, "본문 기사", "확보한 기사 본문", topic, source);
+        stubRuleMemberIssue(member, emptyRepresentative, topic);
+        when(findingRepository.findFirstByArticleIdOrderByIdDesc(101L))
+                .thenReturn(Optional.of(finding(emptyRepresentative)));
+        when(findingRepository.findFirstByArticleIdOrderByIdDesc(102L))
+                .thenReturn(Optional.of(historicalMemberFinding(member, 42L)));
+
+        var detail = service.getArticle(102L, null);
+
+        assertEquals(102L, detail.getAnalysisArticleId());
+        assertEquals("멤버의 과거 분석", detail.getAnalysis().getSummary());
+        assertEquals(List.of(), detail.getRelatedArticles());
+    }
+
+    @Test
+    void collectedMetadataRemainsRetrievableWithoutAppearingAsARelatedArticle() {
+        Topic topic = Topic.builder().id(7L).name("HBM").build();
+        Source source = Source.builder().id(9L).name("검증 소스").build();
+        Article metadata = article(101L, "요약만 수집한 기사", null, topic, source);
+        metadata.applyFullText(null, FetchStatus.FETCH_FAILED, LocalDateTime.now());
+        when(articleRepository.findById(101L)).thenReturn(Optional.of(metadata));
+
+        var detail = service.getArticle(101L, null);
+
+        assertEquals(101L, detail.getId());
+        assertEquals("BLOCKED", detail.getFetchStatus());
+        assertNull(detail.getBodyText());
+        assertEquals(List.of(), detail.getSentences());
+    }
+
+    @Test
+    void availableBodyIsReturnedWhenAnOlderAnalysisHasNoSentenceSnapshot() {
+        Topic topic = Topic.builder().id(7L).name("HBM").build();
+        Source source = Source.builder().id(9L).name("검증 소스").build();
+        Article fullText = article(101L, "본문 기사", "실제로 확보한 기사 본문", topic, source);
+        when(articleRepository.findById(101L)).thenReturn(Optional.of(fullText));
+        when(findingRepository.findFirstByArticleIdOrderByIdDesc(101L))
+                .thenReturn(Optional.of(finding(fullText, List.of())));
+
+        var detail = service.getArticle(101L, null);
+
+        assertEquals("실제로 확보한 기사 본문", detail.getBodyText());
+        assertEquals(List.of(), detail.getSentences());
+    }
+
     private void stubRuleMemberIssue(Article member, Article representative, Topic topic) {
         NewsIssue issue = NewsIssue.builder()
                 .id(88L)
@@ -345,6 +395,10 @@ class ArticleQueryServiceIssueTest {
     }
 
     private Finding finding(Article representative) {
+        return finding(representative, List.of(new FindingSection(0, "대표 근거 문장")));
+    }
+
+    private Finding finding(Article representative, List<FindingSection> sections) {
         return Finding.builder()
                 .id(501L)
                 .run(CollectionRun.builder().id(42L).build())
@@ -357,7 +411,7 @@ class ArticleQueryServiceIssueTest {
                 .relevance(Relevance.IMPORTANT)
                 .category("기업")
                 .analysisSource(AnalysisSource.LLM)
-                .sections(List.of(new FindingSection(0, "대표 근거 문장")))
+                .sections(sections)
                 .analyzedAt(LocalDateTime.of(2026, 8, 10, 10, 2))
                 .build();
     }

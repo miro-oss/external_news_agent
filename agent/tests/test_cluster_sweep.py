@@ -646,7 +646,7 @@ def test_event_text_replay_preserves_background_and_organization_guards(edge):
 @pytest.mark.parametrize(
     "version", [
         "event-text-evidence-v2", "event-text-evidence-v3",
-        "event-text-evidence-v4", "event-text-evidence-v5",
+        "event-text-evidence-v4", "event-text-evidence-v5", "event-text-evidence-v6",
     ]
 )
 def test_event_text_metadata_rejects_missing_or_invalid_features(field, value, version):
@@ -676,7 +676,9 @@ def test_event_text_metadata_rejects_missing_or_invalid_features(field, value, v
 
 
 @pytest.mark.parametrize("value", ["missing", None, 0, 1, "true", [], {}])
-@pytest.mark.parametrize("version", ["event-text-evidence-v4", "event-text-evidence-v5"])
+@pytest.mark.parametrize(
+    "version", ["event-text-evidence-v4", "event-text-evidence-v5", "event-text-evidence-v6"]
+)
 def test_specific_event_metadata_requires_boolean(value, version):
     pair = {
         **_pair(1, 2, "HOLDOUT"),
@@ -745,7 +747,9 @@ def test_event_conflict_metadata_rejects_invalid_ids_and_cross_split_references(
 
 
 @pytest.mark.parametrize("case", ["missing", "asymmetric", "invalid-id", "duplicate-id"])
-@pytest.mark.parametrize("version", ["event-text-evidence-v4", "event-text-evidence-v5"])
+@pytest.mark.parametrize(
+    "version", ["event-text-evidence-v4", "event-text-evidence-v5", "event-text-evidence-v6"]
+)
 def test_event_conflict_metadata_fails_closed_before_any_sweep(case, version):
     articles = [
         _conflict_article(1, "HOLDOUT", "first", conflicts=[2]),
@@ -879,7 +883,9 @@ def test_tfidf_baselines_remain_unguarded_with_explicit_event_conflicts(include_
     assert metrics.precision == 0.0
 
 
-@pytest.mark.parametrize("version", ["event-text-evidence-v4", "event-text-evidence-v5"])
+@pytest.mark.parametrize(
+    "version", ["event-text-evidence-v4", "event-text-evidence-v5", "event-text-evidence-v6"]
+)
 def test_sweep_reports_conflict_guard_and_unguarded_baselines(version):
     articles = [
         _conflict_article(1, "CALIBRATION", "Calibration report", "same"),

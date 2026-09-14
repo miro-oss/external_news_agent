@@ -115,7 +115,7 @@ class IssueClustererGoldenExportTest {
             value.put("articleId", clustered.articleId());
             value.put("topicId", clustered.topicId());
             value.put("title", clustered.title());
-            value.put("titleOrganizations", clusterer.titleOrganizations(clustered.title())
+            value.put("titleOrganizations", clusterer.titleOrganizations(clustered)
                     .stream().sorted().toList());
             value.put("eventConflictingArticleIds", eventConflicts.get(clustered.articleId()));
             value.put("expectedIssueId", article.issueKey());

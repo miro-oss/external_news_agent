@@ -4,7 +4,7 @@ package com.example.be.domain.collection.entity;
  * 기사 본문을 어디까지 확보했는지.
  *
  * <p>RSS의 description은 잘린 요약이라 전문은 기사 URL을 다시 방문해야 얻는다(F6). 그 결과가 이 값이다.
- * 전문을 못 가져왔다고 기사를 버리지 않는다 — 제목과 링크만으로도 목록에는 쓸모가 있다.
+ * 전문을 못 가져온 기사도 수집 이력에는 보존하며 사용자용 결과에서는 제외한다.
  */
 public enum FetchStatus {
 

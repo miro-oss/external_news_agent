@@ -1,7 +1,5 @@
 package com.example.be.domain.collection.cluster;
 
-import com.example.be.domain.collection.content.ArticleBodyCleaner;
-
 import java.text.Normalizer;
 import java.time.DateTimeException;
 import java.time.Duration;
@@ -33,8 +31,7 @@ final class StockEventEvidence {
         DeterministicEntityExtractor extractor = new DeterministicEntityExtractor();
         for (ClusterArticle article : articles) {
             String title = normalize(detector.coreTitle(article.title()));
-            String body = normalize(ArticleBodyCleaner.withoutTrailingBoilerplate(article.body()));
-            String lead = bound(body.isBlank() ? normalize(article.summary()) : body, 350);
+            String lead = bound(normalize(ArticleEvidenceText.primary(article)), 350);
             Matcher trading = TRADING_CONTEXT.matcher(lead);
             if (!HEADLINE.matcher(title).find() || !trading.find()) {
                 continue;

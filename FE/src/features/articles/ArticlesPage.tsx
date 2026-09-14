@@ -48,7 +48,7 @@ export function ArticlesPage() {
       <header className="page-header article-header">
         <div>
           <h1>분석 기사</h1>
-          <p className="muted">수집된 신호의 한국어 요약과 분류를 확인하고, 원문 근거를 펼쳐봅니다.</p>
+          <p className="muted">원문을 확보한 기사의 한국어 요약과 분류를 확인하고, 근거를 펼쳐봅니다.</p>
         </div>
         <div className="summary-count" aria-live="polite">
           <strong>{articles.data?.totalElements ?? 0}</strong>

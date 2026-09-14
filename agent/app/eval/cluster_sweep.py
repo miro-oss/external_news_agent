@@ -18,7 +18,9 @@ _ORGANIZATION_JACCARD_THRESHOLDS = (0.10, 0.125, 0.15, 0.20)
 _ORGANIZATION_TIME_WINDOWS = (12, 24, 48)
 _TITLE_ORGANIZATION_RULE_VERSION = "title-organization-conflict-v1"
 _EVENT_CONFLICT_RULE_VERSION = "event-text-evidence-v4"
-_EVENT_CONFLICT_RULE_VERSIONS = (_EVENT_CONFLICT_RULE_VERSION, "event-text-evidence-v5")
+_EVENT_CONFLICT_RULE_VERSIONS = (
+    _EVENT_CONFLICT_RULE_VERSION, "event-text-evidence-v5", "event-text-evidence-v6",
+)
 _EVENT_TEXT_RULE_VERSIONS = (
     "event-text-evidence-v2", "event-text-evidence-v3", *_EVENT_CONFLICT_RULE_VERSIONS,
 )

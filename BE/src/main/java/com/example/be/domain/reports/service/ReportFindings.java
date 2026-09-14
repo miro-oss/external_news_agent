@@ -16,15 +16,34 @@ public final class ReportFindings {
     }
 
     public static List<Finding> load(NewsReport report, FindingRepository repository) {
+        return loadVisible(report, repository).findings();
+    }
+
+    public static boolean hasFullText(Finding finding) {
+        return finding != null && finding.getArticle() != null && finding.getArticle().hasFullText();
+    }
+
+    /** Keep stored DAILY selection/order, but never expose a finding whose original body is unavailable. */
+    public static Visible loadVisible(NewsReport report, FindingRepository repository) {
         if (report.getReportScope() == ReportScope.RUN) {
-            return ReportFindingOrder.sort(repository.findForReportByRunId(report.getRunId()));
+            List<Finding> all = repository.findForReportByRunId(report.getRunId());
+            List<Finding> visible = all.stream().filter(ReportFindings::hasFullText).toList();
+            return new Visible(ReportFindingOrder.sort(visible), visible.size() != all.size());
         }
         List<Long> ids = report.getReflectedFindingIds();
         if (ids.isEmpty()) {
-            return List.of();
+            return new Visible(List.of(), false);
         }
         Map<Long, Finding> byId = repository.findForReportByIdIn(ids).stream()
+                .filter(ReportFindings::hasFullText)
                 .collect(Collectors.toMap(Finding::getId, Function.identity()));
-        return ids.stream().filter(byId::containsKey).map(byId::get).toList();
+        List<Finding> visible = ids.stream().filter(byId::containsKey).map(byId::get).toList();
+        return new Visible(visible, visible.size() != ids.size());
+    }
+
+    public record Visible(List<Finding> findings, boolean filtered) {
+        public Visible {
+            findings = List.copyOf(findings);
+        }
     }
 }

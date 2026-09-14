@@ -51,7 +51,20 @@ public class IssueClusteringLoader {
         Map<ArticleTopicKey, Long> issueByCurrentArticle = membershipsByArticleTopic(
                 issueArticleRepository.findByArticleIds(currentArticleIds));
         OffsetDateTime since = earliest.minus(properties.getEntityTimeWindow());
-        List<IssueArticle> historical = issueArticleRepository.findRecentByTopicIds(topicIds, since);
+        List<IssueArticle> historical = new ArrayList<>(issueArticleRepository.findRecentByTopicIds(topicIds, since));
+        Set<Long> missingExistingIssueIds = new LinkedHashSet<>();
+        for (CollectionRunArticle observation : current) {
+            Long existingIssueId = issueByCurrentArticle.get(new ArticleTopicKey(
+                    observation.getArticle().getId(), observation.getTopic().getId()));
+            if (existingIssueId != null) {
+                missingExistingIssueIds.add(existingIssueId);
+            }
+        }
+        historical.forEach(membership -> missingExistingIssueIds.remove(membership.getIssue().getId()));
+        // A re-observed article can belong to an issue outside the recent window.
+        // Load only those exact issues, retaining their full-text members for representative selection.
+        missingExistingIssueIds.stream().sorted().forEach(issueId -> historical.addAll(
+                issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(issueId)));
 
         Map<ArticleTopicKey, ClusterArticle> snapshot = new LinkedHashMap<>();
         for (IssueArticle membership : historical) {
