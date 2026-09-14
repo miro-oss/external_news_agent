@@ -14,10 +14,14 @@ import java.util.List;
 
 public interface WatchAlertOutboxRepository extends JpaRepository<WatchAlertOutbox, Long> {
 
+    @Query("SELECT COALESCE(MAX(alert.id), 0) FROM WatchAlertOutbox alert")
+    long findScanUpperBound();
+
     @Query("""
             SELECT alert.id
             FROM WatchAlertOutbox alert
             WHERE alert.id > :afterId
+              AND alert.id <= :upToId
               AND (alert.status = com.example.be.domain.notifications.entity.WatchAlertDeliveryStatus.PENDING
                 OR (alert.status = com.example.be.domain.notifications.entity.WatchAlertDeliveryStatus.PROCESSING
                     AND alert.processingStartedAt <= :staleBefore))
@@ -25,6 +29,7 @@ public interface WatchAlertOutboxRepository extends JpaRepository<WatchAlertOutb
             """)
     List<Long> findClaimableIds(@Param("staleBefore") LocalDateTime staleBefore,
                                 @Param("afterId") Long afterId,
+                                @Param("upToId") Long upToId,
                                 Pageable pageable);
 
     // Keep pagination outside the locking query: Oracle cannot combine FETCH FIRST and FOR UPDATE.

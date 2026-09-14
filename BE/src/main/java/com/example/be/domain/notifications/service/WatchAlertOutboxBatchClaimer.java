@@ -39,28 +39,33 @@ public class WatchAlertOutboxBatchClaimer {
     private final IssueStatusCalculator issueStatusCalculator;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public BatchClaim claimAfter(long afterId, LocalDateTime now, int remainingSlots) {
+    public BatchClaim claimAfter(long afterId, long upToId, LocalDateTime now, int remainingSlots) {
         LocalDateTime staleBefore = now.minus(STALE_PROCESSING_TIMEOUT);
-        List<Long> candidateIds = repository.findClaimableIds(staleBefore, afterId,
+        List<Long> candidateIds = repository.findClaimableIds(staleBefore, afterId, upToId,
                 PageRequest.of(0, CANDIDATE_BATCH_SIZE));
         if (candidateIds.isEmpty()) {
             return new BatchClaim(List.of(), afterId, true);
         }
         Map<Long, List<IssueArticle>> visibleMembershipsByIssue = new HashMap<>();
         List<WatchAlertSnapshot> snapshots = new ArrayList<>();
+        long nextAfterId = candidateIds.getLast();
         for (WatchAlertOutbox alert : repository.findClaimableByIdsForUpdate(candidateIds, staleBefore)) {
             // The locking query rechecks eligibility; candidate IDs alone do not reserve an alert.
             if (hasVisibleEvidence(alert, visibleMembershipsByIssue)) {
                 alert.startProcessing(LocalDateTime.now(ApiTimeZone.ZONE));
                 snapshots.add(snapshot(alert, visibleMembershipsByIssue.get(alert.getWatch().getIssue().getId())));
                 if (snapshots.size() == remainingSlots) {
+                    // Leave unvisited candidates for the next invocation when its claim budget fills mid-page.
+                    nextAfterId = alert.getId();
                     break;
                 }
             }
         }
         repository.flush();
         // Move past hidden and concurrently claimed candidates as well as the ones returned to the sender.
-        return new BatchClaim(snapshots, candidateIds.getLast(), candidateIds.size() < CANDIDATE_BATCH_SIZE);
+        boolean exhausted = nextAfterId == candidateIds.getLast()
+                && (candidateIds.size() < CANDIDATE_BATCH_SIZE || nextAfterId == upToId);
+        return new BatchClaim(snapshots, nextAfterId, exhausted);
     }
 
     private boolean hasVisibleEvidence(WatchAlertOutbox alert, Map<Long, List<IssueArticle>> membershipsByIssue) {

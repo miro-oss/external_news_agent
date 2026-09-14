@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -151,18 +152,18 @@ class WatchAlertOutboxPersistenceServiceTest {
                 membership(2L, "후속 보도", FetchStatus.FULLTEXT, "확보한 후속 원문")));
 
         LocalDateTime now = LocalDateTime.now();
-        var firstBatchResult = service.claimNextBatch(0, now, 100);
+        var firstBatchResult = service.claimNextBatch(0, Long.MAX_VALUE, now, 100);
         assertTrue(firstBatchResult.snapshots().isEmpty());
         assertEquals(100L, firstBatchResult.afterId());
-        var snapshots = service.claimNextBatch(firstBatchResult.afterId(), now, 100).snapshots();
+        var snapshots = service.claimNextBatch(firstBatchResult.afterId(), Long.MAX_VALUE, now, 100).snapshots();
 
         assertEquals(List.of(101L), snapshots.stream()
                 .map(WatchAlertOutboxPersistenceService.WatchAlertSnapshot::id).toList());
         assertEquals(WatchAlertDeliveryStatus.PROCESSING, available.getStatus());
         assertEquals(WatchAlertDeliveryStatus.PENDING, alerts.getFirst().getStatus());
         assertEquals(0, alerts.getFirst().getAttemptCount());
-        verify(repository).findClaimableIds(any(), eq(0L), any());
-        verify(repository).findClaimableIds(any(), eq(100L), any());
+        verify(repository).findClaimableIds(any(), eq(0L), eq(Long.MAX_VALUE), any());
+        verify(repository).findClaimableIds(any(), eq(100L), eq(Long.MAX_VALUE), any());
         verify(repository).findClaimableByIdsForUpdate(eq(List.of(101L)), any());
         verify(issueArticleRepository, times(2)).findByIssueIdOrderByJoinedAtAsc(70L);
     }
@@ -184,7 +185,7 @@ class WatchAlertOutboxPersistenceServiceTest {
                 snapshots.stream().map(WatchAlertOutboxPersistenceService.WatchAlertSnapshot::id).toList());
         assertEquals(WatchAlertDeliveryStatus.PENDING, alerts.get(100).getStatus());
         assertEquals(0, alerts.get(100).getAttemptCount());
-        verify(repository, times(1)).findClaimableIds(any(), anyLong(), any());
+        verify(repository, times(1)).findClaimableIds(any(), anyLong(), anyLong(), any());
         verify(repository, times(1)).findClaimableByIdsForUpdate(anyList(), any());
     }
 
@@ -202,15 +203,53 @@ class WatchAlertOutboxPersistenceServiceTest {
                 membership(2L, "후속 보도", FetchStatus.FULLTEXT, "확보한 후속 원문")));
 
         LocalDateTime now = LocalDateTime.now();
-        var firstBatchResult = service.claimNextBatch(0, now, 100);
+        var firstBatchResult = service.claimNextBatch(0, Long.MAX_VALUE, now, 100);
         assertTrue(firstBatchResult.snapshots().isEmpty());
         assertEquals(100L, firstBatchResult.afterId());
-        var snapshots = service.claimNextBatch(firstBatchResult.afterId(), now, 100).snapshots();
+        var snapshots = service.claimNextBatch(firstBatchResult.afterId(), Long.MAX_VALUE, now, 100).snapshots();
 
         assertEquals(List.of(101L), snapshots.stream()
                 .map(WatchAlertOutboxPersistenceService.WatchAlertSnapshot::id).toList());
-        verify(repository).findClaimableIds(any(), eq(100L), any());
+        verify(repository).findClaimableIds(any(), eq(100L), eq(Long.MAX_VALUE), any());
         assertEquals(WatchAlertDeliveryStatus.PENDING, alerts.getFirst().getStatus());
+    }
+
+    @Test
+    void retainsUnvisitedCandidatesWhenTheClaimLimitFillsMidPage() {
+        List<WatchAlertOutbox> alerts = List.of(
+                alert(1L, "확보한 기사 제목", WatchType.BREAKING),
+                alert(2L, "확보한 기사 제목", WatchType.BREAKING),
+                alert(3L, "확보한 기사 제목", WatchType.BREAKING));
+        stubCandidates(alerts);
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(70L)).thenReturn(List.of(
+                membership(1L, "확보한 기사 제목", FetchStatus.FULLTEXT, "확보한 원문"),
+                membership(2L, "후속 보도", FetchStatus.FULLTEXT, "확보한 후속 원문")));
+        LocalDateTime now = LocalDateTime.now();
+
+        var first = service.claimNextBatch(0, 3, now, 1);
+        assertEquals(List.of(1L), first.snapshots().stream().map(value -> value.id()).toList());
+        assertEquals(1L, first.afterId());
+        assertFalse(first.exhausted());
+
+        var next = service.claimNextBatch(first.afterId(), 3, now, 100);
+        assertEquals(List.of(2L, 3L), next.snapshots().stream().map(value -> value.id()).toList());
+        assertTrue(next.exhausted());
+    }
+
+    @Test
+    void defersCandidatesAboveTheFixedScanUpperBound() {
+        List<WatchAlertOutbox> alerts = List.of(
+                alert(1L, "과거 검증 불가 제목", WatchType.BREAKING),
+                alert(2L, "새 후보 제목", WatchType.BREAKING));
+        stubCandidates(alerts);
+
+        var batch = service.claimNextBatch(0, 1, LocalDateTime.now(), 100);
+
+        assertEquals(1L, batch.afterId());
+        assertTrue(batch.exhausted());
+        assertTrue(batch.snapshots().isEmpty());
+        verify(repository).findClaimableByIdsForUpdate(eq(List.of(1L)), any());
+        assertEquals(WatchAlertDeliveryStatus.PENDING, alerts.getLast().getStatus());
     }
 
     @Test
@@ -275,7 +314,7 @@ class WatchAlertOutboxPersistenceServiceTest {
     }
 
     private List<WatchAlertOutboxPersistenceService.WatchAlertSnapshot> claimInitialBatch() {
-        return service.claimNextBatch(0, LocalDateTime.now(), 100).snapshots();
+        return service.claimNextBatch(0, Long.MAX_VALUE, LocalDateTime.now(), 100).snapshots();
     }
 
     private WatchAlertOutbox alert(Long id, String title, WatchType type) {
@@ -288,18 +327,20 @@ class WatchAlertOutboxPersistenceServiceTest {
     }
 
     private void stubCandidates(List<WatchAlertOutbox> alerts) {
-        when(repository.findClaimableIds(any(), anyLong(), any())).thenAnswer(invocation -> {
+        when(repository.findClaimableIds(any(), anyLong(), anyLong(), any())).thenAnswer(invocation -> {
             long afterId = invocation.getArgument(1);
-            Pageable page = invocation.getArgument(2);
+            long upToId = invocation.getArgument(2);
+            Pageable page = invocation.getArgument(3);
             assertEquals(0, page.getOffset());
             assertEquals(100, page.getPageSize());
-            return alerts.stream().map(WatchAlertOutbox::getId).filter(id -> id > afterId)
+            return alerts.stream().map(WatchAlertOutbox::getId).filter(id -> id > afterId && id <= upToId)
                     .limit(page.getPageSize()).toList();
         });
         when(repository.findClaimableByIdsForUpdate(anyList(), any())).thenAnswer(invocation -> {
             List<Long> ids = invocation.getArgument(0);
             assertTrue(ids.size() <= 100);
-            return alerts.stream().filter(alert -> ids.contains(alert.getId())).toList();
+            return alerts.stream().filter(alert -> ids.contains(alert.getId()))
+                    .filter(alert -> alert.getStatus() == WatchAlertDeliveryStatus.PENDING).toList();
         });
     }
 

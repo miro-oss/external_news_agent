@@ -7,6 +7,7 @@ import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.notifications.service.WatchAlertOutboxPersistenceService.WatchAlertSnapshot;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.mockito.InOrder;
 import com.example.be.domain.notifications.service.WatchAlertOutboxBatchClaimer.BatchClaim;
 
@@ -14,13 +15,20 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -37,6 +45,11 @@ class WatchNotificationDeliveryServiceTest {
             mock(WatchAlertOutboxPersistenceService.class);
     private final WatchNotificationDeliveryService service = new WatchNotificationDeliveryService(
             planService, senderRegistry, persistenceService, outboxPersistenceService);
+
+    @BeforeEach
+    void scanExistingOutbox() {
+        when(outboxPersistenceService.scanUpperBound()).thenReturn(10_000L);
+    }
 
     @Test
     void sendsOneBreakingAlertThroughExistingEmailChannel() {
@@ -155,21 +168,21 @@ class WatchNotificationDeliveryServiceTest {
         WatchAlertSnapshot first = alert();
         WatchAlertSnapshot second = otherAlert(61L, 71L);
         DeliveryFixture fixture = prepareDeliveries(List.of(first, second));
-        when(outboxPersistenceService.claimNextBatch(eq(0L), any(), eq(100)))
+        when(outboxPersistenceService.claimNextBatch(eq(0L), anyLong(), any(), eq(100)))
                 .thenReturn(new BatchClaim(List.of(first), 100L, false));
-        when(outboxPersistenceService.claimNextBatch(eq(100L), any(), eq(99)))
+        when(outboxPersistenceService.claimNextBatch(eq(100L), anyLong(), any(), eq(99)))
                 .thenReturn(new BatchClaim(List.of(), 200L, false));
-        when(outboxPersistenceService.claimNextBatch(eq(200L), any(), eq(99)))
+        when(outboxPersistenceService.claimNextBatch(eq(200L), anyLong(), any(), eq(99)))
                 .thenReturn(new BatchClaim(List.of(second), 201L, true));
 
         assertEquals(2, service.deliverPending());
 
         InOrder order = inOrder(outboxPersistenceService, fixture.session());
-        order.verify(outboxPersistenceService).claimNextBatch(eq(0L), any(), eq(100));
+        order.verify(outboxPersistenceService).claimNextBatch(eq(0L), anyLong(), any(), eq(100));
         order.verify(fixture.session()).send("user@example.com", "알림", "본문 60");
         order.verify(outboxPersistenceService).markSent(60L);
-        order.verify(outboxPersistenceService).claimNextBatch(eq(100L), any(), eq(99));
-        order.verify(outboxPersistenceService).claimNextBatch(eq(200L), any(), eq(99));
+        order.verify(outboxPersistenceService).claimNextBatch(eq(100L), anyLong(), any(), eq(99));
+        order.verify(outboxPersistenceService).claimNextBatch(eq(200L), anyLong(), any(), eq(99));
         order.verify(fixture.session()).send("user@example.com", "알림", "본문 61");
         order.verify(outboxPersistenceService).markSent(61L);
     }
@@ -179,9 +192,9 @@ class WatchNotificationDeliveryServiceTest {
         WatchAlertSnapshot first = alert();
         WatchAlertSnapshot second = otherAlert(61L, first.issueId());
         DeliveryFixture fixture = prepareDeliveries(List.of(first, second));
-        when(outboxPersistenceService.claimNextBatch(eq(0L), any(), eq(100)))
+        when(outboxPersistenceService.claimNextBatch(eq(0L), anyLong(), any(), eq(100)))
                 .thenReturn(new BatchClaim(List.of(first), 100L, false));
-        when(outboxPersistenceService.claimNextBatch(eq(100L), any(), eq(99)))
+        when(outboxPersistenceService.claimNextBatch(eq(100L), anyLong(), any(), eq(99)))
                 .thenReturn(new BatchClaim(List.of(second), 101L, true));
 
         assertEquals(1, service.deliverPending());
@@ -199,15 +212,15 @@ class WatchNotificationDeliveryServiceTest {
         for (long id = 1; id <= 100; id++) {
             alerts.add(otherAlert(id, id));
         }
-        when(outboxPersistenceService.claimNextBatch(eq(0L), any(), eq(100)))
+        when(outboxPersistenceService.claimNextBatch(eq(0L), anyLong(), any(), eq(100)))
                 .thenReturn(new BatchClaim(alerts.subList(0, 60), 100L, false));
-        when(outboxPersistenceService.claimNextBatch(eq(100L), any(), eq(40)))
+        when(outboxPersistenceService.claimNextBatch(eq(100L), anyLong(), any(), eq(40)))
                 .thenReturn(new BatchClaim(alerts.subList(60, 100), 200L, false));
         when(planService.prepareWatchAlerts(any())).thenReturn(Map.of());
 
         assertEquals(0, service.deliverPending());
 
-        verify(outboxPersistenceService, times(2)).claimNextBatch(anyLong(), any(), anyInt());
+        verify(outboxPersistenceService, times(2)).claimNextBatch(anyLong(), anyLong(), any(), anyInt());
         verify(outboxPersistenceService, times(100)).retry(anyLong(), any());
     }
 
@@ -215,9 +228,9 @@ class WatchNotificationDeliveryServiceTest {
     void preparationFailureRetriesItsBatchBeforeContinuingTheCursor() {
         WatchAlertSnapshot first = alert();
         WatchAlertSnapshot second = otherAlert(61L, 71L);
-        when(outboxPersistenceService.claimNextBatch(eq(0L), any(), eq(100)))
+        when(outboxPersistenceService.claimNextBatch(eq(0L), anyLong(), any(), eq(100)))
                 .thenReturn(new BatchClaim(List.of(first), 100L, false));
-        when(outboxPersistenceService.claimNextBatch(eq(100L), any(), eq(99)))
+        when(outboxPersistenceService.claimNextBatch(eq(100L), anyLong(), any(), eq(99)))
                 .thenReturn(new BatchClaim(List.of(second), 101L, true));
         when(planService.prepareWatchAlerts(any())).thenThrow(new IllegalStateException("synthetic"))
                 .thenReturn(Map.of());
@@ -225,10 +238,119 @@ class WatchNotificationDeliveryServiceTest {
         assertEquals(0, service.deliverPending());
 
         InOrder order = inOrder(outboxPersistenceService);
-        order.verify(outboxPersistenceService).claimNextBatch(eq(0L), any(), eq(100));
+        order.verify(outboxPersistenceService).claimNextBatch(eq(0L), anyLong(), any(), eq(100));
         order.verify(outboxPersistenceService).retry(60L, "알림 대상 준비 실패: IllegalStateException");
-        order.verify(outboxPersistenceService).claimNextBatch(eq(100L), any(), eq(99));
+        order.verify(outboxPersistenceService).claimNextBatch(eq(100L), anyLong(), any(), eq(99));
         order.verify(outboxPersistenceService).retry(61L, "발송 가능한 대상 또는 성공한 전송이 없습니다.");
+    }
+
+    @Test
+    void boundsHiddenCandidateScanningAndResumesTheCursorOnTheNextInvocation() {
+        when(outboxPersistenceService.scanUpperBound()).thenReturn(2_500L);
+        when(outboxPersistenceService.claimNextBatch(anyLong(), eq(2_500L), any(), eq(100)))
+                .thenAnswer(invocation -> {
+                    long next = Math.min((long) invocation.getArgument(0) + 100, 2_500L);
+                    return new BatchClaim(List.of(), next, next == 2_500L);
+                });
+
+        assertEquals(0, service.deliverPending());
+        verify(outboxPersistenceService, times(10)).claimNextBatch(anyLong(), anyLong(), any(), anyInt());
+        verify(outboxPersistenceService).claimNextBatch(eq(900L), eq(2_500L), any(), eq(100));
+
+        assertEquals(0, service.deliverPending());
+        verify(outboxPersistenceService, times(20)).claimNextBatch(anyLong(), anyLong(), any(), anyInt());
+        verify(outboxPersistenceService).claimNextBatch(eq(1_000L), eq(2_500L), any(), eq(100));
+        verify(outboxPersistenceService, times(1)).scanUpperBound();
+    }
+
+    @Test
+    void frozenSweepRevisitsRecoveredLowIdsDespiteContinuousHigherIdArrivals() {
+        AtomicLong growingTail = new AtomicLong(1_100L);
+        when(outboxPersistenceService.scanUpperBound()).thenAnswer(ignored -> growingTail.get());
+        WatchAlertSnapshot recovered = alert();
+        prepareDeliveries(List.of(recovered));
+        when(outboxPersistenceService.claimNextBatch(anyLong(), anyLong(), any(), anyInt()))
+                .thenAnswer(invocation -> {
+                    long after = invocation.getArgument(0);
+                    long upper = invocation.getArgument(1);
+                    growingTail.addAndGet(100);
+                    long next = Math.min(after + 100, upper);
+                    List<WatchAlertSnapshot> alerts = after == 0 && upper > 1_100L
+                            ? List.of(recovered) : List.of();
+                    return new BatchClaim(alerts, next, next == upper);
+                });
+
+        assertEquals(0, service.deliverPending()); // Ten hidden batches; higher IDs keep arriving.
+        assertEquals(0, service.deliverPending()); // Finish the original 1,100-ID sweep only.
+        verify(outboxPersistenceService, times(11)).claimNextBatch(anyLong(), anyLong(), any(), anyInt());
+        verify(outboxPersistenceService, times(1)).scanUpperBound();
+
+        assertEquals(1, service.deliverPending()); // A fresh sweep visits the recovered low-ID source.
+
+        verify(outboxPersistenceService, times(2)).scanUpperBound();
+        verify(outboxPersistenceService).claimNextBatch(eq(1_000L), eq(1_100L), any(), eq(100));
+        verify(outboxPersistenceService).claimNextBatch(eq(0L), eq(2_200L), any(), eq(100));
+        verify(outboxPersistenceService).markSent(recovered.id());
+    }
+
+    @Test
+    void concurrentInvocationSkipsWithoutOverwritingTheActiveCursor() throws Exception {
+        CountDownLatch enteredClaim = new CountDownLatch(1);
+        CountDownLatch releaseClaim = new CountDownLatch(1);
+        when(outboxPersistenceService.claimNextBatch(anyLong(), anyLong(), any(), anyInt()))
+                .thenAnswer(ignored -> {
+                    enteredClaim.countDown();
+                    assertTrue(releaseClaim.await(5, TimeUnit.SECONDS));
+                    return new BatchClaim(List.of(), 100L, true);
+                });
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var active = executor.submit(service::deliverPending);
+            assertTrue(enteredClaim.await(5, TimeUnit.SECONDS));
+            assertEquals(0, service.deliverPending());
+            verify(outboxPersistenceService, times(1)).claimNextBatch(anyLong(), anyLong(), any(), anyInt());
+            verify(outboxPersistenceService, times(1)).scanUpperBound();
+            releaseClaim.countDown();
+            assertEquals(0, active.get(5, TimeUnit.SECONDS));
+            assertEquals(0, service.deliverPending());
+            verify(outboxPersistenceService, times(2)).scanUpperBound();
+        } finally {
+            releaseClaim.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void claimFailureReleasesInvocationGuardAndRetriesTheUnadvancedCursor() {
+        when(outboxPersistenceService.claimNextBatch(eq(0L), eq(10_000L), any(), eq(100)))
+                .thenThrow(new IllegalStateException("synthetic claim failure"))
+                .thenReturn(new BatchClaim(List.of(), 100L, true));
+
+        assertThrows(IllegalStateException.class, service::deliverPending);
+        assertEquals(0, service.deliverPending());
+
+        verify(outboxPersistenceService, times(2)).claimNextBatch(eq(0L), eq(10_000L), any(), eq(100));
+        verify(outboxPersistenceService, times(1)).scanUpperBound();
+    }
+
+    @Test
+    void completionFailureKeepsCommittedBatchCursorAndReleasesInvocationGuard() {
+        WatchAlertSnapshot first = alert();
+        prepareDeliveries(List.of(first));
+        when(outboxPersistenceService.claimNextBatch(eq(0L), eq(10_000L), any(), eq(100)))
+                .thenReturn(new BatchClaim(List.of(first), 100L, false));
+        when(outboxPersistenceService.claimNextBatch(eq(100L), eq(10_000L), any(), eq(100)))
+                .thenReturn(new BatchClaim(List.of(), 200L, true));
+        doThrow(new IllegalStateException("synthetic completion failure"))
+                .when(outboxPersistenceService).markSent(first.id());
+
+        assertThrows(IllegalStateException.class, service::deliverPending);
+        assertEquals(0, service.deliverPending());
+
+        verify(outboxPersistenceService).claimNextBatch(eq(0L), eq(10_000L), any(), eq(100));
+        verify(outboxPersistenceService).claimNextBatch(eq(100L), eq(10_000L), any(), eq(100));
+        verify(outboxPersistenceService, times(1)).scanUpperBound();
     }
 
     private DeliveryFixture prepareDeliveries(List<WatchAlertSnapshot> alerts) {
@@ -260,7 +382,7 @@ class WatchNotificationDeliveryServiceTest {
     }
 
     private void stubSingleBatch(List<WatchAlertSnapshot> alerts) {
-        when(outboxPersistenceService.claimNextBatch(anyLong(), any(), anyInt()))
+        when(outboxPersistenceService.claimNextBatch(anyLong(), anyLong(), any(), anyInt()))
                 .thenReturn(new BatchClaim(alerts, alerts.getLast().id(), true));
     }
 

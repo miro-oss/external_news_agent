@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 보고서 발송과 같은 텔레그램·이메일 어댑터를 사용해 속보 후속 문구만 전달한다. */
 @Slf4j
@@ -24,25 +25,52 @@ import java.util.Set;
 public class WatchNotificationDeliveryService {
 
     private static final int CLAIM_LIMIT = 100;
+    private static final int MAX_SCAN_BATCHES = 10;
 
     private final NotificationDeliveryPlanService planService;
     private final NotificationSenderRegistry senderRegistry;
     private final NotificationDeliveryPersistenceService persistenceService;
     private final WatchAlertOutboxPersistenceService outboxPersistenceService;
+    private final AtomicBoolean delivering = new AtomicBoolean();
+    private long scanAfterId;
+    private long scanUpToId;
 
     public int deliverPending() {
+        if (!delivering.compareAndSet(false, true)) {
+            return 0;
+        }
+        try {
+            return scanAndDeliver();
+        } finally {
+            delivering.set(false);
+        }
+    }
+
+    private int scanAndDeliver() {
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
         Map<Long, Set<String>> deliveredRecipientsByChannel = new LinkedHashMap<>();
-        long afterId = 0;
+        if (scanUpToId == 0) {
+            // Freeze this finite sweep so continuous arrivals cannot prevent revisiting recovered low IDs.
+            scanUpToId = outboxPersistenceService.scanUpperBound();
+            if (scanUpToId == 0) {
+                return 0;
+            }
+        }
         int claimed = 0;
         int delivered = 0;
-        while (claimed < CLAIM_LIMIT) {
-            var batch = outboxPersistenceService.claimNextBatch(afterId, now, CLAIM_LIMIT - claimed);
-            afterId = batch.afterId();
+        // Each repository batch reads at most 100 candidates, including hidden ones.
+        for (int batchCount = 0; batchCount < MAX_SCAN_BATCHES && claimed < CLAIM_LIMIT; batchCount++) {
+            var batch = outboxPersistenceService.claimNextBatch(scanAfterId, scanUpToId, now, CLAIM_LIMIT - claimed);
+            scanAfterId = batch.afterId();
             claimed += batch.snapshots().size();
+            boolean sweepComplete = batch.exhausted() || scanAfterId >= scanUpToId;
+            if (sweepComplete) {
+                scanAfterId = 0;
+                scanUpToId = 0;
+            }
             // Deliver each committed batch before scanning more hidden candidates and ageing its lease.
             delivered += deliverClaimed(batch.snapshots(), deliveredRecipientsByChannel);
-            if (batch.exhausted()) {
+            if (sweepComplete) {
                 break;
             }
         }

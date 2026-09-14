@@ -127,7 +127,8 @@ class NewsWatchRepositoryIntegrationTests {
         entityManager.flush();
         entityManager.clear();
 
-        List<Long> candidates = watchAlertOutboxRepository.findClaimableIds(now.minusMinutes(5), 0L, PageRequest.of(0, 100));
+        List<Long> candidates = watchAlertOutboxRepository.findClaimableIds(now.minusMinutes(5), 0L,
+                watchAlertOutboxRepository.findScanUpperBound(), PageRequest.of(0, 100));
         List<WatchAlertOutbox> pending = watchAlertOutboxRepository.findClaimableByIdsForUpdate(candidates, now.minusMinutes(5));
         assertEquals(List.of(alert.getId()), pending.stream().map(WatchAlertOutbox::getId).toList());
         pending.getFirst().startProcessing(now.minusMinutes(10));
@@ -155,9 +156,9 @@ class NewsWatchRepositoryIntegrationTests {
         entityManager.clear();
 
         List<Long> firstPage = watchAlertOutboxRepository.findClaimableIds(now.minusMinutes(5),
-                first.getId() - 1, PageRequest.of(0, 2));
+                first.getId() - 1, last.getId(), PageRequest.of(0, 2));
         List<Long> secondPage = watchAlertOutboxRepository.findClaimableIds(now.minusMinutes(5),
-                firstPage.getLast(), PageRequest.of(0, 2));
+                firstPage.getLast(), last.getId(), PageRequest.of(0, 2));
 
         assertEquals(List.of(first.getId(), stale.getId()), firstPage);
         assertEquals(List.of(last.getId()), secondPage);
@@ -165,6 +166,34 @@ class NewsWatchRepositoryIntegrationTests {
         entityManager.flush();
         entityManager.clear();
         assertTrue(watchAlertOutboxRepository.findClaimableByIdsForUpdate(secondPage, now.minusMinutes(5)).isEmpty());
+    }
+
+    @Test
+    @Transactional
+    void aFixedScanUpperBoundDefersNewPendingAlertsUntilTheNextScan() {
+        LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
+        Fixture fixture = createFixture(now);
+        WatchAlertOutbox first = createAlert(fixture, now);
+        entityManager.flush();
+        long firstScanUpperBound = watchAlertOutboxRepository.findScanUpperBound();
+        assertTrue(firstScanUpperBound >= first.getId());
+
+        WatchAlertOutbox addedAfterScanStarted = createAlert(fixture, now);
+        entityManager.flush();
+        entityManager.clear();
+        assertTrue(addedAfterScanStarted.getId() > firstScanUpperBound);
+
+        List<Long> firstScan = watchAlertOutboxRepository.findClaimableIds(now.minusMinutes(5),
+                first.getId() - 1, firstScanUpperBound, PageRequest.of(0, 100));
+        assertEquals(List.of(first.getId()), firstScan);
+        assertTrue(watchAlertOutboxRepository.findClaimableIds(now.minusMinutes(5),
+                first.getId(), firstScanUpperBound, PageRequest.of(0, 100)).isEmpty());
+
+        long nextScanUpperBound = watchAlertOutboxRepository.findScanUpperBound();
+        List<Long> nextScan = watchAlertOutboxRepository.findClaimableIds(now.minusMinutes(5),
+                first.getId() - 1, nextScanUpperBound, PageRequest.of(0, 100));
+        assertTrue(nextScanUpperBound >= addedAfterScanStarted.getId());
+        assertEquals(List.of(first.getId(), addedAfterScanStarted.getId()), nextScan);
     }
 
     @Test
@@ -187,7 +216,7 @@ class NewsWatchRepositoryIntegrationTests {
             assertTrue(firstLocked.await(5, TimeUnit.SECONDS));
             Future<List<Long>> second = executor.submit(() -> transactionTemplate.execute(status -> {
                 var ids = watchAlertOutboxRepository.findClaimableIds(now.minusMinutes(5),
-                        alertId - 1, PageRequest.of(0, 100));
+                        alertId - 1, alertId, PageRequest.of(0, 100));
                 assertEquals(List.of(alertId), ids);
                 secondReadCandidates.countDown();
                 return watchAlertOutboxRepository.findClaimableByIdsForUpdate(ids, now.minusMinutes(5))
@@ -214,7 +243,7 @@ class NewsWatchRepositoryIntegrationTests {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             transactionTemplate.executeWithoutResult(status -> {
-                var batch = batchClaimer.claimAfter(alertId - 1, now, 100);
+                var batch = batchClaimer.claimAfter(alertId - 1, alertId, now, 100);
                 assertTrue(batch.snapshots().isEmpty());
                 assertEquals(alertId.longValue(), batch.afterId());
                 assertTrue(batch.exhausted());

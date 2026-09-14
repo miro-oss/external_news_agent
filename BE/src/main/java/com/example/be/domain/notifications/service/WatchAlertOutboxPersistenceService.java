@@ -20,10 +20,15 @@ public class WatchAlertOutboxPersistenceService {
     private final WatchAlertOutboxRepository repository;
     private final WatchAlertOutboxBatchClaimer batchClaimer;
 
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public long scanUpperBound() {
+        return repository.findScanUpperBound();
+    }
+
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public WatchAlertOutboxBatchClaimer.BatchClaim claimNextBatch(long afterId, LocalDateTime now,
+    public WatchAlertOutboxBatchClaimer.BatchClaim claimNextBatch(long afterId, long upToId, LocalDateTime now,
                                                                 int remainingSlots) {
-        return batchClaimer.claimAfter(afterId, now, remainingSlots);
+        return batchClaimer.claimAfter(afterId, upToId, now, remainingSlots);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
