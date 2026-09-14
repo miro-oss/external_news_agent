@@ -355,11 +355,12 @@ public class IssueClusterWriter {
             return;
         }
         List<Article> visibleMembers = members.stream().filter(Article::hasFullText).toList();
-        if (visibleMembers.isEmpty()) {
+        if (visibleMembers.size() < 2) {
             return;
         }
         OffsetDateTime claimedAt = now.atZone(ApiTimeZone.ZONE).toOffsetDateTime();
-        int followUpCount = Math.max(1, issue.getArticleCount() - 1);
+        int followUpCount = visibleMembers.size() - 1;
+        int visiblePublisherCount = publisherCount(visibleMembers);
         Article titleArticle = visibleMembers.stream()
                 .min(Comparator.comparing((Article article) -> !isBreaking(article))
                         .thenComparing(this::eventTime, Comparator.nullsLast(Comparator.naturalOrder()))
@@ -382,7 +383,7 @@ public class IssueClusterWriter {
                     .issueTitle(breakingTitle)
                     .firstSeenAt(breakingAt)
                     .followUpCount(followUpCount)
-                    .publisherCount(issue.getPublisherCount())
+                    .publisherCount(visiblePublisherCount)
                     .queuedAt(claimedAt)
                     .status(WatchAlertDeliveryStatus.PENDING)
                     .attemptCount(0)

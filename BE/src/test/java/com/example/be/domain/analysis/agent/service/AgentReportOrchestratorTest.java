@@ -146,6 +146,7 @@ class AgentReportOrchestratorTest {
         var captor = ArgumentCaptor.forClass(AgentReportRequest.class);
         verify(client).report(captor.capture());
         assertEquals(List.of(501L), captor.getValue().findings().stream().map(AgentReportRequest.FindingPayload::id).toList());
+        assertEquals(List.of("수집 제약: 근거 부족 분석 2건 제외."), captor.getValue().sourceNotes());
         assertFalse(document.markdownBody().contains("숨길"));
         assertEquals(List.of(501L), document.reflectedFindingIds());
     }

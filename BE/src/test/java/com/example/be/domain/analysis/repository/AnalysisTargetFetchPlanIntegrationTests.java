@@ -128,6 +128,35 @@ class AnalysisTargetFetchPlanIntegrationTests {
         }
     }
 
+    @Test
+    void issueMembershipBatchesKeepExactIdsOrderAndFetchedRelationsOutsideSession() {
+        Fixture first = transactionTemplate.execute(status -> createFixture());
+        Fixture second = transactionTemplate.execute(status -> createFixture());
+        try {
+            List<IssueArticle> exact = transactionTemplate.execute(status -> issueArticleRepository
+                    .findByIssueIdsOrderByIssueIdAscJoinedAtAsc(List.of(first.issueId())));
+            assertEquals(List.of(first.membershipId()), exact.stream().map(IssueArticle::getId).toList());
+
+            List<IssueArticle> ordered = transactionTemplate.execute(status -> issueArticleRepository
+                    .findByIssueIdsOrderByIssueIdAscJoinedAtAsc(List.of(second.issueId(), first.issueId())));
+            assertEquals(List.of(first.issueId(), second.issueId()),
+                    ordered.stream().map(value -> value.getIssue().getId()).toList());
+            for (IssueArticle membership : ordered) {
+                assertTrue(Hibernate.isInitialized(membership.getIssue()));
+                assertTrue(Hibernate.isInitialized(membership.getIssue().getTopic()));
+                assertTrue(Hibernate.isInitialized(membership.getArticle()));
+                assertTrue(Hibernate.isInitialized(membership.getArticle().getSource()));
+                assertDoesNotThrow(() -> membership.getIssue().getTopic().getName());
+                assertDoesNotThrow(() -> membership.getArticle().getSource().getName());
+            }
+        } finally {
+            transactionTemplate.executeWithoutResult(status -> {
+                deleteFixture(second);
+                deleteFixture(first);
+            });
+        }
+    }
+
     private Fixture createFixture() {
         long stamp = System.nanoTime();
         // 이슈 주제 = 관측 주제. 기사 주제만 다른 주제로 둬서 두 연관이 갈리게 만든다.

@@ -7,6 +7,7 @@ import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.config.ApiTimeZone;
+import com.example.be.global.database.OracleInClause;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -63,8 +64,9 @@ public class IssueClusteringLoader {
         historical.forEach(membership -> missingExistingIssueIds.remove(membership.getIssue().getId()));
         // A re-observed article can belong to an issue outside the recent window.
         // Load only those exact issues, retaining their full-text members for representative selection.
-        missingExistingIssueIds.stream().sorted().forEach(issueId -> historical.addAll(
-                issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(issueId)));
+        for (List<Long> issueIds : OracleInClause.batches(missingExistingIssueIds.stream().sorted().toList())) {
+            historical.addAll(issueArticleRepository.findByIssueIdsOrderByIssueIdAscJoinedAtAsc(issueIds));
+        }
 
         Map<ArticleTopicKey, ClusterArticle> snapshot = new LinkedHashMap<>();
         for (IssueArticle membership : historical) {

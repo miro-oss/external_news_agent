@@ -35,6 +35,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -184,7 +185,12 @@ public class ArticleQueryServiceImpl implements ArticleQueryService {
                 .filter(value -> value.getRole() == IssueArticleRole.REPRESENTATIVE)
                 .filter(value -> value.getArticle().hasFullText())
                 .findFirst()
-                .orElse(null);
+                .orElseGet(() -> issueMemberships.stream()
+                        .filter(value -> value.getArticle().hasFullText())
+                        .min(Comparator.comparing((IssueArticle value) -> value.getArticle().getPublishedAt(),
+                                        Comparator.nullsLast(Comparator.naturalOrder()))
+                                .thenComparing(value -> value.getArticle().getId()))
+                        .orElse(null));
         return new IssueContext(membership, representative, issueMemberships);
     }
 

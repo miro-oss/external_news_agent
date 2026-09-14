@@ -7,14 +7,22 @@ import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.notifications.service.WatchAlertOutboxPersistenceService.WatchAlertSnapshot;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
+import com.example.be.domain.notifications.service.WatchAlertOutboxBatchClaimer.BatchClaim;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -50,7 +58,7 @@ class WatchNotificationDeliveryServiceTest {
         when(sender.isConfigured(channel)).thenReturn(true);
         when(sender.openSession(channel)).thenReturn(session);
 
-        when(outboxPersistenceService.claimPending()).thenReturn(List.of(alert));
+        stubSingleBatch(List.of(alert));
 
         int delivered = service.deliverPending();
 
@@ -63,7 +71,7 @@ class WatchNotificationDeliveryServiceTest {
     @Test
     void keepsAlertPendingWhenNoDeliverySucceeds() {
         WatchAlertSnapshot alert = alert();
-        when(outboxPersistenceService.claimPending()).thenReturn(List.of(alert));
+        stubSingleBatch(List.of(alert));
         when(planService.prepareWatchAlerts(any())).thenReturn(Map.of(
                 alert.id(), new NotificationDeliveryPlanService.PreparedWatchDelivery(List.of(), Map.of())));
 
@@ -88,7 +96,7 @@ class WatchNotificationDeliveryServiceTest {
                 "[속보 후속] 삼성전자", null, List.of("첫 번째"));
         RenderedNotification secondRendered = new RenderedNotification(
                 "[속보 후속] SK하이닉스", null, List.of("두 번째"));
-        when(outboxPersistenceService.claimPending()).thenReturn(List.of(first, second));
+        stubSingleBatch(List.of(first, second));
         when(planService.prepareWatchAlerts(any())).thenReturn(Map.of(
                 first.id(), new NotificationDeliveryPlanService.PreparedWatchDelivery(
                         List.of(target), Map.of(2L, firstRendered)),
@@ -123,7 +131,7 @@ class WatchNotificationDeliveryServiceTest {
                 first.firstSeenAt(), 2, 3, first.queuedAt(), 1);
         RenderedNotification rendered = new RenderedNotification(
                 "[속보 후속] 삼성전자", null, List.of("후속 내용"));
-        when(outboxPersistenceService.claimPending()).thenReturn(List.of(first, second));
+        stubSingleBatch(List.of(first, second));
         when(planService.prepareWatchAlerts(any())).thenReturn(Map.of(
                 first.id(), new NotificationDeliveryPlanService.PreparedWatchDelivery(
                         List.of(target), Map.of(2L, rendered)),
@@ -140,6 +148,120 @@ class WatchNotificationDeliveryServiceTest {
         verify(session, times(1)).send("user@example.com", rendered.subject(), "후속 내용");
         verify(outboxPersistenceService).markSent(60L);
         verify(outboxPersistenceService).markSent(61L);
+    }
+
+    @Test
+    void sendsAndCompletesEachBatchBeforeScanningLaterHiddenCandidates() {
+        WatchAlertSnapshot first = alert();
+        WatchAlertSnapshot second = otherAlert(61L, 71L);
+        DeliveryFixture fixture = prepareDeliveries(List.of(first, second));
+        when(outboxPersistenceService.claimNextBatch(eq(0L), any(), eq(100)))
+                .thenReturn(new BatchClaim(List.of(first), 100L, false));
+        when(outboxPersistenceService.claimNextBatch(eq(100L), any(), eq(99)))
+                .thenReturn(new BatchClaim(List.of(), 200L, false));
+        when(outboxPersistenceService.claimNextBatch(eq(200L), any(), eq(99)))
+                .thenReturn(new BatchClaim(List.of(second), 201L, true));
+
+        assertEquals(2, service.deliverPending());
+
+        InOrder order = inOrder(outboxPersistenceService, fixture.session());
+        order.verify(outboxPersistenceService).claimNextBatch(eq(0L), any(), eq(100));
+        order.verify(fixture.session()).send("user@example.com", "알림", "본문 60");
+        order.verify(outboxPersistenceService).markSent(60L);
+        order.verify(outboxPersistenceService).claimNextBatch(eq(100L), any(), eq(99));
+        order.verify(outboxPersistenceService).claimNextBatch(eq(200L), any(), eq(99));
+        order.verify(fixture.session()).send("user@example.com", "알림", "본문 61");
+        order.verify(outboxPersistenceService).markSent(61L);
+    }
+
+    @Test
+    void deduplicatesAcrossBatchesAndCompletesDuplicateOutboxWithoutRetrying() {
+        WatchAlertSnapshot first = alert();
+        WatchAlertSnapshot second = otherAlert(61L, first.issueId());
+        DeliveryFixture fixture = prepareDeliveries(List.of(first, second));
+        when(outboxPersistenceService.claimNextBatch(eq(0L), any(), eq(100)))
+                .thenReturn(new BatchClaim(List.of(first), 100L, false));
+        when(outboxPersistenceService.claimNextBatch(eq(100L), any(), eq(99)))
+                .thenReturn(new BatchClaim(List.of(second), 101L, true));
+
+        assertEquals(1, service.deliverPending());
+
+        verify(fixture.session(), times(1)).send(any(), any(), any());
+        verify(fixture.sender(), times(1)).openSession(fixture.channel());
+        verify(outboxPersistenceService).markSent(60L);
+        verify(outboxPersistenceService).markSent(61L);
+        verify(outboxPersistenceService, never()).retry(anyLong(), any());
+    }
+
+    @Test
+    void stopsAtOneHundredClaimedAlertsEvenWhenDeliveriesFail() {
+        List<WatchAlertSnapshot> alerts = new ArrayList<>();
+        for (long id = 1; id <= 100; id++) {
+            alerts.add(otherAlert(id, id));
+        }
+        when(outboxPersistenceService.claimNextBatch(eq(0L), any(), eq(100)))
+                .thenReturn(new BatchClaim(alerts.subList(0, 60), 100L, false));
+        when(outboxPersistenceService.claimNextBatch(eq(100L), any(), eq(40)))
+                .thenReturn(new BatchClaim(alerts.subList(60, 100), 200L, false));
+        when(planService.prepareWatchAlerts(any())).thenReturn(Map.of());
+
+        assertEquals(0, service.deliverPending());
+
+        verify(outboxPersistenceService, times(2)).claimNextBatch(anyLong(), any(), anyInt());
+        verify(outboxPersistenceService, times(100)).retry(anyLong(), any());
+    }
+
+    @Test
+    void preparationFailureRetriesItsBatchBeforeContinuingTheCursor() {
+        WatchAlertSnapshot first = alert();
+        WatchAlertSnapshot second = otherAlert(61L, 71L);
+        when(outboxPersistenceService.claimNextBatch(eq(0L), any(), eq(100)))
+                .thenReturn(new BatchClaim(List.of(first), 100L, false));
+        when(outboxPersistenceService.claimNextBatch(eq(100L), any(), eq(99)))
+                .thenReturn(new BatchClaim(List.of(second), 101L, true));
+        when(planService.prepareWatchAlerts(any())).thenThrow(new IllegalStateException("synthetic"))
+                .thenReturn(Map.of());
+
+        assertEquals(0, service.deliverPending());
+
+        InOrder order = inOrder(outboxPersistenceService);
+        order.verify(outboxPersistenceService).claimNextBatch(eq(0L), any(), eq(100));
+        order.verify(outboxPersistenceService).retry(60L, "알림 대상 준비 실패: IllegalStateException");
+        order.verify(outboxPersistenceService).claimNextBatch(eq(100L), any(), eq(99));
+        order.verify(outboxPersistenceService).retry(61L, "발송 가능한 대상 또는 성공한 전송이 없습니다.");
+    }
+
+    private DeliveryFixture prepareDeliveries(List<WatchAlertSnapshot> alerts) {
+        NotificationChannel channel = NotificationChannel.builder().id(2L).channelType(ChannelType.EMAIL)
+                .name("메일").maxLength(Integer.MAX_VALUE).active(true).build();
+        var target = new NotificationDeliveryPlanService.PreparedTarget(
+                3L, "수신자", channel, 4L, "user@example.com", true);
+        Map<Long, NotificationDeliveryPlanService.PreparedWatchDelivery> plans = new java.util.LinkedHashMap<>();
+        for (WatchAlertSnapshot alert : alerts) {
+            plans.put(alert.id(), new NotificationDeliveryPlanService.PreparedWatchDelivery(List.of(target),
+                    Map.of(2L, new RenderedNotification("알림", null, List.of("본문 " + alert.id())))));
+        }
+        when(planService.prepareWatchAlerts(any())).thenReturn(plans);
+        NotificationSender sender = mock(NotificationSender.class);
+        NotificationSender.DeliverySession session = mock(NotificationSender.DeliverySession.class);
+        when(senderRegistry.get(ChannelType.EMAIL)).thenReturn(sender);
+        when(sender.isConfigured(channel)).thenReturn(true);
+        when(sender.openSession(channel)).thenReturn(session);
+        return new DeliveryFixture(sender, session, channel);
+    }
+
+    private record DeliveryFixture(NotificationSender sender, NotificationSender.DeliverySession session,
+                                   NotificationChannel channel) { }
+
+    private WatchAlertSnapshot otherAlert(Long id, Long issueId) {
+        WatchAlertSnapshot first = alert();
+        return new WatchAlertSnapshot(id, id, WatchType.HIGH_SENSITIVITY, issueId, null, "후속 기사 " + id,
+                first.firstSeenAt(), 2, 3, first.queuedAt(), 1);
+    }
+
+    private void stubSingleBatch(List<WatchAlertSnapshot> alerts) {
+        when(outboxPersistenceService.claimNextBatch(anyLong(), any(), anyInt()))
+                .thenReturn(new BatchClaim(alerts, alerts.getLast().id(), true));
     }
 
     private WatchAlertSnapshot alert() {

@@ -66,7 +66,7 @@ public final class DeterministicEntityExtractor {
             "학년도|수시|정시|입시|경쟁률|교수|연구팀|학생|청년|교육|실습|대학|캠퍼스");
     private static final Set<String> GENERAL_INSTITUTIONS = Set.of(
             "초거대", "차세대", "신세대", "새시대", "교육시대", "반도체시대", "첨단시대",
-            "전문대학", "종합대학", "국립대학", "사립대학", "비수도권대학", "지역대학");
+            "전문대", "종합대", "국립대", "사립대", "비수도권대", "지역대");
     private static final Map<String, List<String>> INSTITUTION_ALIASES = Map.of(
             "한국에너지공과대", List.of("한국에너지공과대학교", "한국에너지공과대", "에너지공대", "켄텍", "kentech"),
             "한국기술교육대", List.of("한국기술교육대학교", "한국기술교육대", "한기대", "koreatech"));
@@ -203,9 +203,9 @@ public final class DeterministicEntityExtractor {
         if (ACADEMIC_CONTEXT.matcher(normalized).find()) {
             Matcher matcher = UNIVERSITY.matcher(normalized);
             while (matcher.find()) {
-                String name = matcher.group(1);
+                String name = canonicalSubject(matcher.group(1));
                 if (!GENERAL_INSTITUTIONS.contains(name)) {
-                    institutions.add(canonicalSubject(name));
+                    institutions.add(name);
                 }
             }
         }

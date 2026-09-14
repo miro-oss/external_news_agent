@@ -486,7 +486,8 @@ public class AgentReportOrchestrator {
                 .count();
         int evidenceExcluded = (int) findings.stream()
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
-                .filter(finding -> !FindingEvidencePolicy.hasSupportedEvidence(finding))
+                .filter(finding -> !ReportFindings.hasFullText(finding)
+                        || !FindingEvidencePolicy.hasSupportedEvidence(finding))
                 .count();
         List<CollectionRunItem> items = run.getItems();
         int collected = items == null || items.isEmpty()
