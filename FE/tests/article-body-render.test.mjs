@@ -8,17 +8,21 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createServer } from 'vite'
-import react from '@vitejs/plugin-react'
 
 let server, emptyEnvDir, ArticleDetailModal
 before(async () => {
   emptyEnvDir = await mkdtemp(join(tmpdir(), 'article-body-test-'))
   server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile: false,
-    envDir: emptyEnvDir, cacheDir: join(emptyEnvDir, 'vite-cache'), plugins: [react()],
+    envDir: emptyEnvDir, cacheDir: join(emptyEnvDir, 'vite-cache'),
+    // Static SSR rendering does not need the background browser dependency optimizer.
+    optimizeDeps: { noDiscovery: true, include: [] },
     server: { middlewareMode: true, watch: null, ws: false }, logLevel: 'error' })
   ArticleDetailModal = (await server.ssrLoadModule('/src/features/articles/ArticleDetailModal.tsx')).ArticleDetailModal
 })
-after(async () => { await server?.close(); if (emptyEnvDir) await rm(emptyEnvDir, { recursive: true, force: true }) })
+after(async () => {
+  await server?.close()
+  if (emptyEnvDir) await rm(emptyEnvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+})
 
 function renderBody(bodyText, sentences = []) {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } })
