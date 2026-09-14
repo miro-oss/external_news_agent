@@ -2,6 +2,7 @@ package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.collection.converter.ArticleHasher;
+import com.example.be.domain.collection.converter.TopicKeywordFilter;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ArticleVersion;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -90,7 +91,7 @@ public class CollectionResultWriter {
         writeArticles(run, item, topic, source, outcome.fetch().articles().size(), dedupeByUrl(selected));
     }
 
-    /** 승인된 Agent 추가 수집 결과를 기존 실행의 관측으로 붙인다. 원래 수집 item 통계는 바꾸지 않는다. */
+    /** 접수 당시 키워드 조건을 통과한 Agent 추가 수집 결과만 붙인다. 원래 수집 item 통계는 바꾸지 않는다. */
     @Transactional
     public InvestigationWriteResult writeInvestigation(Long runId,
                                                        Long topicId,
@@ -99,6 +100,13 @@ public class CollectionResultWriter {
         CollectionRun run = runRepository.findById(runId).orElseThrow();
         Topic topic = topicRepository.findById(topicId).orElseThrow();
         Source source = sourceRepository.findById(sourceId).orElseThrow();
+        // 조사 소스가 나중에 추가되어도 같은 실행·주제의 조건을 쓴다. 저장 연결에는 managed Topic을 쓴다.
+        Topic collectionTopic = run.getItems().stream()
+                .filter(item -> topicId.equals(item.getTopic().getId()))
+                .findFirst()
+                .map(CollectionRunItem::collectionTopic)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "수집 실행에 포함되지 않은 주제입니다. runId=" + runId + " topicId=" + topicId));
 
         outcome.robots().applyTo(source);
         if (!outcome.robots().allowed()) {
@@ -119,7 +127,8 @@ public class CollectionResultWriter {
 
         int observed = 0;
         int changed = 0;
-        for (CollectedArticle article : dedupeByUrl(outcome.fetch().articles())) {
+        for (CollectedArticle article : dedupeByUrl(
+                TopicKeywordFilter.filter(collectionTopic, outcome.fetch().articles()))) {
             ChangeType changeType = save(run, topic, source, article);
             observed++;
             if (changeType == ChangeType.NEW || changeType == ChangeType.UPDATED) {
