@@ -14,8 +14,6 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.hibernate.annotations.Fetch;
-import org.hibernate.annotations.FetchMode;
 
 import java.time.LocalDateTime;
 
@@ -53,8 +51,7 @@ public class ArticleVersion {
     @Column(name = "title", length = Article.MAX_TITLE_LENGTH)
     private String title;
 
-    @ManyToOne(fetch = FetchType.EAGER)
-    @Fetch(FetchMode.JOIN)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "body_hash")
     private ArticleBody storedBody;
 
@@ -81,13 +78,5 @@ public class ArticleVersion {
 
     public String getBody() {
         return storedBody == null ? null : storedBody.getBody();
-    }
-
-    public static class ArticleVersionBuilder {
-        /** 영속 저장 경로에서는 기존 기사와 같은 storedBody를 전달한다. */
-        public ArticleVersionBuilder body(String body) {
-            this.storedBody = ArticleBody.of(body);
-            return this;
-        }
     }
 }
