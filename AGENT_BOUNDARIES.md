@@ -209,7 +209,7 @@ PAID는 90 × 15% = 13.5 credits다. PAID의 기준액은 보고서 예약 20을
   정리되지 않은 진행 중 run은 주제 충돌 검사로 다음 수집을 막을 수 있다.
   이 설정을 끄는 것만으로 분산 owner/heartbeat나 전체 run 자동 재개가 구현되지는 않는다.
 - DAILY의 오래된 PENDING 예약은 저장 finding 기반 대체 보고서로 완료한다. 복구 시 LLM 호출을
-  반복하지 않는다. 날짜/원본 run/선택 finding 보존은 [일일 보고서 문서](BE/DAILY_REPORTS.md)를 따른다.
+  반복하지 않으며 날짜/원본 run/선택 finding을 보존한다.
 
 ## 5. 예산·재시도·실패 책임
 

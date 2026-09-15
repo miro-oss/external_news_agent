@@ -43,9 +43,14 @@ screenshots/
 **/Screenshot*.jpg
 **/codex-clipboard-*.png
 
-# Documentation and evaluation reports stay local. Existing tracked files are unaffected.
+# Documentation and evaluation reports stay local.
 *.md
-# Public repository introduction requested for the project handoff.
+# Keep repository rules, templates, project guides, and runtime prompts trackable.
+!/AGENTS.md
+!/AGENT_BOUNDARIES.md
+!/.github/ISSUE_TEMPLATE/*.md
+!/.github/pull_request_template.md
 !/README.md
-!agent/app/prompts/report-changes.ko.v1.md
+!/agent/README.md
+!/agent/app/prompts/*.md
 BE/src/test/resources/golden/clusters.*.summary.json
