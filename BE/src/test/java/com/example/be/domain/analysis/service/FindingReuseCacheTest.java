@@ -12,6 +12,7 @@ import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.Test;
@@ -257,6 +258,23 @@ class FindingReuseCacheTest {
                 "analyze.ko.v1", "openai", "free-model");
     }
 
+    @Test
+    void metadataOnlyIssueMemberDoesNotDisableRepresentativeCacheLookup() {
+        Article representative = article(10L, "대표 본문");
+        Article metadata = Article.builder().id(11L).title("본문 없는 멤버")
+                .fetchStatus(FetchStatus.METADATA_ONLY).build();
+        AnalysisContext context = new AnalysisContext(42L, representative, AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, metadata)));
+        String hash = FindingReuseCache.inputHash(context);
+        when(findingRepository.findReusableSources(Set.of(10L), AnalysisSource.LLM, Set.of(hash),
+                "analyze.ko.v1", "openai", "free-model")).thenReturn(List.of());
+
+        cache.lookupContexts(List.of(context), AgentPlan.FREE);
+
+        verify(findingRepository).findReusableSources(Set.of(10L), AnalysisSource.LLM, Set.of(hash),
+                "analyze.ko.v1", "openai", "free-model");
+    }
+
     private AgentProperties properties() {
         AgentProperties value = new AgentProperties();
         value.setAnalysisPromptVersion("analyze.ko.v1");
@@ -272,6 +290,7 @@ class FindingReuseCacheTest {
                 .title("HBM4 일정")
                 .summary("요약")
                 .body(body)
+                .fetchStatus(FetchStatus.FULLTEXT)
                 .canonicalUrl("https://example.com/" + id)
                 .language("ko")
                 .topic(Topic.builder()

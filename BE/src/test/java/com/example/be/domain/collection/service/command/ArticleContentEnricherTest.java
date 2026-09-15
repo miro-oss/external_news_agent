@@ -8,12 +8,17 @@ import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.robots.RobotsTxtClient;
+import com.example.be.domain.collection.robots.RobotsLookup;
+import com.example.be.domain.collection.robots.RobotsRules;
 import com.example.be.domain.collection.scoring.TopicFitScorer;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -21,9 +26,44 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ArticleContentEnricherTest {
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void passesTheArticleTitleWithOrWithoutRobotsChecks(boolean respectRobots) {
+        CollectionRunArticleRepository repository = mock(CollectionRunArticleRepository.class);
+        ArticleContentClient contentClient = mock(ArticleContentClient.class);
+        RobotsTxtClient robotsClient = mock(RobotsTxtClient.class);
+        CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
+        ArticleContentEnricher enricher = new ArticleContentEnricher(repository, contentClient, robotsClient,
+                resultWriter, new CollectionPipelineProperties(), equalWeightScorer());
+        Topic topic = Topic.builder().id(7L).optionalKeywords(List.of("금리")).build();
+        Source source = Source.builder().id(8L)
+                .crawlPolicy(new CrawlPolicy(respectRobots ? CrawlPolicy.ROBOTS_MODE_RESPECT
+                        : CrawlPolicy.ROBOTS_MODE_IGNORE, 30, true)).build();
+        String title = "한국은행이 기준금리를 동결했다.";
+        Article article = article(1L, "https://example.com/brief", title, source, topic);
+        when(repository.findClusterTargetsByRunId(42L)).thenReturn(List.of(observation(article, topic)));
+        Duration delay = respectRobots ? Duration.ofSeconds(2) : null;
+        if (respectRobots) {
+            when(robotsClient.lookup(article.getCanonicalUrl())).thenReturn(RobotsLookup.fetched(
+                    "https://example.com/robots.txt", new RobotsRules(List.of(), List.of(), delay)));
+        }
+        when(contentClient.fetch(article.getCanonicalUrl(), delay, title))
+                .thenReturn(ArticleContentResult.fullText(title));
+
+        assertEquals(java.util.Set.of(1L), enricher.enrich(42L));
+
+        verify(contentClient).fetch(article.getCanonicalUrl(), delay, title);
+        verify(resultWriter).applyFullText(1L, FetchStatus.FULLTEXT, title);
+        if (!respectRobots) {
+            verifyNoInteractions(robotsClient);
+        }
+    }
 
     @Test
     void fetchesHigherTopicFitFirst() {
@@ -48,7 +88,7 @@ class ArticleContentEnricherTest {
         when(repository.findClusterTargetsByRunId(42L)).thenReturn(List.of(
                 observation(low, topic), observation(high, topic)));
         List<String> fetchedUrls = new ArrayList<>();
-        when(contentClient.fetch(any(), any())).thenAnswer(invocation -> {
+        when(contentClient.fetch(any(), any(), any())).thenAnswer(invocation -> {
             fetchedUrls.add(invocation.getArgument(0));
             return ArticleContentResult.fullText("본문");
         });
@@ -81,7 +121,7 @@ class ArticleContentEnricherTest {
         when(repository.findClusterTargetsByRunId(42L)).thenReturn(List.of(
                 observation(low, topic), observation(high, topic)));
         List<String> fetchedUrls = new ArrayList<>();
-        when(contentClient.fetch(any(), any())).thenAnswer(invocation -> {
+        when(contentClient.fetch(any(), any(), any())).thenAnswer(invocation -> {
             fetchedUrls.add(invocation.getArgument(0));
             return ArticleContentResult.fullText("본문");
         });
@@ -120,7 +160,7 @@ class ArticleContentEnricherTest {
         when(repository.findClusterTargetsByRunId(42L)).thenReturn(List.of(
                 observation(common, topic), observation(rare, topic)));
         List<String> fetchedUrls = new ArrayList<>();
-        when(contentClient.fetch(any(), any())).thenAnswer(invocation -> {
+        when(contentClient.fetch(any(), any(), any())).thenAnswer(invocation -> {
             fetchedUrls.add(invocation.getArgument(0));
             return ArticleContentResult.fullText("본문");
         });

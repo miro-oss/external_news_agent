@@ -1,5 +1,10 @@
 package com.example.be.domain.issues.service;
 
+import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.FetchStatus;
+import com.example.be.domain.issues.entity.IssueArticle;
+import com.example.be.domain.issues.entity.IssueStance;
+import com.example.be.domain.issues.entity.IssueStanceSource;
 import com.example.be.domain.issues.entity.IssueStatus;
 import com.example.be.domain.issues.entity.IssueRelationType;
 import com.example.be.domain.issues.entity.IssueStatusHistory;
@@ -48,6 +53,34 @@ class IssueProjectionServiceTest {
             importanceCalculator);
 
     @Test
+    void metadataDisputeCannotChangeStatusOrCreateDisputedWatch() {
+        NewsIssue issue = NewsIssue.builder().id(10L).status(IssueStatus.EMERGING).build();
+        Article body = Article.builder().id(1L).title("실제 기사")
+                .body("실제로 확보한 기사 본문이다.").fetchStatus(FetchStatus.FULLTEXT).build();
+        Article metadata = Article.builder().id(2L).title("반박 제목만 있는 기사")
+                .fetchStatus(FetchStatus.METADATA_ONLY).build();
+        List<IssueArticle> memberships = List.of(
+                IssueArticle.builder().article(body).stance(IssueStance.SUPPORTS)
+                        .stanceSource(IssueStanceSource.LLM).stanceConfidence(BigDecimal.ONE).build(),
+                IssueArticle.builder().article(metadata).stance(IssueStance.DISPUTES)
+                        .stanceSource(IssueStanceSource.LLM).stanceConfidence(BigDecimal.ONE).build());
+        IssueProjectionService withRealStatusCalculator = new IssueProjectionService(
+                issueRepository, issueArticleRepository, issueRelationRepository, historyRepository,
+                watchRepository, new IssueStatusCalculator(mock(OfficialCorrectionPolicy.class)), importanceCalculator);
+        OffsetDateTime now = OffsetDateTime.parse("2026-09-02T12:00:00+09:00");
+        when(watchRepository.findByIssueIdAndWatchType(10L, WatchType.DISPUTED))
+                .thenReturn(Optional.empty());
+        when(importanceCalculator.calculate(issue, memberships, now)).thenReturn(BigDecimal.ZERO);
+
+        withRealStatusCalculator.recalculate(issue, memberships, now);
+
+        assertEquals(IssueStatus.EMERGING, issue.getStatus());
+        verify(historyRepository, never()).save(any());
+        verify(watchRepository, never()).save(any());
+        verify(importanceCalculator).calculate(issue, memberships, now);
+    }
+
+    @Test
     void incomingRefutationRetractsOriginalIssueAndRecalculatesImportance() {
         NewsIssue issue = NewsIssue.builder().id(10L).status(IssueStatus.CORROBORATED).build();
         when(issueRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(issue));
@@ -63,7 +96,7 @@ class IssueProjectionServiceTest {
 
         assertEquals(IssueStatus.RETRACTED, issue.getStatus());
         assertEquals(new BigDecimal("18.00"), issue.getImportanceScore());
-        verify(statusCalculator, never()).calculate(any(), any());
+        verify(statusCalculator, never()).calculateFromFullText(any(), any());
         ArgumentCaptor<IssueStatusHistory> history = ArgumentCaptor.forClass(IssueStatusHistory.class);
         verify(historyRepository).save(history.capture());
         assertEquals(IssueStatus.CORROBORATED, history.getValue().getFromStatus());
@@ -74,7 +107,7 @@ class IssueProjectionServiceTest {
     void storesHistoryOnlyOnChangeAndAllowsStatusReversal() {
         NewsIssue issue = NewsIssue.builder().id(10L).status(IssueStatus.CORROBORATED).build();
         OffsetDateTime now = OffsetDateTime.parse("2026-09-02T12:00:00+09:00");
-        when(statusCalculator.calculate(issue, List.of()))
+        when(statusCalculator.calculateFromFullText(issue, List.of()))
                 .thenReturn(new IssueStatusCalculator.Projection(IssueStatus.DISPUTED, "충돌 확인"))
                 .thenReturn(new IssueStatusCalculator.Projection(IssueStatus.DISPUTED, "충돌 확인"))
                 .thenReturn(new IssueStatusCalculator.Projection(IssueStatus.CORROBORATED, "정정 반영"));
@@ -118,7 +151,7 @@ class IssueProjectionServiceTest {
                 .expiresAt(LocalDateTime.of(2026, 9, 3, 12, 0))
                 .active(true)
                 .build();
-        when(statusCalculator.calculate(issue, List.of()))
+        when(statusCalculator.calculateFromFullText(issue, List.of()))
                 .thenReturn(new IssueStatusCalculator.Projection(
                         IssueStatus.CORROBORATED, "정정 반영"));
         when(importanceCalculator.calculate(issue, List.of(), now))

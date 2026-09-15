@@ -466,6 +466,71 @@ class AgentAnalysisOrchestratorTest {
     }
 
     @Test
+    void comparesOnlyFullTextMembersOfAMixedIssue() {
+        Article representative = article();
+        Article member = issueMember(representative, 11L, "본문을 확보한 멤버", "확인한 내용");
+        Article metadata = Article.builder().id(12L).title("메타데이터만 확보")
+                .summary("아직 검증하지 않은 요약").fetchStatus(FetchStatus.METADATA_ONLY).build();
+        Article blank = Article.builder().id(13L).title("공백 본문")
+                .body(" \n\t").fetchStatus(FetchStatus.FULLTEXT).build();
+        Article failed = Article.builder().id(14L).title("재수집 실패")
+                .body("옛 전문").fetchStatus(FetchStatus.FETCH_FAILED).build();
+        AnalysisContext context = new AnalysisContext(42L, representative, AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, metadata, member, blank, failed)));
+        AgentAnalyzeResponse.MemberStance stance = new AgentAnalyzeResponse.MemberStance(
+                11L, "SUPPORTS", new BigDecimal("0.55"));
+        when(client.analyze(any())).thenReturn(comparisonResponse(
+                response(List.of(1)), IssueCrossSource.empty(), List.of(), List.of(stance)));
+
+        AnalysisResult result = orchestrator.analyze(context);
+
+        ArgumentCaptor<AgentAnalyzeRequest> captor = ArgumentCaptor.forClass(AgentAnalyzeRequest.class);
+        verify(client).analyze(captor.capture());
+        assertEquals(List.of(11L), captor.getValue().issueMembers().stream()
+                .map(AgentAnalyzeRequest.IssueMemberPayload::id).toList());
+        assertEquals("한국어 요약", result.summary());
+        verify(crossSourceWriter).applyRepresentative(88L, IssueCrossSource.empty(),
+                List.of(new IssueCrossSourceWriter.RuleStance(11L, IssueStance.SUPPORTS, new BigDecimal("0.55"))),
+                false);
+        verifyNoInteractions(stub, findingWriter);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"soleSource", "conflicts", "promoteCandidates", "memberStances"})
+    void rejectsResponsesThatTargetMetadataOnlyIssueMembers(String field) {
+        Article representative = article();
+        Article member = issueMember(representative, 11L, "본문 멤버", "확인한 내용");
+        Article metadata = Article.builder().id(12L).title("본문 없는 멤버")
+                .fetchStatus(FetchStatus.METADATA_ONLY).build();
+        AnalysisContext context = new AnalysisContext(42L, representative, AgentPlan.FREE,
+                new IssueAnalysisContext(88L, 10L, List.of(representative, member, metadata)));
+        IssueCrossSource crossSource = switch (field) {
+            case "soleSource" -> new IssueCrossSource(List.of(),
+                    List.of(new IssueCrossSource.SoleSource(12L, "본문 없는 출처 주장")), List.of(), List.of());
+            case "conflicts" -> new IssueCrossSource(List.of(), List.of(),
+                    List.of(new IssueCrossSource.Conflict(List.of(10L, 12L), "본문 없는 출처와 충돌")), List.of());
+            case "promoteCandidates" -> new IssueCrossSource(List.of(), List.of(),
+                    List.of(new IssueCrossSource.Conflict(List.of(10L, 11L), "확인 가능한 충돌")), List.of());
+            default -> IssueCrossSource.empty();
+        };
+        List<Long> promoteCandidates = field.equals("promoteCandidates") ? List.of(12L) : List.of();
+        long stanceArticleId = field.equals("memberStances") ? 12L : 11L;
+        when(client.analyze(any())).thenReturn(comparisonResponse(response(List.of(1)), crossSource,
+                promoteCandidates, List.of(new AgentAnalyzeResponse.MemberStance(
+                        stanceArticleId, "DISPUTES", new BigDecimal("0.8")))));
+        AnalysisResult fallback = mock(AnalysisResult.class);
+        when(stub.analyze(representative)).thenReturn(fallback);
+
+        AnalysisResult result = orchestrator.analyze(context);
+
+        assertSame(fallback, result);
+        verify(client).analyze(any());
+        verify(recorder).recordFailure(
+                eq(42L), eq(10L), any(), eq("SCHEMA_VIOLATION"), any(), any(), any(), any());
+        verifyNoInteractions(crossSourceWriter, findingWriter);
+    }
+
+    @Test
     void keepsRepresentativeResultWhenPromotionSetupFails() {
         Article representative = article();
         Article member = issueMember(representative, 11L, "충돌 기사", "양산 일정 5조원");

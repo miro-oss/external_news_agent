@@ -53,7 +53,7 @@ public class IssueProjectionService {
                 ? new IssueStatusCalculator.Projection(
                 IssueStatus.RETRACTED,
                 "연결된 검증 실패·정정 이슈가 원 주장을 반박")
-                : statusCalculator.calculate(issue, memberships);
+                : statusCalculator.calculateFromFullText(issue, memberships);
         IssueStatus previous = issue.applyStatus(projection.status());
         if (previous != projection.status()) {
             statusHistoryRepository.save(IssueStatusHistory.builder()

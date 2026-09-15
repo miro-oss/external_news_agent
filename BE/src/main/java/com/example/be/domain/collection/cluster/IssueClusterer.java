@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class IssueClusterer {
 
-    static final String RULE_VERSION = "event-text-evidence-v6";
+    static final String RULE_VERSION = "fulltext-event-evidence-v7";
 
     private static final double MIN_ENTITY_TITLE_SUPPORT_JACCARD = 0.10;
 
@@ -48,6 +48,9 @@ public class IssueClusterer {
 
     /** A product's explicit headline maker takes precedence over its manufacturing partners and rivals. */
     Set<String> titleOrganizations(ClusterArticle article) {
+        if (!article.hasFullText()) {
+            return Set.of();
+        }
         String title = breakingNewsDetector.coreTitle(article.title());
         String subject = new CommercialProductEventEvidence(List.of(article), breakingNewsDetector)
                 .subject(article.articleId());
@@ -57,9 +60,10 @@ public class IssueClusterer {
         return titleOrganizations(article.title());
     }
 
-    /** Export all profiles, including non-voting content proxies, without consulting labels. */
+    /** Export eligible evidence profiles, including full-text content proxies, without consulting labels. */
     Map<Long, List<Long>> eventConflictingArticleIds(List<ClusterArticle> articles) {
-        BiPredicate<Long, Long> conflicts = eventConflicts(articles);
+        BiPredicate<Long, Long> conflicts = eventConflicts(articles.stream()
+                .filter(ClusterArticle::hasFullText).toList());
         List<Long> ids = articles.stream().map(ClusterArticle::articleId).distinct().sorted().toList();
         Map<Long, List<Long>> result = new LinkedHashMap<>();
         for (long id : ids) {
@@ -75,7 +79,9 @@ public class IssueClusterer {
     private BiPredicate<Long, Long> eventConflicts(List<ClusterArticle> articles,
                                                   StrongEventEvidence specific) {
         EventScopeEvidence scope = new EventScopeEvidence(articles, breakingNewsDetector);
-        return (left, right) -> scope.conflicts(left, right) || specific.conflicts(left, right);
+        Set<Long> evidenceIds = articles.stream().map(ClusterArticle::articleId).collect(Collectors.toSet());
+        return (left, right) -> evidenceIds.contains(left) && evidenceIds.contains(right)
+                && (scope.conflicts(left, right) || specific.conflicts(left, right));
     }
 
     /** pair score는 오프라인 측정 전용이다. 프로덕션에서는 O(n²) 진단 목록을 보관하지 않는다. */
@@ -178,7 +184,8 @@ public class IssueClusterer {
 
         articles.forEach(article -> {
             contentKeyByArticle.putIfAbsent(article.articleId(),
-                    article.contentGroupId() == null || rejectedFullTextIds.contains(article.articleId())
+                    !article.hasFullText() || article.contentGroupId() == null
+                            || rejectedFullTextIds.contains(article.articleId())
                             ? "article:" + article.articleId()
                             : "content-group:" + article.contentGroupId());
             representativeByArticle.putIfAbsent(article.articleId(), article.articleId());
@@ -203,6 +210,9 @@ public class IssueClusterer {
         // 연결한다. 그러면 대표 본문은 한 번만 분석되고 그 finding이 두 이슈 요약을 갱신한다.
         List<ClusterArticle> localArticles = List.copyOf(byId.values());
         for (ClusterArticle proxy : localArticles) {
+            if (!proxy.hasFullText()) {
+                continue;
+            }
             long representativeId = contentGrouping.representativeByArticle().get(proxy.articleId());
             if (!byId.containsKey(representativeId)) {
                 ClusterArticle globalRepresentative = contentGrouping.articleById().get(representativeId);
@@ -210,13 +220,16 @@ public class IssueClusterer {
             }
         }
         List<ClusterArticle> unique = List.copyOf(byId.values());
+        // Metadata remains in saved memberships, but cannot create, merge, or veto a new event.
+        // A short verified body is evidence even when it is too short for a SimHash fingerprint.
+        List<ClusterArticle> evidenceArticles = unique.stream().filter(ClusterArticle::hasFullText).toList();
 
         Map<Long, Set<String>> titleTokens = new HashMap<>();
         Map<Long, Set<String>> entities = new HashMap<>();
         Map<Long, Set<String>> organizations = new HashMap<>();
         Map<Long, Set<String>> titleOrganizations = new HashMap<>();
         Map<Long, Set<String>> titleEntities = new HashMap<>();
-        unique.forEach(article -> {
+        evidenceArticles.forEach(article -> {
             String coreTitle = breakingNewsDetector.coreTitle(article.title());
             titleTokens.put(article.articleId(), TitleTokenizer.tokens(coreTitle));
             titleOrganizations.put(article.articleId(), titleOrganizations(article));
@@ -229,23 +242,24 @@ public class IssueClusterer {
             entities.put(article.articleId(), extraction.entities());
         });
 
-        StrongEventEvidence specificEvidence = new StrongEventEvidence(unique, breakingNewsDetector);
-        UnionFind union = new UnionFind(byId.keySet(), titleOrganizations, eventConflicts(unique, specificEvidence));
-        // 저장된 멤버십과 동일 본문은 보존한다. 새 규칙 간선에만 조직·사건 충돌 방어를 적용한다.
-        // 이미 업체가 섞인 그룹도 프로파일을 보존한다. 한 업체의 후속 기사는 다른 기존 업체와
+        StrongEventEvidence specificEvidence = new StrongEventEvidence(evidenceArticles, breakingNewsDetector);
+        UnionFind union = new UnionFind(
+                byId.keySet(), titleOrganizations, eventConflicts(evidenceArticles, specificEvidence));
+        // 저장된 멤버십은 본문 유무와 관계없이 보존한다. 새 간선은 실제 본문 기사만 만든다.
+        // 이미 업체가 섞인 그룹도 본문 기사의 프로파일을 보존한다. 한 업체의 후속 기사는 다른 기존 업체와
         // 충돌하므로 별도 이슈로 남긴다. 과거 과병합을 늘리면서 정상화한 것으로 취급하지 않는다.
         Map<Long, List<ClusterArticle>> byExistingIssue = unique.stream()
                 .filter(article -> article.existingIssueId() != null)
                 .collect(Collectors.groupingBy(ClusterArticle::existingIssueId));
         byExistingIssue.values().forEach(component -> joinAll(union, component));
 
-        Map<String, List<ClusterArticle>> byContent = unique.stream()
+        Map<String, List<ClusterArticle>> byContent = evidenceArticles.stream()
                 .collect(Collectors.groupingBy(
                         article -> contentGrouping.contentKeyByArticle().get(article.articleId())));
         byContent.values().forEach(component -> joinAll(union, component));
 
         // 같은 본문 중복군에서는 대표만 사건 유사도 투표에 참여한다.
-        List<ClusterArticle> voting = unique.stream()
+        List<ClusterArticle> voting = evidenceArticles.stream()
                 .filter(article -> contentGrouping.representativeByArticle().get(article.articleId())
                         .equals(article.articleId()))
                 .sorted(Comparator.comparingLong(ClusterArticle::articleId))
@@ -320,7 +334,12 @@ public class IssueClusterer {
                         article -> union.root(article.articleId()), LinkedHashMap::new, Collectors.toList()));
         List<ClusterPlan.IssueAssignment> assignments = new ArrayList<>();
         for (List<ClusterArticle> component : components.values()) {
-            ClusterArticle representative = representative(component.stream()
+            List<ClusterArticle> evidenceMembers = component.stream().filter(ClusterArticle::hasFullText).toList();
+            if (evidenceMembers.isEmpty()) {
+                // New candidates remain collection records; an existing metadata-only issue is untouched.
+                continue;
+            }
+            ClusterArticle representative = representative(evidenceMembers.stream()
                     .filter(article -> contentGrouping.representativeByArticle().get(article.articleId())
                             .equals(article.articleId()))
                     .toList());
@@ -332,7 +351,7 @@ public class IssueClusterer {
                     .toList();
             Long existingIssueId = existingIssueIds.isEmpty() ? null : existingIssueIds.getFirst();
             List<Long> memberIds = component.stream().map(ClusterArticle::articleId).sorted().toList();
-            List<String> combinedEntities = component.stream()
+            List<String> combinedEntities = evidenceMembers.stream()
                     .flatMap(article -> entities.get(article.articleId()).stream())
                     .distinct()
                     .sorted()

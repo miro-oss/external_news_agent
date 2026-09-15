@@ -31,7 +31,7 @@ public class IssueRefutationLinker {
     private final IssueStanceClassifier stanceClassifier;
 
     public Optional<Long> linkNewIssue(NewsIssue newIssue, Article representative) {
-        if (!stanceClassifier.hasExplicitCorrection(representative)) {
+        if (!representative.hasFullText() || !stanceClassifier.hasExplicitCorrection(representative)) {
             return Optional.empty();
         }
         OffsetDateTime since = newIssue.getFirstSeenAt().minusDays(LOOKBACK_DAYS);
@@ -39,6 +39,7 @@ public class IssueRefutationLinker {
                 .findRecentRepresentativesByTopicIdExcludingIssueId(
                         newIssue.getTopic().getId(), newIssue.getId(), since)
                 .stream()
+                .filter(candidate -> candidate.getArticle().hasFullText())
                 .filter(candidate -> sharesEnoughEntities(newIssue, candidate.getIssue()))
                 .filter(candidate -> stanceClassifier.classify(
                         candidate.getArticle(), representative).stance() == IssueStance.RETRACTS)

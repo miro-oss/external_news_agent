@@ -112,7 +112,7 @@ class IssueClustererTest {
     }
 
     @Test
-    void preservesExistingContentGroupForArticleWithoutFullTextInCurrentRun() {
+    void ignoresExistingContentGroupForArticlesWithoutFullTextInCurrentRun() {
         ClusterArticle first = articleWithContentGroup(
                 1L, "삼성전자 HBM4 공급 일정", null,
                 FetchStatus.METADATA_ONLY, 10L, hour(0));
@@ -122,8 +122,8 @@ class IssueClustererTest {
 
         ClusterPlan plan = clusterer.cluster(List.of(first, second));
 
-        assertEquals(1, plan.issues().size());
-        assertEquals(1, plan.issues().getFirst().independentContentCount());
+        assertTrue(plan.issues().isEmpty());
+        assertTrue(plan.contentGroups().isEmpty());
     }
 
     @Test
@@ -160,11 +160,11 @@ class IssueClustererTest {
     @Test
     void joinsWeakTitlePairAtOrganizationWindowBoundary() {
         ClusterArticle first = article(
-                1L, "DGIST 반도체 결함 초음파 검사 기술 공개", null,
-                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+                1L, "DGIST 반도체 결함 초음파 검사 기술 공개", "DGIST 반도체 결함 초음파 검사 기술 공개 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "전자신문", "0.8", hour(0));
         ClusterArticle second = article(
-                2L, "DGIST 초소형 광 초음파 센서 개발", null,
-                FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(24));
+                2L, "DGIST 초소형 광 초음파 센서 개발", "DGIST 초소형 광 초음파 센서 개발 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "매일경제", "0.8", hour(24));
 
         ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
 
@@ -179,11 +179,11 @@ class IssueClustererTest {
     @Test
     void doesNotUseOrganizationCorroborationOutsideOneDay() {
         ClusterArticle first = article(
-                1L, "DGIST 반도체 결함 초음파 검사 기술 공개", null,
-                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+                1L, "DGIST 반도체 결함 초음파 검사 기술 공개", "DGIST 반도체 결함 초음파 검사 기술 공개 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "전자신문", "0.8", hour(0));
         ClusterArticle second = article(
-                2L, "DGIST 초소형 광 초음파 센서 개발", null,
-                FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(25));
+                2L, "DGIST 초소형 광 초음파 센서 개발", "DGIST 초소형 광 초음파 센서 개발 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "매일경제", "0.8", hour(25));
 
         ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
 
@@ -217,11 +217,11 @@ class IssueClustererTest {
     @Test
     void doesNotTreatSharedProductCodeAsOrganizationCorroboration() {
         ClusterArticle first = article(
-                1L, "HBM4 평택 양산 확정", null,
-                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+                1L, "HBM4 평택 양산 확정", "HBM4 평택 양산 확정 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "전자신문", "0.8", hour(0));
         ClusterArticle second = article(
-                2L, "HBM4 청주 장비 발주", null,
-                FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(4));
+                2L, "HBM4 청주 장비 발주", "HBM4 청주 장비 발주 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "매일경제", "0.8", hour(4));
 
         ClusterPlan plan = clusterer.cluster(List.of(first, second), true);
 
@@ -252,13 +252,13 @@ class IssueClustererTest {
         List<ClusterArticle> articles = new java.util.ArrayList<>();
         for (String title : samsungTitles) {
             articles.add(article(
-                    articles.size() + 1L, title, null,
-                    FetchStatus.METADATA_ONLY, "매체" + articles.size(), "0.8", hour(1)));
+                    articles.size() + 1L, title, title + " 관련 상세 보도다.",
+                    FetchStatus.FULLTEXT, "매체" + articles.size(), "0.8", hour(1)));
         }
         for (String title : unrelatedTitles) {
             articles.add(article(
-                    articles.size() + 1L, title, null,
-                    FetchStatus.METADATA_ONLY, "매체" + articles.size(), "0.8", hour(2)));
+                    articles.size() + 1L, title, title + " 관련 상세 보도다.",
+                    FetchStatus.FULLTEXT, "매체" + articles.size(), "0.8", hour(2)));
         }
 
         ClusterPlan plan = clusterer.cluster(articles, true);
@@ -272,11 +272,11 @@ class IssueClustererTest {
     @Test
     void breakingTitleMatchIsLimitedToSixHours() {
         ClusterArticle breaking = article(
-                1L, "[속보] 삼성전자 HBM4 증설 발표", null,
-                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+                1L, "[속보] 삼성전자 HBM4 증설 발표", "[속보] 삼성전자 HBM4 증설 발표 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "전자신문", "0.8", hour(0));
         ClusterArticle lateFollowUp = article(
-                2L, "삼성전자 HBM4 증설 발표", null,
-                FetchStatus.METADATA_ONLY, "매일경제", "0.9", hour(7));
+                2L, "삼성전자 HBM4 증설 발표", "삼성전자 HBM4 증설 발표 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "매일경제", "0.9", hour(7));
 
         ClusterPlan plan = clusterer.cluster(List.of(breaking, lateFollowUp), true);
 
@@ -290,11 +290,11 @@ class IssueClustererTest {
         properties.setBreakingTimeWindow(Duration.ofMinutes(90));
         clusterer = new IssueClusterer(properties, new BreakingNewsDetector());
         ClusterArticle breaking = article(
-                1L, "[속보] 삼성전자 HBM4 증설 발표", null,
-                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+                1L, "[속보] 삼성전자 HBM4 증설 발표", "[속보] 삼성전자 HBM4 증설 발표 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "전자신문", "0.8", hour(0));
         ClusterArticle followUp = article(
-                2L, "삼성전자 HBM4 증설 발표", null,
-                FetchStatus.METADATA_ONLY, "매일경제", "0.9", hour(1));
+                2L, "삼성전자 HBM4 증설 발표", "삼성전자 HBM4 증설 발표 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "매일경제", "0.9", hour(1));
 
         ClusterPlan plan = clusterer.cluster(List.of(breaking, followUp), true);
 
@@ -374,7 +374,7 @@ class IssueClustererTest {
     @Test
     void usesStableEpochWhenEveryEventTimeIsMissing() {
         ClusterArticle article = new ClusterArticle(
-                1L, 7L, "시간 정보 없는 기사", null, null, FetchStatus.METADATA_ONLY,
+                1L, 7L, "시간 정보 없는 기사", null, "시각 정보 없이 기사가 게시됐다.", FetchStatus.FULLTEXT,
                 1L, "전자신문", new BigDecimal("0.8"), null, null,
                 List.of("반도체"), null, null, null, true);
 
@@ -388,11 +388,11 @@ class IssueClustererTest {
     @Test
     void keepsPairDiagnosticsOptIn() {
         ClusterArticle first = article(
-                1L, "삼성전자 HBM4 투자", null,
-                FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0));
+                1L, "삼성전자 HBM4 투자", "삼성전자 HBM4 투자 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "전자신문", "0.8", hour(0));
         ClusterArticle second = article(
-                2L, "삼성전자 HBM4 공식 투자", null,
-                FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(1));
+                2L, "삼성전자 HBM4 공식 투자", "삼성전자 HBM4 공식 투자 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "매일경제", "0.8", hour(1));
 
         assertTrue(clusterer.cluster(List.of(first, second)).pairScores().isEmpty());
         assertEquals(1, clusterer.cluster(List.of(first, second), true).pairScores().size());
@@ -543,15 +543,15 @@ class IssueClustererTest {
                 "철강 수출 관세 협상 난항", "바이오 위탁생산 계약 체결");
         List<ClusterArticle> articles = new java.util.ArrayList<>();
         articles.add(article(
-                1L, "오로라 가속기 MI300X CDNA4 공급 계약",
-                null, FetchStatus.METADATA_ONLY, "전자신문", "0.8", hour(0)));
+                1L, "오로라 가속기 MI300X CDNA4 공급 계약", "오로라 가속기 MI300X CDNA4 공급 계약 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "전자신문", "0.8", hour(0)));
         articles.add(article(
-                2L, "데이터센터 MI300X CDNA4 생산 일정 공개",
-                null, FetchStatus.METADATA_ONLY, "매일경제", "0.8", hour(1)));
+                2L, "데이터센터 MI300X CDNA4 생산 일정 공개", "데이터센터 MI300X CDNA4 생산 일정 공개 관련 상세 보도다.",
+                FetchStatus.FULLTEXT, "매일경제", "0.8", hour(1)));
         for (int index = 0; index < unrelatedTitles.size(); index++) {
             articles.add(article(
-                    index + 3L, unrelatedTitles.get(index), null,
-                    FetchStatus.METADATA_ONLY, "매체" + index, "0.8", hour(index + 2)));
+                    index + 3L, unrelatedTitles.get(index), unrelatedTitles.get(index) + " 관련 상세 보도다.",
+                    FetchStatus.FULLTEXT, "매체" + index, "0.8", hour(index + 2)));
         }
 
         ClusterPlan plan = clusterer.cluster(articles, true);

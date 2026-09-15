@@ -520,6 +520,30 @@ class IssueClusterWriterTest {
     }
 
     @Test
+    void ignoresMetadataMemberWhenChoosingStanceReference() {
+        Topic topic = topic();
+        Article hidden = article(1L, "삼성전자 HBM4 매출 10조원", topic);
+        hidden.applyFullText(null, FetchStatus.METADATA_ONLY, LocalDateTime.now());
+        Article followUp = article(2L, "삼성전자 HBM4 매출 20조원", topic);
+        Article visible = article(3L, "삼성전자 HBM4 매출 20조원", topic);
+        NewsWatch watch = prepareWatchedIssue(topic, hidden, followUp);
+        IssueArticle hiddenMembership = membership(11L, watch.getIssue(), hidden, IssueArticleRole.MEMBER);
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(100L)).thenReturn(List.of(
+                hiddenMembership,
+                membership(13L, watch.getIssue(), visible, IssueArticleRole.REPRESENTATIVE)));
+
+        writer.write(new ClusterPlan(List.of(),
+                List.of(assignment(100L, List.of(), topic, followUp)), List.of()));
+
+        ArgumentCaptor<IssueArticle> added = ArgumentCaptor.forClass(IssueArticle.class);
+        verify(issueArticleRepository).save(added.capture());
+        assertEquals(followUp, added.getValue().getArticle());
+        assertEquals(IssueStance.SUPPORTS, added.getValue().getStance());
+        assertEquals(3, watch.getIssue().getArticleCount());
+        assertEquals(IssueStance.SUPPORTS, hiddenMembership.getStance());
+    }
+
+    @Test
     void preservesExistingCrossSourceRuleStanceWhenNewArticleJoins() {
         Topic topic = topic();
         Article original = article(1L, "삼성전자 HBM4 양산 확정", topic);

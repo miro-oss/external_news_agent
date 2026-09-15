@@ -21,7 +21,7 @@ class IssueClustererRepresentativeTest {
         var summary = article(1, TITLE, FetchStatus.METADATA_ONLY, null, "0.99", 0, null, true);
         var fullText = article(2, "[속보] " + TITLE, FetchStatus.FULLTEXT, BODY, "0.40", 1, null, true);
 
-        assertRepresentative(2, null, summary, fullText);
+        assertRepresentative(2, null, List.of(2L), summary, fullText);
     }
 
     @Test
@@ -29,7 +29,7 @@ class IssueClustererRepresentativeTest {
         var summary = article(1, TITLE, FetchStatus.METADATA_ONLY, null, "0.99", 0, null, true);
         var fullText = article(2, TITLE, FetchStatus.FULLTEXT, BODY, "0.40", 1, null, true);
 
-        assertRepresentative(2, null, summary, fullText);
+        assertRepresentative(2, null, List.of(2L), summary, fullText);
     }
 
     @Test
@@ -37,7 +37,7 @@ class IssueClustererRepresentativeTest {
         var fullText = article(2, TITLE, FetchStatus.FULLTEXT, BODY, "0.40", 1, null, true);
         for (String absent : new String[]{null, "", " \n\t "}) {
             var empty = article(1, TITLE, FetchStatus.FULLTEXT, absent, "0.99", 0, null, true);
-            assertRepresentative(2, null, empty, fullText);
+            assertRepresentative(2, null, List.of(2L), empty, fullText);
         }
     }
 
@@ -46,15 +46,15 @@ class IssueClustererRepresentativeTest {
         var metadata = article(1, TITLE, FetchStatus.METADATA_ONLY, BODY.repeat(25), "0.99", 0, null, true);
         var fullText = article(2, TITLE, FetchStatus.FULLTEXT, BODY, "0.40", 1, null, true);
 
-        assertRepresentative(2, null, metadata, fullText);
+        assertRepresentative(2, null, List.of(2L), metadata, fullText);
     }
 
     @Test
-    void newFullTextReplacesTheSummaryRepresentativeOfAnExistingIssue() {
+    void newFullTextDoesNotAttachToAnExistingMetadataOnlyIssue() {
         var previous = article(1, TITLE, FetchStatus.METADATA_ONLY, null, "0.99", 0, 74L, false);
         var fullText = article(2, TITLE, FetchStatus.FULLTEXT, BODY, "0.40", 1, null, true);
 
-        assertRepresentative(2, 74L, previous, fullText);
+        assertRepresentative(2, null, List.of(2L), previous, fullText);
     }
 
     @Test
@@ -62,20 +62,18 @@ class IssueClustererRepresentativeTest {
         var previous = article(1, "[속보] " + TITLE, FetchStatus.FULLTEXT, BODY, "0.40", 0, 74L, false);
         var summary = article(2, TITLE, FetchStatus.METADATA_ONLY, null, "0.99", 1, null, true);
 
-        assertRepresentative(1, 74L, previous, summary);
+        assertRepresentative(1, 74L, List.of(1L), previous, summary);
     }
 
     @Test
-    void metadataOnlyMembersRemainInTheInternalIssueAndKeepDeterministicFallback() {
+    void metadataOnlyCandidatesDoNotCreateAnIssueOrRepresentative() {
         var breaking = article(1, "[속보] " + TITLE, FetchStatus.METADATA_ONLY, null, "0.99", 0, null, true);
         var ordinary = article(2, TITLE, FetchStatus.METADATA_ONLY, null, "0.40", 1, null, true);
         var stronger = article(3, TITLE, FetchStatus.METADATA_ONLY, null, "0.80", 2, null, true);
 
         for (List<ClusterArticle> input : List.of(List.of(breaking, ordinary, stronger), List.of(stronger, ordinary, breaking))) {
             ClusterPlan plan = clusterer.cluster(input);
-            assertEquals(1, plan.issues().size());
-            assertEquals(3, plan.issues().getFirst().representativeArticleId());
-            assertEquals(List.of(1L, 2L, 3L), plan.issues().getFirst().articleIds());
+            assertEquals(List.of(), plan.issues());
         }
     }
 
@@ -84,17 +82,17 @@ class IssueClustererRepresentativeTest {
         var breaking = article(1, "[속보] " + TITLE, FetchStatus.FULLTEXT, BODY, "0.99", 0, null, true);
         var followup = article(2, TITLE, FetchStatus.FULLTEXT, BODY, "0.40", 1, null, true);
 
-        assertRepresentative(2, null, breaking, followup);
+        assertRepresentative(2, null, List.of(1L, 2L), breaking, followup);
     }
 
-    private void assertRepresentative(long expectedArticleId, Long expectedIssueId,
+    private void assertRepresentative(long expectedArticleId, Long expectedIssueId, List<Long> expectedMembers,
                                       ClusterArticle first, ClusterArticle second) {
         for (List<ClusterArticle> input : List.of(List.of(first, second), List.of(second, first))) {
             ClusterPlan plan = clusterer.cluster(input);
             assertEquals(1, plan.issues().size());
             assertEquals(expectedArticleId, plan.issues().getFirst().representativeArticleId());
             assertEquals(expectedIssueId, plan.issues().getFirst().existingIssueId());
-            assertEquals(List.of(1L, 2L), plan.issues().getFirst().articleIds());
+            assertEquals(expectedMembers, plan.issues().getFirst().articleIds());
         }
     }
 

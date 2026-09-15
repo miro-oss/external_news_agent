@@ -33,7 +33,7 @@ public class IssueStatusCalculator {
         return calculate(issue, memberships, false);
     }
 
-    /** Read-only delivery view: hidden participants cannot leave a partial conflict behind. */
+    /** 본문 없는 멤버의 주장과 일부 출처만 남은 충돌을 상태 근거로 사용하지 않는다. */
     public Projection calculateFromFullText(NewsIssue issue, List<IssueArticle> memberships) {
         List<IssueArticle> visible = memberships == null ? List.of() : memberships.stream()
                 .filter(value -> value.getArticle().hasFullText()).toList();

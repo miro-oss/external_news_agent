@@ -39,6 +39,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class ArticleAnalysisPipelineTest {
@@ -76,7 +78,7 @@ class ArticleAnalysisPipelineTest {
 
     @Test
     void analyzesSameArticleOnlyOnceAndPrefersUpdatedObservation() {
-        Article article = Article.builder().id(10L).title("기사").build();
+        Article article = Article.builder().id(10L).title("기사").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
         when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
                 observation(article, ChangeType.NEW),
                 observation(article, ChangeType.UPDATED)));
@@ -92,7 +94,7 @@ class ArticleAnalysisPipelineTest {
 
     @Test
     void propagatesPaidPlanFromCollectionRun() {
-        Article article = Article.builder().id(10L).title("기사").build();
+        Article article = Article.builder().id(10L).title("기사").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
         when(runRepository.findById(42L)).thenReturn(java.util.Optional.of(
                 CollectionRun.builder().id(42L).llmPlan(AgentPlan.PAID).build()));
         when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
@@ -115,8 +117,8 @@ class ArticleAnalysisPipelineTest {
                 .source(Source.builder().id(1L).build()).build();
         item.captureTopicSnapshot();
         topic.update("메모리", "DRAM", List.of(), List.of("DRAM"), List.of(), 100, 1440, true);
-        Article queuedMatch = Article.builder().id(10L).title("HBM 공급 확대").topic(topic).build();
-        Article liveMatch = Article.builder().id(11L).title("DRAM 공급 확대").topic(topic).build();
+        Article queuedMatch = Article.builder().id(10L).title("HBM 공급 확대").topic(topic).body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
+        Article liveMatch = Article.builder().id(11L).title("DRAM 공급 확대").topic(topic).body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
         when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(item));
         when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
                 observation(liveMatch, topic, ChangeType.NEW), observation(queuedMatch, topic, ChangeType.NEW)));
@@ -135,8 +137,8 @@ class ArticleAnalysisPipelineTest {
 
     @Test
     void recordsWarningAndContinuesWhenOneArticleFails() {
-        Article failed = Article.builder().id(10L).title("실패").build();
-        Article succeeded = Article.builder().id(11L).title("성공").build();
+        Article failed = Article.builder().id(10L).title("실패").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
+        Article succeeded = Article.builder().id(11L).title("성공").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
         when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
                 observation(failed, ChangeType.NEW),
                 observation(succeeded, ChangeType.NEW)));
@@ -196,7 +198,7 @@ class ArticleAnalysisPipelineTest {
 
     @Test
     void analyzesHistoricalRepresentativeWhenOnlyNewMemberWasObserved() {
-        Article representative = Article.builder().id(10L).title("기존 대표").build();
+        Article representative = Article.builder().id(10L).title("기존 대표").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
         when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of());
         when(issueArticleRepository.findRepresentativesForRun(42L)).thenReturn(List.of(
                 IssueArticle.builder()
@@ -214,7 +216,7 @@ class ArticleAnalysisPipelineTest {
 
     @Test
     void keepsNewChangeTypeWhenObservedRepresentativeIsAlsoBackfilled() {
-        Article representative = Article.builder().id(10L).title("이번 실행의 새 대표").build();
+        Article representative = Article.builder().id(10L).title("이번 실행의 새 대표").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
         when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
                 .thenReturn(List.of(observation(representative, ChangeType.NEW)));
         when(issueArticleRepository.findRepresentativesForRun(42L)).thenReturn(List.of(
@@ -233,7 +235,7 @@ class ArticleAnalysisPipelineTest {
 
     @Test
     void usesUnclusteredTargetsAfterClusteringFailure() {
-        Article article = Article.builder().id(10L).title("기사").build();
+        Article article = Article.builder().id(10L).title("기사").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
         when(runArticleRepository.findUnclusteredAnalysisTargetsByRunId(42L))
                 .thenReturn(List.of(observation(article, ChangeType.NEW)));
         AnalysisResult result = mock(AnalysisResult.class);
@@ -260,6 +262,63 @@ class ArticleAnalysisPipelineTest {
 
         verify(orchestrator, never()).analyze(new AnalysisContext(42L, article, AgentPlan.FREE));
         verify(findingWriter, never()).write(eq(42L), eq(10L), any(), any(), any());
+    }
+
+    @Test
+    void completesWithZeroTargetsWhenObservedArticlesHaveNoUsableFullText() {
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(
+                unavailableArticles().stream().map(article -> observation(article, ChangeType.NEW)).toList());
+
+        pipeline.analyze(42L);
+
+        verify(findingWriter).recordTargetCount(42L, 0);
+        verifyNoMoreInteractions(findingWriter);
+        verifyNoInteractions(orchestrator, reuseCache);
+    }
+
+    @Test
+    void doesNotReviveMetadataOnlyHistoricalRepresentativeOnReobservation() {
+        Article representative = unavailableArticles().getFirst();
+        IssueArticle membership = IssueArticle.builder().article(representative)
+                .role(IssueArticleRole.REPRESENTATIVE).build();
+        when(issueArticleRepository.findRepresentativesForRun(42L)).thenReturn(List.of(membership));
+        when(issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(42L, List.of(19L)))
+                .thenReturn(List.of(membership));
+
+        pipeline.analyze(42L, Set.of(19L));
+
+        verify(findingWriter).recordTargetCount(42L, 0);
+        verifyNoMoreInteractions(findingWriter);
+        verifyNoInteractions(orchestrator, reuseCache);
+    }
+
+    @Test
+    void clusteringFailureDoesNotAnalyzeArticlesWithoutUsableFullText() {
+        List<CollectionRunArticle> observations = unavailableArticles().stream()
+                .map(article -> observation(article, ChangeType.UNCHANGED)).toList();
+        when(runArticleRepository.findUnclusteredAnalysisTargetsByRunId(42L)).thenReturn(observations);
+        when(runArticleRepository.findUnclusteredAnalysisTargetsByRunIdAndArticleIdIn(42L, List.of(10L)))
+                .thenReturn(observations);
+
+        pipeline.analyzeWithoutClustering(42L, Set.of(10L));
+
+        verify(findingWriter).recordTargetCount(42L, 0);
+        verifyNoMoreInteractions(findingWriter);
+        verifyNoInteractions(orchestrator, reuseCache);
+    }
+
+    @Test
+    void investigationDoesNotAnalyzeMissingFullTextOrItsHistoricalRepresentative() {
+        List<Article> articles = unavailableArticles();
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(42L, List.of(10L)))
+                .thenReturn(articles.stream().map(article -> observation(article, ChangeType.UNCHANGED)).toList());
+        when(issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(42L, List.of(10L)))
+                .thenReturn(List.of(IssueArticle.builder().article(articles.getFirst())
+                        .role(IssueArticleRole.REPRESENTATIVE).build()));
+
+        pipeline.analyzeInvestigation(42L, Set.of(10L));
+
+        verifyNoInteractions(orchestrator, reuseCache, findingWriter);
     }
 
     @Test
@@ -292,9 +351,9 @@ class ArticleAnalysisPipelineTest {
                 Topic.builder()
                         .optionalKeywords(List.of("HBM", "삼성", "양산"))
                         .build();
-        Article low = Article.builder().id(10L).title("HBM 소식").summary("요약").build();
-        Article high = Article.builder().id(11L).title("삼성 HBM 양산").summary("요약").build();
-        Article medium = Article.builder().id(12L).title("삼성 HBM").summary("요약").build();
+        Article low = Article.builder().id(10L).title("HBM 소식").summary("요약").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
+        Article high = Article.builder().id(11L).title("삼성 HBM 양산").summary("요약").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
+        Article medium = Article.builder().id(12L).title("삼성 HBM").summary("요약").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
         when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
                 observation(low, topic, ChangeType.NEW),
                 observation(high, topic, ChangeType.NEW),
@@ -316,8 +375,8 @@ class ArticleAnalysisPipelineTest {
         Topic topic = Topic.builder()
                 .optionalKeywords(List.of("반도체", "AI", "HBM4"))
                 .build();
-        Article common = Article.builder().id(10L).title("반도체 AI 투자").build();
-        Article rare = Article.builder().id(11L).title("HBM4 투자").build();
+        Article common = Article.builder().id(10L).title("반도체 AI 투자").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
+        Article rare = Article.builder().id(11L).title("HBM4 투자").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
         when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
                 observation(common, topic, ChangeType.NEW),
                 observation(rare, topic, ChangeType.NEW)));
@@ -335,11 +394,11 @@ class ArticleAnalysisPipelineTest {
                 .optionalKeywords(List.of("HBM", "삼성", "양산"))
                 .build();
         List<Article> articles = List.of(
-                Article.builder().id(10L).title("일반 소식").sourceName("A").build(),
-                Article.builder().id(11L).title("HBM 소식").sourceName("B").build(),
-                Article.builder().id(12L).title("삼성 소식").sourceName("C").build(),
-                Article.builder().id(13L).title("삼성 HBM 소식").sourceName("D").build(),
-                Article.builder().id(14L).title("삼성 HBM 양산").sourceName("E").build());
+                Article.builder().id(10L).title("일반 소식").sourceName("A").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build(),
+                Article.builder().id(11L).title("HBM 소식").sourceName("B").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build(),
+                Article.builder().id(12L).title("삼성 소식").sourceName("C").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build(),
+                Article.builder().id(13L).title("삼성 HBM 소식").sourceName("D").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build(),
+                Article.builder().id(14L).title("삼성 HBM 양산").sourceName("E").body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build());
         when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
                 .thenReturn(articles.stream()
                         .map(article -> observation(article, topic, ChangeType.NEW))
@@ -370,6 +429,14 @@ class ArticleAnalysisPipelineTest {
         assertEquals(10L, eligible.getFirst().article().getId());
         assertTrue(eligible.getFirst().issue().present());
         assertEquals(new BigDecimal("90.00"), eligible.getFirst().issue().importanceScore());
+    }
+
+    private List<Article> unavailableArticles() {
+        return List.of(
+                Article.builder().id(10L).title("메타데이터만 확보").fetchStatus(FetchStatus.METADATA_ONLY).build(),
+                Article.builder().id(11L).title("본문 없음").fetchStatus(FetchStatus.FULLTEXT).build(),
+                Article.builder().id(12L).title("공백 본문").body(" \n\t").fetchStatus(FetchStatus.FULLTEXT).build(),
+                Article.builder().id(13L).title("재수집 실패").body("옛 전문").fetchStatus(FetchStatus.FETCH_FAILED).build());
     }
 
     private CollectionRunArticle observation(Article article, ChangeType changeType) {

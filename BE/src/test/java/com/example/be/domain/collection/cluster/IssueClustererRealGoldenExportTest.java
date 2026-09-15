@@ -134,6 +134,7 @@ class IssueClustererRealGoldenExportTest {
             value.put("sourceArticleId", source.sourceArticleId());
             value.put("topicId", clustered.topicId());
             value.put("title", clustered.title());
+            value.put("eventEvidenceEligible", clustered.hasFullText());
             value.put("titleOrganizations", clusterer.titleOrganizations(clustered)
                     .stream().sorted().toList());
             value.put("eventConflictingArticleIds", eventConflicts.get(clustered.articleId()));

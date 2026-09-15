@@ -19,6 +19,7 @@ import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.collection.robots.RobotsDecision;
 import com.example.be.domain.collection.robots.RobotsPolicyService;
 import com.example.be.domain.notifications.service.ReportNotificationAutomationService;
+import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
@@ -46,6 +47,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -71,6 +73,7 @@ class CollectionNoChangeReportIntegrationTests {
     @Autowired private CollectionRunArticleRepository observationRepository;
     @Autowired private NewsReportRepository reportRepository;
     @Autowired private FindingRepository findingRepository;
+    @Autowired private IssueArticleRepository membershipRepository;
     @Autowired private TopicRepository topicRepository;
     @Autowired private SourceRepository sourceRepository;
     @Autowired private EntityManager entityManager;
@@ -94,10 +97,12 @@ class CollectionNoChangeReportIntegrationTests {
         source = sourceRepository.save(Source.builder().sourceKind(Source.KIND_FEED)
                 .name("변경 감지 테스트 소스").urlTemplate("https://example.com/feed/" + suffix)
                 .language("ko").active(true)
-                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 10, false)).build());
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 10, true)).build());
         articleUrl = "https://example.com/articles/" + suffix;
         when(robotsPolicyService.evaluate(any())).thenAnswer(invocation ->
                 RobotsDecision.skipped(invocation.getArgument(0)));
+        when(contentClient.fetch(any(), any(), any())).thenReturn(
+                ArticleContentResult.fullText("HBM 양산 일정을 발표했다. 고객사에 공급할 제품의 양산 계획을 확인했다."));
     }
 
     @ParameterizedTest
@@ -193,14 +198,20 @@ class CollectionNoChangeReportIntegrationTests {
 
     @Test
     void newlyAvailableFullTextAndReanalysisDoNotCreateReportWithoutNewArticles() {
+        source.update(source.getName(), source.getUrlTemplate(), source.getCountry(), source.getLanguage(),
+                new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 10, false), source.getReliabilityScore(), true);
         givenArticle("HBM 양산 일정 발표");
         CollectionRun first = execute(TriggerType.SCHEDULED);
         assertNotNull(first.getReportId());
+        assertFalse(findingRepository.existsByRunId(first.getId()));
+        var candidate = observationRepository.findByRunIdOrderByIdAsc(first.getId()).getFirst().getArticle();
+        assertFalse(candidate.hasFullText());
+        assertTrue(membershipRepository.findByArticleIds(List.of(candidate.getId())).isEmpty());
         clearInvocations(notificationAutomation);
         source = sourceRepository.findById(source.getId()).orElseThrow();
         source.update(source.getName(), source.getUrlTemplate(), source.getCountry(), source.getLanguage(),
                 new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 10, true), source.getReliabilityScore(), true);
-        when(contentClient.fetch(articleUrl, null)).thenReturn(
+        when(contentClient.fetch(articleUrl, null, "HBM 양산 일정 발표")).thenReturn(
                 ArticleContentResult.fullText("HBM 양산 일정에 대한 상세 내용을 새 본문으로 확보했다."));
 
         CollectionRun refreshed = execute(TriggerType.SCHEDULED);
@@ -210,7 +221,7 @@ class CollectionNoChangeReportIntegrationTests {
         assertEquals(0, refreshed.getUpdatedCount());
         assertEquals(1, observationRepository.countByRunIdAndChangeType(refreshed.getId(), ChangeType.UNCHANGED));
         assertTrue(findingRepository.existsByRunId(refreshed.getId()));
-        verify(contentClient).fetch(articleUrl, null);
+        verify(contentClient).fetch(articleUrl, null, "HBM 양산 일정 발표");
     }
 
     @Test
