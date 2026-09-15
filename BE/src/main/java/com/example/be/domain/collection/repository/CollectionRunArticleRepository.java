@@ -51,6 +51,7 @@ public interface CollectionRunArticleRepository
             SELECT observation
             FROM CollectionRunArticle observation
             JOIN FETCH observation.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.source
             WHERE observation.run.id = :runId AND article.id = :articleId
             ORDER BY observation.id ASC
@@ -85,12 +86,13 @@ public interface CollectionRunArticleRepository
 
     /**
      * 클러스터 계산용 값 복사를 마치면 트랜잭션 밖에서 비교할 수 있게 필요한 연관을 한 번에 붙인다.
-     * Article.body가 CLOB이므로 Oracle ORA-22848을 피하기 위해 이 쿼리에 DISTINCT를 추가하지 않는다.
+     * Article의 summary와 공유 본문이 CLOB이므로 Oracle ORA-22848을 피하기 위해 이 쿼리에 DISTINCT를 추가하지 않는다.
      */
     @Query("""
             SELECT observation
             FROM CollectionRunArticle observation
             JOIN FETCH observation.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH observation.topic topic
             JOIN FETCH article.source source
             LEFT JOIN FETCH article.contentGroup
@@ -104,6 +106,7 @@ public interface CollectionRunArticleRepository
             SELECT observation
             FROM CollectionRunArticle observation
             JOIN FETCH observation.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.topic
             JOIN FETCH article.source
             JOIN FETCH observation.topic
@@ -124,6 +127,7 @@ public interface CollectionRunArticleRepository
             SELECT observation
             FROM CollectionRunArticle observation
             JOIN FETCH observation.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.topic
             JOIN FETCH article.source
             JOIN FETCH observation.topic
@@ -143,6 +147,7 @@ public interface CollectionRunArticleRepository
             SELECT observation
             FROM CollectionRunArticle observation
             JOIN FETCH observation.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.topic
             JOIN FETCH article.source
             JOIN FETCH observation.topic
@@ -159,6 +164,7 @@ public interface CollectionRunArticleRepository
             SELECT observation
             FROM CollectionRunArticle observation
             JOIN FETCH observation.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.topic
             JOIN FETCH article.source
             JOIN FETCH observation.topic
@@ -174,6 +180,7 @@ public interface CollectionRunArticleRepository
             SELECT observation
             FROM CollectionRunArticle observation
             JOIN FETCH observation.article article
+            LEFT JOIN FETCH article.storedBody
             LEFT JOIN FETCH article.source
             JOIN FETCH observation.topic
             WHERE observation.run.id = :runId

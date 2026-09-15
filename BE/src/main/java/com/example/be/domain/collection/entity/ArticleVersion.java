@@ -14,8 +14,6 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 
@@ -53,9 +51,9 @@ public class ArticleVersion {
     @Column(name = "title", length = Article.MAX_TITLE_LENGTH)
     private String title;
 
-    @JdbcTypeCode(SqlTypes.CLOB)
-    @Column(name = "body")
-    private String body;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "body_hash")
+    private ArticleBody storedBody;
 
     @Column(name = "content_hash", length = 64)
     private String contentHash;
@@ -72,9 +70,13 @@ public class ArticleVersion {
                 .run(run)
                 .versionNo(versionNo)
                 .title(article.getTitle())
-                .body(article.getBody())
+                .storedBody(article.getStoredBody())
                 .contentHash(article.getContentHash())
                 .changedAt(changedAt)
                 .build();
+    }
+
+    public String getBody() {
+        return storedBody == null ? null : storedBody.getBody();
     }
 }

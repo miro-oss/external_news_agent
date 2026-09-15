@@ -6,6 +6,7 @@ import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.topics.entity.Topic;
@@ -31,7 +32,7 @@ class ReportGeneratorTest {
         Finding blank = finding(3L, "숨길 빈본문 기사", "숨길 빈본문 요약", SensitivityLevel.HIGH, Relevance.IMPORTANT, "기업");
         org.springframework.test.util.ReflectionTestUtils.setField(metadata.getArticle(), "fetchStatus",
                 com.example.be.domain.collection.entity.FetchStatus.METADATA_ONLY);
-        org.springframework.test.util.ReflectionTestUtils.setField(blank.getArticle(), "body", " \n\t");
+        blank.getArticle().applyFullText(" \n\t", FetchStatus.FULLTEXT, null);
         var result = generator.generate(List.of(available, metadata, blank), LocalDateTime.of(2026, 9, 15, 10, 0));
         assertEquals(List.of(1L), result.reflectedFindingIds());
         assertFalse(result.markdownBody().contains("숨길"));

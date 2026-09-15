@@ -79,6 +79,9 @@ class CollectionExecutorIntegrationTests {
     private ArticleRepository articleRepository;
 
     @Autowired
+    private ArticleBodyStorage bodyStorage;
+
+    @Autowired
     private ArticleVersionRepository articleVersionRepository;
 
     @Autowired
@@ -259,7 +262,7 @@ class CollectionExecutorIntegrationTests {
                 .filter(candidate -> articleUrl.equals(candidate.getCanonicalUrl()))
                 .findFirst()
                 .orElseThrow();
-        first.applyFullText("정정 전 전문", FetchStatus.FULLTEXT, LocalDateTime.now());
+        first.applyStoredFullText(bodyStorage.intern("정정 전 전문"), FetchStatus.FULLTEXT, LocalDateTime.now());
         flushAndClear();
 
         givenFeed(article("HBM4 양산 시작 (정정)", "양산 일정이 앞당겨졌다"));

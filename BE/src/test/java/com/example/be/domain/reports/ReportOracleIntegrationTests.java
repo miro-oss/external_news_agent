@@ -15,6 +15,7 @@ import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.repository.ArticleRepository;
+import com.example.be.domain.collection.service.command.ArticleBodyStorage;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.entity.NewsReport;
@@ -61,6 +62,9 @@ class ReportOracleIntegrationTests {
 
     @Autowired
     private ArticleRepository articleRepository;
+
+    @Autowired
+    private ArticleBodyStorage bodyStorage;
 
     @Autowired
     private FindingRepository findingRepository;
@@ -187,7 +191,7 @@ class ReportOracleIntegrationTests {
                 .canonicalUrl("https://example.com/articles/" + suffix)
                 .title("Oracle에서 검증하는 M5 기사")
                 .summary("수집 요약")
-                .body("Oracle 통합 테스트 본문")
+                .storedBody(bodyStorage.intern("Oracle 통합 테스트 본문"))
                 .language("ko")
                 .fetchStatus(FetchStatus.FULLTEXT)
                 .firstSeenRun(run)

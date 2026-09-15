@@ -8,6 +8,7 @@ import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.repository.ArticleRepository;
+import com.example.be.domain.collection.service.command.ArticleBodyStorage;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
@@ -23,11 +24,13 @@ import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.config.ApiTimeZone;
+import jakarta.persistence.EntityManager;
 import org.hibernate.Hibernate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -65,6 +68,15 @@ class AnalysisTargetFetchPlanIntegrationTests {
     private ArticleRepository articleRepository;
 
     @Autowired
+    private ArticleBodyStorage bodyStorage;
+
+    @Autowired
+    private EntityManager entityManager;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired
     private CollectionRunRepository runRepository;
 
     @Autowired
@@ -96,6 +108,7 @@ class AnalysisTargetFetchPlanIntegrationTests {
             assertTrue(Hibernate.isInitialized(observation.getTopic()),
                     "observation.topic이 fetch join 되지 않았다");
             assertTrue(Hibernate.isInitialized(observation.getArticle()));
+            assertStoredBodyAvailableOutsideSession(observation.getArticle(), fixture.body());
             assertDoesNotThrow(() -> observation.getTopic().getName());
             assertEquals(fixture.observationTopicId(), observation.getTopic().getId());
             assertFalse(fixture.observationTopicId().equals(fixture.articleTopicId()),
@@ -123,6 +136,7 @@ class AnalysisTargetFetchPlanIntegrationTests {
             assertDoesNotThrow(() -> membership.getIssue().getTopic().getName());
             assertEquals(fixture.issueTopicId(), membership.getIssue().getTopic().getId());
             assertDoesNotThrow(() -> membership.getArticle().getTitle());
+            assertStoredBodyAvailableOutsideSession(membership.getArticle(), fixture.body());
         } finally {
             transactionTemplate.executeWithoutResult(status -> deleteFixture(fixture));
         }
@@ -148,6 +162,8 @@ class AnalysisTargetFetchPlanIntegrationTests {
                 assertTrue(Hibernate.isInitialized(membership.getArticle().getSource()));
                 assertDoesNotThrow(() -> membership.getIssue().getTopic().getName());
                 assertDoesNotThrow(() -> membership.getArticle().getSource().getName());
+                Fixture expected = membership.getId().equals(first.membershipId()) ? first : second;
+                assertStoredBodyAvailableOutsideSession(membership.getArticle(), expected.body());
             }
         } finally {
             transactionTemplate.executeWithoutResult(status -> {
@@ -174,13 +190,15 @@ class AnalysisTargetFetchPlanIntegrationTests {
                 .build());
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
         OffsetDateTime seenAt = now.atZone(ApiTimeZone.ZONE).toOffsetDateTime();
+        String body = "fetch-plan 전문 " + stamp;
         Article article = articleRepository.save(Article.builder()
                 .topic(articleTopic)
                 .source(source)
                 .urlHash("fetchplan" + stamp)
                 .canonicalUrl("https://example.test/fetch-plan/" + stamp)
                 .title("HBM4 증설")
-                .fetchStatus(FetchStatus.METADATA_ONLY)
+                .storedBody(bodyStorage.intern(body))
+                .fetchStatus(FetchStatus.FULLTEXT)
                 .collectedAt(now)
                 .build());
         CollectionRun run = runRepository.save(CollectionRun.builder()
@@ -219,7 +237,13 @@ class AnalysisTargetFetchPlanIntegrationTests {
                 .build());
         return new Fixture(run.getId(), observation.getId(), membership.getId(), issue.getId(),
                 article.getId(), source.getId(), observationTopic.getId(), articleTopic.getId(),
-                observationTopic.getId());
+                observationTopic.getId(), article.getStoredBody().getBodyHash(), body);
+    }
+
+    private void assertStoredBodyAvailableOutsideSession(Article article, String expectedBody) {
+        assertTrue(Hibernate.isInitialized(article.getStoredBody()), "공유 본문이 세션 종료 전에 로딩되지 않았다");
+        assertEquals(expectedBody, assertDoesNotThrow(article::getBody));
+        assertTrue(assertDoesNotThrow(article::hasFullText));
     }
 
     private void deleteFixture(Fixture fixture) {
@@ -231,6 +255,8 @@ class AnalysisTargetFetchPlanIntegrationTests {
         sourceRepository.deleteById(fixture.sourceId());
         topicRepository.deleteById(fixture.observationTopicId());
         topicRepository.deleteById(fixture.articleTopicId());
+        entityManager.flush();
+        jdbcTemplate.update("DELETE FROM news_article_bodies WHERE body_hash = ?", fixture.bodyHash());
     }
 
     private record Fixture(Long runId,
@@ -241,6 +267,8 @@ class AnalysisTargetFetchPlanIntegrationTests {
                            Long sourceId,
                            Long observationTopicId,
                            Long articleTopicId,
-                           Long issueTopicId) {
+                           Long issueTopicId,
+                           String bodyHash,
+                           String body) {
     }
 }

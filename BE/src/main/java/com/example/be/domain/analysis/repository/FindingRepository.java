@@ -22,7 +22,7 @@ import java.util.Optional;
 public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpecificationExecutor<Finding> {
 
     @Override
-    @EntityGraph(attributePaths = {"article", "article.topic", "article.source"})
+    @EntityGraph(attributePaths = {"article", "article.topic", "article.source", "article.storedBody"})
     Page<Finding> findAll(Specification<Finding> specification, Pageable pageable);
 
     Optional<Finding> findFirstByArticleIdOrderByIdDesc(Long articleId);
@@ -53,6 +53,7 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             SELECT finding
             FROM Finding finding
             JOIN FETCH finding.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH finding.run
             WHERE article.id IN :articleIds
               AND finding.id = (
@@ -67,6 +68,7 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             SELECT finding
             FROM Finding finding
             JOIN FETCH finding.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH finding.run
             WHERE article.topic.id = :topicId
               AND article.publishedAt IS NOT NULL
@@ -91,6 +93,7 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             SELECT finding
             FROM Finding finding
             JOIN FETCH finding.article article
+            LEFT JOIN FETCH article.storedBody
             WHERE article.id IN :articleIds
               AND finding.analysisSource = :analysisSource
               AND finding.analysisInputHash IN :analysisInputHashes
@@ -115,6 +118,7 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             SELECT finding
             FROM Finding finding
             JOIN FETCH finding.article article
+            LEFT JOIN FETCH article.storedBody
             WHERE finding.run.id = :runId
               AND article.id IN :articleIds
             ORDER BY finding.id ASC
@@ -127,6 +131,7 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             SELECT finding
             FROM Finding finding
             JOIN FETCH finding.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.topic
             JOIN FETCH article.source
             WHERE finding.run.id = :runId
@@ -138,6 +143,7 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             SELECT finding FROM Finding finding
             JOIN FETCH finding.run
             JOIN FETCH finding.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.topic
             JOIN FETCH article.source
             WHERE finding.id IN :ids
@@ -152,9 +158,10 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
                 COLUMNS (finding_id NUMBER PATH '$')) selected
             JOIN news_findings finding ON finding.id = selected.finding_id
             JOIN news_articles article ON article.id = finding.article_id
+            JOIN news_article_bodies stored_body ON stored_body.body_hash = article.body_hash
             WHERE report.id IN (:reportIds) AND report.report_scope = 'DAILY'
               AND article.fetch_status = 'FULLTEXT'
-              AND REGEXP_INSTR(article.body, '[^[:space:]]') > 0
+              AND REGEXP_INSTR(stored_body.body, '[^[:space:]]') > 0
             GROUP BY report.id
             """, nativeQuery = true)
     List<DailyReportCount> countForDailyReports(@Param("reportIds") Collection<Long> reportIds,
@@ -170,6 +177,7 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             SELECT finding FROM Finding finding
             JOIN FETCH finding.run run
             JOIN FETCH finding.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.topic
             JOIN FETCH article.source
             WHERE run.startedAt >= :since AND run.startedAt < :before
@@ -195,7 +203,7 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             FROM Finding finding
             WHERE finding.run.id = :runId
               AND finding.article.fetchStatus = com.example.be.domain.collection.entity.FetchStatus.FULLTEXT
-              AND function('regexp_instr', finding.article.body, '[^[:space:]]') > 0
+              AND function('regexp_instr', finding.article.storedBody.body, '[^[:space:]]') > 0
             GROUP BY finding.category, finding.changeType
             """)
     List<ReportStatsCount> countStatsByRunId(
@@ -205,10 +213,11 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
 
     @Query("""
             SELECT COUNT(finding) FROM Finding finding
+            LEFT JOIN finding.article.storedBody storedBody
             WHERE finding.run.id = :runId
               AND (finding.article.fetchStatus IS NULL
                 OR finding.article.fetchStatus <> com.example.be.domain.collection.entity.FetchStatus.FULLTEXT
-                OR coalesce(function('regexp_instr', finding.article.body, '[^[:space:]]'), 0) = 0)
+                OR coalesce(function('regexp_instr', storedBody.body, '[^[:space:]]'), 0) = 0)
             """)
     long countWithoutFullTextForReportByRunId(@Param("runId") Long runId);
 
@@ -220,7 +229,7 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             FROM Finding finding
             WHERE finding.run.id IN :runIds
               AND finding.article.fetchStatus = com.example.be.domain.collection.entity.FetchStatus.FULLTEXT
-              AND function('regexp_instr', finding.article.body, '[^[:space:]]') > 0
+              AND function('regexp_instr', finding.article.storedBody.body, '[^[:space:]]') > 0
             GROUP BY finding.run.id
             """)
     List<ReportCount> countForReports(

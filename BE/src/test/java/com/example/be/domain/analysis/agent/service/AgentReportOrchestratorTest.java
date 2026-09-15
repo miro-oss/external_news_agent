@@ -140,7 +140,7 @@ class AgentReportOrchestratorTest {
         Finding available = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "확보 기사 요약");
         Finding metadata = finding(502L, AnalysisSource.LLM, FetchStatus.METADATA_ONLY, "숨길 메타 요약");
         Finding blank = finding(503L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "숨길 빈 본문 요약");
-        org.springframework.test.util.ReflectionTestUtils.setField(blank.getArticle(), "body", " \n\t");
+        blank.getArticle().applyFullText(" \n\t", FetchStatus.FULLTEXT, null);
         when(client.report(any())).thenReturn(response(List.of(501L)));
         var document = orchestrator.generate(run(), List.of(available, metadata, blank), LocalDateTime.of(2026, 9, 15, 10, 0));
         var captor = ArgumentCaptor.forClass(AgentReportRequest.class);

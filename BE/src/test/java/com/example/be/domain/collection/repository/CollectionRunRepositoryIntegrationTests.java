@@ -11,12 +11,14 @@ import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
+import com.example.be.domain.collection.service.command.ArticleBodyStorage;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.repository.TopicRepository;
 import jakarta.persistence.EntityManager;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -56,6 +58,9 @@ class CollectionRunRepositoryIntegrationTests {
 
     @Autowired
     private ArticleRepository articleRepository;
+
+    @Autowired
+    private ArticleBodyStorage bodyStorage;
 
     @Autowired
     private ArticleVersionRepository articleVersionRepository;
@@ -313,6 +318,7 @@ class CollectionRunRepositoryIntegrationTests {
     void keepsPreviousStateAsVersionOnUpdate() {
         CollectionRun run = runRepository.save(newRun("version-run"));
         Article saved = articleRepository.save(article(run, randomHash(), OffsetDateTime.now()));
+        saved.applyStoredFullText(bodyStorage.intern("정정 전 본문"), FetchStatus.FULLTEXT, LocalDateTime.now());
         flushAndClear();
 
         Article loaded = articleRepository.findById(saved.getId()).orElseThrow();
@@ -320,8 +326,9 @@ class CollectionRunRepositoryIntegrationTests {
 
         articleVersionRepository.save(
                 ArticleVersion.snapshotOf(loaded, run, ArticleVersion.FIRST_VERSION_NO, LocalDateTime.now()));
-        loaded.applyUpdate("정정된 제목", "새 요약", "새 본문", "content-hash-v2",
+        loaded.applyUpdate("정정된 제목", "새 요약", loaded.getBody(), "content-hash-v2",
                 FetchStatus.FULLTEXT, run, LocalDateTime.now());
+        loaded.applyStoredFullText(bodyStorage.intern("새 본문"), FetchStatus.FULLTEXT, LocalDateTime.now());
         flushAndClear();
 
         Article updated = articleRepository.findById(saved.getId()).orElseThrow();
@@ -335,6 +342,8 @@ class CollectionRunRepositoryIntegrationTests {
         assertEquals(ArticleVersion.FIRST_VERSION_NO,
                 articleVersionRepository.findFirstByArticleIdOrderByVersionNoDesc(saved.getId())
                         .orElseThrow().getVersionNo());
+        assertFalse(Hibernate.isInitialized(versions.get(0).getStoredBody()));
+        assertEquals("정정 전 본문", versions.get(0).getBody());
     }
 
     /**

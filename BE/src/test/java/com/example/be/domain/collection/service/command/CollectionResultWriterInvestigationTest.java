@@ -52,7 +52,7 @@ class CollectionResultWriterInvestigationTest {
     private final CollectionRun run = CollectionRun.builder().id(42L).build();
     private final CollectionResultWriter writer = new CollectionResultWriter(
             articleRepository, versionRepository, observationRepository, runRepository,
-            itemRepository, topicRepository, sourceRepository);
+            itemRepository, topicRepository, sourceRepository, mock(ArticleBodyStorage.class));
 
     private Topic topic;
     private Source source;
