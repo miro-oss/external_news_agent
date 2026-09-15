@@ -117,7 +117,7 @@ class ArticleContentEnricherIntegrationTests {
     @Test
     void fillsBodyForArticlesObservedInThisRun() {
         Article article = observedArticle(source(true));
-        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.fullText(BODY));
+        given(contentClient.fetch(anyString(), any(), any())).willReturn(ArticleContentResult.fullText(BODY));
 
         Set<Long> refreshed = enricher.enrich(run.getId());
         flushAndClear();
@@ -137,7 +137,7 @@ class ArticleContentEnricherIntegrationTests {
     void keepsContentHashSoNextRunDoesNotSeeAFalseUpdate() {
         Article article = observedArticle(source(true));
         String before = article.getContentHash();
-        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.fullText(BODY));
+        given(contentClient.fetch(anyString(), any(), any())).willReturn(ArticleContentResult.fullText(BODY));
 
         enricher.enrich(run.getId());
         flushAndClear();
@@ -165,7 +165,7 @@ class ArticleContentEnricherIntegrationTests {
         Source source = source(true);
         observedArticle(source);
         observedArticle(source);
-        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.blocked());
+        given(contentClient.fetch(anyString(), any(), any())).willReturn(ArticleContentResult.blocked());
 
         enricher.enrich(run.getId());
         flushAndClear();
@@ -242,14 +242,14 @@ class ArticleContentEnricherIntegrationTests {
     @Test
     void retriesArticlesThatFailedEarlier() {
         Article article = observedArticle(source(true));
-        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.failed());
+        given(contentClient.fetch(anyString(), any(), any())).willReturn(ArticleContentResult.failed());
         enricher.enrich(run.getId());
         flushAndClear();
 
         assertEquals(FetchStatus.FETCH_FAILED,
                 articleRepository.findById(article.getId()).orElseThrow().getFetchStatus());
 
-        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.fullText(BODY));
+        given(contentClient.fetch(anyString(), any(), any())).willReturn(ArticleContentResult.fullText(BODY));
         enricher.enrich(run.getId());
         flushAndClear();
 
@@ -263,7 +263,7 @@ class ArticleContentEnricherIntegrationTests {
         Article article = observedArticle(source(true));
         article.applyStoredFullText(bodyStorage.intern("직전 전문"), FetchStatus.FULLTEXT, LocalDateTime.now());
         article.applyStoredFullText(article.getStoredBody(), FetchStatus.METADATA_ONLY, LocalDateTime.now());
-        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.failed());
+        given(contentClient.fetch(anyString(), any(), any())).willReturn(ArticleContentResult.failed());
 
         enricher.enrich(run.getId());
         flushAndClear();
@@ -279,7 +279,7 @@ class ArticleContentEnricherIntegrationTests {
     @Test
     void doesNotRetryBlockedArticles() {
         observedArticle(source(true));
-        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.blocked());
+        given(contentClient.fetch(anyString(), any(), any())).willReturn(ArticleContentResult.blocked());
         enricher.enrich(run.getId());
         flushAndClear();
 
@@ -303,7 +303,7 @@ class ArticleContentEnricherIntegrationTests {
                 .active(true)
                 .build());
         observedArticle(ignoring);
-        given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.fullText(BODY));
+        given(contentClient.fetch(anyString(), any(), any())).willReturn(ArticleContentResult.fullText(BODY));
 
         enricher.enrich(run.getId());
 

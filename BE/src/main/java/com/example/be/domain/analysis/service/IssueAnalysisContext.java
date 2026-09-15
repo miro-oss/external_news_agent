@@ -7,8 +7,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
-/** 대표 분석과 함께 보낼 이슈 멤버의 detached snapshot. */
+/** 실제 전문을 확보한 기사만 담는 분석용 이슈 snapshot. */
 public record IssueAnalysisContext(
         Long issueId,
         Long representativeArticleId,
@@ -22,11 +23,18 @@ public record IssueAnalysisContext(
                 ? List.of()
                 : articles.stream()
                 .filter(Objects::nonNull)
+                .filter(Article::hasFullText)
                 .sorted(Comparator.comparing(Article::getId))
                 .toList();
+        Set<Long> availableArticleIds = articles.stream().map(Article::getId).collect(Collectors.toSet());
         primaryTargetArticleIds = primaryTargetArticleIds == null
                 ? Set.of()
-                : Set.copyOf(primaryTargetArticleIds);
+                : primaryTargetArticleIds.stream()
+                .filter(availableArticleIds::contains)
+                .collect(Collectors.toUnmodifiableSet());
+        if (!availableArticleIds.contains(representativeArticleId)) {
+            representativeArticleId = null;
+        }
     }
 
     public IssueAnalysisContext(Long issueId,
@@ -51,6 +59,9 @@ public record IssueAnalysisContext(
     }
 
     public List<Article> membersExcept(Long articleId) {
+        if (!present()) {
+            return List.of();
+        }
         return articles.stream()
                 .filter(article -> !article.getId().equals(articleId))
                 .toList();

@@ -5,7 +5,6 @@ import com.example.be.domain.analysis.config.AnalysisSelectionProperties;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
-import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
@@ -97,6 +96,9 @@ public class ArticleAnalysisPipeline {
                                 AgentPlan plan,
                                 boolean clustered,
                                 boolean refreshExisting) {
+        if (targets.isEmpty()) {
+            return;
+        }
         Map<Long, AnalysisContext> contexts = analysisContexts(runId, targets, plan, clustered);
         Map<Long, FindingReuseCache.Lookup> lookups = cacheLookups(contexts.values().stream().toList(), plan);
         for (Target target : targets) {
@@ -360,9 +362,8 @@ public class ArticleAnalysisPipeline {
     }
 
     private boolean isReady(Target target) {
-        Article article = target.article();
-        // UPDATED 재수집 실패 시 보존 중인 옛 전문과 새 메타데이터를 섞어 분석하지 않는다.
-        return !StringUtils.hasText(article.getBody()) || article.getFetchStatus() == FetchStatus.FULLTEXT;
+        // 전문이 없는 기사와 재수집에 실패해 옛 전문만 남은 기사는 분석하지 않는다.
+        return target.article().hasFullText();
     }
 
     private Target preferUpdated(Target left, Target right) {

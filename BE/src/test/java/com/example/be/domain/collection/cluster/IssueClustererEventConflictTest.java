@@ -150,7 +150,7 @@ class IssueClustererEventConflictTest {
     private static ClusterArticle statistics(long id, String title, long hours) {
         OffsetDateTime time = OffsetDateTime.parse("2026-10-21T10:00:00+09:00").plusHours(hours);
         String summary = "한국은행이 발표한 3분기 잠정 통계다. 수출 디플레이터는 18.7% 상승했다.";
-        return new ClusterArticle(id, 1, title, summary, null, FetchStatus.METADATA_ONLY,
+        return new ClusterArticle(id, 1, title, summary, summary, FetchStatus.FULLTEXT,
                 id, "fixture-" + id, null, time, time, List.of(), null, null, null, true);
     }
 
@@ -167,7 +167,9 @@ class IssueClustererEventConflictTest {
 
     private static ClusterArticle article(long id, String title, Long contentGroup, Long issue) {
         OffsetDateTime time = OffsetDateTime.parse("2026-03-21T10:00:00+09:00");
-        return new ClusterArticle(id, 1, title, null, null, FetchStatus.METADATA_ONLY,
+        String body = contentGroup == null ? title + " 관련 상세 보도다."
+                : "A laboratory documented a controlled experiment with detailed independent measurements. ".repeat(8);
+        return new ClusterArticle(id, 1, title, null, body, FetchStatus.FULLTEXT,
                 id, "fixture-" + id, null, time, time, List.of(), contentGroup, null, issue, true);
     }
 

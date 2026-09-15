@@ -83,8 +83,8 @@ class IssueClustererSubjectEvidenceTest {
     }
 
     private static ClusterArticle articleAt(long id, String title, String summary, String body, OffsetDateTime time) {
-        return new ClusterArticle(id, 1, title, summary, body,
-                body == null ? FetchStatus.METADATA_ONLY : FetchStatus.FULLTEXT,
+        return new ClusterArticle(id, 1, title, summary, body == null ? summary : body,
+                FetchStatus.FULLTEXT,
                 id, "fixture-" + id, new BigDecimal("0.8"), time, time, List.of(), null, null, null, true);
     }
 }

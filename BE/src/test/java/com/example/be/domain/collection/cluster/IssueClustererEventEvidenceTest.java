@@ -117,7 +117,7 @@ class IssueClustererEventEvidenceTest {
 
     private ClusterArticle article(long id, String title, String summary, int hours) {
         OffsetDateTime time = OffsetDateTime.parse("2026-09-07T10:00:00+09:00").plusHours(hours);
-        return new ClusterArticle(id, 7L, title, summary, null, FetchStatus.METADATA_ONLY,
+        return new ClusterArticle(id, 7L, title, summary, summary == null ? title + " 관련 상세 보도다." : summary, FetchStatus.FULLTEXT,
                 id, "매체" + id, new BigDecimal("0.8"), time, time, List.of("반도체"),
                 null, null, null, true);
     }

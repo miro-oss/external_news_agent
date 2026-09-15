@@ -56,6 +56,10 @@ public class ArticleContentClient {
     }
 
     public ArticleContentResult fetch(String articleUrl, Duration crawlDelay) {
+        return fetch(articleUrl, crawlDelay, null);
+    }
+
+    public ArticleContentResult fetch(String articleUrl, Duration crawlDelay, String articleTitle) {
         Attempt attempt = null;
 
         for (int tries = 1; tries <= maxAttempts; tries++) {
@@ -68,7 +72,7 @@ public class ArticleContentClient {
                         // 상태 처리를 직접 한다. 본문을 읽기 전에 헤더로 크기를 먼저 보려면 이 방법뿐이다.
                         // 닫는 건 Spring에 맡긴다 — close=false로 두면 본문을 읽지 않는 차단·에러·크기 초과
                         // 경로에서 커넥션이 풀로 돌아가지 못한다. 여기가 기사 수만큼 도는 자리라 더 빨리 마른다.
-                        .exchange((request, response) -> read(articleUrl, response));
+                        .exchange((request, response) -> read(articleUrl, articleTitle, response));
             } catch (RuntimeException e) {
                 log.debug("본문 호출에 실패했다. url={} error={}", articleUrl, e.getMessage());
                 attempt = new Attempt(ArticleContentResult.failed(), true);
@@ -84,7 +88,8 @@ public class ArticleContentClient {
         return attempt == null ? ArticleContentResult.failed() : attempt.result();
     }
 
-    private Attempt read(String articleUrl, org.springframework.http.client.ClientHttpResponse response)
+    private Attempt read(String articleUrl, String articleTitle,
+                         org.springframework.http.client.ClientHttpResponse response)
             throws IOException {
         HttpStatusCode status = response.getStatusCode();
 
@@ -110,7 +115,7 @@ public class ArticleContentClient {
             return new Attempt(ArticleContentResult.failed(), false);
         }
 
-        String content = ArticleContentExtractor.extract(body, charsetOf(response), articleUrl);
+        String content = ArticleContentExtractor.extract(body, charsetOf(response), articleUrl, articleTitle);
         if (content == null) {
             // 응답은 정상인데 본문을 못 뽑았다. 이건 "막혔다"가 아니라 "못 읽었다"이다.
             // 차단으로 적으면 짧은 정상 기사가 페이월 경고를 만든다.

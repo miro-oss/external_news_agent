@@ -119,6 +119,20 @@ class FocalEventEvidenceTest {
                 null, FetchStatus.METADATA_ONLY, 2L, "fixture-2", new BigDecimal("0.8"),
                 first.publishedAt(), first.observedAt(), List.of(), null, null, null, true);
         assertFalse(evidence(List.of(first, second)));
+        // This fixture intentionally exercises the summary fallback directly. The clusterer
+        // retains only the full-text article as a candidate for a real issue.
+        assertEquals(List.of(1L), clusterer.cluster(List.of(first, second)).issues().getFirst().articleIds());
+    }
+
+    @Test
+    void availablePrimaryBodyKeepsAggregatedSummaryQuotesOutOfEventComparison() {
+        var first = article(1, "\"지역의 교육 기회를 넓히고 학생들의 안전을 보장\"", null, 0);
+        var second = new ClusterArticle(2, 1, "\"해외 운송 절차를 다시 점검하겠다\"",
+                "협회는 \"해외 운송 절차를 다시 점검하겠다\"고 말했다. 지역 소식: \"지역의 교육 기회를 넓히고 학생들의 안전을 보장하겠다\"",
+                "협회는 \"해외 운송 절차를 다시 점검하겠다\"고 밝혔다.",
+                FetchStatus.FULLTEXT, 2L, "fixture-2", new BigDecimal("0.8"),
+                first.publishedAt(), first.observedAt(), List.of(), null, null, null, true);
+        assertFalse(evidence(List.of(first, second)));
         assertEquals(2, clusterer.cluster(List.of(first, second)).issues().size());
     }
 
@@ -128,8 +142,8 @@ class FocalEventEvidenceTest {
 
     private ClusterArticle article(long id, String title, String body, int hour) {
         var time = OffsetDateTime.parse("2026-01-12T00:00:00+09:00").plusHours(hour);
-        return new ClusterArticle(id, 1, title, null, body,
-                body == null ? FetchStatus.METADATA_ONLY : FetchStatus.FULLTEXT,
+        String articleBody = body == null ? title + "라고 전했다." : body;
+        return new ClusterArticle(id, 1, title, null, articleBody, FetchStatus.FULLTEXT,
                 id, "fixture-" + id, new BigDecimal("0.8"), time, time, List.of(),
                 null, null, null, true);
     }

@@ -117,7 +117,7 @@ class IssueClustererOrganizationConflictTest {
     }
 
     @Test
-    void preservesExistingContentGroupMembershipWhenCurrentBodyIsUnavailable() {
+    void preservesExistingContentGroupMembershipForFullTextArticles() {
         ClusterPlan plan = clusterer.cluster(List.of(
                 article(1L, "한화세미텍 첨단 패키징 장비 공개", null, null, 10L),
                 article(2L, "디엠에스 첨단 패키징 장비 공개", null, null, 10L)));
@@ -193,7 +193,11 @@ class IssueClustererOrganizationConflictTest {
     private ClusterArticle article(long id, String title, String summary,
                                    Long existingIssueId, Long contentGroupId) {
         OffsetDateTime time = OffsetDateTime.parse("2026-09-04T09:00:00+09:00");
-        return new ClusterArticle(id, 7L, title, summary, null, FetchStatus.METADATA_ONLY,
+        String body = summary == null ? title + " 관련 상세 보도다." : summary;
+        if (contentGroupId != null) {
+            body = body.repeat(20);
+        }
+        return new ClusterArticle(id, 7L, title, summary, body, FetchStatus.FULLTEXT,
                 id, "매체" + id, new BigDecimal("0.8"), time, time,
                 List.of("반도체"), contentGroupId, null, existingIssueId, true);
     }

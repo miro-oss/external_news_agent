@@ -211,11 +211,13 @@ public class IssueClusterWriter {
                                     Map<Long, Article> articles) {
         return existingMemberships.values().stream()
                 .map(IssueArticle::getArticle)
+                .filter(Article::hasFullText)
                 .filter(article -> !stanceClassifier.hasExplicitCorrection(article))
                 .findFirst()
                 .or(() -> assignmentArticleIds.stream()
                         .map(articles::get)
                         .filter(article -> article != null)
+                        .filter(Article::hasFullText)
                         .filter(article -> !stanceClassifier.hasExplicitCorrection(article))
                         .min(Comparator.comparing(
                                         this::eventTime,

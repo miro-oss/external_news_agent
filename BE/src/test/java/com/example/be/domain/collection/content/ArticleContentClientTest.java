@@ -53,6 +53,44 @@ class ArticleContentClientTest {
         server.verify();
     }
 
+    @Test
+    void acceptsAShortExplicitBodyParagraphEvenWhenItRepeatsTheFeedTitle() {
+        String bulletin = "한국은행이 기준금리를 동결했다.";
+        String html = "<div id='articleBody'><p>%s</p></div>".formatted(bulletin);
+        server.expect(requestTo(ARTICLE_URL)).andRespond(withSuccess(html, MediaType.TEXT_HTML));
+
+        ArticleContentResult result = client.fetch(ARTICLE_URL, null, bulletin);
+
+        assertEquals(FetchStatus.FULLTEXT, result.status());
+        assertEquals(bulletin, result.body());
+        server.verify();
+    }
+
+    @Test
+    void usesFeedTitleContextToRejectACopiedHeadlineWithoutAParagraph() {
+        String title = "한국은행이 기준금리를 동결했다.";
+        String html = "<div id='articleBody'><span>%s</span></div>".formatted(title);
+        server.expect(requestTo(ARTICLE_URL)).andRespond(withSuccess(html, MediaType.TEXT_HTML));
+
+        ArticleContentResult result = client.fetch(ARTICLE_URL, null, title);
+
+        assertEquals(FetchStatus.FETCH_FAILED, result.status());
+        assertNull(result.body());
+        server.verify();
+    }
+
+    @Test
+    void aSuccessfulResponseWithAnExplicitSubscriptionNoticeIsStillAFetchFailure() {
+        String html = "<div itemprop='articleBody'><p>Subscribe to read the full article.</p></div>";
+        server.expect(requestTo(ARTICLE_URL)).andRespond(withSuccess(html, MediaType.TEXT_HTML));
+
+        ArticleContentResult result = client.fetch(ARTICLE_URL, null, "다른 기사 제목");
+
+        assertEquals(FetchStatus.FETCH_FAILED, result.status());
+        assertNull(result.body());
+        server.verify();
+    }
+
     /**
      * 401·403은 "막았다"이다. 재시도해도 같은 답이고, 명세가 FULLTEXT_BLOCKED로 부르는 경우다.
      */

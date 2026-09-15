@@ -195,6 +195,7 @@ class IssueClustererIndependentExportTest {
                 value.put("sourceId", article.sourceId());
                 value.put("topicId", article.topicId());
                 value.put("title", article.title());
+                value.put("eventEvidenceEligible", article.hasFullText());
                 value.put("titleOrganizations", clusterer.titleOrganizations(article)
                         .stream().sorted().toList());
                 value.put("eventConflictingArticleIds", eventConflicts.get(article.articleId()));
@@ -230,7 +231,9 @@ class IssueClustererIndependentExportTest {
             articles.stream().collect(Collectors.groupingBy(
                             article -> article.article().topicId(), LinkedHashMap::new, Collectors.toList()))
                     .forEach((topicId, topicArticles) -> {
-                        long votingCount = topicArticles.stream().map(article -> representativeByArticle
+                        long votingCount = topicArticles.stream()
+                                .filter(article -> article.article().hasFullText())
+                                .map(article -> representativeByArticle
                                         .getOrDefault(article.article().articleId(), article.article().articleId()))
                                 .distinct().count();
                         documentFrequencyByTopic.add(Map.of(
@@ -567,6 +570,44 @@ class IssueClustererIndependentExportTest {
     }
 
     @Test
+    void exportsUnverifiedArticlesAsUnassignedCandidatesWithoutEvidence(@TempDir Path directory) throws IOException {
+        ObjectNode input = syntheticInput();
+        for (int index : List.of(0, 1)) {
+            articleAt(input, index).put("title", index == 0
+                    ? "삼성전자 ETF 리밸런싱 비중 조정" : "삼성전자 코스피 상승 마감");
+            articleAt(input, index).putNull("body");
+            articleAt(input, index).put("fetchStatus", "METADATA_ONLY");
+        }
+        Path output = directory.resolve("candidates.json");
+        export(MAPPER.writeValueAsBytes(input), output);
+        JsonNode result = MAPPER.readTree(Files.readAllBytes(output));
+        assertEquals(80, result.path("articleCount").asInt());
+        for (JsonNode article : result.path("articles")) {
+            if (article.path("articleId").asLong() <= 2) {
+                assertFalse(article.path("eventEvidenceEligible").asBoolean());
+                assertTrue(article.path("configuredIssueRepresentativeId").isNull());
+                assertTrue(article.path("fixedContentGroupId").isNull());
+                assertTrue(article.path("titleOrganizations").isEmpty());
+                assertTrue(article.path("eventConflictingArticleIds").isEmpty());
+            }
+        }
+        for (JsonNode evaluation : result.path("pairEvaluations")) {
+            for (JsonNode pair : evaluation.path("pairs")) {
+                assertTrue(pair.path("leftArticleId").asLong() > 2);
+                assertTrue(pair.path("rightArticleId").asLong() > 2);
+            }
+        }
+        for (JsonNode frequency : result.path("documentFrequencyByTopic")) {
+            if (frequency.path("split").asString().equals("CALIBRATION")
+                    && frequency.path("topicId").asLong() == 1) {
+                assertEquals(20, frequency.path("articleCount").asInt());
+                assertEquals(18, frequency.path("votingRepresentativeCount").asInt());
+                assertFalse(frequency.path("documentFrequencyActive").asBoolean());
+            }
+        }
+    }
+
+    @Test
     void neverOverwritesExistingFeatureOutput(@TempDir Path directory) throws IOException {
         Path output = directory.resolve("pairs.json");
         String original = "Previously exported evaluation features must remain immutable.";
@@ -654,8 +695,8 @@ class IssueClustererIndependentExportTest {
                     article.put("sourceId", 700);
                     article.put("topicId", topicId);
                     article.put("title", "Synthetic article " + nextId);
-                    article.putNull("body");
-                    article.put("fetchStatus", "METADATA_ONLY");
+                    article.put("body", "Independent report " + nextId + " was published with its original text.");
+                    article.put("fetchStatus", "FULLTEXT");
                     article.put("publishedAt", "2026-01-01T00:00:00Z");
                     article.put("expectedIssueId", split + "-" + topicId + "-event-" + index / 2);
                     article.put("split", split);
