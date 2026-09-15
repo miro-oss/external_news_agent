@@ -2,6 +2,7 @@ package com.example.be.domain.collection.repository;
 
 import com.example.be.domain.collection.entity.Article;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
@@ -14,17 +15,24 @@ import java.util.Optional;
 
 public interface ArticleRepository extends JpaRepository<Article, Long>, JpaSpecificationExecutor<Article> {
 
+    @Override
+    @EntityGraph(attributePaths = "storedBody", type = EntityGraph.EntityGraphType.LOAD)
+    List<Article> findAllById(Iterable<Long> ids);
+
     /**
      * 중복 판정의 유일한 경로다. url_hash에 UNIQUE가 걸려 있어 주제와 무관하게 한 건만 존재한다.
      */
+    @EntityGraph(attributePaths = "storedBody", type = EntityGraph.EntityGraphType.LOAD)
     Optional<Article> findByUrlHash(String urlHash);
 
     /**
      * 수집 한 배치에서 받은 URL들이 이미 있는지 한 번에 확인한다. 기사마다 조회하면 배치 크기만큼 쿼리가 나간다.
      */
+    @EntityGraph(attributePaths = "storedBody", type = EntityGraph.EntityGraphType.LOAD)
     List<Article> findByUrlHashIn(Collection<String> urlHashes);
 
     /** 본문 중복군 병합 시 로더 시간창 밖의 기사까지 승자 그룹으로 옮긴다. */
+    @EntityGraph(attributePaths = "storedBody", type = EntityGraph.EntityGraphType.LOAD)
     List<Article> findByContentGroupIdIn(Collection<Long> contentGroupIds);
 
     boolean existsByUrlHash(String urlHash);

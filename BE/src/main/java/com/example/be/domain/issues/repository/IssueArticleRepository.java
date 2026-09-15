@@ -19,7 +19,7 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
 
     Optional<IssueArticle> findByIssueIdAndArticleId(Long issueId, Long articleId);
 
-    @EntityGraph(attributePaths = {"issue", "issue.topic", "article", "article.source", "article.contentGroup"})
+    @EntityGraph(attributePaths = {"issue", "issue.topic", "article", "article.source", "article.contentGroup", "article.storedBody"})
     List<IssueArticle> findByIssueIdOrderByJoinedAtAsc(Long issueId);
 
     /** 최근 조회 범위 밖에서 재관측된 이슈의 멤버를 제한된 ID 배치로 읽는다. */
@@ -29,6 +29,7 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             JOIN FETCH membership.issue issue
             JOIN FETCH issue.topic
             JOIN FETCH membership.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.source
             LEFT JOIN FETCH article.contentGroup
             WHERE issue.id IN :issueIds
@@ -36,7 +37,7 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             """)
     List<IssueArticle> findByIssueIdsOrderByIssueIdAscJoinedAtAsc(@Param("issueIds") Collection<Long> issueIds);
 
-    @EntityGraph(attributePaths = {"issue", "issue.topic", "article", "article.source", "article.contentGroup"})
+    @EntityGraph(attributePaths = {"issue", "issue.topic", "article", "article.source", "article.contentGroup", "article.storedBody"})
     List<IssueArticle> findByArticleIdOrderByIssueIdAsc(Long articleId);
 
     @Query("""
@@ -45,6 +46,7 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             JOIN FETCH membership.issue issue
             JOIN FETCH issue.topic
             JOIN FETCH membership.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.source
             LEFT JOIN FETCH article.contentGroup
             WHERE article.id IN :articleIds
@@ -59,6 +61,7 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             JOIN FETCH membership.issue issue
             JOIN FETCH issue.topic issueTopic
             JOIN FETCH membership.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.topic articleTopic
             JOIN FETCH article.source
             LEFT JOIN FETCH article.contentGroup
@@ -99,6 +102,7 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             JOIN FETCH membership.issue issue
             JOIN FETCH issue.topic
             JOIN FETCH membership.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.source
             LEFT JOIN FETCH article.contentGroup
             WHERE issue.topic.id IN :topicIds
@@ -115,6 +119,7 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             JOIN FETCH membership.issue issue
             JOIN FETCH issue.topic
             JOIN FETCH membership.article article
+            LEFT JOIN FETCH article.storedBody
             JOIN FETCH article.source
             LEFT JOIN FETCH article.contentGroup
             WHERE membership.role = com.example.be.domain.issues.entity.IssueArticleRole.REPRESENTATIVE
@@ -140,6 +145,7 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             SELECT representative
             FROM IssueArticle representative
             JOIN FETCH representative.article representativeArticle
+            LEFT JOIN FETCH representativeArticle.storedBody
             JOIN FETCH representativeArticle.topic
             JOIN FETCH representativeArticle.source
             JOIN FETCH representative.issue representativeIssue
@@ -165,6 +171,7 @@ public interface IssueArticleRepository extends JpaRepository<IssueArticle, Long
             SELECT representative
             FROM IssueArticle representative
             JOIN FETCH representative.article representativeArticle
+            LEFT JOIN FETCH representativeArticle.storedBody
             JOIN FETCH representativeArticle.topic
             JOIN FETCH representativeArticle.source
             JOIN FETCH representative.issue representativeIssue

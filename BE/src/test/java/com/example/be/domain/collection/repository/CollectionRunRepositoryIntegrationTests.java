@@ -11,6 +11,7 @@ import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
+import com.example.be.domain.collection.service.command.ArticleBodyStorage;
 import com.example.be.domain.sources.entity.CrawlPolicy;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
@@ -56,6 +57,9 @@ class CollectionRunRepositoryIntegrationTests {
 
     @Autowired
     private ArticleRepository articleRepository;
+
+    @Autowired
+    private ArticleBodyStorage bodyStorage;
 
     @Autowired
     private ArticleVersionRepository articleVersionRepository;
@@ -320,8 +324,9 @@ class CollectionRunRepositoryIntegrationTests {
 
         articleVersionRepository.save(
                 ArticleVersion.snapshotOf(loaded, run, ArticleVersion.FIRST_VERSION_NO, LocalDateTime.now()));
-        loaded.applyUpdate("정정된 제목", "새 요약", "새 본문", "content-hash-v2",
+        loaded.applyUpdate("정정된 제목", "새 요약", loaded.getBody(), "content-hash-v2",
                 FetchStatus.FULLTEXT, run, LocalDateTime.now());
+        loaded.applyStoredFullText(bodyStorage.intern("새 본문"), FetchStatus.FULLTEXT, LocalDateTime.now());
         flushAndClear();
 
         Article updated = articleRepository.findById(saved.getId()).orElseThrow();

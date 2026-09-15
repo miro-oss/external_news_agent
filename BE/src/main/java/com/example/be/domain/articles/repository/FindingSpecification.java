@@ -52,7 +52,7 @@ public class FindingSpecification {
             // 페이지와 totalElements 모두 같은 전문 확보 기준으로 계산한다.
             predicates.add(builder.equal(root.get("article").get("fetchStatus"), FetchStatus.FULLTEXT));
             predicates.add(builder.greaterThan(builder.function("regexp_instr", Integer.class,
-                    root.get("article").get("body"), builder.literal("[^[:space:]]")), 0));
+                    root.get("article").get("storedBody").get("body"), builder.literal("[^[:space:]]")), 0));
 
             // runId를 생략하면 기사별 최신 분석만 보인다. 같은 기사의 과거 분석 때문에 목록이 중복되지 않는다.
             if (runId == null) {

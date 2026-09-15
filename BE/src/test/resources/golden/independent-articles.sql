@@ -42,7 +42,7 @@ with eligible_observations as (
                'sourceArticleId' value a.id, 'sourceRunId' value p.source_run_id,
                'sourceRunIds' value p.source_run_ids format json,
                'topicId' value p.topic_id, 'title' value a.title,
-               'summary' value a.summary, 'body' value a.body,
+               'summary' value a.summary, 'body' value stored_body.body,
                'fetchStatus' value a.fetch_status, 'sourceId' value a.source_id,
                'publisher' value coalesce(a.source_name, s.name),
                'reliabilityScore' value s.reliability_score,
@@ -56,6 +56,7 @@ with eligible_observations as (
            ) payload
     from provenance p
     join NEWS_AGENT.news_articles a on a.id = p.article_id
+    left join NEWS_AGENT.news_article_bodies stored_body on stored_body.body_hash = a.body_hash
     join NEWS_AGENT.news_topics t on t.id = p.topic_id
     join NEWS_AGENT.news_sources s on s.id = a.source_id
 )

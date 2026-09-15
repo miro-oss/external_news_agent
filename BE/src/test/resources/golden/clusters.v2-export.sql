@@ -26,13 +26,15 @@ select json_object(
     'id' value a.id,
     'versioned' value case when v.article_id is null then 0 else 1 end,
     'title' value case when v.article_id is null then a.title else v.title end,
-    'body' value case when v.article_id is null then a.body else v.body end
+    'body' value case when v.article_id is null then current_body.body else version_body.body end
     returning clob
 )
 from NEWS_AGENT.NEWS_ARTICLES a
 left join ranked_versions v
   on v.article_id = a.id
  and v.replay_rank = 1
+left join NEWS_AGENT.news_article_bodies current_body on current_body.body_hash = a.body_hash
+left join NEWS_AGENT.news_article_bodies version_body on version_body.body_hash = v.body_hash
 where a.id in (
     2455, 2456, 2476, 2445, 2449, 2519, 2520, 2521, 2312, 2326, 2327, 2450,
     2496, 1965, 2453, 2514, 2546, 2547, 2499, 2463, 2532, 2537, 1960, 2314,

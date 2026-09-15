@@ -63,6 +63,9 @@ class ArticleContentEnricherIntegrationTests {
     private ArticleRepository articleRepository;
 
     @Autowired
+    private ArticleBodyStorage bodyStorage;
+
+    @Autowired
     private CollectionRunRepository runRepository;
 
     @Autowired
@@ -258,8 +261,8 @@ class ArticleContentEnricherIntegrationTests {
     @Test
     void keepsPreviousBodyWhenRefreshFails() {
         Article article = observedArticle(source(true));
-        article.applyUpdate(article.getTitle(), article.getSummary(), "직전 전문", article.getContentHash(),
-                FetchStatus.METADATA_ONLY, run, LocalDateTime.now());
+        article.applyStoredFullText(bodyStorage.intern("직전 전문"), FetchStatus.FULLTEXT, LocalDateTime.now());
+        article.applyStoredFullText(article.getStoredBody(), FetchStatus.METADATA_ONLY, LocalDateTime.now());
         given(contentClient.fetch(anyString(), any())).willReturn(ArticleContentResult.failed());
 
         enricher.enrich(run.getId());

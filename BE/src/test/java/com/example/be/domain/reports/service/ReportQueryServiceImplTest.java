@@ -12,6 +12,7 @@ import com.example.be.domain.analysis.entity.SensitivityLevel;
 import com.example.be.domain.analysis.entity.Sentiment;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionTopicSnapshot;
@@ -246,7 +247,7 @@ class ReportQueryServiceImplTest {
         Finding blank = finding(3L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
         org.springframework.test.util.ReflectionTestUtils.setField(metadata.getArticle(), "fetchStatus",
                 com.example.be.domain.collection.entity.FetchStatus.METADATA_ONLY);
-        org.springframework.test.util.ReflectionTestUtils.setField(blank.getArticle(), "body", " \n\t");
+        blank.getArticle().applyFullText(" \n\t", FetchStatus.FULLTEXT, null);
         when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
         when(reportRepository.findFirstByReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
                 .thenReturn(Optional.of(report));
@@ -275,7 +276,7 @@ class ReportQueryServiceImplTest {
                 .markdownBody("숨길 저장 기사").generatedAt(LocalDateTime.of(2026, 9, 15, 0, 5)).build();
         Finding available = finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
         Finding missing = finding(2L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
-        org.springframework.test.util.ReflectionTestUtils.setField(missing.getArticle(), "body", null);
+        missing.getArticle().applyFullText(null, FetchStatus.FULLTEXT, null);
         when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
         when(findingRepository.findForReportByIdIn(List.of(2L, 1L))).thenReturn(List.of(missing, available));
         for (boolean includeFindings : List.of(true, false)) {

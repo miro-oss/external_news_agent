@@ -22,6 +22,7 @@ import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.repository.ArticleRepository;
+import com.example.be.domain.collection.service.command.ArticleBodyStorage;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
@@ -70,6 +71,9 @@ class FindingRepositoryIntegrationTests {
 
     @Autowired
     private ArticleRepository articleRepository;
+
+    @Autowired
+    private ArticleBodyStorage bodyStorage;
 
     @Autowired
     private TopicRepository topicRepository;
@@ -134,7 +138,7 @@ class FindingRepositoryIntegrationTests {
                 .canonicalUrl("https://example.com/article/" + UUID.randomUUID())
                 .title("US tightens export controls on advanced chipmaking tools")
                 .summary("New restrictions target semiconductor equipment exports.")
-                .body("The United States tightened export controls. Supply chain risks increased.")
+                .storedBody(bodyStorage.intern("The United States tightened export controls. Supply chain risks increased."))
                 .contentHash("b".repeat(64))
                 .language("en")
                 .sourceName("Reuters")
@@ -267,20 +271,23 @@ class FindingRepositoryIntegrationTests {
     void articlePagesAndCountsExcludeMetadataAndEmptyClobsWithoutDeletingCollectionHistory() {
         findingRepository.save(finding());
         Article shortBody = articleRepository.save(historyArticle("short", article.getPublishedAt().minusMinutes(1)));
-        shortBody.applyFullText("짧지만 확보한 전문이다.", FetchStatus.FULLTEXT, LocalDateTime.now());
+        shortBody.applyStoredFullText(bodyStorage.intern("짧지만 확보한 전문이다."), FetchStatus.FULLTEXT, LocalDateTime.now());
         findingRepository.save(historyFinding(shortBody));
         for (FetchStatus status : FetchStatus.values()) {
             Article hidden = articleRepository.save(historyArticle("hidden-" + status, article.getPublishedAt().plusMinutes(1)));
-            hidden.applyFullText(status == FetchStatus.FULLTEXT ? " \n\t\r " : null,
+            hidden.applyStoredFullText(bodyStorage.intern(status == FetchStatus.FULLTEXT ? " \n\t\r " : null),
                     FetchStatus.FULLTEXT, LocalDateTime.now());
-            hidden.applyFullText(hidden.getBody(), status, LocalDateTime.now());
+            hidden.applyStoredFullText(hidden.getStoredBody(), status, LocalDateTime.now());
             findingRepository.save(historyFinding(hidden));
             runArticleRepository.save(CollectionRunArticle.observe(
                     run, hidden, topic, source, ChangeType.NEW, LocalDateTime.now()));
         }
         Article nullBody = articleRepository.save(historyArticle("null-body", article.getPublishedAt().plusMinutes(2)));
-        nullBody.applyFullText(null, FetchStatus.FULLTEXT, LocalDateTime.now());
+        nullBody.applyStoredFullText(null, FetchStatus.FULLTEXT, LocalDateTime.now());
         findingRepository.save(historyFinding(nullBody));
+        Article emptyBody = articleRepository.save(historyArticle("empty-body", article.getPublishedAt().plusMinutes(3)));
+        emptyBody.applyStoredFullText(bodyStorage.intern(""), FetchStatus.FULLTEXT, LocalDateTime.now());
+        findingRepository.save(historyFinding(emptyBody));
         flushAndClear();
 
         var first = articleQueryService.getArticles(run.getId(), null, null, null, null, null,
@@ -293,7 +300,7 @@ class FindingRepositoryIntegrationTests {
         assertTrue(first.isHasNext());
         assertEquals(List.of(article.getId()), first.getContent().stream().map(value -> value.getId()).toList());
         assertEquals(List.of(shortBody.getId()), second.getContent().stream().map(value -> value.getId()).toList());
-        assertEquals(2 + FetchStatus.values().length + 1,
+        assertEquals(2 + FetchStatus.values().length + 2,
                 jdbcTemplate.queryForObject("SELECT COUNT(*) FROM news_findings WHERE run_id = ?", Integer.class, run.getId()));
         assertEquals(FetchStatus.values().length,
                 jdbcTemplate.queryForObject("SELECT COUNT(*) FROM news_collection_run_articles WHERE run_id = ?", Integer.class, run.getId()));
@@ -302,7 +309,7 @@ class FindingRepositoryIntegrationTests {
                 .getFirst().getFindingCount());
         assertEquals(2, findingRepository.countStatsByRunId(run.getId(), new BigDecimal("40"), new BigDecimal("70"))
                 .stream().mapToLong(FindingRepository.ReportStatsCount::getFindingCount).sum());
-        assertEquals(FetchStatus.values().length + 1, findingRepository.countWithoutFullTextForReportByRunId(run.getId()));
+        assertEquals(FetchStatus.values().length + 2, findingRepository.countWithoutFullTextForReportByRunId(run.getId()));
 
         var savedReport = com.example.be.domain.reports.entity.NewsReport.builder()
                 .reportScope(com.example.be.domain.reports.entity.ReportScope.DAILY)
@@ -345,7 +352,7 @@ class FindingRepositoryIntegrationTests {
         flushAndClear();
 
         Article current = articleRepository.findById(article.getId()).orElseThrow();
-        current.applyFullText("Fresh full text first. Fresh full text second.",
+        current.applyStoredFullText(bodyStorage.intern("Fresh full text first. Fresh full text second."),
                 FetchStatus.FULLTEXT, LocalDateTime.now());
         flushAndClear();
 
@@ -536,7 +543,7 @@ class FindingRepositoryIntegrationTests {
                 .canonicalUrl("https://example.com/history/" + UUID.randomUUID())
                 .title("HBM history " + label)
                 .summary("HBM history summary")
-                .body("HBM history body")
+                .storedBody(bodyStorage.intern("HBM history body"))
                 .contentHash(UUID.randomUUID().toString().replace("-", "").repeat(2))
                 .language("ko")
                 .sourceName("테스트 소스")

@@ -19,6 +19,8 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -29,8 +31,9 @@ import java.util.Objects;
 /**
  * 수집된 기사 1건.
  *
- * <p>{@code urlHash}가 중복 판정의 유일한 기준이다. 검색 결과 URL은 매우 길어 Oracle 인덱스 키 길이 제한에
- * 걸리므로 SHA-256으로 줄여서 건다(§2-8). 같은 기사가 여러 주제에 걸려도 한 건만 남는다.
+ * <p>{@code urlHash}가 기사 행 식별의 기준이다. 검색 결과 URL은 매우 길어 Oracle 인덱스 키 길이 제한에
+ * 걸리므로 SHA-256으로 줄여서 건다(§2-8). 같은 기사가 여러 주제에 걸려도 한 건만 남고,
+ * URL이 다른 기사들의 동일한 전문은 {@code storedBody}를 공유한다.
  */
 @Entity
 @Table(name = "news_articles")
@@ -71,11 +74,12 @@ public class Article {
     @Column(name = "summary")
     private String summary;
 
-    @JdbcTypeCode(SqlTypes.CLOB)
-    @Column(name = "body")
-    private String body;
+    @ManyToOne(fetch = FetchType.EAGER)
+    @Fetch(FetchMode.JOIN)
+    @JoinColumn(name = "body_hash")
+    private ArticleBody storedBody;
 
-    /** 본문이 실제로 바뀌었는지 판정한다. 같으면 SKIPPED, 다르면 UPDATED + 버전 1건. */
+    /** 피드 메타데이터 변경을 판정한다. 같으면 UNCHANGED, 다르면 UPDATED + 버전 1건. */
     @Column(name = "content_hash", length = 64)
     private String contentHash;
 
@@ -114,16 +118,19 @@ public class Article {
 
     /** 사용자용 결과는 수집에 성공했고 실제 전문이 있는 기사로 제한한다. */
     public boolean hasFullText() {
+        String body = getBody();
         return fetchStatus == FetchStatus.FULLTEXT && body != null && !body.isBlank();
     }
 
+    public String getBody() {
+        return storedBody == null ? null : storedBody.getBody();
+    }
+
     /**
-     * 이미 있던 기사를 다시 만났을 때 내용이 바뀌었는지 본다. 발행일이나 요약이 조금 달라지는 일은 흔해서,
-     * 본문 해시가 같으면 갱신으로 치지 않는다.
+     * 이미 있던 기사를 다시 만났을 때 수집 단계에서 계산한 제목·요약 지문을 비교한다.
      *
      * <p>둘 다 없으면 "바뀐 게 없다"로 본다. 본문을 못 받은 METADATA_ONLY 기사를 매 실행마다 UPDATED로 찍으면
-     * 실행 통계가 부풀고 바뀌지도 않은 버전이 계속 쌓인다. 본문이 없을 때 무엇으로 해시를 만들지는
-     * 수집 엔진이 정한다(제목·요약 지문) — 여기서는 비교만 한다.
+     * 실행 통계가 부풀고 바뀌지도 않은 버전이 계속 쌓인다.
      */
     public boolean hasSameContent(String contentHash) {
         return Objects.equals(this.contentHash, contentHash);
@@ -142,11 +149,19 @@ public class Article {
      * <p><b>{@code contentHash}를 건드리지 않는다.</b> 변경 판정은 매 실행 피드가 주는 제목+요약 지문으로 한다.
      * 여기서 본문 해시로 덮으면, 다음 실행이 메타데이터 지문과 비교하게 되어 <b>모든 기사가 매번 UPDATED</b>가 된다.
      * 본문은 별도 수집 단계에서 갱신되므로 실행 간 메타데이터 변경 비교의 기준이 될 수 없다.
+     *
+     * <p>이 메서드는 비영속 값 조립용이다. 저장 경로에서는 ArticleBodyStorage.intern으로 본문을 확보한 뒤
+     * {@link #applyStoredFullText(ArticleBody, FetchStatus, LocalDateTime)}를 사용한다.
      */
     public void applyFullText(String body, FetchStatus fetchStatus, LocalDateTime updatedAt) {
+        applyStoredFullText(fetchStatus == FetchStatus.FULLTEXT ? ArticleBody.of(body) : null,
+                fetchStatus, updatedAt);
+    }
+
+    public void applyStoredFullText(ArticleBody storedBody, FetchStatus fetchStatus, LocalDateTime updatedAt) {
         // 재수집 실패나 차단이 직전 전문까지 지우지 않게 성공한 응답만 본문을 교체한다.
         if (fetchStatus == FetchStatus.FULLTEXT) {
-            this.body = body;
+            this.storedBody = storedBody;
         }
         this.fetchStatus = fetchStatus;
         this.updatedAt = updatedAt;
@@ -165,10 +180,20 @@ public class Article {
                             LocalDateTime updatedAt) {
         this.title = title;
         this.summary = summary;
-        this.body = body;
+        if (!Objects.equals(getBody(), body)) {
+            this.storedBody = ArticleBody.of(body);
+        }
         this.contentHash = contentHash;
         this.fetchStatus = fetchStatus;
         this.lastSeenRun = run;
         this.updatedAt = updatedAt;
+    }
+
+    public static class ArticleBuilder {
+        /** 영속 저장 경로에서는 intern으로 얻은 storedBody를 전달한다. */
+        public ArticleBuilder body(String body) {
+            this.storedBody = ArticleBody.of(body);
+            return this;
+        }
     }
 }

@@ -51,6 +51,7 @@ public class CollectionResultWriter {
     private final CollectionRunItemRepository runItemRepository;
     private final TopicRepository topicRepository;
     private final SourceRepository sourceRepository;
+    private final ArticleBodyStorage articleBodyStorage;
 
     /**
      * 주제 전체 후보에서 우선순위 선별을 마친 운영 경로. 소스별 선착순 상한을 다시 적용하지 않는다.
@@ -178,7 +179,9 @@ public class CollectionResultWriter {
     @Transactional
     public void applyFullText(Long articleId, FetchStatus fetchStatus, String body) {
         articleRepository.findById(articleId)
-                .ifPresent(article -> article.applyFullText(body, fetchStatus, LocalDateTime.now(ApiTimeZone.ZONE)));
+                .ifPresent(article -> article.applyStoredFullText(
+                        fetchStatus == FetchStatus.FULLTEXT ? articleBodyStorage.intern(body) : null,
+                        fetchStatus, LocalDateTime.now(ApiTimeZone.ZONE)));
     }
 
     /**
