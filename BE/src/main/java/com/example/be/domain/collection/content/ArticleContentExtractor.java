@@ -14,6 +14,7 @@ import java.io.IOException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
@@ -77,6 +78,8 @@ public final class ArticleContentExtractor {
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern CAPTION_ONLY = Pattern.compile(
             "^(?:[▲△▶▷]\\s*)?(?:자료\\s*)?(?:사진|이미지|그래픽|도표|영상)\\s*(?:설명|(?:제공\\s*)?[=:：]).*"
+                    + "|^(?:photo|image|caption)\\s*[:：].*"
+                    + "|^photo\\s+by\\s+.+$"
                     // '투자를 늘리는 모습이다' 같은 실제 서술 문장을 사진 설명으로 지우지 않는다.
                     + "|모습\\s*[.!。]?$"
                     + "|(?:전경|외관|조감도|개념도|자료사진|기념사진|관련\\s*이미지|사진)(?:이다|입니다)?\\s*[.!。]?$"
@@ -222,7 +225,8 @@ public final class ArticleContentExtractor {
     }
 
     private static String comparable(String text) {
-        return text.replaceAll("\\s+", " ").strip();
+        return text.replaceAll("\\s+", " ").strip().toLowerCase(Locale.ROOT)
+                .replaceAll("[.!?。！？…]+([\"'”’)]*)$", "$1").strip();
     }
 
     /**

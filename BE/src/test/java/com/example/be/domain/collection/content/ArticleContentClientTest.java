@@ -4,6 +4,9 @@ import com.example.be.domain.collection.ResponseCloseProbe;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.ratelimit.DomainRateLimiter;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -76,6 +79,79 @@ class ArticleContentClientTest {
 
         assertEquals(FetchStatus.FETCH_FAILED, result.status());
         assertNull(result.body());
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "The central bank held interest rates steady|The central bank held interest rates steady.",
+            "THE CENTRAL BANK HELD INTEREST RATES STEADY!|The central bank held interest rates steady.",
+            "한국은행이 기준금리를 동결했다|한국은행이 기준금리를 동결했다."})
+    void rejectsCopiedFeedTitleDespiteCaseOrTerminalPunctuationDifferences(String title, String copiedTitle) {
+        String html = "<div id='articleBody'><span>%s</span></div>".formatted(copiedTitle);
+        server.expect(requestTo(ARTICLE_URL)).andRespond(withSuccess(html, MediaType.TEXT_HTML));
+
+        ArticleContentResult result = client.fetch(ARTICLE_URL, null, title);
+
+        assertEquals(FetchStatus.FETCH_FAILED, result.status());
+        assertNull(result.body());
+        server.verify();
+    }
+
+    @Test
+    void acceptsRealParagraphDespiteCaseAndPunctuationDifferencesFromFeedTitle() {
+        String paragraph = "The central bank held interest rates steady.";
+        String html = "<div id='articleBody'><p>%s</p></div>".formatted(paragraph);
+        server.expect(requestTo(ARTICLE_URL)).andRespond(withSuccess(html, MediaType.TEXT_HTML));
+
+        ArticleContentResult result = client.fetch(ARTICLE_URL, null, "THE CENTRAL BANK HELD INTEREST RATES STEADY!");
+
+        assertEquals(FetchStatus.FULLTEXT, result.status());
+        assertEquals(paragraph, result.body());
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Photo: A semiconductor plant stands beside the river.",
+            "Image: Engineers examine a newly built chip factory.",
+            "Caption: The central bank building is shown on Monday.",
+            "Photo by Jane Doe."})
+    void successfulHttpResponseWithOnlyAnEnglishCaptionIsNotFullText(String caption) {
+        String html = "<div id='articleBody'><p>%s</p></div>".formatted(caption);
+        server.expect(requestTo(ARTICLE_URL)).andRespond(withSuccess(html, MediaType.TEXT_HTML));
+
+        ArticleContentResult result = client.fetch(ARTICLE_URL, null, "Semiconductor industry news");
+
+        assertEquals(FetchStatus.FETCH_FAILED, result.status());
+        assertNull(result.body());
+        server.verify();
+    }
+
+    @Test
+    void copiedFeedTitleAndCaptionParagraphTogetherStillFailBodyExtraction() {
+        String html = "<div id='articleBody'><span>The central bank held interest rates steady.</span>"
+                + "<p>Photo: Central bank building.</p></div>";
+        server.expect(requestTo(ARTICLE_URL)).andRespond(withSuccess(html, MediaType.TEXT_HTML));
+
+        ArticleContentResult result = client.fetch(ARTICLE_URL, null, "THE CENTRAL BANK HELD INTEREST RATES STEADY");
+
+        assertEquals(FetchStatus.FETCH_FAILED, result.status());
+        assertNull(result.body());
+        server.verify();
+    }
+
+    @Test
+    void acceptsActualReportingAlongsideAnEnglishCaptionAndPreservesBoth() {
+        String caption = "Photo: A semiconductor plant stands beside the river.";
+        String bulletin = "The chipmaker opened the plant on Monday.";
+        String html = "<div id='articleBody'><p>%s</p><p>%s</p></div>".formatted(caption, bulletin);
+        server.expect(requestTo(ARTICLE_URL)).andRespond(withSuccess(html, MediaType.TEXT_HTML));
+
+        ArticleContentResult result = client.fetch(ARTICLE_URL, null, "Chipmaker opens a new plant");
+
+        assertEquals(FetchStatus.FULLTEXT, result.status());
+        assertEquals(caption + "\n\n" + bulletin, result.body());
         server.verify();
     }
 

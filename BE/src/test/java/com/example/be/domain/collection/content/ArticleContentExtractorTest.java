@@ -2,7 +2,11 @@ package com.example.be.domain.collection.content;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -85,6 +89,36 @@ class ArticleContentExtractorTest {
     }
 
     @ParameterizedTest
+    @MethodSource("titleFormattingVariants")
+    void rejectsCopiedTitleWhenOnlyCaseOrTerminalPunctuationDiffers(String title, String copiedTitle) {
+        String html = "<div itemprop='articleBody'><span>%s</span></div>".formatted(copiedTitle);
+
+        assertNull(ArticleContentExtractor.extract(html, "https://example.com/headline", title));
+    }
+
+    @ParameterizedTest
+    @MethodSource("titleFormattingVariants")
+    void retainsRealBodyParagraphWhenItsTitleDiffersOnlyInFormatting(String title, String paragraph) {
+        String html = "<div itemprop='articleBody'><p>%s</p></div>".formatted(paragraph);
+
+        assertEquals(paragraph, ArticleContentExtractor.extract(html, "https://example.com/brief", title));
+    }
+
+    private static Stream<Arguments> titleFormattingVariants() {
+        return Stream.of(
+                Arguments.of("The central bank held interest rates steady",
+                        "The central bank held interest rates steady."),
+                Arguments.of("THE CENTRAL BANK HELD INTEREST RATES STEADY.",
+                        "The central bank held interest rates steady."),
+                Arguments.of("The central bank held interest rates steady!",
+                        "the central bank held interest rates steady."),
+                Arguments.of("“Bank holds rates”", "“Bank holds rates.”"),
+                Arguments.of("\"Bank holds rates\"", "\"Bank holds rates.\""),
+                Arguments.of("한국은행이 기준금리를 동결했다", "한국은행이 기준금리를 동결했다."),
+                Arguments.of("한국은행이 기준금리를 동결했다!", "한국은행이 기준금리를 동결했다."));
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"h1", "div itemprop='headline'", "p class='article-title'", "p itemprop='description'"})
     void rejectsHeadlineOrSummaryMarkupInsideAnExplicitBody(String tag) {
         String tagName = tag.split(" ")[0];
@@ -129,6 +163,54 @@ class ArticleContentExtractorTest {
         String html = "<div id='articleBody'><p>%s</p></div>".formatted(text);
 
         assertNull(ArticleContentExtractor.extract(html, "https://example.com/non-story"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("englishCaptionExamples")
+    void rejectsAnEnglishCaptionAsTheOnlyTextInAnExplicitBody(String caption) {
+        String html = "<div id='articleBody'><p>%s</p></div>".formatted(caption);
+
+        assertNull(ArticleContentExtractor.extract(html, "https://example.com/photo"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("englishCaptionExamples")
+    void captionParagraphDoesNotQualifyACopiedTitleForTheRealParagraphException(String caption) {
+        String html = "<div id='articleBody'><span>The central bank held interest rates steady.</span>"
+                + "<p>" + caption + "</p></div>";
+
+        assertNull(ArticleContentExtractor.extract(html, "https://example.com/headline",
+                "THE CENTRAL BANK HELD INTEREST RATES STEADY"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("englishCaptionExamples")
+    void preservesEnglishCaptionTextWhenARealShortStoryIsPresent(String caption) {
+        String bulletin = "The chipmaker opened a new semiconductor plant on Monday.";
+        String html = "<div id='articleBody'><p>%s</p><p>%s</p></div>".formatted(caption, bulletin);
+
+        assertEquals(caption + "\n\n" + bulletin,
+                ArticleContentExtractor.extract(html, "https://example.com/factory"));
+    }
+
+    private static Stream<String> englishCaptionExamples() {
+        return Stream.of(
+                "Photo: A semiconductor plant stands beside the river.",
+                "Image: Engineers examine a newly built chip factory.",
+                "Caption: The central bank building is shown on Monday.",
+                "Photo by Jane Doe.");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "Photo sharing companies reported higher revenue this quarter.",
+            "Image sensors generated higher revenue for the chipmaker.",
+            "Caption software now supports twelve additional languages.",
+            "The company published photos of its new semiconductor plant."})
+    void retainsOrdinaryReportingAboutPhotosImagesAndCaptions(String body) {
+        String html = "<div id='articleBody'><p>%s</p></div>".formatted(body);
+
+        assertEquals(body, ArticleContentExtractor.extract(html, "https://example.com/technology"));
     }
 
     @ParameterizedTest
