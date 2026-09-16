@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../../api/client'
@@ -22,6 +22,12 @@ export function ActiveCollectionRuns() {
   const runs = useActiveCollectionRuns(status, page)
   const queue = useCollectionQueue()
   const id = useId()
+
+  useEffect(() => {
+    if (!success) return
+    const timer = window.setTimeout(() => setSuccess(null), 3000)
+    return () => window.clearTimeout(timer)
+  }, [success])
 
   async function open(runId: number) {
     setLoadingRun(runId)

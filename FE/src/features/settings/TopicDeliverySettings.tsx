@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ApiError } from '../../api/client'
 import { useDeliveryPolicy, useSaveDeliveryPolicy, type DeliveryPolicy } from '../../api/notificationConnections'
@@ -12,6 +12,12 @@ export function TopicDeliverySettings({ topicId, topicName }: { topicId: number;
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
   const id = useId()
+
+  useEffect(() => {
+    if (!success) return
+    const timer = window.setTimeout(() => setSuccess(false), 3000)
+    return () => window.clearTimeout(timer)
+  }, [success])
 
   async function open() {
     setLoading(true)
