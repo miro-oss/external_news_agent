@@ -20,8 +20,11 @@ import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -96,16 +99,20 @@ class ArticleContentEnricherDiagnosticsTest {
 
     @Test
     void cancellationStopsTheRemainingArticleRequests() {
+        Article cancelled = article(1L);
+        Article remaining = article(2L);
         when(repository.findClusterTargetsByRunId(42L))
-                .thenReturn(List.of(observation(article(1L)), observation(article(2L))));
+                .thenReturn(List.of(observation(cancelled), observation(remaining)));
         when(client.fetch(anyString(), isNull(), anyString(), eq(false)))
                 .thenReturn(ArticleContentResult.failed(INTERRUPTED));
 
         assertEquals(Set.of(), enricher.enrich(42L));
 
         verify(client, times(1)).fetch(anyString(), isNull(), anyString(), eq(false));
-        verify(writer, never()).applyFullText(eq(2L), any(), any());
-        assertDiagnostic(1, 0, Map.of(INTERRUPTED, 1));
+        verifyNoInteractions(writer);
+        assertEquals(FetchStatus.METADATA_ONLY, cancelled.getFetchStatus());
+        assertEquals(FetchStatus.METADATA_ONLY, remaining.getFetchStatus());
+        assertDiagnostic(0, 0, Map.of(INTERRUPTED, 1));
     }
 
     @Test
@@ -121,11 +128,76 @@ class ArticleContentEnricherDiagnosticsTest {
             Thread.currentThread().interrupt();
             assertEquals(Set.of(), enricher.enrich(42L));
             assertTrue(Thread.currentThread().isInterrupted());
-            verifyNoInteractions(robots, client);
+            verifyNoInteractions(robots, client, writer);
         } finally {
             Thread.interrupted();
         }
-        assertDiagnostic(1, 0, Map.of(INTERRUPTED, 1));
+        assertEquals(FetchStatus.METADATA_ONLY, article.getFetchStatus());
+        assertDiagnostic(0, 0, Map.of(INTERRUPTED, 1));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void cancelledDirectEnrichmentPreservesExistingBodyStatusAndTimestamp(boolean interruptedBeforeFetch) {
+        LocalDateTime previousUpdate = LocalDateTime.of(2026, 9, 16, 12, 0);
+        Article article = Article.builder().id(1L).source(source).topic(topic)
+                .title("private-title-payload").canonicalUrl("https://example.com/private-url-payload")
+                .body("private-existing-body-payload").fetchStatus(FetchStatus.FULLTEXT)
+                .updatedAt(previousUpdate).build();
+        when(repository.findForEnrichment(42L, 1L)).thenReturn(List.of(observation(article)));
+        if (!interruptedBeforeFetch) {
+            when(client.fetch(anyString(), isNull(), anyString(), eq(false)))
+                    .thenReturn(ArticleContentResult.failed(INTERRUPTED));
+        }
+
+        try {
+            if (interruptedBeforeFetch) {
+                Thread.currentThread().interrupt();
+            }
+            assertEquals(Set.of(), enricher.enrichArticle(42L, 1L));
+            if (interruptedBeforeFetch) {
+                assertTrue(Thread.currentThread().isInterrupted());
+                verifyNoInteractions(client);
+            } else {
+                verify(client).fetch(article.getCanonicalUrl(), null, article.getTitle(), false);
+            }
+        } finally {
+            Thread.interrupted();
+        }
+
+        verifyNoInteractions(robots, writer);
+        assertEquals(FetchStatus.FULLTEXT, article.getFetchStatus());
+        assertEquals("private-existing-body-payload", article.getBody());
+        assertEquals(previousUpdate, article.getUpdatedAt());
+        assertDiagnostic(0, 0, Map.of(INTERRUPTED, 1));
+    }
+
+    @Test
+    void cancellationKeepsEarlierSuccessfulResultsAndStopsBeforeWritingTheCancelledArticle() {
+        Article completed = article(1L);
+        Article cancelled = article(2L);
+        Article remaining = article(3L);
+        when(repository.findClusterTargetsByRunId(42L))
+                .thenReturn(List.of(observation(completed), observation(cancelled), observation(remaining)));
+        when(client.fetch(anyString(), isNull(), anyString(), eq(false)))
+                .thenReturn(ArticleContentResult.fullText("private-new-body-payload"),
+                        ArticleContentResult.failed(INTERRUPTED));
+        doAnswer(invocation -> {
+            completed.applyFullText(invocation.getArgument(2), invocation.getArgument(1),
+                    LocalDateTime.of(2026, 9, 17, 12, 0));
+            return null;
+        }).when(writer).applyFullText(1L, FetchStatus.FULLTEXT, "private-new-body-payload");
+
+        assertEquals(Set.of(1L), enricher.enrich(42L));
+
+        verify(client, times(2)).fetch(anyString(), isNull(), anyString(), eq(false));
+        verify(writer).applyFullText(1L, FetchStatus.FULLTEXT, "private-new-body-payload");
+        verifyNoMoreInteractions(writer);
+        assertEquals(FetchStatus.FULLTEXT, completed.getFetchStatus());
+        assertEquals("private-new-body-payload", completed.getBody());
+        assertEquals(FetchStatus.METADATA_ONLY, cancelled.getFetchStatus());
+        assertEquals(FetchStatus.METADATA_ONLY, remaining.getFetchStatus());
+        assertDiagnostic(1, 1, Map.of(INTERRUPTED, 1));
     }
 
     @Test

@@ -68,17 +68,18 @@ public class ArticleContentEnricher {
                 continue;
             }
 
-            attempted++;
             countFailure(failureCounts, result);
+            // Cancellation is not a publisher failure and must not replace a stored fetch result.
+            if (result.reason() == ArticleContentFailureReason.INTERRUPTED) {
+                break;
+            }
+            attempted++;
             resultWriter.applyFullText(article.getId(), result.status(), result.body());
             if (result.status() == FetchStatus.FULLTEXT) {
                 refreshedArticleIds.add(article.getId());
             }
             if (result.status() == FetchStatus.FULLTEXT_BLOCKED) {
                 blockedCountBySource.merge(article.getSource().getId(), 1, Integer::sum);
-            }
-            if (result.reason() == ArticleContentFailureReason.INTERRUPTED) {
-                break;
             }
         }
 
@@ -99,12 +100,16 @@ public class ArticleContentEnricher {
         if (result == null) {
             return Set.of();
         }
+        Map<ArticleContentFailureReason, Integer> failureCounts = new EnumMap<>(ArticleContentFailureReason.class);
+        countFailure(failureCounts, result);
+        if (result.reason() == ArticleContentFailureReason.INTERRUPTED) {
+            logOutcome(runId, 0, 0, failureCounts);
+            return Set.of();
+        }
         resultWriter.applyFullText(article.getId(), result.status(), result.body());
         if (result.status() == FetchStatus.FULLTEXT_BLOCKED) {
             resultWriter.addFullTextBlockedWarning(runId, article.getSource().getId(), 1);
         }
-        Map<ArticleContentFailureReason, Integer> failureCounts = new EnumMap<>(ArticleContentFailureReason.class);
-        countFailure(failureCounts, result);
         logOutcome(runId, 1, result.hasBody() ? 1 : 0, failureCounts);
         return result.status() == FetchStatus.FULLTEXT
                 ? Set.of(article.getId()) : Set.of();

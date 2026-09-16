@@ -219,7 +219,7 @@ public class ArticleContentClient {
         return new Attempt(ArticleContentResult.failed(BODY_NOT_FOUND), false, null, resource, alternative);
     }
 
-    /** A proven public resource gets one bounded GET, without redirects or another fallback chain. */
+    /** Retries only the proven URI; redirects and further fallback discovery remain disabled. */
     private ArticleContentResult fetchSecondary(URI uri, boolean respectsRobots, MediaType expectedType,
                                                 BodyParser parser) {
         httpUri(uri.toString());
@@ -239,36 +239,52 @@ public class ArticleContentClient {
             }
             crawlDelay = robots.rules().crawlDelay();
         }
-        if (!await(url, crawlDelay)) {
-            return ArticleContentResult.failed(INTERRUPTED);
+        for (int tries = 1; tries <= maxAttempts; tries++) {
+            if (!await(url, crawlDelay)) {
+                return ArticleContentResult.failed(INTERRUPTED);
+            }
+            ArticleContentResult result;
+            try {
+                result = restClient.get().uri(uri).header(HttpHeaders.USER_AGENT, userAgent)
+                        .exchange((request, response) -> readSecondary(response, expectedType, parser));
+            } catch (RuntimeException exception) {
+                result = exceptionResult(exception);
+            }
+            if (!result.reason().retryable() || tries == maxAttempts) {
+                return result;
+            }
+            if (!sleep(Backoff.delayAfter(tries, backoffBase, backoffMax))) {
+                return ArticleContentResult.failed(INTERRUPTED);
+            }
         }
-        return restClient.get().uri(uri).header(HttpHeaders.USER_AGENT, userAgent)
-                .exchange((request, response) -> {
-                    ArticleContentFailureReason reason = statusReason(response.getStatusCode());
-                    if (reason != NONE) {
-                        return ArticleContentResult.failed(reason);
-                    }
-                    MediaType type;
-                    try {
-                        type = response.getHeaders().getContentType();
-                        if (type == null || !(expectedType.equals(MediaType.TEXT_HTML)
-                                ? isHtml(type) : expectedType.isCompatibleWith(type))) {
-                            return ArticleContentResult.failed(UNSUPPORTED_CONTENT_TYPE);
-                        }
-                    } catch (InvalidMediaTypeException exception) {
-                        return ArticleContentResult.failed(UNSUPPORTED_CONTENT_TYPE);
-                    }
-                    if (response.getHeaders().getContentLength() > MAX_BODY_BYTES) {
-                        return ArticleContentResult.failed(BODY_TOO_LARGE);
-                    }
-                    byte[] bytes = response.getBody().readNBytes(MAX_BODY_BYTES + 1);
-                    if (bytes.length > MAX_BODY_BYTES) {
-                        return ArticleContentResult.failed(BODY_TOO_LARGE);
-                    }
-                    String body = parser.extract(bytes, charsetOf(type));
-                    return body == null ? ArticleContentResult.failed(RESOURCE_INVALID)
-                            : ArticleContentResult.fullText(body);
-                });
+        return ArticleContentResult.failed(UNKNOWN);
+    }
+
+    private ArticleContentResult readSecondary(ClientHttpResponse response, MediaType expectedType, BodyParser parser)
+            throws IOException {
+        ArticleContentFailureReason reason = statusReason(response.getStatusCode());
+        if (reason != NONE) {
+            return ArticleContentResult.failed(reason);
+        }
+        MediaType type;
+        try {
+            type = response.getHeaders().getContentType();
+            if (type == null || !(expectedType.equals(MediaType.TEXT_HTML)
+                    ? isHtml(type) : expectedType.isCompatibleWith(type))) {
+                return ArticleContentResult.failed(UNSUPPORTED_CONTENT_TYPE);
+            }
+        } catch (InvalidMediaTypeException exception) {
+            return ArticleContentResult.failed(UNSUPPORTED_CONTENT_TYPE);
+        }
+        if (response.getHeaders().getContentLength() > MAX_BODY_BYTES) {
+            return ArticleContentResult.failed(BODY_TOO_LARGE);
+        }
+        byte[] bytes = response.getBody().readNBytes(MAX_BODY_BYTES + 1);
+        if (bytes.length > MAX_BODY_BYTES) {
+            return ArticleContentResult.failed(BODY_TOO_LARGE);
+        }
+        String body = parser.extract(bytes, charsetOf(type));
+        return body == null ? ArticleContentResult.failed(RESOURCE_INVALID) : ArticleContentResult.fullText(body);
     }
 
     private static ArticleContentFailureReason statusReason(HttpStatusCode status) {

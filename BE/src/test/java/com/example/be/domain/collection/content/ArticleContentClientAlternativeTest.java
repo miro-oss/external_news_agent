@@ -71,9 +71,8 @@ class ArticleContentClientAlternativeTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"302, REDIRECT_REJECTED", "403, HTTP_ACCESS_DENIED", "429, HTTP_RATE_LIMITED",
-            "503, HTTP_SERVER_ERROR"})
-    void secondaryErrorNeverStartsARetryOrRedirectChain(int status, ArticleContentFailureReason reason) {
+    @CsvSource({"302, REDIRECT_REJECTED", "403, HTTP_ACCESS_DENIED", "404, HTTP_CLIENT_ERROR"})
+    void permanentSecondaryFailureNeverStartsARetryOrRedirectChain(int status, ArticleContentFailureReason reason) {
         allowAmp();
         expectOriginal();
         server.expect(requestTo(PublicArticleAlternativeTest.ALTERNATIVE))
