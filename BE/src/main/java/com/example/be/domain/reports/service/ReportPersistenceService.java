@@ -61,18 +61,28 @@ public class ReportPersistenceService {
 
     @Transactional
     public Long completeRecovered(Long reportId, ReportDocument document, LocalDateTime generatedAt) {
-        NewsReport report = reportRepository.findByIdForUpdate(reportId)
-                .orElseThrow(() -> new IllegalStateException("복구할 보고서가 없습니다. reportId=" + reportId));
+        NewsReport report = lockedReport(reportId);
         if (report.getReportStatus() != ReportStatus.PENDING) return report.getId();
         // Flag travels in the report completion write itself, without a separate fallible comparison DB write.
         report.invalidateComparisonInput();
-        return complete(reportId, document, generatedAt);
+        return completeLocked(report, document, generatedAt);
     }
 
     @Transactional
     public Long complete(Long reportId, ReportDocument document, LocalDateTime generatedAt) {
-        NewsReport report = reportRepository.findByIdForUpdate(reportId)
+        return completeLocked(lockedReport(reportId), document, generatedAt);
+    }
+
+    private NewsReport lockedReport(Long reportId) {
+        // Use the same run -> report order as reservation and delivery edits. Completion
+        // and outbox creation remain inside this lock until the transaction commits.
+        reportRepository.findRunIdById(reportId).ifPresent(this::lockedRun);
+        return reportRepository.findByIdForUpdate(reportId)
                 .orElseThrow(() -> new IllegalStateException("완료할 보고서가 없습니다. reportId=" + reportId));
+    }
+
+    private Long completeLocked(NewsReport report, ReportDocument document, LocalDateTime generatedAt) {
+        Long reportId = report.getId();
         if (report.getReportStatus() != ReportStatus.PENDING) {
             return report.getId();
         }

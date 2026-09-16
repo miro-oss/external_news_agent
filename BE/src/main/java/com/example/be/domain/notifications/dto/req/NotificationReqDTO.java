@@ -14,6 +14,19 @@ public class NotificationReqDTO {
     }
 
     @Getter @Setter @NoArgsConstructor
+    public static class RunDeliverySettings {
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+        private Boolean enabled;
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+        private Boolean run;
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+        private Boolean daily;
+        private List<Long> groupIds;
+        private List<Long> recipientIds;
+        private List<Long> channelIds;
+    }
+
+    @Getter @Setter @NoArgsConstructor
     public static class ChannelUpdate {
         private String name;
         private Map<String, Object> config;

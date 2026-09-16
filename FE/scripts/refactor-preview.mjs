@@ -18,6 +18,12 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535)
 // A newly created empty directory prevents Vite from loading the application's .env files.
 const emptyEnvDir = mkdtempSync(join(tmpdir(), 'refactor-preview-env-'));
 const page = (content) => ({ content, page: 0, size: 100, totalElements: content.length, totalPages: content.length ? 1 : 0, hasNext: false });
+const requestedPage = (content, url) => {
+    const pageNumber = Math.max(0, Number(url.searchParams.get('page') || 0));
+    const size = Math.max(1, Math.min(100, Number(url.searchParams.get('size') || 20)));
+    return { content: content.slice(pageNumber * size, (pageNumber + 1) * size), page: pageNumber, size,
+        totalElements: content.length, totalPages: Math.ceil(content.length / size), hasNext: (pageNumber + 1) * size < content.length };
+};
 const sources = [{ id: 1, sourceKind: 'SEARCH', name: 'NAVER', urlTemplate: 'NAVER', country: 'KR', language: 'ko', crawlPolicy: null, robotsStatus: 'allowed', robotsCheckedAt: null, reliabilityScore: 80, active: true }, { id: 2, sourceKind: 'FEED', name: '반도체 뉴스 RSS', urlTemplate: 'https://example.invalid/rss', language: 'ko', active: true }];
 const initialTopics = [
     { id: 31, name: '반도체 수출 규제와 공급망', queryText: '반도체 수출', requiredKeywords: ['반도체'], optionalKeywords: ['수출 규제', '공급망'], excludedKeywords: ['채용'], active: true },
@@ -42,6 +48,8 @@ let loadingPath = '/api/';
 let usageCalls = 12;
 let usageLimit = 100;
 let proposalRevision = 0;
+let notificationSettingsSaveError = false;
+let completeRunOnSettingsSave = false;
 const proposalAppliedChanges = new Map();
 const proposalKeywordRevisions = new Map();
 const deliveryLogFixtures = ['SENT', 'FAILED', 'SKIPPED'].map((status, i) => ({
@@ -52,7 +60,42 @@ const deliveryLogFixtures = ['SENT', 'FAILED', 'SKIPPED'].map((status, i) => ({
     chunkSeq: 1, chunkCount: 1, errorMessage: status === 'FAILED' ? '메일 서버에 연결하지 못했습니다.' : status === 'SKIPPED' ? '수신 설정이 꺼져 있습니다.' : null,
     sentAt: '2026-09-08T12:30:00+09:00',
 }));
-function reset() { topics = structuredClone(initialTopics); proposals = structuredClone(initialProposals); channels = structuredClone(initialChannels); recipients = structuredClone(initialRecipients); groups = structuredClone(initialGroups); requests = []; runs = []; runDeliverySettings = []; policies = { 31: { enabled: true, run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1, 2] } }; telegram = { 1: { status: 'DISCONNECTED', expiresAt: null }, 2: { status: 'CONNECTED', expiresAt: null }, 3: { status: 'DISCONNECTED', expiresAt: null } }; readiness = { mode: 'LOCAL_CAPTURE', configured: false, message: '로컬 검증 모드입니다. 이메일은 실제 수신함으로 전달되지 않습니다.' }; audience = { audience: 'CHIP_MAKER' }; plan = { plan: 'FREE', paidExhaustedAction: 'FALLBACK_FREE', allowRunOverride: true }; autoDeliveries = []; sendCache = {}; resetProposalHistory(); }
+function reset() { topics = structuredClone(initialTopics); proposals = structuredClone(initialProposals); channels = structuredClone(initialChannels); recipients = structuredClone(initialRecipients); groups = structuredClone(initialGroups); requests = []; runs = []; runDeliverySettings = []; policies = { 31: { enabled: true, run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1, 2] } }; telegram = { 1: { status: 'DISCONNECTED', expiresAt: null }, 2: { status: 'CONNECTED', expiresAt: null }, 3: { status: 'DISCONNECTED', expiresAt: null } }; readiness = { mode: 'LOCAL_CAPTURE', configured: false, message: '로컬 검증 모드입니다. 이메일은 실제 수신함으로 전달되지 않습니다.' }; audience = { audience: 'CHIP_MAKER' }; plan = { plan: 'FREE', paidExhaustedAction: 'FALLBACK_FREE', allowRunOverride: true }; autoDeliveries = []; sendCache = {}; notificationSettingsSaveError = false; completeRunOnSettingsSave = false; resetProposalHistory(); }
+const policyFields = value => ({ enabled: value.enabled, run: value.run, daily: value.daily,
+    groupIds: [...value.groupIds], recipientIds: [...value.recipientIds], channelIds: [...value.channelIds] });
+function runSettings(run) {
+    const saved = runDeliverySettings.find(settings => settings.runId === run.runId)?.delivery;
+    const reportReady = run.reportReady ?? run.reportId !== null;
+    return { runId: run.runId, editable: ['PENDING', 'RUNNING'].includes(run.status) && !reportReady,
+        reportId: run.reportId, reportReady, source: saved ? 'RUN' : 'TOPIC',
+        ...(saved ? policyFields(saved) : disabledPolicy()),
+        topicPolicies: saved ? [] : run.targetTopicIds.map(topicId => ({ topicId,
+            topicName: topics.find(topic => topic.id === topicId)?.name ?? `주제 ${topicId}`,
+            ...structuredClone(policies[topicId] ?? disabledPolicy()) })) };
+}
+// Seed before opening the page to verify that old active runs survive browser reloads.
+// These controls change fixtures only and never send or schedule notifications.
+function notificationSettingsFixtures(variant) {
+    const count = variant === 'many-runs' ? 205 : 2;
+    notificationSettingsSaveError = variant === 'save-error';
+    completeRunOnSettingsSave = variant === 'completion-race';
+    runs = Array.from({ length: count }, (_, index) => ({
+        runId: 601 + index, status: index % 2 ? 'PENDING' : 'RUNNING', triggerType: index % 2 ? 'MANUAL' : 'SCHEDULED',
+        idempotencyKey: `fixture-existing-${index}`, llmPlan: 'FREE', targetTopicIds: index % 2 ? [31, 29] : [31],
+        targetCombinationCount: index % 2 ? 4 : 2, queuedAt: new Date(Date.now() - (count - index) * 60000).toISOString(),
+        startedAt: index % 2 ? null : new Date(Date.now() - (count - index) * 60000 + 1000).toISOString(),
+        finishedAt: null, reportId: null,
+    }));
+    const delivery = variant === 'stale-targets'
+        ? { enabled: true, run: true, daily: false, channelIds: [3, 99], groupIds: [2, 99], recipientIds: [3, 99] }
+        : { enabled: true, run: true, daily: false, channelIds: [1], groupIds: [1], recipientIds: [] };
+    runDeliverySettings = [{ runId: 601, targetTopicIds: [31], delivery, updatedTopicIds: [] }];
+    policies[31] = structuredClone(variant === 'stale-targets' ? delivery
+        : { enabled: true, run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1, 2] });
+    policies[29] = disabledPolicy();
+    return { variant, runCount: runs.length, runIds: runs.map(run => run.runId),
+        saveError: notificationSettingsSaveError, completeOnSave: completeRunOnSettingsSave };
+}
 const keywordFields = { REQUIRED: 'requiredKeywords', OPTIONAL: 'optionalKeywords', EXCLUDED: 'excludedKeywords' };
 const currentTopicKeywords = topic => Object.fromEntries(Object.values(keywordFields).map(field => [field, [...topic[field]]]));
 const normalizedKeyword = keyword => keyword.trim().toLowerCase();
@@ -255,6 +298,17 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 recipientDeleteError = body.enabled ?? url.searchParams.get('enabled') === 'true';
                                 return json(res, { enabled: recipientDeleteError });
                             }
+                            if (path === '/__qa/notification-settings') {
+                                const variant = body.variant ?? url.searchParams.get('variant') ?? 'existing';
+                                const variants = ['existing', 'many-runs', 'save-error', 'completion-race', 'stale-targets'];
+                                if (!variants.includes(variant)) return json(res, { variants }, 400);
+                                return json(res, notificationSettingsFixtures(variant));
+                            }
+                            if (path === '/__qa/notification-settings-errors') {
+                                notificationSettingsSaveError = body.saveError ?? notificationSettingsSaveError;
+                                completeRunOnSettingsSave = body.completeOnSave ?? completeRunOnSettingsSave;
+                                return json(res, { saveError: notificationSettingsSaveError, completeOnSave: completeRunOnSettingsSave });
+                            }
                             if (path === '/__qa/recipients') {
                                 const count = Math.max(0, Math.min(500, Number(body.count ?? url.searchParams.get('count') ?? 80)));
                                 recipients = count <= 2 ? structuredClone(initialRecipients.filter(r => r.active).slice(0, count)) : [
@@ -332,6 +386,10 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 run.startedAt = run.status === 'PENDING' ? null : run.startedAt || now();
                                 run.finishedAt = ['PENDING', 'RUNNING'].includes(run.status) ? null : now();
                                 run.reportId = ['SUCCESS', 'PARTIAL'].includes(run.status) ? 17 : null;
+                                if (body.reportReady !== undefined) {
+                                    run.reportReady = body.reportReady;
+                                    run.reportId = body.reportReady ? 17 : null;
+                                }
                                 return json(res, run);
                             }
                             if (path === '/__qa/telegram') {
@@ -442,7 +500,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         }
                         else if (path === '/api/news/runs') {
                             const status = url.searchParams.get('status');
-                            result = page(runs.filter(r => !status || r.status === status).toReversed());
+                            result = requestedPage(runs.filter(r => !status || r.status === status).toReversed(), url);
                         }
                         else if ((match = path.match(/^\/api\/news\/runs\/(\d+)$/)))
                             result = runs.find(r => r.runId === Number(match[1]));
@@ -571,10 +629,33 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             groups = groups.filter(g => g.id !== Number(match[1]));
                             result = null;
                         }
-                        else if ((match = path.match(/^\/api\/notifications\/topics\/(\d+)\/delivery-policy$/))) {
-                            if (method === 'PUT')
-                                policies[match[1]] = body;
+                        else if ((match = path.match(/^\/api\/notifications\/topics\/(\d+)\/delivery-policy$/)) && ['GET', 'PUT'].includes(method)) {
+                            if (!topics.some(topic => topic.id === Number(match[1])))
+                                return json(res, { isSuccess: false, code: 'COMMON404', message: '수집 주제를 찾을 수 없습니다.', result: {} }, 404);
+                            if (method === 'PUT') {
+                                if (notificationSettingsSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: null }, 500);
+                                policies[match[1]] = policyFields(body);
+                            }
                             result = policies[match[1]] || disabledPolicy();
+                        }
+                        else if ((match = path.match(/^\/api\/notifications\/runs\/(\d+)\/delivery-settings$/)) && ['GET', 'PUT'].includes(method)) {
+                            const run = runs.find(run => run.runId === Number(match[1]));
+                            if (!run) return json(res, { isSuccess: false, code: 'RUN404', message: '수집 실행 이력을 찾을 수 없습니다.', result: {} }, 404);
+                            if (method === 'PUT') {
+                                if (completeRunOnSettingsSave) {
+                                    Object.assign(run, { status: 'SUCCESS', reportId: 17, reportReady: true,
+                                        startedAt: run.startedAt ?? now(), finishedAt: now() });
+                                    completeRunOnSettingsSave = false;
+                                }
+                                if (!runSettings(run).editable)
+                                    return json(res, { isSuccess: false, code: 'COMMON409', message: '보고서가 완성되었거나 수집이 종료되어 알림 설정을 변경할 수 없습니다.', result: {} }, 409);
+                                if (notificationSettingsSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: null }, 500);
+                                const saved = runDeliverySettings.find(settings => settings.runId === run.runId);
+                                if (saved) saved.delivery = policyFields(body);
+                                else runDeliverySettings.push({ runId: run.runId, targetTopicIds: [...run.targetTopicIds],
+                                    delivery: policyFields(body), updatedTopicIds: [] });
+                            }
+                            result = runSettings(run);
                         }
                         else if (path === '/api/notifications/email-readiness')
                             result = readiness;

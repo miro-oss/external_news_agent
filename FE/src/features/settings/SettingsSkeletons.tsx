@@ -75,16 +75,17 @@ export function TopicTableSkeleton() {
             <col className="topic-surge-column" />
             <col className="topic-related-column" />
             <col className="topic-schedule-column" />
+            <col className="topic-delivery-column" />
             <col className="topic-actions-column" />
           </colgroup>
-          <thead><tr>{['주제', '검색 키워드', '기사 조건', '지난주 대비 증가', '연관 키워드', '수집 일정', '관리']
+          <thead><tr>{['주제', '검색 키워드', '기사 조건', '지난주 대비 증가', '연관 키워드', '수집 일정', '보고서 알림', '관리']
             .map((label) => <th key={label}>{label}</th>)}</tr></thead>
           <tbody>
             {Array.from({ length: 3 }, (_, row) => (
               <tr key={row}>
-                {Array.from({ length: 7 }, (_, column) => (
+                {Array.from({ length: 8 }, (_, column) => (
                   <td key={column}>
-                    {column === 6 ? <div className="settings-skeleton-management-actions"><Skeleton height="1.875rem" /></div>
+                    {column >= 6 ? <div className="settings-skeleton-management-actions"><Skeleton height="1.875rem" /></div>
                       : <SkeletonText lines={column === 2 || column === 5 ? 2 : 1} />}
                   </td>
                 ))}

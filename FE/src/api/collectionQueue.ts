@@ -10,6 +10,17 @@ export interface CollectionProgress {
   reportId: number | null
 }
 
+export type ActiveRunStatus = 'PENDING' | 'RUNNING'
+export type CollectionRunSummary = CollectionProgress & { triggerType: 'MANUAL' | 'SCHEDULED' }
+
+export function useActiveCollectionRuns(status: ActiveRunStatus, page: number) {
+  return useQuery({
+    queryKey: ['collection-queue', 'runs', status, page],
+    queryFn: () => get<PageResult<CollectionRunSummary>>('/runs', { status, page, size: 10 }),
+    refetchInterval: 3000,
+  })
+}
+
 export function useCollectionQueue() {
   return useQuery({
     queryKey: ['collection-queue'],

@@ -4,6 +4,7 @@ import { useSetTopicActivation, useTopics } from '../../api/queries'
 import { ApiError } from '../../api/client'
 import { MutationStatus } from './MutationStatus'
 import { TopicTableSkeleton } from './SettingsSkeletons'
+import { TopicDeliverySettings } from './TopicDeliverySettings'
 
 /** 오프셋이 붙은 ISO-8601을 그대로 보여 주면 열이 넘친다. 날짜와 분까지만 남긴다. */
 function formatCollectedAt(value: string | null) {
@@ -90,6 +91,7 @@ export function TopicTable() {
               <col className="topic-surge-column" />
               <col className="topic-related-column" />
               <col className="topic-schedule-column" />
+              <col className="topic-delivery-column" />
               <col className="topic-actions-column" />
             </colgroup>
             <thead>
@@ -100,6 +102,7 @@ export function TopicTable() {
                 <th title="최근 7일에 전주보다 언급이 늘어난 키워드입니다. 숫자는 관련 주제 묶음의 증가 건수입니다.">지난주 대비 증가</th>
                 <th title="최근 7일에 함께 등장한 키워드와 비중입니다.">연관 키워드</th>
                 <th>수집 일정</th>
+                <th>보고서 알림</th>
                 <th>관리</th>
               </tr>
             </thead>
@@ -126,6 +129,7 @@ export function TopicTable() {
                     renderTitle={relatedKeywordTitle} /></td>
                   <td><div className="topic-condition-lines"><span>{formatInterval(topic.intervalMinutes)}</span>
                     <small title="마지막 수집">{formatCollectedAt(topic.lastCollectedAt)}</small></div></td>
+                  <td><TopicDeliverySettings topicId={topic.id} topicName={topic.name} /></td>
                   <td><div className="topic-management-actions"><button type="button" className="ghost-button topic-management-action" disabled={activation.isPending}
                     onClick={() => setActive(topic.id, !topic.active)}>
                     {activation.isPending && activation.variables?.topicId === topic.id ? '처리 중…' : topic.active ? '수집 중지' : '수집 재개'}

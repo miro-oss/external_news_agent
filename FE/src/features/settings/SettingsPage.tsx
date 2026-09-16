@@ -5,6 +5,7 @@ import { TopicTable } from './TopicTable'
 import { SourceRegistration } from './SourceRegistration'
 import { TopicForm } from './TopicForm'
 import { CollectionRunPanel } from './CollectionRunPanel'
+import { ActiveCollectionRuns } from './ActiveCollectionRuns'
 import { TopicKeywordProposalPanel } from './TopicKeywordProposalPanel'
 import './settings-refinement.css'
 
@@ -43,6 +44,8 @@ export function SettingsPage() {
           <TopicForm />
         </section>
       </div>
+
+      <ActiveCollectionRuns />
 
       <CollapsibleSection
         id="keyword-proposals"
