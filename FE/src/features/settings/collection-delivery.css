@@ -29,8 +29,8 @@
 .collection-delivery-status p { margin: 0; }
 .collection-delivery-status ul { margin: .5rem 0; padding-left: 1.2rem; }
 .collection-delivery-save-error { flex: 1 0 100%; margin: 0; font-size: .8rem; }
-.saved-delivery-setting { display: grid; justify-items: center; gap: .45rem; }
-.saved-delivery-setting > small { color: var(--fg-3); font-size: .75rem; line-height: 1.5; text-align: center; }
+.saved-delivery-setting { display: grid; justify-items: start; gap: .45rem; }
+.saved-delivery-setting > small { color: var(--fg-3); font-size: .75rem; line-height: 1.5; }
 .collection-delivery-enabled { display: flex; justify-content: space-between; align-items: center; gap: 1rem; color: var(--fg-2); font-size: .9rem; font-weight: 600; }
 .collection-delivery-switch { box-sizing: border-box; flex: none; width: 2.5rem; height: 1.5rem; padding: 3px; border: 0; border-radius: 999px; background: var(--line); }
 .collection-delivery-switch span { display: block; width: 1.125rem; height: 1.125rem; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow-sm); transition: transform var(--dur-2) var(--ease-out); }

@@ -2,6 +2,7 @@
 .active-runs-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .active-runs-heading h2 { margin-bottom: .3rem; }
 .active-runs-heading .segmented { flex: none; }
+.active-collection-runs > .empty-block { margin-top: 1rem; }
 .active-runs-list { margin: 1rem 0 0; padding: 0; list-style: none; }
 .active-runs-list > li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--line); }
 .active-runs-list > li > div { display: grid; gap: .35rem; min-width: 0; }
