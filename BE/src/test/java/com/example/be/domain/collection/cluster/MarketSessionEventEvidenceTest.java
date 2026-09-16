@@ -166,7 +166,7 @@ class MarketSessionEventEvidenceTest {
         var metadata = new ClusterArticle(2, 1, "뉴욕증시 하락", "16일 뉴욕증시에서 나스닥은 하락 마감했다.", null,
                 FetchStatus.METADATA_ONLY, 2, "fixture", null, time, time, List.of(), null, null, null, true);
         assertUnrelated(first, metadata);
-        assertUnrelated(first, article(2, "미국 증시 약세", "시장 분석. ".repeat(140)
+        assertUnrelated(first, article(2, "미국 증시 약세", "시장 분석. ".repeat(400)
                 + "17일 뉴욕증시에서 나스닥은 하락 마감했다."));
     }
 
@@ -222,6 +222,70 @@ class MarketSessionEventEvidenceTest {
         var outlook = new ClusterArticle(2, 1, "산업 비관론은 아직", "산업 변화가 사업에 미칠 영향에도 관심이 쏠린다.", null,
                 FetchStatus.METADATA_ONLY, 2, "fixture", null, close.eventTime(), close.eventTime(), List.of(), null, null, null, true);
         assertUnrelated(close, outlook);
+    }
+
+    @Test
+    void numericSnapshotNeedsAnActualCloseAnchorAndSameExplicitDate() {
+        String values = "다우지수는 0.31% 내린 41234.50을 기록했다. 나스닥은 0.53% 하락한 23456.78을 기록했다.";
+        var anchor = article(1, "뉴욕증시 하락", "17일 뉴욕증시에서 다우지수는 0.31% 내린 4만1234.50에 마감했다. 나스닥은 0.53% 내린 23456.78에 마감했다.");
+        var snapshot = article(2, "기술주 약세 확산", "뉴욕증시가 약세를 보였다. 17일 " + values);
+        assertMatch(anchor, snapshot);
+        assertTrue(evidence(snapshot, snapshot).marketReport(2));
+        var otherSnapshot = article(3, "기술주 동반 약세", "17일 뉴욕증시는 약세였다. " + values);
+        assertFalse(evidence(snapshot, otherSnapshot).matches(2, 3));
+        var anotherDay = article(2, snapshot.title(), "16일 뉴욕증시는 약세였다. " + values);
+        assertFalse(evidence(anchor, anotherDay).matches(1, 2));
+        assertTrue(evidence(anchor, anotherDay).conflicts(1, 2));
+    }
+
+    @Test
+    void sectorRoundupHasMarketScopeButCompanyCorporateNewsDoesNot() {
+        var anchor = article(1, "뉴욕증시 하락", "17일 뉴욕증시에서 다우지수는 하락 마감했다.");
+        String body = "17일 뉴욕증시에서 주요 반도체 종목들이 급락했다. 필라델피아반도체지수는 5.12% 내린 12345.67에 거래를 마쳤다.";
+        var sector = article(2, "AMD·인텔 주가 급락", body);
+        assertMatch(anchor, sector);
+        assertTrue(evidence(sector, sector).marketReport(2));
+        assertUnrelated(anchor, article(2, "AMD·인텔 합병 발표", body));
+        assertUnrelated(anchor, article(2, "[美증시 특징주] AMD 주가 상승", body));
+        assertUnrelated(anchor, article(2, "기업 주가 상승", "기업은 인수를 완료했다. " + body));
+    }
+
+    @Test
+    void structuredIndexSummaryCanFollowTheOpeningButRelatedArticlesCannotProvideEvidence() {
+        var anchor = article(1, "뉴욕증시 하락", "17일 뉴욕증시에서 다우지수는 하락 마감했다.");
+        String opening = "17일 뉴욕증시는 기술주를 중심으로 약세였다.\n";
+        String explanation = "시장의 투자 심리가 위축됐다.\n".repeat(55);
+        String summary = "주요 지수 요약\n다우존스30: 0.31% 내린 4만1234.50에 마감했다.\n나스닥 종합: 0.53% 내린 23456.78에 마감했다.";
+        assertMatch(anchor, article(2, "기술주 약세", opening + explanation + summary));
+        assertUnrelated(anchor, article(2, "기술주 약세", opening + explanation + "\n관련 기사\n" + summary));
+    }
+
+    @Test
+    void numericFallbackCannotPromoteOutlooksOtherMarketsOrMixedMarketRoundups() {
+        var anchor = article(1, "뉴욕증시 하락", "17일 뉴욕증시에서 다우지수는 0.31% 내린 41234.50에 마감했다. 나스닥은 0.53% 내린 23456.78에 마감했다.");
+        String close = "17일 뉴욕증시에서 다우지수는 0.31% 내린 41234.50에 마감했다. 나스닥은 0.53% 내린 23456.78에 마감했다.";
+        for (var other : List.of(
+                article(2, "기술주 상승 전망", close),
+                article(2, "뉴욕증시·코스피 약세", close),
+                article(2, "산업 수요 전망", "산업 변화가 기업의 사업에 미칠 영향에도 관심이 쏠린다.\n" + close),
+                article(2, "기술주 약세", "17일 뉴욕증시는 약세였다. 코스피는 0.31% 내린 41234.50을 기록했다. 코스닥은 0.53% 내린 23456.78을 기록했다."))) {
+            assertUnrelated(anchor, other);
+            assertFalse(evidence(anchor, other).marketReport(2), other.body());
+        }
+    }
+
+    @Test
+    void companyResultsAndIndividualPriceMovesCannotUseMarketNumbersAsTheirScope() {
+        var anchor = article(1, "뉴욕증시 하락", "17일 뉴욕증시에서 다우지수는 하락 마감했다.");
+        String background = "\n17일 뉴욕증시에서 다우지수는 0.31% 내린 41234.50에 마감했다. 나스닥은 0.53% 내린 23456.78에 마감했다.";
+        for (var other : List.of(
+                article(2, "엔비디아 사상 최대 실적 발표", "엔비디아는 분기 실적을 발표했다." + background),
+                article(2, "AMD 실적 부진에 급락", "AMD는 실적 부진으로 급락했다." + background),
+                article(2, "엔비디아 10% 급등", "엔비디아의 주가는 크게 올랐다." + background),
+                article(2, "[뉴욕증시] AMD 실적 발표", "AMD는 분기 실적을 발표했다." + background))) {
+            assertUnrelated(anchor, other);
+            assertFalse(evidence(anchor, other).marketReport(2));
+        }
     }
 
     private static void assertMatch(ClusterArticle first, ClusterArticle second) {

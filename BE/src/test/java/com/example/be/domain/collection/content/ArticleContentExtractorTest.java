@@ -44,6 +44,39 @@ class ArticleContentExtractorTest {
         assertFalse(body.contains("회사 소개"));
     }
 
+    @Test
+    void extractsTheNestedNewsBodyWithBreaksWithoutTakingItsLayoutOrRelatedStories() {
+        String html = """
+                <html><body><div class='con_left'>
+                  <div class='detail_box'><div class='news_contents'>
+                    <div class='vodPlayer'>영상 안내</div>
+                    <div class='con_sub'>한국은행이 <strong>기준금리</strong>를 동결했다.<br><br>시장 상황을 계속 점검한다.</div>
+                  </div></div>
+                  <div class='list_type_01b'><p>관련 기사 제목</p><p>다른 소식</p></div>
+                </div><div class='con_sub'>사이트 안내 문구다.</div></body></html>
+                """;
+
+        assertEquals("한국은행이 기준금리를 동결했다.\n\n시장 상황을 계속 점검한다.",
+                ArticleContentExtractor.extract(html, "https://publisher.example/story"));
+    }
+
+    @Test
+    void doesNotTreatEitherNestedNewsBodyClassAloneAsAnArticle() {
+        String text = "한국은행이 기준금리를 동결했다.";
+        for (String className : new String[] {"news_contents", "con_sub"}) {
+            assertNull(ArticleContentExtractor.extract("<div class='" + className + "'>" + text + "</div>",
+                    "https://publisher.example/story"));
+        }
+    }
+
+    @Test
+    void anEmptyNestedNewsBodyCannotBeFilledFromRelatedArticleParagraphs() {
+        String html = "<div class='news_contents'><div class='con_sub'></div></div>"
+                + "<div><p>" + PARAGRAPH + "</p><p>" + PARAGRAPH + "</p></div>";
+
+        assertNull(ArticleContentExtractor.extract(html, "https://publisher.example/story"));
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"itemprop='articleBody'", "id='articleBody'", "class='article-body'",
             "class='article_body'", "id='newsct_article'"})

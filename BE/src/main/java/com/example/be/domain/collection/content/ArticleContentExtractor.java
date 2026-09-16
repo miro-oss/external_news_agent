@@ -37,6 +37,7 @@ public final class ArticleContentExtractor {
             ".article-body",
             ".article_body",
             ".news-content",
+            ".news_contents .con_sub",
             "#newsct_article"
     );
 

@@ -42,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 
@@ -303,10 +304,11 @@ class ArticleContentEnricherIntegrationTests {
                 .active(true)
                 .build());
         observedArticle(ignoring);
-        given(contentClient.fetch(anyString(), any(), any())).willReturn(ArticleContentResult.fullText(BODY));
+        given(contentClient.fetch(anyString(), any(), any(), eq(false))).willReturn(ArticleContentResult.fullText(BODY));
 
         enricher.enrich(run.getId());
 
         then(robotsTxtClient).shouldHaveNoInteractions();
+        then(contentClient).should().fetch(anyString(), any(), any(), eq(false));
     }
 }

@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 
 /** An observed stock-index close, identified by its explicitly reported market and trading day. */
 final class MarketSessionEventEvidence {
-    private static final int CONTEXT_LIMIT = 900;
+    private static final int CONTEXT_LIMIT = 2200;
     private static final Pattern OBSERVATION = Pattern.compile(
             "상승|급등|폭등|강세|오름|오른|하락|급락|폭락|약세|내림|내린|혼조|반등|돌파|마감");
     private static final Pattern MARKET_SECTION = Pattern.compile(
@@ -44,6 +44,14 @@ final class MarketSessionEventEvidence {
                     + "(?:미칠\\s*영향|영향.{0,16}(?:관심|주목)|(?:지속|둔화|위축|감소|회복|확대).{0,16}(?:전망|예상|평가|분석|진단)|가능성.{0,16}(?:평가|분석|진단))");
     private static final Pattern REPORTING_SENTENCE = Pattern.compile("다[.!?](?:\\s|$)");
     private static final Pattern PHOTO_CREDIT = Pattern.compile("[\\[(]\\s*(?:자료\\s*)?(?:사진|이미지|그래픽)\\s*[=:：]");
+    private static final Pattern CORPORATE_EVENT = Pattern.compile(
+            "합병|인수|신제품|출시|공급\\s*계약|계약\\s*체결|분기\\s*배당|배당금|상장\\s*(?:완료|추진|신청)|기업공개|ipo");
+    private static final Pattern CORPORATE_RESULTS = Pattern.compile("실적|영업\\s*이익|순이익|매출|가이던스");
+    private static final Pattern NON_SESSION = Pattern.compile("특징주|개장|장중|출발|시간\\s*외|선물|회고|재조명");
+    private static final Pattern OUTLOOK_FOCUS = Pattern.compile("전망|예상|비관론|낙관론");
+    private static final Pattern SECTOR_ROUNDUP = Pattern.compile("종목|업종|관련주|반도체주|기술주|금융주|주들");
+    private static final Pattern MARKET_BACKGROUND = Pattern.compile(
+            "(?m)^\\s*(?:관련\\s*기사|다른\\s*기사|추천\\s*기사|국내\\s*(?:시장|증시)\\s*전망|저작권(?:자)?|copyright|광고)(?=\\s|$|[:：])");
 
     private final Map<Long, Profile> profiles = new HashMap<>();
     private final Set<Long> industryOutlooks = new HashSet<>();
@@ -55,23 +63,58 @@ final class MarketSessionEventEvidence {
             }
             String title = normalize(detector.coreTitle(article.title()));
             String lead = normalize(ArticleEvidenceText.foreground(article.body(), CONTEXT_LIMIT));
+            Matcher background = MARKET_BACKGROUND.matcher(lead);
+            if (background.find()) {
+                lead = lead.substring(0, background.start());
+            }
+            String opening = lead.substring(0, Math.min(lead.length(), 350));
+            Map<MarketIndexQuoteEvidence.Index, MarketIndexQuoteEvidence.Quote> quotes = MarketIndexQuoteEvidence.extract(lead);
+            boolean corporate = CORPORATE_EVENT.matcher(title).find() || corporateEventInOpening(title, opening);
+            boolean outlook = OUTLOOK_FOCUS.matcher(title).find() || industryOutlook(title, lead);
+            boolean sector = !corporate && sectorRoundup(title, opening);
             Set<Market> titleMarkets = new HashSet<>();
             for (Market market : Market.values()) {
                 if (market.headline.matcher(title).find()) {
                     titleMarkets.add(market);
                 }
             }
+            boolean singleCompanyFocus = new DeterministicEntityExtractor().extractTitleOrganizations(title).size() == 1
+                    && titleMarkets.isEmpty() && !SECTOR_ROUNDUP.matcher(title).find();
+            boolean unscopedResults = titleMarkets.isEmpty() && !SECTOR_ROUNDUP.matcher(title).find()
+                    && CORPORATE_RESULTS.matcher(title).find();
             // A roundup of different exchanges is not one market's closing session.
             boolean marketHeadline = OBSERVATION.matcher(title).find() || MARKET_SECTION.matcher(title).find();
-            if (titleMarkets.size() == 1 && marketHeadline && !OTHER_FOCUS.matcher(title).find()) {
-                Market market = titleMarkets.iterator().next();
-                LocalDate day = sessionDay(lead, market, article.eventTime());
-                if (day != null && observedIndexClose(lead, market, day, article.eventTime())) {
-                    profiles.put(article.articleId(), new Profile(market, day, article.eventTime()));
+            for (Market market : Market.values()) {
+                if (titleMarkets.size() > 1) {
                     continue;
                 }
+                boolean headlineScope = titleMarkets.size() == 1 && titleMarkets.contains(market)
+                        && marketHeadline && !OTHER_FOCUS.matcher(title).find();
+                Map<MarketIndexQuoteEvidence.Index, MarketIndexQuoteEvidence.Quote> marketQuotes = new HashMap<>();
+                quotes.forEach((index, quote) -> {
+                    if ((market == Market.US && index != MarketIndexQuoteEvidence.Index.KOSPI && index != MarketIndexQuoteEvidence.Index.KOSDAQ)
+                            || (market == Market.KOSPI && index == MarketIndexQuoteEvidence.Index.KOSPI)
+                            || (market == Market.KOSDAQ && index == MarketIndexQuoteEvidence.Index.KOSDAQ)) {
+                        marketQuotes.put(index, quote);
+                    }
+                });
+                boolean numericScope = market == Market.US && marketQuotes.size() >= 2
+                        && (market.venue.matcher(opening).find() || sector || market.index.matcher(opening).find())
+                        && (!title.contains("주가") || sector);
+                boolean sectorScope = market == Market.US && sector
+                        && marketQuotes.containsKey(MarketIndexQuoteEvidence.Index.SOX);
+                if (corporate || singleCompanyFocus || unscopedResults || outlook || NON_SESSION.matcher(title).find()
+                        || !(headlineScope || numericScope || sectorScope)) {
+                    continue;
+                }
+                LocalDate day = sessionDay(lead, market, article.eventTime());
+                boolean closed = day != null && observedIndexClose(lead, market, day, article.eventTime());
+                if (day != null && (closed || numericScope)) {
+                    profiles.put(article.articleId(), new Profile(market, day, article.eventTime(), closed, Map.copyOf(marketQuotes)));
+                }
             }
-            if (industryOutlook(title, lead) && !containsDatedClose(lead, article.eventTime())) {
+            if (!profiles.containsKey(article.articleId()) && industryOutlook(title, lead)
+                    && !containsDatedClose(lead, article.eventTime())) {
                 industryOutlooks.add(article.articleId());
             }
         }
@@ -81,7 +124,14 @@ final class MarketSessionEventEvidence {
         Profile a = profiles.get(left);
         Profile b = profiles.get(right);
         return sameMarket(a, b) && a.day().equals(b.day())
-                && Duration.between(a.reportedAt(), b.reportedAt()).abs().compareTo(Duration.ofHours(48)) <= 0;
+                && Duration.between(a.reportedAt(), b.reportedAt()).abs().compareTo(Duration.ofHours(48)) <= 0
+                && ((a.closed() && b.closed()) || ((a.closed() || b.closed())
+                && MarketIndexQuoteEvidence.matches(a.quotes(), b.quotes())));
+    }
+
+    /** Market-report scope, not proof of a close: numeric snapshots may still need an actual-close anchor. */
+    boolean marketReport(long articleId) {
+        return profiles.containsKey(articleId);
     }
 
     /** A close conflicts with a different session or a clearly separate industry-outlook report. */
@@ -95,6 +145,32 @@ final class MarketSessionEventEvidence {
 
     private static boolean sameMarket(Profile a, Profile b) {
         return a != null && b != null && a.market() == b.market();
+    }
+
+    private static boolean sectorRoundup(String title, String opening) {
+        if (!SECTOR_ROUNDUP.matcher(opening).find() || !OBSERVATION.matcher(opening).find()) {
+            return false;
+        }
+        return SECTOR_ROUNDUP.matcher(title).find()
+                || new DeterministicEntityExtractor().extractTitleOrganizations(title).size() >= 2;
+    }
+
+    private static boolean corporateEventInOpening(String title, String opening) {
+        // A market summary may explain a constituent's later corporate news; only the opening focus vetoes.
+        for (String paragraph : opening.split("\\n+")) {
+            String text = paragraph.strip();
+            if (text.equals(title) || PHOTO_CREDIT.matcher(text).find()) {
+                continue;
+            }
+            Matcher reporting = REPORTING_SENTENCE.matcher(text);
+            if (reporting.find()) {
+                String first = text.substring(0, reporting.end());
+                return CORPORATE_EVENT.matcher(first).find()
+                        || (CORPORATE_RESULTS.matcher(first).find()
+                        && new DeterministicEntityExtractor().extractOrganizations(first, null).size() == 1);
+            }
+        }
+        return false;
     }
 
     private static boolean containsDatedClose(String lead, OffsetDateTime time) {
@@ -151,8 +227,11 @@ final class MarketSessionEventEvidence {
 
     private static boolean attachedMarket(String before, String after, Market market) {
         Matcher suffix = DATE_TO_MARKET.matcher(after);
-        if (suffix.find() && market.venue.matcher(after.substring(suffix.end())).lookingAt()) {
-            return true;
+        if (suffix.find()) {
+            String next = after.substring(suffix.end());
+            if (market.venue.matcher(next).lookingAt() || market.index.matcher(next).lookingAt()) {
+                return true;
+            }
         }
         Matcher venue = market.venue.matcher(before);
         while (venue.find()) {
@@ -236,5 +315,6 @@ final class MarketSessionEventEvidence {
         }
     }
 
-    private record Profile(Market market, LocalDate day, OffsetDateTime reportedAt) {}
+    private record Profile(Market market, LocalDate day, OffsetDateTime reportedAt, boolean closed,
+                           Map<MarketIndexQuoteEvidence.Index, MarketIndexQuoteEvidence.Quote> quotes) {}
 }

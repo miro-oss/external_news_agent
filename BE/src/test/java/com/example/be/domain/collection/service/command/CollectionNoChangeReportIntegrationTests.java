@@ -53,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -101,7 +102,7 @@ class CollectionNoChangeReportIntegrationTests {
         articleUrl = "https://example.com/articles/" + suffix;
         when(robotsPolicyService.evaluate(any())).thenAnswer(invocation ->
                 RobotsDecision.skipped(invocation.getArgument(0)));
-        when(contentClient.fetch(any(), any(), any())).thenReturn(
+        when(contentClient.fetch(any(), any(), any(), eq(false))).thenReturn(
                 ArticleContentResult.fullText("HBM 양산 일정을 발표했다. 고객사에 공급할 제품의 양산 계획을 확인했다."));
     }
 
@@ -211,7 +212,7 @@ class CollectionNoChangeReportIntegrationTests {
         source = sourceRepository.findById(source.getId()).orElseThrow();
         source.update(source.getName(), source.getUrlTemplate(), source.getCountry(), source.getLanguage(),
                 new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 10, true), source.getReliabilityScore(), true);
-        when(contentClient.fetch(articleUrl, null, "HBM 양산 일정 발표")).thenReturn(
+        when(contentClient.fetch(articleUrl, null, "HBM 양산 일정 발표", false)).thenReturn(
                 ArticleContentResult.fullText("HBM 양산 일정에 대한 상세 내용을 새 본문으로 확보했다."));
 
         CollectionRun refreshed = execute(TriggerType.SCHEDULED);
@@ -221,7 +222,7 @@ class CollectionNoChangeReportIntegrationTests {
         assertEquals(0, refreshed.getUpdatedCount());
         assertEquals(1, observationRepository.countByRunIdAndChangeType(refreshed.getId(), ChangeType.UNCHANGED));
         assertTrue(findingRepository.existsByRunId(refreshed.getId()));
-        verify(contentClient).fetch(articleUrl, null, "HBM 양산 일정 발표");
+        verify(contentClient).fetch(articleUrl, null, "HBM 양산 일정 발표", false);
     }
 
     @Test

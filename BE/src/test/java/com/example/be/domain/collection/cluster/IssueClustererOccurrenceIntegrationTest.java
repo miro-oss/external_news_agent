@@ -62,6 +62,21 @@ class IssueClustererOccurrenceIntegrationTest {
         assertTrue(call.pairScores().getFirst().specificEventMatch());
     }
 
+    @Test
+    void quantifiedCapacityTargetsConnectAndConflictingTargetsStillVetoTitleEdges() {
+        String body = "한빛반도체는 생산능력 확대 계획을 공개했다. "
+                + "4나노 월 생산량은 내년 중반 7만장으로 확대할 계획이다. "
+                + "6나노 월 생산량은 내년 중반 9만장으로 확대할 계획이다.";
+        var first = article(1, "한빛반도체, 선단 공정 증산 확대", body, 0);
+        var second = article(2, "한빛반도체, 생산능력 청사진 발표",
+                body.replace("내년", "2027년").replace("7만장", "70,000장").replace("9만장", "90천장"), 1);
+        var connected = clusterer.cluster(List.of(first, second), true);
+        assertTrue(connected.pairScores().getFirst().specificEventMatch());
+        assertEquals(1, connected.issues().size());
+        var changed = article(3, first.title(), body.replace("7만장", "8만장"), 1);
+        assertEquals(2, clusterer.cluster(List.of(first, changed)).issues().size());
+    }
+
     private static ClusterArticle article(long id, String title, String body, int hours) {
         var time = OffsetDateTime.parse("2026-06-18T09:00:00+09:00").plusHours(hours);
         return new ClusterArticle(id, 1, title, null, body, FetchStatus.FULLTEXT, id, "fixture-" + id,
