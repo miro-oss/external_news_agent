@@ -52,9 +52,17 @@ final class MarketSessionEventEvidence {
     private static final Pattern SECTOR_ROUNDUP = Pattern.compile("종목|업종|관련주|반도체주|기술주|금융주|주들");
     private static final Pattern MARKET_BACKGROUND = Pattern.compile(
             "(?m)^\\s*(?:관련\\s*기사|다른\\s*기사|추천\\s*기사|국내\\s*(?:시장|증시)\\s*전망|저작권(?:자)?|copyright|광고)(?=\\s|$|[:：])");
+    private static final Pattern NOT_CURRENT_OBSERVATION = Pattern.compile(
+            "장중|한때|장\\s*초반|개장|시간\\s*외|선물|전망|예상|가능성|가정|[?？]");
+    private static final Pattern OBSERVED_MOVEMENT = Pattern.compile(
+            "(?:상승|급등|폭등|하락|급락|폭락|반등|혼조)했"
+                    + "|(?:강세|약세|혼조세|하락세|상승세)(?:를|가)?\\s*(?:보였|나타냈)"
+                    + "|올랐|내렸|떨어졌|뛰었");
+    private static final Pattern MARKET_SUBJECT = Pattern.compile("^(?:은|는|이|가)\\s*");
 
     private final Map<Long, Profile> profiles = new HashMap<>();
     private final Set<Long> industryOutlooks = new HashSet<>();
+    private final Set<Long> roundupsForConflict = new HashSet<>();
 
     MarketSessionEventEvidence(List<ClusterArticle> articles, BreakingNewsDetector detector) {
         for (ClusterArticle article : articles) {
@@ -68,6 +76,7 @@ final class MarketSessionEventEvidence {
                 lead = lead.substring(0, background.start());
             }
             String opening = lead.substring(0, Math.min(lead.length(), 350));
+            String firstReport = firstReportingSentence(title, opening);
             Map<MarketIndexQuoteEvidence.Index, MarketIndexQuoteEvidence.Quote> quotes = MarketIndexQuoteEvidence.extract(lead);
             boolean corporate = CORPORATE_EVENT.matcher(title).find() || corporateEventInOpening(title, opening);
             boolean outlook = OUTLOOK_FOCUS.matcher(title).find() || industryOutlook(title, lead);
@@ -84,6 +93,15 @@ final class MarketSessionEventEvidence {
                     && CORPORATE_RESULTS.matcher(title).find();
             // A roundup of different exchanges is not one market's closing session.
             boolean marketHeadline = OBSERVATION.matcher(title).find() || MARKET_SECTION.matcher(title).find();
+            // Knowing that this is a market roundup can reject an industry-outlook
+            // pairing, without guessing a trading day or creating positive identity.
+            if (!corporate && !outlook && !NON_SESSION.matcher(title).find()
+                    && titleMarkets.size() <= 1 && currentMarketObservation(firstReport, Market.US)
+                    && SECTOR_ROUNDUP.matcher(firstReport).find()
+                    && (Market.US.headline.matcher(title).find() || title.contains("증시")
+                    || sectorRoundup(title, firstReport))) {
+                roundupsForConflict.add(article.articleId());
+            }
             for (Market market : Market.values()) {
                 if (titleMarkets.size() > 1) {
                     continue;
@@ -103,14 +121,18 @@ final class MarketSessionEventEvidence {
                         && (!title.contains("주가") || sector);
                 boolean sectorScope = market == Market.US && sector
                         && marketQuotes.containsKey(MarketIndexQuoteEvidence.Index.SOX);
+                LocalDate primaryDay = primaryMarketDay(firstReport, market, article.eventTime());
+                boolean primarySectorSnapshot = market == Market.US && primaryDay != null
+                        && marketQuotes.containsKey(MarketIndexQuoteEvidence.Index.SOX);
                 if (corporate || singleCompanyFocus || unscopedResults || outlook || NON_SESSION.matcher(title).find()
-                        || !(headlineScope || numericScope || sectorScope)) {
+                        || !(headlineScope || numericScope || sectorScope || primarySectorSnapshot)) {
                     continue;
                 }
                 LocalDate day = sessionDay(lead, market, article.eventTime());
                 boolean closed = day != null && observedIndexClose(lead, market, day, article.eventTime());
-                if (day != null && (closed || numericScope)) {
-                    profiles.put(article.articleId(), new Profile(market, day, article.eventTime(), closed, Map.copyOf(marketQuotes)));
+                if (day != null && (closed || numericScope || (primarySectorSnapshot && day.equals(primaryDay)))) {
+                    profiles.put(article.articleId(), new Profile(market, day, article.eventTime(), closed,
+                            !closed && !numericScope && primarySectorSnapshot, Map.copyOf(marketQuotes)));
                 }
             }
             if (!profiles.containsKey(article.articleId()) && industryOutlook(title, lead)
@@ -123,10 +145,16 @@ final class MarketSessionEventEvidence {
     boolean matches(long left, long right) {
         Profile a = profiles.get(left);
         Profile b = profiles.get(right);
-        return sameMarket(a, b) && a.day().equals(b.day())
-                && Duration.between(a.reportedAt(), b.reportedAt()).abs().compareTo(Duration.ofHours(48)) <= 0
-                && ((a.closed() && b.closed()) || ((a.closed() || b.closed())
-                && MarketIndexQuoteEvidence.matches(a.quotes(), b.quotes())));
+        if (!sameMarket(a, b) || !a.day().equals(b.day())
+                || Duration.between(a.reportedAt(), b.reportedAt()).abs().compareTo(Duration.ofHours(48)) > 0) {
+            return false;
+        }
+        if (a.primarySectorSnapshot() || b.primarySectorSnapshot()) {
+            return (a.closed() || b.closed())
+                    && MarketIndexQuoteEvidence.matchesExactSectorQuote(a.quotes(), b.quotes());
+        }
+        return (a.closed() && b.closed()) || ((a.closed() || b.closed())
+                && MarketIndexQuoteEvidence.matches(a.quotes(), b.quotes()));
     }
 
     /** Market-report scope, not proof of a close: numeric snapshots may still need an actual-close anchor. */
@@ -139,8 +167,8 @@ final class MarketSessionEventEvidence {
         Profile a = profiles.get(left);
         Profile b = profiles.get(right);
         return (sameMarket(a, b) && !a.day().equals(b.day()))
-                || (a != null && industryOutlooks.contains(right))
-                || (b != null && industryOutlooks.contains(left));
+                || ((a != null || roundupsForConflict.contains(left)) && industryOutlooks.contains(right))
+                || ((b != null || roundupsForConflict.contains(right)) && industryOutlooks.contains(left));
     }
 
     private static boolean sameMarket(Profile a, Profile b) {
@@ -153,6 +181,41 @@ final class MarketSessionEventEvidence {
         }
         return SECTOR_ROUNDUP.matcher(title).find()
                 || new DeterministicEntityExtractor().extractTitleOrganizations(title).size() >= 2;
+    }
+
+    private static String firstReportingSentence(String title, String opening) {
+        for (String paragraph : opening.split("\\n+")) {
+            String text = paragraph.strip();
+            if (text.equals(title) || PHOTO_CREDIT.matcher(text).find()) {
+                continue;
+            }
+            Matcher reporting = REPORTING_SENTENCE.matcher(text);
+            if (reporting.find()) {
+                return text.substring(0, reporting.end());
+            }
+        }
+        return "";
+    }
+
+    private static boolean currentMarketObservation(String firstReport, Market market) {
+        return market.venue.matcher(firstReport).find() && OBSERVED_MOVEMENT.matcher(firstReport).find()
+                && !BACKGROUND_CLOSE.matcher(firstReport).find()
+                && !NOT_CURRENT_OBSERVATION.matcher(firstReport).find();
+    }
+
+    private static LocalDate primaryMarketDay(String firstReport, Market market, OffsetDateTime time) {
+        if (!currentMarketObservation(firstReport, market)) {
+            return null;
+        }
+        Matcher venue = market.venue.matcher(firstReport);
+        while (venue.find()) {
+            // A sector/company move "in New York" is not a report about the whole
+            // market, even when its background contains the same index quote.
+            if (MARKET_SUBJECT.matcher(firstReport.substring(venue.end())).find()) {
+                return sessionDay(firstReport, market, time);
+            }
+        }
+        return null;
     }
 
     private static boolean corporateEventInOpening(String title, String opening) {
@@ -316,5 +379,6 @@ final class MarketSessionEventEvidence {
     }
 
     private record Profile(Market market, LocalDate day, OffsetDateTime reportedAt, boolean closed,
+                           boolean primarySectorSnapshot,
                            Map<MarketIndexQuoteEvidence.Index, MarketIndexQuoteEvidence.Quote> quotes) {}
 }

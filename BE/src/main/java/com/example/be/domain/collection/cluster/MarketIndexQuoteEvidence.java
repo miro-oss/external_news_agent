@@ -96,6 +96,26 @@ final class MarketIndexQuoteEvidence {
         return sameRates >= 2 && sameLevel;
     }
 
+    /** A primary-market snapshot needs the exact sector quote and no contradictory shared quote. */
+    static boolean matchesExactSectorQuote(Map<Index, Quote> first, Map<Index, Quote> second) {
+        Quote sector = first.get(Index.SOX);
+        Quote otherSector = second.get(Index.SOX);
+        if (sector == null || otherSector == null || !sameQuote(sector, otherSector)) {
+            return false;
+        }
+        for (var entry : first.entrySet()) {
+            Quote other = second.get(entry.getKey());
+            if (other != null && !sameQuote(entry.getValue(), other)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean sameQuote(Quote first, Quote second) {
+        return first.rate().compareTo(second.rate()) == 0 && first.level().compareTo(second.level()) == 0;
+    }
+
     private static Quote quote(String clause) {
         if (NON_FINAL.matcher(clause).find() || OTHER_SUBJECT.matcher(clause).find()
                 || PAST_AFTER_SUBJECT.matcher(clause).find()) {

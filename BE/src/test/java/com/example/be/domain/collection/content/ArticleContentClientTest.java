@@ -550,4 +550,111 @@ class ArticleContentClientTest {
         assertEquals(1, probe.created(), probe + "을 부르지 않았다");
         assertEquals(probe.created(), probe.closed(), probe + "을 닫지 않았다");
     }
+    @Test
+    void obtainsAnExplicitPublicResourceOnlyAfterCheckingItsOwnRobotsAndCrawlDelay() {
+        DomainRateLimiter limiter = mock(DomainRateLimiter.class);
+        ArticleContentClient resourceClient = new ArticleContentClient(builder, limiter, robots,
+                "external-news-agent", 3, 0L, 0L);
+        when(robots.lookup(PublicArticleResourceTest.RESOURCE)).thenReturn(RobotsLookup.fetched(
+                "https://publisher.example/robots.txt", RobotsRules.parse(
+                        "User-agent: *\nCrawl-delay: 3", "external-news-agent")));
+        server.expect(requestTo(PublicArticleResourceTest.ARTICLE))
+                .andRespond(withSuccess(PublicArticleResourceTest.page(), MediaType.TEXT_HTML));
+        server.expect(requestTo(PublicArticleResourceTest.RESOURCE))
+                .andExpect(header(HttpHeaders.USER_AGENT, "external-news-agent"))
+                .andRespond(withSuccess(PublicArticleResourceTest.json(), MediaType.APPLICATION_JSON));
+
+        assertEquals(FetchStatus.FULLTEXT, resourceClient.fetch(PublicArticleResourceTest.ARTICLE, null).status());
+        var order = inOrder(limiter, robots);
+        order.verify(limiter).await(PublicArticleResourceTest.ARTICLE, null);
+        order.verify(limiter).await(PublicArticleResourceTest.RESOURCE, null);
+        order.verify(robots).lookup(PublicArticleResourceTest.RESOURCE);
+        order.verify(limiter).await(PublicArticleResourceTest.RESOURCE, Duration.ofSeconds(3));
+        order.verifyNoMoreInteractions();
+        server.verify();
+    }
+
+    @Test
+    void neverRequestsAResourceExplicitlyDisallowedByRobots() {
+        when(robots.lookup(PublicArticleResourceTest.RESOURCE)).thenReturn(RobotsLookup.fetched(
+                "https://publisher.example/robots.txt", RobotsRules.parse(
+                        "User-agent: *\nDisallow: /data/", "external-news-agent")));
+        server.expect(requestTo(PublicArticleResourceTest.ARTICLE))
+                .andRespond(withSuccess(PublicArticleResourceTest.page(), MediaType.TEXT_HTML));
+        assertEquals(FetchStatus.ROBOTS_DISALLOWED, client.fetch(PublicArticleResourceTest.ARTICLE, null).status());
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"HTTP_401", "HTTP_403", "HTTP_451"})
+    void stopsTheResourceFallbackWhenItsRobotsEndpointExplicitlyDeniesAccess(String reason) {
+        when(robots.lookup(PublicArticleResourceTest.RESOURCE)).thenReturn(RobotsLookup.unknown(
+                "https://publisher.example/robots.txt", reason));
+        server.expect(requestTo(PublicArticleResourceTest.ARTICLE))
+                .andRespond(withSuccess(PublicArticleResourceTest.page(), MediaType.TEXT_HTML));
+        assertEquals(FetchStatus.FETCH_FAILED, client.fetch(PublicArticleResourceTest.ARTICLE, null).status());
+        server.verify();
+    }
+
+    @Test
+    void anExplicitIgnorePolicySkipsResourceRobotsButStillRequestsOnlyTheProvenResource() {
+        server.expect(requestTo(PublicArticleResourceTest.ARTICLE))
+                .andRespond(withSuccess(PublicArticleResourceTest.page(), MediaType.TEXT_HTML));
+        server.expect(requestTo(PublicArticleResourceTest.RESOURCE))
+                .andRespond(withSuccess(PublicArticleResourceTest.json(), MediaType.APPLICATION_JSON));
+        assertEquals(FetchStatus.FULLTEXT, client.fetch(PublicArticleResourceTest.ARTICLE, null, null, false).status());
+        verifyNoInteractions(robots);
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {301, 302, 401, 403, 451, 429, 500})
+    void resourceRedirectsDenialsAndErrorsDoNotStartAnotherRequestOrRetry(int status) {
+        ArticleContentClient resourceClient = new ArticleContentClient(builder, rateLimiter, robots,
+                "external-news-agent", 3, 0L, 0L);
+        when(robots.lookup(PublicArticleResourceTest.RESOURCE)).thenReturn(RobotsLookup.fetched(
+                "https://publisher.example/robots.txt", RobotsRules.permitAll()));
+        server.expect(requestTo(PublicArticleResourceTest.ARTICLE))
+                .andRespond(withSuccess(PublicArticleResourceTest.page(), MediaType.TEXT_HTML));
+        server.expect(requestTo(PublicArticleResourceTest.RESOURCE)).andRespond(withStatus(HttpStatus.valueOf(status))
+                .header(HttpHeaders.LOCATION, "https://other.example/never-fetch"));
+        assertEquals(FetchStatus.FETCH_FAILED, resourceClient.fetch(PublicArticleResourceTest.ARTICLE, null).status());
+        server.verify();
+    }
+
+    @Test
+    void existingHtmlBodyDoesNotRequestTheAdditionalResource() {
+        String page = PublicArticleResourceTest.page().replace("<div id=\"view_content_body\"></div>",
+                "<div id=\"view_content_body\"><p>" + PublicArticleResourceTest.BODY + "</p></div>");
+        server.expect(requestTo(PublicArticleResourceTest.ARTICLE)).andRespond(withSuccess(page, MediaType.TEXT_HTML));
+        assertEquals(FetchStatus.FULLTEXT, client.fetch(PublicArticleResourceTest.ARTICLE, null).status());
+        verifyNoInteractions(robots);
+        server.verify();
+    }
+
+    @Test
+    void resourceMustBeJsonAndRemainWithinTheArticleSizeLimit() {
+        when(robots.lookup(PublicArticleResourceTest.RESOURCE)).thenReturn(RobotsLookup.fetched(
+                "https://publisher.example/robots.txt", RobotsRules.permitAll()));
+        server.expect(requestTo(PublicArticleResourceTest.ARTICLE))
+                .andRespond(withSuccess(PublicArticleResourceTest.page(), MediaType.TEXT_HTML));
+        server.expect(requestTo(PublicArticleResourceTest.RESOURCE))
+                .andRespond(withSuccess(PublicArticleResourceTest.json(), MediaType.APPLICATION_JSON)
+                        .header(HttpHeaders.CONTENT_LENGTH, Integer.toString(2 * 1024 * 1024 + 1)));
+        assertEquals(FetchStatus.FETCH_FAILED, client.fetch(PublicArticleResourceTest.ARTICLE, null).status());
+        server.verify();
+    }
+
+    @Test
+    void resourceWithHtmlContentTypeDoesNotBecomeAnArticleBody() {
+        when(robots.lookup(PublicArticleResourceTest.RESOURCE)).thenReturn(RobotsLookup.fetched(
+                "https://publisher.example/robots.txt", RobotsRules.permitAll()));
+        server.expect(requestTo(PublicArticleResourceTest.ARTICLE))
+                .andRespond(withSuccess(PublicArticleResourceTest.page(), MediaType.TEXT_HTML));
+        server.expect(requestTo(PublicArticleResourceTest.RESOURCE))
+                .andRespond(withSuccess(PublicArticleResourceTest.json(), MediaType.TEXT_HTML));
+        assertEquals(FetchStatus.FETCH_FAILED, client.fetch(PublicArticleResourceTest.ARTICLE, null).status());
+        server.verify();
+    }
+
 }

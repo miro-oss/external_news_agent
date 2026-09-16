@@ -12,6 +12,49 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NamedEventEvidenceTest {
     @Test
+    void aCreditedPhotoBetweenTheOpeningAndAgreementCannotHideTheActualPartnership() {
+        var first = partnership(1, "해솔컴퓨팅", "12일", "NPU AX OS");
+        var second = article(2, "새빛, 기술 시장 진출",
+                "새빛은 기술 공급 체계를 구축한다.\n\n"
+                        + "양사 관계자들이 업무협약 체결 뒤 기념촬영을 하고 있다. (사진=새빛)\n\n"
+                        + "12일 새빛은 해솔컴퓨팅과 NPU AX OS 사업 업무협약을 체결했다고 밝혔다.");
+        assertTrue(evidence(first, second).matches(1, 2));
+        assertFalse(evidence(first, second).conflicts(1, 2));
+    }
+
+    @Test
+    void aPhotoCannotSupplyAPartnerOrDateMissingFromTheActualReport() {
+        var first = partnership(1, "해솔컴퓨팅", "12일", "NPU AX OS");
+        var second = article(2, "새빛, 기술 사업 확대",
+                "새빛은 기술 공급 체계를 구축한다.\n"
+                        + "새빛은 12일 해솔컴퓨팅과 NPU AX OS 업무협약 체결 뒤 기념촬영을 하고 있다. (사진=새빛)\n"
+                        + "기업들은 기술 시장의 흐름을 살피고 있다.");
+        assertFalse(evidence(first, second).matches(1, 2));
+        assertFalse(evidence(first, second).conflicts(1, 2));
+    }
+
+    @Test
+    void aRemovedPhotoDoesNotEraseTheActualDifferentPartnerConflict() {
+        var first = partnership(1, "해솔컴퓨팅", "12일", "NPU AX OS");
+        var second = article(2, "새빛, 기술 사업 확대",
+                "새빛은 기술 공급 체계를 구축한다.\n"
+                        + "새빛은 12일 해솔컴퓨팅과 업무협약 체결 뒤 기념촬영을 하고 있다. (사진=새빛)\n"
+                        + "새빛은 12일 푸른컴퓨팅과 NPU AX OS 업무협약을 체결했다.");
+        assertFalse(evidence(first, second).matches(1, 2));
+        assertTrue(evidence(first, second).conflicts(1, 2));
+    }
+
+    @Test
+    void mixedReportingAndCaptionLinesKeepTheirActualPartnershipEvidence() {
+        var first = partnership(1, "해솔컴퓨팅", "12일", "NPU AX OS");
+        var second = article(2, "새빛, 기술 사업 확대",
+                "새빛은 기술 공급 체계를 구축한다.\n"
+                        + "새빛은 12일 해솔컴퓨팅과 NPU AX OS 업무협약을 체결했다. "
+                        + "관계자들이 기념촬영을 하고 있다. (사진=새빛)");
+        assertTrue(evidence(first, second).matches(1, 2));
+    }
+
+    @Test
     void joinsTheSameDatedTechnicalPartnershipWithOnlyASummaryForOneArticle() {
         var first = article(1, "새빛, 해솔컴퓨팅과 공공기관 사업 제휴",
                 "새빛은 계열사 새빛교육, 반도체 기업 해솔컴퓨팅(대표 김가온)과 손잡고 시장을 확대한다. "

@@ -288,6 +288,81 @@ class MarketSessionEventEvidenceTest {
         }
     }
 
+    @Test
+    void undatedMarketRoundupOnlyConflictsWithStrictIndustryOutlooks() {
+        var roundup = article(1, "인텔·AMD 희비 엇갈린 증시…반도체주 하락",
+                "간밤 뉴욕증시에서는 반도체와 인프라 관련주가 하락했다. 소프트웨어 업종은 반등했다.");
+        var outlook = article(2, "메모리 비관론은 아직",
+                "기술 개발 논쟁이 기업의 사업에 미칠 영향에도 관심이 쏠린다.");
+        var pair = evidence(roundup, outlook);
+        assertTrue(pair.conflicts(1, 2));
+        assertTrue(pair.conflicts(2, 1));
+        assertFalse(pair.matches(1, 2));
+        assertFalse(pair.marketReport(1));
+        var close = article(3, "뉴욕증시 하락", "17일 뉴욕증시에서 다우지수는 하락 마감했다.");
+        assertUnrelated(roundup, close);
+    }
+
+    @Test
+    void roundupConflictCannotComeFromPredictionsCorporateEventsOrBackground() {
+        var outlook = article(1, "메모리 비관론은 아직",
+                "기술 개발 논쟁이 기업의 사업에 미칠 영향에도 관심이 쏠린다.");
+        for (var other : List.of(
+                article(2, "인텔·AMD 증시 희비", "뉴욕증시에서 반도체 관련주가 상승할 가능성이 제기됐다."),
+                article(2, "인텔·AMD 증시 희비", "뉴욕증시에서 반도체 관련주가 상승할 것으로 예상했다."),
+                article(2, "인텔·AMD 증시 희비", "뉴욕증시에서 반도체 관련주가 장중 상승했다."),
+                article(2, "인텔·AMD 증시 희비", "과거 뉴욕증시에서 반도체 관련주가 상승했다."),
+                article(2, "인텔·AMD 공급 계약 체결", "뉴욕증시에서 공급 계약을 체결한 반도체 관련주가 상승했다."),
+                article(2, "인텔·AMD 증시 희비", "새로운 기술이 공개됐다. 뉴욕증시에서는 반도체 관련주가 하락했다."))) {
+            assertUnrelated(outlook, other);
+        }
+    }
+
+    @Test
+    void primaryDatedMarketSnapshotNeedsAnExactSectorQuoteAndActualClose() {
+        String quote = "필라델피아 반도체 지수는 전장보다 100.25포인트(2.35%) 하락한 4천200.50을 나타냈다.";
+        var snapshot = article(1, "오늘 증시 이슈…코스피 외국인 동향",
+                "뉴욕 증시가 17일(현지시간) 일제히 하락했습니다. " + quote);
+        var close = article(2, "미국 증시 하락",
+                "17일 뉴욕증시는 약세를 보였다. 필라델피아 반도체지수는 2.35% 내린 4200.50에 마감했다.");
+        assertMatch(snapshot, close);
+        assertTrue(evidence(snapshot, close).marketReport(1));
+        var otherSnapshot = article(3, snapshot.title(), snapshot.body());
+        assertFalse(evidence(snapshot, otherSnapshot).matches(1, 3));
+        for (String mismatch : List.of("2.36% 내린 4200.50", "2.35% 내린 4200.51", "2.35% 오른 4200.50")) {
+            assertUnrelated(snapshot, article(2, close.title(),
+                    "17일 뉴욕증시에서 필라델피아 반도체지수는 " + mismatch + "에 마감했다."));
+        }
+        assertUnrelated(snapshot, article(2, close.title(), "17일 뉴욕증시에서 다우지수는 하락 마감했다."));
+        var previous = article(2, close.title(), close.body().replace("17일", "16일"));
+        assertFalse(evidence(snapshot, previous).matches(1, 2));
+        assertTrue(evidence(snapshot, previous).conflicts(1, 2));
+    }
+
+    @Test
+    void singleSectorQuoteCannotBorrowItsScopeFromBackgroundOrIntradayReports() {
+        String quote = "필라델피아 반도체지수는 2.35% 하락한 4200.50을 기록했다.";
+        var close = article(1, "뉴욕증시 하락",
+                "17일 뉴욕증시에서 필라델피아 반도체지수는 2.35% 내린 4200.50에 마감했다.");
+        for (String opening : List.of(
+                "뉴욕증시가 일제히 하락했다. ",
+                "뉴욕증시가 17일 장중 하락했다. ",
+                "뉴욕증시가 17일 상승할 가능성이 제기됐다. ",
+                "업계가 전망을 내놨다. 뉴욕증시가 17일 하락했다. ",
+                "17일 뉴욕증시에서 사이버보안 관련주가 상승했다. ",
+                "뉴욕증시가 지난달 17일 일제히 하락했다. ",
+                "뉴욕증시가 17일 하락했다. 16일 뉴욕증시가 하락했다. ")) {
+            assertUnrelated(close, article(2, "오늘 증시 이슈…코스피 외국인 동향", opening + quote));
+        }
+        for (String title : List.of("엔비디아 신제품 출시", "산업 수요 전망", "뉴욕증시와 코스피 하락")) {
+            assertUnrelated(close, article(2, title, "뉴욕증시가 17일 하락했다. " + quote));
+        }
+        for (String observation : List.of("장중 ", "전날 ", "한때 ")) {
+            assertUnrelated(close, article(2, "오늘 증시 이슈…코스피 외국인 동향",
+                    "뉴욕증시가 17일 하락했다. " + observation + quote));
+        }
+    }
+
     private static void assertMatch(ClusterArticle first, ClusterArticle second) {
         var pair = evidence(first, second);
         assertTrue(pair.matches(first.articleId(), second.articleId()), second.body());

@@ -77,4 +77,22 @@ class MarketIndexQuoteEvidenceTest {
             assertTrue(MarketIndexQuoteEvidence.extract(text).isEmpty(), text);
         }
     }
+
+    @Test
+    void exactSectorAnchorRejectsAnyContradictorySharedLevelOrSignedRate() {
+        String sector = "필라델피아 반도체지수는 2.35% 내린 4200.50에 마감했다. ";
+        var anchor = MarketIndexQuoteEvidence.extract(sector + "다우는 0.31% 내린 41234.50에 마감했다.");
+        assertTrue(MarketIndexQuoteEvidence.matchesExactSectorQuote(anchor,
+                MarketIndexQuoteEvidence.extract("SOX는 2.350% 내린 4천200.5를 기록했다.")));
+        for (String quote : java.util.List.of(
+                "다우는 0.31% 내린 41234.51에 마감했다.",
+                "다우는 0.31% 오른 41234.50에 마감했다.",
+                "다우는 0.32% 내린 41234.50에 마감했다.")) {
+            var other = MarketIndexQuoteEvidence.extract(sector + quote);
+            assertFalse(MarketIndexQuoteEvidence.matchesExactSectorQuote(anchor, other));
+            assertFalse(MarketIndexQuoteEvidence.matchesExactSectorQuote(other, anchor));
+        }
+        assertFalse(MarketIndexQuoteEvidence.matchesExactSectorQuote(anchor,
+                MarketIndexQuoteEvidence.extract("다우는 0.31% 내린 41234.50에 마감했다.")));
+    }
 }

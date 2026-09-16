@@ -11,6 +11,7 @@ import org.springframework.util.StringUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.net.URI;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +39,8 @@ public final class ArticleContentExtractor {
             ".article_body",
             ".news-content",
             ".news_contents .con_sub",
+            "div[id$=_WebNewsView_ltContentDiv].rns_text",
+            "#joinskmbox",
             "#newsct_article"
     );
 
@@ -140,6 +143,10 @@ public final class ArticleContentExtractor {
     }
 
     private static String extract(Document document, String articleTitle) {
+        // Some public pages render empty paragraphs and hydrate the article from this same HTML.
+        // Preserve only a verified, explicitly free current-article payload before scripts are removed.
+        Element hydratedBody = PublicArticleHydration.articleBody(document);
+        boolean accessNotice = hydratedBody != null && hasAccessNotice(document);
         // header를 걷어내기 전에 제목을 확보한다. 제목이나 OG 값을 본문 대신 반환하지는 않는다.
         List<String> titles = new ArrayList<>(document.select("h1, [itemprop=headline]").eachText());
         titles.add(document.title());
@@ -149,6 +156,7 @@ public final class ArticleContentExtractor {
         if (articleTitle != null) {
             titles.add(articleTitle);
         }
+        preserveWebFormsArticleBodies(document);
         document.select(NOISE_SELECTOR).remove();
 
         String body = fromKnownSelectors(document, CONTENT_SELECTORS, titles, true);
@@ -160,7 +168,78 @@ public final class ArticleContentExtractor {
             }
         }
 
+        if (body == null && hydratedBody != null && !accessNotice) {
+            hydratedBody.select(NOISE_SELECTOR).remove();
+            String hydratedText = textOf(hydratedBody);
+            if (ArticleBodyCleaner.withoutTrailingBoilerplate(hydratedText).length() >= MIN_BODY_LENGTH
+                    && !hasAccessNotice(hydratedText) && hasShortStory(hydratedBody, titles)) {
+                body = hydratedText;
+            }
+        }
+
         return body;
+    }
+
+    private static boolean hasAccessNotice(Document document) {
+        for (Element body : document.select(String.join(", ", CONTENT_SELECTORS) + ", article")) {
+            if (hasAccessNotice(textOf(body))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasAccessNotice(String text) {
+        return text.lines().anyMatch(line -> ACCESS_NOTICE.matcher(line.strip()).matches());
+    }
+
+    /** ASP.NET may wrap the entire public news page in its postback form. */
+    private static void preserveWebFormsArticleBodies(Document document) {
+        if (document.select("meta[property=og:type][content=article]").isEmpty()) {
+            return;
+        }
+        String explicitSelectors = String.join(", ", CONTENT_SELECTORS.stream()
+                .filter(selector -> !selector.equals(".news-content")).toList());
+        for (Element form : document.select("form")) {
+            if (!"post".equalsIgnoreCase(form.attr("method"))
+                    || form.select("input[type=hidden][name=__VIEWSTATE]").isEmpty()
+                    || !form.select("input[type=password]").isEmpty()
+                    || !postsToCurrentPage(form, document.baseUri())) {
+                continue;
+            }
+            // Retain only a dedicated article body. Search, login, comment and other
+            // form contents must not become candidates for the generic density fallback.
+            for (Element body : form.select(explicitSelectors)) {
+                if (body == form || hasExcludedAncestorWithinForm(body, form) || hasAccessNotice(textOf(body))) {
+                    continue;
+                }
+                Element preserved = body.clone();
+                preserved.select("input, button, select, textarea, label").remove();
+                form.before(preserved);
+            }
+        }
+    }
+
+    private static boolean hasExcludedAncestorWithinForm(Element body, Element form) {
+        // Cloning the body discards its ancestors. Check them first so a related
+        // article, comment, caption or hidden block cannot escape normal filtering.
+        for (Element ancestor = body; ancestor != null && ancestor != form; ancestor = ancestor.parent()) {
+            if (ancestor.is(NOISE_SELECTOR) || ancestor.is(NON_STORY_SELECTOR)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean postsToCurrentPage(Element form, String baseUrl) {
+        try {
+            URI page = URI.create(baseUrl).normalize();
+            String action = form.attr("action");
+            URI target = action.isBlank() ? page : page.resolve(action).normalize();
+            return page.getHost() != null && page.equals(target);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 
     private static String fromKnownSelectors(Document document, List<String> selectors,

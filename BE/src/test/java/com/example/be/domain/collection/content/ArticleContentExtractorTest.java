@@ -78,6 +78,107 @@ class ArticleContentExtractorTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"class='article-body'", "id='ctl00_ContentPlaceHolder1_WebNewsView_ltContentDiv' class='rns_text'"})
+    void preservesADedicatedArticleBodyInsideASelfPostingWebFormsPage(String attributes) {
+        String html = "<meta property='og:type' content='article'>"
+                + "<form method='post' action='./story.aspx?id=7'>"
+                + "<input type='hidden' name='__VIEWSTATE' value='synthetic-state'>"
+                + "<nav>사이트 메뉴</nav><div " + attributes + ">"
+                + "한국은행이 기준금리를 동결했다.<br>시장 상황을 계속 점검한다."
+                + "<button>댓글 쓰기</button><textarea>댓글 입력 내용</textarea></div>"
+                + "<section><p>" + PARAGRAPH + "</p><p>관련 기사 내용이다.</p></section></form>";
+
+        assertEquals("한국은행이 기준금리를 동결했다.\n시장 상황을 계속 점검한다.",
+                ArticleContentExtractor.extract(html, "https://publisher.example/story.aspx?id=7"));
+        assertEquals("한국은행이 기준금리를 동결했다.\n시장 상황을 계속 점검한다.",
+                ArticleContentExtractor.extract(html.replace("action='./story.aspx?id=7'", "action=''"),
+                        "https://publisher.example/story.aspx?id=7"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"search", "login", "comment"})
+    void webFormsControlsAndUnmarkedLongTextCannotBecomeAnArticle(String purpose) {
+        String html = "<meta property='og:type' content='article'><form method='post' action=''>"
+                + "<input type='hidden' name='__VIEWSTATE' value='synthetic-state'>"
+                + "<div class='" + purpose + "'><p>" + PARAGRAPH + "</p><p>" + PARAGRAPH + "</p></div>"
+                + "<textarea>" + PARAGRAPH + "</textarea></form>";
+
+        assertNull(ArticleContentExtractor.extract(html, "https://publisher.example/story.aspx?id=7"));
+    }
+
+    @Test
+    void anEmptyBodyInsideWebFormsCannotBorrowNeighboringFormParagraphs() {
+        String html = "<meta property='og:type' content='article'><form method='post' action=''>"
+                + "<input type='hidden' name='__VIEWSTATE' value='synthetic-state'>"
+                + "<div class='article-body'></div><div><p>" + PARAGRAPH + "</p><p>" + PARAGRAPH + "</p></div></form>";
+
+        assertNull(ArticleContentExtractor.extract(html, "https://publisher.example/story.aspx?id=7"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"aside", "div class='related'", "div class='comments'", "div hidden",
+            "div aria-hidden='true'", "div class='caption'", "div class='byline'"})
+    void webFormsBodyCannotEscapeAnExcludedAncestorWhenPreserved(String wrapper) {
+        String closingTag = wrapper.split(" ")[0];
+        String html = "<meta property='og:type' content='article'><form method='post' action=''>"
+                + "<input type='hidden' name='__VIEWSTATE' value='synthetic-state'><" + wrapper + ">"
+                + "<div class='article-body'><p>다른 지역에서 별도의 행사가 열렸다. 참가 기업들은 독립된 협약을 체결했다.</p>"
+                + "</div></" + closingTag + "></form>";
+        String url = "https://publisher.example/story.aspx?id=7";
+
+        assertNull(ArticleContentExtractor.extract(html, url));
+
+        String withCurrentArticle = html.replace("</form>",
+                "<div class='article-body'><p>한국은행이 기준금리를 동결했다.</p></div></form>");
+        assertEquals("한국은행이 기준금리를 동결했다.", ArticleContentExtractor.extract(withCurrentArticle, url));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"class='article-body related'", "class='article-body comments'",
+            "class='article-body' hidden", "class='article-body' aria-hidden='true'",
+            "class='article-body caption'", "class='article-body byline'"})
+    void webFormsPreservationAlsoRejectsAnExcludedBodyElementItself(String attributes) {
+        String html = "<meta property='og:type' content='article'><form method='post' action=''>"
+                + "<input type='hidden' name='__VIEWSTATE' value='synthetic-state'><div " + attributes + ">"
+                + "<p>다른 지역에서 별도의 행사가 열렸다. 참가 기업들은 독립된 협약을 체결했다.</p></div></form>";
+
+        assertNull(ArticleContentExtractor.extract(html, "https://publisher.example/story.aspx?id=7"));
+    }
+
+    @Test
+    void doesNotPreserveInteractiveFormsOrArticleBodiesRequiringLogin() {
+        String start = "<meta property='og:type' content='article'><form method='post' action=''>"
+                + "<input type='hidden' name='__VIEWSTATE' value='synthetic-state'>";
+        String body = "<div class='article-body'><p>" + PARAGRAPH + "</p></div></form>";
+        String url = "https://publisher.example/story.aspx?id=7";
+
+        assertNull(ArticleContentExtractor.extract(start + "<input type='password'>" + body, url));
+        assertNull(ArticleContentExtractor.extract((start + body).replace("action=''", "action='/login'"), url));
+        assertNull(ArticleContentExtractor.extract((start + body).replace("action=''", "action='https://other.example/'"), url));
+        assertNull(ArticleContentExtractor.extract((start + body).replace("type='hidden'", "type='text'"), url));
+        assertNull(ArticleContentExtractor.extract((start + body).replace("content='article'", "content='website'"), url));
+        assertNull(ArticleContentExtractor.extract((start + body).replace("<p>", "<p>기사 전문은 로그인 후 확인할 수 있습니다.</p><p>"), url));
+    }
+
+    @Test
+    void extractsTheMarkedDirectTextBodyWithoutNeighboringNavigation() {
+        String html = "<div id='joinskmbox'>한국은행이 기준금리를 동결했다.<br><br>시장 상황을 계속 점검한다.</div>"
+                + "<div><p>" + PARAGRAPH + "</p><p>관련 기사 내용이다.</p></div>";
+
+        assertEquals("한국은행이 기준금리를 동결했다.\n\n시장 상황을 계속 점검한다.",
+                ArticleContentExtractor.extract(html, "https://publisher.example/article.php?aid=1"));
+    }
+
+    @Test
+    void rejectsAnEmptyCaptionOrLoginOnlyMarkedDirectTextBody() {
+        for (String value : new String[] {"", "사진 설명입니다.", "기사 전문은 로그인 후 확인할 수 있습니다."}) {
+            String html = "<div id='joinskmbox'>" + value + "</div>"
+                    + "<div><p>" + PARAGRAPH + "</p><p>" + PARAGRAPH + "</p></div>";
+            assertNull(ArticleContentExtractor.extract(html, "https://publisher.example/article.php?aid=1"));
+        }
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"itemprop='articleBody'", "id='articleBody'", "class='article-body'",
             "class='article_body'", "id='newsct_article'"})
     void acceptsACompleteShortBulletinInAnExplicitBody(String attributes) {

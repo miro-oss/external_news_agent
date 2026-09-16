@@ -110,6 +110,35 @@ class IssueClustererMarketScopeTest {
         assertFalse(plan.issues().getFirst().articleIds().contains(2L));
     }
 
+    @Test
+    void primarySectorSnapshotConnectsToAnActualCloseWithoutAHeadlineVendorVeto() {
+        var snapshot = article(1, "오늘 증시 이슈…코스피 외국인 동향",
+                "뉴욕 증시가 17일(현지시간) 일제히 하락했습니다. "
+                        + "필라델피아 반도체지수는 2.35% 내린 4200.50을 기록했다.");
+        var actualClose = article(2, "[뉴욕증시] SK하이닉스 ADR 급락",
+                "17일 뉴욕증시에서 필라델피아 반도체지수는 2.35% 내린 4200.50에 마감했다.");
+        var plan = clusterer.cluster(List.of(snapshot, actualClose), true);
+        assertEquals(1, plan.issues().size());
+        assertTrue(plan.pairScores().getFirst().specificEventMatch());
+    }
+
+    @Test
+    void undatedRoundupKeepsVendorsAndCannotJoinAnOutlookThroughAnUnknownBridge() {
+        String title = "인텔·AMD 증시 희비…반도체 산업 비관론은 아직";
+        // Scope conflicts require a roundup headline without a primary outlook focus.
+        var roundup = article(1, "인텔·AMD 증시 희비…반도체 관련주 하락",
+                "간밤 뉴욕증시에서는 반도체와 인프라 관련주가 하락했다. 소프트웨어 업종은 반등했다.");
+        var outlook = article(2, title,
+                "기술 개발 논쟁이 기업의 사업에 미칠 영향에도 관심이 쏠린다.");
+        var bridge = article(3, "인텔·AMD 증시 희비…반도체 관련주 하락",
+                "시장 참가자들이 새 보고서에 관심을 보였다.");
+        assertEquals(Set.of("인텔", "AMD"), clusterer.titleOrganizations(roundup));
+        var plan = clusterer.cluster(List.of(roundup, bridge, outlook), true);
+        assertTrue(plan.issues().stream().noneMatch(issue ->
+                issue.articleIds().contains(1L) && issue.articleIds().contains(2L)));
+        assertTrue(clusterer.eventConflictingArticleIds(List.of(roundup, bridge, outlook)).get(1L).contains(2L));
+    }
+
     private static String close(String day) {
         return day + "일(현지시간) 뉴욕증시에서 다우지수는 0.3% 내린 42000.25에 거래를 마쳤다. "
                 + "나스닥 지수는 0.5% 하락한 18500.25에 마감했다.";

@@ -95,6 +95,9 @@ public class ArticleContentClient {
                 currentDelay = robots.rules().crawlDelay();
             }
             Attempt attempt = request(current.toString(), currentDelay, articleTitle);
+            if (attempt.resource() != null) {
+                return fetchResource(attempt.resource(), respectsRobots);
+            }
             if (attempt.location() == null) {
                 return attempt.result();
             }
@@ -202,10 +205,51 @@ public class ArticleContentClient {
             // 응답은 정상인데 본문을 못 뽑았다. 이건 "막혔다"가 아니라 "못 읽었다"이다.
             // 차단으로 적으면 짧은 정상 기사가 페이월 경고를 만든다.
             log.debug("본문을 뽑지 못했다. url={}", articleUrl);
-            return new Attempt(ArticleContentResult.failed(), false);
+            PublicArticleResource.Resource resource = PublicArticleResource.find(body, charsetOf(response), articleUrl);
+            return new Attempt(ArticleContentResult.failed(), false, null, resource);
         }
 
         return new Attempt(ArticleContentResult.fullText(content), false);
+    }
+
+
+    /** A proven public resource is a single bounded GET, never another redirect or fallback chain. */
+    private ArticleContentResult fetchResource(PublicArticleResource.Resource resource, boolean respectsRobots) {
+        String url = resource.uri().toString();
+        Duration crawlDelay = null;
+        if (respectsRobots) {
+            rateLimiter.await(url, null);
+            RobotsLookup robots = robotsTxtClient.lookup(url);
+            if (!robots.allows(url)) {
+                return ArticleContentResult.robotsDisallowed();
+            }
+            // A denied robots response is not evidence that a secondary resource is public.
+            if ("HTTP_401".equals(robots.reason()) || "HTTP_403".equals(robots.reason())
+                    || "HTTP_451".equals(robots.reason())) {
+                return ArticleContentResult.failed();
+            }
+            crawlDelay = robots.rules().crawlDelay();
+        }
+        rateLimiter.await(url, crawlDelay);
+        try {
+            return restClient.get().uri(resource.uri()).header(HttpHeaders.USER_AGENT, userAgent)
+                    .exchange((request, response) -> {
+                        MediaType type = response.getHeaders().getContentType();
+                        if (!response.getStatusCode().is2xxSuccessful() || type == null
+                                || !MediaType.APPLICATION_JSON.isCompatibleWith(type)
+                                || response.getHeaders().getContentLength() > MAX_BODY_BYTES) {
+                            return ArticleContentResult.failed();
+                        }
+                        byte[] json = response.getBody().readNBytes(MAX_BODY_BYTES + 1);
+                        if (json.length > MAX_BODY_BYTES) {
+                            return ArticleContentResult.failed();
+                        }
+                        String body = PublicArticleResource.extract(json, resource);
+                        return body == null ? ArticleContentResult.failed() : ArticleContentResult.fullText(body);
+                    });
+        } catch (RuntimeException exception) {
+            return ArticleContentResult.failed();
+        }
     }
 
     /**
@@ -236,9 +280,14 @@ public class ArticleContentClient {
     }
 
     /** 한 번의 시도 결과와, 다시 불러 볼 가치가 있는지. */
-    private record Attempt(ArticleContentResult result, boolean retryable, String location) {
+    private record Attempt(ArticleContentResult result, boolean retryable, String location,
+                           PublicArticleResource.Resource resource) {
         Attempt(ArticleContentResult result, boolean retryable) {
-            this(result, retryable, null);
+            this(result, retryable, null, null);
+        }
+
+        Attempt(ArticleContentResult result, boolean retryable, String location) {
+            this(result, retryable, location, null);
         }
     }
 }
