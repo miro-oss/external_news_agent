@@ -39,6 +39,7 @@ public final class ArticleContentExtractor {
             ".article_body",
             ".news-content",
             ".news_contents .con_sub",
+            ".article_content_end_middle .acem_text",
             "div[id$=_WebNewsView_ltContentDiv].rns_text",
             "#joinskmbox",
             "#newsct_article"

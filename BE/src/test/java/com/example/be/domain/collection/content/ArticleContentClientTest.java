@@ -639,8 +639,8 @@ class ArticleContentClientTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {301, 302, 401, 403, 451, 429, 500})
-    void resourceRedirectsDenialsAndErrorsDoNotStartAnotherRequestOrRetry(int status) {
+    @ValueSource(ints = {301, 302, 401, 403, 404, 451})
+    void resourceRedirectsAndPermanentErrorsDoNotStartAnotherRequestOrRetry(int status) {
         ArticleContentClient resourceClient = new ArticleContentClient(builder, rateLimiter, robots,
                 "external-news-agent", 3, 0L, 0L);
         when(robots.lookup(PublicArticleResourceTest.RESOURCE)).thenReturn(RobotsLookup.fetched(
