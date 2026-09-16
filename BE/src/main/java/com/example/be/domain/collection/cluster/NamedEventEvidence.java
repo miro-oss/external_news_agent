@@ -48,7 +48,8 @@ final class NamedEventEvidence {
     NamedEventEvidence(List<ClusterArticle> articles, BreakingNewsDetector detector) {
         for (ClusterArticle article : articles) {
             String rawTitle = detector.coreTitle(article.title()).replaceFirst("^(?:\\s*\\[[^]]+])*\\s*", "");
-            String rawLead = withoutPhotoCaptions(foreground(bound(ArticleEvidenceText.primary(article), LEAD_LIMIT)));
+            String rawLead = foreground(withoutPhotoCaptions(
+                    bound(ArticleEvidenceText.primary(article), LEAD_LIMIT)));
             String title = normalize(rawTitle);
             String lead = normalize(rawLead);
             profiles.put(article.articleId(), new Profile(

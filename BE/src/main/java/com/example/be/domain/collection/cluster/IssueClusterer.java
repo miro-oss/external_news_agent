@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class IssueClusterer {
 
-    static final String RULE_VERSION = "fulltext-event-evidence-v10";
+    static final String RULE_VERSION = "fulltext-event-evidence-v11";
 
     private static final double MIN_ENTITY_TITLE_SUPPORT_JACCARD = 0.10;
 

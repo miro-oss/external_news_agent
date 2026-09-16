@@ -12,6 +12,32 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NamedEventEvidenceTest {
     @Test
+    void aCaptionStartingWithABackgroundMarkerCannotTruncateTheActualAgreement() {
+        var first = partnership(1, "해솔컴퓨팅", "12일", "NPU AX OS");
+        for (String marker : List.of("앞서", "한편", "과거")) {
+            String opening = "새빛은 기술 공급 체계를 구축한다.\n"
+                    + marker + " 관계자들이 업무협약 체결 뒤 기념촬영을 하고 있다. (사진=새빛)\n";
+            var same = article(2, "새빛, 기술 시장 진출", opening
+                    + "12일 새빛은 해솔컴퓨팅과 NPU AX OS 사업 업무협약을 체결했다고 밝혔다.");
+            var different = article(2, "새빛, 기술 시장 진출", opening
+                    + "12일 새빛은 푸른컴퓨팅과 NPU AX OS 사업 업무협약을 체결했다고 밝혔다.");
+            assertTrue(evidence(first, same).matches(1, 2), marker);
+            assertTrue(evidence(first, different).conflicts(1, 2), marker);
+        }
+    }
+
+    @Test
+    void realBackgroundAfterACreditedCaptionRemainsExcluded() {
+        var first = partnership(1, "해솔컴퓨팅", "12일", "NPU AX OS");
+        var second = article(2, "새빛, 기술 사업 확대",
+                "새빛은 기술 공급 체계를 구축한다.\n"
+                        + "앞서 관계자들이 기념촬영을 하고 있다. (사진=새빛)\n"
+                        + "앞서 새빛은 12일 해솔컴퓨팅과 NPU AX OS 업무협약을 체결했다.");
+        assertFalse(evidence(first, second).matches(1, 2));
+        assertFalse(evidence(first, second).conflicts(1, 2));
+    }
+
+    @Test
     void aCreditedPhotoBetweenTheOpeningAndAgreementCannotHideTheActualPartnership() {
         var first = partnership(1, "해솔컴퓨팅", "12일", "NPU AX OS");
         var second = article(2, "새빛, 기술 시장 진출",

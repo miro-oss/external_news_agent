@@ -4,6 +4,7 @@ import com.example.be.domain.collection.ratelimit.Backoff;
 import com.example.be.domain.collection.ratelimit.DomainRateLimiter;
 import com.example.be.domain.collection.robots.RobotsLookup;
 import com.example.be.domain.collection.robots.RobotsTxtClient;
+import com.example.be.global.config.PublicDestinationPolicy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -152,10 +153,7 @@ public class ArticleContentClient {
     private static URI httpUri(String value) {
         try {
             URI uri = URI.create(value).normalize();
-            if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
-                    || uri.getHost() == null || uri.getRawUserInfo() != null || uri.getPort() > 65535) {
-                return null;
-            }
+            PublicDestinationPolicy.validate(uri);
             // Fragments are not sent to the server and must not defeat loop detection.
             return URI.create(uri.toString().split("#", 2)[0]);
         } catch (IllegalArgumentException | NullPointerException exception) {
@@ -215,6 +213,9 @@ public class ArticleContentClient {
 
     /** A proven public resource is a single bounded GET, never another redirect or fallback chain. */
     private ArticleContentResult fetchResource(PublicArticleResource.Resource resource, boolean respectsRobots) {
+        if (httpUri(resource.uri().toString()) == null) {
+            return ArticleContentResult.failed();
+        }
         String url = resource.uri().toString();
         Duration crawlDelay = null;
         if (respectsRobots) {

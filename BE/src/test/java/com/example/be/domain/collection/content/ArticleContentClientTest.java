@@ -50,6 +50,37 @@ class ArticleContentClientTest {
     private final ArticleContentClient client =
             new ArticleContentClient(builder, rateLimiter, robots, "external-news-agent", 1, 0L, 0L);
 
+    @ParameterizedTest
+    @ValueSource(strings = {"http://127.0.0.1/private", "https://169.254.169.254/metadata",
+            "https://metadata.google.internal/a", "https://[::1]/a", "http://10.0.0.1/a"})
+    void blocksPrivateInitialUrlsEvenWhenRobotsAreIgnored(String url) {
+        assertEquals(FetchStatus.FETCH_FAILED, client.fetch(url, null, null, false).status());
+        verifyNoInteractions(robots);
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"https://127.0.0.1/private", "https://169.254.169.254/metadata",
+            "https://metadata.google.internal/a", "https://[::1]/a", "https://10.0.0.1/a"})
+    void rejectsPrivateRedirectBeforeEvenCheckingItsRobots(String target) {
+        server.expect(requestTo(ARTICLE_URL)).andRespond(withStatus(HttpStatus.FOUND)
+                .header(HttpHeaders.LOCATION, target));
+
+        assertEquals(FetchStatus.FETCH_FAILED, client.fetch(ARTICLE_URL, null).status());
+        verifyNoInteractions(robots);
+        server.verify();
+    }
+
+    @Test
+    void robotsIgnoreDoesNotPermitPrivateRedirects() {
+        server.expect(requestTo(ARTICLE_URL)).andRespond(withStatus(HttpStatus.FOUND)
+                .header(HttpHeaders.LOCATION, "https://127.0.0.1/private"));
+
+        assertEquals(FetchStatus.FETCH_FAILED, client.fetch(ARTICLE_URL, null, null, false).status());
+        verifyNoInteractions(robots);
+        server.verify();
+    }
+
     @Test
     void extractsFullText() {
         server.expect(requestTo(ARTICLE_URL))
