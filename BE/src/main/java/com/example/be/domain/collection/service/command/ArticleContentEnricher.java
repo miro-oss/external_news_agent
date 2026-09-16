@@ -149,7 +149,7 @@ public class ArticleContentEnricher {
         // robotsMode=ignore면 조회조차 하지 않는다. RobotsPolicyService와 해석을 맞춘다 —
         // 여기서만 robots를 받아 crawl-delay까지 적용하면 같은 정책이 경로마다 다르게 동작한다.
         if (!source.respectsRobots()) {
-            return contentClient.fetch(url, null, article.getTitle());
+            return contentClient.fetch(url, null, article.getTitle(), false);
         }
 
         // robots는 기사 URL의 호스트 기준이다. 구글 뉴스 RSS처럼 소스와 기사 호스트가 다른 경우가 있다.

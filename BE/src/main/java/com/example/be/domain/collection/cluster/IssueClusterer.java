@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class IssueClusterer {
 
-    static final String RULE_VERSION = "fulltext-event-evidence-v7";
+    static final String RULE_VERSION = "fulltext-event-evidence-v11";
 
     private static final double MIN_ENTITY_TITLE_SUPPORT_JACCARD = 0.10;
 
@@ -46,9 +46,15 @@ public class IssueClusterer {
         return entityExtractor.extractTitleOrganizations(breakingNewsDetector.coreTitle(title));
     }
 
-    /** A product's explicit headline maker takes precedence over its manufacturing partners and rivals. */
+    /** Resolve headline companies against the verified event's scope before applying vendor conflicts. */
     Set<String> titleOrganizations(ClusterArticle article) {
         if (!article.hasFullText()) {
+            return Set.of();
+        }
+        // In a dated index/sector report, headline companies are examples from that
+        // market session. They are not mutually exclusive company announcements.
+        if (new MarketSessionEventEvidence(List.of(article), breakingNewsDetector)
+                .marketReport(article.articleId())) {
             return Set.of();
         }
         String title = breakingNewsDetector.coreTitle(article.title());

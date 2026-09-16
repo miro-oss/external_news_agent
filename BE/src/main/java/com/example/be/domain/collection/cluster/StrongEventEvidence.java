@@ -14,6 +14,10 @@ final class StrongEventEvidence {
     private final StockEventEvidence stock;
     private final InstitutionalEventEvidence institutional;
     private final CommercialProductEventEvidence commercial;
+    private final MarketSessionEventEvidence marketSession;
+    private final ConcreteOccurrenceEvidence occurrence;
+    private final BusinessProjectConflictEvidence businessProject;
+    private final ProductionCapacityEventEvidence productionCapacity;
     private final Map<Long, OffsetDateTime> times = new HashMap<>();
 
     StrongEventEvidence(List<ClusterArticle> articles, BreakingNewsDetector detector) {
@@ -23,6 +27,10 @@ final class StrongEventEvidence {
         stock = new StockEventEvidence(articles, detector);
         institutional = new InstitutionalEventEvidence(articles, detector);
         commercial = new CommercialProductEventEvidence(articles, detector);
+        marketSession = new MarketSessionEventEvidence(articles, detector);
+        occurrence = new ConcreteOccurrenceEvidence(articles, detector);
+        businessProject = new BusinessProjectConflictEvidence(articles, detector);
+        productionCapacity = new ProductionCapacityEventEvidence(articles, detector);
         articles.forEach(article -> times.put(article.articleId(), article.eventTime()));
     }
 
@@ -36,12 +44,16 @@ final class StrongEventEvidence {
         }
         return specific.matches(left, right) || product.matches(left, right)
                 || named.matches(left, right) || stock.matches(left, right)
-                || institutional.matches(left, right) || commercial.matches(left, right);
+                || institutional.matches(left, right) || commercial.matches(left, right)
+                || marketSession.matches(left, right) || occurrence.matches(left, right)
+                || productionCapacity.matches(left, right);
     }
 
     boolean conflicts(long left, long right) {
         return specific.conflicts(left, right) || product.conflicts(left, right)
                 || named.conflicts(left, right) || stock.conflicts(left, right)
-                || institutional.conflicts(left, right) || commercial.conflicts(left, right);
+                || institutional.conflicts(left, right) || commercial.conflicts(left, right)
+                || marketSession.conflicts(left, right) || occurrence.conflicts(left, right)
+                || businessProject.conflicts(left, right) || productionCapacity.conflicts(left, right);
     }
 }

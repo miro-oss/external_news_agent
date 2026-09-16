@@ -1,5 +1,6 @@
 package com.example.be.domain.collection.robots;
 
+import com.example.be.global.config.PublicDestinationPolicy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -49,13 +50,13 @@ public class RobotsTxtClient {
         String robotsUrl;
         try {
             robotsUrl = robotsUrlOf(sourceUrl);
-        } catch (URISyntaxException e) {
+        } catch (URISyntaxException | IllegalArgumentException e) {
             return RobotsLookup.unknown(null, "INVALID_URL");
         }
 
         try {
             ResponseEntity<String> response = restClient.get()
-                    .uri(robotsUrl)
+                    .uri(URI.create(robotsUrl))
                     .header("User-Agent", userAgent)
                     .retrieve() 
                     .toEntity(String.class);
@@ -95,9 +96,7 @@ public class RobotsTxtClient {
 
     private String robotsUrlOf(String sourceUrl) throws URISyntaxException {
         URI uri = new URI(sourceUrl);
-        if (uri.getScheme() == null || uri.getHost() == null) {
-            throw new URISyntaxException(sourceUrl, "스킴이나 호스트가 없다.");
-        }
+        PublicDestinationPolicy.validate(uri);
 
         return new URI(uri.getScheme(), null, uri.getHost(), uri.getPort(), ROBOTS_PATH, null, null).toString();
     }

@@ -28,6 +28,8 @@ dependencies {
     implementation 'org.flywaydb:flyway-database-oracle'
     // 기사 본문 추출용 HTML 파서. 임의의 뉴스 페이지에서 본문만 뽑는 건 정규식으로 되지 않는다.
     implementation 'org.jsoup:jsoup:1.18.3'
+    // Public collection requests need DNS validation at the socket connection, not a separate preflight lookup.
+    implementation 'org.apache.httpcomponents.client5:httpclient5'
     runtimeOnly 'com.oracle.database.jdbc:ojdbc11'
 
     compileOnly 'org.projectlombok:lombok'

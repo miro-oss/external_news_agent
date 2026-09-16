@@ -25,6 +25,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -53,12 +54,21 @@ class ArticleContentEnricherTest {
             when(robotsClient.lookup(article.getCanonicalUrl())).thenReturn(RobotsLookup.fetched(
                     "https://example.com/robots.txt", new RobotsRules(List.of(), List.of(), delay)));
         }
-        when(contentClient.fetch(article.getCanonicalUrl(), delay, title))
-                .thenReturn(ArticleContentResult.fullText(title));
+        if (respectRobots) {
+            when(contentClient.fetch(article.getCanonicalUrl(), delay, title))
+                    .thenReturn(ArticleContentResult.fullText(title));
+        } else {
+            when(contentClient.fetch(article.getCanonicalUrl(), null, title, false))
+                    .thenReturn(ArticleContentResult.fullText(title));
+        }
 
         assertEquals(java.util.Set.of(1L), enricher.enrich(42L));
 
-        verify(contentClient).fetch(article.getCanonicalUrl(), delay, title);
+        if (respectRobots) {
+            verify(contentClient).fetch(article.getCanonicalUrl(), delay, title);
+        } else {
+            verify(contentClient).fetch(article.getCanonicalUrl(), null, title, false);
+        }
         verify(resultWriter).applyFullText(1L, FetchStatus.FULLTEXT, title);
         if (!respectRobots) {
             verifyNoInteractions(robotsClient);
@@ -88,7 +98,7 @@ class ArticleContentEnricherTest {
         when(repository.findClusterTargetsByRunId(42L)).thenReturn(List.of(
                 observation(low, topic), observation(high, topic)));
         List<String> fetchedUrls = new ArrayList<>();
-        when(contentClient.fetch(any(), any(), any())).thenAnswer(invocation -> {
+        when(contentClient.fetch(any(), any(), any(), eq(false))).thenAnswer(invocation -> {
             fetchedUrls.add(invocation.getArgument(0));
             return ArticleContentResult.fullText("본문");
         });
@@ -121,7 +131,7 @@ class ArticleContentEnricherTest {
         when(repository.findClusterTargetsByRunId(42L)).thenReturn(List.of(
                 observation(low, topic), observation(high, topic)));
         List<String> fetchedUrls = new ArrayList<>();
-        when(contentClient.fetch(any(), any(), any())).thenAnswer(invocation -> {
+        when(contentClient.fetch(any(), any(), any(), eq(false))).thenAnswer(invocation -> {
             fetchedUrls.add(invocation.getArgument(0));
             return ArticleContentResult.fullText("본문");
         });
@@ -160,7 +170,7 @@ class ArticleContentEnricherTest {
         when(repository.findClusterTargetsByRunId(42L)).thenReturn(List.of(
                 observation(common, topic), observation(rare, topic)));
         List<String> fetchedUrls = new ArrayList<>();
-        when(contentClient.fetch(any(), any(), any())).thenAnswer(invocation -> {
+        when(contentClient.fetch(any(), any(), any(), eq(false))).thenAnswer(invocation -> {
             fetchedUrls.add(invocation.getArgument(0));
             return ArticleContentResult.fullText("본문");
         });

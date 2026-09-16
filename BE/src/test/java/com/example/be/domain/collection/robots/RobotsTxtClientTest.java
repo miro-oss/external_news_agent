@@ -1,6 +1,8 @@
 package com.example.be.domain.collection.robots;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -21,6 +23,15 @@ class RobotsTxtClientTest {
     private final RestClient.Builder builder = RestClient.builder();
     private final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
     private final RobotsTxtClient client = new RobotsTxtClient(builder, "external-news-agent");
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://127.0.0.1/private", "https://169.254.169.254/metadata",
+            "https://metadata.google.internal/a", "https://[::1]/a", "http://10.0.0.1/a",
+            "ftp://news.example/a", "https://user:pass@news.example/a"})
+    void neverRequestsRobotsAtPrivateOrInvalidDestinations(String url) {
+        assertEquals("INVALID_URL", client.lookup(url).reason());
+        server.verify();
+    }
 
     @Test
     void asksTheHostRootRegardlessOfFeedPath() {

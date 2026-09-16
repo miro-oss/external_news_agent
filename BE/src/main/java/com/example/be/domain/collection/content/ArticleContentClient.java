@@ -2,6 +2,9 @@ package com.example.be.domain.collection.content;
 
 import com.example.be.domain.collection.ratelimit.Backoff;
 import com.example.be.domain.collection.ratelimit.DomainRateLimiter;
+import com.example.be.domain.collection.robots.RobotsLookup;
+import com.example.be.domain.collection.robots.RobotsTxtClient;
+import com.example.be.global.config.PublicDestinationPolicy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -11,8 +14,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.Charset;
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * 기사 URL을 방문해 HTML을 받고 본문을 뽑는다.
@@ -29,6 +35,7 @@ public class ArticleContentClient {
      * 재면 이미 메모리에 올라온 뒤라 보호가 되지 않는다.
      */
     private static final int MAX_BODY_BYTES = 2 * 1024 * 1024;
+    private static final int MAX_REDIRECTS = 5;
 
     private static final int UNAUTHORIZED = 401;
     private static final int FORBIDDEN = 403;
@@ -36,6 +43,7 @@ public class ArticleContentClient {
 
     private final RestClient restClient;
     private final DomainRateLimiter rateLimiter;
+    private final RobotsTxtClient robotsTxtClient;
     private final String userAgent;
     private final int maxAttempts;
     private final Duration backoffBase;
@@ -43,12 +51,14 @@ public class ArticleContentClient {
 
     public ArticleContentClient(RestClient.Builder restClientBuilder,
                                 DomainRateLimiter rateLimiter,
+                                RobotsTxtClient robotsTxtClient,
                                 @Value("${news.collection.user-agent:external-news-agent}") String userAgent,
                                 @Value("${news.collection.retry.max-attempts:3}") int maxAttempts,
                                 @Value("${news.collection.retry.base-delay-ms:1000}") long backoffBaseMs,
                                 @Value("${news.collection.retry.max-delay-ms:8000}") long backoffMaxMs) {
         this.restClient = restClientBuilder.build();
         this.rateLimiter = rateLimiter;
+        this.robotsTxtClient = robotsTxtClient;
         this.userAgent = userAgent;
         this.maxAttempts = maxAttempts;
         this.backoffBase = Duration.ofMillis(backoffBaseMs);
@@ -60,6 +70,56 @@ public class ArticleContentClient {
     }
 
     public ArticleContentResult fetch(String articleUrl, Duration crawlDelay, String articleTitle) {
+        return fetch(articleUrl, crawlDelay, articleTitle, true);
+    }
+
+    /** Preserve the source's explicit ignore policy across redirects; default callers respect robots. */
+    public ArticleContentResult fetch(String articleUrl, Duration crawlDelay, String articleTitle,
+                                      boolean respectsRobots) {
+        URI current = httpUri(articleUrl);
+        if (current == null) {
+            return ArticleContentResult.failed();
+        }
+        Set<URI> visited = new HashSet<>();
+        visited.add(current);
+        Duration currentDelay = respectsRobots ? crawlDelay : null;
+        for (int redirects = 0; ; redirects++) {
+            if (redirects > 0 && respectsRobots) {
+                // The caller checked the initial URL. A redirect introduces a new
+                // path/host, so check its own robots policy before requesting it.
+                // Reserve a slot for robots.txt as well as the subsequent article GET.
+                rateLimiter.await(current.toString(), null);
+                RobotsLookup robots = robotsTxtClient.lookup(current.toString());
+                if (!robots.allows(current.toString())) {
+                    return ArticleContentResult.robotsDisallowed();
+                }
+                currentDelay = robots.rules().crawlDelay();
+            }
+            Attempt attempt = request(current.toString(), currentDelay, articleTitle);
+            if (attempt.resource() != null) {
+                return fetchResource(attempt.resource(), respectsRobots);
+            }
+            if (attempt.location() == null) {
+                return attempt.result();
+            }
+            if (redirects == MAX_REDIRECTS) {
+                return ArticleContentResult.failed();
+            }
+            URI next;
+            try {
+                next = httpUri(current.resolve(attempt.location()).toString());
+            } catch (IllegalArgumentException exception) {
+                return ArticleContentResult.failed();
+            }
+            if (next == null || (current.getScheme().equalsIgnoreCase("https")
+                    && next.getScheme().equalsIgnoreCase("http")) || !visited.add(next)) {
+                return ArticleContentResult.failed();
+            }
+            current = next;
+        }
+    }
+
+    private Attempt request(String articleUrl, Duration crawlDelay, String articleTitle) {
         Attempt attempt = null;
 
         for (int tries = 1; tries <= maxAttempts; tries++) {
@@ -67,7 +127,9 @@ public class ArticleContentClient {
 
             try {
                 attempt = restClient.get()
-                        .uri(articleUrl)
+                        // This is already a resolved URI, not a URI template. Passing
+                        // its string to the template overload re-encodes % escapes.
+                        .uri(URI.create(articleUrl))
                         .header(HttpHeaders.USER_AGENT, userAgent)
                         // 상태 처리를 직접 한다. 본문을 읽기 전에 헤더로 크기를 먼저 보려면 이 방법뿐이다.
                         // 닫는 건 Spring에 맡긴다 — close=false로 두면 본문을 읽지 않는 차단·에러·크기 초과
@@ -79,19 +141,40 @@ public class ArticleContentClient {
             }
 
             if (!attempt.retryable() || tries == maxAttempts) {
-                return attempt.result();
+                return attempt;
             }
 
             sleep(Backoff.delayAfter(tries, backoffBase, backoffMax));
         }
 
-        return attempt == null ? ArticleContentResult.failed() : attempt.result();
+        return attempt == null ? new Attempt(ArticleContentResult.failed(), false) : attempt;
+    }
+
+    private static URI httpUri(String value) {
+        try {
+            URI uri = URI.create(value).normalize();
+            PublicDestinationPolicy.validate(uri);
+            // Fragments are not sent to the server and must not defeat loop detection.
+            return URI.create(uri.toString().split("#", 2)[0]);
+        } catch (IllegalArgumentException | NullPointerException exception) {
+            return null;
+        }
     }
 
     private Attempt read(String articleUrl, String articleTitle,
                          org.springframework.http.client.ClientHttpResponse response)
             throws IOException {
         HttpStatusCode status = response.getStatusCode();
+
+        if (status.is3xxRedirection()) {
+            int value = status.value();
+            String location = response.getHeaders().getFirst(HttpHeaders.LOCATION);
+            if ((value == 301 || value == 302 || value == 303 || value == 307 || value == 308)
+                    && location != null && !location.isBlank()) {
+                return new Attempt(null, false, location.strip());
+            }
+            return new Attempt(ArticleContentResult.failed(), false);
+        }
 
         if (isPaywall(status)) {
             // 상대가 명시적으로 막은 경우만 차단으로 본다. 재시도해도 같은 답이다.
@@ -120,10 +203,54 @@ public class ArticleContentClient {
             // 응답은 정상인데 본문을 못 뽑았다. 이건 "막혔다"가 아니라 "못 읽었다"이다.
             // 차단으로 적으면 짧은 정상 기사가 페이월 경고를 만든다.
             log.debug("본문을 뽑지 못했다. url={}", articleUrl);
-            return new Attempt(ArticleContentResult.failed(), false);
+            PublicArticleResource.Resource resource = PublicArticleResource.find(body, charsetOf(response), articleUrl);
+            return new Attempt(ArticleContentResult.failed(), false, null, resource);
         }
 
         return new Attempt(ArticleContentResult.fullText(content), false);
+    }
+
+
+    /** A proven public resource is a single bounded GET, never another redirect or fallback chain. */
+    private ArticleContentResult fetchResource(PublicArticleResource.Resource resource, boolean respectsRobots) {
+        if (httpUri(resource.uri().toString()) == null) {
+            return ArticleContentResult.failed();
+        }
+        String url = resource.uri().toString();
+        Duration crawlDelay = null;
+        if (respectsRobots) {
+            rateLimiter.await(url, null);
+            RobotsLookup robots = robotsTxtClient.lookup(url);
+            if (!robots.allows(url)) {
+                return ArticleContentResult.robotsDisallowed();
+            }
+            // A denied robots response is not evidence that a secondary resource is public.
+            if ("HTTP_401".equals(robots.reason()) || "HTTP_403".equals(robots.reason())
+                    || "HTTP_451".equals(robots.reason())) {
+                return ArticleContentResult.failed();
+            }
+            crawlDelay = robots.rules().crawlDelay();
+        }
+        rateLimiter.await(url, crawlDelay);
+        try {
+            return restClient.get().uri(resource.uri()).header(HttpHeaders.USER_AGENT, userAgent)
+                    .exchange((request, response) -> {
+                        MediaType type = response.getHeaders().getContentType();
+                        if (!response.getStatusCode().is2xxSuccessful() || type == null
+                                || !MediaType.APPLICATION_JSON.isCompatibleWith(type)
+                                || response.getHeaders().getContentLength() > MAX_BODY_BYTES) {
+                            return ArticleContentResult.failed();
+                        }
+                        byte[] json = response.getBody().readNBytes(MAX_BODY_BYTES + 1);
+                        if (json.length > MAX_BODY_BYTES) {
+                            return ArticleContentResult.failed();
+                        }
+                        String body = PublicArticleResource.extract(json, resource);
+                        return body == null ? ArticleContentResult.failed() : ArticleContentResult.fullText(body);
+                    });
+        } catch (RuntimeException exception) {
+            return ArticleContentResult.failed();
+        }
     }
 
     /**
@@ -154,6 +281,14 @@ public class ArticleContentClient {
     }
 
     /** 한 번의 시도 결과와, 다시 불러 볼 가치가 있는지. */
-    private record Attempt(ArticleContentResult result, boolean retryable) {
+    private record Attempt(ArticleContentResult result, boolean retryable, String location,
+                           PublicArticleResource.Resource resource) {
+        Attempt(ArticleContentResult result, boolean retryable) {
+            this(result, retryable, null, null);
+        }
+
+        Attempt(ArticleContentResult result, boolean retryable, String location) {
+            this(result, retryable, location, null);
+        }
     }
 }
