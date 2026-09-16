@@ -2,13 +2,30 @@ package com.example.be.domain.collection.content;
 
 import com.example.be.domain.collection.entity.FetchStatus;
 
+import java.util.Objects;
+
 /**
  * 기사 한 건의 본문 확보 결과.
  *
  * <p>실패해도 기사를 버리지 않는다 — 제목과 링크만으로도 목록에는 쓸모가 있다.
  * 대신 <b>왜 못 받았는지</b>를 남긴다. 페이월(차단)과 서버 오류(재시도 대상)는 다른 사건이다.
  */
-public record ArticleContentResult(FetchStatus status, String body) {
+public record ArticleContentResult(FetchStatus status, String body, ArticleContentFailureReason reason) {
+
+    public ArticleContentResult {
+        Objects.requireNonNull(status, "status");
+        Objects.requireNonNull(reason, "reason");
+    }
+
+    /** Preserve existing internal callers that only know the coarse fetch status. */
+    public ArticleContentResult(FetchStatus status, String body) {
+        this(status, body, switch (status) {
+            case FULLTEXT, METADATA_ONLY -> ArticleContentFailureReason.NONE;
+            case FULLTEXT_BLOCKED -> ArticleContentFailureReason.HTTP_ACCESS_DENIED;
+            case ROBOTS_DISALLOWED -> ArticleContentFailureReason.ROBOTS_DISALLOWED;
+            case FETCH_FAILED -> ArticleContentFailureReason.UNKNOWN;
+        });
+    }
 
     public static ArticleContentResult fullText(String body) {
         return new ArticleContentResult(FetchStatus.FULLTEXT, body);
@@ -25,6 +42,10 @@ public record ArticleContentResult(FetchStatus status, String body) {
 
     public static ArticleContentResult failed() {
         return new ArticleContentResult(FetchStatus.FETCH_FAILED, null);
+    }
+
+    public static ArticleContentResult failed(ArticleContentFailureReason reason) {
+        return new ArticleContentResult(FetchStatus.FETCH_FAILED, null, reason);
     }
 
     public boolean hasBody() {

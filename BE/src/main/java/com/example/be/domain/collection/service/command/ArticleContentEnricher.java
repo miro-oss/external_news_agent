@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.collection.content.ArticleContentClient;
+import com.example.be.domain.collection.content.ArticleContentFailureReason;
 import com.example.be.domain.collection.content.ArticleContentResult;
 import com.example.be.domain.collection.config.CollectionPipelineProperties;
 import com.example.be.domain.collection.entity.Article;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Component;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -56,7 +58,9 @@ public class ArticleContentEnricher {
         // 기사마다 robots.txt를 받으면 요청이 두 배가 된다. 실행 안에서 호스트별로 한 번만 본다.
         Map<String, RobotsLookup> robotsByHost = new HashMap<>();
         Map<Long, Integer> blockedCountBySource = new LinkedHashMap<>();
+        Map<ArticleContentFailureReason, Integer> failureCounts = new EnumMap<>(ArticleContentFailureReason.class);
         Set<Long> refreshedArticleIds = new LinkedHashSet<>();
+        int attempted = 0;
 
         for (Article article : targets) {
             ArticleContentResult result = fetch(article, robotsByHost);
@@ -64,6 +68,8 @@ public class ArticleContentEnricher {
                 continue;
             }
 
+            attempted++;
+            countFailure(failureCounts, result);
             resultWriter.applyFullText(article.getId(), result.status(), result.body());
             if (result.status() == FetchStatus.FULLTEXT) {
                 refreshedArticleIds.add(article.getId());
@@ -71,10 +77,14 @@ public class ArticleContentEnricher {
             if (result.status() == FetchStatus.FULLTEXT_BLOCKED) {
                 blockedCountBySource.merge(article.getSource().getId(), 1, Integer::sum);
             }
+            if (result.reason() == ArticleContentFailureReason.INTERRUPTED) {
+                break;
+            }
         }
 
         blockedCountBySource.forEach((sourceId, count) ->
                 resultWriter.addFullTextBlockedWarning(runId, sourceId, count));
+        logOutcome(runId, attempted, refreshedArticleIds.size(), failureCounts);
         return Set.copyOf(refreshedArticleIds);
     }
 
@@ -93,6 +103,9 @@ public class ArticleContentEnricher {
         if (result.status() == FetchStatus.FULLTEXT_BLOCKED) {
             resultWriter.addFullTextBlockedWarning(runId, article.getSource().getId(), 1);
         }
+        Map<ArticleContentFailureReason, Integer> failureCounts = new EnumMap<>(ArticleContentFailureReason.class);
+        countFailure(failureCounts, result);
+        logOutcome(runId, 1, result.hasBody() ? 1 : 0, failureCounts);
         return result.status() == FetchStatus.FULLTEXT
                 ? Set.of(article.getId()) : Set.of();
     }
@@ -131,6 +144,9 @@ public class ArticleContentEnricher {
      * @return 반영할 결과. 정책상 아예 시도하지 않는 경우에는 null이라 기사는 METADATA_ONLY로 남는다.
      */
     private ArticleContentResult fetch(Article article, Map<String, RobotsLookup> robotsByHost) {
+        if (Thread.currentThread().isInterrupted()) {
+            return ArticleContentResult.failed(ArticleContentFailureReason.INTERRUPTED);
+        }
         Source source = article.getSource();
         if (!allowsFullText(source)) {
             // plan-final §4-3. 페이월 매체는 정책으로 꺼 두므로 요청 자체를 하지 않는다.
@@ -143,7 +159,7 @@ public class ArticleContentEnricher {
         String url = article.getCanonicalUrl();
         String host = hostOf(url);
         if (host == null) {
-            return ArticleContentResult.failed();
+            return ArticleContentResult.failed(ArticleContentFailureReason.INVALID_URL);
         }
 
         // robotsMode=ignore면 조회조차 하지 않는다. RobotsPolicyService와 해석을 맞춘다 —
@@ -155,7 +171,7 @@ public class ArticleContentEnricher {
         // robots는 기사 URL의 호스트 기준이다. 구글 뉴스 RSS처럼 소스와 기사 호스트가 다른 경우가 있다.
         RobotsLookup robots = robotsByHost.computeIfAbsent(host, ignored -> robotsTxtClient.lookup(url));
         if (!robots.allows(url)) {
-            log.debug("robots.txt가 본문 수집을 막는다. url={}", url);
+            log.debug("robots.txt가 본문 수집을 막는다. articleId={}", article.getId());
             return ArticleContentResult.robotsDisallowed();
         }
 
@@ -170,9 +186,21 @@ public class ArticleContentEnricher {
     private String hostOf(String url) {
         try {
             return new URI(url).getHost();
-        } catch (URISyntaxException e) {
+        } catch (URISyntaxException | NullPointerException e) {
             return null;
         }
+    }
+
+    private void countFailure(Map<ArticleContentFailureReason, Integer> counts, ArticleContentResult result) {
+        if (result.reason() != ArticleContentFailureReason.NONE) {
+            counts.merge(result.reason(), 1, Integer::sum);
+        }
+    }
+
+    private void logOutcome(Long runId, int attempted, int fullText,
+                            Map<ArticleContentFailureReason, Integer> failureCounts) {
+        log.info("본문 수집 결과 runId={} attempted={} fullText={} failureReasons={}",
+                runId, attempted, fullText, failureCounts);
     }
 
     private record Target(Article article, double topicFit) {

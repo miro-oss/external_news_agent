@@ -25,6 +25,18 @@ class ArticleContentExtractorTest {
             "무단 전재 및 재배포 금지. " + "테스트용 매체의 저작권 안내입니다. ".repeat(4);
 
     @Test
+    void takesOnlyTheObservedSbsAmpBodyBeforeTheGenericMainContainer() {
+        String html = "<main><div class='article_content_end_middle'><div class='acem_text'>"
+                + PARAGRAPH + "<br>" + PARAGRAPH + "</div></div>"
+                + "<div class='reporter_article_list'><p>" + "다른 기사의 본문이다. ".repeat(20) + "</p></div></main>";
+
+        String body = ArticleContentExtractor.extract(html, "https://publisher.example/amp/article/123456");
+
+        assertTrue(body.contains("HBM4 양산 일정"));
+        assertFalse(body.contains("다른 기사"));
+    }
+
+    @Test
     void takesArticleBody() {
         String html = """
                 <html><body>
