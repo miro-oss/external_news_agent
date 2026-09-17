@@ -16,6 +16,7 @@ import com.example.be.domain.collection.service.command.CollectionResultWriter;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import tools.jackson.databind.ObjectMapper;
@@ -30,6 +31,7 @@ import java.util.*;
 /** Separate from importance: only a grounded RELEVANT decision permits detailed analysis. */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class TopicRelevanceGate {
     public static final String PROMPT_VERSION = "topic-relevance.ko.v1";
     private static final int BATCH_SIZE = 10;
@@ -91,7 +93,11 @@ public class TopicRelevanceGate {
         String key = "topic-relevance:" + runId + ":" + ready.getFirst().topic().id() + ":" + batchHash;
         var request = new AgentTopicRelevanceRequest(key, plan, ready.getFirst().topic(),
                 ready.stream().map(Prepared::article).toList());
-        if (mapper.writeValueAsString(request).length() > 85_000) {
+        // The Agent escapes angle brackets before submitting JSON to the provider.
+        String serialized = mapper.writeValueAsString(request);
+        long providerInputLength = serialized.length()
+                + 5L * serialized.chars().filter(c -> c == '<' || c == '>').count();
+        if (providerInputLength > 85_000) {
             if (ready.size() > 1) {
                 int middle = ready.size() / 2;
                 Set<Key> accepted = new HashSet<>(assessBatch(runId, plan, ready.subList(0, middle)));
@@ -197,7 +203,12 @@ public class TopicRelevanceGate {
         warn(runId, reason);
     }
     private void warn(Long runId, String reason) {
-        resultWriter.addAgentWarning(runId, "TOPIC_RELEVANCE_UNCERTAIN", reason);
+        try {
+            resultWriter.addAgentWarning(runId, "TOPIC_RELEVANCE_UNCERTAIN", reason);
+        } catch (RuntimeException error) {
+            // A diagnostic write must not undo a settled decision or settle the reservation twice.
+            log.warn("주제 적합성 경고를 저장하지 못했습니다. runId={}", runId, error);
+        }
     }
     private List<TopicRelevanceStore.Assessment> held(Long runId, List<Prepared> batch, String reason) {
         return batch.stream().map(p -> new TopicRelevanceStore.Assessment(runId, p.topic().id(), p.article().articleId(),

@@ -34,12 +34,16 @@ class TopicRelevanceRequest(AgentModel):
     topic: RelevanceTopic
     articles: list[RelevanceArticle] = Field(min_length=1, max_length=MAX_RELEVANCE_ARTICLES)
 
+    def provider_input_json(self) -> str:
+        """Bound exactly the compact, delimiter-safe JSON sent to the provider."""
+        return self.model_dump_json(by_alias=True).replace("<", "\\u003c").replace(">", "\\u003e")
+
     @model_validator(mode="after")
     def validate_request(self) -> "TopicRelevanceRequest":
         article_ids = [article.article_id for article in self.articles]
         if len(article_ids) != len(set(article_ids)):
             raise ValueError("articles.articleId는 중복될 수 없습니다.")
-        if len(self.model_dump_json(by_alias=True)) > MAX_RELEVANCE_INPUT_CHARS:
+        if len(self.provider_input_json()) > MAX_RELEVANCE_INPUT_CHARS:
             raise ValueError("topic relevance 입력은 85000자를 초과할 수 없습니다.")
         return self
 

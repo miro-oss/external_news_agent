@@ -15,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDate;
 import java.util.Optional;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import static com.example.be.domain.reports.comparison.ComparisonFixtures.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -89,6 +91,53 @@ class ReportChangesQueryServiceTest {
         assertTrue(result.items().isEmpty());
         assertTrue(result.notes().isEmpty());
         assertEquals("무관한 과거 근거", ready.items().getFirst().previous().claims().getFirst().text());
+    }
+
+    @Test void acceptanceForAnotherTopicCannotExposeEitherSideOfSavedComparison() {
+        visible(ReportScope.DAILY);
+        var work = work(snapshot(side(1, 10, "과거 주제 A 근거")), snapshot(side(1, 20, "현재 주제 A 근거")));
+        var ready = new ReportComparisonEngine().prepare(work).result();
+        when(comparisons.find(101)).thenReturn(Optional.of(new ReportComparisonRepository.Job(
+                101, ReportChanges.Status.READY, work, ready)));
+        when(reports.findByIdAndReportStatusNot(100L, ReportStatus.PENDING))
+                .thenReturn(Optional.of(NewsReport.builder().id(100L).build()));
+        when(findings.findForReportByIdIn(anyCollection())).thenReturn(List.of(fullText(10), fullText(20)));
+        for (long rejectedSide : List.of(10L, 20L)) {
+            long acceptedSide = rejectedSide == 10L ? 20L : 10L;
+            when(relevancePolicy.relevantTopicIdsByFinding(anyList()))
+                    .thenReturn(Map.of(rejectedSide, Set.of(2L), acceptedSide, Set.of(1L)));
+
+            var result = query.get(101);
+
+            assertEquals(ReportChanges.Status.UNAVAILABLE, result.status());
+            assertTrue(result.items().isEmpty());
+            assertTrue(result.notes().isEmpty());
+        }
+        assertEquals("과거 주제 A 근거", ready.items().getFirst().previous().claims().getFirst().text());
+        assertEquals("현재 주제 A 근거", ready.items().getFirst().current().claims().getFirst().text());
+    }
+
+    @Test void comparisonAllowsLegacyAndMatchingTopicEvidenceButRejectsAssessedEmptyTopics() {
+        visible(ReportScope.DAILY);
+        var work = work(snapshot(side(1, 10, "레거시 근거")), snapshot(side(1, 20, "승인된 주제 근거")));
+        var ready = new ReportComparisonEngine().prepare(work).result();
+        when(comparisons.find(101)).thenReturn(Optional.of(new ReportComparisonRepository.Job(
+                101, ReportChanges.Status.READY, work, ready)));
+        when(reports.findByIdAndReportStatusNot(100L, ReportStatus.PENDING))
+                .thenReturn(Optional.of(NewsReport.builder().id(100L).build()));
+        when(findings.findForReportByIdIn(anyCollection())).thenReturn(List.of(fullText(10), fullText(20)));
+        when(relevancePolicy.relevantTopicIdsByFinding(anyList())).thenReturn(Map.of(20L, Set.of(1L, 2L)));
+
+        var visible = query.get(101);
+        assertEquals(ReportChanges.Status.READY, visible.status());
+        assertEquals("레거시 근거", visible.items().getFirst().previous().claims().getFirst().text());
+        assertEquals("승인된 주제 근거", visible.items().getFirst().current().claims().getFirst().text());
+
+        when(relevancePolicy.relevantTopicIdsByFinding(anyList())).thenReturn(Map.of(20L, Set.of()));
+        var unavailable = query.get(101);
+        assertEquals(ReportChanges.Status.UNAVAILABLE, unavailable.status());
+        assertTrue(unavailable.items().isEmpty());
+        assertTrue(unavailable.notes().isEmpty());
     }
 
     @Test void missingOriginalBodyHidesStoredComparisonWithoutRewritingEitherSnapshot() {

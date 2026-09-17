@@ -178,6 +178,38 @@ class TopicRelevanceGateTest {
         assertEquals(2L, failure.getValue().getUsage().outputTokens());
     }
 
+    @Test void warningWriteFailureDoesNotResettleSuccessfulMixedBatch() {
+        reserve();
+        when(client.topicRelevance(any())).thenReturn(response(List.of(
+                new AgentTopicRelevanceResponse.Decision(1L, "RELEVANT", "관련", List.of("기사 1")),
+                new AgentTopicRelevanceResponse.Decision(2L, "UNCERTAIN", "근거 부족", List.of()))));
+        doThrow(new IllegalStateException("warning storage failed")).when(writer)
+                .addAgentWarning(eq(42L), eq("TOPIC_RELEVANCE_UNCERTAIN"), anyString());
+
+        assertEquals(Set.of(new TopicRelevanceGate.Key(1L, 7L)),
+                gate.assess(42L, AgentPlan.FREE, List.of(candidate(1L, 7L), candidate(2L, 7L))));
+        verify(finalizer).success(eq(42L), any(), any(), anyList(), anyString(), any(), any());
+        verify(finalizer, never()).failure(any(), any(), anyList(), anyString(), any(), any(), any());
+    }
+
+    @Test void angleBracketExpansionIsIncludedInBatchLimit() {
+        reserve();
+        var candidates = LongStream.rangeClosed(1, 10)
+                .mapToObj(id -> candidate(id, 7L, "<>".repeat(2500))).toList();
+        when(client.topicRelevance(any())).thenAnswer(invocation -> {
+            AgentTopicRelevanceRequest request = invocation.getArgument(0);
+            String serialized = new ObjectMapper().writeValueAsString(request);
+            long expandedLength = serialized.length()
+                    + 5L * serialized.chars().filter(c -> c == '<' || c == '>').count();
+            assertTrue(expandedLength <= 85_000);
+            return response(request.articles().stream().map(a -> new AgentTopicRelevanceResponse.Decision(
+                    a.articleId(), "UNCERTAIN", "판단 보류", List.of())).toList());
+        });
+
+        assertTrue(gate.assess(42L, AgentPlan.FREE, candidates).isEmpty());
+        verify(client, atLeast(2)).topicRelevance(any());
+    }
+
     private void reserve() {
         when(quota.reserve(anyLong(), anyString(), eq(AgentTask.TOPIC_RELEVANCE), any())).thenAnswer(i ->
                 new QuotaReservation(1L, i.getArgument(0), i.getArgument(1), AgentTask.TOPIC_RELEVANCE, i.getArgument(3), BigDecimal.ONE));

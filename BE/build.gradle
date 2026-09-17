@@ -70,6 +70,10 @@ tasks.named('test') {
     systemProperty 'news.agent.enabled', 'false'
     systemProperty 'news.reports.daily.measure', 'false'
     systemProperty 'news.integration.db', databaseIntegration.toString()
+    // Cached Spring contexts must not each retain ten idle Oracle sessions in CI.
+    // Four connections still cover the two-thread transaction concurrency tests.
+    systemProperty 'spring.datasource.hikari.maximum-pool-size', '4'
+    systemProperty 'spring.datasource.hikari.minimum-idle', '1'
     // Live provider measurement is a separate operational workflow, never an ordinary test.
     exclude '**/DailyReportMeasurementIntegrationTests.class'
 

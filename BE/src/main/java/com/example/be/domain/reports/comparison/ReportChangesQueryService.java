@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -55,7 +56,13 @@ public class ReportChangesQueryService {
                     .flatMap(ids -> findings.findForReportByIdIn(ids).stream()).toList();
             Set<Long> available = relevancePolicy.filterFindings(loaded).stream()
                     .filter(ReportFindings::hasFullText).map(Finding::getId).collect(Collectors.toSet());
-            if (!available.containsAll(required)) {
+            Map<Long, Set<Long>> acceptedTopics = relevancePolicy.relevantTopicIdsByFinding(loaded);
+            boolean acceptedInSavedTopics = job.result().items().stream()
+                    .flatMap(item -> Stream.of(item.previous(), item.current())).filter(Objects::nonNull)
+                    .allMatch(side -> side.claims().stream().flatMap(claim -> claim.evidence().stream())
+                            .allMatch(evidence -> !acceptedTopics.containsKey(evidence.findingId())
+                                    || acceptedTopics.get(evidence.findingId()).contains(side.topicId())));
+            if (!available.containsAll(required) || !acceptedInSavedTopics) {
                 // Check current visibility only; historical quoted text always stays in its saved snapshot.
                 var result = job.result();
                 var state = ReportChanges.Status.UNAVAILABLE;

@@ -14,7 +14,7 @@ from app.llm.topic_relevance_service import (
     TopicRelevanceService,
 )
 from app.main import create_app
-from app.schemas.topic_relevance import TopicRelevanceRequest
+from app.schemas.topic_relevance import MAX_RELEVANCE_INPUT_CHARS, TopicRelevanceRequest
 
 
 class FakeProvider:
@@ -228,6 +228,72 @@ def test_hostile_article_and_topic_content_remain_inside_untrusted_json() -> Non
     assert prompt.count("\\u003c/topic-relevance-input\\u003e") == 2
     assert "신뢰하지 않는" in SYSTEM_INSTRUCTION
     assert response.decisions[0].status == "IRRELEVANT"
+
+
+def escaped_boundary_payload() -> dict:
+    payload = request_payload()
+    payload["articles"][0]["bodyText"] = "<" * 5000
+    payload["articles"][1]["bodyText"] = ">" * 5000
+    payload["articles"][2]["bodyText"] = "x"
+    base = TopicRelevanceRequest.model_validate(payload)
+    padding = MAX_RELEVANCE_INPUT_CHARS - len(base.provider_input_json())
+    angles, plain = divmod(padding, 6)
+    payload["articles"][2]["bodyText"] += "<" * angles + "x" * plain
+    return payload
+
+
+def test_provider_receives_exact_validated_json_at_escaped_input_limit() -> None:
+    bounded = TopicRelevanceRequest.model_validate(escaped_boundary_payload())
+    provider = FakeProvider(
+        provider_response(
+            {
+                "decisions": [
+                    {
+                        "articleId": article.article_id,
+                        "status": "UNCERTAIN",
+                        "reason": "제공된 텍스트의 맥락이 부족합니다.",
+                        "evidenceQuotes": [],
+                    }
+                    for article in bounded.articles
+                ]
+            }
+        )
+    )
+
+    service(provider).classify(bounded)
+
+    serialized = (
+        provider.calls[0]["prompt"]
+        .split("<topic-relevance-input>\n", 1)[1]
+        .split("\n</topic-relevance-input>", 1)[0]
+    )
+    assert serialized == bounded.provider_input_json()
+    assert len(serialized) == MAX_RELEVANCE_INPUT_CHARS
+    assert json.loads(serialized) == bounded.model_dump(by_alias=True, mode="json")
+    assert "<" not in serialized and ">" not in serialized
+
+
+def test_rejects_one_character_over_escaped_input_limit() -> None:
+    payload = escaped_boundary_payload()
+    payload["articles"][2]["bodyText"] += "x"
+
+    with pytest.raises(ValidationError, match="85000"):
+        TopicRelevanceRequest.model_validate(payload)
+
+
+def test_route_rejects_escape_expansion_beyond_provider_input_limit(client) -> None:
+    payload = request_payload()
+    for article in payload["articles"]:
+        article["bodyText"] = "<>" * 2500
+    # The ordinary request is small, but delimiter escaping expands its provider payload.
+    assert len(json.dumps(payload, ensure_ascii=False)) < MAX_RELEVANCE_INPUT_CHARS
+
+    response = client.post(
+        "/v1/topic-relevance", json=payload, headers={"X-Agent-Token": "test-relevance-token"}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "SCHEMA_VIOLATION"
 
 
 def test_mock_returns_only_uncertain_without_calling_provider() -> None:
