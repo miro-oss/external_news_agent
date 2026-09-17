@@ -15,6 +15,7 @@ import { formatMediumDate } from '../../lib/datetime'
 import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { scrollIntoViewGently } from '../../lib/motion'
 import { ArticleDetailSkeleton, ArticleInsightSkeleton } from './ArticleSkeletons'
+import { withoutLeadingNavigation, withoutLeadingSentenceNavigation } from './articleBody'
 
 interface Props {
   articleId: number | null
@@ -88,6 +89,8 @@ export function ArticleDetailModal({
     ? perspectiveSelection.audience
     : defaultAudience
   const keywords = collectionKeywords(collectionContexts, runId ?? null, article.data?.topicId)
+  const bodyText = withoutLeadingNavigation(article.data?.bodyText ?? '')
+  const sentences = withoutLeadingSentenceNavigation(article.data?.sentences ?? [])
 
   const highlightEvidence = (evidence: number[]) => {
     setEvidenceSelection({ articleId, runId, sentences: evidence })
@@ -163,9 +166,9 @@ export function ArticleDetailModal({
                     : `분석 근거 본문 · 기사 #${article.data.analysisArticleId}`}
                 </h3>
               </div>
-              {article.data.bodyText && article.data.sentences.length > 0 ? (
+              {article.data.bodyText && sentences.length > 0 ? (
                 <div className="sentence-list">
-                  {article.data.sentences.map((sentence) => (
+                  {sentences.map((sentence) => (
                     <p
                       id={`article-${articleId}-sentence-${sentence.index}`}
                       className={highlightedSentences.includes(sentence.index) ? 'highlighted' : undefined}
@@ -177,9 +180,9 @@ export function ArticleDetailModal({
                     </p>
                   ))}
                 </div>
-              ) : article.data.bodyText?.trim() ? (
+              ) : bodyText.trim() ? (
                 <div className="sentence-list">
-                  {article.data.bodyText.split(/\n+/).filter((paragraph) => paragraph.trim()).map((paragraph, index) => (
+                  {bodyText.split(/\n+/).filter((paragraph) => paragraph.trim()).map((paragraph, index) => (
                     <p key={index}>{paragraph}</p>
                   ))}
                 </div>

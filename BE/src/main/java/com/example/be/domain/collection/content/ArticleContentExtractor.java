@@ -29,6 +29,7 @@ public final class ArticleContentExtractor {
     /** 본문일 리 없는 영역. 남겨두면 메뉴와 관련기사 목록이 본문에 섞인다. */
     private static final String NOISE_SELECTOR =
             "script, style, noscript, iframe, form, nav, header, footer, aside, "
+                    + "[role=navigation], [role=menu], [role=menubar], #gnb, .gnb, #lnb, .lnb, "
                     + "figure figcaption, .advertisement, .ad, .banner, .comment, .comments, .related";
 
     /** 본문 전용 영역. 메타 태그는 표시되는 본문 영역이 아니다. */
@@ -345,7 +346,7 @@ public final class ArticleContentExtractor {
     private static String textOf(Element element) {
         BodyTextVisitor visitor = new BodyTextVisitor();
         element.traverse(visitor);
-        return visitor.text.toString().strip();
+        return ArticleBodyCleaner.withoutLeadingNavigation(visitor.text.toString().strip());
     }
 
     private static final class BodyTextVisitor implements NodeVisitor {
@@ -395,12 +396,12 @@ public final class ArticleContentExtractor {
     }
 
     private static String textOf(Elements paragraphs) {
-        return paragraphs.stream()
+        return ArticleBodyCleaner.withoutLeadingNavigation(paragraphs.stream()
                 .map(Element::text)
                 .map(String::strip)
                 .filter(StringUtils::hasText)
                 .reduce((left, right) -> left + "\n\n" + right)
                 .orElse("")
-                .strip();
+                .strip());
     }
 }
