@@ -53,11 +53,12 @@ export function CollectionDeliveryPicker({ value, onChange, disabled }: {
   </>
 }
 
-export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, context, pending = false, error, status, readOnly = false }: {
+export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, onDraftChange, context, pending = false, error, status, readOnly = false }: {
   id: string
   value?: CollectionRunDelivery
   onDismiss: () => void
   onApply: (value: CollectionRunDelivery | undefined) => void
+  onDraftChange?: () => void
   context?: { scope: 'TOPIC' | 'RUN'; name: string; description?: string; inherited?: boolean }
   pending?: boolean
   error?: string | null
@@ -91,14 +92,20 @@ export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, contex
     ? `${oversizedSelections.map(selection => selection.label).join(', ')}까지 선택할 수 있어요.` : null
   const canApply = !pending && !readOnly && !selectionLimitMessage && (!draft.enabled || (availability.valid && hasTargets && draft.channelIds.length > 0 && (draft.run || draft.daily)))
 
+  function updateDraft(update: (current: CollectionRunDelivery) => CollectionRunDelivery) {
+    if (pending || readOnly) return
+    setDraft(update)
+    onDraftChange?.()
+  }
+
   function toggle(key: keyof DeliveryTargets, targetId: number) {
-    setDraft(current => ({ ...current, [key]: current[key].includes(targetId)
+    updateDraft(current => ({ ...current, [key]: current[key].includes(targetId)
       ? current[key].filter(selected => selected !== targetId) : [...current[key], targetId] }))
   }
 
   function toggleAll() {
     const ids = new Set(matches.map(target => target.id))
-    setDraft(current => ({ ...current, [tab]: allSelected
+    updateDraft(current => ({ ...current, [tab]: allSelected
       ? current[tab].filter(targetId => !ids.has(targetId)) : [...new Set([...current[tab], ...ids])] }))
   }
 
@@ -140,7 +147,7 @@ export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, contex
     </header>
     {creatingGroup ? <CollectionDeliveryGroupForm recipients={recipients} create={createGroup} onCancel={dismiss}
       onCreated={group => {
-        setDraft(current => ({ ...current, groupIds: [...new Set([...current.groupIds, group.id])] }))
+        updateDraft(current => ({ ...current, groupIds: [...new Set([...current.groupIds, group.id])] }))
         setTab('groupIds'); setSearch(''); setCreatingGroup(false)
       }} /> : <>
     <div className="collection-delivery-body">
@@ -149,13 +156,13 @@ export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, contex
       <div className="collection-delivery-enabled">
         <span id={`${id}-enabled`}>{context?.inherited ? '이번 수집에 별도로 보내기' : '완성된 보고서 보내기'}</span>
         <button type="button" className="collection-delivery-switch" role="switch" aria-checked={draft.enabled}
-          aria-labelledby={`${id}-enabled`} onClick={() => setDraft(current => ({ ...current, enabled: !current.enabled }))}><span /></button>
+          aria-labelledby={`${id}-enabled`} onClick={() => updateDraft(current => ({ ...current, enabled: !current.enabled }))}><span /></button>
       </div>
       {context ? <p className="collection-delivery-note">{context.description ?? (context.scope === 'TOPIC'
         ? '이 주제의 보고서에 계속 적용해요. 이번 수집에 별도 저장한 설정이 있으면 그 설정을 사용합니다.'
         : '이번 수집에만 적용해요. 주제에 저장된 설정은 유지됩니다.')}</p> : <div className="collection-delivery-scope">
         <Segmented label="전달 설정 적용 범위" value={draft.mode} options={MODE_OPTIONS}
-          onSelect={mode => setDraft(current => ({ ...current, mode }))} />
+          onSelect={mode => { if (mode !== draft.mode) updateDraft(current => ({ ...current, mode })) }} />
         <p>{draft.mode === 'ONCE'
           ? '이번 수집에만 적용해요. 주제에 저장된 설정은 유지됩니다.'
           : '수집을 시작하면 선택한 주제의 정기 수집에도 적용해요.'}</p>
@@ -164,8 +171,8 @@ export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, contex
         <div className="collection-delivery-options-row">
         <fieldset className="collection-delivery-options"><legend>보낼 보고서</legend>
           <div className="collection-delivery-checks">
-            <label><input type="checkbox" checked={draft.run} onChange={event => setDraft(current => ({ ...current, run: event.target.checked }))} />수집별 보고서</label>
-            <label><input type="checkbox" checked={draft.daily} onChange={event => setDraft(current => ({ ...current, daily: event.target.checked }))} />일일 통합 보고서</label>
+            <label><input type="checkbox" checked={draft.run} onChange={event => updateDraft(current => ({ ...current, run: event.target.checked }))} />수집별 보고서</label>
+            <label><input type="checkbox" checked={draft.daily} onChange={event => updateDraft(current => ({ ...current, daily: event.target.checked }))} />일일 통합 보고서</label>
           </div>
         </fieldset>
           <fieldset className="collection-delivery-options"><legend>전달 방식</legend>
@@ -211,7 +218,7 @@ export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, contex
       {selectionLimitMessage && <div className="collection-delivery-limit" role="alert">
         <p id={`${id}-selection-limit`}>{selectionLimitMessage}</p>
         {!draft.enabled && <button type="button" className="text-button"
-          disabled={pending || readOnly} onClick={() => setDraft(current => ({ ...current, groupIds: [], recipientIds: [], channelIds: [] }))}>선택 비우기</button>}
+          disabled={pending || readOnly} onClick={() => updateDraft(current => ({ ...current, groupIds: [], recipientIds: [], channelIds: [] }))}>선택 비우기</button>}
       </div>}
       {!context && <button type="button" className="text-button" onClick={() => onApply(undefined)}>기존 설정 사용</button>}
       <button type="button" className="secondary-button" disabled={pending} onClick={onDismiss}>{readOnly ? '닫기' : '취소'}</button>

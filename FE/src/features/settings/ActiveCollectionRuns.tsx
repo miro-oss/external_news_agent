@@ -90,6 +90,7 @@ function RunDeliveryEditor({ id, initial, onDismiss, onSaved }: {
     context={{ scope: 'RUN', name: `수집 #${initial.runId}`, inherited: initial.source === 'TOPIC',
       description: initial.source === 'TOPIC' ? '저장하면 이번 수집은 아래 설정만 사용합니다. 주제 설정은 유지됩니다.' : undefined }}
     pending={save.isPending} readOnly={ended}
+    onDraftChange={save.reset}
     error={save.error ? save.error instanceof ApiError ? save.error.message : '알림 설정을 저장하지 못했습니다. 다시 시도해 주세요.' : null}
     status={ended ? <>
       <p>{settings.reportReady ? '보고서가 완성되어 알림 설정을 변경할 수 없습니다. 보고서의 공유하기에서 전달할 수 있습니다.' : '수집이 종료되어 알림 설정을 변경할 수 없습니다.'}</p>

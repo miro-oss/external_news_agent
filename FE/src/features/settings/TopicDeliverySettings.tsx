@@ -36,6 +36,7 @@ export function TopicDeliverySettings({ topicId, topicName }: { topicId: number;
       aria-controls={editing ? id : undefined} onClick={() => void open()}>{loading ? '불러오는 중…' : policy.isError ? '다시 불러오기' : '알림 설정'}</button>
     {editing && createPortal(<CollectionDeliveryDialog id={id} value={{ ...editing, mode: 'TOPIC' }}
       context={{ scope: 'TOPIC', name: topicName }} pending={save.isPending}
+      onDraftChange={save.reset}
       error={save.error ? save.error instanceof ApiError ? save.error.message : '알림 설정을 저장하지 못했습니다. 다시 시도해 주세요.' : null}
       onDismiss={() => setEditing(null)} onApply={value => {
         if (!value) return

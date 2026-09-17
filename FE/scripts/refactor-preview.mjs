@@ -64,7 +64,8 @@ function reset() { topics = structuredClone(initialTopics); proposals = structur
 const policyFields = value => ({ enabled: value.enabled, run: value.run, daily: value.daily,
     groupIds: [...value.groupIds], recipientIds: [...value.recipientIds], channelIds: [...value.channelIds] });
 function runSettings(run) {
-    const saved = runDeliverySettings.find(settings => settings.runId === run.runId)?.delivery;
+    const delivery = runDeliverySettings.find(settings => settings.runId === run.runId)?.delivery;
+    const saved = delivery?.mode === 'TOPIC' ? null : delivery;
     const reportReady = run.reportReady ?? run.reportId !== null;
     return { runId: run.runId, editable: ['PENDING', 'RUNNING'].includes(run.status) && !reportReady,
         reportId: run.reportId, reportReady, source: saved ? 'RUN' : 'TOPIC',
