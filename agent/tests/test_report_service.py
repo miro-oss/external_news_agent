@@ -141,6 +141,62 @@ def test_generates_structured_report_and_deterministic_markdown() -> None:
     assert response.meta.mock is False
 
 
+@pytest.mark.parametrize(
+    ("source_finding_ids", "expected_ids", "expected_article_ids"),
+    [
+        ([501, 501, 501], [501], [1024]),
+        ([504, 502, 504, 501, 503], [504, 502, 501, 503], [1025, 1024]),
+    ],
+)
+def test_report_references_deduplicate_articles_and_preserve_distinct_findings(
+    source_finding_ids: list[int],
+    expected_ids: list[int],
+    expected_article_ids: list[int],
+) -> None:
+    report_request = request()
+    original_finding = report_request.findings[0]
+    report_request = report_request.model_copy(
+        update={
+            "findings": [
+                original_finding,
+                original_finding.model_copy(update={"id": 502}),
+                original_finding.model_copy(update={"id": 503}),
+                original_finding.model_copy(
+                    update={
+                        "id": 504,
+                        "article_id": 1025,
+                        "canonical_url": "https://example.com/1025",
+                    }
+                ),
+            ]
+        }
+    )
+    output = json.loads(valid_output(source_finding_ids))
+    output["watchItems"] = [
+        {
+            "topic": "HBM4 양산 일정",
+            "reason": "HBM4 양산 일정이 앞당겨졌다.",
+            "sourceFindingIds": source_finding_ids,
+        }
+    ]
+    provider = FakeProvider(provider_response(json.dumps(output, ensure_ascii=False)))
+
+    response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(report_request)
+
+    assert response.important_events[0].source_finding_ids == expected_ids
+    assert response.watch_items[0].source_finding_ids == expected_ids
+    assert [finding.id for finding in report_request.findings] == [501, 502, 503, 504]
+    expected_references = ", ".join(
+        f"[HBM4 양산 일정 단축](<https://example.com/{article_id}>)"
+        for article_id in expected_article_ids
+    )
+    reference_lines = [
+        line.strip() for line in response.markdown_body.splitlines() if "- 근거: " in line
+    ]
+    assert reference_lines == [f"- 근거: {expected_references}"] * 2
+    assert len(provider.prompts) == 1
+
+
 def test_replaces_unsupported_significance_without_another_provider_call() -> None:
     provider = FakeProvider(
         provider_response(valid_output(significance="공급망 병목이 완전히 해결된다."))

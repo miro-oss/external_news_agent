@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
-import type { ReportDetail, ReportFinding } from '../../api/types'
+import type { ReportDetail } from '../../api/types'
 import { CollapsibleSection } from '../../components/CollapsibleSection'
-import { collectionHighlightTerms, groupLegacyReportSections, rehypeCollectionHighlights, splitReportMarkdown } from './reportReading'
+import { collectionHighlightTerms, groupLegacyReportSections, rehypeCollectionHighlights, reportSourceFindings, splitReportMarkdown } from './reportReading'
 import { ReportKeywordText } from './ReportKeywordText'
 
 export function ReportReadingContent({ report, onEvidenceSelect }: {
@@ -17,7 +17,7 @@ export function ReportReadingContent({ report, onEvidenceSelect }: {
   const other = (report.findings ?? []).filter(finding => !referenced.has(finding.id) && finding.keyPoints.length > 0)
   const notes = content.sourceNotes.filter(note => !/제외 사항이 없습니다/.test(note))
   function references(ids: number[]) {
-    const findings = ids.map(id => byId.get(id)).filter((finding): finding is ReportFinding => Boolean(finding))
+    const findings = reportSourceFindings(ids, byId)
     return <div className="report-event-sources">{findings.map(finding => (
       <button type="button" className="text-button" key={finding.id}
         onClick={() => onEvidenceSelect(finding.articleId, finding.runId, [])}>

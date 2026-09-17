@@ -1,4 +1,17 @@
-import type { ReportCollectionContext } from '../../api/types'
+import type { ReportCollectionContext, ReportFinding } from '../../api/types'
+
+/** Repeated IDs or topic findings can cite one article; keep its first cited analysis snapshot. */
+export function reportSourceFindings(ids: number[], byId: ReadonlyMap<number, ReportFinding>): ReportFinding[] {
+  const articleIds = new Set<number>()
+  const sources: ReportFinding[] = []
+  for (const id of ids) {
+    const finding = byId.get(id)
+    if (!finding || articleIds.has(finding.articleId)) continue
+    articleIds.add(finding.articleId)
+    sources.push(finding)
+  }
+  return sources
+}
 
 export interface MarkdownSection { title: string; body: string }
 

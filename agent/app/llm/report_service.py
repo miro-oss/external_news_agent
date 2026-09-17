@@ -435,8 +435,12 @@ def _render_markdown(
 
 def _finding_references(ids: list[int], findings: dict[int, ReportFindingInput]) -> str:
     references: list[str] = []
+    seen_article_ids: set[int] = set()
     for finding_id in ids:
         finding = findings[finding_id]
+        if finding.article_id in seen_article_ids:
+            continue
+        seen_article_ids.add(finding.article_id)
         title = _markdown_text(finding.article_title)
         url = finding.canonical_url
         references.append(f"[{title}](<{url}>)")

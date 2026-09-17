@@ -168,11 +168,21 @@ class ImportantEvent(AgentModel):
     significance: str = Field(min_length=1)
     source_finding_ids: list[Annotated[int, Field(gt=0)]] = Field(min_length=1)
 
+    @field_validator("source_finding_ids")
+    @classmethod
+    def deduplicate_source_finding_ids(cls, value: list[int]) -> list[int]:
+        return list(dict.fromkeys(value))
+
 
 class WatchItem(AgentModel):
     topic: str = Field(min_length=1, max_length=500)
     reason: str = Field(min_length=1)
     source_finding_ids: list[Annotated[int, Field(gt=0)]] = Field(min_length=1)
+
+    @field_validator("source_finding_ids")
+    @classmethod
+    def deduplicate_source_finding_ids(cls, value: list[int]) -> list[int]:
+        return list(dict.fromkeys(value))
 
 
 class ReportOutput(AgentModel):
