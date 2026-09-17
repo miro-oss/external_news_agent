@@ -1,5 +1,7 @@
 package com.example.be.domain.notifications.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
+import com.example.be.domain.analysis.relevance.TopicRelevanceTestSupport;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.SensitivityLevel;
@@ -21,9 +23,28 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class NotificationRendererTest {
+    private final TopicRelevancePolicy relevancePolicy = TopicRelevanceTestSupport.legacyPolicy();
 
     private final FindingRepository findingRepository = mock(FindingRepository.class);
-    private final NotificationRenderer renderer = new NotificationRenderer(findingRepository);
+    private final NotificationRenderer renderer = new NotificationRenderer(findingRepository, relevancePolicy);
+
+    @Test
+    void topicRejectedFindingCannotReachEitherNotificationChannelThroughSavedDigest() {
+        Finding rejected = finding();
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(rejected));
+        when(relevancePolicy.filterFindings(List.of(rejected))).thenReturn(List.of());
+        NewsReport report = report("## 오늘의 핵심\n토스 공정위 무관 요약");
+        org.springframework.test.util.ReflectionTestUtils.setField(report, "structuredContent",
+                new com.example.be.domain.reports.entity.ReportContent(
+                        List.of("토스 공정위 무관 요약"), List.of(), List.of(), List.of()));
+        for (ChannelType type : ChannelType.values()) {
+            String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
+            assertFalse(body.contains("토스"));
+            assertFalse(body.contains("검증된 핵심 요약"));
+            assertFalse(body.contains("https://example.com/article"));
+        }
+        assertTrue(report.getMarkdownBody().contains("토스"));
+    }
 
     @Test
     void dailyNotificationUsesOnlySavedFindingsWithoutRunId() {

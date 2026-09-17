@@ -1,6 +1,8 @@
 package com.example.be.domain.topics.service.strategy;
 
 import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyRequest;
+import com.example.be.domain.analysis.relevance.TopicRelevanceGate;
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.scoring.TopicFitScorer;
@@ -21,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -32,13 +35,17 @@ public class TopicKeywordStrategyInputAssembler {
     private final TopicRepository topicRepository;
     private final CollectionRunArticleRepository runArticleRepository;
     private final TopicFitScorer topicFitScorer;
+    private final TopicRelevancePolicy relevancePolicy;
 
     public Snapshot assemble(Long runId, Long topicId) {
         Topic topic = topicRepository.findById(topicId)
                 .orElseThrow(() -> new TopicException(TopicErrorCode.TOPIC_NOT_FOUND));
+        Set<TopicRelevanceGate.Key> excluded = relevancePolicy.excludedKeys(runId);
         List<CollectionRunArticle> observations = runArticleRepository
                 .findKeywordStrategyObservations(runId, topicId)
                 .stream()
+                .filter(observation -> !excluded.contains(new TopicRelevanceGate.Key(
+                        observation.getArticle().getId(), topicId)))
                 .sorted(Comparator
                         .comparing((CollectionRunArticle observation) -> observation.getArticle().getPublishedAt(),
                                 Comparator.nullsLast(Comparator.reverseOrder()))

@@ -1,5 +1,6 @@
 package com.example.be.domain.notifications.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.notifications.entity.ChannelType;
@@ -21,13 +22,15 @@ import java.util.List;
 public class NotificationRenderer {
 
     private final FindingRepository findingRepository;
+    private final TopicRelevancePolicy relevancePolicy;
 
-    public NotificationRenderer(FindingRepository findingRepository) {
+    public NotificationRenderer(FindingRepository findingRepository, TopicRelevancePolicy relevancePolicy) {
         this.findingRepository = findingRepository;
+        this.relevancePolicy = relevancePolicy;
     }
 
     public RenderedNotification render(NewsReport report, NotificationChannel channel) {
-        ReportFindings.Visible visible = ReportFindings.loadVisible(report, findingRepository);
+        ReportFindings.Visible visible = ReportFindings.loadVisible(report, findingRepository, relevancePolicy);
         List<Finding> findings = visible.findings();
         ReportReadingContent content = ReportReadingContent.from(report, visible);
         return channel.getChannelType() == ChannelType.EMAIL

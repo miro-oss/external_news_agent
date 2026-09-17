@@ -9,5 +9,6 @@ public enum AgentTask {
     INSIGHT,
     INVESTIGATE,
     KEYWORD_STRATEGY,
-    REPORT_CHANGES
+    REPORT_CHANGES,
+    TOPIC_RELEVANCE
 }

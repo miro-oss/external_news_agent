@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
+import com.example.be.domain.analysis.relevance.TopicRelevanceTestSupport;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportScope;
@@ -21,6 +23,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class DailyReportCreationServiceTest {
+    private final TopicRelevancePolicy relevancePolicy = TopicRelevanceTestSupport.legacyPolicy();
     private final DailyReportJdbcRepository daily = mock(DailyReportJdbcRepository.class);
     private final NewsReportRepository reports = mock(NewsReportRepository.class);
     private final FindingRepository findings = mock(FindingRepository.class);
@@ -30,7 +33,7 @@ class DailyReportCreationServiceTest {
     private final AgentReportOrchestrator orchestrator = mock(AgentReportOrchestrator.class);
     private final ReportGenerator fallback = mock(ReportGenerator.class);
     private final DailyReportCreationService service = new DailyReportCreationService(
-            daily, reports, findings, selector, reservation, persistence, orchestrator, fallback);
+            daily, reports, findings, selector, reservation, persistence, orchestrator, fallback, relevancePolicy);
     private final LocalDate date = LocalDate.of(2026, 8, 1);
 
     @BeforeEach

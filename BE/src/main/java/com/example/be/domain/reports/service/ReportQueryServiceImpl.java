@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.agent.investigation.InvestigationTrace;
 import com.example.be.domain.analysis.agent.investigation.IssueInvestigationJdbcRepository;
 import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
@@ -66,6 +67,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     private final SensitivityCalculator sensitivityCalculator;
     private final IssueInvestigationJdbcRepository investigationRepository;
     private final CollectionRunArticleRepository runArticleRepository;
+    private final TopicRelevancePolicy relevancePolicy;
 
     @Override
     public PageResponse<ReportResDTO.Summary> getReports(String from, String to, int page, int size) {
@@ -166,16 +168,17 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         Long runId = report.getRunId();
         boolean daily = report.getReportScope() == ReportScope.DAILY;
         boolean loadFindings = includeFindings || daily
-                || findingRepository.countWithoutFullTextForReportByRunId(runId) > 0;
-        ReportFindings.Visible visible = loadFindings ? ReportFindings.loadVisible(report, findingRepository)
+                || findingRepository.countWithoutFullTextForReportByRunId(runId) > 0
+                || findingRepository.countTopicExcludedForReportByRunId(runId) > 0;
+        ReportFindings.Visible visible = loadFindings ? ReportFindings.loadVisible(report, findingRepository, relevancePolicy)
                 : new ReportFindings.Visible(List.of(), false);
         List<Finding> findings = visible.findings();
         ReportReadingContent readingContent = ReportReadingContent.from(report, visible);
-        Map<Long, Long> issueIdsByArticle = includeFindings
-                ? issueIdsByArticle(findings)
+        Map<Long, Long> issueIdsByFinding = includeFindings
+                ? issueIdsByFinding(findings)
                 : Map.of();
         Map<Long, NewsIssue> issuesById = includeFindings
-                ? issuesById(issueIdsByArticle.values())
+                ? issuesById(issueIdsByFinding.values())
                 : Map.of();
         Map<Long, Map<Long, InvestigationTrace>> tracesByRun = new LinkedHashMap<>();
         if (includeFindings) {
@@ -208,7 +211,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                         .flatMap(ids -> runArticleRepository.findReportArticleObservations(ids).stream()).toList()))
                 .findings(includeFindings ? findings.stream()
                         .map(finding -> {
-                            Long issueId = issueIdsByArticle.get(finding.getArticle().getId());
+                            Long issueId = issueIdsByFinding.get(finding.getId());
                             NewsIssue issue = issueId == null ? null : issuesById.get(issueId);
                             return toFinding(
                                     finding, issueId, issue,
@@ -219,26 +222,27 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .build();
     }
 
-    private Map<Long, Long> issueIdsByArticle(List<Finding> findings) {
+    private Map<Long, Long> issueIdsByFinding(List<Finding> findings) {
         if (findings.isEmpty()) {
             return Map.of();
         }
         Set<Long> articleIds = findings.stream()
                 .map(finding -> finding.getArticle().getId())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        Map<Long, Long> topicIdsByArticle = findings.stream()
-                .collect(Collectors.toMap(
-                        finding -> finding.getArticle().getId(),
-                        finding -> finding.getArticle().getTopic().getId(),
-                        (first, ignored) -> first,
-                        LinkedHashMap::new));
+        Map<Long, Set<Long>> assessedTopics = relevancePolicy.relevantTopicIdsByFinding(findings);
+        Map<Long, List<IssueArticleRepository.CoverageMembership>> membershipsByArticle =
+                OracleInClause.batches(articleIds).stream()
+                        .flatMap(ids -> issueArticleRepository.findCoverageMembershipsByArticleIds(ids).stream())
+                        .collect(Collectors.groupingBy(IssueArticleRepository.CoverageMembership::getArticleId));
         Map<Long, Long> result = new LinkedHashMap<>();
-        OracleInClause.batches(articleIds).stream()
-                .flatMap(ids -> issueArticleRepository.findCoverageMembershipsByArticleIds(ids).stream())
-                .filter(membership -> membership.getTopicId()
-                        .equals(topicIdsByArticle.get(membership.getArticleId())))
-                .forEach(membership -> result.putIfAbsent(
-                        membership.getArticleId(), membership.getIssueId()));
+        for (Finding finding : findings) {
+            Set<Long> topics = assessedTopics.getOrDefault(finding.getId(),
+                    Set.of(finding.getArticle().getTopic().getId()));
+            membershipsByArticle.getOrDefault(finding.getArticle().getId(), List.of()).stream()
+                    .filter(membership -> topics.contains(membership.getTopicId()))
+                    .map(IssueArticleRepository.CoverageMembership::getIssueId).min(Long::compareTo)
+                    .ifPresent(issueId -> result.put(finding.getId(), issueId));
+        }
         return result;
     }
 

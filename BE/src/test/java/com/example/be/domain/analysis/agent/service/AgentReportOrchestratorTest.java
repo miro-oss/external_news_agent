@@ -1,5 +1,7 @@
 package com.example.be.domain.analysis.agent.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
+import com.example.be.domain.analysis.relevance.TopicRelevanceTestSupport;
 import com.example.be.domain.analysis.agent.client.AgentClient;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
@@ -54,6 +56,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AgentReportOrchestratorTest {
+    private final TopicRelevancePolicy relevancePolicy = TopicRelevanceTestSupport.legacyPolicy();
 
     private final AgentProperties properties = enabledProperties();
     private final AgentClient client = mock(AgentClient.class);
@@ -70,12 +73,27 @@ class AgentReportOrchestratorTest {
             new AgentReportOrchestrator(
                     properties, client, recorder, fallback, observationRepository,
                     quotaService, planService, resultWriter, issueArticleRepository,
-                    com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
+                    com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy);
 
     @BeforeEach
     void reserveQuota() {
         when(quotaService.reserve(42L, "run:42:report", AgentTask.REPORT, AgentPlan.FREE))
                 .thenReturn(reservation);
+    }
+
+    @Test
+    void topicRejectedFindingIsAbsentFromAgentInputAndUnreferencedCoverageAppendix() {
+        Finding relevant = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "반도체 장비 요약");
+        Finding irrelevant = finding(502L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "토스 공정위 무관 요약");
+        when(relevancePolicy.filterFindings(List.of(relevant, irrelevant))).thenReturn(List.of(relevant));
+        when(client.report(any())).thenReturn(response(List.of(501L)));
+        var document = orchestrator.generate(run(), List.of(relevant, irrelevant), LocalDateTime.now());
+        var request = ArgumentCaptor.forClass(AgentReportRequest.class);
+        verify(client).report(request.capture());
+        assertEquals(List.of(501L), request.getValue().findings().stream().map(AgentReportRequest.FindingPayload::id).toList());
+        assertEquals(List.of(501L), document.reflectedFindingIds());
+        assertFalse(document.markdownBody().contains("토스"));
+        assertFalse(document.structuredContent().toString().contains("무관"));
     }
 
     @Test
@@ -184,7 +202,7 @@ class AgentReportOrchestratorTest {
         AgentReportOrchestrator disabledOrchestrator = new AgentReportOrchestrator(
                 disabled, client, recorder, fallback, observationRepository,
                 quotaService, planService, resultWriter, issueArticleRepository,
-                com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
+                com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy);
         Finding representative = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "대표 요약");
         Finding member = finding(502L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "멤버 요약");
         NewsIssue issue = NewsIssue.builder().id(88L).build();
@@ -230,7 +248,7 @@ class AgentReportOrchestratorTest {
                 new AgentReportOrchestrator(
                         disabled, client, recorder, fallback, observationRepository,
                         quotaService, planService, resultWriter, issueArticleRepository,
-                        com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
+                        com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy);
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT, "STUB 요약");
         ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
         when(fallback.generate(eq(List.of(stub)), any(), any())).thenReturn(fallbackDocument);

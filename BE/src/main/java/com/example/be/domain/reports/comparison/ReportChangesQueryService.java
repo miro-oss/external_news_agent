@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.comparison;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.reports.service.ReportFindings;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -25,6 +27,7 @@ public class ReportChangesQueryService {
     private final NewsReportRepository reports;
     private final ReportComparisonRepository comparisons;
     private final FindingRepository findings;
+    private final TopicRelevancePolicy relevancePolicy;
 
     @Transactional(readOnly = true)
     public ReportChanges get(long reportId) {
@@ -49,10 +52,17 @@ public class ReportChangesQueryService {
                     .filter(Objects::nonNull).flatMap(side -> side.claims().stream())
                     .flatMap(claim -> claim.evidence().stream()).map(ReportChanges.Evidence::findingId)
                     .forEach(required::add);
-            Set<Long> available = OracleInClause.batches(required).stream()
-                    .flatMap(ids -> findings.findForReportByIdIn(ids).stream())
+            List<Finding> loaded = OracleInClause.batches(required).stream()
+                    .flatMap(ids -> findings.findForReportByIdIn(ids).stream()).toList();
+            Set<Long> available = relevancePolicy.filterFindings(loaded).stream()
                     .filter(ReportFindings::hasFullText).map(Finding::getId).collect(Collectors.toSet());
-            if (!available.containsAll(required)) {
+            Map<Long, Set<Long>> acceptedTopics = relevancePolicy.relevantTopicIdsByFinding(loaded);
+            boolean acceptedInSavedTopics = job.result().items().stream()
+                    .flatMap(item -> Stream.of(item.previous(), item.current())).filter(Objects::nonNull)
+                    .allMatch(side -> side.claims().stream().flatMap(claim -> claim.evidence().stream())
+                            .allMatch(evidence -> !acceptedTopics.containsKey(evidence.findingId())
+                                    || acceptedTopics.get(evidence.findingId()).contains(side.topicId())));
+            if (!available.containsAll(required) || !acceptedInSavedTopics) {
                 // Check current visibility only; historical quoted text always stays in its saved snapshot.
                 var result = job.result();
                 var state = ReportChanges.Status.UNAVAILABLE;

@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.service.FindingEvidencePolicy;
@@ -29,6 +30,7 @@ public class ReportGenerator {
     private static final DateTimeFormatter TITLE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     private final SensitivityCalculator sensitivityCalculator;
+    private final TopicRelevancePolicy relevancePolicy;
 
     public ReportDocument generate(List<Finding> findings, LocalDateTime generatedAt) {
         return generate(findings, generatedAt, ReportSourceStats.empty());
@@ -46,6 +48,7 @@ public class ReportGenerator {
 
     private ReportDocument generate(List<Finding> findings, LocalDateTime generatedAt,
                                     ReportSourceStats sourceStats, LocalDate reportDate) {
+        findings = relevancePolicy.filterFindings(findings);
         int actualStubCount = (int) findings.stream()
                 .filter(finding -> finding.getAnalysisSource() == AnalysisSource.STUB)
                 .count();
@@ -93,7 +96,10 @@ public class ReportGenerator {
     }
 
     private String title(List<Finding> findings, LocalDateTime generatedAt) {
+        Map<Long, java.util.Set<Long>> assessedTopics = relevancePolicy.relevantTopicIdsByFinding(findings);
         List<String> topics = findings.stream()
+                .filter(finding -> !assessedTopics.containsKey(finding.getId())
+                        || assessedTopics.get(finding.getId()).contains(finding.getArticle().getTopic().getId()))
                 .map(finding -> finding.getArticle().getTopic().getName())
                 .filter(StringUtils::hasText)
                 .distinct()

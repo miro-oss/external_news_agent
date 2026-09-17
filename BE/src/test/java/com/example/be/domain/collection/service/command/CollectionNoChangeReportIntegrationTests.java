@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.analysis.repository.FindingRepository;
+import com.example.be.domain.analysis.relevance.TopicRelevanceGate;
 import com.example.be.domain.collection.content.ArticleContentClient;
 import com.example.be.domain.collection.content.ArticleContentResult;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
@@ -45,6 +46,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -53,6 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
@@ -79,6 +82,7 @@ class CollectionNoChangeReportIntegrationTests {
     @Autowired private SourceRepository sourceRepository;
     @Autowired private EntityManager entityManager;
 
+    @MockitoBean private TopicRelevanceGate relevanceGate;
     @MockitoBean private FeedClient feedClient;
     @MockitoBean private ArticleContentClient contentClient;
     @MockitoBean private RobotsPolicyService robotsPolicyService;
@@ -91,6 +95,12 @@ class CollectionNoChangeReportIntegrationTests {
 
     @BeforeEach
     void setUp() {
+        // These HBM fixtures test change/report history; relevance itself has separate gate tests.
+        when(relevanceGate.assess(anyLong(), any(), anyList())).thenAnswer(invocation -> {
+            List<TopicRelevanceGate.Candidate> candidates = invocation.getArgument(2);
+            return candidates.stream().map(candidate -> new TopicRelevanceGate.Key(
+                    candidate.article().getId(), candidate.topic().getId())).collect(Collectors.toSet());
+        });
         String suffix = UUID.randomUUID().toString();
         topic = topicRepository.save(Topic.builder().name("HBM " + suffix).queryText("HBM")
                 .requiredKeywords(List.of("HBM")).optionalKeywords(List.of()).excludedKeywords(List.of())

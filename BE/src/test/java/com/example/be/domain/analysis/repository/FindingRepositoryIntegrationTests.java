@@ -329,6 +329,54 @@ class FindingRepositoryIntegrationTests {
     }
 
     @Test
+    void reportCountsMatchTopicVisibilityForLegacyRejectedUncertainAndSharedArticles() {
+        Finding legacy = findingRepository.save(finding());
+        Article rejected = articleRepository.save(historyArticle("irrelevant", article.getPublishedAt()));
+        Article uncertain = articleRepository.save(historyArticle("uncertain", article.getPublishedAt()));
+        Article shared = articleRepository.save(historyArticle("shared", article.getPublishedAt()));
+        Finding rejectedFinding = findingRepository.save(historyFinding(rejected));
+        Finding uncertainFinding = findingRepository.save(historyFinding(uncertain));
+        Finding sharedFinding = findingRepository.save(historyFinding(shared));
+        Topic other = topicRepository.save(Topic.builder().name("다른 주제 " + UUID.randomUUID())
+                .queryText("규제").requiredKeywords(List.of()).optionalKeywords(List.of()).excludedKeywords(List.of())
+                .batchSize(10).intervalMinutes(60).active(true).build());
+        var daily = com.example.be.domain.reports.entity.NewsReport.builder()
+                .reportScope(com.example.be.domain.reports.entity.ReportScope.DAILY)
+                .reportDate(java.time.LocalDate.of(1997, 3, 15)).sourceRunIds(List.of(run.getId())).sourceReportCount(1L)
+                .title("주제 노출 집계 검증").markdownBody("과거 저장 본문").modelName("synthetic")
+                .generatedAt(LocalDateTime.now()).coverageRecorded(true)
+                .reflectedFindingIds(List.of(legacy.getId(), rejectedFinding.getId(), uncertainFinding.getId(), sharedFinding.getId()))
+                .build();
+        entityManager.persist(daily);
+        entityManager.flush();
+        insertTopicAssessment(rejected.getId(), topic.getId(), "IRRELEVANT");
+        insertTopicAssessment(uncertain.getId(), topic.getId(), "UNCERTAIN");
+        insertTopicAssessment(shared.getId(), topic.getId(), "IRRELEVANT");
+        insertTopicAssessment(shared.getId(), other.getId(), "RELEVANT");
+        flushAndClear();
+
+        var runCounts = findingRepository.countForReports(List.of(run.getId()), new BigDecimal("70"));
+        assertEquals(2, runCounts.getFirst().getFindingCount());
+        assertEquals(1, runCounts.getFirst().getHighSensitivityCount());
+        var stats = findingRepository.countStatsByRunId(run.getId(), new BigDecimal("40"), new BigDecimal("70"));
+        assertEquals(2, stats.stream().mapToLong(FindingRepository.ReportStatsCount::getFindingCount).sum());
+        assertTrue(stats.stream().allMatch(value -> value.getChangeType() == ChangeType.NEW));
+        assertEquals(2, findingRepository.countTopicExcludedForReportByRunId(run.getId()));
+        var dailyCounts = findingRepository.countForDailyReports(List.of(daily.getId()), new BigDecimal("70"));
+        assertEquals(2, dailyCounts.getFirst().getFindingCount());
+        assertEquals(1, dailyCounts.getFirst().getHighSensitivityCount());
+        assertEquals(4, findingRepository.findForReportByRunId(run.getId()).size());
+    }
+
+    private void insertTopicAssessment(Long articleId, Long topicId, String status) {
+        jdbcTemplate.update("""
+                INSERT INTO news_topic_relevance
+                    (run_id, topic_id, article_id, status, reason, input_hash, prompt_version, assessed_at)
+                VALUES (?, ?, ?, ?, '합성 판정', ?, 'test.v1', ?)
+                """, run.getId(), topicId, articleId, status, "a".repeat(64), LocalDateTime.now());
+    }
+
+    @Test
     void filtersByAudienceAndMinimumRelevanceThroughOracleJson() {
         findingRepository.save(finding());
         flushAndClear();
