@@ -1,5 +1,10 @@
+import json
 import logging
+from copy import deepcopy
 from pathlib import Path
+from typing import Annotated
+
+from pydantic import StringConstraints, TypeAdapter
 
 from app.core.config import Settings
 from app.core.parser import parse_json_object
@@ -8,13 +13,15 @@ from app.llm.router import get_analyze_provider
 from app.llm.structured_call import structured_call
 from app.schemas.analyze import ResponseMeta
 from app.schemas.topic_relevance import (
+    RelevanceArticle,
     RelevanceDecision,
     TopicRelevanceOutput,
     TopicRelevanceRequest,
     TopicRelevanceResponse,
 )
 
-PROMPT_VERSION = "topic-relevance.ko.v1"
+PROMPT_VERSION = "topic-relevance.ko.v6"
+_QUOTE_TEXT = TypeAdapter(Annotated[str, StringConstraints(strip_whitespace=True)])
 SYSTEM_INSTRUCTION = (
     (Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md")
     .read_text(encoding="utf-8")
@@ -44,7 +51,7 @@ class TopicRelevanceService:
             provider,
             system_instruction=SYSTEM_INSTRUCTION,
             prompt=_prompt(request),
-            response_schema=TopicRelevanceOutput.model_json_schema(by_alias=True),
+            response_schema=_response_schema(request),
             validate=lambda response: _validated_output(response, request),
             repair_attempts=self._settings.schema_repair_attempts,
             task_name="주제 적합성 판정",
@@ -64,21 +71,126 @@ def _validated_output(
 ) -> TopicRelevanceOutput:
     if response.truncated:
         raise ValueError("잘린 provider 출력은 완전한 주제 적합성 판정으로 사용할 수 없습니다.")
-    output = TopicRelevanceOutput.model_validate(parse_json_object(response.text))
-    articles = {article.article_id: article for article in request.articles}
-    if {decision.article_id for decision in output.decisions} != articles.keys():
-        raise ValueError(
-            "decisions는 입력 기사 ID를 누락·추가 없이 정확히 한 번씩 포함해야 합니다."
+    # Keep the common parser's JSON/fence checks, then reject duplicate object keys
+    # instead of allowing JSON's usual last-value-wins behavior to hide decisions.
+    parse_json_object(response.text)
+    payload, _ = json.JSONDecoder(object_pairs_hook=_unique_object).raw_decode(
+        response.text[response.text.index("{") :]
+    )
+    if set(payload) != {"decisions"} or not isinstance(payload["decisions"], dict):
+        raise ValueError("decisions는 입력 기사 키를 가진 JSON 객체여야 합니다.")
+    values = payload["decisions"]
+    expected_keys = {_article_key(article.article_id) for article in request.articles}
+    if set(values) != expected_keys:
+        raise ValueError("decisions는 입력 기사 키를 누락·추가 없이 정확히 포함해야 합니다.")
+    decisions = []
+    for article in request.articles:
+        value = values[_article_key(article.article_id)]
+        if not isinstance(value, dict) or set(value) != {"status", "reason", "evidenceQuotes"}:
+            raise ValueError("각 판정에는 status, reason, evidenceQuotes만 있어야 합니다.")
+        choices = _quote_choices(article)
+        selected = value["evidenceQuotes"]
+        if not isinstance(selected, list) or not selected or any(
+            not isinstance(quote, str) or quote not in choices for quote in selected
+        ):
+            raise ValueError(
+                "evidenceQuotes는 해당 기사의 인용 선택지 값을 최소 한 개 그대로 반환해야 합니다."
+            )
+        decisions.append(
+            RelevanceDecision.model_validate(
+                {
+                    **value,
+                    "articleId": article.article_id,
+                    "evidenceQuotes": [choices[quote] for quote in selected],
+                }
+            )
         )
+    output = TopicRelevanceOutput(decisions=decisions)
+    articles = {article.article_id: article for article in request.articles}
     for decision in output.decisions:
         article = articles[decision.article_id]
         texts = (article.title, article.summary or "", article.body_text)
+        candidates = _quote_candidates(article)
         for quote in decision.evidence_quotes:
             if not any(quote in text for text in texts):
                 raise ValueError(
                     "evidenceQuotes는 해당 기사 제목·요약·본문의 정확한 부분 문자열이어야 합니다."
                 )
+            if quote not in candidates:
+                raise ValueError(
+                    "evidenceQuotes는 해당 기사에 제공된 인용 선택지 중에서 골라야 합니다."
+                )
     return output
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("주제 적합성 출력에 중복 JSON 키가 있습니다.")
+        value[key] = item
+    return value
+
+
+def _article_key(article_id: int) -> str:
+    return f"article_{article_id}"
+
+
+def _quote_candidates(article: RelevanceArticle) -> list[str]:
+    candidates = []
+    for text in (article.title, article.summary or "", article.body_text):
+        start, units = 0, 0
+        for index, character in enumerate(text):
+            width = 2 if ord(character) > 0xFFFF else 1
+            if units + width > 250:
+                candidates.append(_QUOTE_TEXT.validate_python(text[start:index]))
+                start, units = index, 0
+            units += width
+        candidates.append(_QUOTE_TEXT.validate_python(text[start:]))
+    # Keep every source segment, including the end of long bodies, in source order.
+    # UTF-16 bounds also respect the Java consumer's 300-character quote limit.
+    return list(dict.fromkeys(candidate for candidate in candidates if candidate))
+
+
+def _quote_choices(article: RelevanceArticle) -> dict[str, str]:
+    # Source text is metadata for selection, never a structured-output enum literal.
+    # Stable IDs distinguish excerpts that differ only in whitespace or punctuation.
+    return {f"quote_{index}": raw for index, raw in enumerate(_quote_candidates(article))}
+
+
+def _response_schema(request: TopicRelevanceRequest) -> dict[str, object]:
+    decision_schema = RelevanceDecision.model_json_schema(by_alias=True)
+    decision_schema["properties"].pop("articleId")
+    decision_schema["required"].remove("articleId")
+    decision_schema["title"] = "TopicRelevanceDecision"
+    keys = [_article_key(article.article_id) for article in request.articles]
+    properties = {}
+    for article in request.articles:
+        article_schema = deepcopy(decision_schema)
+        article_schema["properties"]["evidenceQuotes"]["minItems"] = 1
+        quote_schema = article_schema["properties"]["evidenceQuotes"]["items"]
+        # The wire carries bounded IDs, while public quote bounds are checked after
+        # source restoration. Keep the mapping description free of transformer hints.
+        quote_schema.pop("minLength", None)
+        quote_schema.pop("maxLength", None)
+        choices = _quote_choices(article)
+        quote_schema["enum"] = list(choices)
+        quote_schema["description"] = json.dumps(choices, ensure_ascii=False, separators=(",", ":"))
+        properties[_article_key(article.article_id)] = article_schema
+    return {
+        "title": "TopicRelevanceWireOutput",
+        "type": "object",
+        "properties": {
+            "decisions": {
+                "type": "object",
+                "properties": properties,
+                "required": keys,
+                "additionalProperties": False,
+            }
+        },
+        "required": ["decisions"],
+        "additionalProperties": False,
+    }
 
 
 def _prompt(request: TopicRelevanceRequest) -> str:
