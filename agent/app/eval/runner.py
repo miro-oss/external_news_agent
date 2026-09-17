@@ -2,11 +2,9 @@ import json
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Literal
 
-import yaml
 from pydantic import ValidationError
 
 from app.core.config import Settings
@@ -34,6 +32,12 @@ from app.eval.scorer import (
     score_claim_controls,
     score_report_claims,
 )
+from app.eval.sensitivity_scoring import (
+    SensitivityScoringConfig,
+    level_for_score,
+    load_sensitivity_scoring_config,
+    score_axes,
+)
 from app.llm.analyze_service import PROMPT_VERSION as ANALYZE_PROMPT_VERSION
 from app.llm.analyze_service import ArticleAnalyzeService
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
@@ -48,56 +52,6 @@ from app.schemas.report import ReportRequest, ReportResponse
 EvalProfile = Literal["replay", "live"]
 _DEFAULT_CLAIM_DATASET = Path(__file__).resolve().parent / "golden" / "claims.ko.v1.json"
 _DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.4.json"
-_DEFAULT_SENSITIVITY_CONFIG = (
-    Path(__file__).resolve().parents[3] / "BE" / "src" / "main" / "resources" / "application.yml"
-)
-
-
-@dataclass(frozen=True, slots=True)
-class SensitivityScoringConfig:
-    customer_move_weight: Decimal
-    deal_signal_weight: Decimal
-    competitor_threat_weight: Decimal
-    industry_shift_weight: Decimal
-    medium_threshold: Decimal
-    high_threshold: Decimal
-
-    def __post_init__(self) -> None:
-        weights = (
-            self.customer_move_weight,
-            self.deal_signal_weight,
-            self.competitor_threat_weight,
-            self.industry_shift_weight,
-        )
-        if any(weight <= 0 for weight in weights) or sum(weights) != Decimal("1"):
-            raise ValueError("민감도 축 가중치 합은 1이어야 합니다.")
-        if not Decimal("0") <= self.medium_threshold < self.high_threshold <= Decimal("100"):
-            raise ValueError("민감도 임계값은 0 <= medium < high <= 100이어야 합니다.")
-
-    def to_dict(self) -> dict[str, float]:
-        return {
-            "customerMoveWeight": float(self.customer_move_weight),
-            "dealSignalWeight": float(self.deal_signal_weight),
-            "competitorThreatWeight": float(self.competitor_threat_weight),
-            "industryShiftWeight": float(self.industry_shift_weight),
-            "mediumThreshold": float(self.medium_threshold),
-            "highThreshold": float(self.high_threshold),
-        }
-
-
-def load_sensitivity_scoring_config(
-    path: Path = _DEFAULT_SENSITIVITY_CONFIG,
-) -> SensitivityScoringConfig:
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    values = document["news"]["analysis"]["sensitivity"]
-    return SensitivityScoringConfig(
-        customer_move_weight=Decimal(str(values["customer-move-weight"])),
-        deal_signal_weight=Decimal(str(values["deal-signal-weight"])),
-        competitor_threat_weight=Decimal(str(values["competitor-threat-weight"])),
-        industry_shift_weight=Decimal(str(values["industry-shift-weight"])),
-        medium_threshold=Decimal(str(values["medium-threshold"])),
-        high_threshold=Decimal(str(values["high-threshold"])),
-    )
 
 
 def _classification_sensitivity(
@@ -105,31 +59,15 @@ def _classification_sensitivity(
     scoring: SensitivityScoringConfig,
 ) -> dict[str, object]:
     named_axes = (
-        ("customerMove", sensitivity.customer_move, scoring.customer_move_weight),
-        ("dealSignal", sensitivity.deal_signal, scoring.deal_signal_weight),
-        ("competitorThreat", sensitivity.competitor_threat, scoring.competitor_threat_weight),
-        ("industryShift", sensitivity.industry_shift, scoring.industry_shift_weight),
+        ("customerMove", sensitivity.customer_move),
+        ("dealSignal", sensitivity.deal_signal),
+        ("competitorThreat", sensitivity.competitor_threat),
+        ("industryShift", sensitivity.industry_shift),
     )
-    available = [
-        (Decimal(axis.score), weight)
-        for _, axis, weight in named_axes
-        if axis.score is not None
-    ]
-    weighted = sum((score * weight for score, weight in available), start=Decimal("0"))
-    available_weight = sum((weight for _, weight in available), start=Decimal("0"))
-    score = (weighted * Decimal("100") / (available_weight * Decimal("3"))).quantize(
-        Decimal("0.01"), rounding=ROUND_HALF_UP
-    )
-    level = (
-        "high"
-        if score >= scoring.high_threshold
-        else "medium"
-        if score >= scoring.medium_threshold
-        else "low"
-    )
+    score = score_axes({name: axis.score for name, axis in named_axes}, scoring)
     return {
         "score": float(score),
-        "level": level,
+        "level": level_for_score(score, scoring),
         "axes": {
             name: {
                 **axis.model_dump(by_alias=True, mode="json"),
@@ -137,7 +75,7 @@ def _classification_sensitivity(
                     sentence_id - 1 for sentence_id in axis.evidence_sentence_ids
                 ],
             }
-            for name, axis, _ in named_axes
+            for name, axis in named_axes
         },
     }
 
