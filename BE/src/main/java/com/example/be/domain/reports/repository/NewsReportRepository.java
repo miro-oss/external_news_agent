@@ -31,6 +31,10 @@ public interface NewsReportRepository
     @Query("SELECT report FROM NewsReport report WHERE report.run.id = :runId")
     Optional<NewsReport> findByRunId(@Param("runId") Long runId);
 
+    /** Scalar lookup avoids loading stale report state before taking its run lock. DAILY has no run. */
+    @Query("SELECT report.run.id FROM NewsReport report WHERE report.id = :reportId")
+    Optional<Long> findRunIdById(@Param("reportId") Long reportId);
+
     Optional<NewsReport> findByReportScopeAndReportDate(ReportScope scope, LocalDate date);
 
     Optional<NewsReport> findFirstByReportScopeAndReportDateBeforeAndReportStatusNotAndDeletedAtIsNullOrderByReportDateDescIdDesc(
