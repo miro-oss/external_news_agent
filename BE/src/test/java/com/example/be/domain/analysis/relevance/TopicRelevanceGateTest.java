@@ -51,7 +51,7 @@ class TopicRelevanceGateTest {
         gate = new TopicRelevanceGate(properties, client, quota, store, finalizer, writer, new ObjectMapper());
     }
 
-    @Test void batchesAndAcceptsOnlyExplicitlyRelevantDecisions() {
+    @Test void isolatesEachArticleAndAcceptsOnlyExplicitlyRelevantDecisions() {
         reserve();
         when(client.topicRelevance(any())).thenAnswer(invocation -> {
             AgentTopicRelevanceRequest request = invocation.getArgument(0);
@@ -62,10 +62,16 @@ class TopicRelevanceGateTest {
         var accepted = gate.assess(42L, AgentPlan.FREE, candidates);
         assertEquals(Set.of(new TopicRelevanceGate.Key(2L, 7L), new TopicRelevanceGate.Key(4L, 7L),
                 new TopicRelevanceGate.Key(6L, 7L), new TopicRelevanceGate.Key(8L, 7L), new TopicRelevanceGate.Key(10L, 7L)), accepted);
-        verify(client, times(2)).topicRelevance(any());
+        ArgumentCaptor<AgentTopicRelevanceRequest> requests = ArgumentCaptor.forClass(AgentTopicRelevanceRequest.class);
+        verify(client, times(11)).topicRelevance(requests.capture());
+        assertTrue(requests.getAllValues().stream().allMatch(request -> request.articles().size() == 1));
+        assertEquals(11, requests.getAllValues().stream().map(AgentTopicRelevanceRequest::idempotencyKey).distinct().count());
+        verify(quota, times(11)).reserve(eq(42L), anyString(), eq(AgentTask.TOPIC_RELEVANCE), eq(AgentPlan.FREE));
+        verify(finalizer, times(11)).success(eq(42L), any(), any(), anyList(), anyString(), any(), any());
         var order = inOrder(store, client, finalizer);
         order.verify(store).findByRun(42L);
-        order.verify(store).saveAll(argThat(rows -> rows.size() == 10 && rows.stream().allMatch(a -> a.status() == TopicRelevanceStatus.UNCERTAIN)));
+        order.verify(store).saveAll(argThat(rows -> rows.size() == 1 && rows.getFirst().articleId().equals(1L)
+                && rows.getFirst().status() == TopicRelevanceStatus.UNCERTAIN));
         order.verify(client).topicRelevance(any());
         order.verify(finalizer).success(eq(42L), any(), any(), anyList(), anyString(), any(), any());
     }
@@ -91,6 +97,62 @@ class TopicRelevanceGateTest {
         assertTrue(gate.assess(42L, AgentPlan.FREE, List.of(candidate(1L, 7L))).isEmpty());
         verify(finalizer).failure(eq(42L), any(), argThat(rows -> rows.getFirst().status() == TopicRelevanceStatus.UNCERTAIN),
                 anyString(), any(), any(), same(failure));
+    }
+
+    @Test void oneArticleFailureDoesNotDiscardOrBlockOtherArticles() {
+        reserve();
+        var timeout = new AgentClientException("PROVIDER_UNAVAILABLE", "timeout", null, null,
+                AgentClientException.TimeoutPhase.READ);
+        when(client.topicRelevance(any())).thenAnswer(invocation -> {
+            AgentTopicRelevanceRequest request = invocation.getArgument(0);
+            assertEquals(1, request.articles().size());
+            var article = request.articles().getFirst();
+            if (article.articleId() == 2L) throw timeout;
+            return response(List.of(new AgentTopicRelevanceResponse.Decision(article.articleId(),
+                    "RELEVANT", "관련", List.of(article.title()))));
+        });
+
+        assertEquals(Set.of(new TopicRelevanceGate.Key(1L, 7L), new TopicRelevanceGate.Key(3L, 7L)),
+                gate.assess(42L, AgentPlan.FREE,
+                        List.of(candidate(1L, 7L), candidate(2L, 7L), candidate(3L, 7L))));
+        verify(client, times(3)).topicRelevance(any());
+        verify(finalizer, times(2)).success(eq(42L), any(), any(), anyList(), anyString(), any(), any());
+        verify(finalizer).failure(eq(42L), argThat(request -> request.articles().size() == 1
+                        && request.articles().getFirst().articleId() == 2L),
+                argThat(rows -> rows.size() == 1 && rows.getFirst().articleId() == 2L
+                        && rows.getFirst().status() == TopicRelevanceStatus.UNCERTAIN),
+                anyString(), any(), any(), same(timeout));
+    }
+
+    @Test void exhaustedQuotaAfterOneArticlePreservesItsDecisionAndStopsFurtherProviderCalls() {
+        when(quota.reserve(anyLong(), anyString(), eq(AgentTask.TOPIC_RELEVANCE), any()))
+                .thenAnswer(invocation -> new QuotaReservation(1L, invocation.getArgument(0),
+                        invocation.getArgument(1), AgentTask.TOPIC_RELEVANCE,
+                        invocation.getArgument(3), BigDecimal.ONE))
+                .thenThrow(new QuotaExceededException(AgentPlan.FREE, "예산 부족"));
+        when(client.topicRelevance(any())).thenReturn(response(List.of(
+                new AgentTopicRelevanceResponse.Decision(1L, "RELEVANT", "관련", List.of("기사 1")))));
+
+        assertEquals(Set.of(new TopicRelevanceGate.Key(1L, 7L)), gate.assess(42L, AgentPlan.FREE,
+                List.of(candidate(1L, 7L), candidate(2L, 7L), candidate(3L, 7L))));
+        verify(client).topicRelevance(any());
+        verify(finalizer).success(eq(42L), any(), any(), anyList(), anyString(), any(), any());
+        verify(finalizer, never()).failure(any(), any(), anyList(), anyString(), any(), any(), any());
+        verify(store, atLeastOnce()).saveAll(argThat(rows -> rows.size() == 1
+                && rows.getFirst().articleId() == 3L && rows.getFirst().status() == TopicRelevanceStatus.UNCERTAIN));
+    }
+
+    @Test void oversizedSingleArticleInputIsHeldBeforeReservingQuota() {
+        var keywords = java.util.Collections.nCopies(100, "<>".repeat(50));
+        Topic topic = Topic.builder().id(7L).name("장비").queryText("반도체 장비")
+                .requiredKeywords(keywords).optionalKeywords(keywords).excludedKeywords(keywords).build();
+        Article article = Article.builder().id(1L).title("기사 1").topic(topic)
+                .fetchStatus(FetchStatus.FULLTEXT).storedBody(ArticleBody.of("반도체 공정 본문")).build();
+
+        assertTrue(gate.assess(42L, AgentPlan.FREE,
+                List.of(new TopicRelevanceGate.Candidate(article, topic))).isEmpty());
+        verifyNoInteractions(client, quota, finalizer);
+        verify(writer).addAgentWarning(eq(42L), eq("TOPIC_RELEVANCE_UNCERTAIN"), contains("입력 상한"));
     }
 
     @Test void invalidGroundingKeepsObservedUsageInFailure() {
@@ -145,7 +207,7 @@ class TopicRelevanceGateTest {
                 List.of(new AgentTopicRelevanceResponse.Decision(1L, "IRRELEVANT", "금융 분쟁", List.of("토스 분쟁"))), actualMeta), request));
     }
 
-    @Test void oversizedBatchSplitsBeforeProviderInsteadOfDiscardingValidArticles() {
+    @Test void denseTopicAndFullTextStayWithinThePerArticleInputLimit() {
         reserve();
         var keywords = java.util.stream.IntStream.range(0, 100).mapToObj(i -> ("k" + i).repeat(100).substring(0, 100)).toList();
         Topic topic = Topic.builder().id(7L).name("장비").queryText("반도체 장비")
@@ -155,12 +217,13 @@ class TopicRelevanceGateTest {
                         .storedBody(ArticleBody.of("본문".repeat(2500))).fetchStatus(FetchStatus.FULLTEXT).topic(topic).build(), topic)).toList();
         when(client.topicRelevance(any())).thenAnswer(invocation -> {
             AgentTopicRelevanceRequest request = invocation.getArgument(0);
+            assertEquals(1, request.articles().size());
             assertTrue(new ObjectMapper().writeValueAsString(request).length() <= 85_000);
             return response(request.articles().stream().map(a -> new AgentTopicRelevanceResponse.Decision(
                     a.articleId(), "UNCERTAIN", "판단 보류", List.of())).toList());
         });
         assertTrue(gate.assess(42L, AgentPlan.FREE, candidates).isEmpty());
-        verify(client, times(2)).topicRelevance(any());
+        verify(client, times(10)).topicRelevance(any());
     }
 
     @Test void malformedUsageCannotOverflowFailureAudit() {
@@ -178,26 +241,30 @@ class TopicRelevanceGateTest {
         assertEquals(2L, failure.getValue().getUsage().outputTokens());
     }
 
-    @Test void warningWriteFailureDoesNotResettleSuccessfulMixedBatch() {
+    @Test void warningWriteFailureDoesNotResettleOtherArticles() {
         reserve();
-        when(client.topicRelevance(any())).thenReturn(response(List.of(
-                new AgentTopicRelevanceResponse.Decision(1L, "RELEVANT", "관련", List.of("기사 1")),
-                new AgentTopicRelevanceResponse.Decision(2L, "UNCERTAIN", "근거 부족", List.of()))));
+        when(client.topicRelevance(any())).thenAnswer(invocation -> {
+            AgentTopicRelevanceRequest request = invocation.getArgument(0);
+            var article = request.articles().getFirst();
+            return response(List.of(new AgentTopicRelevanceResponse.Decision(article.articleId(),
+                    article.articleId() == 1L ? "RELEVANT" : "UNCERTAIN", "주제 맥락 판정", List.of(article.title()))));
+        });
         doThrow(new IllegalStateException("warning storage failed")).when(writer)
                 .addAgentWarning(eq(42L), eq("TOPIC_RELEVANCE_UNCERTAIN"), anyString());
 
         assertEquals(Set.of(new TopicRelevanceGate.Key(1L, 7L)),
                 gate.assess(42L, AgentPlan.FREE, List.of(candidate(1L, 7L), candidate(2L, 7L))));
-        verify(finalizer).success(eq(42L), any(), any(), anyList(), anyString(), any(), any());
+        verify(finalizer, times(2)).success(eq(42L), any(), any(), anyList(), anyString(), any(), any());
         verify(finalizer, never()).failure(any(), any(), anyList(), anyString(), any(), any(), any());
     }
 
-    @Test void angleBracketExpansionIsIncludedInBatchLimit() {
+    @Test void angleBracketExpansionIsIncludedInEachArticleLimit() {
         reserve();
         var candidates = LongStream.rangeClosed(1, 10)
                 .mapToObj(id -> candidate(id, 7L, "<>".repeat(2500))).toList();
         when(client.topicRelevance(any())).thenAnswer(invocation -> {
             AgentTopicRelevanceRequest request = invocation.getArgument(0);
+            assertEquals(1, request.articles().size());
             String serialized = new ObjectMapper().writeValueAsString(request);
             long expandedLength = serialized.length()
                     + 5L * serialized.chars().filter(c -> c == '<' || c == '>').count();
@@ -207,7 +274,7 @@ class TopicRelevanceGateTest {
         });
 
         assertTrue(gate.assess(42L, AgentPlan.FREE, candidates).isEmpty());
-        verify(client, atLeast(2)).topicRelevance(any());
+        verify(client, times(10)).topicRelevance(any());
     }
 
     private void reserve() {

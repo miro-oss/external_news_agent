@@ -27,13 +27,16 @@ from app.schemas.topic_relevance import MAX_RELEVANCE_INPUT_CHARS, TopicRelevanc
 
 
 class FakeProvider:
-    def __init__(self, *responses: ProviderResponse) -> None:
+    def __init__(self, *responses: ProviderResponse | AgentError) -> None:
         self.responses = list(responses)
         self.calls: list[dict] = []
 
     def generate(self, **kwargs):
         self.calls.append(kwargs)
-        return self.responses.pop(0)
+        response = self.responses.pop(0)
+        if isinstance(response, AgentError):
+            raise response
+        return response
 
 
 def request_payload() -> dict:
@@ -114,6 +117,16 @@ def provider_response(payload: dict, *, truncated: bool = False) -> ProviderResp
     )
 
 
+def article_output(article_id: int = 501, payload: dict | None = None) -> dict:
+    key = f"article_{article_id}"
+    return {"decisions": {key: (payload or output())["decisions"][key]}}
+
+
+def article_responses(payload: dict | None = None) -> list[ProviderResponse]:
+    return [provider_response({"decisions": {key: value}})
+            for key, value in (payload or output())["decisions"].items()]
+
+
 def service(provider: FakeProvider, *, repair_attempts: int = 1) -> TopicRelevanceService:
     return TopicRelevanceService(
         Settings(AGENT_MOCK=False, AGENT_SCHEMA_REPAIR_ATTEMPTS=repair_attempts), provider
@@ -122,16 +135,16 @@ def service(provider: FakeProvider, *, repair_attempts: int = 1) -> TopicRelevan
 
 def test_preserves_grounded_provider_decisions_and_metadata() -> None:
     # A fake provider tests the transport/grounding contract, not live model accuracy.
-    provider = FakeProvider(provider_response(output()))
+    provider = FakeProvider(*article_responses())
 
     response = service(provider).classify(request())
 
     assert [item.status for item in response.decisions] == ["IRRELEVANT", "RELEVANT", "RELEVANT"]
     assert [item.article_id for item in response.decisions] == [501, 502, 503]
     assert response.meta.prompt_version == PROMPT_VERSION
-    assert response.meta.input_tokens == 20
-    assert response.meta.output_tokens == 10
-    assert response.meta.credits == 0.1
+    assert response.meta.input_tokens == 60
+    assert response.meta.output_tokens == 30
+    assert response.meta.credits == 0.3
     assert not response.meta.mock
     assert provider.calls[0]["system_instruction"] == SYSTEM_INSTRUCTION
     assert provider.calls[0]["response_schema"]["additionalProperties"] is False
@@ -148,31 +161,33 @@ def test_prompt_distinguishes_meaning_and_preserves_relevant_regulatory_news() -
     assert "articleId는 출력하지 않는다" in SYSTEM_INSTRUCTION
 
 
-def test_openai_strict_wire_schema_requires_each_input_key_and_converts_to_public_array() -> None:
-    provider = FakeProvider(provider_response(output()))
+def test_openai_strict_wire_schema_is_single_article_and_converts_to_public_array() -> None:
+    provider = FakeProvider(*article_responses())
     response = service(provider).classify(request())
-    contract = output_contract(provider.calls[0]["response_schema"])
-    wire_schema = OpenAIJsonSchemaTransformer(deepcopy(contract.schema), strict=True).walk()
-    validator = Draft202012Validator(wire_schema)
-
-    validator.validate(output())
-    decision_map = wire_schema["properties"]["decisions"]
-    assert set(decision_map["required"]) == {"article_501", "article_502", "article_503"}
-    assert decision_map["additionalProperties"] is False
+    assert len(provider.calls) == 3
+    for article, call in zip(request().articles, provider.calls, strict=True):
+        contract = output_contract(call["response_schema"])
+        wire_schema = OpenAIJsonSchemaTransformer(deepcopy(contract.schema), strict=True).walk()
+        validator = Draft202012Validator(wire_schema)
+        validator.validate(article_output(article.article_id))
+        key = f"article_{article.article_id}"
+        decision_map = wire_schema["properties"]["decisions"]
+        assert decision_map["required"] == [key]
+        assert decision_map["additionalProperties"] is False
+        for violation in ("missing", "extra", "invented_id", "legacy_array"):
+            invalid = article_output(article.article_id)
+            if violation == "missing":
+                invalid["decisions"].pop(key)
+            elif violation == "extra":
+                invalid["decisions"]["article_999"] = invalid["decisions"][key]
+            elif violation == "invented_id":
+                invalid["decisions"][key]["articleId"] = article.article_id
+            else:
+                invalid["decisions"] = list(invalid["decisions"].values())
+            with pytest.raises(JsonSchemaValidationError):
+                validator.validate(invalid)
     public_decisions = response.model_dump(by_alias=True)["decisions"]
     assert [d["articleId"] for d in public_decisions] == [501, 502, 503]
-    for violation in ("missing", "extra", "invented_id", "legacy_array"):
-        invalid = output()
-        if violation == "missing":
-            invalid["decisions"].pop("article_503")
-        elif violation == "extra":
-            invalid["decisions"]["article_999"] = invalid["decisions"]["article_501"]
-        elif violation == "invented_id":
-            invalid["decisions"]["article_501"]["articleId"] = 501
-        else:
-            invalid["decisions"] = list(invalid["decisions"].values())
-        with pytest.raises(JsonSchemaValidationError):
-            validator.validate(invalid)
 
 
 @pytest.mark.parametrize(
@@ -191,7 +206,7 @@ def test_article_specific_strict_schema_rejects_invented_quote_ids(quote: str) -
 
 
 def test_quote_ids_resolve_only_against_their_own_article_sources() -> None:
-    response = service(FakeProvider(provider_response(output()))).classify(request())
+    response = service(FakeProvider(*article_responses())).classify(request())
     assert response.decisions[0].evidence_quotes == [
         "토스와 네이버의 검색 광고 분쟁을 공정위가 조사했다."
     ]
@@ -213,7 +228,7 @@ def test_every_wire_status_requires_a_quote_in_native_schema_and_local_validatio
     assert evidence["minItems"] == 1
     assert evidence["maxItems"] == 3
     Draft202012Validator(schema).validate(wire)
-    response = service(FakeProvider(provider_response(wire))).classify(request())
+    response = service(FakeProvider(*article_responses(wire))).classify(request())
     assert response.decisions[0].status == status
     assert response.decisions[0].evidence_quotes
 
@@ -221,7 +236,7 @@ def test_every_wire_status_requires_a_quote_in_native_schema_and_local_validatio
     with pytest.raises(JsonSchemaValidationError):
         Draft202012Validator(schema).validate(wire)
     with pytest.raises(AgentError) as caught:
-        service(FakeProvider(provider_response(wire)), repair_attempts=0).classify(request())
+        service(FakeProvider(*article_responses(wire)), repair_attempts=0).classify(request())
     assert caught.value.code == "SCHEMA_VIOLATION"
 
 
@@ -309,7 +324,7 @@ def test_accepted_control_only_input_never_builds_an_empty_enum(character: str) 
     ["토스와 네이버의 검색 광고 분쟁을 공정위가 조사했다.", "quote_99: 없는 선택지"],
 )
 def test_rejects_raw_text_or_unknown_choice_instead_of_guessing_a_quote(quote: str) -> None:
-    wire = output()
+    wire = article_output()
     wire["decisions"]["article_501"]["evidenceQuotes"] = [quote]
     with pytest.raises(AgentError) as caught:
         service(FakeProvider(provider_response(wire)), repair_attempts=0).classify(request())
@@ -382,9 +397,8 @@ def test_rejects_duplicate_json_keys_instead_of_silently_replacing_decisions(lev
 
 
 def test_preserves_common_parser_support_for_markdown_fenced_json() -> None:
-    response = provider_response(output())
-    response = replace(response, text=f"```json\n{response.text}\n```")
-    classified = service(FakeProvider(response)).classify(request())
+    responses = [replace(r, text=f"```json\n{r.text}\n```") for r in article_responses()]
+    classified = service(FakeProvider(*responses)).classify(request())
     assert [d.article_id for d in classified.decisions] == [501, 502, 503]
 
 
@@ -394,7 +408,7 @@ def test_evidence_can_be_exact_quote_from_each_article_field(source: str) -> Non
     quotes = [request_payload()["articles"][0][source]]
     index = ("title", "summary", "bodyText").index(source)
     payload["decisions"]["article_501"]["evidenceQuotes"] = [f"quote_{index}"]
-    response = service(FakeProvider(provider_response(payload))).classify(request())
+    response = service(FakeProvider(*article_responses(payload))).classify(request())
     assert response.decisions[0].evidence_quotes == quotes
     schema = OpenAIJsonSchemaTransformer(_response_schema(request()), strict=True).walk()
     Draft202012Validator(schema).validate(payload)
@@ -402,9 +416,9 @@ def test_evidence_can_be_exact_quote_from_each_article_field(source: str) -> Non
 
 @pytest.mark.parametrize("violation", ["missing", "extra", "forged_id", "foreign_quote"])
 def test_rejects_missing_extra_forged_id_or_cross_article_evidence(violation: str) -> None:
-    payload = output()
+    payload = article_output()
     if violation == "missing":
-        payload["decisions"].pop("article_503")
+        payload["decisions"].pop("article_501")
     elif violation == "extra":
         payload["decisions"]["article_999"] = payload["decisions"]["article_501"]
     elif violation == "forged_id":
@@ -425,52 +439,188 @@ def test_rejects_missing_extra_forged_id_or_cross_article_evidence(violation: st
 @pytest.mark.parametrize("status", ["RELEVANT", "IRRELEVANT"])
 @pytest.mark.parametrize("quotes", [[], ["원문에 없는 조작한 인용"], [" "]])
 def test_definite_decisions_require_nonblank_exact_evidence(status: str, quotes: list) -> None:
-    payload = output()
+    payload = article_output()
     payload["decisions"]["article_501"].update(status=status, evidenceQuotes=quotes)
 
     with pytest.raises(AgentError) as caught:
-        service(FakeProvider(provider_response(payload)), repair_attempts=0).classify(request())
+        service(FakeProvider(*article_responses(payload)), repair_attempts=0).classify(request())
     assert caught.value.code == "SCHEMA_VIOLATION"
 
 
-def test_uncertain_with_quote_and_reordered_decisions_are_valid() -> None:
+def test_uncertain_with_quote_and_reordered_inputs_preserve_input_order() -> None:
     payload = output()
     payload["decisions"]["article_501"].update(status="UNCERTAIN")
     payload["decisions"] = dict(reversed(payload["decisions"].items()))
+    reversed_request = request().model_copy(update={"articles": list(reversed(request().articles))})
 
-    response = service(FakeProvider(provider_response(payload))).classify(request())
+    response = service(FakeProvider(*article_responses(payload))).classify(reversed_request)
 
-    assert response.decisions[0].status == "UNCERTAIN"
-    assert response.decisions[0].article_id == 501
-    assert [item.article_id for item in response.decisions] == [501, 502, 503]
+    assert response.decisions[-1].status == "UNCERTAIN"
+    assert [item.article_id for item in response.decisions] == [503, 502, 501]
 
 
 def test_repairs_missing_article_key_without_changing_request_schema() -> None:
-    invalid = output()
-    invalid["decisions"].pop("article_502")
-    provider = FakeProvider(provider_response(invalid), provider_response(output()))
+    invalid = article_output()
+    invalid["decisions"].pop("article_501")
+    provider = FakeProvider(provider_response(invalid), *article_responses())
 
     response = service(provider).classify(request())
 
     assert [item.article_id for item in response.decisions] == [501, 502, 503]
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 4
     assert provider.calls[0]["response_schema"] == provider.calls[1]["response_schema"]
-    assert response.meta.input_tokens == 40
+    assert response.meta.input_tokens == 80
 
 
 def test_repairs_ungrounded_quote_and_accumulates_usage() -> None:
-    invalid = output()
+    invalid = article_output()
     invalid["decisions"]["article_501"]["evidenceQuotes"] = ["조작한 인용"]
-    provider = FakeProvider(provider_response(invalid), provider_response(output()))
+    provider = FakeProvider(provider_response(invalid), *article_responses())
 
     response = service(provider).classify(request())
 
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 4
     assert "validation-error" in provider.calls[1]["prompt"]
-    assert response.meta.input_tokens == 40
-    assert response.meta.output_tokens == 20
-    assert response.meta.cost_usd == 0.002
-    assert response.meta.credits == 0.2
+    assert response.meta.input_tokens == 80
+    assert response.meta.output_tokens == 40
+    assert response.meta.cost_usd == 0.004
+    assert response.meta.credits == 0.4
+
+
+def test_sequential_article_contexts_and_repair_prompts_never_include_other_articles() -> None:
+    payload = request_payload()
+    for article in payload["articles"]:
+        article.update(
+            title=f"TITLE_ONLY_{article['articleId']}", summary=None,
+            bodyText=f"ARTICLE_ONLY_MARKER_{article['articleId']}",
+        )
+    wire = output()
+    for aid, decision in zip((501, 502, 503), wire["decisions"].values(), strict=True):
+        decision.update(reason=f"OUTPUT_ONLY_{aid}", evidenceQuotes=["quote_1"])
+    invalid = article_output(502, deepcopy(wire))
+    invalid["decisions"]["article_502"].update(
+        reason="REPAIR_ONLY_502", evidenceQuotes=["quote_missing"],
+    )
+    responses = article_responses(wire)
+    provider = FakeProvider(responses[0], provider_response(invalid), *responses[1:])
+
+    response = service(provider).classify(TopicRelevanceRequest.model_validate(payload))
+
+    assert [decision.article_id for decision in response.decisions] == [501, 502, 503]
+    assert response.meta.input_tokens == 80
+    assert response.meta.cost_usd == 0.004
+    for aid, call in zip((501, 502, 502, 503), provider.calls, strict=True):
+        for other in {501, 502, 503} - {aid}:
+            assert f"ARTICLE_ONLY_MARKER_{other}" not in call["prompt"]
+            assert f"OUTPUT_ONLY_{other}" not in call["prompt"]
+            assert f"TITLE_ONLY_{other}" not in json.dumps(call["response_schema"])
+            assert f"ARTICLE_ONLY_MARKER_{other}" not in json.dumps(call["response_schema"])
+        assert call["response_schema"]["properties"]["decisions"]["required"] == [f"article_{aid}"]
+    assert "REPAIR_ONLY_502" in provider.calls[2]["prompt"]
+    assert "quote_missing" in provider.calls[2]["prompt"]
+    assert "REPAIR_ONLY_502" not in provider.calls[3]["prompt"]
+    assert "quote_missing" not in provider.calls[3]["prompt"]
+
+
+@pytest.mark.parametrize("failure_usage", [None, {"inputTokens": 7, "costUsd": "0.02"}])
+def test_middle_provider_failure_preserves_known_usage_and_stops_remaining_articles(
+    failure_usage,
+) -> None:
+    failure = AgentError(503, "PROVIDER_UNAVAILABLE", "일시 오류입니다.",
+                         {"usage": failure_usage, "retryable": False})
+    responses = article_responses()
+    provider = FakeProvider(responses[0], failure, responses[2])
+
+    with pytest.raises(AgentError) as caught:
+        service(provider).classify(request())
+
+    assert caught.value is failure
+    assert (failure.status_code, failure.code, failure.message) == (
+        503, "PROVIDER_UNAVAILABLE", "일시 오류입니다.",
+    )
+    assert len(provider.calls) == 2
+    assert provider.responses == [responses[2]]
+    assert failure.details["retryable"] is False
+    assert failure.details["usage"] == {
+        "inputTokens": 27 if failure_usage else 20,
+        "outputTokens": 10, "costUsd": 0.021 if failure_usage else 0.001, "credits": 0.1,
+    }
+    assert failure.details["executionMetadata"]["usageCompleteness"] == "PARTIAL"
+    assert failure.details["executionMetadata"]["provider"] is None
+
+
+def test_middle_schema_failure_includes_both_repair_attempts_and_previous_article_usage() -> None:
+    invalid = article_output(502)
+    invalid["decisions"]["article_502"]["evidenceQuotes"] = []
+    responses = article_responses()
+    provider = FakeProvider(
+        responses[0], provider_response(invalid), provider_response(invalid), responses[2],
+    )
+
+    with pytest.raises(AgentError) as caught:
+        service(provider).classify(request())
+
+    assert len(provider.calls) == 3
+    assert provider.responses == [responses[2]]
+    assert caught.value.details["usage"] == {
+        "inputTokens": 60, "outputTokens": 30, "costUsd": 0.003, "credits": 0.3,
+    }
+    assert caught.value.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
+
+
+def test_middle_repair_provider_failure_aggregates_usage_once_and_keeps_partial_status() -> None:
+    invalid = article_output(502)
+    invalid["decisions"]["article_502"]["evidenceQuotes"] = []
+    failure = AgentError(503, "PROVIDER_UNAVAILABLE", "일시 오류입니다.",
+                         {"usage": {"inputTokens": 7, "outputTokens": 3, "costUsd": 0.002}})
+    responses = article_responses()
+    provider = FakeProvider(responses[0], provider_response(invalid), failure, responses[2])
+
+    with pytest.raises(AgentError) as caught:
+        service(provider).classify(request())
+
+    assert len(provider.calls) == 3
+    assert provider.responses == [responses[2]]
+    assert caught.value.details["usage"] == {
+        "inputTokens": 47, "outputTokens": 23, "costUsd": 0.004, "credits": 0.2,
+    }
+    assert caught.value.details["executionMetadata"]["usageCompleteness"] == "PARTIAL"
+
+
+@pytest.mark.parametrize("change", [{"provider": "mindlogic-claude"}, {"model": "other-model"}])
+def test_mixed_provider_or_model_across_articles_is_rejected_without_further_calls(change) -> None:
+    responses = article_responses()
+    provider = FakeProvider(responses[0], replace(responses[1], **change), responses[2])
+
+    with pytest.raises(AgentError) as caught:
+        service(provider).classify(request())
+
+    assert caught.value.code == "SCHEMA_VIOLATION"
+    assert len(provider.calls) == 2
+    assert provider.responses == [responses[2]]
+    assert caught.value.details["usage"]["inputTokens"] == 40
+    assert caught.value.details["executionMetadata"] == {
+        "provider": None, "model": None, "promptVersion": PROMPT_VERSION,
+        "source": "AGENT_ERROR", "usageCompleteness": "COMPLETE",
+    }
+
+
+def test_identity_change_within_repair_cannot_be_hidden_by_a_valid_final_response() -> None:
+    invalid = article_output()
+    invalid["decisions"]["article_501"]["evidenceQuotes"] = []
+    responses = article_responses()
+    provider = FakeProvider(
+        provider_response(invalid), replace(responses[0], model="other-model"), *responses[1:],
+    )
+
+    with pytest.raises(AgentError) as caught:
+        service(provider).classify(request())
+
+    assert caught.value.code == "SCHEMA_VIOLATION"
+    assert len(provider.calls) == 2
+    assert len(provider.responses) == 2
+    assert caught.value.details["usage"]["inputTokens"] == 40
+    assert caught.value.details["executionMetadata"]["model"] is None
 
 
 def test_truncated_provider_output_is_not_accepted_as_a_final_decision() -> None:
@@ -491,7 +641,7 @@ def test_hostile_article_and_topic_content_remain_inside_untrusted_json() -> Non
     decisions["decisions"]["article_501"]["evidenceQuotes"] = [
         "quote_0"
     ]
-    provider = FakeProvider(provider_response(decisions))
+    provider = FakeProvider(*article_responses(decisions))
 
     response = service(provider).classify(TopicRelevanceRequest.model_validate(payload))
 
@@ -514,34 +664,27 @@ def escaped_boundary_payload() -> dict:
     return payload
 
 
-def test_provider_receives_exact_validated_json_at_escaped_input_limit() -> None:
+def test_provider_receives_isolated_validated_json_at_original_batch_input_limit() -> None:
     bounded = TopicRelevanceRequest.model_validate(escaped_boundary_payload())
-    provider = FakeProvider(
-        provider_response(
-            {
-                "decisions": {
-                    f"article_{article.article_id}": {
-                        "status": "UNCERTAIN",
-                        "reason": "제공된 텍스트의 맥락이 부족합니다.",
-                        "evidenceQuotes": ["quote_0"],
-                    }
-                    for article in bounded.articles
-                }
-            }
-        )
-    )
+    provider = FakeProvider(*[
+        provider_response({"decisions": {f"article_{article.article_id}": {
+            "status": "UNCERTAIN", "reason": "제공된 텍스트의 맥락이 부족합니다.",
+            "evidenceQuotes": ["quote_0"],
+        }}}) for article in bounded.articles
+    ])
 
     service(provider).classify(bounded)
 
-    serialized = (
-        provider.calls[0]["prompt"]
-        .split("<topic-relevance-input>\n", 1)[1]
-        .split("\n</topic-relevance-input>", 1)[0]
-    )
-    assert serialized == bounded.provider_input_json()
-    assert len(serialized) == MAX_RELEVANCE_INPUT_CHARS
-    assert json.loads(serialized) == bounded.model_dump(by_alias=True, mode="json")
-    assert "<" not in serialized and ">" not in serialized
+    assert len(bounded.provider_input_json()) == MAX_RELEVANCE_INPUT_CHARS
+    for article, call in zip(bounded.articles, provider.calls, strict=True):
+        serialized = call["prompt"].split("<topic-relevance-input>\n", 1)[1].split(
+            "\n</topic-relevance-input>", 1
+        )[0]
+        single = bounded.model_copy(update={"articles": [article]})
+        assert serialized == single.provider_input_json()
+        assert len(serialized) <= MAX_RELEVANCE_INPUT_CHARS
+        assert json.loads(serialized) == single.model_dump(by_alias=True, mode="json")
+        assert "<" not in serialized and ">" not in serialized
 
 
 def test_rejects_one_character_over_escaped_input_limit() -> None:
@@ -580,25 +723,20 @@ def test_mock_returns_only_uncertain_without_calling_provider() -> None:
     assert response.meta.input_tokens == response.meta.output_tokens == 0
 
 
-@pytest.mark.parametrize("count,expected_tokens", [(1, 1792), (10, 8192)])
-def test_routes_plan_through_shared_provider_with_bounded_output(
-    monkeypatch, count: int, expected_tokens: int
+@pytest.mark.parametrize("count", [1, 10])
+def test_routes_plan_through_shared_provider_with_single_article_output_limit(
+    monkeypatch, count: int
 ) -> None:
     payload = request_payload()
     payload["plan"] = "PAID"
     payload["articles"] = [
         dict(payload["articles"][0], articleId=index + 1) for index in range(count)
     ]
-    provider = FakeProvider(
-        provider_response(
-            {
-                "decisions": {
-                    f"article_{index + 1}": output()["decisions"]["article_501"]
-                    for index in range(count)
-                }
-            }
-        )
-    )
+    provider = FakeProvider(*[
+        provider_response({"decisions": {f"article_{index + 1}":
+            output()["decisions"]["article_501"]}})
+        for index in range(count)
+    ])
     captured = {}
 
     def routed(settings, plan):
@@ -606,17 +744,18 @@ def test_routes_plan_through_shared_provider_with_bounded_output(
         return provider
 
     monkeypatch.setattr("app.llm.topic_relevance_service.get_analyze_provider", routed)
-
     TopicRelevanceService(Settings(AGENT_MOCK=False)).classify(
         TopicRelevanceRequest.model_validate(payload)
     )
 
     assert captured["plan"] == "PAID"
-    assert captured["settings"].max_output_tokens == expected_tokens
+    assert captured["settings"].max_output_tokens == 1792
     assert captured["settings"].provider_timeout_seconds == 60.0
-    assert provider.calls[0]["response_schema"]["properties"]["decisions"]["required"] == [
-        f"article_{index + 1}" for index in range(count)
-    ]
+    assert len(provider.calls) == count
+    for index, call in enumerate(provider.calls):
+        assert call["response_schema"]["properties"]["decisions"]["required"] == [
+            f"article_{index + 1}"
+        ]
 
 
 @pytest.fixture

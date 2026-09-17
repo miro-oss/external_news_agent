@@ -33,8 +33,7 @@ import java.util.*;
 @RequiredArgsConstructor
 @Slf4j
 public class TopicRelevanceGate {
-    public static final String PROMPT_VERSION = "topic-relevance.ko.v6";
-    private static final int BATCH_SIZE = 10;
+    public static final String PROMPT_VERSION = "topic-relevance.ko.v7";
     private final AgentProperties properties;
     private final AgentClient client;
     private final AgentQuotaService quota;
@@ -71,15 +70,16 @@ public class TopicRelevanceGate {
                     .add(new Prepared(topic, article, inputHash, candidate.article().hasFullText()));
         }
         for (List<Prepared> topicCandidates : pending.values()) {
-            for (int start = 0; start < topicCandidates.size(); start += BATCH_SIZE) {
-                var batch = List.copyOf(topicCandidates.subList(start, Math.min(start + BATCH_SIZE, topicCandidates.size())));
-                accepted.addAll(assessBatch(runId, plan, batch));
+            for (Prepared candidate : topicCandidates) {
+                accepted.addAll(assessArticle(runId, plan, candidate));
             }
         }
         return Set.copyOf(accepted);
     }
 
-    private Set<Key> assessBatch(Long runId, AgentPlan plan, List<Prepared> batch) {
+    private Set<Key> assessArticle(Long runId, AgentPlan plan, Prepared candidate) {
+        // One article per HTTP request isolates context, quota settlement, and failures.
+        List<Prepared> batch = List.of(candidate);
         // Commit a hold before external I/O. A crash or stale finding cannot imply acceptance.
         store.saveAll(held(runId, batch, "주제 적합성 판정 대기 또는 미완료입니다."));
         if (!properties.isEnabled()) {
@@ -98,12 +98,6 @@ public class TopicRelevanceGate {
         long providerInputLength = serialized.length()
                 + 5L * serialized.chars().filter(c -> c == '<' || c == '>').count();
         if (providerInputLength > 85_000) {
-            if (ready.size() > 1) {
-                int middle = ready.size() / 2;
-                Set<Key> accepted = new HashSet<>(assessBatch(runId, plan, ready.subList(0, middle)));
-                accepted.addAll(assessBatch(runId, plan, ready.subList(middle, ready.size())));
-                return Set.copyOf(accepted);
-            }
             hold(runId, ready, "주제 적합성 입력 상한을 초과해 판정을 보류했습니다.");
             return Set.of();
         }

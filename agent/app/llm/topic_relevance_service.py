@@ -7,10 +7,11 @@ from typing import Annotated
 from pydantic import StringConstraints, TypeAdapter
 
 from app.core.config import Settings
+from app.core.errors import AgentError
 from app.core.parser import parse_json_object
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.router import get_analyze_provider
-from app.llm.structured_call import structured_call
+from app.llm.structured_call import _accumulated_failure_usage, structured_call
 from app.schemas.analyze import ResponseMeta
 from app.schemas.topic_relevance import (
     RelevanceArticle,
@@ -20,7 +21,7 @@ from app.schemas.topic_relevance import (
     TopicRelevanceResponse,
 )
 
-PROMPT_VERSION = "topic-relevance.ko.v6"
+PROMPT_VERSION = "topic-relevance.ko.v7"
 _QUOTE_TEXT = TypeAdapter(Annotated[str, StringConstraints(strip_whitespace=True)])
 SYSTEM_INSTRUCTION = (
     (Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md")
@@ -39,31 +40,91 @@ class TopicRelevanceService:
         if self._settings.mock:
             return _mock_response(request)
 
-        # Ten short decisions fit within 8192 tokens; small batches need a smaller ceiling.
+        # A compatibility batch is evaluated in isolated, sequential model calls.
         settings = self._settings.model_copy(
             update={
-                "max_output_tokens": min(8192, 1024 + 768 * len(request.articles)),
+                "max_output_tokens": 1792,
                 "provider_timeout_seconds": self._settings.insight_provider_timeout_seconds,
             }
         )
         provider = self._provider or get_analyze_provider(settings, request.plan)
-        result = structured_call(
-            provider,
-            system_instruction=SYSTEM_INSTRUCTION,
-            prompt=_prompt(request),
-            response_schema=_response_schema(request),
-            validate=lambda response: _validated_output(response, request),
-            repair_attempts=self._settings.schema_repair_attempts,
-            task_name="주제 적합성 판정",
-            input_tag="topic-relevance",
-            schema_violation_message="Provider 주제 적합성 출력이 Agent 계약을 위반했습니다.",
-            logger=logger,
-            failure_prompt_version=PROMPT_VERSION,
-        )
+        decisions: list[RelevanceDecision] = []
+        usage = ProviderUsage()
+        identity: tuple[str, str] | None = None
+        last_response: ProviderResponse | None = None
+        for article in request.articles:
+            single = request.model_copy(update={"articles": [article]})
+            article_usage = ProviderUsage()
+
+            def validate(
+                response: ProviderResponse, single_request: TopicRelevanceRequest = single
+            ) -> TopicRelevanceOutput:
+                nonlocal article_usage, identity
+                article_usage += response.usage
+                current_identity = (response.provider, response.model)
+                if identity is None:
+                    identity = current_identity
+                elif identity != current_identity:
+                    raise AgentError(
+                        status_code=502,
+                        code="SCHEMA_VIOLATION",
+                        message="주제 적합성 판정 도중 provider 또는 모델이 변경되었습니다.",
+                        details={
+                            "usage": _accumulated_failure_usage(article_usage, None),
+                            "executionMetadata": {
+                                "provider": None,
+                                "model": None,
+                                "promptVersion": PROMPT_VERSION,
+                                "source": "AGENT_ERROR",
+                                "usageCompleteness": "COMPLETE",
+                            },
+                        },
+                    )
+                return _validated_output(response, single_request)
+
+            try:
+                result = structured_call(
+                    provider,
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    prompt=_prompt(single),
+                    response_schema=_response_schema(single),
+                    validate=validate,
+                    repair_attempts=self._settings.schema_repair_attempts,
+                    task_name="주제 적합성 판정",
+                    input_tag="topic-relevance",
+                    schema_violation_message=(
+                        "Provider 주제 적합성 출력이 Agent 계약을 위반했습니다."
+                    ),
+                    logger=logger,
+                    failure_prompt_version=PROMPT_VERSION,
+                )
+            except AgentError as error:
+                if decisions:
+                    _include_previous_usage(error, usage)
+                raise
+            decisions.extend(result.output.decisions)
+            usage += result.usage
+            last_response = result.response
+
+        assert last_response is not None  # Validated requests contain at least one article.
         return TopicRelevanceResponse(
-            decisions=result.output.decisions,
-            meta=_meta(result.response, result.usage),
+            decisions=decisions,
+            meta=_meta(last_response, usage),
         )
+
+
+def _include_previous_usage(error: AgentError, previous: ProviderUsage) -> None:
+    details = dict(error.details) if isinstance(error.details, dict) else {}
+    details["usage"] = _accumulated_failure_usage(previous, details.get("usage"))
+    supplied_meta = details.get("executionMetadata")
+    metadata = dict(supplied_meta) if isinstance(supplied_meta, dict) else {}
+    metadata.setdefault("provider", None)
+    metadata.setdefault("model", None)
+    metadata.update(promptVersion=PROMPT_VERSION, source="AGENT_ERROR")
+    if metadata.get("usageCompleteness") != "COMPLETE":
+        metadata["usageCompleteness"] = "PARTIAL"
+    details["executionMetadata"] = metadata
+    error.details = details
 
 
 def _validated_output(
