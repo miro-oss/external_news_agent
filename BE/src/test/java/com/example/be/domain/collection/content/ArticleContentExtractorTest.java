@@ -24,6 +24,39 @@ class ArticleContentExtractorTest {
     private static final String COPYRIGHT_NOTICE =
             "무단 전재 및 재배포 금지. " + "테스트용 매체의 저작권 안내입니다. ".repeat(4);
 
+    @ParameterizedTest
+    @ValueSource(strings = {"role='navigation'", "role='menu'", "role='menubar'", "id='gnb'", "class='lnb'"})
+    void removesNavigationContainersInsideTheArticle(String attributes) {
+        String html = "<div id='articleBody'><div " + attributes + ">"
+                + "<a href='/latest'>오늘의 새 소식</a><a href='/economy'>경제 기사 모아보기</a>"
+                + "</div><p>" + PARAGRAPH + "</p></div>";
+
+        assertEquals(PARAGRAPH.strip(), ArticleContentExtractor.extract(html, "https://example.com/story"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"<div id='articleBody'>", "<article>", "<main>", "<div>"})
+    void removesPlainLeadingMenuFromEveryExtractionPath(String opening) {
+        String closing = opening.contains("articleBody") || opening.equals("<div>") ? "</div>"
+                : opening.equals("<article>") ? "</article>" : "</main>";
+        String html = opening + "<p>최신뉴스</p><p>정치</p><p>경제</p><p>사회</p>"
+                + "<p>생활문화</p><p>스포츠</p><p>국제</p><p>날씨</p>"
+                + "<p>" + PARAGRAPH + "</p><p>" + PARAGRAPH + "</p>" + closing;
+
+        assertEquals(String.join("\n\n", PARAGRAPH.strip(), PARAGRAPH.strip()),
+                ArticleContentExtractor.extract(html, "https://example.com/story"));
+    }
+
+    @Test
+    void menuCannotPadAnOtherwiseTooShortGenericBody() {
+        String menu = "<p>최신뉴스</p><p>정치</p><p>경제</p><p>사회</p>".repeat(20);
+
+        assertNull(ArticleContentExtractor.extract("<article>" + menu
+                + "<p>새 공장을 설립했다.</p></article>", "https://example.com/brief"));
+        assertNull(ArticleContentExtractor.extract("<div id='articleBody'>" + menu + "</div>",
+                "https://example.com/menu"));
+    }
+
     @Test
     void takesOnlyTheObservedSbsAmpBodyBeforeTheGenericMainContainer() {
         String html = "<main><div class='article_content_end_middle'><div class='acem_text'>"
