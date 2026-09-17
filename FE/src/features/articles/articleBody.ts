@@ -6,21 +6,26 @@ const SEPARATOR = /^[\s|·]+/u
 
 function navigationPrefix(line: string) {
   const labels: string[] = []
-  const starts: number[] = []
   let end = SEPARATOR.exec(line)?.[0].length ?? 0
+  let delimitedEnd = 0
+  let delimitedLabelCount = 0
   while (end < line.length) {
     const match = NAVIGATION_LABEL.exec(line.slice(end))
     if (!match) break
-    starts.push(end)
     labels.push(match[1].replace(/[\s·/]/gu, ''))
     end += match[0].length
-    end += SEPARATOR.exec(line.slice(end))?.[0].length ?? 0
+    const separator = SEPARATOR.exec(line.slice(end))?.[0] ?? ''
+    end += separator.length
+    if (separator.includes('|')) {
+      delimitedEnd = end
+      delimitedLabelCount = labels.length
+    }
   }
-  return { labels, starts, end }
+  return { labels, end, delimitedEnd, delimitedLabelCount }
 }
 
 function articleStart(text: string): number {
-  const labels = new Set<string>()
+  const groupLabels = new Set<string>()
   let end = 0
   for (const line of text.matchAll(/([^\r\n]*)(?:\r\n|\r|\n|$)/gu)) {
     const value = line[1]
@@ -29,26 +34,20 @@ function articleStart(text: string): number {
     if (prefix.labels.length === 0) break
     const menuOnly = prefix.end === value.length
     if (!menuOnly) {
-      const seen = new Set<string>()
-      for (let index = 0; index < prefix.labels.length; index++) {
-        const label = prefix.labels[index]
-        if (seen.has(label)) {
-          // Once a menu category repeats, it may be the first word of the actual article.
-          prefix.end = prefix.starts[index]
-          prefix.labels = prefix.labels.slice(0, index)
-          break
-        }
-        seen.add(label)
-      }
+      // Spaces and middle dots can belong to prose, so only a pipe confirms an inline boundary.
+      prefix.labels = prefix.labels.slice(0, prefix.delimitedLabelCount)
+      prefix.end = prefix.delimitedEnd
+      if (prefix.labels[0] !== '최신뉴스' || new Set(prefix.labels).size < 3) break
     }
-    // A menu merged with prose needs an explicit first marker. Ordinary prose such as
-    // "정치 경제 사회 분야의 변화" must never lose its opening words.
-    if (!menuOnly && (prefix.labels[0] !== '최신뉴스' || new Set(prefix.labels).size < 3)) break
-    prefix.labels.forEach((label) => labels.add(label))
-    end = line.index + prefix.end
+    // A repeated explicit menu starts a new group, which must qualify independently.
+    if (menuOnly && prefix.labels[0] === '최신뉴스' && groupLabels.size >= 3) groupLabels.clear()
+    if (prefix.labels.some((label) => groupLabels.has(label))) break
+    prefix.labels.forEach((label) => groupLabels.add(label))
+    // Keep the previous confirmed boundary when a new group is only a lone heading.
+    if (groupLabels.size >= 3) end = line.index + prefix.end
     if (!menuOnly) break
   }
-  return labels.size >= 3 ? text.length - text.slice(end).trimStart().length : 0
+  return end > 0 ? text.length - text.slice(end).trimStart().length : 0
 }
 
 export function withoutLeadingNavigation(text: string): string {

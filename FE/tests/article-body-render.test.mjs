@@ -71,9 +71,9 @@ test('saved navigation rows disappear without renumbering evidence sentences', (
   assert.match(html, /정부는 오늘 지원 계획을 발표했다/)
 })
 
-test('navigation merged into a sentence is trimmed only after an explicit latest-news marker', () => {
+test('navigation merged into a sentence needs a latest-news marker and an explicit end separator', () => {
   const html = renderBody('확보한 본문', [
-    { index: 11, text: '최신 뉴스 | 정치 · 경제 | 생활 · 문화 | IT/과학 정부가 새 정책을 발표했다.' },
+    { index: 11, text: '최신 뉴스 | 정치 · 경제 | 생활 · 문화 | IT/과학 | 정부가 새 정책을 발표했다.' },
     { index: 15, text: '정치 경제 사회 분야 전문가들이 의견을 냈다.' },
   ])
   assert.doesNotMatch(html, /최신 뉴스|생활 · 문화|IT\/과학/)
@@ -101,14 +101,79 @@ test('a recognized menu never consumes a category word from the first prose sent
   assert.match(renderBody('최신뉴스\n정치\n경제\n사회\n경제 전망은 밝다.'), /경제 전망은 밝다/)
 })
 
-test('flattened navigation preserves a repeated category word beginning the actual article', () => {
+test('space-only flattened navigation remains intact because the prose boundary is ambiguous', () => {
   const text = `${navigation.join(' ')} 경제 전망은 밝다.`
   for (const sentences of [[], [{ index: 17, text }]]) {
     const html = renderBody(text, sentences)
-    assert.doesNotMatch(html, /최신뉴스|생활문화|날씨/)
+    assert.ok(html.includes(text))
     assert.match(html, /경제 전망은 밝다/)
     if (sentences.length > 0) assert.match(html, /id="article-10-sentence-17"/)
   }
+})
+
+test('space-only navigation never consumes an unseen category at the start of prose', () => {
+  for (const text of [
+    '최신뉴스 정치 경제 사회 국제 관계가 악화됐다.',
+    '최신뉴스 정치 경제 사회 국제 정치 관계가 악화됐다.',
+    '최신뉴스 정치 경제 사회 · 국제 관계가 악화됐다.',
+    '최신뉴스 정치 생활·문화 국제 관계가 악화됐다.',
+    '최신뉴스 | 정치 경제 사회 국제 관계가 악화됐다.',
+  ]) {
+    for (const sentences of [[], [{ index: 19, text }]]) {
+      const html = renderBody(text, sentences)
+      assert.ok(html.includes(text), text)
+      if (sentences.length > 0) assert.match(html, /id="article-10-sentence-19"/)
+    }
+  }
+})
+
+test('a delimited menu preserves all prose after the last pipe separator', () => {
+  for (const prose of ['국제 관계가 악화됐다.', '국제·정치 관계가 악화됐다.']) {
+    const text = `최신뉴스 정치 경제 사회 | ${prose}`
+    for (const sentences of [[], [{ index: 23, text }]]) {
+      const html = renderBody(text, sentences)
+      assert.doesNotMatch(html, /최신뉴스|경제|사회/)
+      assert.ok(html.includes(prose), prose)
+      if (sentences.length > 0) assert.match(html, /id="article-10-sentence-23"/)
+    }
+  }
+})
+
+test('a category heading repeated after navigation survives in every stored body representation', () => {
+  const lines = ['최신뉴스', '정치', '경제', '사회', '경제', '본문이 여기서 시작된다.']
+  const text = lines.join('\n')
+  const fallback = renderBody(text)
+  assert.doesNotMatch(fallback, /최신뉴스|정치|사회/)
+  assert.match(fallback, /<p>경제<\/p>/)
+
+  const split = renderBody(text, lines.map((line, index) => ({ index: index + 41, text: line })))
+  assert.doesNotMatch(split, /최신뉴스|정치|사회|article-10-sentence-43/)
+  assert.match(split, /id="article-10-sentence-45"[^>]*><span>경제<\/span>/)
+  assert.match(split, /id="article-10-sentence-46"/)
+
+  const packed = renderBody(text, [{ index: 51, text }])
+  assert.doesNotMatch(packed, /최신뉴스|정치|사회/)
+  assert.match(packed, /id="article-10-sentence-51"[^>]*><span>경제\n본문이 여기서 시작된다/)
+})
+
+test('repeated explicit latest-news groups are removed but a following category heading remains', () => {
+  const lines = [...navigation, ...navigation, '경제', '본문이 여기서 시작된다.']
+  const text = lines.join('\n')
+  const html = renderBody(text, lines.map((line, index) => ({ index: index + 61, text: line })))
+  assert.doesNotMatch(html, /최신뉴스|생활문화|날씨/)
+  assert.match(html, /id="article-10-sentence-77"[^>]*><span>경제<\/span>/)
+  assert.match(html, /id="article-10-sentence-78"/)
+  assert.match(renderBody(text), /<p>경제<\/p>/)
+})
+
+test('a lone latest-news heading after a confirmed menu is not a complete repeated menu', () => {
+  const lines = [...navigation, '최신뉴스', '본문이 여기서 시작된다.']
+  const text = lines.join('\n')
+  const html = renderBody(text, lines.map((line, index) => ({ index: index + 81, text: line })))
+  assert.doesNotMatch(html, /생활문화|날씨|article-10-sentence-81/)
+  assert.match(html, /id="article-10-sentence-89"[^>]*><span>최신뉴스<\/span>/)
+  assert.match(html, /id="article-10-sentence-90"/)
+  assert.match(renderBody(text), /<p>최신뉴스<\/p>/)
 })
 
 test('multiline navigation within one saved sentence retains its original evidence index', () => {
@@ -130,6 +195,7 @@ test('isolated headings, repeated labels, and category words in prose remain vis
     '경제\n한국 경제 전망을 설명한다.',
     '정치\n경제\n사회 분야 협력을 논의했다.',
     '최신뉴스\n경제\n경제\n경제 전망을 설명했다.',
+    '최신뉴스\n최신뉴스\n정치\n경제\n본문이다.',
     '정치 경제 사회 분야 전문가들이 의견을 냈다.',
     '최신뉴스에서는 정치 경제 사회 분야를 보도한다.',
     '최신뉴스 생활문화 생활·문화 생활/문화 관련 소식을 전했다.',
