@@ -1,0 +1,735 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>주제 적합성 · 독립 검증</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #24352f;
+      --muted: #718079;
+      --line: #e1e7e1;
+      --paper: #ffffff;
+      --canvas: #f3f5f1;
+      --green: #25694e;
+      --soft: #eaf2eb;
+      --warning: #815715;
+      --danger: #983e3e;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: var(--canvas); color: var(--ink); font: 14px/1.65 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+    button { cursor: pointer; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 9px 13px; font-weight: 600; }
+    button:hover { background: #f2f6f0; border-color: #b8c8bb; }
+    button:disabled { opacity: .45; cursor: default; }
+    button:disabled:hover { background: var(--paper); border-color: var(--line); }
+    button.primary { background: var(--green); border-color: var(--green); color: white; }
+    button.primary:hover { background: #1e573f; }
+    button.primary:disabled:hover { background: var(--green); border-color: var(--green); }
+    a { color: var(--green); text-underline-offset: 3px; }
+    :focus-visible { outline: 3px solid #a87520; outline-offset: 3px; }
+    h1, h2, h3, p { margin: 0; }
+    input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 7px; background: white; padding: 10px 11px; min-width: 0; }
+    input::placeholder, textarea::placeholder { color: #89958e; }
+    textarea { resize: vertical; min-height: 112px; line-height: 1.7; }
+    .shell { max-width: 1800px; margin: 0 auto; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 25px 32px 23px; border-bottom: 1px solid var(--line); background: var(--paper); }
+    .brand { display: flex; gap: 13px; align-items: center; }
+    .brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; background: var(--green); color: white; font-size: 24px; line-height: 1; }
+    .eyebrow { font-size: 10px; color: var(--muted); letter-spacing: .14em; font-weight: 700; }
+    h1 { font-size: 21px; line-height: 1.45; letter-spacing: -.045em; }
+    .header-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .save-status { margin-right: 10px; color: var(--muted); font-size: 12px; }
+    .save-status::before { content: ""; display: inline-block; width: 6px; height: 6px; background: #6e9678; border-radius: 50%; margin-right: 7px; }
+    .save-status.failed { color: var(--danger); }
+    .save-status.failed::before { background: var(--danger); }
+    .intro { display: flex; justify-content: space-between; align-items: center; gap: 25px; padding: 20px 32px; }
+    .intro-copy { color: #526159; }
+    .intro-copy strong { color: var(--ink); font-weight: 650; }
+    .progress-area { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+    .progress-copy { color: var(--muted); font-size: 12px; min-width: 94px; }
+    .progress-copy strong { color: var(--ink); font-size: 19px; font-variant-numeric: tabular-nums; }
+    progress { width: 145px; height: 6px; border: 0; border-radius: 8px; overflow: hidden; background: #dde5dc; accent-color: var(--green); }
+    progress::-webkit-progress-bar { background: #dde5dc; border-radius: 8px; }
+    progress::-webkit-progress-value { background: var(--green); border-radius: 8px; }
+    progress::-moz-progress-bar { background: var(--green); }
+    .workspace { display: grid; grid-template-columns: 254px minmax(300px, 1fr) 315px; align-items: start; gap: 18px; padding: 0 24px 25px; }
+    .panel { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+    .sidebar { position: sticky; top: 18px; overflow: hidden; }
+    .sidebar-heading { padding: 19px 18px 13px; display: flex; align-items: center; justify-content: space-between; }
+    .sidebar-heading h2 { font-size: 14px; }
+    .small-count { font-size: 11px; color: var(--muted); }
+    .search-tools { display: grid; gap: 7px; padding: 0 13px 13px; border-bottom: 1px solid var(--line); }
+    .search-tools input, .search-tools select { font-size: 12px; padding: 8px 10px; background: #fbfcfa; }
+    .case-list { padding: 7px; max-height: calc(100vh - 342px); min-height: 220px; overflow-y: auto; scrollbar-gutter: stable; }
+    .case-button { display: grid; grid-template-columns: 25px minmax(0, 1fr); width: 100%; text-align: left; gap: 7px; border-color: transparent; border-radius: 7px; padding: 12px 9px; font-weight: 400; }
+    .case-button:hover { background: #f6f8f3; border-color: transparent; }
+    .case-button[aria-current="true"] { background: var(--soft); border-color: #d9e6d8; }
+    .case-number { color: #86938b; font-size: 11px; padding-top: 2px; font-variant-numeric: tabular-nums; }
+    .case-button[aria-current="true"] .case-number { color: var(--green); }
+    .case-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+    .case-caption { display: flex; gap: 5px; align-items: center; margin-top: 5px; color: var(--muted); font-size: 10px; }
+    .case-topic { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 115px; }
+    .status-dot { flex-shrink: 0; width: 5px; height: 5px; border-radius: 50%; background: #c4ccc5; }
+    .status-dot.done { background: #438160; }
+    .list-empty { padding: 25px 12px; color: var(--muted); text-align: center; font-size: 12px; }
+    .sidebar-footer { border-top: 1px solid var(--line); padding: 13px; }
+    .sidebar-footer button { width: 100%; font-size: 12px; }
+    .article-panel { padding: 27px 30px 24px; }
+    .article-top { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    .article-position { font-size: 11px; color: var(--muted); letter-spacing: .06em; font-weight: 650; }
+    .badge { padding: 3px 8px; border-radius: 5px; font-size: 11px; background: #f0f3ee; color: var(--muted); font-weight: 550; }
+    .badge.done { background: var(--soft); color: var(--green); }
+    .article-title { font-size: 25px; line-height: 1.48; letter-spacing: -.045em; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .article-meta { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; margin-top: 16px; font-size: 11px; color: var(--muted); }
+    .article-meta .source-link { margin-left: auto; white-space: nowrap; }
+    .article-meta .source-link[aria-disabled="true"] { color: var(--muted); text-decoration: none; }
+    .article-content { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 25px; }
+    .section-label { color: #89938b; font-size: 10px; letter-spacing: .1em; font-weight: 700; margin-bottom: 11px; }
+    .summary-box { margin-bottom: 26px; padding: 15px 18px; background: #f6f8f3; border-radius: 7px; border-left: 3px solid #bacdb6; }
+    .summary-box .section-label { margin-bottom: 7px; }
+    .article-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.95; color: #425048; }
+    .body-text { min-height: 235px; }
+    .notice { padding: 10px 13px; background: #fff7e7; color: var(--warning); border: 1px solid #eedfc0; border-radius: 7px; font-size: 12px; }
+    .excerpt-notice { margin-bottom: 17px; }
+    .article-nav { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 19px; margin-top: 32px; gap: 12px; }
+    .article-nav button { min-width: 83px; font-size: 12px; }
+    .article-nav span { font-size: 11px; color: var(--muted); }
+    .review-column { display: grid; gap: 15px; position: sticky; top: 18px; }
+    .topic-panel { padding: 21px 21px 19px; }
+    .topic-panel h2 { font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; margin: 7px 0 13px; letter-spacing: -.025em; }
+    .context-query { color: #4e6054; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 16px; }
+    .context-query::before { content: "검색어  "; color: #8a958d; }
+    .keyword-group { display: grid; grid-template-columns: 31px 1fr; gap: 8px; margin-top: 9px; align-items: baseline; font-size: 11px; }
+    .keyword-group dt { color: var(--muted); }
+    .keyword-group dd { margin: 0; display: flex; flex-wrap: wrap; gap: 5px; }
+    .keyword { display: inline-block; padding: 1px 6px; border-radius: 4px; background: #f0f3ed; color: #4f6353; overflow-wrap: anywhere; max-width: 100%; }
+    .keyword.excluded { background: #f6efec; color: #8b665a; }
+    .keyword-empty { color: #a1aaa3; }
+    .decision-panel { padding: 22px 21px 20px; }
+    .decision-panel h2 { font-size: 16px; letter-spacing: -.03em; margin-bottom: 5px; }
+    .help { font-size: 11px; color: var(--muted); line-height: 1.75; }
+    .decision-options { display: grid; gap: 8px; margin: 17px 0; }
+    .decision-option { display: flex; align-items: center; gap: 10px; text-align: left; padding: 12px 11px; }
+    .choice-marker { height: 16px; width: 16px; flex-shrink: 0; border: 1.5px solid #c4cfc4; border-radius: 50%; display: grid; place-items: center; }
+    .decision-option[aria-pressed="true"] { border-color: #478265; background: #eff6ed; }
+    .decision-option[aria-pressed="true"] .choice-marker { border-color: var(--green); background: var(--green); }
+    .decision-option[aria-pressed="true"] .choice-marker::after { content: ""; height: 5px; width: 5px; border-radius: 50%; background: white; }
+    .choice-copy { flex: 1; }
+    .choice-copy strong { display: block; font-size: 13px; }
+    .choice-copy span { display: block; color: var(--muted); font-size: 10px; font-weight: 400; margin-top: 1px; }
+    kbd { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-family: inherit; font-size: 10px; font-weight: 400; color: #91a091; background: white; }
+    .reason-heading { display: flex; align-items: baseline; justify-content: space-between; margin: 19px 0 7px; }
+    .reason-heading label { font-size: 12px; font-weight: 650; }
+    .reason-heading span { font-size: 10px; color: var(--muted); }
+    #reason { font-size: 12px; background: #fcfdfa; }
+    .reason-footer { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-top: 4px; }
+    #reasonCount { color: #8d998f; font-size: 10px; }
+    .text-button { border: 0; background: transparent; color: var(--muted); padding: 3px 0; font-size: 11px; font-weight: 400; }
+    .text-button:hover { background: transparent; color: var(--ink); }
+    .guide { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+    .guide summary { font-size: 11px; color: #647367; cursor: pointer; }
+    .guide p { margin-top: 9px; }
+    .page-footer { padding: 0 32px 27px; display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 10px; color: #88958b; font-size: 11px; }
+    .page-footer details { max-width: 100%; }
+    .page-footer summary { cursor: pointer; }
+    .dataset-info { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; margin-top: 10px; }
+    .dataset-info dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
+    .global-message { margin: 0 24px 15px; padding: 12px 16px; border-radius: 8px; border: 1px solid #d9e6d8; background: #edf5e9; font-size: 12px; color: var(--green); }
+    .global-message.error { border-color: #e9cdcd; color: var(--danger); background: #fff1ef; }
+    .global-message.warning { border-color: #eedfc0; color: var(--warning); background: #fff7e7; }
+    .import-preview { margin: 0 24px 15px; padding: 16px; background: #edf3e9; border: 1px solid #c7d7c3; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+    .import-preview p { font-size: 12px; }
+    .import-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .fatal { margin: 30px; padding: 25px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    @media (min-width: 1500px) {
+      .workspace { grid-template-columns: 282px minmax(300px, 1fr) 337px; gap: 23px; padding-left: 32px; padding-right: 32px; }
+      .article-panel { padding: 32px 40px 26px; }
+      .article-title { font-size: 28px; }
+    }
+    @media (max-width: 1160px) {
+      .workspace { grid-template-columns: 215px minmax(0, 1fr); }
+      .sidebar { grid-row: 1 / span 2; }
+      .review-column { grid-column: 2; position: static; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+      .case-list { max-height: calc(100vh - 358px); }
+      .article-panel { padding: 24px; }
+      .save-status { display: none; }
+      .intro { align-items: start; }
+      .progress-area { gap: 10px; }
+      progress { width: 95px; }
+    }
+    @media (max-width: 760px) {
+      .topbar { padding: 20px; align-items: start; gap: 16px; flex-direction: column; }
+      .header-actions { width: 100%; }
+      .header-actions button { font-size: 11px; padding: 8px 11px; }
+      .header-actions .primary { margin-left: auto; }
+      .intro { padding: 18px 20px; gap: 13px; flex-direction: column; }
+      .progress-area { width: 100%; }
+      progress { flex: 1; }
+      .workspace { padding: 0 13px 20px; grid-template-columns: 1fr; gap: 13px; }
+      .sidebar { grid-row: auto; position: static; }
+      .sidebar-heading { padding: 12px 14px 8px; }
+      .search-tools { grid-template-columns: 1fr 100px; padding-bottom: 9px; }
+      .case-list { max-height: 134px; min-height: 0; }
+      .case-button { padding: 8px; }
+      .case-title { -webkit-line-clamp: 1; }
+      .case-caption { margin-top: 2px; }
+      .sidebar-footer { padding: 8px 12px; }
+      .sidebar-footer button { padding: 6px; }
+      .article-panel { padding: 21px; }
+      .article-title { font-size: 22px; }
+      .review-column { grid-column: 1; grid-template-columns: 1fr; }
+      .article-text { font-size: 13px; }
+      .body-text { min-height: 120px; }
+      .article-nav span { display: none; }
+      .global-message, .import-preview { margin-left: 13px; margin-right: 13px; }
+      .import-preview { align-items: start; flex-direction: column; }
+      .page-footer { padding: 0 20px 25px; }
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      button { transition: background-color .12s, border-color .12s; }
+    }
+    @media print {
+      .sidebar, .header-actions, .article-nav, .page-footer, .import-preview { display: none; }
+      .workspace { display: block; }
+      .review-column { position: static; display: block; }
+      .panel { margin-bottom: 15px; }
+      textarea { min-height: 80px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">≋</span>
+        <div><p class="eyebrow">HUMAN REVIEW / 01</p><h1>주제 적합성 독립 검증</h1></div>
+      </div>
+      <div class="header-actions" id="headerActions" hidden>
+        <span class="save-status" id="saveStatus" role="status">이 브라우저에 자동 저장</span>
+        <button type="button" id="importButton">이어서 하기</button>
+        <button type="button" id="draftButton">중간 저장 JSON</button>
+        <button type="button" id="finalButton" class="primary" disabled>최종 JSON 내려받기 ↗</button>
+      </div>
+    </header>
+    <noscript><p class="notice fatal">JavaScript를 켜면 검증 화면을 사용할 수 있습니다. 판단 기록은 서버로 전송되지 않습니다.</p></noscript>
+    <div id="fatalError" class="notice fatal" role="alert" hidden></div>
+    <main id="app" hidden>
+      <section class="intro" aria-label="검증 안내 및 진행률">
+        <p class="intro-copy"><strong>이 기사는 이 주제에 관련이 있나요?</strong><br>주제와 기사 내용을 읽고 판단해 주세요. 모델의 답은 표시하지 않습니다.</p>
+        <div class="progress-area">
+          <span class="progress-copy"><strong id="completedCount">0</strong> / <span id="totalCount"></span>건 완료</span>
+          <progress id="progressBar" value="0" aria-label="판단 완료 수"></progress>
+          <span id="progressPercent" class="small-count">0%</span>
+        </div>
+      </section>
+      <div id="storageWarning" class="global-message warning" role="alert" hidden></div>
+      <div id="feedback" class="global-message" role="status" aria-live="polite" hidden></div>
+      <section id="importPreview" class="import-preview" aria-label="가져올 기록 확인" hidden>
+        <p id="importDescription"></p>
+        <div class="import-actions"><button id="cancelImport" type="button">취소</button><button id="applyImport" type="button" class="primary">이 기록으로 이어서 하기</button></div>
+      </section>
+      <div class="workspace">
+        <aside class="panel sidebar" aria-label="검토 목록">
+          <div class="sidebar-heading"><h2>검토 목록</h2><span id="listCount" class="small-count" aria-live="polite"></span></div>
+          <div class="search-tools">
+            <label class="sr-only" for="searchInput">기사 제목 또는 주제 검색</label>
+            <input id="searchInput" type="search" placeholder="제목 · 주제로 찾기" autocomplete="off">
+            <label class="sr-only" for="statusFilter">판단 상태 필터</label>
+            <select id="statusFilter"><option value="all">전체 보기</option><option value="pending">미완료</option><option value="done">완료</option><option value="RELEVANT">관련</option><option value="IRRELEVANT">무관</option><option value="UNCERTAIN">판단 어려움</option></select>
+          </div>
+          <nav id="caseList" class="case-list" aria-label="검토할 기사 선택"></nav>
+          <div class="sidebar-footer"><button id="nextPending" type="button">다음 미완료 기사 →</button></div>
+        </aside>
+        <article class="panel article-panel">
+          <div class="article-top"><p id="articlePosition" class="article-position"></p><span id="currentStatus" class="badge">아직 판단하지 않음</span></div>
+          <h2 id="articleTitle" class="article-title" tabindex="-1"></h2>
+          <div class="article-meta"><span id="articlePublisher"></span><span id="articleDate"></span><a id="originalLink" class="source-link" target="_blank" rel="noopener noreferrer">원문 보기 ↗</a></div>
+          <div id="articleContent" class="article-content">
+            <section id="summarySection" class="summary-box" aria-label="수집된 요약"><p class="section-label">수집된 요약</p><p id="articleSummary" class="article-text"></p></section>
+            <p class="section-label">수집된 기사 본문</p>
+            <p id="excerptNotice" class="notice excerpt-notice" hidden>긴 본문의 일부만 제공됩니다. 필요한 정보가 없으면 원문을 확인하거나 ‘판단 어려움’을 선택해 주세요.</p>
+            <p id="articleBody" class="article-text body-text"></p>
+          </div>
+          <nav class="article-nav" aria-label="기사 이동"><button id="previousButton" type="button">← 이전</button><span>판단 후에도 자유롭게 수정할 수 있어요.</span><button id="nextButton" type="button">다음 →</button></nav>
+        </article>
+        <aside class="review-column" aria-label="주제 및 판단">
+          <section class="panel topic-panel" aria-labelledby="topicName">
+            <p class="eyebrow">판단 기준이 되는 주제</p><h2 id="topicName"></h2><p id="topicQuery" class="context-query"></p>
+            <dl><div class="keyword-group"><dt>필수</dt><dd id="requiredKeywords"></dd></div><div class="keyword-group"><dt>선택</dt><dd id="optionalKeywords"></dd></div><div class="keyword-group"><dt>제외</dt><dd id="excludedKeywords"></dd></div></dl>
+          </section>
+          <section class="panel decision-panel" aria-labelledby="decisionHeading">
+            <h2 id="decisionHeading">나의 판단</h2><p class="help">위 주제에 필요한 정보인지 판단해 주세요.</p>
+            <div class="decision-options" role="group" aria-label="주제 적합성 선택">
+              <button type="button" class="decision-option" data-decision="RELEVANT" aria-pressed="false"><span class="choice-marker" aria-hidden="true"></span><span class="choice-copy"><strong>관련</strong><span>이 주제와 직접 관련이 있어요</span></span><kbd aria-hidden="true">1</kbd></button>
+              <button type="button" class="decision-option" data-decision="IRRELEVANT" aria-pressed="false"><span class="choice-marker" aria-hidden="true"></span><span class="choice-copy"><strong>무관</strong><span>이 주제와 관련이 없어요</span></span><kbd aria-hidden="true">2</kbd></button>
+              <button type="button" class="decision-option" data-decision="UNCERTAIN" aria-pressed="false"><span class="choice-marker" aria-hidden="true"></span><span class="choice-copy"><strong>판단 어려움</strong><span>정보가 부족하거나 경계가 모호해요</span></span><kbd aria-hidden="true">3</kbd></button>
+            </div>
+            <div class="reason-heading"><label for="reason">판단 이유</label><span>선택 입력</span></div>
+            <textarea id="reason" rows="4" maxlength="2000" placeholder="애매했던 점이나 판단의 근거를 짧게 남겨 주세요."></textarea>
+            <div class="reason-footer"><button id="clearDecision" class="text-button" type="button">선택 지우기</button><span id="reasonCount">0 / 2,000</span></div>
+            <details class="guide"><summary>판단 기준과 단축키</summary><p class="help">같은 단어가 등장하는지만 보지 말고, 이 주제가 의도하는 대상과 기사 내용의 실제 관계를 확인해 주세요. 표현 하나만으로 일괄 제외하지 않습니다. 주제의 의미가 불분명하거나 근거가 부족하면 ‘판단 어려움’을 선택해 주세요.</p><p class="help">1 관련 · 2 무관 · 3 판단 어려움<br>Alt + ← / → 이전·다음 기사<br>입력 중에는 단축키가 작동하지 않습니다.</p></details>
+          </section>
+        </aside>
+      </div>
+      <footer class="page-footer"><p>이 브라우저에 자동 저장됩니다. 중간 JSON도 내려받아 두세요.<br>원문 링크를 누르기 전까지 외부로 연결하지 않습니다.</p><details><summary>검증 자료 정보</summary><dl class="dataset-info"><dt>자료 ID</dt><dd id="datasetId"></dd><dt>생성 시각</dt><dd id="datasetCreatedAt"></dd><dt>SHA-256</dt><dd id="datasetHash"></dd><dt>무결성 확인</dt><dd id="integrityStatus"></dd></dl></details></footer>
+    </main>
+    <input id="importFile" type="file" accept="application/json,.json" hidden aria-label="이전에 저장한 JSON 파일 선택">
+  </div>
+  <script id="reviewPacket" type="application/json">__REVIEW_PACKET_JSON__</script>
+  <script>
+    (() => {
+      'use strict';
+
+      const $ = id => document.getElementById(id);
+      const DECISIONS = ['RELEVANT', 'IRRELEVANT', 'UNCERTAIN'];
+      const DECISION_LABELS = { RELEVANT: '관련', IRRELEVANT: '무관', UNCERTAIN: '판단 어려움' };
+      const PACKET_FIELDS = ['schemaVersion', 'purpose', 'datasetId', 'createdAt', 'datasetSha256', 'cases'];
+      const CASE_FIELDS = ['caseId', 'inputSha256', 'topic', 'article'];
+      const TOPIC_FIELDS = ['id', 'name', 'queryText', 'requiredKeywords', 'optionalKeywords', 'excludedKeywords'];
+      const ARTICLE_FIELDS = ['id', 'title', 'summary', 'bodyText', 'publisher', 'url', 'publishedAt', 'bodyTruncated'];
+      const EXPORT_FIELDS = ['schemaVersion', 'purpose', 'datasetId', 'datasetSha256', 'exportKind', 'exportedAt', 'records'];
+      const RECORD_FIELDS = ['caseId', 'inputSha256', 'decision', 'reason', 'updatedAt', 'sourceOpened'];
+      let packet;
+      let records = new Map();
+      let caseById;
+      let currentIndex = 0;
+      let storageKey;
+      let pendingImport = null;
+      let pendingImportRevision = 0;
+      let editRevision = 0;
+
+      const now = () => new Date().toISOString();
+      const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+      const exactKeys = (value, keys) => isObject(value) && Object.keys(value).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(value, key));
+      const nonempty = value => typeof value === 'string' && value.trim().length > 0;
+      const stableId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(value);
+      const positiveId = value => Number.isSafeInteger(value) && value > 0;
+      const nullableText = value => value === null || typeof value === 'string';
+      const sha256 = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+      const stringList = value => Array.isArray(value) && value.every(item => typeof item === 'string');
+      const currentCase = () => packet.cases[currentIndex];
+      const currentRecord = () => records.get(currentCase().caseId);
+      const completeCount = () => [...records.values()].filter(record => record.decision !== null).length;
+
+      function isoTimestamp(value) {
+        if (typeof value !== 'string') return false;
+        const parts = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?(Z|[+-](\d{2}):(\d{2}))$/.exec(value);
+        if (!parts) return false;
+        const [, year, month, day, hour, minute, second, , offsetHour, offsetMinute] = parts;
+        const leap = Number(year) % 4 === 0 && (Number(year) % 100 !== 0 || Number(year) % 400 === 0);
+        const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        return Number(year) >= 1 && Number(month) >= 1 && Number(month) <= 12 && Number(day) >= 1 && Number(day) <= days[Number(month) - 1] && Number(hour) < 24 && Number(minute) < 60 && Number(second) < 60 && (offsetHour === undefined || (Number(offsetHour) < 24 && Number(offsetMinute) < 60)) && Number.isFinite(Date.parse(value));
+      }
+
+      function showFeedback(message, error = false) {
+        $('feedback').textContent = message;
+        $('feedback').className = 'global-message' + (error ? ' error' : '');
+        $('feedback').hidden = false;
+      }
+
+      function showStorageWarning(message) {
+        $('storageWarning').textContent = message;
+        $('storageWarning').hidden = false;
+        $('saveStatus').textContent = '자동 저장 확인 필요';
+        $('saveStatus').classList.add('failed');
+      }
+
+      function validatePacket(value) {
+        if (!exactKeys(value, PACKET_FIELDS) || value.schemaVersion !== 1 || value.purpose !== 'topic-relevance-blind-review' || !stableId(value.datasetId) || !isoTimestamp(value.createdAt) || !sha256(value.datasetSha256) || !Array.isArray(value.cases) || value.cases.length === 0) {
+          throw Error('검증 자료의 형식이 올바르지 않습니다. 자료 파일을 다시 생성해 주세요.');
+        }
+        const ids = new Set();
+        for (const item of value.cases) {
+          if (!exactKeys(item, CASE_FIELDS) || !stableId(item.caseId) || ids.has(item.caseId) || !sha256(item.inputSha256)) {
+            throw Error('검증 항목의 ID 또는 해시가 올바르지 않습니다.');
+          }
+          const topic = item.topic;
+          if (!exactKeys(topic, TOPIC_FIELDS) || !positiveId(topic.id) || !nonempty(topic.name) || !nullableText(topic.queryText) || !['requiredKeywords', 'optionalKeywords', 'excludedKeywords'].every(key => stringList(topic[key]))) {
+            throw Error('검증 자료의 주제 정보가 올바르지 않습니다.');
+          }
+          const article = item.article;
+          if (!exactKeys(article, ARTICLE_FIELDS) || !positiveId(article.id) || !nonempty(article.title) || typeof article.bodyText !== 'string' || typeof article.publisher !== 'string' || !['summary', 'url', 'publishedAt'].every(key => nullableText(article[key])) || typeof article.bodyTruncated !== 'boolean') {
+            throw Error('검증 자료의 기사 정보가 올바르지 않습니다.');
+          }
+          ids.add(item.caseId);
+        }
+      }
+
+      function canonicalize(value) {
+        if (Array.isArray(value)) return '[' + value.map(canonicalize).join(',') + ']';
+        if (isObject(value)) return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonicalize(value[key])).join(',') + '}';
+        return JSON.stringify(value);
+      }
+
+      async function verifyPacketHash(value) {
+        if (!globalThis.crypto || !globalThis.crypto.subtle) {
+          $('integrityStatus').textContent = '이 브라우저에서는 해시 계산을 지원하지 않습니다.';
+          return;
+        }
+        const content = Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'datasetSha256'));
+        const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalize(content)));
+        const actual = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+        if (actual !== value.datasetSha256) throw Error('검증 자료의 해시가 일치하지 않습니다. 변경되지 않은 원본 HTML 파일을 다시 열어 주세요.');
+        $('integrityStatus').textContent = '자료 해시 일치';
+      }
+
+      function freshRecord(item) {
+        return { caseId: item.caseId, inputSha256: item.inputSha256, decision: null, reason: '', updatedAt: null, sourceOpened: false };
+      }
+
+      function snapshot(kind) {
+        return {
+          schemaVersion: 1,
+          purpose: 'topic-relevance-human-labels',
+          datasetId: packet.datasetId,
+          datasetSha256: packet.datasetSha256,
+          exportKind: kind,
+          exportedAt: now(),
+          records: packet.cases.map(item => ({ ...records.get(item.caseId) }))
+        };
+      }
+
+      function validateSaved(value) {
+        if (!exactKeys(value, EXPORT_FIELDS) || value.schemaVersion !== 1 || value.purpose !== 'topic-relevance-human-labels' || value.datasetId !== packet.datasetId || value.datasetSha256 !== packet.datasetSha256 || !['draft', 'final'].includes(value.exportKind) || !isoTimestamp(value.exportedAt) || !Array.isArray(value.records) || value.records.length !== packet.cases.length) {
+          throw Error('이 검증 자료와 일치하는 JSON이 아닙니다. 자료 ID·해시·파일 형식을 확인해 주세요.');
+        }
+        const incoming = new Map();
+        for (const record of value.records) {
+          if (!exactKeys(record, RECORD_FIELDS) || !caseById.has(record.caseId) || incoming.has(record.caseId) || record.inputSha256 !== caseById.get(record.caseId).inputSha256 || (record.decision !== null && !DECISIONS.includes(record.decision)) || typeof record.reason !== 'string' || record.reason.length > 2000 || (record.updatedAt !== null && !isoTimestamp(record.updatedAt)) || typeof record.sourceOpened !== 'boolean') {
+            throw Error('저장 기록의 항목 ID·해시·판단 값 또는 필드 형식이 올바르지 않습니다. 기존 기록은 유지됩니다.');
+          }
+          if (record.decision !== null && record.updatedAt === null) {
+            throw Error('수정된 기록에 저장 시각이 없습니다. 기존 기록은 유지됩니다.');
+          }
+          if (value.exportKind === 'final' && record.decision === null) {
+            throw Error('최종 JSON에 판단하지 않은 항목이 있습니다. 기존 기록은 유지됩니다.');
+          }
+          incoming.set(record.caseId, { ...record });
+        }
+        return incoming;
+      }
+
+      function persist() {
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(snapshot('draft')));
+          $('saveStatus').textContent = '이 브라우저에 저장됨';
+          $('saveStatus').classList.remove('failed');
+          $('storageWarning').hidden = true;
+        } catch {
+          showStorageWarning('이 브라우저에 자동 저장할 수 없습니다. 현재 기록은 화면에 유지되지만 창을 닫으면 사라질 수 있으니 중간 JSON을 내려받아 주세요.');
+        }
+      }
+
+      function loadSaved() {
+        try {
+          const raw = localStorage.getItem(storageKey);
+          if (!raw) return;
+          records = validateSaved(JSON.parse(raw));
+          const firstPending = packet.cases.findIndex(item => records.get(item.caseId).decision === null);
+          currentIndex = firstPending < 0 ? 0 : firstPending;
+          showFeedback('이 브라우저에 저장된 기록을 불러왔습니다. ' + completeCount() + '건을 판단한 상태입니다.');
+        } catch {
+          showStorageWarning('자동 저장 기록을 읽지 못했습니다. 기록을 복구하려면 이전에 내려받은 JSON을 ‘이어서 하기’로 가져와 주세요.');
+        }
+      }
+
+      function renderKeywords(id, words, excluded = false) {
+        const container = $(id);
+        container.replaceChildren();
+        if (!words.length) {
+          const empty = document.createElement('span');
+          empty.className = 'keyword-empty';
+          empty.textContent = '없음';
+          container.append(empty);
+          return;
+        }
+        for (const word of words) {
+          const tag = document.createElement('span');
+          tag.className = 'keyword' + (excluded ? ' excluded' : '');
+          tag.textContent = word;
+          container.append(tag);
+        }
+      }
+
+      function safeUrl(raw) {
+        if (typeof raw !== 'string' || /\s/.test(raw) || !/^https?:\/\//i.test(raw)) return null;
+        try {
+          const url = new URL(raw);
+          return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : null;
+        } catch {
+          return null;
+        }
+      }
+
+      function renderArticle() {
+        const item = currentCase();
+        const article = item.article;
+        $('articlePosition').textContent = 'ARTICLE ' + String(currentIndex + 1).padStart(2, '0') + ' / ' + packet.cases.length;
+        $('articleTitle').textContent = article.title;
+        $('articlePublisher').textContent = article.publisher || '출처 미제공';
+        $('articleDate').textContent = article.publishedAt ? '발행 ' + article.publishedAt : '발행 시각 미제공';
+        $('summarySection').hidden = !article.summary;
+        $('articleSummary').textContent = article.summary || '';
+        $('articleBody').textContent = article.bodyText || '수집된 본문이 없습니다. 제목과 요약만으로 판단하기 어렵다면 원문을 확인하거나 ‘판단 어려움’을 선택해 주세요.';
+        $('excerptNotice').hidden = !article.bodyTruncated;
+        const link = $('originalLink');
+        const url = safeUrl(article.url);
+        if (url) {
+          link.href = url;
+          link.removeAttribute('aria-disabled');
+          link.removeAttribute('tabindex');
+          link.textContent = '원문 보기 ↗';
+        } else {
+          link.removeAttribute('href');
+          link.setAttribute('aria-disabled', 'true');
+          link.setAttribute('tabindex', '-1');
+          link.textContent = '원문 링크 없음';
+        }
+        $('topicName').textContent = item.topic.name;
+        $('topicQuery').textContent = item.topic.queryText || '없음';
+        renderKeywords('requiredKeywords', item.topic.requiredKeywords);
+        renderKeywords('optionalKeywords', item.topic.optionalKeywords);
+        renderKeywords('excludedKeywords', item.topic.excludedKeywords, true);
+        $('previousButton').disabled = currentIndex === 0;
+        $('nextButton').disabled = currentIndex === packet.cases.length - 1;
+        $('reason').value = currentRecord().reason;
+        renderDecision();
+      }
+
+      function renderDecision() {
+        const record = currentRecord();
+        for (const button of document.querySelectorAll('[data-decision]')) {
+          button.setAttribute('aria-pressed', String(button.dataset.decision === record.decision));
+        }
+        $('currentStatus').textContent = record.decision === null ? '아직 판단하지 않음' : DECISION_LABELS[record.decision];
+        $('currentStatus').className = 'badge' + (record.decision === null ? '' : ' done');
+        $('clearDecision').disabled = record.decision === null;
+        $('reasonCount').textContent = record.reason.length.toLocaleString('ko-KR') + ' / 2,000';
+      }
+
+      function renderList() {
+        const query = $('searchInput').value.trim().toLocaleLowerCase('ko-KR');
+        const filter = $('statusFilter').value;
+        const fragment = document.createDocumentFragment();
+        let count = 0;
+        packet.cases.forEach((item, index) => {
+          const record = records.get(item.caseId);
+          const matchesQuery = (item.article.title + ' ' + item.topic.name + ' ' + (item.topic.queryText || '')).toLocaleLowerCase('ko-KR').includes(query);
+          const matchesFilter = filter === 'all' || (filter === 'pending' && record.decision === null) || (filter === 'done' && record.decision !== null) || filter === record.decision;
+          if (!matchesQuery || !matchesFilter) return;
+          count += 1;
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'case-button';
+          button.setAttribute('aria-current', String(index === currentIndex));
+          button.setAttribute('aria-label', (index + 1) + '번, ' + item.article.title + ', ' + (record.decision === null ? '미완료' : DECISION_LABELS[record.decision]));
+          const number = document.createElement('span');
+          number.className = 'case-number';
+          number.textContent = String(index + 1).padStart(2, '0');
+          const text = document.createElement('span');
+          const title = document.createElement('span');
+          title.className = 'case-title';
+          title.textContent = item.article.title;
+          const caption = document.createElement('span');
+          caption.className = 'case-caption';
+          const dot = document.createElement('span');
+          dot.className = 'status-dot' + (record.decision === null ? '' : ' done');
+          dot.setAttribute('aria-hidden', 'true');
+          const topic = document.createElement('span');
+          topic.className = 'case-topic';
+          topic.textContent = item.topic.name;
+          const status = document.createElement('span');
+          status.textContent = record.decision === null ? '미완료' : DECISION_LABELS[record.decision];
+          caption.append(dot, topic, status);
+          text.append(title, caption);
+          button.append(number, text);
+          button.addEventListener('click', () => goTo(index));
+          fragment.append(button);
+        });
+        if (!count) {
+          const empty = document.createElement('p');
+          empty.className = 'list-empty';
+          empty.textContent = '조건에 맞는 기사가 없습니다.';
+          fragment.append(empty);
+        }
+        $('caseList').replaceChildren(fragment);
+        $('listCount').textContent = count + '건';
+      }
+
+      function renderProgress() {
+        const count = completeCount();
+        $('completedCount').textContent = String(count);
+        $('totalCount').textContent = String(packet.cases.length);
+        $('progressBar').max = packet.cases.length;
+        $('progressBar').value = count;
+        $('progressBar').setAttribute('aria-valuetext', packet.cases.length + '건 중 ' + count + '건 완료');
+        $('progressPercent').textContent = Math.round(count * 100 / packet.cases.length) + '%';
+        $('finalButton').disabled = count !== packet.cases.length;
+        $('finalButton').title = count === packet.cases.length ? '모든 판단을 담은 최종 JSON을 내려받습니다.' : '모든 기사에 판단을 선택하면 내려받을 수 있습니다.';
+        $('nextPending').disabled = count === packet.cases.length;
+      }
+
+      function goTo(index) {
+        if (index < 0 || index >= packet.cases.length) return;
+        currentIndex = index;
+        renderArticle();
+        renderList();
+        $('articleTitle').focus({ preventScroll: true });
+      }
+
+      function changeRecord(changes) {
+        Object.assign(currentRecord(), changes, { updatedAt: now() });
+        editRevision += 1;
+        persist();
+        renderDecision();
+        renderProgress();
+        renderList();
+      }
+
+      function setDecision(decision) {
+        if (!DECISIONS.includes(decision)) return;
+        changeRecord({ decision });
+      }
+
+      function nextUnreviewed() {
+        for (let offset = 1; offset <= packet.cases.length; offset += 1) {
+          const index = (currentIndex + offset) % packet.cases.length;
+          if (records.get(packet.cases[index].caseId).decision === null) {
+            goTo(index);
+            return;
+          }
+        }
+      }
+
+      function download(kind) {
+        if (kind === 'final' && completeCount() !== packet.cases.length) {
+          showFeedback('모든 기사에 판단을 선택한 뒤 최종 JSON을 내려받을 수 있습니다.', true);
+          return;
+        }
+        const blob = new Blob([JSON.stringify(snapshot(kind), null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        const safeId = packet.datasetId.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
+        link.download = safeId + '.' + kind + '.' + now().replace(/[:.]/g, '-') + '.json';
+        document.body.append(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showFeedback(kind === 'final' ? '최종 JSON 다운로드를 요청했습니다. 내려받은 파일을 전달해 주세요.' : '중간 JSON 다운로드를 요청했습니다. 다음에는 ‘이어서 하기’로 불러올 수 있습니다.');
+      }
+
+      async function prepareImport(file) {
+        pendingImport = null;
+        $('importPreview').hidden = true;
+        if (!file) return;
+        try {
+          if (file.size > 10 * 1024 * 1024) throw Error('JSON 파일은 10MB 이하여야 합니다.');
+          const incoming = validateSaved(JSON.parse(await file.text()));
+          const count = [...incoming.values()].filter(record => record.decision !== null).length;
+          pendingImport = incoming;
+          pendingImportRevision = editRevision;
+          $('importDescription').textContent = count + ' / ' + packet.cases.length + '건을 판단한 파일입니다. 적용하면 현재 브라우저의 기록 전체를 이 파일의 기록으로 바꿉니다.';
+          $('importPreview').hidden = false;
+          $('applyImport').focus();
+        } catch (error) {
+          showFeedback(error instanceof SyntaxError ? 'JSON을 읽을 수 없습니다. 기존 기록은 유지됩니다.' : error.message, true);
+        } finally {
+          $('importFile').value = '';
+        }
+      }
+
+      function applyImport() {
+        if (!pendingImport) return;
+        if (editRevision !== pendingImportRevision) {
+          pendingImportRevision = editRevision;
+          $('importDescription').textContent = '파일을 고른 뒤 화면의 판단이 변경되었습니다. 가져오기를 계속하면 방금 변경한 기록도 파일 내용으로 바뀝니다. 계속하려면 적용 버튼을 한 번 더 눌러 주세요.';
+          return;
+        }
+        records = pendingImport;
+        pendingImport = null;
+        editRevision += 1;
+        $('importPreview').hidden = true;
+        persist();
+        const firstPending = packet.cases.findIndex(item => records.get(item.caseId).decision === null);
+        currentIndex = firstPending < 0 ? 0 : firstPending;
+        renderArticle();
+        renderProgress();
+        renderList();
+        showFeedback('저장 파일을 가져왔습니다. ' + completeCount() + '건의 판단을 완료한 상태입니다.');
+      }
+
+      function wireEvents() {
+        $('searchInput').addEventListener('input', renderList);
+        $('statusFilter').addEventListener('change', renderList);
+        $('previousButton').addEventListener('click', () => goTo(currentIndex - 1));
+        $('nextButton').addEventListener('click', () => goTo(currentIndex + 1));
+        $('nextPending').addEventListener('click', nextUnreviewed);
+        for (const button of document.querySelectorAll('[data-decision]')) {
+          button.addEventListener('click', () => setDecision(button.dataset.decision));
+        }
+        $('reason').addEventListener('input', event => changeRecord({ reason: event.target.value.slice(0, 2000) }));
+        $('clearDecision').addEventListener('click', () => changeRecord({ decision: null }));
+        const markSourceOpened = event => {
+          if (!$('originalLink').hasAttribute('href')) event.preventDefault();
+          else changeRecord({ sourceOpened: true });
+        };
+        $('originalLink').addEventListener('click', markSourceOpened);
+        $('originalLink').addEventListener('auxclick', event => { if (event.button === 1) markSourceOpened(event); });
+        $('draftButton').addEventListener('click', () => download('draft'));
+        $('finalButton').addEventListener('click', () => download('final'));
+        $('importButton').addEventListener('click', () => $('importFile').click());
+        $('importFile').addEventListener('change', event => prepareImport(event.target.files[0]));
+        $('applyImport').addEventListener('click', applyImport);
+        $('cancelImport').addEventListener('click', () => { pendingImport = null; $('importPreview').hidden = true; });
+        document.addEventListener('keydown', event => {
+          const target = event.target;
+          if (event.repeat || event.isComposing || (target instanceof Element && (target.closest('input, textarea, select, [contenteditable]')))) return;
+          if (!event.altKey && !event.ctrlKey && !event.metaKey && ['1', '2', '3'].includes(event.key)) {
+            event.preventDefault();
+            setDecision(DECISIONS[Number(event.key) - 1]);
+          } else if (event.altKey && !event.ctrlKey && !event.metaKey && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+            event.preventDefault();
+            goTo(currentIndex + (event.key === 'ArrowRight' ? 1 : -1));
+          }
+        });
+      }
+
+      async function initialize() {
+        try {
+          packet = JSON.parse($('reviewPacket').textContent);
+          validatePacket(packet);
+          await verifyPacketHash(packet);
+          caseById = new Map(packet.cases.map(item => [item.caseId, item]));
+          records = new Map(packet.cases.map(item => [item.caseId, freshRecord(item)]));
+          storageKey = 'topic-relevance-human-review:v1:' + packet.datasetSha256;
+          $('datasetId').textContent = packet.datasetId;
+          $('datasetCreatedAt').textContent = packet.createdAt;
+          $('datasetHash').textContent = packet.datasetSha256;
+          loadSaved();
+          wireEvents();
+          renderArticle();
+          renderProgress();
+          renderList();
+          $('app').hidden = false;
+          $('headerActions').hidden = false;
+        } catch (error) {
+          $('fatalError').textContent = error instanceof SyntaxError ? '검증 자료를 읽을 수 없습니다. 원본 HTML 파일을 다시 열어 주세요.' : error.message;
+          $('fatalError').hidden = false;
+          $('app').hidden = true;
+          $('headerActions').hidden = true;
+        }
+      }
+
+      initialize();
+    })();
+  </script>
+</body>
+</html>
