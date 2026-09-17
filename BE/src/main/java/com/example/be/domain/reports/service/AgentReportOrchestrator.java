@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.agent.client.AgentClient;
 import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
@@ -68,18 +69,19 @@ public class AgentReportOrchestrator {
     private final CollectionResultWriter resultWriter;
     private final IssueArticleRepository issueArticleRepository;
     private final SensitivityCalculator sensitivityCalculator;
+    private final TopicRelevancePolicy relevancePolicy;
 
     public ReportDocument generate(CollectionRun run,
                                    List<Finding> findings,
                                    LocalDateTime generatedAt) {
-        List<Finding> representativeFindings = representativeFindings(findings);
+        List<Finding> representativeFindings = representativeFindings(relevancePolicy.filterFindings(findings));
         ReportSourceStats sourceStats = sourceStats(run, representativeFindings);
         return generate(new GenerationContext(run, null, null), representativeFindings, sourceStats, generatedAt);
     }
 
     public ReportDocument generateDaily(Long reportId, LocalDate date, List<Finding> findings,
                                         ReportSourceStats sourceStats, LocalDateTime generatedAt) {
-        return generate(new GenerationContext(null, reportId, date), findings,
+        return generate(new GenerationContext(null, reportId, date), relevancePolicy.filterFindings(findings),
                 sourceStats, generatedAt);
     }
 
@@ -513,7 +515,11 @@ public class AgentReportOrchestrator {
         if (!fromItems.isEmpty()) {
             return fromItems;
         }
+        Map<Long, Set<Long>> assessedTopics = relevancePolicy.relevantTopicIdsByFinding(findings);
         return findings.stream()
+                .filter(finding -> !assessedTopics.containsKey(finding.getId())
+                        || finding.getArticle().getTopic() != null && assessedTopics.get(finding.getId())
+                        .contains(finding.getArticle().getTopic().getId()))
                 .map(finding -> finding.getArticle().getTopic())
                 .filter(topic -> topic != null && StringUtils.hasText(topic.getName()))
                 .map(topic -> topic.getName().trim())

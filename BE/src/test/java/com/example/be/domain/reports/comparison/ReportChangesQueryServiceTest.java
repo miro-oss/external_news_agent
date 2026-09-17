@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.comparison;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
+import com.example.be.domain.analysis.relevance.TopicRelevanceTestSupport;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
@@ -18,10 +20,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ReportChangesQueryServiceTest {
+    private final TopicRelevancePolicy relevancePolicy = TopicRelevanceTestSupport.legacyPolicy();
     private final NewsReportRepository reports = mock(NewsReportRepository.class);
     private final ReportComparisonRepository comparisons = mock(ReportComparisonRepository.class);
     private final FindingRepository findings = mock(FindingRepository.class);
-    private final ReportChangesQueryService query = new ReportChangesQueryService(reports, comparisons, findings);
+    private final ReportChangesQueryService query = new ReportChangesQueryService(reports, comparisons, findings, relevancePolicy);
 
     private void visible(ReportScope scope) {
         when(reports.findByIdAndReportStatusNot(101L, ReportStatus.PENDING)).thenReturn(Optional.of(
@@ -68,6 +71,24 @@ class ReportChangesQueryServiceTest {
                 .thenReturn(Optional.of(NewsReport.builder().id(100L).build()));
         assertEquals(ReportChanges.Status.FAILED, query.get(101).status());
         assertEquals(ReportChanges.Status.FAILED.message, query.get(101).message());
+    }
+
+    @Test void topicRejectedEvidenceHidesStoredComparisonQuotes() {
+        visible(ReportScope.DAILY);
+        var work = work(snapshot(side(1, 10, "무관한 과거 근거")), snapshot(side(1, 20, "현재 근거")));
+        var ready = new ReportComparisonEngine().prepare(work).result();
+        when(comparisons.find(101)).thenReturn(Optional.of(new ReportComparisonRepository.Job(
+                101, ReportChanges.Status.READY, work, ready)));
+        when(reports.findByIdAndReportStatusNot(100L, ReportStatus.PENDING))
+                .thenReturn(Optional.of(NewsReport.builder().id(100L).build()));
+        var current = fullText(20);
+        when(findings.findForReportByIdIn(anyCollection())).thenReturn(List.of(fullText(10), current));
+        when(relevancePolicy.filterFindings(anyList())).thenReturn(List.of(current));
+        var result = query.get(101);
+        assertEquals(ReportChanges.Status.UNAVAILABLE, result.status());
+        assertTrue(result.items().isEmpty());
+        assertTrue(result.notes().isEmpty());
+        assertEquals("무관한 과거 근거", ready.items().getFirst().previous().claims().getFirst().text());
     }
 
     @Test void missingOriginalBodyHidesStoredComparisonWithoutRewritingEitherSnapshot() {

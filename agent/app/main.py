@@ -13,6 +13,7 @@ from app.api.v1.insight import router as insight_router
 from app.api.v1.keyword_strategy import router as keyword_strategy_router
 from app.api.v1.report import router as report_router
 from app.api.v1.report_changes import router as report_changes_router
+from app.api.v1.topic_relevance import router as topic_relevance_router
 from app.core.errors import AgentError
 from app.core.security import require_agent_token
 from app.llm.router import close_analyze_providers
@@ -56,6 +57,11 @@ def create_app() -> FastAPI:
     )
     application.include_router(
         keyword_strategy_router,
+        prefix="/v1",
+        dependencies=[Depends(require_agent_token)],
+    )
+    application.include_router(
+        topic_relevance_router,
         prefix="/v1",
         dependencies=[Depends(require_agent_token)],
     )

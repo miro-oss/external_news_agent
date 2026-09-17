@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.function.Function;
 
 /** Detached generation input, never reconstructed from a current finding or article on a later read. */
 public record ReportComparisonSnapshot(int version, List<Issue> issues, List<ReportCollectionContext> scopes) {
@@ -20,9 +21,18 @@ public record ReportComparisonSnapshot(int version, List<Issue> issues, List<Rep
                         String analyzedAt, ReportChanges.Side side) { }
 
     public static ReportComparisonSnapshot capture(List<Finding> findings, Map<Long, NewsIssue> issueByArticle) {
+        return capture(findings, finding -> issueByArticle.get(finding.getArticle().getId()));
+    }
+
+    /** A shared article may be analyzed for different accepted topics in different runs. */
+    public static ReportComparisonSnapshot captureByFinding(List<Finding> findings, Map<Long, NewsIssue> issueByFinding) {
+        return capture(findings, finding -> issueByFinding.get(finding.getId()));
+    }
+
+    private static ReportComparisonSnapshot capture(List<Finding> findings, Function<Finding, NewsIssue> resolveIssue) {
         List<Issue> issues = new ArrayList<>();
         for (Finding finding : findings) {
-            NewsIssue issue = issueByArticle.get(finding.getArticle().getId());
+            NewsIssue issue = resolveIssue.apply(finding);
             if (issue == null) throw new IllegalStateException("선택된 이슈 식별자가 없습니다.");
             Map<Integer, String> sentences = (finding.getSections() == null ? List.<FindingSection>of()
                     : finding.getSections()).stream().collect(Collectors.toMap(FindingSection::index,

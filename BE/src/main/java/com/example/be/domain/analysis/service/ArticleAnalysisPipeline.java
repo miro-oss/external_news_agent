@@ -2,6 +2,7 @@ package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.config.AnalysisSelectionProperties;
+import com.example.be.domain.analysis.relevance.TopicRelevanceGate;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
@@ -26,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -45,6 +47,7 @@ public class ArticleAnalysisPipeline {
     private final FindingWriter findingWriter;
     private final AnalysisSelectionProperties selectionProperties;
     private final TopicFitScorer topicFitScorer;
+    private final TopicRelevanceGate relevanceGate;
 
     public void analyze(Long runId) {
         analyze(runId, Set.of());
@@ -64,12 +67,13 @@ public class ArticleAnalysisPipeline {
             return;
         }
         AgentPlan plan = plan(runId);
-        analyzeTargets(runId, investigationTargets(runId, refreshedArticleIds, snapshotTopics(runId)), plan, true, true);
+        List<Target> targets = investigationTargets(runId, refreshedArticleIds, snapshotTopics(runId), plan);
+        analyzeTargets(runId, targets, plan, true, true);
     }
 
     private void analyze(Long runId, Set<Long> refreshedArticleIds, boolean clustered) {
         AgentPlan plan = plan(runId);
-        List<Target> targets = targets(runId, refreshedArticleIds, clustered, snapshotTopics(runId));
+        List<Target> targets = targets(runId, refreshedArticleIds, clustered, snapshotTopics(runId), plan);
         // coverage의 분모는 이슈다. 클러스터링 실패 시 기사 단위 degrade 결과를 이슈 수로 가장하지 않는다.
         findingWriter.recordTargetCount(runId, clustered ? targets.size() : 0);
         analyzeTargets(runId, targets, plan, clustered, false);
@@ -153,7 +157,7 @@ public class ArticleAnalysisPipeline {
                                                         AgentPlan plan,
                                                         boolean clustered) {
         Map<Long, IssueAnalysisContext> issues = clustered
-                ? issueContexts(targets)
+                ? issueContexts(runId, plan, targets)
                 : Map.of();
         Set<Long> selfCritiqueTargets = selfCritiqueTargets(targets, issues);
         Map<Long, AnalysisContext> contexts = new LinkedHashMap<>();
@@ -210,13 +214,13 @@ public class ArticleAnalysisPipeline {
                 .count();
     }
 
-    private Map<Long, IssueAnalysisContext> issueContexts(List<Target> targets) {
+    private Map<Long, IssueAnalysisContext> issueContexts(Long runId, AgentPlan plan, List<Target> targets) {
         if (targets.isEmpty()) {
             return Map.of();
         }
-        Set<Long> representativeIds = targets.stream()
-                .map(target -> target.article().getId())
-                .collect(Collectors.toSet());
+        Map<Long, Target> targetByArticleId = targets.stream().collect(Collectors.toMap(
+                target -> target.article().getId(), target -> target));
+        Set<Long> representativeIds = targetByArticleId.keySet();
         List<IssueArticle> memberships =
                 issueArticleRepository.findIssueContextsByRepresentativeArticleIds(representativeIds);
         Map<Long, List<IssueArticle>> byIssue = memberships.stream()
@@ -224,33 +228,57 @@ public class ArticleAnalysisPipeline {
                         membership -> membership.getIssue().getId(),
                         LinkedHashMap::new,
                         Collectors.toList()));
-        Map<Long, IssueAnalysisContext> result = new LinkedHashMap<>();
+        Map<Long, Target> representativeByIssue = new LinkedHashMap<>();
         byIssue.forEach((issueId, issueMemberships) -> issueMemberships.stream()
                 .filter(membership -> membership.getRole() == IssueArticleRole.REPRESENTATIVE)
                 .filter(membership -> representativeIds.contains(membership.getArticle().getId()))
+                // 공유 기사의 다른 주제 이슈를 비교 문맥으로 섞지 않는다.
+                .filter(membership -> Objects.equals(topicId(membership.getIssue().getTopic()),
+                        topicId(targetByArticleId.get(membership.getArticle().getId()).topicOverride())))
                 .findFirst()
-                .ifPresent(representative -> result.putIfAbsent(
-                        representative.getArticle().getId(),
-                        new IssueAnalysisContext(
-                                issueId,
-                                representative.getArticle().getId(),
-                                issueMemberships.stream().map(IssueArticle::getArticle).toList(),
-                                representativeIds,
-                                representative.getIssue().getImportanceScore()))));
+                .ifPresent(representative -> representativeByIssue.put(issueId,
+                        targetByArticleId.get(representative.getArticle().getId()))));
+        List<TopicRelevanceGate.Candidate> candidates = representativeByIssue.entrySet().stream()
+                .flatMap(entry -> byIssue.get(entry.getKey()).stream()
+                        .map(IssueArticle::getArticle)
+                        .filter(Article::hasFullText)
+                        .map(article -> new TopicRelevanceGate.Candidate(article, entry.getValue().topicOverride())))
+                .toList();
+        Set<TopicRelevanceGate.Key> accepted = candidates.isEmpty()
+                ? Set.of() : relevanceGate.assess(runId, plan, candidates);
+        Map<Long, IssueAnalysisContext> result = new LinkedHashMap<>();
+        representativeByIssue.forEach((issueId, representative) -> {
+            List<IssueArticle> issueMemberships = byIssue.get(issueId);
+            List<Article> relevantArticles = issueMemberships.stream()
+                    .map(IssueArticle::getArticle)
+                    .filter(article -> accepted.contains(new TopicRelevanceGate.Key(
+                            article.getId(), topicId(representative.topicOverride()))))
+                    .toList();
+            result.putIfAbsent(representative.article().getId(), new IssueAnalysisContext(
+                    issueId,
+                    representative.article().getId(),
+                    relevantArticles,
+                    representativeIds,
+                    issueMemberships.getFirst().getIssue().getImportanceScore()));
+        });
         return Map.copyOf(result);
     }
 
-    private List<Target> targets(Long runId, Set<Long> refreshedArticleIds, boolean clustered, Map<Long, Topic> snapshotTopics) {
-        Map<Long, Target> byArticleId = new LinkedHashMap<>();
+    private List<Target> targets(Long runId,
+                                 Set<Long> refreshedArticleIds,
+                                 boolean clustered,
+                                 Map<Long, Topic> snapshotTopics,
+                                 AgentPlan plan) {
+        Map<TopicRelevanceGate.Key, Target> byArticleTopic = new LinkedHashMap<>();
         if (!clustered) {
-            addUnclusteredTargets(byArticleId, runId, refreshedArticleIds, snapshotTopics);
-            return prioritized(byArticleId.values());
+            addUnclusteredTargets(byArticleTopic, runId, refreshedArticleIds, snapshotTopics);
+            return relevantTargets(runId, plan, byArticleTopic.values());
         }
         for (CollectionRunArticle observation :
                 runArticleRepository.findRepresentativeAnalysisTargetsByRunId(runId)) {
-            addTarget(byArticleId, observation, observation.getChangeType(), snapshotTopics);
+            addTarget(byArticleTopic, observation, observation.getChangeType(), snapshotTopics);
         }
-        addMissingRepresentatives(byArticleId, issueArticleRepository.findRepresentativesForRun(runId), snapshotTopics);
+        addMissingRepresentatives(byArticleTopic, issueArticleRepository.findRepresentativesForRun(runId), snapshotTopics);
         if (!refreshedArticleIds.isEmpty()) {
             for (List<Long> articleIds : OracleInClause.batches(refreshedArticleIds)) {
                 for (CollectionRunArticle observation :
@@ -260,32 +288,37 @@ public class ArticleAnalysisPipeline {
                     ChangeType changeType = observation.getChangeType() == ChangeType.UNCHANGED
                             ? ChangeType.UPDATED
                             : observation.getChangeType();
-                    addTarget(byArticleId, observation, changeType, snapshotTopics);
+                    addTarget(byArticleTopic, observation, changeType, snapshotTopics);
                 }
-                addMissingRepresentatives(byArticleId,
+                addMissingRepresentatives(byArticleTopic,
                         issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(
                                 runId, articleIds), snapshotTopics);
             }
         }
-        return prioritized(byArticleId.values());
+        return relevantTargets(runId, plan, byArticleTopic.values());
     }
 
-    private List<Target> investigationTargets(Long runId, Set<Long> refreshedArticleIds, Map<Long, Topic> snapshotTopics) {
-        Map<Long, Target> byArticleId = new LinkedHashMap<>();
+    private List<Target> investigationTargets(Long runId,
+                                              Set<Long> refreshedArticleIds,
+                                              Map<Long, Topic> snapshotTopics,
+                                              AgentPlan plan) {
+        Map<TopicRelevanceGate.Key, Target> byArticleTopic = new LinkedHashMap<>();
         for (List<Long> articleIds : OracleInClause.batches(refreshedArticleIds)) {
             for (CollectionRunArticle observation :
                     runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(
                             runId, articleIds)) {
-                addTarget(byArticleId, observation, ChangeType.UPDATED, snapshotTopics);
+                addTarget(byArticleTopic, observation, ChangeType.UPDATED, snapshotTopics);
             }
-            addMissingRepresentatives(byArticleId,
+            addMissingRepresentatives(byArticleTopic,
                     issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(
                             runId, articleIds), snapshotTopics);
         }
-        return prioritized(byArticleId.values());
+        return relevantTargets(runId, plan, byArticleTopic.values());
     }
 
-    private void addMissingRepresentatives(Map<Long, Target> targets, List<IssueArticle> memberships, Map<Long, Topic> snapshotTopics) {
+    private void addMissingRepresentatives(Map<TopicRelevanceGate.Key, Target> targets,
+                                           List<IssueArticle> memberships,
+                                           Map<Long, Topic> snapshotTopics) {
         if (memberships == null) {
             return;
         }
@@ -295,14 +328,15 @@ public class ArticleAnalysisPipeline {
                     ? article.getTopic()
                     : membership.getIssue().getTopic();
             Topic snapshot = topicSnapshot(snapshotTopics, topic);
+            Topic effectiveTopic = snapshot == null ? topic : snapshot;
             targets.merge(
-                    article.getId(),
-                    new Target(article, ChangeType.UPDATED, topicFit(snapshot == null ? topic : snapshot, article), snapshot),
+                    new TopicRelevanceGate.Key(article.getId(), topicId(effectiveTopic)),
+                    new Target(article, ChangeType.UPDATED, topicFit(effectiveTopic, article), effectiveTopic),
                     this::preserveObservedChangeType);
         });
     }
 
-    private void addUnclusteredTargets(Map<Long, Target> targets,
+    private void addUnclusteredTargets(Map<TopicRelevanceGate.Key, Target> targets,
                                        Long runId,
                                        Set<Long> refreshedArticleIds, Map<Long, Topic> snapshotTopics) {
         runArticleRepository.findUnclusteredAnalysisTargetsByRunId(runId)
@@ -320,20 +354,43 @@ public class ArticleAnalysisPipeline {
         }
     }
 
-    private void addTarget(Map<Long, Target> byArticleId,
+    private void addTarget(Map<TopicRelevanceGate.Key, Target> byArticleTopic,
                            CollectionRunArticle observation,
                            ChangeType changeType, Map<Long, Topic> snapshotTopics) {
         Topic observedTopic = observation.getTopic() == null ? observation.getArticle().getTopic() : observation.getTopic();
         Topic snapshot = topicSnapshot(snapshotTopics, observedTopic);
+        Topic effectiveTopic = snapshot == null ? observedTopic : snapshot;
         Target candidate = new Target(
-                observation.getArticle(),
-                changeType,
-                topicFit(snapshot == null ? observedTopic : snapshot, observation.getArticle()), snapshot);
-        byArticleId.merge(observation.getArticle().getId(), candidate, this::preferUpdated);
+                observation.getArticle(), changeType,
+                topicFit(effectiveTopic, observation.getArticle()), effectiveTopic);
+        byArticleTopic.merge(new TopicRelevanceGate.Key(observation.getArticle().getId(), topicId(effectiveTopic)),
+                candidate, this::preferUpdated);
     }
 
     private Topic topicSnapshot(Map<Long, Topic> snapshotTopics, Topic topic) {
         return topic == null || topic.getId() == null ? null : snapshotTopics.get(topic.getId());
+    }
+
+    /** 주제별 판정을 먼저 적용해야 다른 주제에서 탈락한 공유 기사가 분석을 우회하지 않는다. */
+    private List<Target> relevantTargets(Long runId, AgentPlan plan, Collection<Target> candidates) {
+        List<Target> ready = candidates.stream().filter(this::isReady).toList();
+        if (ready.isEmpty()) {
+            return List.of();
+        }
+        Set<TopicRelevanceGate.Key> accepted = relevanceGate.assess(runId, plan, ready.stream()
+                .map(target -> new TopicRelevanceGate.Candidate(target.article(), target.topicOverride()))
+                .toList());
+        Map<Long, Target> byArticle = new LinkedHashMap<>();
+        ready.stream()
+                .filter(target -> accepted.contains(new TopicRelevanceGate.Key(
+                        target.article().getId(), topicId(target.topicOverride()))))
+                .forEach(target -> byArticle.merge(target.article().getId(), target, this::preferUpdated));
+        // 무관 후보가 분석 상한을 먼저 소진하지 않도록 판정 뒤에 상한을 적용한다.
+        return prioritized(byArticle.values());
+    }
+
+    private Long topicId(Topic topic) {
+        return topic == null ? null : topic.getId();
     }
 
     private List<Target> prioritized(Collection<Target> targets) {

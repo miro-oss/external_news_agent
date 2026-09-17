@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.reports.entity.NewsReport;
@@ -17,6 +18,16 @@ public final class ReportFindings {
 
     public static List<Finding> load(NewsReport report, FindingRepository repository) {
         return loadVisible(report, repository).findings();
+    }
+
+    public static List<Finding> load(NewsReport report, FindingRepository repository, TopicRelevancePolicy policy) {
+        return loadVisible(report, repository, policy).findings();
+    }
+
+    public static Visible loadVisible(NewsReport report, FindingRepository repository, TopicRelevancePolicy policy) {
+        Visible original = loadVisible(report, repository);
+        List<Finding> relevant = policy.filterFindings(original.findings());
+        return new Visible(relevant, original.filtered() || relevant.size() != original.findings().size());
     }
 
     public static boolean hasFullText(Finding finding) {

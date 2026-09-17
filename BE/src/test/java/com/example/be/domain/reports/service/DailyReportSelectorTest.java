@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
+import com.example.be.domain.analysis.relevance.TopicRelevanceTestSupport;
 import com.example.be.domain.analysis.entity.*;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.*;
@@ -17,10 +19,77 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class DailyReportSelectorTest {
+    private final TopicRelevancePolicy relevancePolicy = TopicRelevanceTestSupport.legacyPolicy();
     private final FindingRepository findings = mock(FindingRepository.class);
     private final IssueArticleRepository memberships = mock(IssueArticleRepository.class);
-    private final DailyReportSelector selector = new DailyReportSelector(findings, memberships);
+    private final DailyReportSelector selector = new DailyReportSelector(findings, memberships, relevancePolicy);
     private final Topic topic = Topic.builder().id(1L).build();
+
+    @Test
+    void sharedArticleUsesAcceptedTopicMembershipInsteadOfItsOriginalRejectedTopic() {
+        Finding shared = finding(1, 1, "grounded");
+        org.springframework.test.util.ReflectionTestUtils.setField(shared, "sections",
+                List.of(new FindingSection(0, "확보한 본문")));
+        NewsIssue rejectedTopicIssue = issue(10, 100);
+        NewsIssue acceptedTopicIssue = NewsIssue.builder().id(20L).articleCount(1)
+                .topic(Topic.builder().id(2L).build()).importanceScore(BigDecimal.TEN).build();
+        when(relevancePolicy.relevantTopicIdsByFinding(List.of(shared)))
+                .thenReturn(java.util.Map.of(1L, java.util.Set.of(2L)));
+
+        var selected = selector.selectWithStats(List.of(shared),
+                List.of(link(shared, rejectedTopicIssue), link(shared, acceptedTopicIssue)), 10);
+        assertEquals(List.of(shared), selected.findings());
+        assertNotNull(selected.comparisonSnapshot());
+        assertEquals(20L, selected.comparisonSnapshot().issues().getFirst().side().issueId());
+        assertEquals(2L, selected.comparisonSnapshot().issues().getFirst().side().topicId());
+    }
+
+    @Test
+    void comparisonKeepsDifferentAcceptedTopicsForTheSameArticleAcrossRuns() {
+        Finding first = finding(1, 1, "grounded");
+        Finding second = finding(2, 2, "grounded");
+        org.springframework.test.util.ReflectionTestUtils.setField(second.getArticle(), "id", first.getArticle().getId());
+        for (Finding finding : List.of(first, second)) org.springframework.test.util.ReflectionTestUtils.setField(
+                finding, "sections", List.of(new FindingSection(0, "확보한 본문")));
+        NewsIssue firstIssue = issue(10, 100);
+        NewsIssue secondIssue = NewsIssue.builder().id(20L).articleCount(1)
+                .topic(Topic.builder().id(2L).build()).importanceScore(BigDecimal.TEN).build();
+        when(relevancePolicy.relevantTopicIdsByFinding(List.of(first, second)))
+                .thenReturn(java.util.Map.of(1L, java.util.Set.of(1L), 2L, java.util.Set.of(2L)));
+
+        var selected = selector.selectWithStats(List.of(first, second),
+                List.of(link(first, firstIssue), link(second, secondIssue)), 10);
+        assertEquals(List.of(first, second), selected.findings());
+        assertNotNull(selected.comparisonSnapshot());
+        assertEquals(List.of(1L, 2L), selected.comparisonSnapshot().issues().stream()
+                .map(value -> value.side().topicId()).toList());
+        assertEquals(List.of(10L, 20L), selected.comparisonSnapshot().issues().stream()
+                .map(value -> value.side().issueId()).toList());
+    }
+
+    @Test
+    void latestIrrelevantFindingDoesNotReviveOlderRelevantFindingFromSameIssue() {
+        Finding old = finding(1, 1, "grounded");
+        Finding latest = finding(2, 2, "grounded");
+        NewsIssue issue = issue(10, 90);
+        when(relevancePolicy.filterFindings(List.of(latest))).thenReturn(List.of());
+        var selected = selector.selectWithStats(List.of(old, latest),
+                List.of(link(old, issue), link(latest, issue)), 10);
+        assertTrue(selected.findings().isEmpty());
+        verify(relevancePolicy).filterFindings(List.of(latest));
+    }
+
+    @Test
+    void dailyChecksNewerRejectionEvenWhenItProducedNoFinding() {
+        LocalDate date = LocalDate.of(2026, 9, 3);
+        Finding old = finding(1, 1, "grounded");
+        when(findings.findDailyReportCandidates(date.atStartOfDay(), date.plusDays(1).atStartOfDay()))
+                .thenReturn(List.of(old));
+        when(memberships.findByArticleIds(List.of(1L))).thenReturn(List.of(link(old, issue(10, 90))));
+        when(relevancePolicy.filterDailyFindings(date, List.of(old))).thenReturn(List.of());
+        assertTrue(selector.select(date, 10).isEmpty());
+        verify(relevancePolicy).filterDailyFindings(date, List.of(old));
+    }
 
     @Test
     void latestSummaryOnlyFindingCannotResurrectAnOlderFullTextClaim() {

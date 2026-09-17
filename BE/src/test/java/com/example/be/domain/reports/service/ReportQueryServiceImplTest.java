@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
+import com.example.be.domain.analysis.relevance.TopicRelevanceTestSupport;
 import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.analysis.agent.investigation.IssueInvestigationJdbcRepository;
 import com.example.be.domain.analysis.agent.investigation.InvestigationTrace;
@@ -59,6 +61,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ReportQueryServiceImplTest {
+    private final TopicRelevancePolicy relevancePolicy = TopicRelevanceTestSupport.legacyPolicy();
 
     private final NewsReportRepository reportRepository = mock(NewsReportRepository.class);
     private final FindingRepository findingRepository = mock(FindingRepository.class);
@@ -71,7 +74,7 @@ class ReportQueryServiceImplTest {
             reportRepository, findingRepository, issueArticleRepository,
             newsIssueRepository, deliveryLogRepository,
             com.example.be.domain.analysis.service.SensitivityCalculator.defaults(),
-            investigationRepository, mock(com.example.be.domain.collection.repository.CollectionRunArticleRepository.class));
+            investigationRepository, mock(com.example.be.domain.collection.repository.CollectionRunArticleRepository.class), relevancePolicy);
 
     @Test
     void latestReturnsNullWhenNoReportExists() {
@@ -210,6 +213,31 @@ class ReportQueryServiceImplTest {
     }
 
     @Test
+    void topicExclusionSanitizesStoredBodyEvenWhenFindingsAreNotRequested() {
+        var run = CollectionRun.builder().id(42L).build();
+        var report = NewsReport.builder().id(17L).run(run).title("보고서")
+                .markdownBody("## 오늘의 핵심\n토스 공정위 무관 요약")
+                .structuredContent(new com.example.be.domain.reports.entity.ReportContent(
+                        List.of("토스 공정위 무관 요약"), List.of(), List.of(), List.of()))
+                .generatedAt(LocalDateTime.of(2026, 9, 17, 10, 0)).build();
+        var relevant = finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        var irrelevant = finding(2L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(findingRepository.countTopicExcludedForReportByRunId(42L)).thenReturn(1L);
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(relevant, irrelevant));
+        when(relevancePolicy.filterFindings(any())).thenReturn(List.of(relevant));
+        for (boolean includeFindings : List.of(false, true)) {
+            var detail = service.getReport(17L, includeFindings);
+            assertEquals(1, detail.getSummaryStats().getFindingCount());
+            assertFalse(detail.getMarkdownBody().contains("토스"));
+            assertFalse(detail.getStructuredContent().toString().contains("무관"));
+            if (includeFindings) assertEquals(List.of(1L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
+            else assertNull(detail.getFindings());
+        }
+        assertTrue(report.getMarkdownBody().contains("토스"));
+    }
+
+    @Test
     void detailWithoutFindingsUsesAggregateCountsWithoutLoadingClobs() {
         CollectionRun run = CollectionRun.builder().id(42L).build();
         NewsReport report = NewsReport.builder().id(17L).run(run).title("보고서")
@@ -287,6 +315,31 @@ class ReportQueryServiceImplTest {
             else assertNull(detail.getFindings());
         }
         assertEquals(List.of(2L, 1L), report.getReflectedFindingIds());
+    }
+
+    @Test
+    void sharedArticleDetailUsesAcceptedTopicIssueAndItsInvestigationTrace() {
+        var report = NewsReport.builder().id(17L).run(CollectionRun.builder().id(42L).build())
+                .title("보고서").generatedAt(LocalDateTime.of(2026, 9, 17, 10, 0)).build();
+        Finding shared = finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        NewsIssue accepted = NewsIssue.builder().id(88L).topic(topic(8L)).title("관련 주제 이슈")
+                .articleCount(1).entities(List.of()).build();
+        var rejectedMembership = membership(101L, 77L, 7L);
+        var acceptedMembership = membership(101L, 88L, 8L);
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(shared));
+        when(relevancePolicy.relevantTopicIdsByFinding(List.of(shared)))
+                .thenReturn(java.util.Map.of(1L, java.util.Set.of(8L)));
+        when(issueArticleRepository.findCoverageMembershipsByArticleIds(List.of(101L)))
+                .thenReturn(List.of(rejectedMembership, acceptedMembership));
+        when(newsIssueRepository.findAllById(List.of(88L))).thenReturn(List.of(accepted));
+        when(investigationRepository.findTraces(42L)).thenReturn(java.util.Map.of(88L,
+                new InvestigationTrace("NO_NEW_EVIDENCE", 1, 2, 0, "관련 주제 추가 확인", null)));
+
+        var detail = service.getReport(17L, true).getFindings().getFirst();
+        assertEquals(88L, detail.getIssueId());
+        assertEquals("관련 주제 이슈", detail.getIssue().getTitle());
+        assertEquals("NO_NEW_EVIDENCE", detail.getInvestigation().getStatus());
     }
 
     @Test

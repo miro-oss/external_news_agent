@@ -45,7 +45,7 @@ public class AgentQuotaJdbcRepository {
     private static final String RESERVATION_TASK_USAGE_SQL = RESERVATION_USAGE_SQL
             + " AND agent_task = ?";
     private static final String RESERVATION_ANALYSIS_USAGE_SQL = RESERVATION_USAGE_SQL
-            + " AND agent_task IN ('ANALYZE', 'SELF_CRITIQUE', 'KEYWORD_STRATEGY', 'REPORT_CHANGES')";
+            + " AND agent_task IN ('ANALYZE', 'SELF_CRITIQUE', 'KEYWORD_STRATEGY', 'REPORT_CHANGES', 'TOPIC_RELEVANCE')";
     private static final String LEGACY_PAID_USAGE_SQL = """
             SELECT COALESCE(SUM(COALESCE(run.credits, 0)), 0)
             FROM agent_runs run
@@ -55,7 +55,7 @@ public class AgentQuotaJdbcRepository {
                   run.status = 'FAILED'
                   AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
                   AND (run.timeout_phase IS NULL OR run.timeout_phase <> 'READ')
-                  AND NOT (run.agent_task = 'REPORT_CHANGES' AND COALESCE(run.credits, 0) > 0)
+                  AND NOT (run.agent_task IN ('REPORT_CHANGES', 'TOPIC_RELEVANCE') AND COALESCE(run.credits, 0) > 0)
               )
               AND NOT EXISTS (
                   SELECT 1 FROM agent_quota_reservations reservation
@@ -89,7 +89,7 @@ public class AgentQuotaJdbcRepository {
                   run.status = 'FAILED'
                   AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
                   AND (run.timeout_phase IS NULL OR run.timeout_phase <> 'READ')
-                  AND NOT (run.agent_task = 'REPORT_CHANGES' AND COALESCE(run.credits, 0) > 0)
+                  AND NOT (run.agent_task IN ('REPORT_CHANGES', 'TOPIC_RELEVANCE') AND COALESCE(run.credits, 0) > 0)
               )
               AND NOT EXISTS (
                   SELECT 1 FROM agent_quota_reservations reservation
@@ -102,12 +102,12 @@ public class AgentQuotaJdbcRepository {
             FROM agent_runs run
             WHERE run.llm_plan = 'PAID'
               AND run.started_at >= ? AND run.started_at < ?
-              AND run.agent_task IN ('ANALYZE', 'SELF_CRITIQUE', 'KEYWORD_STRATEGY', 'REPORT_CHANGES')
+              AND run.agent_task IN ('ANALYZE', 'SELF_CRITIQUE', 'KEYWORD_STRATEGY', 'REPORT_CHANGES', 'TOPIC_RELEVANCE')
               AND NOT (
                   run.status = 'FAILED'
                   AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
                   AND (run.timeout_phase IS NULL OR run.timeout_phase <> 'READ')
-                  AND NOT (run.agent_task = 'REPORT_CHANGES' AND COALESCE(run.credits, 0) > 0)
+                  AND NOT (run.agent_task IN ('REPORT_CHANGES', 'TOPIC_RELEVANCE') AND COALESCE(run.credits, 0) > 0)
               )
               AND NOT EXISTS (
                   SELECT 1 FROM agent_quota_reservations reservation

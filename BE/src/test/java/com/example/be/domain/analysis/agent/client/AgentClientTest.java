@@ -45,6 +45,33 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class AgentClientTest {
 
     @Test
+    void postsTopicRelevanceWithTopicContextAndReadsGroundedDecisions() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/topic-relevance"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
+                .andExpect(jsonPath("$.topic.queryText").value("반도체 장비 공정"))
+                .andExpect(jsonPath("$.articles[0].articleId").value(5))
+                .andRespond(withSuccess("""
+                        {"decisions":[{"articleId":5,"status":"IRRELEVANT","reason":"금융 분쟁 기사입니다.",
+                         "evidenceQuotes":["토스 공정위 분쟁"]}],"meta":{"provider":"openai","model":"fixture",
+                         "promptVersion":"topic-relevance.ko.v1","inputTokens":10,"outputTokens":5,
+                         "costUsd":0.0000004,"credits":0,"mock":false,"truncated":false}}
+                        """, MediaType.APPLICATION_JSON));
+        var response = client.topicRelevance(new com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceRequest(
+                "test-relevance", AgentPlan.FREE,
+                new com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceRequest.TopicInput(
+                        7L, "제조장비", "반도체 장비 공정", List.of("공정"), List.of("공정"), List.of()),
+                List.of(new com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceRequest.ArticleInput(
+                        5L, "토스 공정위 분쟁", null, "토스와 네이버의 금융 플랫폼 분쟁"))));
+        assertEquals("IRRELEVANT", response.decisions().getFirst().status());
+        assertEquals(List.of("토스 공정위 분쟁"), response.decisions().getFirst().evidenceQuotes());
+        server.verify();
+    }
+
+    @Test
     void postsReportChangesWithSharedAuthenticationAndPreservesResponseReferences() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();

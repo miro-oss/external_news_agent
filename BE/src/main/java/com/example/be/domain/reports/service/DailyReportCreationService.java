@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.reports.entity.NewsReport;
@@ -30,6 +31,7 @@ public class DailyReportCreationService {
     private final ReportPersistenceService persistence;
     private final AgentReportOrchestrator orchestrator;
     private final ReportGenerator fallbackGenerator;
+    private final TopicRelevancePolicy relevancePolicy;
 
     @Value("${news.reports.daily.max-issues:10}")
     private int maxIssues = 10;
@@ -72,7 +74,7 @@ public class DailyReportCreationService {
         for (NewsReport report : reportRepository.findByReportScopeAndReportStatusAndGeneratedAtBefore(
                 ReportScope.DAILY, ReportStatus.PENDING, before)) {
             try {
-                List<Finding> findings = ReportFindings.load(report, findingRepository);
+                List<Finding> findings = ReportFindings.load(report, findingRepository, relevancePolicy);
                 LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
                 ReportSourceStats stats = selector.selectWithStats(report.getReportDate(), maxIssues)
                         .applyTo(dailyRepository.sourceStats(report.getReportDate()));

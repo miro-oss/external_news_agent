@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
+import com.example.be.domain.analysis.relevance.TopicRelevanceTestSupport;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
@@ -21,9 +23,36 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReportGeneratorTest {
+    private final TopicRelevancePolicy relevancePolicy = TopicRelevanceTestSupport.legacyPolicy();
 
     private final ReportGenerator generator = new ReportGenerator(
-            com.example.be.domain.analysis.service.SensitivityCalculator.defaults());
+            com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy);
+
+    @Test
+    void fallbackDoesNotLabelSharedArticleWithItsRejectedOriginalTopic() {
+        Finding shared = finding(1L, "장비 기업결합", "관련 내용", SensitivityLevel.HIGH, Relevance.IMPORTANT, "기업", "무관한 원래 주제");
+        org.mockito.Mockito.when(relevancePolicy.relevantTopicIdsByFinding(List.of(shared)))
+                .thenReturn(java.util.Map.of(1L, java.util.Set.of(99L)));
+        var document = generator.generate(List.of(shared), LocalDateTime.of(2026, 9, 17, 10, 0));
+        assertTrue(document.title().startsWith("뉴스 보고서"));
+        assertFalse(document.title().contains("무관한 원래 주제"));
+        assertTrue(document.markdownBody().contains("관련 내용"));
+    }
+
+    @Test
+    void topicRejectedFindingNeverReappearsInFallbackOrExclusionAppendix() {
+        Finding relevant = finding(1L, "반도체 장비", "관련 내용", SensitivityLevel.HIGH, Relevance.IMPORTANT, "기업");
+        Finding irrelevant = finding(2L, "토스 공정위", "무관 내용", SensitivityLevel.HIGH, Relevance.IMPORTANT, "기업");
+        org.springframework.test.util.ReflectionTestUtils.setField(irrelevant, "keyPoints", List.of());
+        org.mockito.Mockito.when(relevancePolicy.filterFindings(List.of(relevant, irrelevant)))
+                .thenReturn(List.of(relevant));
+        var document = generator.generate(List.of(relevant, irrelevant), LocalDateTime.of(2026, 9, 17, 10, 0));
+        assertEquals(List.of(1L), document.reflectedFindingIds());
+        assertTrue(document.excludedFindingIds().isEmpty());
+        assertFalse(document.markdownBody().contains("토스"));
+        assertFalse(document.markdownBody().contains("무관"));
+        assertFalse(document.structuredContent().toString().contains("무관"));
+    }
 
     @Test
     void summaryOnlyAndBlankFullTextNeverAppearInFallbackOrItsExclusionTitles() {
