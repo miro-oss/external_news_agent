@@ -396,8 +396,8 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
         </div>}
       </header>
 
-      <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect} />
-      {report.reportScope === 'DAILY' && <ReportChangesPanel reportId={report.id} />}
+      <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect}
+        beforeOtherAnalysis={report.reportScope === 'DAILY' ? <ReportChangesPanel reportId={report.id} /> : undefined} />
 
       <section className="report-findings">
         <div className="section-heading report-section-heading">
