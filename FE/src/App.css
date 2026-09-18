@@ -4455,12 +4455,16 @@ body.modal-open {
 .report-event-list { display: grid; gap: 1rem; }
 .report-event-card { min-width: 0; padding: 1.5rem; border-radius: var(--radius); background: var(--surface-sunken); }
 .report-event-card + .report-event-card { margin-top: 1rem; }
-.report-reading-content > .collapsible > .collapsible-body > .report-event-card {
+.report-reading-content > .collapsible > .collapsible-body > .report-event-card:not(.report-analysis-card) {
   padding: 0;
   border-radius: 0;
   background: transparent;
 }
 .report-event-list > .report-event-card + .report-event-card { margin-top: 0; }
+.report-analysis-list { scroll-margin-top: 7.5rem; }
+.report-analysis-pagination { flex-wrap: wrap; gap: 0.5rem; margin-top: 1.25rem; }
+.report-analysis-pagination button { min-width: 2.75rem; min-height: 2.75rem; padding: 0.5rem; font-variant-numeric: tabular-nums; }
+.report-analysis-pagination button[aria-current='page'] { background: var(--primary-weak); color: var(--primary-strong); font-weight: 700; }
 .report-event-card p { margin: 0; }
 .report-event-card .report-event-significance { margin-top: 0.65rem; }
 .report-event-sources { display: grid; gap: 0.3rem; margin-top: 0.8rem; }

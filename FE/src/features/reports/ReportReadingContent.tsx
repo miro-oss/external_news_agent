@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import type { ReportDetail } from '../../api/types'
 import { CollapsibleSection } from '../../components/CollapsibleSection'
+import { prefersReducedMotion } from '../../lib/motion'
 import { collectionHighlightTerms, groupLegacyReportSections, rehypeCollectionHighlights, reportSourceFindings, splitReportMarkdown } from './reportReading'
 import { ReportKeywordText } from './ReportKeywordText'
 
@@ -11,7 +12,7 @@ export function ReportReadingContent({ report, onEvidenceSelect }: {
 }) {
   const content = report.structuredContent
   const terms = collectionHighlightTerms(report.collectionContexts ?? [])
-  if (!content) return <LegacyReportBody markdown={report.markdownBody} terms={terms} />
+  if (!content) return <LegacyReportBody key={report.id} markdown={report.markdownBody} terms={terms} />
   const byId = new Map((report.findings ?? []).map(finding => [finding.id, finding]))
   const referenced = new Set([...content.importantEvents, ...content.watchItems].flatMap(item => item.sourceFindingIds))
   const other = (report.findings ?? []).filter(finding => !referenced.has(finding.id) && finding.keyPoints.length > 0)
@@ -51,9 +52,11 @@ export function ReportReadingContent({ report, onEvidenceSelect }: {
         </article>)}
       </section>}
       {other.length > 0 && <ReadingDisclosure title="기타 분석">
-        {other.map(finding => <article className="report-event-card" key={finding.id}>
-          <h4><ReportKeywordText text={finding.articleTitle} terms={terms} /></h4><p><ReportKeywordText text={finding.summary} terms={terms} /></p>{references([finding.id])}
-        </article>)}
+        <PaginatedAnalysis key={report.id}>
+          {other.map(finding => <article className="report-event-card report-analysis-card" key={finding.id}>
+            <h4><ReportKeywordText text={finding.articleTitle} terms={terms} /></h4><p><ReportKeywordText text={finding.summary} terms={terms} /></p>{references([finding.id])}
+          </article>)}
+        </PaginatedAnalysis>
       </ReadingDisclosure>}
       {notes.length > 0 && <ReadingDisclosure title="수집 상태"><ul>{notes.map((note, index) => <li key={index}><ReportKeywordText text={note} terms={terms} /></li>)}</ul></ReadingDisclosure>}
     </div>
@@ -65,13 +68,56 @@ function ReadingDisclosure({ title, children }: { title: string; children: React
   return <CollapsibleSection title={title} open={open} onToggle={() => setOpen(value => !value)}>{children}</CollapsibleSection>
 }
 
+const ANALYSIS_PER_PAGE = 3
+
+function PaginatedAnalysis({ children }: { children: ReactNode[] }) {
+  const [page, setPage] = useState(0)
+  const listId = useId()
+  const listRef = useRef<HTMLDivElement>(null)
+  const pageCount = Math.ceil(children.length / ANALYSIS_PER_PAGE)
+  const currentPage = Math.min(page, Math.max(0, pageCount - 1))
+
+  function changePage(nextPage: number) {
+    if (nextPage === currentPage) return
+    setPage(nextPage)
+    requestAnimationFrame(() => {
+      listRef.current?.focus({ preventScroll: true })
+      listRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' })
+    })
+  }
+
+  return <>
+    <div className="report-event-list report-analysis-list" id={listId} ref={listRef} tabIndex={-1}
+      role="group" aria-label={`기타 분석 ${currentPage + 1}페이지`}>
+      {children.slice(currentPage * ANALYSIS_PER_PAGE, (currentPage + 1) * ANALYSIS_PER_PAGE)}
+    </div>
+    {pageCount > 1 && <nav className="pagination report-analysis-pagination" aria-label="기타 분석 페이지 이동">
+      {Array.from({ length: pageCount }, (_, index) => <button type="button" className="secondary-button" key={index}
+        aria-label={`기타 분석 ${index + 1}페이지`} aria-current={index === currentPage ? 'page' : undefined}
+        aria-controls={listId} onClick={() => changePage(index)}>{index + 1}</button>)}
+    </nav>}
+  </>
+}
+
 function LegacyReportBody({ markdown, terms }: { markdown: string; terms: string[] }) {
   return <div className="report-reading-content">{groupLegacyReportSections(markdown).map((group, index) => {
-    if (group.kind === 'notes' || group.kind === 'other') {
+    if (group.kind === 'other') {
+      return <ReadingDisclosure key={index} title={group.title}>
+        <PaginatedAnalysis>
+          {group.sections.flatMap((section, sectionIndex) => splitReportMarkdown(section.body, 3).map((issue, issueIndex) => {
+            const sectionTitle = /기타\s*분석/.test(section.title) ? '' : section.title
+            const title = issue.title && sectionTitle ? `${sectionTitle} · ${issue.title}` : issue.title || sectionTitle
+            return <article className="report-event-card report-analysis-card" key={`${sectionIndex}:${issueIndex}`}>
+              {title && <h4><ReportKeywordText text={title} terms={terms} /></h4>}
+              <MarkdownText text={issue.body} terms={terms} />
+            </article>
+          }))}
+        </PaginatedAnalysis>
+      </ReadingDisclosure>
+    }
+    if (group.kind === 'notes') {
       return <ReadingDisclosure key={index} title={group.title}>
         {group.sections.map((section, sectionIndex) => <article className="report-event-card" key={sectionIndex}>
-          {group.kind === 'other' && !/기타\s*분석/.test(section.title)
-            && <h4><ReportKeywordText text={section.title} terms={terms} /></h4>}
           <MarkdownText text={section.body} terms={terms} />
         </article>)}
       </ReadingDisclosure>
