@@ -8,6 +8,7 @@ from app.core.evidence import factual_mismatches
 from app.core.parser import parse_json_object
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.insight_draft import OpenAIInsightDraft
+from app.llm.request_contract import insight_schema
 from app.llm.router import get_analyze_provider
 from app.llm.structured_call import structured_call
 from app.schemas.analyze import ResponseMeta
@@ -79,9 +80,7 @@ class InsightService:
             provider,
             system_instruction=OPENAI_SYSTEM_INSTRUCTION if use_draft else SYSTEM_INSTRUCTION,
             prompt=_insight_prompt(request),
-            response_schema=(OpenAIInsightDraft if use_draft else InsightOutput).model_json_schema(
-                by_alias=True
-            ),
+            response_schema=insight_schema(request),
             validate=lambda response: _validated_output(response, request, use_draft=use_draft),
             repair_attempts=self._settings.schema_repair_attempts,
             task_name="관점 인사이트",
@@ -117,7 +116,10 @@ def _validated_output(
         for fact in insight.facts:
             finding = finding_by_id.get(fact.finding_id)
             if finding is None:
-                raise ValueError("FACT findingId는 요청 findings에 포함되어야 합니다.")
+                raise ValueError(
+                    "FACT findingId는 요청 findings에 포함되어야 합니다. "
+                    f"findingId={fact.finding_id}, allowedFindingIds={sorted(finding_by_id)}"
+                )
             sentence_ids = {sentence.id for sentence in finding.sentences}
             if not set(fact.evidence_sentence_ids) <= sentence_ids:
                 raise ValueError(
