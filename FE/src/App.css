@@ -4432,7 +4432,8 @@ body.modal-open {
 /* 보고서의 읽기 구획은 수집 설정의 card/collapsible 토큰을 그대로 따른다. */
 .report-reading-content { display: grid; gap: 1.25rem; margin-top: 1.25rem; }
 .report-reading-content > .card,
-.report-reading-content > .collapsible { margin: 0; }
+.report-reading-content > .collapsible,
+.report-reading-content > .report-changes-panel { margin: 0; }
 .report-sharing-section {
   margin-top: 1.5rem;
   padding-top: 1.5rem;
@@ -4446,11 +4447,11 @@ body.modal-open {
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
-.report-reading-content h3 { margin: 0 0 1rem; font-size: 1.1rem; letter-spacing: -0.03em; }
-.report-reading-content h4 { margin: 0 0 0.65rem; font-size: 1rem; line-height: 1.5; }
-.report-reading-content p,
-.report-reading-content li { color: var(--fg-2); font-size: 0.92rem; line-height: 1.8; }
-.report-reading-content ul { margin: 0; padding-left: 1.2rem; }
+.report-reading-content > :where(.card, .collapsible) h3 { margin: 0 0 1rem; font-size: 1.1rem; letter-spacing: -0.03em; }
+.report-reading-content > :where(.card, .collapsible) h4 { margin: 0 0 0.65rem; font-size: 1rem; line-height: 1.5; }
+.report-reading-content > :where(.card, .collapsible) p,
+.report-reading-content > :where(.card, .collapsible) li { color: var(--fg-2); font-size: 0.92rem; line-height: 1.8; }
+.report-reading-content > :where(.card, .collapsible) ul { margin: 0; padding-left: 1.2rem; }
 .report-summary-card li + li { margin-top: 0.7rem; }
 .report-event-list { display: grid; gap: 1rem; }
 .report-event-card { min-width: 0; padding: 1.5rem; border-radius: var(--radius); background: var(--surface-sunken); }

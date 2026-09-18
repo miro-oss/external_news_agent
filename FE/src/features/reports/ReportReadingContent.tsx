@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useId, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import type { ReportDetail } from '../../api/types'
 import { CollapsibleSection } from '../../components/CollapsibleSection'
@@ -6,13 +6,14 @@ import { prefersReducedMotion } from '../../lib/motion'
 import { collectionHighlightTerms, groupLegacyReportSections, rehypeCollectionHighlights, reportSourceFindings, splitReportMarkdown } from './reportReading'
 import { ReportKeywordText } from './ReportKeywordText'
 
-export function ReportReadingContent({ report, onEvidenceSelect }: {
+export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnalysis }: {
   report: ReportDetail
   onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
+  beforeOtherAnalysis?: ReactNode
 }) {
   const content = report.structuredContent
   const terms = collectionHighlightTerms(report.collectionContexts ?? [])
-  if (!content) return <LegacyReportBody key={report.id} markdown={report.markdownBody} terms={terms} />
+  if (!content) return <LegacyReportBody key={report.id} markdown={report.markdownBody} terms={terms} beforeOtherAnalysis={beforeOtherAnalysis} />
   const byId = new Map((report.findings ?? []).map(finding => [finding.id, finding]))
   const referenced = new Set([...content.importantEvents, ...content.watchItems].flatMap(item => item.sourceFindingIds))
   const other = (report.findings ?? []).filter(finding => !referenced.has(finding.id) && finding.keyPoints.length > 0)
@@ -51,6 +52,7 @@ export function ReportReadingContent({ report, onEvidenceSelect }: {
           <h4><ReportKeywordText text={item.topic} terms={terms} /></h4><p><ReportKeywordText text={item.reason} terms={terms} /></p>{references(item.sourceFindingIds)}
         </article>)}
       </section>}
+      {beforeOtherAnalysis}
       {other.length > 0 && <ReadingDisclosure title="기타 분석">
         <PaginatedAnalysis key={report.id}>
           {other.map(finding => <article className="report-event-card report-analysis-card" key={finding.id}>
@@ -99,8 +101,13 @@ function PaginatedAnalysis({ children }: { children: ReactNode[] }) {
   </>
 }
 
-function LegacyReportBody({ markdown, terms }: { markdown: string; terms: string[] }) {
-  return <div className="report-reading-content">{groupLegacyReportSections(markdown).map((group, index) => {
+function LegacyReportBody({ markdown, terms, beforeOtherAnalysis }: {
+  markdown: string
+  terms: string[]
+  beforeOtherAnalysis?: ReactNode
+}) {
+  const groups = groupLegacyReportSections(markdown)
+  const sections = groups.map((group, index) => {
     if (group.kind === 'other') {
       return <ReadingDisclosure key={index} title={group.title}>
         <PaginatedAnalysis>
@@ -134,7 +141,12 @@ function LegacyReportBody({ markdown, terms }: { markdown: string; terms: string
       {section.title && <h3>{/경영진 요약|오늘의 핵심/.test(section.title) ? '핵심 요약' : <ReportKeywordText text={section.title} terms={terms} />}</h3>}
       <MarkdownText text={section.body} terms={terms} />
     </section>
-  })}</div>
+  })
+  const otherIndex = groups.findIndex(group => group.kind === 'other')
+  const notesIndex = groups.findIndex(group => group.kind === 'notes')
+  const insertionIndex = otherIndex >= 0 ? otherIndex : notesIndex >= 0 ? notesIndex : sections.length
+  if (beforeOtherAnalysis) sections.splice(insertionIndex, 0, <Fragment key="before-other-analysis">{beforeOtherAnalysis}</Fragment>)
+  return <div className="report-reading-content">{sections}</div>
 }
 
 function MarkdownText({ text, terms }: { text: string; terms: string[] }) {

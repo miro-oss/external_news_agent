@@ -3,6 +3,7 @@
 from copy import deepcopy
 from typing import Any
 
+from app.llm.insight_draft import OpenAIInsightDraft
 from app.llm.openai_contract import _object
 from app.schemas.analyze import (
     AnalyzeOutput,
@@ -11,6 +12,7 @@ from app.schemas.analyze import (
     SelfCritiqueOutput,
 )
 from app.schemas.evidence import EvidenceBatchOutput, EvidenceClaim
+from app.schemas.insight import InsightOutput, InsightRequest
 from app.schemas.report import ReportOutput, ReportRequest
 from app.schemas.report_changes import ReportChangesOutput, ReportChangesRequest
 
@@ -96,6 +98,31 @@ def report_schema(request: ReportRequest) -> dict[str, Any]:
             definitions[name]["properties"]["sourceFindingIds"]["items"] = {
                 "$ref": "#/$defs/AllowedFindingId"
             }
+    return schema
+
+
+def insight_schema(request: InsightRequest) -> dict[str, Any]:
+    if request.plan != "FREE":
+        return InsightOutput.model_json_schema(by_alias=True)
+    schema = OpenAIInsightDraft.model_json_schema(by_alias=True)
+    properties = schema["$defs"]["OpenAIInsightFactDraft"]["properties"]
+    # Bind both IDs in the same branch so a valid sentence from another finding
+    # cannot be attached to this fact's source.
+    schema["$defs"]["OpenAIInsightFactDraft"] = {
+        "anyOf": [
+            _object(
+                {
+                    **deepcopy(properties),
+                    "findingId": {"type": "integer", "const": finding.id},
+                    "evidenceSentenceIds": {
+                        **deepcopy(properties["evidenceSentenceIds"]),
+                        "items": _integer_choices([sentence.id for sentence in finding.sentences]),
+                    },
+                }
+            )
+            for finding in request.findings
+        ]
+    }
     return schema
 
 

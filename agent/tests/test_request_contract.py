@@ -7,8 +7,10 @@ from jsonschema import Draft202012Validator, ValidationError
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
 from test_analyze_service import request as analyze_request
 from test_evidence_service import provider_request as evidence_request
+from test_insight_service import output as insight_output
+from test_insight_service import request as insight_request
 from test_openai_contract import wire_analysis
-from test_openai_provider import client_for, response_body
+from test_openai_provider import assert_strict, client_for, response_body
 from test_report_service import request as report_request
 from test_report_service import valid_output as report_output
 from test_self_critique_service import critique_output
@@ -16,6 +18,8 @@ from test_self_critique_service import request as critique_request
 
 from app.core.config import Settings
 from app.llm.evidence_service import EvidenceVerifierService
+from app.llm.insight_draft import OpenAIInsightDraft
+from app.llm.insight_service import InsightService
 from app.llm.openai_contract import output_contract
 from app.llm.openai_provider import OpenAIAnalyzeProvider
 from app.llm.report_service import ReportWriterService
@@ -23,11 +27,13 @@ from app.llm.request_contract import (
     analysis_schema,
     critique_schema,
     evidence_schema,
+    insight_schema,
     report_schema,
 )
 from app.llm.self_critique_service import ArticleSelfCritiqueService
 from app.schemas.analyze import AnalyzeOutput, SelfCritiqueOutput
 from app.schemas.evidence import EvidenceBatchOutput, EvidenceClaim
+from app.schemas.insight import InsightOutput
 from app.schemas.report import ReportOutput
 
 
@@ -84,6 +90,65 @@ def test_report_allows_actual_noncontiguous_finding_ids_only():
             validator.validate(json.loads(report_output([finding_id])))
     request.plan = "PAID"
     assert report_schema(request) == ReportOutput.model_json_schema(by_alias=True)
+
+
+def insight_request_with_disjoint_evidence():
+    request = insight_request(include_history=True)
+    for finding, ids in zip(request.findings, ([2, 8], [11, 13]), strict=True):
+        finding.sentences = [
+            finding.sentences[0].model_copy(update={"id": sid}) for sid in ids
+        ]
+    return request
+
+
+def test_insight_accepts_current_and_history_evidence_in_one_group_and_empty_results():
+    validator = validator_for(insight_schema(insight_request_with_disjoint_evidence()))
+    assert_strict(validator.schema)
+    wire = insight_output()
+    facts = wire["insights"][0]["factGroups"][0]["facts"]
+    facts[0].update(findingId=501, evidenceSentenceIds=[8, 2])
+    facts.append({**deepcopy(facts[0]), "findingId": 388, "evidenceSentenceIds": [11, 13]})
+    validator.validate(wire)
+    wire["insights"][0].update(factGroups=[], watchNext=[], confidence=0)
+    validator.validate(wire)
+
+
+@pytest.mark.parametrize(
+    "finding_id,sentence_ids",
+    [(999, [2]), (1, [2]), (500, [2]), (501, [3]), (501, [11]), (388, [2]), (501, [])],
+)
+def test_insight_rejects_invented_ids_gaps_and_cross_finding_evidence(finding_id, sentence_ids):
+    validator = validator_for(insight_schema(insight_request_with_disjoint_evidence()))
+    wire = insight_output()
+    wire["insights"][0]["factGroups"][0]["facts"][0].update(
+        findingId=finding_id, evidenceSentenceIds=sentence_ids
+    )
+    with pytest.raises(ValidationError):
+        validator.validate(wire)
+
+
+def test_insight_schema_is_request_scoped_and_preserves_paid_contract():
+    first = insight_request()
+    original_request = first.model_dump()
+    static_schema = OpenAIInsightDraft.model_json_schema(by_alias=True)
+    schema = insight_schema(first)
+    original_schema = deepcopy(schema)
+    other = insight_request()
+    other.findings[0].id = 999
+    other_schema = insight_schema(other)
+    wire = insight_output()
+    validator_for(schema).validate(wire)
+    with pytest.raises(ValidationError):
+        validator_for(other_schema).validate(wire)
+    wire["insights"][0]["factGroups"][0]["facts"][0]["findingId"] = 999
+    validator_for(other_schema).validate(wire)
+    with pytest.raises(ValidationError):
+        validator_for(schema).validate(wire)
+    assert first.model_dump() == original_request
+    assert schema == original_schema
+    assert OpenAIInsightDraft.model_json_schema(by_alias=True) == static_schema
+    first.plan = "PAID"
+    assert insight_schema(first) == InsightOutput.model_json_schema(by_alias=True)
 
 
 def claims():
@@ -186,7 +251,7 @@ def test_critique_disallows_wrong_targets_new_evidence_and_inconsistent_rejectio
     )
 
 
-@pytest.mark.parametrize("task", ["report", "evidence", "critique"])
+@pytest.mark.parametrize("task", ["report", "evidence", "critique", "insight"])
 def test_services_send_request_bounds_to_responses_and_preserve_usage(task):
     if task == "report":
         request = report_request()
@@ -195,6 +260,9 @@ def test_services_send_request_bounds_to_responses_and_preserve_usage(task):
         request = evidence_request()
         request.claims = claims()
         wire = evidence_wire()
+    elif task == "insight":
+        request = insight_request()
+        wire = insight_output()
     else:
         request = critique_request(
             claim="A사는 투자를 승인했다.", evidence="A사는 투자를 발표했다."
@@ -205,12 +273,16 @@ def test_services_send_request_bounds_to_responses_and_preserve_usage(task):
     def handler(http_request):
         payload = json.loads(http_request.content)
         schema = payload["text"]["format"]["schema"]
+        assert payload["text"]["format"]["strict"] is True
+        assert_strict(schema)
         Draft202012Validator(schema).validate(wire)
         invalid = deepcopy(wire)
         if task == "report":
             invalid["importantEvents"][0]["sourceFindingIds"] = [999]
         elif task == "evidence":
             invalid["results"]["claim0"]["acceptedSentenceIds"] = [999]
+        elif task == "insight":
+            invalid["insights"][0]["factGroups"][0]["facts"][0]["findingId"] = 999
         else:
             invalid["revision"]["claimId"] = "0:9"
         with pytest.raises(ValidationError):
@@ -225,6 +297,8 @@ def test_services_send_request_bounds_to_responses_and_preserve_usage(task):
             response = ReportWriterService(settings, provider).write(request)
         elif task == "evidence":
             response = EvidenceVerifierService(settings, provider).verify(request)
+        elif task == "insight":
+            response = InsightService(settings, provider).generate(request)
         else:
             response = ArticleSelfCritiqueService(settings, provider).critique(request)
     assert len(sent) == 1
@@ -236,6 +310,7 @@ def test_services_send_request_bounds_to_responses_and_preserve_usage(task):
             "report": "report.ko.v1.5",
             "evidence": "evidence.ko.v3",
             "critique": "self-critique.ko.v3",
+            "insight": "insight.ko.v2+perspective.ko.v1",
         }[task]
     )
 
