@@ -6,7 +6,7 @@
 .active-runs-list { margin: 1rem 0 0; padding: 0; list-style: none; }
 .active-runs-list > li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--line); }
 .active-runs-list > li > div { display: grid; gap: .35rem; min-width: 0; }
-.active-runs-list strong { color: var(--fg-2); font-size: .9rem; }
+.active-runs-list strong { color: var(--fg-2); font-size: .9rem; overflow-wrap: anywhere; }
 .active-runs-list span { color: var(--fg-3); font-size: .78rem; }
 .active-runs-list button { flex: none; font-size: .8rem; }
 .active-runs-pagination { display: flex; justify-content: flex-end; align-items: center; gap: .75rem; margin-top: .75rem; color: var(--fg-3); font-size: .8rem; }
