@@ -3,6 +3,7 @@ import { useCreateTopic, useSources } from '../../api/queries'
 import { FormStatus } from './FormStatus'
 import { baseTopicKeywords, buildTopicKeywordInput } from './topicKeywordInput'
 import { TopicSourcesSkeleton } from './SettingsSkeletons'
+import { COLLECTION_INTERVALS } from './collectionIntervals'
 
 const EMPTY = {
   name: '',
@@ -12,12 +13,6 @@ const EMPTY = {
   excludedKeywords: '',
   intervalMinutes: '1440',
 }
-
-const COLLECTION_INTERVALS = [
-  { value: '60', label: '1시간마다' },
-  { value: '720', label: '12시간마다' },
-  { value: '1440', label: '24시간마다' },
-] as const
 
 export function TopicForm() {
   const [form, setForm] = useState(EMPTY)

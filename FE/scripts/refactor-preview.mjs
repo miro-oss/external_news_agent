@@ -50,6 +50,8 @@ let usageLimit = 100;
 let proposalRevision = 0;
 let notificationSettingsSaveError = false;
 let completeRunOnSettingsSave = false;
+let topicScheduleLoadError = false;
+let topicScheduleSaveError = false;
 const proposalAppliedChanges = new Map();
 const proposalKeywordRevisions = new Map();
 const deliveryLogFixtures = ['SENT', 'FAILED', 'SKIPPED'].map((status, i) => ({
@@ -60,7 +62,9 @@ const deliveryLogFixtures = ['SENT', 'FAILED', 'SKIPPED'].map((status, i) => ({
     chunkSeq: 1, chunkCount: 1, errorMessage: status === 'FAILED' ? '메일 서버에 연결하지 못했습니다.' : status === 'SKIPPED' ? '수신 설정이 꺼져 있습니다.' : null,
     sentAt: '2026-09-08T12:30:00+09:00',
 }));
-function reset() { topics = structuredClone(initialTopics); proposals = structuredClone(initialProposals); channels = structuredClone(initialChannels); recipients = structuredClone(initialRecipients); groups = structuredClone(initialGroups); requests = []; runs = []; runDeliverySettings = []; policies = { 31: { enabled: true, run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1, 2] } }; telegram = { 1: { status: 'DISCONNECTED', expiresAt: null }, 2: { status: 'CONNECTED', expiresAt: null }, 3: { status: 'DISCONNECTED', expiresAt: null } }; readiness = { mode: 'LOCAL_CAPTURE', configured: false, message: '로컬 검증 모드입니다. 이메일은 실제 수신함으로 전달되지 않습니다.' }; audience = { audience: 'CHIP_MAKER' }; plan = { plan: 'FREE', paidExhaustedAction: 'FALLBACK_FREE', allowRunOverride: true }; autoDeliveries = []; sendCache = {}; notificationSettingsSaveError = false; completeRunOnSettingsSave = false; resetProposalHistory(); }
+function reset() { topics = structuredClone(initialTopics); proposals = structuredClone(initialProposals); channels = structuredClone(initialChannels); recipients = structuredClone(initialRecipients); groups = structuredClone(initialGroups); requests = []; runs = []; runDeliverySettings = []; policies = { 31: { enabled: true, run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1, 2] } }; telegram = { 1: { status: 'DISCONNECTED', expiresAt: null }, 2: { status: 'CONNECTED', expiresAt: null }, 3: { status: 'DISCONNECTED', expiresAt: null } }; readiness = { mode: 'LOCAL_CAPTURE', configured: false, message: '로컬 검증 모드입니다. 이메일은 실제 수신함으로 전달되지 않습니다.' }; audience = { audience: 'CHIP_MAKER' }; plan = { plan: 'FREE', paidExhaustedAction: 'FALLBACK_FREE', allowRunOverride: true }; autoDeliveries = []; sendCache = {}; notificationSettingsSaveError = false; completeRunOnSettingsSave = false; topicScheduleLoadError = false; topicScheduleSaveError = false; resetProposalHistory(); }
+const topicFields = topic => Object.fromEntries(['id', 'name', 'queryText', 'requiredKeywords', 'optionalKeywords',
+    'excludedKeywords', 'batchSize', 'intervalMinutes', 'active'].map(field => [field, topic[field]]));
 const policyFields = value => ({ enabled: value.enabled, run: value.run, daily: value.daily,
     groupIds: [...value.groupIds], recipientIds: [...value.recipientIds], channelIds: [...value.channelIds] });
 function runSettings(run) {
@@ -310,6 +314,11 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 completeRunOnSettingsSave = body.completeOnSave ?? completeRunOnSettingsSave;
                                 return json(res, { saveError: notificationSettingsSaveError, completeOnSave: completeRunOnSettingsSave });
                             }
+                            if (path === '/__qa/topic-schedule-errors') {
+                                topicScheduleLoadError = body.loadError ?? topicScheduleLoadError;
+                                topicScheduleSaveError = body.saveError ?? topicScheduleSaveError;
+                                return json(res, { loadError: topicScheduleLoadError, saveError: topicScheduleSaveError });
+                            }
                             if (path === '/__qa/recipients') {
                                 const count = Math.max(0, Math.min(500, Number(body.count ?? url.searchParams.get('count') ?? 80)));
                                 recipients = count <= 2 ? structuredClone(initialRecipients.filter(r => r.active).slice(0, count)) : [
@@ -451,7 +460,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         else if (path === '/api/news/sources')
                             result = page(sources);
                         else if (path === '/api/news/topic-sources')
-                            result = { ...page(topics.flatMap(t => sources.map(s => ({ topicId: t.id, topicName: t.name, sourceId: s.id, sourceName: s.name, sourceKind: s.sourceKind, queryText: t.queryText, active: t.active, batchSize: 100, intervalMinutes: 1440, lastCollectedAt: t.lastCollectedAt, lastCollectedCount: 12 })))), combinationCount: topics.length * 2 };
+                            result = { ...page(topics.flatMap(t => sources.map(s => ({ topicId: t.id, topicName: t.name, sourceId: s.id, sourceName: s.name, sourceKind: s.sourceKind, queryText: t.queryText, active: t.active, batchSize: t.batchSize, intervalMinutes: t.intervalMinutes, lastCollectedAt: t.lastCollectedAt, lastCollectedCount: 12 })))), combinationCount: topics.length * 2 };
                         else if (path === '/api/news/topics' && method === 'POST') {
                             result = { id: Math.max(...topics.map(t => t.id)) + 1, ...body, active: true, lastCollectedAt: null, linkedSourceCount: 2, sources, surgeKeywords: [], relatedKeywords: [] };
                             topics.unshift(result);
@@ -460,6 +469,24 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         else if (path === '/api/news/topics') {
                             const active = url.searchParams.get('active');
                             result = page(topics.filter(t => active === null || t.active === (active === 'true')).sort((a, b) => b.id - a.id));
+                        }
+                        else if ((match = path.match(/^\/api\/news\/topics\/(\d+)$/)) && ['GET', 'PATCH'].includes(method)) {
+                            const topic = topics.find(t => t.id === Number(match[1]));
+                            if (!topic) return json(res, { isSuccess: false, code: 'TOPIC404', message: '수집 주제를 찾을 수 없습니다.', result: {} }, 404);
+                            if (method === 'GET') {
+                                if (topicScheduleLoadError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류입니다.', result: {} }, 500);
+                                result = { ...topicFields(topic), lastCollectedAt: topic.lastCollectedAt,
+                                    sources: sources.map(({ id, name, sourceKind, language, robotsStatus, active }) => ({ id, name, sourceKind, language, robotsStatus, active })) };
+                            }
+                            else {
+                                if (topicScheduleSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류입니다.', result: {} }, 500);
+                                if ((body.intervalMinutes != null && ![60, 720, 1440].includes(body.intervalMinutes))
+                                    || (body.batchSize != null && (!Number.isInteger(body.batchSize) || body.batchSize < 1 || body.batchSize > 300)))
+                                    return json(res, { isSuccess: false, code: 'TOPIC400', message: 'batchSize는 1 이상 300 이하, intervalMinutes는 60, 720, 1440 중 하나여야 합니다.', result: {} }, 400);
+                                for (const field of Object.keys(topicFields(topic)))
+                                    if (field !== 'id' && body[field] != null) topic[field] = structuredClone(body[field]);
+                                return json(res, { isSuccess: true, code: 'COMMON200', message: '수정되었습니다.', result: topicFields(topic) });
+                            }
                         }
                         else if ((match = path.match(/^\/api\/news\/topics\/(\d+)\/activation$/))) {
                             const topic = topics.find(t => t.id === Number(match[1]));
@@ -503,8 +530,14 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             const status = url.searchParams.get('status');
                             result = requestedPage(runs.filter(r => !status || r.status === status).toReversed(), url);
                         }
-                        else if ((match = path.match(/^\/api\/news\/runs\/(\d+)$/)))
-                            result = runs.find(r => r.runId === Number(match[1]));
+                        else if ((match = path.match(/^\/api\/news\/runs\/(\d+)$/))) {
+                            const run = runs.find(r => r.runId === Number(match[1]));
+                            result = run ? { ...run, breakdown: run.targetTopicIds.flatMap(topicId => sources.map(source => ({
+                                topicId, topicName: topics.find(topic => topic.id === topicId)?.name ?? `주제 ${topicId}`,
+                                sourceId: source.id, sourceName: source.name,
+                                status: run.status, scannedCount: 0, newCount: 0, updatedCount: 0,
+                            }))) } : undefined;
+                        }
                         else if (path === '/api/news/reports') {
                             const scope = url.searchParams.get('reportScope');
                             const filtered = reports.filter(r => !scope || r.reportScope === scope);

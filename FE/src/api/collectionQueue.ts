@@ -21,6 +21,16 @@ export function useActiveCollectionRuns(status: ActiveRunStatus, page: number) {
   })
 }
 
+export function useCollectionRunTopics(runId: number) {
+  return useQuery({
+    queryKey: ['collection-run-topics', runId],
+    queryFn: () => get<{ breakdown: Array<{ topicId: number; topicName: string }> }>(`/runs/${runId}`),
+    // 같은 주제가 여러 소스와 연결되어도 이름은 한 번만 표시한다.
+    select: detail => [...new Map(detail.breakdown.map(item => [item.topicId, item.topicName])).values()],
+    staleTime: 60_000,
+  })
+}
+
 export function useCollectionQueue() {
   return useQuery({
     queryKey: ['collection-queue'],

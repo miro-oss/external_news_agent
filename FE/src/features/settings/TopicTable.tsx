@@ -5,30 +5,7 @@ import { ApiError } from '../../api/client'
 import { MutationStatus } from './MutationStatus'
 import { TopicTableSkeleton } from './SettingsSkeletons'
 import { TopicDeliverySettings } from './TopicDeliverySettings'
-
-/** 오프셋이 붙은 ISO-8601을 그대로 보여 주면 열이 넘친다. 날짜와 분까지만 남긴다. */
-function formatCollectedAt(value: string | null) {
-  if (!value) return '—'
-
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return value
-
-  return parsed.toLocaleString('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-/** 저장된 분 값을 설정 화면에서 쓰는 주기 표현으로 바꾼다. 기존 사용자 지정 값도 읽을 수 있게 남긴다. */
-function formatInterval(minutes: number) {
-  if (minutes === 1440) return '24시간마다'
-  if (minutes % 1440 === 0) return `${minutes / 1440}일마다`
-  if (minutes % 60 === 0) return `${minutes / 60}시간마다`
-  return `${minutes}분마다`
-}
+import { TopicScheduleSettings } from './TopicScheduleSettings'
 
 function formatKeywords(keywords: string[]) {
   return keywords.length > 0 ? keywords.join(', ') : '—'
@@ -127,8 +104,7 @@ export function TopicTable() {
                   <td className="topic-signal-cell"><KeywordSignalList items={topic.relatedKeywords ?? []} emptyLabel="—"
                     renderLabel={(keyword) => `${keyword.keyword} ${keyword.sharePercent.toFixed(0)}%`}
                     renderTitle={relatedKeywordTitle} /></td>
-                  <td><div className="topic-condition-lines"><span>{formatInterval(topic.intervalMinutes)}</span>
-                    <small title="마지막 수집">{formatCollectedAt(topic.lastCollectedAt)}</small></div></td>
+                  <td><TopicScheduleSettings topic={topic} /></td>
                   <td><TopicDeliverySettings topicId={topic.id} topicName={topic.name} /></td>
                   <td><div className="topic-management-actions"><button type="button" className="ghost-button topic-management-action" disabled={activation.isPending}
                     onClick={() => setActive(topic.id, !topic.active)}>
