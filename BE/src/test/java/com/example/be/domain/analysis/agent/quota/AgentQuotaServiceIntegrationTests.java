@@ -39,6 +39,31 @@ class AgentQuotaServiceIntegrationTests {
     private AgentQuotaJdbcRepository quotaRepository;
 
     @Test
+    void recordedCostUsesDailyFreeWindowAndIncludesKnownFailureCostOnce() {
+        LocalDateTime dayStart = LocalDateTime.of(2084, 6, 8, 0, 0);
+        LocalDateTime dayEnd = dayStart.plusDays(1);
+        assertEquals(0, BigDecimal.ZERO.compareTo(
+                quotaRepository.freeEstimatedCost(dayStart, dayEnd)));
+        String successKey = "integration:cost:success:" + UUID.randomUUID();
+        insertCostRun(successKey, "FREE", "openai", "SUCCESS", "0.100001", dayStart);
+        insertCostRun("FREE", "openai", "FAILED", "0.200002", dayEnd.minusSeconds(1));
+        insertCostRun("FREE", "openai", "SUCCESS", null, dayStart.plusHours(1));
+        insertCostRun("PAID", "openai", "SUCCESS", "9", dayStart.plusHours(1));
+        insertCostRun("FREE", "gemini", "SUCCESS", "0.040004", dayStart.plusHours(1));
+        insertCostRun("FREE", "mock", "MOCK", "0", dayStart.plusHours(1));
+        insertCostRun("FREE", null, "FAILED", "0.300003", dayStart.plusHours(1));
+        insertCostRun("FREE", "openai", "SUCCESS", "9", dayStart.minusSeconds(1));
+        insertCostRun("FREE", "openai", "SUCCESS", "9", dayEnd);
+        quotaRepository.insert(null, successKey, AgentTask.ANALYZE, AgentPlan.FREE,
+                BigDecimal.ONE, dayStart);
+        quotaRepository.insert(null, "integration:cost:reserved-only:" + UUID.randomUUID(),
+                AgentTask.ANALYZE, AgentPlan.FREE, BigDecimal.ONE, dayStart);
+
+        assertEquals(0, new BigDecimal("0.640010").compareTo(
+                quotaRepository.freeEstimatedCost(dayStart, dayEnd)));
+    }
+
+    @Test
     void reservesAndSettlesAgainstOracleWithTaskUsageQuery() {
         String key = "integration:a3:quota:" + UUID.randomUUID();
 
@@ -150,5 +175,21 @@ class AgentQuotaServiceIntegrationTests {
                 "SELECT status FROM agent_quota_reservations WHERE id = ?",
                 String.class,
                 reservation.id()));
+    }
+
+    private void insertCostRun(String plan, String provider, String status, String cost,
+                               LocalDateTime startedAt) {
+        insertCostRun("integration:cost:" + UUID.randomUUID(), plan, provider, status, cost, startedAt);
+    }
+
+    private void insertCostRun(String key, String plan, String provider, String status,
+                               String cost, LocalDateTime startedAt) {
+        jdbcTemplate.update("""
+                INSERT INTO agent_runs (
+                    idempotency_key, agent_task, target_type, status, llm_plan, llm_provider,
+                    cost_usd, started_at, finished_at
+                ) VALUES (?, 'ANALYZE', 'ARTICLE', ?, ?, ?, ?, ?, ?)
+                """, key, status, plan, provider, cost == null ? null : new BigDecimal(cost),
+                Timestamp.valueOf(startedAt), Timestamp.valueOf(startedAt));
     }
 }

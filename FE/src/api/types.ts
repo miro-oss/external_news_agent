@@ -668,6 +668,7 @@ export interface LlmUsage {
     dailyCallsUsed: number
     dailyCallsLimit: number
     dailyCallsRemaining: number
+    dailyEstimatedCostUsd: number
     resetAt: string
   }
   paid: {

@@ -167,6 +167,9 @@ public class AgentQuotaService {
         repository.lockSingletonSettings();
         releaseExpiredReservations();
         UsageWindow usage = usageWindow();
+        LocalDateTime dailyResetAt = usage.dailyResetAt().toLocalDateTime();
+        BigDecimal freeDailyEstimatedCost = nonNegative(repository.freeEstimatedCost(
+                dailyResetAt.minusDays(1), dailyResetAt));
         BigDecimal paidDailyRemaining = remaining(paidDailyLimit(), usage.paidDailyUsed());
         BigDecimal insightRemaining = remaining(insightCap(), usage.paidInsightDailyUsed());
         BigDecimal analysisRemaining = remaining(
@@ -180,6 +183,7 @@ public class AgentQuotaService {
                         usage.freeDailyUsed(),
                         freeDailyLimit(),
                         remaining(freeDailyLimit(), usage.freeDailyUsed()),
+                        freeDailyEstimatedCost,
                         usage.dailyResetAt()),
                 new LlmSettingDTO.PaidUsage(
                         usage.paidDailyUsed(),

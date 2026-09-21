@@ -263,7 +263,7 @@ public class AgentProperties implements InitializingBean {
 
     public static class Quota {
 
-        private int freeDailyCalls = 1500;
+        private int freeDailyCalls = 3000;
         private int paidMonthlyCredits = 3000;
         private int paidDailyCredits = 90;
         private int paidDailyReportReserve = 20;

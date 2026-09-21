@@ -4,6 +4,8 @@ import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
+import com.example.be.domain.settings.dto.LlmSettingDTO;
+import com.example.be.domain.settings.entity.PaidExhaustedAction;
 import com.example.be.domain.settings.exception.LlmException;
 import com.example.be.domain.settings.service.LlmPlanService;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +16,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -66,6 +69,25 @@ class AgentQuotaServiceTest {
         order.verify(repository).insert(
                 eq(42L), eq("run:42:article:10"), eq(AgentTask.ANALYZE),
                 eq(AgentPlan.PAID), eq(new BigDecimal("5")), any(LocalDateTime.class));
+        verify(repository, never()).freeEstimatedCost(any(), any());
+    }
+
+    @Test
+    void usageReportsRecordedEstimateForItsDailyWindow() {
+        when(planService.get()).thenReturn(new LlmSettingDTO.PlanResponse(
+                AgentPlan.FREE, true, PaidExhaustedAction.FALLBACK_FREE));
+        BigDecimal estimate = new BigDecimal("0.123456");
+        when(repository.freeEstimatedCost(any(), any())).thenReturn(estimate);
+
+        LlmSettingDTO.UsageResponse response = service.usage();
+
+        assertEquals(estimate, response.free().dailyEstimatedCostUsd());
+        ArgumentCaptor<LocalDateTime> start = ArgumentCaptor.forClass(LocalDateTime.class);
+        ArgumentCaptor<LocalDateTime> end = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(repository).freeEstimatedCost(start.capture(), end.capture());
+        assertEquals(response.free().resetAt().toLocalDateTime(), end.getValue());
+        assertEquals(end.getValue().minusDays(1), start.getValue());
+        assertEquals(0, start.getValue().getHour());
     }
 
     @Test
@@ -331,12 +353,12 @@ class AgentQuotaServiceTest {
 
     @Test
     void investigationCannotReserveBeyondFifteenPercentOfFreeDailyCalls() {
-        stubUsage(new BigDecimal("225"), BigDecimal.ZERO, BigDecimal.ZERO,
+        stubUsage(new BigDecimal("450"), BigDecimal.ZERO, BigDecimal.ZERO,
                 BigDecimal.ZERO);
         when(repository.usage(
                 eq(AgentPlan.FREE), any(LocalDateTime.class), any(LocalDateTime.class),
                 eq(AgentTask.INVESTIGATE)))
-                .thenReturn(new BigDecimal("225"));
+                .thenReturn(new BigDecimal("450"));
         when(repository.usage(
                 eq(AgentPlan.PAID), any(LocalDateTime.class), any(LocalDateTime.class),
                 eq(AgentTask.INVESTIGATE)))

@@ -46,7 +46,7 @@ let recipientDeleteError = false;
 let loadingDelayMs = 0;
 let loadingPath = '/api/';
 let usageCalls = 12;
-let usageLimit = 100;
+let usageLimit = 3000;
 let proposalRevision = 0;
 let notificationSettingsSaveError = false;
 let completeRunOnSettingsSave = false;
@@ -252,7 +252,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 loadingDelayMs = 0;
                                 loadingPath = '/api/';
                                 usageCalls = 12;
-                                usageLimit = 100;
+                                usageLimit = 3000;
                                 return json(res, { reset: true });
                             }
                             if (path === '/__qa/report-filters') {
@@ -261,7 +261,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             }
                             if (path === '/__qa/usage') {
                                 const used = Number(body.used ?? url.searchParams.get('used') ?? 12);
-                                const limit = Number(body.limit ?? url.searchParams.get('limit') ?? 100);
+                                const limit = Number(body.limit ?? url.searchParams.get('limit') ?? 3000);
                                 if (![used, limit].every(value => Number.isSafeInteger(value) && value >= 0))
                                     return json(res, { error: 'Use nonnegative integer used and limit values.' }, 400);
                                 usageCalls = used;
@@ -441,7 +441,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         if (path === '/api/usage/llm') {
                             const resetAt = '2026-09-09T00:00:00+09:00';
                             result = { currentPlan: plan.plan,
-                                free: { dailyCallsUsed: usageCalls, dailyCallsLimit: usageLimit, dailyCallsRemaining: Math.max(0, usageLimit - usageCalls), resetAt },
+                                free: { dailyCallsUsed: usageCalls, dailyCallsLimit: usageLimit, dailyCallsRemaining: Math.max(0, usageLimit - usageCalls), dailyEstimatedCostUsd: usageCalls * 0.0009, resetAt },
                                 paid: { dailyCreditsUsed: 0, dailyCreditsLimit: 100, dailyCreditsRemaining: 100,
                                     analysisCreditsRemaining: 80, insightCreditsUsed: 0, insightCreditsCap: 20, insightCreditsRemaining: 20,
                                     reportReserve: 20, monthlyCreditsUsed: 0, monthlyCreditsLimit: 3000, monthlyCreditsRemaining: 3000,

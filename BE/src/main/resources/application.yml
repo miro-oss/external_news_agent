@@ -114,7 +114,7 @@ news:
       search-batch-size: 10
       daily-budget-percent: 15
     quota:
-      free-daily-calls: 1500
+      free-daily-calls: 3000
       paid-monthly-credits: 3000
       paid-daily-credits: 90
       paid-daily-report-reserve: 20

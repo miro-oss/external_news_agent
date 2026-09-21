@@ -46,6 +46,12 @@ public class AgentQuotaJdbcRepository {
             + " AND agent_task = ?";
     private static final String RESERVATION_ANALYSIS_USAGE_SQL = RESERVATION_USAGE_SQL
             + " AND agent_task IN ('ANALYZE', 'SELF_CRITIQUE', 'KEYWORD_STRATEGY', 'REPORT_CHANGES', 'TOPIC_RELEVANCE')";
+    private static final String FREE_COST_SQL = """
+            SELECT COALESCE(SUM(cost_usd), 0)
+            FROM agent_runs
+            WHERE llm_plan = 'FREE'
+              AND started_at >= ? AND started_at < ?
+            """;
     private static final String LEGACY_PAID_USAGE_SQL = """
             SELECT COALESCE(SUM(COALESCE(run.credits, 0)), 0)
             FROM agent_runs run
@@ -174,6 +180,14 @@ public class AgentQuotaJdbcRepository {
                 start,
                 end);
         return nonNull(reserved).add(nonNull(legacy));
+    }
+
+    public BigDecimal freeEstimatedCost(LocalDateTime from, LocalDateTime to) {
+        return nonNull(jdbcTemplate.queryForObject(
+                FREE_COST_SQL,
+                BigDecimal.class,
+                Timestamp.valueOf(from),
+                Timestamp.valueOf(to)));
     }
 
     public BigDecimal usage(AgentPlan plan,
