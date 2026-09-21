@@ -123,9 +123,9 @@ export function KeywordProposalsSkeleton() {
 
 export function LlmUsageSummarySkeleton() {
   return (
-    <SkeletonRegion label="오늘 OpenAI 사용량과 예상 비용을 불러오는 중" contentClassName="run-usage-details">
-      <div className="run-usage-summary"><Skeleton width="7rem" height=".75rem" /><Skeleton width="6rem" height="1rem" /></div>
-      <div className="run-usage-summary"><Skeleton width="7rem" height=".75rem" /><Skeleton width="4rem" height="1rem" /></div>
+    <SkeletonRegion label="오늘 OpenAI 사용량을 불러오는 중" contentClassName="run-usage-summary">
+      <Skeleton width="7rem" height=".75rem" />
+      <Skeleton width="6rem" height="1rem" />
     </SkeletonRegion>
   )
 }

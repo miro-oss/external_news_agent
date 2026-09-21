@@ -168,11 +168,6 @@
   margin-top: calc(1rem - 1.2px);
 }
 
-.run-usage-details {
-  display: grid;
-  gap: .25rem;
-}
-
 .run-usage-summary {
   display: flex;
   align-items: baseline;
