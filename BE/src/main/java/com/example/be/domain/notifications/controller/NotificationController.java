@@ -151,7 +151,78 @@ public class NotificationController {
     }
 
     @PostMapping("/reports/{reportId}/preview")
-    @Operation(summary = "보고서 발송 미리보기", description = "DB와 발송 이력을 변경하지 않습니다.")
+    @Operation(summary = "보고서 발송 미리보기", description = """
+            실제 발송과 같은 텔레그램 뉴스 카드형·이메일 브리핑형 본문을 반환합니다. DB와 발송 이력을 변경하지 않습니다.
+            저장된 importantEvents 중 sourceFindingIds가 비어 있지 않고 모두 표시 가능한 finding인 이벤트를 저장 순서대로 최대 3개 사용합니다.
+            텔레그램은 제목·요약·확인할 점·근거 원문을 채널 maxLength 안의 HTML 메시지 1개로 구성합니다.
+            긴 URL은 원문 링크 수를 2개에서 1개 또는 0개로 줄여 카드 주요 내용과 가능한 전체 보고서 링크를 유지하며, 극소 길이에서만 일반 텍스트로 안전하게 축약합니다.
+            이메일은 executiveSummary를 우선한 핵심 요약과 이벤트별 주요 내용·후속 확인·원문을 제공합니다.
+            후속 확인은 모든 근거가 표시 가능하고 해당 이벤트와 근거가 연결된 저장 watchItems만 최대 2개 사용합니다.
+            이벤트별 원문 링크는 해당 sourceFindingIds에 연결된 안전한 URL을 최대 2개 표시합니다.
+            읽는 관점과 significance는 표시하지 않습니다. 후속 확인을 새로 만들거나 AI를 다시 호출하지 않습니다.
+            기존 요약 대체 경로, 본문 확보·관련성 필터와 DAILY에 저장된 finding 선택·순서를 유지합니다.
+            public-base-url 설정 시 전체 보고서 링크를 추가합니다.
+            """)
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다.",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = {
+                            @ExampleObject(name = "TELEGRAM 뉴스 카드형", value = """
+                                    {
+                                      "isSuccess": true,
+                                      "code": "COMMON200",
+                                      "message": "성공입니다.",
+                                      "result": {
+                                        "reportId": 17,
+                                        "channelId": 1,
+                                        "channelType": "TELEGRAM",
+                                        "parseMode": "HTML",
+                                        "maxLength": 3500,
+                                        "subject": null,
+                                        "chunks": [
+                                          {
+                                            "seq": 1,
+                                            "length": 486,
+                                            "body": "<b>반도체 뉴스 브리핑 · 2026-09-22 (형식 예시)</b>\\n\\n<b>1. HBM 공급 확대</b>\\nHBM 공급 확대 계획이 발표됐습니다. 공급 일정과 생산 여력에 관한 내용을 함께 정리했습니다.\\n확인할 점: 공급 일정 — 세부 일정이 공개되면 후속 내용을 확인합니다.\\n<a href=\\"https://example.com/article-11\\">원문 1 · example.com</a>\\n\\n<b>2. 반도체 장비 생산거점 확대</b>\\n반도체 장비 기업이 생산거점 확대 계획을 공개했습니다. 거점의 역할과 대응 시장에 관한 내용을 다룹니다.\\n확인할 점: 거점 운영 계획 — 신규 거점의 가동 일정과 생산 품목을 확인합니다.\\n<a href=\\"https://example.com/article-22\\">원문 1 · example.com</a>\\n\\n<a href=\\"https://news.example.com/#/reports?reportId=17\\">보고서 전체 보기</a>\\n"
+                                          }
+                                        ],
+                                        "chunkCount": 1
+                                      }
+                                    }
+                                    """),
+                            @ExampleObject(name = "EMAIL 브리핑형", value = """
+                                    {
+                                      "isSuccess": true,
+                                      "code": "COMMON200",
+                                      "message": "성공입니다.",
+                                      "result": {
+                                        "reportId": 17,
+                                        "channelId": 2,
+                                        "channelType": "EMAIL",
+                                        "parseMode": null,
+                                        "maxLength": 2147483647,
+                                        "subject": "[뉴스 보고서] 반도체 뉴스 브리핑 · 2026-09-22 (형식 예시)",
+                                        "chunks": [
+                                          {
+                                            "seq": 1,
+                                            "length": 1252,
+                                            "body": "<html><body style=\\"margin:0;padding:24px;background:#f4f6f8;color:#172331;font-family:Arial,sans-serif;line-height:1.7\\"><div style=\\"max-width:680px;margin:0 auto;padding:24px;background:#ffffff\\"><p style=\\"color:#526578;font-size:12px\\">NEWS BRIEFING</p><h2>반도체 뉴스 브리핑 · 2026-09-22 (형식 예시)</h2><h3>핵심 요약</h3><ul><li>HBM 공급 확대와 반도체 장비 생산거점 변화가 이번 보고서의 주요 내용입니다.</li></ul><div style=\\"border-top:1px solid #dce3e9;margin-top:24px;padding-top:16px\\"><p style=\\"color:#526578;font-size:12px\\">주요 이슈 1</p><h3>HBM 공급 확대</h3><p><strong>주요 내용</strong><br>HBM 공급 확대 계획이 발표됐습니다. 공급 일정과 생산 여력에 관한 내용을 함께 정리했습니다.</p><p><strong>후속 확인</strong></p><ul><li>공급 일정 — 세부 일정이 공개되면 후속 내용을 확인합니다.</li></ul><p><a href=\\"https://example.com/article-11\\">원문 1 · example.com</a></p></div><div style=\\"border-top:1px solid #dce3e9;margin-top:24px;padding-top:16px\\"><p style=\\"color:#526578;font-size:12px\\">주요 이슈 2</p><h3>반도체 장비 생산거점 확대</h3><p><strong>주요 내용</strong><br>반도체 장비 기업이 생산거점 확대 계획을 공개했습니다. 거점의 역할과 대응 시장에 관한 내용을 다룹니다.</p><p><strong>후속 확인</strong></p><ul><li>거점 운영 계획 — 신규 거점의 가동 일정과 생산 품목을 확인합니다.</li></ul><p><a href=\\"https://example.com/article-22\\">원문 1 · example.com</a></p></div><p><a href=\\"https://news.example.com/#/reports?reportId=17\\">보고서 전체 보기</a></p></div></body></html>"
+                                          }
+                                        ],
+                                        "chunkCount": 1
+                                      }
+                                    }
+                                    """)
+                    })),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "보고서 또는 활성 채널 없음",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = {
+                            @ExampleObject(name = "보고서 없음", value = """
+                                    {"isSuccess":false,"code":"REPORT404","message":"보고서를 찾을 수 없습니다.","result":{}}
+                                    """),
+                            @ExampleObject(name = "채널 없음", value = """
+                                    {"isSuccess":false,"code":"CHANNEL404","message":"알림 채널을 찾을 수 없습니다.","result":{}}
+                                    """)
+                    }))
+    })
     public ApiResponse<NotificationResDTO.Preview> preview(
             @PathVariable Long reportId,
             @RequestBody NotificationReqDTO.Preview request) {
@@ -159,7 +230,13 @@ public class NotificationController {
     }
 
     @PostMapping("/reports/{reportId}/send")
-    @Operation(summary = "보고서 발송", description = "활성 그룹·수신자·주소에 발송하고 개별 결과를 기록합니다.")
+    @Operation(summary = "보고서 발송", description = """
+            활성 그룹·수신자·주소에 발송하고 개별 결과를 기록합니다. 수신자·채널별 중복 제거와 배치 처리 규칙을 유지합니다.
+            미리보기와 같은 텔레그램 뉴스 카드형·이메일 브리핑형 본문을 사용하며 저장된 근거 있는 importantEvents를 최대 3개 표시합니다.
+            텔레그램은 채널 maxLength 안의 메시지 1개이며, 이메일은 핵심 요약과 이벤트별 주요 내용·후속 확인·원문을 제공합니다.
+            읽는 관점과 significance는 표시하지 않고, 저장된 관련 watchItems만 사용하며 AI를 다시 호출하지 않습니다.
+            본문 확보·관련성 필터와 DAILY에 저장된 finding 선택·순서를 유지하며 public-base-url 설정 시 전체 보고서 링크를 추가합니다.
+            """)
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "발송을 완료했습니다."),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "발송 대상 없음"),
