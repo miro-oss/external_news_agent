@@ -21,7 +21,6 @@ export function LlmUsageSummary() {
         <span>오늘 예상 비용 (USD)</span>
         <strong>{estimatedCost}</strong>
       </div>
-      <p className="run-usage-note">기록된 비용 기준 · 진행 중이거나 비용을 확인하지 못한 요청은 제외되어 실제 청구액과 다를 수 있습니다.</p>
     </div>
   )
 }
