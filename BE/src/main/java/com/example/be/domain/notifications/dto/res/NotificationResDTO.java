@@ -2,6 +2,7 @@ package com.example.be.domain.notifications.dto.res;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -112,21 +113,31 @@ public class NotificationResDTO {
     }
 
     @Getter @Builder @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @Schema(description = "채널별 미리보기 본문. 텔레그램과 이메일 모두 하나의 본문을 반환합니다.")
     public static class PreviewChunk {
+        @Schema(description = "본문 순번", example = "1")
         private final int seq;
+        @Schema(description = "렌더링된 body 문자열 길이")
         private final int length;
+        @Schema(description = "실제 발송과 동일한 HTML 본문. 텔레그램은 뉴스 카드형, 이메일은 핵심 요약과 이벤트별 브리핑형입니다.")
         private final String body;
     }
 
     @Getter @Builder @AllArgsConstructor(access = AccessLevel.PRIVATE)
+    @Schema(description = "저장된 보고서의 채널별 발송 미리보기. AI 재호출과 발송 이력 저장 없이 렌더링합니다.")
     public static class Preview {
         private final Long reportId;
         private final Long channelId;
         private final String channelType;
+        @Schema(description = "텔레그램은 HTML, 이메일은 null", nullable = true)
         private final String parseMode;
+        @Schema(description = "채널의 본문 길이 제한. 텔레그램 본문은 이 길이 안으로 제한합니다.")
         private final int maxLength;
+        @Schema(description = "이메일 제목. 텔레그램은 null", nullable = true)
         private final String subject;
+        @Schema(description = "텔레그램은 뉴스 카드 메시지 1개, 이메일은 브리핑 HTML 본문 1개")
         private final List<PreviewChunk> chunks;
+        @Schema(description = "본문 개수", example = "1")
         private final int chunkCount;
     }
 
