@@ -13,6 +13,8 @@ public enum TopicErrorCode implements BaseErrorCode {
             "batchSize는 1 이상 300 이하, intervalMinutes는 60, 720, 1440 중 하나여야 합니다."),
     QUERY_TEXT_REQUIRED(HttpStatus.BAD_REQUEST, "TOPIC400",
             "SEARCH 소스를 연결하려면 검색어가 필요합니다."),
+    INVALID_KEYWORD_PROPOSAL_SELECTION(HttpStatus.BAD_REQUEST, "TOPIC400",
+            "적용할 키워드 변경 항목을 올바르게 선택해 주세요."),
     TOPIC_NOT_FOUND(HttpStatus.NOT_FOUND, "TOPIC404",
             "수집 주제를 찾을 수 없습니다."),
     SOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "SOURCE404",
