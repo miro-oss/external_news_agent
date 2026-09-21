@@ -49,6 +49,11 @@ public class TopicKeywordProposalResDTO {
 
         @Schema(description = "변경 제안 목록")
         private final List<Change> changes;
+
+        @Schema(description = "마지막 승인에서 선택한 원본 changes의 0-based 인덱스(오름차순). "
+                + "대기 또는 승인 이력이 없는 반려는 null. 도입 전 승인의 null은 전체 적용을 의미하며, 반려 후에도 마지막 선택을 유지합니다.",
+                example = "[0, 2]", nullable = true)
+        private final List<Integer> selectedChangeIndexes;
     }
 
     @Getter

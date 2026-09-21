@@ -491,6 +491,61 @@
   gap: 0;
 }
 
+.proposal-selection-toolbar {
+  margin-bottom: 0.9rem;
+}
+
+.proposal-selection-toolbar > p,
+.proposal-selection-history {
+  margin: 0 0 0.65rem;
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+.proposal-selection-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+  font-size: 0.8rem;
+}
+
+.proposal-selection-controls > span {
+  margin-right: auto;
+  color: var(--fg-2);
+}
+
+.proposal-detail-dialog .proposal-change-option {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0.4rem 0;
+  cursor: pointer;
+}
+
+.proposal-detail-dialog .proposal-change-option > input {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin: 0.25rem 0 0;
+  accent-color: var(--primary);
+}
+
+.proposal-detail-dialog .proposal-change-option:has(input:disabled) {
+  cursor: default;
+}
+
+.proposal-detail-dialog .proposal-change-readonly > input {
+  opacity: 1;
+}
+
+.proposal-change-applied {
+  color: var(--fg-3);
+  font-size: 0.75rem;
+}
+
 .proposal-detail-dialog .proposal-change-item {
   padding: 0;
   border-radius: 0;

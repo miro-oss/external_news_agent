@@ -168,6 +168,7 @@ export interface TopicKeywordProposal {
   createdAt: string
   currentKeywords: TopicKeywordProposalCurrentKeywords
   changes: TopicKeywordProposalChange[]
+  selectedChangeIndexes?: number[] | null
 }
 
 export type ChangeType = 'NEW' | 'UPDATED'

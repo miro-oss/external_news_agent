@@ -196,8 +196,8 @@ export function useSetTopicActivation() {
 export function useApproveTopicKeywordProposal() {
   const refresh = useRefreshTopicKeywordProposals()
   return useMutation({
-    mutationFn: (proposalId: number) =>
-      post<TopicKeywordProposal>(`/topics/keyword-proposals/${proposalId}/approve`, {}),
+    mutationFn: ({ proposalId, selectedChangeIndexes }: { proposalId: number; selectedChangeIndexes: number[] }) =>
+      post<TopicKeywordProposal>(`/topics/keyword-proposals/${proposalId}/approve`, { selectedChangeIndexes }),
     onSuccess: refresh,
   })
 }

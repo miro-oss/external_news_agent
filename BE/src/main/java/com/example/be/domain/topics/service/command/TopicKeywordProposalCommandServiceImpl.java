@@ -20,6 +20,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.stream.IntStream;
 
 @Service
 @RequiredArgsConstructor
@@ -31,16 +33,35 @@ public class TopicKeywordProposalCommandServiceImpl implements TopicKeywordPropo
 
     @Override
     public TopicKeywordProposalResDTO.Item approve(Long proposalId) {
+        return approve(proposalId, null);
+    }
+
+    @Override
+    public TopicKeywordProposalResDTO.Item approve(Long proposalId, List<Integer> selectedChangeIndexes) {
         TopicKeywordProposal proposal = getLockedProposal(proposalId);
+        List<Integer> selection = validateSelection(selectedChangeIndexes, proposal.getChanges().size());
         if (proposal.getStatus() == TopicKeywordProposalStatus.APPROVED) {
             return TopicKeywordProposalConverter.toItem(proposal);
         }
         if (proposal.isPending() && !proposal.matchesCurrentTopicKeywords()) {
             throw new TopicException(TopicErrorCode.KEYWORD_PROPOSAL_STALE);
         }
-        var applied = proposal.getTopic().applyKeywordChanges(proposal.getChanges());
-        proposal.approve(LocalDateTime.now(ApiTimeZone.ZONE), applied);
+        var selectedChanges = selection.stream().map(proposal.getChanges()::get).toList();
+        var applied = proposal.getTopic().applyKeywordChanges(selectedChanges);
+        proposal.approve(LocalDateTime.now(ApiTimeZone.ZONE), applied, selection);
         return TopicKeywordProposalConverter.toItem(proposal);
+    }
+
+    private List<Integer> validateSelection(List<Integer> indexes, int changeCount) {
+        if (indexes == null) {
+            return IntStream.range(0, changeCount).boxed().toList();
+        }
+        if (indexes.isEmpty() || indexes.stream().anyMatch(index -> index == null || index < 0 || index >= changeCount)
+                || new HashSet<>(indexes).size() != indexes.size()) {
+            throw new TopicException(TopicErrorCode.INVALID_KEYWORD_PROPOSAL_SELECTION);
+        }
+        // Apply in the immutable proposal order, regardless of the order selected in the client.
+        return indexes.stream().sorted().toList();
     }
 
     @Override
@@ -83,7 +104,9 @@ public class TopicKeywordProposalCommandServiceImpl implements TopicKeywordPropo
                         || !other.getReviewedAt().isBefore(proposal.getReviewedAt())).toList();
         return baseline.apply(proposal.getChanges()).stream()
                 // Existing ADDs and absent REMOVEs never appear in this reconstructed actual delta.
-                .filter(change -> laterApprovals.stream().noneMatch(other -> other.getChanges().stream()
+                .filter(change -> laterApprovals.stream().noneMatch(other ->
+                        (other.getSelectedChangeIndexes() == null ? other.getChanges().stream()
+                                : other.getSelectedChangeIndexes().stream().map(other.getChanges()::get))
                         .anyMatch(intent -> intent.bucket() == change.bucket()
                                 && TopicKeywordReviewState.normalize(intent.keyword()).equals(change.keyword()))))
                 // A legacy change has no revision ownership. Any tracked later edit protects that keyword.

@@ -52,6 +52,7 @@ let notificationSettingsSaveError = false;
 let completeRunOnSettingsSave = false;
 let topicScheduleLoadError = false;
 let topicScheduleSaveError = false;
+let proposalReviewError = false;
 const proposalAppliedChanges = new Map();
 const proposalKeywordRevisions = new Map();
 const deliveryLogFixtures = ['SENT', 'FAILED', 'SKIPPED'].map((status, i) => ({
@@ -105,17 +106,19 @@ const keywordFields = { REQUIRED: 'requiredKeywords', OPTIONAL: 'optionalKeyword
 const currentTopicKeywords = topic => Object.fromEntries(Object.values(keywordFields).map(field => [field, [...topic[field]]]));
 const normalizedKeyword = keyword => keyword.trim().toLowerCase();
 const proposalResult = proposal => ({ ...proposal, currentKeywords: currentTopicKeywords(topics.find(topic => topic.id === proposal.topicId)) });
-function resetProposalHistory() { proposalRevision = 0; proposalAppliedChanges.clear(); proposalKeywordRevisions.clear(); }
+function resetProposalHistory() { proposalRevision = 0; proposalReviewError = false; proposalAppliedChanges.clear(); proposalKeywordRevisions.clear(); }
 function matchingProposalBaseline(proposal, topic) {
     const normalized = values => [...new Set(values.map(normalizedKeyword))].sort().join('\u0000');
     return Object.values(keywordFields).every(field => normalized(proposal.currentKeywords[field]) === normalized(topic[field]));
 }
-function reviewProposal(proposal, status) {
+function reviewProposal(proposal, status, selectedChangeIndexes = null) {
     if (proposal.status === status) return proposalResult(proposal);
     const topic = topics.find(item => item.id === proposal.topicId);
     if (status === 'APPROVED') {
         const touched = new Map();
-        for (const change of proposal.changes) {
+        const indexes = selectedChangeIndexes == null ? proposal.changes.map((_, index) => index) : [...selectedChangeIndexes].sort((a, b) => a - b);
+        for (const index of indexes) {
+            const change = proposal.changes[index];
             const field = keywordFields[change.bucket];
             const normalized = normalizedKeyword(change.keyword);
             const key = `${topic.id}:${change.bucket}:${normalized}`;
@@ -134,6 +137,7 @@ function reviewProposal(proposal, status) {
             if (entry.before !== after) deltas.push({ ...entry, after, revision });
         }
         proposalAppliedChanges.set(proposal.id, deltas);
+        proposal.selectedChangeIndexes = [...indexes];
     }
     else if (proposal.status === 'APPROVED') {
         for (const delta of proposalAppliedChanges.get(proposal.id) ?? []) {
@@ -356,6 +360,10 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 return json(res, { variant, count: proposals.filter(proposal => topics.some(topic => topic.id === proposal.topicId && topic.active)).length,
                                     proposals: proposals.map(proposal => ({ id: proposal.id, topicId: proposal.topicId, status: proposal.status, changeCount: proposal.changes.length })) });
                             }
+                            if (path === '/__qa/proposal-review-error') {
+                                proposalReviewError = body.enabled ?? url.searchParams.get('enabled') === 'true';
+                                return json(res, { enabled: proposalReviewError });
+                            }
                             if (path === '/__qa/findings') {
                                 const count = Number(body.count ?? url.searchParams.get('count') ?? 8);
                                 const mediumCount = Number(body.mediumCount ?? url.searchParams.get('mediumCount') ?? 0);
@@ -500,11 +508,20 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         else if ((match = path.match(/keyword-proposals\/(\d+)\/(approve|reject)$/))) {
                             const proposal = proposals.find(p => p.id === Number(match[1]));
                             if (!proposal) return json(res, { isSuccess: false, code: 'TOPIC404', message: '키워드 제안을 찾을 수 없습니다.', result: null }, 404);
+                            if (proposalReviewError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: null }, 500);
                             const nextStatus = match[2] === 'approve' ? 'APPROVED' : 'REJECTED';
+                            const indexes = body.selectedChangeIndexes;
+                            if (nextStatus === 'APPROVED' && indexes != null && (!Array.isArray(indexes)
+                                || indexes.some(index => index !== null && (!Number.isInteger(index) || index < -2147483648 || index > 2147483647))))
+                                return json(res, { isSuccess: false, code: 'COMMON400', message: '입력값 검증 실패입니다.', result: null }, 400);
+                            if (nextStatus === 'APPROVED' && indexes != null && (indexes.length === 0
+                                || indexes.some(index => index === null || index < 0 || index >= proposal.changes.length)
+                                || new Set(indexes).size !== indexes.length))
+                                return json(res, { isSuccess: false, code: 'TOPIC400', message: '적용할 키워드 변경 항목을 올바르게 선택해 주세요.', result: null }, 400);
                             if (nextStatus === 'APPROVED' && proposal.status === 'PENDING'
                                 && !matchingProposalBaseline(proposal, topics.find(topic => topic.id === proposal.topicId)))
                                 return json(res, { isSuccess: false, code: 'TOPIC409', message: '제안 생성 후 주제 키워드가 변경되었습니다. 새 제안을 기다려 주세요.', result: null }, 409);
-                            result = reviewProposal(proposal, nextStatus);
+                            result = reviewProposal(proposal, nextStatus, indexes);
                         }
                         else if (path === '/api/news/runs' && method === 'POST') {
                             result = runs.find(r => r.idempotencyKey === body.idempotencyKey);
