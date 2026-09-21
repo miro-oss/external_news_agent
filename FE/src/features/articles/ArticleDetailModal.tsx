@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ApiError } from '../../api/client'
 import { useArticle, useGenerateInsight, useInsight } from '../../api/queries'
 import {
   AUDIENCES,
@@ -319,6 +320,8 @@ function PerspectiveInsight({
     && generate.variables?.audience === audience
   const result = matchesCurrentSelection && generate.data ? generate.data : stored.data
   const insight = result?.insights.find((item) => item.audience === audience)
+  const hasNoStoredInsight = stored.error instanceof ApiError && stored.error.code === 'COMMON404'
+  const lookupError = !insight && !hasNoStoredInsight ? stored.error : null
   const error = matchesCurrentSelection ? generate.error : null
 
   return (
@@ -328,18 +331,30 @@ function PerspectiveInsight({
           <strong>관점 인사이트</strong>
           <span>검증된 사실과 조건부 해석을 분리해 생성합니다.</span>
         </div>
-        <button
-          type="button"
-          disabled={generate.isPending}
-          onClick={() => generate.mutate({ issueId, audience })}
-        >
-          {generate.isPending && matchesCurrentSelection
-            ? '인사이트 생성 중…'
-            : '이 관점으로 인사이트 보기 · 크레딧 1 사용'}
-        </button>
+        {!insight && hasNoStoredInsight && (
+          <button
+            type="button"
+            disabled={stored.isFetching || generate.isPending}
+            onClick={() => generate.mutate({ issueId, audience })}
+          >
+            {generate.isPending && matchesCurrentSelection
+              ? '인사이트 생성 중…'
+              : '이 관점으로 인사이트 보기 · 크레딧 1 사용'}
+          </button>
+        )}
+        {lookupError && (
+          <button
+            type="button"
+            disabled={stored.isFetching}
+            onClick={() => void stored.refetch()}
+          >
+            저장된 인사이트 다시 조회
+          </button>
+        )}
       </div>
+      {lookupError && <p className="perspective-insight-error" role="alert">{lookupError.message}</p>}
       {error && <p className="perspective-insight-error" role="alert">{error.message}</p>}
-      {stored.isPending && !insight && <ArticleInsightSkeleton />}
+      {stored.isFetching && !insight && <ArticleInsightSkeleton />}
       {insight && (
         <InsightContents
           insight={insight}
