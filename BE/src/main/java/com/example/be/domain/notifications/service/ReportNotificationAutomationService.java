@@ -2,6 +2,9 @@ package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.notifications.dto.req.NotificationReqDTO;
 import com.example.be.domain.notifications.entity.*;
+import com.example.be.domain.notifications.repository.NotificationChannelRepository;
+import com.example.be.domain.notifications.repository.NotificationGroupRepository;
+import com.example.be.domain.notifications.repository.NotificationRecipientRepository;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.topics.repository.TopicRepository;
@@ -30,6 +33,9 @@ public class ReportNotificationAutomationService {
     private final NotificationRenderer renderer;
     private final RunDeliverySnapshotStore runDeliveries;
     private final ReportDeliveryOutboxStore outbox;
+    private final NotificationGroupRepository groups;
+    private final NotificationChannelRepository channels;
+    private final NotificationRecipientRepository recipients;
     private static final LongListJsonConverter IDS = new LongListJsonConverter();
 
     public record Policy(boolean enabled, boolean run, boolean daily, List<Long> groupIds,
@@ -128,9 +134,17 @@ public class ReportNotificationAutomationService {
                 report.getId(), report.getReportScope(), targets.size(), queuedCount);
     }
 
-    private NotificationGroup optionalGroup(Long id) { try { return management.findGroup(id, true); } catch (com.example.be.domain.notifications.exception.NotificationException ex) { return null; } }
-    private NotificationChannel optionalChannel(Long id) { try { return management.findChannel(id, true); } catch (com.example.be.domain.notifications.exception.NotificationException ex) { return null; } }
-    private boolean activeRecipient(Long id) { try { return management.findRecipient(id).isActive(); } catch (com.example.be.domain.notifications.exception.NotificationException ex) { return false; } }
+    // Optional stale destinations are normal. Catching a transactional service's not-found
+    // exception here would still leave the report-completion transaction rollback-only.
+    private NotificationGroup optionalGroup(Long id) {
+        return groups.findById(id).filter(NotificationGroup::isActive).orElse(null);
+    }
+    private NotificationChannel optionalChannel(Long id) {
+        return channels.findById(id).filter(NotificationChannel::isActive).orElse(null);
+    }
+    private boolean activeRecipient(Long id) {
+        return recipients.findById(id).filter(NotificationRecipient::isActive).isPresent();
+    }
     private void requireTopic(Long id) { if (!topics.existsById(id)) throw new GeneralException(GeneralErrorCode.NOT_FOUND, "수집 주제를 찾을 수 없습니다."); }
     static List<Long> ids(List<Long> values) {
         if (values == null) return List.of();
