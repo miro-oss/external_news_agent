@@ -61,9 +61,16 @@ public class NotificationRenderer {
         StringBuilder html = new StringBuilder("<html><body style=\"margin:0;padding:24px;background:#f4f6f8;color:#172331;"
                 + "font-family:Arial,sans-serif;line-height:1.7\"><div style=\"max-width:680px;margin:0 auto;"
                 + "padding:24px;background:#ffffff\"><p style=\"color:#526578;font-size:12px\">NEWS BRIEFING</p><h2>")
-                .append(escape(report.getTitle())).append("</h2><h3>핵심 요약</h3><ul>");
-        digest(content, findings, 700).forEach(line -> html.append("<li>").append(escape(line)).append("</li>"));
-        html.append("</ul>");
+                .append(escape(report.getTitle())).append("</h2><h3 style=\"margin:16px 0 4px\">핵심 요약</h3>");
+        // Mail clients can override list indentation; use cells to keep summary bullets at the left edge.
+        html.append("<table role=\"presentation\" width=\"100%\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" "
+                + "style=\"border-collapse:collapse;border-spacing:0;margin:0;text-align:left;"
+                + "mso-table-lspace:0pt;mso-table-rspace:0pt\"><tbody>");
+        digest(content, findings, 700).forEach(line -> html.append("<tr><td width=\"20\" valign=\"top\" aria-hidden=\"true\" "
+                        + "style=\"width:20px;padding:0;line-height:1.7\">•</td>"
+                        + "<td valign=\"top\" style=\"padding:0;line-height:1.7\">")
+                .append(escape(line)).append("</td></tr>"));
+        html.append("</tbody></table>");
         List<NewsCard> cards = cards(content, findings);
         for (int i = 0; i < cards.size(); i++) {
             NewsCard card = cards.get(i);
@@ -72,15 +79,12 @@ public class NotificationRenderer {
                     .append(escape(limit(card.title(), 180))).append("</h3><p><strong>주요 내용</strong><br>")
                     .append(escape(limit(card.summary(), 1200))).append("</p>");
             if (!card.watches().isEmpty()) {
-                // Mail clients can override list indentation; use cells to control the bullet spacing.
                 html.append("<table role=\"presentation\" width=\"100%\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" "
-                        + "style=\"border-collapse:collapse;border-spacing:0;margin:0;"
+                        + "style=\"border-collapse:collapse;border-spacing:0;margin:0;text-align:left;"
                         + "mso-table-lspace:0pt;mso-table-rspace:0pt\"><tbody>"
-                        + "<tr><td colspan=\"2\" style=\"padding:0 0 4px;line-height:1.7\">"
+                        + "<tr><td style=\"padding:0 0 4px;line-height:1.7\">"
                         + "<strong>후속 확인</strong></td></tr>");
-                card.watches().forEach(watch -> html.append("<tr><td width=\"20\" valign=\"top\" aria-hidden=\"true\" "
-                                + "style=\"width:20px;padding:0;line-height:1.7\">•</td>"
-                                + "<td valign=\"top\" style=\"padding:0;line-height:1.7\">")
+                card.watches().forEach(watch -> html.append("<tr><td valign=\"top\" style=\"padding:0;line-height:1.7\">")
                         .append(escape(limit(watch, 600))).append("</td></tr>"));
                 html.append("</tbody></table>");
             }
