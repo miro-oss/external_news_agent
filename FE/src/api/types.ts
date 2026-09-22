@@ -103,6 +103,12 @@ export interface Topic {
   active: boolean
 }
 
+/** GET /topics/{topicId} 응답. 편집 시 연결된 소스의 검색어 필수 여부를 확인한다. */
+export interface TopicDetail extends Topic {
+  lastCollectedAt: string | null
+  sources: (TopicSourceBrief & Pick<Source, 'language' | 'robotsStatus' | 'active'>)[]
+}
+
 export interface TopicSurgeKeyword {
   keyword: string
   issueCount: number

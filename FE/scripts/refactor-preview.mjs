@@ -105,7 +105,10 @@ function notificationSettingsFixtures(variant) {
 const keywordFields = { REQUIRED: 'requiredKeywords', OPTIONAL: 'optionalKeywords', EXCLUDED: 'excludedKeywords' };
 const currentTopicKeywords = topic => Object.fromEntries(Object.values(keywordFields).map(field => [field, [...topic[field]]]));
 const normalizedKeyword = keyword => keyword.trim().toLowerCase();
-const proposalResult = proposal => ({ ...proposal, currentKeywords: currentTopicKeywords(topics.find(topic => topic.id === proposal.topicId)) });
+const proposalResult = proposal => {
+    const topic = topics.find(topic => topic.id === proposal.topicId);
+    return { ...proposal, topicName: topic.name, currentKeywords: currentTopicKeywords(topic) };
+};
 function resetProposalHistory() { proposalRevision = 0; proposalReviewError = false; proposalAppliedChanges.clear(); proposalKeywordRevisions.clear(); }
 function matchingProposalBaseline(proposal, topic) {
     const normalized = values => [...new Set(values.map(normalizedKeyword))].sort().join('\u0000');
@@ -318,7 +321,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 completeRunOnSettingsSave = body.completeOnSave ?? completeRunOnSettingsSave;
                                 return json(res, { saveError: notificationSettingsSaveError, completeOnSave: completeRunOnSettingsSave });
                             }
-                            if (path === '/__qa/topic-schedule-errors') {
+                            if (path === '/__qa/topic-schedule-errors' || path === '/__qa/topic-edit-errors') {
                                 topicScheduleLoadError = body.loadError ?? topicScheduleLoadError;
                                 topicScheduleSaveError = body.saveError ?? topicScheduleSaveError;
                                 return json(res, { loadError: topicScheduleLoadError, saveError: topicScheduleSaveError });

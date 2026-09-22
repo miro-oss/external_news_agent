@@ -6,10 +6,7 @@ import { MutationStatus } from './MutationStatus'
 import { TopicTableSkeleton } from './SettingsSkeletons'
 import { TopicDeliverySettings } from './TopicDeliverySettings'
 import { TopicScheduleSettings } from './TopicScheduleSettings'
-
-function formatKeywords(keywords: string[]) {
-  return keywords.length > 0 ? keywords.join(', ') : '—'
-}
+import { TopicEditSettings } from './TopicEditSettings'
 
 function formatSignedDelta(value: number) {
   return value > 0 ? `+${value}` : `${value}`
@@ -64,7 +61,6 @@ export function TopicTable() {
             <colgroup>
               <col className="topic-name-column" />
               <col className="topic-query-column" />
-              <col className="topic-conditions-column" />
               <col className="topic-surge-column" />
               <col className="topic-related-column" />
               <col className="topic-schedule-column" />
@@ -75,7 +71,6 @@ export function TopicTable() {
               <tr>
                 <th>주제</th>
                 <th>검색 키워드</th>
-                <th>기사 조건</th>
                 <th title="최근 7일에 전주보다 언급이 늘어난 키워드입니다. 숫자는 관련 주제 묶음의 증가 건수입니다.">지난주 대비 증가</th>
                 <th title="최근 7일에 함께 등장한 키워드와 비중입니다.">연관 키워드</th>
                 <th>수집 일정</th>
@@ -89,14 +84,6 @@ export function TopicTable() {
                   <td className="topic-name-cell"><strong className="topic-name-scroll" title={topic.name}
                     tabIndex={topic.name.length > 24 ? 0 : undefined}>{topic.name}</strong></td>
                   <td>{topic.queryText ?? '—'}</td>
-                  <td className="topic-conditions-cell">
-                    <div className="topic-condition-lines">
-                      {topic.requiredKeywords.length > 0 && <span className="topic-condition-row"><small>모두</small><span>{formatKeywords(topic.requiredKeywords)}</span></span>}
-                      {topic.optionalKeywords.length > 0 && <span className="topic-condition-row"><small>하나 이상</small><span>{formatKeywords(topic.optionalKeywords)}</span></span>}
-                      {topic.excludedKeywords.length > 0 && <span className="topic-condition-row"><small>제외</small><span>{formatKeywords(topic.excludedKeywords)}</span></span>}
-                      {topic.requiredKeywords.length + topic.optionalKeywords.length + topic.excludedKeywords.length === 0 && '—'}
-                    </div>
-                  </td>
                   <td className="topic-signal-cell"><KeywordSignalList items={topic.surgeKeywords ?? []} emptyLabel="—"
                     renderLabel={(keyword) => `${keyword.keyword} ${formatSignedDelta(keyword.deltaIssueCount)}`}
                     isEmphasized={(keyword) => keyword.deltaIssueCount > 50}
@@ -110,6 +97,7 @@ export function TopicTable() {
                     onClick={() => setActive(topic.id, !topic.active)}>
                     {activation.isPending && activation.variables?.topicId === topic.id ? '처리 중…' : topic.active ? '수집 중지' : '수집 재개'}
                   </button>
+                  <TopicEditSettings topic={topic} />
                   </div></td>
                 </tr>
               ))}
