@@ -23,6 +23,7 @@ import {
   notificationGroupsKey,
 } from './notificationGroupCache'
 import { getAllNotificationPages } from './notificationPages'
+import { approveTopicKeywordProposalOptions, rejectTopicKeywordProposalOptions } from './topicKeywordProposalReview'
 import type { CollectionRunDelivery } from './notificationConnections'
 import type {
   ArticleDetail,
@@ -154,14 +155,6 @@ function useRefreshOnSuccess() {
   }
 }
 
-function useRefreshTopicKeywordProposals() {
-  const queryClient = useQueryClient()
-  return () => {
-    void queryClient.invalidateQueries({ queryKey: ['topic-keyword-proposals'] })
-    void queryClient.invalidateQueries({ queryKey: keys.topics })
-  }
-}
-
 export function useCreateSource() {
   const refresh = useRefreshOnSuccess()
   return useMutation({
@@ -192,21 +185,11 @@ export function useSetTopicActivation() {
 }
 
 export function useApproveTopicKeywordProposal() {
-  const refresh = useRefreshTopicKeywordProposals()
-  return useMutation({
-    mutationFn: ({ proposalId, selectedChangeIndexes }: { proposalId: number; selectedChangeIndexes: number[] }) =>
-      post<TopicKeywordProposal>(`/topics/keyword-proposals/${proposalId}/approve`, { selectedChangeIndexes }),
-    onSuccess: refresh,
-  })
+  return useMutation(approveTopicKeywordProposalOptions(useQueryClient()))
 }
 
 export function useRejectTopicKeywordProposal() {
-  const refresh = useRefreshTopicKeywordProposals()
-  return useMutation({
-    mutationFn: (proposalId: number) =>
-      post<TopicKeywordProposal>(`/topics/keyword-proposals/${proposalId}/reject`, {}),
-    onSuccess: refresh,
-  })
+  return useMutation(rejectTopicKeywordProposalOptions(useQueryClient()))
 }
 
 export function useArticles(filters: ArticleFilters) {

@@ -96,3 +96,27 @@ test('empty proposals cannot be approved, and cards lead into selection rather t
     assert.doesNotMatch(html, />승인<\/button>/)
   } finally { client.clear() }
 })
+
+test('a stale proposal preserves the server error, disables repeat application and offers an explicit rejection', () => {
+  const message = '제안 생성 후 주제 키워드가 변경되었습니다. 새 제안을 기다려 주세요.'
+  const html = render({}, { error: new ApiError('TOPIC409', message, 409) })
+  assert.ok(html.includes(`role="alert">${message}`))
+  assert.ok(checkboxes(html).every(input => input.includes('disabled')))
+  assert.match(html, /<button type="button" disabled="">적용할 수 없는 제안<\/button>/)
+  assert.match(html, /<button type="button" class="secondary-button proposal-reject-button">반려하고 닫기<\/button>/)
+  assert.match(html, /다음 자동 수집에서 새 제안이 생성되는지 확인해 주세요/)
+  assert.match(render({}, { hasConflict: true, error: new Error('반려 실패') }), /disabled="">적용할 수 없는 제안/)
+  assert.doesNotMatch(render({ status: 'REJECTED' }, { hasConflict: true }), /적용할 수 없는 제안|반려하고 닫기/)
+})
+
+test('background refresh errors remain visible alongside previously loaded cards', () => {
+  const client = new QueryClient()
+  const key = ['topic-keyword-proposals', 'PENDING']
+  client.setQueryData(key, { content: [proposal] })
+  client.getQueryCache().find({ queryKey: key, exact: true }).setState({ status: 'error', error: new ApiError('NETWORK', '제안 목록을 새로 불러오지 못했습니다.', 502) })
+  try {
+    const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(Panel)))
+    assert.match(html, /role="alert">제안 목록을 새로 불러오지 못했습니다./)
+    assert.match(html, />선택해서 적용<\/button>/)
+  } finally { client.clear() }
+})

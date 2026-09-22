@@ -60,6 +60,7 @@ export function TopicKeywordProposalPanel() {
   const [actingIds, setActingIds] = useState<Set<number>>(() => new Set())
   const [selected, setSelected] = useState<TopicKeywordProposal | null>(null)
   const [reviewErrors, setReviewErrors] = useState<Map<number, unknown>>(() => new Map())
+  const [conflictedIds, setConflictedIds] = useState<Set<number>>(() => new Set())
   const toolbar = useRef<HTMLDivElement>(null)
   const completedReviewIds = useRef(new Set<number>())
   const proposals = useTopicKeywordProposals(filter)
@@ -80,17 +81,27 @@ export function TopicKeywordProposalPanel() {
   }
 
   async function review(proposalId: number, action: 'approve' | 'reject', selectedChangeIndexes: number[] = []) {
-    if (actingIds.has(proposalId) || (action === 'approve' && selectedChangeIndexes.length === 0)) return
+    const proposal = proposals.data?.content.find(item => item.id === proposalId) ?? (selected?.id === proposalId ? selected : null)
+    const staleProposal = proposal?.status === 'PENDING' && conflictedIds.has(proposalId)
+    if (actingIds.has(proposalId) || (action === 'approve' && (selectedChangeIndexes.length === 0 || staleProposal))) return
 
     resetFeedback()
     setActingIds((current) => new Set(current).add(proposalId))
     try {
       if (action === 'approve') await approve.mutateAsync({ proposalId, selectedChangeIndexes })
       else await reject.mutateAsync(proposalId)
+      setConflictedIds(current => {
+        const next = new Set(current)
+        next.delete(proposalId)
+        return next
+      })
       completedReviewIds.current.add(proposalId)
       setSelected(current => current?.id === proposalId ? null : current)
     } catch (error) {
       setReviewErrors(current => new Map(current).set(proposalId, error))
+      if (action === 'approve' && error instanceof ApiError && error.code === 'TOPIC409') {
+        setConflictedIds(current => new Set(current).add(proposalId))
+      }
     } finally {
       setActingIds((current) => {
         const next = new Set(current)
@@ -127,6 +138,7 @@ export function TopicKeywordProposalPanel() {
         />
       </div>
 
+      {proposals.error && <MutationStatus error={proposals.error} success={null} />}
       {proposals.data.content.length === 0 ? (
         <p className="empty-block">{emptyMessage(filter)}</p>
       ) : (
@@ -147,6 +159,7 @@ export function TopicKeywordProposalPanel() {
       {selectedProposal && createPortal(
         <ProposalDetailDialog proposal={selectedProposal} isActing={actingIds.has(selectedProposal.id)}
           error={reviewErrors.get(selectedProposal.id)} fallbackFocus={toolbar}
+          hasConflict={conflictedIds.has(selectedProposal.id)}
           completedReviewIds={completedReviewIds}
           onDismiss={() => setSelected(null)}
           onApprove={indexes => review(selectedProposal.id, 'approve', indexes)}
@@ -275,10 +288,11 @@ function OverflowKeywords({ keywords, tone }: { keywords: string[]; tone: 'add' 
   </div>
 }
 
-export function ProposalDetailDialog({ proposal, isActing, error, fallbackFocus, completedReviewIds, onDismiss, onApprove, onReject }: {
+export function ProposalDetailDialog({ proposal, isActing, error, hasConflict = false, fallbackFocus, completedReviewIds, onDismiss, onApprove, onReject }: {
   proposal: TopicKeywordProposal
   isActing: boolean
   error: unknown
+  hasConflict?: boolean
   fallbackFocus: RefObject<HTMLDivElement | null>
   completedReviewIds: RefObject<Set<number>>
   onDismiss: () => void
@@ -290,12 +304,13 @@ export function ProposalDetailDialog({ proposal, isActing, error, fallbackFocus,
   const closeButton = useRef<HTMLButtonElement>(null)
   const [selection, setSelection] = useState<Set<number>>(() => new Set())
   const approved = proposal.status === 'APPROVED'
+  const staleProposal = proposal.status === 'PENDING' && (hasConflict || (error instanceof ApiError && error.code === 'TOPIC409'))
   const appliedSelection = new Set(proposal.selectedChangeIndexes ?? proposal.changes.map((_, index) => index))
   const selectedIndexes = proposal.changes.flatMap((_, index) => selection.has(index) ? [index] : [])
   const selectedCount = selectedIndexes.length
 
   function toggleSelection(index: number) {
-    if (isActing || approved) return
+    if (isActing || approved || staleProposal) return
     setSelection(current => {
       const next = new Set(current)
       if (next.has(index)) next.delete(index)
@@ -352,9 +367,9 @@ export function ProposalDetailDialog({ proposal, isActing, error, fallbackFocus,
             <p id={`${id}-selection-help`} className="muted">적용할 변경을 선택하세요. 선택하지 않은 항목은 반영하지 않습니다.</p>
             <div className="proposal-selection-controls">
               <span role="status">{selectedCount} / {proposal.changes.length}개 선택</span>
-              <button type="button" className="text-button" disabled={isActing || selectedCount === proposal.changes.length}
+              <button type="button" className="text-button" disabled={isActing || staleProposal || selectedCount === proposal.changes.length}
                 onClick={() => setSelection(new Set(proposal.changes.map((_, index) => index)))}>전체 선택</button>
-              <button type="button" className="text-button" disabled={isActing || selectedCount === 0}
+              <button type="button" className="text-button" disabled={isActing || staleProposal || selectedCount === 0}
                 onClick={() => setSelection(new Set())}>선택 해제</button>
             </div>
           </div>}
@@ -367,7 +382,7 @@ export function ProposalDetailDialog({ proposal, isActing, error, fallbackFocus,
                 <li className="proposal-change-item" key={`${proposal.id}-${change.bucket}-${change.keyword}-${index}`}>
                   <label className={`proposal-change-option${approved ? ' proposal-change-readonly' : ''}`}>
                     <input type="checkbox" checked={approved ? appliedSelection.has(index) : selection.has(index)}
-                      disabled={isActing || approved} onChange={() => toggleSelection(index)}
+                      disabled={isActing || approved || staleProposal} onChange={() => toggleSelection(index)}
                       aria-describedby={approved ? undefined : `${id}-selection-help`} />
                     <span className="proposal-change-title">
                       <span className={`proposal-change-kind proposal-change-${change.action.toLowerCase()}`}>{BUCKET_LABELS[change.bucket]} · {ACTION_LABELS[change.action]}</span>
@@ -384,23 +399,28 @@ export function ProposalDetailDialog({ proposal, isActing, error, fallbackFocus,
     </div>
     <footer className="proposal-detail-footer">
       <MutationStatus error={error} success={null} />
+      {staleProposal && <p className="muted proposal-conflict-help">
+        현재 키워드와 맞지 않아 적용하지 않았습니다. 이 제안을 반려하거나 다음 자동 수집에서 새 제안이 생성되는지 확인해 주세요.
+      </p>}
       <ProposalActions proposal={proposal} isActing={isActing} onApprove={() => onApprove(selectedIndexes)} onReject={onReject}
-        approveLabel={`선택 ${selectedCount}개 적용`} approveDisabled={selectedCount === 0} />
+        approveLabel={staleProposal ? '적용할 수 없는 제안' : `선택 ${selectedCount}개 적용`} approveDisabled={staleProposal || selectedCount === 0}
+        rejectLabel={staleProposal ? '반려하고 닫기' : '반려'} />
     </footer>
   </dialog>
 }
 
-function ProposalActions({ proposal, isActing, onApprove, onReject, approveLabel = '승인', approveDisabled = false }: {
+function ProposalActions({ proposal, isActing, onApprove, onReject, approveLabel = '승인', approveDisabled = false, rejectLabel = '반려' }: {
   proposal: TopicKeywordProposal
   isActing: boolean
   onApprove: () => void
   onReject: () => void
   approveLabel?: string
   approveDisabled?: boolean
+  rejectLabel?: string
 }) {
   return <div className="proposal-actions">
     {proposal.status !== 'APPROVED' && <button type="button" disabled={isActing || approveDisabled} onClick={onApprove}>{isActing ? '처리 중…' : approveLabel}</button>}
-    {proposal.status !== 'REJECTED' && <button type="button" className="secondary-button proposal-reject-button" disabled={isActing} onClick={onReject}>{isActing ? '처리 중…' : '반려'}</button>}
+    {proposal.status !== 'REJECTED' && <button type="button" className="secondary-button proposal-reject-button" disabled={isActing} onClick={onReject}>{isActing ? '처리 중…' : rejectLabel}</button>}
   </div>
 }
 

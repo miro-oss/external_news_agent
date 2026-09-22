@@ -568,7 +568,8 @@
   border-top: 1px solid var(--line);
 }
 
-.proposal-detail-footer > .error {
+.proposal-detail-footer > .error,
+.proposal-detail-footer > .proposal-conflict-help {
   justify-self: stretch;
   margin: 0;
 }

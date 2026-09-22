@@ -13,6 +13,7 @@ import com.example.be.domain.topics.repository.TopicKeywordProposalRepository;
 import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,6 +24,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.stream.IntStream;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional
@@ -41,14 +43,20 @@ public class TopicKeywordProposalCommandServiceImpl implements TopicKeywordPropo
         TopicKeywordProposal proposal = getLockedProposal(proposalId);
         List<Integer> selection = validateSelection(selectedChangeIndexes, proposal.getChanges().size());
         if (proposal.getStatus() == TopicKeywordProposalStatus.APPROVED) {
+            log.info("키워드 제안 승인 재요청: proposalId={}, topicId={}, status={}",
+                    proposalId, proposal.getTopic().getId(), proposal.getStatus());
             return TopicKeywordProposalConverter.toItem(proposal);
         }
         if (proposal.isPending() && !proposal.matchesCurrentTopicKeywords()) {
+            log.warn("현재 키워드와 제안 기준이 달라 승인을 거부했습니다: proposalId={}, topicId={}, status={}, code=TOPIC409",
+                    proposalId, proposal.getTopic().getId(), proposal.getStatus());
             throw new TopicException(TopicErrorCode.KEYWORD_PROPOSAL_STALE);
         }
         var selectedChanges = selection.stream().map(proposal.getChanges()::get).toList();
         var applied = proposal.getTopic().applyKeywordChanges(selectedChanges);
         proposal.approve(LocalDateTime.now(ApiTimeZone.ZONE), applied, selection);
+        log.info("키워드 제안 승인 처리: proposalId={}, topicId={}, status={}",
+                proposalId, proposal.getTopic().getId(), proposal.getStatus());
         return TopicKeywordProposalConverter.toItem(proposal);
     }
 
@@ -68,6 +76,8 @@ public class TopicKeywordProposalCommandServiceImpl implements TopicKeywordPropo
     public TopicKeywordProposalResDTO.Item reject(Long proposalId) {
         TopicKeywordProposal proposal = getLockedProposal(proposalId);
         if (proposal.getStatus() == TopicKeywordProposalStatus.REJECTED) {
+            log.info("키워드 제안 반려 재요청: proposalId={}, topicId={}, status={}",
+                    proposalId, proposal.getTopic().getId(), proposal.getStatus());
             return TopicKeywordProposalConverter.toItem(proposal);
         }
         if (proposal.getStatus() == TopicKeywordProposalStatus.APPROVED) {
@@ -76,6 +86,8 @@ public class TopicKeywordProposalCommandServiceImpl implements TopicKeywordPropo
             proposal.getTopic().reverseKeywordChanges(applied);
         }
         proposal.reject(LocalDateTime.now(ApiTimeZone.ZONE));
+        log.info("키워드 제안 반려 처리: proposalId={}, topicId={}, status={}",
+                proposalId, proposal.getTopic().getId(), proposal.getStatus());
         return TopicKeywordProposalConverter.toItem(proposal);
     }
 

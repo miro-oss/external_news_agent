@@ -81,6 +81,23 @@ class TopicKeywordProposalRepositoryIntegrationTests {
     }
 
     @Test
+    void pendingQueryFiltersTopicAndStatusAndFetchesKeywordsForDetachedFreshnessChecks() {
+        Topic topic = topic("제안 기준 조회 주제", true);
+        var pending = proposal(topic, TopicKeywordProposalStatus.PENDING);
+        proposal(topic, TopicKeywordProposalStatus.APPROVED);
+        proposal(topic, TopicKeywordProposalStatus.REJECTED);
+        proposal(topic("다른 제안 주제", true), TopicKeywordProposalStatus.PENDING);
+        flushAndClear();
+
+        var found = proposals.findByTopic_IdAndStatus(topic.getId(), TopicKeywordProposalStatus.PENDING);
+        entityManager.clear();
+
+        assertThat(found).extracting(TopicKeywordProposal::getId).containsExactly(pending.getId());
+        assertThat(found.getFirst().matchesCurrentTopicKeywords()).isTrue();
+        assertThat(found.getFirst().getTopic().getRequiredKeywords()).containsExactly("HBM");
+    }
+
+    @Test
     void legacyApprovedRowRetainsNullSelectionAfterReload() {
         var proposal = proposal(topic("레거시 선택 주제", true), TopicKeywordProposalStatus.APPROVED);
         flushAndClear();
@@ -166,6 +183,9 @@ class TopicKeywordProposalRepositoryIntegrationTests {
                 .triggerType(TriggerType.SCHEDULED).build());
         return proposals.save(TopicKeywordProposal.builder().topic(topic).collectionRunId(run.getId())
                 .idempotencyKey("proposal-visibility:" + run.getId()).summary("저장된 키워드 제안")
+                .baselineRequiredKeywords(topic.getRequiredKeywords())
+                .baselineOptionalKeywords(topic.getOptionalKeywords())
+                .baselineExcludedKeywords(topic.getExcludedKeywords())
                 .changes(List.of()).status(status).createdAt(LocalDateTime.of(2026, 9, 8, 16, 0)).build());
     }
 

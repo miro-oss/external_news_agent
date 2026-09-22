@@ -22,6 +22,7 @@ import com.example.be.domain.collection.service.command.CollectionResultWriter;
 import com.example.be.domain.topics.entity.TopicKeywordBucket;
 import com.example.be.domain.topics.entity.TopicKeywordChange;
 import com.example.be.domain.topics.entity.TopicKeywordChangeAction;
+import com.example.be.domain.topics.entity.TopicKeywordProposal;
 import com.example.be.domain.topics.entity.TopicKeywordProposalStatus;
 import com.example.be.domain.topics.repository.TopicKeywordProposalRepository;
 import com.example.be.global.config.ApiTimeZone;
@@ -67,8 +68,13 @@ public class TopicKeywordStrategyOrchestrator {
         }
         Map<Long, TopicRunStats> statsByTopic = topicRunStats(runId);
         for (Long topicId : statsByTopic.keySet()) {
-            if (proposalRepository.existsByTopic_IdAndStatus(topicId, TopicKeywordProposalStatus.PENDING)) {
-                log.info("검토 대기 중인 키워드 제안이 있어 새 제안을 건너뜁니다. topicId={}", topicId);
+            // Stale proposals remain available for review, but cannot be approved and must not
+            // prevent the next scheduled run from producing a proposal for the current keywords.
+            boolean hasCurrentPendingProposal = proposalRepository
+                    .findByTopic_IdAndStatus(topicId, TopicKeywordProposalStatus.PENDING).stream()
+                    .anyMatch(TopicKeywordProposal::matchesCurrentTopicKeywords);
+            if (hasCurrentPendingProposal) {
+                log.info("현재 키워드에 대한 검토 대기 제안이 있어 새 제안을 건너뜁니다. topicId={}", topicId);
                 continue;
             }
             propose(run, topicId, statsByTopic.get(topicId));
