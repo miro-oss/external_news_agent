@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePreviewNotification } from '../../api/queries'
 import { useAutoDeliveries, useRetryAutoDeliveries, useShareReport, type DeliveryTargets } from '../../api/notificationConnections'
 import { DeliveryTargetPicker } from './DeliveryTargetPicker'
@@ -13,12 +13,19 @@ const LABELS: Record<string, string> = { PENDING: '전달 대기', PROCESSING: '
 export function ReportSharePanel({ reportId }: { reportId: number }) {
   const [targets, setTargets] = useState<DeliveryTargets>({ groupIds: [], recipientIds: [], channelIds: [] })
   const [requestKey, setRequestKey] = useState(() => `r${reportId}-${crypto.randomUUID()}`)
+  const [dismissedBatchId, setDismissedBatchId] = useState<string | null>(null)
   const send = useShareReport(reportId)
   const preview = usePreviewNotification()
   const deliveries = useAutoDeliveries(reportId)
   const retry = useRetryAutoDeliveries(reportId)
   const availability = useDeliveryTargetAvailability(targets)
   const feedback = reportShareFeedback(send.data)
+  const successfulBatchId = feedback.success ? send.data?.deliveryBatchId : undefined
+  useEffect(() => {
+    if (!successfulBatchId) return
+    const timer = window.setTimeout(() => setDismissedBatchId(successfulBatchId), 5000)
+    return () => window.clearTimeout(timer)
+  }, [successfulBatchId])
   const failureBatchId = failedDeliveryBatchId(send.error)
   const canRetryFailed = canRetryFailedReportShare(send.data, send.error)
   const resultBatchId = failureBatchId ?? (send.data && (send.data.failedCount || send.data.skippedCount) ? send.data.deliveryBatchId : null)
@@ -47,7 +54,7 @@ export function ReportSharePanel({ reportId }: { reportId: number }) {
     </div>
     {canRetryFailed && <p className="muted">새 요청은 중복 전달될 수 있으니 연결 설정과 수신함을 확인한 뒤 다시 전달해 주세요.</p>}
     <MutationStatus error={send.error ?? preview.error ?? deliveries.error}
-      success={feedback.success} warning={feedback.warning} />
+      success={successfulBatchId === dismissedBatchId ? null : feedback.success} warning={feedback.warning} />
     {resultBatchId && <ReportShareDeliveryLogs key={resultBatchId} reportId={reportId} deliveryBatchId={resultBatchId} />}
     {preview.isPending && !preview.data && <MessagePreviewSkeleton />}
     {preview.data && <div className="report-message-preview"><strong>{preview.data.subject ?? '텔레그램 요약'}</strong>{preview.data.chunks.map((chunk) => <p key={chunk.seq}>{plainPreview(chunk.body)}</p>)}</div>}

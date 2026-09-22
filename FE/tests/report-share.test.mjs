@@ -20,20 +20,32 @@ test('an idempotent replay of an all-failed batch never says delivery completed'
   const result = reportShareFeedback({ sentCount: 0, failedCount: 2, skippedCount: 0 })
   assert.equal(result.label, '전달 실패')
   assert.equal(result.success, null)
-  assert.match(result.warning, /0명 전달 · 2명 실패/)
+  assert.match(result.warning, /0건 전달 · 2건 실패/)
 })
 
 test('partial and excluded deliveries retain their individual outcomes', () => {
   const partial = reportShareFeedback({ sentCount: 1, failedCount: 1, skippedCount: 1 })
   assert.equal(partial.label, '일부 전달 완료')
   assert.equal(partial.success, null)
-  assert.match(partial.warning, /1명 전달 · 1명 실패 · 1명 제외/)
+  assert.match(partial.warning, /1건 전달 · 1건 실패 · 1건 제외/)
   const skipped = reportShareFeedback({ sentCount: 0, failedCount: 0, skippedCount: 2 })
   assert.equal(skipped.label, '전달 제외')
   assert.equal(skipped.success, null)
-  assert.deepEqual(reportShareFeedback({ sentCount: 2, failedCount: 0, skippedCount: 0 }), {
-    label: '전달 완료', success: '2명에게 전달했습니다.', warning: null,
+})
+
+test('sending by email and Telegram counts each recipient once', () => {
+  const results = [
+    { recipientId: 1, recipientName: '수신자', channelType: 'EMAIL', status: 'SENT' },
+    { recipientId: 1, recipientName: '수신자', channelType: 'TELEGRAM', status: 'SENT' },
+  ]
+  const batch = { sentCount: 2, failedCount: 0, skippedCount: 0, results }
+  assert.deepEqual(reportShareFeedback(batch), {
+    label: '전달 완료', success: '1명에게 전달했습니다.', warning: null,
   })
+  assert.equal(reportShareFeedback({ ...batch, sentCount: 1, results: results.slice(0, 1) }).success, '1명에게 전달했습니다.')
+  assert.equal(reportShareFeedback({ ...batch, sentCount: 4, results: [
+    ...results, ...results.map(result => ({ ...result, recipientId: 2 })),
+  ] }).success, '2명에게 전달했습니다.', 'recipients with the same name still count separately')
 })
 
 test('a failed send refreshes saved delivery logs and preserves the key on explicit replay', async (context) => {

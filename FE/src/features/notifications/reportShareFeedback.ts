@@ -39,8 +39,9 @@ export function reportShareFeedback(batch: NotificationSendBatch | undefined) {
     return {
       label: sentCount ? '일부 전달 완료' : failedCount ? '전달 실패' : '전달 제외',
       success: null,
-      warning: `${sentCount}명 전달 · ${failedCount}명 실패 · ${skippedCount}명 제외. 아래에서 수신자별 결과를 확인해 주세요.`,
+      warning: `${sentCount}건 전달 · ${failedCount}건 실패 · ${skippedCount}건 제외. 아래에서 수신자별 결과를 확인해 주세요.`,
     }
   }
-  return { label: '전달 완료', success: `${sentCount}명에게 전달했습니다.`, warning: null }
+  const recipientCount = new Set(batch.results.filter((result) => result.status === 'SENT').map((result) => result.recipientId)).size
+  return { label: '전달 완료', success: `${recipientCount}명에게 전달했습니다.`, warning: null }
 }
