@@ -32,6 +32,19 @@
   font-size: 0.82rem;
 }
 
+.settings-page .topic-signal-help {
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 0.65rem;
+  line-height: 1.6;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .topic-signal-help > p {
+  margin: 0;
+}
+
 .settings-page .topic-visibility-toggle {
   margin-left: auto;
   padding: 0.35rem 0.6rem;

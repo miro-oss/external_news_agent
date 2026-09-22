@@ -117,6 +117,12 @@ export function TopicTable() {
           </table>
         </div>
       )}
+      {topics.data.content.length > 0 && (
+        <div className="hint topic-signal-help">
+          <p>지난주 대비 증가: 최근 7일의 키워드별 이슈 수가 직전 7일보다 늘어난 수입니다. 같은 사건의 기사들은 하나의 이슈로 셉니다.</p>
+          <p>연관 키워드: 최근 7일 해당 주제에서 함께 등장한 키워드와, 전체 이슈 중 그 키워드가 포함된 비율입니다.</p>
+        </div>
+      )}
     </>
   )
 }
