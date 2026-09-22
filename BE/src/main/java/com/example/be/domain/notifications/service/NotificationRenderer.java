@@ -72,8 +72,10 @@ public class NotificationRenderer {
                     .append(escape(limit(card.title(), 180))).append("</h3><p><strong>주요 내용</strong><br>")
                     .append(escape(limit(card.summary(), 1200))).append("</p>");
             if (!card.watches().isEmpty()) {
-                html.append("<p><strong>후속 확인</strong></p><ul>");
-                card.watches().forEach(watch -> html.append("<li>").append(escape(limit(watch, 600))).append("</li>"));
+                html.append("<p style=\"margin:16px 0 4px\"><strong>후속 확인</strong></p>"
+                        + "<ul style=\"margin:0 0 0 20px;padding:0\">");
+                card.watches().forEach(watch -> html.append("<li style=\"margin:0;padding:0\">")
+                        .append(escape(limit(watch, 600))).append("</li>"));
                 html.append("</ul>");
             }
             appendCardSources(html, card.urls(), true);
