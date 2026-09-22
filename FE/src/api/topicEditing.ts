@@ -42,7 +42,7 @@ export function saveTopicEditOptions(client: QueryClient, topicId: number) {
         content: current.content.map(combination => combination.topicId === topicId ? {
           ...combination,
           ...(changes.name !== undefined ? { topicName: changes.name } : {}),
-          ...(changes.queryText !== undefined ? { queryText: changes.queryText } : {}),
+          ...(changes.queryText !== undefined ? { queryText: combination.sourceKind === 'SEARCH' ? changes.queryText : null } : {}),
         } : combination),
       } : current)
       await Promise.all(affectedKeys.map(queryKey => client.invalidateQueries({ queryKey })))

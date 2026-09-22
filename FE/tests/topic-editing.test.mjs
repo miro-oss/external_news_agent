@@ -33,7 +33,8 @@ test('editing clears requested filters and preserves stopped state, schedule, so
   client.setQueryData(['topic-schedule', topic.id], detail)
   const combination = { topicId: 31, topicName: topic.name, sourceId: 1, sourceName: '검색', sourceKind: 'SEARCH',
     queryText: topic.queryText, batchSize: 100, intervalMinutes: 1440, active: false, lastCollectedAt: null, lastCollectedCount: null }
-  client.setQueryData(['topic-sources'], { ...page([combination]), combinationCount: 1 })
+  const feedCombination = { ...combination, sourceId: 2, sourceName: 'RSS', sourceKind: 'FEED', queryText: null }
+  client.setQueryData(['topic-sources'], { ...page([combination, feedCombination]), combinationCount: 2 })
   client.setQueryData(['topic-keyword-proposals', 'PENDING'], page([{ id: 1, topicId: 31 }]))
   const changes = { name: '공급망 뉴스', queryText: '공급망', excludedKeywords: [] }
   const requests = []
@@ -52,7 +53,10 @@ test('editing clears requested filters and preserves stopped state, schedule, so
   assert.deepEqual(client.getQueryData(topicEditOptions(topic.id).queryKey), { ...detail, ...changes })
   assert.deepEqual(client.getQueryData(['topic-schedule', topic.id]), { ...detail, ...changes })
   assert.deepEqual(client.getQueryData(['topic-sources']), {
-    ...page([{ ...combination, topicName: changes.name, queryText: changes.queryText }]), combinationCount: 1,
+    ...page([
+      { ...combination, topicName: changes.name, queryText: changes.queryText },
+      { ...feedCombination, topicName: changes.name },
+    ]), combinationCount: 2,
   })
   assert.equal(client.getQueryState(['topic-keyword-proposals', 'PENDING']).isInvalidated, true)
 })
