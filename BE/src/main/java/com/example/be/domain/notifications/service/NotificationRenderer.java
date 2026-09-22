@@ -24,6 +24,13 @@ import java.util.Map;
 @Component
 public class NotificationRenderer {
 
+    // Inline styles and presentation tables keep the site's palette readable in mail clients.
+    private static final String EMAIL_TABLE = "<table role=\"presentation\" width=\"100%\" border=\"0\" "
+            + "cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;border-spacing:0;"
+            + "text-align:left;mso-table-lspace:0pt;mso-table-rspace:0pt\"><tbody>";
+    private static final String EMAIL_LINK_STYLE = " style=\"color:#1b64da;text-decoration:underline;"
+            + "overflow-wrap:anywhere;word-break:break-word\"";
+
     private final FindingRepository findingRepository;
     private final TopicRelevancePolicy relevancePolicy;
 
@@ -46,8 +53,10 @@ public class NotificationRenderer {
                                                      NotificationChannel channel) {
         if (channel.getChannelType() == ChannelType.EMAIL) {
             String subject = "[속보 후속] " + singleLine(issueTitle);
-            String html = "<html><body><h2>속보 후속</h2><p>" + escape(message) + "</p></body></html>";
-            return new RenderedNotification(subject, null, List.of(html));
+            StringBuilder html = emailStart("속보 후속");
+            html.append("<p style=\"margin:0;color:#4e5968;font-size:15px;line-height:1.8\">")
+                    .append(escape(message)).append("</p>");
+            return new RenderedNotification(subject, null, List.of(emailEnd(html)));
         }
         String body = "<b>속보 후속</b>\n" + escape(message);
         if (body.length() > channel.getMaxLength()) {
@@ -58,42 +67,71 @@ public class NotificationRenderer {
 
     private RenderedNotification renderEmail(NewsReport report, List<Finding> findings, ReportReadingContent content) {
         String subject = "[뉴스 보고서] " + singleLine(normalize(report.getTitle()));
-        StringBuilder html = new StringBuilder("<html><body style=\"margin:0;padding:24px;background:#f4f6f8;color:#172331;"
-                + "font-family:Arial,sans-serif;line-height:1.7\"><div style=\"max-width:680px;margin:0 auto;"
-                + "padding:24px;background:#ffffff\"><p style=\"color:#526578;font-size:12px\">NEWS BRIEFING</p><h2>")
-                .append(escape(report.getTitle())).append("</h2><h3 style=\"margin:16px 0 4px\">핵심 요약</h3>");
+        StringBuilder html = emailStart(report.getTitle());
+        html.append(EMAIL_TABLE).append("<tr><td class=\"email-card\" bgcolor=\"#e8f3ff\" "
+                + "style=\"padding:24px;background:#e8f3ff;border-radius:16px\">"
+                + "<h2 style=\"margin:0 0 12px;color:#1b64da;font-size:14px;font-weight:700\">핵심 요약</h2>");
         // Mail clients can override list indentation; use cells to keep summary bullets at the left edge.
-        html.append("<table role=\"presentation\" width=\"100%\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" "
-                + "style=\"border-collapse:collapse;border-spacing:0;margin:0;text-align:left;"
-                + "mso-table-lspace:0pt;mso-table-rspace:0pt\"><tbody>");
+        html.append(EMAIL_TABLE);
         digest(content, findings, 700).forEach(line -> html.append("<tr><td width=\"20\" valign=\"top\" aria-hidden=\"true\" "
-                        + "style=\"width:20px;padding:0;line-height:1.7\">•</td>"
-                        + "<td valign=\"top\" style=\"padding:0;line-height:1.7\">")
+                        + "style=\"width:20px;padding:4px 0;color:#1b64da;font-size:15px;line-height:1.8\">•</td>"
+                        + "<td valign=\"top\" style=\"padding:4px 0;color:#191f28;font-size:15px;line-height:1.8\">")
                 .append(escape(line)).append("</td></tr>"));
-        html.append("</tbody></table>");
+        html.append("</tbody></table></td></tr></tbody></table>");
         List<NewsCard> cards = cards(content, findings);
         for (int i = 0; i < cards.size(); i++) {
             NewsCard card = cards.get(i);
-            html.append("<div style=\"border-top:1px solid #dce3e9;margin-top:24px;padding-top:16px\">")
-                    .append("<p style=\"color:#526578;font-size:12px\">주요 이슈 ").append(i + 1).append("</p><h3>")
-                    .append(escape(limit(card.title(), 180))).append("</h3><p><strong>주요 내용</strong><br>")
+            html.append(EMAIL_TABLE).append("<tr><td height=\"20\" style=\"height:20px;font-size:0;line-height:0\"></td></tr>"
+                            + "<tr><td class=\"email-card\" bgcolor=\"#f9fafb\" "
+                            + "style=\"padding:24px;background:#f9fafb;border-radius:16px\">"
+                            + "<p style=\"margin:0 0 12px;color:#1b64da;font-size:12px;font-weight:700\">"
+                            + "<span style=\"display:inline-block;padding:4px 10px;background:#e8f3ff;border-radius:8px\">주요 이슈 ")
+                    .append(i + 1).append("</span></p><h2 style=\"margin:0 0 20px;color:#191f28;"
+                            + "font-size:21px;font-weight:700;line-height:1.45;letter-spacing:-0.5px\">")
+                    .append(escape(limit(card.title(), 180)))
+                    .append("</h2><p style=\"margin:0 0 6px;color:#191f28;font-size:13px;font-weight:700\">주요 내용</p>"
+                            + "<p style=\"margin:0;color:#4e5968;font-size:15px;line-height:1.8\">")
                     .append(escape(limit(card.summary(), 1200))).append("</p>");
             if (!card.watches().isEmpty()) {
-                html.append("<table role=\"presentation\" width=\"100%\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" "
-                        + "style=\"border-collapse:collapse;border-spacing:0;margin:0;text-align:left;"
-                        + "mso-table-lspace:0pt;mso-table-rspace:0pt\"><tbody>"
-                        + "<tr><td style=\"padding:0 0 4px;line-height:1.7\">"
+                html.append(EMAIL_TABLE).append("<tr><td style=\"padding:20px 0 6px;color:#191f28;font-size:13px;line-height:1.7\">"
                         + "<strong>후속 확인</strong></td></tr>");
-                card.watches().forEach(watch -> html.append("<tr><td valign=\"top\" style=\"padding:0;line-height:1.7\">")
+                card.watches().forEach(watch -> html.append("<tr><td valign=\"top\" "
+                                + "style=\"padding:0 0 4px;color:#4e5968;font-size:14px;line-height:1.8\">")
                         .append(escape(limit(watch, 600))).append("</td></tr>"));
                 html.append("</tbody></table>");
             }
             appendCardSources(html, card.urls(), true);
-            html.append("</div>");
+            html.append("</td></tr></tbody></table>");
         }
         if (cards.isEmpty()) appendSources(html, findings, true);
         appendReportLink(html, report, true);
-        return new RenderedNotification(subject, null, List.of(html.append("</div></body></html>").toString()));
+        return new RenderedNotification(subject, null, List.of(emailEnd(html)));
+    }
+
+    private StringBuilder emailStart(String title) {
+        return new StringBuilder("""
+                <!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>@media only screen and (max-width:600px){.email-content{padding:24px 20px!important}.email-card{padding:20px!important}.email-title{font-size:25px!important}}</style>
+                </head><body style="margin:0;padding:0;background:#f2f4f6;color:#191f28;font-family:Pretendard,-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif;line-height:1.7;-webkit-text-size-adjust:100%">
+                <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#f2f4f6" style="background:#f2f4f6"><tbody><tr><td align="center" style="padding:32px 12px">
+                <!--[if mso]><table role="presentation" width="680" border="0" cellpadding="0" cellspacing="0"><tr><td><![endif]-->
+                <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#ffffff" style="width:100%;max-width:680px;table-layout:fixed;background:#ffffff;border-radius:20px;border-spacing:0;overflow-wrap:anywhere;word-break:break-word;text-align:left"><tbody>
+                <tr><td class="email-content" style="padding:32px;border-top:4px solid #3182f6;border-radius:20px 20px 0 0">
+                <p style="margin:0;color:#1b64da;font-size:20px;font-weight:800;letter-spacing:-0.6px">BISTelligence</p>
+                <p style="margin:2px 0 28px;color:#636c78;font-size:11px;letter-spacing:0.6px">News Signal Desk</p>
+                <p style="margin:0 0 10px;color:#1b64da;font-size:11px;font-weight:700;letter-spacing:1.6px">NEWS BRIEFING</p>
+                <h1 class="email-title" style="margin:0 0 24px;color:#191f28;font-size:30px;font-weight:800;line-height:1.4;letter-spacing:-0.8px">
+                """).append(escape(title)).append("</h1>");
+    }
+
+    private String emailEnd(StringBuilder html) {
+        return html.append("""
+                </td></tr></tbody></table>
+                <!--[if mso]></td></tr></table><![endif]-->
+                <p style="margin:20px 0 0;color:#636c78;font-size:12px;line-height:1.6">BISTelligence · News Signal Desk</p>
+                </td></tr></tbody></table></body></html>
+                """).toString();
     }
 
     private RenderedNotification renderTelegram(NewsReport report, List<Finding> findings,
@@ -177,11 +215,13 @@ public class NotificationRenderer {
 
     private void appendCardSources(StringBuilder body, List<String> urls, boolean email) {
         if (urls.isEmpty()) return;
-        if (email) body.append("<p>");
+        if (email) body.append("<p style=\"margin:20px 0 0;padding-top:16px;border-top:1px solid #e5e8eb;"
+                + "color:#636c78;font-size:12px;line-height:1.8\">");
         for (int i = 0; i < urls.size(); i++) {
             if (i > 0) body.append(" · ");
             String url = urls.get(i);
-            body.append("<a href=\"").append(attribute(url)).append("\">원문 ").append(i + 1)
+            body.append("<a href=\"").append(attribute(url)).append("\"")
+                    .append(email ? EMAIL_LINK_STYLE : "").append(">원문 ").append(i + 1)
                     .append(" · ").append(escape(URI.create(url).getHost())).append("</a>");
         }
         body.append(email ? "</p>" : "\n");
@@ -221,18 +261,28 @@ public class NotificationRenderer {
     private void appendReportLink(StringBuilder body, NewsReport report, boolean email) {
         if (!safeUrl(publicBaseUrl)) return;
         String url = publicBaseUrl.replaceAll("/+$", "") + "/#/reports?reportId=" + report.getId();
-        body.append(email ? "<p>" : "\n").append("<a href=\"").append(attribute(url))
-                .append("\">보고서 전체 보기</a>").append(email ? "</p>" : "\n");
+        if (email) {
+            body.append(EMAIL_TABLE).append("<tr><td align=\"center\" style=\"padding:28px 0 0\">"
+                            + "<table role=\"presentation\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\"><tbody><tr>"
+                            + "<td align=\"center\" bgcolor=\"#1b64da\" style=\"background:#1b64da;border-radius:12px;mso-padding-alt:14px 24px\">"
+                            + "<a href=\"").append(attribute(url)).append("\" style=\"display:inline-block;padding:14px 24px;"
+                            + "color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;line-height:1.5\">"
+                            + "보고서 전체 보기</a></td></tr></tbody></table></td></tr></tbody></table>");
+        } else {
+            body.append("\n<a href=\"").append(attribute(url)).append("\">보고서 전체 보기</a>\n");
+        }
     }
 
     private void appendSources(StringBuilder body, List<Finding> findings, boolean email) {
         List<String> urls = findings.stream().map(f -> f.getArticle().getCanonicalUrl())
                 .filter(this::safeUrl).distinct().limit(3).toList();
         if (urls.isEmpty()) return;
-        body.append(email ? "<p>참고 원문: " : "\n참고 원문: ");
+        body.append(email ? "<p style=\"margin:20px 0 0;color:#636c78;font-size:13px;line-height:1.8\">참고 원문: "
+                : "\n참고 원문: ");
         for (int i = 0; i < urls.size(); i++) {
             if (i > 0) body.append(" · ");
-            body.append("<a href=\"").append(attribute(urls.get(i))).append("\">자료 ").append(i + 1).append("</a>");
+            body.append("<a href=\"").append(attribute(urls.get(i))).append("\"")
+                    .append(email ? EMAIL_LINK_STYLE : "").append(">자료 ").append(i + 1).append("</a>");
         }
         if (email) body.append("</p>");
     }

@@ -149,7 +149,9 @@ class NotificationRendererTest {
             assertTrue(body.contains("오늘 보고서의 결론입니다."));
             assertFalse(body.contains("검증된 핵심 요약"));
             assertFalse(body.contains("HBM 공급 계약 확대"));
-            assertTrue(body.length()<1500);
+            // Email includes the branded layout; the actual briefing must stay concise.
+            int contentLength = type == ChannelType.EMAIL ? org.jsoup.Jsoup.parse(body).text().length() : body.length();
+            assertTrue(contentLength < 1500);
         }
     }
 
