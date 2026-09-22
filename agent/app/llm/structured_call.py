@@ -122,13 +122,26 @@ def _log_validation_failure(
     task_name: str,
     attempt: int,
 ) -> None:
+    # ValidationError.__str__ includes input_value; custom ValueError messages
+    # can also contain provider output. Neither belongs in application logs.
+    error_count = error.error_count() if isinstance(error, ValidationError) else 1
+    error_kinds = (
+        sorted({item["type"] for item in error.errors(
+            include_input=False, include_context=False, include_url=False
+        )})[:5]
+        if isinstance(error, ValidationError)
+        else []
+    )
     target_logger.warning(
-        "Provider %s 출력이 계약을 위반했습니다. provider=%s model=%s attempt=%d error=%s",
+        "Provider %s 출력이 계약을 위반했습니다. provider=%s model=%s attempt=%d "
+        "errorType=%s errorCount=%d errorKinds=%s",
         task_name,
         response.provider,
         response.model,
         attempt,
-        " ".join(str(error).split())[:500],
+        type(error).__name__,
+        error_count,
+        error_kinds,
     )
 
 
