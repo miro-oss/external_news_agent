@@ -5,7 +5,7 @@ import { DeliveryTargetPicker } from './DeliveryTargetPicker'
 import { useDeliveryTargetAvailability } from './useDeliveryTargetAvailability'
 import { MutationStatus } from '../settings/MutationStatus'
 import { MessagePreviewSkeleton } from './NotificationSkeletons'
-import { failedDeliveryBatchId, reportShareFeedback } from './reportShareFeedback'
+import { canRetryFailedReportShare, failedDeliveryBatchId, reportShareFeedback, reportShareRequestKey } from './reportShareFeedback'
 import { ReportShareDeliveryLogs } from './ReportShareDeliveryLogs'
 import './notifications-refinement.css'
 
@@ -20,9 +20,15 @@ export function ReportSharePanel({ reportId }: { reportId: number }) {
   const availability = useDeliveryTargetAvailability(targets)
   const feedback = reportShareFeedback(send.data)
   const failureBatchId = failedDeliveryBatchId(send.error)
+  const canRetryFailed = canRetryFailedReportShare(send.data, send.error)
   const resultBatchId = failureBatchId ?? (send.data && (send.data.failedCount || send.data.skippedCount) ? send.data.deliveryBatchId : null)
   function change(next: DeliveryTargets) { setTargets(next); setRequestKey(`r${reportId}-${crypto.randomUUID()}`); send.reset(); preview.reset() }
   const canSend = availability.valid && targets.channelIds.length > 0 && (targets.groupIds.length > 0 || targets.recipientIds.length > 0)
+  function share() {
+    const key = reportShareRequestKey(reportId, requestKey, send.data, send.error)
+    setRequestKey(key)
+    send.mutate({ ...targets, idempotencyKey: key })
+  }
   return <section className="report-delivery-panel report-share-card" aria-label="보고서 공유">
     <div className="report-share-heading">
       <h3>다른 사람에게 공유</h3>
@@ -37,8 +43,9 @@ export function ReportSharePanel({ reportId }: { reportId: number }) {
     <DeliveryTargetPicker value={targets} disabled={send.isPending} onChange={change} />
     <div className="report-share-actions">
       <button type="button" className="secondary-button" disabled={!availability.valid || !targets.channelIds.length || preview.isPending} onClick={() => preview.mutate({ reportId, channelId: targets.channelIds[0] })}>{preview.isPending ? '준비 중…' : '내용 미리보기'}</button>
-      <button type="button" className="primary-button" disabled={!canSend || send.isPending || send.isSuccess || !!failureBatchId} onClick={() => send.mutate({ ...targets, idempotencyKey: requestKey })}>{send.isPending ? '전달 중…' : failureBatchId ? '전달 실패' : send.error ? '같은 요청 다시 확인' : feedback.label}</button>
+      <button type="button" className="primary-button" disabled={!canSend || send.isPending || (!canRetryFailed && (send.isSuccess || !!failureBatchId))} onClick={share}>{send.isPending ? '전달 중…' : canRetryFailed ? '새 요청으로 다시 전달' : failureBatchId ? '전달 실패' : send.error ? '같은 요청 다시 확인' : feedback.label}</button>
     </div>
+    {canRetryFailed && <p className="muted">새 요청은 중복 전달될 수 있으니 연결 설정과 수신함을 확인한 뒤 다시 전달해 주세요.</p>}
     <MutationStatus error={send.error ?? preview.error ?? deliveries.error}
       success={feedback.success} warning={feedback.warning} />
     {resultBatchId && <ReportShareDeliveryLogs key={resultBatchId} reportId={reportId} deliveryBatchId={resultBatchId} />}
