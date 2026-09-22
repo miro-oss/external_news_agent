@@ -76,3 +76,31 @@ test('daily sources keep the first cited run snapshot independently for each rep
   buttons.forEach(button => button.props.onClick())
   assert.deepEqual(selections, [[10, 43, []], [10, 42, []]])
 })
+
+test('legacy report images display their labels without creating browser resource requests', () => {
+  for (const url of [
+    'https://attacker.invalid/pixel?report=private-summary',
+    'http://attacker.invalid/pixel.svg',
+    '//attacker.invalid/pixel',
+    '/api/news/reports/latest',
+    'data:image/svg+xml;base64,PHN2Zy8+',
+    'data:image/png;base64,aGVsbG8=',
+  ]) {
+    const report = { id: 1, markdownBody: `본문\n\n![이미지 설명](${url})`, structuredContent: null }
+    const html = renderToStaticMarkup(createElement(ReportReadingContent, { report, onEvidenceSelect() {} }))
+    assert.match(html, /본문/)
+    assert.match(html, /이미지 설명/)
+    assert.doesNotMatch(html, /<(?:img|image|svg|iframe|link)\b/)
+    assert.doesNotMatch(html, /attacker\.invalid|\/api\/news\/reports\/latest|data:image/)
+  }
+})
+
+test('legacy report prose and explicit links remain usable while HTML stays escaped', () => {
+  const report = { id: 1, structuredContent: null, markdownBody:
+    '**분석 결과**\n\n[원문](https://example.invalid/article)\n\n![<img onerror=alert(1)>](https://attacker.invalid/pixel)\n\n<img src="https://attacker.invalid/html-pixel" onerror="alert(1)">' }
+  const html = renderToStaticMarkup(createElement(ReportReadingContent, { report, onEvidenceSelect() {} }))
+  assert.match(html, /<strong>분석 결과<\/strong>/)
+  assert.match(html, /<a href="https:\/\/example\.invalid\/article" target="_blank" rel="noreferrer">원문<\/a>/)
+  assert.match(html, /&lt;img onerror=alert\(1\)&gt;/)
+  assert.doesNotMatch(html, /<(?:img|iframe|link|script)\b/)
+})

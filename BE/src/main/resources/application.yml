@@ -1,3 +1,8 @@
+server:
+  # Product APIs are an unauthenticated, local-only PoC.
+  address: 127.0.0.1
+  forward-headers-strategy: none
+
 spring:
   application:
     name: BE
