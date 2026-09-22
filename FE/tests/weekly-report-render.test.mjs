@@ -27,16 +27,37 @@ after(async () => {
   if (emptyEnvDir) await rm(emptyEnvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 })
 
-function renderPage(report, scope = report.reportScope, hash = `#/reports?reportId=${report.id}`) {
+function renderPage(report, scope = report.reportScope, hash = `#/reports?reportId=${report.id}`, reports = [report]) {
   globalThis.window = { location: { hash } }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } } })
-  client.setQueryData(['reports', report.id], report)
-  client.setQueryData(['reports', 'list', scope], { content: [report] })
+  for (const item of reports) client.setQueryData(['reports', item.id], item)
+  client.setQueryData(['reports', 'list', scope], { content: reports })
   const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(ReportsPage)))
   const changesQueries = client.getQueryCache().findAll().filter(query => query.queryKey.at(-1) === 'changes')
   client.clear()
   return { html, changesQueries }
 }
+
+test('weekly list and initial selection use the newest aggregation period while older deep links stay selected', () => {
+  const base = weeklyReportFixture(fixture.report)
+  const reports = [
+    { ...base, id: 301, reportDate: '2026-08-31', reportEndDate: '2026-09-06', generatedAt: '2026-09-23T00:00:00+09:00' },
+    { ...base, id: 302, reportDate: '2026-09-07', reportEndDate: '2026-09-13', generatedAt: '2026-09-22T00:00:00+09:00' },
+    { ...base, id: 303, reportDate: '2026-09-14', reportEndDate: '2026-09-20', generatedAt: '2026-09-21T00:00:00+09:00' },
+  ]
+  const listItems = html => [...html.matchAll(/<button\b[^>]*class="report-list-item(?: active)?"[\s\S]*?<\/button>/gu)].map(match => match[0])
+  const { html } = renderPage(reports[0], 'WEEKLY', '#/reports?reportScope=WEEKLY', reports)
+  const items = listItems(html)
+  assert.equal(items.length, 3)
+  for (const [index, date] of ['2026-09-14', '2026-09-07', '2026-08-31'].entries()) {
+    assert.ok(items[index].includes(`집계 기간 ${date}`))
+  }
+  assert.match(items[0], /class="report-list-item active"/)
+  assert.match(html.split('class="report-detail-shell"')[1], /2026-09-14 ~ 2026-09-20 주간 통합 뉴스 보고서/)
+  const linked = renderPage(reports[0], 'WEEKLY', '#/reports?reportId=301', reports).html
+  assert.match(listItems(linked)[2], /class="report-list-item active"/)
+  assert.match(linked.split('class="report-detail-shell"')[1], /2026-08-31 ~ 2026-09-06 주간 통합 뉴스 보고서/)
+})
 
 test('weekly deep links select the weekly tab and render source coverage without requesting comparisons', () => {
   const report = weeklyReportFixture(fixture.report)

@@ -38,6 +38,11 @@ export function reportFilterDate(report: ReportSummary): string | null {
   return report.collectionStartedAt ? kstDate(new Date(report.collectionStartedAt)) : null
 }
 
+export function sortReportsByAggregationDate(reports: readonly ReportSummary[]): ReportSummary[] {
+  return [...reports].sort((left, right) =>
+    (reportFilterDate(right) ?? '').localeCompare(reportFilterDate(left) ?? ''))
+}
+
 export function reportTopicOptions(reports: readonly ReportSummary[]): Array<{ id: number; label: string }> {
   const names = new Map<number, Set<string>>()
   for (const report of reports) {

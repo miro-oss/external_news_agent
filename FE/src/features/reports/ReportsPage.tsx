@@ -38,7 +38,7 @@ import { WeeklyReportSources } from './WeeklyReportSources'
 import { reportHash, reportScopeFromHash } from './reportNavigation'
 import { ReportDetailSkeleton, ReportWorkspaceSkeleton, RelatedArticlesSkeleton } from './ReportSkeletons'
 import { ReportFiltersBar } from './ReportFiltersBar'
-import { DEFAULT_REPORT_FILTERS, filterReports, reportFilterDate, reportTopicOptions, type ReportFilters } from './reportFilters'
+import { DEFAULT_REPORT_FILTERS, filterReports, reportFilterDate, reportTopicOptions, sortReportsByAggregationDate, type ReportFilters } from './reportFilters'
 
 type ReportScopeTab = ReportScope
 
@@ -111,7 +111,11 @@ export function ReportsPage() {
   const scopeFilter = selectedReport.data?.reportScope ?? reportScope
   const reports = useReports(scopeFilter)
   const audienceSetting = useAudienceSetting()
-  const filteredReports = useMemo(() => filterReports(reports.data?.content ?? [], filters, filterNow), [reports.data?.content, filters, filterNow])
+  const orderedReports = useMemo(() => {
+    const items = reports.data?.content ?? []
+    return scopeFilter === 'RUN' ? items : sortReportsByAggregationDate(items)
+  }, [reports.data?.content, scopeFilter])
+  const filteredReports = useMemo(() => filterReports(orderedReports, filters, filterNow), [orderedReports, filters, filterNow])
   const topicOptions = useMemo(() => reportTopicOptions(reports.data?.content ?? []), [reports.data?.content])
   // A direct link may refer to an aggregate while the default RUN list is still loading.
   const isResolvingSelection = selectedId !== null && selectedReport.isPending
@@ -139,7 +143,7 @@ export function ReportsPage() {
     window.history.replaceState(null, '', reportHash(scopeFilter, id))
   }
   function changeFilters(nextFilters: ReportFilters) {
-    const matches = filterReports(reports.data?.content ?? [], nextFilters, filterNow)
+    const matches = filterReports(orderedReports, nextFilters, filterNow)
     const nextId = matches.find(report => report.id === activeId)?.id ?? matches[0]?.id ?? null
     setReportScope(scopeFilter)
     setFilters(nextFilters)

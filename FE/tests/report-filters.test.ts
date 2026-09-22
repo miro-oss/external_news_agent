@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import type { ReportCollectionContext, ReportSummary } from '../src/api/types.ts'
 import {
   DEFAULT_REPORT_FILTERS, filterReports, hasReportFilters, reportDateRangeError,
-  reportFilterDate, reportTopicOptions, type ReportFilters,
+  reportFilterDate, reportTopicOptions, sortReportsByAggregationDate, type ReportFilters,
 } from '../src/features/reports/reportFilters.ts'
 
 const now = new Date('2026-09-10T16:00:00Z') // September 11 in Korea, September 10 in UTC.
@@ -20,6 +20,30 @@ const report = (id: number, changes: Partial<ReportSummary> = {}): ReportSummary
 })
 const filters = (changes: Partial<ReportFilters> = {}): ReportFilters => ({ ...DEFAULT_REPORT_FILTERS, ...changes })
 const ids = (items: ReportSummary[]) => items.map(item => item.id)
+
+test('aggregate reports sort by newest period despite later backfills without mutating cached order', () => {
+  for (const reportScope of ['DAILY', 'WEEKLY'] as const) {
+    const items = [
+      report(1, { reportScope, reportDate: '2026-08-31', generatedAt: '2026-09-23T00:00:00+09:00' }),
+      report(2, { reportScope, reportDate: '2026-09-07', generatedAt: '2026-09-22T00:00:00+09:00' }),
+      report(3, { reportScope, reportDate: '2026-09-14', generatedAt: '2026-09-21T00:00:00+09:00' }),
+    ]
+    const ordered = sortReportsByAggregationDate(items)
+    assert.deepEqual(ids(ordered), [3, 2, 1], reportScope)
+    assert.deepEqual(ids(items), [1, 2, 3], 'React Query cache order must stay unchanged')
+    assert.deepEqual(ids(filterReports(ordered, filters({ period: 'CUSTOM', from: '2026-09-01' }), now)), [3, 2])
+  }
+})
+
+test('missing or invalid aggregation dates follow dated reports and ties preserve incoming order', () => {
+  const items = [
+    report(1, { reportScope: 'WEEKLY', reportDate: null }),
+    report(2, { reportScope: 'WEEKLY', reportDate: '2026-02-30' }),
+    report(3, { reportScope: 'WEEKLY', reportDate: '2026-09-14' }),
+    report(4, { reportScope: 'WEEKLY', reportDate: '2026-09-14' }),
+  ]
+  assert.deepEqual(ids(sortReportsByAggregationDate(items)), [3, 4, 1, 2])
+})
 
 test('search uses saved titles, topic names, queries and every keyword bucket', () => {
   const saved = [report(1)]
