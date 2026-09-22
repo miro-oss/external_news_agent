@@ -1,5 +1,6 @@
-import { useEffect, useId, useState } from 'react'
+import { useId, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { TransientStatus } from '../../components/TransientStatus'
 import { ApiError } from '../../api/client'
 import { useDeliveryPolicy, useSaveDeliveryPolicy, type DeliveryPolicy } from '../../api/notificationConnections'
 import { CollectionDeliveryDialog } from './CollectionDeliveryPicker'
@@ -13,12 +14,6 @@ export function TopicDeliverySettings({ topicId, topicName }: { topicId: number;
   const [success, setSuccess] = useState(false)
   const id = useId()
 
-  useEffect(() => {
-    if (!success) return
-    const timer = window.setTimeout(() => setSuccess(false), 3000)
-    return () => window.clearTimeout(timer)
-  }, [success])
-
   async function open() {
     setLoading(true)
     setSuccess(false)
@@ -30,7 +25,7 @@ export function TopicDeliverySettings({ topicId, topicName }: { topicId: number;
 
   return <div className="saved-delivery-setting">
     <small>{policy.isPending ? '불러오는 중…' : policy.isError ? '설정을 불러오지 못했습니다.' : deliveryPolicySummary(policy.data)}</small>
-    {success && <small role="status">저장했습니다.</small>}
+    <TransientStatus as="small" message={success ? '저장했습니다.' : null} />
     <button type="button" className="ghost-button topic-management-action" disabled={loading || policy.isPending}
       aria-label={`${topicName} 보고서 알림 설정`} aria-haspopup="dialog" aria-expanded={editing !== null}
       aria-controls={editing ? id : undefined} onClick={() => void open()}>{loading ? '불러오는 중…' : policy.isError ? '다시 불러오기' : '알림 설정'}</button>

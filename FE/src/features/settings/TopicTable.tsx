@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { FEEDBACK_DURATION_MS } from '../../lib/feedback'
 import type { TopicRelatedKeyword, TopicSurgeKeyword } from '../../api/types'
 import { useSetTopicActivation, useTopics } from '../../api/queries'
 import { ApiError } from '../../api/client'
@@ -26,6 +27,13 @@ export function TopicTable() {
   const [success, setSuccess] = useState<string | null>(null)
   const topics = useTopics(!showInactive)
   const activation = useSetTopicActivation()
+
+  // 목록 조회 오류로 알림이 잠시 사라져도 예전 성공 상태가 복구 시 다시 표시되지 않게 한다.
+  useEffect(() => {
+    if (!success) return
+    const timer = window.setTimeout(() => setSuccess(null), FEEDBACK_DURATION_MS)
+    return () => window.clearTimeout(timer)
+  }, [success])
 
   if (topics.isPending) return <TopicTableSkeleton />
 

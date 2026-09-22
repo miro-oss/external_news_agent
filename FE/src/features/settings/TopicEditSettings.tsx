@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { TransientStatus } from '../../components/TransientStatus'
 import { ApiError } from '../../api/client'
 import type { TopicDetail, TopicSummary } from '../../api/types'
 import { saveTopicEditOptions, topicEditOptions, type TopicEditRequest } from '../../api/topicEditing'
@@ -18,12 +19,6 @@ export function TopicEditSettings({ topic }: { topic: TopicSummary }) {
   const [success, setSuccess] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const id = useId()
-
-  useEffect(() => {
-    if (!success) return
-    const timer = window.setTimeout(() => setSuccess(false), 3000)
-    return () => window.clearTimeout(timer)
-  }, [success])
 
   async function open() {
     if (loading) return
@@ -46,7 +41,7 @@ export function TopicEditSettings({ topic }: { topic: TopicSummary }) {
       aria-controls={editing ? id : undefined} onClick={() => void open()}>
       {loading ? '불러오는 중…' : '수집 편집'}
     </button>
-    {success && <small role="status">저장했습니다.</small>}
+    <TransientStatus as="small" message={success ? '저장했습니다.' : null} />
     {loadError && <small className="field-error" role="alert">{loadError}</small>}
     {editing && createPortal(<TopicEditDialog id={id} initial={editing} pending={save.isPending}
       returnFocusRef={trigger} onDraftChange={save.reset}

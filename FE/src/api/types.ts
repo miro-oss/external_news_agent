@@ -602,6 +602,15 @@ export interface NotificationGroup {
   members?: Array<{ recipientId: number; name: string; active: boolean }>
 }
 
+export interface NotificationGroupMembers {
+  groupId: number
+  members: Array<{ recipientId: number; name: string; active: boolean }>
+  addedCount: number
+  removedCount: number
+  memberCount: number
+  activeMemberCount: number
+}
+
 export interface NotificationPreview {
   reportId: number
   channelId: number

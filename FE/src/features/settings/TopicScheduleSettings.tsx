@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { TransientStatus } from '../../components/TransientStatus'
 import { ApiError } from '../../api/client'
 import type { Topic, TopicSummary } from '../../api/types'
 import { saveTopicScheduleOptions, topicScheduleOptions } from '../../api/topicSchedule'
@@ -27,12 +28,6 @@ export function TopicScheduleSettings({ topic }: { topic: TopicSummary }) {
   const trigger = useRef<HTMLButtonElement>(null)
   const id = useId()
 
-  useEffect(() => {
-    if (!success) return
-    const timer = window.setTimeout(() => setSuccess(false), 3000)
-    return () => window.clearTimeout(timer)
-  }, [success])
-
   async function open() {
     if (loading) return
     setLoading(true)
@@ -51,7 +46,7 @@ export function TopicScheduleSettings({ topic }: { topic: TopicSummary }) {
   return <div className="saved-topic-schedule">
     <span>{formatCollectionInterval(topic.intervalMinutes)}</span>
     <small title="마지막 수집">{formatCollectedAt(topic.lastCollectedAt)}</small>
-    {success && <small role="status">저장했습니다.</small>}
+    <TransientStatus as="small" message={success ? '저장했습니다.' : null} />
     {loadError && <small className="field-error" role="alert">{loadError}</small>}
     <button ref={trigger} type="button" className="ghost-button topic-management-action" disabled={loading}
       aria-label={`${topic.name} 수집 일정 설정`} aria-haspopup="dialog" aria-expanded={editing !== null}

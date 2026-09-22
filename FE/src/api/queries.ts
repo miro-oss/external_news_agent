@@ -15,7 +15,14 @@ import {
 } from './client'
 import { saveRecipientEmail } from '../lib/recipientEmail'
 import { cacheDeletedNotificationRecipient, notificationRecipientsKey } from './notificationRecipientCache'
-import { cacheDeletedNotificationGroup, notificationGroupsKey } from './notificationGroupCache'
+import {
+  cacheDeletedNotificationGroup,
+  cacheReplacedNotificationGroupMembers,
+  cacheUpdatedNotificationGroup,
+  notificationGroupRecipientsKey,
+  notificationGroupsKey,
+} from './notificationGroupCache'
+import { getAllNotificationPages } from './notificationPages'
 import type { CollectionRunDelivery } from './notificationConnections'
 import type {
   ArticleDetail,
@@ -35,6 +42,7 @@ import type {
   InsightResult,
   NotificationChannel,
   NotificationGroup,
+  NotificationGroupMembers,
   NotificationPreview,
   NotificationRecipient,
   NotificationSendBatch,
@@ -96,16 +104,6 @@ async function getAllPages<T, TPage extends PageResult<T> = PageResult<T>>(
     content.push(...next.content)
   }
 
-  return { ...first, content, hasNext: false }
-}
-
-async function getAllNotificationPages<T>(path: string): Promise<PageResult<T>> {
-  const first = await notificationGet<PageResult<T>>(path, { page: 0, size: PAGE_SIZE })
-  const content = [...first.content]
-  for (let page = first.page + 1; page < first.totalPages; page += 1) {
-    const next = await notificationGet<PageResult<T>>(path, { page, size: PAGE_SIZE })
-    content.push(...next.content)
-  }
   return { ...first, content, hasNext: false }
 }
 
@@ -327,6 +325,14 @@ export function useNotificationRecipients() {
   })
 }
 
+export function useNotificationGroupRecipients(groupId: number) {
+  return useQuery({
+    queryKey: notificationGroupRecipientsKey(groupId),
+    queryFn: () => getAllNotificationPages<NotificationRecipient>('/recipients', { groupId }),
+    staleTime: 0,
+  })
+}
+
 export function useNotificationGroups() {
   return useQuery({
     queryKey: keys.notificationGroups,
@@ -455,6 +461,32 @@ export function useDeleteNotificationGroup() {
     }>(`/groups/${groupId}`),
     onSuccess: async (_, groupId) => {
       await cacheDeletedNotificationGroup(client, groupId)
+      refresh()
+    },
+  })
+}
+
+export function useUpdateNotificationGroup() {
+  const client = useQueryClient()
+  const refresh = useRefreshNotifications()
+  return useMutation({
+    mutationFn: ({ groupId, name }: { groupId: number; name: string }) =>
+      notificationPatch<NotificationGroup>(`/groups/${groupId}`, { name }),
+    onSuccess: async group => {
+      await cacheUpdatedNotificationGroup(client, group)
+      refresh()
+    },
+  })
+}
+
+export function useReplaceNotificationGroupMembers() {
+  const client = useQueryClient()
+  const refresh = useRefreshNotifications()
+  return useMutation({
+    mutationFn: ({ groupId, recipientIds }: { groupId: number; recipientIds: number[] }) =>
+      notificationPut<NotificationGroupMembers>(`/groups/${groupId}/members`, { recipientIds }),
+    onSuccess: async members => {
+      await cacheReplacedNotificationGroupMembers(client, members)
       refresh()
     },
   })

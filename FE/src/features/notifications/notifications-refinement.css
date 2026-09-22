@@ -127,6 +127,18 @@
 .recipient-actions { display: flex; align-items: center; gap: .25rem; }
 .recipient-actions [aria-expanded='true'] { color: var(--primary); background: var(--primary-weak); }
 .recipient-settings { display: grid; grid-column: 1 / -1; gap: 1.1rem; padding: 1.1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunken); animation: collapsible-in var(--dur-2) var(--ease-out); }
+.group-editor { min-width: 0; }
+.group-editor-help { margin: 0; font-size: .78rem; color: var(--fg-3); line-height: 1.6; }
+.group-members-form { display: grid; gap: .65rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.group-members-form > button { justify-self: start; }
+.group-editor-close { justify-self: end; }
+.group-row-status { grid-column: 1 / -1; }
+.group-row-status:empty { display: none; }
+.recipient-selection-list small { margin-left: .5rem; color: var(--fg-3); font-size: .75rem; }
+@media (max-width: 480px) {
+  .group-editor .recipient-email-fields { flex-wrap: wrap; }
+  .group-editor .recipient-email-fields input { flex-basis: 100%; }
+}
 .recipient-email-form { display: grid; gap: .4rem; }
 .recipient-email-form label,
 .telegram-connection-heading strong { font-size: .84rem; color: var(--fg-2); }

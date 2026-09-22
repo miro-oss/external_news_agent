@@ -43,6 +43,9 @@ let telegramLinkError = false;
 let showDeliveryLogs = false;
 let recipientProfileError = false;
 let recipientDeleteError = false;
+let groupMembersLoadError = false;
+let groupNameSaveError = false;
+let groupMembersSaveError = false;
 let loadingDelayMs = 0;
 let loadingPath = '/api/';
 let usageCalls = 12;
@@ -63,7 +66,25 @@ const deliveryLogFixtures = ['SENT', 'FAILED', 'SKIPPED'].map((status, i) => ({
     chunkSeq: 1, chunkCount: 1, errorMessage: status === 'FAILED' ? '메일 서버에 연결하지 못했습니다.' : status === 'SKIPPED' ? '수신 설정이 꺼져 있습니다.' : null,
     sentAt: '2026-09-08T12:30:00+09:00',
 }));
-function reset() { topics = structuredClone(initialTopics); proposals = structuredClone(initialProposals); channels = structuredClone(initialChannels); recipients = structuredClone(initialRecipients); groups = structuredClone(initialGroups); requests = []; runs = []; runDeliverySettings = []; policies = { 31: { enabled: true, run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1, 2] } }; telegram = { 1: { status: 'DISCONNECTED', expiresAt: null }, 2: { status: 'CONNECTED', expiresAt: null }, 3: { status: 'DISCONNECTED', expiresAt: null } }; readiness = { mode: 'LOCAL_CAPTURE', configured: false, message: '로컬 검증 모드입니다. 이메일은 실제 수신함으로 전달되지 않습니다.' }; audience = { audience: 'CHIP_MAKER' }; plan = { plan: 'FREE', paidExhaustedAction: 'FALLBACK_FREE', allowRunOverride: true }; autoDeliveries = []; sendCache = {}; notificationSettingsSaveError = false; completeRunOnSettingsSave = false; topicScheduleLoadError = false; topicScheduleSaveError = false; resetProposalHistory(); }
+function reset() { topics = structuredClone(initialTopics); proposals = structuredClone(initialProposals); channels = structuredClone(initialChannels); recipients = structuredClone(initialRecipients); groups = structuredClone(initialGroups); requests = []; runs = []; runDeliverySettings = []; policies = { 31: { enabled: true, run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1, 2] } }; telegram = { 1: { status: 'DISCONNECTED', expiresAt: null }, 2: { status: 'CONNECTED', expiresAt: null }, 3: { status: 'DISCONNECTED', expiresAt: null } }; readiness = { mode: 'LOCAL_CAPTURE', configured: false, message: '로컬 검증 모드입니다. 이메일은 실제 수신함으로 전달되지 않습니다.' }; audience = { audience: 'CHIP_MAKER' }; plan = { plan: 'FREE', paidExhaustedAction: 'FALLBACK_FREE', allowRunOverride: true }; autoDeliveries = []; sendCache = {}; notificationSettingsSaveError = false; completeRunOnSettingsSave = false; topicScheduleLoadError = false; topicScheduleSaveError = false; groupMembersLoadError = false; groupNameSaveError = false; groupMembersSaveError = false; resetProposalHistory(); }
+const groupSummary = group => Object.fromEntries(['id', 'name', 'perspective', 'active', 'memberCount', 'activeMemberCount']
+    .map(field => [field, group[field]]));
+function syncRecipientGroups() {
+    for (const recipient of recipients)
+        recipient.groupNames = groups.filter(group => group.active && group.members.some(member => member.recipientId === recipient.id))
+            .map(group => group.name);
+}
+function replaceGroupMembers(group, recipientIds) {
+    const previousIds = new Set(group.members.map(member => member.recipientId));
+    const nextIds = new Set(recipientIds);
+    group.members = [...nextIds].map(id => recipients.find(recipient => recipient.id === id)).filter(Boolean)
+        .map(recipient => ({ recipientId: recipient.id, name: recipient.name, active: recipient.active }));
+    group.memberCount = group.members.length;
+    group.activeMemberCount = group.members.filter(member => member.active).length;
+    return { groupId: group.id, addedCount: group.members.filter(member => !previousIds.has(member.recipientId)).length,
+        removedCount: [...previousIds].filter(id => !nextIds.has(id)).length,
+        memberCount: group.memberCount, activeMemberCount: group.activeMemberCount, members: group.members };
+}
 const topicFields = topic => Object.fromEntries(['id', 'name', 'queryText', 'requiredKeywords', 'optionalKeywords',
     'excludedKeywords', 'batchSize', 'intervalMinutes', 'active'].map(field => [field, topic[field]]));
 const policyFields = value => ({ enabled: value.enabled, run: value.run, daily: value.daily,
@@ -310,6 +331,24 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 recipientDeleteError = body.enabled ?? url.searchParams.get('enabled') === 'true';
                                 return json(res, { enabled: recipientDeleteError });
                             }
+                            if (path === '/__qa/group-edit-errors') {
+                                groupMembersLoadError = body.loadError ?? groupMembersLoadError;
+                                groupNameSaveError = body.nameSaveError ?? groupNameSaveError;
+                                groupMembersSaveError = body.membersSaveError ?? groupMembersSaveError;
+                                return json(res, { loadError: groupMembersLoadError, nameSaveError: groupNameSaveError,
+                                    membersSaveError: groupMembersSaveError });
+                            }
+                            if (path === '/__qa/group-members') {
+                                const groupId = Number(body.groupId ?? url.searchParams.get('groupId') ?? 1);
+                                const group = groups.find(group => group.id === groupId);
+                                if (!group) return json(res, { error: 'Unknown fixture group.' }, 404);
+                                const recipientIds = body.recipientIds ?? [1, 2, 3];
+                                if (!Array.isArray(recipientIds) || recipientIds.some(id => !recipients.some(recipient => recipient.id === id)))
+                                    return json(res, { error: 'Use recipientIds from the current fixture recipients.' }, 400);
+                                const updated = replaceGroupMembers(group, recipientIds);
+                                syncRecipientGroups();
+                                return json(res, updated);
+                            }
                             if (path === '/__qa/notification-settings') {
                                 const variant = body.variant ?? url.searchParams.get('variant') ?? 'existing';
                                 const variants = ['existing', 'many-runs', 'save-error', 'completion-race', 'stale-targets'];
@@ -332,6 +371,9 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                     ...structuredClone(initialRecipients),
                                     ...Array.from({ length: count - 2 }, (_, i) => ({ id: 1000 + i, name: `검증 수신자 ${String(i + 1).padStart(3, '0')}`, email: `reader-${i + 1}@example.invalid`, phone: null, memo: null, active: true, groupNames: [], destinations: [] })),
                                 ];
+                                for (const group of groups)
+                                    replaceGroupMembers(group, group.members.map(member => member.recipientId));
+                                syncRecipientGroups();
                                 return json(res, { activeCount: recipients.filter(r => r.active).length });
                             }
                             if (path === '/__qa/groups') {
@@ -346,8 +388,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                     active: true, memberCount: members.length, activeMemberCount: members.length,
                                     members: structuredClone(members),
                                 }));
-                                for (const recipient of recipients)
-                                    recipient.groupNames = groups.filter(group => group.members.some(member => member.recipientId === recipient.id)).map(group => group.name);
+                                syncRecipientGroups();
                                 return json(res, { activeCount: groups.length });
                             }
                             if (path === '/__qa/proposals') {
@@ -617,8 +658,18 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             result = { id, ...body, active: true, phone: null, memo: body.memo || null, groupNames: [], destinations: body.destinations.map(d => ({ ...d, channelType: channels.find(c => c.id === d.channelId)?.channelType, onboarded: d.channelId === 1 })) };
                             recipients.push(result);
                         }
-                        else if (path === '/api/notifications/recipients')
-                            result = page(recipients);
+                        else if (path === '/api/notifications/recipients' && method === 'GET') {
+                            const groupId = url.searchParams.get('groupId');
+                            const group = groupId === null ? null : groups.find(group => group.id === Number(groupId));
+                            if (groupId !== null && !group)
+                                return json(res, { isSuccess: false, code: 'GROUP404', message: '수신 그룹을 찾을 수 없습니다.', result: {} }, 404);
+                            if (group && groupMembersLoadError)
+                                return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: {} }, 500);
+                            const active = url.searchParams.get('active');
+                            result = requestedPage(recipients.filter(recipient =>
+                                (!group || group.members.some(member => member.recipientId === recipient.id))
+                                && (active === null || recipient.active === (active === 'true'))), url);
+                        }
                         else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)\/destinations$/)) && method === 'PUT') {
                             const recipient = recipients.find(r => r.id === Number(match[1]));
                             if (!recipient) return json(res, { isSuccess: false, code: 'RECIPIENT404', message: '수신자를 찾을 수 없습니다.', result: {} }, 404);
@@ -652,6 +703,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 group.activeMemberCount = group.members.filter(member => member.active).length;
                             }
                             Object.assign(recipient, { active: false, destinations: [], groupNames: [] });
+                            syncRecipientGroups();
                             result = { id: recipient.id, active: false, deletedAt: now(), removedGroupCount: removedGroups.length };
                         }
                         else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)\/telegram(\/link)?$/))) {
@@ -675,12 +727,49 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             const members = recipients.filter(r => body.recipientIds.includes(r.id));
                             result = { id: Math.max(0, ...groups.map(g => g.id)) + 1, name: body.name, perspective: body.perspective || null, active: true, memberCount: members.length, activeMemberCount: members.filter(r => r.active).length, members: members.map(r => ({ recipientId: r.id, name: r.name, active: r.active })) };
                             groups.push(result);
+                            syncRecipientGroups();
                             status = 201;
                         }
-                        else if (path === '/api/notifications/groups')
-                            result = page(groups);
+                        else if (path === '/api/notifications/groups' && method === 'GET') {
+                            const active = url.searchParams.get('active');
+                            result = requestedPage(groups.filter(group => active === null || group.active === (active === 'true'))
+                                .map(groupSummary), url);
+                        }
+                        else if ((match = path.match(/^\/api\/notifications\/groups\/(\d+)$/)) && method === 'PATCH') {
+                            const group = groups.find(group => group.id === Number(match[1]));
+                            if (!group) return json(res, { isSuccess: false, code: 'GROUP404', message: '수신 그룹을 찾을 수 없습니다.', result: {} }, 404);
+                            if (groupNameSaveError)
+                                return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: {} }, 500);
+                            if (typeof body.name !== 'string' || !body.name.trim())
+                                return json(res, { isSuccess: false, code: 'COMMON400', message: '그룹명은 필수입니다.', result: {} }, 400);
+                            const name = body.name.trim();
+                            if (name.length > 100)
+                                return json(res, { isSuccess: false, code: 'COMMON400', message: '그룹명은 100자 이하여야 합니다.', result: {} }, 400);
+                            if (groups.some(existing => existing.id !== group.id && existing.name === name))
+                                return json(res, { isSuccess: false, code: 'GROUP409', message: '이미 존재하는 그룹명입니다.', result: {} }, 409);
+                            group.name = name;
+                            syncRecipientGroups();
+                            result = groupSummary(group);
+                        }
+                        else if ((match = path.match(/^\/api\/notifications\/groups\/(\d+)\/members$/)) && method === 'PUT') {
+                            const group = groups.find(group => group.id === Number(match[1]));
+                            if (!group) return json(res, { isSuccess: false, code: 'GROUP404', message: '수신 그룹을 찾을 수 없습니다.', result: {} }, 404);
+                            if (groupMembersSaveError)
+                                return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: {} }, 500);
+                            const recipientIds = body.recipientIds ?? [];
+                            if (recipientIds.includes(null))
+                                return json(res, { isSuccess: false, code: 'RECIPIENT400', message: 'recipientIds에는 null을 포함할 수 없습니다.', result: {} }, 400);
+                            const notFoundRecipientIds = [...new Set(recipientIds)].filter(id => !recipients.some(recipient => recipient.id === id));
+                            if (notFoundRecipientIds.length)
+                                return json(res, { isSuccess: false, code: 'RECIPIENT404', message: '수신자를 찾을 수 없습니다.', result: { notFoundRecipientIds } }, 404);
+                            result = replaceGroupMembers(group, recipientIds);
+                            syncRecipientGroups();
+                        }
                         else if ((match = path.match(/^\/api\/notifications\/groups\/(\d+)$/)) && method === 'DELETE') {
+                            if (!groups.some(group => group.id === Number(match[1])))
+                                return json(res, { isSuccess: false, code: 'GROUP404', message: '수신 그룹을 찾을 수 없습니다.', result: {} }, 404);
                             groups = groups.filter(g => g.id !== Number(match[1]));
+                            syncRecipientGroups();
                             result = null;
                         }
                         else if ((match = path.match(/^\/api\/notifications\/topics\/(\d+)\/delivery-policy$/)) && ['GET', 'PUT'].includes(method)) {

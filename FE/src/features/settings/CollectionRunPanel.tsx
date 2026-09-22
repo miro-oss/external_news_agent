@@ -13,6 +13,7 @@ import {
   type Audience,
 } from '../../api/types'
 import { Segmented, type SegmentedOption } from '../../components/Segmented'
+import { TransientStatus } from '../../components/TransientStatus'
 import { MutationStatus } from './MutationStatus'
 import { LlmUsageSummary } from './LlmUsageSummary'
 import { CollectionTopicPicker } from './CollectionTopicPicker'
@@ -142,15 +143,18 @@ export function CollectionRunPanel() {
               : scope === 'ALL' ? '모든 활성 주제 수집' : '선택 주제 수집'}
           </button>
           <MutationStatus error={startRun.error} success={startRun.data ? '수집 요청을 접수했습니다.' : null} />
-          {progress.data && <p className="hint" role="status">
-            {progress.data.status === 'PENDING' ? '준비가 끝나면 자동으로 수집합니다.'
-              : progress.data.status === 'RUNNING' ? '선택한 주제를 수집하고 있습니다.'
-              : progress.data.status === 'FAILED' ? '수집을 완료하지 못했습니다. 다시 요청할 수 있습니다.'
-              : progress.data.status === 'PARTIAL' ? '수집을 마쳤습니다. 일부 출처를 가져오지 못했습니다.'
-              : progress.data.reportId === null ? '수집을 마쳤습니다. 새로 분석할 기사나 변경 사항이 없어 보고서를 생성하지 않았습니다.'
-              : '수집을 마쳤습니다.'}
-            {progress.data.reportId && <> <a href={`#/reports?reportId=${progress.data.reportId}`}>보고서 보기</a></>}
-          </p>}
+          {progress.data && <>
+            {progress.data.status === 'SUCCESS' ? <TransientStatus key={progress.data.runId} className="hint"
+              message={progress.data.reportId === null
+                ? '수집을 마쳤습니다. 새로 분석할 기사나 변경 사항이 없어 보고서를 생성하지 않았습니다.'
+                : '수집을 마쳤습니다.'} /> : <p className="hint" role="status">
+              {progress.data.status === 'PENDING' ? '준비가 끝나면 자동으로 수집합니다.'
+                : progress.data.status === 'RUNNING' ? '선택한 주제를 수집하고 있습니다.'
+                : progress.data.status === 'FAILED' ? '수집을 완료하지 못했습니다. 다시 요청할 수 있습니다.'
+                : '수집을 마쳤습니다. 일부 출처를 가져오지 못했습니다.'}
+            </p>}
+            {progress.data.reportId && <p className="hint"><a href={`#/reports?reportId=${progress.data.reportId}`}>보고서 보기</a></p>}
+          </>}
         </div>
       </div>
     </section>

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useId, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../../api/client'
@@ -6,6 +6,7 @@ import { useActiveCollectionRuns, useCollectionQueue, useCollectionRunTopics, ty
 import { runDeliverySettingsOptions, saveRunDeliverySettingsOptions, type RunDeliverySettings } from '../../api/runDeliverySettings'
 import { Segmented } from '../../components/Segmented'
 import { Skeleton, SkeletonRegion } from '../../components/Skeleton'
+import { TransientStatus } from '../../components/TransientStatus'
 import { formatShortDate } from '../../lib/datetime'
 import { CollectionDeliveryDialog } from './CollectionDeliveryPicker'
 import { deliveryPolicySummary, toDeliveryPolicy } from './deliverySettings'
@@ -22,12 +23,6 @@ export function ActiveCollectionRuns() {
   const runs = useActiveCollectionRuns(status, page)
   const queue = useCollectionQueue()
   const id = useId()
-
-  useEffect(() => {
-    if (!success) return
-    const timer = window.setTimeout(() => setSuccess(null), 3000)
-    return () => window.clearTimeout(timer)
-  }, [success])
 
   async function open(runId: number, name: string) {
     setLoadingRun(runId)
@@ -51,7 +46,7 @@ export function ActiveCollectionRuns() {
       ]} onSelect={value => { setStatus(value); setPage(0) }} />
     </header>
     {error && <p className="field-error" role="alert">{error}</p>}
-    {success && <p className="hint" role="status">{success}</p>}
+    <TransientStatus className="hint" message={success} />
     {runs.isPending ? <SkeletonRegion label="진행 중인 수집을 불러오는 중"><Skeleton height="4rem" /></SkeletonRegion>
       : runs.isError ? <div className="active-runs-error" role="alert"><p>진행 중인 수집을 불러오지 못했습니다.</p><button type="button" className="text-button" onClick={() => void runs.refetch()}>다시 불러오기</button></div>
       : <>

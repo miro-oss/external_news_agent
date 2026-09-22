@@ -91,7 +91,7 @@ function RecipientSelectionDialog({ id, recipients, selected, onDismiss, onApply
     <div className="member-choice-list recipient-selection-list" role="group" aria-label="선택 가능한 수신자">
       {matches.map(recipient => <label key={recipient.id}>
         <input type="checkbox" checked={validDraft.includes(recipient.id)} onChange={() => setDraft(current => current.includes(recipient.id) ? current.filter(value => value !== recipient.id) : [...current, recipient.id])} />
-        <span><strong>{recipient.name}</strong></span>
+        <span><strong>{recipient.name}</strong>{!recipient.active && <small>수신 중지</small>}</span>
       </label>)}
       {!matches.length && <p className="recipient-selection-empty">{recipients.length ? '검색 결과가 없습니다.' : '수신자를 먼저 등록해 주세요.'}</p>}
     </div>

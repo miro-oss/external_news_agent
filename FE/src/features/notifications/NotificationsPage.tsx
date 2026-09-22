@@ -3,7 +3,6 @@ import {
   type DeliveryLogFilters,
   useCreateNotificationGroup,
   useCreateNotificationRecipient,
-  useDeleteNotificationGroup,
   useDeleteNotificationRecipient,
   useDeliveryLogs,
   useNotificationChannels,
@@ -19,6 +18,7 @@ import { MutationStatus } from '../settings/MutationStatus'
 import { TelegramConnectionCard } from './TelegramConnectionCard'
 import { RecipientEmailForm } from './RecipientEmailForm'
 import { GroupRecipientPicker } from './GroupRecipientPicker'
+import { NotificationGroupRow } from './NotificationGroupRow'
 import { DeliveryLogSkeleton, NotificationPanelSkeleton } from './NotificationSkeletons'
 import './notifications-refinement.css'
 
@@ -234,7 +234,6 @@ function GroupPanel({ recipients, groups }: {
   groups: NonNullable<ReturnType<typeof useNotificationGroups>['data']>['content']
 }) {
   const create = useCreateNotificationGroup()
-  const remove = useDeleteNotificationGroup()
   const [name, setName] = useState('')
   const [perspective, setPerspective] = useState<GroupPerspective>('EXECUTIVE')
   const [selected, setSelected] = useState<number[]>([])
@@ -266,13 +265,10 @@ function GroupPanel({ recipients, groups }: {
       <SavedNotificationList title="등록된 수신 그룹">
         <div className="compact-list group-list">
           {groups.length === 0 && <p className="notification-list-empty">등록된 수신 그룹이 없습니다.</p>}
-          {groups.map((group) => <article key={group.id}>
-            <div><strong>{group.name}</strong><span>{perspectiveLabel(group.perspective)} · {group.memberCount}명</span></div>
-            <button type="button" className="text-button danger" aria-label={`${group.name} 삭제`} disabled={remove.isPending} onClick={() => remove.mutate(group.id)}>삭제</button>
-          </article>)}
+          {groups.map((group) => <NotificationGroupRow key={group.id} group={group} recipients={recipients}
+            perspectiveLabel={perspectiveLabel(group.perspective)} />)}
         </div>
       </SavedNotificationList>
-      <MutationStatus error={remove.error} success={null} />
     </section>
   )
 }

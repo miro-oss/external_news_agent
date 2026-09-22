@@ -1,4 +1,5 @@
 import { ApiError } from '../../api/client'
+import { TransientStatus } from '../../components/TransientStatus'
 
 interface Props {
   error: unknown
@@ -13,12 +14,8 @@ interface Props {
  * 서버 로그와 화면에서 다르게 불려서, 사용자가 말한 문구로 로그를 찾을 수 없게 된다.
  */
 export function FormStatus({ error, successMessage }: Props) {
-  if (error) {
-    const text = error instanceof ApiError ? error.message : '등록에 실패했습니다.'
-    return <p className="error" role="alert">{text}</p>
-  }
-  if (successMessage) {
-    return <p className="success" role="status">{successMessage}</p>
-  }
-  return null
+  return <>
+    {error ? <p className="error" role="alert">{error instanceof ApiError ? error.message : '등록에 실패했습니다.'}</p> : null}
+    <TransientStatus className="success" message={successMessage} suppressed={Boolean(error)} />
+  </>
 }
