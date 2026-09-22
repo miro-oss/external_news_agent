@@ -42,6 +42,7 @@ public class AgentClient {
     private static final int MAX_ERROR_BODY_LENGTH = 500;
 
     private final RestClient analyzeClient;
+    private final RestClient relevanceClient;
     private final RestClient insightClient;
     private final RestClient reportClient;
 
@@ -54,6 +55,8 @@ public class AgentClient {
                         properties.getConnectTimeout(), properties.getInsightTimeout()),
                 restClientFactory.create(
                         properties.getConnectTimeout(), properties.getReportTimeout()),
+                restClientFactory.create(
+                        properties.getConnectTimeout(), properties.getRelevanceTimeout()),
                 properties);
     }
 
@@ -65,10 +68,19 @@ public class AgentClient {
                 RestClient.Builder insightBuilder,
                 RestClient.Builder reportBuilder,
                 AgentProperties properties) {
+        this(analyzeBuilder, insightBuilder, reportBuilder, analyzeBuilder, properties);
+    }
+
+    AgentClient(RestClient.Builder analyzeBuilder,
+                RestClient.Builder insightBuilder,
+                RestClient.Builder reportBuilder,
+                RestClient.Builder relevanceBuilder,
+                AgentProperties properties) {
         validateSecureBaseUrl(properties);
         this.analyzeClient = configured(analyzeBuilder, properties).build();
         this.insightClient = configured(insightBuilder, properties).build();
         this.reportClient = configured(reportBuilder, properties).build();
+        this.relevanceClient = configured(relevanceBuilder, properties).build();
     }
 
     private RestClient.Builder configured(RestClient.Builder builder, AgentProperties properties) {
@@ -136,7 +148,7 @@ public class AgentClient {
     }
 
     public AgentTopicRelevanceResponse topicRelevance(AgentTopicRelevanceRequest request) {
-        return post(analyzeClient, "/v1/topic-relevance", request, AgentTopicRelevanceResponse.class);
+        return post(relevanceClient, "/v1/topic-relevance", request, AgentTopicRelevanceResponse.class);
     }
 
     public AgentEvidenceResponse verifyEvidence(AgentEvidenceRequest request) {

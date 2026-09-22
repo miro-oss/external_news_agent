@@ -174,6 +174,9 @@ def test_openai_strict_wire_schema_is_single_article_and_converts_to_public_arra
         decision_map = wire_schema["properties"]["decisions"]
         assert decision_map["required"] == [key]
         assert decision_map["additionalProperties"] is False
+        assert list(decision_map["properties"][key]["properties"]) == [
+            "reason", "evidenceQuotes", "status",
+        ]
         for violation in ("missing", "extra", "invented_id", "legacy_array"):
             invalid = article_output(article.article_id)
             if violation == "missing":
@@ -721,6 +724,106 @@ def test_mock_returns_only_uncertain_without_calling_provider() -> None:
     )
     assert response.meta.mock
     assert response.meta.input_tokens == response.meta.output_tokens == 0
+
+
+@pytest.mark.parametrize("status", ["IRRELEVANT", "RELEVANT", "UNCERTAIN"])
+def test_valid_decision_is_single_pass_for_every_status(status):
+    single = request().model_copy(update={"articles": request().articles[:1]})
+    wire = article_output()
+    wire["decisions"]["article_501"]["status"] = status
+    unused = AgentError(503, "PROVIDER_UNAVAILABLE", "must not be called")
+    provider = FakeProvider(provider_response(wire), unused)
+
+    response = service(provider).classify(single)
+
+    assert response.decisions[0].status == status
+    assert len(provider.calls) == 1 and provider.responses == [unused]
+    assert response.meta.input_tokens == 20 and response.meta.cost_usd == 0.001
+
+
+@pytest.mark.parametrize(("model", "token_limit"), [
+    ("gpt-4.1-nano", 1792), ("gpt-4.1-nano-2025-04-14", 1792),
+    ("gpt-4o-mini", 1792), ("gpt-4o-mini-2024-07-18", 1792),
+    ("gpt-5-mini", 4096), ("gpt-5-mini-2025-08-07", 4096),
+    ("gpt-5.6-terra", 6144),
+])
+@pytest.mark.parametrize("plan", ["FREE", "PAID"])
+def test_relevance_model_and_prices_are_isolated_to_free_task(
+    monkeypatch, model, token_limit, plan,
+):
+    settings = Settings(
+        AGENT_MOCK=False, OPENAI_MODEL="analysis-original", MINDLOGIC_CLAUDE_MODEL="paid-original",
+        TOPIC_RELEVANCE_OPENAI_MODEL=model, OPENAI_INPUT_COST_PER_MILLION="1",
+        OPENAI_CACHED_INPUT_COST_PER_MILLION="0.5", OPENAI_OUTPUT_COST_PER_MILLION="2",
+    )
+    before = settings.model_dump()
+    captured = {}
+
+    def routed(effective, requested_plan):
+        captured.update(settings=effective, plan=requested_plan)
+        result = replace(
+            provider_response(article_output()),
+            provider="openai" if requested_plan == "FREE" else "mindlogic-claude",
+            model=effective.openai_model if requested_plan == "FREE"
+            else effective.mindlogic_claude_model,
+        )
+        return FakeProvider(result)
+
+    monkeypatch.setattr("app.llm.topic_relevance_service.get_analyze_provider", routed)
+    single = request().model_copy(update={"plan": plan, "articles": request().articles[:1]})
+    response = TopicRelevanceService(settings).classify(single)
+
+    effective = captured["settings"]
+    assert captured["plan"] == plan
+    assert settings.model_dump() == before
+    assert effective.provider_timeout_seconds == settings.insight_provider_timeout_seconds
+    assert effective.openai_model == (model if plan == "FREE" else "analysis-original")
+    assert effective.mindlogic_claude_model == "paid-original"
+    assert response.meta.model == (model if plan == "FREE" else "paid-original")
+    assert response.meta.provider == ("openai" if plan == "FREE" else "mindlogic-claude")
+    assert effective.max_output_tokens == (token_limit if plan == "FREE" else 1792)
+    prices = (effective.openai_input_cost_per_million,
+              effective.openai_cached_input_cost_per_million,
+              effective.openai_output_cost_per_million)
+    assert prices == ((None, None, None) if plan == "FREE"
+                      else (Decimal("1"), Decimal("0.5"), Decimal("2")))
+
+
+@pytest.mark.parametrize("repair", [False, True])
+@pytest.mark.parametrize(("model", "token_limit", "cost"), [
+    ("gpt-5-mini", 4096, Decimal("0.008397")),
+    ("gpt-5.6-terra", 6144, Decimal("0.075368")),
+])
+def test_empty_reasoning_limit_never_becomes_a_decision_and_keeps_total_usage(
+    repair, model, token_limit, cost,
+):
+    truncated = ProviderResponse(
+        text="", provider="openai", model=model, truncated=True,
+        usage=ProviderUsage(input_tokens=1000, output_tokens=token_limit, cost_usd=cost),
+    )
+    valid = replace(provider_response(article_output()), model=model)
+    provider = FakeProvider(truncated, valid)
+    single = request().model_copy(update={"articles": request().articles[:1]})
+    subject = service(provider, repair_attempts=int(repair))
+
+    if repair:
+        response = subject.classify(single)
+        assert len(provider.calls) == 2
+        assert response.decisions[0].status == "IRRELEVANT"
+        assert response.meta.input_tokens == 1020
+        assert response.meta.output_tokens == token_limit + 10
+        assert response.meta.cost_usd == float(cost + Decimal("0.001"))
+    else:
+        with pytest.raises(AgentError) as caught:
+            subject.classify(single)
+        assert len(provider.calls) == 1 and provider.responses == [valid]
+        assert caught.value.code == "SCHEMA_VIOLATION"
+        assert caught.value.details["truncated"] is True
+        assert caught.value.details["usage"] == {
+            "inputTokens": 1000, "outputTokens": token_limit,
+            "costUsd": float(cost), "credits": 0.0,
+        }
+        assert caught.value.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
 
 
 @pytest.mark.parametrize("count", [1, 10])

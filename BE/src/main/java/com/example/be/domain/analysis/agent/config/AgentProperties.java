@@ -19,6 +19,8 @@ public class AgentProperties implements InitializingBean {
     private String token = "";
     private Duration connectTimeout = Duration.ofSeconds(5);
     private Duration analyzeTimeout = Duration.ofSeconds(90);
+    // HTTP response wait only; this is not an end-to-end deadline for provider retries.
+    private Duration relevanceTimeout = Duration.ofSeconds(180);
     private Duration insightTimeout = Duration.ofSeconds(60);
     private Duration reportTimeout = Duration.ofSeconds(120);
     private AgentPlan defaultPlan = AgentPlan.FREE;
@@ -29,6 +31,7 @@ public class AgentProperties implements InitializingBean {
             "analyze.ko.v11+perspective.ko.v1+sensitivity.ko.v2";
     private String insightPromptVersion = "insight.ko.v2+perspective.ko.v1";
     private String freeModel = "";
+    private String relevanceFreeModel = "gpt-5.6-terra";
     private String paidModel = "";
     private final Quota quota = new Quota();
     private final InsightHistory insightHistory = new InsightHistory();
@@ -36,6 +39,9 @@ public class AgentProperties implements InitializingBean {
 
     @Override
     public void afterPropertiesSet() {
+        if (relevanceTimeout == null || relevanceTimeout.isNegative() || relevanceTimeout.isZero()) {
+            throw new IllegalStateException("news.agent.relevance-timeout은 양수여야 합니다.");
+        }
         if (enabled && !StringUtils.hasText(token)) {
             throw new IllegalStateException(
                     "news.agent.enabled=true이면 AGENT_SHARED_SECRET을 설정해야 합니다.");
@@ -115,6 +121,14 @@ public class AgentProperties implements InitializingBean {
         this.analyzeTimeout = analyzeTimeout;
     }
 
+    public Duration getRelevanceTimeout() {
+        return relevanceTimeout;
+    }
+
+    public void setRelevanceTimeout(Duration relevanceTimeout) {
+        this.relevanceTimeout = relevanceTimeout;
+    }
+
     public Duration getReportTimeout() {
         return reportTimeout;
     }
@@ -177,6 +191,14 @@ public class AgentProperties implements InitializingBean {
 
     public void setFreeModel(String freeModel) {
         this.freeModel = freeModel;
+    }
+
+    public String getRelevanceFreeModel() {
+        return relevanceFreeModel;
+    }
+
+    public void setRelevanceFreeModel(String relevanceFreeModel) {
+        this.relevanceFreeModel = relevanceFreeModel;
     }
 
     public String getPaidModel() {
