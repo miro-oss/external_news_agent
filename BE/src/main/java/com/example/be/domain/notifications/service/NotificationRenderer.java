@@ -72,11 +72,17 @@ public class NotificationRenderer {
                     .append(escape(limit(card.title(), 180))).append("</h3><p><strong>주요 내용</strong><br>")
                     .append(escape(limit(card.summary(), 1200))).append("</p>");
             if (!card.watches().isEmpty()) {
-                html.append("<p style=\"margin:16px 0 4px\"><strong>후속 확인</strong></p>"
-                        + "<ul style=\"margin:0 0 0 20px;padding:0\">");
-                card.watches().forEach(watch -> html.append("<li style=\"margin:0;padding:0\">")
-                        .append(escape(limit(watch, 600))).append("</li>"));
-                html.append("</ul>");
+                // Mail clients can override list indentation; use cells to control the bullet spacing.
+                html.append("<table role=\"presentation\" width=\"100%\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" "
+                        + "style=\"border-collapse:collapse;border-spacing:0;margin:0;"
+                        + "mso-table-lspace:0pt;mso-table-rspace:0pt\"><tbody>"
+                        + "<tr><td colspan=\"2\" style=\"padding:0 0 4px;line-height:1.7\">"
+                        + "<strong>후속 확인</strong></td></tr>");
+                card.watches().forEach(watch -> html.append("<tr><td width=\"20\" valign=\"top\" aria-hidden=\"true\" "
+                                + "style=\"width:20px;padding:0;line-height:1.7\">•</td>"
+                                + "<td valign=\"top\" style=\"padding:0;line-height:1.7\">")
+                        .append(escape(limit(watch, 600))).append("</td></tr>"));
+                html.append("</tbody></table>");
             }
             appendCardSources(html, card.urls(), true);
             html.append("</div>");
