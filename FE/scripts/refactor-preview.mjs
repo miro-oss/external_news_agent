@@ -35,7 +35,7 @@ const initialTopics = [
 const initialProposals = initialTopics.map((t, i) => ({ id: 100 + i, topicId: t.id, topicName: t.name, collectionRunId: 148, status: 'PENDING', summary: i === 0 ? '수출 규제와 공급망 재편에 반복 등장한 키워드를 추가하는 제안입니다.' : '최근 수집한 기사에서 반복 등장한 키워드를 추가합니다.', createdAt: '2026-09-08T09:30:00+09:00', reviewedAt: null, currentKeywords: { requiredKeywords: t.requiredKeywords, optionalKeywords: t.optionalKeywords, excludedKeywords: t.excludedKeywords }, changes: [{ bucket: 'OPTIONAL', action: 'ADD', keyword: i === 0 ? '첨단 패키징' : 'HBM4', reason: '최근 수집에서 반복 등장했으며 현재 주제와 관련성이 높습니다.' }, { bucket: 'EXCLUDED', action: 'ADD', keyword: '채용 공고', reason: '분석 대상에서 채용 안내를 제외합니다.' }] }));
 const fixture = JSON.parse(readFileSync(new URL('../tests/fixtures/refactor-report.json', import.meta.url), 'utf8'));
 const now = () => new Date().toISOString();
-const disabledPolicy = () => ({ enabled: false, run: true, daily: false, channelIds: [], groupIds: [], recipientIds: [] });
+const disabledPolicy = () => ({ enabled: false, run: true, daily: false, weekly: false, channelIds: [], groupIds: [], recipientIds: [] });
 const initialChannels = [{ id: 1, channelType: 'EMAIL', name: '이메일', config: {}, maxLength: 20000, active: true, tokenConfigured: false }, { id: 2, channelType: 'TELEGRAM', name: '텔레그램', config: {}, maxLength: 4096, active: true, tokenConfigured: true }, { id: 3, channelType: 'EMAIL', name: '사용 중지한 메일', config: {}, maxLength: 20000, active: false, tokenConfigured: false }];
 const initialRecipients = [{ id: 1, name: '김수신', email: 'reader@example.invalid', phone: null, memo: '검증용 수신자', active: true, groupNames: ['반도체 전략팀'], destinations: [{ channelId: 1, channelType: 'EMAIL', address: 'reader@example.invalid', use: true, onboarded: true }, { channelId: 2, channelType: 'TELEGRAM', address: null, use: false, onboarded: false }] }, { id: 2, name: '이구독', email: 'reviewer@example.invalid', phone: null, memo: null, active: true, groupNames: ['반도체 전략팀'], destinations: [{ channelId: 1, channelType: 'EMAIL', address: 'reviewer@example.invalid', use: true, onboarded: true }, { channelId: 2, channelType: 'TELEGRAM', address: 'fixture-chat-2', use: true, onboarded: true }] }, { id: 3, name: '중지한 수신자', email: 'paused@example.invalid', phone: null, memo: null, active: false, groupNames: [], destinations: [] }];
 const initialGroups = [{ id: 1, name: '반도체 전략팀', perspective: 'TECHNOLOGY', active: true, memberCount: 2, activeMemberCount: 2, members: [{ recipientId: 1, name: '김수신', active: true }, { recipientId: 2, name: '이구독', active: true }] }, { id: 2, name: '사용 중지한 그룹', perspective: null, active: false, memberCount: 1, activeMemberCount: 0, members: [{ recipientId: 3, name: '중지한 수신자', active: false }] }];
@@ -44,6 +44,9 @@ let telegramLinkError = false;
 let showDeliveryLogs = false;
 let recipientProfileError = false;
 let recipientDeleteError = false;
+let reportSubscriptionsLoadError = false;
+let reportSubscriptionsSaveError = false;
+let subscriptionExclusions = {};
 let groupMembersLoadError = false;
 let groupNameSaveError = false;
 let groupMembersSaveError = false;
@@ -90,6 +93,28 @@ const topicFields = topic => Object.fromEntries(['id', 'name', 'queryText', 'req
     'excludedKeywords', 'batchSize', 'intervalMinutes', 'active'].map(field => [field, topic[field]]));
 const policyFields = value => ({ enabled: value.enabled, run: value.run, daily: value.daily,
     groupIds: [...value.groupIds], recipientIds: [...value.recipientIds], channelIds: [...value.channelIds] });
+const topicPolicyFields = value => ({ ...policyFields(value), weekly: value.weekly ?? false });
+function reportSubscriptions(recipientId) {
+    const recipient = recipients.find(item => item.id === recipientId);
+    const subscriptionTopics = topics.flatMap(topic => {
+        const policy = policies[topic.id];
+        const direct = policy?.recipientIds.includes(recipientId) ?? false;
+        const memberGroups = groups.filter(group => policy?.groupIds.includes(group.id)
+            && group.members.some(member => member.recipientId === recipientId));
+        const excludedScopes = subscriptionExclusions[`${recipientId}:${topic.id}`] ?? [];
+        if (!direct && memberGroups.length === 0 && excludedScopes.length === 0) return [];
+        const targeted = direct || memberGroups.length > 0;
+        const reachable = recipient.active && (direct || memberGroups.some(group => group.active));
+        return [{ topicId: topic.id, topicName: topic.name, enabled: targeted && (policy?.enabled ?? false),
+            configuredScopes: targeted ? ['RUN', 'DAILY', 'WEEKLY'].filter(scope => policy?.[scope.toLowerCase()]) : [],
+            excludedScopes, direct, groupNames: memberGroups.map(group => group.name),
+            channelTypes: reachable ? [...new Set(recipient.destinations.filter(destination =>
+                policy?.channelIds.includes(destination.channelId) && destination.use && destination.onboarded && destination.address?.trim()
+                && channels.some(channel => channel.id === destination.channelId && channel.active)).map(destination => destination.channelType))] : [],
+        }];
+    }).sort((a, b) => a.topicName.localeCompare(b.topicName, 'ko') || a.topicId - b.topicId);
+    return { recipientId, topics: subscriptionTopics };
+}
 function runSettings(run) {
     const delivery = runDeliverySettings.find(settings => settings.runId === run.runId)?.delivery;
     const saved = delivery?.mode === 'TOPIC' ? null : delivery;
@@ -279,6 +304,9 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 showDeliveryLogs = false;
                                 recipientProfileError = false;
                                 recipientDeleteError = false;
+                                reportSubscriptionsLoadError = false;
+                                reportSubscriptionsSaveError = false;
+                                subscriptionExclusions = {};
                                 loadingDelayMs = 0;
                                 loadingPath = '/api/';
                                 usageCalls = 12;
@@ -288,6 +316,18 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             if (path === '/__qa/report-filters') {
                                 reports = reportFilterFixtures();
                                 return json(res, { count: reports.length });
+                            }
+                            if (path === '/__qa/report-subscriptions') {
+                                const variant = body.variant ?? url.searchParams.get('variant') ?? 'default';
+                                reportSubscriptionsLoadError = variant === 'load-error';
+                                reportSubscriptionsSaveError = variant === 'save-error';
+                                policies = variant === 'empty' ? {} : {
+                                    31: { enabled: true, run: true, daily: true, weekly: true, groupIds: [1], recipientIds: [1], channelIds: [1, 2] },
+                                    29: { enabled: true, run: false, daily: false, weekly: true, groupIds: [], recipientIds: [1], channelIds: [2] },
+                                    25: { enabled: false, run: false, daily: true, weekly: false, groupIds: [1], recipientIds: [], channelIds: [1] },
+                                };
+                                subscriptionExclusions = variant === 'empty' ? {} : { '1:31': ['DAILY'], '1:9': ['WEEKLY'] };
+                                return json(res, { variant });
                             }
                             if (path === '/__qa/usage') {
                                 const used = Number(body.used ?? url.searchParams.get('used') ?? 12);
@@ -579,7 +619,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 const delivery = body.delivery === undefined ? null : structuredClone(body.delivery);
                                 const updatedTopicIds = delivery?.mode === 'TOPIC' ? [...targetTopicIds] : [];
                                 if (updatedTopicIds.length) {
-                                    const policy = { enabled: delivery.enabled, run: delivery.run, daily: delivery.daily,
+                                    const policy = { enabled: delivery.enabled, run: delivery.run, daily: delivery.daily, weekly: delivery.weekly ?? false,
                                         groupIds: delivery.groupIds, recipientIds: delivery.recipientIds, channelIds: delivery.channelIds };
                                     for (const topicId of updatedTopicIds)
                                         policies[topicId] = structuredClone(policy);
@@ -689,6 +729,24 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             });
                             result = { recipientId: recipient.id, destinations: recipient.destinations };
                         }
+                        else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)\/report-subscriptions(?:\/(\d+))?$/))) {
+                            const recipientId = Number(match[1]);
+                            if (!recipients.some(recipient => recipient.id === recipientId))
+                                return json(res, { isSuccess: false, code: 'RECIPIENT404', message: '수신자를 찾을 수 없습니다.', result: {} }, 404);
+                            if (method === 'PUT' && match[2]) {
+                                if (reportSubscriptionsSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '알림 설정을 저장하지 못했습니다. 다시 시도해 주세요.', result: {} }, 500);
+                                if (!Array.isArray(body.excludedScopes) || body.excludedScopes.some(scope => !['RUN', 'DAILY', 'WEEKLY'].includes(scope)))
+                                    return json(res, { isSuccess: false, code: 'COMMON400', message: '제외할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.', result: {} }, 400);
+                                const topicId = Number(match[2]);
+                                const previous = reportSubscriptions(recipientId).topics.find(topic => topic.topicId === topicId);
+                                subscriptionExclusions[`${recipientId}:${topicId}`] = [...new Set(body.excludedScopes)];
+                                result = reportSubscriptions(recipientId).topics.find(topic => topic.topicId === topicId)
+                                    ?? { ...previous, excludedScopes: [] };
+                            } else if (method === 'GET' && !match[2]) {
+                                if (reportSubscriptionsLoadError) return json(res, { isSuccess: false, code: 'COMMON500', message: '주제 보고서 알림을 불러오지 못했습니다.', result: {} }, 500);
+                                result = reportSubscriptions(recipientId);
+                            } else return json(res, { isSuccess: false, code: 'QA_BLOCKED', message: '지원하지 않는 검증 요청입니다.', result: {} }, 400);
+                        }
                         else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)$/)) && method === 'PATCH') {
                             if (recipientProfileError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: {} }, 500);
                             const recipient = recipients.find(r => r.id === Number(match[1]));
@@ -781,7 +839,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 return json(res, { isSuccess: false, code: 'COMMON404', message: '수집 주제를 찾을 수 없습니다.', result: {} }, 404);
                             if (method === 'PUT') {
                                 if (notificationSettingsSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: null }, 500);
-                                policies[match[1]] = policyFields(body);
+                                policies[match[1]] = topicPolicyFields(body);
                             }
                             result = policies[match[1]] || disabledPolicy();
                         }

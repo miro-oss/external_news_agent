@@ -82,8 +82,10 @@ class ReportCompletionTransactionTest {
         var reports = mock(NewsReportRepository.class);
         var plans = new NotificationDeliveryPlanService(reports, channels, groups, management, renderer,
                 new com.example.be.domain.notifications.config.NotificationProperties());
+        var subscriptions = mock(ReportSubscriptionStore.class);
+        when(subscriptions.allowedTopics(anyLong(), any(), anyList())).thenAnswer(invocation -> invocation.getArgument(2));
         var automation = transactional(new ReportNotificationAutomationService(jdbc, topics, management,
-                plans, renderer, snapshots, outbox, groups, channels, recipients), transactions);
+                plans, renderer, snapshots, outbox, groups, channels, recipients, subscriptions), transactions);
         when(snapshots.find(42L)).thenReturn(Optional.empty());
         when(jdbc.queryForList(anyString(), eq(Long.class), eq(42L))).thenReturn(List.of(1L));
         when(topics.existsById(1L)).thenReturn(true);
@@ -114,7 +116,7 @@ class ReportCompletionTransactionTest {
         verify(connection).commit();
         verify(connection, never()).rollback();
         verify(jdbc).update(startsWith("INSERT INTO report_notification_outbox"), eq(117L), eq(7L), eq(2L),
-                anyString(), eq("유효 수신자"), eq("valid@example.invalid"), eq("보고서"), eq("요약"), any());
+                anyString(), eq("유효 수신자"), eq("valid@example.invalid"), eq("보고서"), eq("요약"), any(), eq("[1]"));
         verify(renderer, times(1)).render(report, email);
     }
 

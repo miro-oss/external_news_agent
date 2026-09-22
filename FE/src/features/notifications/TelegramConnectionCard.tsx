@@ -16,8 +16,11 @@ export function TelegramConnectionCard({ recipientId, recipientName }: { recipie
   const connected = connection.data?.status === 'CONNECTED'
   const waiting = connection.data?.status === 'WAITING'
   useEffect(() => {
-    if (connected) void client.invalidateQueries({ queryKey: ['notifications', 'recipients'] })
-  }, [connected, client])
+    if (connected) {
+      void client.invalidateQueries({ queryKey: ['notifications', 'recipients'] })
+      void client.invalidateQueries({ queryKey: ['notifications', 'report-subscriptions', recipientId] })
+    }
+  }, [connected, client, recipientId])
   useEffect(() => () => window.clearTimeout(copyTimer.current), [])
 
   function resetCopyFeedback() {

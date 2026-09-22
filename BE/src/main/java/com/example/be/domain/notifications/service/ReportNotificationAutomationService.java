@@ -1,6 +1,5 @@
 package com.example.be.domain.notifications.service;
 
-import com.example.be.domain.notifications.dto.req.NotificationReqDTO;
 import com.example.be.domain.notifications.entity.*;
 import com.example.be.domain.notifications.repository.NotificationChannelRepository;
 import com.example.be.domain.notifications.repository.NotificationGroupRepository;
@@ -36,14 +35,23 @@ public class ReportNotificationAutomationService {
     private final NotificationGroupRepository groups;
     private final NotificationChannelRepository channels;
     private final NotificationRecipientRepository recipients;
+    private final ReportSubscriptionStore subscriptions;
     private static final LongListJsonConverter IDS = new LongListJsonConverter();
 
-    public record Policy(boolean enabled, boolean run, boolean daily, List<Long> groupIds,
+    public record Policy(boolean enabled, boolean run, boolean daily, boolean weekly, List<Long> groupIds,
                          List<Long> recipientIds, List<Long> channelIds) {
         public Policy {
             groupIds = ids(groupIds); recipientIds = ids(recipientIds); channelIds = ids(channelIds);
         }
+        public Policy(boolean enabled, boolean run, boolean daily, List<Long> groupIds,
+                      List<Long> recipientIds, List<Long> channelIds) {
+            this(enabled, run, daily, false, groupIds, recipientIds, channelIds);
+        }
         static Policy empty() { return new Policy(false, true, false, List.of(), List.of(), List.of()); }
+
+        boolean includes(ReportScope scope) {
+            return enabled && switch (scope) { case RUN -> run; case DAILY -> daily; case WEEKLY -> weekly; };
+        }
     }
 
     @Transactional(readOnly = true)
@@ -51,7 +59,7 @@ public class ReportNotificationAutomationService {
         requireTopic(topicId);
         return jdbc.query("SELECT * FROM topic_delivery_policies WHERE topic_id=?", (rs, n) -> new Policy(
                 "Y".equals(rs.getString("enabled_yn")), "Y".equals(rs.getString("run_yn")),
-                "Y".equals(rs.getString("daily_yn")), IDS.convertToEntityAttribute(rs.getString("group_ids")),
+                "Y".equals(rs.getString("daily_yn")), "Y".equals(rs.getString("weekly_yn")), IDS.convertToEntityAttribute(rs.getString("group_ids")),
                 IDS.convertToEntityAttribute(rs.getString("recipient_ids")),
                 IDS.convertToEntityAttribute(rs.getString("channel_ids"))), topicId).stream().findFirst().orElse(Policy.empty());
     }
@@ -60,7 +68,7 @@ public class ReportNotificationAutomationService {
     public Policy savePolicy(Long topicId, Policy policy) {
         requireTopic(topicId);
         if (policy == null) throw invalid("자동 전달 설정이 필요합니다.");
-        if (policy.enabled() && (!policy.run() && !policy.daily())) throw invalid("전달할 보고서 종류를 선택해 주세요.");
+        if (policy.enabled() && (!policy.run() && !policy.daily() && !policy.weekly())) throw invalid("전달할 보고서 종류를 선택해 주세요.");
         if (policy.enabled() && policy.groupIds().isEmpty() && policy.recipientIds().isEmpty()) throw invalid("수신 그룹이나 수신자를 선택해 주세요.");
         if (policy.enabled() && policy.channelIds().isEmpty()) throw invalid("전달 채널을 선택해 주세요.");
         if (policy.enabled()) {
@@ -73,49 +81,54 @@ public class ReportNotificationAutomationService {
         // Serialize concurrent edits against an existing topic row.
         jdbc.queryForObject("SELECT id FROM news_topics WHERE id=? FOR UPDATE", Long.class, topicId);
         jdbc.update("DELETE FROM topic_delivery_policies WHERE topic_id=?", topicId);
-        jdbc.update("INSERT INTO topic_delivery_policies(topic_id,enabled_yn,run_yn,daily_yn,group_ids,recipient_ids,channel_ids) VALUES(?,?,?,?,?,?,?)",
-                topicId, yn(policy.enabled()), yn(policy.run()), yn(policy.daily()), IDS.convertToDatabaseColumn(policy.groupIds()),
+        jdbc.update("INSERT INTO topic_delivery_policies(topic_id,enabled_yn,run_yn,daily_yn,weekly_yn,group_ids,recipient_ids,channel_ids) VALUES(?,?,?,?,?,?,?,?)",
+                topicId, yn(policy.enabled()), yn(policy.run()), yn(policy.daily()), yn(policy.weekly()), IDS.convertToDatabaseColumn(policy.groupIds()),
                 IDS.convertToDatabaseColumn(policy.recipientIds()), IDS.convertToDatabaseColumn(policy.channelIds()));
         return policy;
     }
 
     @Transactional
     public void enqueueCompletedReport(NewsReport report) {
-        // Weekly delivery requires its own explicit policy; RUN/DAILY opt-ins do not authorize it.
-        if (report.getReportScope() == ReportScope.WEEKLY) return;
-        List<Long> runIds = report.getReportScope() == ReportScope.DAILY ? report.getSourceRunIds()
+        List<Long> runIds = report.getReportScope() != ReportScope.RUN ? report.getSourceRunIds()
                 : report.getRunId() == null ? List.of() : List.of(report.getRunId());
         if (runIds.isEmpty()) return;
         Map<String, NotificationDeliveryPlanService.PreparedTarget> targets = new LinkedHashMap<>();
+        Map<String, Set<Long>> origins = new LinkedHashMap<>();
         Set<Long> topicIds = new LinkedHashSet<>();
         // DAILY merges several requests. Prefer the latest eligible captured destination.
         for (Long runId : runIds.stream().distinct().sorted(Comparator.reverseOrder()).toList()) {
+            if (report.getReportScope() == ReportScope.WEEKLY) {
+                topicIds.addAll(runTopicIds(runId));
+                continue;
+            }
             var explicit = runDeliveries.find(runId);
             if (explicit.isEmpty()) {
-                topicIds.addAll(jdbc.queryForList("SELECT DISTINCT topic_id FROM news_collection_run_items WHERE run_id=?", Long.class, runId));
+                topicIds.addAll(runTopicIds(runId));
                 continue;
             }
             var snapshot = explicit.get();
             if (!snapshot.enabled() || (report.getReportScope() == ReportScope.DAILY ? !snapshot.daily() : !snapshot.run())) continue;
+            List<Long> runTopics = runTopicIds(runId);
             for (var saved : snapshot.targets()) {
                 var channel = optionalChannel(saved.channelId());
                 if (channel == null) continue;
                 if (report.getReportScope() == ReportScope.DAILY
                         && !outbox.destinationStillActive(saved.recipientId(), saved.channelId(), saved.address())) continue;
-                targets.putIfAbsent(saved.recipientId() + ":" + saved.channelId(),
+                addTarget(report.getReportScope(), targets, origins,
                         new NotificationDeliveryPlanService.PreparedTarget(saved.recipientId(), saved.recipientName(), channel,
-                                null, saved.address(), true));
+                                null, saved.address(), true), runTopics);
             }
         }
         for (Long topicId : topicIds) {
             Policy policy = policy(topicId);
-            if (!policy.enabled() || (report.getReportScope() == ReportScope.DAILY ? !policy.daily() : !policy.run())) continue;
+            if (!policy.includes(report.getReportScope())) continue;
             // Stale/deactivated targets are omitted, not allowed to fail report persistence.
             List<NotificationGroup> groups = policy.groupIds().stream().map(id -> optionalGroup(id)).filter(Objects::nonNull).toList();
             List<NotificationChannel> channels = policy.channelIds().stream().map(id -> optionalChannel(id)).filter(Objects::nonNull).toList();
             List<Long> recipientIds = policy.recipientIds().stream().filter(this::activeRecipient).toList();
-            plans.resolveTargets(groups, channels, recipientIds).forEach(target ->
-                    targets.putIfAbsent(target.recipientId() + ":" + target.channel().getId(), target));
+            plans.resolveTargets(groups, channels, recipientIds).stream()
+                    .filter(target -> target.channelType() != ChannelType.TELEGRAM || target.onboarded())
+                    .forEach(target -> addTarget(report.getReportScope(), targets, origins, target, List.of(topicId)));
         }
         int queuedCount = 0;
         for (var target : targets.values()) {
@@ -127,13 +140,33 @@ public class ReportNotificationAutomationService {
             LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
             jdbc.update("INSERT INTO notification_delivery_batches(id,report_id,idempotency_key,requested_at) VALUES(?,?,?,?)",
                     batchId, report.getId(), "auto:" + report.getId() + ":" + target.recipientId() + ":" + target.channel().getId(), now);
-            jdbc.update("INSERT INTO report_notification_outbox(report_id,recipient_id,channel_id,batch_id,recipient_name,address,subject,body,available_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            jdbc.update("INSERT INTO report_notification_outbox(report_id,recipient_id,channel_id,batch_id,recipient_name,address,subject,body,available_at,source_topic_ids) VALUES(?,?,?,?,?,?,?,?,?,?)",
                     report.getId(), target.recipientId(), target.channel().getId(), batchId, target.recipientName(), target.address(),
-                    message.subject(), String.join("\n", message.chunks()), now);
+                    message.subject(), String.join("\n", message.chunks()), now,
+                    IDS.convertToDatabaseColumn(List.copyOf(origins.get(targetKey(target)))));
             queuedCount++;
         }
         log.info("보고서 자동 전달 예약. reportId={} reportScope={} targetCount={} queuedCount={}",
                 report.getId(), report.getReportScope(), targets.size(), queuedCount);
+    }
+
+    private List<Long> runTopicIds(Long runId) {
+        return jdbc.queryForList("SELECT DISTINCT topic_id FROM news_collection_run_items WHERE run_id=?", Long.class, runId);
+    }
+
+    private void addTarget(ReportScope scope, Map<String, NotificationDeliveryPlanService.PreparedTarget> targets,
+                           Map<String, Set<Long>> origins, NotificationDeliveryPlanService.PreparedTarget target, List<Long> topics) {
+        List<Long> allowed = subscriptions.allowedTopics(target.recipientId(), scope, topics);
+        if (allowed.isEmpty()) return;
+        String key = targetKey(target);
+        targets.putIfAbsent(key, target);
+        // A stale address must not grant permission to a newer address that happened to deduplicate with it.
+        if (Objects.equals(targets.get(key).address(), target.address()))
+            origins.computeIfAbsent(key, ignored -> new LinkedHashSet<>()).addAll(allowed);
+    }
+
+    private static String targetKey(NotificationDeliveryPlanService.PreparedTarget target) {
+        return target.recipientId() + ":" + target.channel().getId();
     }
 
     // Optional stale destinations are normal. Catching a transactional service's not-found

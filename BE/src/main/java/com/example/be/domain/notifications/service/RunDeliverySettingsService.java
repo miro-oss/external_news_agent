@@ -28,8 +28,13 @@ public class RunDeliverySettingsService {
     private final CollectionRunDeliveryService delivery;
     private final ReportNotificationAutomationService automation;
 
-    public record TopicPolicy(Long topicId, String topicName, boolean enabled, boolean run, boolean daily,
-                              List<Long> groupIds, List<Long> recipientIds, List<Long> channelIds) { }
+    public record TopicPolicy(Long topicId, String topicName, boolean enabled, boolean run, boolean daily, boolean weekly,
+                              List<Long> groupIds, List<Long> recipientIds, List<Long> channelIds) {
+        public TopicPolicy(Long topicId, String topicName, boolean enabled, boolean run, boolean daily,
+                           List<Long> groupIds, List<Long> recipientIds, List<Long> channelIds) {
+            this(topicId, topicName, enabled, run, daily, false, groupIds, recipientIds, channelIds);
+        }
+    }
     public record Settings(Long runId, boolean editable, Long reportId, boolean reportReady, String source,
                            boolean enabled, boolean run, boolean daily, List<Long> groupIds,
                            List<Long> recipientIds, List<Long> channelIds, List<TopicPolicy> topicPolicies) { }
@@ -71,7 +76,7 @@ public class RunDeliverySettingsService {
             if (policies.containsKey(topic.getId())) continue;
             var policy = automation.policy(topic.getId());
             policies.put(topic.getId(), new TopicPolicy(topic.getId(), topic.getName(), policy.enabled(), policy.run(), policy.daily(),
-                    policy.groupIds(), policy.recipientIds(), policy.channelIds()));
+                    policy.weekly(), policy.groupIds(), policy.recipientIds(), policy.channelIds()));
         }
         // A new override draft, not a lossy union of independently scoped topic policies.
         return new Settings(run.getId(), editable(run, report), report == null ? null : report.getId(), ready(report), "TOPIC",

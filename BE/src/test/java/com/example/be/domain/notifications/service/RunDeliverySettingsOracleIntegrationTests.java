@@ -3,6 +3,8 @@ package com.example.be.domain.notifications.service;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
+import com.example.be.domain.collection.entity.CollectionRunItem;
+import com.example.be.domain.collection.entity.RunItemStatus;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.notifications.dto.req.NotificationReqDTO;
 import com.example.be.domain.notifications.entity.*;
@@ -11,6 +13,8 @@ import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.service.ReportDocument;
 import com.example.be.domain.reports.service.ReportPersistenceService;
+import com.example.be.domain.sources.entity.Source;
+import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.*;
@@ -48,12 +52,20 @@ class RunDeliverySettingsOracleIntegrationTests {
     private Long runId;
     private Long reportId;
     private Long recipientId;
+    private Long topicId;
+    private Long sourceId;
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
 
     @BeforeEach
     void fixture() {
         transactions.executeWithoutResult(tx -> {
+            var topic = Topic.builder().name("경합 대상 주제 " + System.nanoTime()).active(true)
+                    .batchSize(10).intervalMinutes(1440).build();
+            var source = Source.builder().name("경합 대상 소스 " + System.nanoTime()).sourceKind(Source.KIND_FEED)
+                    .urlTemplate("https://example.invalid/race/" + System.nanoTime()).language("ko").active(true).build();
+            em.persist(topic); em.persist(source);
             var run = CollectionRun.builder().status(RunStatus.RUNNING).triggerType(TriggerType.MANUAL).startedAt(now()).build();
+            run.addItem(CollectionRunItem.builder().topic(topic).source(source).status(RunItemStatus.RUNNING).build());
             em.persist(run);
             var recipient = NotificationRecipient.builder().name("알림 수정 경합 " + System.nanoTime()).active(true).build();
             recipient.replaceDestinations(List.of(RecipientDestination.builder()
@@ -65,6 +77,7 @@ class RunDeliverySettingsOracleIntegrationTests {
             em.persist(report); em.flush();
             run.attachReport(report.getId());
             runId = run.getId(); reportId = report.getId(); recipientId = recipient.getId();
+            topicId = topic.getId(); sourceId = source.getId();
         });
     }
 
@@ -82,8 +95,11 @@ class RunDeliverySettingsOracleIntegrationTests {
             if (runId != null) {
                 jdbc.update("DELETE FROM run_delivery_targets WHERE run_id=?", runId);
                 jdbc.update("DELETE FROM run_delivery_settings WHERE run_id=?", runId);
+                jdbc.update("DELETE FROM news_collection_run_items WHERE run_id=?", runId);
                 jdbc.update("DELETE FROM news_collection_runs WHERE id=?", runId);
             }
+            if (topicId != null) jdbc.update("DELETE FROM news_topics WHERE id=?", topicId);
+            if (sourceId != null) jdbc.update("DELETE FROM news_sources WHERE id=?", sourceId);
             if (recipientId != null) {
                 jdbc.update("DELETE FROM notification_recipient_destinations WHERE recipient_id=?", recipientId);
                 jdbc.update("DELETE FROM notification_recipients WHERE id=?", recipientId);

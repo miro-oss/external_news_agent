@@ -346,6 +346,7 @@ function useRefreshNotifications() {
     void queryClient.invalidateQueries({ queryKey: keys.notificationRecipients })
     void queryClient.invalidateQueries({ queryKey: keys.notificationGroups })
     void queryClient.invalidateQueries({ queryKey: ['notifications', 'delivery-logs'] })
+    void queryClient.invalidateQueries({ queryKey: ['notifications', 'report-subscriptions'] })
     void queryClient.invalidateQueries({ queryKey: keys.reports })
   }
 }
@@ -557,6 +558,7 @@ export function useStartCollectionRun() {
       void queryClient.invalidateQueries({ queryKey: keys.llmUsage })
       void queryClient.invalidateQueries({ queryKey: ['collection-queue'] })
       void queryClient.invalidateQueries({ queryKey: ['delivery-policy'] })
+      void queryClient.invalidateQueries({ queryKey: ['notifications', 'report-subscriptions'] })
     },
   })
 }

@@ -126,7 +126,43 @@
 .compact-list .recipient-name-row .recipient-channel-tag.telegram { color: var(--primary-strong); background: var(--primary-weak); }
 .recipient-actions { display: flex; align-items: center; gap: .25rem; }
 .recipient-actions [aria-expanded='true'] { color: var(--primary); background: var(--primary-weak); }
-.recipient-settings { display: grid; grid-column: 1 / -1; gap: 1.1rem; padding: 1.1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunken); animation: collapsible-in var(--dur-2) var(--ease-out); }
+.recipient-settings-dialog[open] { width: min(42rem, calc(100vw - 2rem)); height: min(45rem, calc(100dvh - 2rem)); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.recipient-settings-tabs { display: flex; gap: .25rem; border-bottom: 1px solid var(--line); }
+.recipient-settings-tabs button { flex: 1; min-width: 0; padding: .75rem .4rem; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--fg-3); font-size: .87rem; }
+.recipient-settings-tabs button[aria-selected='true'] { color: var(--primary-strong); border-bottom-color: var(--primary); font-weight: 700; }
+.recipient-subscriptions-panel, .recipient-connections-panel { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.recipient-subscriptions-panel[hidden], .recipient-connections-panel[hidden] { display: none; }
+.recipient-settings-intro, .recipient-subscriptions-footnote { margin: 0 0 1rem; color: var(--fg-3); font-size: .8rem; line-height: 1.65; }
+.recipient-subscriptions-footnote { margin: 1rem 0 0; }
+.recipient-subscriptions-list, .recipient-subscriptions-loading { display: grid; gap: .8rem; }
+.recipient-subscription-row { padding: 1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.recipient-subscription-row header { display: flex; align-items: flex-start; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
+.recipient-subscription-row h3 { margin: 0; font-size: .94rem; line-height: 1.5; overflow-wrap: anywhere; }
+.recipient-subscription-state { color: var(--fg-3); font-size: .73rem; line-height: 1.8; }
+.recipient-subscription-state[data-receiving='true'] { color: var(--success-strong); }
+.recipient-subscription-sources, .recipient-subscription-channels, .recipient-subscription-note { margin: .4rem 0 0; color: var(--fg-3); font-size: .76rem; line-height: 1.65; overflow-wrap: anywhere; }
+.recipient-subscription-scopes { display: flex; gap: .6rem 1.1rem; flex-wrap: wrap; margin: 1rem 0 0; padding: 0; border: 0; }
+.recipient-subscription-scopes legend { padding: 0; margin-bottom: .5rem; color: var(--fg-2); font-size: .77rem; font-weight: 600; }
+.recipient-subscription-scopes label { display: flex; align-items: flex-start; gap: .45rem; color: var(--fg-2); font-size: .82rem; cursor: pointer; }
+.recipient-subscription-scopes label[data-configured='false'] { color: var(--fg-3); cursor: default; }
+.recipient-subscription-scopes input { width: 1rem; height: 1rem; margin: .15rem 0 0; accent-color: var(--primary); }
+.recipient-subscription-scopes small { display: block; margin-top: .15rem; font-size: .65rem; }
+.recipient-subscription-actions { display: flex; align-items: center; justify-content: flex-end; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
+.recipient-subscription-actions > span { margin-left: auto; font-size: .72rem; color: var(--fg-3); }
+.recipient-subscription-actions .text-button { padding: .3rem 0; font-size: .72rem; }
+.recipient-subscription-actions .secondary-button { min-height: 2rem; padding: .4rem .8rem; font-size: .78rem; }
+.recipient-subscription-row > .field-error { margin-bottom: 0; font-size: .8rem; }
+.recipient-subscriptions-empty { padding: 2rem 1rem; color: var(--fg-3); text-align: center; font-size: .86rem; line-height: 1.7; }
+.recipient-subscriptions-empty strong { color: var(--fg-2); }
+.recipient-subscriptions-error { margin-bottom: 1rem; font-size: .85rem; }
+.recipient-connections-panel { padding: .25rem 0; }
+.recipient-connections-panel .telegram-connection { margin-top: 1.2rem; }
+@media (max-width: 540px) {
+  .recipient-settings-dialog[open] { width: calc(100vw - 1rem); height: calc(100dvh - 1rem); padding: 1rem; }
+  .recipient-settings-tabs button { font-size: .79rem; }
+  .recipient-subscription-row { padding: .8rem; }
+  .recipient-subscription-scopes { column-gap: .8rem; }
+}
 .group-editor { min-width: 0; }
 .group-editor-help { margin: 0; font-size: .78rem; color: var(--fg-3); line-height: 1.6; }
 .group-members-form { display: grid; gap: .65rem; padding-top: 1rem; border-top: 1px solid var(--line); }

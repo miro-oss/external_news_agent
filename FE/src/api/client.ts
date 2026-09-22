@@ -78,13 +78,13 @@ export function remove<T>(path: string) {
 
 const NOTIFICATIONS_BASE = '/api/notifications'
 
-export function notificationGet<T>(path: string, params?: Record<string, string | number | boolean | undefined>) {
+export function notificationGet<T>(path: string, params?: Record<string, string | number | boolean | undefined>, signal?: AbortSignal) {
   const query = new URLSearchParams()
   Object.entries(params ?? {}).forEach(([key, value]) => {
     if (value !== undefined && value !== '') query.set(key, String(value))
   })
   const suffix = query.toString()
-  return request<T>(suffix ? `${path}?${suffix}` : path, undefined, NOTIFICATIONS_BASE)
+  return request<T>(suffix ? `${path}?${suffix}` : path, { signal }, NOTIFICATIONS_BASE)
 }
 
 export function notificationPost<T>(path: string, body: unknown) {

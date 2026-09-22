@@ -41,7 +41,7 @@ export function ReportSharePanel({ reportId, reportScope }: { reportId: number; 
       <MutationStatus error={retry.error} success={retry.data ? `${retry.data.queuedCount}명에게 다시 전달합니다.` : null} />
     </details>}
     {deliveries.isSuccess && deliveries.data.length === 0 && <p className="muted">{reportScope === 'WEEKLY'
-      ? '주간 통합 보고서는 공유 대상을 선택해 직접 전달할 수 있습니다.'
+      ? '이 보고서에 예약된 자동 전달이 없습니다. 다음 주간 보고서부터 받으려면 수집 설정의 주제 보고서 알림에서 ‘주간 통합 보고서’를 선택해 주세요.'
       : '이 보고서에 예약된 자동 전달이 없습니다. 다음 수집에서 자동으로 받으려면 수집 설정의 ‘보고서 자동 전달’에서 대상과 전달 방식을 선택해 주세요.'}</p>}
     <DeliveryTargetPicker value={targets} disabled={send.isPending} onChange={change} />
     <div className="report-share-actions">

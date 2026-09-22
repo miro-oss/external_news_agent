@@ -10,6 +10,7 @@ import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.topics.repository.TopicRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,14 +34,24 @@ class ReportRunDeliveryAutomationTest {
     private final NotificationGroupRepository groups = mock(NotificationGroupRepository.class);
     private final NotificationChannelRepository channels = mock(NotificationChannelRepository.class);
     private final NotificationRecipientRepository recipients = mock(NotificationRecipientRepository.class);
-    private final ReportNotificationAutomationService automation = new ReportNotificationAutomationService(jdbc, topics, management, plans, renderer, snapshots, outbox, groups, channels, recipients);
+    private final ReportSubscriptionStore subscriptions = mock(ReportSubscriptionStore.class);
+    private final ReportNotificationAutomationService automation = new ReportNotificationAutomationService(jdbc, topics, management, plans, renderer, snapshots, outbox, groups, channels, recipients, subscriptions);
     private final NotificationChannel email = NotificationChannel.builder().id(2L).channelType(ChannelType.EMAIL).active(true).build();
+
+    @BeforeEach
+    void allowOriginalTopics() {
+        when(jdbc.queryForList(startsWith("SELECT DISTINCT topic_id FROM news_collection_run_items"), eq(Long.class), anyLong())).thenReturn(List.of(1L));
+        when(subscriptions.allowedTopics(anyLong(), any(), anyList())).thenAnswer(invocation -> invocation.getArgument(2));
+    }
 
     @Test
     void weeklyDoesNotInheritRunOrDailyDeliveryConsent() {
+        when(topics.existsById(1L)).thenReturn(true);
+        doReturn(List.of(new ReportNotificationAutomationService.Policy(true, true, true, List.of(), List.of(7L), List.of(2L))))
+                .when(jdbc).query(startsWith("SELECT * FROM topic_delivery_policies"), any(RowMapper.class), eq(1L));
         automation.enqueueCompletedReport(NewsReport.builder().id(80L).reportScope(ReportScope.WEEKLY)
                 .sourceRunIds(List.of(42L, 43L)).build());
-        verifyNoInteractions(jdbc, topics, management, plans, renderer, snapshots, outbox, groups, channels, recipients);
+        verifyNoInteractions(management, plans, renderer, snapshots, outbox, groups, channels, recipients);
     }
 
     @Test
@@ -53,7 +64,7 @@ class ReportRunDeliveryAutomationTest {
 
         verifyQueued(17L);
         verifyNoInteractions(topics, plans);
-        verify(jdbc, never()).queryForList(anyString(), eq(Long.class), any());
+        verify(jdbc).queryForList(anyString(), eq(Long.class), eq(42L));
     }
 
     @Test
@@ -68,6 +79,18 @@ class ReportRunDeliveryAutomationTest {
         when(snapshots.find(42L)).thenReturn(Optional.of(snapshot(true, false, true)));
         automation.enqueueCompletedReport(runReport());
         verifyNoInteractions(jdbc, topics, management, plans, renderer);
+    }
+
+    @Test
+    void excludedExplicitRunTargetIsNotEnqueued() {
+        when(snapshots.find(42L)).thenReturn(Optional.of(snapshot(true, true, false)));
+        when(channels.findById(2L)).thenReturn(Optional.of(email));
+        when(subscriptions.allowedTopics(7L, ReportScope.RUN, List.of(1L))).thenReturn(List.of());
+
+        automation.enqueueCompletedReport(runReport());
+
+        verifyNoInteractions(renderer, plans);
+        verify(jdbc, never()).update(anyString(), any(Object[].class));
     }
 
     @Test
@@ -110,7 +133,7 @@ class ReportRunDeliveryAutomationTest {
         automation.enqueueCompletedReport(report);
 
         verify(jdbc).update(startsWith("INSERT INTO report_notification_outbox"), eq(117L), eq(7L), eq(2L), anyString(),
-                eq("수정한 수신자"), eq("current@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class));
+                eq("수정한 수신자"), eq("current@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class), eq("[1]"));
         verify(renderer, times(1)).render(report, email);
     }
 
@@ -123,7 +146,7 @@ class ReportRunDeliveryAutomationTest {
         stubRendering(report);
         automation.enqueueCompletedReport(report);
         verify(jdbc).update(startsWith("INSERT INTO report_notification_outbox"), eq(117L), eq(7L), eq(2L), anyString(),
-                eq("최근 수신자 이름"), eq("captured@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class));
+                eq("최근 수신자 이름"), eq("captured@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class), eq("[1]"));
     }
 
     @Test
@@ -172,7 +195,7 @@ class ReportRunDeliveryAutomationTest {
         automation.enqueueCompletedReport(report);
 
         verify(jdbc).update(startsWith("INSERT INTO report_notification_outbox"), eq(117L), eq(7L), eq(2L), anyString(),
-                eq("주제 정책 수신자"), eq("policy@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class));
+                eq("주제 정책 수신자"), eq("policy@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class), eq("[1]"));
         verify(renderer, times(1)).render(report, email);
     }
 
@@ -192,6 +215,6 @@ class ReportRunDeliveryAutomationTest {
 
     private void verifyQueued(Long reportId) {
         verify(jdbc).update(startsWith("INSERT INTO report_notification_outbox"), eq(reportId), eq(7L), eq(2L),
-                anyString(), eq("접수 당시 수신자"), eq("captured@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class));
+                anyString(), eq("접수 당시 수신자"), eq("captured@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class), eq("[1]"));
     }
 }

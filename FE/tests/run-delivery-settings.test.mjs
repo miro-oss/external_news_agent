@@ -17,7 +17,7 @@ test('inherited topic policies remain separate and never become a combined run s
   context.mock.method(globalThis, 'fetch', async (url, init) => { calls.push({ url, method: init.method }); return response(inherited) })
   const result = await runDeliverySettingsOptions(42).queryFn()
   assert.deepEqual(result, inherited)
-  assert.deepEqual(toDeliveryPolicy(result), { ...policy, enabled: false, groupIds: [], channelIds: [] })
+  assert.deepEqual(toDeliveryPolicy(result), { ...policy, weekly: false, enabled: false, groupIds: [], channelIds: [] })
   assert.deepEqual(calls, [{ url: '/api/notifications/runs/42/delivery-settings', method: undefined }])
 })
 
@@ -62,6 +62,21 @@ test('turning off preserves stale selections and a failed save leaves the last s
     return new Response(JSON.stringify({ isSuccess: false, code: 'COMMON500', message: '서버 내부 오류입니다.', result: {} }), { status: 500 })
   })
   await assert.rejects(client.getMutationCache().build(client, saveRunDeliverySettingsOptions(client, 42)).execute(disabled))
-  assert.deepEqual(requests, [{ url: '/api/notifications/runs/42/delivery-settings', body: disabled }])
+  const { weekly: _weekly, ...runPolicy } = disabled
+  assert.deepEqual(requests, [{ url: '/api/notifications/runs/42/delivery-settings', body: runPolicy }])
   assert.deepEqual(client.getQueryData(runDeliverySettingsOptions(42).queryKey), saved)
+})
+
+test('weekly topic settings round trip but run-only updates never send weekly or mutate inherited topics', async context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const weekly = { ...policy, run: false, weekly: true }
+  assert.deepEqual(toDeliveryPolicy({ ...weekly, mode: 'TOPIC', topicId: 9 }), weekly)
+  const requests = []
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    requests.push({ url, body: JSON.parse(init.body) })
+    return response(saved)
+  })
+  await client.getMutationCache().build(client, saveRunDeliverySettingsOptions(client, 42)).execute(weekly)
+  assert.deepEqual(requests, [{ url: '/api/notifications/runs/42/delivery-settings', body: { ...policy, run: false } }])
 })
