@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 
 from pydantic import ValidationError
 
-from app.core.errors import AgentError
+from app.core.errors import AgentError, OutputValidationError
 from app.core.parser import JsonObjectParseError
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.prompt_data import escape_prompt_text
@@ -125,14 +125,17 @@ def _log_validation_failure(
 ) -> None:
     # ValidationError.__str__ includes input_value; custom ValueError messages
     # can also contain provider output. Neither belongs in application logs.
-    error_count = error.error_count() if isinstance(error, ValidationError) else 1
-    error_kinds = (
-        sorted({item["type"] for item in error.errors(
+    if isinstance(error, OutputValidationError):
+        error_count = len(error.error_kinds)
+        error_kinds = sorted(set(error.error_kinds))[:5]
+    elif isinstance(error, ValidationError):
+        error_count = error.error_count()
+        error_kinds = sorted({item["type"] for item in error.errors(
             include_input=False, include_context=False, include_url=False
         )})[:5]
-        if isinstance(error, ValidationError)
-        else []
-    )
+    else:
+        error_count = 1
+        error_kinds = []
     target_logger.warning(
         "Provider %s 출력이 계약을 위반했습니다. provider=%s model=%s attempt=%d "
         "errorType=%s errorCount=%d errorKinds=%s",

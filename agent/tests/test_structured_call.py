@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from app.core.errors import AgentError
+from app.core.errors import AgentError, OutputValidationError
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.structured_call import _log_validation_failure, structured_call
 
@@ -63,6 +63,24 @@ def test_custom_validation_logs_omit_exception_messages(caplog) -> None:
     )
     assert marker not in caplog.text
     assert "errorType=ValueError" in caplog.text
+
+
+def test_output_validation_logs_count_violations_and_only_unique_safe_kinds(caplog) -> None:
+    marker = "SYNTHETIC_PRIVATE_OUTPUT_ERROR"
+    error = OutputValidationError(
+        marker,
+        error_kinds=("REMOVE_NOT_FOUND", "ADD_ALREADY_EXISTS", "REMOVE_NOT_FOUND"),
+    )
+
+    _log_validation_failure(
+        logging.getLogger(__name__), response(), error,
+        task_name="fixture", attempt=1,
+    )
+
+    assert marker not in caplog.text
+    assert "errorType=OutputValidationError" in caplog.text
+    assert "errorCount=3" in caplog.text
+    assert "errorKinds=['ADD_ALREADY_EXISTS', 'REMOVE_NOT_FOUND']" in caplog.text
 
 
 def invoke(provider: SequenceProvider, *, prompt_version: str | None = "insight.v2"):
