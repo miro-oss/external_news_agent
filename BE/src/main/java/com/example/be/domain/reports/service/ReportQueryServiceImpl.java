@@ -92,11 +92,11 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 PageRequest.of(page, size, Sort.by(
                         Sort.Order.desc("generatedAt"), Sort.Order.desc("id"))));
         Map<Long, FindingRepository.ReportCount> counts = countsByRun(reports.getContent());
-        Map<Long, FindingRepository.DailyReportCount> dailyCounts = dailyCounts(reports.getContent());
+        Map<Long, FindingRepository.DailyReportCount> aggregateCounts = aggregateCounts(reports.getContent());
         Map<Long, String> deliveryStatuses = deliveryStatuses(reports.getContent());
         List<ReportResDTO.Summary> content = reports.getContent().stream()
                 .map(report -> toSummary(report, report.getRunId() == null ? null : counts.get(report.getRunId()),
-                        dailyCounts.get(report.getId()),
+                        aggregateCounts.get(report.getId()),
                         deliveryStatuses.getOrDefault(report.getId(), DELIVERY_STATUS_NOT_SENT)))
                 .toList();
         return PageResponse.of(content, page, size, reports.getTotalElements());
@@ -125,11 +125,13 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     private ReportResDTO.Summary toSummary(NewsReport report,
                                            FindingRepository.ReportCount count,
-                                           FindingRepository.DailyReportCount dailyCount, String deliveryStatus) {
+                                           FindingRepository.DailyReportCount aggregateCount, String deliveryStatus) {
         return ReportResDTO.Summary.builder()
                 .id(report.getId())
                 .runId(report.getRunId())
                 .reportScope(report.getReportScope()).reportDate(report.getReportDate())
+                .reportEndDate(report.getReportEndDate()).sourceReportIds(report.getSourceReportIds())
+                .sourceReportDates(report.getSourceReportDates()).missingReportDates(report.getMissingReportDates())
                 .sourceRunIds(sourceRunIds(report))
                 .sourceReportCount(report.getSourceReportCount())
                 .title(report.getTitle())
@@ -138,11 +140,11 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                         ? toOffset(report.getRun().getStartedAt()) : null)
                 .collectionContexts(report.getCollectionContexts())
                 .modelName(report.getModelName())
-                .findingCount(report.getReportScope() == ReportScope.DAILY
-                        ? dailyCount == null ? 0 : dailyCount.getFindingCount()
+                .findingCount(report.getReportScope() != ReportScope.RUN
+                        ? aggregateCount == null ? 0 : aggregateCount.getFindingCount()
                         : count == null ? 0 : count.getFindingCount())
-                .highSensitivityCount(report.getReportScope() == ReportScope.DAILY
-                        ? dailyCount == null ? 0 : dailyCount.getHighSensitivityCount()
+                .highSensitivityCount(report.getReportScope() != ReportScope.RUN
+                        ? aggregateCount == null ? 0 : aggregateCount.getHighSensitivityCount()
                         : count == null ? 0 : count.getHighSensitivityCount())
                 .deliveryStatus(deliveryStatus)
                 .build();
@@ -166,8 +168,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     private ReportResDTO.Detail toDetail(NewsReport report, boolean includeFindings) {
         Long runId = report.getRunId();
-        boolean daily = report.getReportScope() == ReportScope.DAILY;
-        boolean loadFindings = includeFindings || daily
+        boolean aggregate = report.getReportScope() != ReportScope.RUN;
+        boolean loadFindings = includeFindings || aggregate
                 || findingRepository.countWithoutFullTextForReportByRunId(runId) > 0
                 || findingRepository.countTopicExcludedForReportByRunId(runId) > 0;
         ReportFindings.Visible visible = loadFindings ? ReportFindings.loadVisible(report, findingRepository, relevancePolicy)
@@ -182,7 +184,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 : Map.of();
         Map<Long, Map<Long, InvestigationTrace>> tracesByRun = new LinkedHashMap<>();
         if (includeFindings) {
-            if (daily) {
+            if (aggregate) {
                 tracesByRun.putAll(investigationRepository.findTraces(
                         findings.stream().map(f -> f.getRun().getId()).distinct().toList()));
             } else {
@@ -196,6 +198,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .id(report.getId())
                 .runId(runId)
                 .reportScope(report.getReportScope()).reportDate(report.getReportDate())
+                .reportEndDate(report.getReportEndDate()).sourceReportIds(report.getSourceReportIds())
+                .sourceReportDates(report.getSourceReportDates()).missingReportDates(report.getMissingReportDates())
                 .sourceRunIds(sourceRunIds(report))
                 .sourceReportCount(report.getSourceReportCount())
                 .title(report.getTitle())
@@ -216,7 +220,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                             return toFinding(
                                     finding, issueId, issue,
                                     issueId == null ? null : tracesByRun.getOrDefault(
-                                            daily ? finding.getRun().getId() : runId, Map.of()).get(issueId));
+                                            aggregate ? finding.getRun().getId() : runId, Map.of()).get(issueId));
                         })
                         .toList() : null)
                 .build();
@@ -393,12 +397,12 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     }
 
     private List<Long> sourceRunIds(NewsReport report) {
-        return report.getReportScope() == ReportScope.DAILY ? report.getSourceRunIds()
+        return report.getReportScope() != ReportScope.RUN ? report.getSourceRunIds()
                 : report.getRunId() == null ? List.of() : List.of(report.getRunId());
     }
 
-    private Map<Long, FindingRepository.DailyReportCount> dailyCounts(List<NewsReport> reports) {
-        List<Long> ids = reports.stream().filter(r -> r.getReportScope() == ReportScope.DAILY)
+    private Map<Long, FindingRepository.DailyReportCount> aggregateCounts(List<NewsReport> reports) {
+        List<Long> ids = reports.stream().filter(r -> r.getReportScope() != ReportScope.RUN)
                 .map(NewsReport::getId).toList();
         return OracleInClause.batches(ids).stream()
                 .flatMap(batch -> findingRepository.countForDailyReports(batch, sensitivityCalculator.highThreshold()).stream())

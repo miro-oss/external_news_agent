@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { reportChangesFixture, reportChangesVariants } from './report-changes-fixtures.mjs';
+import { weeklyReportFixture } from './weekly-report-fixtures.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const portFlag = process.argv.indexOf('--port');
 const port = Number(portFlag >= 0 ? process.argv[portFlag + 1] : 5187);
@@ -230,6 +231,7 @@ initialReports.at(-1).collectionContexts.push({ ...structuredClone(fixture.repor
 initialReports.push({ ...structuredClone(initialReports.at(-1)), id: 116, reportDate: '2026-09-07', title: '이전 일일 통합 보고서', collectionContexts: [], structuredContent: null,
     markdownBody: fixture.report.markdownBody.replace('수집 또는 분석 제외 사항이 없습니다.', '본문을 확인하지 못한 기사 1건은 분석에서 제외했습니다.'),
     findings: structuredClone(fixture.report.findings).map((finding, index) => ({ ...finding, issue: { ...finding.issue, topicName: index === 1 ? 'AI 인프라' : 'HBM 시장' } })) });
+initialReports.push(weeklyReportFixture(initialReports.find(report => report.id === 117)));
 let reports = structuredClone(initialReports);
 let reportDeleteError = false;
 let reportChangesVariant = 'ready';
@@ -252,7 +254,7 @@ function reportFilterFixtures() {
     });
     result[4].collectionStartedAt = null;
     result[4].collectionContexts = [];
-    return [...result, ...structuredClone(initialReports.filter(report => report.reportScope === 'DAILY'))];
+    return [...result, ...structuredClone(initialReports.filter(report => report.reportScope !== 'RUN'))];
 }
 const json = (res, value, status = 200) => { res.statusCode = status; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
 const server = await createServer({ root, configFile: false, envDir: emptyEnvDir, plugins: [react(), { name: 'isolated-qa-fixtures', configureServer(server) {
@@ -607,6 +609,8 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             const summaries = filtered.slice(pageNumber * size, (pageNumber + 1) * size).map(report => ({
                                 id: report.id, runId: report.runId, reportScope: report.reportScope,
                                 reportDate: report.reportDate ?? null, sourceRunIds: report.sourceRunIds,
+                                reportEndDate: report.reportEndDate ?? null, sourceReportIds: report.sourceReportIds ?? [],
+                                sourceReportDates: report.sourceReportDates ?? [], missingReportDates: report.missingReportDates ?? [],
                                 sourceReportCount: report.sourceReportCount ?? null, title: report.title,
                                 generatedAt: report.generatedAt, modelName: report.modelName,
                                 findingCount: report.findingCount, highSensitivityCount: report.highSensitivityCount,

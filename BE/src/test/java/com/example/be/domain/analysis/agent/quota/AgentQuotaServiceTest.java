@@ -52,6 +52,27 @@ class AgentQuotaServiceTest {
         service = new AgentQuotaService(repository, properties, planService);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "1.5", "5"})
+    void weeklySchemaFailureRetainsObservedPaidUsage(String credits) {
+        var reservation = new QuotaReservation(1L, null, "weekly-report:77", AgentTask.REPORT,
+                AgentPlan.PAID, new BigDecimal("5"));
+        var actual = new BigDecimal(credits);
+        service.completeObservedFailure(reservation, new AgentClientException("SCHEMA_VIOLATION", "invalid", null,
+                new AgentClientException.Usage(30L, 20L, BigDecimal.ZERO, actual)));
+        verify(repository).consume(eq(reservation), eq(actual), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test
+    void weeklyConnectFailureWithoutUsageReleasesReservation() {
+        var reservation = reservation(AgentTask.REPORT, AgentPlan.PAID);
+        service.completeObservedFailure(reservation, new AgentClientException("PROVIDER_UNAVAILABLE", "offline", null,
+                null, AgentClientException.TimeoutPhase.CONNECT));
+        verify(repository).release(eq(reservation), any(LocalDateTime.class));
+        verify(repository, never()).consume(any(), any(), any());
+    }
+
     @Test
     void serializesCheckBeforeInsertAndLeavesReportReserveUntouched() {
         stubUsage(BigDecimal.ZERO, new BigDecimal("65"), new BigDecimal("65"), new BigDecimal("100"));

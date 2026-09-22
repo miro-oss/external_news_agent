@@ -30,25 +30,36 @@ public class ReportResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "id", "runId", "reportScope", "reportDate", "sourceRunIds", "sourceReportCount", "title", "generatedAt", "collectionStartedAt", "collectionContexts", "modelName", "findingCount", "highSensitivityCount",
+            "id", "runId", "reportScope", "reportDate", "reportEndDate", "sourceReportIds", "sourceReportDates", "missingReportDates", "sourceRunIds", "sourceReportCount", "title", "generatedAt", "collectionStartedAt", "collectionContexts", "modelName", "findingCount", "highSensitivityCount",
             "deliveryStatus"
     })
     @Schema(name = "ReportSummaryResponse", description = "보고서 목록 항목")
     public static class Summary {
 
         private final Long id;
-        @Schema(description = "RUN 수집 실행 ID. DAILY는 null", nullable = true)
+        @Schema(description = "RUN 수집 실행 ID. DAILY/WEEKLY는 null", nullable = true)
         private final Long runId;
         private final ReportScope reportScope;
-        @Schema(description = "DAILY 집계일 (Asia/Seoul). RUN은 null", nullable = true)
+        @Schema(description = "DAILY 집계일 또는 WEEKLY 집계 시작 월요일 (Asia/Seoul). RUN은 null", nullable = true)
         private final LocalDate reportDate;
+        @Schema(description = "WEEKLY 집계 종료 일요일 (Asia/Seoul). RUN/DAILY는 null", nullable = true, example = "2026-09-20")
+        private final LocalDate reportEndDate;
+        @Schema(description = "WEEKLY 입력 DAILY 보고서 ID, 집계일 순서. RUN/DAILY는 []")
+        @Builder.Default
+        private final List<Long> sourceReportIds = List.of();
+        @Schema(description = "sourceReportIds와 같은 순서의 일일 집계일. RUN/DAILY는 []")
+        @Builder.Default
+        private final List<LocalDate> sourceReportDates = List.of();
+        @Schema(description = "WEEKLY 7일 중 입력 일일 보고서가 없는 날짜. 수집 없는 날 포함. RUN/DAILY는 []")
+        @Builder.Default
+        private final List<LocalDate> missingReportDates = List.of();
         private final List<Long> sourceRunIds;
-        @Schema(description = "DAILY 생성 시점에 sourceRunIds에 대해 생성 완료된 RUN 보고서 수. 이후 삭제해도 유지. RUN은 null", nullable = true, minimum = "0")
+        @Schema(description = "DAILY는 생성 완료된 원본 RUN 보고서 수, WEEKLY는 입력 DAILY 보고서 수. 이후 삭제해도 유지. RUN은 null", nullable = true, minimum = "0")
         private final Long sourceReportCount;
-        @Schema(description = "수집 시점 주제명과 생성 시각(RUN) 또는 집계일(DAILY)을 포함한 제목. 스냅샷이 없는 이전 보고서는 저장된 기존 제목을 유지", example = "HBM 시장 · 2026-09-08 10:00 리포트")
+        @Schema(description = "수집 시점 주제명과 생성 시각(RUN) 또는 집계일(DAILY)·월요일~일요일 기간(WEEKLY)을 포함한 제목. 스냅샷이 없는 이전 보고서는 저장된 기존 제목을 유지", example = "HBM 시장 · 2026-09-08 10:00 리포트")
         private final String title;
         private final OffsetDateTime generatedAt;
-        @Schema(description = "RUN 원본 수집 실행의 시작 시각 (Asia/Seoul). DAILY 또는 시작 시각 기록이 없으면 null이며 생성 시각으로 대체하지 않음", nullable = true, example = "2026-09-08T10:00:00+09:00")
+        @Schema(description = "RUN 원본 수집 실행의 시작 시각 (Asia/Seoul). DAILY/WEEKLY 또는 시작 시각 기록이 없으면 null이며 생성 시각으로 대체하지 않음", nullable = true, example = "2026-09-08T10:00:00+09:00")
         private final OffsetDateTime collectionStartedAt;
         @Schema(description = "보고서 상세와 동일한 저장된 실행별 수집 조건. 현재 주제 설정에서 복원하지 않으며 기록이 없는 이전 보고서는 []")
         private final List<ReportCollectionContext> collectionContexts;
@@ -62,22 +73,33 @@ public class ReportResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "id", "runId", "reportScope", "reportDate", "sourceRunIds", "sourceReportCount", "title", "markdownBody", "modelName", "promptVersion", "llmProvider",
+            "id", "runId", "reportScope", "reportDate", "reportEndDate", "sourceReportIds", "sourceReportDates", "missingReportDates", "sourceRunIds", "sourceReportCount", "title", "markdownBody", "modelName", "promptVersion", "llmProvider",
             "generatedAt", "structuredContent", "collectionContexts", "articleStats", "summaryStats", "findings"
     })
     @Schema(name = "ReportDetailResponse", description = "보고서 상세")
     public static class Detail {
 
         private final Long id;
-        @Schema(description = "RUN 수집 실행 ID. DAILY는 null", nullable = true)
+        @Schema(description = "RUN 수집 실행 ID. DAILY/WEEKLY는 null", nullable = true)
         private final Long runId;
         private final ReportScope reportScope;
-        @Schema(description = "DAILY 집계일 (Asia/Seoul). RUN은 null", nullable = true)
+        @Schema(description = "DAILY 집계일 또는 WEEKLY 집계 시작 월요일 (Asia/Seoul). RUN은 null", nullable = true)
         private final LocalDate reportDate;
+        @Schema(description = "WEEKLY 집계 종료 일요일 (Asia/Seoul). RUN/DAILY는 null", nullable = true, example = "2026-09-20")
+        private final LocalDate reportEndDate;
+        @Schema(description = "WEEKLY 입력 DAILY 보고서 ID, 집계일 순서. RUN/DAILY는 []")
+        @Builder.Default
+        private final List<Long> sourceReportIds = List.of();
+        @Schema(description = "sourceReportIds와 같은 순서의 일일 집계일. RUN/DAILY는 []")
+        @Builder.Default
+        private final List<LocalDate> sourceReportDates = List.of();
+        @Schema(description = "WEEKLY 7일 중 입력 일일 보고서가 없는 날짜. 수집 없는 날 포함. RUN/DAILY는 []")
+        @Builder.Default
+        private final List<LocalDate> missingReportDates = List.of();
         private final List<Long> sourceRunIds;
-        @Schema(description = "DAILY 생성 시점에 sourceRunIds에 대해 생성 완료된 RUN 보고서 수. 이후 삭제해도 유지. RUN은 null", nullable = true, minimum = "0")
+        @Schema(description = "DAILY는 생성 완료된 원본 RUN 보고서 수, WEEKLY는 입력 DAILY 보고서 수. 이후 삭제해도 유지. RUN은 null", nullable = true, minimum = "0")
         private final Long sourceReportCount;
-        @Schema(description = "수집 시점 주제명과 생성 시각(RUN) 또는 집계일(DAILY)을 포함한 제목. 스냅샷이 없는 이전 보고서는 저장된 기존 제목을 유지", example = "HBM 시장 · 2026-09-08 10:00 리포트")
+        @Schema(description = "수집 시점 주제명과 생성 시각(RUN) 또는 집계일(DAILY)·월요일~일요일 기간(WEEKLY)을 포함한 제목. 스냅샷이 없는 이전 보고서는 저장된 기존 제목을 유지", example = "HBM 시장 · 2026-09-08 10:00 리포트")
         private final String title;
         @Schema(description = "원본 Markdown 보고서. structuredContent가 null인 이전 보고서의 본문 렌더링에도 사용")
         private final String markdownBody;
@@ -90,7 +112,7 @@ public class ReportResDTO {
         private final ReportContent structuredContent;
         @Schema(description = "보고서에 포함된 실행별 접수 시점 수집 조건. 이후 주제를 편집해도 변경되지 않음. 이전 보고서 자체에 저장된 문맥이 없으면 [], 새 보고서가 스냅샷 없는 이전 실행을 참조하면 해당 topics가 []. includeFindings와 관계없이 반환", requiredMode = Schema.RequiredMode.REQUIRED)
         private final List<ReportCollectionContext> collectionContexts;
-        @Schema(description = "RUN은 runId, DAILY는 sourceRunIds 전체에서 관측한 고유 articleId 집계. 동일 기사의 소스·실행 중복을 제거하며 분석 결과 수인 summaryStats와 다름. includeFindings=false에도 반환. 관측 데이터가 없으면 모든 수가 0", requiredMode = Schema.RequiredMode.REQUIRED)
+        @Schema(description = "RUN은 runId, DAILY/WEEKLY는 sourceRunIds 전체에서 관측한 고유 articleId 집계. 동일 기사의 소스·실행 중복을 제거하며 분석 결과 수인 summaryStats와 다름. includeFindings=false에도 반환. 관측 데이터가 없으면 모든 수가 0", requiredMode = Schema.RequiredMode.REQUIRED)
         private final ArticleStats articleStats;
 
         @JsonInclude(JsonInclude.Include.NON_NULL)

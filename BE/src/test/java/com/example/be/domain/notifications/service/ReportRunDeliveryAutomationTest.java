@@ -37,6 +37,13 @@ class ReportRunDeliveryAutomationTest {
     private final NotificationChannel email = NotificationChannel.builder().id(2L).channelType(ChannelType.EMAIL).active(true).build();
 
     @Test
+    void weeklyDoesNotInheritRunOrDailyDeliveryConsent() {
+        automation.enqueueCompletedReport(NewsReport.builder().id(80L).reportScope(ReportScope.WEEKLY)
+                .sourceRunIds(List.of(42L, 43L)).build());
+        verifyNoInteractions(jdbc, topics, management, plans, renderer, snapshots, outbox, groups, channels, recipients);
+    }
+
+    @Test
     void completedRunUsesSavedAddressWithoutReresolvingEditedTopicPoliciesOrGroupMembers() {
         var report = runReport();
         when(snapshots.find(42L)).thenReturn(Optional.of(snapshot(true, true, false)));

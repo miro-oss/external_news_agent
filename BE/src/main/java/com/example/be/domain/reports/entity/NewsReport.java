@@ -2,6 +2,8 @@ package com.example.be.domain.reports.entity;
 
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.reports.converter.ReportContentConverter;
+import com.example.be.domain.reports.converter.LocalDateListConverter;
+import com.example.be.domain.reports.converter.WeeklyReportInputConverter;
 import com.example.be.domain.reports.converter.ReportCollectionContextConverter;
 import com.example.be.global.converter.LongListJsonConverter;
 import com.example.be.global.converter.YnBooleanConverter;
@@ -57,6 +59,32 @@ public class NewsReport {
 
     @Column(name = "report_date")
     private LocalDate reportDate;
+
+    @Column(name = "report_end_date")
+    private LocalDate reportEndDate;
+
+    @Builder.Default
+    @Convert(converter = LongListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "source_report_ids", nullable = false)
+    private List<Long> sourceReportIds = List.of();
+
+    @Builder.Default
+    @Convert(converter = LocalDateListConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "source_report_dates", nullable = false)
+    private List<LocalDate> sourceReportDates = List.of();
+
+    @Builder.Default
+    @Convert(converter = LocalDateListConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "missing_report_dates", nullable = false)
+    private List<LocalDate> missingReportDates = List.of();
+
+    @Convert(converter = WeeklyReportInputConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "weekly_input")
+    private WeeklyReportInput weeklyInput;
 
     @Builder.Default
     @Convert(converter = LongListJsonConverter.class)

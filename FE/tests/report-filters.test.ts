@@ -100,3 +100,21 @@ test('invalid dates are rejected instead of rolling into another month', () => {
   assert.equal(reportFilterDate(report(2, { reportScope: 'DAILY', reportDate: '2026-02-30' })), null)
   assert.equal(reportFilterDate(report(3, { collectionStartedAt: 'unknown' })), null)
 })
+
+test('weekly periods overlap inclusive custom and recent ranges rather than using generation dates', () => {
+  const weekly = report(9, { reportScope: 'WEEKLY', runId: null, reportDate: '2026-08-31', reportEndDate: '2026-09-06',
+    generatedAt: '2026-09-12T01:00:00+09:00', collectionStartedAt: null })
+  assert.equal(reportFilterDate(weekly), '2026-08-31')
+  for (const date of ['2026-08-31', '2026-09-03', '2026-09-06']) {
+    assert.deepEqual(ids(filterReports([weekly], filters({ period: 'CUSTOM', from: date, to: date }), now)), [9], date)
+  }
+  for (const date of ['2026-08-30', '2026-09-07', '2026-09-12']) {
+    assert.deepEqual(filterReports([weekly], filters({ period: 'CUSTOM', from: date, to: date }), now), [], date)
+  }
+  assert.deepEqual(ids(filterReports([weekly], filters({ period: '7' }), now)), [9])
+  assert.deepEqual(filterReports([weekly], filters({ period: 'TODAY' }), now), [])
+  assert.deepEqual(ids(filterReports([weekly], filters({ period: 'CUSTOM', from: '2026-09-06' }), now)), [9])
+  assert.deepEqual(ids(filterReports([weekly], filters({ period: 'CUSTOM', to: '2026-08-31' }), now)), [9])
+  assert.deepEqual(filterReports([{ ...weekly, reportEndDate: '2026-08-30' }], filters({ period: '7' }), now), [])
+  assert.deepEqual(filterReports([{ ...weekly, reportEndDate: '2026-09-31' }], filters({ period: '7' }), now), [])
+})

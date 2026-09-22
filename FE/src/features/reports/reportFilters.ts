@@ -32,7 +32,7 @@ function validCalendarDate(value: string) {
 }
 
 export function reportFilterDate(report: ReportSummary): string | null {
-  if (report.reportScope === 'DAILY') {
+  if (report.reportScope !== 'RUN') {
     return report.reportDate && validCalendarDate(report.reportDate) ? report.reportDate : null
   }
   return report.collectionStartedAt ? kstDate(new Date(report.collectionStartedAt)) : null
@@ -94,7 +94,9 @@ export function filterReports(reports: readonly ReportSummary[], filters: Report
     ].some(value => value.toLocaleLowerCase('ko-KR').includes(search))) return false
     if (filters.period !== 'ALL') {
       const date = reportFilterDate(report)
-      if (!date || (from && date < from) || (to && date > to)) return false
+      const endDate = report.reportScope === 'WEEKLY' && report.reportEndDate ? report.reportEndDate : date
+      if (!date || !endDate || !validCalendarDate(endDate) || endDate < date
+        || (from && endDate < from) || (to && date > to)) return false
     }
     return true
   })

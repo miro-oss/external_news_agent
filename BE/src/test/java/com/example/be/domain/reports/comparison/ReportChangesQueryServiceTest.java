@@ -33,6 +33,12 @@ class ReportChangesQueryServiceTest {
                 NewsReport.builder().id(101L).reportScope(scope).reportDate(LocalDate.of(2026, 9, 10)).build()));
     }
 
+    @Test void weeklyReportDoesNotFetchOrSchedulePreviousWeekComparisons() {
+        visible(ReportScope.WEEKLY);
+        assertEquals(ReportChanges.Status.NOT_APPLICABLE, query.get(101).status());
+        verifyNoInteractions(comparisons, findings, relevancePolicy);
+    }
+
     @Test void missingHiddenOrPendingReportUsesReport404() {
         assertThrows(ReportException.class, () -> query.get(101));
         verifyNoInteractions(comparisons);

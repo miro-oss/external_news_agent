@@ -2870,6 +2870,13 @@ body.modal-open {
 .report-daily-topics > span,
 .report-daily-keywords > span { flex: none; color: var(--fg-3); font-size: .8rem; }
 .report-daily-summary .report-daily-keywords { font-size: .82rem; }
+.report-weekly-sources { margin-top: .6rem; }
+.report-weekly-sources .report-weekly-missing { margin-top: .7rem; padding: .65rem .8rem; border-left: 2px solid var(--border); background: var(--surface); font-size: .8rem; overflow-wrap: anywhere; }
+.report-weekly-originals { margin-top: .75rem; }
+.report-weekly-originals > span { color: var(--fg-3); font-size: .78rem; }
+.report-weekly-originals ul { display: flex; flex-wrap: wrap; gap: .35rem .8rem; padding: 0; margin: .3rem 0 0; list-style: none; }
+.report-weekly-originals a { color: var(--primary-strong); font-size: .8rem; text-underline-offset: .2rem; }
+.report-weekly-originals a:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 2px; }
 
 .report-ai-context {
   display: flex;

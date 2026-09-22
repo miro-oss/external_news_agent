@@ -13,6 +13,7 @@ import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyRequest;
 import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentWeeklyReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.domain.analysis.agent.entity.AgentRun;
 import com.example.be.domain.analysis.agent.entity.AgentRunStatus;
@@ -427,6 +428,35 @@ public class AgentRunRecorder {
                 .startedAt(startedAt)
                 .finishedAt(now())
                 .build());
+    }
+
+    @Transactional
+    public void recordWeeklyReportSuccess(AgentWeeklyReportRequest request,
+                                          AgentReportResponse response,
+                                          LocalDateTime startedAt) {
+        AgentReportResponse.Meta meta = response.meta();
+        repository.insertIfAbsent(AgentRun.builder()
+                .idempotencyKey(request.idempotencyKey()).agentTask(AgentTask.REPORT)
+                .targetType(AgentTargetType.REPORT).targetId(request.reportId())
+                .status(meta.mock() ? AgentRunStatus.MOCK : AgentRunStatus.SUCCESS)
+                .promptVersion(meta.promptVersion()).llmProvider(meta.provider()).llmModel(meta.model())
+                .llmPlan(request.plan()).inputTokens(meta.inputTokens()).outputTokens(meta.outputTokens())
+                .costUsd(meta.costUsd()).credits(meta.credits()).requestHash(hash(request))
+                .startedAt(startedAt).finishedAt(now()).build());
+    }
+
+    @Transactional
+    public void recordWeeklyReportFailure(AgentWeeklyReportRequest request, String code, String message,
+                                          AgentClientException.Usage usage, AgentTimeoutPhase timeoutPhase,
+                                          LocalDateTime startedAt) {
+        repository.insertIfAbsent(AgentRun.builder()
+                .idempotencyKey(request.idempotencyKey()).agentTask(AgentTask.REPORT)
+                .targetType(AgentTargetType.REPORT).targetId(request.reportId()).status(AgentRunStatus.FAILED)
+                .failureCode(code).failureMessage(truncate(message)).timeoutPhase(timeoutPhase)
+                .llmPlan(request.plan()).inputTokens(usage == null ? null : usage.inputTokens())
+                .outputTokens(usage == null ? null : usage.outputTokens())
+                .costUsd(usage == null ? null : usage.costUsd()).credits(usage == null ? null : usage.credits())
+                .requestHash(hash(request)).startedAt(startedAt).finishedAt(now()).build());
     }
 
     @Transactional

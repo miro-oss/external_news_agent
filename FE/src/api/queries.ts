@@ -51,6 +51,7 @@ import type {
   PageResult,
   ReportDetail,
   ReportSummary,
+  ReportScope,
   Source,
   SourceCreateRequest,
   TopicCreated,
@@ -218,14 +219,14 @@ export function useArticle(articleId: number | null, runId?: number) {
   })
 }
 
-export function useReports(reportScope?: 'RUN' | 'DAILY') {
+export function useReports(reportScope?: ReportScope) {
   return useQuery({
     queryKey: [...keys.reports, reportScope ?? 'ALL'],
     queryFn: () => getAllPages<ReportSummary>('/reports', { reportScope }),
   })
 }
 
-export function useLatestReport(reportScope?: 'RUN' | 'DAILY') {
+export function useLatestReport(reportScope?: ReportScope) {
   return useQuery({
     queryKey: [...keys.latestReport, reportScope ?? 'ALL'],
     queryFn: () => get<ReportDetail | null>('/reports/latest', { includeFindings: true, reportScope }),

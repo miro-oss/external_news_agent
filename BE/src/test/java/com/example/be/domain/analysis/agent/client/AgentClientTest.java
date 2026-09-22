@@ -45,6 +45,41 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class AgentClientTest {
 
     @Test
+    void weeklyRequestSerializesFrozenDailyContentWithDatesAndKnownIssueIds() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        var date = java.time.LocalDate.of(2026, 9, 14);
+        var content = new com.example.be.domain.reports.entity.ReportContent(List.of("생산 계획 발표"), List.of(
+                new com.example.be.domain.reports.entity.ReportContent.ImportantEvent(
+                        "생산 계획", "생산 계획 발표", null, List.of(501L))), List.of(), List.of());
+        var source = new com.example.be.domain.analysis.agent.dto.AgentWeeklyReportRequest.DailySource(
+                101L, date, "일일 통합", content, List.of(501L), java.util.Map.of(501L, 20L));
+        server.expect(requestTo("http://127.0.0.1:8088/v1/weekly-report"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
+                .andExpect(jsonPath("$.reportId").value(77))
+                .andExpect(jsonPath("$.reportDate").value("2026-09-14"))
+                .andExpect(jsonPath("$.reportEndDate").value("2026-09-20"))
+                .andExpect(jsonPath("$.sources[0].reportId").value(101))
+                .andExpect(jsonPath("$.sources[0].structuredContent.importantEvents[0].sourceFindingIds[0]").value(501))
+                .andExpect(jsonPath("$.sources[0].structuredContent.importantEvents[0].significance").doesNotExist())
+                .andExpect(jsonPath("$.sources[0].issueIdsByFinding['501']").value(20))
+                .andExpect(jsonPath("$.sources[0].markdownBody").doesNotExist())
+                .andRespond(withSuccess("""
+                        {"title":"주간 통합", "executiveSummary":["생산 계획 발표"], "importantEvents":[],
+                         "watchItems":[], "sourceNotes":[], "markdownBody":"주간 통합",
+                         "meta":{"provider":"mock","model":"weekly-mock","promptVersion":"weekly-report.ko.v1",
+                         "inputTokens":0,"outputTokens":0,"costUsd":0,"credits":0,"mock":true,"truncated":false}}
+                        """, MediaType.APPLICATION_JSON));
+        var result = client.weeklyReport(new com.example.be.domain.analysis.agent.dto.AgentWeeklyReportRequest(
+                "weekly-report:77", AgentPlan.FREE, 77L, date, date.plusDays(6), List.of(source),
+                java.util.stream.IntStream.rangeClosed(1, 6).mapToObj(date::plusDays).toList(), List.of("자료 범위")));
+        assertEquals("weekly-report.ko.v1", result.meta().promptVersion());
+        server.verify();
+    }
+
+    @Test
     void postsTopicRelevanceWithTopicContextAndReadsGroundedDecisions() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();

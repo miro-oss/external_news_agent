@@ -168,7 +168,7 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             JOIN news_findings finding ON finding.id = selected.finding_id
             JOIN news_articles article ON article.id = finding.article_id
             JOIN news_article_bodies stored_body ON stored_body.body_hash = article.body_hash
-            WHERE report.id IN (:reportIds) AND report.report_scope = 'DAILY'
+            WHERE report.id IN (:reportIds) AND report.report_scope IN ('DAILY', 'WEEKLY')
               AND article.fetch_status = 'FULLTEXT'
               AND REGEXP_INSTR(stored_body.body, '[^[:space:]]') > 0
             """ + REPORT_TOPIC_ELIGIBLE_SQL + " GROUP BY report.id", nativeQuery = true)

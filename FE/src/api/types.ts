@@ -401,11 +401,17 @@ export interface ReportChanges {
   items: ReportChangeItem[]
 }
 
+export type ReportScope = 'RUN' | 'DAILY' | 'WEEKLY'
+
 export interface ReportSummary {
   id: number
   runId: number | null
-  reportScope: 'RUN' | 'DAILY'
+  reportScope: ReportScope
   reportDate: string | null
+  reportEndDate?: string | null
+  sourceReportIds?: number[]
+  sourceReportDates?: string[]
+  missingReportDates?: string[]
   sourceRunIds: number[]
   sourceReportCount?: number | null
   title: string
@@ -470,8 +476,12 @@ export interface ReportIssueSummary {
 export interface ReportDetail {
   id: number
   runId: number | null
-  reportScope: 'RUN' | 'DAILY'
+  reportScope: ReportScope
   reportDate: string | null
+  reportEndDate?: string | null
+  sourceReportIds?: number[]
+  sourceReportDates?: string[]
+  missingReportDates?: string[]
   sourceRunIds: number[]
   sourceReportCount?: number | null
   title: string

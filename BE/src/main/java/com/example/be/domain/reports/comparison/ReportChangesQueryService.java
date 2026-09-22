@@ -33,7 +33,7 @@ public class ReportChangesQueryService {
     public ReportChanges get(long reportId) {
         var report = reports.findByIdAndReportStatusNot(reportId, ReportStatus.PENDING)
                 .orElseThrow(() -> new ReportException(ReportErrorCode.REPORT_NOT_FOUND));
-        if (report.getReportScope() == ReportScope.RUN) return new ReportChanges(reportId, null, null, null,
+        if (report.getReportScope() != ReportScope.DAILY) return new ReportChanges(reportId, null, null, null,
                 ReportChanges.Status.NOT_APPLICABLE, ReportChanges.Status.NOT_APPLICABLE.message, false, List.of(), List.of());
         var job = comparisons.find(reportId).orElse(null);
         if (job == null) {

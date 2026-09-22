@@ -81,6 +81,8 @@ public class ReportNotificationAutomationService {
 
     @Transactional
     public void enqueueCompletedReport(NewsReport report) {
+        // Weekly delivery requires its own explicit policy; RUN/DAILY opt-ins do not authorize it.
+        if (report.getReportScope() == ReportScope.WEEKLY) return;
         List<Long> runIds = report.getReportScope() == ReportScope.DAILY ? report.getSourceRunIds()
                 : report.getRunId() == null ? List.of() : List.of(report.getRunId());
         if (runIds.isEmpty()) return;

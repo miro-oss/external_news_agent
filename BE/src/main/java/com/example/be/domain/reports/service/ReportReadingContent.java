@@ -24,7 +24,8 @@ public record ReportReadingContent(String markdownBody, ReportContent structured
                 supported.stream().map(f -> new ReportContent.ImportantEvent(f.getArticle().getTitle(),
                         FindingEvidencePolicy.reportSummary(f), "", List.of(f.getId()))).toList(),
                 List.of(), List.of("본문을 확보한 기사의 확인된 내용만 표시합니다."));
-        StringBuilder markdown = new StringBuilder("## 오늘의 핵심\n\n");
+        StringBuilder markdown = new StringBuilder(report.getReportScope() == com.example.be.domain.reports.entity.ReportScope.WEEKLY
+                ? "## 이번 주 핵심\n\n" : "## 오늘의 핵심\n\n");
         if (summaries.isEmpty()) {
             markdown.append("- 본문에서 근거를 확인할 수 있는 기사가 없습니다.\n");
         } else {

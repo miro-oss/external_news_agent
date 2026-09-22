@@ -37,6 +37,31 @@ class ReportControllerTest {
     private ReportCommandService reportCommandService;
 
     @Test
+    void weeklyScopeExposesPeriodAndDailySourcesAndKeepsEmptyLatestContract() throws Exception {
+        var scope = com.example.be.domain.reports.entity.ReportScope.WEEKLY;
+        var monday = java.time.LocalDate.of(2026, 9, 14);
+        var summary = ReportResDTO.Summary.builder().id(90L).reportScope(scope).reportDate(monday)
+                .reportEndDate(monday.plusDays(6)).sourceReportIds(List.of(80L))
+                .sourceReportDates(List.of(monday)).missingReportDates(List.of(monday.plusDays(1)))
+                .sourceReportCount(1L).build();
+        when(reportQueryService.getReports(null, null, 0, 20, scope))
+                .thenReturn(PageResponse.of(List.of(summary), 0, 20, 1));
+        mockMvc.perform(get("/api/news/reports").param("reportScope", "WEEKLY"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value("COMMON200"))
+                .andExpect(jsonPath("$.result.content[0].reportScope").value("WEEKLY"))
+                .andExpect(jsonPath("$.result.content[0].reportDate").value("2026-09-14"))
+                .andExpect(jsonPath("$.result.content[0].reportEndDate").value("2026-09-20"))
+                .andExpect(jsonPath("$.result.content[0].sourceReportIds[0]").value(80))
+                .andExpect(jsonPath("$.result.content[0].sourceReportDates[0]").value("2026-09-14"))
+                .andExpect(jsonPath("$.result.content[0].missingReportDates[0]").value("2026-09-15"));
+        when(reportQueryService.getLatest(false, scope)).thenReturn(null);
+        mockMvc.perform(get("/api/news/reports/latest").param("reportScope", "WEEKLY").param("includeFindings", "false"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.code").value("COMMON200"))
+                .andExpect(jsonPath("$.message").value("생성된 보고서가 없습니다."))
+                .andExpect(jsonPath("$.result").doesNotExist());
+    }
+
+    @Test
     void deletionReturnsCommonSuccessEnvelope() throws Exception {
         when(reportCommandService.deleteReport(17L)).thenReturn(new ReportResDTO.Deleted(17L, true));
 

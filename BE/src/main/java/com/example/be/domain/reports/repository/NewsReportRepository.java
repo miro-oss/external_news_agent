@@ -40,6 +40,9 @@ public interface NewsReportRepository
     Optional<NewsReport> findFirstByReportScopeAndReportDateBeforeAndReportStatusNotAndDeletedAtIsNullOrderByReportDateDescIdDesc(
             ReportScope scope, LocalDate before, ReportStatus status);
 
+    List<NewsReport> findByReportScopeAndReportDateBetweenOrderByReportDateAsc(
+            ReportScope scope, LocalDate from, LocalDate through);
+
     List<NewsReport> findByReportScopeAndReportStatusAndGeneratedAtBefore(
             ReportScope scope, ReportStatus status, LocalDateTime before);
 
