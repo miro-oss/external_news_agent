@@ -8,6 +8,14 @@ group = 'com.example'
 version = '0.0.1-SNAPSHOT'
 description = 'BE'
 
+// Security fixes newer than the Spring Boot 4.1.0 dependency baseline (#263).
+ext['httpclient5.version'] = '5.6.3'
+ext['httpcore5.version'] = '5.4.3'
+ext['jackson-2-bom.version'] = '2.21.5'
+ext['jackson-bom.version'] = '3.1.5'
+ext['log4j2.version'] = '2.25.5'
+ext['tomcat.version'] = '11.0.25'
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
@@ -27,7 +35,7 @@ dependencies {
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
     implementation 'org.flywaydb:flyway-database-oracle'
     // 기사 본문 추출용 HTML 파서. 임의의 뉴스 페이지에서 본문만 뽑는 건 정규식으로 되지 않는다.
-    implementation 'org.jsoup:jsoup:1.18.3'
+    implementation 'org.jsoup:jsoup:1.23.1'
     // Public collection requests need DNS validation at the socket connection, not a separate preflight lookup.
     implementation 'org.apache.httpcomponents.client5:httpclient5'
     runtimeOnly 'com.oracle.database.jdbc:ojdbc11'
