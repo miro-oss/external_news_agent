@@ -18,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 import org.slf4j.LoggerFactory;
 
@@ -63,9 +64,10 @@ class EmailNotificationSenderTest {
         logs.stop();
     }
 
-    @Test
-    void authenticationFailureClosesTransportAndLogsOnlyStatusCodes() throws Exception {
-        doThrow(new AuthenticationFailedException("535 5.7.8 rejected private-user@example.test private-app-password"))
+    @ParameterizedTest
+    @ValueSource(strings = {"535 5.7.8", "535 5.7.1"})
+    void authenticationFailureClosesTransportAndLogsOnlyStatusCodes(String smtpStatus) throws Exception {
+        doThrow(new AuthenticationFailedException(smtpStatus + " rejected private-user@example.test private-app-password"))
                 .when(transport).connect(anyString(), anyInt(), anyString(), anyString());
 
         NotificationTransportException error = assertThrows(NotificationTransportException.class,
@@ -75,7 +77,7 @@ class EmailNotificationSenderTest {
         assertTrue(error.isDefinitelyRejected());
         verify(transport).close();
         verify(transport, never()).sendMessage(any(), any());
-        assertSafeLog("stage=CONNECT", "smtpStatus=535 5.7.8", "errorType=AuthenticationFailedException",
+        assertSafeLog("stage=CONNECT", "smtpStatus=" + smtpStatus, "errorType=AuthenticationFailedException",
                 "usernameConfigured=true", "passwordConfigured=true");
     }
 

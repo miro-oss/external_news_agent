@@ -97,6 +97,8 @@ public class NotificationReqDTO {
         private List<Long> groupIds;
         private List<Long> recipientIds;
         private List<Long> channelIds;
+        @Schema(description = "중복 발송 방지 키. 같은 키는 실패한 배치를 포함해 기존 결과만 반환합니다. "
+                + "사용자가 전체 실패 후 새 발송을 명시적으로 요청할 때만 새 키를 사용합니다.")
         private String idempotencyKey;
     }
 }
