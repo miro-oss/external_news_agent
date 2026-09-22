@@ -103,6 +103,8 @@ class EmailNotificationSenderTest {
             verify(transport).connect("smtp.example.test", port, "private-user@example.test", "private-app-password");
             assertEquals(String.valueOf(ssl), mailProperties.get().getProperty("mail.smtp.ssl.enable"));
             assertEquals(String.valueOf(startTls), mailProperties.get().getProperty("mail.smtp.starttls.enable"));
+            assertEquals(String.valueOf(startTls), mailProperties.get().getProperty("mail.smtp.starttls.required"));
+            assertEquals("true", mailProperties.get().getProperty("mail.smtp.ssl.checkserveridentity"));
         }
         verify(transport).close();
         assertTrue(logs.list.isEmpty());
@@ -141,6 +143,55 @@ class EmailNotificationSenderTest {
                 .config(Map.of("host", "smtp.example.test", "port", port, "from", "private-user@example.test",
                         "ssl", ssl, "startTls", startTls))
                 .maxLength(Integer.MAX_VALUE).active(true).build();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"victim@example.test,hidden@example.test", "team:victim@example.test;",
+            "victim@example.test\r\nBcc:hidden@example.test", "victim@example.test\n", "not-an-email"})
+    void refusesLegacyUnsafeRecipientsBeforeOpeningSmtp(String address) {
+        var error = assertThrows(NotificationTransportException.class,
+                () -> sender.send(channel(465, true, false), address, "보고서", "본문"));
+        assertTrue(error.isDefinitelyRejected());
+        verifyNoInteractions(transport);
+        sessions.verifyNoInteractions();
+    }
+
+    @Test
+    void pooledSessionAlsoRefusesLegacyRecipientExpansion() throws Exception {
+        try (var delivery = sender.openSession(channel(465, true, false))) {
+            var error = assertThrows(NotificationTransportException.class,
+                    () -> delivery.send("victim@example.test,hidden@example.test", "보고서", "본문"));
+            assertTrue(error.isDefinitelyRejected());
+            verify(transport, never()).sendMessage(any(), any());
+        }
+    }
+
+    @Test
+    void refusesSubjectHeaderInjectionBeforeOpeningSmtp() {
+        assertThrows(NotificationTransportException.class,
+                () -> sender.send(channel(465, true, false), "victim@example.test",
+                        "보고서\r\nBcc:hidden@example.test", "본문"));
+        verifyNoInteractions(transport);
+        sessions.verifyNoInteractions();
+    }
+
+    @Test
+    void refusesUnsafeStoredSenderBeforeOpeningSmtp() {
+        var channel = channel(465, true, false);
+        channel.update(channel.getName(), Map.of("host", "smtp.example.test", "port", 465,
+                "from", "sender@example.test\r\nBcc:hidden@example.test", "ssl", true), 10000, true);
+        assertThrows(NotificationTransportException.class, () -> sender.openSession(channel));
+        verifyNoInteractions(transport);
+        sessions.verifyNoInteractions();
+    }
+
+    @Test
+    void validSingleMailboxProducesExactlyOneEnvelopeRecipient() throws Exception {
+        sender.send(channel(465, true, false), "받는 사람 <victim+news@example.test>", "보고서", "본문");
+        var recipients = org.mockito.ArgumentCaptor.forClass(jakarta.mail.Address[].class);
+        verify(transport).sendMessage(any(Message.class), recipients.capture());
+        assertEquals(1, recipients.getValue().length);
+        assertEquals("victim+news@example.test", ((jakarta.mail.internet.InternetAddress) recipients.getValue()[0]).getAddress());
     }
 
     private void assertSafeLog(String... expectedParts) {
