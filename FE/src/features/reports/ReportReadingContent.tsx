@@ -155,5 +155,7 @@ function MarkdownText({ text, terms }: { text: string; terms: string[] }) {
     h2: ({ children }) => <h4>{children}</h4>,
     h3: ({ children }) => <h4>{children}</h4>,
     a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
+    // Saved Markdown may contain untrusted image URLs; reading a report must not fetch them.
+    img: ({ alt }) => <>{alt}</>,
   }}>{text}</Markdown></div>
 }

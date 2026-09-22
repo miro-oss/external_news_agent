@@ -11,19 +11,35 @@ import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.DefaultSchemePortResolver;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.io.DefaultHttpClientConnectionOperator;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.impl.routing.DefaultRoutePlanner;
 import org.apache.hc.client5.http.io.HttpClientConnectionOperator;
 import org.apache.hc.client5.http.ssl.TlsSocketStrategy;
 import org.apache.hc.core5.util.Timeout;
+import org.apache.hc.core5.io.CloseMode;
+import jakarta.annotation.PreDestroy;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 /** Trusted configured services and untrusted public collection URLs use separate network boundaries. */
 @Component
-public class RestClientFactory {
+public class RestClientFactory implements AutoCloseable {
+
+    private final List<CloseableHttpClient> publicClients = new ArrayList<>();
+    private final ScheduledThreadPoolExecutor deadlines = new ScheduledThreadPoolExecutor(1,
+            Thread.ofPlatform().daemon(true).name("public-http-deadline-", 0).factory());
+    private boolean closed;
+
+    public RestClientFactory() {
+        // Successful requests must not accumulate canceled timeout tasks until their original due dates.
+        deadlines.setRemoveOnCancelPolicy(true);
+    }
 
     public RestClient.Builder create(Duration connectTimeout, Duration readTimeout) {
         HttpClient httpClient = HttpClient.newBuilder()
@@ -39,7 +55,8 @@ public class RestClientFactory {
         return createPublic(connectTimeout, readTimeout, SystemDefaultDnsResolver.INSTANCE);
     }
 
-    RestClient.Builder createPublic(Duration connectTimeout, Duration readTimeout, DnsResolver resolver) {
+    synchronized RestClient.Builder createPublic(Duration connectTimeout, Duration readTimeout, DnsResolver resolver) {
+        if (closed) throw new IllegalStateException("HTTP client factory is closed");
         var connections = new PoolingHttpClientConnectionManagerBuilder() {
             @Override
             protected HttpClientConnectionOperator createConnectionOperator(SchemePortResolver ports,
@@ -56,6 +73,8 @@ public class RestClientFactory {
                 .build();
         var client = HttpClients.custom()
                 .setConnectionManager(connections)
+                .addExecInterceptorFirst("public-response-guard",
+                        new PublicResponseGuard(deadlines, connectTimeout.plus(readTimeout)))
                 .setRoutePlanner(new DefaultRoutePlanner(DefaultSchemePortResolver.INSTANCE))
                 .setDefaultRequestConfig(RequestConfig.custom()
                         .setConnectionRequestTimeout(Timeout.ofMilliseconds(connectTimeout.toMillis()))
@@ -64,10 +83,20 @@ public class RestClientFactory {
                 .disableAutomaticRetries()
                 .disableCookieManagement()
                 .build();
+        publicClients.add(client);
         return RestClient.builder().requestFactory(new HttpComponentsClientHttpRequestFactory(client))
                 .requestInterceptor((request, body, execution) -> {
                     PublicDestinationPolicy.validate(request.getURI());
                     return execution.execute(request, body);
                 });
+    }
+
+    @PreDestroy
+    @Override
+    public synchronized void close() {
+        closed = true;
+        deadlines.shutdownNow();
+        publicClients.forEach(client -> client.close(CloseMode.IMMEDIATE));
+        publicClients.clear();
     }
 }

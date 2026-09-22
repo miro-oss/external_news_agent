@@ -1,6 +1,8 @@
 package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.notifications.channel.NotificationSenderRegistry;
+import com.example.be.domain.notifications.channel.EmailAddressPolicy;
+import jakarta.mail.internet.AddressException;
 import com.example.be.domain.notifications.dto.req.NotificationReqDTO;
 import com.example.be.domain.notifications.dto.res.NotificationResDTO;
 import com.example.be.domain.notifications.entity.ChannelType;
@@ -92,7 +94,7 @@ public class NotificationManagementService {
         NotificationRecipient recipient = NotificationRecipient.builder()
                 .name(name)
                 .phone(trimToNull(request.getPhone()))
-                .email(trimToNull(request.getEmail()))
+                .email(validatedEmail(request.getEmail()))
                 .memo(trimToNull(request.getMemo()))
                 .active(request.getActive() == null || request.getActive())
                 .destinations(new ArrayList<>())
@@ -112,7 +114,7 @@ public class NotificationManagementService {
         validateLength(name, 100, "수신자명은 100자 이하여야 합니다.", NotificationErrorCode.RECIPIENT_INVALID);
         recipient.update(name,
                 request.getPhone() == null ? recipient.getPhone() : trimToNull(request.getPhone()),
-                request.getEmail() == null ? recipient.getEmail() : trimToNull(request.getEmail()),
+                request.getEmail() == null ? recipient.getEmail() : validatedEmail(request.getEmail()),
                 request.getMemo() == null ? recipient.getMemo() : trimToNull(request.getMemo()),
                 request.getActive() == null ? recipient.isActive() : request.getActive());
         return toRecipientBasic(recipient);
@@ -275,7 +277,8 @@ public class NotificationManagementService {
             }
             NotificationChannel channel = findChannel(input.getChannelId(), false);
             boolean use = input.getUse() == null || input.getUse();
-            String address = trimToNull(input.getAddress());
+            String address = channel.getChannelType() == ChannelType.EMAIL
+                    ? validatedEmail(input.getAddress()) : trimToNull(input.getAddress());
             if (use && !StringUtils.hasText(address)) {
                 throw new NotificationException(NotificationErrorCode.RECIPIENT_INVALID,
                         "수신 주소 없이 해당 채널을 활성화할 수 없습니다.",
@@ -423,8 +426,10 @@ public class NotificationManagementService {
             throw new NotificationException(NotificationErrorCode.CHANNEL_INVALID,
                     "메일 port는 1 이상 65535 이하여야 합니다.");
         }
-        String from = configText(config, "from");
-        if (!StringUtils.hasText(from) || !from.contains("@")) {
+        try {
+            if (!(config.get("from") instanceof String from)) throw new AddressException("Invalid mailbox");
+            EmailAddressPolicy.mailbox(from);
+        } catch (AddressException exception) {
             throw new NotificationException(NotificationErrorCode.CHANNEL_INVALID,
                     "메일 from은 올바른 메일 주소여야 합니다.");
         }
@@ -490,6 +495,18 @@ public class NotificationManagementService {
 
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    private String validatedEmail(String value) {
+        if (value == null || value.isBlank() && value.codePoints().noneMatch(Character::isISOControl)) {
+            return null;
+        }
+        try {
+            EmailAddressPolicy.mailbox(value);
+            return value.trim();
+        } catch (AddressException exception) {
+            throw new NotificationException(NotificationErrorCode.RECIPIENT_INVALID);
+        }
     }
 
     private void validateLength(String value, int max, String message,

@@ -2,10 +2,11 @@ import logging
 from decimal import Decimal
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
 from app.core.errors import AgentError
 from app.llm.base import ProviderResponse, ProviderUsage
-from app.llm.structured_call import structured_call
+from app.llm.structured_call import _log_validation_failure, structured_call
 
 
 class SequenceProvider:
@@ -31,6 +32,37 @@ def response(model: str = "observed-model", *, truncated: bool = False) -> Provi
 
 def reject(_response: ProviderResponse) -> None:
     raise ValueError("invalid fixture")
+
+
+def test_validation_logs_omit_provider_values_and_untrusted_field_names(caplog) -> None:
+    class Output(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        count: int
+
+    marker = "SYNTHETIC_PRIVATE_PROVIDER_VALUE"
+    with pytest.raises(ValueError) as caught:
+        Output.model_validate({"count": marker, marker: "extra value"})
+
+    _log_validation_failure(
+        logging.getLogger(__name__), response(), caught.value,
+        task_name="fixture", attempt=1,
+    )
+
+    assert marker not in caplog.text
+    assert "input_value" not in caplog.text
+    assert "errorType=ValidationError" in caplog.text
+    assert "errorCount=2" in caplog.text
+    assert "int_parsing" in caplog.text
+
+
+def test_custom_validation_logs_omit_exception_messages(caplog) -> None:
+    marker = "SYNTHETIC_PRIVATE_CUSTOM_ERROR"
+    _log_validation_failure(
+        logging.getLogger(__name__), response(), ValueError(marker),
+        task_name="fixture", attempt=1,
+    )
+    assert marker not in caplog.text
+    assert "errorType=ValueError" in caplog.text
 
 
 def invoke(provider: SequenceProvider, *, prompt_version: str | None = "insight.v2"):

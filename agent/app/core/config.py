@@ -20,6 +20,11 @@ class Settings(BaseSettings):
         validation_alias="AGENT_SHARED_SECRET",
     )
     mock: bool = Field(default=True, validation_alias="AGENT_MOCK")
+    max_request_body_bytes: int = Field(
+        default=16 * 1024 * 1024,
+        ge=1,
+        validation_alias="AGENT_MAX_REQUEST_BODY_BYTES",
+    )
     max_body_chars: int = Field(
         default=20_000,
         ge=1,

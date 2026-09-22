@@ -14,8 +14,9 @@ from app.api.v1.keyword_strategy import router as keyword_strategy_router
 from app.api.v1.report import router as report_router
 from app.api.v1.report_changes import router as report_changes_router
 from app.api.v1.topic_relevance import router as topic_relevance_router
+from app.core.config import Settings, get_settings
 from app.core.errors import AgentError
-from app.core.security import require_agent_token
+from app.core.security import AgentRequestGuardMiddleware, require_agent_token
 from app.llm.router import close_analyze_providers
 from app.schemas.common import ErrorDetail, ErrorResponse
 
@@ -35,45 +36,32 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.include_router(health_router, prefix="/v1")
-    application.include_router(
+    protected_routers = (
         analyze_router,
-        prefix="/v1",
-        dependencies=[Depends(require_agent_token)],
-    )
-    application.include_router(
         evidence_router,
-        prefix="/v1",
-        dependencies=[Depends(require_agent_token)],
-    )
-    application.include_router(
         explore_router,
-        prefix="/v1",
-        dependencies=[Depends(require_agent_token)],
-    )
-    application.include_router(
         insight_router,
-        prefix="/v1",
-        dependencies=[Depends(require_agent_token)],
-    )
-    application.include_router(
         keyword_strategy_router,
-        prefix="/v1",
-        dependencies=[Depends(require_agent_token)],
-    )
-    application.include_router(
         topic_relevance_router,
-        prefix="/v1",
-        dependencies=[Depends(require_agent_token)],
-    )
-    application.include_router(
         report_router,
-        prefix="/v1",
-        dependencies=[Depends(require_agent_token)],
-    )
-    application.include_router(
         report_changes_router,
-        prefix="/v1",
-        dependencies=[Depends(require_agent_token)],
+    )
+    for router in protected_routers:
+        application.include_router(
+            router, prefix="/v1", dependencies=[Depends(require_agent_token)]
+        )
+
+    def request_settings() -> Settings:
+        # Keep middleware and route dependency settings identical, including
+        # explicitly isolated settings supplied by tests/embedded applications.
+        return application.dependency_overrides.get(get_settings, get_settings)()
+
+    application.add_middleware(
+        AgentRequestGuardMiddleware,
+        protected_paths=frozenset(
+            f"/v1{route.path}" for router in protected_routers for route in router.routes
+        ),
+        settings_provider=request_settings,
     )
 
     @application.exception_handler(AgentError)

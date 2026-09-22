@@ -3,13 +3,13 @@ package com.example.be.domain.collection.robots;
 import com.example.be.global.config.PublicDestinationPolicy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestClientResponseException;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -55,43 +55,35 @@ public class RobotsTxtClient {
         }
 
         try {
-            ResponseEntity<String> response = restClient.get()
+            return restClient.get()
                     .uri(URI.create(robotsUrl))
                     .header("User-Agent", userAgent)
-                    .retrieve() 
-                    .toEntity(String.class);
-
-            if (isTooLarge(response)) {
-                log.warn("robots.txt가 너무 크다. 읽지 않는다. url={}", robotsUrl);
-                return RobotsLookup.unknown(robotsUrl, "TOO_LARGE");
-            }
-
-            return RobotsLookup.fetched(robotsUrl, RobotsRules.parse(response.getBody(), userAgent));
-        } catch (RestClientResponseException e) {
-            if (e.getStatusCode().value() == HttpStatus.NOT_FOUND.value()) {
-                // robots.txt가 없는 사이트는 흔하다. 404는 "제한이 없다"는 뜻이다.
-                log.debug("robots.txt가 없다. 제한 없음으로 본다. url={}", robotsUrl);
-                return RobotsLookup.fetched(robotsUrl, RobotsRules.permitAll());
-            }
-
-            // 401·403은 "없다"가 아니라 "안 보여준다"이다. 제한 없음으로 읽으면 접근이 거부된 robots.txt를
-            // 허용으로 오판한다.
-
-            log.warn("robots.txt를 확인하지 못했다. url={} status={}", robotsUrl, e.getStatusCode());
-            return RobotsLookup.unknown(robotsUrl, "HTTP_" + e.getStatusCode().value());
+                    // retrieve() buffers both success and error bodies before a size check can run.
+                    .exchange((request, response) -> read(robotsUrl, response));
         } catch (RestClientException e) {
-            log.warn("robots.txt를 확인하지 못했다. url={} error={}", robotsUrl, e.getMessage());
+            log.warn("robots.txt를 확인하지 못했다. reason=CONNECT_TIMEOUT");
             return RobotsLookup.unknown(robotsUrl, "CONNECT_TIMEOUT");
         }
     }
 
-    private boolean isTooLarge(ResponseEntity<String> response) {
-        if (response.getHeaders().getContentLength() > MAX_BODY_BYTES) {
-            return true;
+    private RobotsLookup read(String robotsUrl, ClientHttpResponse response) throws IOException {
+        int status = response.getStatusCode().value();
+        if (status == HttpStatus.NOT_FOUND.value()) {
+            return RobotsLookup.fetched(robotsUrl, RobotsRules.permitAll());
         }
-
-        String body = response.getBody();
-        return body != null && body.getBytes(StandardCharsets.UTF_8).length > MAX_BODY_BYTES;
+        if (!response.getStatusCode().is2xxSuccessful()) {
+            // Neither redirects nor error pages are robots rules. Never read their bodies.
+            return RobotsLookup.unknown(robotsUrl, "HTTP_" + status);
+        }
+        if (response.getHeaders().getContentLength() > MAX_BODY_BYTES) {
+            return RobotsLookup.unknown(robotsUrl, "TOO_LARGE");
+        }
+        // Bound decoded bytes as well: chunked and compressed responses may have no useful length.
+        byte[] body = response.getBody().readNBytes(MAX_BODY_BYTES + 1);
+        if (body.length > MAX_BODY_BYTES) {
+            return RobotsLookup.unknown(robotsUrl, "TOO_LARGE");
+        }
+        return RobotsLookup.fetched(robotsUrl, RobotsRules.parse(new String(body, StandardCharsets.UTF_8), userAgent));
     }
 
     private String robotsUrlOf(String sourceUrl) throws URISyntaxException {

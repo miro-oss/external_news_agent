@@ -12,6 +12,8 @@ import com.example.be.domain.notifications.repository.NotificationGroupRepositor
 import com.example.be.domain.notifications.repository.NotificationRecipientRepository;
 import com.example.be.domain.notifications.repository.RecipientDestinationRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -187,6 +189,57 @@ class NotificationManagementServiceTest {
         when(channelRepository.findById(1L)).thenReturn(Optional.of(telegram));
         when(channelRepository.findById(2L)).thenReturn(Optional.of(email));
         return recipient;
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"victim@example.test,hidden@example.test", "team:victim@example.test,hidden@example.test;",
+            "victim@example.test\r\nBcc:hidden@example.test", "victim@example.test\n", "<script>alert(1)</script>",
+            "not-an-email", "victim@example.test\u0000"})
+    void rejectsRecipientExpansionAndHeaderInjectionBeforeChangingDestinations(String address) {
+        var recipient = recipientWithEmailAndTelegram();
+        var original = List.copyOf(recipient.getDestinations());
+        var request = new NotificationReqDTO.DestinationsUpdate();
+        request.setDestinations(List.of(destination(2L, address, false)));
+
+        var error = assertThrows(NotificationException.class, () -> service.replaceDestinations(7L, request));
+
+        assertEquals("RECIPIENT400", error.getCode().getCode());
+        assertEquals(original, recipient.getDestinations());
+        verify(recipientRepository, never()).flush();
+    }
+
+    @Test
+    void rejectsInvalidBasicEmailBeforeCreateOrUpdate() {
+        var create = new NotificationReqDTO.RecipientCreate();
+        create.setName("수신자");
+        create.setEmail("victim@example.test,hidden@example.test");
+        assertEquals("RECIPIENT400", assertThrows(NotificationException.class,
+                () -> service.createRecipient(create)).getCode().getCode());
+        verify(recipientRepository, never()).save(org.mockito.ArgumentMatchers.any());
+
+        var recipient = recipientWithEmailAndTelegram();
+        var update = new NotificationReqDTO.RecipientUpdate();
+        update.setName("이름도 변경하지 않음");
+        update.setEmail("victim@example.test\r\nBcc:hidden@example.test");
+        assertThrows(NotificationException.class, () -> service.updateRecipient(7L, update));
+        assertEquals("기존 수신자", recipient.getName());
+        assertEquals("old@invalid.test", recipient.getEmail());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"sender@example.test,other@example.test", "team:sender@example.test;",
+            "sender@example.test\r\nBcc:hidden@example.test", "not-an-email"})
+    void rejectsInjectedSenderConfiguration(String from) {
+        var channel = NotificationChannel.builder().id(2L).channelType(ChannelType.EMAIL)
+                .name("메일").config(Map.of("host", "localhost", "port", 1025, "from", "sender@example.test"))
+                .maxLength(10000).active(true).build();
+        when(channelRepository.findById(2L)).thenReturn(Optional.of(channel));
+        var update = new NotificationReqDTO.ChannelUpdate();
+        update.setConfig(Map.of("host", "localhost", "port", 1025, "from", from));
+
+        assertEquals("CHANNEL400", assertThrows(NotificationException.class,
+                () -> service.updateChannel(2L, update)).getCode().getCode());
+        assertEquals("sender@example.test", channel.getConfig().get("from"));
     }
 
     private NotificationReqDTO.DestinationInput destination(Long channelId, String address, boolean use) {

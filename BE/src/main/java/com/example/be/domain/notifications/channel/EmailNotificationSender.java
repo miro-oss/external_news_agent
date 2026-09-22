@@ -51,6 +51,7 @@ public class EmailNotificationSender implements NotificationSender {
 
     @Override
     public String send(NotificationChannel channel, String address, String subject, String body) {
+        validateMessageHeaders(address, subject);
         try (DeliverySession deliverySession = openSession(channel)) {
             return deliverySession.send(address, subject, body);
         }
@@ -61,7 +62,12 @@ public class EmailNotificationSender implements NotificationSender {
         Map<String, Object> config = channel.getConfig();
         String host = text(config, "host");
         int port = integer(config, "port", 25);
-        String from = text(config, "from");
+        InternetAddress from;
+        try {
+            from = EmailAddressPolicy.mailbox(config.get("from") instanceof String value ? value : null);
+        } catch (MessagingException exception) {
+            throw new NotificationTransportException("메일 주소가 거절되었습니다. 수신 주소와 발신 주소를 확인해 주세요.", true);
+        }
         boolean ssl = bool(config, "ssl", false);
         boolean startTls = bool(config, "startTls", false);
         String username = properties.getSmtp().getUsername();
@@ -73,6 +79,8 @@ public class EmailNotificationSender implements NotificationSender {
         mail.setProperty("mail.smtp.auth", String.valueOf(StringUtils.hasText(username)));
         mail.setProperty("mail.smtp.ssl.enable", String.valueOf(ssl));
         mail.setProperty("mail.smtp.starttls.enable", String.valueOf(startTls));
+        mail.setProperty("mail.smtp.starttls.required", String.valueOf(startTls));
+        mail.setProperty("mail.smtp.ssl.checkserveridentity", "true");
         mail.setProperty("mail.smtp.connectiontimeout", String.valueOf(properties.getConnectTimeout().toMillis()));
         mail.setProperty("mail.smtp.timeout", String.valueOf(properties.getReadTimeout().toMillis()));
         mail.setProperty("mail.smtp.writetimeout", String.valueOf(properties.getReadTimeout().toMillis()));
@@ -98,10 +106,11 @@ public class EmailNotificationSender implements NotificationSender {
             return new DeliverySession() {
                 @Override
                 public String send(String address, String subject, String body) {
+                    InternetAddress recipient = validateMessageHeaders(address, subject);
                     try {
                         MimeMessage message = new MimeMessage(session);
-                        message.setFrom(new InternetAddress(from));
-                        message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(address, false));
+                        message.setFrom(from);
+                        message.setRecipient(Message.RecipientType.TO, recipient);
                         message.setSubject(subject, "UTF-8");
                         message.setContent(body, "text/html; charset=UTF-8");
                         message.saveChanges();
@@ -129,6 +138,17 @@ public class EmailNotificationSender implements NotificationSender {
                 throw new NotificationTransportException("메일 서버 인증에 실패했습니다. 관리자에게 메일 연결 설정 확인을 요청해 주세요.", true);
             }
             throw new NotificationTransportException("메일 서버에 연결하지 못했습니다. 메일 연결 설정과 서버 상태를 확인해 주세요.", true);
+        }
+    }
+
+    private InternetAddress validateMessageHeaders(String address, String subject) {
+        try {
+            if (subject == null || subject.codePoints().anyMatch(Character::isISOControl)) {
+                throw new jakarta.mail.internet.AddressException("Invalid subject");
+            }
+            return EmailAddressPolicy.mailbox(address);
+        } catch (MessagingException exception) {
+            throw new NotificationTransportException("메일 주소가 거절되었습니다. 수신 주소와 발신 주소를 확인해 주세요.", true);
         }
     }
 
