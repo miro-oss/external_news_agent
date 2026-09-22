@@ -33,7 +33,7 @@ import java.util.*;
 @RequiredArgsConstructor
 @Slf4j
 public class TopicRelevanceGate {
-    public static final String PROMPT_VERSION = "topic-relevance.ko.v8";
+    public static final String PROMPT_VERSION = "topic-relevance.ko.v9";
     private final AgentProperties properties;
     private final AgentClient client;
     private final AgentQuotaService quota;
@@ -57,8 +57,10 @@ public class TopicRelevanceGate {
                     clip(candidate.article().getTitle(), 1000), clip(candidate.article().getSummary(), 1000),
                     clip(candidate.article().getBody(), 5000));
             // Full input participates even when the provider receives a bounded excerpt.
+            String model = plan == AgentPlan.FREE
+                    ? properties.getRelevanceFreeModel() : properties.getPaidModel();
             String inputHash = hash(mapper.writeValueAsString(topic) + "\n" + PROMPT_VERSION + "\n" + plan
-                    + "\n" + properties.getFreeModel() + "\n" + properties.getPaidModel()
+                    + "\n" + model
                     + "\n" + candidate.article().getTitle() + "\n" + candidate.article().getSummary()
                     + "\n" + candidate.article().getBody());
             var cached = previous.get(key);

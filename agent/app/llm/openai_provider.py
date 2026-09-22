@@ -21,13 +21,18 @@ logger = logging.getLogger(__name__)
 # Standard USD per million tokens (input, cached input, output), checked 2026-09-07.
 # https://developers.openai.com/api/docs/models/gpt-4.1-nano
 # https://developers.openai.com/api/docs/models/gpt-4o-mini
+# https://developers.openai.com/api/docs/models/gpt-5-mini (checked 2026-09-22)
+# https://developers.openai.com/api/docs/models/gpt-5.6-terra (checked 2026-09-22)
 _MODEL_PRICES = {
     "gpt-4.1-nano": (Decimal("0.10"), Decimal("0.025"), Decimal("0.40")),
     "gpt-4o-mini": (Decimal("0.15"), Decimal("0.075"), Decimal("0.60")),
+    "gpt-5-mini": (Decimal("0.25"), Decimal("0.025"), Decimal("2.00")),
+    "gpt-5.6-terra": (Decimal("2.00"), Decimal("0.20"), Decimal("12.00")),
 }
 _MODEL_ALIASES = {
     "gpt-4.1-nano-2025-04-14": "gpt-4.1-nano",
     "gpt-4o-mini-2024-07-18": "gpt-4o-mini",
+    "gpt-5-mini-2025-08-07": "gpt-5-mini",
 }
 _ERROR_CODES = {
     "insufficient_quota",
@@ -128,13 +133,23 @@ class OpenAIAnalyzeProvider:
     ) -> Any:
         schema = OpenAIJsonSchemaTransformer(deepcopy(response_schema), strict=True).walk()
         name = re.sub(r"[^a-zA-Z0-9_-]", "_", str(response_schema.get("title") or "output"))
+        # Use model-specific reasoning only for explicitly supported models;
+        # preserve the sampling contract for every other configured model.
+        effort = {"gpt-5-mini": "low", "gpt-5.6-terra": "medium"}.get(
+            _MODEL_ALIASES.get(self._model, self._model)
+        )
+        options = (
+            {"reasoning": {"effort": effort}}
+            if effort is not None
+            else {"temperature": 0}
+        )
         for attempt in range(self._retry_attempts + 1):
             try:
                 return self._client.responses.create(
                     model=self._model,
                     instructions=system_instruction,
                     input=prompt,
-                    temperature=0,
+                    **options,
                     max_output_tokens=self._max_output_tokens,
                     store=False,
                     text={

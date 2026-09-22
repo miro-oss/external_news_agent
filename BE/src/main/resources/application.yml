@@ -109,6 +109,7 @@ news:
     free-analysis-prompt-version: ${AGENT_FREE_ANALYSIS_PROMPT_VERSION:analyze.ko.v10+perspective.ko.v1+sensitivity.ko.v2}
     insight-prompt-version: ${AGENT_INSIGHT_PROMPT_VERSION:insight.ko.v2+perspective.ko.v1}
     free-model: ${OPENAI_MODEL:gpt-4.1-nano}
+    relevance-free-model: ${TOPIC_RELEVANCE_OPENAI_MODEL:gpt-5.6-terra}
     paid-model: ${MINDLOGIC_CLAUDE_MODEL:}
     insight-history:
       days: 30

@@ -21,7 +21,7 @@ from app.schemas.topic_relevance import (
     TopicRelevanceResponse,
 )
 
-PROMPT_VERSION = "topic-relevance.ko.v8"
+PROMPT_VERSION = "topic-relevance.ko.v9"
 _QUOTE_TEXT = TypeAdapter(Annotated[str, StringConstraints(strip_whitespace=True)])
 SYSTEM_INSTRUCTION = (
     (Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md")
@@ -47,6 +47,22 @@ class TopicRelevanceService:
                 "provider_timeout_seconds": self._settings.insight_provider_timeout_seconds,
             }
         )
+        if request.plan == "FREE":
+            model = self._settings.topic_relevance_openai_model
+            max_output_tokens = 1792
+            if model == "gpt-5.6-terra":
+                max_output_tokens = 6144
+            elif model in {"gpt-5-mini", "gpt-5-mini-2025-08-07"}:
+                max_output_tokens = 4096
+            settings = settings.model_copy(update={
+                "openai_model": model,
+                "max_output_tokens": max_output_tokens,
+                # A task-specific model uses its built-in prices, not a custom
+                # price override intended for the general analysis model.
+                "openai_input_cost_per_million": None,
+                "openai_cached_input_cost_per_million": None,
+                "openai_output_cost_per_million": None,
+            })
         provider = self._provider or get_analyze_provider(settings, request.plan)
         decisions: list[RelevanceDecision] = []
         usage = ProviderUsage()
@@ -223,6 +239,11 @@ def _response_schema(request: TopicRelevanceRequest) -> dict[str, object]:
     decision_schema = RelevanceDecision.model_json_schema(by_alias=True)
     decision_schema["properties"].pop("articleId")
     decision_schema["required"].remove("articleId")
+    decision_schema["properties"] = {
+        key: decision_schema["properties"][key]
+        for key in ("reason", "evidenceQuotes", "status")
+    }
+    decision_schema["required"] = list(decision_schema["properties"])
     decision_schema["title"] = "TopicRelevanceDecision"
     keys = [_article_key(article.article_id) for article in request.articles]
     properties = {}

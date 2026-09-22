@@ -11,7 +11,9 @@ import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportChangesRequest;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
+import com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceRequest;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.global.config.RestClientFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -35,6 +37,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -57,18 +63,65 @@ class AgentClientTest {
                 .andRespond(withSuccess("""
                         {"decisions":[{"articleId":5,"status":"IRRELEVANT","reason":"금융 분쟁 기사입니다.",
                          "evidenceQuotes":["토스 공정위 분쟁"]}],"meta":{"provider":"openai","model":"fixture",
-                         "promptVersion":"topic-relevance.ko.v7","inputTokens":10,"outputTokens":5,
+                         "promptVersion":"topic-relevance.ko.v9","inputTokens":10,"outputTokens":5,
                          "costUsd":0.0000004,"credits":0,"mock":false,"truncated":false}}
                         """, MediaType.APPLICATION_JSON));
-        var response = client.topicRelevance(new com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceRequest(
-                "test-relevance", AgentPlan.FREE,
-                new com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceRequest.TopicInput(
-                        7L, "제조장비", "반도체 장비 공정", List.of("공정"), List.of("공정"), List.of()),
-                List.of(new com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceRequest.ArticleInput(
-                        5L, "토스 공정위 분쟁", null, "토스와 네이버의 금융 플랫폼 분쟁"))));
+        var response = client.topicRelevance(relevanceRequest());
         assertEquals("IRRELEVANT", response.decisions().getFirst().status());
         assertEquals(List.of("토스 공정위 분쟁"), response.decisions().getFirst().evidenceQuotes());
         server.verify();
+    }
+
+    @Test
+    void routesRelevanceThroughItsConfiguredTimeoutWithoutChangingOtherClients() {
+        AgentProperties properties = properties();
+        properties.setAnalyzeTimeout(Duration.ofSeconds(91));
+        properties.setInsightTimeout(Duration.ofSeconds(61));
+        properties.setReportTimeout(Duration.ofSeconds(121));
+        properties.setRelevanceTimeout(Duration.ofSeconds(240));
+        RestClientFactory factory = mock(RestClientFactory.class);
+        RestClient.Builder analyzeBuilder = RestClient.builder();
+        RestClient.Builder insightBuilder = RestClient.builder();
+        RestClient.Builder reportBuilder = RestClient.builder();
+        RestClient.Builder relevanceBuilder = RestClient.builder();
+        MockRestServiceServer analyzeServer = MockRestServiceServer.bindTo(analyzeBuilder).build();
+        MockRestServiceServer insightServer = MockRestServiceServer.bindTo(insightBuilder).build();
+        MockRestServiceServer reportServer = MockRestServiceServer.bindTo(reportBuilder).build();
+        MockRestServiceServer relevanceServer = MockRestServiceServer.bindTo(relevanceBuilder).build();
+        when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(91))).thenReturn(analyzeBuilder);
+        when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(61))).thenReturn(insightBuilder);
+        when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(121))).thenReturn(reportBuilder);
+        when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(240))).thenReturn(relevanceBuilder);
+        AgentClient client = new AgentClient(factory, properties);
+        analyzeServer.expect(requestTo("http://127.0.0.1:8088/v1/analyze"))
+                .andRespond(withSuccess(responseJson(), MediaType.APPLICATION_JSON));
+        insightServer.expect(requestTo("http://127.0.0.1:8088/v1/insight"))
+                .andRespond(withSuccess(insightResponseJson(), MediaType.APPLICATION_JSON));
+        reportServer.expect(requestTo("http://127.0.0.1:8088/v1/report"))
+                .andRespond(withSuccess(reportResponseJson(), MediaType.APPLICATION_JSON));
+        relevanceServer.expect(requestTo("http://127.0.0.1:8088/v1/topic-relevance"))
+                .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
+                .andRespond(withSuccess("""
+                        {"decisions":[{"articleId":5,"status":"IRRELEVANT","reason":"금융 분쟁 기사입니다.",
+                         "evidenceQuotes":["토스 공정위 분쟁"]}],"meta":{"provider":"openai","model":"fixture",
+                         "promptVersion":"topic-relevance.ko.v9","inputTokens":10,"outputTokens":5,
+                         "costUsd":0,"credits":0,"mock":false,"truncated":false}}
+                        """, MediaType.APPLICATION_JSON));
+
+        assertEquals("topic-relevance.ko.v9", client.topicRelevance(relevanceRequest()).meta().promptVersion());
+        client.analyze(request());
+        client.insight(insightRequest());
+        client.report(reportRequest());
+
+        analyzeServer.verify();
+        insightServer.verify();
+        reportServer.verify();
+        relevanceServer.verify();
+        verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(91));
+        verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(61));
+        verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(121));
+        verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(240));
+        verifyNoMoreInteractions(factory);
     }
 
     @Test
@@ -354,6 +407,14 @@ class AgentClientTest {
         properties.setInsightTimeout(Duration.ofSeconds(1));
         properties.setReportTimeout(Duration.ofSeconds(2));
         return properties;
+    }
+
+    private static AgentTopicRelevanceRequest relevanceRequest() {
+        return new AgentTopicRelevanceRequest("test-relevance", AgentPlan.FREE,
+                new AgentTopicRelevanceRequest.TopicInput(
+                        7L, "제조장비", "반도체 장비 공정", List.of("공정"), List.of("공정"), List.of()),
+                List.of(new AgentTopicRelevanceRequest.ArticleInput(
+                        5L, "토스 공정위 분쟁", null, "토스와 네이버의 금융 플랫폼 분쟁")));
     }
 
     private static AgentReportRequest reportRequest() {
