@@ -81,14 +81,15 @@ class AgentWeeklyReportOrchestratorTest {
     }
 
     @Test
-    void readTimeoutRetainsReservedCreditsAndAuditPhase() {
+    void readTimeoutKeepsAuditUsageUnknownAndPassesTimeoutPhaseToQuotaSettlement() {
         when(client.weeklyReport(any())).thenThrow(new AgentClientException("PROVIDER_UNAVAILABLE", "timeout", null,
                 null, AgentClientException.TimeoutPhase.READ));
         assertEquals(ReportStatus.FALLBACK, subject.generate(77L, input(), LocalDateTime.now()).status());
         var failure = ArgumentCaptor.forClass(AgentClientException.class);
         verify(quota).completeObservedFailure(eq(reservation), failure.capture());
-        assertEquals(BigDecimal.ONE, failure.getValue().getUsage().credits());
-        verify(recorder).recordWeeklyReportFailure(any(), any(), any(), any(), eq(AgentTimeoutPhase.READ), any());
+        assertNull(failure.getValue().getUsage());
+        assertTrue(failure.getValue().isReadTimeout());
+        verify(recorder).recordWeeklyReportFailure(any(), any(), any(), isNull(), eq(AgentTimeoutPhase.READ), any());
     }
 
     @Test

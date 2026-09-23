@@ -77,4 +77,47 @@ class WeeklyReportGeneratorTest {
                 findingId, "hash", "v1", date.toString(), side)), List.of());
         return new WeeklyReportInput.DailySource(reportId, date, title, text, content, List.of(findingId), evidence);
     }
+
+    @Test
+    void multiIssueDailyItemsNeverBridgeDistinctHistoriesRegardlessOfArrivalOrder() {
+        var first = identifiedSource(0, List.of(1L), List.of(10L), false);
+        var second = identifiedSource(1, List.of(2L), List.of(20L), false);
+        var combined = identifiedSource(2, List.of(3L, 4L), List.of(10L, 20L), false);
+        var followup = identifiedSource(3, List.of(5L), List.of(10L), false);
+        for (var order : List.of(List.of(first, second, combined), List.of(combined, first, second),
+                List.of(first, combined, second), List.of(second, first, combined),
+                List.of(combined, second, first), List.of(second, combined, first))) {
+            var sources = new java.util.ArrayList<>(order);
+            sources.add(followup);
+            var events = generator.generate(new WeeklyReportInput(monday, monday.plusDays(6), sources, List.of()))
+                    .structuredContent().importantEvents();
+            assertEquals(java.util.Set.of(java.util.Set.of(1L, 5L), java.util.Set.of(2L), java.util.Set.of(3L, 4L)),
+                    events.stream().map(event -> java.util.Set.copyOf(event.sourceFindingIds())).collect(java.util.stream.Collectors.toSet()));
+        }
+    }
+
+    @Test
+    void watchGroupingKeepsKnownIdentitiesSeparateButDeduplicatesSameIdentityAndLegacyText() {
+        var sources = List.of(
+                identifiedSource(0, List.of(1L), List.of(10L), true),
+                identifiedSource(1, List.of(2L), List.of(20L), true),
+                identifiedSource(2, List.of(3L), List.of(10L), true),
+                identifiedSource(3, List.of(4L), List.of(), true),
+                identifiedSource(4, List.of(5L), List.of(), true));
+        var items = generator.generate(new WeeklyReportInput(monday, monday.plusDays(6), sources, List.of()))
+                .structuredContent().watchItems();
+        assertEquals(List.of(List.of(1L, 3L), List.of(2L), List.of(4L, 5L)),
+                items.stream().map(ReportContent.WatchItem::sourceFindingIds).toList());
+    }
+
+    private WeeklyReportInput.DailySource identifiedSource(int day, List<Long> ids, List<Long> issues, boolean watch) {
+        String title = day % 2 == 0 ? "공급  계획" : " 공급 계획 ";
+        var content = new ReportContent(List.of(), watch ? List.of() : List.of(
+                new ReportContent.ImportantEvent(title, "확정 여부를 확인한다.", "", ids)),
+                watch ? List.of(new ReportContent.WatchItem(title, "확정 여부를 확인한다.", ids)) : List.of(), List.of());
+        var snapshot = new ReportComparisonSnapshot(1, java.util.stream.IntStream.range(0, issues.size())
+                .mapToObj(index -> new ReportComparisonSnapshot.Issue(ids.get(index), "hash", "v1", "date",
+                        new ReportChanges.Side(issues.get(index), 1, title, "확정 여부를 확인한다.", List.of()))).toList(), List.of());
+        return new WeeklyReportInput.DailySource(20L + day, monday.plusDays(day), title, "", content, ids, snapshot);
+    }
 }

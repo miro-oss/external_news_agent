@@ -63,7 +63,7 @@ public class AgentWeeklyReportOrchestrator {
             safely(() -> quotaService.completeSuccess(reservation, completed.meta().credits()), "성공 quota 정산", reportId);
             return document;
         } catch (RuntimeException error) {
-            AgentClientException failure = failure(error, response, reservation);
+            AgentClientException failure = failure(error, response);
             AgentTimeoutPhase timeout = failure.getTimeoutPhase() == AgentClientException.TimeoutPhase.NONE
                     ? null : AgentTimeoutPhase.valueOf(failure.getTimeoutPhase().name());
             safely(() -> recorder.recordWeeklyReportFailure(request, failure.getCode(), failure.getMessage(),
@@ -156,7 +156,7 @@ public class AgentWeeklyReportOrchestrator {
         reflected.addAll(values);
     }
 
-    private AgentClientException failure(RuntimeException error, AgentReportResponse response, QuotaReservation reservation) {
+    private AgentClientException failure(RuntimeException error, AgentReportResponse response) {
         AgentReportResponse.Meta meta = response == null ? null : response.meta();
         AgentClientException.Usage usage = meta == null ? null : new AgentClientException.Usage(
                 meta.inputTokens() == null || meta.inputTokens() < 0 ? null : meta.inputTokens(),
@@ -164,9 +164,6 @@ public class AgentWeeklyReportOrchestrator {
                 negative(meta.costUsd()) ? null : meta.costUsd(), negative(meta.credits()) ? null : meta.credits());
         if (error instanceof AgentClientException exception) {
             if (exception.getUsage() != null) return exception;
-            if (exception.isReadTimeout()) {
-                usage = new AgentClientException.Usage(null, null, null, reservation.reservedUnits());
-            }
             if (usage == null) return exception;
             return new AgentClientException(exception.getCode(), exception.getMessage(), exception, usage,
                     exception.getTimeoutPhase(), exception.getExecutionMetadata());

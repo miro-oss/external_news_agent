@@ -229,7 +229,9 @@ def _supported(text: str, claims: list[SavedClaim], *, title: bool = False) -> b
 
 
 def _same_issue(left: SavedClaim, right: SavedClaim) -> bool:
-    if set(left.ids) & set(right.ids) or set(left.issue_ids) & set(right.issue_ids):
+    if left.issue_ids and right.issue_ids:
+        return set(left.issue_ids) == set(right.issue_ids)
+    if set(left.ids) & set(right.ids):
         return True
     # Matching generic wording cannot override two different saved issue identities.
     if left.issue_ids or right.issue_ids:
@@ -247,6 +249,11 @@ def _claim_groups(claims: list[SavedClaim]) -> list[list[SavedClaim]]:
         connected = [
             group
             for group in groups
+            if not (
+                claim.issue_ids
+                and (known := {id_ for old in group for id_ in old.issue_ids})
+                and set(claim.issue_ids) != known
+            )
             if any(
                 set(claim.ids) & set(old.ids) or set(claim.issue_ids) & set(old.issue_ids)
                 for old in group
@@ -265,6 +272,13 @@ def _claim_groups(claims: list[SavedClaim]) -> list[list[SavedClaim]]:
             ]
             if len(connected) > 1:
                 connected = []
+        # Also guard unidentified evidence shared by multiple known histories.
+        identities = {
+            frozenset(id_ for old in group for id_ in old.issue_ids)
+            for group in connected
+        } - {frozenset()}
+        if len(identities) > 1:
+            connected = []
         if not connected:
             groups.append([claim])
             continue

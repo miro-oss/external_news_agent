@@ -20,7 +20,7 @@ public class WeeklyReportGenerator {
 
     public ReportDocument generate(WeeklyReportInput input) {
         List<EventGroup> groups = new ArrayList<>();
-        Map<String, WatchGroup> watches = new LinkedHashMap<>();
+        Map<WatchKey, WatchGroup> watches = new LinkedHashMap<>();
         for (var source : input.sources()) {
             ReportContent content = source.structuredContent();
             if (content == null) continue;
@@ -29,12 +29,9 @@ public class WeeklyReportGenerator {
                 List<Long> ids = allowedIds.containsAll(event.sourceFindingIds()) ? event.sourceFindingIds().stream().distinct().toList() : List.of();
                 if (ids.isEmpty() || blank(event.title()) || blank(event.summaryKo())) continue;
                 String key = normalized(event.title()) + "|" + normalized(event.summaryKo());
-                Set<Long> issueIds = source.evidenceSnapshot() == null ? Set.of() : source.evidenceSnapshot().issues().stream()
-                        .filter(issue -> ids.contains(issue.findingId()) && issue.side() != null && issue.side().issueId() > 0)
-                        .map(issue -> issue.side().issueId())
-                        .collect(java.util.stream.Collectors.toSet());
+                Set<Long> issueIds = issueIds(source, ids);
                 List<EventGroup> matches = groups.stream().filter(group -> group.matches(key, ids, issueIds)).toList();
-                if (issueIds.isEmpty() && conflictingKnownIdentities(matches)) matches = List.of();
+                if (conflictingKnownIdentities(matches)) matches = List.of();
                 EventGroup group = matches.isEmpty() ? new EventGroup() : matches.getFirst();
                 if (matches.isEmpty()) groups.add(group);
                 for (int index = 1; index < matches.size(); index++) {
@@ -46,7 +43,7 @@ public class WeeklyReportGenerator {
             for (var item : content.watchItems()) {
                 List<Long> ids = allowedIds.containsAll(item.sourceFindingIds()) ? item.sourceFindingIds().stream().distinct().toList() : List.of();
                 if (ids.isEmpty() || blank(item.topic()) || blank(item.reason())) continue;
-                watches.computeIfAbsent(normalized(item.topic()) + "|" + normalized(item.reason()),
+                watches.computeIfAbsent(new WatchKey(normalized(item.topic()), normalized(item.reason()), issueIds(source, ids)),
                         key -> new WatchGroup(item.topic(), item.reason())).ids.addAll(ids);
             }
         }
@@ -99,13 +96,20 @@ public class WeeklyReportGenerator {
         List<Set<Long>> known = groups.stream().map(group -> group.issueIds).filter(ids -> !ids.isEmpty()).toList();
         for (int left = 0; left < known.size(); left++) {
             for (int right = left + 1; right < known.size(); right++) {
-                if (java.util.Collections.disjoint(known.get(left), known.get(right))) return true;
+                if (!known.get(left).equals(known.get(right))) return true;
             }
         }
         return false;
     }
 
     private static boolean blank(String text) { return text == null || text.isBlank(); }
+    private static Set<Long> issueIds(WeeklyReportInput.DailySource source, List<Long> ids) {
+        return source.evidenceSnapshot() == null ? Set.of() : source.evidenceSnapshot().issues().stream()
+                .filter(issue -> ids.contains(issue.findingId()) && issue.side() != null && issue.side().issueId() > 0)
+                .map(issue -> issue.side().issueId()).collect(java.util.stream.Collectors.toSet());
+    }
+
+    private record WatchKey(String topic, String reason, Set<Long> issueIds) { }
     private static String normalized(String text) { return text.strip().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT); }
 
     private record Observation(LocalDate date, String summary) { }
@@ -119,7 +123,8 @@ public class WeeklyReportGenerator {
         private final List<Observation> observations = new ArrayList<>();
 
         boolean matches(String key, List<Long> candidates, Set<Long> issues) {
-            if (!issueIds.isEmpty() && !issues.isEmpty()) return issues.stream().anyMatch(issueIds::contains);
+            // A combined daily item is its own history, never a bridge between saved identities.
+            if (!issueIds.isEmpty() && !issues.isEmpty()) return issueIds.equals(issues);
             if (candidates.stream().anyMatch(ids::contains)) return true;
             // An unidentified legacy row must not bridge two different saved identities by generic wording.
             return issueIds.isEmpty() && issues.isEmpty() && keys.contains(key);

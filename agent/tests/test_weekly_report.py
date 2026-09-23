@@ -1,5 +1,6 @@
 import json
 from datetime import date, timedelta
+from itertools import permutations
 
 import pytest
 from fastapi.testclient import TestClient
@@ -276,6 +277,28 @@ def test_unknown_identity_cannot_bridge_two_known_distinct_issues(order):
     response, _ = write(data, output([501, 502, 503]))
     for event in response.important_events:
         assert not {501, 502} <= set(event.source_finding_ids)
+
+
+@pytest.mark.parametrize("order", list(permutations(range(3))))
+@pytest.mark.parametrize("watch", [False, True])
+def test_multi_issue_claim_cannot_bridge_distinct_histories_in_any_order(order, watch):
+    from app.llm.weekly_report_service import SavedClaim, _claim_groups
+
+    claims = [
+        SavedClaim(START, "공급 계획", "확정 여부를 확인한다.", (501,), watch, (10,)),
+        SavedClaim(
+            START + timedelta(1), "공급 계획", "확정 여부를 확인한다.", (502,), watch, (20,)
+        ),
+        SavedClaim(
+            START + timedelta(2), "공급 계획", "확정 여부를 확인한다.",
+            (503, 504), watch, (10, 20)
+        ),
+    ]
+    followup = SavedClaim(START + timedelta(3), "진행 경과", "검토 중이다.", (505,), watch, (10,))
+    groups = _claim_groups([*(claims[index] for index in order), followup])
+    assert {frozenset(id_ for claim in group for id_ in claim.ids) for group in groups} == {
+        frozenset({501, 505}), frozenset({502}), frozenset({503, 504}),
+    }
 
 
 def test_long_daily_assertion_uses_saved_issue_title_in_executive_summary():

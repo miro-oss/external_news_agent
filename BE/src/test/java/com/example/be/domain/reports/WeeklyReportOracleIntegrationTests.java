@@ -49,6 +49,29 @@ class WeeklyReportOracleIntegrationTests {
     @Autowired private ArticleBodyStorage bodyStorage;
 
     @Test
+    void missingWeekPagesReachOlderHistorySkipReservedAndHiddenReportsAndExcludeCurrentWeek() {
+        LocalDate currentMonday = LocalDate.of(1995, 7, 3);
+        for (int week = 0; week <= 10; week++) daily(currentMonday.minusWeeks(week), ReportStatus.FALLBACK, null);
+        daily(currentMonday.minusWeeks(11), ReportStatus.PENDING, null);
+        daily(currentMonday.minusWeeks(12), ReportStatus.FALLBACK, null).hide(currentMonday.atStartOfDay());
+        entities.flush();
+        var first = readiness.findMissingWeeks(currentMonday, 4);
+        assertEquals(java.util.stream.IntStream.rangeClosed(1, 4).mapToObj(currentMonday::minusWeeks).toList(), first);
+        for (var monday : first) {
+            var saved = reservation.reserve(monday, currentMonday.atTime(0, 5));
+            assertTrue(saved.owner());
+            if (monday.equals(first.getFirst())) reports.findById(saved.reportId()).orElseThrow().hide(currentMonday.atTime(0, 6));
+        }
+        entities.flush();
+        var next = java.util.stream.IntStream.rangeClosed(5, 8).mapToObj(currentMonday::minusWeeks).toList();
+        assertEquals(next, readiness.findMissingWeeks(currentMonday, 4));
+        assertEquals(next, readiness.findMissingWeeks(first.getLast(), 4));
+        assertEquals(List.of(currentMonday.minusWeeks(9), currentMonday.minusWeeks(10)),
+                readiness.findMissingWeeks(next.getLast(), 4));
+        assertTrue(readiness.findMissingWeeks(currentMonday.minusWeeks(10), 4).isEmpty());
+    }
+
+    @Test
     void reservationPersistsImmutableDailyInputsAndQueriesWeeklySavedEvidenceCounts() {
         LocalDate monday = LocalDate.of(1996, 1, 1);
         LocalDateTime now = monday.plusWeeks(1).atTime(0, 5);

@@ -65,6 +65,15 @@ class AgentQuotaServiceTest {
     }
 
     @Test
+    void weeklyReadTimeoutWithoutMeasuredUsageStillConsumesReservedQuota() {
+        var reservation = reservation(AgentTask.REPORT, AgentPlan.PAID);
+        service.completeObservedFailure(reservation, new AgentClientException("PROVIDER_UNAVAILABLE", "timeout", null,
+                null, AgentClientException.TimeoutPhase.READ));
+        verify(repository).consume(eq(reservation), eq(reservation.reservedUnits()), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test
     void weeklyConnectFailureWithoutUsageReleasesReservation() {
         var reservation = reservation(AgentTask.REPORT, AgentPlan.PAID);
         service.completeObservedFailure(reservation, new AgentClientException("PROVIDER_UNAVAILABLE", "offline", null,
