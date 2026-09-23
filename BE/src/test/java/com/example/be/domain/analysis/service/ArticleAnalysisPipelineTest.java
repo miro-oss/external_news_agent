@@ -185,6 +185,28 @@ class ArticleAnalysisPipelineTest {
     }
 
     @Test
+    void recoveryRefreshesExistingFindingForObservedRepresentative() {
+        Article article = Article.builder()
+                .id(10L)
+                .title("복구 대상 기사")
+                .body("확보한 전문")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
+                .thenReturn(List.of(observation(article, ChangeType.NEW)));
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(42L, List.of(10L)))
+                .thenReturn(List.of(observation(article, ChangeType.NEW)));
+        AnalysisResult result = mock(AnalysisResult.class);
+        when(orchestrator.analyze(new AnalysisContext(42L, article, AgentPlan.FREE))).thenReturn(result);
+
+        pipeline.recover(42L, Set.of(10L));
+
+        verify(findingWriter).recordTargetCount(42L, 1);
+        verify(findingWriter).refresh(42L, 10L, ChangeType.NEW, inputHash(article), result);
+        verify(findingWriter, never()).write(any(), any(), any(), any(), any());
+    }
+
+    @Test
     void refreshesOnlyInvestigationTargetsWithoutOverwritingCoverageCount() {
         Article article = Article.builder()
                 .id(10L)

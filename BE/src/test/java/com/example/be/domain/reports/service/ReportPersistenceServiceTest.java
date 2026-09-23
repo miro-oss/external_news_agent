@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -41,10 +42,11 @@ class ReportPersistenceServiceTest {
     private final ReportNotificationAutomationService notificationAutomation =
             mock(ReportNotificationAutomationService.class);
     private final CollectionRunArticleRepository observationRepository = mock(CollectionRunArticleRepository.class);
+    private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     private final ReportPersistenceService service =
             new ReportPersistenceService(runRepository, reportRepository,
                     notificationAutomation, observationRepository,
-                    mock(org.springframework.context.ApplicationEventPublisher.class));
+                    events);
 
     @org.junit.jupiter.api.Test
     void lateRecoveryMustNotInvalidateTheAlreadyCompletedOriginalSnapshot() {
@@ -206,6 +208,37 @@ class ReportPersistenceServiceTest {
         assertTrue(report.isCoverageRecorded());
         assertEquals(java.util.List.of(501L), report.getReflectedFindingIds());
         assertEquals(java.util.List.of(502L), report.getExcludedFindingIds());
+    }
+
+    @Test
+    void replacesRunReportWithoutSchedulingDuplicateDelivery() {
+        LocalDateTime generatedAt = LocalDateTime.of(2026, 9, 23, 10, 30);
+        CollectionRun run = CollectionRun.builder().id(42L).build();
+        NewsReport report = NewsReport.builder()
+                .id(17L)
+                .run(run)
+                .title("기존 보고서")
+                .markdownBody("# 기존 보고서")
+                .modelName("old-model")
+                .reportStatus(ReportStatus.GENERATED)
+                .generatedAt(generatedAt.minusHours(1))
+                .build();
+        ReportDocument document = new ReportDocument(
+                "복구 보고서", "# 복구 보고서", "configured-model", "report.ko.v1", "gemini",
+                100L, 20L, new BigDecimal("0.001"), BigDecimal.ZERO, ReportStatus.GENERATED,
+                java.util.List.of(501L), java.util.List.of(502L));
+        when(reportRepository.findRunIdById(17L)).thenReturn(Optional.of(42L));
+        when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
+        when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
+
+        assertEquals(17L, service.replace(17L, document, generatedAt));
+
+        assertEquals("복구 보고서", report.getTitle());
+        assertEquals("# 복구 보고서", report.getMarkdownBody());
+        assertEquals("configured-model", report.getModelName());
+        assertEquals(generatedAt, report.getGeneratedAt());
+        assertEquals(java.util.List.of(501L), report.getReflectedFindingIds());
+        verifyNoInteractions(notificationAutomation, events);
     }
 
     @Test

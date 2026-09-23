@@ -73,6 +73,33 @@ public class ReportPersistenceService {
         return completeLocked(lockedReport(reportId), document, generatedAt);
     }
 
+    /** 운영 복구에서 예약된 보고서를 완성하거나 기존 내용을 교체한다. 자동 전달과 완료 이벤트는 발생시키지 않는다. */
+    @Transactional
+    public Long replace(Long reportId, ReportDocument document, LocalDateTime generatedAt) {
+        NewsReport report = lockedReport(reportId);
+        if (report.getRunId() == null) {
+            throw new IllegalArgumentException("실행별 보고서만 복구할 수 있습니다. reportId=" + reportId);
+        }
+        String title = ReportTitles.forReport(report, document.title(), generatedAt);
+        report.complete(
+                title,
+                document.title().equals(title) ? document.markdownBody()
+                        : ReportTitles.alignMarkdownTitle(document.markdownBody(), title),
+                document.modelName(),
+                document.promptVersion(),
+                document.llmProvider(),
+                document.inputTokens(),
+                document.outputTokens(),
+                document.costUsd(),
+                document.credits(),
+                document.reflectedFindingIds(),
+                document.excludedFindingIds(),
+                document.status(),
+                generatedAt);
+        report.recordStructuredContent(document.structuredContent());
+        return report.getId();
+    }
+
     private NewsReport lockedReport(Long reportId) {
         // Use the same run -> report order as reservation and delivery edits. Completion
         // and outbox creation remain inside this lock until the transaction commits.

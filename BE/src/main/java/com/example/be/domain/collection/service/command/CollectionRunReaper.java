@@ -4,10 +4,12 @@ import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.global.config.ApiTimeZone;
+import com.example.be.global.config.ReportRecoveryMode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
@@ -34,6 +36,7 @@ import java.util.List;
 @Component
 @RequiredArgsConstructor
 @ConditionalOnProperty(name = "news.collection.reap-on-startup", havingValue = "true", matchIfMissing = true)
+@Conditional(ReportRecoveryMode.Disabled.class)
 public class CollectionRunReaper {
 
     private final CollectionRunRepository runRepository;
