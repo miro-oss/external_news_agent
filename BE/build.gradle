@@ -75,6 +75,7 @@ tasks.named('test') {
     systemProperty 'news.scheduling.enabled', 'false'
     systemProperty 'news.collection.reap-on-startup', 'false'
     systemProperty 'news.reports.daily.enabled', 'false'
+    systemProperty 'news.reports.weekly.enabled', 'false'
     systemProperty 'news.agent.enabled', 'false'
     systemProperty 'news.reports.daily.measure', 'false'
     systemProperty 'news.integration.db', databaseIntegration.toString()

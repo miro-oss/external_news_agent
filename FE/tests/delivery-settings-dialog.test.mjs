@@ -21,7 +21,7 @@ before(async () => {
 })
 after(async () => { await server?.close(); if (emptyEnvDir) await rm(emptyEnvDir, { recursive: true, force: true, maxRetries: 3 }) })
 
-const value = { enabled: true, mode: 'ONCE', run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1] }
+const value = { enabled: true, mode: 'ONCE', run: true, daily: false, weekly: false, groupIds: [1], recipientIds: [], channelIds: [1] }
 function render(props = {}) {
   const client = new QueryClient()
   client.setQueryData(['notifications', 'groups'], { content: [{ id: 1, name: '그룹', active: true, activeMemberCount: 1 }] })
@@ -68,4 +68,20 @@ test('pending saves prevent editing and duplicate submission; errors stay inside
   assert.match(pending, /class="primary-button" disabled="">저장 중…/)
   assert.match(pending, /class="secondary-button" disabled="">취소/)
   assert.match(render({ error: '저장 실패' }), /role="alert">저장 실패/)
+})
+
+test('weekly alone can save a recurring topic policy and is unavailable for one-time or running collections', () => {
+  const weekly = { ...value, mode: 'TOPIC', run: false, weekly: true }
+  for (const context of [undefined, { scope: 'TOPIC', name: '반도체' }]) {
+    const markup = render({ value: weekly, context })
+    assert.match(markup, /<input type="checkbox" checked=""\/>주간 통합 보고서/)
+    assert.doesNotMatch(markup, /class="primary-button" disabled/)
+  }
+  const once = render({ value: { ...weekly, mode: 'ONCE' } })
+  assert.match(once, /<input type="checkbox" disabled=""\/>주간 통합 보고서/)
+  assert.match(once, /주간 통합은 주제에 계속 적용하는 설정에서 선택할 수 있습니다/)
+  assert.match(once, /class="primary-button" disabled/)
+  const running = render({ value: weekly, context: { scope: 'RUN', name: '수집 #42' } })
+  assert.doesNotMatch(running, /주간 통합 보고서/)
+  assert.match(running, /class="primary-button" disabled/)
 })

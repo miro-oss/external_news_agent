@@ -27,8 +27,11 @@ public class CollectionRunDeliveryService {
         if (request.getEnabled() == null) throw invalid("자동 전달 사용 여부를 선택해 주세요.");
         if (!"ONCE".equals(request.getMode()) && !"TOPIC".equals(request.getMode()))
             throw invalid("전달 적용 범위는 ONCE 또는 TOPIC이어야 합니다.");
+        if (Boolean.TRUE.equals(request.getWeekly()) && !"TOPIC".equals(request.getMode()))
+            throw invalid("주간 보고서 알림은 주제에 계속 적용하는 설정에서만 사용할 수 있습니다.");
         var policy = new ReportNotificationAutomationService.Policy(request.getEnabled(),
                 !Boolean.FALSE.equals(request.getRun()), Boolean.TRUE.equals(request.getDaily()),
+                Boolean.TRUE.equals(request.getWeekly()),
                 request.getGroupIds(), request.getRecipientIds(), request.getChannelIds());
         return prepareSelection(request.getMode(), policy, null);
     }
@@ -37,7 +40,7 @@ public class CollectionRunDeliveryService {
                               List<RunDeliverySnapshotStore.Target> preservedTargets) {
         if (policy == null) throw invalid("자동 전달 설정이 필요합니다.");
         if (!policy.enabled()) return prepared(mode, policy, preservedTargets == null ? List.of() : preservedTargets);
-        if (!policy.run() && !policy.daily()) throw invalid("전달할 보고서 종류를 선택해 주세요.");
+        if (!policy.run() && !policy.daily() && !("TOPIC".equals(mode) && policy.weekly())) throw invalid("전달할 보고서 종류를 선택해 주세요.");
         if (policy.groupIds().isEmpty() && policy.recipientIds().isEmpty()) throw invalid("수신 그룹이나 수신자를 선택해 주세요.");
         if (policy.channelIds().isEmpty()) throw invalid("전달 채널을 선택해 주세요.");
         var groups = policy.groupIds().stream().map(id -> management.findGroup(id, true)).toList();
@@ -68,7 +71,7 @@ public class CollectionRunDeliveryService {
     }
 
     private Prepared prepared(String mode, ReportNotificationAutomationService.Policy policy, List<RunDeliverySnapshotStore.Target> targets) {
-        return new Prepared(policy, new RunDeliverySnapshotStore.Snapshot(mode, policy.enabled(), policy.run(), policy.daily(), targets,
+        return new Prepared(policy, new RunDeliverySnapshotStore.Snapshot(mode, policy.enabled() && (policy.run() || policy.daily()), policy.run(), policy.daily(), targets,
                 policy.groupIds(), policy.recipientIds(), policy.channelIds()));
     }
 

@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { notificationDelete, notificationGet, notificationPost, notificationPut } from './client'
 import { reportShareOptions } from './reportShare'
+import { recipientReportSubscriptionsOptions, reportSubscriptionsKey, saveRecipientReportSubscriptionOptions, saveRecipientSettingsOptions } from './recipientReportSubscriptions'
 
 export type DeliveryPolicy = {
   enabled: boolean
   run: boolean
   daily: boolean
+  weekly: boolean
   groupIds: number[]
   recipientIds: number[]
   channelIds: number[]
@@ -36,13 +38,30 @@ export function useDisconnectTelegram(recipientId: number) {
   })
 }
 export function useDeliveryPolicy(topicId: number) {
-  return useQuery({ queryKey: ['delivery-policy', topicId], queryFn: () => notificationGet<DeliveryPolicy>(`/topics/${topicId}/delivery-policy`) })
+  return useQuery({ queryKey: ['delivery-policy', topicId], queryFn: async () => {
+    const policy = await notificationGet<DeliveryPolicy>(`/topics/${topicId}/delivery-policy`)
+    return { ...policy, weekly: policy.weekly ?? false }
+  } })
 }
 export function useSaveDeliveryPolicy(topicId: number) {
   const client = useQueryClient()
   return useMutation({ mutationFn: (policy: DeliveryPolicy) => notificationPut<DeliveryPolicy>(`/topics/${topicId}/delivery-policy`, policy),
-    onSuccess: (policy) => client.setQueryData(['delivery-policy', topicId], policy),
+    onSuccess: async (policy) => {
+      await client.cancelQueries({ queryKey: ['delivery-policy', topicId] })
+      client.setQueryData(['delivery-policy', topicId], { ...policy, weekly: policy.weekly ?? false })
+      await client.invalidateQueries({ queryKey: reportSubscriptionsKey })
+      await client.invalidateQueries({ queryKey: ['run-delivery-settings'] })
+    },
   })
+}
+export function useRecipientReportSubscriptions(recipientId: number) {
+  return useQuery(recipientReportSubscriptionsOptions(recipientId))
+}
+export function useSaveRecipientReportSubscription(recipientId: number, topicId: number) {
+  return useMutation(saveRecipientReportSubscriptionOptions(useQueryClient(), recipientId, topicId))
+}
+export function useSaveRecipientSettings(recipientId: number) {
+  return useMutation(saveRecipientSettingsOptions(useQueryClient(), recipientId))
 }
 export function useEmailReadiness() {
   return useQuery({ queryKey: ['notifications', 'email-readiness'],

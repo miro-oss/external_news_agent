@@ -50,6 +50,10 @@ springdoc:
 
 news:
   reports:
+    weekly:
+      enabled: true
+      backfill-weeks: 4
+      poll-interval-ms: 300000
     daily:
       enabled: true
       max-issues: 10

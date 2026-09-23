@@ -16,6 +16,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ReportReadingContractTest {
     @Test
+    void weeklyTitleUsesSavedCalendarPeriodInsteadOfGenerationDate() {
+        var report = NewsReport.builder().reportScope(ReportScope.WEEKLY)
+                .reportDate(LocalDate.of(2026, 9, 14)).reportEndDate(LocalDate.of(2026, 9, 20)).build();
+        assertEquals("2026-09-14 ~ 2026-09-20 주간 통합 뉴스 보고서",
+                ReportTitles.forReport(report, "주간", LocalDateTime.of(2026, 9, 23, 10, 0)));
+    }
+
+    @Test
     void countsUniqueArticlesAcrossSourcesAndRunsWithoutCallingFindingsArticles() {
         var stats = ReportArticleStatistics.count(List.of(
                 observation(1, ChangeType.NEW), observation(1, ChangeType.UNCHANGED),

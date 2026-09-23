@@ -152,6 +152,19 @@ public class AgentQuotaService {
         repository.consume(reservation, reservation.reservedUnits(), now());
     }
 
+    /** Preserve known charges for weekly synthesis, including failed schema-repair attempts. */
+    @Transactional
+    public void completeObservedFailure(QuotaReservation reservation, AgentClientException exception) {
+        if (exception.getUsage() == null) {
+            completeFailure(reservation, exception);
+            return;
+        }
+        BigDecimal observed = exception.getUsage().credits();
+        BigDecimal units = reservation.plan() == AgentPlan.FREE ? BigDecimal.ONE
+                : observed == null || observed.signum() < 0 ? reservation.reservedUnits() : observed;
+        settleObservedFailure(reservation, units);
+    }
+
     @Transactional
     public void completeFailure(QuotaReservation reservation, String failureCode) {
         if ("PROVIDER_UNAVAILABLE".equals(failureCode)

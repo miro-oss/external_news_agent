@@ -14,6 +14,7 @@ import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyRequest;
 import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentWeeklyReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportChangesRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportChangesResponse;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
@@ -121,6 +122,10 @@ public class AgentClient {
 
     public AgentReportResponse report(AgentReportRequest request) {
         return post(reportClient, "/v1/report", request, AgentReportResponse.class);
+    }
+
+    public AgentReportResponse weeklyReport(AgentWeeklyReportRequest request) {
+        return post(reportClient, "/v1/weekly-report", request, AgentReportResponse.class);
     }
 
     public AgentReportChangesResponse reportChanges(AgentReportChangesRequest request) {

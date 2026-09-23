@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/** DAILY는 생성 시 고정한 근거와 순서를 그대로 조회/발송한다. */
+/** DAILY/WEEKLY는 생성 시 고정한 근거와 순서를 그대로 조회/발송한다. */
 public final class ReportFindings {
     private ReportFindings() {
     }
@@ -34,7 +34,7 @@ public final class ReportFindings {
         return finding != null && finding.getArticle() != null && finding.getArticle().hasFullText();
     }
 
-    /** Keep stored DAILY selection/order, but never expose a finding whose original body is unavailable. */
+    /** Keep stored DAILY/WEEKLY selection/order, but never expose a finding whose original body is unavailable. */
     public static Visible loadVisible(NewsReport report, FindingRepository repository) {
         if (report.getReportScope() == ReportScope.RUN) {
             List<Finding> all = repository.findForReportByRunId(report.getRunId());

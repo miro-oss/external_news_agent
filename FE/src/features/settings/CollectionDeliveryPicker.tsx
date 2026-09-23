@@ -10,7 +10,7 @@ import '../notifications/notifications-refinement.css'
 import './collection-delivery.css'
 
 const EMPTY_DELIVERY: CollectionRunDelivery = {
-  enabled: true, mode: 'ONCE', run: true, daily: false,
+  enabled: true, mode: 'ONCE', run: true, daily: false, weekly: false,
   groupIds: [], recipientIds: [], channelIds: [],
 }
 const MODE_OPTIONS = [
@@ -66,7 +66,8 @@ export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, onDraf
   readOnly?: boolean
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
-  const [draft, setDraft] = useState(value ?? EMPTY_DELIVERY)
+  const [draft, setDraft] = useState(() => ({ ...(value ?? EMPTY_DELIVERY),
+    weekly: (context?.scope === 'TOPIC' || (!context && value?.mode === 'TOPIC')) && (value?.weekly ?? false) }))
   const [tab, setTab] = useState<TargetTab>('groupIds')
   const [search, setSearch] = useState('')
   const [creatingGroup, setCreatingGroup] = useState(false)
@@ -90,7 +91,8 @@ export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, onDraf
   ].filter(selection => selection.count > SELECTION_LIMIT)
   const selectionLimitMessage = oversizedSelections.length
     ? `${oversizedSelections.map(selection => selection.label).join(', ')}까지 선택할 수 있어요.` : null
-  const canApply = !pending && !readOnly && !selectionLimitMessage && (!draft.enabled || (availability.valid && hasTargets && draft.channelIds.length > 0 && (draft.run || draft.daily)))
+  const allowWeekly = context?.scope === 'TOPIC' || (!context && draft.mode === 'TOPIC')
+  const canApply = !pending && !readOnly && !selectionLimitMessage && (!draft.enabled || (availability.valid && hasTargets && draft.channelIds.length > 0 && (draft.run || draft.daily || (allowWeekly && draft.weekly))))
 
   function updateDraft(update: (current: CollectionRunDelivery) => CollectionRunDelivery) {
     if (pending || readOnly) return
@@ -159,10 +161,10 @@ export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, onDraf
           aria-labelledby={`${id}-enabled`} onClick={() => updateDraft(current => ({ ...current, enabled: !current.enabled }))}><span /></button>
       </div>
       {context ? <p className="collection-delivery-note">{context.description ?? (context.scope === 'TOPIC'
-        ? '이 주제의 보고서에 계속 적용해요. 이번 수집에 별도 저장한 설정이 있으면 그 설정을 사용합니다.'
+        ? '이 주제의 보고서에 계속 적용해요. 수집별·일일 알림은 이번 수집에 별도 저장한 설정이 있으면 그 설정을 사용합니다.'
         : '이번 수집에만 적용해요. 주제에 저장된 설정은 유지됩니다.')}</p> : <div className="collection-delivery-scope">
         <Segmented label="전달 설정 적용 범위" value={draft.mode} options={MODE_OPTIONS}
-          onSelect={mode => { if (mode !== draft.mode) updateDraft(current => ({ ...current, mode })) }} />
+          onSelect={mode => { if (mode !== draft.mode) updateDraft(current => ({ ...current, mode, weekly: mode === 'TOPIC' && current.weekly })) }} />
         <p>{draft.mode === 'ONCE'
           ? '이번 수집에만 적용해요. 주제에 저장된 설정은 유지됩니다.'
           : '수집을 시작하면 선택한 주제의 정기 수집에도 적용해요.'}</p>
@@ -173,6 +175,8 @@ export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, onDraf
           <div className="collection-delivery-checks">
             <label><input type="checkbox" checked={draft.run} onChange={event => updateDraft(current => ({ ...current, run: event.target.checked }))} />수집별 보고서</label>
             <label><input type="checkbox" checked={draft.daily} onChange={event => updateDraft(current => ({ ...current, daily: event.target.checked }))} />일일 통합 보고서</label>
+            {context?.scope !== 'RUN' && <label><input type="checkbox" checked={allowWeekly && draft.weekly} disabled={!allowWeekly}
+              onChange={event => updateDraft(current => ({ ...current, weekly: event.target.checked }))} />주간 통합 보고서</label>}
           </div>
         </fieldset>
           <fieldset className="collection-delivery-options"><legend>전달 방식</legend>
@@ -184,6 +188,9 @@ export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, onDraf
           </fieldset>
         </div>
         {draft.daily && <p className="collection-delivery-note">일일 통합에는 같은 날 수집한 다른 주제도 함께 담깁니다.</p>}
+        {!allowWeekly && context?.scope !== 'RUN' && <p className="collection-delivery-note">주간 통합은 주제에 계속 적용하는 설정에서 선택할 수 있습니다.</p>}
+        {allowWeekly && draft.weekly && <p className="collection-delivery-note">주간 통합은 월요일부터 일요일까지의 보고서가 완성되면 보내며, 다른 주제도 함께 담깁니다.</p>}
+        {!draft.run && !draft.daily && !(allowWeekly && draft.weekly) && <p className="collection-delivery-note">보낼 보고서를 하나 이상 선택해 주세요.</p>}
         {availability.pending ? <SkeletonRegion label="전달 대상을 불러오는 중" contentClassName="collection-delivery-loading">
           <Skeleton width="7rem" /><Skeleton height="2.75rem" /><Skeleton height="12rem" />
         </SkeletonRegion> : availability.error ? <p className="field-error" role="alert">전달 대상을 불러오지 못했습니다. 잠시 후 다시 열어 주세요.</p> : <>

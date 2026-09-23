@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReportScope } from '../../api/types'
 import { usePreviewNotification } from '../../api/queries'
 import { useAutoDeliveries, useRetryAutoDeliveries, useShareReport, type DeliveryTargets } from '../../api/notificationConnections'
 import { DeliveryTargetPicker } from './DeliveryTargetPicker'
@@ -10,7 +11,7 @@ import { ReportShareDeliveryLogs } from './ReportShareDeliveryLogs'
 import './notifications-refinement.css'
 
 const LABELS: Record<string, string> = { PENDING: '전달 대기', PROCESSING: '전달 중', SENT: '전달됨', FAILED: '전달 실패', SKIPPED: '전달 제외', UNKNOWN: '수신 확인 필요' }
-export function ReportSharePanel({ reportId }: { reportId: number }) {
+export function ReportSharePanel({ reportId, reportScope }: { reportId: number; reportScope?: ReportScope }) {
   const [targets, setTargets] = useState<DeliveryTargets>({ groupIds: [], recipientIds: [], channelIds: [] })
   const [requestKey, setRequestKey] = useState(() => `r${reportId}-${crypto.randomUUID()}`)
   const send = useShareReport(reportId)
@@ -39,7 +40,9 @@ export function ReportSharePanel({ reportId }: { reportId: number }) {
       {deliveries.data.some((delivery) => delivery.status === 'FAILED') && <button className="secondary-button" type="button" disabled={retry.isPending} onClick={() => retry.mutate()}>실패한 대상만 다시 전달</button>}
       <MutationStatus error={retry.error} success={retry.data ? `${retry.data.queuedCount}명에게 다시 전달합니다.` : null} />
     </details>}
-    {deliveries.isSuccess && deliveries.data.length === 0 && <p className="muted">이 보고서에 예약된 자동 전달이 없습니다. 다음 수집에서 자동으로 받으려면 수집 설정의 ‘보고서 자동 전달’에서 대상과 전달 방식을 선택해 주세요.</p>}
+    {deliveries.isSuccess && deliveries.data.length === 0 && <p className="muted">{reportScope === 'WEEKLY'
+      ? '이 보고서에 예약된 자동 전달이 없습니다. 다음 주간 보고서부터 받으려면 수집 설정의 주제 보고서 알림에서 ‘주간 통합 보고서’를 선택해 주세요.'
+      : '이 보고서에 예약된 자동 전달이 없습니다. 다음 수집에서 자동으로 받으려면 수집 설정의 ‘보고서 자동 전달’에서 대상과 전달 방식을 선택해 주세요.'}</p>}
     <DeliveryTargetPicker value={targets} disabled={send.isPending} onChange={change} />
     <div className="report-share-actions">
       <button type="button" className="secondary-button" disabled={!availability.valid || !targets.channelIds.length || preview.isPending} onClick={() => preview.mutate({ reportId, channelId: targets.channelIds[0] })}>{preview.isPending ? '준비 중…' : '내용 미리보기'}</button>

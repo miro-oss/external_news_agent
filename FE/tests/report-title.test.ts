@@ -76,3 +76,11 @@ test('legacy daily reports without an aggregation day preserve the saved title',
     }
   }
 })
+
+test('weekly titles show both saved period boundaries independently of the generation date', () => {
+  const report = { reportScope: 'WEEKLY' as const, title: '저장된 주간 보고서',
+    reportDate: '2026-08-31', reportEndDate: '2026-09-06', generatedAt: 'invalid' }
+  assert.equal(reportDisplayTitle(report), '2026-08-31 ~ 2026-09-06 주간 통합 뉴스 보고서')
+  assert.equal(reportDisplayTitle({ ...report, reportEndDate: null }), report.title)
+  assert.equal(reportDisplayTitle({ ...report, reportDate: undefined }), report.title)
+})

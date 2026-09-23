@@ -1,4 +1,5 @@
 import { useId, useState } from 'react'
+import type { ReportScope } from '../../api/types'
 import {
   hasReportFilters,
   reportDateRangeError,
@@ -10,7 +11,7 @@ import './report-filters.css'
 interface Props {
   filters: ReportFilters
   topicOptions: Array<{ id: number; label: string }>
-  scope: 'RUN' | 'DAILY'
+  scope: ReportScope
   totalCount: number
   resultCount: number
   loading: boolean
@@ -25,7 +26,7 @@ export function ReportFiltersBar({ filters, topicOptions, scope, totalCount, res
   const missingSelectedTopic = filters.topicId !== null && !topicOptions.some(option => option.id === filters.topicId)
   const selectedTopicLabel = selectedTopic?.id === filters.topicId ? selectedTopic.label : `주제 #${filters.topicId}`
   const dateError = reportDateRangeError(filters)
-  const dateLabel = scope === 'RUN' ? '수집 실행일' : '집계일'
+  const dateLabel = scope === 'RUN' ? '수집 실행일' : scope === 'WEEKLY' ? '집계 기간' : '집계일'
   return (
     <section className="report-filters" aria-label="보고서 검색 및 필터">
       <div className="report-filter-fields">
@@ -90,7 +91,7 @@ export function ReportFiltersBar({ filters, topicOptions, scope, totalCount, res
       <div className="report-filter-summary">
         <p aria-live="polite" aria-atomic="true">
           {loading ? '보고서를 불러오는 중…' : <>전체 {totalCount.toLocaleString()}개 중 <strong>{resultCount.toLocaleString()}개</strong></>}
-          <span className="report-filter-date-basis">{dateLabel} 기준 · 한국 시간</span>
+          <span className="report-filter-date-basis">{scope === 'WEEKLY' ? '선택한 기간과 겹치는 주간 보고서' : `${dateLabel} 기준`} · 한국 시간</span>
         </p>
         <button type="button" className="text-button report-filter-reset" disabled={disabled || !hasReportFilters(filters)} onClick={onReset}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6" /></svg>

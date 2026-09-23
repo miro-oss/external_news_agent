@@ -14,6 +14,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ReportDeliveryOutboxStore {
     private final JdbcTemplate jdbc;
+    private final ReportSubscriptionStore subscriptions;
     public record Work(Long id, Long reportId, Long recipientId, Long channelId, String batchId,
                        String name, String address, String subject, String body, int attempts) { }
     public record Delivery(Long id, String recipientName, String channelType, String status, int attempts, String message) { }
@@ -51,7 +52,8 @@ public class ReportDeliveryOutboxStore {
 
     @Transactional(readOnly = true)
     public boolean destinationStillActive(Work work) {
-        return destinationStillActive(work.recipientId(), work.channelId(), work.address());
+        return destinationStillActive(work.recipientId(), work.channelId(), work.address())
+                && subscriptions.stillAllowed(work.id(), work.reportId(), work.recipientId());
     }
 
     @Transactional(readOnly = true)

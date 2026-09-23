@@ -1,4 +1,5 @@
 import { type FormEvent, type ReactNode, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   type DeliveryLogFilters,
   useCreateNotificationGroup,
@@ -15,8 +16,7 @@ import { Segmented, type SegmentedOption } from '../../components/Segmented'
 import { Skeleton, SkeletonRegion } from '../../components/Skeleton'
 import { formatMediumDate } from '../../lib/datetime'
 import { MutationStatus } from '../settings/MutationStatus'
-import { TelegramConnectionCard } from './TelegramConnectionCard'
-import { RecipientEmailForm } from './RecipientEmailForm'
+import { RecipientSettingsDialog } from './RecipientSettingsDialog'
 import { GroupRecipientPicker } from './GroupRecipientPicker'
 import { NotificationGroupRow } from './NotificationGroupRow'
 import { DeliveryLogSkeleton, NotificationPanelSkeleton } from './NotificationSkeletons'
@@ -166,6 +166,7 @@ function RecipientPanel({ channels, recipients }: {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [settingsRecipientId, setSettingsRecipientId] = useState<number | null>(null)
+  const settingsRecipient = recipients.find(recipient => recipient.id === settingsRecipientId)
 
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -207,24 +208,18 @@ function RecipientPanel({ channels, recipients }: {
               </div>
               <div className="recipient-actions">
                 <button type="button" className="text-button" aria-label={`${recipient.name} 수신 설정`}
-                  aria-expanded={settingsRecipientId === recipient.id} aria-controls={`recipient-settings-${recipient.id}`}
-                  onClick={() => setSettingsRecipientId((current) => current === recipient.id ? null : recipient.id)}>설정</button>
+                  aria-haspopup="dialog" aria-expanded={settingsRecipientId === recipient.id} aria-controls={settingsRecipientId === recipient.id ? `recipient-settings-${recipient.id}` : undefined}
+                  onClick={() => setSettingsRecipientId(recipient.id)}>설정</button>
                 <button type="button" className="text-button danger" aria-label={`${recipient.name} 삭제`} disabled={remove.isPending} onClick={() => remove.mutate(recipient.id)}>삭제</button>
               </div>
-              {settingsRecipientId === recipient.id && (
-                <div className="recipient-settings" id={`recipient-settings-${recipient.id}`}>
-                  <RecipientEmailForm recipient={recipient} emailChannelId={
-                    (channels.find((channel) => channel.channelType === 'EMAIL' && channel.active)
-                      ?? channels.find((channel) => channel.channelType === 'EMAIL'))?.id
-                  } />
-                  <TelegramConnectionCard recipientId={recipient.id} recipientName={recipient.name} />
-                </div>
-              )}
             </article>
           ))}
         </div>
       </SavedNotificationList>
       <MutationStatus error={remove.error} success={null} />
+      {settingsRecipient && createPortal(<RecipientSettingsDialog key={settingsRecipient.id} recipient={settingsRecipient}
+        emailChannelId={(channels.find(channel => channel.channelType === 'EMAIL' && channel.active)
+          ?? channels.find(channel => channel.channelType === 'EMAIL'))?.id} onDismiss={() => setSettingsRecipientId(null)} />, document.body)}
     </section>
   )
 }

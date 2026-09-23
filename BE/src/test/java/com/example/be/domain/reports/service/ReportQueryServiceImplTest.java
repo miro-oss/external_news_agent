@@ -423,12 +423,17 @@ class ReportQueryServiceImplTest {
         assertEquals(List.of(900, 101), ids.getAllValues().stream().map(Collection::size).toList());
     }
 
-    @Test
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = ReportScope.class, names = {"DAILY", "WEEKLY"})
     @SuppressWarnings("unchecked")
-    void dailyLoadsSavedFindingsAcrossRunsAndCountsTheSameWithoutDetails() {
+    void aggregatesLoadSavedFindingsAcrossRunsAndCountTheSameWithoutDetails(ReportScope scope) {
         var date = java.time.LocalDate.of(2026, 9, 3);
         NewsReport daily = NewsReport.builder().id(70L)
-                .reportScope(com.example.be.domain.reports.entity.ReportScope.DAILY).reportDate(date)
+                .reportScope(scope).reportDate(date)
+                .reportEndDate(scope == ReportScope.WEEKLY ? date.plusDays(6) : null)
+                .sourceReportIds(scope == ReportScope.WEEKLY ? List.of(60L, 61L) : List.of())
+                .sourceReportDates(scope == ReportScope.WEEKLY ? List.of(date, date.plusDays(1)) : List.of())
+                .missingReportDates(scope == ReportScope.WEEKLY ? List.of(date.plusDays(2)) : List.of())
                 .sourceRunIds(List.of(42L, 43L)).reflectedFindingIds(List.of(2L, 1L))
                 .generatedAt(date.plusDays(1).atStartOfDay()).build();
         Finding first = finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
@@ -443,6 +448,12 @@ class ReportQueryServiceImplTest {
         var detail = service.getReport(70L, true);
         assertNull(detail.getRunId());
         assertEquals(date, detail.getReportDate());
+        assertEquals(scope, detail.getReportScope());
+        assertEquals(daily.getReportEndDate(), detail.getReportEndDate());
+        assertEquals(daily.getSourceReportIds(), detail.getSourceReportIds());
+        assertEquals(daily.getSourceReportDates(), detail.getSourceReportDates());
+        assertEquals(daily.getMissingReportDates(), detail.getMissingReportDates());
+        assertEquals(List.of(42L, 43L), detail.getSourceRunIds());
         assertEquals(List.of(2L, 1L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
         assertEquals(List.of(43L, 42L), detail.getFindings().stream().map(ReportResDTO.Finding::getRunId).toList());
         assertEquals(2, service.getReport(70L, false).getSummaryStats().getFindingCount());
@@ -454,6 +465,11 @@ class ReportQueryServiceImplTest {
         var summary = service.getReports(null, null, 0, 20).getContent().getFirst();
         assertEquals(2, summary.getFindingCount());
         assertEquals(1, summary.getHighSensitivityCount());
+        assertEquals(daily.getReportEndDate(), summary.getReportEndDate());
+        assertEquals(daily.getSourceReportIds(), summary.getSourceReportIds());
+        assertEquals(daily.getSourceReportDates(), summary.getSourceReportDates());
+        assertEquals(daily.getMissingReportDates(), summary.getMissingReportDates());
+        assertEquals(List.of(42L, 43L), summary.getSourceRunIds());
         verify(findingRepository, never()).findForReportByRunId(any());
         verify(investigationRepository).findTraces(List.of(43L, 42L));
         verify(investigationRepository, never()).findTraces(any(Long.class));

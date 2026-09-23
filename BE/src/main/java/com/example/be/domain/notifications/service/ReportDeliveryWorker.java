@@ -33,7 +33,7 @@ public class ReportDeliveryWorker {
         if (channel == null) return; // FK prevents removal while a delivery exists.
         String type = channel.getChannelType().name();
         if (!store.destinationStillActive(work)) {
-            finish(work, type, "SKIPPED", null, "수신 설정이 변경되었거나 텔레그램 연결이 완료되지 않았습니다.", false);
+            finish(work, type, "SKIPPED", null, "보고서 수신이 해제되었거나 수신 채널 연결이 변경되었습니다.", false);
             return;
         }
         NotificationSender sender = senders.get(channel.getChannelType());
