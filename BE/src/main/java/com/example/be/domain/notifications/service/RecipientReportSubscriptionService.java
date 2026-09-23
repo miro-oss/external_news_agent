@@ -29,6 +29,7 @@ public class RecipientReportSubscriptionService {
     private static final LongListJsonConverter IDS = new LongListJsonConverter();
     private static final List<String> SCOPES = List.of("RUN", "DAILY", "WEEKLY");
     private static final String INVALID_SCOPES = "제외할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.";
+    private static final String INVALID_INCLUSIONS = "추가할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.";
 
     public record Subscriptions(Long recipientId, List<TopicSubscription> topics) { }
 
@@ -36,11 +37,16 @@ public class RecipientReportSubscriptionService {
                                     @Schema(description = "저장된 주제 정책의 활성 여부") boolean enabled,
                                     @Schema(description = "주제에 설정한 보고서 종류. RUN, DAILY, WEEKLY 순") List<String> configuredScopes,
                                     @Schema(description = "이 수신자만 제외한 보고서 종류") List<String> excludedScopes,
+                                    @Schema(description = "이 수신자가 추가로 선택한 보고서 종류") List<String> includedScopes,
                                     @Schema(description = "현재 연결된 수신 경로의 채널 종류") List<String> channelTypes,
                                     boolean direct, List<String> groupNames) { }
 
     public record Exclusions(@Schema(description = "필수. RUN, DAILY, WEEKLY만 허용하며 최대 3개. []는 개인 제외 해제", requiredMode = Schema.RequiredMode.REQUIRED)
-                             List<String> excludedScopes) { }
+                             List<String> excludedScopes,
+                             @Schema(description = "RUN, DAILY, WEEKLY만 허용하며 최대 3개. []는 개인 추가 초기화. 생략/null은 기존 추가에서 새 제외 종류만 제거")
+                             List<String> includedScopes) {
+        public Exclusions(List<String> excludedScopes) { this(excludedScopes, null); }
+    }
 
     private record SavedPolicy(Long topicId, String topicName, boolean enabled, List<String> scopes,
                                List<Long> groupIds, List<Long> recipientIds, List<Long> channelIds) { }
@@ -49,8 +55,10 @@ public class RecipientReportSubscriptionService {
     public Subscriptions get(Long recipientId) {
         NotificationRecipient recipient = management.findRecipient(recipientId);
         var exclusions = exclusions(recipientId);
-        var rows = policies().stream().map(policy -> row(recipient, policy, exclusions.getOrDefault(policy.topicId(), List.of())))
-                .filter(row -> row.direct() || !row.groupNames().isEmpty() || !row.excludedScopes().isEmpty())
+        var inclusions = inclusions(recipientId);
+        var rows = policies().stream().map(policy -> row(recipient, policy, exclusions.getOrDefault(policy.topicId(), List.of()),
+                        inclusions.getOrDefault(policy.topicId(), List.of())))
+                .filter(row -> row.direct() || !row.groupNames().isEmpty() || !row.excludedScopes().isEmpty() || !row.includedScopes().isEmpty())
                 .toList();
         return new Subscriptions(recipientId, rows);
     }
@@ -60,22 +68,41 @@ public class RecipientReportSubscriptionService {
         NotificationRecipient recipient = management.findRecipient(recipientId);
         var topic = topics.findById(topicId).orElseThrow(() ->
                 new GeneralException(GeneralErrorCode.NOT_FOUND, "수집 주제를 찾을 수 없습니다."));
-        if (request == null || request.excludedScopes() == null || request.excludedScopes().size() > 3
-                || request.excludedScopes().stream().anyMatch(scope -> scope == null || !SCOPES.contains(scope)))
+        if (request == null || request.excludedScopes() == null || invalidScopes(request.excludedScopes()))
             throw new GeneralException(GeneralErrorCode.BAD_REQUEST, INVALID_SCOPES);
+        if (request.includedScopes() != null && invalidScopes(request.includedScopes()))
+            throw new GeneralException(GeneralErrorCode.BAD_REQUEST, INVALID_INCLUSIONS);
         List<String> excluded = SCOPES.stream().filter(request.excludedScopes()::contains).toList();
+        if (request.includedScopes() != null && request.includedScopes().stream().anyMatch(excluded::contains))
+            throw new GeneralException(GeneralErrorCode.BAD_REQUEST, "같은 보고서 종류를 추가와 제외에 동시에 선택할 수 없습니다.");
         // Concurrent full replacements for one recipient must not interleave DELETE/INSERT.
         jdbc.queryForObject("SELECT id FROM notification_recipients WHERE id=? FOR UPDATE", Long.class, recipientId);
+        List<String> requestedInclusions = request.includedScopes() == null
+                ? inclusions(recipientId).getOrDefault(topicId, List.of()) : request.includedScopes();
+        List<String> included = SCOPES.stream().filter(requestedInclusions::contains).filter(scope -> !excluded.contains(scope)).toList();
         jdbc.update("DELETE FROM recipient_report_exclusions WHERE recipient_id=? AND topic_id=?", recipientId, topicId);
         for (String scope : excluded) jdbc.update(
                 "INSERT INTO recipient_report_exclusions(recipient_id,topic_id,report_scope) VALUES(?,?,?)", recipientId, topicId, scope);
+        jdbc.update("DELETE FROM recipient_report_inclusions WHERE recipient_id=? AND topic_id=?", recipientId, topicId);
+        for (String scope : included) jdbc.update(
+                "INSERT INTO recipient_report_inclusions(recipient_id,topic_id,report_scope) VALUES(?,?,?)", recipientId, topicId, scope);
         var policy = policies().stream().filter(saved -> saved.topicId().equals(topicId)).findFirst()
                 .orElse(new SavedPolicy(topicId, topic.getName(), false, List.of(), List.of(), List.of(), List.of()));
-        return row(recipient, policy, excluded);
+        return row(recipient, policy, excluded, included);
+    }
+
+    private static boolean invalidScopes(List<String> scopes) {
+        return scopes.size() > 3 || scopes.stream().anyMatch(scope -> scope == null || !SCOPES.contains(scope));
     }
 
     private Map<Long, List<String>> exclusions(Long recipientId) {
         return jdbc.query("SELECT topic_id,report_scope FROM recipient_report_exclusions WHERE recipient_id=?",
+                        (rs, n) -> Map.entry(rs.getLong("topic_id"), rs.getString("report_scope")), recipientId).stream()
+                .collect(Collectors.groupingBy(Map.Entry::getKey, Collectors.mapping(Map.Entry::getValue, Collectors.toList())));
+    }
+
+    private Map<Long, List<String>> inclusions(Long recipientId) {
+        return jdbc.query("SELECT topic_id,report_scope FROM recipient_report_inclusions WHERE recipient_id=?",
                         (rs, n) -> Map.entry(rs.getLong("topic_id"), rs.getString("report_scope")), recipientId).stream()
                 .collect(Collectors.groupingBy(Map.Entry::getKey, Collectors.mapping(Map.Entry::getValue, Collectors.toList())));
     }
@@ -95,7 +122,7 @@ public class RecipientReportSubscriptionService {
         });
     }
 
-    private TopicSubscription row(NotificationRecipient recipient, SavedPolicy policy, List<String> excluded) {
+    private TopicSubscription row(NotificationRecipient recipient, SavedPolicy policy, List<String> excluded, List<String> included) {
         boolean direct = policy.recipientIds().contains(recipient.getId());
         List<NotificationGroup> matchingGroups = recipient.getGroups().stream()
                 .filter(group -> policy.groupIds().contains(group.getId())).toList();
@@ -108,7 +135,8 @@ public class RecipientReportSubscriptionService {
                 .filter(destination -> destination.getChannel().getChannelType() == ChannelType.EMAIL || destination.isOnboarded())
                 .map(destination -> destination.getChannel().getChannelType().name()).distinct().sorted().toList();
         return new TopicSubscription(policy.topicId(), policy.topicName(), targeted && policy.enabled(),
-                targeted ? policy.scopes() : List.of(), SCOPES.stream().filter(excluded::contains).toList(), channelTypes,
+                targeted ? policy.scopes() : List.of(), SCOPES.stream().filter(excluded::contains).toList(),
+                SCOPES.stream().filter(included::contains).toList(), channelTypes,
                 direct, matchingGroups.stream().map(NotificationGroup::getName).distinct().sorted().toList());
     }
 }

@@ -42,6 +42,141 @@ class NotificationAutomationOracleIntegrationTests {
     @Autowired RunDeliverySettingsService runSettings;
 
     @Test
+    void personalWeeklyOptInQueuesOnlyThatGroupMemberAndResetCancelsPendingConsent() {
+        var topic = topic(); var run = run(topic); var first = recipient(true); var second = recipient(true);
+        var group = group(first, second);
+        var policy = new ReportNotificationAutomationService.Policy(true, true, true,
+                List.of(group.getId()), List.of(first.getId()), List.of(2L));
+        automation.savePolicy(topic.getId(), policy);
+        subscriptions.save(first.getId(), topic.getId(), preference(List.of(), List.of("WEEKLY")));
+        em.clear();
+
+        var weekly = aggregate(ReportScope.WEEKLY, List.of(run.getId()), 0);
+        automation.enqueueCompletedReport(weekly);
+        assertEquals(List.of(first.getId()), jdbc.queryForList(
+                "SELECT recipient_id FROM report_notification_outbox WHERE report_id=?", Long.class, weekly.getId()));
+        assertEquals(policy, automation.policy(topic.getId()));
+        var firstRow = subscriptions.get(first.getId()).topics().getFirst();
+        assertEquals(List.of("WEEKLY"), firstRow.includedScopes());
+        assertEquals(List.of("RUN", "DAILY"), firstRow.configuredScopes());
+        assertTrue(subscriptions.get(second.getId()).topics().getFirst().includedScopes().isEmpty());
+        assertEquals("[]", jdbc.queryForObject("SELECT source_topic_ids FROM report_notification_outbox WHERE report_id=?", String.class, weekly.getId()));
+        assertEquals("[" + topic.getId() + "]", jdbc.queryForObject("SELECT personal_topic_ids FROM report_notification_outbox WHERE report_id=?", String.class, weekly.getId()));
+        var queued = work(weekly.getId(), first);
+        assertTrue(outbox.destinationStillActive(queued));
+        subscriptions.save(first.getId(), topic.getId(), preference(List.of(), List.of()));
+        assertFalse(outbox.destinationStillActive(queued));
+        assertEquals(1, outbox.deliveries(weekly.getId()).size());
+    }
+
+    @Test
+    void oldClientsPreserveOtherOptInsButCanUnsubscribeFromANewPersonalScope() {
+        var topic = topic(); var recipient = recipient(true);
+        subscriptions.save(recipient.getId(), topic.getId(), preference(List.of(), List.of("RUN", "WEEKLY")));
+        var preserved = subscriptions.save(recipient.getId(), topic.getId(), excluded("DAILY"));
+        assertEquals(List.of("RUN", "WEEKLY"), preserved.includedScopes());
+        var removed = subscriptions.save(recipient.getId(), topic.getId(), excluded("WEEKLY"));
+        assertEquals(List.of("RUN"), removed.includedScopes());
+        assertEquals(List.of("WEEKLY"), removed.excludedScopes());
+        em.clear();
+        var retained = subscriptions.get(recipient.getId()).topics().getFirst();
+        assertEquals(List.of("RUN"), retained.includedScopes());
+        assertFalse(retained.enabled());
+        assertTrue(retained.configuredScopes().isEmpty());
+    }
+
+    @Test
+    void personalQueuedOriginsRecheckPolicyChannelAndGroupMembership() {
+        var topic = topic(); var run = run(topic); var recipient = recipient(true); var group = group(recipient);
+        var policy = new ReportNotificationAutomationService.Policy(true, true, false,
+                List.of(group.getId()), List.of(), List.of(2L));
+        automation.savePolicy(topic.getId(), policy);
+        subscriptions.save(recipient.getId(), topic.getId(), preference(List.of(), List.of("WEEKLY")));
+        var weekly = aggregate(ReportScope.WEEKLY, List.of(run.getId()), 0);
+        automation.enqueueCompletedReport(weekly);
+        var queued = work(weekly.getId(), recipient);
+        assertTrue(outbox.destinationStillActive(queued));
+        jdbc.update("UPDATE topic_delivery_policies SET enabled_yn='N' WHERE topic_id=?", topic.getId());
+        assertFalse(outbox.destinationStillActive(queued));
+        jdbc.update("UPDATE topic_delivery_policies SET enabled_yn='Y',channel_ids='[1]' WHERE topic_id=?", topic.getId());
+        assertFalse(outbox.destinationStillActive(queued));
+        jdbc.update("UPDATE topic_delivery_policies SET channel_ids='[2]' WHERE topic_id=?", topic.getId());
+        jdbc.update("UPDATE notification_groups SET active_yn='N' WHERE id=?", group.getId());
+        assertFalse(outbox.destinationStillActive(queued));
+        jdbc.update("UPDATE notification_groups SET active_yn='Y' WHERE id=?", group.getId());
+        assertTrue(outbox.destinationStillActive(queued));
+        jdbc.update("DELETE FROM notification_group_members WHERE group_id=? AND recipient_id=?", group.getId(), recipient.getId());
+        assertFalse(outbox.destinationStillActive(queued));
+    }
+
+    @Test
+    void personalOptInCannotBypassDisabledPolicyOrMissingTargetAndChannel() {
+        var topic = topic(); var run = run(topic); var recipient = recipient(true);
+        subscriptions.save(recipient.getId(), topic.getId(), preference(List.of(), List.of("WEEKLY")));
+        automation.savePolicy(topic.getId(), new ReportNotificationAutomationService.Policy(false, true, false,
+                List.of(), List.of(recipient.getId()), List.of(2L)));
+        var disabled = aggregate(ReportScope.WEEKLY, List.of(run.getId()), 0);
+        automation.enqueueCompletedReport(disabled);
+        assertTrue(outbox.deliveries(disabled.getId()).isEmpty());
+        var other = recipient(true);
+        automation.savePolicy(topic.getId(), new ReportNotificationAutomationService.Policy(true, true, false,
+                List.of(), List.of(other.getId()), List.of(2L)));
+        var untargeted = aggregate(ReportScope.WEEKLY, List.of(run.getId()), 1);
+        automation.enqueueCompletedReport(untargeted);
+        assertTrue(outbox.deliveries(untargeted.getId()).isEmpty());
+        automation.savePolicy(topic.getId(), new ReportNotificationAutomationService.Policy(true, true, false,
+                List.of(), List.of(recipient.getId()), List.of(1L)));
+        var noChannel = aggregate(ReportScope.WEEKLY, List.of(run.getId()), 2);
+        automation.enqueueCompletedReport(noChannel);
+        assertTrue(outbox.deliveries(noChannel.getId()).isEmpty());
+    }
+
+    @Test
+    void personalRunAndDailyOptInsApplyToRecurringPoliciesButNeverExpandExplicitRunConsent() {
+        var topic = topic(); var run = run(topic); var recipient = recipient(true);
+        automation.savePolicy(topic.getId(), new ReportNotificationAutomationService.Policy(true, false, false, true,
+                List.of(), List.of(recipient.getId()), List.of(2L)));
+        subscriptions.save(recipient.getId(), topic.getId(), preference(List.of(), List.of("RUN", "DAILY")));
+        var reserved = reports.reserve(run.getId(), now());
+        reports.complete(reserved.reportId(), new ReportDocument("개인 실행 알림", "요약", "fallback"), now());
+        assertEquals(1, outbox.deliveries(reserved.reportId()).size());
+        var daily = aggregate(ReportScope.DAILY, List.of(run.getId()), 0);
+        automation.enqueueCompletedReport(daily);
+        assertEquals(1, outbox.deliveries(daily.getId()).size());
+
+        var explicitRun = run(topic);
+        runSnapshots.save(explicitRun.getId(), new RunDeliverySnapshotStore.Snapshot("ONCE", false, false, false, List.of()));
+        var explicitReport = reports.reserve(explicitRun.getId(), now());
+        reports.complete(explicitReport.reportId(), new ReportDocument("명시적으로 알림 중지", "요약", "fallback"), now());
+        assertTrue(outbox.deliveries(explicitReport.reportId()).isEmpty());
+        var explicitDaily = aggregate(ReportScope.DAILY, List.of(explicitRun.getId()), 1);
+        automation.enqueueCompletedReport(explicitDaily);
+        assertTrue(outbox.deliveries(explicitDaily.getId()).isEmpty());
+    }
+
+    @Test
+    void unrelatedNewOptInsDoNotReviveAnOldQueueAndOriginalSharedConsentRemainsIndependent() {
+        var personalTopic = topic(); var sharedTopic = topic(); var unrelated = topic();
+        var personalRun = run(personalTopic); var sharedRun = run(sharedTopic); var unrelatedRun = run(unrelated);
+        var recipient = recipient(true);
+        var withoutWeekly = new ReportNotificationAutomationService.Policy(true, true, false,
+                List.of(), List.of(recipient.getId()), List.of(2L));
+        automation.savePolicy(personalTopic.getId(), withoutWeekly);
+        automation.savePolicy(unrelated.getId(), withoutWeekly);
+        automation.savePolicy(sharedTopic.getId(), new ReportNotificationAutomationService.Policy(true, false, false, true,
+                List.of(), List.of(recipient.getId()), List.of(2L)));
+        subscriptions.save(recipient.getId(), personalTopic.getId(), preference(List.of(), List.of("WEEKLY")));
+        var weekly = aggregate(ReportScope.WEEKLY, List.of(personalRun.getId(), sharedRun.getId(), unrelatedRun.getId()), 0);
+        automation.enqueueCompletedReport(weekly);
+        var queued = work(weekly.getId(), recipient);
+        subscriptions.save(recipient.getId(), personalTopic.getId(), preference(List.of(), List.of()));
+        assertTrue(outbox.destinationStillActive(queued));
+        subscriptions.save(recipient.getId(), sharedTopic.getId(), excluded("WEEKLY"));
+        subscriptions.save(recipient.getId(), unrelated.getId(), preference(List.of(), List.of("WEEKLY")));
+        assertFalse(outbox.destinationStillActive(queued));
+    }
+
+    @Test
     void weeklyRequiresItsOwnCurrentPolicyAndIgnoresOneTimeRunOverrides() {
         var weeklyTopic = topic(); var dailyTopic = topic();
         var weeklyRun = run(weeklyTopic); var dailyRun = run(dailyTopic); var recipient = recipient(true);
@@ -169,7 +304,7 @@ class NotificationAutomationOracleIntegrationTests {
         subscriptions.save(recipient.getId(), topic.getId(), excluded("RUN"));
         assertFalse(outbox.destinationStillActive(queued));
         assertEquals(1, runSnapshots.find(run.getId()).orElseThrow().targets().size());
-        jdbc.update("UPDATE report_notification_outbox SET source_topic_ids=NULL WHERE id=?", queued.id());
+        jdbc.update("UPDATE report_notification_outbox SET source_topic_ids=NULL,personal_topic_ids=NULL WHERE id=?", queued.id());
         assertFalse(outbox.destinationStillActive(queued));
         subscriptions.save(recipient.getId(), topic.getId(), excluded());
         assertTrue(outbox.destinationStillActive(queued));
@@ -195,6 +330,10 @@ class NotificationAutomationOracleIntegrationTests {
 
     private RecipientReportSubscriptionService.Exclusions excluded(String... scopes) {
         return new RecipientReportSubscriptionService.Exclusions(List.of(scopes));
+    }
+
+    private RecipientReportSubscriptionService.Exclusions preference(List<String> excluded, List<String> included) {
+        return new RecipientReportSubscriptionService.Exclusions(excluded, included);
     }
 
     private NotificationGroup group(NotificationRecipient... recipients) {

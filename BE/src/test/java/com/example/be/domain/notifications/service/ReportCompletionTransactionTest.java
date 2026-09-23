@@ -116,7 +116,7 @@ class ReportCompletionTransactionTest {
         verify(connection).commit();
         verify(connection, never()).rollback();
         verify(jdbc).update(startsWith("INSERT INTO report_notification_outbox"), eq(117L), eq(7L), eq(2L),
-                anyString(), eq("유효 수신자"), eq("valid@example.invalid"), eq("보고서"), eq("요약"), any(), eq("[1]"));
+                anyString(), eq("유효 수신자"), eq("valid@example.invalid"), eq("보고서"), eq("요약"), any(), eq("[1]"), eq("[]"));
         verify(renderer, times(1)).render(report, email);
     }
 

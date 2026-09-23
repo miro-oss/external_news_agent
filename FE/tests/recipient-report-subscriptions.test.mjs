@@ -4,7 +4,8 @@ import { QueryClient } from '@tanstack/react-query'
 import { recipientReportSubscriptionsOptions, saveRecipientReportSubscriptionOptions } from '../src/api/recipientReportSubscriptions.ts'
 
 const row = { topicId: 31, topicName: '반도체', enabled: true, configuredScopes: ['RUN', 'DAILY', 'WEEKLY'],
-  excludedScopes: [], channelTypes: ['EMAIL'], direct: false, groupNames: ['기술'] }
+  includedScopes: [], excludedScopes: [], channelTypes: ['EMAIL'], direct: false, groupNames: ['기술'] }
+const choices = (excludedScopes = [], includedScopes = []) => ({ excludedScopes, includedScopes })
 const response = result => new Response(JSON.stringify({ isSuccess: true, code: 'COMMON200', message: '성공입니다.', result }))
 
 test('recipient subscription reads keep recipient IDs, original target attribution and abort signals', async context => {
@@ -25,8 +26,8 @@ test('saving exclusions sends only personal report choices and retains fully dis
   const updated = { ...row, excludedScopes: ['RUN', 'DAILY', 'WEEKLY'] }
   const calls = []
   context.mock.method(globalThis, 'fetch', async (url, init) => { calls.push({ url, method: init.method, body: JSON.parse(init.body) }); return response(updated) })
-  await client.getMutationCache().build(client, saveRecipientReportSubscriptionOptions(client, 1, 31)).execute(updated.excludedScopes)
-  assert.deepEqual(calls, [{ url: '/api/notifications/recipients/1/report-subscriptions/31', method: 'PUT', body: { excludedScopes: updated.excludedScopes } }])
+  await client.getMutationCache().build(client, saveRecipientReportSubscriptionOptions(client, 1, 31)).execute(choices(updated.excludedScopes))
+  assert.deepEqual(calls, [{ url: '/api/notifications/recipients/1/report-subscriptions/31', method: 'PUT', body: choices(updated.excludedScopes) }])
   assert.deepEqual(client.getQueryData(recipientReportSubscriptionsOptions(1).queryKey), { recipientId: 1, topics: [updated, otherRow] })
   assert.deepEqual(client.getQueryData(recipientReportSubscriptionsOptions(2).queryKey), { recipientId: 2, topics: [row] })
 })
@@ -42,7 +43,7 @@ test('a read started before save cannot restore a removed subscription and other
   const otherRequest = client.fetchQuery({ queryKey: recipientReportSubscriptionsOptions(2).queryKey, queryFn: () => other.promise })
   const updated = { ...row, excludedScopes: ['WEEKLY'] }
   context.mock.method(globalThis, 'fetch', async () => response(updated))
-  await client.getMutationCache().build(client, saveRecipientReportSubscriptionOptions(client, 1, 31)).execute(['WEEKLY'])
+  await client.getMutationCache().build(client, saveRecipientReportSubscriptionOptions(client, 1, 31)).execute(choices(['WEEKLY']))
   stale.resolve({ recipientId: 1, topics: [row] })
   other.resolve({ recipientId: 2, topics: [row] })
   await Promise.all([oldRequest, otherRequest])
@@ -61,10 +62,10 @@ test('save failures retain saved settings, expose the error and can be retried w
     ? new Response(JSON.stringify({ isSuccess: false, code: 'COMMON500', message: '저장 실패', result: {} }), { status: 500 })
     : response({ ...row, excludedScopes: ['DAILY'] }))
   const mutation = client.getMutationCache().build(client, saveRecipientReportSubscriptionOptions(client, 1, 31))
-  await assert.rejects(mutation.execute(['DAILY']), /저장 실패/)
+  await assert.rejects(mutation.execute(choices(['DAILY'])), /저장 실패/)
   assert.deepEqual(client.getQueryData(key), saved)
   failure = false
-  await mutation.execute(['DAILY'])
+  await mutation.execute(choices(['DAILY']))
   assert.deepEqual(client.getQueryData(key).topics[0].excludedScopes, ['DAILY'])
 })
 
@@ -74,10 +75,48 @@ test('pending saves retain saved state and do not fabricate a missing full recip
   const completion = Promise.withResolvers()
   context.mock.method(globalThis, 'fetch', async () => { await completion.promise; return response({ ...row, excludedScopes: ['WEEKLY'] }) })
   const mutation = client.getMutationCache().build(client, saveRecipientReportSubscriptionOptions(client, 1, 31))
-  const request = mutation.execute(['WEEKLY'])
+  const request = mutation.execute(choices(['WEEKLY']))
   assert.equal(mutation.state.status, 'pending')
   assert.equal(client.getQueryData(recipientReportSubscriptionsOptions(1).queryKey), undefined)
   completion.resolve()
   await request
   assert.equal(client.getQueryData(recipientReportSubscriptionsOptions(1).queryKey), undefined)
+})
+
+test('a personal weekly opt-in saves both choice lists and leaves the shared policy and other recipient unchanged', async context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const dailyOnly = { ...row, configuredScopes: ['DAILY'] }
+  const key = recipientReportSubscriptionsOptions(1).queryKey
+  const otherKey = recipientReportSubscriptionsOptions(2).queryKey
+  client.setQueryData(key, { recipientId: 1, topics: [dailyOnly] })
+  client.setQueryData(otherKey, { recipientId: 2, topics: [dailyOnly] })
+  const calls = []
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    const body = JSON.parse(init.body)
+    calls.push({ url, body })
+    return response({ ...dailyOnly, ...body })
+  })
+  const mutation = client.getMutationCache().build(client, saveRecipientReportSubscriptionOptions(client, 1, 31))
+  await mutation.execute(choices([], ['WEEKLY']))
+  assert.deepEqual(calls, [{ url: '/api/notifications/recipients/1/report-subscriptions/31', body: choices([], ['WEEKLY']) }])
+  assert.deepEqual(client.getQueryData(key).topics[0].configuredScopes, ['DAILY'])
+  assert.deepEqual(client.getQueryData(key).topics[0].includedScopes, ['WEEKLY'])
+  assert.deepEqual(client.getQueryData(otherKey).topics, [dailyOnly])
+  await mutation.execute(choices(['WEEKLY']))
+  assert.deepEqual(client.getQueryData(key).topics[0].includedScopes, [])
+  assert.deepEqual(client.getQueryData(key).topics[0].excludedScopes, ['WEEKLY'])
+})
+
+test('an old server ignoring personal weekly opt-in must not show a successful save', async context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const key = recipientReportSubscriptionsOptions(1).queryKey
+  const { includedScopes, ...oldRow } = row
+  assert.deepEqual(includedScopes, [])
+  client.setQueryData(key, { recipientId: 1, topics: [oldRow] })
+  context.mock.method(globalThis, 'fetch', async () => response(oldRow))
+  const mutation = client.getMutationCache().build(client, saveRecipientReportSubscriptionOptions(client, 1, 31))
+  await assert.rejects(mutation.execute(choices([], ['WEEKLY'])), /서버 업데이트/)
+  assert.deepEqual(client.getQueryData(key).topics, [oldRow])
 })

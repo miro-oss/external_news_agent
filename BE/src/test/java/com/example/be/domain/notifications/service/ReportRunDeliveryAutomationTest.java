@@ -133,7 +133,7 @@ class ReportRunDeliveryAutomationTest {
         automation.enqueueCompletedReport(report);
 
         verify(jdbc).update(startsWith("INSERT INTO report_notification_outbox"), eq(117L), eq(7L), eq(2L), anyString(),
-                eq("수정한 수신자"), eq("current@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class), eq("[1]"));
+                eq("수정한 수신자"), eq("current@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class), eq("[1]"), eq("[]"));
         verify(renderer, times(1)).render(report, email);
     }
 
@@ -146,7 +146,7 @@ class ReportRunDeliveryAutomationTest {
         stubRendering(report);
         automation.enqueueCompletedReport(report);
         verify(jdbc).update(startsWith("INSERT INTO report_notification_outbox"), eq(117L), eq(7L), eq(2L), anyString(),
-                eq("최근 수신자 이름"), eq("captured@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class), eq("[1]"));
+                eq("최근 수신자 이름"), eq("captured@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class), eq("[1]"), eq("[]"));
     }
 
     @Test
@@ -195,7 +195,7 @@ class ReportRunDeliveryAutomationTest {
         automation.enqueueCompletedReport(report);
 
         verify(jdbc).update(startsWith("INSERT INTO report_notification_outbox"), eq(117L), eq(7L), eq(2L), anyString(),
-                eq("주제 정책 수신자"), eq("policy@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class), eq("[1]"));
+                eq("주제 정책 수신자"), eq("policy@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class), eq("[1]"), eq("[]"));
         verify(renderer, times(1)).render(report, email);
     }
 
@@ -215,6 +215,6 @@ class ReportRunDeliveryAutomationTest {
 
     private void verifyQueued(Long reportId) {
         verify(jdbc).update(startsWith("INSERT INTO report_notification_outbox"), eq(reportId), eq(7L), eq(2L),
-                anyString(), eq("접수 당시 수신자"), eq("captured@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class), eq("[1]"));
+                anyString(), eq("접수 당시 수신자"), eq("captured@example.invalid"), eq("보고서"), eq("핵심 요약"), any(LocalDateTime.class), eq("[1]"), eq("[]"));
     }
 }

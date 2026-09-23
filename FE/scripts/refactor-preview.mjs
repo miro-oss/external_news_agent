@@ -47,6 +47,7 @@ let recipientDeleteError = false;
 let reportSubscriptionsLoadError = false;
 let reportSubscriptionsSaveError = false;
 let subscriptionExclusions = {};
+let subscriptionInclusions = {};
 let groupMembersLoadError = false;
 let groupNameSaveError = false;
 let groupMembersSaveError = false;
@@ -102,12 +103,13 @@ function reportSubscriptions(recipientId) {
         const memberGroups = groups.filter(group => policy?.groupIds.includes(group.id)
             && group.members.some(member => member.recipientId === recipientId));
         const excludedScopes = subscriptionExclusions[`${recipientId}:${topic.id}`] ?? [];
-        if (!direct && memberGroups.length === 0 && excludedScopes.length === 0) return [];
+        const includedScopes = subscriptionInclusions[`${recipientId}:${topic.id}`] ?? [];
+        if (!direct && memberGroups.length === 0 && excludedScopes.length === 0 && includedScopes.length === 0) return [];
         const targeted = direct || memberGroups.length > 0;
         const reachable = recipient.active && (direct || memberGroups.some(group => group.active));
         return [{ topicId: topic.id, topicName: topic.name, enabled: targeted && (policy?.enabled ?? false),
             configuredScopes: targeted ? ['RUN', 'DAILY', 'WEEKLY'].filter(scope => policy?.[scope.toLowerCase()]) : [],
-            excludedScopes, direct, groupNames: memberGroups.map(group => group.name),
+            includedScopes, excludedScopes, direct, groupNames: memberGroups.map(group => group.name),
             channelTypes: reachable ? [...new Set(recipient.destinations.filter(destination =>
                 policy?.channelIds.includes(destination.channelId) && destination.use && destination.onboarded && destination.address?.trim()
                 && channels.some(channel => channel.id === destination.channelId && channel.active)).map(destination => destination.channelType))] : [],
@@ -307,6 +309,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 reportSubscriptionsLoadError = false;
                                 reportSubscriptionsSaveError = false;
                                 subscriptionExclusions = {};
+                                subscriptionInclusions = {};
                                 loadingDelayMs = 0;
                                 loadingPath = '/api/';
                                 usageCalls = 12;
@@ -322,11 +325,13 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 reportSubscriptionsLoadError = variant === 'load-error';
                                 reportSubscriptionsSaveError = variant === 'save-error';
                                 policies = variant === 'empty' ? {} : {
-                                    31: { enabled: true, run: true, daily: true, weekly: true, groupIds: [1], recipientIds: [1], channelIds: [1, 2] },
+                                    31: { enabled: true, run: true, daily: true, weekly: variant !== 'opt-in' && variant !== 'opt-in-save-error', groupIds: [1], recipientIds: [1], channelIds: [1, 2] },
                                     29: { enabled: true, run: false, daily: false, weekly: true, groupIds: [], recipientIds: [1], channelIds: [2] },
                                     25: { enabled: false, run: false, daily: true, weekly: false, groupIds: [1], recipientIds: [], channelIds: [1] },
                                 };
                                 subscriptionExclusions = variant === 'empty' ? {} : { '1:31': ['DAILY'], '1:9': ['WEEKLY'] };
+                                subscriptionInclusions = {};
+                                reportSubscriptionsSaveError ||= variant === 'opt-in-save-error';
                                 return json(res, { variant });
                             }
                             if (path === '/__qa/usage') {
@@ -735,13 +740,19 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 return json(res, { isSuccess: false, code: 'RECIPIENT404', message: '수신자를 찾을 수 없습니다.', result: {} }, 404);
                             if (method === 'PUT' && match[2]) {
                                 if (reportSubscriptionsSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '알림 설정을 저장하지 못했습니다. 다시 시도해 주세요.', result: {} }, 500);
-                                if (!Array.isArray(body.excludedScopes) || body.excludedScopes.some(scope => !['RUN', 'DAILY', 'WEEKLY'].includes(scope)))
+                                if (!Array.isArray(body.excludedScopes) || body.excludedScopes.length > 3 || body.excludedScopes.some(scope => !['RUN', 'DAILY', 'WEEKLY'].includes(scope)))
                                     return json(res, { isSuccess: false, code: 'COMMON400', message: '제외할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.', result: {} }, 400);
+                                if (body.includedScopes != null && (!Array.isArray(body.includedScopes) || body.includedScopes.length > 3 || body.includedScopes.some(scope => !['RUN', 'DAILY', 'WEEKLY'].includes(scope))))
+                                    return json(res, { isSuccess: false, code: 'COMMON400', message: '추가할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.', result: {} }, 400);
+                                if (body.includedScopes?.some(scope => body.excludedScopes.includes(scope)))
+                                    return json(res, { isSuccess: false, code: 'COMMON400', message: '같은 보고서 종류를 추가와 제외에 동시에 선택할 수 없습니다.', result: {} }, 400);
                                 const topicId = Number(match[2]);
                                 const previous = reportSubscriptions(recipientId).topics.find(topic => topic.topicId === topicId);
                                 subscriptionExclusions[`${recipientId}:${topicId}`] = [...new Set(body.excludedScopes)];
+                                subscriptionInclusions[`${recipientId}:${topicId}`] = [...new Set(body.includedScopes
+                                    ?? (subscriptionInclusions[`${recipientId}:${topicId}`] ?? []).filter(scope => !body.excludedScopes.includes(scope)))];
                                 result = reportSubscriptions(recipientId).topics.find(topic => topic.topicId === topicId)
-                                    ?? { ...previous, excludedScopes: [] };
+                                    ?? { ...previous, includedScopes: [], excludedScopes: [] };
                             } else if (method === 'GET' && !match[2]) {
                                 if (reportSubscriptionsLoadError) return json(res, { isSuccess: false, code: 'COMMON500', message: '주제 보고서 알림을 불러오지 못했습니다.', result: {} }, 500);
                                 result = reportSubscriptions(recipientId);

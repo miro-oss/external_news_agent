@@ -51,4 +51,26 @@ class RecipientReportSubscriptionServiceTest {
         assertThat(restored.configuredScopes()).isEmpty();
         verify(jdbc, times(2)).update("DELETE FROM recipient_report_exclusions WHERE recipient_id=? AND topic_id=?", 2L, 1L);
     }
+
+    @Test
+    void rejectsInvalidAndOverlappingInclusionsBeforeAnyWrite() {
+        for (var included : List.of(Arrays.asList("RUN", null), List.of("MONTHLY"), List.of("RUN", "RUN", "RUN", "RUN")))
+            assertThatThrownBy(() -> service.save(2L, 1L, new RecipientReportSubscriptionService.Exclusions(List.of(), included)))
+                    .isInstanceOf(GeneralException.class).hasMessage("추가할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.");
+        assertThatThrownBy(() -> service.save(2L, 1L,
+                new RecipientReportSubscriptionService.Exclusions(List.of("WEEKLY"), List.of("WEEKLY"))))
+                .isInstanceOf(GeneralException.class).hasMessage("같은 보고서 종류를 추가와 제외에 동시에 선택할 수 없습니다.");
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test
+    void personalInclusionsAreSortedDeduplicatedAndDoNotActivateAnUnconfiguredTopic() {
+        var result = service.save(2L, 1L,
+                new RecipientReportSubscriptionService.Exclusions(List.of(), List.of("WEEKLY", "RUN", "WEEKLY")));
+        assertThat(result.includedScopes()).containsExactly("RUN", "WEEKLY");
+        assertThat(result.configuredScopes()).isEmpty();
+        assertThat(result.enabled()).isFalse();
+        verify(jdbc).update("INSERT INTO recipient_report_inclusions(recipient_id,topic_id,report_scope) VALUES(?,?,?)", 2L, 1L, "WEEKLY");
+        assertThat(service.save(2L, 1L, new RecipientReportSubscriptionService.Exclusions(List.of(), List.of())).includedScopes()).isEmpty();
+    }
 }

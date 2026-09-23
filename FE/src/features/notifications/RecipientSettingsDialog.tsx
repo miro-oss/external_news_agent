@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { useIsMutating } from '@tanstack/react-query'
 import { ApiError } from '../../api/client'
 import { useRecipientReportSubscriptions, useSaveRecipientReportSubscription } from '../../api/notificationConnections'
-import type { RecipientReportSubscription } from '../../api/recipientReportSubscriptions'
+import type { RecipientReportChoices, RecipientReportSubscription } from '../../api/recipientReportSubscriptions'
 import type { NotificationRecipient, ReportScope } from '../../api/types'
 import { Skeleton, SkeletonRegion } from '../../components/Skeleton'
 import { TransientStatus } from '../../components/TransientStatus'
@@ -71,7 +71,7 @@ export function RecipientSettingsDialog({ recipient, emailChannelId, onDismiss }
         onKeyDown={event => selectWithKeyboard(event, index)} onClick={() => setTab(item.value)}>{item.label}</button>)}
     </div>
     <div id={`${id}-reports-panel`} role="tabpanel" aria-labelledby={`${id}-reports-tab`} hidden={tab !== 'reports'} className="recipient-subscriptions-panel">
-      <p className="recipient-settings-intro">체크한 보고서를 받습니다. 해제하면 이 수신자의 해당 주제 알림만 중지됩니다.</p>
+      <p className="recipient-settings-intro">받을 보고서를 선택하세요. 추가하거나 해제한 내용은 이 수신자에게만 적용됩니다.</p>
       {subscriptions.isPending && <SkeletonRegion label="주제 보고서 알림을 불러오는 중입니다." contentClassName="recipient-subscriptions-loading">
         <Skeleton height="9rem" /><Skeleton height="9rem" />
       </SkeletonRegion>}
@@ -97,11 +97,13 @@ export function RecipientSubscriptionRow({ recipientId, topic, unavailable = fal
   recipientId: number; topic: RecipientReportSubscription; unavailable?: boolean
 }) {
   const save = useSaveRecipientReportSubscription(recipientId, topic.topicId)
-  const [draft, setDraft] = useState<ReportScope[] | null>(null)
+  const [draft, setDraft] = useState<RecipientReportChoices | null>(null)
   const [saved, setSaved] = useState(false)
-  const excluded = draft ?? topic.excludedScopes
-  const changed = SCOPES.some(scope => excluded.includes(scope.value) !== topic.excludedScopes.includes(scope.value))
-  const receiving = SCOPES.filter(scope => topic.configuredScopes.includes(scope.value) && !topic.excludedScopes.includes(scope.value))
+  const choices = draft ?? { includedScopes: topic.includedScopes ?? [], excludedScopes: topic.excludedScopes }
+  const changed = SCOPES.some(({ value }) => choices.excludedScopes.includes(value) !== topic.excludedScopes.includes(value)
+    || choices.includedScopes.includes(value) !== (topic.includedScopes ?? []).includes(value))
+  const receiving = SCOPES.filter(({ value }) => (topic.configuredScopes.includes(value) || (topic.includedScopes ?? []).includes(value))
+    && !topic.excludedScopes.includes(value))
   const status = !topic.enabled ? '주제 알림 중지' : topic.channelTypes.length === 0 ? '수신 가능한 전달 방식 없음'
     : receiving.length === 0 ? '받지 않음' : `${receiving.map(scope => scope.label).join(' · ')} 받는 중`
   const sources = [topic.direct ? '직접 등록' : '', ...topic.groupNames.map(name => `${name} 그룹`)].filter(Boolean)
@@ -109,7 +111,13 @@ export function RecipientSubscriptionRow({ recipientId, topic, unavailable = fal
 
   function change(scope: ReportScope, checked: boolean) {
     if (locked) return
-    setDraft(checked ? excluded.filter(value => value !== scope) : [...new Set([...excluded, scope])])
+    setDraft({
+      includedScopes: checked && !topic.configuredScopes.includes(scope)
+        ? [...new Set([...choices.includedScopes, scope])]
+        : choices.includedScopes.filter(value => value !== scope),
+      excludedScopes: checked ? choices.excludedScopes.filter(value => value !== scope)
+        : [...new Set([...choices.excludedScopes, scope])],
+    })
     setSaved(false)
     save.reset()
   }
@@ -119,19 +127,20 @@ export function RecipientSubscriptionRow({ recipientId, topic, unavailable = fal
     <p className="recipient-subscription-channels">전달 방식: {topic.channelTypes.length
       ? topic.channelTypes.map(type => type === 'EMAIL' ? '이메일' : '텔레그램').join(' · ') : '연결된 전달 방식 없음'}</p>
     <fieldset disabled={locked} className="recipient-subscription-scopes"><legend>받을 보고서</legend>
-      {SCOPES.map(scope => <label key={scope.value} data-configured={topic.configuredScopes.includes(scope.value)}>
-        <input type="checkbox" checked={topic.configuredScopes.includes(scope.value) && !excluded.includes(scope.value)}
-          disabled={!topic.configuredScopes.includes(scope.value)} onChange={event => change(scope.value, event.target.checked)} />
-        <span>{scope.label}{!topic.configuredScopes.includes(scope.value) && <small>주제 설정 없음</small>}</span>
+      {SCOPES.map(scope => <label key={scope.value}>
+        <input type="checkbox" checked={(topic.configuredScopes.includes(scope.value) || choices.includedScopes.includes(scope.value))
+          && !choices.excludedScopes.includes(scope.value)} onChange={event => change(scope.value, event.target.checked)} />
+        <span>{scope.label}{choices.includedScopes.includes(scope.value) && <small>개인 추가</small>}</span>
       </label>)}
     </fieldset>
     {!topic.enabled && <p className="recipient-subscription-note">주제 알림이 꺼져 있어 전달되지 않습니다. 개인 선택은 유지됩니다.</p>}
+    {topic.enabled && topic.channelTypes.length === 0 && <p className="recipient-subscription-note">선택은 저장되며, 전달 방식이 연결되면 알림을 받을 수 있습니다.</p>}
     <div className="recipient-subscription-actions">
-      {excluded.length > 0 && <button type="button" className="text-button" disabled={locked}
-        onClick={() => { setDraft([]); setSaved(false); save.reset() }}>개인 해제 초기화</button>}
+      {(choices.excludedScopes.length > 0 || choices.includedScopes.length > 0) && <button type="button" className="text-button" disabled={locked}
+        onClick={() => { setDraft({ includedScopes: [], excludedScopes: [] }); setSaved(false); save.reset() }}>개인 설정 초기화</button>}
       <span>{changed ? '저장하지 않은 변경 사항' : <TransientStatus as="small" message={saved ? '저장했습니다.' : null} />}</span>
       <button type="button" className="secondary-button" aria-label={`${topic.topicName} 알림 저장`} disabled={locked || !changed}
-        onClick={() => save.mutate(excluded, { onSuccess: () => { setDraft(null); setSaved(true) } })}>{save.isPending ? '저장 중…' : '저장'}</button>
+        onClick={() => save.mutate(choices, { onSuccess: () => { setDraft(null); setSaved(true) } })}>{save.isPending ? '저장 중…' : '저장'}</button>
     </div>
     {save.error && <p className="field-error" role="alert">{save.error instanceof ApiError ? save.error.message : '알림 설정을 저장하지 못했습니다. 다시 시도해 주세요.'}</p>}
   </article>

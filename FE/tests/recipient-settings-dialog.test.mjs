@@ -25,7 +25,7 @@ after(async () => { await server?.close(); if (emptyEnvDir) await rm(emptyEnvDir
 
 const recipient = { id: 1, name: '김수신', active: true, email: 'reader@example.invalid', destinations: [], groupNames: ['전략팀'] }
 const topic = { topicId: 31, topicName: '반도체', enabled: true, configuredScopes: ['RUN', 'DAILY', 'WEEKLY'],
-  excludedScopes: ['DAILY'], channelTypes: ['EMAIL'], direct: true, groupNames: ['전략팀', '기술팀'] }
+  includedScopes: [], excludedScopes: ['DAILY'], channelTypes: ['EMAIL'], direct: true, groupNames: ['전략팀', '기술팀'] }
 const key = ['notifications', 'report-subscriptions', 1]
 function render(client, component = Dialog, props = {}) {
   return renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(component,
@@ -63,8 +63,8 @@ test('paused policies, fully excluded subscriptions and unavailable channels are
   assert.doesNotMatch(disconnected, /받는 중/)
   const former = render(client, Row, { topic: { ...topic, enabled: false, configuredScopes: [], direct: false, groupNames: [] } })
   assert.match(former, /현재 주제의 수신 대상이 아닙니다/)
-  assert.match(former, /개인 해제 초기화/)
-  assert.equal((former.match(/주제 설정 없음/g) ?? []).length, 3)
+  assert.match(former, /개인 설정 초기화/)
+  assert.doesNotMatch(former, /주제 설정 없음/)
 })
 
 test('loading and an empty saved list have separate states and never claim the recipient receives reports', context => {
@@ -111,4 +111,17 @@ test('stored topic and group names remain text inside subscription controls', co
   const markup = render(client, Row, { topic: { ...topic, topicName: '<img src=x onerror=alert(1)>', groupNames: ['<script>alert(1)</script>'] } })
   assert.doesNotMatch(markup, /<script>|<img/)
   assert.match(markup, /&lt;img/)
+})
+
+test('weekly is selectable when the shared topic only sends daily, and saved personal weekly opt-in is shown', context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const dailyOnly = { ...topic, configuredScopes: ['DAILY'], excludedScopes: [] }
+  const initial = render(client, Row, { topic: dailyOnly })
+  assert.match(initial, /<input type="checkbox"\/><span>주간 통합/)
+  assert.doesNotMatch(initial, /주제 설정 없음/)
+  const saved = render(client, Row, { topic: { ...dailyOnly, includedScopes: ['WEEKLY'] } })
+  assert.match(saved, /일일 통합 · 주간 통합 받는 중/)
+  assert.match(saved, /<input type="checkbox" checked=""\/><span>주간 통합<small>개인 추가/)
+  assert.match(saved, /개인 설정 초기화/)
 })

@@ -94,6 +94,7 @@ public class ReportNotificationAutomationService {
         if (runIds.isEmpty()) return;
         Map<String, NotificationDeliveryPlanService.PreparedTarget> targets = new LinkedHashMap<>();
         Map<String, Set<Long>> origins = new LinkedHashMap<>();
+        Map<String, Set<Long>> personalOrigins = new LinkedHashMap<>();
         Set<Long> topicIds = new LinkedHashSet<>();
         // DAILY merges several requests. Prefer the latest eligible captured destination.
         for (Long runId : runIds.stream().distinct().sorted(Comparator.reverseOrder()).toList()) {
@@ -121,14 +122,18 @@ public class ReportNotificationAutomationService {
         }
         for (Long topicId : topicIds) {
             Policy policy = policy(topicId);
-            if (!policy.includes(report.getReportScope())) continue;
+            if (!policy.enabled()) continue;
+            boolean sharedScope = policy.includes(report.getReportScope());
+            List<Long> includedRecipients = sharedScope ? List.of() : subscriptions.includedRecipients(topicId, report.getReportScope());
+            if (!sharedScope && includedRecipients.isEmpty()) continue;
             // Stale/deactivated targets are omitted, not allowed to fail report persistence.
             List<NotificationGroup> groups = policy.groupIds().stream().map(id -> optionalGroup(id)).filter(Objects::nonNull).toList();
             List<NotificationChannel> channels = policy.channelIds().stream().map(id -> optionalChannel(id)).filter(Objects::nonNull).toList();
             List<Long> recipientIds = policy.recipientIds().stream().filter(this::activeRecipient).toList();
             plans.resolveTargets(groups, channels, recipientIds).stream()
                     .filter(target -> target.channelType() != ChannelType.TELEGRAM || target.onboarded())
-                    .forEach(target -> addTarget(report.getReportScope(), targets, origins, target, List.of(topicId)));
+                    .filter(target -> sharedScope || includedRecipients.contains(target.recipientId()))
+                    .forEach(target -> addTarget(report.getReportScope(), targets, sharedScope ? origins : personalOrigins, target, List.of(topicId)));
         }
         int queuedCount = 0;
         for (var target : targets.values()) {
@@ -140,10 +145,11 @@ public class ReportNotificationAutomationService {
             LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
             jdbc.update("INSERT INTO notification_delivery_batches(id,report_id,idempotency_key,requested_at) VALUES(?,?,?,?)",
                     batchId, report.getId(), "auto:" + report.getId() + ":" + target.recipientId() + ":" + target.channel().getId(), now);
-            jdbc.update("INSERT INTO report_notification_outbox(report_id,recipient_id,channel_id,batch_id,recipient_name,address,subject,body,available_at,source_topic_ids) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            jdbc.update("INSERT INTO report_notification_outbox(report_id,recipient_id,channel_id,batch_id,recipient_name,address,subject,body,available_at,source_topic_ids,personal_topic_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                     report.getId(), target.recipientId(), target.channel().getId(), batchId, target.recipientName(), target.address(),
                     message.subject(), String.join("\n", message.chunks()), now,
-                    IDS.convertToDatabaseColumn(List.copyOf(origins.get(targetKey(target)))));
+                    IDS.convertToDatabaseColumn(List.copyOf(origins.getOrDefault(targetKey(target), Set.of()))),
+                    IDS.convertToDatabaseColumn(List.copyOf(personalOrigins.getOrDefault(targetKey(target), Set.of()))));
             queuedCount++;
         }
         log.info("보고서 자동 전달 예약. reportId={} reportScope={} targetCount={} queuedCount={}",

@@ -26,12 +26,12 @@ class RecipientReportSubscriptionControllerTest {
     @Test
     void exposesCurrentScopesAndSavesOnlyThisRecipientsExclusions() throws Exception {
         var row = new RecipientReportSubscriptionService.TopicSubscription(1L, "HBM 시장", true,
-                List.of("RUN", "DAILY", "WEEKLY"), List.of("DAILY"), List.of("EMAIL"), false, List.of("기술"));
+                List.of("RUN", "DAILY"), List.of("DAILY"), List.of("WEEKLY"), List.of("EMAIL"), false, List.of("기술"));
         when(service.get(2L)).thenReturn(new RecipientReportSubscriptionService.Subscriptions(2L, List.of(row)));
         mvc.perform(get("/api/notifications/recipients/2/report-subscriptions"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.code").value("COMMON200"))
                 .andExpect(jsonPath("$.result.recipientId").value(2))
-                .andExpect(jsonPath("$.result.topics[0].configuredScopes[2]").value("WEEKLY"))
+                .andExpect(jsonPath("$.result.topics[0].includedScopes[0]").value("WEEKLY"))
                 .andExpect(jsonPath("$.result.topics[0].excludedScopes[0]").value("DAILY"))
                 .andExpect(jsonPath("$.result.topics[0].channelTypes[0]").value("EMAIL"));
         when(service.save(eq(2L), eq(1L), any())).thenReturn(row);
@@ -39,6 +39,10 @@ class RecipientReportSubscriptionControllerTest {
                         .content("{\"excludedScopes\":[\"DAILY\"]}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.result.topicId").value(1));
         verify(service).save(2L, 1L, new RecipientReportSubscriptionService.Exclusions(List.of("DAILY")));
+        mvc.perform(put("/api/notifications/recipients/2/report-subscriptions/1").contentType("application/json")
+                        .content("{\"excludedScopes\":[],\"includedScopes\":[\"WEEKLY\"]}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.includedScopes[0]").value("WEEKLY"));
+        verify(service).save(2L, 1L, new RecipientReportSubscriptionService.Exclusions(List.of(), List.of("WEEKLY")));
     }
 
     @Test
