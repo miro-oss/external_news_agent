@@ -3,12 +3,13 @@ package com.example.be.domain.reports.service;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.analysis.service.ArticleAnalysisPipeline;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.global.config.ReportRecoveryMode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
@@ -17,15 +18,16 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 저장된 수집 실행에서 보고서 생성 단계만 다시 수행하는 운영 복구 도구다.
+ * 저장된 수집 실행에서 분석과 보고서 생성을 다시 수행하는 운영 복구 도구다.
  *
  * <p>수집 도중 프로세스가 종료되면 신규 기사와 finding은 저장됐어도 실행별 보고서가 없을 수 있다.
  * 복구 대상은 명시적으로 전달받고, 평상시 애플리케이션에서는 bean 자체를 만들지 않는다.
+ * 복구 모드에서는 정기 작업과 기동 시 유실 실행 정리를 비활성화한다.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "news.reports.recovery.run-ids")
+@Conditional(ReportRecoveryMode.Enabled.class)
 public class ReportRecoveryRunner implements ApplicationRunner {
 
     private final ReportCreationService reportCreationService;
@@ -33,7 +35,7 @@ public class ReportRecoveryRunner implements ApplicationRunner {
     private final CollectionRunArticleRepository observationRepository;
     private final FindingRepository findingRepository;
 
-    @Value("${news.reports.recovery.run-ids}")
+    @Value("${" + ReportRecoveryMode.RUN_IDS_PROPERTY + "}")
     String configuredRunIds;
 
     @Override
@@ -61,7 +63,7 @@ public class ReportRecoveryRunner implements ApplicationRunner {
             throw new IllegalArgumentException("복구할 수집 실행 ID를 지정해야 합니다.");
         }
         LinkedHashSet<Long> runIds = new LinkedHashSet<>();
-        Arrays.stream(value.split(","))
+        Arrays.stream(value.split(",", -1))
                 .map(String::trim)
                 .forEach(token -> {
                     try {

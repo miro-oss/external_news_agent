@@ -38,17 +38,24 @@ public class ReportCreationService {
         return persistenceService.complete(reservation.reportId(), document, generatedAt);
     }
 
-    /** 저장된 finding으로 기존 실행 보고서를 교체하고, 보고서가 없으면 새로 만든다. */
+    /** 저장된 finding으로 실행 보고서를 복구한다. 신규 생성도 자동 전달과 완료 이벤트를 발생시키지 않는다. */
     public Long recover(Long runId) {
-        NewsReport existing = reportRepository.findByRunId(runId).orElse(null);
-        if (existing == null) {
-            return generate(runId);
-        }
         LocalDateTime generatedAt = LocalDateTime.now(ApiTimeZone.ZONE);
+        NewsReport existing = reportRepository.findByRunId(runId).orElse(null);
+        Long reportId;
+        if (existing == null) {
+            ReportPersistenceService.Reservation reservation = persistenceService.reserve(runId, generatedAt);
+            if (!reservation.owner()) {
+                return reservation.reportId();
+            }
+            reportId = reservation.reportId();
+        } else {
+            reportId = existing.getId();
+        }
         CollectionRun run = runRepository.findReportContextById(runId)
                 .orElseThrow(() -> new IllegalStateException("보고서를 만들 수집 실행이 없습니다. runId=" + runId));
         List<Finding> findings = findingRepository.findForReportByRunId(runId);
         ReportDocument document = reportOrchestrator.generate(run, findings, generatedAt);
-        return persistenceService.replace(existing.getId(), document, generatedAt);
+        return persistenceService.replace(reportId, document, generatedAt);
     }
 }

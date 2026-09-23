@@ -73,7 +73,7 @@ public class ReportPersistenceService {
         return completeLocked(lockedReport(reportId), document, generatedAt);
     }
 
-    /** 운영 복구에서 완료된 실행 보고서의 내용만 교체한다. 자동 전달은 다시 예약하지 않는다. */
+    /** 운영 복구에서 예약된 보고서를 완성하거나 기존 내용을 교체한다. 자동 전달과 완료 이벤트는 발생시키지 않는다. */
     @Transactional
     public Long replace(Long reportId, ReportDocument document, LocalDateTime generatedAt) {
         NewsReport report = lockedReport(reportId);

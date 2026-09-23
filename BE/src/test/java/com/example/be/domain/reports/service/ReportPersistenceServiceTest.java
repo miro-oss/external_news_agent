@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -41,10 +42,11 @@ class ReportPersistenceServiceTest {
     private final ReportNotificationAutomationService notificationAutomation =
             mock(ReportNotificationAutomationService.class);
     private final CollectionRunArticleRepository observationRepository = mock(CollectionRunArticleRepository.class);
+    private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     private final ReportPersistenceService service =
             new ReportPersistenceService(runRepository, reportRepository,
                     notificationAutomation, observationRepository,
-                    mock(org.springframework.context.ApplicationEventPublisher.class));
+                    events);
 
     @org.junit.jupiter.api.Test
     void lateRecoveryMustNotInvalidateTheAlreadyCompletedOriginalSnapshot() {
@@ -236,7 +238,7 @@ class ReportPersistenceServiceTest {
         assertEquals("configured-model", report.getModelName());
         assertEquals(generatedAt, report.getGeneratedAt());
         assertEquals(java.util.List.of(501L), report.getReflectedFindingIds());
-        verifyNoInteractions(notificationAutomation);
+        verifyNoInteractions(notificationAutomation, events);
     }
 
     @Test
