@@ -1,19 +1,16 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { useIsMutating } from '@tanstack/react-query'
 import { ApiError } from '../../api/client'
-import { useRecipientReportSubscriptions, useSaveRecipientReportSubscription } from '../../api/notificationConnections'
-import type { RecipientReportChoices, RecipientReportSubscription } from '../../api/recipientReportSubscriptions'
-import type { NotificationRecipient, ReportScope } from '../../api/types'
+import { useRecipientReportSubscriptions, useSaveRecipientSettings } from '../../api/notificationConnections'
+import { topicReportSelected, type RecipientReportSubscriptions, type RecipientSettingsUpdate } from '../../api/recipientReportSubscriptions'
+import type { NotificationRecipient } from '../../api/types'
 import { Skeleton, SkeletonRegion } from '../../components/Skeleton'
 import { TransientStatus } from '../../components/TransientStatus'
 import { RecipientEmailForm } from './RecipientEmailForm'
 import { TelegramConnectionCard } from './TelegramConnectionCard'
 
-const SCOPES: ReadonlyArray<{ value: ReportScope; label: string }> = [
-  { value: 'RUN', label: '수집별' }, { value: 'DAILY', label: '일일 통합' }, { value: 'WEEKLY', label: '주간 통합' },
-]
 const TABS = [
-  { value: 'reports', label: '주제 보고서 알림' }, { value: 'channels', label: '이메일·텔레그램' },
+  { value: 'reports', label: '보고서 알림' }, { value: 'channels', label: '이메일·텔레그램' },
 ] as const
 type SettingsTab = typeof TABS[number]['value']
 
@@ -71,19 +68,12 @@ export function RecipientSettingsDialog({ recipient, emailChannelId, onDismiss }
         onKeyDown={event => selectWithKeyboard(event, index)} onClick={() => setTab(item.value)}>{item.label}</button>)}
     </div>
     <div id={`${id}-reports-panel`} role="tabpanel" aria-labelledby={`${id}-reports-tab`} hidden={tab !== 'reports'} className="recipient-subscriptions-panel">
-      <p className="recipient-settings-intro">받을 보고서를 선택하세요. 추가하거나 해제한 내용은 이 수신자에게만 적용됩니다.</p>
       {subscriptions.isPending && <SkeletonRegion label="주제 보고서 알림을 불러오는 중입니다." contentClassName="recipient-subscriptions-loading">
         <Skeleton height="9rem" /><Skeleton height="9rem" />
       </SkeletonRegion>}
       {subscriptions.isError && <div className="recipient-subscriptions-error" role="alert"><p>주제 보고서 알림을 불러오지 못했습니다.</p>
         <button type="button" className="secondary-button" disabled={subscriptions.isFetching} onClick={() => void subscriptions.refetch()}>다시 불러오기</button></div>}
-      {subscriptions.data && <>
-        {subscriptions.data.topics.length === 0 ? <div className="recipient-subscriptions-empty"><strong>등록된 주제 보고서 알림이 없습니다.</strong>
-          <p>수집 설정의 보고서 알림에서 이 수신자나 소속 그룹을 선택하면 여기에 표시됩니다.</p></div>
-          : <div className="recipient-subscriptions-list">{subscriptions.data.topics.map(topic => <RecipientSubscriptionRow key={`${recipient.id}-${topic.topicId}`}
-            recipientId={recipient.id} topic={topic} unavailable={subscriptions.isError} />)}</div>}
-        {subscriptions.data.topics.length > 0 && <p className="recipient-subscriptions-footnote">일일·주간 통합은 여러 주제를 담습니다. 다른 포함 주제에서 같은 보고서를 받도록 설정했다면 한 번 전달될 수 있습니다. 변경한 설정은 앞으로 보낼 알림에 적용됩니다.</p>}
-      </>}
+      {subscriptions.data && <RecipientReportSettings settings={subscriptions.data} unavailable={subscriptions.isError} />}
     </div>
     <div id={`${id}-channels-panel`} role="tabpanel" aria-labelledby={`${id}-channels-tab`} hidden={tab !== 'channels'} className="recipient-connections-panel">
       {tab === 'channels' && <><RecipientEmailForm recipient={recipient} emailChannelId={emailChannelId} />
@@ -93,55 +83,55 @@ export function RecipientSettingsDialog({ recipient, emailChannelId, onDismiss }
   </dialog>
 }
 
-export function RecipientSubscriptionRow({ recipientId, topic, unavailable = false }: {
-  recipientId: number; topic: RecipientReportSubscription; unavailable?: boolean
+export function RecipientReportSettings({ settings, unavailable = false }: {
+  settings: RecipientReportSubscriptions; unavailable?: boolean
 }) {
-  const save = useSaveRecipientReportSubscription(recipientId, topic.topicId)
-  const [draft, setDraft] = useState<RecipientReportChoices | null>(null)
+  const save = useSaveRecipientSettings(settings.recipientId)
+  const [draft, setDraft] = useState<RecipientSettingsUpdate>({})
   const [saved, setSaved] = useState(false)
-  const choices = draft ?? { includedScopes: topic.includedScopes ?? [], excludedScopes: topic.excludedScopes }
-  const changed = SCOPES.some(({ value }) => choices.excludedScopes.includes(value) !== topic.excludedScopes.includes(value)
-    || choices.includedScopes.includes(value) !== (topic.includedScopes ?? []).includes(value))
-  const receiving = SCOPES.filter(({ value }) => (topic.configuredScopes.includes(value) || (topic.includedScopes ?? []).includes(value))
-    && !topic.excludedScopes.includes(value))
-  const status = !topic.enabled ? '주제 알림 중지' : topic.channelTypes.length === 0 ? '수신 가능한 전달 방식 없음'
-    : receiving.length === 0 ? '받지 않음' : `${receiving.map(scope => scope.label).join(' · ')} 받는 중`
-  const sources = [topic.direct ? '직접 등록' : '', ...topic.groupNames.map(name => `${name} 그룹`)].filter(Boolean)
+  const aggregates = settings.aggregates
+  const changes: RecipientSettingsUpdate = {
+    ...(draft.daily !== undefined && draft.daily !== aggregates?.daily ? { daily: draft.daily } : {}),
+    ...(draft.weekly !== undefined && draft.weekly !== aggregates?.weekly ? { weekly: draft.weekly } : {}),
+  }
+  const topics = (draft.topics ?? []).filter(choice => {
+    const topic = settings.topics.find(row => row.topicId === choice.topicId)
+    return topic && choice.subscribed !== topicReportSelected(topic)
+  })
+  if (topics.length > 0) changes.topics = topics
+  const changed = Object.keys(changes).length > 0
   const locked = save.isPending || unavailable
-
-  function change(scope: ReportScope, checked: boolean) {
+  function change(next: RecipientSettingsUpdate) {
     if (locked) return
-    setDraft({
-      includedScopes: checked && !topic.configuredScopes.includes(scope)
-        ? [...new Set([...choices.includedScopes, scope])]
-        : choices.includedScopes.filter(value => value !== scope),
-      excludedScopes: checked ? choices.excludedScopes.filter(value => value !== scope)
-        : [...new Set([...choices.excludedScopes, scope])],
-    })
+    setDraft(current => ({ ...current, ...next }))
     setSaved(false)
     save.reset()
   }
-  return <article className="recipient-subscription-row" aria-label={`${topic.topicName} 보고서 알림`} aria-busy={save.isPending}>
-    <header><h3>{topic.topicName}</h3><span className="recipient-subscription-state" data-receiving={topic.enabled && topic.channelTypes.length > 0 && receiving.length > 0}>{status}</span></header>
-    <p className="recipient-subscription-sources">{sources.length ? sources.join(' · ') : '현재 주제의 수신 대상이 아닙니다.'}</p>
-    <p className="recipient-subscription-channels">전달 방식: {topic.channelTypes.length
-      ? topic.channelTypes.map(type => type === 'EMAIL' ? '이메일' : '텔레그램').join(' · ') : '연결된 전달 방식 없음'}</p>
-    <fieldset disabled={locked} className="recipient-subscription-scopes"><legend>받을 보고서</legend>
-      {SCOPES.map(scope => <label key={scope.value}>
-        <input type="checkbox" checked={(topic.configuredScopes.includes(scope.value) || choices.includedScopes.includes(scope.value))
-          && !choices.excludedScopes.includes(scope.value)} onChange={event => change(scope.value, event.target.checked)} />
-        <span>{scope.label}{choices.includedScopes.includes(scope.value) && <small>개인 추가</small>}</span>
-      </label>)}
+  if (!aggregates) return <p role="alert" className="field-error">새 수신 설정을 불러오려면 서버 업데이트가 필요합니다. 잠시 후 다시 열어 주세요.</p>
+  return <div className="recipient-simple-settings" aria-busy={save.isPending}>
+    <fieldset disabled={locked} className="recipient-aggregate-choices"><legend>통합 보고서</legend>
+      <label><input type="checkbox" checked={draft.daily ?? aggregates.daily} onChange={event => change({ daily: event.target.checked })} />일일 통합 받기</label>
+      <label><input type="checkbox" checked={draft.weekly ?? aggregates.weekly} onChange={event => change({ weekly: event.target.checked })} />주간 통합 받기</label>
     </fieldset>
-    {!topic.enabled && <p className="recipient-subscription-note">주제 알림이 꺼져 있어 전달되지 않습니다. 개인 선택은 유지됩니다.</p>}
-    {topic.enabled && topic.channelTypes.length === 0 && <p className="recipient-subscription-note">선택은 저장되며, 전달 방식이 연결되면 알림을 받을 수 있습니다.</p>}
-    <div className="recipient-subscription-actions">
-      {(choices.excludedScopes.length > 0 || choices.includedScopes.length > 0) && <button type="button" className="text-button" disabled={locked}
-        onClick={() => { setDraft({ includedScopes: [], excludedScopes: [] }); setSaved(false); save.reset() }}>개인 설정 초기화</button>}
-      <span>{changed ? '저장하지 않은 변경 사항' : <TransientStatus as="small" message={saved ? '저장했습니다.' : null} />}</span>
-      <button type="button" className="secondary-button" aria-label={`${topic.topicName} 알림 저장`} disabled={locked || !changed}
-        onClick={() => save.mutate(choices, { onSuccess: () => { setDraft(null); setSaved(true) } })}>{save.isPending ? '저장 중…' : '저장'}</button>
-    </div>
+    <p className="recipient-settings-intro">통합 보고서는 아래 주제 선택과 별도로 받습니다.</p>
+    {aggregates.channelTypes.length === 0 && <p className="recipient-subscription-note">이메일·텔레그램 탭에서 전달 방식을 연결해 주세요. 선택한 설정은 유지됩니다.</p>}
+    <fieldset disabled={locked} className="recipient-simple-topics"><legend>주제 보고서</legend>
+      <p className="recipient-settings-intro">받고 싶은 주제만 체크해 주세요.</p>
+      {settings.topics.length === 0 ? <p className="recipient-subscriptions-empty">등록된 주제가 없습니다.</p>
+        : <ul>{settings.topics.map(topic => {
+          const selected = topicReportSelected(topic)
+          const checked = draft.topics?.find(choice => choice.topicId === topic.topicId)?.subscribed ?? selected
+          const status = !selected ? '받지 않음' : !topic.enabled ? '주제 알림 중지'
+            : topic.channelTypes.length === 0 ? '연결 필요' : '받는 중'
+          return <li key={topic.topicId}><label><input type="checkbox" checked={checked}
+            onChange={event => change({ topics: [...(draft.topics ?? []).filter(choice => choice.topicId !== topic.topicId),
+              { topicId: topic.topicId, subscribed: event.target.checked }] })} /><span>{topic.topicName}</span></label>
+            <small>{status}</small></li>
+        })}</ul>}
+    </fieldset>
+    <div className="recipient-settings-save"><span>{changed ? '저장하지 않은 변경 사항' : <TransientStatus as="small" message={saved ? '저장했습니다.' : null} />}</span>
+      <button type="button" className="primary-button" disabled={locked || !changed}
+        onClick={() => save.mutate(changes, { onSuccess: () => { setDraft({}); setSaved(true) } })}>{save.isPending ? '저장 중…' : '저장'}</button></div>
     {save.error && <p className="field-error" role="alert">{save.error instanceof ApiError ? save.error.message : '알림 설정을 저장하지 못했습니다. 다시 시도해 주세요.'}</p>}
-  </article>
+  </div>
 }

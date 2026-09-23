@@ -1,12 +1,57 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { QueryClient } from '@tanstack/react-query'
-import { recipientReportSubscriptionsOptions, saveRecipientReportSubscriptionOptions } from '../src/api/recipientReportSubscriptions.ts'
+import { recipientReportSubscriptionsOptions, saveRecipientReportSubscriptionOptions, saveRecipientSettingsOptions } from '../src/api/recipientReportSubscriptions.ts'
 
 const row = { topicId: 31, topicName: '반도체', enabled: true, configuredScopes: ['RUN', 'DAILY', 'WEEKLY'],
   includedScopes: [], excludedScopes: [], channelTypes: ['EMAIL'], direct: false, groupNames: ['기술'] }
 const choices = (excludedScopes = [], includedScopes = []) => ({ excludedScopes, includedScopes })
 const response = result => new Response(JSON.stringify({ isSuccess: true, code: 'COMMON200', message: '성공입니다.', result }))
+
+test('one atomic patch sends only changed aggregate choices and topics and isolates the recipient cache', async context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const key = recipientReportSubscriptionsOptions(1).queryKey
+  const otherKey = recipientReportSubscriptionsOptions(2).queryKey
+  const initial = { recipientId: 1, aggregates: { daily: true, weekly: false, channelTypes: ['EMAIL'] }, topics: [row] }
+  const other = { ...initial, recipientId: 2 }
+  client.setQueryData(key, initial)
+  client.setQueryData(otherKey, other)
+  const changes = { weekly: true, topics: [{ topicId: 31, subscribed: false }] }
+  const updated = { ...initial, aggregates: { ...initial.aggregates, weekly: true }, topics: [{ ...row, excludedScopes: ['RUN'] }] }
+  const calls = []
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    calls.push({ url, method: init.method, body: JSON.parse(init.body) })
+    return response(updated)
+  })
+  await client.getMutationCache().build(client, saveRecipientSettingsOptions(client, 1)).execute(changes)
+  assert.deepEqual(calls, [{ url: '/api/notifications/recipients/1/report-subscriptions', method: 'PATCH', body: changes }])
+  assert.deepEqual(client.getQueryData(key), updated)
+  assert.deepEqual(client.getQueryData(otherKey), other)
+})
+
+test('aggregate save failures preserve saved state and a successful retry cannot be overwritten by a stale read', async context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const key = recipientReportSubscriptionsOptions(1).queryKey
+  const initial = { recipientId: 1, aggregates: { daily: false, weekly: false, channelTypes: [] }, topics: [] }
+  const updated = { ...initial, aggregates: { ...initial.aggregates, weekly: true } }
+  client.setQueryData(key, initial)
+  let failure = true
+  context.mock.method(globalThis, 'fetch', async () => failure
+    ? new Response(JSON.stringify({ isSuccess: false, code: 'COMMON500', message: '저장 실패', result: {} }), { status: 500 })
+    : response(updated))
+  const mutation = client.getMutationCache().build(client, saveRecipientSettingsOptions(client, 1))
+  await assert.rejects(mutation.execute({ weekly: true }), /저장 실패/)
+  assert.deepEqual(client.getQueryData(key), initial)
+  const stale = Promise.withResolvers()
+  const oldRequest = client.fetchQuery({ queryKey: key, queryFn: () => stale.promise }).catch(() => null)
+  failure = false
+  await mutation.execute({ weekly: true })
+  stale.resolve(initial)
+  await oldRequest
+  assert.deepEqual(client.getQueryData(key), updated)
+})
 
 test('recipient subscription reads keep recipient IDs, original target attribution and abort signals', async context => {
   const signal = new AbortController().signal

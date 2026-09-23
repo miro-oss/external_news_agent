@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
-import { ApiError, notificationGet, notificationPut } from './client.ts'
+import { ApiError, notificationGet, notificationPatch, notificationPut } from './client.ts'
 import type { NotificationChannelType, ReportScope } from './types'
 
 export type RecipientReportSubscription = {
@@ -13,9 +13,32 @@ export type RecipientReportSubscription = {
   direct: boolean
   groupNames: string[]
 }
-export type RecipientReportSubscriptions = { recipientId: number; topics: RecipientReportSubscription[] }
+export type AggregateSubscriptions = { daily: boolean; weekly: boolean; channelTypes: NotificationChannelType[] }
+export type RecipientReportSubscriptions = { recipientId: number; topics: RecipientReportSubscription[]; aggregates: AggregateSubscriptions }
+export type RecipientSettingsUpdate = { daily?: boolean; weekly?: boolean; topics?: { topicId: number; subscribed: boolean }[] }
 export type RecipientReportChoices = Pick<RecipientReportSubscription, 'includedScopes' | 'excludedScopes'>
 export const reportSubscriptionsKey = ['notifications', 'report-subscriptions'] as const
+
+export function topicReportSelected(topic: RecipientReportSubscription) {
+  return (topic.configuredScopes.includes('RUN') || (topic.includedScopes ?? []).includes('RUN')) && !topic.excludedScopes.includes('RUN')
+}
+
+export function saveRecipientSettingsOptions(client: QueryClient, recipientId: number) {
+  const queryKey = recipientReportSubscriptionsOptions(recipientId).queryKey
+  return {
+    mutationKey: ['recipient-report-settings-save', recipientId],
+    mutationFn: async (changes: RecipientSettingsUpdate) => {
+      const result = await notificationPatch<RecipientReportSubscriptions>(`/recipients/${recipientId}/report-subscriptions`, changes)
+      if (!result.aggregates) throw new ApiError('SERVER_UPDATE_REQUIRED', '알림 설정을 저장하려면 서버 업데이트가 필요합니다. 잠시 후 다시 시도해 주세요.')
+      return result
+    },
+    retry: false,
+    onSuccess: async (settings: RecipientReportSubscriptions) => {
+      await client.cancelQueries({ queryKey, exact: true })
+      client.setQueryData(queryKey, settings)
+    },
+  }
+}
 
 export function recipientReportSubscriptionsOptions(recipientId: number) {
   return {

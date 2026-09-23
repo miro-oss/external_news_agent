@@ -91,7 +91,8 @@ public class ReportNotificationAutomationService {
     public void enqueueCompletedReport(NewsReport report) {
         List<Long> runIds = report.getReportScope() != ReportScope.RUN ? report.getSourceRunIds()
                 : report.getRunId() == null ? List.of() : List.of(report.getRunId());
-        if (runIds.isEmpty()) return;
+        if (runIds.isEmpty() && report.getReportScope() == ReportScope.RUN) return;
+        Map<Long, Boolean> aggregatePreferences = subscriptions.aggregatePreferences(report.getReportScope());
         Map<String, NotificationDeliveryPlanService.PreparedTarget> targets = new LinkedHashMap<>();
         Map<String, Set<Long>> origins = new LinkedHashMap<>();
         Map<String, Set<Long>> personalOrigins = new LinkedHashMap<>();
@@ -135,6 +136,16 @@ public class ReportNotificationAutomationService {
                     .filter(target -> sharedScope || includedRecipients.contains(target.recipientId()))
                     .forEach(target -> addTarget(report.getReportScope(), targets, sharedScope ? origins : personalOrigins, target, List.of(topicId)));
         }
+        // A recipient's aggregate choice supersedes every topic/run automatic path.
+        targets.entrySet().removeIf(entry -> aggregatePreferences.containsKey(entry.getValue().recipientId()));
+        Set<String> aggregateTargets = new HashSet<>();
+        List<Long> aggregateRecipients = aggregatePreferences.entrySet().stream().filter(Map.Entry::getValue)
+                .map(Map.Entry::getKey).filter(this::activeRecipient).toList();
+        if (!aggregateRecipients.isEmpty()) {
+            plans.resolveTargets(List.of(), channels.findAll().stream().filter(NotificationChannel::isActive).toList(), aggregateRecipients).stream()
+                    .filter(target -> target.channelType() != ChannelType.TELEGRAM || target.onboarded())
+                    .forEach(target -> { targets.put(targetKey(target), target); aggregateTargets.add(targetKey(target)); });
+        }
         int queuedCount = 0;
         for (var target : targets.values()) {
             Integer exists = jdbc.queryForObject("SELECT COUNT(*) FROM report_notification_outbox WHERE report_id=? AND recipient_id=? AND channel_id=?",
@@ -145,11 +156,12 @@ public class ReportNotificationAutomationService {
             LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
             jdbc.update("INSERT INTO notification_delivery_batches(id,report_id,idempotency_key,requested_at) VALUES(?,?,?,?)",
                     batchId, report.getId(), "auto:" + report.getId() + ":" + target.recipientId() + ":" + target.channel().getId(), now);
-            jdbc.update("INSERT INTO report_notification_outbox(report_id,recipient_id,channel_id,batch_id,recipient_name,address,subject,body,available_at,source_topic_ids,personal_topic_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            jdbc.update("INSERT INTO report_notification_outbox(report_id,recipient_id,channel_id,batch_id,recipient_name,address,subject,body,available_at,source_topic_ids,personal_topic_ids,aggregate_yn) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     report.getId(), target.recipientId(), target.channel().getId(), batchId, target.recipientName(), target.address(),
                     message.subject(), String.join("\n", message.chunks()), now,
                     IDS.convertToDatabaseColumn(List.copyOf(origins.getOrDefault(targetKey(target), Set.of()))),
-                    IDS.convertToDatabaseColumn(List.copyOf(personalOrigins.getOrDefault(targetKey(target), Set.of()))));
+                    IDS.convertToDatabaseColumn(List.copyOf(personalOrigins.getOrDefault(targetKey(target), Set.of()))),
+                    yn(aggregateTargets.contains(targetKey(target))));
             queuedCount++;
         }
         log.info("보고서 자동 전달 예약. reportId={} reportScope={} targetCount={} queuedCount={}",

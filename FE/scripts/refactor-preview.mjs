@@ -48,6 +48,7 @@ let reportSubscriptionsLoadError = false;
 let reportSubscriptionsSaveError = false;
 let subscriptionExclusions = {};
 let subscriptionInclusions = {};
+let aggregateSubscriptions = {};
 let groupMembersLoadError = false;
 let groupNameSaveError = false;
 let groupMembersSaveError = false;
@@ -115,7 +116,15 @@ function reportSubscriptions(recipientId) {
                 && channels.some(channel => channel.id === destination.channelId && channel.active)).map(destination => destination.channelType))] : [],
         }];
     }).sort((a, b) => a.topicName.localeCompare(b.topicName, 'ko') || a.topicId - b.topicId);
-    return { recipientId, topics: subscriptionTopics };
+    const inherited = scope => subscriptionTopics.some(topic => topic.enabled && topic.channelTypes.length > 0
+        && (topic.configuredScopes.includes(scope) || topic.includedScopes.includes(scope)) && !topic.excludedScopes.includes(scope));
+    return { recipientId, topics: subscriptionTopics, aggregates: {
+        daily: aggregateSubscriptions[`${recipientId}:DAILY`] ?? inherited('DAILY'),
+        weekly: aggregateSubscriptions[`${recipientId}:WEEKLY`] ?? inherited('WEEKLY'),
+        channelTypes: recipient.active ? [...new Set(recipient.destinations.filter(destination =>
+            destination.use && destination.onboarded && destination.address?.trim()
+            && channels.some(channel => channel.id === destination.channelId && channel.active)).map(destination => destination.channelType))] : [],
+    } };
 }
 function runSettings(run) {
     const delivery = runDeliverySettings.find(settings => settings.runId === run.runId)?.delivery;
@@ -310,6 +319,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 reportSubscriptionsSaveError = false;
                                 subscriptionExclusions = {};
                                 subscriptionInclusions = {};
+                                aggregateSubscriptions = {};
                                 loadingDelayMs = 0;
                                 loadingPath = '/api/';
                                 usageCalls = 12;
@@ -331,6 +341,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 };
                                 subscriptionExclusions = variant === 'empty' ? {} : { '1:31': ['DAILY'], '1:9': ['WEEKLY'] };
                                 subscriptionInclusions = {};
+                                aggregateSubscriptions = {};
                                 reportSubscriptionsSaveError ||= variant === 'opt-in-save-error';
                                 return json(res, { variant });
                             }
@@ -738,7 +749,27 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             const recipientId = Number(match[1]);
                             if (!recipients.some(recipient => recipient.id === recipientId))
                                 return json(res, { isSuccess: false, code: 'RECIPIENT404', message: '수신자를 찾을 수 없습니다.', result: {} }, 404);
-                            if (method === 'PUT' && match[2]) {
+                            if (method === 'PATCH' && !match[2]) {
+                                if (reportSubscriptionsSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '알림 설정을 저장하지 못했습니다. 다시 시도해 주세요.', result: {} }, 500);
+                                const choices = body.topics ?? [];
+                                if (body.daily == null && body.weekly == null && choices.length === 0)
+                                    return json(res, { isSuccess: false, code: 'COMMON400', message: '변경할 알림 설정을 선택해 주세요.', result: {} }, 400);
+                                if (!Array.isArray(choices) || choices.some(choice => !Number.isSafeInteger(choice?.topicId) || choice.topicId <= 0 || typeof choice.subscribed !== 'boolean')
+                                    || new Set(choices.map(choice => choice.topicId)).size !== choices.length)
+                                    return json(res, { isSuccess: false, code: 'COMMON400', message: '주제 수신 설정이 올바르지 않습니다.', result: {} }, 400);
+                                if (choices.some(choice => !topics.some(topic => topic.id === choice.topicId)))
+                                    return json(res, { isSuccess: false, code: 'COMMON404', message: '수집 주제를 찾을 수 없습니다.', result: {} }, 404);
+                                for (const scope of ['DAILY', 'WEEKLY']) if (body[scope.toLowerCase()] != null)
+                                    aggregateSubscriptions[`${recipientId}:${scope}`] = body[scope.toLowerCase()];
+                                for (const choice of choices) {
+                                    const key = `${recipientId}:${choice.topicId}`;
+                                    subscriptionExclusions[key] = (subscriptionExclusions[key] ?? []).filter(scope => scope !== 'RUN');
+                                    subscriptionInclusions[key] = (subscriptionInclusions[key] ?? []).filter(scope => scope !== 'RUN');
+                                    if (!choice.subscribed) subscriptionExclusions[key].push('RUN');
+                                    else if (!policies[choice.topicId]?.run) subscriptionInclusions[key].push('RUN');
+                                }
+                                result = reportSubscriptions(recipientId);
+                            } else if (method === 'PUT' && match[2]) {
                                 if (reportSubscriptionsSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '알림 설정을 저장하지 못했습니다. 다시 시도해 주세요.', result: {} }, 500);
                                 if (!Array.isArray(body.excludedScopes) || body.excludedScopes.length > 3 || body.excludedScopes.some(scope => !['RUN', 'DAILY', 'WEEKLY'].includes(scope)))
                                     return json(res, { isSuccess: false, code: 'COMMON400', message: '제외할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.', result: {} }, 400);

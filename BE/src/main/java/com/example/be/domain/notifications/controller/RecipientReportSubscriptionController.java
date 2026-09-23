@@ -19,13 +19,25 @@ public class RecipientReportSubscriptionController {
     private final RecipientReportSubscriptionService subscriptions;
 
     @GetMapping
-    @Operation(summary = "수신자 주제 보고서 알림 조회", description = "직접 또는 그룹으로 지정된 주제와 저장한 개인 추가·제외를 주제명, ID 순으로 반환합니다. configuredScopes와 includedScopes의 합집합에서 excludedScopes를 제외한 종류를 선택한 상태입니다. 현재 연결된 채널만 수신 가능으로 표시합니다.")
+    @Operation(summary = "수신자 보고서 알림 조회", description = "aggregates는 주제와 별개인 일일·주간 통합 수신과 사용 가능한 전달 방식입니다. 아직 직접 저장하지 않은 통합 종류는 기존 수신 경로를 유지합니다. topics는 직접/그룹 대상 및 개인 선택을 주제명, ID 순으로 반환하며 주제 체크는 RUN 수신에 사용합니다.")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다."),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "RECIPIENT404 / 수신자를 찾을 수 없습니다.")
     })
     public ApiResponse<RecipientReportSubscriptionService.Subscriptions> get(@PathVariable Long recipientId) {
         return ApiResponse.of(GeneralSuccessCode.OK, subscriptions.get(recipientId));
+    }
+
+    @PatchMapping
+    @Operation(summary = "수신자 통합 보고서 및 주제 수신 설정", description = "변경한 daily/weekly와 topics[{topicId,subscribed}]만 원자적으로 저장합니다. 통합 수신은 주제와 독립적이며 명시적으로 저장한 종류는 기존 자동 전달 경로보다 우선합니다. 주제 선택은 RUN만 바꾸며 다른 수신자·공통 정책은 유지합니다. 저장 자체로 재발송하지 않습니다.")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다."),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "변경할 알림 설정을 선택해 주세요. / 주제 수신 설정이 올바르지 않습니다."),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "RECIPIENT404 수신자 없음 / COMMON404 수집 주제 없음")
+    })
+    public ApiResponse<RecipientReportSubscriptionService.Subscriptions> update(@PathVariable Long recipientId,
+            @RequestBody RecipientReportSubscriptionService.SettingsUpdate request) {
+        return ApiResponse.of(GeneralSuccessCode.OK, subscriptions.update(recipientId, request));
     }
 
     @PutMapping("/{topicId}")

@@ -8,6 +8,8 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /** Individual choices augment topic policies; exclusions also apply to captured run targets. */
 @Repository
@@ -32,15 +34,28 @@ public class ReportSubscriptionStore {
     }
 
     @Transactional(readOnly = true)
+    public Map<Long, Boolean> aggregatePreferences(ReportScope scope) {
+        if (scope == ReportScope.RUN) return Map.of();
+        return jdbc.query("SELECT recipient_id,enabled_yn FROM recipient_aggregate_subscriptions WHERE report_scope=?",
+                (rs, n) -> Map.entry(rs.getLong("recipient_id"), "Y".equals(rs.getString("enabled_yn"))), scope.name())
+                .stream().collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    @Transactional(readOnly = true)
     public boolean stillAllowed(Long outboxId, Long reportId, Long recipientId) {
         var rows = jdbc.query("""
-                SELECT o.source_topic_ids,o.personal_topic_ids,o.channel_id,r.report_scope FROM report_notification_outbox o
+                SELECT o.source_topic_ids,o.personal_topic_ids,o.aggregate_yn,o.channel_id,r.report_scope FROM report_notification_outbox o
                 JOIN news_reports r ON r.id=o.report_id WHERE o.id=? AND o.report_id=? AND o.recipient_id=?
                 """, (rs, n) -> new Consent(rs.getString("source_topic_ids"), rs.getString("personal_topic_ids"),
-                        rs.getLong("channel_id"), ReportScope.valueOf(rs.getString("report_scope"))),
+                        rs.getLong("channel_id"), ReportScope.valueOf(rs.getString("report_scope")), "Y".equals(rs.getString("aggregate_yn"))),
                 outboxId, reportId, recipientId);
         if (rows.isEmpty()) return false;
         var consent = rows.getFirst();
+        List<String> preference = consent.scope() == ReportScope.RUN ? List.of() : jdbc.queryForList(
+                "SELECT enabled_yn FROM recipient_aggregate_subscriptions WHERE recipient_id=? AND report_scope=?",
+                String.class, recipientId, consent.scope().name());
+        if (preference.contains("N")) return false;
+        if (consent.aggregate()) return preference.contains("Y");
         if (consent.topicIds() != null || consent.personalTopicIds() != null) {
             if (!allowedTopics(recipientId, consent.scope(), IDS.convertToEntityAttribute(consent.topicIds())).isEmpty()) return true;
             return allowedTopics(recipientId, consent.scope(), IDS.convertToEntityAttribute(consent.personalTopicIds())).stream()
@@ -73,5 +88,5 @@ public class ReportSubscriptionStore {
         return count != null && count > 0;
     }
 
-    private record Consent(String topicIds, String personalTopicIds, Long channelId, ReportScope scope) { }
+    private record Consent(String topicIds, String personalTopicIds, Long channelId, ReportScope scope, boolean aggregate) { }
 }

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { notificationDelete, notificationGet, notificationPost, notificationPut } from './client'
 import { reportShareOptions } from './reportShare'
-import { recipientReportSubscriptionsOptions, reportSubscriptionsKey, saveRecipientReportSubscriptionOptions } from './recipientReportSubscriptions'
+import { recipientReportSubscriptionsOptions, reportSubscriptionsKey, saveRecipientReportSubscriptionOptions, saveRecipientSettingsOptions } from './recipientReportSubscriptions'
 
 export type DeliveryPolicy = {
   enabled: boolean
@@ -59,6 +59,9 @@ export function useRecipientReportSubscriptions(recipientId: number) {
 }
 export function useSaveRecipientReportSubscription(recipientId: number, topicId: number) {
   return useMutation(saveRecipientReportSubscriptionOptions(useQueryClient(), recipientId, topicId))
+}
+export function useSaveRecipientSettings(recipientId: number) {
+  return useMutation(saveRecipientSettingsOptions(useQueryClient(), recipientId))
 }
 export function useEmailReadiness() {
   return useQuery({ queryKey: ['notifications', 'email-readiness'],

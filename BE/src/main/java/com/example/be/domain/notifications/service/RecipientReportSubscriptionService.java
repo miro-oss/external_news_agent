@@ -31,7 +31,17 @@ public class RecipientReportSubscriptionService {
     private static final String INVALID_SCOPES = "제외할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.";
     private static final String INVALID_INCLUSIONS = "추가할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.";
 
-    public record Subscriptions(Long recipientId, List<TopicSubscription> topics) { }
+    public record Subscriptions(Long recipientId, List<TopicSubscription> topics, Aggregates aggregates) {
+        public Subscriptions(Long recipientId, List<TopicSubscription> topics) {
+            this(recipientId, topics, new Aggregates(false, false, List.of()));
+        }
+    }
+
+    public record Aggregates(boolean daily, boolean weekly, List<String> channelTypes) { }
+    public record TopicChoice(Long topicId, Boolean subscribed) { }
+    public record SettingsUpdate(@Schema(description = "일일 통합 수신. 생략/null은 유지") Boolean daily,
+                                 @Schema(description = "주간 통합 수신. 생략/null은 유지") Boolean weekly,
+                                 @Schema(description = "변경할 주제의 RUN 수신 선택만 전달") List<TopicChoice> topics) { }
 
     public record TopicSubscription(Long topicId, String topicName,
                                     @Schema(description = "저장된 주제 정책의 활성 여부") boolean enabled,
@@ -60,7 +70,59 @@ public class RecipientReportSubscriptionService {
                         inclusions.getOrDefault(policy.topicId(), List.of())))
                 .filter(row -> row.direct() || !row.groupNames().isEmpty() || !row.excludedScopes().isEmpty() || !row.includedScopes().isEmpty())
                 .toList();
-        return new Subscriptions(recipientId, rows);
+        return new Subscriptions(recipientId, rows, new Aggregates(aggregateChoice(recipientId, "DAILY", rows),
+                aggregateChoice(recipientId, "WEEKLY", rows), usableChannels(recipient)));
+    }
+
+    @Transactional
+    public Subscriptions update(Long recipientId, SettingsUpdate request) {
+        management.findRecipient(recipientId);
+        if (request == null || (request.daily() == null && request.weekly() == null
+                && (request.topics() == null || request.topics().isEmpty())))
+            throw new GeneralException(GeneralErrorCode.BAD_REQUEST, "변경할 알림 설정을 선택해 주세요.");
+        List<TopicChoice> choices = request.topics() == null ? List.of() : request.topics();
+        if (choices.stream().anyMatch(choice -> choice == null || choice.topicId() == null || choice.topicId() <= 0 || choice.subscribed() == null)
+                || choices.stream().map(TopicChoice::topicId).distinct().count() != choices.size())
+            throw new GeneralException(GeneralErrorCode.BAD_REQUEST, "주제 수신 설정이 올바르지 않습니다.");
+        for (TopicChoice choice : choices) if (!topics.existsById(choice.topicId()))
+            throw new GeneralException(GeneralErrorCode.NOT_FOUND, "수집 주제를 찾을 수 없습니다.");
+        jdbc.queryForObject("SELECT id FROM notification_recipients WHERE id=? FOR UPDATE", Long.class, recipientId);
+        saveAggregate(recipientId, "DAILY", request.daily());
+        saveAggregate(recipientId, "WEEKLY", request.weekly());
+        var current = get(recipientId).topics().stream().collect(Collectors.toMap(TopicSubscription::topicId, row -> row));
+        for (TopicChoice choice : choices) {
+            TopicSubscription row = current.get(choice.topicId());
+            var excluded = new ArrayList<>(row == null ? List.<String>of() : row.excludedScopes());
+            var included = new ArrayList<>(row == null ? List.<String>of() : row.includedScopes());
+            excluded.remove("RUN"); included.remove("RUN");
+            if (!choice.subscribed()) excluded.add("RUN");
+            else if (row == null || !row.configuredScopes().contains("RUN")) included.add("RUN");
+            save(recipientId, choice.topicId(), new Exclusions(excluded, included));
+        }
+        return get(recipientId);
+    }
+
+    private void saveAggregate(Long recipientId, String scope, Boolean enabled) {
+        if (enabled == null) return;
+        jdbc.update("DELETE FROM recipient_aggregate_subscriptions WHERE recipient_id=? AND report_scope=?", recipientId, scope);
+        jdbc.update("INSERT INTO recipient_aggregate_subscriptions(recipient_id,report_scope,enabled_yn) VALUES(?,?,?)",
+                recipientId, scope, enabled ? "Y" : "N");
+    }
+
+    private boolean aggregateChoice(Long recipientId, String scope, List<TopicSubscription> rows) {
+        List<String> saved = jdbc.queryForList("SELECT enabled_yn FROM recipient_aggregate_subscriptions WHERE recipient_id=? AND report_scope=?",
+                String.class, recipientId, scope);
+        if (!saved.isEmpty()) return "Y".equals(saved.getFirst());
+        return rows.stream().anyMatch(row -> row.enabled() && !row.channelTypes().isEmpty()
+                && (row.configuredScopes().contains(scope) || row.includedScopes().contains(scope)) && !row.excludedScopes().contains(scope));
+    }
+
+    private List<String> usableChannels(NotificationRecipient recipient) {
+        if (!recipient.isActive()) return List.of();
+        return recipient.getDestinations().stream().filter(RecipientDestination::isUse)
+                .filter(destination -> StringUtils.hasText(destination.getAddress()) && destination.getChannel().isActive())
+                .filter(destination -> destination.getChannel().getChannelType() == ChannelType.EMAIL || destination.isOnboarded())
+                .map(destination -> destination.getChannel().getChannelType().name()).distinct().sorted().toList();
     }
 
     @Transactional

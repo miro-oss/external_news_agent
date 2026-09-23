@@ -46,6 +46,18 @@ class RecipientReportSubscriptionControllerTest {
     }
 
     @Test
+    void patchesGlobalAggregateAndTopicRunChoicesTogether() throws Exception {
+        when(service.update(eq(2L), any())).thenReturn(new RecipientReportSubscriptionService.Subscriptions(2L, List.of(),
+                new RecipientReportSubscriptionService.Aggregates(true, false, List.of("EMAIL"))));
+        mvc.perform(patch("/api/notifications/recipients/2/report-subscriptions").contentType("application/json")
+                        .content("{\"daily\":true,\"topics\":[{\"topicId\":1,\"subscribed\":false}]}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.aggregates.daily").value(true))
+                .andExpect(jsonPath("$.result.aggregates.weekly").value(false));
+        verify(service).update(2L, new RecipientReportSubscriptionService.SettingsUpdate(true, null,
+                List.of(new RecipientReportSubscriptionService.TopicChoice(1L, false))));
+    }
+
+    @Test
     void preservesSpecifiedValidationAndMissingRecipientErrors() throws Exception {
         when(service.save(eq(2L), eq(1L), any())).thenThrow(new GeneralException(GeneralErrorCode.BAD_REQUEST,
                 "제외할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요."));

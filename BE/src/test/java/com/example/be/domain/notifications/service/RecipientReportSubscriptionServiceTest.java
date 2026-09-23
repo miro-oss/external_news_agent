@@ -28,6 +28,18 @@ class RecipientReportSubscriptionServiceTest {
     }
 
     @Test
+    void invalidGlobalOrTopicPatchIsRejectedBeforeAnyWrite() {
+        assertThatThrownBy(() -> service.update(2L, new RecipientReportSubscriptionService.SettingsUpdate(null, null, List.of())))
+                .hasMessage("변경할 알림 설정을 선택해 주세요.");
+        for (var choices : List.of(Arrays.asList((RecipientReportSubscriptionService.TopicChoice) null),
+                List.of(new RecipientReportSubscriptionService.TopicChoice(1L, null)),
+                List.of(new RecipientReportSubscriptionService.TopicChoice(1L, true), new RecipientReportSubscriptionService.TopicChoice(1L, false))))
+            assertThatThrownBy(() -> service.update(2L, new RecipientReportSubscriptionService.SettingsUpdate(true, null, choices)))
+                    .hasMessage("주제 수신 설정이 올바르지 않습니다.");
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test
     void rejectsMissingNullUnknownAndOversizedExclusionsBeforeAnyWrite() {
         List<RecipientReportSubscriptionService.Exclusions> invalid = Arrays.asList(null,
                 new RecipientReportSubscriptionService.Exclusions(null),

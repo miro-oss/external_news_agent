@@ -42,6 +42,76 @@ class NotificationAutomationOracleIntegrationTests {
     @Autowired RunDeliverySettingsService runSettings;
 
     @Test
+    void aggregateSubscriptionWorksWithoutTopicsAndUnsubscribeCancelsQueuedDelivery() {
+        var first = recipient(true); var other = recipient(true);
+        var saved = subscriptions.update(first.getId(), new RecipientReportSubscriptionService.SettingsUpdate(null, true, null));
+        assertTrue(saved.topics().isEmpty()); assertTrue(saved.aggregates().weekly());
+        assertFalse(saved.aggregates().daily()); assertFalse(subscriptions.get(other.getId()).aggregates().weekly());
+        var weekly = aggregate(ReportScope.WEEKLY, List.of(), 30);
+        automation.enqueueCompletedReport(weekly);
+        assertEquals(List.of(first.getId()), jdbc.queryForList("SELECT recipient_id FROM report_notification_outbox WHERE report_id=?", Long.class, weekly.getId()));
+        var queued = work(weekly.getId(), first);
+        assertTrue(outbox.destinationStillActive(queued));
+        assertEquals("Y", jdbc.queryForObject("SELECT aggregate_yn FROM report_notification_outbox WHERE id=?", String.class, queued.id()));
+        subscriptions.update(first.getId(), new RecipientReportSubscriptionService.SettingsUpdate(null, false, null));
+        assertFalse(outbox.destinationStillActive(queued));
+        assertEquals(1, outbox.deliveries(weekly.getId()).size());
+    }
+
+    @Test
+    void topicUnsubscribeChangesOnlyRunWhileAggregateChoicesRemainIndependent() {
+        var topic = topic(); var run = run(topic); var recipient = recipient(true);
+        var policy = new ReportNotificationAutomationService.Policy(true, true, true, true, List.of(), List.of(recipient.getId()), List.of(2L));
+        automation.savePolicy(topic.getId(), policy);
+        subscriptions.update(recipient.getId(), new RecipientReportSubscriptionService.SettingsUpdate(true, true, null));
+        var saved = subscriptions.update(recipient.getId(), new RecipientReportSubscriptionService.SettingsUpdate(null, null,
+                List.of(new RecipientReportSubscriptionService.TopicChoice(topic.getId(), false))));
+        assertTrue(saved.aggregates().daily()); assertTrue(saved.aggregates().weekly());
+        assertEquals(List.of("RUN"), saved.topics().getFirst().excludedScopes());
+        assertEquals(policy, automation.policy(topic.getId()));
+        var runReport = reports.reserve(run.getId(), now());
+        reports.complete(runReport.reportId(), new ReportDocument("주제 보고서", "요약", "fallback"), now());
+        assertTrue(outbox.deliveries(runReport.reportId()).isEmpty());
+        var weekly = aggregate(ReportScope.WEEKLY, List.of(run.getId()), 31);
+        automation.enqueueCompletedReport(weekly);
+        automation.enqueueCompletedReport(em.find(NewsReport.class, weekly.getSourceReportIds().getFirst()));
+        assertEquals(1, outbox.deliveries(weekly.getId()).size());
+        assertEquals(1, outbox.deliveries(weekly.getSourceReportIds().getFirst()).size());
+    }
+
+    @Test
+    void aggregateOffOverridesCapturedRunTargetsAndPreviouslyQueuedTopicConsent() {
+        var topic = topic(); var run = run(topic); var recipient = recipient(true);
+        var selection = new com.example.be.domain.collection.dto.req.CollectionRunReqDTO.Delivery();
+        selection.setMode("ONCE"); selection.setEnabled(true); selection.setDaily(true);
+        selection.setRecipientIds(List.of(recipient.getId())); selection.setChannelIds(List.of(2L));
+        runDelivery.save(run.getId(), List.of(topic.getId()), runDelivery.prepare(selection));
+        var before = aggregate(ReportScope.DAILY, List.of(run.getId()), 32);
+        automation.enqueueCompletedReport(before);
+        var queued = work(before.getId(), recipient);
+        assertTrue(outbox.destinationStillActive(queued));
+        subscriptions.update(recipient.getId(), new RecipientReportSubscriptionService.SettingsUpdate(false, null, null));
+        assertFalse(outbox.destinationStillActive(queued));
+        var after = aggregate(ReportScope.DAILY, List.of(run.getId()), 33);
+        automation.enqueueCompletedReport(after);
+        assertTrue(outbox.deliveries(after.getId()).isEmpty());
+        assertTrue(runSnapshots.find(run.getId()).orElseThrow().daily());
+    }
+
+    @Test
+    void partialAggregateUpdatePreservesOtherScopeAndInvalidTopicDoesNotPartiallySave() {
+        var recipient = recipient(true);
+        subscriptions.update(recipient.getId(), new RecipientReportSubscriptionService.SettingsUpdate(true, true, null));
+        var saved = subscriptions.update(recipient.getId(), new RecipientReportSubscriptionService.SettingsUpdate(null, false, null));
+        assertTrue(saved.aggregates().daily()); assertFalse(saved.aggregates().weekly());
+        assertThrows(com.example.be.global.apiPayload.exception.GeneralException.class,
+                () -> subscriptions.update(recipient.getId(), new RecipientReportSubscriptionService.SettingsUpdate(false, true,
+                        List.of(new RecipientReportSubscriptionService.TopicChoice(Long.MAX_VALUE, false)))));
+        var unchanged = subscriptions.get(recipient.getId());
+        assertTrue(unchanged.aggregates().daily()); assertFalse(unchanged.aggregates().weekly());
+    }
+
+    @Test
     void personalWeeklyOptInQueuesOnlyThatGroupMemberAndResetCancelsPendingConsent() {
         var topic = topic(); var run = run(topic); var first = recipient(true); var second = recipient(true);
         var group = group(first, second);
