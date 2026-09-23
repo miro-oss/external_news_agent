@@ -209,6 +209,37 @@ class ReportPersistenceServiceTest {
     }
 
     @Test
+    void replacesRunReportWithoutSchedulingDuplicateDelivery() {
+        LocalDateTime generatedAt = LocalDateTime.of(2026, 9, 23, 10, 30);
+        CollectionRun run = CollectionRun.builder().id(42L).build();
+        NewsReport report = NewsReport.builder()
+                .id(17L)
+                .run(run)
+                .title("기존 보고서")
+                .markdownBody("# 기존 보고서")
+                .modelName("old-model")
+                .reportStatus(ReportStatus.GENERATED)
+                .generatedAt(generatedAt.minusHours(1))
+                .build();
+        ReportDocument document = new ReportDocument(
+                "복구 보고서", "# 복구 보고서", "configured-model", "report.ko.v1", "gemini",
+                100L, 20L, new BigDecimal("0.001"), BigDecimal.ZERO, ReportStatus.GENERATED,
+                java.util.List.of(501L), java.util.List.of(502L));
+        when(reportRepository.findRunIdById(17L)).thenReturn(Optional.of(42L));
+        when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
+        when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
+
+        assertEquals(17L, service.replace(17L, document, generatedAt));
+
+        assertEquals("복구 보고서", report.getTitle());
+        assertEquals("# 복구 보고서", report.getMarkdownBody());
+        assertEquals("configured-model", report.getModelName());
+        assertEquals(generatedAt, report.getGeneratedAt());
+        assertEquals(java.util.List.of(501L), report.getReflectedFindingIds());
+        verifyNoInteractions(notificationAutomation);
+    }
+
+    @Test
     void concurrentCallerReusesReservationWithoutCallingAgent() {
         CollectionRun run = runWithItem(RunItemStatus.SUCCESS);
         NewsReport existing = NewsReport.builder()

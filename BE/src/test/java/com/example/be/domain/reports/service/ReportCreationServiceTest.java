@@ -4,6 +4,8 @@ import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.repository.NewsReportRepository;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -23,8 +25,9 @@ class ReportCreationServiceTest {
     private final FindingRepository findingRepository = mock(FindingRepository.class);
     private final AgentReportOrchestrator reportOrchestrator = mock(AgentReportOrchestrator.class);
     private final ReportPersistenceService persistenceService = mock(ReportPersistenceService.class);
+    private final NewsReportRepository reportRepository = mock(NewsReportRepository.class);
     private final ReportCreationService service = new ReportCreationService(
-            runRepository, findingRepository, reportOrchestrator, persistenceService);
+            runRepository, findingRepository, reportOrchestrator, persistenceService, reportRepository);
 
     @Test
     void describesMissingRunInGenerationFailure() {
@@ -93,5 +96,34 @@ class ReportCreationServiceTest {
                 org.mockito.ArgumentMatchers.anyList(),
                 org.mockito.ArgumentMatchers.any());
         verify(runRepository, never()).findReportContextById(42L);
+    }
+
+    @Test
+    void regeneratesExistingReportFromStoredFindings() {
+        CollectionRun run = mock(CollectionRun.class);
+        Finding finding = mock(Finding.class);
+        NewsReport report = mock(NewsReport.class);
+        when(report.getId()).thenReturn(17L);
+        when(reportRepository.findByRunId(42L)).thenReturn(java.util.Optional.of(report));
+        when(runRepository.findReportContextById(42L)).thenReturn(java.util.Optional.of(run));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(finding));
+        ReportDocument document = new ReportDocument("복구 보고서", "# 복구 보고서", "stub-report-v1");
+        when(reportOrchestrator.generate(
+                org.mockito.ArgumentMatchers.eq(run),
+                org.mockito.ArgumentMatchers.anyList(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(document);
+        when(persistenceService.replace(
+                org.mockito.ArgumentMatchers.eq(17L),
+                org.mockito.ArgumentMatchers.eq(document),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(17L);
+
+        assertEquals(17L, service.recover(42L));
+
+        verify(persistenceService).replace(
+                org.mockito.ArgumentMatchers.eq(17L),
+                org.mockito.ArgumentMatchers.eq(document),
+                org.mockito.ArgumentMatchers.any());
     }
 }

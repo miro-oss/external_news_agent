@@ -61,6 +61,14 @@ public class ArticleAnalysisPipeline {
         analyze(runId, refreshedArticleIds, false);
     }
 
+    /** 중단 실행 복구에서는 이미 저장된 finding도 같은 입력으로 안전하게 갱신한다. */
+    public void recover(Long runId, Set<Long> observedArticleIds) {
+        AgentPlan plan = plan(runId);
+        List<Target> targets = targets(runId, observedArticleIds, true, snapshotTopics(runId), plan);
+        findingWriter.recordTargetCount(runId, targets.size());
+        analyzeTargets(runId, targets, plan, true, true);
+    }
+
     /** 조사 액션으로 새 전문이나 이슈 멤버가 생긴 범위만 다시 분석한다. */
     public void analyzeInvestigation(Long runId, Set<Long> refreshedArticleIds) {
         if (refreshedArticleIds.isEmpty()) {
