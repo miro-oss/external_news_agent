@@ -1,4 +1,4 @@
-"""Synthesize frozen daily reports, keeping their dated claims and source identities."""
+"""Synthesize frozen daily inputs, keeping their dated claims and source identities."""
 
 import logging
 import re
@@ -23,7 +23,7 @@ from app.schemas.report import (
 )
 from app.schemas.weekly_report import WeeklyReportRequest
 
-PROMPT_VERSION = "weekly-report.ko.v1"
+PROMPT_VERSION = "weekly-report.ko.v2"
 SYSTEM_INSTRUCTION = (
     (Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md")
     .read_text(encoding="utf-8")
@@ -49,8 +49,9 @@ class WeeklyReportWriterService:
 
     def write(self, request: WeeklyReportRequest) -> ReportResponse:
         claims = _claims(request)
+        source_label = "주제별 분석 결과" if request.topic_id is not None else "일일 보고서"
         if self._settings.mock or not claims:
-            output = _deterministic(claims)
+            output = _deterministic(claims, source_label=source_label)
             meta = ReportResponseMeta(
                 provider="mock",
                 model="deterministic-weekly-report",
@@ -80,7 +81,7 @@ class WeeklyReportWriterService:
                 provider,
                 system_instruction=SYSTEM_INSTRUCTION,
                 prompt=(
-                    "아래 일일 통합 스냅샷만 사용하세요.\n<weekly-report-input>\n"
+                    f"아래 저장된 {source_label} 스냅샷만 사용하세요.\n<weekly-report-input>\n"
                     + prompt_json(
                         request.model_dump(
                             by_alias=True,
@@ -96,7 +97,9 @@ class WeeklyReportWriterService:
                 response_schema=schema,
                 validate=lambda response: _validated_output(response, ids),
                 repair_attempts=settings.schema_repair_attempts,
-                task_name="주간 통합 보고서",
+                task_name=(
+                    "주제별 주간 보고서" if request.topic_id is not None else "주간 통합 보고서"
+                ),
                 input_tag="weekly-report",
                 schema_violation_message="주간 보고서 출력 계약 위반입니다.",
                 failure_prompt_version=PROMPT_VERSION,
@@ -114,8 +117,13 @@ class WeeklyReportWriterService:
                 mock=False,
                 truncated=result.response.truncated,
             )
-        output = _verified(output, claims)
-        title = f"{request.report_date} ~ {request.report_end_date} 주간 통합 뉴스 보고서"
+        output = _verified(output, claims, source_label=source_label)
+        period = f"{request.report_date} ~ {request.report_end_date}"
+        title = (
+            f"{request.topic_name} · {period} 주간 보고서"
+            if request.topic_id is not None
+            else f"{period} 주간 통합 뉴스 보고서"
+        )
         notes = list(dict.fromkeys(request.source_notes))
         return ReportResponse(
             title=title,
@@ -179,12 +187,14 @@ def _validated_output(response: ProviderResponse, ids: list[int]) -> ReportOutpu
     return output
 
 
-def _deterministic(claims: list[SavedClaim]) -> ReportOutput:
+def _deterministic(
+    claims: list[SavedClaim], *, source_label: str = "일일 보고서"
+) -> ReportOutput:
     events = [claim for claim in claims if not claim.watch]
     return ReportOutput(
-        title="주간 통합 보고서",
+        title="주간 보고서",
         executive_summary=[_summary(claim.text, 100, claim.title) for claim in events[:3]]
-        or ["해당 주에 저장된 일일 보고서의 확인 가능한 근거가 없습니다."],
+        or [f"해당 주에 저장된 {source_label}의 확인 가능한 근거가 없습니다."],
         important_events=[
             ImportantEvent(
                 title=claim.title[:500],
@@ -215,7 +225,7 @@ def _summary(text: str, limit: int, fallback: str | None = None) -> str:
         return text
     if fallback and len(fallback) <= limit:
         return fallback
-    return "날짜별 일일 보고서의 확인 내용은 아래 주간 흐름을 참고하세요."
+    return "날짜별 저장 근거의 확인 내용은 아래 주간 흐름을 참고하세요."
 
 
 def _supported(text: str, claims: list[SavedClaim], *, title: bool = False) -> bool:
@@ -282,10 +292,11 @@ def _claim_groups(claims: list[SavedClaim]) -> list[list[SavedClaim]]:
         if not connected:
             groups.append([claim])
             continue
-        merged = [claim]
+        merged = []
         for group in connected:
             groups.remove(group)
             merged.extend(group)
+        merged.append(claim)
         merged.sort(key=lambda item: item.date)
         groups.append(list(dict.fromkeys(merged)))
     return sorted(groups, key=lambda group: group[0].date)
@@ -304,7 +315,9 @@ def _select_group(ids: list[int], groups: list[list[SavedClaim]]) -> list[SavedC
     )
 
 
-def _verified(output: ReportOutput, claims: list[SavedClaim]) -> ReportOutput:
+def _verified(
+    output: ReportOutput, claims: list[SavedClaim], *, source_label: str = "일일 보고서"
+) -> ReportOutput:
     available = _claim_groups([claim for claim in claims if not claim.watch])
     events: list[ImportantEvent] = []
     groups: list[list[SavedClaim]] = []
@@ -315,7 +328,9 @@ def _verified(output: ReportOutput, claims: list[SavedClaim]) -> ReportOutput:
         groups.append(supporting)
         events.append(event)
     if not events and available:
-        return _verified(_deterministic(claims), claims)
+        return _verified(
+            _deterministic(claims, source_label=source_label), claims, source_label=source_label
+        )
     verified_events = []
     for event, supporting in list(zip(events, groups, strict=True))[:5]:
         supporting.sort(key=lambda claim: claim.date)
@@ -323,11 +338,17 @@ def _verified(output: ReportOutput, claims: list[SavedClaim]) -> ReportOutput:
         summary = (
             event.summary_ko if _supported(event.summary_ko, supporting) else supporting[-1].text
         )
+        if len(summary) > 150:
+            # Topic analysis days may retain multiple complete claims for one finding.
+            # Select another whole saved claim; every claim remains in the chronology.
+            summary = next(
+                (claim.text for claim in reversed(supporting) if len(claim.text) <= 150), summary
+            )
         title = (
             event.title if _supported(event.title, supporting, title=True) else supporting[-1].title
         )
         chronology = list(
-            dict.fromkeys(f"{claim.date} 일일 보고서: {claim.text}" for claim in supporting)
+            dict.fromkeys(f"{claim.date} {source_label}: {claim.text}" for claim in supporting)
         )
         verified_events.append(
             ImportantEvent(
@@ -369,13 +390,21 @@ def _verified(output: ReportOutput, claims: list[SavedClaim]) -> ReportOutput:
         )
     )[:3]
     if not summaries:
-        summaries = list(
-            dict.fromkeys(_summary(event.summary_ko, 100, event.title) for event in verified_events)
-        )[:3]
+        for event, supporting in zip(verified_events, groups[:5], strict=True):
+            text, fallback = event.summary_ko, event.title
+            if source_label == "주제별 분석 결과":
+                # Raw analysis titles are article headlines, not verified assertions.
+                # Never promote a headline to replace a long qualified claim.
+                text = next(
+                    (claim.text for claim in reversed(supporting) if len(claim.text) <= 100), text
+                )
+                fallback = None
+            summaries.append(_summary(text, 100, fallback))
+        summaries = list(dict.fromkeys(summaries))[:3]
     return output.model_copy(
         update={
             "executive_summary": summaries
-            or ["해당 주에 저장된 일일 보고서의 확인 가능한 근거가 없습니다."],
+            or [f"해당 주에 저장된 {source_label}의 확인 가능한 근거가 없습니다."],
             "important_events": verified_events,
             "watch_items": watch_items,
         }

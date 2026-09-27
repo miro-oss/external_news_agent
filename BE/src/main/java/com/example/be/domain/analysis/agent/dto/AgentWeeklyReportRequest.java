@@ -13,7 +13,11 @@ import java.util.stream.Collectors;
 public record AgentWeeklyReportRequest(
         String idempotencyKey, AgentPlan plan, Long reportId,
         LocalDate reportDate, LocalDate reportEndDate, List<DailySource> sources,
-        List<LocalDate> missingReportDates, List<String> sourceNotes) {
+        List<LocalDate> missingReportDates, List<String> sourceNotes, Long topicId, String topicName) {
+    public AgentWeeklyReportRequest(String key, AgentPlan plan, Long reportId, LocalDate reportDate,
+            LocalDate reportEndDate, List<DailySource> sources, List<LocalDate> missingReportDates, List<String> sourceNotes) {
+        this(key, plan, reportId, reportDate, reportEndDate, sources, missingReportDates, sourceNotes, null, null);
+    }
     public record DailySource(Long reportId, LocalDate reportDate, String title,
                               ReportContent structuredContent, List<Long> reflectedFindingIds,
                               Map<Long, Long> issueIdsByFinding) { }
@@ -23,7 +27,7 @@ public record AgentWeeklyReportRequest(
         return new AgentWeeklyReportRequest(key, plan, reportId, input.reportDate(), input.reportEndDate(),
                 input.sources().stream().map(source -> new DailySource(source.reportId(), source.reportDate(),
                         source.title(), source.structuredContent(), source.reflectedFindingIds(), issueIds(source))).toList(),
-                input.missingReportDates(), input.sourceNotes());
+                input.missingReportDates(), input.sourceNotes(), input.topicId(), input.topicName());
     }
     private static Map<Long, Long> issueIds(WeeklyReportInput.DailySource source) {
         if (source.evidenceSnapshot() == null) return Map.of();

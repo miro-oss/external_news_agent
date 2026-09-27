@@ -1,12 +1,23 @@
 import type { ReportDetail } from '../../api/types'
 
-type WeeklySources = Pick<ReportDetail, 'sourceReportCount' | 'sourceReportIds' | 'sourceReportDates' | 'missingReportDates'>
+type WeeklySources = Pick<ReportDetail, 'topicId' | 'sourceAnalysisDates' | 'sourceReportCount' | 'sourceReportIds' | 'sourceReportDates' | 'missingReportDates'>
 
 export function WeeklyReportSources({ report }: { report: WeeklySources }) {
   const dates = report.sourceReportDates ?? []
   const ids = report.sourceReportIds ?? []
   const missing = report.missingReportDates ?? []
   const count = report.sourceReportCount ?? (report.sourceReportDates ? dates.length : null)
+  if (report.topicId != null) {
+    const analysisDates = report.sourceAnalysisDates ?? []
+    return <div className="report-weekly-sources" aria-label="주제별 주간 보고서 집계 범위">
+      <p className="report-daily-count">7일 중 <strong>{analysisDates.length}일</strong>의 분석 자료를 모았습니다.</p>
+      {analysisDates.length > 0 && <div className="report-weekly-originals">
+        <span>분석 자료가 있는 날</span>
+        <ul>{analysisDates.map(date => <li key={date}><time dateTime={date}>{date}</time></li>)}</ul>
+      </div>}
+      {missing.length > 0 && <p className="report-weekly-missing">분석 자료가 없는 날: <strong>{missing.join(' · ')}</strong><br />해당 날짜는 이번 주간 보고서에 포함되지 않았습니다.</p>}
+    </div>
+  }
   return <div className="report-weekly-sources" aria-label="주간 보고서 집계 범위">
     {count !== null && <p className="report-daily-count">7일 중 <strong>{count}일</strong>의 일일 통합 보고서를 모았습니다.</p>}
     {missing.length > 0 && <p className="report-weekly-missing">일일 보고서가 없는 날: <strong>{missing.join(' · ')}</strong><br />해당 날짜는 이번 주간 통합에 포함되지 않았습니다.</p>}

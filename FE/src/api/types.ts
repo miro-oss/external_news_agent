@@ -407,10 +407,13 @@ export interface ReportSummary {
   id: number
   runId: number | null
   reportScope: ReportScope
+  topicId?: number | null
+  topicName?: string | null
   reportDate: string | null
   reportEndDate?: string | null
   sourceReportIds?: number[]
   sourceReportDates?: string[]
+  sourceAnalysisDates?: string[]
   missingReportDates?: string[]
   sourceRunIds: number[]
   sourceReportCount?: number | null
@@ -477,10 +480,13 @@ export interface ReportDetail {
   id: number
   runId: number | null
   reportScope: ReportScope
+  topicId?: number | null
+  topicName?: string | null
   reportDate: string | null
   reportEndDate?: string | null
   sourceReportIds?: number[]
   sourceReportDates?: string[]
+  sourceAnalysisDates?: string[]
   missingReportDates?: string[]
   sourceRunIds: number[]
   sourceReportCount?: number | null

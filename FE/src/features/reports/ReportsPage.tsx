@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import type { TopicWeeklyReportCreated } from '../../api/topicWeeklyReport'
 import {
   useAudienceSetting,
   useIssue,
@@ -38,6 +40,8 @@ import { WeeklyReportSources } from './WeeklyReportSources'
 import { reportHash, reportScopeFromHash } from './reportNavigation'
 import { ReportDetailSkeleton, ReportWorkspaceSkeleton, RelatedArticlesSkeleton } from './ReportSkeletons'
 import { ReportFiltersBar } from './ReportFiltersBar'
+import { TopicWeeklyReportCreate } from './TopicWeeklyReportCreate'
+import { TransientStatus } from '../../components/TransientStatus'
 import { DEFAULT_REPORT_FILTERS, filterReports, reportFilterDate, reportTopicOptions, sortReportsByAggregationDate, type ReportFilters } from './reportFilters'
 
 type ReportScopeTab = ReportScope
@@ -45,13 +49,13 @@ type ReportScopeTab = ReportScope
 const REPORT_SCOPE_OPTIONS: ReadonlyArray<SegmentedOption<ReportScopeTab>> = [
   { value: 'RUN', label: '실행별' },
   { value: 'DAILY', label: '일일 통합' },
-  { value: 'WEEKLY', label: '주간 통합' },
+  { value: 'WEEKLY', label: '주간 보고서' },
 ]
 
 // 이름만으로는 두 보고서의 차이가 서지 않는다. 고른 범위가 무엇을 담는지 한 줄로 붙여 둔다.
 const REPORT_SCOPE_HINTS: Record<ReportScopeTab, string> = {
   DAILY: '하루 동안 모인 같은 이슈를 한 장으로 묶었습니다.',
-  WEEKLY: '월요일부터 일요일까지의 일일 보고서를 주 단위로 묶었습니다.',
+  WEEKLY: '월요일부터 일요일까지의 소식을 전체 통합 또는 주제별로 확인합니다.',
   RUN: '수집을 실행할 때마다 만들어진 보고서입니다.',
 }
 
@@ -101,6 +105,10 @@ export function ReportsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(reportIdFromHash)
   const [filters, setFilters] = useState<ReportFilters>(DEFAULT_REPORT_FILTERS)
   const filterNow = useReportFilterClock()
+  const [creatingWeekly, setCreatingWeekly] = useState(false)
+  const [weeklyNotice, setWeeklyNotice] = useState<string | null>(null)
+  const weeklyTrigger = useRef<HTMLButtonElement>(null)
+  const weeklyDialogId = useId()
   const [audienceOverride, setAudienceOverride] = useState<Audience | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
     articleId: number | null
@@ -158,6 +166,15 @@ export function ReportsPage() {
     setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
     window.history.replaceState(null, '', reportHash(scope))
   }
+  const openCreatedWeekly = useCallback((result: TopicWeeklyReportCreated) => {
+    setCreatingWeekly(false)
+    setReportScope('WEEKLY')
+    setFilters(DEFAULT_REPORT_FILTERS)
+    setSelectedId(result.reportId)
+    setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
+    setWeeklyNotice(result.created ? '주제별 주간 보고서를 만들었습니다.' : '같은 주제·주차의 기존 보고서를 열었습니다.')
+    window.history.replaceState(null, '', reportHash('WEEKLY', result.reportId))
+  }, [])
   async function deleteReport(id: number) {
     const nextId = filteredReports.find(report => report.id !== id)?.id ?? null
     const currentHash = window.location.hash
@@ -185,7 +202,7 @@ export function ReportsPage() {
         </div>
       </header>
 
-      <div className="report-scope-bar">
+      <div className={`report-scope-bar${scopeFilter === 'WEEKLY' ? ' report-scope-with-create' : ''}`}>
         <Segmented
           className="report-scope-tabs"
           label="보고서 범위"
@@ -194,8 +211,15 @@ export function ReportsPage() {
           disabled={removeReport.isPending}
           onSelect={changeScope}
         />
+        {scopeFilter === 'WEEKLY' && <button ref={weeklyTrigger} type="button" className="primary-button report-weekly-create"
+          disabled={removeReport.isPending} aria-haspopup="dialog" aria-expanded={creatingWeekly}
+          aria-controls={creatingWeekly ? weeklyDialogId : undefined}
+          onClick={() => { setWeeklyNotice(null); setCreatingWeekly(true) }}>
+          <span aria-hidden="true">＋</span> 주제별 보고서 만들기
+        </button>}
         <p className="report-scope-hint">{REPORT_SCOPE_HINTS[scopeFilter]}</p>
       </div>
+      <TransientStatus as="p" className="report-weekly-notice" message={weeklyNotice} />
 
       <ReportFiltersBar
         filters={filters}
@@ -219,7 +243,7 @@ export function ReportsPage() {
           <span className="empty-mark" aria-hidden="true">⌁</span>
           <strong>표시할 보고서가 없습니다.</strong>
           <span>{scopeFilter === 'WEEKLY'
-            ? '매주 월요일, 지난주 월~일의 일일 통합 보고서를 모아 주간 보고서를 만듭니다.'
+            ? '주제별 보고서 만들기에서 주제와 지난 주차를 선택해 보세요. 전체 통합은 매주 월요일에 자동으로 만들어집니다.'
             : scopeFilter === 'DAILY'
             ? '하루의 수집이 모두 끝나면 다음 날 일일 통합 보고서가 자동으로 만들어집니다.'
             : '수집을 실행하면 분석 완료 후 첫 보고서가 자동으로 만들어집니다.'}</span>
@@ -288,6 +312,9 @@ export function ReportsPage() {
         collectionContexts={activeReportData?.collectionContexts ?? []}
         onClose={closeArticle}
       />
+      {creatingWeekly && createPortal(<TopicWeeklyReportCreate id={weeklyDialogId} initialTopicId={filters.topicId}
+        now={filterNow} returnFocusRef={weeklyTrigger} onDismiss={() => setCreatingWeekly(false)}
+        onReady={openCreatedWeekly} />, document.body)}
     </main>
   )
 }
@@ -298,8 +325,9 @@ function ReportListItem({ report, active, onSelect, disabled }: {
   onSelect: () => void
   disabled: boolean
 }) {
-  const topicNames = [...new Set((report.collectionContexts ?? [])
-    .flatMap(context => context.topics.map(topic => topic.topicName.trim())).filter(Boolean))]
+  const topicNames = report.topicId != null ? [report.topicName?.trim() || `주제 #${report.topicId}`]
+    : [...new Set((report.collectionContexts ?? [])
+      .flatMap(context => context.topics.map(topic => topic.topicName.trim())).filter(Boolean))]
   const filterDate = reportFilterDate(report)
   const collectionTime = report.collectionStartedAt && filterDate && report.reportScope === 'RUN'
     ? collectionClock.format(new Date(report.collectionStartedAt))
@@ -313,6 +341,9 @@ function ReportListItem({ report, active, onSelect, disabled }: {
       disabled={disabled}
       onClick={onSelect}
     >
+      {report.reportScope === 'WEEKLY' && <span className={`report-kind-label${report.topicId != null ? ' is-topic' : ''}`}>
+        {report.topicId != null ? '주제별' : '전체 통합'}
+      </span>}
       <strong title={report.reportScope !== 'RUN' ? reportDisplayTitle(report) : report.title}>{reportDisplayTitle(report)}</strong>
       <span className="report-list-topics" title={topicNames.join(' · ')}>{topicNames.length ? topicNames.join(' · ') : '수집 주제 기록 없음'}</span>
       {filterDate ? (
@@ -372,6 +403,9 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
   return (
     <article className="report-document report-document-enter" data-report-scope={report.reportScope}>
       <header className="report-document-header">
+        {report.reportScope === 'WEEKLY' && <span className={`report-kind-label${report.topicId != null ? ' is-topic' : ''}`}>
+          {report.topicId != null ? '주제별' : '전체 통합'}
+        </span>}
         <div className="report-title-row">
           <h2 title={report.reportScope !== 'RUN' ? reportDisplayTitle(report) : report.title}><ReportKeywordText text={reportDisplayTitle(report)} terms={highlightTerms} /></h2>
           <button type="button" className="text-button report-delete-button" aria-label="이 보고서 삭제" aria-expanded={confirmDelete}
@@ -397,7 +431,9 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
         </div>}
         {report.reportScope !== 'RUN' ? <div className="report-daily-summary">
           <span className="report-daily-date">{report.reportDate ?? '집계일 미상'}{report.reportScope === 'WEEKLY' && report.reportEndDate ? ` ~ ${report.reportEndDate}` : ''}</span>
-          {dailyTopics.names.length > 0 && <p className="report-daily-topics"><span>{dailyTopics.label}</span><strong>{dailyTopics.names.join(' · ')}</strong></p>}
+          {report.topicId != null
+            ? <p className="report-daily-topics"><span>수집 주제</span><strong>{report.topicName || `주제 #${report.topicId}`}</strong></p>
+            : dailyTopics.names.length > 0 && <p className="report-daily-topics"><span>{dailyTopics.label}</span><strong>{dailyTopics.names.join(' · ')}</strong></p>}
           {report.reportScope === 'WEEKLY' ? <WeeklyReportSources report={report} /> : report.sourceReportCount != null && report.sourceReportCount > 0
             && <p className="report-daily-count">실행별 보고서 <strong>{report.sourceReportCount}개</strong>를 통합했습니다.</p>}
           {keywords.length > 0 && <p className="report-daily-keywords"><span>키워드</span>{keywords.join(' · ')}</p>}
@@ -453,7 +489,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
       </section>
 
       <div className="report-sharing-section">
-        <ReportSharePanel reportId={report.id} reportScope={report.reportScope} />
+        <ReportSharePanel reportId={report.id} reportScope={report.reportScope} topicId={report.topicId} />
       </div>
       <ReportDisclaimer report={report} audience={audience} />
     </article>

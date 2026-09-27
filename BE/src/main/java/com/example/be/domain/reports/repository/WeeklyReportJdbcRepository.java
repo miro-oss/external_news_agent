@@ -22,12 +22,24 @@ public class WeeklyReportJdbcRepository {
                       AND d.report_status <> 'PENDING' AND d.report_date < ?
                       AND NOT EXISTS (
                           SELECT 1 FROM news_reports w
-                          WHERE w.report_scope = 'WEEKLY'
+                          WHERE w.report_scope = 'WEEKLY' AND w.topic_id IS NULL
                             AND w.report_date = TRUNC(d.report_date, 'IW'))
                     ORDER BY week_start DESC
                 ) WHERE ROWNUM <= ?
                 """, (rs, row) -> rs.getDate("week_start").toLocalDate(),
                 java.sql.Date.valueOf(beforeMonday), limit);
+    }
+
+    /** Topic reports depend on saved analyses, not DAILY completion or unrelated topic runs. */
+    public boolean hasUnfinishedTopicInputs(Long topicId, LocalDate monday) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM news_collection_runs run
+                WHERE run.started_at >= ? AND run.started_at < ? AND run.status IN ('PENDING', 'RUNNING')
+                  AND EXISTS (SELECT 1 FROM news_collection_run_items item
+                              WHERE item.run_id = run.id AND item.topic_id = ?)
+                """, Integer.class, Timestamp.valueOf(monday.atStartOfDay()),
+                Timestamp.valueOf(monday.plusWeeks(1).atStartOfDay()), topicId);
+        return count != null && count > 0;
     }
 
     /** Wait for active collection and daily generation, including overdue pending days. */

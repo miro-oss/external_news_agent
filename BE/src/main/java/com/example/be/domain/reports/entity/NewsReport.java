@@ -60,6 +60,20 @@ public class NewsReport {
     @Column(name = "report_date")
     private LocalDate reportDate;
 
+    /** Manual weekly topic identity and reservation-time display name; null means global scope. */
+    @Column(name = "topic_id")
+    private Long topicId;
+
+    @Column(name = "topic_name", length = 255)
+    private String topicName;
+
+    public List<LocalDate> getSourceAnalysisDates() {
+        return topicId == null || weeklyInput == null ? List.of()
+                : weeklyInput.sources().stream().map(WeeklyReportInput.DailySource::reportDate).toList();
+    }
+
+    public void restore() { deletedAt = null; }
+
     @Column(name = "report_end_date")
     private LocalDate reportEndDate;
 

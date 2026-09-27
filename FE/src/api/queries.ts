@@ -126,11 +126,15 @@ export function useSources() {
 }
 
 /** 설정 화면의 등록 주제 목록과 주제 등록 후 캐시 갱신에 쓰는 주제 목록. */
-export function useTopics(active?: boolean) {
-  return useQuery({
+export function topicListOptions(active?: boolean) {
+  return {
     queryKey: [...keys.topics, active ?? 'all'],
     queryFn: () => getAllPages<TopicSummary>('/topics', { active }),
-  })
+  }
+}
+
+export function useTopics(active?: boolean) {
+  return useQuery(topicListOptions(active))
 }
 
 export function useTopicKeywordProposals(status: TopicKeywordProposalFilter = 'PENDING') {
@@ -219,10 +223,11 @@ export function useArticle(articleId: number | null, runId?: number) {
   })
 }
 
-export function useReports(reportScope?: ReportScope) {
+export function useReports(reportScope?: ReportScope, options?: { enabled?: boolean; refetchInterval?: number | false }) {
   return useQuery({
     queryKey: [...keys.reports, reportScope ?? 'ALL'],
     queryFn: () => getAllPages<ReportSummary>('/reports', { reportScope }),
+    ...options,
   })
 }
 

@@ -48,6 +48,16 @@ class ReportPersistenceServiceTest {
                     notificationAutomation, observationRepository,
                     events);
 
+    @Test
+    void manualTopicWeeklyCompletionAndRecoveryNeverEnqueueAutomaticDelivery() {
+        var report = NewsReport.builder().id(101L).topicId(1L).reportScope(ReportScope.WEEKLY)
+                .reportStatus(ReportStatus.PENDING).build();
+        when(reportRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(report));
+        service.complete(101L, new ReportDocument("주제 주간", "저장된 근거", "fallback"), LocalDateTime.now());
+        verifyNoInteractions(notificationAutomation);
+        assertEquals("주제 주간", report.getTitle());
+    }
+
     @org.junit.jupiter.api.Test
     void lateRecoveryMustNotInvalidateTheAlreadyCompletedOriginalSnapshot() {
         NewsReport report = NewsReport.builder().id(101L).reportStatus(ReportStatus.GENERATED).build();

@@ -89,6 +89,8 @@ public class ReportNotificationAutomationService {
 
     @Transactional
     public void enqueueCompletedReport(NewsReport report) {
+        // Manual topic-weekly creation never opts recipients into delivery.
+        if (report.getTopicId() != null) return;
         List<Long> runIds = report.getReportScope() != ReportScope.RUN ? report.getSourceRunIds()
                 : report.getRunId() == null ? List.of() : List.of(report.getRunId());
         if (runIds.isEmpty() && report.getReportScope() == ReportScope.RUN) return;
