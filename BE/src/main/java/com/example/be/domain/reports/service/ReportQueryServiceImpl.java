@@ -129,7 +129,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         return ReportResDTO.Summary.builder()
                 .id(report.getId())
                 .runId(report.getRunId())
-                .reportScope(report.getReportScope()).reportDate(report.getReportDate())
+                .reportScope(report.getReportScope()).topicId(report.getTopicId()).topicName(report.getTopicName())
+                .sourceAnalysisDates(report.getSourceAnalysisDates()).reportDate(report.getReportDate())
                 .reportEndDate(report.getReportEndDate()).sourceReportIds(report.getSourceReportIds())
                 .sourceReportDates(report.getSourceReportDates()).missingReportDates(report.getMissingReportDates())
                 .sourceRunIds(sourceRunIds(report))
@@ -177,7 +178,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         List<Finding> findings = visible.findings();
         ReportReadingContent readingContent = ReportReadingContent.from(report, visible);
         Map<Long, Long> issueIdsByFinding = includeFindings
-                ? issueIdsByFinding(findings)
+                ? issueIdsByFinding(findings, report.getTopicId())
                 : Map.of();
         Map<Long, NewsIssue> issuesById = includeFindings
                 ? issuesById(issueIdsByFinding.values())
@@ -197,7 +198,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         return ReportResDTO.Detail.builder()
                 .id(report.getId())
                 .runId(runId)
-                .reportScope(report.getReportScope()).reportDate(report.getReportDate())
+                .reportScope(report.getReportScope()).topicId(report.getTopicId()).topicName(report.getTopicName())
+                .sourceAnalysisDates(report.getSourceAnalysisDates()).reportDate(report.getReportDate())
                 .reportEndDate(report.getReportEndDate()).sourceReportIds(report.getSourceReportIds())
                 .sourceReportDates(report.getSourceReportDates()).missingReportDates(report.getMissingReportDates())
                 .sourceRunIds(sourceRunIds(report))
@@ -211,8 +213,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .summaryStats(summaryStats)
                 .structuredContent(readingContent.structuredContent())
                 .collectionContexts(report.getCollectionContexts())
-                .articleStats(ReportArticleStatistics.count(OracleInClause.batches(sourceRunIds(report)).stream()
-                        .flatMap(ids -> runArticleRepository.findReportArticleObservations(ids).stream()).toList()))
+                .articleStats(articleStats(report))
                 .findings(includeFindings ? findings.stream()
                         .map(finding -> {
                             Long issueId = issueIdsByFinding.get(finding.getId());
@@ -226,7 +227,18 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .build();
     }
 
-    private Map<Long, Long> issueIdsByFinding(List<Finding> findings) {
+    private ReportResDTO.ArticleStats articleStats(NewsReport report) {
+        Set<Long> allowedArticles = report.getTopicId() == null || report.getWeeklyInput() == null ? null
+                : report.getWeeklyInput().sources().stream().filter(source -> source.evidenceSnapshot() != null)
+                        .flatMap(source -> source.evidenceSnapshot().issues().stream())
+                        .flatMap(issue -> issue.side().claims().stream()).flatMap(claim -> claim.evidence().stream())
+                        .map(evidence -> evidence.articleId()).collect(Collectors.toSet());
+        return ReportArticleStatistics.count(OracleInClause.batches(sourceRunIds(report)).stream()
+                .flatMap(ids -> runArticleRepository.findReportArticleObservations(ids).stream())
+                .filter(observation -> allowedArticles == null || allowedArticles.contains(observation.getArticleId())).toList());
+    }
+
+    private Map<Long, Long> issueIdsByFinding(List<Finding> findings, Long reportTopicId) {
         if (findings.isEmpty()) {
             return Map.of();
         }
@@ -243,7 +255,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
             Set<Long> topics = assessedTopics.getOrDefault(finding.getId(),
                     Set.of(finding.getArticle().getTopic().getId()));
             membershipsByArticle.getOrDefault(finding.getArticle().getId(), List.of()).stream()
-                    .filter(membership -> topics.contains(membership.getTopicId()))
+                    .filter(membership -> topics.contains(membership.getTopicId())
+                            && (reportTopicId == null || reportTopicId.equals(membership.getTopicId())))
                     .map(IssueArticleRepository.CoverageMembership::getIssueId).min(Long::compareTo)
                     .ifPresent(issueId -> result.put(finding.getId(), issueId));
         }

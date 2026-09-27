@@ -35,7 +35,10 @@ public interface NewsReportRepository
     @Query("SELECT report.run.id FROM NewsReport report WHERE report.id = :reportId")
     Optional<Long> findRunIdById(@Param("reportId") Long reportId);
 
-    Optional<NewsReport> findByReportScopeAndReportDate(ReportScope scope, LocalDate date);
+    @Query("SELECT report FROM NewsReport report WHERE report.reportScope = :scope AND report.reportDate = :date AND report.topicId IS NULL")
+    Optional<NewsReport> findByReportScopeAndReportDate(@Param("scope") ReportScope scope, @Param("date") LocalDate date);
+
+    Optional<NewsReport> findByReportScopeAndReportDateAndTopicId(ReportScope scope, LocalDate date, Long topicId);
 
     Optional<NewsReport> findFirstByReportScopeAndReportDateBeforeAndReportStatusNotAndDeletedAtIsNullOrderByReportDateDescIdDesc(
             ReportScope scope, LocalDate before, ReportStatus status);

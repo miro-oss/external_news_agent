@@ -171,7 +171,16 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             WHERE report.id IN (:reportIds) AND report.report_scope IN ('DAILY', 'WEEKLY')
               AND article.fetch_status = 'FULLTEXT'
               AND REGEXP_INSTR(stored_body.body, '[^[:space:]]') > 0
-            """ + REPORT_TOPIC_ELIGIBLE_SQL + " GROUP BY report.id", nativeQuery = true)
+            """ + REPORT_TOPIC_ELIGIBLE_SQL + """
+              AND (report.topic_id IS NULL
+                   OR (NOT EXISTS (SELECT 1 FROM news_topic_relevance r
+                                   WHERE r.run_id = finding.run_id AND r.article_id = finding.article_id)
+                       AND article.topic_id = report.topic_id)
+                   OR EXISTS (SELECT 1 FROM news_topic_relevance r
+                              WHERE r.run_id = finding.run_id AND r.article_id = finding.article_id
+                                AND r.topic_id = report.topic_id AND r.status = 'RELEVANT'))
+              GROUP BY report.id
+            """, nativeQuery = true)
     List<DailyReportCount> countForDailyReports(@Param("reportIds") Collection<Long> reportIds,
                                                @Param("highThreshold") BigDecimal highThreshold);
 

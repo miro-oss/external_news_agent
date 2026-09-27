@@ -130,7 +130,7 @@ public class ReportPersistenceService {
                 document.status(),
                 generatedAt);
         report.recordStructuredContent(document.structuredContent());
-        notificationAutomation.enqueueCompletedReport(report);
+        if (report.getTopicId() == null) notificationAutomation.enqueueCompletedReport(report);
         events.publishEvent(new ReportCompleted(reportId));
         return report.getId();
     }

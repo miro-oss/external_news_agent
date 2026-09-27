@@ -47,6 +47,9 @@ class WeeklyReportOracleIntegrationTests {
     @Autowired private TopicRepository topics;
     @Autowired private ArticleRepository articles;
     @Autowired private ArticleBodyStorage bodyStorage;
+    @Autowired private TopicWeeklyReportPersistenceService topicReservation;
+    @Autowired private com.example.be.domain.issues.repository.NewsIssueRepository issues;
+    @Autowired private com.example.be.domain.issues.repository.IssueArticleRepository memberships;
 
     @Test
     void missingWeekPagesReachOlderHistorySkipReservedAndHiddenReportsAndExcludeCurrentWeek() {
@@ -181,6 +184,68 @@ class WeeklyReportOracleIntegrationTests {
                 "UPDATE news_reports SET report_date = report_date + 1 WHERE id = ?", created.reportId()));
         assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () -> jdbc.update(
                 "UPDATE news_reports SET report_end_date = report_end_date + 1 WHERE id = ?", created.reportId()));
+    }
+
+    @Test
+    void topicWeeklyUsesRawAnalysisAndCoexistsWithGlobalIdentityAndImmutableReadMetadata() {
+        LocalDate monday = LocalDate.of(1996, 5, 6);
+        LocalDateTime now = monday.plusWeeks(2).atTime(9, 0);
+        Finding evidence = evidence(monday.atTime(8, 0));
+        var topic = evidence.getArticle().getTopic();
+        var issue = issues.saveAndFlush(com.example.be.domain.issues.entity.NewsIssue.builder()
+                .topic(topic).title("설비 증설").status(com.example.be.domain.issues.entity.IssueStatus.EMERGING)
+                .firstSeenAt(monday.atStartOfDay().atOffset(java.time.ZoneOffset.ofHours(9)))
+                .lastSeenAt(monday.atStartOfDay().atOffset(java.time.ZoneOffset.ofHours(9)))
+                .articleCount(1).publisherCount(1).independentContentCount(1).build());
+        memberships.saveAndFlush(com.example.be.domain.issues.entity.IssueArticle.builder()
+                .article(evidence.getArticle()).issue(issue).role(com.example.be.domain.issues.entity.IssueArticleRole.REPRESENTATIVE)
+                .stance(com.example.be.domain.issues.entity.IssueStance.SUPPORTS)
+                .stanceSource(com.example.be.domain.issues.entity.IssueStanceSource.RULE)
+                .stanceConfidence(java.math.BigDecimal.ONE).joinedAt(monday.atTime(8, 0)).build());
+        var owner = topicReservation.reserve(topic.getId(), monday, now);
+        assertTrue(owner.owner());
+        assertEquals(List.of(evidence.getId()), owner.input().sourceFindingIds());
+        assertNull(owner.input().sources().getFirst().reportId());
+        assertFalse(topicReservation.reserve(topic.getId(), monday, now).ready());
+        assertFalse(topicReservation.reserve(topic.getId(), monday, now).owner());
+        // Topic reservation must not hide a missing global weekly report from the scheduler.
+        daily(monday, ReportStatus.FALLBACK, null);
+        entities.flush();
+        assertTrue(readiness.findMissingWeeks(monday.plusWeeks(1), 4).contains(monday));
+        var global = reservation.reserve(monday, now);
+        assertTrue(global.owner()); assertNotEquals(owner.reportId(), global.reportId());
+        assertEquals(global.reportId(), reports.findByReportScopeAndReportDate(ReportScope.WEEKLY, monday).orElseThrow().getId());
+        persistence.complete(owner.reportId(), generator.generate(owner.input()), now);
+        entities.flush(); entities.clear();
+        var detail = queries.getReport(owner.reportId(), false);
+        assertEquals(topic.getId(), detail.getTopicId());
+        assertEquals(topic.getName(), detail.getTopicName());
+        assertEquals(List.of(monday), detail.getSourceAnalysisDates());
+        assertEquals(List.of(), detail.getSourceReportIds());
+        assertEquals(List.of(), detail.getSourceReportDates());
+        assertEquals(0L, detail.getSourceReportCount());
+        assertEquals(1, detail.getSummaryStats().getFindingCount());
+        assertEquals(owner.input(), reports.findById(owner.reportId()).orElseThrow().getWeeklyInput());
+        assertTrue(detail.getMarkdownBody().contains("기업은 설비 증설을 발표했다."));
+        assertFalse(detail.getMarkdownBody().contains("보고서 #null"));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM notification_delivery_batches WHERE report_id = ?", Integer.class, owner.reportId()));
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () -> jdbc.update(
+                "UPDATE news_reports SET topic_name = 'invalid' WHERE id = ?", global.reportId()));
+    }
+
+    @Test
+    void topicReadinessOnlyBlocksItsOwnActiveRuns() {
+        LocalDate monday = LocalDate.of(1996, 6, 3);
+        Finding evidence = evidence(monday.atTime(8, 0));
+        var topic = evidence.getArticle().getTopic();
+        CollectionRun running = run(monday.atTime(10, 0), RunStatus.RUNNING);
+        entities.persist(CollectionRunItem.builder().run(running).topic(topic).source(evidence.getArticle().getSource())
+                .status(RunItemStatus.RUNNING).build());
+        entities.flush();
+        assertTrue(readiness.hasUnfinishedTopicInputs(topic.getId(), monday));
+        assertFalse(readiness.hasUnfinishedTopicInputs(topic.getId() + 100000L, monday));
+        assertThrows(com.example.be.domain.reports.exception.ReportException.class,
+                () -> topicReservation.reserve(topic.getId(), monday, monday.plusWeeks(1).atStartOfDay()));
     }
 
     private CollectionRun run(LocalDateTime time, RunStatus status) {

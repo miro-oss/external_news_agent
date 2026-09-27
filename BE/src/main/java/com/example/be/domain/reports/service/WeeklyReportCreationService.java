@@ -35,9 +35,14 @@ public class WeeklyReportCreationService {
     }
 
     /** Saved DAILY contents suffice for recovery; an uncertain provider call is never repeated. */
-    public void recoverInterrupted(LocalDateTime before) {
+    public void recoverInterrupted(LocalDateTime before) { recoverInterrupted(before, false); }
+
+    public void recoverInterruptedTopics(LocalDateTime before) { recoverInterrupted(before, true); }
+
+    private void recoverInterrupted(LocalDateTime before, boolean topicOnly) {
         for (var report : reports.findByReportScopeAndReportStatusAndGeneratedAtBefore(
                 ReportScope.WEEKLY, ReportStatus.PENDING, before)) {
+            if (topicOnly && report.getTopicId() == null) continue;
             try {
                 if (report.getWeeklyInput() == null) {
                     log.error("주간 보고서 복구 입력 누락. reportId={}", report.getId());

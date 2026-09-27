@@ -1,0 +1,37 @@
+.report-scope-bar.report-scope-with-create { flex-wrap: wrap; gap: .65rem 1rem; }
+.report-scope-with-create .report-scope-hint { flex-basis: 100%; }
+.report-weekly-create { display: inline-flex; flex: none; align-items: center; gap: .4rem; font-size: .83rem; }
+.report-kind-label { display: inline-block; width: fit-content; padding: .2rem .5rem; border-radius: 5px; color: var(--fg-2); background: var(--surface-sunken); font-size: .69rem; font-weight: 600; }
+.report-kind-label.is-topic { color: var(--primary-strong); background: var(--primary-weak); }
+.report-document-header > .report-kind-label { margin-bottom: .6rem; }
+.topic-weekly-dialog { box-sizing: border-box; width: min(560px, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); margin: auto; padding: 1.4rem; border: 1px solid var(--line); border-radius: var(--radius); color: var(--fg); background: var(--surface); box-shadow: var(--shadow-lg); }
+.topic-weekly-dialog[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 1.2rem; }
+.topic-weekly-dialog::backdrop { background: rgb(16 24 40 / 42%); backdrop-filter: blur(3px); }
+.topic-weekly-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; }
+.topic-weekly-heading h2 { margin: 0; font-size: 1.1rem; line-height: 1.5; }
+.topic-weekly-heading p { margin: .45rem 0 0; font-size: .8rem; line-height: 1.6; color: var(--fg-3); }
+.topic-weekly-close { flex: none; width: 2rem; height: 2rem; padding: 0; font-size: 1.5rem; line-height: 1; }
+.topic-weekly-form { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; gap: 1.1rem; }
+.topic-weekly-body { display: grid; align-content: start; gap: 1.2rem; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: .15rem; }
+.topic-weekly-body .field { min-width: 0; margin: 0; }
+.topic-weekly-body select, .topic-weekly-body input { box-sizing: border-box; width: 100%; min-width: 0; margin: 0; }
+.topic-weekly-date-control { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr) 2.6rem; align-items: stretch; gap: .45rem; }
+.topic-weekly-date-control button { padding: .4rem; font-size: 1.35rem; }
+.topic-weekly-topic-error { display: flex; align-items: baseline; flex-wrap: wrap; gap: .5rem; }
+.topic-weekly-topic-error p { margin: 0; }
+.topic-weekly-topic-error button { color: var(--primary-strong); font-size: .8rem; }
+.topic-weekly-selection { display: grid; gap: .35rem; padding: .95rem 1rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--primary-weak); overflow-wrap: anywhere; }
+.topic-weekly-selection > span { font-size: .84rem; color: var(--fg-2); }
+.topic-weekly-selection strong { font-size: .91rem; font-variant-numeric: tabular-nums; }
+.topic-weekly-selection small { color: var(--fg-3); font-size: .72rem; }
+.topic-weekly-progress { margin: 0; color: var(--primary-strong); font-size: .82rem; line-height: 1.6; }
+.topic-weekly-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .6rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+.topic-weekly-actions .topic-weekly-save-error { flex-basis: 100%; margin: 0 0 .3rem; font-size: .82rem; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .report-scope-with-create .report-weekly-create { order: 3; width: 100%; justify-content: center; }
+  .report-scope-with-create .report-scope-hint { order: 2; }
+  .topic-weekly-dialog { padding: 1.1rem; }
+}
+
+.report-weekly-notice { margin: 0 0 1rem; color: var(--success-strong); font-size: .84rem; }
+.topic-weekly-reuse-hint { margin: 0; }

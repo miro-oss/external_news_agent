@@ -31,6 +31,7 @@ function renderPage(report, scope = report.reportScope, hash = `#/reports?report
   globalThis.window = { location: { hash } }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } } })
   for (const item of reports) client.setQueryData(['reports', item.id], item)
+  client.setQueryData(['auto-deliveries', report.id], [])
   client.setQueryData(['reports', 'list', scope], { content: reports })
   const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(ReportsPage)))
   const changesQueries = client.getQueryCache().findAll().filter(query => query.queryKey.at(-1) === 'changes')
@@ -62,7 +63,7 @@ test('weekly list and initial selection use the newest aggregation period while 
 test('weekly deep links select the weekly tab and render source coverage without requesting comparisons', () => {
   const report = weeklyReportFixture(fixture.report)
   const { html, changesQueries } = renderPage(report)
-  assert.match(html, /aria-pressed="true"[^>]*>주간 통합/)
+  assert.match(html, /aria-pressed="true"[^>]*>주간 보고서/)
   assert.match(html, /2026-09-07 ~ 2026-09-13 주간 통합 뉴스 보고서/)
   assert.match(html, /7일 중 <strong>2일<\/strong>/)
   assert.match(html, /일일 보고서가 없는 날/)
@@ -117,7 +118,33 @@ test('weekly loading waits for the list before explaining the Monday generation 
   client.setQueryData(['reports', 'list', 'WEEKLY'], { content: [] })
   const empty = render()
   assert.match(empty, /표시할 보고서가 없습니다/)
-  assert.match(empty, /매주 월요일, 지난주 월~일의 일일 통합 보고서를 모아 주간 보고서를 만듭니다/)
+  assert.match(empty, /주제별 보고서 만들기에서 주제와 지난 주차를 선택해 보세요/)
+  assert.match(empty, /전체 통합은 매주 월요일에 자동으로 만들어집니다/)
   assert.doesNotMatch(empty, /report-changes-panel|수집을 실행하면 분석 완료/)
   client.clear()
+})
+
+test('topic weekly reports keep the saved subject and show analysis coverage without daily-report links', () => {
+  const report = { ...weeklyReportFixture(fixture.report), topicId: 29, topicName: '저장 당시 HBM 주제',
+    sourceReportCount: 0, sourceReportIds: [], sourceReportDates: [], sourceAnalysisDates: ['2026-09-07', '2026-09-09'],
+    missingReportDates: ['2026-09-08', '2026-09-10', '2026-09-11', '2026-09-12', '2026-09-13'] }
+  const { html } = renderPage(report)
+  assert.match(html, /저장 당시 HBM 주제 · 2026-09-07 ~ 2026-09-13 주간 보고서/)
+  assert.match(html, /주제로 보고서 찾기/)
+  assert.match(html, /report-kind-label is-topic/)
+  assert.match(html, /7일 중 <strong>2일<\/strong>의 분석 자료/)
+  assert.match(html, /분석 자료가 있는 날/)
+  assert.match(html, /분석 자료가 없는 날/)
+  assert.doesNotMatch(html, /원본 일일 보고서|일일 보고서가 없는 날|href="#\/reports\?reportId=116"/)
+  assert.match(html, /이 주제별 보고서는 수동으로 만든 보고서입니다/)
+  assert.doesNotMatch(html, /다음 주간 보고서부터 받으려면/)
+})
+
+test('the create entry point appears only on the weekly report tab', () => {
+  const weekly = renderPage(weeklyReportFixture(fixture.report)).html
+  assert.match(weekly, /class="primary-button report-weekly-create"[^>]*aria-haspopup="dialog"/)
+  assert.match(weekly, /주제별 보고서 만들기/)
+  assert.match(weekly, /report-kind-label">전체 통합/)
+  assert.match(weekly, /다음 주간 보고서부터 받으려면/)
+  assert.doesNotMatch(renderPage(fixture.report).html, /report-weekly-create/)
 })

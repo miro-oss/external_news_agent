@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { reportChangesFixture, reportChangesVariants } from './report-changes-fixtures.mjs';
-import { weeklyReportFixture } from './weekly-report-fixtures.mjs';
+import { weeklyReportFixture, topicWeeklyReportFixture } from './weekly-report-fixtures.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const portFlag = process.argv.indexOf('--port');
 const port = Number(portFlag >= 0 ? process.argv[portFlag + 1] : 5187);
@@ -271,6 +271,9 @@ initialReports.push(weeklyReportFixture(initialReports.find(report => report.id 
 let reports = structuredClone(initialReports);
 let reportDeleteError = false;
 let reportChangesVariant = 'ready';
+let topicWeeklyVariant = 'ready';
+let pendingTopicWeekly = null;
+let pendingTopicWeeklyPolls = 0;
 // This scenario includes a matching report beyond the API's first 100 items.
 function reportFilterFixtures() {
     const result = Array.from({ length: 105 }, (_, index) => {
@@ -311,6 +314,9 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 reports = structuredClone(initialReports);
                                 reportDeleteError = false;
                                 reportChangesVariant = 'ready';
+                                topicWeeklyVariant = 'ready';
+                                pendingTopicWeekly = null;
+                                pendingTopicWeeklyPolls = 0;
                                 telegramLinkError = false;
                                 showDeliveryLogs = false;
                                 recipientProfileError = false;
@@ -329,6 +335,16 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             if (path === '/__qa/report-filters') {
                                 reports = reportFilterFixtures();
                                 return json(res, { count: reports.length });
+                            }
+                            if (path === '/__qa/topic-weekly') {
+                                topicWeeklyVariant = body.variant ?? url.searchParams.get('variant') ?? 'ready';
+                                topics = structuredClone(initialTopics);
+                                if (topicWeeklyVariant === 'topics-empty') topics = [];
+                                if (topicWeeklyVariant === 'many-topics') topics.push(...Array.from({ length: 105 }, (_, index) => ({
+                                    ...structuredClone(initialTopics[0]), id: 1000 + index,
+                                    name: index === 0 ? '두 번째 페이지의 중지한 주제' : `추가 주제 ${index + 1}`, active: index !== 0,
+                                })));
+                                return json(res, { variant: topicWeeklyVariant, topicCount: topics.length });
                             }
                             if (path === '/__qa/report-subscriptions') {
                                 const variant = body.variant ?? url.searchParams.get('variant') ?? 'default';
@@ -577,8 +593,9 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             status = 201;
                         }
                         else if (path === '/api/news/topics') {
+                            if (topicWeeklyVariant === 'topics-error') return json(res, { isSuccess: false, code: 'COMMON500', message: '수집 주제 목록을 불러오지 못했습니다.', result: {} }, 500);
                             const active = url.searchParams.get('active');
-                            result = page(topics.filter(t => active === null || t.active === (active === 'true')).sort((a, b) => b.id - a.id));
+                            result = requestedPage(topics.filter(t => active === null || t.active === (active === 'true')).sort((a, b) => b.id - a.id), url);
                         }
                         else if ((match = path.match(/^\/api\/news\/topics\/(\d+)$/)) && ['GET', 'PATCH'].includes(method)) {
                             const topic = topics.find(t => t.id === Number(match[1]));
@@ -657,16 +674,51 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 status: run.status, scannedCount: 0, newCount: 0, updatedCount: 0,
                             }))) } : undefined;
                         }
+                        else if (path === '/api/news/reports/weekly' && method === 'POST') {
+                            const topic = topics.find(item => item.id === body.topicId);
+                            if (!topic) return json(res, { isSuccess: false, code: 'TOPIC404', message: '수집 주제를 찾을 수 없습니다.', result: {} }, 404);
+                            const date = new Date(`${body.weekStartDate}T00:00:00Z`);
+                            const todayKst = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+                            if (!/^\d{4}-\d{2}-\d{2}$/.test(body.weekStartDate ?? '') || Number.isNaN(date.getTime())
+                                || date.toISOString().slice(0, 10) !== body.weekStartDate || date.getUTCDay() !== 1
+                                || new Date(date.getTime() + 6 * 86400000).toISOString().slice(0, 10) >= todayKst)
+                                return json(res, { isSuccess: false, code: 'COMMON400', message: '주간 보고서는 종료된 월요일~일요일 기간만 집계할 수 있습니다.', result: {} }, 400);
+                            if (['no-evidence', 'unfinished'].includes(topicWeeklyVariant))
+                                return json(res, { isSuccess: false, code: 'REPORT409', message: topicWeeklyVariant === 'unfinished'
+                                    ? '선택한 주제의 수집·분석이 진행 중입니다. 완료 후 다시 시도해 주세요.'
+                                    : '선택한 주제와 기간에 보고서를 만들 수 있는 분석 자료가 없습니다.', result: {} }, 409);
+                            const existing = reports.find(report => report.topicId === body.topicId && report.reportDate === body.weekStartDate);
+                            if (existing) result = { reportId: existing.id, created: false, reportReady: true };
+                            else if (pendingTopicWeekly) result = { reportId: pendingTopicWeekly.id, created: false, reportReady: false };
+                            else {
+                                const saved = topicWeeklyReportFixture(initialReports.find(report => report.id === 117), topic, body.weekStartDate,
+                                    Math.max(300, ...reports.map(report => report.id)) + 1);
+                                if (topicWeeklyVariant === 'pending') {
+                                    pendingTopicWeekly = saved;
+                                    pendingTopicWeeklyPolls = 0;
+                                    result = { reportId: saved.id, created: false, reportReady: false };
+                                } else {
+                                    reports.unshift(saved);
+                                    result = { reportId: saved.id, created: true, reportReady: true };
+                                }
+                            }
+                        }
                         else if (path === '/api/news/reports') {
                             const scope = url.searchParams.get('reportScope');
+                            if (scope === 'WEEKLY' && pendingTopicWeekly && ++pendingTopicWeeklyPolls >= 3) {
+                                reports.unshift(pendingTopicWeekly);
+                                pendingTopicWeekly = null;
+                            }
                             const filtered = reports.filter(r => !scope || r.reportScope === scope);
                             const pageNumber = Number(url.searchParams.get('page') || 0);
                             const size = Number(url.searchParams.get('size') || 20);
                             const summaries = filtered.slice(pageNumber * size, (pageNumber + 1) * size).map(report => ({
                                 id: report.id, runId: report.runId, reportScope: report.reportScope,
+                                topicId: report.topicId ?? null, topicName: report.topicName ?? null,
                                 reportDate: report.reportDate ?? null, sourceRunIds: report.sourceRunIds,
                                 reportEndDate: report.reportEndDate ?? null, sourceReportIds: report.sourceReportIds ?? [],
                                 sourceReportDates: report.sourceReportDates ?? [], missingReportDates: report.missingReportDates ?? [],
+                                sourceAnalysisDates: report.sourceAnalysisDates ?? [],
                                 sourceReportCount: report.sourceReportCount ?? null, title: report.title,
                                 generatedAt: report.generatedAt, modelName: report.modelName,
                                 findingCount: report.findingCount, highSensitivityCount: report.highSensitivityCount,

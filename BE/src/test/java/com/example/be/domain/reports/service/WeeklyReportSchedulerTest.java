@@ -37,6 +37,21 @@ class WeeklyReportSchedulerTest {
     }
 
     @Test
+    void disabledAutomaticWeeklyStillRecoversManualTopicReports() {
+        var creation = mock(WeeklyReportCreationService.class);
+        var reports = mock(WeeklyReportJdbcRepository.class);
+        var scheduler = new WeeklyReportScheduler(creation, reports);
+        org.springframework.test.util.ReflectionTestUtils.setField(scheduler, "enabled", false);
+        scheduler.generateDueReports();
+        verify(creation).recoverInterruptedTopics(any());
+        verify(creation, never()).recoverInterrupted(any());
+        verifyNoInteractions(reports);
+        org.springframework.test.util.ReflectionTestUtils.setField(scheduler, "schedulingEnabled", false);
+        scheduler.generateDueReports();
+        verify(creation, times(1)).recoverInterruptedTopics(any());
+    }
+
+    @Test
     void restartDerivesRemainingWorkFromSavedReportsAndEmptyHistoryCreatesNothing() {
         var creation = mock(WeeklyReportCreationService.class);
         var reports = mock(WeeklyReportJdbcRepository.class);

@@ -58,9 +58,12 @@ public class WeeklyReportGenerator {
         List<ReportContent.WatchItem> watchItems = watches.values().stream().limit(5)
                 .map(item -> new ReportContent.WatchItem(item.topic, item.reason, List.copyOf(item.ids))).toList();
         List<String> notes = new ArrayList<>(input.sourceNotes());
-        notes.add("자동 요약을 사용할 수 없어 일일 보고서의 검증된 내용을 근거와 날짜별로 묶었습니다.");
+        notes.add(input.topicId() == null ? "자동 요약을 사용할 수 없어 일일 보고서의 검증된 내용을 근거와 날짜별로 묶었습니다."
+                : "자동 요약을 사용할 수 없어 저장된 분석의 검증된 내용을 근거와 날짜별로 묶었습니다.");
         if (groups.size() > selected.size()) {
-            notes.add("주요 이슈 " + selected.size() + "개를 표시했습니다. 나머지 내용은 연결된 일일 통합 보고서에서 확인할 수 있습니다.");
+            notes.add("주요 이슈 " + selected.size() + (input.topicId() == null
+                    ? "개를 표시했습니다. 나머지 내용은 연결된 일일 통합 보고서에서 확인할 수 있습니다."
+                    : "개를 표시했습니다. 자료 범위에는 주제별 분석 입력 전체의 날짜를 표시합니다."));
         }
         ReportContent content = new ReportContent(summaries, events, watchItems, notes);
         LinkedHashSet<Long> reflected = new LinkedHashSet<>();
@@ -68,7 +71,7 @@ public class WeeklyReportGenerator {
         watchItems.forEach(item -> reflected.addAll(item.sourceFindingIds()));
         return new ReportDocument(input.title(), markdown(input, content), MODEL_NAME,
                 null, null, null, null, null, null, ReportStatus.FALLBACK,
-                List.copyOf(reflected), List.of(), content);
+                List.copyOf(reflected), input.sourceFindingIds().stream().filter(id -> !reflected.contains(id)).toList(), content);
     }
 
     private String markdown(WeeklyReportInput input, ReportContent content) {
@@ -84,9 +87,12 @@ public class WeeklyReportGenerator {
             content.watchItems().forEach(item -> body.append("- ").append(ReportMarkdown.text(item.topic()))
                     .append(": ").append(ReportMarkdown.text(item.reason())).append("\n"));
         }
-        body.append("\n## 일일 통합 보고서 출처\n\n");
-        input.sources().forEach(source -> body.append("- ").append(source.reportDate())
-                .append(" · 보고서 #").append(source.reportId()).append("\n"));
+        body.append(input.topicId() == null ? "\n## 일일 통합 보고서 출처\n\n" : "\n## 분석 자료 날짜\n\n");
+        input.sources().forEach(source -> {
+            body.append("- ").append(source.reportDate());
+            if (source.reportId() != null) body.append(" · 보고서 #").append(source.reportId());
+            body.append("\n");
+        });
         body.append("\n## 수집 및 출처 참고\n\n");
         content.sourceNotes().forEach(note -> body.append("- ").append(ReportMarkdown.text(note)).append("\n"));
         return body.toString();

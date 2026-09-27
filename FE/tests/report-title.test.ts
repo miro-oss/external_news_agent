@@ -84,3 +84,10 @@ test('weekly titles show both saved period boundaries independently of the gener
   assert.equal(reportDisplayTitle({ ...report, reportEndDate: null }), report.title)
   assert.equal(reportDisplayTitle({ ...report, reportDate: undefined }), report.title)
 })
+
+test('topic weekly titles use the saved subject with a safe ID fallback', () => {
+  const report = { reportScope: 'WEEKLY' as const, topicId: 29, topicName: 'HBM 시장', title: '저장된 제목',
+    reportDate: '2026-09-21', reportEndDate: '2026-09-27', generatedAt: 'invalid' }
+  assert.equal(reportDisplayTitle(report), 'HBM 시장 · 2026-09-21 ~ 2026-09-27 주간 보고서')
+  assert.equal(reportDisplayTitle({ ...report, topicName: null }), '주제 #29 · 2026-09-21 ~ 2026-09-27 주간 보고서')
+})

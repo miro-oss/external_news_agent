@@ -25,8 +25,12 @@ public class WeeklyReportScheduler {
 
     @Scheduled(fixedDelayString = "${news.reports.weekly.poll-interval-ms:300000}")
     public void generateDueReports() {
-        if (!enabled || !schedulingEnabled) return;
+        if (!schedulingEnabled) return;
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
+        if (!enabled) {
+            creation.recoverInterruptedTopics(now.minusMinutes(30));
+            return;
+        }
         creation.recoverInterrupted(now.minusMinutes(30));
         LocalDate currentMonday = now.toLocalDate().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
         int limit = Math.clamp(backfillWeeks, 1, 12);

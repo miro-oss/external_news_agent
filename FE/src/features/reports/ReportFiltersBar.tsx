@@ -44,7 +44,7 @@ export function ReportFiltersBar({ filters, topicOptions, scope, totalCount, res
           </div>
         </label>
         <label className="report-filter-field report-topic-field">
-          <span>수집 주제</span>
+          <span>주제로 보고서 찾기</span>
           <select value={filters.topicId ?? ''} disabled={disabled} onChange={event => {
             const topicId = event.target.value ? Number(event.target.value) : null
             setSelectedTopic(topicOptions.find(option => option.id === topicId) ?? (selectedTopic?.id === topicId ? selectedTopic : null))

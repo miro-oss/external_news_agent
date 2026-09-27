@@ -11,6 +11,7 @@ final class ReportTitles {
 
     static String forReport(NewsReport report, String fallback, LocalDateTime generatedAt) {
         if (report.getReportScope() == ReportScope.WEEKLY) {
+            if (report.getTopicId() != null && report.getWeeklyInput() != null) return report.getWeeklyInput().title();
             return report.getReportDate() == null || report.getReportEndDate() == null ? fallback
                     : report.getReportDate() + " ~ " + report.getReportEndDate() + " 주간 통합 뉴스 보고서";
         }

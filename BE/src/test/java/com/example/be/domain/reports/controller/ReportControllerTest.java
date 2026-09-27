@@ -7,6 +7,7 @@ import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;
 import com.example.be.domain.reports.service.ReportQueryService;
 import com.example.be.domain.reports.service.ReportCommandService;
+import com.example.be.domain.reports.service.TopicWeeklyReportCreationService;
 import com.example.be.global.apiPayload.PageResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +22,7 @@ import java.util.Map;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -35,6 +37,103 @@ class ReportControllerTest {
 
     @MockitoBean
     private ReportCommandService reportCommandService;
+
+    @MockitoBean
+    private TopicWeeklyReportCreationService topicWeeklyReportCreationService;
+
+    @Test
+    void topicWeeklyCreationAndDuplicateResponsesUseCommonSuccessEnvelope() throws Exception {
+        var monday = java.time.LocalDate.of(2026, 9, 21);
+        when(topicWeeklyReportCreationService.generate(29L, monday)).thenReturn(
+                new ReportResDTO.WeeklyCreated(301L, true, true),
+                new ReportResDTO.WeeklyCreated(301L, false, true),
+                new ReportResDTO.WeeklyCreated(301L, false, false));
+        boolean[] created = {true, false, false};
+        boolean[] ready = {true, true, false};
+        for (int index = 0; index < created.length; index++) {
+            mockMvc.perform(post("/api/news/reports/weekly").contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"topicId":29,"weekStartDate":"2026-09-21"}
+                                    """))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.isSuccess").value(true))
+                    .andExpect(jsonPath("$.code").value("COMMON200"))
+                    .andExpect(jsonPath("$.message").value("성공입니다."))
+                    .andExpect(jsonPath("$.result.reportId").value(301))
+                    .andExpect(jsonPath("$.result.created").value(created[index]))
+                    .andExpect(jsonPath("$.result.reportReady").value(ready[index]));
+        }
+    }
+
+    @Test
+    void topicWeeklyMalformedDateUsesCommonBadRequestWithoutStartingGeneration() throws Exception {
+        mockMvc.perform(post("/api/news/reports/weekly").contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"topicId":29,"weekStartDate":"2026-09-99"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.isSuccess").value(false))
+                .andExpect(jsonPath("$.code").value("COMMON400"))
+                .andExpect(jsonPath("$.result").isMap());
+        org.mockito.Mockito.verifyNoInteractions(topicWeeklyReportCreationService);
+    }
+
+    @Test
+    void topicWeeklyInvalidCalendarAndMissingTopicPreserveDomainErrors() throws Exception {
+        var tuesday = java.time.LocalDate.of(2026, 9, 22);
+        when(topicWeeklyReportCreationService.generate(29L, tuesday)).thenThrow(
+                new com.example.be.global.apiPayload.exception.GeneralException(
+                        com.example.be.global.apiPayload.code.GeneralErrorCode.BAD_REQUEST,
+                        "주간 보고서는 종료된 월요일~일요일 기간만 집계할 수 있습니다."));
+        mockMvc.perform(post("/api/news/reports/weekly").contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"topicId":29,"weekStartDate":"2026-09-22"}
+                                """))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("COMMON400"))
+                .andExpect(jsonPath("$.message").value("주간 보고서는 종료된 월요일~일요일 기간만 집계할 수 있습니다."))
+                .andExpect(jsonPath("$.result").isMap());
+        when(topicWeeklyReportCreationService.generate(99L, tuesday.minusDays(1))).thenThrow(
+                new com.example.be.domain.topics.exception.TopicException(
+                        com.example.be.domain.topics.exception.code.TopicErrorCode.TOPIC_NOT_FOUND));
+        mockMvc.perform(post("/api/news/reports/weekly").contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"topicId":99,"weekStartDate":"2026-09-21"}
+                                """))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("TOPIC404"))
+                .andExpect(jsonPath("$.message").value("수집 주제를 찾을 수 없습니다."))
+                .andExpect(jsonPath("$.result").isMap());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = ReportErrorCode.class, names = {"TOPIC_INPUT_PENDING", "TOPIC_INPUT_EMPTY"})
+    void topicWeeklyUnavailableInputUsesReportConflictEnvelope(ReportErrorCode error) throws Exception {
+        when(topicWeeklyReportCreationService.generate(29L, java.time.LocalDate.of(2026, 9, 21)))
+                .thenThrow(new ReportException(error));
+        mockMvc.perform(post("/api/news/reports/weekly").contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"topicId":29,"weekStartDate":"2026-09-21"}
+                                """))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.isSuccess").value(false))
+                .andExpect(jsonPath("$.code").value("REPORT409"))
+                .andExpect(jsonPath("$.message").value(error.getMessage()))
+                .andExpect(jsonPath("$.result").isMap());
+    }
+
+    @Test
+    void topicWeeklyReadMetadataDistinguishesAnalysisDatesFromDailyReportSources() throws Exception {
+        var monday = java.time.LocalDate.of(2026, 9, 21);
+        var detail = ReportResDTO.Detail.builder().id(301L).reportScope(com.example.be.domain.reports.entity.ReportScope.WEEKLY)
+                .topicId(29L).topicName("HBM 시장").reportDate(monday).reportEndDate(monday.plusDays(6))
+                .sourceAnalysisDates(List.of(monday)).sourceReportCount(0L).build();
+        when(reportQueryService.getReport(301L, false)).thenReturn(detail);
+        mockMvc.perform(get("/api/news/reports/301").param("includeFindings", "false"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.topicId").value(29))
+                .andExpect(jsonPath("$.result.topicName").value("HBM 시장"))
+                .andExpect(jsonPath("$.result.sourceAnalysisDates[0]").value("2026-09-21"))
+                .andExpect(jsonPath("$.result.sourceReportIds").isEmpty())
+                .andExpect(jsonPath("$.result.sourceReportDates").isEmpty())
+                .andExpect(jsonPath("$.result.sourceReportCount").value(0));
+    }
 
     @Test
     void weeklyScopeExposesPeriodAndDailySourcesAndKeepsEmptyLatestContract() throws Exception {

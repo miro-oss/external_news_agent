@@ -68,6 +68,37 @@ public class TopicRelevancePolicy {
         }).toList();
     }
 
+    /** Keep rejected target observations in latest selection, but ignore another topic's own analysis. */
+    public List<Finding> topicContextFindings(Long topicId, List<Finding> findings) {
+        var byRun = assessments(findings);
+        return findings.stream().filter(f -> {
+            var rows = articleAssessments(f, byRun);
+            return rows.isEmpty() ? f.getArticle().getTopic().getId().equals(topicId)
+                    : rows.stream().anyMatch(a -> a.topicId().equals(topicId));
+        }).toList();
+    }
+
+    /** A topic report must not use another accepted topic to bypass this topic's rejection. */
+    public List<Finding> filterTopicFindings(Long topicId, List<Finding> findings) {
+        var byRun = assessments(findings);
+        return findings.stream().filter(f -> {
+            var rows = articleAssessments(f, byRun);
+            return rows.isEmpty() ? f.getArticle().getTopic().getId().equals(topicId)
+                    : rows.stream().anyMatch(a -> a.topicId().equals(topicId)
+                            && a.status() == TopicRelevanceStatus.RELEVANT);
+        }).toList();
+    }
+
+    public List<Finding> filterDailyTopicFindings(LocalDate date, Long topicId, List<Finding> findings) {
+        List<Finding> permitted = filterTopicFindings(topicId, findings);
+        var latest = store.latestOnDate(date, permitted.stream().map(f -> f.getArticle().getId()).distinct().toList());
+        return permitted.stream().filter(f -> latest.stream().noneMatch(a ->
+                a.topicId().equals(topicId) && a.articleId().equals(f.getArticle().getId())
+                        && (a.startedAt().isAfter(f.getRun().getStartedAt())
+                            || (a.startedAt().equals(f.getRun().getStartedAt()) && a.runId() >= f.getRun().getId()))
+                        && a.status() != TopicRelevanceStatus.RELEVANT)).toList();
+    }
+
     private Map<Long, List<TopicRelevanceStore.Assessment>> assessments(List<Finding> findings) {
         return findings.stream().map(f -> f.getRun().getId()).distinct()
                 .collect(Collectors.toMap(Function.identity(), store::findByRun));

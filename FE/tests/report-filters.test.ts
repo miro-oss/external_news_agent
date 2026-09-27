@@ -21,6 +21,16 @@ const report = (id: number, changes: Partial<ReportSummary> = {}): ReportSummary
 const filters = (changes: Partial<ReportFilters> = {}): ReportFilters => ({ ...DEFAULT_REPORT_FILTERS, ...changes })
 const ids = (items: ReportSummary[]) => items.map(item => item.id)
 
+test('topic weekly reports use their explicit saved topic even without collection contexts', () => {
+  const weekly = report(1, { reportScope: 'WEEKLY', topicId: 31, topicName: '저장된 단일 주제', collectionContexts: [] })
+  assert.deepEqual(reportTopicOptions([weekly]), [{ id: 31, label: '저장된 단일 주제' }])
+  assert.deepEqual(ids(filterReports([weekly], filters({ topicId: 31, search: '단일' }), now)), [1])
+  assert.deepEqual(ids(filterReports([weekly], filters({ topicId: 29 }), now)), [])
+  const oldContext = { ...weekly, collectionContexts: [{ runId: 42, topics: [topic(29, '다른 주제')] }] }
+  assert.deepEqual(reportTopicOptions([oldContext]), [{ id: 31, label: '저장된 단일 주제' }])
+  assert.deepEqual(ids(filterReports([oldContext], filters({ topicId: 29 }), now)), [])
+})
+
 test('aggregate reports sort by newest period despite later backfills without mutating cached order', () => {
   for (const reportScope of ['DAILY', 'WEEKLY'] as const) {
     const items = [

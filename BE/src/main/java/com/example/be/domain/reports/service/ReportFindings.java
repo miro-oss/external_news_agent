@@ -26,7 +26,8 @@ public final class ReportFindings {
 
     public static Visible loadVisible(NewsReport report, FindingRepository repository, TopicRelevancePolicy policy) {
         Visible original = loadVisible(report, repository);
-        List<Finding> relevant = policy.filterFindings(original.findings());
+        List<Finding> relevant = report.getTopicId() == null ? policy.filterFindings(original.findings())
+                : policy.filterTopicFindings(report.getTopicId(), original.findings());
         return new Visible(relevant, original.filtered() || relevant.size() != original.findings().size());
     }
 
