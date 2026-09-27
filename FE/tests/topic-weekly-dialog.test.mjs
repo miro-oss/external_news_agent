@@ -29,10 +29,12 @@ const render = (props = {}) => renderToStaticMarkup(createElement(Dialog, {
   id: 'weekly-dialog', topics, now, onRetryTopics() {}, onDismiss() {}, onCreate() {}, ...props,
 }))
 
-test('the dialog defaults to the last closed KST week and offers paused topics with accessible labels', () => {
-  const html = render({ initialTopicId: 31 })
+test('the dialog defaults to the last closed KST week and offers only active topics with accessible labels', () => {
+  const html = render({ initialTopicId: 29 })
   assert.match(html, /aria-labelledby="weekly-dialog-title"/)
-  assert.match(html, /<option value="31" selected="">중지한 반도체 주제 \(수집 중지\)/)
+  assert.match(html, /<option value="29" selected="">HBM 시장/)
+  assert.doesNotMatch(html, /중지한 반도체 주제|수집 중지/)
+  assert.match(html, /활성화된 수집 주제만 표시합니다/)
   assert.match(html, /type="date"[^>]*max="2026-09-27"[^>]*value="2026-09-21"/)
   assert.match(html, /aria-label="이전 주 선택"/)
   assert.match(html, /aria-label="다음 주 선택" disabled=""/)
@@ -43,13 +45,18 @@ test('the dialog defaults to the last closed KST week and offers paused topics w
 test('topic loading, empty, and error states prevent invalid submission and provide recovery', () => {
   const loading = render({ topics: [], topicsLoading: true })
   assert.match(loading, /aria-busy="true"/)
-  assert.match(loading, /전체 수집 주제를 불러오는 중/)
+  assert.match(loading, /활성화된 수집 주제를 불러오는 중/)
   const empty = render({ topics: [] })
-  assert.match(empty, /등록된 수집 주제가 없습니다/)
+  assert.match(empty, /활성화된 수집 주제가 없습니다/)
+  const pausedOnly = render({ topics: topics.filter(topic => !topic.active), initialTopicId: 31 })
+  assert.match(pausedOnly, /활성화된 수집 주제가 없습니다/)
+  assert.doesNotMatch(pausedOnly, /<option value="31"/)
+  const pausedSelection = render({ initialTopicId: 31 })
+  assert.match(pausedSelection, /<option value="" selected="">주제를 선택해 주세요/)
   const failure = render({ topicsError: '주제 조회 실패' })
   assert.match(failure, /role="alert"><p class="error">주제 조회 실패/)
   assert.match(failure, /주제 다시 불러오기/)
-  for (const html of [loading, empty, failure, render()]) {
+  for (const html of [loading, empty, failure, pausedOnly, pausedSelection, render()]) {
     assert.match(html, /type="submit" class="primary-button" disabled=""/)
   }
 })
@@ -71,20 +78,20 @@ test('API failures are shown inside the form with the selected topic retained', 
   assert.match(html, /class="error topic-weekly-save-error" role="alert">선택한 주제와 기간/)
 })
 
-test('the all-topic query follows every page without an active filter and preserves paused topics', async context => {
+test('the active-topic query preserves the active filter on every page', async context => {
   const calls = []
   context.mock.method(globalThis, 'fetch', async url => {
     calls.push(url)
     const page = Number(new URL(url, 'https://fixture.invalid').searchParams.get('page'))
     const content = page === 0 ? Array.from({ length: 100 }, (_, index) => ({ id: 100 + index, name: `주제 ${index}`, active: true }))
-      : [{ id: 1, name: '두 번째 페이지의 중지한 주제', active: false }]
+      : [{ id: 1, name: '두 번째 페이지의 활성 주제', active: true }]
     return new Response(JSON.stringify({ isSuccess: true, code: 'COMMON200', message: '성공입니다.',
       result: { content, page, size: 100, totalElements: 101, totalPages: 2, hasNext: page === 0 } }))
   })
-  const all = await topicListOptions().queryFn()
-  assert.deepEqual(calls, ['/api/news/topics?page=0&size=100', '/api/news/topics?page=1&size=100'])
+  const all = await topicListOptions(true).queryFn()
+  assert.deepEqual(calls, ['/api/news/topics?active=true&page=0&size=100', '/api/news/topics?active=true&page=1&size=100'])
   assert.equal(all.content.length, 101)
-  assert.equal(all.content.at(-1).active, false)
+  assert.equal(all.content.at(-1).active, true)
   assert.equal(all.hasNext, false)
-  assert.match(render({ topics: all.content, initialTopicId: 1 }), /두 번째 페이지의 중지한 주제 \(수집 중지\)/)
+  assert.match(render({ topics: all.content, initialTopicId: 1 }), /두 번째 페이지의 활성 주제/)
 })

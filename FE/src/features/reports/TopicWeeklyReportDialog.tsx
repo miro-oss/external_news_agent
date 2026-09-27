@@ -32,7 +32,8 @@ export function TopicWeeklyReportDialog({ id, topics, topicsLoading = false, top
   const lastWeek = lastCompletedReportWeek(now)
   const weekError = reportWeekError(weekStart, now)
   const weekEnd = shiftReportDate(weekStart, 6)
-  const selectedTopic = topics.find(topic => topic.id === topicId)
+  const activeTopics = topics.filter(topic => topic.active)
+  const selectedTopic = activeTopics.find(topic => topic.id === topicId)
   const busy = pending || waiting
   const canCreate = !busy && !topicsLoading && !topicsError && !!selectedTopic && !weekError
 
@@ -83,17 +84,17 @@ export function TopicWeeklyReportDialog({ id, topics, topicsLoading = false, top
         <div className="field">
           <label htmlFor={`${id}-topic`}>수집 주제</label>
           <select ref={topicSelect} id={`${id}-topic`} value={selectedTopic?.id ?? ''} required
-            disabled={busy || topicsLoading || !!topicsError || topics.length === 0}
+            disabled={busy || topicsLoading || !!topicsError || activeTopics.length === 0}
             aria-describedby={`${id}-topic-hint`}
             onChange={event => { setTopicId(event.target.value ? Number(event.target.value) : null); onDraftChange?.() }}>
             <option value="">{topicsLoading ? '주제를 불러오는 중…' : '주제를 선택해 주세요'}</option>
-            {topics.map(topic => <option key={topic.id} value={topic.id}>{topic.name}{topic.active ? '' : ' (수집 중지)'}</option>)}
+            {activeTopics.map(topic => <option key={topic.id} value={topic.id}>{topic.name}</option>)}
           </select>
-          <p id={`${id}-topic-hint`} className="hint">수집을 중지한 주제도 이전에 모은 기사로 보고서를 만들 수 있습니다.</p>
-          {topicsLoading && <p className="hint" role="status">전체 수집 주제를 불러오는 중입니다.</p>}
+          <p id={`${id}-topic-hint`} className="hint">활성화된 수집 주제만 표시합니다.</p>
+          {topicsLoading && <p className="hint" role="status">활성화된 수집 주제를 불러오는 중입니다.</p>}
           {topicsError && <div className="topic-weekly-topic-error" role="alert"><p className="error">{topicsError}</p>
             <button type="button" className="text-button" disabled={pending} onClick={onRetryTopics}>주제 다시 불러오기</button></div>}
-          {!topicsLoading && !topicsError && topics.length === 0 && <p className="hint" role="status">등록된 수집 주제가 없습니다. 수집 설정에서 주제를 등록해 주세요.</p>}
+          {!topicsLoading && !topicsError && activeTopics.length === 0 && <p className="hint" role="status">활성화된 수집 주제가 없습니다. 수집 설정에서 주제를 활성화해 주세요.</p>}
         </div>
         <div className="field">
           <label htmlFor={`${id}-week`}>주차 선택</label>

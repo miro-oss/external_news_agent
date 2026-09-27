@@ -14,7 +14,7 @@ export function TopicWeeklyReportCreate({ id, initialTopicId, now, onDismiss, on
   returnFocusRef: RefObject<HTMLButtonElement | null>
 }) {
   const client = useQueryClient()
-  const topics = useTopics()
+  const topics = useTopics(true)
   const create = useMutation(createTopicWeeklyReportOptions())
   const [waiting, setWaiting] = useState<TopicWeeklyReportCreated | null>(null)
   const reports = useReports('WEEKLY', { enabled: waiting !== null, refetchInterval: waiting ? 3000 : false })
