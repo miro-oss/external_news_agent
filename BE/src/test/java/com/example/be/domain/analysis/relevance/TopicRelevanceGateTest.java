@@ -19,7 +19,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -192,20 +194,31 @@ class TopicRelevanceGateTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = TopicRelevanceStatus.class, names = {"RELEVANT", "IRRELEVANT"})
-    void v9ReassessesCachedV8DecisionForUnchangedInput(TopicRelevanceStatus cachedStatus) {
-        assertEquals("topic-relevance.ko.v9", TopicRelevanceGate.PROMPT_VERSION);
+    @CsvSource({
+            "topic-relevance.ko.v8, RELEVANT",
+            "topic-relevance.ko.v8, IRRELEVANT",
+            "topic-relevance.ko.v9, RELEVANT",
+            "topic-relevance.ko.v9, IRRELEVANT"
+    })
+    void v10ReassessesCachedEarlierDecisionForUnchangedInput(
+            String legacyVersion, TopicRelevanceStatus cachedStatus) {
+        assertEquals("topic-relevance.ko.v10", TopicRelevanceGate.PROMPT_VERSION);
         reserve();
         var input = candidate(1L, 7L);
         var topic = new AgentTopicRelevanceRequest.TopicInput(7L, "제조장비", "반도체 장비 공정",
                 List.of(), List.of(), List.of());
+        // v8 hashed both global models; v9 hashes only the task-specific model.
+        String legacyModels = legacyVersion.equals("topic-relevance.ko.v8")
+                ? "\n\n" : "\ngpt-5.6-terra";
         String legacyInput = new ObjectMapper().writeValueAsString(topic)
-                + "\ntopic-relevance.ko.v8\nFREE\n\n\n기사 1\nnull\n반도체 제조 장비 공정 본문";
+                + "\n" + legacyVersion + "\nFREE" + legacyModels
+                + "\n기사 1\nnull\n반도체 제조 장비 공정 본문";
         String legacyHash = TopicRelevanceGate.hash(legacyInput);
         String upgradedHash = TopicRelevanceGate.hash(new ObjectMapper().writeValueAsString(topic)
-                + "\ntopic-relevance.ko.v9\nFREE\ngpt-5.6-terra\n기사 1\nnull\n반도체 제조 장비 공정 본문");
+                + "\ntopic-relevance.ko.v10\nFREE\ngpt-5.6-terra\n기사 1\nnull\n반도체 제조 장비 공정 본문");
+        assertNotEquals(legacyHash, upgradedHash);
         when(store.findByRun(42L)).thenReturn(List.of(new TopicRelevanceStore.Assessment(
-                42L, 7L, 1L, cachedStatus, "이전 판정", legacyHash, "topic-relevance.ko.v8",
+                42L, 7L, 1L, cachedStatus, "이전 판정", legacyHash, legacyVersion,
                 "test-model", "[\"기사 1\"]")));
         TopicRelevanceStatus newStatus = cachedStatus == TopicRelevanceStatus.RELEVANT
                 ? TopicRelevanceStatus.IRRELEVANT : TopicRelevanceStatus.RELEVANT;
@@ -219,7 +232,7 @@ class TopicRelevanceGateTest {
         verify(client).topicRelevance(any());
         verify(finalizer).success(eq(42L), any(), any(), argThat(rows -> rows.size() == 1
                         && rows.getFirst().status() == newStatus
-                        && rows.getFirst().promptVersion().equals("topic-relevance.ko.v9")
+                        && rows.getFirst().promptVersion().equals("topic-relevance.ko.v10")
                         && rows.getFirst().inputHash().equals(upgradedHash)),
                 anyString(), any(), any());
     }
@@ -263,13 +276,15 @@ class TopicRelevanceGateTest {
         assertNotEquals(persistedHashes.getFirst(), persistedHashes.getLast());
     }
 
-    @Test void rejectsV8ResponseAfterV9Upgrade() {
+    @ParameterizedTest
+    @ValueSource(strings = {"topic-relevance.ko.v8", "topic-relevance.ko.v9"})
+    void rejectsEarlierResponseAfterV10Upgrade(String legacyVersion) {
         var request = new AgentTopicRelevanceRequest("test", AgentPlan.FREE,
                 new AgentTopicRelevanceRequest.TopicInput(7L, "장비", "반도체 장비", List.of(), List.of(), List.of()),
                 List.of(new AgentTopicRelevanceRequest.ArticleInput(1L, "공정위", null, "토스 분쟁")));
         var oldResponse = new AgentTopicRelevanceResponse(List.of(
                 new AgentTopicRelevanceResponse.Decision(1L, "IRRELEVANT", "금융 분쟁", List.of("토스 분쟁"))),
-                new AgentTopicRelevanceResponse.Meta("openai", "test-model", "topic-relevance.ko.v8",
+                new AgentTopicRelevanceResponse.Meta("openai", "test-model", legacyVersion,
                         10L, 5L, BigDecimal.ZERO, BigDecimal.ZERO, false, false));
 
         AgentClientException error = assertThrows(AgentClientException.class,

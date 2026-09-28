@@ -21,7 +21,7 @@ from app.schemas.topic_relevance import (
     TopicRelevanceResponse,
 )
 
-PROMPT_VERSION = "topic-relevance.ko.v9"
+PROMPT_VERSION = "topic-relevance.ko.v10"
 _QUOTE_TEXT = TypeAdapter(Annotated[str, StringConstraints(strip_whitespace=True)])
 SYSTEM_INSTRUCTION = (
     (Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md")
