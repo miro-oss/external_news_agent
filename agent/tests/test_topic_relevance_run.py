@@ -55,7 +55,11 @@ class FakeProvider:
         return ProviderResponse(
             text=json.dumps({"decisions": {
                 key: {"status": "RELEVANT", "reason": "기사에 장비 공급이 명시된다.",
-                      "evidenceQuotes": ["quote_0"]} for key in keys
+                      "sourceAssessment": {
+                          quote: "D"
+                          for quote in value["properties"]["sourceAssessment"]["properties"]
+                      },
+                      "evidenceQuotes": ["quote_0"]} for key, value in keys.items()
             }}),
             provider="openai", model=self.model,
             usage=ProviderUsage(input_tokens=30, output_tokens=20, cost_usd=self.cost),

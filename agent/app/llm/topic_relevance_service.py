@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Annotated
@@ -21,7 +22,11 @@ from app.schemas.topic_relevance import (
     TopicRelevanceResponse,
 )
 
-PROMPT_VERSION = "topic-relevance.ko.v15"
+PROMPT_VERSION = "topic-relevance.ko.v21"
+_SOURCE_ASSESSMENTS = (
+    "E", "D", "L", "G", "N",
+)
+_RELEVANT_ASSESSMENTS = frozenset({"D", "L"})
 _QUOTE_TEXT = TypeAdapter(Annotated[str, StringConstraints(strip_whitespace=True)])
 SYSTEM_INSTRUCTION = (
     (Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md")
@@ -163,9 +168,22 @@ def _validated_output(
     decisions = []
     for article in request.articles:
         value = values[_article_key(article.article_id)]
-        if not isinstance(value, dict) or set(value) != {"status", "reason", "evidenceQuotes"}:
-            raise ValueError("각 판정에는 status, reason, evidenceQuotes만 있어야 합니다.")
+        if not isinstance(value, dict) or set(value) != {
+            "sourceAssessment", "status", "reason", "evidenceQuotes",
+        }:
+            raise ValueError(
+                "각 판정에는 sourceAssessment, status, reason, evidenceQuotes만 있어야 합니다."
+            )
         choices = _quote_choices(article)
+        assessment = value["sourceAssessment"]
+        if (
+            not isinstance(assessment, dict) or set(assessment) != set(choices)
+            or any(not isinstance(role, str) or role not in _SOURCE_ASSESSMENTS
+                   for role in assessment.values())
+        ):
+            raise ValueError(
+                "sourceAssessment는 모든 인용 ID를 누락·추가 없이 허용된 역할로 분류해야 합니다."
+            )
         selected = value["evidenceQuotes"]
         if not isinstance(selected, list) or not selected or any(
             not isinstance(quote, str) or quote not in choices for quote in selected
@@ -173,11 +191,32 @@ def _validated_output(
             raise ValueError(
                 "evidenceQuotes는 해당 기사의 인용 선택지 값을 최소 한 개 그대로 반환해야 합니다."
             )
+        excluded = {quote for quote, role in assessment.items() if role == "E"}
+        if excluded and not request.topic.excluded_keywords:
+            raise ValueError("사용자 제외 조건이 없으면 제외 사건(E)으로 분류할 수 없습니다.")
+        if excluded and (
+            value["status"] != "IRRELEVANT" or not excluded.intersection(selected)
+        ):
+            raise ValueError(
+                "제외 사건(E)이 있으면 IRRELEVANT로 판정하고 해당 제외 근거를 인용해야 합니다."
+            )
+        if value["status"] == "RELEVANT" and not any(
+            assessment[quote] in _RELEVANT_ASSESSMENTS for quote in selected
+        ):
+            raise ValueError(
+                "RELEVANT의 선택 인용에는 직접 사건 또는 명시적인 연결 근거가 필요합니다."
+            )
+        explicit = {quote for quote, role in assessment.items() if role == "L"}
+        if value["status"] == "RELEVANT" and explicit and not explicit.intersection(selected):
+            raise ValueError(
+                "명시적인 연결(L)이 있으면 RELEVANT의 선택 인용에 해당 근거를 포함해야 합니다."
+            )
         decisions.append(
             RelevanceDecision.model_validate(
                 {
-                    **value,
                     "articleId": article.article_id,
+                    "status": value["status"],
+                    "reason": value["reason"],
                     "evidenceQuotes": [choices[quote] for quote in selected],
                 }
             )
@@ -216,16 +255,28 @@ def _article_key(article_id: int) -> str:
 def _quote_candidates(article: RelevanceArticle) -> list[str]:
     candidates = []
     for text in (article.title, article.summary or "", article.body_text):
-        start, units = 0, 0
-        for index, character in enumerate(text):
-            width = 2 if ord(character) > 0xFFFF else 1
-            if units + width > 250:
-                candidates.append(_QUOTE_TEXT.validate_python(text[start:index]))
-                start, units = index, 0
-            units += width
-        candidates.append(_QUOTE_TEXT.validate_python(text[start:]))
-    # Keep every source segment, including the end of long bodies, in source order.
-    # UTF-16 bounds also respect the Java consumer's 300-character quote limit.
+        start = 0
+        while start < len(text):
+            end, units = start, 0
+            while end < len(text):
+                width = 2 if ord(text[end]) > 0xFFFF else 1
+                if units + width > 250:
+                    break
+                units += width
+                end += 1
+            if end < len(text):
+                # Pack complete paragraphs, then sentences, before using a hard cut.
+                # The final boundary in the window also packs short paragraphs together.
+                window = text[start:end]
+                for pattern in (r"(?:\r?\n[ \t]*){2,}", r"[.!?。！？][\"'”’」』)]*\s+"):
+                    boundaries = list(re.finditer(pattern, window))
+                    if boundaries:
+                        end = start + boundaries[-1].end()
+                        break
+            candidates.append(_QUOTE_TEXT.validate_python(text[start:end]))
+            start = end
+    # Keep every source span in order without rewriting it; only boundary whitespace
+    # is trimmed as before. UTF-16 bounds also respect Java's 300-character limit.
     return list(dict.fromkeys(candidate for candidate in candidates if candidate))
 
 
@@ -239,7 +290,7 @@ def _response_schema(request: TopicRelevanceRequest) -> dict[str, object]:
     decision_schema = RelevanceDecision.model_json_schema(by_alias=True)
     decision_schema["properties"].pop("articleId")
     decision_schema["required"].remove("articleId")
-    # Select source evidence before drafting an explanation and verdict.
+    # Assess every source segment before selecting evidence and drafting a verdict.
     decision_schema["properties"] = {
         key: decision_schema["properties"][key]
         for key in ("evidenceQuotes", "reason", "status")
@@ -259,9 +310,29 @@ def _response_schema(request: TopicRelevanceRequest) -> dict[str, object]:
         choices = _quote_choices(article)
         quote_schema["enum"] = list(choices)
         quote_schema["description"] = json.dumps(choices, ensure_ascii=False, separators=(",", ":"))
+        article_schema["properties"] = {
+            "sourceAssessment": {
+                "type": "object",
+                "properties": {
+                    quote: {"$ref": "#/$defs/SourceAssessmentRole"} for quote in choices
+                },
+                "required": list(choices),
+                "additionalProperties": False,
+            },
+            **article_schema["properties"],
+        }
+        article_schema["required"] = list(article_schema["properties"])
         properties[_article_key(article.article_id)] = article_schema
     return {
         "title": "TopicRelevanceWireOutput",
+        "$defs": {
+            "SourceAssessmentRole": {
+                "type": "string", "enum": list(_SOURCE_ASSESSMENTS),
+                "description": (
+                    "E=제외 사건, D=주제 자체의 실제 사건, L=명시적 연결, G=일반 배경, N=무관"
+                ),
+            },
+        },
         "type": "object",
         "properties": {
             "decisions": {

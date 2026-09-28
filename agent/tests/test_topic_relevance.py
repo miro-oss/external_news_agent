@@ -78,8 +78,12 @@ def request() -> TopicRelevanceRequest:
     return TopicRelevanceRequest.model_validate(request_payload())
 
 
+def source_assessment(article, role: str = "N") -> dict[str, str]:
+    return {key: role for key in _quote_choices(article)}
+
+
 def output() -> dict:
-    return {
+    value = {
         "decisions": {
             "article_501": {
                 "status": "IRRELEVANT",
@@ -100,6 +104,11 @@ def output() -> dict:
             },
         }
     }
+    for article in request().articles:
+        decision = value["decisions"][f"article_{article.article_id}"]
+        role = "D" if decision["status"] == "RELEVANT" else "N"
+        decision["sourceAssessment"] = source_assessment(article, role)
+    return value
 
 
 def provider_response(payload: dict, *, truncated: bool = False) -> ProviderResponse:
@@ -175,7 +184,7 @@ def test_openai_strict_wire_schema_is_single_article_and_converts_to_public_arra
         assert decision_map["required"] == [key]
         assert decision_map["additionalProperties"] is False
         assert list(decision_map["properties"][key]["properties"]) == [
-            "evidenceQuotes", "reason", "status",
+            "sourceAssessment", "evidenceQuotes", "reason", "status",
         ]
         for violation in ("missing", "extra", "invented_id", "legacy_array"):
             invalid = article_output(article.article_id)
@@ -191,6 +200,182 @@ def test_openai_strict_wire_schema_is_single_article_and_converts_to_public_arra
                 validator.validate(invalid)
     public_decisions = response.model_dump(by_alias=True)["decisions"]
     assert [d["articleId"] for d in public_decisions] == [501, 502, 503]
+
+
+def test_private_source_assessment_covers_all_quotes_and_stays_out_of_public_response() -> None:
+    provider = FakeProvider(*article_responses())
+    response = service(provider).classify(request())
+    for article, call in zip(request().articles, provider.calls, strict=True):
+        schema = OpenAIJsonSchemaTransformer(deepcopy(call["response_schema"]), strict=True).walk()
+        decision = schema["properties"]["decisions"]["properties"][f"article_{article.article_id}"]
+        assessment = decision["properties"]["sourceAssessment"]
+        assert assessment["required"] == list(_quote_choices(article))
+        assert list(assessment["properties"]) == assessment["required"]
+        assert assessment["additionalProperties"] is False
+        assert schema["$defs"]["SourceAssessmentRole"]["enum"] == ["E", "D", "L", "G", "N"]
+        assert all(value == {"$ref": "#/$defs/SourceAssessmentRole"}
+                   for value in assessment["properties"].values())
+    public = response.model_dump(by_alias=True)
+    assert all(set(item) == {"articleId", "status", "reason", "evidenceQuotes"}
+               for item in public["decisions"])
+    assert "sourceAssessment" not in json.dumps(public)
+
+
+@pytest.mark.parametrize("violation", ["absent", "missing", "extra", "not_object", "role", "type"])
+def test_rejects_incomplete_or_invalid_private_assessment_in_schema_and_parser(
+    violation: str,
+) -> None:
+    wire = article_output()
+    decision = wire["decisions"]["article_501"]
+    if violation == "absent":
+        decision.pop("sourceAssessment")
+    elif violation == "missing":
+        decision["sourceAssessment"].pop("quote_2")
+    elif violation == "extra":
+        decision["sourceAssessment"]["quote_999"] = "N"
+    elif violation == "not_object":
+        decision["sourceAssessment"] = []
+    elif violation == "role":
+        decision["sourceAssessment"]["quote_0"] = "EXPLICIT_CONNECTION"
+    else:
+        decision["sourceAssessment"]["quote_0"] = True
+    single = request().model_copy(update={"articles": request().articles[:1]})
+    schema = OpenAIJsonSchemaTransformer(_response_schema(single), strict=True).walk()
+    with pytest.raises(JsonSchemaValidationError):
+        Draft202012Validator(schema).validate(wire)
+    with pytest.raises(AgentError) as caught:
+        service(FakeProvider(provider_response(wire)), repair_attempts=0).classify(single)
+    assert caught.value.code == "SCHEMA_VIOLATION"
+
+
+@pytest.mark.parametrize("role", ["G", "N"])
+def test_relevant_requires_selected_direct_evidence_not_unselected_candidate(role: str) -> None:
+    wire = article_output(502)
+    decision = wire["decisions"]["article_502"]
+    decision["sourceAssessment"].update(quote_0="L", quote_1="D", quote_2=role)
+    single = request().model_copy(update={"articles": request().articles[1:2]})
+    with pytest.raises(AgentError) as caught:
+        service(FakeProvider(provider_response(wire)), repair_attempts=0).classify(single)
+    assert caught.value.code == "SCHEMA_VIOLATION"
+
+
+@pytest.mark.parametrize("role", ["D", "L"])
+def test_relevant_accepts_selected_direct_event_or_explicit_connection(role: str) -> None:
+    wire = article_output(502)
+    decision = wire["decisions"]["article_502"]
+    decision["sourceAssessment"] = source_assessment(request().articles[1], "G")
+    decision["sourceAssessment"]["quote_2"] = role
+    single = request().model_copy(update={"articles": request().articles[1:2]})
+    response = service(FakeProvider(provider_response(wire))).classify(single)
+    assert response.decisions[0].status == "RELEVANT"
+
+
+@pytest.mark.parametrize("status,selected", [
+    ("RELEVANT", "quote_0"), ("UNCERTAIN", "quote_0"), ("IRRELEVANT", "quote_2"),
+])
+def test_excluded_event_requires_irrelevant_status_and_selected_exclusion(
+    status: str, selected: str,
+) -> None:
+    wire = article_output()
+    decision = wire["decisions"]["article_501"]
+    decision.update(status=status, evidenceQuotes=[selected])
+    decision["sourceAssessment"].update(quote_0="E", quote_2="D")
+    single = request().model_copy(update={
+        "articles": request().articles[:1],
+        "topic": request().topic.model_copy(update={"excluded_keywords": ["금융 플랫폼"]}),
+    })
+    with pytest.raises(AgentError) as caught:
+        service(FakeProvider(provider_response(wire)), repair_attempts=0).classify(single)
+    assert caught.value.code == "SCHEMA_VIOLATION"
+
+
+def test_excluded_event_with_its_quote_preserves_reason_and_public_shape() -> None:
+    wire = article_output()
+    decision = wire["decisions"]["article_501"]
+    decision.update(reason="사용자가 제외한 기사 유형입니다.", evidenceQuotes=["quote_0"])
+    decision["sourceAssessment"]["quote_0"] = "E"
+    single = request().model_copy(update={
+        "articles": request().articles[:1],
+        "topic": request().topic.model_copy(update={"excluded_keywords": ["금융 플랫폼"]}),
+    })
+    response = service(FakeProvider(provider_response(wire))).classify(single)
+    assert response.decisions[0].status == "IRRELEVANT"
+    assert response.decisions[0].reason == decision["reason"]
+    assert response.decisions[0].evidence_quotes == [single.articles[0].title]
+
+
+def test_rejects_exclusion_assessment_when_user_has_no_exclusion_condition() -> None:
+    wire = article_output()
+    decision = wire["decisions"]["article_501"]
+    decision.update(evidenceQuotes=["quote_0"])
+    decision["sourceAssessment"]["quote_0"] = "E"
+    single = request().model_copy(update={"articles": request().articles[:1]})
+    assert single.topic.excluded_keywords == []
+    with pytest.raises(AgentError) as caught:
+        service(FakeProvider(provider_response(wire)), repair_attempts=0).classify(single)
+    assert caught.value.code == "SCHEMA_VIOLATION"
+
+
+@pytest.mark.parametrize("selected", [["quote_0"], ["quote_0", "quote_2"]])
+def test_relevant_includes_recognized_explicit_connection_and_can_keep_direct_event(
+    selected: list[str],
+) -> None:
+    wire = article_output(502)
+    decision = wire["decisions"]["article_502"]
+    decision["sourceAssessment"].update(quote_0="L", quote_1="G", quote_2="D")
+    decision["evidenceQuotes"] = selected
+    single = request().model_copy(update={"articles": request().articles[1:2]})
+    response = service(FakeProvider(provider_response(wire))).classify(single)
+    assert response.decisions[0].status == "RELEVANT"
+    assert response.decisions[0].evidence_quotes == [
+        _quote_choices(single.articles[0])[key] for key in selected
+    ]
+
+
+def test_recognized_explicit_connection_cannot_be_skipped_or_silently_substituted() -> None:
+    wire = article_output(502)
+    wire["decisions"]["article_502"]["sourceAssessment"]["quote_0"] = "L"
+    single = request().model_copy(update={"articles": request().articles[1:2]})
+    provider = FakeProvider(provider_response(wire))
+    with pytest.raises(AgentError) as caught:
+        service(provider, repair_attempts=0).classify(single)
+    assert caught.value.code == "SCHEMA_VIOLATION"
+    assert len(provider.calls) == 1
+
+
+@pytest.mark.parametrize("status", ["IRRELEVANT", "UNCERTAIN"])
+def test_explicit_connection_does_not_force_relevant_or_a_quote_for_other_statuses(
+    status: str,
+) -> None:
+    wire = article_output()
+    wire["decisions"]["article_501"].update(status=status)
+    wire["decisions"]["article_501"]["sourceAssessment"]["quote_0"] = "L"
+    single = request().model_copy(update={"articles": request().articles[:1]})
+    response = service(FakeProvider(provider_response(wire))).classify(single)
+    assert response.decisions[0].status == status
+
+
+def test_uncertain_can_use_context_when_no_exclusion_or_direct_connection_is_established() -> None:
+    wire = article_output()
+    decision = wire["decisions"]["article_501"]
+    decision.update(
+        status="UNCERTAIN", sourceAssessment=source_assessment(request().articles[0], "G"),
+    )
+    single = request().model_copy(update={"articles": request().articles[:1]})
+    response = service(FakeProvider(provider_response(wire))).classify(single)
+    assert response.decisions[0].status == "UNCERTAIN"
+
+
+def test_repairs_incomplete_assessment_once_and_keeps_usage_without_private_fields() -> None:
+    invalid = article_output()
+    invalid["decisions"]["article_501"]["sourceAssessment"].pop("quote_2")
+    provider = FakeProvider(provider_response(invalid), *article_responses())
+    response = service(provider).classify(request())
+    assert len(provider.calls) == 4
+    assert "sourceAssessment" in provider.calls[1]["prompt"]
+    assert response.meta.input_tokens == 80
+    assert response.meta.output_tokens == 40
+    assert "sourceAssessment" not in response.model_dump_json(by_alias=True)
 
 
 @pytest.mark.parametrize(
@@ -223,7 +408,9 @@ def test_every_wire_status_requires_a_quote_in_native_schema_and_local_validatio
     status: str,
 ) -> None:
     wire = output()
-    wire["decisions"]["article_501"].update(status=status)
+    wire["decisions"]["article_501"].update(
+        status=status, sourceAssessment=source_assessment(request().articles[0], "D"),
+    )
     schema = OpenAIJsonSchemaTransformer(_response_schema(request()), strict=True).walk()
     evidence = schema["properties"]["decisions"]["properties"]["article_501"]["properties"][
         "evidenceQuotes"
@@ -263,6 +450,64 @@ def test_quote_candidates_cover_every_field_through_the_last_character(astral: b
     assert _quote_candidates(article) == quotes
 
 
+
+@pytest.mark.parametrize("separator", ["\n\n", "\r\n\r\n"])
+def test_quote_candidates_keep_explicit_production_purpose_in_one_paragraph(separator: str) -> None:
+    payload = request_payload()
+    purpose = "신설 공장은 백신 배양용 배지를 생산한다. 해당 제품을 백신 제조사에 공급할 예정이다."
+    body = "가" * 225 + separator + purpose + separator + "나" * 230
+    payload["articles"][0].update(title="생산 계획", summary=None, bodyText=body)
+    article = TopicRelevanceRequest.model_validate(payload).articles[0]
+    quotes = _quote_candidates(article)
+
+    assert any(purpose in quote for quote in quotes)
+    assert all(len(quote.encode("utf-16-le")) // 2 <= 250 for quote in quotes)
+    assert all(quote in article.title or quote in body for quote in quotes)
+    assert "".join(quotes[1:]).replace(separator, "") == body.replace(separator, "")
+
+
+@pytest.mark.parametrize("astral", [False, True])
+def test_long_paragraph_quotes_keep_complete_sentences_when_they_fit(astral: bool) -> None:
+    payload = request_payload()
+    filler = "🙂" * 50 if astral else "다" * 100
+    sentences = [f"사건 {index}: {filler}를 확인했다." for index in range(5)]
+    body = " ".join(sentences)
+    payload["articles"][0].update(title="긴 문단", summary=None, bodyText=body)
+    article = TopicRelevanceRequest.model_validate(payload).articles[0]
+    quotes = _quote_candidates(article)[1:]
+
+    assert all(any(sentence in quote for quote in quotes) for sentence in sentences)
+    assert all(len(quote.encode("utf-16-le")) // 2 <= 250 for quote in quotes)
+    assert all(quote in body for quote in quotes)
+    assert "".join(quotes).replace(" ", "") == body.replace(" ", "")
+
+
+@pytest.mark.parametrize("astral", [False, True])
+def test_many_short_paragraphs_are_packed_and_keep_provider_enum_budget(astral: bool) -> None:
+    payload = request_payload()
+    unit = "🙂" if astral else "자"
+    paragraphs = [f"{index:04d}{unit}" for index in range(700)]
+    body = "\n\n".join(paragraphs)[:5000]
+    payload["articles"] = [
+        {"articleId": index + 1, "title": f"기사 {index}", "summary": None, "bodyText": body}
+        for index in range(10)
+    ]
+    bounded = TopicRelevanceRequest.model_validate(payload)
+    for article in bounded.articles:
+        quotes = _quote_candidates(article)[1:]
+        assert len(quotes) < len(paragraphs) // 10
+        assert all(len(quote.encode("utf-16-le")) // 2 <= 250 for quote in quotes)
+        assert all(quote in body for quote in quotes)
+        assert "".join(quotes).replace("\n", "") == body.replace("\n", "")
+    schema = OpenAIJsonSchemaTransformer(_response_schema(bounded), strict=True).walk()
+    quote_schemas = [
+        value["properties"]["evidenceQuotes"]["items"]
+        for value in schema["properties"]["decisions"]["properties"].values()
+    ]
+    assert all(len(item["enum"]) <= 250 for item in quote_schemas)
+    assert sum(len(item["enum"]) for item in quote_schemas) <= 1000
+
+
 def test_quote_candidates_trim_blanks_and_deduplicate_in_stable_source_order() -> None:
     payload = request_payload()
     payload["articles"][0].update(title=" 중복 본문 ", summary="중복 본문", bodyText="마지막 본문")
@@ -290,6 +535,7 @@ def test_ascii_choices_preserve_distinct_raw_quotes_in_metadata_and_round_trip(
     }
     wire = {"decisions": {"article_501": {
         "status": "RELEVANT", "reason": "검증용 판정입니다.",
+        "sourceAssessment": source_assessment(bounded.articles[0], "D"),
         "evidenceQuotes": ["quote_0", "quote_1", "quote_2"],
     }}}
     schema = OpenAIJsonSchemaTransformer(_response_schema(bounded), strict=True).walk()
@@ -317,6 +563,7 @@ def test_accepted_control_only_input_never_builds_an_empty_enum(character: str) 
     assert choices == {"quote_0": character}
     wire = {"decisions": {"article_501": {
         "status": "UNCERTAIN", "reason": "제공된 문맥이 부족합니다.", "evidenceQuotes": ["quote_0"],
+        "sourceAssessment": source_assessment(bounded.articles[0]),
     }}}
     response = service(FakeProvider(provider_response(wire))).classify(bounded)
     assert response.decisions[0].evidence_quotes == [character]
@@ -383,15 +630,17 @@ def test_rejects_non_object_wire_output(value) -> None:
     assert caught.value.code == "SCHEMA_VIOLATION"
 
 
-@pytest.mark.parametrize("level", ["root", "article", "field"])
+@pytest.mark.parametrize("level", ["root", "article", "field", "assessment"])
 def test_rejects_duplicate_json_keys_instead_of_silently_replacing_decisions(level: str) -> None:
     serialized = json.dumps(output(), ensure_ascii=False)
     if level == "root":
         serialized = serialized.replace('{"decisions":', '{"decisions": {}, "decisions":', 1)
     elif level == "article":
         serialized = serialized.replace('"article_501":', '"article_501": {}, "article_501":', 1)
-    else:
+    elif level == "field":
         serialized = serialized.replace('"status":', '"status": "RELEVANT", "status":', 1)
+    else:
+        serialized = serialized.replace('"quote_0":', '"quote_0": "N", "quote_0":', 1)
     response = replace(provider_response(output()), text=serialized)
 
     with pytest.raises(AgentError) as caught:
@@ -498,8 +747,14 @@ def test_sequential_article_contexts_and_repair_prompts_never_include_other_arti
             bodyText=f"ARTICLE_ONLY_MARKER_{article['articleId']}",
         )
     wire = output()
-    for aid, decision in zip((501, 502, 503), wire["decisions"].values(), strict=True):
-        decision.update(reason=f"OUTPUT_ONLY_{aid}", evidenceQuotes=["quote_1"])
+    for article, decision in zip(
+        TopicRelevanceRequest.model_validate(payload).articles, wire["decisions"].values(),
+        strict=True,
+    ):
+        decision.update(
+            reason=f"OUTPUT_ONLY_{article.article_id}", evidenceQuotes=["quote_1"],
+            sourceAssessment=source_assessment(article, "D"),
+        )
     invalid = article_output(502, deepcopy(wire))
     invalid["decisions"]["article_502"].update(
         reason="REPAIR_ONLY_502", evidenceQuotes=["quote_missing"],
@@ -672,6 +927,7 @@ def test_provider_receives_isolated_validated_json_at_original_batch_input_limit
     provider = FakeProvider(*[
         provider_response({"decisions": {f"article_{article.article_id}": {
             "status": "UNCERTAIN", "reason": "제공된 텍스트의 맥락이 부족합니다.",
+            "sourceAssessment": source_assessment(article),
             "evidenceQuotes": ["quote_0"],
         }}}) for article in bounded.articles
     ])
@@ -730,7 +986,9 @@ def test_mock_returns_only_uncertain_without_calling_provider() -> None:
 def test_valid_decision_is_single_pass_for_every_status(status):
     single = request().model_copy(update={"articles": request().articles[:1]})
     wire = article_output()
-    wire["decisions"]["article_501"]["status"] = status
+    wire["decisions"]["article_501"].update(
+        status=status, sourceAssessment=source_assessment(single.articles[0], "D"),
+    )
     unused = AgentError(503, "PROVIDER_UNAVAILABLE", "must not be called")
     provider = FakeProvider(provider_response(wire), unused)
 
