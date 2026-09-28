@@ -32,7 +32,7 @@ class AgentPropertiesTest {
                 "analyze.ko.v11+perspective.ko.v1+sensitivity.ko.v2",
                 properties.getFreeAnalysisPromptVersion());
         assertEquals("insight.ko.v2+perspective.ko.v1", properties.getInsightPromptVersion());
-        assertEquals("gpt-5.6-terra", properties.getRelevanceFreeModel());
+        assertEquals("gpt-4.1-nano", properties.getRelevanceFreeModel());
         assertEquals(Duration.ofSeconds(180), properties.getRelevanceTimeout());
         assertEquals(Duration.ofSeconds(90), properties.getAnalyzeTimeout());
         assertEquals(Duration.ofSeconds(60), properties.getInsightTimeout());
@@ -52,7 +52,7 @@ class AgentPropertiesTest {
 
         AgentProperties defaults = Binder.get(environment).bind("news.agent", AgentProperties.class).get();
         assertEquals("global-free-model", defaults.getFreeModel());
-        assertEquals("gpt-5.6-terra", defaults.getRelevanceFreeModel());
+        assertEquals("gpt-4.1-nano", defaults.getRelevanceFreeModel());
 
         environment.setProperty("TOPIC_RELEVANCE_OPENAI_MODEL", "dedicated-relevance-model");
         AgentProperties configured = Binder.get(environment).bind("news.agent", AgentProperties.class).get();

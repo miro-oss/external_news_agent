@@ -31,7 +31,7 @@ public class AgentProperties implements InitializingBean {
             "analyze.ko.v11+perspective.ko.v1+sensitivity.ko.v2";
     private String insightPromptVersion = "insight.ko.v2+perspective.ko.v1";
     private String freeModel = "";
-    private String relevanceFreeModel = "gpt-5.6-terra";
+    private String relevanceFreeModel = "gpt-4.1-nano";
     private String paidModel = "";
     private final Quota quota = new Quota();
     private final InsightHistory insightHistory = new InsightHistory();

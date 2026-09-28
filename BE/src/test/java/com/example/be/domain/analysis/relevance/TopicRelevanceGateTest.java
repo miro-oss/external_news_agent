@@ -237,7 +237,7 @@ class TopicRelevanceGateTest {
                 + "\n기사 1\nnull\n반도체 제조 장비 공정 본문";
         String legacyHash = TopicRelevanceGate.hash(legacyInput);
         String upgradedHash = TopicRelevanceGate.hash(new ObjectMapper().writeValueAsString(topic)
-                + "\ntopic-relevance.ko.v21\nFREE\ngpt-5.6-terra\n기사 1\nnull\n반도체 제조 장비 공정 본문");
+                + "\ntopic-relevance.ko.v21\nFREE\ngpt-4.1-nano\n기사 1\nnull\n반도체 제조 장비 공정 본문");
         assertNotEquals(legacyHash, upgradedHash);
         when(store.findByRun(42L)).thenReturn(List.of(new TopicRelevanceStore.Assessment(
                 42L, 7L, 1L, cachedStatus, "이전 판정", legacyHash, legacyVersion,

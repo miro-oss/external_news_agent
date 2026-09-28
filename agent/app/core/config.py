@@ -169,7 +169,7 @@ class Settings(BaseSettings):
         "gpt-4o-mini", "gpt-4o-mini-2024-07-18",
         "gpt-5-mini", "gpt-5-mini-2025-08-07",
         "gpt-5.6-terra",
-    ] = Field(default="gpt-5.6-terra", validation_alias="TOPIC_RELEVANCE_OPENAI_MODEL")
+    ] = Field(default="gpt-4.1-nano", validation_alias="TOPIC_RELEVANCE_OPENAI_MODEL")
     openai_input_cost_per_million: Decimal | None = Field(
         default=None, ge=0, validation_alias="OPENAI_INPUT_COST_PER_MILLION"
     )

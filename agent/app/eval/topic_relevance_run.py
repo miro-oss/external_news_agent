@@ -33,14 +33,14 @@ from app.schemas.topic_relevance import TopicRelevanceRequest, TopicRelevanceRes
 
 AGENT_ROOT = Path(__file__).resolve().parents[2]
 DOCS_ROOT = AGENT_ROOT.parent / "docs"
-MODEL = "gpt-5.6-terra"
+MODEL = "gpt-4.1-nano"
 PLAN = "FREE"
 # Fixed evaluation policy makes preflight credential-free while pinning every
 # relevant setting. The relevance service uses built-in model prices, isolated
 # from global model/price overrides. These are estimates, not invoice guarantees.
-MODEL_PRICES = (Decimal("2.00"), Decimal("0.20"), Decimal("12.00"))
+MODEL_PRICES = (Decimal("0.10"), Decimal("0.025"), Decimal("0.40"))
 LIVE_SETTINGS = {
-    "mock": False, "max_output_tokens": 6144, "provider_timeout_seconds": 60.0,
+    "mock": False, "max_output_tokens": 1792, "provider_timeout_seconds": 60.0,
     "topic_relevance_openai_model": MODEL,
     "schema_repair_attempts": 1, "provider_retry_attempts": 1,
     "insight_provider_timeout_seconds": 60.0, "openai_request_interval_seconds": 1.0,
@@ -58,7 +58,7 @@ LIVE_SETTINGS = {
 def execution_settings() -> dict:
     return {"provider": "openai", "model": MODEL,
             "modelPricesUsdPerMillion": [str(price) for price in MODEL_PRICES],
-            "reasoningEffort": "medium", "temperature": "omitted", **{
+            "reasoningEffort": "omitted", "temperature": 0, **{
         key: str(value) if isinstance(value, Decimal) else value
         for key, value in LIVE_SETTINGS.items()
     }}

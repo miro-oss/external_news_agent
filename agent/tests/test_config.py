@@ -8,7 +8,7 @@ def test_relevance_model_default_is_independent_of_general_model(monkeypatch):
     monkeypatch.delenv("TOPIC_RELEVANCE_OPENAI_MODEL", raising=False)
     settings = Settings(OPENAI_MODEL="custom-analysis-model")
 
-    assert settings.topic_relevance_openai_model == "gpt-5.6-terra"
+    assert settings.topic_relevance_openai_model == "gpt-4.1-nano"
     assert settings.openai_model == "custom-analysis-model"
 
 

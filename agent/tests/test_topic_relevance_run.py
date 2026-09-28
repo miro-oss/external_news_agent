@@ -92,6 +92,11 @@ def test_preflight_never_constructs_settings_or_provider(inputs, monkeypatch):
         "phase": "preflight", "cases": 7, "pilotCases": 5, "remainingCases": 2,
     }
     lock = read_json(inputs[2] / "evaluation-lock.json")
+    assert lock["model"] == "gpt-4.1-nano"
+    assert lock["executionSettings"]["modelPricesUsdPerMillion"] == ["0.10", "0.025", "0.40"]
+    assert lock["executionSettings"]["max_output_tokens"] == 1792
+    assert lock["executionSettings"]["reasoningEffort"] == "omitted"
+    assert lock["executionSettings"]["temperature"] == 0
     pins = lock["runtimeSourceSha256s"]
     assert {"app/core/config.py", "app/llm/router.py", "app/llm/openai_provider.py",
             f"app/prompts/{runner.PROMPT_VERSION}.md",
@@ -307,7 +312,7 @@ def test_live_settings_have_pinned_positive_prices_even_with_zero_env(monkeypatc
         assert settings == runner.execution_settings()
         assert settings["topic_relevance_openai_model"] == runner.MODEL
         assert settings["model"] == runner.MODEL
-        assert all(Decimal(price) > 0 for price in settings["modelPricesUsdPerMillion"])
+        assert settings["modelPricesUsdPerMillion"] == ["0.10", "0.025", "0.40"]
         assert settings["openai_input_cost_per_million"] is None
         assert settings["mock"] is False
     finally:
