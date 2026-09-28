@@ -18,6 +18,10 @@ import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -187,6 +191,115 @@ class TopicRelevanceGateTest {
         gate.assess(42L, AgentPlan.FREE, List.of(candidate(1L, 7L, "본문".repeat(3000) + "수정")));
         gate.assess(42L, AgentPlan.FREE, List.of(candidate(1L, 8L)));
         verify(client, times(3)).topicRelevance(any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "topic-relevance.ko.v8, RELEVANT",
+            "topic-relevance.ko.v8, IRRELEVANT",
+            "topic-relevance.ko.v9, RELEVANT",
+            "topic-relevance.ko.v9, IRRELEVANT",
+            "topic-relevance.ko.v10, RELEVANT",
+            "topic-relevance.ko.v10, IRRELEVANT",
+            "topic-relevance.ko.v11, RELEVANT",
+            "topic-relevance.ko.v11, IRRELEVANT",
+            "topic-relevance.ko.v12, RELEVANT",
+            "topic-relevance.ko.v12, IRRELEVANT",
+            "topic-relevance.ko.v13, RELEVANT",
+            "topic-relevance.ko.v13, IRRELEVANT",
+            "topic-relevance.ko.v14, RELEVANT",
+            "topic-relevance.ko.v14, IRRELEVANT"
+    })
+    void v15ReassessesCachedEarlierDecisionForUnchangedInput(
+            String legacyVersion, TopicRelevanceStatus cachedStatus) {
+        assertEquals("topic-relevance.ko.v15", TopicRelevanceGate.PROMPT_VERSION);
+        reserve();
+        var input = candidate(1L, 7L);
+        var topic = new AgentTopicRelevanceRequest.TopicInput(7L, "제조장비", "반도체 장비 공정",
+                List.of(), List.of(), List.of());
+        // v8 hashed both global models; v9 and later hash only the task-specific model.
+        String legacyModels = legacyVersion.equals("topic-relevance.ko.v8")
+                ? "\n\n" : "\ngpt-5.6-terra";
+        String legacyInput = new ObjectMapper().writeValueAsString(topic)
+                + "\n" + legacyVersion + "\nFREE" + legacyModels
+                + "\n기사 1\nnull\n반도체 제조 장비 공정 본문";
+        String legacyHash = TopicRelevanceGate.hash(legacyInput);
+        String upgradedHash = TopicRelevanceGate.hash(new ObjectMapper().writeValueAsString(topic)
+                + "\ntopic-relevance.ko.v15\nFREE\ngpt-5.6-terra\n기사 1\nnull\n반도체 제조 장비 공정 본문");
+        assertNotEquals(legacyHash, upgradedHash);
+        when(store.findByRun(42L)).thenReturn(List.of(new TopicRelevanceStore.Assessment(
+                42L, 7L, 1L, cachedStatus, "이전 판정", legacyHash, legacyVersion,
+                "test-model", "[\"기사 1\"]")));
+        TopicRelevanceStatus newStatus = cachedStatus == TopicRelevanceStatus.RELEVANT
+                ? TopicRelevanceStatus.IRRELEVANT : TopicRelevanceStatus.RELEVANT;
+        when(client.topicRelevance(any())).thenReturn(response(List.of(
+                new AgentTopicRelevanceResponse.Decision(1L, newStatus.name(), "재검토한 판정", List.of("기사 1")))));
+
+        Set<TopicRelevanceGate.Key> expected = newStatus == TopicRelevanceStatus.RELEVANT
+                ? Set.of(new TopicRelevanceGate.Key(1L, 7L)) : Set.of();
+        assertEquals(expected, gate.assess(42L, AgentPlan.FREE, List.of(input)));
+
+        verify(client).topicRelevance(any());
+        verify(finalizer).success(eq(42L), any(), any(), argThat(rows -> rows.size() == 1
+                        && rows.getFirst().status() == newStatus
+                        && rows.getFirst().promptVersion().equals("topic-relevance.ko.v15")
+                        && rows.getFirst().inputHash().equals(upgradedHash)),
+                anyString(), any(), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(AgentPlan.class)
+    void sameRunCacheDependsOnlyOnTheRelevanceModelForItsPlan(AgentPlan plan) {
+        reserve();
+        properties.setFreeModel("global-free-a");
+        properties.setRelevanceFreeModel("relevance-free-a");
+        properties.setPaidModel("paid-a");
+        Map<TopicRelevanceGate.Key, TopicRelevanceStore.Assessment> saved = new HashMap<>();
+        List<String> persistedHashes = new ArrayList<>();
+        when(store.findByRun(42L)).thenAnswer(invocation -> new ArrayList<>(saved.values()));
+        doAnswer(invocation -> {
+            List<TopicRelevanceStore.Assessment> values = invocation.getArgument(3);
+            values.forEach(a -> {
+                saved.put(new TopicRelevanceGate.Key(a.articleId(), a.topicId()), a);
+                persistedHashes.add(a.inputHash());
+            });
+            return null;
+        }).when(finalizer).success(eq(42L), any(), any(), anyList(), anyString(), any(), any());
+        when(client.topicRelevance(any())).thenReturn(response(List.of(
+                new AgentTopicRelevanceResponse.Decision(1L, "RELEVANT", "관련", List.of("기사 1")))));
+        var input = List.of(candidate(1L, 7L));
+        var expected = Set.of(new TopicRelevanceGate.Key(1L, 7L));
+
+        assertEquals(expected, gate.assess(42L, plan, input));
+        properties.setFreeModel("global-free-b");
+        assertEquals(expected, gate.assess(42L, plan, input));
+        if (plan == AgentPlan.FREE) properties.setPaidModel("paid-b");
+        else properties.setRelevanceFreeModel("relevance-free-b");
+        assertEquals(expected, gate.assess(42L, plan, input));
+        verify(client, times(1)).topicRelevance(any());
+
+        if (plan == AgentPlan.FREE) properties.setRelevanceFreeModel("relevance-free-b");
+        else properties.setPaidModel("paid-b");
+        assertEquals(expected, gate.assess(42L, plan, input));
+        verify(client, times(2)).topicRelevance(any());
+        assertEquals(2, persistedHashes.size());
+        assertNotEquals(persistedHashes.getFirst(), persistedHashes.getLast());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"topic-relevance.ko.v8", "topic-relevance.ko.v9", "topic-relevance.ko.v10", "topic-relevance.ko.v11", "topic-relevance.ko.v12", "topic-relevance.ko.v13", "topic-relevance.ko.v14"})
+    void rejectsEarlierResponseAfterV15Upgrade(String legacyVersion) {
+        var request = new AgentTopicRelevanceRequest("test", AgentPlan.FREE,
+                new AgentTopicRelevanceRequest.TopicInput(7L, "장비", "반도체 장비", List.of(), List.of(), List.of()),
+                List.of(new AgentTopicRelevanceRequest.ArticleInput(1L, "공정위", null, "토스 분쟁")));
+        var oldResponse = new AgentTopicRelevanceResponse(List.of(
+                new AgentTopicRelevanceResponse.Decision(1L, "IRRELEVANT", "금융 분쟁", List.of("토스 분쟁"))),
+                new AgentTopicRelevanceResponse.Meta("openai", "test-model", legacyVersion,
+                        10L, 5L, BigDecimal.ZERO, BigDecimal.ZERO, false, false));
+
+        AgentClientException error = assertThrows(AgentClientException.class,
+                () -> TopicRelevanceGate.validate(oldResponse, request));
+        assertEquals("SCHEMA_VIOLATION", error.getCode());
     }
 
     @Test void responseRequiresExactIdsAndForbidsMockAcceptance() {

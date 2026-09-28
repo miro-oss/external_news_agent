@@ -139,6 +139,9 @@ def assert_strict(schema):
         ("gpt-4.1-nano-2025-04-14", "0.000125"),
         ("gpt-4o-mini", "0.000195"),
         ("gpt-4o-mini-2024-07-18", "0.000195"),
+        ("gpt-5-mini", "0.000405"),
+        ("gpt-5-mini-2025-08-07", "0.000405"),
+        ("gpt-5.6-terra", "0.00284"),
         ("unknown-model", "0"),
     ],
 )
@@ -146,6 +149,82 @@ def test_model_specific_cost(model, cost):
     with client_for(lambda _: httpx2.Response(200, json=response_body())) as client:
         result = generate(OpenAIAnalyzeProvider(Settings(OPENAI_MODEL=model), client))
     assert result.model == model
+    assert result.usage.cost_usd == Decimal(cost)
+
+
+@pytest.mark.parametrize(("model", "effort", "token_limit", "cost"), [
+    ("gpt-5-mini", "low", 4096, "0.002405"),
+    ("gpt-5-mini-2025-08-07", "low", 4096, "0.002405"),
+    ("gpt-5.6-terra", "medium", 6144, "0.01484"),
+])
+def test_known_reasoning_models_omit_temperature_and_bill_total_output(
+    model, effort, token_limit, cost,
+):
+    requests = []
+    body = response_body()
+    body["model"] = model
+    body["output"].insert(0, {"id": "rs_test", "type": "reasoning", "summary": []})
+    body["usage"].update(output_tokens=1100, output_tokens_details={"reasoning_tokens": 1000},
+                         total_tokens=2100)
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx2.Response(200, json=body)
+
+    with client_for(handler) as client:
+        settings = Settings(OPENAI_MODEL=model, AGENT_MAX_OUTPUT_TOKENS=token_limit)
+        result = generate(OpenAIAnalyzeProvider(settings, client))
+
+    assert requests[0]["model"] == result.model == model
+    assert requests[0]["reasoning"] == {"effort": effort}
+    assert "temperature" not in requests[0]
+    assert requests[0]["max_output_tokens"] == token_limit
+    assert requests[0]["text"]["format"]["strict"] is True
+    assert requests[0]["store"] is False
+    assert result.text == '{"ok":true}'
+    assert result.usage.output_tokens == 1100
+    assert result.usage.cost_usd == Decimal(cost)
+
+
+@pytest.mark.parametrize("model", [
+    "gpt-4.1-nano-2025-04-14", "gpt-4o-mini", "gpt-4o-mini-2024-07-18",
+    "gpt-5-mini-experimental", "gpt-5.6-terra-experimental",
+])
+def test_reasoning_branch_does_not_change_other_or_unrecognized_models(model):
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx2.Response(200, json=response_body())
+
+    with client_for(handler) as client:
+        generate(OpenAIAnalyzeProvider(Settings(OPENAI_MODEL=model), client))
+
+    assert requests[0]["temperature"] == 0
+    assert "reasoning" not in requests[0]
+
+
+@pytest.mark.parametrize(("model", "token_limit", "cost"), [
+    ("gpt-5-mini", 4096, "0.008397"),
+    ("gpt-5.6-terra", 6144, "0.075368"),
+])
+def test_reasoning_only_token_limit_keeps_empty_output_and_billed_usage(
+    model, token_limit, cost,
+):
+    body = response_body(status="incomplete", reason="max_output_tokens")
+    body["model"] = model
+    body["output"] = [{"id": "rs_test", "type": "reasoning", "summary": []}]
+    body["usage"].update(output_tokens=token_limit,
+                         output_tokens_details={"reasoning_tokens": token_limit},
+                         total_tokens=1000 + token_limit)
+
+    with client_for(lambda _: httpx2.Response(200, json=body)) as client:
+        settings = Settings(OPENAI_MODEL=model, AGENT_MAX_OUTPUT_TOKENS=token_limit)
+        result = generate(OpenAIAnalyzeProvider(settings, client))
+
+    assert result.text == "" and result.truncated is True
+    assert result.usage.input_tokens == 1000
+    assert result.usage.output_tokens == token_limit
     assert result.usage.cost_usd == Decimal(cost)
 
 

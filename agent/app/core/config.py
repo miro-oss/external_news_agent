@@ -1,5 +1,6 @@
 from decimal import Decimal
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -163,6 +164,12 @@ class Settings(BaseSettings):
     )
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4.1-nano", validation_alias="OPENAI_MODEL")
+    topic_relevance_openai_model: Literal[
+        "gpt-4.1-nano", "gpt-4.1-nano-2025-04-14",
+        "gpt-4o-mini", "gpt-4o-mini-2024-07-18",
+        "gpt-5-mini", "gpt-5-mini-2025-08-07",
+        "gpt-5.6-terra",
+    ] = Field(default="gpt-5.6-terra", validation_alias="TOPIC_RELEVANCE_OPENAI_MODEL")
     openai_input_cost_per_million: Decimal | None = Field(
         default=None, ge=0, validation_alias="OPENAI_INPUT_COST_PER_MILLION"
     )
