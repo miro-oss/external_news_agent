@@ -21,7 +21,7 @@ from app.schemas.topic_relevance import (
     TopicRelevanceResponse,
 )
 
-PROMPT_VERSION = "topic-relevance.ko.v10"
+PROMPT_VERSION = "topic-relevance.ko.v15"
 _QUOTE_TEXT = TypeAdapter(Annotated[str, StringConstraints(strip_whitespace=True)])
 SYSTEM_INSTRUCTION = (
     (Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md")
@@ -239,9 +239,10 @@ def _response_schema(request: TopicRelevanceRequest) -> dict[str, object]:
     decision_schema = RelevanceDecision.model_json_schema(by_alias=True)
     decision_schema["properties"].pop("articleId")
     decision_schema["required"].remove("articleId")
+    # Select source evidence before drafting an explanation and verdict.
     decision_schema["properties"] = {
         key: decision_schema["properties"][key]
-        for key in ("reason", "evidenceQuotes", "status")
+        for key in ("evidenceQuotes", "reason", "status")
     }
     decision_schema["required"] = list(decision_schema["properties"])
     decision_schema["title"] = "TopicRelevanceDecision"

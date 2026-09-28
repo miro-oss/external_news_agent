@@ -151,7 +151,7 @@ def test_preserves_grounded_provider_decisions_and_metadata() -> None:
 
 
 def test_prompt_distinguishes_meaning_and_preserves_relevant_regulatory_news() -> None:
-    assert "토스와 네이버의 검색 광고 분쟁" in SYSTEM_INSTRUCTION
+    assert "금융 플랫폼의 검색 광고 분쟁 조사" in SYSTEM_INSTRUCTION
     assert "온라인·오프라인의 라인은 생산 라인이 아니다" in SYSTEM_INSTRUCTION
     assert "공정한 채용은 제조 공정이 아니다" in SYSTEM_INSTRUCTION
     assert "공정위가 반도체 장비업체의 기업결합을 심사했다': RELEVANT" in SYSTEM_INSTRUCTION
@@ -175,7 +175,7 @@ def test_openai_strict_wire_schema_is_single_article_and_converts_to_public_arra
         assert decision_map["required"] == [key]
         assert decision_map["additionalProperties"] is False
         assert list(decision_map["properties"][key]["properties"]) == [
-            "reason", "evidenceQuotes", "status",
+            "evidenceQuotes", "reason", "status",
         ]
         for violation in ("missing", "extra", "invented_id", "legacy_array"):
             invalid = article_output(article.article_id)

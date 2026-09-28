@@ -198,16 +198,26 @@ class TopicRelevanceGateTest {
             "topic-relevance.ko.v8, RELEVANT",
             "topic-relevance.ko.v8, IRRELEVANT",
             "topic-relevance.ko.v9, RELEVANT",
-            "topic-relevance.ko.v9, IRRELEVANT"
+            "topic-relevance.ko.v9, IRRELEVANT",
+            "topic-relevance.ko.v10, RELEVANT",
+            "topic-relevance.ko.v10, IRRELEVANT",
+            "topic-relevance.ko.v11, RELEVANT",
+            "topic-relevance.ko.v11, IRRELEVANT",
+            "topic-relevance.ko.v12, RELEVANT",
+            "topic-relevance.ko.v12, IRRELEVANT",
+            "topic-relevance.ko.v13, RELEVANT",
+            "topic-relevance.ko.v13, IRRELEVANT",
+            "topic-relevance.ko.v14, RELEVANT",
+            "topic-relevance.ko.v14, IRRELEVANT"
     })
-    void v10ReassessesCachedEarlierDecisionForUnchangedInput(
+    void v15ReassessesCachedEarlierDecisionForUnchangedInput(
             String legacyVersion, TopicRelevanceStatus cachedStatus) {
-        assertEquals("topic-relevance.ko.v10", TopicRelevanceGate.PROMPT_VERSION);
+        assertEquals("topic-relevance.ko.v15", TopicRelevanceGate.PROMPT_VERSION);
         reserve();
         var input = candidate(1L, 7L);
         var topic = new AgentTopicRelevanceRequest.TopicInput(7L, "제조장비", "반도체 장비 공정",
                 List.of(), List.of(), List.of());
-        // v8 hashed both global models; v9 hashes only the task-specific model.
+        // v8 hashed both global models; v9 and later hash only the task-specific model.
         String legacyModels = legacyVersion.equals("topic-relevance.ko.v8")
                 ? "\n\n" : "\ngpt-5.6-terra";
         String legacyInput = new ObjectMapper().writeValueAsString(topic)
@@ -215,7 +225,7 @@ class TopicRelevanceGateTest {
                 + "\n기사 1\nnull\n반도체 제조 장비 공정 본문";
         String legacyHash = TopicRelevanceGate.hash(legacyInput);
         String upgradedHash = TopicRelevanceGate.hash(new ObjectMapper().writeValueAsString(topic)
-                + "\ntopic-relevance.ko.v10\nFREE\ngpt-5.6-terra\n기사 1\nnull\n반도체 제조 장비 공정 본문");
+                + "\ntopic-relevance.ko.v15\nFREE\ngpt-5.6-terra\n기사 1\nnull\n반도체 제조 장비 공정 본문");
         assertNotEquals(legacyHash, upgradedHash);
         when(store.findByRun(42L)).thenReturn(List.of(new TopicRelevanceStore.Assessment(
                 42L, 7L, 1L, cachedStatus, "이전 판정", legacyHash, legacyVersion,
@@ -232,7 +242,7 @@ class TopicRelevanceGateTest {
         verify(client).topicRelevance(any());
         verify(finalizer).success(eq(42L), any(), any(), argThat(rows -> rows.size() == 1
                         && rows.getFirst().status() == newStatus
-                        && rows.getFirst().promptVersion().equals("topic-relevance.ko.v10")
+                        && rows.getFirst().promptVersion().equals("topic-relevance.ko.v15")
                         && rows.getFirst().inputHash().equals(upgradedHash)),
                 anyString(), any(), any());
     }
@@ -277,8 +287,8 @@ class TopicRelevanceGateTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"topic-relevance.ko.v8", "topic-relevance.ko.v9"})
-    void rejectsEarlierResponseAfterV10Upgrade(String legacyVersion) {
+    @ValueSource(strings = {"topic-relevance.ko.v8", "topic-relevance.ko.v9", "topic-relevance.ko.v10", "topic-relevance.ko.v11", "topic-relevance.ko.v12", "topic-relevance.ko.v13", "topic-relevance.ko.v14"})
+    void rejectsEarlierResponseAfterV15Upgrade(String legacyVersion) {
         var request = new AgentTopicRelevanceRequest("test", AgentPlan.FREE,
                 new AgentTopicRelevanceRequest.TopicInput(7L, "장비", "반도체 장비", List.of(), List.of(), List.of()),
                 List.of(new AgentTopicRelevanceRequest.ArticleInput(1L, "공정위", null, "토스 분쟁")));

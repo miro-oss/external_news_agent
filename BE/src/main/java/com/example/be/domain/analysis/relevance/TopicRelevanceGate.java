@@ -33,7 +33,7 @@ import java.util.*;
 @RequiredArgsConstructor
 @Slf4j
 public class TopicRelevanceGate {
-    public static final String PROMPT_VERSION = "topic-relevance.ko.v10";
+    public static final String PROMPT_VERSION = "topic-relevance.ko.v15";
     private final AgentProperties properties;
     private final AgentClient client;
     private final AgentQuotaService quota;
