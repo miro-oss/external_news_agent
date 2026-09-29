@@ -15,7 +15,7 @@ before(async () => {
   server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile: false,
     envDir: emptyEnvDir, cacheDir: join(emptyEnvDir, 'vite-cache'), plugins: [react()],
     optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, watch: null, ws: false }, logLevel: 'error' })
-  const module = await server.ssrLoadModule('/src/features/reports/ReportEventFeedback.tsx')
+  const module = await server.ssrLoadModule('/src/features/reports/ReportReadingWithFeedback.tsx')
   Card = module.ReportEventFeedbackCard
   ReadingWithFeedback = module.ReportReadingWithFeedback
   Reading = (await server.ssrLoadModule('/src/features/reports/ReportReadingContent.tsx')).ReportReadingContent
