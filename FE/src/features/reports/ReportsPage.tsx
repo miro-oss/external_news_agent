@@ -29,7 +29,7 @@ import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { prefersReducedMotion } from '../../lib/motion'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { ReportSharePanel } from '../notifications/ReportSharePanel'
-import { ReportReadingContent } from './ReportReadingContent'
+import { ReportReadingWithFeedback } from './ReportReadingWithFeedback'
 import { ReportChangesPanel } from './ReportChangesPanel'
 import { IssueTonePanel } from './IssueTonePanel'
 import { collectionHighlightTerms, collectionKeywords } from './reportReading'
@@ -291,6 +291,7 @@ export function ReportsPage() {
                 defaultAudience={audienceSetting.data?.audience}
                 onAudienceSelect={setAudienceOverride}
                 onDelete={() => deleteReport(activeReportData.id)}
+                onRefreshReport={() => activeReport.refetch({ throwOnError: true })}
                 onEvidenceSelect={(articleId, runId, sentences) => {
                   setEvidenceSelection({
                     articleId,
@@ -355,13 +356,14 @@ function ReportListItem({ report, active, onSelect, disabled }: {
   )
 }
 
-function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvidenceSelect, onDelete }: {
+function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvidenceSelect, onDelete, onRefreshReport }: {
   report: ReportDetail
   audience: Audience
   defaultAudience?: Audience
   onAudienceSelect: (audience: Audience) => void
   onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
   onDelete: () => Promise<void>
+  onRefreshReport: () => Promise<unknown>
 }) {
   const [sensitivityOverride, setSensitivityOverride] = useState<ReportFindingFilters['sensitivityLevel'] | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -444,7 +446,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
         </div>}
       </header>
 
-      <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect}
+      <ReportReadingWithFeedback report={report} onEvidenceSelect={onEvidenceSelect} onRefreshReport={onRefreshReport}
         beforeOtherAnalysis={report.reportScope === 'DAILY' ? <ReportChangesPanel reportId={report.id} /> : undefined} />
 
       <section className="report-findings">

@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "test": "node --experimental-strip-types --test tests/*.test.ts tests/*.test.mjs",
     "preview": "vite preview",
-    "preview:refactor": "node scripts/refactor-preview.mjs"
+    "preview:refactor": "node scripts/refactor-preview.mjs",
+    "preview:feedback": "node scripts/feedback-preview.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

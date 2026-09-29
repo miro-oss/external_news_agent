@@ -35,6 +35,48 @@ class NotificationRendererTest {
     private final NotificationRenderer renderer = new NotificationRenderer(findingRepository, relevancePolicy);
 
     @Test
+    void personalExclusionRemovesSavedSummaryAndSourceFromBothChannels() {
+        NewsReport report = report("## 오늘의 핵심\n이전 제외 내용");
+        org.springframework.test.util.ReflectionTestUtils.setField(report, "structuredContent",
+                new ReportContent(List.of("이전 제외 내용"), List.of(
+                        new ReportContent.ImportantEvent("숨긴 이슈", "이전 제외 내용", "", List.of(1L))),
+                        List.of(), List.of()));
+        for (ChannelType type : ChannelType.values()) {
+            var rendered = renderer.render(report, channel(type, 3500),
+                    new com.example.be.domain.reports.service.ReportFindings.Visible(List.of(), true),
+                    "https://news.example/#/feedback?token=synthetic-test-token");
+            String body = rendered.chunks().getFirst();
+            assertFalse(body.contains("이전 제외 내용"));
+            assertFalse(body.contains("숨긴 이슈"));
+            assertFalse(body.contains("example.com/article"));
+            assertTrue(body.contains("이슈 피드백"));
+        }
+        assertTrue(report.getStructuredContent().executiveSummary().contains("이전 제외 내용"));
+    }
+
+    @Test
+    void telegramReservesLengthForFeedbackLinkWithoutSplittingMessage() {
+        String feedbackUrl = "https://news.example/#/feedback?token=" + "test".repeat(12);
+        var rendered = renderer.render(report("## 오늘의 핵심\n" + "긴 요약 ".repeat(300)),
+                channel(ChannelType.TELEGRAM, 500),
+                new com.example.be.domain.reports.service.ReportFindings.Visible(List.of(finding()), false), feedbackUrl);
+        assertEquals(1, rendered.chunks().size());
+        assertTrue(rendered.chunks().getFirst().length() <= 500);
+        assertTrue(rendered.chunks().getFirst().contains(feedbackUrl));
+        assertTrue(rendered.chunks().getFirst().endsWith("</a>"));
+    }
+
+    @Test
+    void previewNeverReceivesCapabilityLinkAndUnsafeLinksAreOmitted() {
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of());
+        assertFalse(renderer.render(report(""), channel(ChannelType.EMAIL, 3500)).chunks().getFirst().contains("이슈 피드백"));
+        var body = renderer.render(report(""), channel(ChannelType.EMAIL, 3500),
+                new com.example.be.domain.reports.service.ReportFindings.Visible(List.of(), false), "javascript:alert(1)")
+                .chunks().getFirst();
+        assertFalse(body.contains("javascript:"));
+    }
+
+    @Test
     void topicRejectedFindingCannotReachEitherNotificationChannelThroughSavedDigest() {
         Finding rejected = finding();
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(rejected));

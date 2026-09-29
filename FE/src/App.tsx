@@ -6,10 +6,12 @@ import { Segmented, type SegmentedOption } from './components/Segmented'
 import { ReportsPage } from './features/reports/ReportsPage'
 import { NotificationsPage } from './features/notifications/NotificationsPage'
 import { SettingsPage } from './features/settings/SettingsPage'
+import { FeedbackPage } from './features/feedback/FeedbackPage'
+import { feedbackTokenFromHash, isFeedbackHash } from './features/feedback/feedbackState'
 
 const PAGES = ['reports', 'notifications', 'settings'] as const
 
-type Page = (typeof PAGES)[number]
+type Page = (typeof PAGES)[number] | 'feedback'
 
 const DEFAULT_PAGE: Page = 'settings'
 
@@ -29,10 +31,11 @@ function hashValue() {
  * 고칠 수 있고, 그때 빈 화면을 보여 주는 것보다 낫다.
  */
 function pageFromHash(): Page {
+  if (isFeedbackHash(window.location.hash)) return 'feedback'
   const value = hashValue()
   // P1-3 이전 북마크는 기사 화면을 가리킨다. 화면을 없애더라도 리포트로 이어 줘야 한다.
   if (value === 'articles') return 'reports'
-  return PAGES.includes(value as Page) ? (value as Page) : DEFAULT_PAGE
+  return PAGES.includes(value as (typeof PAGES)[number]) ? (value as Page) : DEFAULT_PAGE
 }
 
 /**
@@ -50,6 +53,7 @@ function pageFromHash(): Page {
  */
 function usePageRoute() {
   const [page, setPage] = useState<Page>(pageFromHash)
+  const [feedbackToken, setFeedbackToken] = useState(() => feedbackTokenFromHash(window.location.hash))
 
   useEffect(() => {
     function sync() {
@@ -58,8 +62,10 @@ function usePageRoute() {
         window.history.replaceState(null, '', '#/reports')
       }
       setPage(pageFromHash())
+      setFeedbackToken(feedbackTokenFromHash(window.location.hash))
     }
-    sync()
+    // The initial route is already captured. A feedback page removes its fragment token on mount.
+    if (hashValue() === 'articles') sync()
     window.addEventListener('hashchange', sync)
     return () => window.removeEventListener('hashchange', sync)
   }, [])
@@ -71,7 +77,7 @@ function usePageRoute() {
     setPage(next)
   }, [])
 
-  return { page, go }
+  return { page, go, feedbackToken }
 }
 
 /**
@@ -105,8 +111,13 @@ function useScrolled(threshold = 8) {
 }
 
 function App() {
-  const { page, go } = usePageRoute()
+  const { page, go, feedbackToken } = usePageRoute()
   const scrolled = useScrolled()
+
+  // Public capability links never mount the administrative navigation or its data queries.
+  if (page === 'feedback') return <ErrorBoundary key={feedbackToken ?? 'feedback-invalid'}>
+    <FeedbackPage key={feedbackToken ?? 'feedback-invalid'} token={feedbackToken} />
+  </ErrorBoundary>
 
   return (
     <div className="app-shell">

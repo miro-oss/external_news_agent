@@ -129,7 +129,8 @@ public class AgentQuotaService {
         BigDecimal observedCredits = exception.getUsage() == null
                 ? null
                 : exception.getUsage().credits();
-        if ((reservation.task() == AgentTask.REPORT_CHANGES || reservation.task() == AgentTask.TOPIC_RELEVANCE)
+        if ((reservation.task() == AgentTask.REPORT_CHANGES || reservation.task() == AgentTask.TOPIC_RELEVANCE
+                || reservation.task() == AgentTask.FEEDBACK_REVIEW || reservation.task() == AgentTask.FEEDBACK_EVALUATE)
                 && exception.getUsage() != null) {
             // A schema-repair failure can still incur provider charges. Keep known exposure
             // in the work budget, including a guard-reported charge above the reservation.
@@ -245,7 +246,8 @@ public class AgentQuotaService {
                 || task == AgentTask.SELF_CRITIQUE
                 || task == AgentTask.KEYWORD_STRATEGY
                 || task == AgentTask.REPORT_CHANGES
-                || task == AgentTask.TOPIC_RELEVANCE;
+                || task == AgentTask.TOPIC_RELEVANCE
+                || task == AgentTask.FEEDBACK_REVIEW || task == AgentTask.FEEDBACK_EVALUATE;
         boolean insightTask = task == AgentTask.INSIGHT;
         boolean investigationTask = task == AgentTask.INVESTIGATE;
         BigDecimal workUsed = usage.paidAnalysisDailyUsed()

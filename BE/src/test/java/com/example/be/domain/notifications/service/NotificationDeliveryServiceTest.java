@@ -147,7 +147,9 @@ class NotificationDeliveryServiceTest {
         NotificationSender.DeliverySession session = mock(NotificationSender.DeliverySession.class);
         when(planService.prepare(any(), any())).thenReturn(new NotificationDeliveryPlanService.PreparedDelivery(
                 17L, List.of(first, second),
-                Map.of(channel.getId(), new RenderedNotification("제목", "HTML", List.of("메시지")))));
+                Map.of(channel.getId(), new RenderedNotification("제목", "HTML", List.of("공용 메시지"))),
+                Map.of(first.recipientId() + ":" + channel.getId(), new RenderedNotification("제목", "HTML", List.of("첫 수신자 전용")),
+                        second.recipientId() + ":" + channel.getId(), new RenderedNotification("제목", "HTML", List.of("둘째 수신자 전용")))));
         when(persistenceService.reserve(17L, null)).thenReturn(
                 new NotificationDeliveryPersistenceService.BatchInfo("batch-id", 17L, REQUESTED_AT));
         when(senderRegistry.get(ChannelType.EMAIL)).thenReturn(sender);
@@ -159,7 +161,8 @@ class NotificationDeliveryServiceTest {
 
         assertEquals(2, response.getSentCount());
         verify(sender).openSession(channel);
-        verify(session, times(2)).send(any(), any(), any());
+        verify(session).send(first.address(), "제목", "첫 수신자 전용");
+        verify(session).send(second.address(), "제목", "둘째 수신자 전용");
         verify(session).close();
     }
 

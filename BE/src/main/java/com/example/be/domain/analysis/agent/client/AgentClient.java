@@ -21,6 +21,7 @@ import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceRequest;
 import com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceResponse;
 import com.example.be.global.config.RestClientFactory;
+import tools.jackson.databind.JsonNode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -154,6 +155,14 @@ public class AgentClient {
 
     public AgentTopicRelevanceResponse topicRelevance(AgentTopicRelevanceRequest request) {
         return post(relevanceClient, "/v1/topic-relevance", request, AgentTopicRelevanceResponse.class);
+    }
+
+    public JsonNode feedbackReview(JsonNode request) {
+        return post(relevanceClient, "/v1/feedback/review", request, JsonNode.class);
+    }
+
+    public JsonNode feedbackEvaluate(JsonNode request) {
+        return post(relevanceClient, "/v1/feedback/evaluate", request, JsonNode.class);
     }
 
     public AgentEvidenceResponse verifyEvidence(AgentEvidenceRequest request) {

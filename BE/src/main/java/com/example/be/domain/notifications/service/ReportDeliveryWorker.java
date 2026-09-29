@@ -4,6 +4,8 @@ import com.example.be.domain.notifications.channel.NotificationSender;
 import com.example.be.domain.notifications.channel.NotificationSenderRegistry;
 import com.example.be.domain.notifications.repository.NotificationChannelRepository;
 import com.example.be.domain.notifications.exception.NotificationTransportException;
+import com.example.be.global.apiPayload.code.GeneralErrorCode;
+import com.example.be.global.apiPayload.exception.GeneralException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -18,6 +20,7 @@ public class ReportDeliveryWorker {
     private final ReportDeliveryOutboxStore store;
     private final NotificationChannelRepository channels;
     private final NotificationSenderRegistry senders;
+    private final PersonalizedNotificationRenderer personalizedRenderer;
 
     @Scheduled(fixedDelayString="${news.notifications.delivery-poll-ms:5000}", scheduler="reportDeliveryScheduler")
     public void deliverPending() {
@@ -41,6 +44,20 @@ public class ReportDeliveryWorker {
             finish(work, type, "FAILED", null, "전달 채널 연결을 확인해 주세요.", true);
             return;
         }
+        final RenderedNotification personalized;
+        try {
+            personalized = personalizedRenderer.render(work.reportId(), channel, work.recipientId());
+        } catch (GeneralException failure) {
+            if (failure.getCode() == GeneralErrorCode.CONFLICT) {
+                store.deferPersonalization(work);
+            } else {
+                finish(work, type, "FAILED", null, "개인 전달 내용을 준비하지 못했습니다.", true);
+            }
+            return;
+        } catch (RuntimeException failure) {
+            finish(work, type, "FAILED", null, "개인 전달 내용을 준비하지 못했습니다.", true);
+            return;
+        }
         NotificationSender.DeliverySession session;
         try { session = sender.openSession(channel); }
         catch (RuntimeException failure) {
@@ -48,7 +65,7 @@ public class ReportDeliveryWorker {
             return;
         }
         String externalId;
-        try { externalId = session.send(work.address(),work.subject(),work.body()); }
+        try { externalId = session.send(work.address(),personalized.subject(),String.join("\n", personalized.chunks())); }
         catch (RuntimeException failure) {
             // A transport timeout may occur after the provider accepted a message.
             boolean knownFailure = failure instanceof NotificationTransportException transport && transport.isDefinitelyRejected();
