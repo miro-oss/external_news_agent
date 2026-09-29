@@ -5,8 +5,14 @@ import logging
 from pathlib import Path
 
 from app.core.config import Settings
+from app.core.errors import OutputValidationError
 from app.core.parser import parse_json_object
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
+from app.llm.feedback_topic_review import (
+    build_topic_review_input,
+    project_topic_review,
+    topic_scope_fits_diagnosis,
+)
 from app.llm.router import get_analyze_provider
 from app.llm.structured_call import structured_call
 from app.schemas.analyze import ResponseMeta
@@ -21,11 +27,13 @@ from app.schemas.feedback import (
     FeedbackReviewInput,
     FeedbackReviewOutput,
     FeedbackReviewResponse,
+    FeedbackTopicReviewOutput,
 )
 
 REVIEW_VERSION = "feedback-review.ko.v1"
 EVENT_REVIEW_VERSION = "feedback-event-review.ko.v1"
 EVALUATE_VERSION = "feedback-evaluate.ko.v1"
+TOPIC_REVIEW_VERSION = "feedback-topic-review.ko.v1"
 _PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
 logger = logging.getLogger(__name__)
 
@@ -37,7 +45,11 @@ class FeedbackService:
 
     def review(self, request: FeedbackReviewInput) -> FeedbackReviewResponse:
         is_event = isinstance(request, FeedbackEventReviewRequest)
-        version = EVENT_REVIEW_VERSION if is_event else REVIEW_VERSION
+        is_topic_review = request.feedback.category == "TOPIC_MISMATCH"
+        version = (
+            TOPIC_REVIEW_VERSION if is_topic_review
+            else EVENT_REVIEW_VERSION if is_event else REVIEW_VERSION
+        )
         if self._settings.mock:
             return FeedbackReviewResponse(
                 verdict="INSUFFICIENT_EVIDENCE",
@@ -47,8 +59,28 @@ class FeedbackService:
                 meta=_mock_meta(version),
             )
 
+        topics = request.topics if is_event else [request.topic]
+        if is_topic_review and not topic_scope_fits_diagnosis(topics):
+            # No model was called. Preserve the existing non-provider metadata contract;
+            # a distinct model label keeps this bounded fallback separate from test mocks.
+            return FeedbackReviewResponse(
+                verdict="INSUFFICIENT_EVIDENCE",
+                diagnosis="연결된 주제가 많아 모든 주제의 판단을 빠짐없이 설명하기 어렵습니다. "
+                "일부 주제만 골라 결론 내리지 않고 검토를 보류했습니다.",
+                evidence=[],
+                proposed_policy=None,
+                meta=_mock_meta(version).model_copy(update={"model": "topic-scope-limit"}),
+            )
+        model_input, catalog = build_topic_review_input(request) if is_topic_review else (None, {})
+
         def validate(response: ProviderResponse) -> FeedbackReviewOutput:
-            result = FeedbackReviewOutput.model_validate(_payload(response))
+            payload = _payload(response)
+            if is_topic_review:
+                result = project_topic_review(
+                    topics, FeedbackTopicReviewOutput.model_validate(payload), catalog
+                )
+            else:
+                result = FeedbackReviewOutput.model_validate(payload)
             _validate_evidence(result.evidence, request.articles)
             if result.verdict != "INSUFFICIENT_EVIDENCE" and not result.evidence:
                 raise ValueError("확정적인 검토 결과에는 기사 원문 근거가 필요합니다.")
@@ -65,7 +97,8 @@ class FeedbackService:
                     raise ValueError("이미 활성화된 동일한 정책을 제안할 수 없습니다.")
             return result
 
-        result = self._call(request, version, FeedbackReviewOutput, validate)
+        output_type = FeedbackTopicReviewOutput if is_topic_review else FeedbackReviewOutput
+        result = self._call(request, version, output_type, validate, model_input=model_input)
         return FeedbackReviewResponse(
             **result.output.model_dump(), meta=_meta(result.response, result.usage, version)
         )
@@ -118,7 +151,7 @@ class FeedbackService:
             meta=_meta(result.response, result.usage, EVALUATE_VERSION),
         )
 
-    def _call(self, request, version, output_type, validate):
+    def _call(self, request, version, output_type, validate, *, model_input=None):
         settings = self._settings.model_copy(
             update={
                 "max_output_tokens": 4096,
@@ -126,9 +159,11 @@ class FeedbackService:
             }
         )
         provider = self._provider or get_analyze_provider(settings, request.plan)
-        data = (
-            request.model_dump_json(by_alias=True).replace("<", "\\u003c").replace(">", "\\u003e")
+        serialized = (
+            json.dumps(model_input, ensure_ascii=False, separators=(",", ":"))
+            if model_input is not None else request.model_dump_json(by_alias=True)
         )
+        data = serialized.replace("<", "\\u003c").replace(">", "\\u003e")
         return structured_call(
             provider,
             system_instruction=(_PROMPTS / f"{version}.md").read_text(encoding="utf-8").strip(),
@@ -170,10 +205,13 @@ def _validate_evidence(evidence: list[FeedbackEvidence], articles: list[Feedback
     sources = {article.id: article for article in articles}
     for item in evidence:
         article = sources.get(item.article_id)
-        if article is None or not any(
+        if article is None or not item.quote.strip() or not any(
             item.quote in text for text in (article.title, article.content)
         ):
-            raise ValueError("근거는 해당 기사 제목 또는 본문의 정확한 부분 문자열이어야 합니다.")
+            raise OutputValidationError(
+                "근거는 해당 기사 제목 또는 본문의 정확한 부분 문자열이어야 합니다.",
+                error_kinds=("feedback_evidence_not_in_article",),
+            )
 
 
 def _meta(response: ProviderResponse, usage: ProviderUsage, version: str) -> ResponseMeta:

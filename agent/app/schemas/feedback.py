@@ -122,6 +122,31 @@ class FeedbackReviewOutput(AgentModel):
     proposed_policy: ProposedPolicy | None = None
 
 
+class FeedbackPassageReference(AgentModel):
+    article_id: int = Field(gt=0)
+    passage_id: int = Field(ge=0)
+
+
+class FeedbackTopicAssessment(AgentModel):
+    """Provider-only justification of an event/issue's connection to one topic."""
+
+    topic_id: int = Field(gt=0)
+    relation: Literal[
+        "SUBSTANTIVE", "MENTION_ONLY", "DIFFERENT_SUBJECT", "EXCLUDED", "UNCERTAIN"
+    ]
+    rationale: str = Field(min_length=1, max_length=300)
+    evidence: list[FeedbackPassageReference] = Field(max_length=2)
+    counter_evidence: list[FeedbackPassageReference] = Field(max_length=2)
+    counterpoint: str = Field(max_length=300)
+
+
+class FeedbackTopicReviewOutput(AgentModel):
+    """Internal model output, projected onto the unchanged review HTTP response."""
+
+    assessments: list[FeedbackTopicAssessment] = Field(min_length=1)
+    improvement: str = Field(min_length=1, max_length=400)
+
+
 class FeedbackReviewResponse(FeedbackReviewOutput):
     meta: ResponseMeta
 
