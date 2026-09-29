@@ -67,7 +67,6 @@ public class FeedbackStore {
     public List<Policy> policies(long recipientId) {
         return jdbc.query("SELECT * FROM news_feedback_policies WHERE recipient_id=? ORDER BY id",this::policy,recipientId);
     }
-    public List<Policy> activePolicies() { return jdbc.query("SELECT * FROM news_feedback_policies WHERE status='ACTIVE' ORDER BY id",this::policy); }
     private Policy policy(ResultSet rs,int row) throws SQLException {
         return new Policy(rs.getLong("id"),rs.getLong("recipient_id"),rs.getLong("topic_id"),rs.getString("topic_name"),
                 rs.getString("instruction"),rs.getInt("version"),rs.getString("status"),time(rs,"created_at"));
@@ -133,16 +132,6 @@ public class FeedbackStore {
         // A lost provider response is ambiguous. Do not repeat a paid call after the lease expires.
         jdbc.update("UPDATE news_feedback_jobs SET status='FAILED',finished_at=?,claim_key=NULL WHERE status='PROCESSING' AND started_at<?",now,now.minusMinutes(30));
         jdbc.update("UPDATE news_feedback SET status='FAILED' WHERE status='PROCESSING' AND EXISTS(SELECT 1 FROM news_feedback_jobs j WHERE j.feedback_id=news_feedback.id AND j.status='FAILED')");
-    }
-    public List<Long> reportsToPrepare() {
-        // Only new reports can use a policy; the worker creates one immutable evaluation per scope.
-        return jdbc.queryForList("""
-                SELECT r.id FROM news_reports r WHERE r.report_status<>'PENDING' AND r.deleted_at IS NULL
-                AND EXISTS(SELECT 1 FROM news_feedback_policies p WHERE p.status='ACTIVE' AND p.created_at<=r.generated_at
-                  AND NOT EXISTS(SELECT 1 FROM news_feedback_jobs j WHERE j.report_id=r.id AND j.recipient_id=p.recipient_id
-                    AND j.topic_id=p.topic_id AND j.kind='EVALUATE'))
-                ORDER BY r.generated_at DESC FETCH FIRST 20 ROWS ONLY
-                """,Long.class);
     }
     public List<Feedback> export(long after,int limit) {
         return jdbc.query("SELECT * FROM news_feedback WHERE id>? AND status='COMPLETED' AND category<>'PREFERENCE' ORDER BY id FETCH FIRST "+limit+" ROWS ONLY",this::feedback,after);

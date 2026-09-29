@@ -1,10 +1,6 @@
 package com.example.be.domain.feedback.service;
 
-import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
-import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.feedback.repository.FeedbackStore;
-import com.example.be.domain.reports.repository.NewsReportRepository;
-import com.example.be.domain.reports.service.ReportFindings;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -20,22 +16,8 @@ import static com.example.be.domain.feedback.model.FeedbackModels.*;
 @RequiredArgsConstructor
 public class FeedbackWorkService {
     private final FeedbackStore store;
-    private final FeedbackSnapshotFactory snapshots;
-    private final NewsReportRepository reports;
-    private final FindingRepository findings;
-    private final TopicRelevancePolicy relevance;
 
-    @Transactional(propagation=Propagation.REQUIRES_NEW)
-    public void prepareReport(long reportId) {
-        var policies=store.activePolicies();
-        if(policies.isEmpty())return;
-        var report=reports.findById(reportId).orElse(null);
-        if(report==null || report.getDeletedAt()!=null || report.getReportStatus()==com.example.be.domain.reports.entity.ReportStatus.PENDING)return;
-        Snapshot snapshot=snapshots.capture(report,ReportFindings.load(report,findings,relevance));
-        for(long recipientId:policies.stream().map(Policy::recipientId).distinct().toList()) enqueue(snapshot,recipientId,policies);
-    }
-
-    /** Commits queue writes even if a caller subsequently reports preparation as pending. */
+    /** Registers only a requested delivery's recipient, independently of a pending delivery response. */
     @Transactional(propagation=Propagation.REQUIRES_NEW)
     public void ensure(Snapshot snapshot,long recipientId) { enqueue(snapshot,recipientId,store.policies(recipientId)); }
 

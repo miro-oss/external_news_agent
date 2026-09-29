@@ -160,6 +160,92 @@ def test_actual_gepa_runs_with_fake_provider_and_never_sees_heldout():
     assert report["providerCalls"] == provider.calls <= 40
 
 
+@pytest.mark.parametrize("max_calls", [9, 10])
+def test_rejects_budget_at_or_below_final_comparison_and_proposal_reserve(max_calls):
+    pytest.importorskip("gepa")
+    provider = FakeProvider()
+    # Two validation + two test cases, each compared twice, plus two proposals.
+    with pytest.raises(ValueError, match="INSUFFICIENT_BUDGET_FOR_HELDOUT"):
+        optimize(
+            validate_dataset(raw_dataset()),
+            settings=Settings(AGENT_MOCK=False),
+            provider=provider,
+            max_calls=max_calls,
+            max_cost_usd=Decimal("1"),
+            max_proposals=2,
+        )
+    assert provider.calls == 0
+
+
+@pytest.mark.parametrize("max_calls", [11, 13, 14, 26])
+def test_actual_gepa_preserves_comparison_budget_across_iteration_boundaries(max_calls):
+    pytest.importorskip("gepa")
+    raw = raw_dataset()
+    # More than one reflection minibatch exposes GEPA 0.1.4's soft metric cap.
+    # With the arithmetic-only reserve, limits 13 and 14 exhaust provider calls
+    # before final comparisons, because GEPA finishes the whole started batch.
+    for number in range(7, 11):
+        case = deepcopy(raw["cases"][(number - 7) % 2])
+        case.update(caseId=f"train-{number}", groupId=f"event-{number}")
+        case["request"]["articles"][0].update(
+            articleId=number, title=f"train 기사 {number}", bodyText=f"train 본문 {number}"
+        )
+        raw["cases"].append(case)
+    provider = FakeProvider()
+    report = optimize(
+        validate_dataset(raw),
+        settings=Settings(AGENT_MOCK=False),
+        provider=provider,
+        max_calls=max_calls,
+        max_cost_usd=Decimal("1"),
+        max_proposals=2,
+    )
+    for split in ("validation", "test"):
+        assert report["comparisons"][split]["baseline"]["count"] == 2
+        assert report["comparisons"][split]["candidate"]["count"] == 2
+    assert report["providerCalls"] == provider.calls <= max_calls
+    if max_calls == 11:
+        assert not provider.reflections
+        assert not report["eligibleForReview"]
+    if max_calls == 26:
+        assert provider.reflections
+        assert report["eligibleForReview"]
+        assert report["comparisons"]["test"]["candidate"]["irrelevantPassed"] == 0
+
+
+def test_actual_gepa_seed_validation_before_stop_callback_keeps_final_comparisons():
+    pytest.importorskip("gepa")
+    raw = raw_dataset()
+    for number in range(7, 11):
+        case = deepcopy(raw["cases"][2 + (number - 7) % 2])
+        case.update(caseId=f"validation-{number}", groupId=f"event-{number}")
+        case["request"]["articles"][0].update(
+            articleId=number,
+            title=f"validation 기사 {number}",
+            bodyText=f"validation 본문 {number}",
+        )
+        raw["cases"].append(case)
+    provider = FakeProvider()
+    # Reserve is 17, leaving one search metric call. GEPA still evaluates all
+    # six seed validation cases before its first stop check. Those predictions
+    # are reused in both comparison columns; the seed also wins without a loop.
+    report = optimize(
+        validate_dataset(raw),
+        settings=Settings(AGENT_MOCK=False),
+        provider=provider,
+        max_calls=18,
+        max_cost_usd=Decimal("1"),
+        max_proposals=1,
+    )
+    assert not provider.reflections
+    assert report["candidate"]["instruction"] == ""
+    assert report["comparisons"]["validation"]["baseline"]["count"] == 6
+    assert report["comparisons"]["validation"]["candidate"]["count"] == 6
+    assert report["comparisons"]["test"]["baseline"]["count"] == 2
+    assert report["comparisons"]["test"]["candidate"]["count"] == 2
+    assert report["providerCalls"] == provider.calls == 8
+
+
 def test_budget_stops_subsequent_requests_and_unknown_failure():
     provider = FakeProvider()
     budget = Budget(1, Decimal("1"))

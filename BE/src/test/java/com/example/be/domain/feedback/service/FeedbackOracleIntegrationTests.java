@@ -4,7 +4,10 @@ import com.example.be.domain.analysis.agent.service.FeedbackAgentGateway;
 import com.example.be.domain.feedback.repository.FeedbackStore;
 import com.example.be.domain.feedback.util.FeedbackTokens;
 import com.example.be.domain.notifications.entity.NotificationRecipient;
+import com.example.be.domain.reports.comparison.ReportComparisonWorker;
+import com.example.be.domain.reports.comparison.ReportCompleted;
 import com.example.be.domain.reports.entity.*;
+import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import com.example.be.global.config.ApiTimeZone;
 import jakarta.persistence.EntityManager;
@@ -13,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -43,7 +47,9 @@ class FeedbackOracleIntegrationTests {
     @Autowired FeedbackWorker worker;
     @Autowired PlatformTransactionManager manager;
     @Autowired ObjectMapper json;
+    @Autowired ApplicationEventPublisher events;
     @MockitoBean FeedbackAgentGateway gateway;
+    @MockitoBean ReportComparisonWorker comparisons;
     private final List<Long> recipients=new ArrayList<>(),reports=new ArrayList<>(),topics=new ArrayList<>();
 
     @AfterEach void clean() {
@@ -112,6 +118,50 @@ class FeedbackOracleIntegrationTests {
                 """);
         transactions.review(job,store.byId(submitted.id()).orElseThrow(),List.of(),response);
         assertEquals("FAILED",service.context(new TokenRequest(link(f))).feedback().getFirst().status());assertTrue(store.policies(f.recipient()).isEmpty());
+    }
+    @Test void requestedDeliveryAloneQueuesEvaluationAndPendingResponseDoesNotRollBackJob() {
+        var f=fixture();var unused=fixture();
+        var other=new Fixture(unused.recipient(),f.topic(),f.report(),f.snapshot());
+        when(gateway.review(isNull(),anyLong(),any())).thenReturn(json.readTree("""
+                {"verdict":"PREFERENCE","diagnosis":"주가 전망 제외 선호입니다.","evidence":[{"articleId":21,"quote":"주가 전망"}],"proposedPolicy":{"instruction":"주가 전망 중심의 기사는 제외한다.","reason":"사용자의 명시적 선호"},"meta":{"truncated":false,"mock":false}}
+                """));
+        for(var recipient:List.of(f,other)) {
+            var feedback=service.submit(request(link(recipient),"preference"));
+            worker.process(jobFor(feedback.id()));
+        }
+        var policy=store.policies(f.recipient()).getFirst();
+        var latest=store.policies(other.recipient()).getFirst().createdAt();
+        var next=next(f,latest.plusSeconds(1));
+        var transaction=new TransactionTemplate(manager);
+
+        transaction.executeWithoutResult(tx->events.publishEvent(new ReportCompleted(next.report().getId())));
+        // Completion and scheduler recovery must not evaluate every policy owner's new report.
+        new FeedbackWorker(store,transactions,gateway,json).poll();
+        assertTrue(store.evaluations(next.report().getId(),f.recipient()).isEmpty());
+        assertTrue(store.evaluations(next.report().getId(),other.recipient()).isEmpty());
+        verify(gateway,never()).evaluate(any(),anyLong(),any());
+
+        var factory=mock(FeedbackSnapshotFactory.class);
+        when(factory.capture(eq(next.report()),anyList())).thenReturn(next.snapshot());
+        var delivery=new FeedbackDeliveryService(store,factory,work,json);
+        var pending=assertThrows(GeneralException.class,()->transaction.execute(tx->delivery.prepare(next.report(),f.recipient(),List.of())));
+        assertEquals(GeneralErrorCode.CONFLICT,pending.getCode());
+        // ensure() commits independently, although the caller's delivery transaction rolled back.
+        var jobs=store.evaluations(next.report().getId(),f.recipient());
+        assertEquals(1,jobs.size());assertEquals("PENDING",jobs.getFirst().status());
+        assertTrue(store.evaluations(next.report().getId(),other.recipient()).isEmpty());
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM news_feedback_capabilities WHERE report_id=?",Integer.class,next.report().getId()));
+        verify(gateway,never()).evaluate(any(),anyLong(),any());
+
+        when(gateway.evaluate(isNull(),anyLong(),any())).thenReturn(json.readTree("""
+                {"decisions":[{"articleId":21,"status":"SUPPRESS","policyIds":[%d],"evidence":[{"articleId":21,"quote":"주가 전망"}],"reason":"명시한 개인 선호"}],"meta":{"truncated":false,"mock":false}}
+                """.formatted(policy.id())));
+        worker.process(jobs.getFirst().id());
+        var delivered=transaction.execute(tx->delivery.prepare(next.report(),f.recipient(),List.of()));
+        assertNotNull(delivered);assertEquals(Set.of(11L),delivered.suppressedFindingIds());assertNotNull(delivered.token());
+        assertEquals(1,store.evaluations(next.report().getId(),f.recipient()).size());
+        assertTrue(store.evaluations(next.report().getId(),other.recipient()).isEmpty());
+        verify(gateway,times(1)).evaluate(any(),anyLong(),any());
     }
     private long jobFor(long feedbackId){return jdbc.queryForObject("SELECT id FROM news_feedback_jobs WHERE feedback_id=?",Long.class,feedbackId);}
     private SubmitRequest request(String token,String key){return new SubmitRequest(token,11L,"PREFERENCE","주가 전망은 제외해 주세요.",true,key);}

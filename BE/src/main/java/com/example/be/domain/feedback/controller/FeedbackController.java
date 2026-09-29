@@ -38,7 +38,12 @@ public class FeedbackController {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(ApiResponse.of(GeneralSuccessCode.OK,service.revoke(policyId,request)));
     }
     @GetMapping("/evaluation-candidates")
-    @Operation(summary="공통 개선 평가 후보 내보내기",description="운영 관리 API. afterId>=0, size 1~100(기본50). schemaVersion=1/cases/nextAfterId/hasNext. 개인 선호는 제외하며 goldLabel·split은 null, labelSource=USER_FEEDBACK입니다. 독립 사람 검증 전 정답으로 사용할 수 없습니다. 400 COMMON400.")
+    @Operation(summary="공통 개선 평가 후보 내보내기",description="""
+            로컬 PoC 관리 API. 별도 운영자 인증 없이 LocalRequestGuard가 허용하는 루프백 요청에 제공하며 수신자 token은 요구하지 않습니다.
+            수신자 공개 화면에서는 호출하지 않습니다. 원문을 포함하므로 외부 공개 서비스로 전환할 때 기존 관리 API와 함께 운영자 인증을 적용해야 합니다.
+            afterId>=0, size 1~100(기본50). schemaVersion=1/cases/nextAfterId/hasNext.
+            개인 선호는 제외하며 goldLabel·split은 null, labelSource=USER_FEEDBACK입니다. 독립 사람 검증 전 정답으로 사용할 수 없습니다. 400 COMMON400.
+            """)
     public ResponseEntity<ApiResponse<Map<String,Object>>> export(@RequestParam(defaultValue="0")long afterId,@RequestParam(defaultValue="50")int size) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(ApiResponse.of(GeneralSuccessCode.OK,service.export(afterId,size)));
     }

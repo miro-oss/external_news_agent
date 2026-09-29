@@ -232,8 +232,16 @@ def optimize(
     train = [case for case in dataset.cases if case.split == "train"]
     validation = [case for case in dataset.cases if case.split == "validation"]
     heldout = [case for case in dataset.cases if case.split == "test"]
-    if max_calls < len(validation) + len(heldout) * 2 + 3:
+    comparison_calls = 2 * (len(validation) + len(heldout))
+    reserve = comparison_calls + max_proposals
+    if max_calls <= reserve:
         raise ValueError("INSUFFICIENT_BUDGET_FOR_HELDOUT")
+    reflection_batch_size = min(3, len(train))
+    # GEPA 0.1.4 checks metric limits only between complete iterations. A new
+    # iteration can evaluate both minibatches and the full validation set; its
+    # reflection helper can also retry once. Keep final comparisons available
+    # even when GEPA overshoots max_metric_calls inside an iteration.
+    iteration_calls = 2 * reflection_batch_size + len(validation) + 2
     budget = Budget(max_calls, max_cost_usd)
     predictions: dict[tuple[str, str], str] = {}
     settings = settings.model_copy(update={"schema_repair_attempts": 0})
@@ -300,15 +308,18 @@ def optimize(
         ),
         config=GEPAConfig(
             engine=EngineConfig(
-                max_metric_calls=max(1, max_calls - len(heldout) * 2 - max_proposals),
+                max_metric_calls=max_calls - reserve,
                 max_candidate_proposals=max_proposals,
                 parallel=False,
                 use_cloudpickle=False,
                 display_progress_bar=False,
                 raise_on_exception=True,
             ),
-            reflection=ReflectionConfig(reflection_lm=reflect),
+            reflection=ReflectionConfig(
+                reflection_lm=reflect, reflection_minibatch_size=reflection_batch_size
+            ),
             tracking=TrackingConfig(logger=QuietLogger()),
+            stop_callbacks=lambda _: budget.calls + iteration_calls + comparison_calls > max_calls,
         ),
     )
     candidate = result.best_candidate

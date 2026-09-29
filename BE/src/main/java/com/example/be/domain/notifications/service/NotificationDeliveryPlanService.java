@@ -16,6 +16,8 @@ import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;
 import com.example.be.domain.reports.repository.NewsReportRepository;
+import com.example.be.global.apiPayload.code.GeneralErrorCode;
+import com.example.be.global.apiPayload.exception.GeneralException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,10 +61,19 @@ public class NotificationDeliveryPlanService {
         Map<Long, RenderedNotification> renderedByChannel = new LinkedHashMap<>();
         channels.forEach(channel -> renderedByChannel.put(channel.getId(), renderer.render(report, channel)));
         Map<String, RenderedNotification> renderedByTarget = new LinkedHashMap<>();
+        GeneralException personalizationPending = null;
         for (PreparedTarget target : targets) {
-            renderedByTarget.put(target.recipientId() + ":" + target.channel().getId(),
-                    personalizedRenderer.render(report, target.channel(), target.recipientId()));
+            try {
+                renderedByTarget.put(target.recipientId() + ":" + target.channel().getId(),
+                        personalizedRenderer.render(report, target.channel(), target.recipientId()));
+            } catch (GeneralException failure) {
+                if (failure.getCode() != GeneralErrorCode.CONFLICT) throw failure;
+                // Every selected recipient must enqueue its evaluation before the caller waits.
+                // Evaluation jobs commit independently; this plan never reaches external delivery.
+                if (personalizationPending == null) personalizationPending = failure;
+            }
         }
+        if (personalizationPending != null) throw personalizationPending;
         return new PreparedDelivery(reportId, targets, renderedByChannel, renderedByTarget);
     }
 
