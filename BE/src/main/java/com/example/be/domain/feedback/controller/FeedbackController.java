@@ -1,5 +1,6 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.controller;
 
+import com.example.be.domain.feedback.service.FeedbackService;
 import com.example.be.global.apiPayload.ApiResponse;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
 import io.swagger.v3.oas.annotations.Operation;
@@ -9,8 +10,11 @@ import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.Map;
-import static com.example.be.domain.feedback.FeedbackModels.*;
+
+import static com.example.be.domain.feedback.dto.req.FeedbackReqDTO.*;
+import static com.example.be.domain.feedback.dto.res.FeedbackResDTO.*;
 
 @RestController
 @RequiredArgsConstructor

@@ -1,12 +1,16 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.controller;
 
+import com.example.be.domain.feedback.exception.FeedbackErrors;
+import com.example.be.domain.feedback.service.FeedbackService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+
 import java.time.OffsetDateTime;
-import static com.example.be.domain.feedback.FeedbackModels.*;
+
+import static com.example.be.domain.feedback.dto.res.FeedbackResDTO.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;

@@ -1,13 +1,16 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.service;
 
+import com.example.be.domain.feedback.repository.FeedbackStore;
 import com.example.be.domain.reports.entity.NewsReport;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import tools.jackson.databind.ObjectMapper;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
-import static com.example.be.domain.feedback.FeedbackModels.*;
+
+import static com.example.be.domain.feedback.model.FeedbackModels.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -22,7 +25,7 @@ class FeedbackDeliveryServiceTest {
         when(factory.capture(eq(report),anyList())).thenReturn(new Snapshot(5,"보고서",now,List.of(item)));
         when(store.policies(7)).thenReturn(List.of(policy));
         // Jackson's standalone mapper does not install java.time modules; use the application's record input via mocked parser.
-        var mapped=mock(ObjectMapper.class);when(mapped.readValue("input",FeedbackWorkService.EvaluationInput.class)).thenReturn(new FeedbackWorkService.EvaluationInput(item.topic(),List.of(item),List.of(policy)));
+        var mapped=mock(ObjectMapper.class);when(mapped.readValue("input",EvaluationInput.class)).thenReturn(new EvaluationInput(item.topic(),List.of(item),List.of(policy)));
         service=new FeedbackDeliveryService(store,factory,work,mapped);ReflectionTestUtils.setField(service,"schedulingEnabled",false);
         when(store.evaluations(5,7)).thenReturn(List.of(new Job(8,"EVALUATE",null,7,5,2,"input",null,"PENDING",null,0)));
         var result=service.prepare(report,7,List.of());assertEquals(Set.of(),result.suppressedFindingIds());assertNotNull(result.token());

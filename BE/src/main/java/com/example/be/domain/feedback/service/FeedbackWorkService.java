@@ -1,7 +1,8 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.service;
 
-import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
+import com.example.be.domain.analysis.repository.FindingRepository;
+import com.example.be.domain.feedback.repository.FeedbackStore;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.reports.service.ReportFindings;
 import com.example.be.global.config.ApiTimeZone;
@@ -9,9 +10,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.time.LocalDateTime;
 import java.util.*;
-import static com.example.be.domain.feedback.FeedbackModels.*;
+
+import static com.example.be.domain.feedback.model.FeedbackModels.*;
 
 @Service
 @RequiredArgsConstructor
@@ -21,7 +24,6 @@ public class FeedbackWorkService {
     private final NewsReportRepository reports;
     private final FindingRepository findings;
     private final TopicRelevancePolicy relevance;
-    public record EvaluationInput(Topic topic,List<Item> items,List<Policy> policies) { }
 
     @Transactional(propagation=Propagation.REQUIRES_NEW)
     public void prepareReport(long reportId) {

@@ -1,6 +1,9 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.service;
 
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.feedback.exception.FeedbackErrors;
+import com.example.be.domain.feedback.repository.FeedbackStore;
+import com.example.be.domain.feedback.util.FeedbackTokens;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.service.ReportFindings;
 import com.example.be.global.config.ApiTimeZone;
@@ -9,9 +12,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
+
 import java.time.LocalDateTime;
 import java.util.*;
-import static com.example.be.domain.feedback.FeedbackModels.*;
+
+import static com.example.be.domain.feedback.model.FeedbackModels.*;
 
 @Service
 @RequiredArgsConstructor
@@ -39,7 +44,7 @@ public class FeedbackDeliveryService {
         store.policies(recipientId).stream().filter(p->p.status().equals("ACTIVE")).forEach(p->active.add(p.id()));
         Set<Long> suppressed=new HashSet<>();
         for(Job job:store.evaluations(report.getId(),recipientId)) {
-            var input=json.readValue(job.inputJson(),FeedbackWorkService.EvaluationInput.class);
+            var input=json.readValue(job.inputJson(),EvaluationInput.class);
             if(input.items().isEmpty() || input.policies().stream().noneMatch(p->active.contains(p.id())))continue;
             if(job.status().equals("PENDING") || job.status().equals("PROCESSING")) {
                 if(schedulingEnabled)throw FeedbackErrors.conflict();

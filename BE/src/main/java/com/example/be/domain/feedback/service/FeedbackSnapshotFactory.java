@@ -1,7 +1,8 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.service;
 
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.collection.entity.CollectionTopicSnapshot;
+import com.example.be.domain.feedback.exception.FeedbackErrors;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.service.ReportFindings;
 import com.example.be.domain.reports.service.ReportReadingContent;
@@ -9,12 +10,14 @@ import com.example.be.domain.topics.repository.TopicRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import static com.example.be.domain.feedback.FeedbackModels.*;
+
+import static com.example.be.domain.feedback.model.FeedbackModels.*;
 
 @Component
 @RequiredArgsConstructor

@@ -1,10 +1,13 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.repository;
 
+import com.example.be.domain.feedback.exception.FeedbackErrors;
+import com.example.be.domain.feedback.util.FeedbackTokens;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Repository;
 import tools.jackson.databind.ObjectMapper;
+
 import java.io.StringReader;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -12,7 +15,8 @@ import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
-import static com.example.be.domain.feedback.FeedbackModels.*;
+
+import static com.example.be.domain.feedback.model.FeedbackModels.*;
 
 @Repository
 @RequiredArgsConstructor

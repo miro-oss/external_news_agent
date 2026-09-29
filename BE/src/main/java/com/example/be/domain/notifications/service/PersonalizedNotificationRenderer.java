@@ -3,7 +3,7 @@ package com.example.be.domain.notifications.service;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
-import com.example.be.domain.feedback.FeedbackDeliveryService;
+import com.example.be.domain.feedback.service.FeedbackDeliveryService;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.repository.NewsReportRepository;

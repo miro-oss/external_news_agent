@@ -1,13 +1,16 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.service;
 
+import com.example.be.domain.feedback.repository.FeedbackStore;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
+
 import java.time.LocalDateTime;
 import java.util.*;
-import static com.example.be.domain.feedback.FeedbackModels.*;
+
+import static com.example.be.domain.feedback.model.FeedbackModels.*;
 
 @Service
 @RequiredArgsConstructor

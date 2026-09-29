@@ -1,6 +1,8 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.service;
 
 import com.example.be.domain.analysis.agent.service.FeedbackAgentGateway;
+import com.example.be.domain.feedback.repository.FeedbackStore;
+import com.example.be.domain.feedback.util.FeedbackTokens;
 import com.example.be.domain.notifications.entity.NotificationRecipient;
 import com.example.be.domain.reports.entity.*;
 import com.example.be.global.apiPayload.exception.GeneralException;
@@ -17,10 +19,13 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
+
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
-import static com.example.be.domain.feedback.FeedbackModels.*;
+
+import static com.example.be.domain.feedback.dto.req.FeedbackReqDTO.*;
+import static com.example.be.domain.feedback.model.FeedbackModels.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;

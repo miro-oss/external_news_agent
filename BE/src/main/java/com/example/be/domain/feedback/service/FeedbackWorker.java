@@ -1,8 +1,9 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.service;
 
 import com.example.be.domain.analysis.agent.client.AgentClientException;
-import com.example.be.domain.analysis.agent.service.FeedbackAgentGateway;
 import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
+import com.example.be.domain.analysis.agent.service.FeedbackAgentGateway;
+import com.example.be.domain.feedback.repository.FeedbackStore;
 import com.example.be.domain.reports.comparison.ReportCompleted;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
@@ -13,8 +14,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import tools.jackson.databind.ObjectMapper;
+
 import java.time.LocalDateTime;
 import java.util.Map;
+
+import static com.example.be.domain.feedback.model.FeedbackModels.*;
 
 @Component
 @RequiredArgsConstructor
@@ -54,7 +58,7 @@ public class FeedbackWorker {
                 FeedbackResultValidator.review(request,result);
                 transactions.review(job,feedback,baseline,result);
             }else {
-                var input=json.readValue(job.inputJson(),FeedbackWorkService.EvaluationInput.class);
+                var input=json.readValue(job.inputJson(),EvaluationInput.class);
                 if(input.items().isEmpty()) { transactions.evaluated(job,json.valueToTree(Map.of("decisions",java.util.List.of())));return; }
                 var request=FeedbackAgentRequests.evaluate(json,job,input);
                 var result=agent.evaluate(null,job.topicId(),request);

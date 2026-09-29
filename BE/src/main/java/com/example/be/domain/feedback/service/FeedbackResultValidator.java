@@ -1,6 +1,7 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.service;
 
 import tools.jackson.databind.JsonNode;
+
 import java.util.*;
 
 /** Validate exact frozen citations and permitted IDs again at the persistence boundary. */

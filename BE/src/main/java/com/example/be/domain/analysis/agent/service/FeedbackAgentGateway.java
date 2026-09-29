@@ -6,7 +6,7 @@ import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.entity.*;
 import com.example.be.domain.analysis.agent.quota.AgentQuotaService;
 import com.example.be.domain.analysis.agent.repository.AgentRunJdbcRepository;
-import com.example.be.domain.feedback.FeedbackResultValidator;
+import com.example.be.domain.feedback.service.FeedbackResultValidator;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;

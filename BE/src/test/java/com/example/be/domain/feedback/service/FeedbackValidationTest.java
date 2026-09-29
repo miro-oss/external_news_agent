@@ -1,11 +1,14 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.service;
 
+import com.example.be.domain.feedback.util.FeedbackTokens;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
-import static com.example.be.domain.feedback.FeedbackModels.*;
+
+import static com.example.be.domain.feedback.model.FeedbackModels.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FeedbackValidationTest {

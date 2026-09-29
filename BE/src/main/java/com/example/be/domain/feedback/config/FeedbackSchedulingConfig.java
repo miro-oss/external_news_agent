@@ -1,4 +1,4 @@
-package com.example.be.domain.feedback;
+package com.example.be.domain.feedback.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
