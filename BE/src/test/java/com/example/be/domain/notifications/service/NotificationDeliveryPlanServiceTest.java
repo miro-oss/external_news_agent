@@ -31,7 +31,7 @@ class NotificationDeliveryPlanServiceTest {
     private final NotificationRenderer renderer = mock(NotificationRenderer.class);
     private final NotificationProperties properties = new NotificationProperties();
     private final NotificationDeliveryPlanService service = new NotificationDeliveryPlanService(
-            reportRepository, channelRepository, groupRepository, managementService, renderer, properties);
+            reportRepository, channelRepository, groupRepository, managementService, renderer, properties, mock(PersonalizedNotificationRenderer.class));
 
     @Test
     void watchWithoutSpecificGroupUsesConfiguredBreakingGroupOnly() {

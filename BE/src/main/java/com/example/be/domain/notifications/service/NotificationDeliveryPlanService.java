@@ -37,13 +37,14 @@ public class NotificationDeliveryPlanService {
     private final NotificationManagementService managementService;
     private final NotificationRenderer renderer;
     private final NotificationProperties properties;
+    private final PersonalizedNotificationRenderer personalizedRenderer;
 
     @Transactional(readOnly = true)
     public void requireReport(Long reportId) {
         findReport(reportId);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public PreparedDelivery prepare(Long reportId, NotificationReqDTO.Send request) {
         NewsReport report = findReport(reportId);
         List<NotificationChannel> channels = resolveChannels(request.getChannelIds());
@@ -57,7 +58,12 @@ public class NotificationDeliveryPlanService {
 
         Map<Long, RenderedNotification> renderedByChannel = new LinkedHashMap<>();
         channels.forEach(channel -> renderedByChannel.put(channel.getId(), renderer.render(report, channel)));
-        return new PreparedDelivery(reportId, targets, renderedByChannel);
+        Map<String, RenderedNotification> renderedByTarget = new LinkedHashMap<>();
+        for (PreparedTarget target : targets) {
+            renderedByTarget.put(target.recipientId() + ":" + target.channel().getId(),
+                    personalizedRenderer.render(report, target.channel(), target.recipientId()));
+        }
+        return new PreparedDelivery(reportId, targets, renderedByChannel, renderedByTarget);
     }
 
     @Transactional(readOnly = true)
@@ -144,7 +150,16 @@ public class NotificationDeliveryPlanService {
 
     public record PreparedDelivery(Long reportId,
                                    List<PreparedTarget> targets,
-                                   Map<Long, RenderedNotification> renderedByChannel) {
+                                   Map<Long, RenderedNotification> renderedByChannel,
+                                   Map<String, RenderedNotification> renderedByTarget) {
+        public PreparedDelivery(Long reportId, List<PreparedTarget> targets, Map<Long, RenderedNotification> renderedByChannel) {
+            this(reportId, targets, renderedByChannel, Map.of());
+        }
+
+        public RenderedNotification rendered(PreparedTarget target) {
+            return renderedByTarget.getOrDefault(target.recipientId() + ":" + target.channel().getId(),
+                    renderedByChannel.get(target.channel().getId()));
+        }
     }
 
     public record PreparedWatchDelivery(

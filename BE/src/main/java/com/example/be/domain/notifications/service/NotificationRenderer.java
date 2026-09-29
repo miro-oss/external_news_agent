@@ -41,11 +41,28 @@ public class NotificationRenderer {
 
     public RenderedNotification render(NewsReport report, NotificationChannel channel) {
         ReportFindings.Visible visible = ReportFindings.loadVisible(report, findingRepository, relevancePolicy);
+        return render(report, channel, visible, null);
+    }
+
+    /** Personalization is already evaluated and persisted; rendering never calls the agent. */
+    public RenderedNotification render(NewsReport report, NotificationChannel channel,
+                                       ReportFindings.Visible visible, String feedbackUrl) {
         List<Finding> findings = visible.findings();
         ReportReadingContent content = ReportReadingContent.from(report, visible);
-        return channel.getChannelType() == ChannelType.EMAIL
-                ? renderEmail(report, findings, content)
-                : renderTelegram(report, findings, content, channel.getMaxLength());
+        String link = safeUrl(feedbackUrl) ? "<a href=\"" + attribute(feedbackUrl)
+                + "\">이슈 피드백 · 내 수신 기준</a>" : "";
+        if (channel.getChannelType() == ChannelType.EMAIL) {
+            RenderedNotification rendered = renderEmail(report, findings, content);
+            if (link.isEmpty()) return rendered;
+            String footer = "<p style=\"margin:24px 0;color:#636c78;font-size:13px\">" + link
+                    + "<br>이 링크는 수신자 전용입니다.</p>";
+            return new RenderedNotification(rendered.subject(), rendered.parseMode(),
+                    rendered.chunks().stream().map(body -> body.replace("<!-- feedback-footer -->", footer)).toList());
+        }
+        String footer = link.isEmpty() ? "" : "\n\n" + link;
+        if (footer.length() + 80 >= channel.getMaxLength()) footer = "";
+        RenderedNotification rendered = renderTelegram(report, findings, content, channel.getMaxLength() - footer.length());
+        return new RenderedNotification(rendered.subject(), rendered.parseMode(), List.of(rendered.chunks().getFirst() + footer));
     }
 
     public RenderedNotification renderBreakingAlert(String issueTitle,
@@ -127,6 +144,7 @@ public class NotificationRenderer {
 
     private String emailEnd(StringBuilder html) {
         return html.append("""
+                <!-- feedback-footer -->
                 </td></tr></tbody></table>
                 <!--[if mso]></td></tr></table><![endif]-->
                 <p style="margin:20px 0 0;color:#636c78;font-size:12px;line-height:1.6">BISTelligence · News Signal Desk</p>

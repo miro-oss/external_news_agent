@@ -69,6 +69,17 @@ public class ReportDeliveryOutboxStore {
     }
 
     @Transactional
+    public void deferPersonalization(Work work) {
+        // No transport has started; a pending personal evaluation must not consume a send attempt.
+        jdbc.update("""
+                UPDATE report_notification_outbox SET status='PENDING',processing_at=NULL,
+                  attempt_count=GREATEST(0,attempt_count-1),available_at=?,last_error=?
+                WHERE id=? AND status='PROCESSING' AND attempt_count=?
+                """, LocalDateTime.now(ApiTimeZone.ZONE).plusSeconds(15),
+                "개인 수신 기준을 적용하고 있습니다.", work.id(), work.attempts());
+    }
+
+    @Transactional
     public void finish(Work work, String channelType, String status, String externalId, String error, boolean retryable) {
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
         boolean retry = "FAILED".equals(status) && retryable && work.attempts() < 5;

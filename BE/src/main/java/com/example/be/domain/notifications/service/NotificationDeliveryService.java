@@ -155,7 +155,7 @@ public class NotificationDeliveryService {
             }
             try {
                 for (NotificationDeliveryPlanService.PreparedTarget target : targets) {
-                    results.add(deliverTarget(batch, plan.reportId(), target, rendered, sender, session));
+                    results.add(deliverTarget(batch, plan.reportId(), target, plan.rendered(target), sender, session));
                 }
             } finally {
                 try {

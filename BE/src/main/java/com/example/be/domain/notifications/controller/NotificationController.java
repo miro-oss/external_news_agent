@@ -152,7 +152,7 @@ public class NotificationController {
 
     @PostMapping("/reports/{reportId}/preview")
     @Operation(summary = "보고서 발송 미리보기", description = """
-            실제 발송과 같은 텔레그램 뉴스 카드형·이메일 브리핑형 본문을 반환합니다. DB와 발송 이력을 변경하지 않습니다.
+            개인 기준 적용 전 공용 보고서의 텔레그램 뉴스 카드형·이메일 브리핑형 본문을 반환합니다. DB와 발송 이력을 변경하지 않고 수신자 전용 링크를 발급하지 않습니다.
             저장된 importantEvents 중 sourceFindingIds가 비어 있지 않고 모두 표시 가능한 finding인 이벤트를 저장 순서대로 최대 3개 사용합니다.
             텔레그램은 제목·요약·확인할 점·근거 원문을 채널 maxLength 안의 HTML 메시지 1개로 구성합니다.
             긴 URL은 원문 링크 수를 2개에서 1개 또는 0개로 줄여 카드 주요 내용과 가능한 전체 보고서 링크를 유지하며, 극소 길이에서만 일반 텍스트로 안전하게 축약합니다.
@@ -232,14 +232,17 @@ public class NotificationController {
     @PostMapping("/reports/{reportId}/send")
     @Operation(summary = "보고서 발송", description = """
             활성 그룹·수신자·주소에 발송하고 개별 결과를 기록합니다. 수신자·채널별 중복 제거와 배치 처리 규칙을 유지합니다.
-            미리보기와 같은 텔레그램 뉴스 카드형·이메일 브리핑형 본문을 사용하며 저장된 근거 있는 importantEvents를 최대 3개 표시합니다.
+            텔레그램 뉴스 카드형·이메일 브리핑형 본문에 저장된 개인 정책 판정을 적용하며 근거 있는 importantEvents를 최대 3개 표시합니다.
             텔레그램은 채널 maxLength 안의 메시지 1개이며, 이메일은 핵심 요약과 이벤트별 주요 내용·후속 확인·원문을 제공합니다.
             읽는 관점과 significance는 표시하지 않고, 저장된 관련 watchItems만 사용하며 AI를 다시 호출하지 않습니다.
             본문 확보·관련성 필터와 DAILY에 저장된 finding 선택·순서를 유지하며 public-base-url 설정 시 전체 보고서 링크를 추가합니다.
+            수신자별 제외 항목은 요약·근거에서도 제거하며 공용 보고서는 변경하지 않습니다. 개인화 준비 중에는 외부 발송 없이 COMMON409를 반환합니다.
+            public-base-url 설정 시 수신자·보고서에 묶인 30일 유효 피드백 링크를 추가합니다. 발송 시 AI 호출은 없습니다.
             """)
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "발송을 완료했습니다."),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "발송 대상 없음"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "상태 충돌이 발생했습니다. 개인화 준비가 끝난 뒤 재시도할 수 있습니다."),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "502", description = "모든 발송 실패")
     })
     public ApiResponse<NotificationResDTO.SendBatch> send(

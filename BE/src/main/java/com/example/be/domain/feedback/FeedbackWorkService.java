@@ -1,0 +1,68 @@
+package com.example.be.domain.feedback;
+
+import com.example.be.domain.analysis.repository.FindingRepository;
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
+import com.example.be.domain.reports.repository.NewsReportRepository;
+import com.example.be.domain.reports.service.ReportFindings;
+import com.example.be.global.config.ApiTimeZone;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import java.time.LocalDateTime;
+import java.util.*;
+import static com.example.be.domain.feedback.FeedbackModels.*;
+
+@Service
+@RequiredArgsConstructor
+public class FeedbackWorkService {
+    private final FeedbackStore store;
+    private final FeedbackSnapshotFactory snapshots;
+    private final NewsReportRepository reports;
+    private final FindingRepository findings;
+    private final TopicRelevancePolicy relevance;
+    public record EvaluationInput(Topic topic,List<Item> items,List<Policy> policies) { }
+
+    @Transactional(propagation=Propagation.REQUIRES_NEW)
+    public void prepareReport(long reportId) {
+        var policies=store.activePolicies();
+        if(policies.isEmpty())return;
+        var report=reports.findById(reportId).orElse(null);
+        if(report==null || report.getDeletedAt()!=null || report.getReportStatus()==com.example.be.domain.reports.entity.ReportStatus.PENDING)return;
+        Snapshot snapshot=snapshots.capture(report,ReportFindings.load(report,findings,relevance));
+        for(long recipientId:policies.stream().map(Policy::recipientId).distinct().toList()) enqueue(snapshot,recipientId,policies);
+    }
+
+    /** Commits queue writes even if a caller subsequently reports preparation as pending. */
+    @Transactional(propagation=Propagation.REQUIRES_NEW)
+    public void ensure(Snapshot snapshot,long recipientId) { enqueue(snapshot,recipientId,store.policies(recipientId)); }
+
+    private void enqueue(Snapshot snapshot,long recipientId,List<Policy> all) {
+        var scopes=all.stream().filter(p->p.recipientId()==recipientId && p.status().equals("ACTIVE")
+                && !p.createdAt().isAfter(snapshot.generatedAt())).map(Policy::topicId).distinct().toList();
+        LocalDateTime now=LocalDateTime.now(ApiTimeZone.ZONE);
+        for(long topicId:scopes) {
+            if(store.evaluations(snapshot.reportId(),recipientId).stream().anyMatch(j->j.topicId()==topicId))continue;
+            List<Policy> policies=all.stream().filter(p->p.recipientId()==recipientId && p.topicId()==topicId && p.status().equals("ACTIVE") && !p.createdAt().isAfter(snapshot.generatedAt())).toList();
+            Map<List<Long>,List<Item>> batches=new LinkedHashMap<>();
+            for(Item item:snapshot.items()) {
+                if(item.topic().id()!=topicId)continue;
+                List<Long> ids=eligible(policies,item,snapshot.generatedAt()).stream().map(Policy::id).toList();
+                if(!ids.isEmpty())batches.computeIfAbsent(ids,ignored->new ArrayList<>()).add(item);
+            }
+            int batch=0;
+            for(var entry:batches.entrySet())for(int start=0;start<entry.getValue().size();start+=10) {
+                var items=List.copyOf(entry.getValue().subList(start,Math.min(start+10,entry.getValue().size())));
+                var selected=policies.stream().filter(p->entry.getKey().contains(p.id())).toList();
+                store.enqueue("evaluate:"+snapshot.reportId()+":"+recipientId+":"+topicId+":"+(batch++),"EVALUATE",null,recipientId,snapshot.reportId(),topicId,
+                        new EvaluationInput(items.getFirst().topic(),items,selected),now);
+            }
+            if(batch==0)store.enqueue("evaluate:"+snapshot.reportId()+":"+recipientId+":"+topicId+":empty","EVALUATE",null,recipientId,snapshot.reportId(),topicId,
+                    new EvaluationInput(new Topic(topicId,policies.getFirst().topicName(),List.of(),List.of()),List.of(),List.of()),now);
+        }
+    }
+    static List<Policy> eligible(List<Policy> policies,Item item,LocalDateTime generatedAt) {
+        return policies.stream().filter(p->p.status().equals("ACTIVE") && p.topicId()==item.topic().id()
+                && !p.createdAt().isAfter(generatedAt) && item.runStartedAt()!=null && item.runStartedAt().isAfter(p.createdAt())).toList();
+    }
+}

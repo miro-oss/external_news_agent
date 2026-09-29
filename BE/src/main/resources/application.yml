@@ -87,6 +87,7 @@ news:
     # 잘린 요약·매체 푸터만으로 동일 본문 그룹을 만들지 않는다.
     min-article-content-length: 200
   notifications:
+    public-base-url: ${NOTIFICATION_PUBLIC_BASE_URL:}
     # 미설정 시 자동 속보 알림은 전송하지 않는다. 활성 알림 그룹 ID를 명시적으로 지정해야 한다.
     breaking-group-id: ${BREAKING_NOTIFICATION_GROUP_ID:}
     telegram:
@@ -97,6 +98,9 @@ news:
       password: ${SMTP_PASSWORD:}
     connect-timeout: 5s
     read-timeout: 10s
+  feedback:
+    enabled: ${FEEDBACK_ENABLED:true}
+    poll-interval-ms: 15000
   agent:
     enabled: ${AGENT_ENABLED:false}
     base-url: ${AGENT_BASE_URL:http://127.0.0.1:8088}

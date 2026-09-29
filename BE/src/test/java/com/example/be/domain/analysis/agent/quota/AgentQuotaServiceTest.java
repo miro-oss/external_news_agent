@@ -304,17 +304,19 @@ class AgentQuotaServiceTest {
         verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
     }
 
-    @Test
-    void topicRelevanceCannotConsumePaidReportReserve() {
+    @ParameterizedTest
+    @EnumSource(value=AgentTask.class,names={"TOPIC_RELEVANCE","FEEDBACK_REVIEW","FEEDBACK_EVALUATE"})
+    void relevanceAndFeedbackCannotConsumePaidReportReserve(AgentTask task) {
         stubUsage(BigDecimal.ZERO, new BigDecimal("70"), new BigDecimal("70"), new BigDecimal("100"));
         assertThrows(QuotaExceededException.class, () -> service.reserve(
-                42L, "topic-relevance:42", AgentTask.TOPIC_RELEVANCE, AgentPlan.PAID));
+                42L, "topic-relevance:42", task, AgentPlan.PAID));
         verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
     }
 
-    @Test
-    void topicRelevanceFailureWithKnownChargesConsumesObservedQuota() {
-        QuotaReservation reservation = reservation(AgentTask.TOPIC_RELEVANCE, AgentPlan.PAID);
+    @ParameterizedTest
+    @EnumSource(value=AgentTask.class,names={"TOPIC_RELEVANCE","FEEDBACK_REVIEW","FEEDBACK_EVALUATE"})
+    void relevanceAndFeedbackFailureWithKnownChargesConsumesObservedQuota(AgentTask task) {
+        QuotaReservation reservation = reservation(task, AgentPlan.PAID);
         var credits = new BigDecimal("1.2345");
         service.completeFailure(reservation, new AgentClientException("SCHEMA_VIOLATION", "invalid grounding", null,
                 new AgentClientException.Usage(100L, 25L, new BigDecimal("0.0000004"), credits)));
