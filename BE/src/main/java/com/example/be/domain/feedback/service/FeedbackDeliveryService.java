@@ -57,7 +57,7 @@ public class FeedbackDeliveryService {
                 if(required.isEmpty() || !active.containsAll(required))continue;
                 long articleId=decision.path("articleId").asLong();
                 input.items().stream().filter(i->i.articles().getFirst().id()==articleId)
-                        .filter(i->snapshot.items().stream().anyMatch(current->current.itemId()==i.itemId()
+                        .filter(i->snapshot.items().stream().anyMatch(current->Objects.equals(current.itemId(),i.itemId())
                                 && current.articles().getFirst().equals(i.articles().getFirst())
                                 && Objects.equals(current.analysisInputHash(),i.analysisInputHash())))
                         .forEach(i->suppressed.add(i.itemId()));

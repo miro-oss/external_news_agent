@@ -27,7 +27,7 @@ class FeedbackDeliveryServiceTest {
         // Jackson's standalone mapper does not install java.time modules; use the application's record input via mocked parser.
         var mapped=mock(ObjectMapper.class);when(mapped.readValue("input",EvaluationInput.class)).thenReturn(new EvaluationInput(item.topic(),List.of(item),List.of(policy)));
         service=new FeedbackDeliveryService(store,factory,work,mapped);ReflectionTestUtils.setField(service,"schedulingEnabled",false);
-        when(store.evaluations(5,7)).thenReturn(List.of(new Job(8,"EVALUATE",null,7,5,2,"input",null,"PENDING",null,0)));
+        when(store.evaluations(5,7)).thenReturn(List.of(new Job(8,"EVALUATE",null,7L,5,2L,"input",null,"PENDING",null,0)));
         var result=service.prepare(report,7,List.of());assertEquals(Set.of(),result.suppressedFindingIds());assertNotNull(result.token());
         verifyNoInteractions(work);verify(store).capability(anyString(),eq(7L),any(),any());
     }

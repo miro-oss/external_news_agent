@@ -16,13 +16,15 @@ from app.schemas.feedback import (
     FeedbackEvaluateOutput,
     FeedbackEvaluateRequest,
     FeedbackEvaluateResponse,
+    FeedbackEventReviewRequest,
     FeedbackEvidence,
+    FeedbackReviewInput,
     FeedbackReviewOutput,
-    FeedbackReviewRequest,
     FeedbackReviewResponse,
 )
 
 REVIEW_VERSION = "feedback-review.ko.v1"
+EVENT_REVIEW_VERSION = "feedback-event-review.ko.v1"
 EVALUATE_VERSION = "feedback-evaluate.ko.v1"
 _PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
 logger = logging.getLogger(__name__)
@@ -33,14 +35,16 @@ class FeedbackService:
         self._settings = settings
         self._provider = provider
 
-    def review(self, request: FeedbackReviewRequest) -> FeedbackReviewResponse:
+    def review(self, request: FeedbackReviewInput) -> FeedbackReviewResponse:
+        is_event = isinstance(request, FeedbackEventReviewRequest)
+        version = EVENT_REVIEW_VERSION if is_event else REVIEW_VERSION
         if self._settings.mock:
             return FeedbackReviewResponse(
                 verdict="INSUFFICIENT_EVIDENCE",
                 diagnosis="모의 실행에서는 제보를 판정하거나 전달 정책을 생성하지 않습니다.",
                 evidence=[],
                 proposed_policy=None,
-                meta=_mock_meta(REVIEW_VERSION),
+                meta=_mock_meta(version),
             )
 
         def validate(response: ProviderResponse) -> FeedbackReviewOutput:
@@ -50,7 +54,8 @@ class FeedbackService:
                 raise ValueError("확정적인 검토 결과에는 기사 원문 근거가 필요합니다.")
             if result.proposed_policy is not None:
                 if not (
-                    request.feedback.category == "PREFERENCE"
+                    not is_event
+                    and request.feedback.category == "PREFERENCE"
                     and request.feedback.allow_personalization
                     and result.verdict == "PREFERENCE"
                 ):
@@ -60,9 +65,9 @@ class FeedbackService:
                     raise ValueError("이미 활성화된 동일한 정책을 제안할 수 없습니다.")
             return result
 
-        result = self._call(request, REVIEW_VERSION, FeedbackReviewOutput, validate)
+        result = self._call(request, version, FeedbackReviewOutput, validate)
         return FeedbackReviewResponse(
-            **result.output.model_dump(), meta=_meta(result.response, result.usage, REVIEW_VERSION)
+            **result.output.model_dump(), meta=_meta(result.response, result.usage, version)
         )
 
     def evaluate(self, request: FeedbackEvaluateRequest) -> FeedbackEvaluateResponse:

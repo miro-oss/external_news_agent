@@ -22,10 +22,10 @@ export function feedbackTokenFromHash(hash: string): string | null {
   const token = values[0]
   return values.length === 1 && token.length > 0 && token.length <= 512 && !/\s/.test(token) ? token : null
 }
-export function pendingFeedback(feedback: ReaderFeedback[]) {
+export function pendingFeedback(feedback: Array<Pick<ReaderFeedback, 'status'>>) {
   return feedback.some(item => item.status === 'PENDING' || item.status === 'PROCESSING')
 }
-export function nextFeedbackPoll(feedback: ReaderFeedback[], attempt: number): number | false {
+export function nextFeedbackPoll(feedback: Array<Pick<ReaderFeedback, 'status'>>, attempt: number): number | false {
   return pendingFeedback(feedback) && attempt >= 0 && attempt < FEEDBACK_POLL_DELAYS.length
     ? FEEDBACK_POLL_DELAYS[attempt] : false
 }

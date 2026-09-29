@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 import static com.example.be.domain.feedback.model.FeedbackModels.*;
@@ -40,9 +41,15 @@ public class FeedbackWorker {
         try {
             if(job.kind().equals("REVIEW")) {
                 var feedback=store.byId(job.feedbackId()).orElseThrow();
-                var baseline=store.policies(job.recipientId());
+                var baseline=job.recipientId()==null?List.<Policy>of():store.policies(job.recipientId());
+                String unavailable=FeedbackAgentRequests.eventUnavailableReason(json,job,feedback);
+                if(unavailable!=null) {
+                    transactions.review(job,feedback,baseline,json.valueToTree(Map.of("verdict","INSUFFICIENT_EVIDENCE",
+                            "diagnosis",unavailable,"evidence",List.of(),"meta",Map.of("truncated",false,"mock",false,"local",true))));
+                    return;
+                }
                 var request=FeedbackAgentRequests.review(json,job,feedback,baseline);
-                var result=agent.review(null,feedback.itemId(),request);
+                var result=agent.review(null,feedback.eventKey()==null?feedback.itemId():feedback.reportId(),request);
                 FeedbackResultValidator.review(request,result);
                 transactions.review(job,feedback,baseline,result);
             }else {

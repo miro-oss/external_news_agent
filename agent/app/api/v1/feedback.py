@@ -7,7 +7,7 @@ from app.llm.feedback_service import FeedbackService
 from app.schemas.feedback import (
     FeedbackEvaluateRequest,
     FeedbackEvaluateResponse,
-    FeedbackReviewRequest,
+    FeedbackReviewInput,
     FeedbackReviewResponse,
 )
 
@@ -16,7 +16,7 @@ router = APIRouter(tags=["feedback"])
 
 @router.post("/feedback/review", response_model=FeedbackReviewResponse)
 def review_feedback(
-    request: FeedbackReviewRequest,
+    request: FeedbackReviewInput,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> FeedbackReviewResponse:
     return FeedbackService(settings).review(request)

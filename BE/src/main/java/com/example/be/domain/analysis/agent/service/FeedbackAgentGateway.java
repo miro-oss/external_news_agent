@@ -89,7 +89,9 @@ public class FeedbackAgentGateway {
     private AgentRun.AgentRunBuilder base(Long runId, Long targetId, JsonNode request, AgentTask task,
                                          AgentPlan plan, String key, LocalDateTime started) {
         return AgentRun.builder().collectionRunId(runId).targetId(targetId)
-                .targetType(task == AgentTask.FEEDBACK_REVIEW ? AgentTargetType.FINDING : AgentTargetType.TOPIC)
+                .targetType(task == AgentTask.FEEDBACK_REVIEW
+                        ? request.path("event").isObject() ? AgentTargetType.REPORT : AgentTargetType.FINDING
+                        : AgentTargetType.TOPIC)
                 .agentTask(task).llmPlan(plan).idempotencyKey(key).requestHash(hash(request.toString()))
                 .startedAt(started).finishedAt(LocalDateTime.now(ApiTimeZone.ZONE));
     }

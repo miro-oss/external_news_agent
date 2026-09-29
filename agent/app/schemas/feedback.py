@@ -34,10 +34,28 @@ class FeedbackIssue(AgentModel):
     summary: str = Field(default="", max_length=5000)
 
 
+class FeedbackEvent(AgentModel):
+    key: str = Field(pattern=r"^[0-9a-f]{64}$")
+    title: str = Field(min_length=1, max_length=1000)
+    summary: str = Field(min_length=1, max_length=5000)
+    significance: str | None = Field(default=None, max_length=5000)
+    source_finding_ids: list[Annotated[int, Field(gt=0)]] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_sources(self) -> "FeedbackEvent":
+        if len(set(self.source_finding_ids)) != len(self.source_finding_ids):
+            raise ValueError("sourceFindingIds는 중복될 수 없습니다.")
+        return self
+
+
 class UserFeedback(AgentModel):
     category: FeedbackCategory
     comment: str = Field(min_length=1, max_length=2000)
     allow_personalization: bool = False
+
+
+class EventUserFeedback(UserFeedback):
+    allow_personalization: Literal[False] = False
 
 
 class DeliveryPolicy(AgentModel):
@@ -58,7 +76,6 @@ class ProposedPolicy(AgentModel):
 class _ArticleRequest(AgentModel):
     idempotency_key: str = Field(min_length=1, max_length=200)
     plan: Plan
-    topic: FeedbackTopic
     articles: list[FeedbackArticle] = Field(min_length=1, max_length=10)
 
     @model_validator(mode="after")
@@ -71,6 +88,7 @@ class _ArticleRequest(AgentModel):
 
 
 class FeedbackReviewRequest(_ArticleRequest):
+    topic: FeedbackTopic
     issue: FeedbackIssue
     feedback: UserFeedback
     active_policies: list[DeliveryPolicy] = Field(default_factory=list, max_length=20)
@@ -79,6 +97,22 @@ class FeedbackReviewRequest(_ArticleRequest):
     def validate_policies(self) -> "FeedbackReviewRequest":
         _unique_policies(self.active_policies)
         return self
+
+
+class FeedbackEventReviewRequest(_ArticleRequest):
+    event: FeedbackEvent
+    topics: list[FeedbackTopic] = Field(min_length=1)
+    feedback: EventUserFeedback
+    active_policies: list[DeliveryPolicy] = Field(default_factory=list, max_length=0)
+
+    @model_validator(mode="after")
+    def validate_topics(self) -> "FeedbackEventReviewRequest":
+        if len({topic.id for topic in self.topics}) != len(self.topics):
+            raise ValueError("topics.id는 중복될 수 없습니다.")
+        return self
+
+
+FeedbackReviewInput = FeedbackReviewRequest | FeedbackEventReviewRequest
 
 
 class FeedbackReviewOutput(AgentModel):
@@ -93,6 +127,7 @@ class FeedbackReviewResponse(FeedbackReviewOutput):
 
 
 class FeedbackEvaluateRequest(_ArticleRequest):
+    topic: FeedbackTopic
     policies: list[DeliveryPolicy] = Field(max_length=20)
 
     @model_validator(mode="after")

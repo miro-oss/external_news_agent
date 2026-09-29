@@ -13,7 +13,11 @@ from app.core.errors import AgentError
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.feedback_service import FeedbackService
 from app.main import create_app
-from app.schemas.feedback import FeedbackEvaluateRequest, FeedbackReviewRequest
+from app.schemas.feedback import (
+    FeedbackEvaluateRequest,
+    FeedbackEventReviewRequest,
+    FeedbackReviewRequest,
+)
 
 
 class Provider:
@@ -68,6 +72,43 @@ def review_output():
     }
 
 
+def event_review_request():
+    request = review_request()
+    request["topics"] = [
+        request.pop("topic"),
+        {"id": 8, "name": "인공지능", "keywords": ["AI"], "negativeKeywords": ["광고"]},
+    ]
+    request.pop("issue")
+    request["event"] = {
+        "key": "a" * 64,
+        "title": "반도체와 AI 투자",
+        "summary": "반도체 실적과 AI 투자가 모두 감소했다.",
+        "significance": "AI 공급망 전반의 투자 감소다.",
+        "sourceFindingIds": [101, 102],
+    }
+    request["articles"].append(
+        {"id": 20, "title": "AI 투자 증가", "content": "AI 투자가 증가했다.", "url": ""}
+    )
+    request["feedback"].update(
+        category="SUMMARY_ERROR",
+        comment="AI 투자는 증가했는데 감소로 나와요.",
+        allowPersonalization=False,
+    )
+    return request
+
+
+def event_review_output():
+    return {
+        "verdict": "CONFIRMED_ERROR",
+        "diagnosis": "반도체 실적과 AI 투자 기사는 별개이며, AI 투자는 증가했습니다.",
+        "evidence": [
+            {"articleId": 10, "quote": "분기 실적을 발표했다."},
+            {"articleId": 20, "quote": "AI 투자가 증가했다."},
+        ],
+        "proposedPolicy": None,
+    }
+
+
 def evaluate_request():
     base = review_request()
     return {
@@ -101,6 +142,7 @@ def test_review_preserves_source_bound_diagnosis_and_explicit_preference():
     assert result.proposed_policy.instruction == review_output()["proposedPolicy"]["instruction"]
     assert result.meta.cost_usd == 0.001
     assert not result.meta.mock
+    assert result.meta.prompt_version == "feedback-review.ko.v1"
     schema = OpenAIJsonSchemaTransformer(
         deepcopy(provider.calls[0]["response_schema"]), strict=True
     ).walk()
@@ -237,3 +279,135 @@ def test_internal_routes_require_agent_token_and_accept_agreed_camel_case():
             )
             assert response.status_code == 200
             assert response.json()["meta"]["mock"] is True
+
+
+def test_event_api_uses_all_topics_and_event_text_without_fabricated_issue(monkeypatch):
+    payload = event_review_request()
+    provider = Provider(event_review_output())
+    monkeypatch.setattr("app.llm.feedback_service.get_analyze_provider", lambda *_: provider)
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        AGENT_MOCK=False, AGENT_SHARED_SECRET="test-only", AGENT_SCHEMA_REPAIR_ATTEMPTS=0
+    )
+    with TestClient(app) as client:
+        assert client.post("/v1/feedback/review", json=payload).status_code == 401
+        response = client.post(
+            "/v1/feedback/review", json=payload, headers={"X-Agent-Token": "test-only"}
+        )
+    assert response.status_code == 200
+    assert response.json()["verdict"] == "CONFIRMED_ERROR"
+    assert response.json()["proposedPolicy"] is None
+    assert response.json()["meta"]["promptVersion"] == "feedback-event-review.ko.v1"
+    assert response.json()["meta"]["costUsd"] == 0.001
+    assert len(provider.calls) == 1
+    call = provider.calls[0]
+    submitted = json.loads(
+        call["prompt"].split("<feedback-input>")[1].split("</feedback-input>")[0]
+    )
+    assert submitted["event"] == payload["event"]
+    assert submitted["topics"] == payload["topics"]
+    assert submitted["articles"] == payload["articles"]
+    assert "issue" not in submitted and "topic" not in submitted
+    assert "첫 번째 주제만 골라 판단하지 않고" in call["system_instruction"]
+    schema = OpenAIJsonSchemaTransformer(deepcopy(call["response_schema"]), strict=True).walk()
+    Draft202012Validator(schema).validate(event_review_output())
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "personalization",
+        "active_policy",
+        "fake_issue",
+        "bad_key",
+        "no_findings",
+        "duplicate_findings",
+        "invalid_finding",
+        "no_topics",
+        "duplicate_topics",
+        "duplicate_articles",
+        "too_many_articles",
+        "long_content",
+        "oversized_payload",
+    ],
+)
+def test_event_api_rejects_invalid_context_and_personal_policy_before_provider(change, monkeypatch):
+    request = event_review_request()
+    if change == "personalization":
+        request["feedback"]["allowPersonalization"] = True
+    elif change == "active_policy":
+        request["activePolicies"] = [{"id": 1, "instruction": "제외"}]
+    elif change == "fake_issue":
+        request["issue"] = review_request()["issue"]
+    elif change == "bad_key":
+        request["event"]["key"] = "not-a-hash"
+    elif change == "no_findings":
+        request["event"]["sourceFindingIds"] = []
+    elif change == "duplicate_findings":
+        request["event"]["sourceFindingIds"] = [101, 101]
+    elif change == "invalid_finding":
+        request["event"]["sourceFindingIds"] = [0]
+    elif change == "no_topics":
+        request["topics"] = []
+    elif change == "duplicate_topics":
+        request["topics"].append(deepcopy(request["topics"][0]))
+    elif change == "duplicate_articles":
+        request["articles"].append(deepcopy(request["articles"][0]))
+    elif change == "too_many_articles":
+        request["articles"] = [dict(request["articles"][0], id=i) for i in range(1, 12)]
+    elif change == "long_content":
+        request["articles"][0]["content"] = "가" * 10_001
+    else:
+        request["topics"] = [
+            {
+                "id": i,
+                "name": "주제",
+                "keywords": ["가" * 100] * 100,
+                "negativeKeywords": ["나" * 100] * 100,
+            }
+            for i in range(1, 9)
+        ]
+    provider = Provider(event_review_output())
+    monkeypatch.setattr("app.llm.feedback_service.get_analyze_provider", lambda *_: provider)
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        AGENT_MOCK=False, AGENT_SHARED_SECRET="test-only", AGENT_SCHEMA_REPAIR_ATTEMPTS=0
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/feedback/review", json=request, headers={"X-Agent-Token": "test-only"}
+        )
+    assert response.status_code == 422
+    assert not provider.calls
+
+
+@pytest.mark.parametrize("change", ["personal_policy", "finding_as_article", "invented_quote"])
+def test_event_review_rejects_policy_and_non_article_evidence(change):
+    request, output = event_review_request(), event_review_output()
+    if change == "personal_policy":
+        request["feedback"]["category"] = output["verdict"] = "PREFERENCE"
+        output["proposedPolicy"] = review_output()["proposedPolicy"]
+    elif change == "finding_as_article":
+        output["evidence"][0]["articleId"] = 101
+    else:
+        output["evidence"][0]["quote"] = "기사에 없는 주장"
+    with pytest.raises(AgentError) as error:
+        service(Provider(output)).review(FeedbackEventReviewRequest.model_validate(request))
+    assert error.value.code == "SCHEMA_VIOLATION"
+
+
+def test_event_mock_is_safe_and_preference_is_diagnosis_only():
+    request = event_review_request()
+    request["event"]["significance"] = None
+    request["feedback"]["category"] = "PREFERENCE"
+    validated = FeedbackEventReviewRequest.model_validate(request)
+    provider = Provider(event_review_output())
+    result = FeedbackService(Settings(AGENT_MOCK=True), provider).review(validated)
+    assert result.verdict == "INSUFFICIENT_EVIDENCE"
+    assert result.proposed_policy is None
+    assert result.meta.mock and result.meta.prompt_version == "feedback-event-review.ko.v1"
+    assert not provider.calls
+    output = event_review_output()
+    output["verdict"] = "PREFERENCE"
+    result = service(Provider(output)).review(validated)
+    assert result.verdict == "PREFERENCE" and result.proposed_policy is None

@@ -38,6 +38,24 @@ public class FeedbackStore {
     }
     public void lockCapability(long id) { jdbc.queryForObject("SELECT id FROM news_feedback_capabilities WHERE id=? FOR UPDATE", Long.class,id); }
     public void lockRecipient(long id) { jdbc.queryForObject("SELECT id FROM notification_recipients WHERE id=? FOR UPDATE",Long.class,id); }
+    public List<Feedback> eventFeedback(long reportId) {
+        return jdbc.query("SELECT * FROM news_feedback WHERE report_id=? AND event_key IS NOT NULL ORDER BY id",this::feedback,reportId);
+    }
+    public Optional<Feedback> eventByRequest(long reportId,String key) {
+        return jdbc.query("SELECT f.* FROM news_feedback f JOIN news_feedback_event_requests r ON r.feedback_id=f.id WHERE r.report_id=? AND r.idempotency_key=?",this::feedback,reportId,key).stream().findFirst();
+    }
+    public void reserveEventRequest(long reportId,String key,long feedbackId) {
+        jdbc.update("INSERT INTO news_feedback_event_requests(report_id,idempotency_key,feedback_id) VALUES(?,?,?)",reportId,key,feedbackId);
+    }
+    public Optional<Feedback> eventByKey(long reportId,String key) {
+        return jdbc.query("SELECT * FROM news_feedback WHERE report_id=? AND event_key=?",this::feedback,reportId,key).stream().findFirst();
+    }
+    public long submitEvent(long reportId,Item item,Category category,String comment,String key,String hash,LocalDateTime now) {
+        return insert("""
+                INSERT INTO news_feedback(report_id,event_key,category,user_comment,allow_personalization,
+                  idempotency_key,request_hash,input_json,created_at) VALUES(?,?,?,?,'N',?,?,?,?)
+                """,reportId,item.event().key(),category.name(),comment,key,hash,clob(item),now);
+    }
     public Optional<Feedback> byItem(long recipientId,long reportId,long itemId) {
         return jdbc.query("SELECT * FROM news_feedback WHERE recipient_id=? AND report_id=? AND item_id=?",this::feedback,recipientId,reportId,itemId).stream().findFirst();
     }
@@ -59,10 +77,10 @@ public class FeedbackStore {
                 comment,consent?"Y":"N",key,hash,clob(item),now);
     }
     private Feedback feedback(ResultSet rs,int row) throws SQLException {
-        return new Feedback(rs.getLong("id"),rs.getLong("capability_id"),rs.getLong("recipient_id"),rs.getLong("report_id"),
-                rs.getLong("item_id"),Category.valueOf(rs.getString("category")),rs.getString("user_comment"),
+        return new Feedback(rs.getLong("id"),rs.getObject("capability_id",Long.class),rs.getObject("recipient_id",Long.class),rs.getLong("report_id"),
+                rs.getObject("item_id",Long.class),Category.valueOf(rs.getString("category")),rs.getString("user_comment"),
                 "Y".equals(rs.getString("allow_personalization")),rs.getString("request_hash"),Status.valueOf(rs.getString("status")),
-                rs.getString("verdict"),rs.getString("diagnosis"),time(rs,"created_at"),json.readValue(rs.getString("input_json"),Item.class));
+                rs.getString("verdict"),rs.getString("diagnosis"),time(rs,"created_at"),json.readValue(rs.getString("input_json"),Item.class),rs.getString("event_key"));
     }
     public List<Policy> policies(long recipientId) {
         return jdbc.query("SELECT * FROM news_feedback_policies WHERE recipient_id=? ORDER BY id",this::policy,recipientId);
@@ -89,7 +107,7 @@ public class FeedbackStore {
                 """,feedback.recipientId(),feedback.input().topic().id(),feedback.input().topic().name(),instruction,hash,version,feedback.id(),now);
         return true;
     }
-    public void enqueue(String key,String kind,Long feedbackId,long recipientId,long reportId,long topicId,Object input,LocalDateTime now) {
+    public void enqueue(String key,String kind,Long feedbackId,Long recipientId,long reportId,Long topicId,Object input,LocalDateTime now) {
         if(jdbc.queryForObject("SELECT COUNT(*) FROM news_feedback_jobs WHERE job_key=?",Integer.class,key)>0) return;
         try { insert("""
                 INSERT INTO news_feedback_jobs(job_key,kind,feedback_id,recipient_id,report_id,topic_id,input_json,created_at,available_at)
@@ -111,7 +129,7 @@ public class FeedbackStore {
     }
     private Job job(ResultSet rs,int row) throws SQLException {
         return new Job(rs.getLong("id"),rs.getString("kind"),rs.getObject("feedback_id",Long.class),
-                rs.getLong("recipient_id"),rs.getLong("report_id"),rs.getLong("topic_id"),rs.getString("input_json"),
+                rs.getObject("recipient_id",Long.class),rs.getLong("report_id"),rs.getObject("topic_id",Long.class),rs.getString("input_json"),
                 rs.getString("result_json"),rs.getString("status"),rs.getString("claim_key"),rs.getInt("attempt_count"));
     }
     public boolean finish(Job job,Object result,LocalDateTime now) {

@@ -100,6 +100,29 @@ def test_preflight_is_deterministic_and_never_calls_a_provider(tmp_path, capsys)
     assert main(["optimize", "--dataset", str(path)]) == 2
 
 
+def test_event_provenance_is_preserved_and_unreviewed_feedback_still_needs_human_labels():
+    raw = raw_dataset()
+    first = raw["cases"][0]
+    first.update(sourceReportId=20, sourceEventKey="a" * 64, sourceFindingId=30, sourceRunId=40)
+    case = validate_dataset(raw).cases[0]
+    assert case.source_report_id == 20 and case.source_event_key == "a" * 64
+    assert case.source_finding_id == 30 and case.source_run_id == 40
+    first.update(labelSource="USER_FEEDBACK", goldLabel=None, split=None, humanExplanation="")
+    with pytest.raises(ValueError, match="HUMAN_CONFIRMATION_REQUIRED"):
+        validate_dataset(raw)
+
+
+def test_distinct_articles_from_one_event_cannot_cross_dataset_splits():
+    raw = raw_dataset()
+    # Different source URLs/groups and documents can still describe one event.
+    for index in (0, 1):
+        raw["cases"][index].update(sourceEventKey="b" * 64, sourceFindingId=index + 1)
+    validate_dataset(raw)
+    raw["cases"][2].update(sourceEventKey="b" * 64, sourceFindingId=3)
+    with pytest.raises(ValueError, match="EVENT_LEAKAGE"):
+        validate_dataset(raw)
+
+
 class FakeProvider:
     """A deterministic world used only to exercise the optimizer orchestration."""
 

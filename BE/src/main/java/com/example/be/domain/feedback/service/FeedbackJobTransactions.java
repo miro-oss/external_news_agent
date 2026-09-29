@@ -21,9 +21,14 @@ public class FeedbackJobTransactions {
     @Transactional
     public void review(Job job,Feedback feedback,List<Policy> baseline,JsonNode result) {
         var now=LocalDateTime.now(ApiTimeZone.ZONE);
-        store.lockRecipient(feedback.recipientId());
+        if(feedback.recipientId()!=null)store.lockRecipient(feedback.recipientId());
         if(!store.finish(job,result,now))return;
         String diagnosis=result.path("diagnosis").asString();
+        if(feedback.recipientId()==null) {
+            if(feedback.category()==Category.PREFERENCE)diagnosis+="\n이 의견은 보고서 이벤트 검토로 저장되며 개인 전달 기준은 변경하지 않았습니다.";
+            store.reviewed(feedback,result.path("verdict").asString(),diagnosis,result,now);
+            return;
+        }
         var current=store.policies(feedback.recipientId());
         // An in-flight reviewer cannot resurrect a just-revoked policy or overwrite a newer decision.
         boolean unchanged=fingerprint(current,feedback.input().topic().id()).equals(fingerprint(baseline,feedback.input().topic().id()));

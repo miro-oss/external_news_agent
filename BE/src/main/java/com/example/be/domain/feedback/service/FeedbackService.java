@@ -42,7 +42,7 @@ public class FeedbackService {
         try { category=Category.valueOf(request.category()); }catch(RuntimeException bad){throw FeedbackErrors.bad();}
         if(request.allowPersonalization() && category!=Category.PREFERENCE)throw FeedbackErrors.bad();
         var capability=authorize(request.token());
-        var item=capability.snapshot().items().stream().filter(i->i.itemId()==request.itemId()).findFirst().orElseThrow(FeedbackErrors::missing);
+        var item=capability.snapshot().items().stream().filter(i->Objects.equals(i.itemId(),request.itemId())).findFirst().orElseThrow(FeedbackErrors::missing);
         String comment=request.comment().strip();
         String hash=FeedbackTokens.hash(json.writeValueAsString(List.of(item.itemId(),category.name(),comment,request.allowPersonalization())));
         store.lockRecipient(capability.recipientId());
@@ -83,16 +83,42 @@ public class FeedbackService {
         var rows=store.export(afterId,size+1);boolean hasNext=rows.size()>size;
         var selected=rows.stream().limit(size).toList();
         var cases=new ArrayList<Map<String,Object>>();
-        for(var f:selected)for(var a:f.input().articles()) {
+        for(var f:selected) {
+            if(f.input().event()!=null) {
+                for(var source:f.input().event().sources()) {
+                    if(!source.contextComplete())continue;
+                    for(var scope:source.collectionTopics()) {
+                    var a=source.article();
+                    if(a==null || a.url()==null || a.url().isBlank())continue;
+                    var topic=new LinkedHashMap<String,Object>();topic.put("id",scope.topicId());topic.put("name",scope.topicName());
+                    topic.put("queryText",scope.queryText());topic.put("requiredKeywords",scope.requiredKeywords());
+                    topic.put("optionalKeywords",scope.optionalKeywords());topic.put("excludedKeywords",scope.excludedKeywords());
+                    String caseId="feedback-"+f.id()+"-finding-"+source.findingId()+"-topic-"+scope.topicId();
+                    var value=exportCase(f,a,topic,caseId);
+                    value.put("sourceIssueId",null);
+                    value.put("sourceReportId",f.reportId());value.put("sourceEventKey",f.eventKey());value.put("sourceFindingId",source.findingId());
+                    if(source.runId()!=null)value.put("sourceRunId",source.runId());
+                    cases.add(value);
+                    }
+                }
+                continue;
+            }
+            for(var a:f.input().articles()) {
             var topic=new LinkedHashMap<String,Object>();topic.put("id",f.input().topic().id());topic.put("name",f.input().topic().name());
             topic.put("queryText",null);topic.put("requiredKeywords",List.of());topic.put("optionalKeywords",f.input().topic().keywords());topic.put("excludedKeywords",f.input().topic().negativeKeywords());
-            var article=new LinkedHashMap<String,Object>();article.put("articleId",a.id());article.put("title",a.title());article.put("summary",null);article.put("bodyText",FeedbackAgentRequests.clip(a.content(),5000));
-            var value=new LinkedHashMap<String,Object>();value.put("caseId","feedback-"+f.id()+"-article-"+a.id());
-            value.put("groupId","article-"+FeedbackTokens.hash(a.url()));value.put("sourceFeedbackId",f.id());value.put("sourceIssueId",f.input().issue().id());
-            value.put("split",null);value.put("labelSource","USER_FEEDBACK");value.put("goldLabel",null);value.put("humanExplanation","");
-            value.put("request",Map.of("idempotencyKey","feedback-export-"+f.id()+"-"+a.id(),"plan","FREE","topic",topic,"articles",List.of(article)));cases.add(value);
+            var value=exportCase(f,a,topic,"feedback-"+f.id()+"-article-"+a.id());
+            value.put("sourceIssueId",f.input().issue().id());cases.add(value);
+            }
         }
         return Map.of("schemaVersion",1,"cases",cases,"nextAfterId",selected.isEmpty()?afterId:selected.getLast().id(),"hasNext",hasNext);
+    }
+    private Map<String,Object> exportCase(Feedback f,Article a,Map<String,Object> topic,String caseId) {
+        var article=new LinkedHashMap<String,Object>();article.put("articleId",a.id());article.put("title",a.title());article.put("summary",null);article.put("bodyText",FeedbackAgentRequests.clip(a.content(),5000));
+        var value=new LinkedHashMap<String,Object>();value.put("caseId",caseId);
+        value.put("groupId","article-"+FeedbackTokens.hash(a.url()));value.put("sourceFeedbackId",f.id());
+        value.put("split",null);value.put("labelSource","USER_FEEDBACK");value.put("goldLabel",null);value.put("humanExplanation","");
+        value.put("request",Map.of("idempotencyKey",caseId,"plan","FREE","topic",topic,"articles",List.of(article)));
+        return value;
     }
     Capability authorize(String token) {
         if(token==null || token.isBlank())throw FeedbackErrors.bad();

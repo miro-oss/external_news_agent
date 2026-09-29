@@ -44,6 +44,10 @@ class OptimizationCase(AgentModel):
     human_explanation: str = Field(default="", max_length=2000)
     source_feedback_id: int | None = Field(default=None, gt=0)
     source_issue_id: int | None = Field(default=None, gt=0)
+    source_report_id: int | None = Field(default=None, gt=0)
+    source_event_key: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    source_finding_id: int | None = Field(default=None, gt=0)
+    source_run_id: int | None = Field(default=None, gt=0)
     request: TopicRelevanceRequest
 
 
@@ -70,6 +74,7 @@ def validate_dataset(raw: dict) -> OptimizationDataset:
         raise ValueError("INCOMPLETE_EXPORT: 모든 페이지를 병합한 뒤 hasNext를 false로 설정하세요.")
     ids: set[str] = set()
     groups: dict[str, str] = {}
+    events: dict[str, str] = {}
     documents: dict[str, str] = {}
     splits: dict[str, list[OptimizationCase]] = {
         name: [] for name in ("train", "validation", "test")
@@ -89,6 +94,11 @@ def validate_dataset(raw: dict) -> OptimizationDataset:
             raise ValueError("ONE_ARTICLE_PER_CASE_REQUIRED")
         if groups.setdefault(case.group_id, case.split) != case.split:
             raise ValueError("GROUP_LEAKAGE")
+        if (
+            case.source_event_key is not None
+            and events.setdefault(case.source_event_key, case.split) != case.split
+        ):
+            raise ValueError("EVENT_LEAKAGE")
         article = case.request.articles[0]
         fingerprint = digest([article.title, article.summary, article.body_text])
         if documents.setdefault(fingerprint, case.split) != case.split:

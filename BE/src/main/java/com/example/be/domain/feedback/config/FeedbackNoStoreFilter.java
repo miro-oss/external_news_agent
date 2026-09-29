@@ -12,7 +12,8 @@ import java.io.IOException;
 @Component
 public class FeedbackNoStoreFilter extends OncePerRequestFilter {
     @Override protected void doFilterInternal(HttpServletRequest request,HttpServletResponse response,FilterChain chain)throws ServletException,IOException {
-        if(request.getRequestURI().startsWith("/api/feedback"))response.setHeader("Cache-Control","no-store");
+        String path=request.getRequestURI();
+        if(path.startsWith("/api/feedback") || path.matches("/api/news/reports/[^/]+/event-feedback"))response.setHeader("Cache-Control","no-store");
         chain.doFilter(request,response);
     }
 }

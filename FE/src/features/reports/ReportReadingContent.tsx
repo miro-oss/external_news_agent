@@ -1,15 +1,17 @@
 import { Fragment, useId, useRef, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
-import type { ReportDetail } from '../../api/types'
+import type { ReportContent, ReportDetail } from '../../api/types'
 import { CollapsibleSection } from '../../components/CollapsibleSection'
 import { prefersReducedMotion } from '../../lib/motion'
 import { collectionHighlightTerms, groupLegacyReportSections, rehypeCollectionHighlights, reportSourceFindings, splitReportMarkdown } from './reportReading'
 import { ReportKeywordText } from './ReportKeywordText'
 
-export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnalysis }: {
+export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnalysis, eventFeedback, feedbackNotice }: {
   report: ReportDetail
   onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
   beforeOtherAnalysis?: ReactNode
+  eventFeedback?: (event: ReportContent['importantEvents'][number], index: number) => ReactNode
+  feedbackNotice?: ReactNode
 }) {
   const content = report.structuredContent
   const terms = collectionHighlightTerms(report.collectionContexts ?? [])
@@ -37,12 +39,14 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
       </section>
       <section className="card report-important-events">
         <h3>중요 이벤트</h3>
+        {feedbackNotice}
         {content.importantEvents.length > 0 ? <div className="report-event-list">
           {content.importantEvents.map((event, index) => <article className="report-event-card" key={index}>
             <h4><ReportKeywordText text={event.title} terms={terms} /></h4>
             <p><ReportKeywordText text={event.summaryKo} terms={terms} /></p>
             {event.significance && event.significance !== event.summaryKo && <p className="report-event-significance"><ReportKeywordText text={event.significance} terms={terms} /></p>}
             {references(event.sourceFindingIds)}
+            {eventFeedback?.(event, index)}
           </article>)}
         </div> : <p className="muted">중요 이벤트가 없습니다.</p>}
       </section>

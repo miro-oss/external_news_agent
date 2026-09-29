@@ -19,4 +19,13 @@ public final class FeedbackResDTO {
                                @Schema(allowableValues={"ACTIVE","REVOKED"}) String status, OffsetDateTime createdAt) { }
     public record Context(long reportId, String reportTitle, OffsetDateTime expiresAt, List<PublicItem> items,
                           List<PublicFeedback> feedback, List<PublicPolicy> policies) { }
+    public record PublicEvent(String eventKey, int eventIndex, String title, String summary, String significance,
+                              List<Long> sourceFindingIds) { }
+    public record EventFeedback(long id, String eventKey,
+                                @Schema(allowableValues={"PREFERENCE","TOPIC_MISMATCH","SUMMARY_ERROR","WRONG_CLUSTER","OTHER"}) String category,
+                                String comment,
+                                @Schema(allowableValues={"PENDING","PROCESSING","COMPLETED","FAILED"}) String status,
+                                @Schema(allowableValues={"PREFERENCE","CONFIRMED_ERROR","NOT_CONFIRMED","INSUFFICIENT_EVIDENCE"},nullable=true) String verdict,
+                                String diagnosis, OffsetDateTime createdAt) { }
+    public record EventFeedbackContext(long reportId, List<PublicEvent> events, List<EventFeedback> feedback) { }
 }
