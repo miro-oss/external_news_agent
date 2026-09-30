@@ -147,10 +147,10 @@ def input_payload(call):
     return json.loads(text.split("\n</report-insight-input>", 1)[0])
 
 
-def test_runtime_versions_distinguish_v2_from_existing_measured_v1():
+def test_runtime_versions_distinguish_v3_from_existing_measurements():
     provider = StageSourceProvider()
     result = generate(provider, source_request())
-    assert PROMPT_VERSION == "report-insight.ko.v2"
+    assert PROMPT_VERSION == "report-insight.ko.v3"
     assert RUBRIC_VERSION == "report-importance.v2"
     assert result.meta.prompt_version == PROMPT_VERSION
     assert provider.calls[0]["system_instruction"] != provider.calls[1]["system_instruction"]

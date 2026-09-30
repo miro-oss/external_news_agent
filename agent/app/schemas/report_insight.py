@@ -11,6 +11,7 @@ from app.schemas.report import MAX_REPORT_FINDINGS, ReportResponseMeta
 
 ClaimId = Annotated[str, Field(min_length=1, max_length=50)]
 Score = Annotated[StrictInt, Field(ge=0, le=3)] | None
+CLAIMLESS_ASSESSMENT_REASON = "검증을 통과한 claim 근거가 없어 중요도 판단을 보류합니다."
 
 
 class ReportInsightTarget(AgentModel):

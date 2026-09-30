@@ -1,6 +1,8 @@
 import json
+import re
 from copy import deepcopy
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from test_report_insight import output, request_body
@@ -10,6 +12,10 @@ from app.core.errors import AgentError
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.guarded_provider import ProviderGuard
 from app.llm.rate_limit_provider import ProviderRequestCoordinator, ProviderRequestPolicy
+from app.llm.report_insight_pipeline import (
+    MAX_REPORT_INSIGHT_DEADLINE_SECONDS,
+    ReportInsightPipelineProvider,
+)
 from app.llm.report_insight_service import ReportInsightService
 from app.schemas.report_insight import ReportInsightRequest
 
@@ -242,16 +248,24 @@ def test_shared_cooldown_beyond_deadline_does_not_sleep_or_invoke_provider():
     assert sleeps == []
 
 
-def test_native_clients_are_scoped_closed_and_get_remaining_deadline(monkeypatch):
+@pytest.mark.parametrize(
+    "configured_timeout,expected_timeouts", [(90, [89, 79]), (120, [119, 109]), (300, [179, 169])]
+)
+@pytest.mark.parametrize("plan", ["FREE", "PAID"])
+def test_native_clients_are_scoped_closed_and_get_remaining_deadline(
+    monkeypatch, configured_timeout, expected_timeouts, plan
+):
     clock = [0.0]
     monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])
-    settings = []
+    captured_settings = []
+    captured_deadlines = []
     closed = []
     results = [response(map_output()), response(reduce_output())]
 
     class Transport:
-        def __init__(self, config):
-            settings.append(config)
+        def __init__(self, config, *, request_deadline=None):
+            captured_settings.append(config)
+            captured_deadlines.append(request_deadline)
 
         def generate(self, **kwargs):
             clock[0] += 10
@@ -269,14 +283,98 @@ def test_native_clients_are_scoped_closed_and_get_remaining_deadline(monkeypatch
     )
     coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0), clock=lambda: clock[0])
     monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
+    monkeypatch.setattr("app.llm.report_insight_pipeline.MindlogicAnalyzeProvider", Transport)
     monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
     monkeypatch.setattr(
         "app.llm.report_insight_pipeline.get_provider_coordinator", lambda *_: coordinator
     )
-    generate(None, OPENAI_API_KEY="offline-test-only", AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=120)
-    assert [config.provider_timeout_seconds for config in settings] == [119, 109]
-    assert all(config.provider_retry_attempts == 0 for config in settings)
+    settings = Settings(
+        AGENT_MOCK=False,
+        OPENAI_API_KEY="offline-test-only",
+        MINDLOGIC_API_KEY="offline-test-only",
+        MINDLOGIC_CLAUDE_MODEL="offline-model",
+        OPENAI_REQUEST_INTERVAL_SECONDS=0,
+        AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=configured_timeout,
+    )
+    body = request_body()
+    body["plan"] = plan
+    ReportInsightService(settings).generate(ReportInsightRequest.model_validate(body))
+    assert [config.provider_timeout_seconds for config in captured_settings] == expected_timeouts
+    assert captured_deadlines == [min(configured_timeout, MAX_REPORT_INSIGHT_DEADLINE_SECONDS)] * 2
+    assert all(config.provider_retry_attempts == 0 for config in captured_settings)
     assert len(closed) == 2
+
+    # Ordinary reports using the same immutable Settings retain their configured timeout.
+    from test_report_service import FakeProvider, provider_response, request, valid_output
+
+    from app.llm.report_service import ReportWriterService
+    from app.llm.router import close_analyze_providers
+
+    ordinary_configs = []
+
+    class OrdinaryTransport:
+        def __init__(self, config, *, request_deadline=None):
+            ordinary_configs.append((config.provider_timeout_seconds, request_deadline))
+            self.delegate = FakeProvider(provider_response(valid_output()))
+
+        def generate(self, **kwargs):
+            return self.delegate.generate(**kwargs)
+
+    monkeypatch.setattr("app.llm.router.OpenAIAnalyzeProvider", OrdinaryTransport)
+    monkeypatch.setattr("app.llm.router.MindlogicAnalyzeProvider", OrdinaryTransport)
+    close_analyze_providers()
+    try:
+        ReportWriterService(settings).write(request().model_copy(update={"plan": plan}))
+        assert ordinary_configs == [(configured_timeout, None)]
+    finally:
+        close_analyze_providers()
+
+
+@pytest.mark.parametrize("configured_timeout,blocking_interval", [(90, 91), (300, 181)])
+def test_pipeline_coordinator_rejects_wait_beyond_its_bounded_deadline(
+    monkeypatch, configured_timeout, blocking_interval
+):
+    clock = [0.0]
+    sleeps = []
+    monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])
+    coordinator = ProviderRequestCoordinator(
+        ProviderRequestPolicy(blocking_interval), clock=lambda: clock[0], sleeper=sleeps.append
+    )
+    coordinator.wait_before_call()
+    guard = ProviderGuard(
+        concurrency=1,
+        acquire_timeout_seconds=1,
+        failure_threshold=3,
+        cooldown_seconds=30,
+        hard_cap_credits=Decimal(5),
+    )
+    monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
+    monkeypatch.setattr(
+        "app.llm.report_insight_pipeline.get_provider_coordinator", lambda *_: coordinator
+    )
+    settings = Settings(
+        AGENT_MOCK=False,
+        OPENAI_API_KEY="offline-test-only",
+        AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=configured_timeout,
+    )
+    pipeline = ReportInsightPipelineProvider(settings, "FREE")
+
+    with pytest.raises(AgentError) as error:
+        pipeline.generate(system_instruction="offline", prompt="offline", response_schema={})
+
+    assert error.value.details["requestDeadlineExceeded"] is True
+    assert pipeline.calls == 0
+    assert sleeps == []
+
+
+def test_backend_default_wait_covers_maximum_insight_deadline_and_response_margin():
+    application = Path(__file__).resolve().parents[2] / "BE/src/main/resources/application.yml"
+    match = re.search(
+        r"report-insight-timeout: \$\{AGENT_REPORT_INSIGHT_TIMEOUT:(\d+)s\}",
+        application.read_text(encoding="utf-8"),
+    )
+    assert match is not None
+    assert int(match.group(1)) >= MAX_REPORT_INSIGHT_DEADLINE_SECONDS + 30
 
 
 def test_reduce_refs_bound_to_retrieved_subset_not_all_map_findings(monkeypatch):

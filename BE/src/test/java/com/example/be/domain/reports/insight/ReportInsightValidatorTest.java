@@ -18,7 +18,7 @@ class ReportInsightValidatorTest {
         var current = response();
         var meta = current.meta();
         var legacy = new AgentReportInsightResponse(current.insights(), new AgentReportResponse.Meta(
-                meta.provider(), meta.model(), "report-insight.ko.v1", meta.inputTokens(), meta.outputTokens(),
+                meta.provider(), meta.model(), "report-insight.ko.v2", meta.inputTokens(), meta.outputTokens(),
                 meta.costUsd(), meta.credits(), meta.mock(), meta.truncated()));
         assertEquals("SCHEMA_VIOLATION", assertThrows(AgentClientException.class,
                 () -> validator.validate(legacy, request())).getCode());

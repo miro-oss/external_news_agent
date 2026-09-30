@@ -13,13 +13,19 @@ from app.llm.rate_limit_provider import run_with_request_policy
 from app.llm.router import get_provider_coordinator, get_provider_guard
 from app.schemas.analyze import Plan
 
+MAX_REPORT_INSIGHT_DEADLINE_SECONDS = 180.0
+
 
 class ReportInsightPipelineProvider:
     def __init__(self, settings: Settings, plan: Plan, provider: AnalyzeProvider | None = None):
         self.settings = settings
         self.plan = plan
         self.provider = provider
-        self.deadline = monotonic() + settings.report_provider_timeout_seconds
+        # Bound this pipeline even when ordinary reports have a longer provider timeout.
+        # The BE's read timeout covers this maximum plus response serialization/transport time.
+        self.deadline = monotonic() + min(
+            settings.report_provider_timeout_seconds, MAX_REPORT_INSIGHT_DEADLINE_SECONDS
+        )
         self.cap = Decimal(str(settings.hard_cap_credits_per_request))
         self.usage = ProviderUsage()
         self.last_response: ProviderResponse | None = None
@@ -95,11 +101,11 @@ class ReportInsightPipelineProvider:
             if self.plan == "FREE":
                 if not scoped.openai_api_key.strip():
                     raise AgentError(503, "API_KEY_MISSING", "OpenAI provider 설정이 없습니다.")
-                raw = OpenAIAnalyzeProvider(scoped)
+                raw = OpenAIAnalyzeProvider(scoped, request_deadline=self.deadline)
             else:
                 if not scoped.mindlogic_api_key.strip():
                     raise AgentError(503, "API_KEY_MISSING", "Mindlogic provider 설정이 없습니다.")
-                raw = MindlogicAnalyzeProvider(scoped)
+                raw = MindlogicAnalyzeProvider(scoped, request_deadline=self.deadline)
             provider = GuardedAnalyzeProvider(
                 raw,
                 concurrency=scoped.provider_concurrency,

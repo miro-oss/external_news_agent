@@ -30,8 +30,8 @@ from app.llm.report_insight_service import (
     RUBRIC_VERSION,
     SYSTEM_INSTRUCTION,
     ReportInsightService,
+    _eligible_report_request,
     _report_insight_prompt,
-    _validate_source_claims,
     _validated_output,
 )
 from app.llm.request_contract import report_insight_schema
@@ -220,7 +220,6 @@ def prepare(
         source = case.request.model_dump(mode="json", by_alias=True)
         source.update(plan=PLAN, idempotencyKey=f"eval:{index + 1}:{file_digest(dataset)[:16]}")
         request = ReportInsightRequest.model_validate(source)
-        _validate_source_claims(request)
         require(len(request.audiences) == 1, "SINGLE_AUDIENCE_REQUIRED")
         payload = request.model_dump(mode="json", by_alias=True)
         variants = (
@@ -474,7 +473,9 @@ def _verify_attempts(manifest: dict, state: dict, *, revalidate_outputs: bool = 
                         model=MODEL,
                         usage=ProviderUsage(),
                     ),
-                    ReportInsightRequest.model_validate(result["request"]),
+                    _eligible_report_request(
+                        ReportInsightRequest.model_validate(result["request"])
+                    ),
                 )
             require(
                 response.meta.input_tokens == sum(item["usage"]["input_tokens"] for item in records)
@@ -760,7 +761,7 @@ def settings(api_key: str) -> Settings:
 
 
 def single_call(request: ReportInsightRequest, provider: AttemptProvider) -> ReportInsightResponse:
-    _validate_source_claims(request)
+    request = _eligible_report_request(request)
     result = structured_call(
         provider,
         system_instruction=SYSTEM_INSTRUCTION,

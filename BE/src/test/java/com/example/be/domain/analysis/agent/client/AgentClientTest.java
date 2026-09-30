@@ -140,7 +140,7 @@ class AgentClientTest {
         properties.setAnalyzeTimeout(Duration.ofSeconds(91));
         properties.setInsightTimeout(Duration.ofSeconds(61));
         properties.setReportTimeout(Duration.ofSeconds(121));
-        properties.setReportInsightTimeout(Duration.ofSeconds(151));
+        properties.setReportInsightTimeout(Duration.ofSeconds(211));
         properties.setRelevanceTimeout(Duration.ofSeconds(240));
         RestClientFactory factory = mock(RestClientFactory.class);
         RestClient.Builder analyzeBuilder = RestClient.builder();
@@ -157,7 +157,7 @@ class AgentClientTest {
         when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(61))).thenReturn(insightBuilder);
         when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(121))).thenReturn(reportBuilder);
         when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(240))).thenReturn(relevanceBuilder);
-        when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(151))).thenReturn(reportInsightBuilder);
+        when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(211))).thenReturn(reportInsightBuilder);
         AgentClient client = new AgentClient(factory, properties);
         analyzeServer.expect(requestTo("http://127.0.0.1:8088/v1/analyze"))
                 .andRespond(withSuccess(responseJson(), MediaType.APPLICATION_JSON));
@@ -195,7 +195,7 @@ class AgentClientTest {
         verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(61));
         verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(121));
         verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(240));
-        verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(151));
+        verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(211));
         verifyNoMoreInteractions(factory);
     }
 

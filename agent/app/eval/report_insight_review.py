@@ -13,7 +13,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from app.llm.base import ProviderResponse, ProviderUsage
-from app.llm.report_insight_service import _validated_output
+from app.llm.report_insight_service import _eligible_report_request, _validated_output
 from app.schemas.report_insight import ReportInsightRequest
 
 # Four anchors make reviewer disagreements concrete. Zero in factual integrity
@@ -71,6 +71,7 @@ _DECISION_TERMS = {
 
 def review_saved_output(request: ReportInsightRequest, payload: dict) -> dict:
     """Return contract status and independent, conservative editorial diagnostics."""
+    request = _eligible_report_request(request)
     try:
         output = _validated_output(
             ProviderResponse(

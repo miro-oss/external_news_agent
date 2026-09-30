@@ -22,7 +22,11 @@ from app.llm.report_insight_service import (
 )
 from app.llm.request_contract import report_insight_map_schema, report_insight_schema
 from app.main import create_app
-from app.schemas.report_insight import ReportImportanceAxes, ReportInsightRequest
+from app.schemas.report_insight import (
+    CLAIMLESS_ASSESSMENT_REASON,
+    ReportImportanceAxes,
+    ReportInsightRequest,
+)
 
 
 def request_body(*, audiences=None, second=False):
@@ -397,14 +401,21 @@ def test_request_preserves_opinion_attribution_and_stored_text_spacing():
         "삼성전자는 CPO 양산 계획에 따라 양산을 완료했다.",
     ],
 )
-def test_input_grounding_mismatch_rejected_before_any_provider_call(invented_claim):
+def test_input_grounding_mismatch_is_filtered_without_dropping_finding(invented_claim):
     body = request_body()
     body["findings"][0]["claims"][0]["text"] = invented_claim
-    provider = FakeProvider()
-    with pytest.raises(AgentError) as error:
-        run(provider, body)
-    assert error.value.status_code == 422
-    assert provider.calls == []
+    payload = output()
+    payload["insights"][0]["assessments"][0].update(
+        reason=CLAIMLESS_ASSESSMENT_REASON,
+        basisClaimIds=[],
+        axes={"directness": None, "impact": None, "urgency": None, "novelty": None},
+    )
+    provider = FakeProvider(payload)
+    result = run(provider, body)
+    assert len(provider.calls) == 1
+    assert result.insights[0].assessments[0].finding_id == 501
+    assert result.insights[0].assessments[0].reason == CLAIMLESS_ASSESSMENT_REASON
+    assert result.insights[0].overview == []
 
 
 def test_prompt_injection_is_data_and_keeps_single_delimiter():

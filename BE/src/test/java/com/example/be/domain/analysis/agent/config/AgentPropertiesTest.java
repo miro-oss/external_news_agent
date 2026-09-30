@@ -37,6 +37,7 @@ class AgentPropertiesTest {
         assertEquals(Duration.ofSeconds(90), properties.getAnalyzeTimeout());
         assertEquals(Duration.ofSeconds(60), properties.getInsightTimeout());
         assertEquals(Duration.ofSeconds(120), properties.getReportTimeout());
+        assertEquals(Duration.ofSeconds(210), properties.getReportInsightTimeout());
         assertEquals(30, properties.getInsightHistory().getDays());
         assertEquals(6, properties.getInsightHistory().getLimit());
         assertEquals(15, properties.getQuota().getPaidDailyInsightCap());
@@ -79,6 +80,51 @@ class AgentPropertiesTest {
 
         assertDoesNotThrow(properties::afterPropertiesSet);
         assertEquals(Duration.ofSeconds(240), properties.getRelevanceTimeout());
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"PT0S", "PT-1S", "PT150S", "PT180S", "PT209.999S"})
+    void rejectsReportInsightWaitShorterThanMaximumAgentDeadlineAndResponseMargin(String value) {
+        AgentProperties properties = new AgentProperties();
+        properties.setReportInsightTimeout(value == null ? null : Duration.parse(value));
+
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class, properties::afterPropertiesSet);
+        assertEquals(
+                "news.agent.report-insight-timeout은 Agent 최대 기한 180초에 여유 30초를 더한 210초 이상이어야 합니다.",
+                error.getMessage());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PT210S", "PT300S"})
+    void acceptsReportInsightWaitThatCoversMaximumAgentDeadline(String value) {
+        AgentProperties properties = new AgentProperties();
+        properties.setReportInsightTimeout(Duration.parse(value));
+
+        assertDoesNotThrow(properties::afterPropertiesSet);
+        assertEquals(Duration.parse(value), properties.getReportInsightTimeout());
+    }
+
+    @Test
+    void bindsReportInsightWaitOverrideAndRejectsUnsafeConfiguredValue() throws IOException {
+        var source = new YamlPropertySourceLoader()
+                .load("application", new ClassPathResource("application.yml")).getFirst();
+        MockEnvironment environment = new MockEnvironment();
+        environment.getPropertySources().addLast(source);
+
+        AgentProperties defaults = Binder.get(environment).bind("news.agent", AgentProperties.class).get();
+        assertDoesNotThrow(defaults::afterPropertiesSet);
+        assertEquals(Duration.ofSeconds(210), defaults.getReportInsightTimeout());
+
+        environment.setProperty("AGENT_REPORT_INSIGHT_TIMEOUT", "300s");
+        AgentProperties configured = Binder.get(environment).bind("news.agent", AgentProperties.class).get();
+        assertDoesNotThrow(configured::afterPropertiesSet);
+        assertEquals(Duration.ofSeconds(300), configured.getReportInsightTimeout());
+
+        environment.setProperty("AGENT_REPORT_INSIGHT_TIMEOUT", "150s");
+        AgentProperties unsafe = Binder.get(environment).bind("news.agent", AgentProperties.class).get();
+        assertThrows(IllegalStateException.class, unsafe::afterPropertiesSet);
     }
 
     @Test

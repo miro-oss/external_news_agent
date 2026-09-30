@@ -17,6 +17,7 @@ from app.schemas.insight import InsightOutput, InsightRequest
 from app.schemas.report import ReportOutput, ReportRequest
 from app.schemas.report_changes import ReportChangesOutput, ReportChangesRequest
 from app.schemas.report_insight import (
+    CLAIMLESS_ASSESSMENT_REASON,
     ReportInsightMapOutput,
     ReportInsightOutput,
     ReportInsightReduceOutput,
@@ -186,6 +187,11 @@ def report_insight_schema(request: ReportInsightRequest) -> dict[str, Any]:
     definitions = schema["$defs"]
     definitions["ReportAudienceInsight"]["properties"]["audience"]["enum"] = list(request.audiences)
     claim_ids = [claim.id for finding in request.findings for claim in finding.claims]
+    if not claim_ids:
+        properties = definitions["ReportAudienceInsight"]["properties"]
+        properties["headline"]["const"] = "이 관점의 관련 근거가 부족합니다."
+        for field in ("overview", "implications", "watchItems"):
+            properties[field]["maxItems"] = 0
     definitions["AllowedReportClaimId"] = _report_claim_choices(claim_ids)
     for name in ("ReportInsightOverview", "ReportInsightImplication", "ReportInsightWatchItem"):
         definitions[name]["properties"]["basisClaimIds"]["items"] = {
@@ -203,6 +209,19 @@ def report_insight_schema(request: ReportInsightRequest) -> dict[str, Any]:
                         "items": _report_claim_choices([claim.id for claim in finding.claims]),
                         "maxItems": len(finding.claims),
                     },
+                    **(
+                        {
+                            "reason": {"type": "string", "const": CLAIMLESS_ASSESSMENT_REASON},
+                            "axes": _object(
+                                {
+                                    name: {"type": "null"}
+                                    for name in ("directness", "impact", "urgency", "novelty")
+                                }
+                            ),
+                        }
+                        if not finding.claims
+                        else {}
+                    ),
                 }
             )
             for finding in request.findings

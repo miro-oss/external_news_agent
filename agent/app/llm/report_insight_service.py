@@ -23,6 +23,7 @@ from app.llm.request_contract import report_insight_map_schema, report_insight_r
 from app.llm.structured_call import structured_call
 from app.schemas.report import ReportResponseMeta
 from app.schemas.report_insight import (
+    CLAIMLESS_ASSESSMENT_REASON,
     ReportAudienceInsight,
     ReportImportanceAxes,
     ReportInsightAssessment,
@@ -33,7 +34,7 @@ from app.schemas.report_insight import (
     ReportInsightResponse,
 )
 
-PROMPT_VERSION = "report-insight.ko.v2"
+PROMPT_VERSION = "report-insight.ko.v3"
 RUBRIC_VERSION = "report-importance.v2"
 _PROMPT_ROOT = Path(__file__).resolve().parents[1] / "prompts"
 SYSTEM_INSTRUCTION = "\n\n".join(
@@ -85,7 +86,9 @@ MAP_INSTRUCTION = SYSTEM_INSTRUCTION + (
     "\n\n현재 단계는 MAP이다. findings[].claims[]와 연결 sentences를 읽어 insights의 "
     "audience와 assessments만 반환한다. 모든 finding을 정확히 한 번 평가하며 assessment "
     "basisClaimIds는 같은 finding만 쓴다. 종합 필드는 출력하지 않는다. 저장된 claim의 "
-    "타입과 근거를 유지한다."
+    "타입과 근거를 유지한다. claims가 빈 finding은 제거하지 말고 모든 축을 null, "
+    "basisClaimIds를 []로 두며 reason은 "
+    f"'{CLAIMLESS_ASSESSMENT_REASON}'로 정확히 반환한다."
 )
 REDUCE_INSTRUCTION = SYSTEM_INSTRUCTION + (
     "\n\n현재 단계는 REDUCE다. findings가 없는 것은 정상이며, 동일 audience의 "
@@ -110,10 +113,10 @@ class ReportInsightService:
         )
 
     def generate(self, request: ReportInsightRequest) -> ReportInsightResponse:
+        request = _eligible_report_request(request)
         pipeline = ReportInsightPipelineProvider(
             self._report_settings, request.plan, self._provider
         )
-        _validate_source_claims(request)
         if self._settings.mock:
             return _mock_response(request)
         try:
@@ -292,6 +295,41 @@ def _validate_source_claims(request: ReportInsightRequest) -> None:
                 )
 
 
+def _eligible_report_request(request: ReportInsightRequest) -> ReportInsightRequest:
+    """Use verified claims locally without rewriting the stored report snapshot.
+
+    Public requests still require at least one claim and sentence per finding.
+    These already validated local copies may become claimless after grounding
+    checks; retaining them preserves the one-assessment-per-finding contract.
+    Only sentences connected to eligible claims are exposed to model stages.
+    """
+    findings = []
+    for finding in request.findings:
+        sentences = {sentence.index: sentence.text for sentence in finding.sentences}
+        claims = [
+            claim
+            for claim in finding.claims
+            if not _report_factual_mismatches(
+                claim.text,
+                "\n".join(sentences[index] for index in claim.evidence_sentence_ids),
+            )
+        ]
+        eligible_sentence_ids = {index for claim in claims for index in claim.evidence_sentence_ids}
+        findings.append(
+            finding.model_copy(
+                update={
+                    "claims": claims,
+                    "sentences": [
+                        sentence
+                        for sentence in finding.sentences
+                        if sentence.index in eligible_sentence_ids
+                    ],
+                }
+            )
+        )
+    return request.model_copy(update={"findings": findings})
+
+
 def _validated_output(
     response: ProviderResponse,
     request: ReportInsightRequest,
@@ -309,6 +347,8 @@ def _validated_output(
     findings = {finding.id: finding for finding in request.findings}
     claims, evidence = _source_context(request)
     for insight in output.insights:
+        if not claims and insight.headline != "이 관점의 관련 근거가 부족합니다.":
+            raise ValueError("검증된 claim이 없으면 headline은 관련 근거 부족만 설명해야 합니다.")
         ids = [assessment.finding_id for assessment in insight.assessments]
         if len(ids) != len(set(ids)) or set(ids) != set(findings):
             raise ValueError("각 audience는 모든 input finding을 정확히 한 번 판정해야 합니다.")
@@ -318,6 +358,17 @@ def _validated_output(
                 raise ValueError(
                     "assessment basisClaimIds는 같은 finding의 claim만 참조해야 합니다."
                 )
+            if not local_ids:
+                if (
+                    assessment.basis_claim_ids
+                    or any(value is not None for value in assessment.axes.model_dump().values())
+                    or assessment.reason != CLAIMLESS_ASSESSMENT_REASON
+                ):
+                    raise ValueError(
+                        "검증된 claim이 없는 finding은 근거 없이 모든 축을 null로 두고 "
+                        "근거 부족에 따른 판단 보류만 설명해야 합니다."
+                    )
+                continue
             _validate_prose(
                 [assessment.reason],
                 assessment.basis_claim_ids,
@@ -543,6 +594,8 @@ def _mock_response(request: ReportInsightRequest) -> ReportInsightResponse:
                         finding_id=finding.id,
                         reason=(
                             "모의 실행에서는 원문 근거만 전달하며 관점별 중요도는 판단 보류입니다."
+                            if finding.claims
+                            else CLAIMLESS_ASSESSMENT_REASON
                         ),
                         basis_claim_ids=[],
                         axes=ReportImportanceAxes(

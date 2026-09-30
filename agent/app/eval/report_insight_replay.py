@@ -23,6 +23,7 @@ from app.llm.report_insight_guard import has_blanket_insufficient_headline
 from app.llm.report_insight_service import (
     PROMPT_VERSION,
     RUBRIC_VERSION,
+    _eligible_report_request,
     _empty_synthesis,
     _validated_map_output,
     _validated_output,
@@ -46,7 +47,9 @@ def provider_response(attempt: dict) -> ProviderResponse:
     )
 
 
-def saved_reduce_context(attempt: dict, request: ReportInsightRequest, mapped):
+def saved_reduce_context(
+    attempt: dict, request: ReportInsightRequest, mapped, *, eligible_request=None
+):
     # Use the first REDUCE wire, before repair escapes its delimiters. Do not
     # rerun retrieval and silently grant evidence the original model never saw.
     text = attempt["wireRequest"]["input"]
@@ -91,7 +94,16 @@ def saved_reduce_context(attempt: dict, request: ReportInsightRequest, mapped):
             refs.append(ref)
         allowed[audience] = refs
     require(set(allowed) == set(request.audiences), "INVALID_REDUCE_INPUT")
-    return allowed
+    # Authenticate the saved evidence against the original snapshot first, then
+    # narrow its scope to claims today's grounding filter still accepts. Never
+    # recreate retrieval or expose another claim the recorded model did not see.
+    eligible = (
+        eligible_request if eligible_request is not None else _eligible_report_request(request)
+    )
+    eligible_ids = {claim.id for finding in eligible.findings for claim in finding.claims}
+    return {
+        audience: [ref for ref in refs if ref in eligible_ids] for audience, refs in allowed.items()
+    }
 
 
 def rejection_code(error: Exception) -> str:
@@ -117,7 +129,8 @@ def rejection_code(error: Exception) -> str:
 
 
 def replay_job(result: dict, attempts: list[dict]) -> dict:
-    request = ReportInsightRequest.model_validate(result["request"])
+    original_request = ReportInsightRequest.model_validate(result["request"])
+    request = _eligible_report_request(original_request)
     diagnostic = {
         "caseId": result["caseId"],
         "variant": result["variant"],
@@ -150,7 +163,9 @@ def replay_job(result: dict, attempts: list[dict]) -> dict:
             if "REDUCE" in stages:
                 first, last = stages["REDUCE"][0], stages["REDUCE"][-1]
                 diagnostic["usedAttemptIds"].append(last["attemptId"])
-                allowed = saved_reduce_context(first, request, mapped)
+                allowed = saved_reduce_context(
+                    first, original_request, mapped, eligible_request=request
+                )
                 output = _validated_reduce_output(
                     provider_response(last), request, mapped, allowed, require_synthesis=False
                 )
@@ -247,7 +262,7 @@ def replay(source_dir: Path, output_dir: Path) -> dict:
         "variants": variants,
         "cases": cases,
         "limitations": [
-            "Saved v1 answers only; v2 prompting effectiveness is not measured.",
+            "Saved answers only; current prompting effectiveness is not measured.",
             "Missing REDUCE answers are incomplete, not recovered full results.",
             "Original blind judgments remain attached exclusively to the original experiment.",
         ],
