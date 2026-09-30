@@ -220,24 +220,27 @@ class TopicRelevanceGateTest {
             "topic-relevance.ko.v19, RELEVANT",
             "topic-relevance.ko.v19, IRRELEVANT",
             "topic-relevance.ko.v20, RELEVANT",
-            "topic-relevance.ko.v20, IRRELEVANT"
+            "topic-relevance.ko.v20, IRRELEVANT",
+            "topic-relevance.ko.v21, RELEVANT",
+            "topic-relevance.ko.v21, IRRELEVANT"
     })
-    void v21ReassessesCachedEarlierDecisionForUnchangedInput(
+    void v22ReassessesCachedEarlierDecisionForUnchangedInput(
             String legacyVersion, TopicRelevanceStatus cachedStatus) {
-        assertEquals("topic-relevance.ko.v21", TopicRelevanceGate.PROMPT_VERSION);
+        assertEquals("topic-relevance.ko.v22", TopicRelevanceGate.PROMPT_VERSION);
         reserve();
         var input = candidate(1L, 7L);
         var topic = new AgentTopicRelevanceRequest.TopicInput(7L, "제조장비", "반도체 장비 공정",
                 List.of(), List.of(), List.of());
         // v8 hashed both global models; v9 and later hash only the task-specific model.
         String legacyModels = legacyVersion.equals("topic-relevance.ko.v8")
-                ? "\n\n" : "\ngpt-5.6-terra";
+                ? "\n\n" : legacyVersion.equals("topic-relevance.ko.v21")
+                ? "\ngpt-4.1-nano" : "\ngpt-5.6-terra";
         String legacyInput = new ObjectMapper().writeValueAsString(topic)
                 + "\n" + legacyVersion + "\nFREE" + legacyModels
                 + "\n기사 1\nnull\n반도체 제조 장비 공정 본문";
         String legacyHash = TopicRelevanceGate.hash(legacyInput);
         String upgradedHash = TopicRelevanceGate.hash(new ObjectMapper().writeValueAsString(topic)
-                + "\ntopic-relevance.ko.v21\nFREE\ngpt-4.1-nano\n기사 1\nnull\n반도체 제조 장비 공정 본문");
+                + "\ntopic-relevance.ko.v22\nFREE\ngpt-4.1-nano\n기사 1\nnull\n반도체 제조 장비 공정 본문");
         assertNotEquals(legacyHash, upgradedHash);
         when(store.findByRun(42L)).thenReturn(List.of(new TopicRelevanceStore.Assessment(
                 42L, 7L, 1L, cachedStatus, "이전 판정", legacyHash, legacyVersion,
@@ -254,7 +257,7 @@ class TopicRelevanceGateTest {
         verify(client).topicRelevance(any());
         verify(finalizer).success(eq(42L), any(), any(), argThat(rows -> rows.size() == 1
                         && rows.getFirst().status() == newStatus
-                        && rows.getFirst().promptVersion().equals("topic-relevance.ko.v21")
+                        && rows.getFirst().promptVersion().equals("topic-relevance.ko.v22")
                         && rows.getFirst().inputHash().equals(upgradedHash)),
                 anyString(), any(), any());
     }

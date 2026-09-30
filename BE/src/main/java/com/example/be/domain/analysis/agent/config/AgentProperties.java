@@ -20,7 +20,7 @@ public class AgentProperties implements InitializingBean {
     private Duration connectTimeout = Duration.ofSeconds(5);
     private Duration analyzeTimeout = Duration.ofSeconds(90);
     // HTTP response wait only; this is not an end-to-end deadline for provider retries.
-    private Duration relevanceTimeout = Duration.ofSeconds(180);
+    private Duration relevanceTimeout = Duration.ofSeconds(240);
     private Duration insightTimeout = Duration.ofSeconds(60);
     private Duration reportTimeout = Duration.ofSeconds(120);
     private AgentPlan defaultPlan = AgentPlan.FREE;

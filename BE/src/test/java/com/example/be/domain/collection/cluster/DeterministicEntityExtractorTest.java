@@ -23,6 +23,16 @@ class DeterministicEntityExtractorTest {
 
     private final DeterministicEntityExtractor extractor = new DeterministicEntityExtractor();
 
+    @Test
+    void preservesDecimalProductVersionsInsteadOfInventingEarlierVersions() {
+        Set<String> entities = extractor.extract("GPT-6.1 새 모델 공개", "Atlas2.3.1 업데이트, GPT-6.1-sol 제공",
+                "GPT-5.6과 비교한 평가를 공개했다.", List.of());
+        assertTrue(entities.containsAll(Set.of("GPT-6.1", "GPT-6.1-SOL", "ATLAS2.3.1", "GPT-5.6")));
+        assertFalse(entities.contains("GPT-6"));
+        assertFalse(entities.contains("GPT-5"));
+        assertFalse(entities.contains("ATLAS2"));
+    }
+
     /** 실제 한국어 기사 본문 끝에 흔히 붙는 것들. 기자 바이라인·매체 약어·광고 문구. */
     private static final String NOISY_BODY = """
             업계에 따르면 이번 투자로 생산능력이 늘어난다고 IT 업계 CEO들은 전망했다.

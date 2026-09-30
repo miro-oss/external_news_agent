@@ -10,6 +10,7 @@ import java.util.Map;
 final class StrongEventEvidence {
     private final SpecificEventEvidence specific;
     private final ProductEventEvidence product;
+    private final VersionedProductEventEvidence versionedProduct;
     private final NamedEventEvidence named;
     private final StockEventEvidence stock;
     private final InstitutionalEventEvidence institutional;
@@ -23,6 +24,7 @@ final class StrongEventEvidence {
     StrongEventEvidence(List<ClusterArticle> articles, BreakingNewsDetector detector) {
         specific = new SpecificEventEvidence(articles, detector);
         product = new ProductEventEvidence(articles, detector);
+        versionedProduct = new VersionedProductEventEvidence(articles, detector);
         named = new NamedEventEvidence(articles, detector);
         stock = new StockEventEvidence(articles, detector);
         institutional = new InstitutionalEventEvidence(articles, detector);
@@ -51,6 +53,7 @@ final class StrongEventEvidence {
 
     boolean conflicts(long left, long right) {
         return specific.conflicts(left, right) || product.conflicts(left, right)
+                || versionedProduct.conflicts(left, right)
                 || named.conflicts(left, right) || stock.conflicts(left, right)
                 || institutional.conflicts(left, right) || commercial.conflicts(left, right)
                 || marketSession.conflicts(left, right) || occurrence.conflicts(left, right)

@@ -33,7 +33,7 @@ class AgentPropertiesTest {
                 properties.getFreeAnalysisPromptVersion());
         assertEquals("insight.ko.v2+perspective.ko.v1", properties.getInsightPromptVersion());
         assertEquals("gpt-4.1-nano", properties.getRelevanceFreeModel());
-        assertEquals(Duration.ofSeconds(180), properties.getRelevanceTimeout());
+        assertEquals(Duration.ofSeconds(240), properties.getRelevanceTimeout());
         assertEquals(Duration.ofSeconds(90), properties.getAnalyzeTimeout());
         assertEquals(Duration.ofSeconds(60), properties.getInsightTimeout());
         assertEquals(Duration.ofSeconds(120), properties.getReportTimeout());

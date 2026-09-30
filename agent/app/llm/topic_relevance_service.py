@@ -2,6 +2,7 @@ import json
 import logging
 import re
 from copy import deepcopy
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 
@@ -22,7 +23,7 @@ from app.schemas.topic_relevance import (
     TopicRelevanceResponse,
 )
 
-PROMPT_VERSION = "topic-relevance.ko.v21"
+PROMPT_VERSION = "topic-relevance.ko.v22"
 _SOURCE_ASSESSMENTS = (
     "E", "D", "L", "G", "N",
 )
@@ -69,48 +70,62 @@ class TopicRelevanceService:
                 "openai_output_cost_per_million": None,
             })
         provider = self._provider or get_analyze_provider(settings, request.plan)
+        hard_cap = Decimal(str(self._settings.hard_cap_credits_per_request))
         decisions: list[RelevanceDecision] = []
         usage = ProviderUsage()
         identity: tuple[str, str] | None = None
         last_response: ProviderResponse | None = None
         for article in request.articles:
+            if last_response is not None and usage.credits >= hard_cap:
+                raise _budget_error(last_response, usage, hard_cap)
             single = request.model_copy(update={"articles": [article]})
-            article_usage = ProviderUsage()
+            completed_usage = ProviderUsage()
 
-            def validate(
-                response: ProviderResponse, single_request: TopicRelevanceRequest = single
-            ) -> TopicRelevanceOutput:
-                nonlocal article_usage, identity
-                article_usage += response.usage
-                current_identity = (response.provider, response.model)
-                if identity is None:
-                    identity = current_identity
-                elif identity != current_identity:
-                    raise AgentError(
-                        status_code=502,
-                        code="SCHEMA_VIOLATION",
-                        message="주제 적합성 판정 도중 provider 또는 모델이 변경되었습니다.",
-                        details={
-                            "usage": _accumulated_failure_usage(article_usage, None),
-                            "executionMetadata": {
-                                "provider": None,
-                                "model": None,
-                                "promptVersion": PROMPT_VERSION,
-                                "source": "AGENT_ERROR",
-                                "usageCompleteness": "COMPLETE",
+            def call(
+                prompt: str, *, repair_attempts: int, previous_usage: ProviderUsage,
+                single_request: TopicRelevanceRequest = single,
+            ):
+                # Each stage owns its failure usage; completed stages are added below.
+                article_usage = ProviderUsage()
+
+                def validate(response: ProviderResponse) -> TopicRelevanceOutput:
+                    nonlocal article_usage, identity
+                    article_usage += response.usage
+                    current_identity = (response.provider, response.model)
+                    if identity is None:
+                        identity = current_identity
+                    elif identity != current_identity:
+                        raise AgentError(
+                            status_code=502,
+                            code="SCHEMA_VIOLATION",
+                            message="주제 적합성 판정 도중 provider 또는 모델이 변경되었습니다.",
+                            details={
+                                "usage": _accumulated_failure_usage(article_usage, None),
+                                "executionMetadata": {
+                                    "provider": None,
+                                    "model": None,
+                                    "promptVersion": PROMPT_VERSION,
+                                    "source": "AGENT_ERROR",
+                                    "usageCompleteness": "COMPLETE",
+                                },
                             },
-                        },
-                    )
-                return _validated_output(response, single_request)
+                        )
+                    if (previous_usage + article_usage).credits > hard_cap:
+                        raise _budget_error(response, article_usage, hard_cap)
+                    try:
+                        return _validated_output(response, single_request)
+                    except ValueError:
+                        if (previous_usage + article_usage).credits >= hard_cap:
+                            raise _budget_error(response, article_usage, hard_cap) from None
+                        raise
 
-            try:
-                result = structured_call(
+                return structured_call(
                     provider,
                     system_instruction=SYSTEM_INSTRUCTION,
-                    prompt=_prompt(single),
-                    response_schema=_response_schema(single),
+                    prompt=prompt,
+                    response_schema=_response_schema(single_request),
                     validate=validate,
-                    repair_attempts=self._settings.schema_repair_attempts,
+                    repair_attempts=repair_attempts,
                     task_name="주제 적합성 판정",
                     input_tag="topic-relevance",
                     schema_violation_message=(
@@ -119,12 +134,29 @@ class TopicRelevanceService:
                     logger=logger,
                     failure_prompt_version=PROMPT_VERSION,
                 )
+
+            try:
+                result = call(
+                    _prompt(single), repair_attempts=self._settings.schema_repair_attempts,
+                    previous_usage=usage,
+                )
+                if _requires_negative_review(result.response, result.output):
+                    completed_usage = result.usage
+                    if (usage + completed_usage).credits >= hard_cap:
+                        raise _budget_error(result.response, ProviderUsage(), hard_cap)
+                    # One independent review also catches a direct event mislabeled G/N.
+                    # Do not expose the earlier verdict/reason, and never review recursively.
+                    result = call(
+                        _negative_review_prompt(single), repair_attempts=0,
+                        previous_usage=usage + completed_usage,
+                    )
             except AgentError as error:
-                if decisions:
-                    _include_previous_usage(error, usage)
+                previous_usage = usage + completed_usage
+                if previous_usage != ProviderUsage():
+                    _include_previous_usage(error, previous_usage)
                 raise
             decisions.extend(result.output.decisions)
-            usage += result.usage
+            usage += completed_usage + result.usage
             last_response = result.response
 
         assert last_response is not None  # Validated requests contain at least one article.
@@ -200,6 +232,12 @@ def _validated_output(
             raise ValueError(
                 "제외 사건(E)이 있으면 IRRELEVANT로 판정하고 해당 제외 근거를 인용해야 합니다."
             )
+        if (value["status"] == "IRRELEVANT" and not excluded
+                and any(role in _RELEVANT_ASSESSMENTS for role in assessment.values())):
+            raise ValueError(
+                "직접 사건(D) 또는 명시적인 연결(L)이 있으면 제외 근거 없이 무관으로 "
+                "판정할 수 없습니다. 주제 범위와 모든 구간을 다시 확인하세요."
+            )
         if value["status"] == "RELEVANT" and not any(
             assessment[quote] in _RELEVANT_ASSESSMENTS for quote in selected
         ):
@@ -237,6 +275,18 @@ def _validated_output(
                     "evidenceQuotes는 해당 기사에 제공된 인용 선택지 중에서 골라야 합니다."
                 )
     return output
+
+
+def _requires_negative_review(
+    response: ProviderResponse, output: TopicRelevanceOutput,
+) -> bool:
+    if output.decisions[0].status != "IRRELEVANT":
+        return False
+    # Called only after strict validation: E already requires a configured exclusion
+    # and a selected source quote, and takes precedence over otherwise direct events.
+    payload = parse_json_object(response.text)
+    decision = next(iter(payload["decisions"].values()))
+    return "E" not in decision["sourceAssessment"].values()
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -355,6 +405,19 @@ def _prompt(request: TopicRelevanceRequest) -> str:
     )
 
 
+def _negative_review_prompt(request: TopicRelevanceRequest) -> str:
+    return (
+        "기사와 관심 범위의 관계를 독립적으로 재검토하세요. 아래 원문과 사용자 설정만으로 "
+        "관심 범위를 다시 확정하고 모든 구간을 새로 분류하세요. 범위 안 대상 자체의 "
+        "출시·개발·기능·검증·가격·도입 변화가 실제 사건인지, 일반 배경이나 다른 대상의 "
+        "사건인지 구별하세요. 생산·수요·계약을 사용자가 요구하지 않았다면 추가 조건으로 "
+        "요구하지 마세요. 사용자 제외 조건과 특정 대상·세대 한정은 그대로 적용하세요. "
+        "직접 사건이나 연결이 없으면 IRRELEVANT이며, 주제 자체가 충돌하거나 "
+        "맥락이 부족하면 UNCERTAIN입니다. 모든 상태에 같은 근거 계약을 적용하세요.\n\n"
+        + _prompt(request)
+    )
+
+
 def _meta(response: ProviderResponse, usage: ProviderUsage) -> ResponseMeta:
     return ResponseMeta(
         provider=response.provider,
@@ -391,4 +454,25 @@ def _mock_response(request: TopicRelevanceRequest) -> TopicRelevanceResponse:
             mock=True,
             truncated=False,
         ),
+    )
+
+
+def _budget_error(
+    response: ProviderResponse, stage_usage: ProviderUsage, hard_cap: Decimal,
+) -> AgentError:
+    return AgentError(
+        status_code=429,
+        code="BUDGET_EXCEEDED",
+        message="주제 적합성 판정의 누적 사용량이 요청당 hard cap에 도달했습니다.",
+        details={
+            "usage": _accumulated_failure_usage(stage_usage, None),
+            "hardCapCredits": float(hard_cap),
+            "executionMetadata": {
+                "provider": response.provider,
+                "model": response.model,
+                "promptVersion": PROMPT_VERSION,
+                "source": "AGENT_ERROR",
+                "usageCompleteness": "COMPLETE",
+            },
+        },
     )
