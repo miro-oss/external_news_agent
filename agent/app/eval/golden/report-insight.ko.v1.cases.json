@@ -1,0 +1,1995 @@
+{
+  "version": "report-insight-cases.ko.v1",
+  "promptVersion": "report-insight.ko.v1",
+  "synthetic": true,
+  "qualityMeasured": false,
+  "cases": [
+    {
+      "caseId": "planned-production-and-order-chip_maker",
+      "scenario": "planned-production-and-order",
+      "request": {
+        "idempotencyKey": "eval:planned-production-and-order:CHIP_MAKER",
+        "plan": "FREE",
+        "audiences": [
+          "CHIP_MAKER"
+        ],
+        "report": {
+          "id": 301,
+          "title": "생산 목표와 장비 발주의 구분",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1001,
+            "articleId": 2001,
+            "articleTitle": "생산 목표와 장비 발주의 구분 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/planned-production-and-order/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1001:0",
+                "text": "A사는 2027년 공정 양산을 목표로 공정 검증을 준비한다고 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 2027년 공정 양산을 목표로 공정 검증을 준비한다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1002,
+            "articleId": 2002,
+            "articleTitle": "생산 목표와 장비 발주의 구분 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/planned-production-and-order/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1002:0",
+                "text": "B장비사는 A사와 검증 장비 공급 계약을 체결했다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "B장비사는 A사와 검증 장비 공급 계약을 체결했다고 발표했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1001:0",
+          "1002:0"
+        ],
+        "forbiddenProse": [
+          "양산을 완료했다",
+          "매출이 실현됐다",
+          "수익률이 보장된다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "planned-production-and-order-equipment_maker",
+      "scenario": "planned-production-and-order",
+      "request": {
+        "idempotencyKey": "eval:planned-production-and-order:EQUIPMENT_MAKER",
+        "plan": "FREE",
+        "audiences": [
+          "EQUIPMENT_MAKER"
+        ],
+        "report": {
+          "id": 301,
+          "title": "생산 목표와 장비 발주의 구분",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1001,
+            "articleId": 2001,
+            "articleTitle": "생산 목표와 장비 발주의 구분 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/planned-production-and-order/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1001:0",
+                "text": "A사는 2027년 공정 양산을 목표로 공정 검증을 준비한다고 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 2027년 공정 양산을 목표로 공정 검증을 준비한다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1002,
+            "articleId": 2002,
+            "articleTitle": "생산 목표와 장비 발주의 구분 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/planned-production-and-order/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1002:0",
+                "text": "B장비사는 A사와 검증 장비 공급 계약을 체결했다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "B장비사는 A사와 검증 장비 공급 계약을 체결했다고 발표했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1002:0"
+        ],
+        "forbiddenProse": [
+          "양산을 완료했다",
+          "매출이 실현됐다",
+          "수익률이 보장된다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "planned-production-and-order-market_investor",
+      "scenario": "planned-production-and-order",
+      "request": {
+        "idempotencyKey": "eval:planned-production-and-order:MARKET_INVESTOR",
+        "plan": "FREE",
+        "audiences": [
+          "MARKET_INVESTOR"
+        ],
+        "report": {
+          "id": 301,
+          "title": "생산 목표와 장비 발주의 구분",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1001,
+            "articleId": 2001,
+            "articleTitle": "생산 목표와 장비 발주의 구분 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/planned-production-and-order/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1001:0",
+                "text": "A사는 2027년 공정 양산을 목표로 공정 검증을 준비한다고 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 2027년 공정 양산을 목표로 공정 검증을 준비한다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1002,
+            "articleId": 2002,
+            "articleTitle": "생산 목표와 장비 발주의 구분 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/planned-production-and-order/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1002:0",
+                "text": "B장비사는 A사와 검증 장비 공급 계약을 체결했다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "B장비사는 A사와 검증 장비 공급 계약을 체결했다고 발표했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1002:0"
+        ],
+        "forbiddenProse": [
+          "양산을 완료했다",
+          "매출이 실현됐다",
+          "수익률이 보장된다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "planned-production-and-order-it_infra",
+      "scenario": "planned-production-and-order",
+      "request": {
+        "idempotencyKey": "eval:planned-production-and-order:IT_INFRA",
+        "plan": "FREE",
+        "audiences": [
+          "IT_INFRA"
+        ],
+        "report": {
+          "id": 301,
+          "title": "생산 목표와 장비 발주의 구분",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1001,
+            "articleId": 2001,
+            "articleTitle": "생산 목표와 장비 발주의 구분 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/planned-production-and-order/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1001:0",
+                "text": "A사는 2027년 공정 양산을 목표로 공정 검증을 준비한다고 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 2027년 공정 양산을 목표로 공정 검증을 준비한다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1002,
+            "articleId": 2002,
+            "articleTitle": "생산 목표와 장비 발주의 구분 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/planned-production-and-order/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1002:0",
+                "text": "B장비사는 A사와 검증 장비 공급 계약을 체결했다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "B장비사는 A사와 검증 장비 공급 계약을 체결했다고 발표했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [],
+        "forbiddenProse": [
+          "양산을 완료했다",
+          "매출이 실현됐다",
+          "수익률이 보장된다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "conflicting-certification-chip_maker",
+      "scenario": "conflicting-certification",
+      "request": {
+        "idempotencyKey": "eval:conflicting-certification:CHIP_MAKER",
+        "plan": "FREE",
+        "audiences": [
+          "CHIP_MAKER"
+        ],
+        "report": {
+          "id": 302,
+          "title": "같은 공정의 인증 완료 여부 상충",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1011,
+            "articleId": 2011,
+            "articleTitle": "같은 공정의 인증 완료 여부 상충 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/conflicting-certification/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1011:0",
+                "text": "A사는 P공정 고객 인증이 완료됐다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 P공정 고객 인증이 완료됐다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1012,
+            "articleId": 2012,
+            "articleTitle": "같은 공정의 인증 완료 여부 상충 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/conflicting-certification/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1012:0",
+                "text": "고객 C사는 같은 P공정 인증이 아직 완료되지 않았다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "고객 C사는 같은 P공정 인증이 아직 완료되지 않았다고 발표했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1011:0",
+          "1012:0"
+        ],
+        "forbiddenProse": [
+          "인증 완료가 확정됐다",
+          "고객 인증 문제가 해소됐다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "conflicting-certification-equipment_maker",
+      "scenario": "conflicting-certification",
+      "request": {
+        "idempotencyKey": "eval:conflicting-certification:EQUIPMENT_MAKER",
+        "plan": "FREE",
+        "audiences": [
+          "EQUIPMENT_MAKER"
+        ],
+        "report": {
+          "id": 302,
+          "title": "같은 공정의 인증 완료 여부 상충",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1011,
+            "articleId": 2011,
+            "articleTitle": "같은 공정의 인증 완료 여부 상충 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/conflicting-certification/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1011:0",
+                "text": "A사는 P공정 고객 인증이 완료됐다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 P공정 고객 인증이 완료됐다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1012,
+            "articleId": 2012,
+            "articleTitle": "같은 공정의 인증 완료 여부 상충 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/conflicting-certification/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1012:0",
+                "text": "고객 C사는 같은 P공정 인증이 아직 완료되지 않았다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "고객 C사는 같은 P공정 인증이 아직 완료되지 않았다고 발표했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1011:0",
+          "1012:0"
+        ],
+        "forbiddenProse": [
+          "인증 완료가 확정됐다",
+          "고객 인증 문제가 해소됐다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "conflicting-certification-market_investor",
+      "scenario": "conflicting-certification",
+      "request": {
+        "idempotencyKey": "eval:conflicting-certification:MARKET_INVESTOR",
+        "plan": "FREE",
+        "audiences": [
+          "MARKET_INVESTOR"
+        ],
+        "report": {
+          "id": 302,
+          "title": "같은 공정의 인증 완료 여부 상충",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1011,
+            "articleId": 2011,
+            "articleTitle": "같은 공정의 인증 완료 여부 상충 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/conflicting-certification/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1011:0",
+                "text": "A사는 P공정 고객 인증이 완료됐다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 P공정 고객 인증이 완료됐다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1012,
+            "articleId": 2012,
+            "articleTitle": "같은 공정의 인증 완료 여부 상충 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/conflicting-certification/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1012:0",
+                "text": "고객 C사는 같은 P공정 인증이 아직 완료되지 않았다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "고객 C사는 같은 P공정 인증이 아직 완료되지 않았다고 발표했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1011:0",
+          "1012:0"
+        ],
+        "forbiddenProse": [
+          "인증 완료가 확정됐다",
+          "고객 인증 문제가 해소됐다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "conflicting-certification-it_infra",
+      "scenario": "conflicting-certification",
+      "request": {
+        "idempotencyKey": "eval:conflicting-certification:IT_INFRA",
+        "plan": "FREE",
+        "audiences": [
+          "IT_INFRA"
+        ],
+        "report": {
+          "id": 302,
+          "title": "같은 공정의 인증 완료 여부 상충",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1011,
+            "articleId": 2011,
+            "articleTitle": "같은 공정의 인증 완료 여부 상충 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/conflicting-certification/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1011:0",
+                "text": "A사는 P공정 고객 인증이 완료됐다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 P공정 고객 인증이 완료됐다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1012,
+            "articleId": 2012,
+            "articleTitle": "같은 공정의 인증 완료 여부 상충 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/conflicting-certification/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1012:0",
+                "text": "고객 C사는 같은 P공정 인증이 아직 완료되지 않았다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "고객 C사는 같은 P공정 인증이 아직 완료되지 않았다고 발표했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [],
+        "forbiddenProse": [
+          "인증 완료가 확정됐다",
+          "고객 인증 문제가 해소됐다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "infra-compatibility-deadline-chip_maker",
+      "scenario": "infra-compatibility-deadline",
+      "request": {
+        "idempotencyKey": "eval:infra-compatibility-deadline:CHIP_MAKER",
+        "plan": "FREE",
+        "audiences": [
+          "CHIP_MAKER"
+        ],
+        "report": {
+          "id": 303,
+          "title": "인프라 호환성 확인과 공정 연구",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1021,
+            "articleId": 2021,
+            "articleTitle": "인프라 호환성 확인과 공정 연구 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/infra-compatibility-deadline/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1021:0",
+                "text": "D운영사는 서버 도입을 위해 2026년 10월 네트워크 호환성 검증을 진행한다고 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "D운영사는 서버 도입을 위해 2026년 10월 네트워크 호환성 검증을 진행한다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1022,
+            "articleId": 2022,
+            "articleTitle": "인프라 호환성 확인과 공정 연구 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/infra-compatibility-deadline/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1022:0",
+                "text": "A사는 연구 단계의 반도체 공정 실험 결과를 공개했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 연구 단계의 반도체 공정 실험 결과를 공개했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1022:0"
+        ],
+        "forbiddenProse": [
+          "호환성 검증을 완료했다",
+          "서버 도입이 완료됐다",
+          "운영 비용이 절감됐다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "infra-compatibility-deadline-equipment_maker",
+      "scenario": "infra-compatibility-deadline",
+      "request": {
+        "idempotencyKey": "eval:infra-compatibility-deadline:EQUIPMENT_MAKER",
+        "plan": "FREE",
+        "audiences": [
+          "EQUIPMENT_MAKER"
+        ],
+        "report": {
+          "id": 303,
+          "title": "인프라 호환성 확인과 공정 연구",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1021,
+            "articleId": 2021,
+            "articleTitle": "인프라 호환성 확인과 공정 연구 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/infra-compatibility-deadline/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1021:0",
+                "text": "D운영사는 서버 도입을 위해 2026년 10월 네트워크 호환성 검증을 진행한다고 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "D운영사는 서버 도입을 위해 2026년 10월 네트워크 호환성 검증을 진행한다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1022,
+            "articleId": 2022,
+            "articleTitle": "인프라 호환성 확인과 공정 연구 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/infra-compatibility-deadline/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1022:0",
+                "text": "A사는 연구 단계의 반도체 공정 실험 결과를 공개했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 연구 단계의 반도체 공정 실험 결과를 공개했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [],
+        "forbiddenProse": [
+          "호환성 검증을 완료했다",
+          "서버 도입이 완료됐다",
+          "운영 비용이 절감됐다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "infra-compatibility-deadline-market_investor",
+      "scenario": "infra-compatibility-deadline",
+      "request": {
+        "idempotencyKey": "eval:infra-compatibility-deadline:MARKET_INVESTOR",
+        "plan": "FREE",
+        "audiences": [
+          "MARKET_INVESTOR"
+        ],
+        "report": {
+          "id": 303,
+          "title": "인프라 호환성 확인과 공정 연구",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1021,
+            "articleId": 2021,
+            "articleTitle": "인프라 호환성 확인과 공정 연구 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/infra-compatibility-deadline/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1021:0",
+                "text": "D운영사는 서버 도입을 위해 2026년 10월 네트워크 호환성 검증을 진행한다고 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "D운영사는 서버 도입을 위해 2026년 10월 네트워크 호환성 검증을 진행한다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1022,
+            "articleId": 2022,
+            "articleTitle": "인프라 호환성 확인과 공정 연구 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/infra-compatibility-deadline/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1022:0",
+                "text": "A사는 연구 단계의 반도체 공정 실험 결과를 공개했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 연구 단계의 반도체 공정 실험 결과를 공개했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [],
+        "forbiddenProse": [
+          "호환성 검증을 완료했다",
+          "서버 도입이 완료됐다",
+          "운영 비용이 절감됐다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "infra-compatibility-deadline-it_infra",
+      "scenario": "infra-compatibility-deadline",
+      "request": {
+        "idempotencyKey": "eval:infra-compatibility-deadline:IT_INFRA",
+        "plan": "FREE",
+        "audiences": [
+          "IT_INFRA"
+        ],
+        "report": {
+          "id": 303,
+          "title": "인프라 호환성 확인과 공정 연구",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1021,
+            "articleId": 2021,
+            "articleTitle": "인프라 호환성 확인과 공정 연구 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/infra-compatibility-deadline/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1021:0",
+                "text": "D운영사는 서버 도입을 위해 2026년 10월 네트워크 호환성 검증을 진행한다고 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "D운영사는 서버 도입을 위해 2026년 10월 네트워크 호환성 검증을 진행한다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1022,
+            "articleId": 2022,
+            "articleTitle": "인프라 호환성 확인과 공정 연구 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/infra-compatibility-deadline/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1022:0",
+                "text": "A사는 연구 단계의 반도체 공정 실험 결과를 공개했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 연구 단계의 반도체 공정 실험 결과를 공개했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1021:0"
+        ],
+        "forbiddenProse": [
+          "호환성 검증을 완료했다",
+          "서버 도입이 완료됐다",
+          "운영 비용이 절감됐다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {
+          "1022": "low"
+        }
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "past-deadline-and-forecast-chip_maker",
+      "scenario": "past-deadline-and-forecast",
+      "request": {
+        "idempotencyKey": "eval:past-deadline-and-forecast:CHIP_MAKER",
+        "plan": "FREE",
+        "audiences": [
+          "CHIP_MAKER"
+        ],
+        "report": {
+          "id": 304,
+          "title": "지난 기한과 미래 목표의 시간 기준",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1031,
+            "articleId": 2031,
+            "articleTitle": "지난 기한과 미래 목표의 시간 기준 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/past-deadline-and-forecast/0",
+            "publishedAt": "2024-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1031:0",
+                "text": "A사는 공정 인증 검증 기한을 2024년 10월로 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 공정 인증 검증 기한을 2024년 10월로 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1032,
+            "articleId": 2032,
+            "articleTitle": "지난 기한과 미래 목표의 시간 기준 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/past-deadline-and-forecast/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1032:0",
+                "text": "A사는 2027년 양산을 목표로 장비 검증을 준비한다고 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 2027년 양산을 목표로 장비 검증을 준비한다고 발표했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1032:0"
+        ],
+        "forbiddenProse": [
+          "2024년 기한이 임박했다",
+          "양산 준비가 완료됐다"
+        ],
+        "notUrgentFindingIds": [
+          1031
+        ],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "past-deadline-and-forecast-equipment_maker",
+      "scenario": "past-deadline-and-forecast",
+      "request": {
+        "idempotencyKey": "eval:past-deadline-and-forecast:EQUIPMENT_MAKER",
+        "plan": "FREE",
+        "audiences": [
+          "EQUIPMENT_MAKER"
+        ],
+        "report": {
+          "id": 304,
+          "title": "지난 기한과 미래 목표의 시간 기준",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1031,
+            "articleId": 2031,
+            "articleTitle": "지난 기한과 미래 목표의 시간 기준 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/past-deadline-and-forecast/0",
+            "publishedAt": "2024-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1031:0",
+                "text": "A사는 공정 인증 검증 기한을 2024년 10월로 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 공정 인증 검증 기한을 2024년 10월로 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1032,
+            "articleId": 2032,
+            "articleTitle": "지난 기한과 미래 목표의 시간 기준 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/past-deadline-and-forecast/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1032:0",
+                "text": "A사는 2027년 양산을 목표로 장비 검증을 준비한다고 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 2027년 양산을 목표로 장비 검증을 준비한다고 발표했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1032:0"
+        ],
+        "forbiddenProse": [
+          "2024년 기한이 임박했다",
+          "양산 준비가 완료됐다"
+        ],
+        "notUrgentFindingIds": [
+          1031
+        ],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "past-deadline-and-forecast-market_investor",
+      "scenario": "past-deadline-and-forecast",
+      "request": {
+        "idempotencyKey": "eval:past-deadline-and-forecast:MARKET_INVESTOR",
+        "plan": "FREE",
+        "audiences": [
+          "MARKET_INVESTOR"
+        ],
+        "report": {
+          "id": 304,
+          "title": "지난 기한과 미래 목표의 시간 기준",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1031,
+            "articleId": 2031,
+            "articleTitle": "지난 기한과 미래 목표의 시간 기준 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/past-deadline-and-forecast/0",
+            "publishedAt": "2024-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1031:0",
+                "text": "A사는 공정 인증 검증 기한을 2024년 10월로 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 공정 인증 검증 기한을 2024년 10월로 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1032,
+            "articleId": 2032,
+            "articleTitle": "지난 기한과 미래 목표의 시간 기준 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/past-deadline-and-forecast/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1032:0",
+                "text": "A사는 2027년 양산을 목표로 장비 검증을 준비한다고 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 2027년 양산을 목표로 장비 검증을 준비한다고 발표했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [],
+        "forbiddenProse": [
+          "2024년 기한이 임박했다",
+          "양산 준비가 완료됐다"
+        ],
+        "notUrgentFindingIds": [
+          1031
+        ],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "past-deadline-and-forecast-it_infra",
+      "scenario": "past-deadline-and-forecast",
+      "request": {
+        "idempotencyKey": "eval:past-deadline-and-forecast:IT_INFRA",
+        "plan": "FREE",
+        "audiences": [
+          "IT_INFRA"
+        ],
+        "report": {
+          "id": 304,
+          "title": "지난 기한과 미래 목표의 시간 기준",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1031,
+            "articleId": 2031,
+            "articleTitle": "지난 기한과 미래 목표의 시간 기준 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/past-deadline-and-forecast/0",
+            "publishedAt": "2024-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1031:0",
+                "text": "A사는 공정 인증 검증 기한을 2024년 10월로 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 공정 인증 검증 기한을 2024년 10월로 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1032,
+            "articleId": 2032,
+            "articleTitle": "지난 기한과 미래 목표의 시간 기준 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/past-deadline-and-forecast/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1032:0",
+                "text": "A사는 2027년 양산을 목표로 장비 검증을 준비한다고 발표했다.",
+                "claimType": "FORECAST",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 2027년 양산을 목표로 장비 검증을 준비한다고 발표했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [],
+        "forbiddenProse": [
+          "2024년 기한이 임박했다",
+          "양산 준비가 완료됐다"
+        ],
+        "notUrgentFindingIds": [
+          1031
+        ],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "attributed-opinion-and-no-information-chip_maker",
+      "scenario": "attributed-opinion-and-no-information",
+      "request": {
+        "idempotencyKey": "eval:attributed-opinion-and-no-information:CHIP_MAKER",
+        "plan": "FREE",
+        "audiences": [
+          "CHIP_MAKER"
+        ],
+        "report": {
+          "id": 305,
+          "title": "발언자 견해와 정보 미제공의 구분",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1041,
+            "articleId": 2041,
+            "articleTitle": "발언자 견해와 정보 미제공의 구분 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/attributed-opinion-and-no-information/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1041:0",
+                "text": "E연구원은 반도체 수요가 증가할 가능성이 있다는 견해를 밝혔다.",
+                "claimType": "OPINION",
+                "attributedTo": "E연구원",
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "E연구원은 반도체 수요가 증가할 가능성이 있다는 견해를 밝혔다."
+              }
+            ]
+          },
+          {
+            "id": 1042,
+            "articleId": 2042,
+            "articleTitle": "발언자 견해와 정보 미제공의 구분 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/attributed-opinion-and-no-information/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1042:0",
+                "text": "A사의 자료에는 신규 설비 발주 계약 금액이 제공되지 않았다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사의 자료에는 신규 설비 발주 계약 금액이 제공되지 않았다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [],
+        "forbiddenProse": [
+          "설비 발주 계약이 없다",
+          "수요 증가가 확정됐다",
+          "실제 매출이 증가했다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "attributed-opinion-and-no-information-equipment_maker",
+      "scenario": "attributed-opinion-and-no-information",
+      "request": {
+        "idempotencyKey": "eval:attributed-opinion-and-no-information:EQUIPMENT_MAKER",
+        "plan": "FREE",
+        "audiences": [
+          "EQUIPMENT_MAKER"
+        ],
+        "report": {
+          "id": 305,
+          "title": "발언자 견해와 정보 미제공의 구분",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1041,
+            "articleId": 2041,
+            "articleTitle": "발언자 견해와 정보 미제공의 구분 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/attributed-opinion-and-no-information/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1041:0",
+                "text": "E연구원은 반도체 수요가 증가할 가능성이 있다는 견해를 밝혔다.",
+                "claimType": "OPINION",
+                "attributedTo": "E연구원",
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "E연구원은 반도체 수요가 증가할 가능성이 있다는 견해를 밝혔다."
+              }
+            ]
+          },
+          {
+            "id": 1042,
+            "articleId": 2042,
+            "articleTitle": "발언자 견해와 정보 미제공의 구분 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/attributed-opinion-and-no-information/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1042:0",
+                "text": "A사의 자료에는 신규 설비 발주 계약 금액이 제공되지 않았다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사의 자료에는 신규 설비 발주 계약 금액이 제공되지 않았다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1042:0"
+        ],
+        "forbiddenProse": [
+          "설비 발주 계약이 없다",
+          "수요 증가가 확정됐다",
+          "실제 매출이 증가했다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "attributed-opinion-and-no-information-market_investor",
+      "scenario": "attributed-opinion-and-no-information",
+      "request": {
+        "idempotencyKey": "eval:attributed-opinion-and-no-information:MARKET_INVESTOR",
+        "plan": "FREE",
+        "audiences": [
+          "MARKET_INVESTOR"
+        ],
+        "report": {
+          "id": 305,
+          "title": "발언자 견해와 정보 미제공의 구분",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1041,
+            "articleId": 2041,
+            "articleTitle": "발언자 견해와 정보 미제공의 구분 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/attributed-opinion-and-no-information/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1041:0",
+                "text": "E연구원은 반도체 수요가 증가할 가능성이 있다는 견해를 밝혔다.",
+                "claimType": "OPINION",
+                "attributedTo": "E연구원",
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "E연구원은 반도체 수요가 증가할 가능성이 있다는 견해를 밝혔다."
+              }
+            ]
+          },
+          {
+            "id": 1042,
+            "articleId": 2042,
+            "articleTitle": "발언자 견해와 정보 미제공의 구분 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/attributed-opinion-and-no-information/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1042:0",
+                "text": "A사의 자료에는 신규 설비 발주 계약 금액이 제공되지 않았다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사의 자료에는 신규 설비 발주 계약 금액이 제공되지 않았다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1041:0"
+        ],
+        "forbiddenProse": [
+          "설비 발주 계약이 없다",
+          "수요 증가가 확정됐다",
+          "실제 매출이 증가했다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "attributed-opinion-and-no-information-it_infra",
+      "scenario": "attributed-opinion-and-no-information",
+      "request": {
+        "idempotencyKey": "eval:attributed-opinion-and-no-information:IT_INFRA",
+        "plan": "FREE",
+        "audiences": [
+          "IT_INFRA"
+        ],
+        "report": {
+          "id": 305,
+          "title": "발언자 견해와 정보 미제공의 구분",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1041,
+            "articleId": 2041,
+            "articleTitle": "발언자 견해와 정보 미제공의 구분 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/attributed-opinion-and-no-information/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1041:0",
+                "text": "E연구원은 반도체 수요가 증가할 가능성이 있다는 견해를 밝혔다.",
+                "claimType": "OPINION",
+                "attributedTo": "E연구원",
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "E연구원은 반도체 수요가 증가할 가능성이 있다는 견해를 밝혔다."
+              }
+            ]
+          },
+          {
+            "id": 1042,
+            "articleId": 2042,
+            "articleTitle": "발언자 견해와 정보 미제공의 구분 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/attributed-opinion-and-no-information/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1042:0",
+                "text": "A사의 자료에는 신규 설비 발주 계약 금액이 제공되지 않았다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사의 자료에는 신규 설비 발주 계약 금액이 제공되지 않았다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [],
+        "forbiddenProse": [
+          "설비 발주 계약이 없다",
+          "수요 증가가 확정됐다",
+          "실제 매출이 증가했다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {}
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "production-halt-and-unrelated-ad-chip_maker",
+      "scenario": "production-halt-and-unrelated-ad",
+      "request": {
+        "idempotencyKey": "eval:production-halt-and-unrelated-ad:CHIP_MAKER",
+        "plan": "FREE",
+        "audiences": [
+          "CHIP_MAKER"
+        ],
+        "report": {
+          "id": 306,
+          "title": "가동 중단과 관련 없는 소비자 광고",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1051,
+            "articleId": 2051,
+            "articleTitle": "가동 중단과 관련 없는 소비자 광고 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/production-halt-and-unrelated-ad/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1051:0",
+                "text": "A사는 P공정 생산라인 가동을 즉시 중단한다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 P공정 생산라인 가동을 즉시 중단한다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1052,
+            "articleId": 2052,
+            "articleTitle": "가동 중단과 관련 없는 소비자 광고 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/production-halt-and-unrelated-ad/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1052:0",
+                "text": "F유통사는 소비자 스마트폰 할인 행사를 안내했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "F유통사는 소비자 스마트폰 할인 행사를 안내했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1051:0"
+        ],
+        "forbiddenProse": [
+          "공급 감소 규모가 확정됐다",
+          "장비 교체 계약이 체결됐다",
+          "서버 공급이 중단됐다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {
+          "1052": "low",
+          "1051": "high"
+        }
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "production-halt-and-unrelated-ad-equipment_maker",
+      "scenario": "production-halt-and-unrelated-ad",
+      "request": {
+        "idempotencyKey": "eval:production-halt-and-unrelated-ad:EQUIPMENT_MAKER",
+        "plan": "FREE",
+        "audiences": [
+          "EQUIPMENT_MAKER"
+        ],
+        "report": {
+          "id": 306,
+          "title": "가동 중단과 관련 없는 소비자 광고",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1051,
+            "articleId": 2051,
+            "articleTitle": "가동 중단과 관련 없는 소비자 광고 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/production-halt-and-unrelated-ad/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1051:0",
+                "text": "A사는 P공정 생산라인 가동을 즉시 중단한다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 P공정 생산라인 가동을 즉시 중단한다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1052,
+            "articleId": 2052,
+            "articleTitle": "가동 중단과 관련 없는 소비자 광고 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/production-halt-and-unrelated-ad/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1052:0",
+                "text": "F유통사는 소비자 스마트폰 할인 행사를 안내했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "F유통사는 소비자 스마트폰 할인 행사를 안내했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [],
+        "forbiddenProse": [
+          "공급 감소 규모가 확정됐다",
+          "장비 교체 계약이 체결됐다",
+          "서버 공급이 중단됐다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {
+          "1052": "low"
+        }
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "production-halt-and-unrelated-ad-market_investor",
+      "scenario": "production-halt-and-unrelated-ad",
+      "request": {
+        "idempotencyKey": "eval:production-halt-and-unrelated-ad:MARKET_INVESTOR",
+        "plan": "FREE",
+        "audiences": [
+          "MARKET_INVESTOR"
+        ],
+        "report": {
+          "id": 306,
+          "title": "가동 중단과 관련 없는 소비자 광고",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1051,
+            "articleId": 2051,
+            "articleTitle": "가동 중단과 관련 없는 소비자 광고 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/production-halt-and-unrelated-ad/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1051:0",
+                "text": "A사는 P공정 생산라인 가동을 즉시 중단한다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 P공정 생산라인 가동을 즉시 중단한다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1052,
+            "articleId": 2052,
+            "articleTitle": "가동 중단과 관련 없는 소비자 광고 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/production-halt-and-unrelated-ad/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1052:0",
+                "text": "F유통사는 소비자 스마트폰 할인 행사를 안내했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "F유통사는 소비자 스마트폰 할인 행사를 안내했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [
+          "1051:0"
+        ],
+        "forbiddenProse": [
+          "공급 감소 규모가 확정됐다",
+          "장비 교체 계약이 체결됐다",
+          "서버 공급이 중단됐다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {
+          "1052": "low"
+        }
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    },
+    {
+      "caseId": "production-halt-and-unrelated-ad-it_infra",
+      "scenario": "production-halt-and-unrelated-ad",
+      "request": {
+        "idempotencyKey": "eval:production-halt-and-unrelated-ad:IT_INFRA",
+        "plan": "FREE",
+        "audiences": [
+          "IT_INFRA"
+        ],
+        "report": {
+          "id": 306,
+          "title": "가동 중단과 관련 없는 소비자 광고",
+          "reportScope": "DAILY",
+          "reportDate": "2026-09-30",
+          "reportEndDate": null
+        },
+        "findings": [
+          {
+            "id": 1051,
+            "articleId": 2051,
+            "articleTitle": "가동 중단과 관련 없는 소비자 광고 · 근거 1",
+            "canonicalUrl": "https://example.invalid/report-insight/production-halt-and-unrelated-ad/0",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1051:0",
+                "text": "A사는 P공정 생산라인 가동을 즉시 중단한다고 발표했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "A사는 P공정 생산라인 가동을 즉시 중단한다고 발표했다."
+              }
+            ]
+          },
+          {
+            "id": 1052,
+            "articleId": 2052,
+            "articleTitle": "가동 중단과 관련 없는 소비자 광고 · 근거 2",
+            "canonicalUrl": "https://example.invalid/report-insight/production-halt-and-unrelated-ad/1",
+            "publishedAt": "2026-09-30",
+            "topicName": "반도체 및 IT 인프라",
+            "claims": [
+              {
+                "id": "1052:0",
+                "text": "F유통사는 소비자 스마트폰 할인 행사를 안내했다.",
+                "claimType": "FACT",
+                "attributedTo": null,
+                "evidenceSentenceIds": [
+                  0
+                ]
+              }
+            ],
+            "sentences": [
+              {
+                "index": 0,
+                "text": "F유통사는 소비자 스마트폰 할인 행사를 안내했다."
+              }
+            ]
+          }
+        ]
+      },
+      "annotations": {
+        "requiredSynthesisClaimIds": [],
+        "forbiddenProse": [
+          "공급 감소 규모가 확정됐다",
+          "장비 교체 계약이 체결됐다",
+          "서버 공급이 중단됐다"
+        ],
+        "notUrgentFindingIds": [],
+        "expectedImportanceByFinding": {
+          "1052": "low"
+        }
+      },
+      "reviewNote": "합성 자료로 작성한 검토 기준이며, 실제 모델 품질 측정이나 모든 가능한 올바른 해석의 정답은 아닙니다. 관점의 업무 연결·상충 범위·조건을 원문과 함께 검토합니다."
+    }
+  ]
+}

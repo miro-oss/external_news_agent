@@ -23,6 +23,7 @@ public class AgentProperties implements InitializingBean {
     private Duration relevanceTimeout = Duration.ofSeconds(240);
     private Duration insightTimeout = Duration.ofSeconds(60);
     private Duration reportTimeout = Duration.ofSeconds(120);
+    private Duration reportInsightTimeout = Duration.ofSeconds(150);
     private AgentPlan defaultPlan = AgentPlan.FREE;
     private boolean allowRunOverride = true;
     private String analysisPromptVersion =
@@ -39,6 +40,8 @@ public class AgentProperties implements InitializingBean {
 
     @Override
     public void afterPropertiesSet() {
+        if (reportInsightTimeout == null || reportInsightTimeout.isNegative() || reportInsightTimeout.isZero())
+            throw new IllegalStateException("news.agent.report-insight-timeout은 양수여야 합니다.");
         if (relevanceTimeout == null || relevanceTimeout.isNegative() || relevanceTimeout.isZero()) {
             throw new IllegalStateException("news.agent.relevance-timeout은 양수여야 합니다.");
         }
@@ -132,6 +135,9 @@ public class AgentProperties implements InitializingBean {
     public Duration getReportTimeout() {
         return reportTimeout;
     }
+
+    public Duration getReportInsightTimeout() { return reportInsightTimeout; }
+    public void setReportInsightTimeout(Duration timeout) { this.reportInsightTimeout = timeout; }
 
     public Duration getInsightTimeout() {
         return insightTimeout;

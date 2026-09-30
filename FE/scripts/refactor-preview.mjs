@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { reportChangesFixture, reportChangesVariants } from './report-changes-fixtures.mjs';
+import { reportInsightFixture, reportInsightVariants } from './report-insight-fixtures.mjs';
 import { weeklyReportFixture, topicWeeklyReportFixture } from './weekly-report-fixtures.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const portFlag = process.argv.indexOf('--port');
@@ -271,6 +272,8 @@ initialReports.push(weeklyReportFixture(initialReports.find(report => report.id 
 let reports = structuredClone(initialReports);
 let reportDeleteError = false;
 let reportChangesVariant = 'ready';
+let reportInsightVariant = 'missing';
+const savedReportInsights = new Map();
 let topicWeeklyVariant = 'ready';
 let pendingTopicWeekly = null;
 let pendingTopicWeeklyPolls = 0;
@@ -314,6 +317,8 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 reports = structuredClone(initialReports);
                                 reportDeleteError = false;
                                 reportChangesVariant = 'ready';
+                                reportInsightVariant = 'missing';
+                                savedReportInsights.clear();
                                 topicWeeklyVariant = 'ready';
                                 pendingTopicWeekly = null;
                                 pendingTopicWeeklyPolls = 0;
@@ -509,6 +514,13 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                     return copy;
                                 });
                                 return json(res, { reportCount: reports.length, count, highCount: count - mediumCount, mediumCount });
+                            }
+                            if (path === '/__qa/report-insights') {
+                                const variant = body.variant ?? url.searchParams.get('variant') ?? 'ready';
+                                if (!reportInsightVariants.includes(variant)) return json(res, { error: 'Unknown report insight variant.' }, 400);
+                                reportInsightVariant = variant;
+                                savedReportInsights.clear();
+                                return json(res, { variant });
                             }
                             if (path === '/__qa/requests')
                                 return json(res, requests);
@@ -730,6 +742,33 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         }
                         else if (path === '/api/news/reports/latest')
                             result = reports.find(r => r.reportScope === (url.searchParams.get('reportScope') || 'RUN')) || null;
+                        else if ((match = path.match(/^\/api\/news\/reports\/(\d+)\/insights$/))) {
+                            const id = Number(match[1]);
+                            const report = reports.find(item => item.id === id);
+                            if (!report) return json(res, { isSuccess: false, code: 'REPORT404', message: '보고서를 찾을 수 없습니다.', result: {} }, 404);
+                            const audience = method === 'POST' ? body.audiences?.[0] : url.searchParams.get('audience');
+                            if (!['CHIP_MAKER', 'EQUIPMENT_MAKER', 'IT_INFRA', 'MARKET_INVESTOR'].includes(audience))
+                                return json(res, { isSuccess: false, code: 'AUDIENCE400', message: '지원하지 않는 관점입니다.', result: {} }, 400);
+                            const key = `${id}:${audience}:${JSON.stringify(report.findings)}`;
+                            const cached = savedReportInsights.get(key);
+                            const variants = {
+                                'no-evidence': ['COMMON409', 409, '이 리포트는 인사이트에 사용할 검증된 근거가 없습니다.'],
+                                disabled: ['COMMON409', 409, '리포트 관점 인사이트 기능이 현재 비활성화되어 있습니다.'],
+                                inflight: ['COMMON409', 409, '동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.'],
+                                quota: ['QUOTA429', 429, '인사이트 크레딧을 모두 사용했습니다.'],
+                                error: ['COMMON500', 500, '리포트 관점 인사이트 생성에 실패했습니다.'],
+                            };
+                            if (reportInsightVariant === 'lookup-error' && method === 'GET')
+                                return json(res, { isSuccess: false, code: 'COMMON500', message: '저장된 관점 분석을 불러오지 못했습니다.', result: {} }, 500);
+                            if (variants[reportInsightVariant] && method === 'POST') {
+                                const [code, status, message] = variants[reportInsightVariant];
+                                return json(res, { isSuccess: false, code, message, result: {} }, status);
+                            }
+                            if (method === 'GET' && !cached && ['missing', 'disabled', 'inflight', 'quota', 'error', 'no-evidence'].includes(reportInsightVariant))
+                                return json(res, { isSuccess: false, code: 'COMMON404', message: '저장된 리포트 관점 인사이트가 없습니다.', result: {} }, 404);
+                            result = cached ?? reportInsightFixture(report, audience, reportInsightVariant);
+                            if (method === 'POST') { result = { ...result, cached: Boolean(cached) }; savedReportInsights.set(key, { ...result, cached: true }); }
+                        }
                         else if ((match = path.match(/^\/api\/news\/reports\/(\d+)\/changes$/))) {
                             const id = Number(match[1]);
                             const report = reports.find(r => r.id === id);

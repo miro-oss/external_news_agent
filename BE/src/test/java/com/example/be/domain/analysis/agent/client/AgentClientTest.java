@@ -9,6 +9,7 @@ import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
 import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentReportInsightRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportChangesRequest;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceRequest;
@@ -49,6 +50,32 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
 class AgentClientTest {
+
+    @Test
+    void reportInsightUsesReportClientAndPreservesOriginalClaimAttributionAndEvidenceIndices() {
+        RestClient.Builder analyzeBuilder = RestClient.builder();
+        RestClient.Builder insightBuilder = RestClient.builder();
+        RestClient.Builder reportBuilder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(reportBuilder).build();
+        AgentClient client = new AgentClient(analyzeBuilder, insightBuilder, reportBuilder, properties());
+        var request = new AgentReportInsightRequest("report-insight:test", AgentPlan.PAID, List.of("CHIP_MAKER"),
+                new AgentReportInsightRequest.ReportPayload(101L, "일일 보고서", "DAILY", java.time.LocalDate.of(2026, 9, 30), null),
+                List.of(new AgentReportInsightRequest.FindingPayload(50L, 150L, "당시 제목", "https://example.com/150",
+                        "2026-09-30", "HBM", List.of(new AgentReportInsightRequest.ClaimPayload("50:0", "의견 원문", "OPINION", "발언자", List.of(0))),
+                        List.of(new AgentReportInsightRequest.SentencePayload(0, "발언자가 의견을 밝혔다.")))));
+        server.expect(requestTo("http://127.0.0.1:8088/v1/report-insight"))
+                .andExpect(method(HttpMethod.POST)).andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
+                .andExpect(jsonPath("$.report.id").value(101)).andExpect(jsonPath("$.report.reportDate").value("2026-09-30"))
+                .andExpect(jsonPath("$.findings[0].claims[0].claimType").value("OPINION"))
+                .andExpect(jsonPath("$.findings[0].claims[0].attributedTo").value("발언자"))
+                .andExpect(jsonPath("$.findings[0].claims[0].evidenceSentenceIds[0]").value(0))
+                .andRespond(withSuccess("""
+                        {"insights":[],"meta":{"provider":"mock","model":"mock-v1","promptVersion":"report-insight.ko.v1",
+                         "inputTokens":0,"outputTokens":0,"costUsd":0,"credits":0,"mock":true,"truncated":false}}
+                        """, MediaType.APPLICATION_JSON));
+        assertEquals("report-insight.ko.v1", client.reportInsight(request).meta().promptVersion());
+        server.verify();
+    }
 
     @Test
     void weeklyRequestSerializesFrozenDailyContentWithDatesAndKnownIssueIds() {
@@ -113,20 +140,24 @@ class AgentClientTest {
         properties.setAnalyzeTimeout(Duration.ofSeconds(91));
         properties.setInsightTimeout(Duration.ofSeconds(61));
         properties.setReportTimeout(Duration.ofSeconds(121));
+        properties.setReportInsightTimeout(Duration.ofSeconds(151));
         properties.setRelevanceTimeout(Duration.ofSeconds(240));
         RestClientFactory factory = mock(RestClientFactory.class);
         RestClient.Builder analyzeBuilder = RestClient.builder();
         RestClient.Builder insightBuilder = RestClient.builder();
         RestClient.Builder reportBuilder = RestClient.builder();
         RestClient.Builder relevanceBuilder = RestClient.builder();
+        RestClient.Builder reportInsightBuilder = RestClient.builder();
         MockRestServiceServer analyzeServer = MockRestServiceServer.bindTo(analyzeBuilder).build();
         MockRestServiceServer insightServer = MockRestServiceServer.bindTo(insightBuilder).build();
         MockRestServiceServer reportServer = MockRestServiceServer.bindTo(reportBuilder).build();
         MockRestServiceServer relevanceServer = MockRestServiceServer.bindTo(relevanceBuilder).build();
+        MockRestServiceServer reportInsightServer = MockRestServiceServer.bindTo(reportInsightBuilder).build();
         when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(91))).thenReturn(analyzeBuilder);
         when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(61))).thenReturn(insightBuilder);
         when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(121))).thenReturn(reportBuilder);
         when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(240))).thenReturn(relevanceBuilder);
+        when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(151))).thenReturn(reportInsightBuilder);
         AgentClient client = new AgentClient(factory, properties);
         analyzeServer.expect(requestTo("http://127.0.0.1:8088/v1/analyze"))
                 .andRespond(withSuccess(responseJson(), MediaType.APPLICATION_JSON));
@@ -134,6 +165,11 @@ class AgentClientTest {
                 .andRespond(withSuccess(insightResponseJson(), MediaType.APPLICATION_JSON));
         reportServer.expect(requestTo("http://127.0.0.1:8088/v1/report"))
                 .andRespond(withSuccess(reportResponseJson(), MediaType.APPLICATION_JSON));
+        reportInsightServer.expect(requestTo("http://127.0.0.1:8088/v1/report-insight"))
+                .andRespond(withSuccess("""
+                        {"insights":[],"meta":{"provider":"mock","model":"mock-v1","promptVersion":"report-insight.ko.v1",
+                        "inputTokens":0,"outputTokens":0,"costUsd":0,"credits":0,"mock":true,"truncated":false}}
+                        """, MediaType.APPLICATION_JSON));
         relevanceServer.expect(requestTo("http://127.0.0.1:8088/v1/topic-relevance"))
                 .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
                 .andRespond(withSuccess("""
@@ -147,15 +183,19 @@ class AgentClientTest {
         client.analyze(request());
         client.insight(insightRequest());
         client.report(reportRequest());
+        client.reportInsight(new AgentReportInsightRequest("test-report-insight", AgentPlan.FREE, List.of("CHIP_MAKER"),
+                new AgentReportInsightRequest.ReportPayload(101L, "보고서", "DAILY", java.time.LocalDate.of(2026, 9, 30), null), List.of()));
 
         analyzeServer.verify();
         insightServer.verify();
         reportServer.verify();
         relevanceServer.verify();
+        reportInsightServer.verify();
         verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(91));
         verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(61));
         verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(121));
         verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(240));
+        verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(151));
         verifyNoMoreInteractions(factory);
     }
 

@@ -13,6 +13,8 @@ import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyRequest;
 import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentReportInsightRequest;
+import com.example.be.domain.analysis.agent.dto.AgentReportInsightResponse;
 import com.example.be.domain.analysis.agent.dto.AgentWeeklyReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
 import com.example.be.domain.analysis.agent.entity.AgentRun;
@@ -566,6 +568,58 @@ public class AgentRunRecorder {
                 .startedAt(startedAt)
                 .finishedAt(now())
                 .build());
+    }
+
+    @Transactional
+    public boolean recordReportInsightSuccess(Long runId, AgentReportInsightRequest request,
+            AgentReportInsightResponse response, ReportInsightAuditContext context, LocalDateTime startedAt) {
+        var meta = response.meta();
+        return repository.insertIfAbsent(AgentRun.builder().collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey()).agentTask(AgentTask.INSIGHT)
+                .targetType(AgentTargetType.REPORT).targetId(request.report().id())
+                .status(meta.mock() ? AgentRunStatus.MOCK : AgentRunStatus.SUCCESS)
+                .promptVersion(meta.promptVersion()).llmProvider(meta.provider()).llmModel(meta.model())
+                .llmPlan(request.plan()).inputTokens(meta.inputTokens()).outputTokens(meta.outputTokens())
+                .costUsd(meta.costUsd()).credits(meta.credits()).requestHash(hash(request))
+                .actionPayload(objectMapper.writeValueAsString(context.withExecution("RESPONSE",
+                        usageCompleteness(meta.inputTokens(), meta.outputTokens(), meta.costUsd(), meta.credits()))))
+                .startedAt(startedAt).finishedAt(now()).build());
+    }
+
+    @Transactional
+    public boolean recordReportInsightFailure(Long runId, AgentReportInsightRequest request,
+            AgentClientException exception, ReportInsightAuditContext context, LocalDateTime startedAt) {
+        var usage = exception.getUsage();
+        var metadata = exception.getExecutionMetadata();
+        AgentTimeoutPhase timeout = switch (exception.getTimeoutPhase()) {
+            case CONNECT -> AgentTimeoutPhase.CONNECT;
+            case READ -> AgentTimeoutPhase.READ;
+            case NONE -> null;
+        };
+        return repository.insertIfAbsent(AgentRun.builder().collectionRunId(runId)
+                .idempotencyKey(request.idempotencyKey()).agentTask(AgentTask.INSIGHT)
+                .targetType(AgentTargetType.REPORT).targetId(request.report().id()).status(AgentRunStatus.FAILED)
+                .failureCode(exception.getCode()).failureMessage(truncate(exception.getMessage())).timeoutPhase(timeout)
+                .promptVersion(metadata == null ? null : validFailureMetadata(metadata.promptVersion(), 50))
+                .llmProvider(metadata == null ? null : validFailureMetadata(metadata.provider(), 30))
+                .llmModel(metadata == null ? null : validFailureMetadata(metadata.model(), 100)).llmPlan(request.plan())
+                .inputTokens(usage == null ? null : usage.inputTokens()).outputTokens(usage == null ? null : usage.outputTokens())
+                .costUsd(usage == null ? null : usage.costUsd()).credits(usage == null ? null : usage.credits())
+                .requestHash(hash(request)).actionPayload(objectMapper.writeValueAsString(context.withExecution(
+                        metadata == null ? "UNAVAILABLE" : metadata.source(), failureUsageCompleteness(usage, metadata))))
+                .startedAt(startedAt).finishedAt(now()).build());
+    }
+
+    @Transactional
+    public void recordReportInsightCacheHit(Long runId, Long reportId, ReportInsightAuditContext context,
+            LocalDateTime startedAt) {
+        repository.insertIfAbsent(AgentRun.builder().collectionRunId(runId)
+                .idempotencyKey("report-insight-cache:" + UUID.randomUUID()).agentTask(AgentTask.INSIGHT)
+                .targetType(AgentTargetType.REPORT).targetId(reportId).status(AgentRunStatus.REUSED)
+                .promptVersion(context.promptVersion()).llmPlan(null).inputTokens(0L).outputTokens(0L)
+                .costUsd(BigDecimal.ZERO).credits(BigDecimal.ZERO).requestHash(context.inputHash())
+                .actionPayload(objectMapper.writeValueAsString(context.withExecution("CACHE", "COMPLETE")))
+                .startedAt(startedAt).finishedAt(now()).build());
     }
 
     private String hash(Object request) {

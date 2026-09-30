@@ -170,6 +170,28 @@ class AgentQuotaServiceTest {
     }
 
     @Test
+    void chargedFailedReportInsightCanRetryWithoutReleasingOrReplacingOriginalCharge() {
+        String key = "report-insight:10:failed";
+        String retryKey = key + ":retry:1";
+        var retry = new QuotaReservation(2L, null, retryKey, AgentTask.INSIGHT, AgentPlan.FREE, BigDecimal.ONE);
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of("CONSUMED"));
+        when(repository.isFailedReportInsight(key)).thenReturn(true);
+        when(repository.findByIdempotencyKey(retryKey)).thenReturn(Optional.of(retry));
+        assertEquals(retry, service.reserveReportInsight(null, key, AgentPlan.FREE));
+        verify(repository).insert(eq(null), eq(retryKey), eq(AgentTask.INSIGHT), eq(AgentPlan.FREE), eq(BigDecimal.ONE), any());
+        verify(repository, never()).release(any(), any());
+        verify(repository, never()).consume(any(), any(), any());
+    }
+
+    @Test
+    void consumedReportInsightWithoutFailedAuditCannotRetry() {
+        String key = "report-insight:10:success";
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of("CONSUMED"));
+        assertThrows(DuplicateQuotaReservationException.class, () -> service.reserveReportInsight(null, key, AgentPlan.FREE));
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void skipsAllReleasedInsightAttemptsForSecondRetry() {
         String key = "insight:ISSUE:88:released-twice";
         QuotaReservation retryReservation = new QuotaReservation(

@@ -48,6 +48,16 @@ public class AgentQuotaService {
     public QuotaReservation reserveInsight(Long runId,
                                            String baseKey,
                                            AgentPlan plan) {
+        return reserveInsightAttempt(runId, baseKey, plan, false);
+    }
+
+    @Transactional
+    public QuotaReservation reserveReportInsight(Long runId, String baseKey, AgentPlan plan) {
+        return reserveInsightAttempt(runId, baseKey, plan, true);
+    }
+
+    private QuotaReservation reserveInsightAttempt(Long runId, String baseKey, AgentPlan plan,
+            boolean allowChargedReportFailure) {
         repository.lockSingletonSettings();
         releaseExpiredReservations();
         String candidate = baseKey;
@@ -57,7 +67,8 @@ public class AgentQuotaService {
             if (existingStatus.isEmpty()) {
                 return createReservation(runId, candidate, AgentTask.INSIGHT, plan);
             }
-            if (!"RELEASED".equals(existingStatus.get())) {
+            if (!"RELEASED".equals(existingStatus.get()) && !(allowChargedReportFailure
+                    && "CONSUMED".equals(existingStatus.get()) && repository.isFailedReportInsight(candidate))) {
                 throw new DuplicateQuotaReservationException(candidate, existingStatus.get());
             }
             // Preserve each attempt so a late completion cannot settle the retry's reservation.

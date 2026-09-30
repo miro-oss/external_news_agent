@@ -1,5 +1,6 @@
 """Request-bound OpenAI schemas. Public semantic validators remain authoritative."""
 
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -15,6 +16,12 @@ from app.schemas.evidence import EvidenceBatchOutput, EvidenceClaim
 from app.schemas.insight import InsightOutput, InsightRequest
 from app.schemas.report import ReportOutput, ReportRequest
 from app.schemas.report_changes import ReportChangesOutput, ReportChangesRequest
+from app.schemas.report_insight import (
+    ReportInsightMapOutput,
+    ReportInsightOutput,
+    ReportInsightReduceOutput,
+    ReportInsightRequest,
+)
 
 
 def _integer_choices(ids: list[int]) -> dict[str, Any]:
@@ -36,6 +43,21 @@ def _array_choices(array: dict[str, Any], ids: list[int]) -> None:
         array["items"] = _integer_choices(ids)
     else:
         array["maxItems"] = 0
+
+
+def _report_claim_choices(ids: list[str]) -> dict[str, Any]:
+    # Fifty reports can contain 48 grounded keypoints each. Enumerating these
+    # strings globally and again per finding exceeds OpenAI's 1,000-enum budget.
+    # Factor an exact anchored pattern by finding, without truncating evidence.
+    groups: dict[str, list[str]] = {}
+    for claim_id in ids:
+        finding_id, point_index = claim_id.split(":")
+        groups.setdefault(finding_id, []).append(point_index)
+    alternatives = [
+        re.escape(finding_id) + ":(?:" + "|".join(map(re.escape, indices)) + ")"
+        for finding_id, indices in groups.items()
+    ]
+    return {"type": "string", "pattern": "^(?:" + "|".join(alternatives) + ")$"}
 
 
 def analysis_schema(
@@ -143,16 +165,97 @@ def report_changes_schema(request: ReportChangesRequest) -> dict[str, Any]:
             },
         }
         for name, claims in (
-            ("previousClaimIds", candidate.previous), ("currentClaimIds", candidate.current),
+            ("previousClaimIds", candidate.previous),
+            ("currentClaimIds", candidate.current),
         ):
             fields[name] = {
                 "type": "array",
                 "items": {"type": "string", "enum": [claim.id for claim in claims]}
-                if claims else {"type": "string"},
+                if claims
+                else {"type": "string"},
                 "maxItems": len(claims),
             }
         entries[f"candidate{index}"] = _object(fields)
     schema["properties"]["items"] = _object(entries)
+    return schema
+
+
+def report_insight_schema(request: ReportInsightRequest) -> dict[str, Any]:
+    """Bind all references to the report snapshot, including each assessment's source."""
+    schema = ReportInsightOutput.model_json_schema(by_alias=True)
+    definitions = schema["$defs"]
+    definitions["ReportAudienceInsight"]["properties"]["audience"]["enum"] = list(request.audiences)
+    claim_ids = [claim.id for finding in request.findings for claim in finding.claims]
+    definitions["AllowedReportClaimId"] = _report_claim_choices(claim_ids)
+    for name in ("ReportInsightOverview", "ReportInsightImplication", "ReportInsightWatchItem"):
+        definitions[name]["properties"]["basisClaimIds"]["items"] = {
+            "$ref": "#/$defs/AllowedReportClaimId"
+        }
+    properties = definitions["ReportInsightAssessment"]["properties"]
+    definitions["ReportInsightAssessment"] = {
+        "anyOf": [
+            _object(
+                {
+                    **deepcopy(properties),
+                    "findingId": {"type": "integer", "const": finding.id},
+                    "basisClaimIds": {
+                        **deepcopy(properties["basisClaimIds"]),
+                        "items": _report_claim_choices([claim.id for claim in finding.claims]),
+                        "maxItems": len(finding.claims),
+                    },
+                }
+            )
+            for finding in request.findings
+        ]
+    }
+    assessments = definitions["ReportAudienceInsight"]["properties"]["assessments"]
+    assessments.update(minItems=len(request.findings), maxItems=len(request.findings))
+    schema["properties"]["insights"].update(
+        minItems=len(request.audiences), maxItems=len(request.audiences)
+    )
+    return schema
+
+
+def report_insight_map_schema(request: ReportInsightRequest) -> dict[str, Any]:
+    schema = ReportInsightMapOutput.model_json_schema(by_alias=True)
+    shared = report_insight_schema(request)
+    schema["$defs"]["ReportInsightAssessment"] = shared["$defs"]["ReportInsightAssessment"]
+    properties = schema["$defs"]["ReportInsightMapAudience"]["properties"]
+    properties["audience"]["enum"] = list(request.audiences)
+    properties["assessments"].update(minItems=len(request.findings), maxItems=len(request.findings))
+    schema["properties"]["insights"].update(
+        minItems=len(request.audiences), maxItems=len(request.audiences)
+    )
+    return schema
+
+
+def report_insight_reduce_schema(
+    request: ReportInsightRequest,
+    allowed_claims: dict[str, tuple[str, ...]],
+) -> dict[str, Any]:
+    schema = ReportInsightReduceOutput.model_json_schema(by_alias=True)
+    properties = schema["$defs"]["ReportInsightReduceAudience"]["properties"]
+    branches = []
+    for audience in request.audiences:
+        refs = list(allowed_claims[audience])
+        fields = {**deepcopy(properties), "audience": {"type": "string", "const": audience}}
+        for field, model in (
+            ("overview", "ReportInsightOverview"),
+            ("implications", "ReportInsightImplication"),
+            ("watchItems", "ReportInsightWatchItem"),
+        ):
+            item = deepcopy(schema["$defs"][model]["properties"])
+            item["basisClaimIds"]["items"] = (
+                _report_claim_choices(refs) if refs else {"type": "string"}
+            )
+            fields[field] = {**deepcopy(properties[field]), "items": _object(item)}
+            if not refs:
+                fields[field]["maxItems"] = 0
+        branches.append(_object(fields))
+    schema["$defs"]["ReportInsightReduceAudience"] = {"anyOf": branches}
+    schema["properties"]["insights"].update(
+        minItems=len(request.audiences), maxItems=len(request.audiences)
+    )
     return schema
 
 
