@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class IssueClusterer {
 
-    static final String RULE_VERSION = "fulltext-event-evidence-v11";
+    static final String RULE_VERSION = "fulltext-event-evidence-v12";
 
     private static final double MIN_ENTITY_TITLE_SUPPORT_JACCARD = 0.10;
 
@@ -132,7 +132,9 @@ public class IssueClusterer {
                     }, () -> rejectedFullTextIds.add(article.articleId()));
         }
         List<ClusterArticle> fullText = List.copyOf(fullTextById.values());
-        UnionFind union = new UnionFind(fullText.stream().map(ClusterArticle::articleId).toList());
+        VersionedProductEventEvidence versionedProduct = new VersionedProductEventEvidence(fullText, breakingNewsDetector);
+        UnionFind union = new UnionFind(fullText.stream().map(ClusterArticle::articleId).toList(),
+                Map.of(), versionedProduct::conflicts);
 
         for (int left = 0; left < fullText.size(); left++) {
             for (int right = left + 1; right < fullText.size(); right++) {
@@ -143,7 +145,10 @@ public class IssueClusterer {
                 int distance = SimHash.distance(
                         fingerprintByArticle.get(first.articleId()),
                         fingerprintByArticle.get(second.articleId()));
-                if (alreadyGrouped || distance <= properties.getSimhashHammingThreshold()) {
+                // Template similarity cannot make two explicitly different product releases duplicate content.
+                // Existing saved groups are retained, as are existing issue memberships below.
+                if (alreadyGrouped || distance <= properties.getSimhashHammingThreshold()
+                        && union.canJoin(first.articleId(), second.articleId())) {
                     union.join(first.articleId(), second.articleId());
                 }
             }

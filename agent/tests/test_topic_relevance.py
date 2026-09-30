@@ -131,9 +131,17 @@ def article_output(article_id: int = 501, payload: dict | None = None) -> dict:
     return {"decisions": {key: (payload or output())["decisions"][key]}}
 
 
-def article_responses(payload: dict | None = None) -> list[ProviderResponse]:
-    return [provider_response({"decisions": {key: value}})
-            for key, value in (payload or output())["decisions"].items()]
+def article_responses(
+    payload: dict | None = None, *, include_review: bool = True,
+) -> list[ProviderResponse]:
+    responses = []
+    for key, value in (payload or output())["decisions"].items():
+        response = provider_response({"decisions": {key: value}})
+        responses.append(response)
+        if (include_review and value["status"] == "IRRELEVANT"
+                and "E" not in value["sourceAssessment"].values()):
+            responses.append(response)
+    return responses
 
 
 def service(provider: FakeProvider, *, repair_attempts: int = 1) -> TopicRelevanceService:
@@ -151,9 +159,9 @@ def test_preserves_grounded_provider_decisions_and_metadata() -> None:
     assert [item.status for item in response.decisions] == ["IRRELEVANT", "RELEVANT", "RELEVANT"]
     assert [item.article_id for item in response.decisions] == [501, 502, 503]
     assert response.meta.prompt_version == PROMPT_VERSION
-    assert response.meta.input_tokens == 60
-    assert response.meta.output_tokens == 30
-    assert response.meta.credits == 0.3
+    assert response.meta.input_tokens == 80
+    assert response.meta.output_tokens == 40
+    assert response.meta.credits == 0.4
     assert not response.meta.mock
     assert provider.calls[0]["system_instruction"] == SYSTEM_INSTRUCTION
     assert provider.calls[0]["response_schema"]["additionalProperties"] is False
@@ -173,8 +181,10 @@ def test_prompt_distinguishes_meaning_and_preserves_relevant_regulatory_news() -
 def test_openai_strict_wire_schema_is_single_article_and_converts_to_public_array() -> None:
     provider = FakeProvider(*article_responses())
     response = service(provider).classify(request())
-    assert len(provider.calls) == 3
-    for article, call in zip(request().articles, provider.calls, strict=True):
+    assert len(provider.calls) == 4
+    for article, call in zip(
+        [request().articles[0], *request().articles], provider.calls, strict=True,
+    ):
         contract = output_contract(call["response_schema"])
         wire_schema = OpenAIJsonSchemaTransformer(deepcopy(contract.schema), strict=True).walk()
         validator = Draft202012Validator(wire_schema)
@@ -205,7 +215,9 @@ def test_openai_strict_wire_schema_is_single_article_and_converts_to_public_arra
 def test_private_source_assessment_covers_all_quotes_and_stays_out_of_public_response() -> None:
     provider = FakeProvider(*article_responses())
     response = service(provider).classify(request())
-    for article, call in zip(request().articles, provider.calls, strict=True):
+    for article, call in zip(
+        [request().articles[0], *request().articles], provider.calls, strict=True,
+    ):
         schema = OpenAIJsonSchemaTransformer(deepcopy(call["response_schema"]), strict=True).walk()
         decision = schema["properties"]["decisions"]["properties"][f"article_{article.article_id}"]
         assessment = decision["properties"]["sourceAssessment"]
@@ -343,16 +355,13 @@ def test_recognized_explicit_connection_cannot_be_skipped_or_silently_substitute
     assert len(provider.calls) == 1
 
 
-@pytest.mark.parametrize("status", ["IRRELEVANT", "UNCERTAIN"])
-def test_explicit_connection_does_not_force_relevant_or_a_quote_for_other_statuses(
-    status: str,
-) -> None:
+def test_explicit_connection_does_not_force_acceptance_when_scope_is_uncertain() -> None:
     wire = article_output()
-    wire["decisions"]["article_501"].update(status=status)
+    wire["decisions"]["article_501"].update(status="UNCERTAIN")
     wire["decisions"]["article_501"]["sourceAssessment"]["quote_0"] = "L"
     single = request().model_copy(update={"articles": request().articles[:1]})
     response = service(FakeProvider(provider_response(wire))).classify(single)
-    assert response.decisions[0].status == status
+    assert response.decisions[0].status == "UNCERTAIN"
 
 
 def test_uncertain_can_use_context_when_no_exclusion_or_direct_connection_is_established() -> None:
@@ -371,10 +380,10 @@ def test_repairs_incomplete_assessment_once_and_keeps_usage_without_private_fiel
     invalid["decisions"]["article_501"]["sourceAssessment"].pop("quote_2")
     provider = FakeProvider(provider_response(invalid), *article_responses())
     response = service(provider).classify(request())
-    assert len(provider.calls) == 4
+    assert len(provider.calls) == 5
     assert "sourceAssessment" in provider.calls[1]["prompt"]
-    assert response.meta.input_tokens == 80
-    assert response.meta.output_tokens == 40
+    assert response.meta.input_tokens == 100
+    assert response.meta.output_tokens == 50
     assert "sourceAssessment" not in response.model_dump_json(by_alias=True)
 
 
@@ -409,7 +418,9 @@ def test_every_wire_status_requires_a_quote_in_native_schema_and_local_validatio
 ) -> None:
     wire = output()
     wire["decisions"]["article_501"].update(
-        status=status, sourceAssessment=source_assessment(request().articles[0], "D"),
+        status=status, sourceAssessment=source_assessment(
+            request().articles[0], "N" if status == "IRRELEVANT" else "D",
+        ),
     )
     schema = OpenAIJsonSchemaTransformer(_response_schema(request()), strict=True).walk()
     evidence = schema["properties"]["decisions"]["properties"]["article_501"]["properties"][
@@ -719,9 +730,9 @@ def test_repairs_missing_article_key_without_changing_request_schema() -> None:
     response = service(provider).classify(request())
 
     assert [item.article_id for item in response.decisions] == [501, 502, 503]
-    assert len(provider.calls) == 4
+    assert len(provider.calls) == 5
     assert provider.calls[0]["response_schema"] == provider.calls[1]["response_schema"]
-    assert response.meta.input_tokens == 80
+    assert response.meta.input_tokens == 100
 
 
 def test_repairs_ungrounded_quote_and_accumulates_usage() -> None:
@@ -731,12 +742,12 @@ def test_repairs_ungrounded_quote_and_accumulates_usage() -> None:
 
     response = service(provider).classify(request())
 
-    assert len(provider.calls) == 4
+    assert len(provider.calls) == 5
     assert "validation-error" in provider.calls[1]["prompt"]
-    assert response.meta.input_tokens == 80
-    assert response.meta.output_tokens == 40
-    assert response.meta.cost_usd == 0.004
-    assert response.meta.credits == 0.4
+    assert response.meta.input_tokens == 100
+    assert response.meta.output_tokens == 50
+    assert response.meta.cost_usd == 0.005
+    assert response.meta.credits == 0.5
 
 
 def test_sequential_article_contexts_and_repair_prompts_never_include_other_articles() -> None:
@@ -752,7 +763,8 @@ def test_sequential_article_contexts_and_repair_prompts_never_include_other_arti
         strict=True,
     ):
         decision.update(
-            reason=f"OUTPUT_ONLY_{article.article_id}", evidenceQuotes=["quote_1"],
+            status="RELEVANT", reason=f"OUTPUT_ONLY_{article.article_id}",
+            evidenceQuotes=["quote_1"],
             sourceAssessment=source_assessment(article, "D"),
         )
     invalid = article_output(502, deepcopy(wire))
@@ -786,8 +798,8 @@ def test_middle_provider_failure_preserves_known_usage_and_stops_remaining_artic
 ) -> None:
     failure = AgentError(503, "PROVIDER_UNAVAILABLE", "일시 오류입니다.",
                          {"usage": failure_usage, "retryable": False})
-    responses = article_responses()
-    provider = FakeProvider(responses[0], failure, responses[2])
+    responses = article_responses(include_review=False)
+    provider = FakeProvider(responses[0], responses[0], failure, responses[2])
 
     with pytest.raises(AgentError) as caught:
         service(provider).classify(request())
@@ -796,12 +808,12 @@ def test_middle_provider_failure_preserves_known_usage_and_stops_remaining_artic
     assert (failure.status_code, failure.code, failure.message) == (
         503, "PROVIDER_UNAVAILABLE", "일시 오류입니다.",
     )
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 3
     assert provider.responses == [responses[2]]
     assert failure.details["retryable"] is False
     assert failure.details["usage"] == {
-        "inputTokens": 27 if failure_usage else 20,
-        "outputTokens": 10, "costUsd": 0.021 if failure_usage else 0.001, "credits": 0.1,
+        "inputTokens": 47 if failure_usage else 40,
+        "outputTokens": 20, "costUsd": 0.022 if failure_usage else 0.002, "credits": 0.2,
     }
     assert failure.details["executionMetadata"]["usageCompleteness"] == "PARTIAL"
     assert failure.details["executionMetadata"]["provider"] is None
@@ -810,18 +822,19 @@ def test_middle_provider_failure_preserves_known_usage_and_stops_remaining_artic
 def test_middle_schema_failure_includes_both_repair_attempts_and_previous_article_usage() -> None:
     invalid = article_output(502)
     invalid["decisions"]["article_502"]["evidenceQuotes"] = []
-    responses = article_responses()
+    responses = article_responses(include_review=False)
     provider = FakeProvider(
-        responses[0], provider_response(invalid), provider_response(invalid), responses[2],
+        responses[0], responses[0], provider_response(invalid), provider_response(invalid),
+        responses[2],
     )
 
     with pytest.raises(AgentError) as caught:
         service(provider).classify(request())
 
-    assert len(provider.calls) == 3
+    assert len(provider.calls) == 4
     assert provider.responses == [responses[2]]
     assert caught.value.details["usage"] == {
-        "inputTokens": 60, "outputTokens": 30, "costUsd": 0.003, "credits": 0.3,
+        "inputTokens": 80, "outputTokens": 40, "costUsd": 0.004, "credits": 0.4,
     }
     assert caught.value.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
 
@@ -831,32 +844,36 @@ def test_middle_repair_provider_failure_aggregates_usage_once_and_keeps_partial_
     invalid["decisions"]["article_502"]["evidenceQuotes"] = []
     failure = AgentError(503, "PROVIDER_UNAVAILABLE", "일시 오류입니다.",
                          {"usage": {"inputTokens": 7, "outputTokens": 3, "costUsd": 0.002}})
-    responses = article_responses()
-    provider = FakeProvider(responses[0], provider_response(invalid), failure, responses[2])
+    responses = article_responses(include_review=False)
+    provider = FakeProvider(
+        responses[0], responses[0], provider_response(invalid), failure, responses[2],
+    )
 
     with pytest.raises(AgentError) as caught:
         service(provider).classify(request())
 
-    assert len(provider.calls) == 3
+    assert len(provider.calls) == 4
     assert provider.responses == [responses[2]]
     assert caught.value.details["usage"] == {
-        "inputTokens": 47, "outputTokens": 23, "costUsd": 0.004, "credits": 0.2,
+        "inputTokens": 67, "outputTokens": 33, "costUsd": 0.005, "credits": 0.3,
     }
     assert caught.value.details["executionMetadata"]["usageCompleteness"] == "PARTIAL"
 
 
 @pytest.mark.parametrize("change", [{"provider": "mindlogic-claude"}, {"model": "other-model"}])
 def test_mixed_provider_or_model_across_articles_is_rejected_without_further_calls(change) -> None:
-    responses = article_responses()
-    provider = FakeProvider(responses[0], replace(responses[1], **change), responses[2])
+    responses = article_responses(include_review=False)
+    provider = FakeProvider(
+        responses[0], responses[0], replace(responses[1], **change), responses[2],
+    )
 
     with pytest.raises(AgentError) as caught:
         service(provider).classify(request())
 
     assert caught.value.code == "SCHEMA_VIOLATION"
-    assert len(provider.calls) == 2
+    assert len(provider.calls) == 3
     assert provider.responses == [responses[2]]
-    assert caught.value.details["usage"]["inputTokens"] == 40
+    assert caught.value.details["usage"]["inputTokens"] == 60
     assert caught.value.details["executionMetadata"] == {
         "provider": None, "model": None, "promptVersion": PROMPT_VERSION,
         "source": "AGENT_ERROR", "usageCompleteness": "COMPLETE",
@@ -866,7 +883,7 @@ def test_mixed_provider_or_model_across_articles_is_rejected_without_further_cal
 def test_identity_change_within_repair_cannot_be_hidden_by_a_valid_final_response() -> None:
     invalid = article_output()
     invalid["decisions"]["article_501"]["evidenceQuotes"] = []
-    responses = article_responses()
+    responses = article_responses(include_review=False)
     provider = FakeProvider(
         provider_response(invalid), replace(responses[0], model="other-model"), *responses[1:],
     )
@@ -982,8 +999,8 @@ def test_mock_returns_only_uncertain_without_calling_provider() -> None:
     assert response.meta.input_tokens == response.meta.output_tokens == 0
 
 
-@pytest.mark.parametrize("status", ["IRRELEVANT", "RELEVANT", "UNCERTAIN"])
-def test_valid_decision_is_single_pass_for_every_status(status):
+@pytest.mark.parametrize("status", ["RELEVANT", "UNCERTAIN"])
+def test_acceptance_or_uncertainty_stays_single_pass(status):
     single = request().model_copy(update={"articles": request().articles[:1]})
     wire = article_output()
     wire["decisions"]["article_501"].update(
@@ -997,6 +1014,283 @@ def test_valid_decision_is_single_pass_for_every_status(status):
     assert response.decisions[0].status == status
     assert len(provider.calls) == 1 and provider.responses == [unused]
     assert response.meta.input_tokens == 20 and response.meta.cost_usd == 0.001
+
+
+def ai_release_request(*, excluded: bool = False) -> TopicRelevanceRequest:
+    payload = request_payload()
+    payload["topic"].update(
+        name="AI·LLM 기술 및 산업 동향", queryText="인공지능", requiredKeywords=[],
+        optionalKeywords=["OpenAI", "LLM"], excludedKeywords=["[협찬]"] if excluded else [],
+    )
+    # Paraphrased regression for the collected GPT-6.1 launch, not a brand acceptance rule.
+    payload["articles"] = [{
+        "articleId": 28727,
+        "title": ("[협찬] " if excluded else "") + "오픈AI, GPT-6.1 솔 공개",
+        "summary": "새 인공지능 모델의 기능과 이용 가격을 발표했다.",
+        "bodyText": (
+            "오픈AI가 개발자 행사에서 GPT-6.1 솔을 공개했다. 새 모델은 에이전트 작업과 "
+            "코딩 성능을 개선했으며, 최상위 모델보다 낮은 API 이용 가격으로 제공된다."
+        ),
+    }]
+    return TopicRelevanceRequest.model_validate(payload)
+
+
+def ai_release_wire(
+    single: TopicRelevanceRequest, status: str, role: str, reason: str,
+) -> dict:
+    article = single.articles[0]
+    return {"decisions": {f"article_{article.article_id}": {
+        "sourceAssessment": source_assessment(article, role),
+        "evidenceQuotes": ["quote_2"], "reason": reason, "status": status,
+    }}}
+
+
+def test_prompt_covers_actual_technology_release_without_a_brand_whitelist() -> None:
+    assert "출시와 업데이트" in SYSTEM_INSTRUCTION
+    assert "이용 가격·제공 조건의 변화" in SYSTEM_INSTRUCTION
+    assert "생산·수요·계약을 추가 필수 조건으로 요구하지 않는다" in SYSTEM_INSTRUCTION
+    assert "일반적 당위만" in SYSTEM_INSTRUCTION
+    assert "특정 제품·세대를 지정했다면 그 한정을 유지한다" in SYSTEM_INSTRUCTION
+    assert "GPT-6.1" not in SYSTEM_INSTRUCTION
+
+
+def test_independent_review_recovers_ai_release_mislabeled_as_general_discussion() -> None:
+    single = ai_release_request()
+    initial = ai_release_wire(single, "IRRELEVANT", "G", "INITIAL_FALSE_NEGATIVE_MARKER")
+    reviewed = ai_release_wire(
+        single, "RELEVANT", "D", "새 AI 모델의 공개와 코딩 기능 및 이용 가격 변화를 보도했다.",
+    )
+    provider = FakeProvider(provider_response(initial), provider_response(reviewed))
+
+    response = service(provider).classify(single)
+
+    assert len(provider.calls) == 2
+    assert response.decisions[0].status == "RELEVANT"
+    assert response.decisions[0].evidence_quotes == [single.articles[0].body_text]
+    review_call = provider.calls[1]
+    assert "독립적으로 재검토" in review_call["prompt"]
+    assert "INITIAL_FALSE_NEGATIVE_MARKER" not in review_call["prompt"]
+    assert "IRRELEVANT를 유지" not in review_call["prompt"]
+    assert single.provider_input_json() in review_call["prompt"]
+    assert review_call["response_schema"] == provider.calls[0]["response_schema"]
+    assert response.meta.input_tokens == 40 and response.meta.output_tokens == 20
+    assert response.meta.cost_usd == 0.002 and response.meta.credits == 0.2
+
+
+def test_generic_ai_background_stays_irrelevant_after_only_one_review() -> None:
+    single = ai_release_request()
+    single = single.model_copy(update={"articles": [single.articles[0].model_copy(update={
+        "title": "AI 시대의 기업 혁신 방향", "summary": "산업 변화에 대비해야 한다.",
+        "body_text": "AI 시대에 경쟁력을 높이려면 혁신이 필요하다는 일반적인 의견이 제시됐다.",
+    })]})
+    wire = ai_release_wire(single, "IRRELEVANT", "G", "AI 시대의 당위만 있고 실제 변화가 없다.")
+    unused = AgentError(503, "PROVIDER_UNAVAILABLE", "must not review recursively")
+    provider = FakeProvider(provider_response(wire), provider_response(wire), unused)
+
+    response = service(provider).classify(single)
+
+    assert response.decisions[0].status == "IRRELEVANT"
+    assert len(provider.calls) == 2 and provider.responses == [unused]
+    assert response.meta.input_tokens == 40
+
+
+@pytest.mark.parametrize("role", ["D", "L"])
+def test_irrelevant_with_direct_evidence_is_repaired_instead_of_accepted(role: str) -> None:
+    single = ai_release_request()
+    invalid = ai_release_wire(single, "IRRELEVANT", role, "기술 발전의 일반적 논의이다.")
+    corrected = ai_release_wire(single, "RELEVANT", role, "원문에 주제 대상의 실제 변화가 있다.")
+    provider = FakeProvider(provider_response(invalid), provider_response(corrected))
+
+    response = service(provider).classify(single)
+
+    assert response.decisions[0].status == "RELEVANT"
+    assert len(provider.calls) == 2
+    assert "직접 사건(D)" in provider.calls[1]["prompt"]
+    assert response.meta.input_tokens == 40
+
+
+@pytest.mark.parametrize("reviewed", [False, True])
+def test_user_exclusion_overrides_direct_ai_release_even_when_found_by_review(reviewed) -> None:
+    single = ai_release_request(excluded=True)
+    excluded = ai_release_wire(single, "IRRELEVANT", "D", "사용자가 제외한 협찬 기사이다.")
+    excluded["decisions"]["article_28727"].update(evidenceQuotes=["quote_0"])
+    excluded["decisions"]["article_28727"]["sourceAssessment"]["quote_0"] = "E"
+    responses = [provider_response(excluded)]
+    if reviewed:
+        responses.insert(0, provider_response(ai_release_wire(
+            single, "IRRELEVANT", "G", "기술 발전의 일반적 논의이다.",
+        )))
+    unused = AgentError(503, "PROVIDER_UNAVAILABLE", "must not review exclusion")
+    provider = FakeProvider(*responses, unused)
+
+    response = service(provider).classify(single)
+
+    assert response.decisions[0].status == "IRRELEVANT"
+    assert response.decisions[0].reason == "사용자가 제외한 협찬 기사이다."
+    assert response.decisions[0].evidence_quotes == [single.articles[0].title]
+    assert len(provider.calls) == 1 + int(reviewed) and provider.responses == [unused]
+
+
+def test_independent_review_keeps_conflicting_user_scope_uncertain() -> None:
+    single = ai_release_request()
+    single = single.model_copy(update={"topic": single.topic.model_copy(update={
+        "query_text": "의약품 임상시험", "name": "치과 임플란트 생산",
+        "required_keywords": ["치과 임플란트 생산"],
+    })})
+    initial = ai_release_wire(single, "IRRELEVANT", "N", "AI 모델은 임상시험과 무관하다.")
+    reviewed = ai_release_wire(single, "UNCERTAIN", "N", "주제 질의와 이름의 대상이 충돌한다.")
+    provider = FakeProvider(provider_response(initial), provider_response(reviewed))
+
+    response = service(provider).classify(single)
+
+    assert response.decisions[0].status == "UNCERTAIN"
+    assert single.provider_input_json() in provider.calls[1]["prompt"]
+
+
+def test_actual_ai_release_of_other_generation_is_not_forced_relevant() -> None:
+    single = ai_release_request()
+    single = single.model_copy(update={"topic": single.topic.model_copy(update={
+        "query_text": "GPT-6.2 솔",
+    })})
+    wire = ai_release_wire(single, "IRRELEVANT", "N", "실제 출시 대상은 관심 세대와 다르다.")
+    provider = FakeProvider(provider_response(wire), provider_response(wire))
+
+    response = service(provider).classify(single)
+
+    assert response.decisions[0].status == "IRRELEVANT"
+    assert single.provider_input_json() in provider.calls[1]["prompt"]
+
+
+def test_invalid_negative_review_stops_without_repair_or_silent_rejection() -> None:
+    single = ai_release_request()
+    initial = ai_release_wire(single, "IRRELEVANT", "G", "기술 발전의 일반적 논의이다.")
+    invalid = ai_release_wire(single, "IRRELEVANT", "D", "직접 사건과 관계없다.")
+    unused = provider_response(ai_release_wire(single, "RELEVANT", "D", "실제 모델 출시이다."))
+    provider = FakeProvider(provider_response(initial), provider_response(invalid), unused)
+
+    with pytest.raises(AgentError) as caught:
+        service(provider).classify(single)
+
+    assert caught.value.code == "SCHEMA_VIOLATION"
+    assert len(provider.calls) == 2 and provider.responses == [unused]
+    assert caught.value.details["usage"] == {
+        "inputTokens": 40, "outputTokens": 20, "costUsd": 0.002, "credits": 0.2,
+    }
+    assert caught.value.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
+
+
+def test_negative_review_provider_failure_preserves_initial_usage() -> None:
+    single = ai_release_request()
+    initial = ai_release_wire(single, "IRRELEVANT", "G", "기술 발전의 일반적 논의이다.")
+    failure = AgentError(503, "PROVIDER_UNAVAILABLE", "일시 오류입니다.", {
+        "usage": {"inputTokens": 7, "outputTokens": 3, "costUsd": 0.002},
+    })
+    provider = FakeProvider(provider_response(initial), failure)
+
+    with pytest.raises(AgentError) as caught:
+        service(provider).classify(single)
+
+    assert caught.value is failure and len(provider.calls) == 2
+    assert failure.details["usage"] == {
+        "inputTokens": 27, "outputTokens": 13, "costUsd": 0.003, "credits": 0.1,
+    }
+    assert failure.details["executionMetadata"]["usageCompleteness"] == "PARTIAL"
+
+
+@pytest.mark.parametrize("change", [{"provider": "mindlogic-claude"}, {"model": "other-model"}])
+def test_negative_review_identity_change_counts_initial_usage_once(change) -> None:
+    single = ai_release_request()
+    initial = ai_release_wire(single, "IRRELEVANT", "G", "기술 발전의 일반적 논의이다.")
+    reviewed = ai_release_wire(single, "RELEVANT", "D", "실제 모델 출시이다.")
+    provider = FakeProvider(
+        provider_response(initial), replace(provider_response(reviewed), **change),
+    )
+
+    with pytest.raises(AgentError) as caught:
+        service(provider).classify(single)
+
+    assert caught.value.code == "SCHEMA_VIOLATION" and len(provider.calls) == 2
+    assert caught.value.details["usage"]["inputTokens"] == 40
+    assert caught.value.details["executionMetadata"]["model"] is None
+    assert caught.value.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
+
+
+def test_initial_budget_exhaustion_prevents_starting_negative_review() -> None:
+    single = ai_release_request()
+    initial = ai_release_wire(single, "IRRELEVANT", "G", "기술 발전의 일반적 논의이다.")
+    unused = provider_response(ai_release_wire(single, "RELEVANT", "D", "실제 모델 출시이다."))
+    provider = FakeProvider(provider_response(initial), unused)
+    subject = TopicRelevanceService(Settings(
+        AGENT_MOCK=False, AGENT_HARD_CAP_CREDITS_PER_REQUEST=0.1,
+    ), provider)
+
+    with pytest.raises(AgentError) as caught:
+        subject.classify(single)
+
+    assert caught.value.code == "BUDGET_EXCEEDED"
+    assert len(provider.calls) == 1 and provider.responses == [unused]
+    assert caught.value.details["usage"]["credits"] == 0.1
+    assert caught.value.details["usage"]["inputTokens"] == 20
+    assert caught.value.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
+
+
+def test_initial_repair_and_review_share_request_budget_and_failure_usage() -> None:
+    single = ai_release_request()
+    initial = ai_release_wire(single, "IRRELEVANT", "G", "기술 발전의 일반적 논의이다.")
+    invalid = deepcopy(initial)
+    invalid["decisions"]["article_28727"]["evidenceQuotes"] = []
+    reviewed = ai_release_wire(single, "RELEVANT", "D", "실제 모델 출시이다.")
+    provider = FakeProvider(
+        provider_response(invalid), provider_response(initial), provider_response(reviewed),
+    )
+    subject = TopicRelevanceService(Settings(
+        AGENT_MOCK=False, AGENT_HARD_CAP_CREDITS_PER_REQUEST=0.25,
+    ), provider)
+
+    with pytest.raises(AgentError) as caught:
+        subject.classify(single)
+
+    assert caught.value.code == "BUDGET_EXCEEDED" and len(provider.calls) == 3
+    assert caught.value.details["usage"] == {
+        "inputTokens": 60, "outputTokens": 30, "costUsd": 0.003, "credits": 0.3,
+    }
+    assert caught.value.details["hardCapCredits"] == 0.25
+    assert caught.value.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
+
+
+def test_exhausted_request_budget_prevents_schema_repair_call() -> None:
+    single = ai_release_request()
+    invalid = ai_release_wire(single, "IRRELEVANT", "D", "기술 발전의 일반적 논의이다.")
+    unused = provider_response(ai_release_wire(single, "RELEVANT", "D", "실제 모델 출시이다."))
+    provider = FakeProvider(provider_response(invalid), unused)
+    subject = TopicRelevanceService(Settings(
+        AGENT_MOCK=False, AGENT_HARD_CAP_CREDITS_PER_REQUEST=0.1,
+    ), provider)
+
+    with pytest.raises(AgentError) as caught:
+        subject.classify(single)
+
+    assert caught.value.code == "BUDGET_EXCEEDED"
+    assert len(provider.calls) == 1 and provider.responses == [unused]
+    assert caught.value.details["usage"]["credits"] == 0.1
+
+
+def test_exhausted_compatibility_batch_budget_prevents_next_article_call() -> None:
+    batch = request().model_copy(update={"articles": request().articles[1:]})
+    first = provider_response(article_output(502))
+    unused = provider_response(article_output(503))
+    provider = FakeProvider(first, unused)
+    subject = TopicRelevanceService(Settings(
+        AGENT_MOCK=False, AGENT_HARD_CAP_CREDITS_PER_REQUEST=0.1,
+    ), provider)
+
+    with pytest.raises(AgentError) as caught:
+        subject.classify(batch)
+
+    assert caught.value.code == "BUDGET_EXCEEDED"
+    assert len(provider.calls) == 1 and provider.responses == [unused]
+    assert caught.value.details["usage"]["credits"] == 0.1
+    assert caught.value.details["usage"]["inputTokens"] == 20
 
 
 @pytest.mark.parametrize(("model", "token_limit"), [
@@ -1025,7 +1319,7 @@ def test_relevance_model_and_prices_are_isolated_to_free_task(
             model=effective.openai_model if requested_plan == "FREE"
             else effective.mindlogic_claude_model,
         )
-        return FakeProvider(result)
+        return FakeProvider(result, result)
 
     monkeypatch.setattr("app.llm.topic_relevance_service.get_analyze_provider", routed)
     single = request().model_copy(update={"plan": plan, "articles": request().articles[:1]})
@@ -1060,21 +1354,21 @@ def test_empty_reasoning_limit_never_becomes_a_decision_and_keeps_total_usage(
         usage=ProviderUsage(input_tokens=1000, output_tokens=token_limit, cost_usd=cost),
     )
     valid = replace(provider_response(article_output()), model=model)
-    provider = FakeProvider(truncated, valid)
+    provider = FakeProvider(truncated, valid, valid)
     single = request().model_copy(update={"articles": request().articles[:1]})
     subject = service(provider, repair_attempts=int(repair))
 
     if repair:
         response = subject.classify(single)
-        assert len(provider.calls) == 2
+        assert len(provider.calls) == 3
         assert response.decisions[0].status == "IRRELEVANT"
-        assert response.meta.input_tokens == 1020
-        assert response.meta.output_tokens == token_limit + 10
-        assert response.meta.cost_usd == float(cost + Decimal("0.001"))
+        assert response.meta.input_tokens == 1040
+        assert response.meta.output_tokens == token_limit + 20
+        assert response.meta.cost_usd == float(cost + Decimal("0.002"))
     else:
         with pytest.raises(AgentError) as caught:
             subject.classify(single)
-        assert len(provider.calls) == 1 and provider.responses == [valid]
+        assert len(provider.calls) == 1 and provider.responses == [valid, valid]
         assert caught.value.code == "SCHEMA_VIOLATION"
         assert caught.value.details["truncated"] is True
         assert caught.value.details["usage"] == {
@@ -1097,6 +1391,7 @@ def test_routes_plan_through_shared_provider_with_single_article_output_limit(
         provider_response({"decisions": {f"article_{index + 1}":
             output()["decisions"]["article_501"]}})
         for index in range(count)
+        for _ in range(2)
     ])
     captured = {}
 
@@ -1112,10 +1407,10 @@ def test_routes_plan_through_shared_provider_with_single_article_output_limit(
     assert captured["plan"] == "PAID"
     assert captured["settings"].max_output_tokens == 1792
     assert captured["settings"].provider_timeout_seconds == 60.0
-    assert len(provider.calls) == count
+    assert len(provider.calls) == count * 2
     for index, call in enumerate(provider.calls):
         assert call["response_schema"]["properties"]["decisions"]["required"] == [
-            f"article_{index + 1}"
+            f"article_{index // 2 + 1}"
         ]
 
 

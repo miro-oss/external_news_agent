@@ -98,7 +98,7 @@ class AgentClientTest {
                 .andRespond(withSuccess("""
                         {"decisions":[{"articleId":5,"status":"IRRELEVANT","reason":"금융 분쟁 기사입니다.",
                          "evidenceQuotes":["토스 공정위 분쟁"]}],"meta":{"provider":"openai","model":"fixture",
-                         "promptVersion":"topic-relevance.ko.v21","inputTokens":10,"outputTokens":5,
+                         "promptVersion":"topic-relevance.ko.v22","inputTokens":10,"outputTokens":5,
                          "costUsd":0.0000004,"credits":0,"mock":false,"truncated":false}}
                         """, MediaType.APPLICATION_JSON));
         var response = client.topicRelevance(relevanceRequest());
@@ -139,11 +139,11 @@ class AgentClientTest {
                 .andRespond(withSuccess("""
                         {"decisions":[{"articleId":5,"status":"IRRELEVANT","reason":"금융 분쟁 기사입니다.",
                          "evidenceQuotes":["토스 공정위 분쟁"]}],"meta":{"provider":"openai","model":"fixture",
-                         "promptVersion":"topic-relevance.ko.v21","inputTokens":10,"outputTokens":5,
+                         "promptVersion":"topic-relevance.ko.v22","inputTokens":10,"outputTokens":5,
                          "costUsd":0,"credits":0,"mock":false,"truncated":false}}
                         """, MediaType.APPLICATION_JSON));
 
-        assertEquals("topic-relevance.ko.v21", client.topicRelevance(relevanceRequest()).meta().promptVersion());
+        assertEquals("topic-relevance.ko.v22", client.topicRelevance(relevanceRequest()).meta().promptVersion());
         client.analyze(request());
         client.insight(insightRequest());
         client.report(reportRequest());
