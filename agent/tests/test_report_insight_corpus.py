@@ -88,10 +88,12 @@ def test_past_deadline_has_independent_urgency_label_and_no_real_model_claim():
         and case.request.audiences == ["CHIP_MAKER"]
     )
     result = review_case(case, candidate_for(case, urgency=3))
-    assert result["contractPassed"] is True
-    assert (
-        "past_deadline_is_imminent:" + str(case.request.findings[0].id) in result["annotationFlags"]
-    )
+    # The independent past-deadline label now also has a runtime release guard.
+    # A rejected contract is not scored as an accepted model-quality candidate.
+    assert result["contractPassed"] is False
+    assert result["annotationFlags"] == []
+    assert result["qualityMeasured"] is False
+    assert case.annotations.not_urgent_finding_ids == [case.request.findings[0].id]
 
 
 def test_wrong_sources_and_unknown_case_ids_fail_before_editorial_scoring():

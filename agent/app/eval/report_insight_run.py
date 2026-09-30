@@ -301,6 +301,24 @@ def prepare(
 
 
 def verify(output_dir: Path, manifest: dict, state: dict) -> None:
+    provenance = manifest["provenance"]
+    require(provenance["runtimeSourceSha256s"] == runtime_hashes(), "RUNTIME_CHANGED")
+    require(
+        provenance["dependencyVersions"] == dependencies()
+        and provenance["pythonVersion"] == platform.python_version(),
+        "DEPENDENCIES_CHANGED",
+    )
+    verify_recorded(output_dir, manifest, state, revalidate_outputs=True)
+
+
+def verify_recorded(
+    output_dir: Path, manifest: dict, state: dict, *, revalidate_outputs: bool = False
+) -> None:
+    """Verify a frozen ledger without equating it to today's generation runtime.
+
+    Only live resume uses current source/dependency checks and output validation.
+    Offline replay keeps the original versions and never resumes paid calls.
+    """
     require(
         state.get("checkpointSha256")
         == digest({key: value for key, value in state.items() if key != "checkpointSha256"}),
@@ -316,18 +334,13 @@ def verify(output_dir: Path, manifest: dict, state: dict) -> None:
         all(manifest["policy"].get(key) == value for key, value in POLICY.items()), "POLICY_CHANGED"
     )
     provenance = manifest["provenance"]
-    require(provenance["runtimeSourceSha256s"] == runtime_hashes(), "RUNTIME_CHANGED")
-    require(
-        provenance["dependencyVersions"] == dependencies()
-        and provenance["pythonVersion"] == platform.python_version(),
-        "DEPENDENCIES_CHANGED",
-    )
     require(
         provenance["datasetSha256"] == file_digest(Path(provenance["datasetPath"])),
         "DATASET_CHANGED",
     )
     require(
         digest(manifest["jobs"]) == provenance["scheduleSha256"]
+        and digest([job["request"] for job in manifest["jobs"]]) == provenance["inputSha256"]
         and digest(manifest["policy"]) == provenance["policySha256"],
         "MANIFEST_CHANGED",
     )
@@ -338,11 +351,11 @@ def verify(output_dir: Path, manifest: dict, state: dict) -> None:
         require(
             all(result.get(key) == value for key, value in job.items()), "CHECKPOINT_INPUT_CHANGED"
         )
-    _verify_attempts(manifest, state)
+    _verify_attempts(manifest, state, revalidate_outputs=revalidate_outputs)
     require(state["totals"] == totals(state), "CHECKPOINT_TOTALS_CHANGED")
 
 
-def _verify_attempts(manifest: dict, state: dict) -> None:
+def _verify_attempts(manifest: dict, state: dict, *, revalidate_outputs: bool = True) -> None:
     jobs = {(item["caseId"], item["variant"]): item for item in state["results"]}
     require(len(jobs) == len(state["results"]), "DUPLICATE_CHECKPOINT_JOB")
     require(len(state["attempts"]) <= manifest["policy"]["maxCalls"], "CHECKPOINT_CALL_LIMIT")
@@ -371,6 +384,14 @@ def _verify_attempts(manifest: dict, state: dict) -> None:
         if item["providerRawResponse"] is not None:
             raw_usage = item["providerRawResponse"].get("usage")
             require(raw_usage == item["providerRawUsage"], "CHECKPOINT_RAW_USAGE_CHANGED")
+            raw_text = "".join(
+                content["text"]
+                for output in item["providerRawResponse"].get("output", [])
+                if output.get("type") == "message"
+                for content in output.get("content", [])
+                if content.get("type") == "output_text"
+            )
+            require(item["providerText"] == raw_text, "CHECKPOINT_PROVIDER_TEXT_CHANGED")
         else:
             raw_usage = item["providerRawUsage"]
             if raw_usage is not None:
@@ -440,20 +461,21 @@ def _verify_attempts(manifest: dict, state: dict) -> None:
             require(
                 response.meta.model == MODEL
                 and response.meta.provider == "openai"
-                and response.meta.prompt_version == PROMPT_VERSION
+                and response.meta.prompt_version == manifest["provenance"]["promptVersion"]
                 and not response.meta.mock
                 and not response.meta.truncated,
                 "CHECKPOINT_RESPONSE_CHANGED",
             )
-            _validated_output(
-                ProviderResponse(
-                    text=json.dumps({"insights": result["response"]["insights"]}),
-                    provider="openai",
-                    model=MODEL,
-                    usage=ProviderUsage(),
-                ),
-                ReportInsightRequest.model_validate(result["request"]),
-            )
+            if revalidate_outputs:
+                _validated_output(
+                    ProviderResponse(
+                        text=json.dumps({"insights": result["response"]["insights"]}),
+                        provider="openai",
+                        model=MODEL,
+                        usage=ProviderUsage(),
+                    ),
+                    ReportInsightRequest.model_validate(result["request"]),
+                )
             require(
                 response.meta.input_tokens == sum(item["usage"]["input_tokens"] for item in records)
                 and response.meta.output_tokens

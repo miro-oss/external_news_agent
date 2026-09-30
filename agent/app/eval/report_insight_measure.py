@@ -29,7 +29,7 @@ from app.eval.report_insight_run import (
     verify,
 )
 
-DEFAULT_OUTPUT = AGENT_ROOT.parent / "docs/report-insight-evaluation-20260930/nano-comparison-v1"
+DEFAULT_OUTPUT = AGENT_ROOT.parent / "docs/report-insight-evaluation-20260930/nano-comparison-v2"
 WINNERS = {"A", "B", "tie", "both_fail"}
 VARIANTS = ("single_call", "staged")
 
@@ -310,7 +310,7 @@ def main() -> None:
                 args.output_dir, prepare_only=args.prepare_only, open_browser=not args.no_open
             )
             if args.prepare_only and args.output_dir == DEFAULT_OUTPUT:
-                path = args.output_dir.parent / "측정 시작.command"
+                path = args.output_dir.parent / "v2 측정 시작.command"
                 path.write_text(launcher_text(), encoding="utf-8")
                 path.chmod(0o700)
                 result["launcher"] = str(path)

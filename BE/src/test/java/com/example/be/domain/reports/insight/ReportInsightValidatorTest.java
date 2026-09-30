@@ -2,6 +2,7 @@ package com.example.be.domain.reports.insight;
 
 import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.dto.AgentReportInsightResponse;
+import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.util.List;
@@ -12,6 +13,15 @@ class ReportInsightValidatorTest {
     private final ReportInsightValidator validator = new ReportInsightValidator();
     @Test void acceptsCompleteReferencedInterpretationsAndEmptyOptionalInterpretations() {
         assertDoesNotThrow(() -> validator.validate(response(), request()));
+    }
+    @Test void rejectsLegacyPromptMetadataEvenWhenTheInsightShapeIsValid() {
+        var current = response();
+        var meta = current.meta();
+        var legacy = new AgentReportInsightResponse(current.insights(), new AgentReportResponse.Meta(
+                meta.provider(), meta.model(), "report-insight.ko.v1", meta.inputTokens(), meta.outputTokens(),
+                meta.costUsd(), meta.credits(), meta.mock(), meta.truncated()));
+        assertEquals("SCHEMA_VIOLATION", assertThrows(AgentClientException.class,
+                () -> validator.validate(legacy, request())).getCode());
     }
     @Test void rejectsOmittedDuplicateAndUnknownFindings() {
         for (var assessments : List.of(List.of(assessment(50, 3, 2, 2)),
