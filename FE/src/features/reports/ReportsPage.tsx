@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import type { TopicWeeklyReportCreated } from '../../api/topicWeeklyReport'
 import {
   useAudienceSetting,
@@ -31,6 +32,7 @@ import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { ReportSharePanel } from '../notifications/ReportSharePanel'
 import { ReportReadingWithFeedback } from './ReportReadingWithFeedback'
 import { ReportChangesPanel } from './ReportChangesPanel'
+import { refreshReportReading } from './reportRefresh'
 import { IssueTonePanel } from './IssueTonePanel'
 import { collectionHighlightTerms, collectionKeywords } from './reportReading'
 import { ReportKeywordText } from './ReportKeywordText'
@@ -101,6 +103,7 @@ function useReportFilterClock() {
 }
 
 export function ReportsPage() {
+  const queryClient = useQueryClient()
   const [reportScope, setReportScope] = useState<ReportScopeTab>(() => reportScopeFromHash(window.location.hash))
   const [selectedId, setSelectedId] = useState<number | null>(reportIdFromHash)
   const [filters, setFilters] = useState<ReportFilters>(DEFAULT_REPORT_FILTERS)
@@ -291,7 +294,8 @@ export function ReportsPage() {
                 defaultAudience={audienceSetting.data?.audience}
                 onAudienceSelect={setAudienceOverride}
                 onDelete={() => deleteReport(activeReportData.id)}
-                onRefreshReport={() => activeReport.refetch({ throwOnError: true })}
+                onRefreshReport={() => refreshReportReading(queryClient, activeReportData,
+                  () => activeReport.refetch({ throwOnError: true }))}
                 onEvidenceSelect={(articleId, runId, sentences) => {
                   setEvidenceSelection({
                     articleId,

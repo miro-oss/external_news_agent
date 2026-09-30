@@ -18,12 +18,16 @@ import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionTopicSnapshot;
+import com.example.be.domain.feedback.model.FeedbackModels;
+import com.example.be.domain.feedback.repository.FeedbackStore;
+import com.example.be.domain.feedback.service.ReportEventSnapshotFactory;
 import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportContent;
 import com.example.be.domain.reports.entity.ReportCollectionContext;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
@@ -70,11 +74,16 @@ class ReportQueryServiceImplTest {
     private final DeliveryLogRepository deliveryLogRepository = mock(DeliveryLogRepository.class);
     private final IssueInvestigationJdbcRepository investigationRepository =
             mock(IssueInvestigationJdbcRepository.class);
+    private final FeedbackStore feedbackStore = mock(FeedbackStore.class);
+    private final ReportEventSnapshotFactory eventSnapshots = mock(ReportEventSnapshotFactory.class);
+    private final ReportEventFeedbackProjection feedbackProjection =
+            new ReportEventFeedbackProjection(feedbackStore, eventSnapshots);
     private final ReportQueryServiceImpl service = new ReportQueryServiceImpl(
             reportRepository, findingRepository, issueArticleRepository,
             newsIssueRepository, deliveryLogRepository,
             com.example.be.domain.analysis.service.SensitivityCalculator.defaults(),
-            investigationRepository, mock(com.example.be.domain.collection.repository.CollectionRunArticleRepository.class), relevancePolicy);
+            investigationRepository, mock(com.example.be.domain.collection.repository.CollectionRunArticleRepository.class), relevancePolicy,
+            feedbackProjection);
 
     @Test
     void latestReturnsNullWhenNoReportExists() {
@@ -260,6 +269,70 @@ class ReportQueryServiceImplTest {
         assertEquals(2, detail.getSummaryStats().getNewCount());
         assertEquals(2, detail.getSummaryStats().getBySensitivityLevel().get("high"));
         verify(findingRepository, never()).findForReportByRunId(42L);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(ReportScope.class)
+    @SuppressWarnings("unchecked")
+    void confirmedEventDisappearsFromReloadedDetailLatestAndCountsWithoutChangingSavedReport(ReportScope scope) {
+        var run = CollectionRun.builder().id(42L).build();
+        var stored = new ReportContent(List.of("잘못된 이슈 저장 요약"), List.of(
+                new ReportContent.ImportantEvent("잘못된 이슈", "잘못된 사건 내용", "잘못된 영향", List.of(1L)),
+                new ReportContent.ImportantEvent("남은 이슈", "남은 사건 내용", "남은 영향", List.of(2L))),
+                List.of(new ReportContent.WatchItem("잘못된 관찰", "잘못된 이유", List.of(1L))),
+                List.of("잘못된 출처 설명"));
+        var report = NewsReport.builder().id(17L).reportScope(scope)
+                .run(scope == ReportScope.RUN ? run : null)
+                .sourceRunIds(List.of(42L)).reflectedFindingIds(List.of(1L, 2L))
+                .title("리포트").markdownBody("## 핵심\n잘못된 이슈 저장 본문").structuredContent(stored)
+                .generatedAt(LocalDateTime.of(2026, 10, 1, 10, 0)).build();
+        var rejected = finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        var retained = finding(2L, SensitivityLevel.LOW, Relevance.REFERENCE);
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(reportRepository.findFirstByReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
+                .thenReturn(Optional.of(report));
+        when(reportRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(report)));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(rejected, retained));
+        when(findingRepository.findForReportByIdIn(List.of(1L, 2L))).thenReturn(List.of(rejected, retained));
+        var first = eventItem('a', 0, stored.importantEvents().getFirst());
+        var second = eventItem('b', 1, stored.importantEvents().getLast());
+        when(eventSnapshots.capture(eq(report), any())).thenReturn(List.of(first, second));
+        when(feedbackStore.eventFeedback(17L)).thenReturn(List.of(new FeedbackModels.Feedback(
+                9L, null, null, 17L, null, FeedbackModels.Category.SUMMARY_ERROR, "오류입니다", false,
+                "request-hash", FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR", "검토 설명",
+                LocalDateTime.of(2026, 10, 1, 10, 1), first, first.event().key())));
+
+        for (boolean includeFindings : List.of(false, true)) {
+            var detail = service.getReport(17L, includeFindings);
+            var reloaded = service.getReport(17L, includeFindings);
+            var latest = service.getLatest(includeFindings);
+            assertEquals(1, detail.getSummaryStats().getFindingCount());
+            assertEquals(0, detail.getSummaryStats().getBySensitivityLevel().get("high"));
+            assertEquals(List.of("남은 이슈"), detail.getStructuredContent().importantEvents().stream()
+                    .map(ReportContent.ImportantEvent::title).toList());
+            assertFalse(detail.getStructuredContent().toString().contains("잘못된"));
+            assertFalse(detail.getMarkdownBody().contains("잘못된"));
+            assertTrue(detail.getMarkdownBody().contains("남은 사건 내용"));
+            assertEquals(detail.getMarkdownBody(), reloaded.getMarkdownBody());
+            assertEquals(detail.getStructuredContent(), latest.getStructuredContent());
+            assertEquals(1, latest.getSummaryStats().getFindingCount());
+            if (includeFindings) assertEquals(List.of(2L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
+            else assertNull(detail.getFindings());
+        }
+        var summary = service.getReports(null, null, 0, 20).getContent().getFirst();
+        assertEquals(1, summary.getFindingCount());
+        assertEquals(0, summary.getHighSensitivityCount());
+        assertEquals(stored, report.getStructuredContent());
+        assertEquals("## 핵심\n잘못된 이슈 저장 본문", report.getMarkdownBody());
+        assertEquals(List.of(1L, 2L), report.getReflectedFindingIds());
+    }
+
+    private static FeedbackModels.Item eventItem(char key, int index, ReportContent.ImportantEvent event) {
+        var context = new FeedbackModels.EventContext(String.valueOf(key).repeat(64), index,
+                event.title(), event.summaryKo(), event.significance(), event.sourceFindingIds(), List.of(), List.of(), null);
+        return new FeedbackModels.Item(null, null, null, List.of(), null, null, null, null,
+                "report-v1", "fixture", null, context);
     }
 
     @Test

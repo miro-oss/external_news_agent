@@ -6,6 +6,8 @@ import com.example.be.domain.collection.entity.CollectionTopicSnapshot;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.reports.entity.*;
 import com.example.be.domain.reports.service.ReportFindings;
+import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
+import com.example.be.domain.feedback.repository.FeedbackStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.ObjectMapper;
@@ -16,10 +18,36 @@ import java.util.stream.IntStream;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static com.example.be.domain.feedback.model.FeedbackModels.*;
 
 class ReportEventSnapshotFactoryTest {
     private final JdbcTemplate jdbc=mock(JdbcTemplate.class);
     private final ReportEventSnapshotFactory factory=new ReportEventSnapshotFactory(jdbc,new ObjectMapper());
+
+    @Test void repeatedErrorProjectionKeepsSurvivingRealSnapshotHashAndSavedOriginalIndex() {
+        var a=finding(11,21,31,41,"오류 사건 원문");var b=finding(12,22,31,41,"정상 사건 원문");
+        var content=new ReportContent(List.of("오류를 포함한 요약"),List.of(
+                new ReportContent.ImportantEvent("오류 사건","오류 요약","이유",List.of(11L)),
+                new ReportContent.ImportantEvent("정상 사건","정상 요약","정상 이유",List.of(12L))),List.of(),List.of());
+        var report=NewsReport.builder().id(1L).title("보고서").markdownBody("오류 원본")
+                .structuredContent(content).collectionContexts(List.of(context(31,scope(41,"검색",List.of("HBM"),List.of())))).build();
+        var visible=new ReportFindings.Visible(List.of(a,b),false);
+        var original=factory.capture(report,visible);
+        var review=new Feedback(5L,null,null,1L,null,Category.SUMMARY_ERROR,"의견",false,"hash",Status.COMPLETED,
+                "CONFIRMED_ERROR","설명",java.time.LocalDateTime.of(2026,10,1,10,0),original.getFirst(),original.getFirst().event().key());
+        var projection=new ReportEventFeedbackProjection(mock(FeedbackStore.class),factory);
+        for(int refresh=0;refresh<3;refresh++) {
+            var view=projection.project(report,visible,List.of(review));
+            assertEquals(List.of(12L),view.findings().stream().map(Finding::getId).toList());
+            assertEquals(List.of(content.importantEvents().get(1)),view.readingContent().structuredContent().importantEvents());
+            var surviving=projection.events(report,visible,List.of(review)).getFirst();
+            assertEquals(original.get(1).event().key(),surviving.event().key());
+            assertEquals(1,surviving.event().index());
+            assertEquals(List.of(12L),surviving.event().sourceFindingIds());
+            assertSame(content,report.getStructuredContent());
+            assertEquals("오류 원본",report.getMarkdownBody());
+        }
+    }
 
     @Test void eventPreservesEverySourceAndTopicAndKeyBindsDisplayedTextAndOriginalBody() {
         var a=finding(11,21,31,41,"첫째 원문");var b=finding(12,22,32,42,"둘째 원문");
