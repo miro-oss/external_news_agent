@@ -22,6 +22,7 @@ import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -39,9 +40,20 @@ public class ReportInsightService {
     private final LlmPlanService plans;
     private final AgentRunRecorder recorder;
     private final ReportInsightExecutionRecorder executions;
+    private final ReportInsightJobRepository jobs;
+    @Value("${news.scheduling.enabled:true}") private boolean schedulingEnabled = true;
     private final Set<String> active = ConcurrentHashMap.newKeySet();
 
     public ReportInsightDTO.Result create(Long reportId, ReportInsightDTO.CreateRequest body) {
+        return create(reportId, body, false);
+    }
+
+    /** Only the durable worker may bypass its own queued/running state. */
+    public ReportInsightDTO.Result createAutomatic(long reportId, Audience audience) {
+        return create(reportId, new ReportInsightDTO.CreateRequest(List.of(audience.name())), true);
+    }
+
+    private ReportInsightDTO.Result create(Long reportId, ReportInsightDTO.CreateRequest body, boolean automatic) {
         positive(reportId);
         var audiences = audiences(body == null ? null : body.audiences());
         if (!properties.isEnabled()) throw new GeneralException(GeneralErrorCode.CONFLICT,
@@ -52,6 +64,11 @@ public class ReportInsightService {
             safeAudit(() -> recorder.recordReportInsightCacheHit(snapshot.runId(), reportId,
                     context(snapshot, audiences.size(), audiences.size(), false), now()));
             return result(true, snapshot, audiences, cached);
+        }
+        if (!automatic && schedulingEnabled) {
+            for (var audience : audiences) {
+                if (!cached.containsKey(audience) && jobs.isPending(reportId, audience)) throw inflight();
+            }
         }
         String key = reportId + ":" + snapshot.inputHash();
         if (!active.add(key)) throw inflight();
@@ -73,11 +90,9 @@ public class ReportInsightService {
         positive(reportId);
         Audience audience = audience(audienceValue);
         var snapshot = assembler.assembleForRead(reportId);
-        if (snapshot.findings().isEmpty()) throw new GeneralException(GeneralErrorCode.NOT_FOUND,
-                "저장된 리포트 관점 인사이트가 없습니다.");
+        if (snapshot.findings().isEmpty()) throw missing(reportId, audience);
         var cached = cached(snapshot, List.of(audience));
-        if (cached.isEmpty()) throw new GeneralException(GeneralErrorCode.NOT_FOUND,
-                "저장된 리포트 관점 인사이트가 없습니다.");
+        if (cached.isEmpty()) throw missing(reportId, audience);
         return result(true, snapshot, List.of(audience), cached);
     }
 
@@ -166,6 +181,10 @@ public class ReportInsightService {
     }
     private GeneralException inflight() { return new GeneralException(GeneralErrorCode.CONFLICT,
             "동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요."); }
+    private GeneralException missing(long reportId, Audience audience) {
+        if (properties.isEnabled() && schedulingEnabled && jobs.isPending(reportId, audience)) return inflight();
+        return new GeneralException(GeneralErrorCode.NOT_FOUND, "저장된 리포트 관점 인사이트가 없습니다.");
+    }
     private LocalDateTime now() { return LocalDateTime.now(ApiTimeZone.ZONE); }
     private void safeAudit(Runnable action) {
         try { action.run(); } catch (RuntimeException exception) { log.warn("리포트 인사이트 감사 기록 실패: {}", exception.getClass().getSimpleName()); }

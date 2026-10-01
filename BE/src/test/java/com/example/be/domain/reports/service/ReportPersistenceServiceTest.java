@@ -218,6 +218,8 @@ class ReportPersistenceServiceTest {
         assertTrue(report.isCoverageRecorded());
         assertEquals(java.util.List.of(501L), report.getReflectedFindingIds());
         assertEquals(java.util.List.of(502L), report.getExcludedFindingIds());
+        assertTrue(report.isAutomaticInsightsRequested());
+        verify(events).publishEvent(new com.example.be.domain.reports.comparison.ReportCompleted(17L));
     }
 
     @Test
@@ -249,6 +251,7 @@ class ReportPersistenceServiceTest {
         assertEquals(generatedAt, report.getGeneratedAt());
         assertEquals(java.util.List.of(501L), report.getReflectedFindingIds());
         verifyNoInteractions(notificationAutomation, events);
+        assertFalse(report.isAutomaticInsightsRequested());
     }
 
     @Test

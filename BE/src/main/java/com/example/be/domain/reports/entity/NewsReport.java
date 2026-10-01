@@ -151,6 +151,14 @@ public class NewsReport {
     /** Recovery which used live findings cannot attest to the original detached generation input. */
     public void invalidateComparisonInput() { this.comparisonInputUsable = false; }
 
+    /** Durable completion intent; legacy reports are not automatically backfilled. */
+    @Convert(converter = YnBooleanConverter.class)
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "insight_auto_requested_yn", nullable = false, length = 1)
+    private boolean automaticInsightsRequested;
+
+    public void requestAutomaticInsights() { this.automaticInsightsRequested = true; }
+
     @Column(name = "model_name", nullable = false, length = MAX_MODEL_NAME_LENGTH)
     private String modelName;
 
