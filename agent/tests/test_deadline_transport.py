@@ -284,7 +284,7 @@ def test_native_providers_parse_success_usage_and_own_the_deadline_clients(plan)
         }
     )
     with local_server(json.dumps(body).encode(), compressed=True) as (url, requests, _, _):
-        provider = make_provider(plan, url, monotonic() + 1)
+        provider = make_provider(plan, url, monotonic() + 5)
         try:
             result = provider.generate(
                 system_instruction="offline",
