@@ -121,19 +121,22 @@ def test_reassessment_context_is_independent_and_preserves_source_identity_and_t
     assert context["reportReferenceDate"] == "2026-09-25"
     assert [item["claims"][0]["id"] for item in context["findings"]] == ["101:0", "102:0"]
     assert source.model_dump_json(by_alias=True) == original
-    assert result.meta.prompt_version == "report-insight.ko.v7"
+    assert result.meta.prompt_version == "report-insight.ko.v8"
 
 
-def test_native_contract_emits_proof_before_categories_without_changing_accepted_wire():
+def test_native_contract_selects_category_before_fields_without_changing_accepted_wire():
     source = request()
     schema = draft_schema(source)
     record = schema["properties"]["assessments"]["properties"]["CHIP_MAKER"]["properties"][
         "finding101"
     ]["properties"]
-    connection = record["connection"]["properties"]
-    assert list(connection) == ["basis", "work", "condition", "relation"]
-    assert list(record["effect"]["properties"])[0] == "basis"
-    assert list(record["timing"]["properties"])[0] == "basis"
+    for field, category in (
+        ("connection", "relation"),
+        ("effect", "impactScope"),
+        ("timing", "urgencyState"),
+    ):
+        for branch in record[field]["anyOf"]:
+            assert list(branch["properties"])[0] == category
     native = response(payload(source), source)
     Draft202012Validator(schema).validate(json.loads(native.text))
     assert validate_draft(native, source).mapped.insights[0].assessments[0].axes.directness == 3

@@ -889,8 +889,8 @@ def test_four_audience_twelve_finding_sdk_review_schema_stays_within_all_size_li
         for finding in source.findings
         for quotes in source_quote_choices(finding).values()
     )
-    # Four five-value work enums and three five-value categories are shared once.
-    assert metrics["enum_values"] == proof_choice_count + 20 + 5 + 5 + 5
+    # Work, conditional relation and known axis enums are each shared once.
+    assert metrics["enum_values"] == proof_choice_count + 20 + 2 + 4 + 4
     assert metrics["enum_values"] <= 1000
     assert metrics["properties"] <= 5000
     assert metrics["string_characters"] <= 120_000
@@ -906,13 +906,22 @@ def test_four_audience_twelve_finding_sdk_review_schema_stays_within_all_size_li
     assert len(validate_draft(response(payload(source), source), source).mapped.insights) == 4
 
 
-def test_uniform_shared_categories_move_correlations_to_existing_post_validation():
+def test_compact_native_axes_enforce_categories_without_duplicating_source_choices():
     source = request(ids=(101, 102), audiences=tuple(ROLE_WORK))
     wire = OpenAIJsonSchemaTransformer(draft_schema(source), strict=True).walk()
     definitions = wire["$defs"]
-    assert definitions["ReportRelation"]["enum"] == list(RELATION_SCORES)
-    assert definitions["ReportImpactScope"]["enum"] == list(IMPACT_SCORES)
-    assert definitions["ReportUrgencyState"]["enum"] == list(URGENCY_SCORES)
+    assert definitions["ReportConditionalRelation"]["enum"] == ["CONDITIONAL", "BACKGROUND"]
+    assert definitions["ReportKnownImpactScope"]["enum"] == [
+        category for category in IMPACT_SCORES if category != "UNDETERMINED"
+    ]
+    assert definitions["ReportKnownUrgencyState"]["enum"] == [
+        category for category in URGENCY_SCORES if category != "UNDETERMINED"
+    ]
+    assert not {"ReportRelation", "ReportImpactScope", "ReportUrgencyState"} & definitions.keys()
+    assert [name for name in definitions if name.endswith("SourceSpan")] == [
+        "Finding101SourceSpan",
+        "Finding102SourceSpan",
+    ]
     for audience in source.audiences:
         name = f"ReportWork{audience}"
         assert definitions[name]["enum"] == list(ROLE_WORK[audience])
@@ -921,19 +930,34 @@ def test_uniform_shared_categories_move_correlations_to_existing_post_validation
             record = audience_schema["properties"][f"finding{finding.id}"]
             assert "anyOf" not in record
             props = record["properties"]
-            assert props["connection"]["properties"]["work"] == {
-                "anyOf": [{"$ref": f"#/$defs/{name}"}, {"type": "null"}]
-            }
+            branches = props["connection"]["anyOf"]
+            assert len(branches) == 4
+            for branch in branches:
+                assert list(branch["properties"]) == ["relation", "work", "condition", "basis"]
+            for branch in branches[:2]:
+                assert branch["properties"]["work"] == {"$ref": f"#/$defs/{name}"}
+            for branch in branches[:3]:
+                assert branch["properties"]["basis"] == {
+                    "$ref": f"#/$defs/Finding{finding.id}SourceSpan"
+                }
+            assert branches[-1]["properties"]["basis"] == {"type": "null"}
             for field, category, definition in (
-                ("effect", "impactScope", "ReportImpactScope"),
-                ("timing", "urgencyState", "ReportUrgencyState"),
+                ("effect", "impactScope", "ReportKnownImpactScope"),
+                ("timing", "urgencyState", "ReportKnownUrgencyState"),
             ):
-                assert props[field]["properties"][category] == {"$ref": f"#/$defs/{definition}"}
+                known, unknown = props[field]["anyOf"]
+                assert list(known["properties"])[0] == category
+                assert known["properties"][category] == {"$ref": f"#/$defs/{definition}"}
+                assert known["properties"]["basis"] == {
+                    "$ref": f"#/$defs/Finding{finding.id}SourceSpan"
+                }
+                assert unknown["properties"]["basis"] == {"type": "null"}
     validator = Draft202012Validator(wire)
     for field in ("connection", "effect", "timing"):
         native = draft_to_wire(payload(source), source)
         native["assessments"]["CHIP_MAKER"]["finding101"][field]["basis"] = None
-        validator.validate(native)
+        with pytest.raises(JsonSchemaValidationError):
+            validator.validate(native)
         with pytest.raises(ReportAssessmentDraftValidationError):
             validate_draft(
                 ProviderResponse(json.dumps(native), "openai", "offline", ProviderUsage()), source

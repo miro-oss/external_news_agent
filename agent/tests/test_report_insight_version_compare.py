@@ -722,7 +722,7 @@ def test_actual_correlated_native_shape_preserves_stage_raw_response_and_public_
         ("connection", "relation", "UNRELATED"),
     ],
 )
-def test_uniform_native_fields_keep_category_correlations_in_post_validation(
+def test_native_axis_branches_and_post_validation_both_reject_invalid_correlations(
     prepared, block, field, value
 ):
     _, directory, _ = prepared
@@ -735,7 +735,8 @@ def test_uniform_native_fields_keep_category_correlations_in_post_validation(
     native_schema = sdk.calls[0]["text"]["format"]["schema"]
     invalid = deepcopy(native)
     invalid["assessments"]["CHIP_MAKER"]["finding501"][block][field] = value
-    Draft202012Validator(native_schema).validate(invalid)
+    with pytest.raises(JsonSchemaValidationError):
+        Draft202012Validator(native_schema).validate(invalid)
     with pytest.raises(assessment.ReportAssessmentDraftValidationError):
         assessment.validate_draft(replace(generated, text=json.dumps(invalid)), source)
 

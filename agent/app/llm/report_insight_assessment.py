@@ -194,25 +194,27 @@ def source_span_choices(finding: ReportInsightFinding) -> dict[str, dict[str, st
 
 
 def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
-    """Use uniform records; keep role/source choices closed and validate axes locally.
+    """Keep fixed records with compact category-first branches inside each axis.
 
-    Category-specific record branches duplicated the full source/work/axis
-    shape and encouraged nano to choose the short unrelated record. Independent
-    nullable fields keep every record the same size. Existing post-validation
-    still enforces category/basis/work/condition correlations without rewriting
-    any model judgment.
+    The native schema enforces each category's source/work/condition contract.
+    Every branch references the same finding-bound proof definition; no full
+    record or proof choice set is duplicated. Local validation still checks
+    cross-axis consistency and whether the selected sources support the prose.
     """
     generic = ReportAssessmentDraft.model_json_schema(by_alias=True)
     properties = generic["$defs"]["ReportFindingAssessmentDraft"]["properties"]
     definitions = {
-        "ReportRelation": {"type": "string", "enum": list(RELATION_SCORES)},
-        "ReportImpactScope": {
+        "ReportConditionalRelation": {
             "type": "string",
-            "enum": list(IMPACT_SCORES),
+            "enum": ["CONDITIONAL", "BACKGROUND"],
         },
-        "ReportUrgencyState": {
+        "ReportKnownImpactScope": {
             "type": "string",
-            "enum": list(URGENCY_SCORES),
+            "enum": [value for value in IMPACT_SCORES if value != "UNDETERMINED"],
+        },
+        "ReportKnownUrgencyState": {
+            "type": "string",
+            "enum": [value for value in URGENCY_SCORES if value != "UNDETERMINED"],
         },
     }
     audiences = {}
@@ -224,22 +226,22 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
         for finding in request.findings:
             unknown_connection = _object(
                 {
-                    "basis": {"type": "null"},
+                    "relation": {"type": "string", "const": "UNDETERMINED"},
                     "work": {"type": "null"},
                     "condition": {"type": "null"},
-                    "relation": {"type": "string", "const": "UNDETERMINED"},
+                    "basis": {"type": "null"},
                 }
             )
             unknown_effect = _object(
                 {
-                    "basis": {"type": "null"},
                     "impactScope": {"type": "string", "const": "UNDETERMINED"},
+                    "basis": {"type": "null"},
                 }
             )
             unknown_timing = _object(
                 {
-                    "basis": {"type": "null"},
                     "urgencyState": {"type": "string", "const": "UNDETERMINED"},
+                    "basis": {"type": "null"},
                 }
             )
 
@@ -270,7 +272,7 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                         for claim_id, spans in source_span_choices(finding).items()
                     ]
                 }
-                nullable_basis = {"anyOf": [{"$ref": f"#/$defs/{source_name}"}, {"type": "null"}]}
+                basis = {"$ref": f"#/$defs/{source_name}"}
 
                 reason = deepcopy(properties["reason"])
                 reason["description"] = (
@@ -280,31 +282,61 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                     "claims=[] 전용 문구를 쓰지 않는다."
                 )
                 entries[f"finding{finding.id}"] = record(
-                    _object(
-                        {
-                            "basis": deepcopy(nullable_basis),
-                            "work": {"anyOf": [deepcopy(work), {"type": "null"}]},
-                            "condition": {
-                                "anyOf": [
-                                    {"type": "string", "minLength": 1, "maxLength": 120},
-                                    {"type": "null"},
-                                ]
-                            },
-                            "relation": {"$ref": "#/$defs/ReportRelation"},
-                        }
-                    ),
-                    _object(
-                        {
-                            "basis": deepcopy(nullable_basis),
-                            "impactScope": {"$ref": "#/$defs/ReportImpactScope"},
-                        }
-                    ),
-                    _object(
-                        {
-                            "basis": deepcopy(nullable_basis),
-                            "urgencyState": {"$ref": "#/$defs/ReportUrgencyState"},
-                        }
-                    ),
+                    {
+                        "anyOf": [
+                            _object(
+                                {
+                                    "relation": {"type": "string", "const": "DIRECT"},
+                                    "work": deepcopy(work),
+                                    "condition": {"type": "null"},
+                                    "basis": deepcopy(basis),
+                                }
+                            ),
+                            _object(
+                                {
+                                    "relation": {"$ref": "#/$defs/ReportConditionalRelation"},
+                                    "work": deepcopy(work),
+                                    "condition": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 120,
+                                    },
+                                    "basis": deepcopy(basis),
+                                }
+                            ),
+                            _object(
+                                {
+                                    "relation": {"type": "string", "const": "UNRELATED"},
+                                    "work": {"type": "null"},
+                                    "condition": {"type": "null"},
+                                    "basis": deepcopy(basis),
+                                }
+                            ),
+                            unknown_connection,
+                        ]
+                    },
+                    {
+                        "anyOf": [
+                            _object(
+                                {
+                                    "impactScope": {"$ref": "#/$defs/ReportKnownImpactScope"},
+                                    "basis": deepcopy(basis),
+                                }
+                            ),
+                            unknown_effect,
+                        ]
+                    },
+                    {
+                        "anyOf": [
+                            _object(
+                                {
+                                    "urgencyState": {"$ref": "#/$defs/ReportKnownUrgencyState"},
+                                    "basis": deepcopy(basis),
+                                }
+                            ),
+                            unknown_timing,
+                        ]
+                    },
                     reason,
                 )
             else:

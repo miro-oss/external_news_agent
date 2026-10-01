@@ -5,7 +5,7 @@ from pathlib import Path
 from app.schemas.analyze import Audience
 
 _ROOT = Path(__file__).resolve().parents[1] / "prompts"
-_BASE = (_ROOT / "report-insight.ko.v7.md").read_text(encoding="utf-8").strip()
+_BASE = (_ROOT / "report-insight.ko.v8.md").read_text(encoding="utf-8").strip()
 _RUBRIC = (_ROOT / "report-importance.v5.md").read_text(encoding="utf-8").strip()
 _ROLES = {
     "CHIP_MAKER": "칩 제조: 공정/인증 PROCESS_QUALIFICATION, 생산 일정 PRODUCTION_SCHEDULE, "
@@ -35,10 +35,14 @@ def report_stage_instruction(audiences: list[Audience], stage: str) -> str:
     common = _BASE + "\n\n" + roles
     if stage in {"MAP", "REVIEW"}:
         stage_text = (
-            f"현재 단계는 {stage}. 실제 원문 basis를 먼저 선택하고 그 원문이 연결하는 work를 "
-            "판단한다. 각 finding의 사건에 맞는 reason을 새로 쓰고 다른 항목의 문장을 "
+            f"현재 단계는 {stage}. 원문을 읽고 connection.relation, effect.impactScope, "
+            "timing.urgencyState의 범주를 각각 먼저 판단한 뒤 그 범주의 Schema가 요구하는 "
+            "필드를 작성한다. 알려진 축의 basis는 같은 finding/claim의 실제 원문을 선택한다. "
+            "UNDETERMINED인 축은 basis=null이다. 업무 관계가 UNDETERMINED이면 "
+            "connection의 work/condition/basis는 모두 null이고 영향·시점도 UNDETERMINED다. "
+            "확인된 업무 관계를 유지하면서 영향·시점만 UNDETERMINED로 둘 수 있다. "
+            "각 finding의 사건에 맞는 reason을 새로 쓰고 다른 항목의 문장을 "
             "반복하지 않는다. basis가 지원하지 않는 팀·규격·승인·검증 절차를 추가하지 않는다. "
-            "업무를 특정할 수 없으면 relation=UNDETERMINED이며 work/condition/basis=null이다. "
             "실제 claims=[]인 항목의 고정 reason은 해당 항목의 Schema const만 따른다."
         )
         if stage == "REVIEW":
