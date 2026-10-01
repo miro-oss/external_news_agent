@@ -10,6 +10,7 @@ import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.reports.service.ReportFindings;
+import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -29,15 +30,20 @@ public class ReportEventFeedbackService {
     private final NewsReportRepository reports;
     private final FindingRepository findings;
     private final TopicRelevancePolicy relevance;
-    private final ReportEventSnapshotFactory snapshots;
+    private final ReportEventFeedbackProjection projection;
     private final FeedbackStore store;
     private final ObjectMapper json;
 
     @Transactional(readOnly=true)
     public EventFeedbackContext context(long reportId) {
         var report=report(reportId,false);
-        var events=capture(report).stream().map(Item::event).map(e->new PublicEvent(e.key(),e.index(),e.title(),e.summary(),e.significance(),e.sourceFindingIds())).toList();
-        return new EventFeedbackContext(reportId,events,store.eventFeedback(reportId).stream().map(ReportEventFeedbackService::response).toList());
+        var reviews=projection.reviews(reportId);
+        var items=projection.events(report,ReportFindings.loadVisible(report,findings,relevance),reviews);
+        var events=java.util.stream.IntStream.range(0,items.size()).mapToObj(index->{
+            var event=items.get(index).event();
+            return new PublicEvent(event.key(),index,event.title(),event.summary(),event.significance(),event.sourceFindingIds());
+        }).toList();
+        return new EventFeedbackContext(reportId,events,reviews.stream().map(ReportEventFeedbackService::response).toList());
     }
 
     @Transactional
@@ -67,7 +73,7 @@ public class ReportEventFeedbackService {
     }
 
     private List<Item> capture(NewsReport report) {
-        return snapshots.capture(report,ReportFindings.loadVisible(report,findings,relevance));
+        return projection.events(report,ReportFindings.loadVisible(report,findings,relevance),projection.reviews(report.getId()));
     }
     private NewsReport report(long id,boolean lock) {
         if(id<1)throw FeedbackErrors.bad();

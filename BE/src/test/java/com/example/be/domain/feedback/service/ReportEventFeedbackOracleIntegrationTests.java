@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-@SpringBootTest(properties={"news.agent.enabled=false","news.notifications.automation-enabled=false"})
+@SpringBootTest(properties={"news.agent.enabled=false","news.notifications.automation-enabled=false","news.feedback.enabled=false"})
 @ActiveProfiles("local")
 @EnabledIfSystemProperty(named="news.integration.db",matches="true")
 class ReportEventFeedbackOracleIntegrationTests {
@@ -77,6 +77,34 @@ class ReportEventFeedbackOracleIntegrationTests {
         assertThrows(ReportException.class,()->service.submit(report,request('a',"key","SUMMARY_ERROR")));
         jdbc.update("UPDATE news_reports SET report_status='GENERATED',deleted_at=? WHERE id=?",now(),report);
         assertThrows(ReportException.class,()->service.context(report));
+    }
+
+    @Test void batchReviewStatesKeepReportIsolationOrderAndLeaveFrozenInputsOnSingleReportReads() {
+        long first=report(List.of(item('a',2,null),item('b',2,null)));
+        long second=report(List.of(item('a',2,null)));
+        long untouched=report(List.of(item('a',2,null)));
+        var firstReview=service.submit(first,request('a',"first-batch","SUMMARY_ERROR"));
+        var secondReview=service.submit(second,request('a',"second-batch","SUMMARY_ERROR"));
+        var laterReview=service.submit(first,request('b',"later-batch","WRONG_CLUSTER"));
+        service.submit(untouched,request('a',"outside-batch","SUMMARY_ERROR"));
+        store.reviewed(store.byId(firstReview.id()).orElseThrow(),"CONFIRMED_ERROR","오류 확인",result("CONFIRMED_ERROR"),now());
+        clearInvocations(snapshots);
+
+        var states=store.eventReviewStates(List.of(second,first,first));
+
+        assertEquals(List.of(firstReview.id(),secondReview.id(),laterReview.id()),states.stream().map(Feedback::id).toList());
+        assertEquals(List.of(first,second,first),states.stream().map(Feedback::reportId).toList());
+        assertEquals(List.of(Status.COMPLETED,Status.PENDING,Status.PENDING),states.stream().map(Feedback::status).toList());
+        assertEquals("CONFIRMED_ERROR",states.getFirst().verdict());
+        assertEquals("a".repeat(64),states.getFirst().eventKey());
+        assertEquals("a".repeat(64),states.get(1).eventKey());
+        assertTrue(states.stream().allMatch(feedback->feedback.input()==null && feedback.diagnosis()==null));
+        assertTrue(store.eventReviewStates(List.of()).isEmpty());
+        var complete=store.eventFeedback(first);
+        assertEquals(List.of(firstReview.id(),laterReview.id()),complete.stream().map(Feedback::id).toList());
+        assertEquals(inputs.get(first).getFirst(),complete.getFirst().input());
+        assertEquals("오류 확인",complete.getFirst().diagnosis());
+        verifyNoInteractions(snapshots,gateway);
     }
 
     @Test void concurrentRetriesReserveAllKeysAndSeparateEventsWorkWithOracleNullOwnership() throws Exception {
@@ -123,6 +151,75 @@ class ReportEventFeedbackOracleIntegrationTests {
         assertEquals("검색1",exported.path("request").path("topic").path("queryText").asString());
         assertEquals("필수1",exported.path("request").path("topic").path("requiredKeywords").get(0).asString());
         assertEquals("선택1",exported.path("request").path("topic").path("optionalKeywords").get(0).asString());
+    }
+
+    @Test void confirmedErrorDisappearsAcrossReloadsWithoutChangingOtherEventsOrSavedEvidence() {
+        // These events intentionally share finding IDs: one incorrect event does not invalidate its siblings.
+        var originals=IntStream.range(0,6).mapToObj(i->item((char)('a'+i),2,null)).toList();
+        long report=report(originals);
+        var rejected=service.submit(report,request('a',"rejected","SUMMARY_ERROR"));
+        var notConfirmed=service.submit(report,request('b',"not-confirmed","WRONG_CLUSTER"));
+        var pending=service.submit(report,request('c',"pending","TOPIC_MISMATCH"));
+        var preference=service.submit(report,request('d',"preference","PREFERENCE"));
+        var insufficient=service.submit(report,request('e',"insufficient","SUMMARY_ERROR"));
+        var processing=service.submit(report,request('f',"processing","OTHER"));
+        assertEquals(6,service.context(report).events().size());
+
+        when(gateway.review(isNull(),eq(report),any())).thenReturn(result("CONFIRMED_ERROR"));
+        worker.process(job(rejected.id()));
+        store.reviewed(store.byId(notConfirmed.id()).orElseThrow(),"NOT_CONFIRMED","오류를 확인하지 못했습니다.",result("NOT_CONFIRMED"),now());
+        // Even an unexpected error verdict on personal preference must never suppress a common event.
+        store.reviewed(store.byId(preference.id()).orElseThrow(),"CONFIRMED_ERROR","관심에 대한 의견입니다.",result("CONFIRMED_ERROR"),now());
+        store.reviewed(store.byId(insufficient.id()).orElseThrow(),"INSUFFICIENT_EVIDENCE","검토 근거가 부족합니다.",result("INSUFFICIENT_EVIDENCE"),now());
+        jdbc.update("UPDATE news_feedback SET status='PROCESSING',verdict='CONFIRMED_ERROR' WHERE id=?",processing.id());
+        var frozenInput=store.byId(rejected.id()).orElseThrow().input();
+        var storedReport=reportSnapshot(report);
+        int feedbackCount=count("news_feedback",report),jobCount=count("news_feedback_jobs",report);
+        int requestCount=count("news_feedback_event_requests",report);
+        clearInvocations(gateway);
+
+        var refreshed=service.context(report);
+        assertEquals(List.of('b','c','d','e','f').stream().map(key->String.valueOf(key).repeat(64)).toList(),
+                refreshed.events().stream().map(event->event.eventKey()).toList());
+        assertEquals(List.of(0,1,2,3,4),refreshed.events().stream().map(event->event.eventIndex()).toList());
+        assertTrue(refreshed.events().stream().allMatch(event->event.sourceFindingIds().equals(List.of(501L,502L))));
+        assertEquals(6,refreshed.feedback().size());
+        assertEquals("CONFIRMED_ERROR",refreshed.feedback().stream().filter(feedback->feedback.id()==rejected.id()).findFirst().orElseThrow().verdict());
+        assertEquals("PENDING",refreshed.feedback().stream().filter(feedback->feedback.id()==pending.id()).findFirst().orElseThrow().status());
+        for(int reload=0;reload<3;reload++)assertEquals(refreshed,service.context(report));
+        assertEquals(feedbackCount,count("news_feedback",report));assertEquals(jobCount,count("news_feedback_jobs",report));
+        assertEquals(requestCount,count("news_feedback_event_requests",report));assertEquals(0,count("news_feedback_capabilities",report));
+        assertEquals(storedReport,reportSnapshot(report));assertEquals(frozenInput,store.byId(rejected.id()).orElseThrow().input());
+        assertEquals(originals,inputs.get(report));verifyNoInteractions(gateway);
+
+        var acceptedRetry=service.submit(report,request('a',"retry-hidden-event","SUMMARY_ERROR"));
+        assertEquals(rejected.id(),acceptedRetry.id());assertEquals("COMPLETED",acceptedRetry.status());
+        assertEquals("CONFIRMED_ERROR",acceptedRetry.verdict());
+        assertEquals(acceptedRetry,service.submit(report,request('a',"retry-hidden-event","SUMMARY_ERROR")));
+        assertEquals(feedbackCount,count("news_feedback",report));assertEquals(jobCount,count("news_feedback_jobs",report));
+        assertEquals(requestCount+1,count("news_feedback_event_requests",report));
+        assertEquals(refreshed,service.context(report));assertEquals(storedReport,reportSnapshot(report));
+        assertEquals(frozenInput,store.byId(rejected.id()).orElseThrow().input());verifyNoInteractions(gateway);
+    }
+
+    @Test void errorReviewOfOlderEventRevisionDoesNotSuppressTheCurrentEvent() {
+        var original=item('a',2,null);
+        long report=report(List.of(original));
+        var submitted=service.submit(report,request('a',"old-revision","SUMMARY_ERROR"));
+        store.reviewed(store.byId(submitted.id()).orElseThrow(),"CONFIRMED_ERROR","이전 이벤트의 오류를 확인했습니다.",result("CONFIRMED_ERROR"),now());
+        assertTrue(service.context(report).events().isEmpty());
+
+        var event=original.event();
+        var revisedEvent=new EventContext("b".repeat(64),event.index(),event.title(),event.summary(),event.significance(),
+                event.sourceFindingIds(),event.topics(),event.sources(),event.unavailableReason());
+        var revised=new Item(null,null,null,original.articles(),null,null,null,null,"report-v1","fixture",null,revisedEvent);
+        inputs.put(report,List.of(revised));
+        var current=service.context(report);
+        assertEquals(1,current.events().size());assertEquals("b".repeat(64),current.events().getFirst().eventKey());
+        assertEquals(0,current.events().getFirst().eventIndex());
+        assertEquals("a".repeat(64),current.feedback().getFirst().eventKey());
+        assertEquals(original,store.byId(submitted.id()).orElseThrow().input());
+        assertEquals(current,service.context(report));verifyNoInteractions(gateway);
     }
 
     @Test void localPreferencesProduceDiagnosisWithoutActivatingOrExportingPersonalPolicies() {
@@ -184,6 +281,9 @@ class ReportEventFeedbackOracleIntegrationTests {
         return new TransactionTemplate(manager).execute(tx->{
             var report=NewsReport.builder().reportScope(ReportScope.DAILY).reportDate(LocalDate.of(2189,1,1).plusDays(reports.size()))
                     .reportStatus(ReportStatus.GENERATED).title("이벤트 보고서").markdownBody("보고서").modelName("fixture").generatedAt(now()).build();
+            report.recordStructuredContent(new ReportContent(items.stream().map(item->item.event().summary()).limit(3).toList(),
+                    items.stream().map(item->new ReportContent.ImportantEvent(item.event().title(),item.event().summary(),
+                            item.event().significance(),item.event().sourceFindingIds())).toList(),List.of(),List.of()));
             em.persist(report);em.flush();reports.add(report.getId());inputs.put(report.getId(),items);return report.getId();
         });
     }
@@ -202,6 +302,10 @@ class ReportEventFeedbackOracleIntegrationTests {
             {"verdict":"%s","diagnosis":"전체 원문을 확인했습니다.","evidence":[{"articleId":401,"quote":"원문 근거"}],"proposedPolicy":null,"meta":{"truncated":false,"mock":false}}
             """.formatted(verdict)); }
     private long job(long feedbackId) { return jdbc.queryForObject("SELECT id FROM news_feedback_jobs WHERE feedback_id=?",Long.class,feedbackId); }
+    private List<String> reportSnapshot(long reportId) {
+        return jdbc.queryForObject("SELECT markdown_body,structured_content,report_reflected_finding_ids FROM news_reports WHERE id=?",
+                (row,index)->List.of(row.getString("markdown_body"),row.getString("structured_content"),row.getString("report_reflected_finding_ids")),reportId);
+    }
     private int count(String table,long reportId) { return jdbc.queryForObject("SELECT COUNT(*) FROM "+table+" WHERE report_id=?",Integer.class,reportId); }
     private static LocalDateTime now() { return LocalDateTime.now(ApiTimeZone.ZONE); }
 }

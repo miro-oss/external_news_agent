@@ -72,7 +72,9 @@ public class ReportInsightService {
     public ReportInsightDTO.Result get(Long reportId, String audienceValue) {
         positive(reportId);
         Audience audience = audience(audienceValue);
-        var snapshot = assembler.assemble(reportId);
+        var snapshot = assembler.assembleForRead(reportId);
+        if (snapshot.findings().isEmpty()) throw new GeneralException(GeneralErrorCode.NOT_FOUND,
+                "저장된 리포트 관점 인사이트가 없습니다.");
         var cached = cached(snapshot, List.of(audience));
         if (cached.isEmpty()) throw new GeneralException(GeneralErrorCode.NOT_FOUND,
                 "저장된 리포트 관점 인사이트가 없습니다.");

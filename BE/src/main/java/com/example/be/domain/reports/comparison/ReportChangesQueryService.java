@@ -4,6 +4,8 @@ import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.reports.service.ReportFindings;
+import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
+import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.global.database.OracleInClause;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
@@ -28,6 +30,7 @@ public class ReportChangesQueryService {
     private final ReportComparisonRepository comparisons;
     private final FindingRepository findings;
     private final TopicRelevancePolicy relevancePolicy;
+    private final ReportEventFeedbackProjection feedbackProjection;
 
     @Transactional(readOnly = true)
     public ReportChanges get(long reportId) {
@@ -42,8 +45,12 @@ public class ReportChangesQueryService {
         }
         var base = job.result().baseReportId() == null ? null : reports.findByIdAndReportStatusNot(
                 job.result().baseReportId(), ReportStatus.PENDING).orElse(null);
+        if (excludedEvent(report) || (base != null && excludedEvent(base))) {
+            // Every saved state can contain uncertainty notes quoting the unfiltered snapshots.
+            return unavailable(job.result());
+        }
         if (job.result().baseReportId() != null && base == null) {
-            return job.result().withStatus(ReportChanges.Status.UNAVAILABLE);
+            return unavailable(job.result());
         }
         if (job.status() == ReportChanges.Status.READY) {
             Set<Long> required = new LinkedHashSet<>(report.getReflectedFindingIds());
@@ -64,12 +71,22 @@ public class ReportChangesQueryService {
                                     || acceptedTopics.get(evidence.findingId()).contains(side.topicId())));
             if (!available.containsAll(required) || !acceptedInSavedTopics) {
                 // Check current visibility only; historical quoted text always stays in its saved snapshot.
-                var result = job.result();
-                var state = ReportChanges.Status.UNAVAILABLE;
-                return new ReportChanges(result.reportId(), result.reportDate(), result.baseReportId(),
-                        result.baseReportDate(), state, state.message, false, List.of(), List.of());
+                return unavailable(job.result());
             }
         }
         return job.result().withStatus(job.status());
+    }
+
+    private boolean excludedEvent(NewsReport report) {
+        var reviews = feedbackProjection.reviews(report.getId());
+        if (!feedbackProjection.hasConfirmedErrors(reviews)) return false;
+        return feedbackProjection.project(report, ReportFindings.loadVisible(report, findings, relevancePolicy), reviews)
+                .excludedEvents();
+    }
+
+    private static ReportChanges unavailable(ReportChanges result) {
+        var state = ReportChanges.Status.UNAVAILABLE;
+        return new ReportChanges(result.reportId(), result.reportDate(), result.baseReportId(),
+                result.baseReportDate(), state, state.message, false, List.of(), List.of());
     }
 }

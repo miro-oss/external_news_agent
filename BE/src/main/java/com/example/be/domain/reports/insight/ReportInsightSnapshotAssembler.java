@@ -12,6 +12,7 @@ import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;
 import com.example.be.domain.reports.repository.NewsReportRepository;
+import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import com.example.be.domain.reports.service.ReportFindings;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
@@ -33,14 +34,27 @@ public class ReportInsightSnapshotAssembler {
     private final FindingRepository findings;
     private final TopicRelevancePolicy relevancePolicy;
     private final ObjectMapper mapper;
+    private final ReportEventFeedbackProjection feedbackProjection;
 
     @Transactional(readOnly = true)
     public Snapshot assemble(Long reportId) {
+        return assemble(reportId, true);
+    }
+
+    @Transactional(readOnly = true)
+    public Snapshot assembleForRead(Long reportId) {
+        return assemble(reportId, false);
+    }
+
+    private Snapshot assemble(Long reportId, boolean validateGeneration) {
         NewsReport report = reports.findByIdAndReportStatusNot(reportId, ReportStatus.PENDING)
                 .orElseThrow(() -> new ReportException(ReportErrorCode.REPORT_NOT_FOUND));
         var reportPayload = new AgentReportInsightRequest.ReportPayload(report.getId(), report.getTitle(),
                 report.getReportScope().name(), report.getReportDate(), report.getReportEndDate());
-        List<Finding> visible = ReportFindings.loadVisible(report, findings, relevancePolicy).findings();
+        var original = ReportFindings.loadVisible(report, findings, relevancePolicy);
+        // Match revision-bound feedback before narrowing the original report evidence for insights.
+        List<Finding> visible = feedbackProjection.project(report, original,
+                feedbackProjection.reviews(report.getId())).findings();
         if (report.getReportScope() == ReportScope.RUN && report.isCoverageRecorded()) {
             Map<Long, Finding> byId = new HashMap<>();
             visible.forEach(finding -> byId.put(finding.getId(), finding));
@@ -52,9 +66,9 @@ public class ReportInsightSnapshotAssembler {
                 .filter(finding -> finding.getArticle().getTopic() != null
                         && StringUtils.hasText(finding.getArticle().getTopic().getName()))
                 .map(this::payload).filter(finding -> !finding.claims().isEmpty()).toList();
-        if (selected.isEmpty()) throw new GeneralException(GeneralErrorCode.CONFLICT,
+        if (validateGeneration && selected.isEmpty()) throw new GeneralException(GeneralErrorCode.CONFLICT,
                 "이 리포트는 인사이트에 사용할 검증된 근거가 없습니다.");
-        if (selected.size() > MAX_FINDINGS) throw new GeneralException(GeneralErrorCode.CONFLICT,
+        if (validateGeneration && selected.size() > MAX_FINDINGS) throw new GeneralException(GeneralErrorCode.CONFLICT,
                 "리포트 관점 인사이트는 검증된 근거 50개까지 지원합니다.");
         return new Snapshot(report.getId(), report.getRunId(), hash(new Fingerprint(reportPayload, selected)),
                 reportPayload, selected);

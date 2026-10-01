@@ -54,6 +54,7 @@ class ReportInsightVersionTest {
         service = new ReportInsightService(properties, assembler, persistence, new ReportInsightValidator(),
                 client, quota, plans, recorder, new ReportInsightExecutionRecorder(recorder, quota, persistence));
         when(assembler.assemble(10L)).thenReturn(snapshot(HASH));
+        when(assembler.assembleForRead(10L)).thenReturn(snapshot(HASH));
         when(reports.findByIdForUpdate(10L)).thenReturn(Optional.of(NewsReport.builder()
                 .id(10L).reportStatus(ReportStatus.GENERATED).build()));
         stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
