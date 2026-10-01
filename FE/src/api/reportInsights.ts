@@ -1,4 +1,5 @@
 import { queryOptions, useIsMutating, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useMemo } from 'react'
 import { ApiError, get, post } from './client.ts'
 import type { Audience, ReportDetail } from './types'
 
@@ -80,6 +81,10 @@ export function reportInsightKey(reportId: number, audience: Audience, snapshot:
 export function isReportInsightAbsent(error: unknown) {
   return error instanceof ApiError && error.code === 'COMMON404' && error.status === 404
 }
+export function isReportInsightPreparing(error: unknown) {
+  return error instanceof ApiError && error.code === 'COMMON409' && error.status === 409
+    && error.message === '동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.'
+}
 export function selectReportInsight(result: ReportInsightResult | undefined, reportId: number, audience: Audience) {
   if (!result || result.reportId !== reportId) return undefined
   return result.insights.find(insight => insight.audience === audience)
@@ -90,13 +95,22 @@ function verifyResult(result: ReportInsightResult, reportId: number, audience: A
   }
   return result
 }
-export function reportInsightOptions(reportId: number, audience: Audience, snapshot: string) {
+const PREPARING_POLL_INTERVAL_MS = 10_000
+const PREPARING_WAIT_MS = 15 * 60_000
+export function reportInsightOptions(reportId: number, audience: Audience, snapshot: string, preparingWaitMs = PREPARING_WAIT_MS) {
+  let preparingStartedAt = 0
   return queryOptions({
     queryKey: reportInsightKey(reportId, audience, snapshot),
     queryFn: async ({ signal }) => verifyResult(await get<ReportInsightResult>(`/reports/${reportId}/insights`,
       { audience }, AbortSignal.any([signal, AbortSignal.timeout(30_000)])), reportId, audience),
     staleTime: 0,
-    retry: false,
+    // Only an automatic job in progress is polled. Missing results and real failures stay actionable.
+    retry: (failureCount, error) => {
+      if (!isReportInsightPreparing(error)) return false
+      if (failureCount === 0) preparingStartedAt = Date.now()
+      return Date.now() - preparingStartedAt < preparingWaitMs
+    },
+    retryDelay: Math.min(PREPARING_POLL_INTERVAL_MS, preparingWaitMs),
     retryOnMount: true,
     refetchOnWindowFocus: false,
     refetchOnMount: 'always',
@@ -114,11 +128,17 @@ export function generateReportInsightOptions(client: QueryClient) {
       await client.cancelQueries({ queryKey, exact: true })
       client.setQueryData(queryKey, result)
     },
+    onError: (error: Error, { reportId, audience, snapshot }: GenerateReportInsightRequest) => {
+      if (isReportInsightPreparing(error)) {
+        void client.invalidateQueries({ queryKey: reportInsightKey(reportId, audience, snapshot), exact: true })
+      }
+    },
     onSettled: () => { void client.invalidateQueries({ queryKey: ['usage', 'llm'] }) },
   }
 }
 export function useReportInsight(reportId: number, audience: Audience, snapshot: string) {
-  return useQuery(reportInsightOptions(reportId, audience, snapshot))
+  const options = useMemo(() => reportInsightOptions(reportId, audience, snapshot), [reportId, audience, snapshot])
+  return useQuery(options)
 }
 export function useGenerateReportInsight() {
   const client = useQueryClient()

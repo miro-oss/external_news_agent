@@ -131,6 +131,8 @@ public class ReportPersistenceService {
                 generatedAt);
         report.recordStructuredContent(document.structuredContent());
         if (report.getTopicId() == null) notificationAutomation.enqueueCompletedReport(report);
+        // Written atomically with completion. A crash before the after-commit listener is recoverable.
+        report.requestAutomaticInsights();
         events.publishEvent(new ReportCompleted(reportId));
         return report.getId();
     }

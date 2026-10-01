@@ -1,7 +1,7 @@
 import { useId, type ReactNode } from 'react'
 import { ApiError } from '../../api/client'
 import {
-  isReportInsightAbsent, reportInsightSnapshotKey, selectReportInsight,
+  isReportInsightAbsent, isReportInsightPreparing, reportInsightSnapshotKey, selectReportInsight,
   useGenerateReportInsight, useReportInsight, useReportInsightGenerating,
   type ReportAudienceInsight, type ReportImportance, type ReportInsightFact, type ReportInsightResult,
 } from '../../api/reportInsights'
@@ -30,7 +30,9 @@ export function ReportInsightsPanel({ report, audience, selector, onEvidenceSele
   const generationError = activeGeneration && generate.isError ? generate.error : null
   const insight = !stored.isFetching && !stored.isError ? selectReportInsight(stored.data, report.id, audience) : undefined
   const missing = !stored.isFetching && isReportInsightAbsent(stored.error)
-  const blockedGeneration = generationError instanceof ApiError && ['COMMON409', 'QUOTA429', 'COMMON400', 'AUDIENCE400', 'REPORT404'].includes(generationError.code)
+  const preparing = !insight && !generating && isReportInsightPreparing(stored.failureReason ?? stored.error)
+  const blockedGeneration = generationError instanceof ApiError && !isReportInsightPreparing(generationError)
+    && ['COMMON409', 'QUOTA429', 'COMMON400', 'AUDIENCE400', 'REPORT404'].includes(generationError.code)
   const canGenerate = missing && !generating && !blockedGeneration && (report.findings?.length ?? 0) > 0
   async function refresh() {
     if (!generating) generate.reset()
@@ -38,26 +40,34 @@ export function ReportInsightsPanel({ report, audience, selector, onEvidenceSele
   }
   return <section className="report-insights-panel" aria-labelledby={headingId} aria-busy={stored.isFetching || generating}>
     <header className="report-insights-heading">
-      <div><h3 id={headingId}>리포트 관점 분석</h3><p>보고서 전체의 근거를 종합해, 선택한 관점에서 중요한 이슈와 다음 확인 항목을 읽습니다.</p></div>
+      <div><h3 id={headingId}>리포트 관점 분석</h3><p>보고서를 만들 때 네 관점의 분석을 자동으로 준비합니다. 관점을 선택해 중요한 이슈와 다음 확인 항목을 읽습니다.</p></div>
       {insight && <button type="button" className="text-button" onClick={() => { void refresh() }}>저장된 분석 새로고침</button>}
     </header>
     <div className="report-insights-selector">{selector}</div>
-    {(stored.isPending || stored.isFetching) && <div className="report-insights-state" role="status"><p>이 리포트의 저장된 {AUDIENCE_LABELS[audience]} 관점 분석을 확인하고 있습니다.</p></div>}
+    <p className="report-insights-usage">자동 분석에는 인사이트 크레딧을 사용합니다. 저장된 분석 조회와 관점 전환은 추가 크레딧을 사용하지 않습니다.</p>
+    {(stored.isPending || stored.isFetching) && !preparing && !generating && <div className="report-insights-state" role="status"><p>이 리포트의 저장된 {AUDIENCE_LABELS[audience]} 관점 분석을 확인하고 있습니다.</p></div>}
+    {preparing && <div className="report-insights-state" role="status">
+      <strong>{stored.isFetching ? '관점 분석을 자동으로 준비하고 있습니다.' : '관점 분석 준비가 계속되고 있습니다.'}</strong>
+      <p>{stored.isFetching ? '여러 관점의 근거를 종합하므로 몇 분이 걸릴 수 있습니다. 완료되면 분석 결과가 자동으로 표시됩니다.'
+        : '완료까지 시간이 더 걸리고 있습니다. 잠시 후 다시 확인해 주세요.'}</p>
+      {!stored.isFetching && <button type="button" className="text-button" onClick={() => { void refresh() }}>저장된 분석 다시 확인</button>}
+    </div>}
     {generating && <div className="report-insights-state" role="status"><strong>리포트 전체를 분석하고 있습니다.</strong><p>주요 이슈의 우선순위와 근거를 종합하는 동안 잠시 기다려 주세요.</p></div>}
-    {generationError && <div className="report-insights-state" role="alert"><strong>관점 분석을 생성하지 못했습니다.</strong><p>{generationError.message}</p>
+    {generationError && !isReportInsightPreparing(generationError) && <div className="report-insights-state" role="alert"><strong>관점 분석을 생성하지 못했습니다.</strong><p>{generationError.message}</p>
       <button type="button" className="text-button" disabled={stored.isFetching || generating} onClick={() => { void refresh() }}>저장된 분석 다시 확인</button>
     </div>}
-    {stored.isError && !stored.isFetching && !missing && !generating && <div className="report-insights-state" role="alert">
+    {stored.isError && !stored.isFetching && !missing && !preparing && !generating && <div className="report-insights-state" role="alert">
       <strong>저장된 관점 분석을 불러오지 못했습니다.</strong><p>{stored.error.message}</p>
       <button type="button" className="text-button" onClick={() => { void refresh() }}>다시 불러오기</button>
     </div>}
     {missing && !generating && !blockedGeneration && <div className="report-insights-state">
-      <strong>아직 이 관점의 리포트 분석이 없습니다.</strong>
-      <p>{(report.findings?.length ?? 0) > 0 ? '생성하면 이 보고서에서 무엇을 먼저 살펴봐야 하는지, 어떤 조건에서 의미가 있는지 함께 확인할 수 있습니다.'
+      <strong>이 관점의 분석 결과가 없습니다.</strong>
+      <p>{(report.findings?.length ?? 0) > 0 ? '자동 분석이 완료되지 않았거나 이전에 만든 보고서일 수 있습니다. 저장된 분석을 다시 확인하거나 이 관점의 분석을 다시 준비할 수 있습니다.'
         : '이 보고서에 포함된 주요 이슈가 없어 관점 분석을 생성할 수 없습니다.'}</p>
+      <button type="button" className="text-button" onClick={() => { void refresh() }}>저장된 분석 다시 확인</button>
       {canGenerate && <><p className="report-insights-usage">새 분석 생성 시 인사이트 크레딧을 사용합니다. 저장된 결과 조회는 크레딧을 사용하지 않습니다.</p>
         <button type="button" className="primary-button" onClick={() => generate.mutate({ reportId: report.id, audience, snapshot })}>
-          {generationError ? '이 관점으로 다시 생성 · 크레딧 사용' : '이 관점으로 리포트 분석 생성 · 크레딧 사용'}
+          이 관점 분석 다시 준비 · 크레딧 사용
         </button></>}
     </div>}
     {insight && stored.data && !generating && <ReportInsightsContent result={stored.data} insight={insight}

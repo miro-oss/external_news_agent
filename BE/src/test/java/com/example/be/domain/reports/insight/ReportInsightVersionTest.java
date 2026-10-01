@@ -52,7 +52,8 @@ class ReportInsightVersionTest {
         var properties = new AgentProperties();
         properties.setEnabled(true);
         service = new ReportInsightService(properties, assembler, persistence, new ReportInsightValidator(),
-                client, quota, plans, recorder, new ReportInsightExecutionRecorder(recorder, quota, persistence));
+                client, quota, plans, recorder, new ReportInsightExecutionRecorder(recorder, quota, persistence),
+                mock(ReportInsightJobRepository.class));
         when(assembler.assemble(10L)).thenReturn(snapshot(HASH));
         when(assembler.assembleForRead(10L)).thenReturn(snapshot(HASH));
         when(reports.findByIdForUpdate(10L)).thenReturn(Optional.of(NewsReport.builder()

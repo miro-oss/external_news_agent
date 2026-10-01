@@ -272,7 +272,7 @@ initialReports.push(weeklyReportFixture(initialReports.find(report => report.id 
 let reports = structuredClone(initialReports);
 let reportDeleteError = false;
 let reportChangesVariant = 'ready';
-let reportInsightVariant = 'missing';
+let reportInsightVariant = 'ready';
 const savedReportInsights = new Map();
 let topicWeeklyVariant = 'ready';
 let pendingTopicWeekly = null;
@@ -317,7 +317,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 reports = structuredClone(initialReports);
                                 reportDeleteError = false;
                                 reportChangesVariant = 'ready';
-                                reportInsightVariant = 'missing';
+                                reportInsightVariant = 'ready';
                                 savedReportInsights.clear();
                                 topicWeeklyVariant = 'ready';
                                 pendingTopicWeekly = null;
@@ -760,11 +760,11 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             };
                             if (reportInsightVariant === 'lookup-error' && method === 'GET')
                                 return json(res, { isSuccess: false, code: 'COMMON500', message: '저장된 관점 분석을 불러오지 못했습니다.', result: {} }, 500);
-                            if (variants[reportInsightVariant] && method === 'POST') {
+                            if (variants[reportInsightVariant] && (method === 'POST' || (method === 'GET' && !cached && reportInsightVariant === 'inflight'))) {
                                 const [code, status, message] = variants[reportInsightVariant];
                                 return json(res, { isSuccess: false, code, message, result: {} }, status);
                             }
-                            if (method === 'GET' && !cached && ['missing', 'disabled', 'inflight', 'quota', 'error', 'no-evidence'].includes(reportInsightVariant))
+                            if (method === 'GET' && !cached && ['missing', 'disabled', 'quota', 'error', 'no-evidence'].includes(reportInsightVariant))
                                 return json(res, { isSuccess: false, code: 'COMMON404', message: '저장된 리포트 관점 인사이트가 없습니다.', result: {} }, 404);
                             result = cached ?? reportInsightFixture(report, audience, reportInsightVariant);
                             if (method === 'POST') { result = { ...result, cached: Boolean(cached) }; savedReportInsights.set(key, { ...result, cached: true }); }

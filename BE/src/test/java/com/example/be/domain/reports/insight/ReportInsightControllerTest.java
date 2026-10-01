@@ -47,6 +47,14 @@ class ReportInsightControllerTest {
         verify(service).get(10L, "IT_INFRA");
         verify(service, never()).create(any(), any());
     }
+    @Test void automaticAnalysisPendingUsesExistingConflictEnvelopeWithoutTriggeringGeneration() throws Exception {
+        when(service.get(10L, "IT_INFRA")).thenThrow(new GeneralException(GeneralErrorCode.CONFLICT,
+                "동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요."));
+        mvc.perform(get("/api/news/reports/10/insights").param("audience", "IT_INFRA"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("COMMON409"))
+                .andExpect(jsonPath("$.message").value("동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요."));
+        verify(service, never()).create(any(), any());
+    }
     @Test void missingReportAndInvalidAudienceHaveSpecifiedDomainErrors() throws Exception {
         when(service.get(10L, "CHIP_MAKER")).thenThrow(new ReportException(ReportErrorCode.REPORT_NOT_FOUND));
         when(service.get(10L, "OTHER")).thenThrow(new AudienceException());

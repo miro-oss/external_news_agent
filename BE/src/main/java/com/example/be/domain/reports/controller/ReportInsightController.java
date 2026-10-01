@@ -20,7 +20,7 @@ public class ReportInsightController {
     private final ReportInsightService service;
 
     @PostMapping("/{reportId}/insights")
-    @Operation(summary = "리포트 관점 인사이트 생성", description = "완료된 리포트의 검증된 근거로 관점별 중요도와 종합 해석을 생성합니다. 1~4개의 서로 다른 기존 관점을 요청할 수 있으며, 미저장 관점마다 INSIGHT 사용량을 별도로 예약합니다. 동일 보고서·근거 해시·관점·프롬프트·평가 기준은 재사용합니다. 사실은 저장된 주장과 원래 주장 유형을 유지하고 신규 LLM 사실을 만들지 않습니다. 검증된 근거 50개 초과는 호출 전에 거절합니다.")
+    @Operation(summary = "리포트 관점 인사이트 생성", description = "새 리포트 저장 후 4개 관점의 분석을 자동 준비합니다. 이 API는 자동 분석 실패나 기존 리포트의 미저장 관점을 명시적으로 재시도할 때 사용합니다. 완료된 리포트의 검증된 근거로 관점별 중요도와 종합 해석을 생성합니다. 1~4개의 서로 다른 기존 관점을 요청할 수 있으며, 미저장 관점마다 INSIGHT 사용량을 별도로 예약합니다. 동일 보고서·근거 해시·관점·프롬프트·평가 기준은 재사용합니다. 사실은 저장된 주장과 원래 주장 유형을 유지하고 신규 LLM 사실을 만들지 않습니다. 검증된 근거 50개 초과는 호출 전에 거절합니다.")
     @io.swagger.v3.oas.annotations.parameters.RequestBody(required = true,
             content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                     examples = @ExampleObject(value = "{\"audiences\":[\"CHIP_MAKER\"]}")))
@@ -41,7 +41,7 @@ public class ReportInsightController {
     }
 
     @GetMapping("/{reportId}/insights")
-    @Operation(summary = "저장된 리포트 관점 인사이트 조회", description = "현재 공개 가능한 보고서 근거를 다시 확인하고, 같은 근거 해시·관점·프롬프트·평가 기준으로 저장된 결과만 반환합니다. LLM 호출, 사용량 예약 및 감사 기록 쓰기가 없습니다. 과거의 다른 근거로 생성한 결과를 대신 반환하지 않습니다.")
+    @Operation(summary = "저장된 리포트 관점 인사이트 조회", description = "현재 공개 가능한 보고서 근거를 다시 확인하고, 같은 근거 해시·관점·프롬프트·평가 기준으로 저장된 결과만 반환합니다. 현재 결과가 없고 자동 분석이 대기·실행 중이면 COMMON409, 자동 분석이 종료되었거나 기존 리포트의 결과가 없으면 COMMON404를 반환합니다. LLM 호출, 사용량 예약 및 DB 쓰기가 없습니다. 과거의 다른 근거로 생성한 결과를 대신 반환하지 않습니다.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다."),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "COMMON400: reportId는 양수여야 합니다. / AUDIENCE400: 지원하지 않는 관점입니다."),
@@ -49,7 +49,9 @@ public class ReportInsightController {
                 content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = {
                     @ExampleObject(name = "report", value = "{\"isSuccess\":false,\"code\":\"REPORT404\",\"message\":\"보고서를 찾을 수 없습니다.\",\"result\":{}}"),
                     @ExampleObject(name = "cache", value = "{\"isSuccess\":false,\"code\":\"COMMON404\",\"message\":\"저장된 리포트 관점 인사이트가 없습니다.\",\"result\":{}}") })),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "COMMON409: 검증 근거가 없거나 검증된 근거가 50개를 초과합니다.")
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "COMMON409: 동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요. (자동 분석 대기·실행 중)",
+                content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                    examples = @ExampleObject(value = "{\"isSuccess\":false,\"code\":\"COMMON409\",\"message\":\"동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.\",\"result\":{}}")))
     })
     public ApiResponse<ReportInsightDTO.Result> get(@Parameter(description = "양수 보고서 ID") @PathVariable Long reportId,
             @Parameter(description = "CHIP_MAKER, EQUIPMENT_MAKER, MARKET_INVESTOR, IT_INFRA 중 하나", required = true)

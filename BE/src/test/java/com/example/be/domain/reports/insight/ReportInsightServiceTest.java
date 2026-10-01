@@ -46,6 +46,9 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import static com.example.be.domain.reports.insight.ReportInsightTestFixtures.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -59,8 +62,9 @@ class ReportInsightServiceTest {
     AgentQuotaService quota = mock(AgentQuotaService.class);
     LlmPlanService plans = mock(LlmPlanService.class);
     AgentRunRecorder recorder = mock(AgentRunRecorder.class);
+    ReportInsightJobRepository jobs = mock(ReportInsightJobRepository.class);
     ReportInsightService service = new ReportInsightService(properties, assembler, persistence,
-            new ReportInsightValidator(), client, quota, plans, recorder, new ReportInsightExecutionRecorder(recorder, quota, persistence));
+            new ReportInsightValidator(), client, quota, plans, recorder, new ReportInsightExecutionRecorder(recorder, quota, persistence), jobs);
     @BeforeEach void setup() {
         properties.setEnabled(true);
         when(recorder.recordReportInsightSuccess(any(), any(), any(), any(), any())).thenReturn(true);
@@ -71,13 +75,7 @@ class ReportInsightServiceTest {
         when(plans.get()).thenReturn(new LlmSettingDTO.PlanResponse(AgentPlan.PAID, false, PaidExhaustedAction.STUB));
         when(quota.reserveReportInsight(any(), anyString(), any())).thenAnswer(call ->
                 new QuotaReservation(1L, 20L, call.getArgument(1), AgentTask.INSIGHT, AgentPlan.PAID, BigDecimal.ONE));
-        when(client.reportInsight(any())).thenAnswer(call -> {
-            AgentReportInsightRequest request = call.getArgument(0);
-            var original = response();
-            var insight = original.insights().getFirst();
-            return new AgentReportInsightResponse(List.of(new AgentReportInsightResponse.Insight(request.audiences().getFirst(),
-                    insight.headline(), insight.overview(), insight.assessments(), insight.implications(), insight.watchItems())), original.meta());
-        });
+        when(client.reportInsight(any())).thenAnswer(call -> responseFor(call.getArgument(0)));
         when(persistence.saveGenerated(any(), any())).thenAnswer(call -> {
             AgentReportInsightResponse response = call.getArgument(1);
             return List.of(row(Audience.valueOf(response.insights().getFirst().audience())));
@@ -106,6 +104,115 @@ class ReportInsightServiceTest {
         assertEquals("저장된 리포트 관점 인사이트가 없습니다.", missing.getMessage());
         verifyNoInteractions(client, quota, plans, recorder);
     }
+    @Test void queuedOrRunningAutoAnalysisReturnsPendingWhileTerminalOrLegacyIsMissing() {
+        when(jobs.isPending(10L, Audience.IT_INFRA)).thenReturn(true);
+        var pending = assertThrows(GeneralException.class, () -> service.get(10L, "IT_INFRA"));
+        assertEquals(GeneralErrorCode.CONFLICT, pending.getCode());
+        assertEquals("동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.", pending.getMessage());
+        when(jobs.isPending(10L, Audience.IT_INFRA)).thenReturn(false);
+        assertEquals(GeneralErrorCode.NOT_FOUND,
+                assertThrows(GeneralException.class, () -> service.get(10L, "IT_INFRA")).getCode());
+        verifyNoInteractions(client, quota, plans, recorder);
+    }
+    @Test void currentCacheWinsOverAutomaticPendingAndDisabledFeature() {
+        when(jobs.isPending(10L, Audience.CHIP_MAKER)).thenReturn(true);
+        when(persistence.findCached(10L, "a".repeat(64), List.of(Audience.CHIP_MAKER)))
+                .thenReturn(List.of(row(Audience.CHIP_MAKER)));
+        properties.setEnabled(false);
+        assertTrue(service.get(10L, "CHIP_MAKER").cached());
+        verifyNoInteractions(jobs, client, quota, plans, recorder);
+    }
+    @Test void disabledFeatureAndSchedulerReturnMissingInsteadOfUnendingPending() {
+        when(jobs.isPending(10L, Audience.CHIP_MAKER)).thenReturn(true);
+        properties.setEnabled(false);
+        assertEquals(GeneralErrorCode.NOT_FOUND,
+                assertThrows(GeneralException.class, () -> service.get(10L, "CHIP_MAKER")).getCode());
+        properties.setEnabled(true);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "schedulingEnabled", false);
+        assertEquals(GeneralErrorCode.NOT_FOUND,
+                assertThrows(GeneralException.class, () -> service.get(10L, "CHIP_MAKER")).getCode());
+        verifyNoInteractions(jobs, client, quota, plans, recorder);
+    }
+    @Test void manualCreateCannotOvertakeAutoJobButItsOwnerGeneratesNormally() {
+        when(jobs.isPending(10L, Audience.CHIP_MAKER)).thenReturn(true);
+        assertEquals(GeneralErrorCode.CONFLICT, assertThrows(GeneralException.class,
+                () -> service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER")))).getCode());
+        verifyNoInteractions(client, quota, plans, recorder);
+        assertFalse(service.createAutomatic(10L, Audience.CHIP_MAKER).cached());
+        verify(client).reportInsight(any());
+        verify(quota).completeSuccess(any(), any());
+    }
+    @Test void manualRetryDoesNotBlockAnotherAutomaticAudience() throws Exception {
+        var manualStarted = new CountDownLatch(1);
+        var releaseManual = new CountDownLatch(1);
+        when(jobs.isPending(10L, Audience.IT_INFRA)).thenReturn(true);
+        doAnswer(call -> {
+            AgentReportInsightRequest request = call.getArgument(0);
+            if (request.audiences().equals(List.of("CHIP_MAKER"))) {
+                manualStarted.countDown();
+                assertTrue(releaseManual.await(10, TimeUnit.SECONDS));
+            }
+            return responseFor(request);
+        }).when(client).reportInsight(any());
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var manual = executor.submit(() -> service.create(10L,
+                    new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER"))));
+            try {
+                assertTrue(manualStarted.await(10, TimeUnit.SECONDS));
+                var automatic = service.createAutomatic(10L, Audience.IT_INFRA);
+                assertFalse(automatic.cached());
+                assertEquals(Audience.IT_INFRA, automatic.insights().getFirst().audience());
+                assertFalse(manual.isDone());
+            } finally { releaseManual.countDown(); }
+            assertFalse(manual.get(10, TimeUnit.SECONDS).cached());
+        }
+        verify(client, times(2)).reportInsight(any());
+        verify(quota, times(2)).reserveReportInsight(eq(20L), anyString(), eq(AgentPlan.PAID));
+        verify(quota, times(2)).completeSuccess(any(), eq(BigDecimal.ONE));
+    }
+    @Test void sameAudienceIsRejectedBeforeDuplicateReservationAndGuardIsReleasedAfterFailure() throws Exception {
+        var automaticStarted = new CountDownLatch(1);
+        var releaseAutomatic = new CountDownLatch(1);
+        doAnswer(call -> {
+            automaticStarted.countDown();
+            assertTrue(releaseAutomatic.await(10, TimeUnit.SECONDS));
+            throw new AgentClientException("PROVIDER_UNAVAILABLE", "실패");
+        }).when(client).reportInsight(any());
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var automatic = executor.submit(() -> assertThrows(GeneralException.class,
+                    () -> service.createAutomatic(10L, Audience.CHIP_MAKER)));
+            try {
+                assertTrue(automaticStarted.await(10, TimeUnit.SECONDS));
+                assertEquals(GeneralErrorCode.CONFLICT, assertThrows(GeneralException.class,
+                        () -> service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER")))).getCode());
+                assertEquals(GeneralErrorCode.CONFLICT, assertThrows(GeneralException.class,
+                        () -> service.createAutomatic(10L, Audience.CHIP_MAKER)).getCode());
+                verify(quota, times(1)).reserveReportInsight(eq(20L), anyString(), eq(AgentPlan.PAID));
+                verify(client, times(1)).reportInsight(any());
+            } finally { releaseAutomatic.countDown(); }
+            assertEquals(GeneralErrorCode.INTERNAL_SERVER_ERROR, automatic.get(10, TimeUnit.SECONDS).getCode());
+        }
+        doAnswer(call -> responseFor(call.getArgument(0))).when(client).reportInsight(any());
+        assertFalse(service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER"))).cached());
+        verify(quota, times(2)).reserveReportInsight(eq(20L), anyString(), eq(AgentPlan.PAID));
+        verify(quota).completeObservedFailure(any(), any());
+        verify(quota).completeSuccess(any(), eq(BigDecimal.ONE));
+    }
+    @Test void manualRetryRemainsAvailableWhenSchedulerIsDisabled() {
+        when(jobs.isPending(10L, Audience.CHIP_MAKER)).thenReturn(true);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "schedulingEnabled", false);
+        assertFalse(service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER"))).cached());
+        verifyNoInteractions(jobs);
+        verify(client).reportInsight(any());
+    }
+    @Test void cachedPerspectivePendingDoesNotBlockAnotherTerminalPerspectiveRetry() {
+        when(persistence.findCached(eq(10L), anyString(), anyCollection())).thenReturn(List.of(row(Audience.CHIP_MAKER)));
+        when(jobs.isPending(10L, Audience.CHIP_MAKER)).thenReturn(true);
+        var result = service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER", "IT_INFRA")));
+        assertFalse(result.cached());
+        verify(jobs, never()).isPending(10L, Audience.CHIP_MAKER);
+        verify(client).reportInsight(argThat(request -> request.audiences().equals(List.of("IT_INFRA"))));
+    }
     @Test void allConfirmedErrorEvidenceReturnsReadNotFoundAndCreateConflictWithoutExecutionOrWrites() {
         var reportRepository = mock(NewsReportRepository.class);
         var findingRepository = mock(FindingRepository.class);
@@ -115,7 +222,7 @@ class ReportInsightServiceTest {
         var realAssembler = new ReportInsightSnapshotAssembler(reportRepository, findingRepository, relevance, new ObjectMapper(),
                 new ReportEventFeedbackProjection(feedback, events));
         var realService = new ReportInsightService(properties, realAssembler, persistence, new ReportInsightValidator(),
-                client, quota, plans, recorder, new ReportInsightExecutionRecorder(recorder, quota, persistence));
+                client, quota, plans, recorder, new ReportInsightExecutionRecorder(recorder, quota, persistence), jobs);
         var rejected = new ReportContent.ImportantEvent("오류 사건", "오류 요약", "판단 이유", List.of(50L));
         var report = NewsReport.builder().id(10L).title("일일 리포트").reportScope(ReportScope.DAILY)
                 .reflectedFindingIds(List.of(50L)).reportStatus(ReportStatus.GENERATED)
@@ -202,6 +309,12 @@ class ReportInsightServiceTest {
         verify(persistence, times(1)).saveGenerated(any(), any());
         verify(quota, times(1)).completeSuccess(any(), any());
         verify(quota, times(1)).completeObservedFailure(any(), any());
+    }
+    private AgentReportInsightResponse responseFor(AgentReportInsightRequest request) {
+        var original = response();
+        var insight = original.insights().getFirst();
+        return new AgentReportInsightResponse(List.of(new AgentReportInsightResponse.Insight(request.audiences().getFirst(),
+                insight.headline(), insight.overview(), insight.assessments(), insight.implications(), insight.watchItems())), original.meta());
     }
     private NewsReportInsight row(Audience audience) { return NewsReportInsight.builder().reportId(10L).audience(audience).inputHash("a".repeat(64)).build(); }
     private ReportInsightDTO.AudienceInsight dto(Audience audience) { return new ReportInsightDTO.AudienceInsight(audience,

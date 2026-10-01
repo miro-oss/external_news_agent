@@ -6,10 +6,11 @@ import { fileURLToPath } from 'node:url'
 import { after, before, test } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import { reportInsightFixture } from '../scripts/report-insight-fixtures.mjs'
-let server, emptyEnvDir, Content
+let server, emptyEnvDir, Content, Panel, ApiError, insightKey, snapshot
 const report = JSON.parse(await readFile(new URL('./fixtures/refactor-report.json', import.meta.url), 'utf8')).report
 before(async () => {
   emptyEnvDir = await mkdtemp(join(tmpdir(), 'report-insights-render-'))
@@ -17,11 +18,28 @@ before(async () => {
     envDir: emptyEnvDir, cacheDir: join(emptyEnvDir, 'vite-cache'), plugins: [react()],
     optimizeDeps: { noDiscovery: true, include: [] },
     server: { middlewareMode: true, watch: null, ws: false }, logLevel: 'error' })
-  Content = (await server.ssrLoadModule('/src/features/reports/ReportInsightsPanel.tsx')).ReportInsightsContent
+  const panel = await server.ssrLoadModule('/src/features/reports/ReportInsightsPanel.tsx')
+  Content = panel.ReportInsightsContent
+  Panel = panel.ReportInsightsPanel
+  ApiError = (await server.ssrLoadModule('/src/api/client.ts')).ApiError
+  const api = await server.ssrLoadModule('/src/api/reportInsights.ts')
+  insightKey = api.reportInsightKey
+  snapshot = api.reportInsightSnapshotKey(report)
 })
 after(async () => { await server?.close(); if (emptyEnvDir) await rm(emptyEnvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
 function render(result, findings = report.findings) {
   return renderToStaticMarkup(createElement(Content, { result, insight: result.insights[0], findings, onEvidenceSelect() {} }))
+}
+function renderPanel(state, panelReport = report) {
+  // Freeze the supplied lifecycle state; API tests exercise the actual reads and retries.
+  const client = new QueryClient({ defaultOptions: { queries: { enabled: false } } })
+  const query = client.getQueryCache().build(client, { queryKey: insightKey(report.id, 'CHIP_MAKER', snapshot) })
+  query.setState(state)
+  try {
+    return renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(Panel, {
+      report: panelReport, audience: 'CHIP_MAKER', selector: createElement('span', null, '관점 선택'), onEvidenceSelect() {},
+    })))
+  } finally { client.clear() }
 }
 test('report importance, priority, conditions, watch criteria, original claims and evidence are visible without confidence percentages', () => {
   const result = reportInsightFixture(report)
@@ -59,4 +77,44 @@ test('unresolvable evidence cannot link to a later or different article', () => 
   const html = render(result)
   assert.match(html, /현재 보고서에서 근거 기사를 확인할 수 없습니다/)
   assert.doesNotMatch(html, /href="https:\/\/example.invalid\/news\/0"/)
+})
+test('an automatically queued report shows preparation and no manual generation prerequisite', () => {
+  const reason = new ApiError('COMMON409', '동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.', 409)
+  const html = renderPanel({ status: 'pending', fetchStatus: 'fetching', fetchFailureCount: 1, fetchFailureReason: reason })
+  assert.match(html, /보고서를 만들 때 네 관점의 분석을 자동으로 준비/)
+  assert.match(html, /관점 분석을 자동으로 준비하고 있습니다/)
+  assert.match(html, /완료되면 분석 결과가 자동으로 표시됩니다/)
+  assert.match(html, /조회와 관점 전환은 추가 크레딧을 사용하지 않습니다/)
+  assert.doesNotMatch(html, /<button|분석 결과가 없습니다|생성하지 못했습니다/)
+})
+test('pending preparation after the poll budget offers only a stored-result refresh', () => {
+  const reason = new ApiError('COMMON409', '동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.', 409)
+  const html = renderPanel({ status: 'error', fetchStatus: 'idle', error: reason, fetchFailureReason: reason })
+  assert.match(html, /관점 분석 준비가 계속되고 있습니다/)
+  assert.match(html, /저장된 분석 다시 확인/)
+  assert.doesNotMatch(html, /분석 다시 준비 · 크레딧 사용|불러오지 못했습니다/)
+})
+test('terminal or legacy absence offers an explicit retry with its usage notice', () => {
+  const reason = new ApiError('COMMON404', '저장된 리포트 관점 인사이트가 없습니다.', 404)
+  const html = renderPanel({ status: 'error', fetchStatus: 'idle', error: reason, fetchFailureReason: reason })
+  assert.match(html, /이 관점의 분석 결과가 없습니다/)
+  assert.match(html, /이 관점 분석 다시 준비 · 크레딧 사용/)
+  assert.match(html, /새 분석 생성 시 인사이트 크레딧을 사용/)
+  assert.doesNotMatch(html, /이 관점으로 리포트 분석 생성|관점 분석을 자동으로 준비하고 있습니다/)
+})
+test('real lookup errors retain the server message and offer GET reload only', () => {
+  const reason = new ApiError('COMMON409', '리포트 관점 인사이트 기능이 현재 비활성화되어 있습니다.', 409)
+  const html = renderPanel({ status: 'error', fetchStatus: 'idle', error: reason, fetchFailureReason: reason })
+  assert.match(html, /저장된 관점 분석을 불러오지 못했습니다/)
+  assert.match(html, /리포트 관점 인사이트 기능이 현재 비활성화되어 있습니다/)
+  assert.match(html, /다시 불러오기/)
+  assert.doesNotMatch(html, /분석 다시 준비 · 크레딧 사용|관점 분석을 자동으로 준비하고 있습니다/)
+})
+test('a completed automatic result is displayed with evidence and no paid generation action', () => {
+  const result = reportInsightFixture(report)
+  const html = renderPanel({ status: 'success', fetchStatus: 'idle', data: result, dataUpdatedAt: Date.now() })
+  assert.match(html, /리포트 중요도 높음/)
+  assert.match(html, /원문 근거 문장 1 보기/)
+  assert.match(html, /저장된 분석 새로고침/)
+  assert.doesNotMatch(html, /분석 다시 준비 · 크레딧 사용|관점 분석을 자동으로 준비하고 있습니다|분석 결과가 없습니다/)
 })
