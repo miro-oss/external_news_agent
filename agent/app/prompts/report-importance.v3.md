@@ -21,7 +21,8 @@
 | urgency | UNDETERMINED | null | 행동 시점·기한 미확인 |
 
 - 0은 원문 근거가 있는 판정이고 null은 판단 불가다. 모든 판정 가능한 범주는 같은 finding의 claimId와 실제 원문 구절을 요구한다. 미확인 범주의 basis는 null이다. 연결되지 않은 문장·다른 finding·제목은 축 근거가 아니다.
-- DIRECT라고 영향이나 시급성이 최대가 되지 않는다. 실제 계약은 사건 단계이며 공급 범위·이행 시점·실적 효과를 대신하지 않는다. 범위가 명시된 제한적 준비는 그 범위만 판단하고, 범위조차 없으면 영향은 미확인이다.
+- DIRECT라고 영향이나 시급성이 최대가 되지 않는다. 실제 계약은 사건 단계이며 공급 범위·이행 시점·실적 효과를 대신하지 않는다. 계약과 해당 관점 업무의 직접 연결만 확인되면 DIRECT로 두고, 영향 범위와 대응 기한은 독립적으로 UNDETERMINED로 남길 수 있다. "DIRECT이므로 CORE_CONSTRAINT/IMMEDIATE"로 세 축을 함께 올리지 않는다. 범위가 명시된 제한적 준비는 그 범위만 판단하고, 범위조차 없으면 영향은 미확인이다.
+- 메모리/HBM 제조사의 확인된 고객 공급 계약은 CHIP_MAKER의 CUSTOMER_REQUIREMENTS에 직접 연결될 수 있다. 공정·생산량·수율 정보가 없다고 고객 대응 관계까지 미확인이나 무관으로 낮추지 않는다. 반대로 계약만으로 생산 확대·핵심 제약·즉시 대응은 확정하지 않는다. 해당 업무의 관계는 알려져도 범위와 시점이 없으면 directness=3, impact=null, urgency=null이며 계산 결과 unavailable과 관련 사건의 종합 설명이 함께 성립한다.
 - UNRELATED/UNDETERMINED에서는 work=null, 업무 영향·시급성은 UNDETERMINED다. CONDITIONAL/BACKGROUND는 어떤 연결 조건이 미확인인지 condition으로 드러낸다. 알려진 사건 자체를 없다고 하지 않는다.
 - 시간 기준은 전체 보고서의 reportReferenceDate다. 과거 기한·먼 미래 목표·발행일만으로 IMMEDIATE가 되지 않는다. 과거에 시작한 제약이 기준 시점에도 계속된다는 원문은 현재 제약으로 평가할 수 있다. 이행 결과가 없으면 기한과 실제 상태를 구분한다.
 - 이전 리포트 기준선이 없으므로 novelty는 항상 null이다.

@@ -218,6 +218,7 @@ def test_real_market_confirmation_and_reversed_falsification_are_both_reported()
         validate(insight(implication=power_implication()), power_request())
     assert caught.value.error_kinds == (
         "report_assumption_unconfirmed",
+        "report_falsification_missing_observation",
         "report_falsification_direction",
     )
 
@@ -257,6 +258,7 @@ def test_absence_of_additional_supply_can_refute_an_explicit_positive_supply_hyp
             text="전력 경매 중단이 대체 전력 공급 확대를 촉진할 수 있다.",
             mechanism="대체 조달이 추진된다면 추가 전력 공급이 증가할 수 있다.",
             assumption="경매 중단에 대응해 대체 조달이 추진되는 경우",
+            falsifiedBy="대체 전력 조달 계획의 철회나 추가 공급 확보 실패가 확인되는 경우",
         )
     )
     validate(node, power_request())
@@ -338,6 +340,102 @@ def test_surface_processing_is_not_misread_as_a_conditional_suffix():
 
 def test_a_denied_auction_halt_does_not_trigger_the_halted_auction_specific_rule():
     source = "PJM은 전력 경매를 중단하지 않았다."
-    node = insight(implication=power_implication())
+    node = insight(implication=power_implication(falsifiedBy="대체 전력 공급 확보가 확인되는 경우"))
     # General polarity checks live in the existing service, not this narrow rule.
     validate(node, source_request(claim=source, sentences=[source]))
+
+
+@pytest.mark.parametrize(
+    "falsifier",
+    [
+        "공급망 변화와 매출 증대 간의 구체적 연결 증거 없음",
+        "관련 업무 연결 조건이 명확히 제시된 사건 없음",
+        "There is no evidence of a connection.",
+    ],
+)
+def test_information_absence_is_not_an_observation_that_refutes_a_mechanism(falsifier):
+    node = insight(
+        implication={
+            "text": "계획이 유지되면 검증 준비 조건을 확인한다.",
+            "mechanism": "공정 검증 계획 → 검증 장비가 필요한 경우 → 설계 채택 준비 검토",
+            "assumption": "해당 검증에 장비가 필요한 경우",
+            "falsifiedBy": falsifier,
+        }
+    )
+    with pytest.raises(OutputValidationError) as caught:
+        validate(node, source_request())
+    assert caught.value.error_kinds == ("report_falsification_missing_observation",)
+
+
+def test_real_v4_information_gap_chain_is_not_a_causal_implication():
+    node = insight(
+        implication={
+            "text": "장비 업무 연결 조건이 미확인이다.",
+            "mechanism": (
+                "원문에 구체적 업무 연결 조건이 명시되어 있지 않음 → 영향 범위와 시급성 미확인"
+            ),
+            "assumption": "장비 업무 연결이 확인되는 경우",
+            "falsifiedBy": "장비 공급 계획의 철회가 확인되는 경우",
+        }
+    )
+    with pytest.raises(OutputValidationError) as caught:
+        validate(node, source_request())
+    assert caught.value.error_kinds == ("report_synthesis_information_gap",)
+
+
+@pytest.mark.parametrize(
+    "mechanism,falsifier",
+    [
+        (
+            "공정 검증 계획 → 검증 장비가 필요한 경우 → 설계 채택 준비 검토",
+            "공정 검증 계획이 철회되는 경우",
+        ),
+        (
+            "삼성전기의 투자 계획 → 장비 공급 조건 미확인 → 조건이 확인되면 설계 채택 검토",
+            "투자 계획 철회가 확인되는 경우",
+        ),
+        (
+            "실제 납기 지연 → 대체 부품 확보가 안 된 경우 → 설치 일정 재검토",
+            "대체 부품 확보로 납기 지연이 해소되는 경우",
+        ),
+        (
+            "시험 장비 검증 계획 → 성능 충족 조건 → 설계 채택 준비",
+            "해당 시험에서 요구 성능을 충족하지 못한 결과가 확인되는 경우",
+        ),
+        (
+            "계획이 유지되면 장비 필요 여부를 검토한다.",
+            "연결 증거가 없다는 기존 설명이 철회되는 경우",
+        ),
+    ],
+)
+def test_concrete_conditions_and_observed_negative_results_are_not_missing_evidence(
+    mechanism, falsifier
+):
+    node = insight(
+        implication={
+            "text": "계획이 유지되면 검증 준비 조건을 확인한다.",
+            "mechanism": mechanism,
+            "assumption": "해당 검증에 장비가 필요한 경우",
+            "falsifiedBy": falsifier,
+        }
+    )
+    validate(node, source_request())
+
+
+def test_measured_negative_evidence_and_actual_event_uncertain_chain_are_not_false_rejected():
+    node = insight(
+        implication={
+            "text": "투자 계획이 유지되면 장비 검증 조건을 확인한다.",
+            "mechanism": (
+                "원문은 삼성전기의 투자 계획을 명시하지만 장비 업무 연결 조건은 미확인 "
+                "→ 투자 집행 조건이 미확인이면 장비 발주 범위도 미확인 "
+                "→ 장비 검증 업무 범위는 발주 조건이 확인되지 않으면 판단 보류"
+            ),
+            "assumption": "해당 검증에 장비가 필요한 경우",
+            "falsifiedBy": (
+                "동일 공정 검증 시험에서 요구 성능 충족의 증거가 없다는 "
+                "결과가 확인되는 경우"
+            ),
+        }
+    )
+    validate(node, source_request())

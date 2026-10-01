@@ -1062,3 +1062,42 @@ def test_shared_wire_parser_preserves_json_fence_behavior_and_literal_ids():
     raw = json.dumps(native, ensure_ascii=False)
     assert parse_wire_draft(raw).model_dump(by_alias=True) == native
     assert parse_wire_draft(f"  ```json\n{raw}\n```  ").model_dump(by_alias=True) == native
+
+
+def test_dense_single_finding_keeps_all_literal_choices_without_native_enum_overflow():
+    import re
+
+    source = source_finding(
+        text="공정 검증을 준비한다.",
+        sentence=" ".join(f"검증 구절 {index}." for index in range(1100)),
+        second_claim="별도 공급 계약의 조건을 검토한다.",
+    )
+    snapshot = source.model_dump_json(by_alias=True)
+    choices = source_span_choices(source.findings[0])
+    assert sum(map(len, choices.values())) > 1000
+    schema = OpenAIJsonSchemaTransformer(draft_schema(source), strict=True).walk()
+
+    def enum_count(value):
+        if isinstance(value, dict):
+            return len(value.get("enum", [])) + sum(
+                enum_count(v) for k, v in value.items() if k != "enum"
+            )
+        if isinstance(value, list):
+            return sum(map(enum_count, value))
+        return 0
+
+    assert enum_count(schema) <= 1000
+    branches = schema["$defs"]["Finding101SourceSpan"]["anyOf"]
+    for branch in branches:
+        claim_id = branch["properties"]["claimId"]["const"]
+        handle_schema = branch["properties"]["sourceSpanId"]
+        assert "enum" not in handle_schema
+        expression = re.compile(handle_schema["pattern"])
+        assert all(expression.fullmatch(handle) for handle in choices[claim_id])
+        assert not expression.fullmatch(f"s{claim_id.replace(':', '_')}_9999999")
+        assert not expression.fullmatch("s102_0_0")
+        assert not expression.fullmatch("s101_99_0")
+    native = draft_to_wire(payload(source), source)
+    Draft202012Validator(schema).validate(native)
+    validate_draft(response(payload(source), source), source)
+    assert source.model_dump_json(by_alias=True) == snapshot

@@ -28,8 +28,9 @@ MAX_RETRIEVAL_CLAIMS = 24
 # Vocabulary describes work questions; it is never factual evidence or instructions.
 _ROLE_QUERIES: dict[Audience, str] = {
     "CHIP_MAKER": "반도체 제조 양산 생산능력 생산공정 공정 인증 수율 웨이퍼 파운드리 메모리 HBM "
-    "패키징 고객인증 생산일정 fab capacity wafer yield foundry memory packaging "
-    "manufacturing production qualification customer certification",
+    "패키징 고객인증 고객요구 공급계약 장기계약 원재료 소재확보 생산일정 "
+    "fab capacity wafer yield foundry memory packaging "
+    "manufacturing production qualification customer certification supply contract materials",
     "EQUIPMENT_MAKER": "장비 설비 소재 발주 공정인증 장비수주 납품 설치 증설 투자집행 "
     "식각 증착 노광 검사장비 패키징 equipment materials machinery orders capex "
     "installation delivery etching deposition lithography procurement",

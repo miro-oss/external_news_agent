@@ -476,8 +476,8 @@ def test_shifted_finding_span_is_native_invalid_and_locally_repaired_without_usa
     repair_entries = repair["response_schema"]["properties"]["assessments"]["properties"][
         "CHIP_MAKER"
     ]
-    assert set(repair_entries["properties"]) == {"finding101"}
-    assert [finding["id"] for finding in framed(repair["prompt"])["findings"]] == [101]
+    assert set(repair_entries["properties"]) == {"finding101", "finding102"}
+    assert [finding["id"] for finding in framed(repair["prompt"])["findings"]] == [101, 102]
     assert "sourceSpanId" in repair["prompt"] and "findingId=101" in repair["prompt"]
     assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
     assert result.meta.cost_usd == 0.012 and result.meta.credits == 0.8
@@ -796,3 +796,29 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
     assessment = output["insights"][0]["assessments"][0]
     assert set(assessment) == {"findingId", "reason", "basisClaimIds", "axes"}
     assert assessment["axes"]["novelty"] is None
+
+
+def test_draft_error_repairs_whole_batch_before_unvisited_prose_guards():
+    source, reasons, _ = partial_repair_fixture()
+
+    def hook(stage, occurrence, _, value):
+        for record in value["assessments"]["CHIP_MAKER"].values():
+            record["reason"] = reasons[record["findingId"]]
+        if stage == "MAP-001" and occurrence == 1:
+            value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = (
+                "검증을 통과한 claim 근거가 없어 중요도 판단을 보류합니다."
+            )
+            value["assessments"]["CHIP_MAKER"]["finding103"]["reason"] = (
+                "2026년에는 검증 준비 조건을 확인해야 한다."
+            )
+        return value
+
+    provider = V4Provider(source, relation="UNRELATED", hook=hook)
+    result = generate(provider, source)
+    assert stages(provider) == ["MAP-001", "MAP-001"]
+    assert provider.schema_validity == [True, True]
+    assert [f["id"] for f in framed(provider.calls[1]["prompt"])["findings"]] == list(
+        range(101, 109)
+    )
+    assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
+    assert result.meta.input_tokens == 22 and result.meta.cost_usd == 0.006

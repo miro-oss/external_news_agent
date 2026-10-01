@@ -118,6 +118,29 @@ _NO_ADDITIONAL_SUPPLY = re.compile(
 _WITHDRAWN_ABSENCE = re.compile(
     r"없(?:다는|던).{0,25}(?:철회|반박|부정)|없지\s*않|없는\s*것이\s*아니"
 )
+_INFORMATION_GAP = re.compile(
+    r"(?:업무|연결|조건|범위|시급성|영향).{0,50}"
+    r"(?:미확인|불명|(?:명시|제시|확인)(?:되|되어|되어\s*있|되었)?지\s*않)|"
+    r"(?:원문|근거|정보|자료).{0,20}(?:없|부족)|"
+    r"(?:missing|unknown|unclear|unconfirmed).{0,35}(?:evidence|connection|scope|timing)",
+    re.IGNORECASE,
+)
+_MISSING_EVIDENCE = re.compile(
+    r"(?:근거|증거|정보|자료).{0,18}(?:없|부재|미확인|부족)|"
+    r"(?:연결|업무|관련).{0,30}(?:제시|명시).{0,15}(?:사건|정보).{0,8}(?:없|부재)|"
+    r"(?:no|missing|absence\s+of|lack\s+of).{0,20}(?:evidence|information)",
+    re.IGNORECASE,
+)
+_METADATA_ONLY_START = re.compile(
+    r"^(?:원문(?:에|에서|상)?(?:는|은)?\s*)?(?:구체적(?:인)?\s*)?"
+    r"(?:관점(?:의)?\s*)?업무\s*연결\s*(?:조건|경로)|"
+    r"^(?:원문|근거|정보|자료)(?:가|는|이|은)?\s*(?:미확인|없|부족)"
+)
+_MEASUREMENT_CONTEXT = re.compile(r"시험|검증\s*시험|측정|테스트|\b(?:test|experiment)\b", re.I)
+_OBSERVED_RESULT = re.compile(
+    r"결과.{0,20}(?:확인|관측|측정|보고)|\b(?:observed|measured|reported)\s+result\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -351,6 +374,18 @@ def _placeholder(value: str) -> bool:
     )
 
 
+def _information_gap_only(value: str) -> bool:
+    # Reject chains made entirely of missing-information statements. A real
+    # source event followed by an uncertain effect is still a valid conditional
+    # mechanism; unknown scope alone does not erase that event.
+    segments = [part.strip() for part in _MECHANISM_BREAK.split(value) if part.strip()]
+    return (
+        len(segments) >= 2
+        and bool(_METADATA_ONLY_START.search(segments[0]))
+        and all(_INFORMATION_GAP.search(part) for part in segments)
+    )
+
+
 def _auction_halted(rows: list[EvidenceText]) -> bool:
     return any(
         _HALTED_AUCTION.search(row.text) and not _HALT_DENIAL.search(row.text) for row in rows
@@ -422,6 +457,31 @@ def validate_synthesis_quality(
                     "report_synthesis_placeholder",
                     f"implications[{index}].mechanism: 일반 자리표시자 대신 근거 사건과 "
                     "해당 관점의 구체적 업무 판단을 잇는 경로를 작성해야 합니다.",
+                )
+            )
+        if _information_gap_only(item.mechanism):
+            violations.append(
+                (
+                    "report_synthesis_information_gap",
+                    f"implications[{index}].mechanism: 정보 부족만 잇는 문장은 인과 경로가 "
+                    "아닙니다. 인용한 실제 사건과 관점 업무 사이의 조건을 설명하거나 "
+                    "연결 경로를 만들 수 없는 implication을 제외해야 합니다.",
+                )
+            )
+        if (
+            _MISSING_EVIDENCE.search(item.falsified_by)
+            and not _WITHDRAWN_ABSENCE.search(item.falsified_by)
+            and not (
+                _MEASUREMENT_CONTEXT.search(item.falsified_by)
+                and _OBSERVED_RESULT.search(item.falsified_by)
+            )
+        ):
+            violations.append(
+                (
+                    "report_falsification_missing_observation",
+                    f"implications[{index}].falsifiedBy: 근거·정보 부족은 반증 관측이 "
+                    "아닙니다. 같은 대상의 계약 철회·검증 실패·대체 공급 확보처럼 "
+                    "해석을 바꾸는 관측을 쓰거나 해당 implication을 제외해야 합니다.",
                 )
             )
         rows = _texts(request, item.basis_claim_ids)

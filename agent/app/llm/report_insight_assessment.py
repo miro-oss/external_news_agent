@@ -40,6 +40,7 @@ from app.schemas.report_insight_assessment import (
 MAX_REVIEW_FINDINGS = 12
 TOP_REVIEW_FINDINGS = 5
 MAX_SOURCE_QUOTE_LENGTH = 200
+MAX_NATIVE_ENUM_VALUES = 1000
 _SOURCE_CLAUSE_BOUNDARY = re.compile(r"[.!?。！？](?=\s|$)|[,，;；:：]\s*|\n+")
 ROLE_WORK: dict[Audience, tuple[str, ...]] = {
     "CHIP_MAKER": (
@@ -308,11 +309,36 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                     {"type": "string", "const": CLAIMLESS_ASSESSMENT_REASON},
                 )
         audiences[audience] = _object(entries)
-    return {
+    schema = {
         "title": "ReportAssessmentDraft",
         **_object({"assessments": _object(audiences)}),
         "$defs": definitions,
     }
+    # OpenAI limits the total enum values across a strict schema, even for one
+    # finding with many literal spans. Dense inputs use the same exact closed
+    # set as an anchored regex, without dropping any source choice. Claim IDs
+    # remain const-bound and the server still resolves every handle literally.
+    if _enum_value_count(schema) > MAX_NATIVE_ENUM_VALUES:
+        for definition in definitions.values():
+            for branch in definition.get("anyOf", []):
+                span = branch.get("properties", {}).get("sourceSpanId")
+                if span is None or "enum" not in span:
+                    continue
+                handles = span.pop("enum")
+                prefix = handles[0].rsplit("_", 1)[0] + "_"
+                indexes = [handle[len(prefix) :] for handle in handles]
+                span["pattern"] = "^" + re.escape(prefix) + "(?:" + "|".join(indexes) + ")$"
+    return schema
+
+
+def _enum_value_count(value: Any) -> int:
+    if isinstance(value, dict):
+        return len(value.get("enum", [])) + sum(
+            _enum_value_count(item) for key, item in value.items() if key != "enum"
+        )
+    if isinstance(value, list):
+        return sum(_enum_value_count(item) for item in value)
+    return 0
 
 
 def draft_to_wire(

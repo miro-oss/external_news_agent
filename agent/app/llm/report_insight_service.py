@@ -13,7 +13,6 @@ from app.core.parser import parse_json_object
 from app.llm.base import AnalyzeProvider, ProviderResponse
 from app.llm.prompt_data import escape_prompt_text, prompt_json
 from app.llm.report_insight_assessment import (
-    ReportAssessmentDraftValidationError,
     draft_prompt,
     draft_schema,
     merge_drafts,
@@ -413,9 +412,11 @@ def _validated_v4_reduce_output(response, request, mapped, allowed):
 
 def _partial_assessment_repair(prompt, schema, raw, error, validate, fallback):
     """Repair only server-identified native entries, then revalidate the full batch."""
-    if not isinstance(
-        error, (ReportAssessmentValidationError, ReportAssessmentDraftValidationError)
-    ):
+    # Draft failures occur before the public prose/time guards have visited the
+    # other records. Regenerate the full batch once so a later hidden error is
+    # not preserved outside the only allowed repair. Partial repair is safe only
+    # after the complete draft and all public assessment guards have run.
+    if not isinstance(error, ReportAssessmentValidationError):
         return fallback
     instructions, framed_input = prompt.split("<report-insight-input>", 1)
     payload = parse_json_object(framed_input.split("</report-insight-input>", 1)[0])
