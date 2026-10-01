@@ -16,7 +16,7 @@ from app.llm.report_insight_pipeline import (
     MAX_REPORT_INSIGHT_DEADLINE_SECONDS,
     ReportInsightPipelineProvider,
 )
-from app.llm.report_insight_service import ReportInsightService
+from app.llm.report_insight_service import ReportInsightLegacyService as ReportInsightService
 from app.schemas.report_insight import ReportInsightRequest
 
 

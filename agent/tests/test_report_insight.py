@@ -14,9 +14,15 @@ from app.core.errors import AgentError
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.openai_contract import output_contract
 from app.llm.report_insight_service import (
-    PROMPT_VERSION,
-    SYSTEM_INSTRUCTION,
-    ReportInsightService,
+    LEGACY_PROMPT_VERSION as PROMPT_VERSION,
+)
+from app.llm.report_insight_service import (
+    LEGACY_SYSTEM_INSTRUCTION as SYSTEM_INSTRUCTION,
+)
+from app.llm.report_insight_service import (
+    ReportInsightLegacyService as ReportInsightService,
+)
+from app.llm.report_insight_service import (
     importance_grade,
     importance_score,
 )

@@ -7,7 +7,8 @@ import pytest
 from test_report_insight import FakeProvider, output, request_body, run
 
 from app.eval.report_insight_review import QUALITY_RUBRIC, review_saved_output
-from app.llm.report_insight_service import SYSTEM_INSTRUCTION, _validate_prose
+from app.llm.report_insight_service import LEGACY_SYSTEM_INSTRUCTION as SYSTEM_INSTRUCTION
+from app.llm.report_insight_service import _validate_prose
 from app.schemas.report_insight import ReportInsightRequest
 
 

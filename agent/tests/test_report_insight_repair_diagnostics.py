@@ -16,7 +16,6 @@ from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.prompt_data import prompt_json
 from app.llm.report_insight_service import (
     ReportAssessmentValidationError,
-    ReportInsightService,
     ReportSynthesisValidationError,
     _report_insight_prompt,
     _report_insight_repair_call,
@@ -25,6 +24,9 @@ from app.llm.report_insight_service import (
     _validate_prose,
     _validated_map_output,
     _validated_output,
+)
+from app.llm.report_insight_service import (
+    ReportInsightLegacyService as ReportInsightService,
 )
 from app.llm.request_contract import report_insight_map_schema
 from app.llm.structured_call import structured_call

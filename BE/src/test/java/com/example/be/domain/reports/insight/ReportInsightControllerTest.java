@@ -28,13 +28,13 @@ class ReportInsightControllerTest {
         var insight = new ReportInsightDTO.AudienceInsight(Audience.CHIP_MAKER, "핵심 판단", "high", List.of(), List.of(),
                 List.of(new ReportInsightDTO.Fact("50:0", "2027년 생산을 목표로 한다.", "FORECAST", null,
                         50L, 150L, List.of(0), "grounded")), List.of(), List.of(), "openai", "model", OffsetDateTime.parse("2026-09-30T09:00:00+09:00"));
-        var result = new ReportInsightDTO.Result(false, 10L, "a".repeat(64), "report-insight.ko.v3", "report-importance.v2", 1, List.of(insight));
+        var result = new ReportInsightDTO.Result(false, 10L, "a".repeat(64), "report-insight.ko.v4", "report-importance.v3", 1, List.of(insight));
         when(service.create(eq(10L), any())).thenReturn(result);
         mvc.perform(post("/api/news/reports/10/insights").contentType(MediaType.APPLICATION_JSON).content("{\"audiences\":[\"CHIP_MAKER\"]}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.code").value("COMMON200"))
                 .andExpect(jsonPath("$.message").value("성공입니다."))
-                .andExpect(jsonPath("$.result.promptVersion").value("report-insight.ko.v3"))
-                .andExpect(jsonPath("$.result.rubricVersion").value("report-importance.v2"))
+                .andExpect(jsonPath("$.result.promptVersion").value("report-insight.ko.v4"))
+                .andExpect(jsonPath("$.result.rubricVersion").value("report-importance.v3"))
                 .andExpect(jsonPath("$.result.insights[0].facts[0].claimType").value("FORECAST"))
                 .andExpect(jsonPath("$.result.insights[0].facts[0].evidenceSentenceIds[0]").value(0));
         verify(service).create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER")));

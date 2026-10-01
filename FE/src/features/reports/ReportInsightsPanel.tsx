@@ -106,10 +106,10 @@ export function ReportInsightsContent({ result, insight, findings, onEvidenceSel
         <div><dt>판단 기준</dt><dd>{item.trigger}</dd></div></dl>{evidence(item.basisClaimIds)}
     </li>)}</ul></section>}
     {insight.facts.length > 0 && <ClaimEvidence ids={insight.facts.map(fact => fact.id)} facts={facts} findings={byFinding}
-      onEvidenceSelect={onEvidenceSelect} label={`분석에 사용한 저장된 주장 ${insight.facts.length}개 보기`} />}
-    <p className="report-insights-footnote">리포트 중요도는 이 관점에서 가장 우선하는 이슈의 중요도입니다. 계획·전망과 의견은 확인된 사실과 구분해 읽어 주세요.</p>
+      onEvidenceSelect={onEvidenceSelect} label={`리포트에 저장된 주장 ${insight.facts.length}개 보기`} />}
+    <p className="report-insights-footnote">리포트 중요도는 이 관점에서 가장 우선하는 이슈의 중요도입니다. 저장된 주장 목록은 원본이며, 분석에 인용한 근거는 각 항목에 표시됩니다. 계획·전망과 의견은 확인된 사실과 구분해 읽어 주세요.</p>
     <details className="report-insights-rubric"><summary>중요도 판단 기준 보기</summary>
-      <p>직접 관련성·영향 크기·시급성을 각각 0~3점으로 평가합니다. 직접 관련성과 영향 크기의 비중은 각각 40%, 시급성은 20%입니다. 시급성 근거가 없으면 나머지 기준으로 계산합니다. 2.25점 이상은 높음, 1.25점 이상은 중간입니다. 직접 관련성이 없으면 낮음, 직접 관련성이나 영향 크기를 판단할 수 없으면 판단 보류입니다. 이전 보고서와의 비교 근거가 없어 새 변화는 평가하지 않습니다.</p>
+      <p>직접 관련성·영향 크기·시급성을 각각 0~3점으로 평가합니다. 직접 관련성과 영향 크기의 비중은 각각 40%, 시급성은 20%입니다. 시급성 근거가 없으면 나머지 기준으로 계산합니다. 2.25점 이상은 높음, 1.25점 이상은 중간입니다. 직접 관련성이나 영향 크기가 미확인이면 먼저 판단을 보류합니다. 두 기준을 판단할 수 있고 직접 관련성이 0이면 낮음입니다. 이전 보고서와의 비교 근거가 없어 새 변화는 평가하지 않습니다.</p>
     </details>
   </div>
 }

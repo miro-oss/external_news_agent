@@ -8,9 +8,15 @@ import pytest
 from app.core.config import Settings
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.report_insight_service import (
-    PROMPT_VERSION,
-    RUBRIC_VERSION,
-    ReportInsightService,
+    LEGACY_PROMPT_VERSION as PROMPT_VERSION,
+)
+from app.llm.report_insight_service import (
+    LEGACY_RUBRIC_VERSION as RUBRIC_VERSION,
+)
+from app.llm.report_insight_service import (
+    ReportInsightLegacyService as ReportInsightService,
+)
+from app.llm.report_insight_service import (
     importance_grade,
 )
 from app.schemas.report_insight import ReportInsightRequest

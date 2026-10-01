@@ -14,7 +14,7 @@ from test_report_insight_repair_diagnostics import (
 from app.core.config import Settings
 from app.eval import report_insight_replay as replay
 from app.llm.openai_contract import output_contract
-from app.llm.report_insight_service import ReportInsightService
+from app.llm.report_insight_service import ReportInsightLegacyService as ReportInsightService
 from app.llm.request_contract import report_insight_map_schema
 
 

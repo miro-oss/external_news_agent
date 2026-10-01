@@ -26,10 +26,18 @@ from app.eval.report_insight_corpus import DEFAULT_DATASET, load_corpus
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.openai_provider import OpenAIAnalyzeProvider
 from app.llm.report_insight_service import (
-    PROMPT_VERSION,
-    RUBRIC_VERSION,
-    SYSTEM_INSTRUCTION,
-    ReportInsightService,
+    LEGACY_PROMPT_VERSION as PROMPT_VERSION,
+)
+from app.llm.report_insight_service import (
+    LEGACY_RUBRIC_VERSION as RUBRIC_VERSION,
+)
+from app.llm.report_insight_service import (
+    LEGACY_SYSTEM_INSTRUCTION as SYSTEM_INSTRUCTION,
+)
+from app.llm.report_insight_service import (
+    ReportInsightLegacyService as ReportInsightService,
+)
+from app.llm.report_insight_service import (
     _eligible_report_request,
     _report_insight_prompt,
     _validated_output,

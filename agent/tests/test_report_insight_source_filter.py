@@ -13,7 +13,9 @@ from app.core.config import Settings
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.openai_contract import output_contract
 from app.llm.report_insight_service import (
-    ReportInsightService,
+    ReportInsightLegacyService as ReportInsightService,
+)
+from app.llm.report_insight_service import (
     _eligible_report_request,
     _source_context,
     _validated_output,
