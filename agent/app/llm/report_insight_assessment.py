@@ -20,6 +20,7 @@ from app.llm.openai_contract import _object
 from app.llm.prompt_data import prompt_json
 from app.llm.report_insight_guard import report_reference_date
 from app.llm.report_insight_retrieval import _ROLE_QUERIES, tokenize_report_evidence
+from app.llm.report_insight_work_grounding import work_prose_problems
 from app.schemas.analyze import Audience
 from app.schemas.report_insight import (
     CLAIMLESS_ASSESSMENT_REASON,
@@ -110,6 +111,13 @@ _METADATA_CONDITION = re.compile(
     r"(?:지\s*않|없|미확인|불명|부족)|"
     r"^(?:원문|근거|정보|자료)(?:이|가|은|는)?\s*(?:없|미확인|불명|부족)",
     re.IGNORECASE,
+)
+_UNDECIDABLE_RELATION_REASON = re.compile(
+    r"(?:관점(?:의)?\s*)?업무\s*(?:연결|관계|관련성)\s*(?:자체)?\s*"
+    r"(?:판단)?(?:이|은|을|가|는|를)?\s*(?:불가능|불확실|불명|보류|미확인|할\s*수\s*없)|"
+    r"관점(?:의)?\s*업무에\s*이어지는\s*대상과\s*전제를\s*판단할\s*수\s*없|"
+    r"(?:업무\s*연결|관련성)\s*자체(?:가|는|를|의)?\s*"
+    r"(?:미확인|불명|불확실|판단할\s*수\s*없)"
 )
 
 
@@ -635,6 +643,11 @@ def _assessment_errors(
             "reason: 원문 claim이 존재합니다. claim이 없다고 단정하지 말고 "
             "관점 업무와 연결되는 조건·범위의 판단 한계를 설명해야 합니다."
         )
+    if item.relation != "UNDETERMINED" and _UNDECIDABLE_RELATION_REASON.search(item.reason):
+        errors.append(
+            "reason은 업무 관계의 판단 불가를 선언하지만 connection.relation은 판정 가능합니다. "
+            "원문으로 구체 업무 관계를 설명하거나 관계가 불명인 경우 UNDETERMINED로 판정하세요."
+        )
     related = item.relation not in {"UNRELATED", "UNDETERMINED"}
     if related and item.work not in ROLE_WORK[audience]:
         errors.append("connection.work는 해당 audience에 허용된 구체 업무여야 합니다.")
@@ -661,6 +674,31 @@ def _assessment_errors(
         errors.append("DIRECT/UNRELATED/UNDETERMINED에서는 connection.condition=null이어야 합니다.")
     claims = {claim.id: claim for claim in finding.claims}
     sentences = {sentence.index: sentence.text for sentence in finding.sentences}
+    selected_ids = {
+        basis.claim_id
+        for basis in (item.relation_basis, item.impact_basis, item.urgency_basis)
+        if basis is not None and basis.claim_id in claims
+    }
+    # Unknown axes need no public citation. Their reason still must not invent
+    # concrete procedures absent from this finding's eligible source context.
+    # This fallback never borrows another finding or assigns a missing basis.
+    reason_source_ids = selected_ids or claims.keys()
+    selected_source = "\n".join(
+        text
+        for claim_id in reason_source_ids
+        for text in [
+            claims[claim_id].text,
+            *(sentences[index] for index in claims[claim_id].evidence_sentence_ids),
+        ]
+    )
+    for field, prose in (("reason", item.reason), ("condition", item.condition)):
+        if prose is not None:
+            for problem in work_prose_problems(prose, selected_source):
+                errors.append(
+                    f"{field}: {problem}. 같은 finding의 claim과 연결 원문이 지원하지 않는 "
+                    "구체 업무 "
+                    "전제·조직·부품을 만들지 말고 원문 사건의 업무 판단을 설명하세요."
+                )
     for field, category, basis in (
         ("connection.basis", item.relation, item.relation_basis),
         ("effect.basis", item.impact_scope, item.impact_basis),

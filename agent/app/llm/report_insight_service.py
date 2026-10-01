@@ -35,6 +35,7 @@ from app.llm.report_insight_synthesis_quality import (
     synthesis_evidence_frames,
     validate_synthesis_quality,
 )
+from app.llm.report_insight_work_grounding import validate_work_synthesis
 from app.llm.request_contract import report_insight_map_schema, report_insight_reduce_schema
 from app.llm.structured_call import StructuredCallRepair, structured_call
 from app.schemas.report import ReportResponseMeta
@@ -50,8 +51,8 @@ from app.schemas.report_insight import (
     ReportInsightResponse,
 )
 
-PROMPT_VERSION = "report-insight.ko.v5"
-RUBRIC_VERSION = "report-importance.v4"
+PROMPT_VERSION = "report-insight.ko.v6"
+RUBRIC_VERSION = "report-importance.v5"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"
 MAX_ASSESSMENT_BATCH = 8
@@ -418,6 +419,7 @@ class ReportInsightService(ReportInsightLegacyService):
 
 def _validated_v4_reduce_output(response, request, mapped, allowed):
     output = _validated_reduce_output(response, request, mapped, allowed)
+    validate_work_synthesis(output, request, allowed)
     for insight in output.insights:
         for overview in insight.overview:
             # Only a complete standalone metadata statement is rejected. A

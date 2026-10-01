@@ -55,7 +55,10 @@ def test_missing_metadata_cannot_mint_a_background_work_connection(condition):
     ],
 )
 def test_concrete_prerequisite_is_not_rejected_for_containing_uncertainty(condition):
-    source = request()
+    source = request(
+        text="제조사는 고객 승인에 따른 공정 검증과 서버 도입안의 냉각 요건을 점검한다. "
+        "생산라인 전체의 가동 중단이 현재 계속된다."
+    )
     candidate = payload(source, relation="CONDITIONAL")
     candidate["assessments"]["CHIP_MAKER"]["finding101"]["condition"] = condition
     validated = validate_flat(candidate, source)
@@ -81,34 +84,28 @@ def test_pseudo_connection_failure_is_not_silently_demoted_or_hidden_by_synthesi
 
 @pytest.mark.parametrize("audience", ROLES)
 @pytest.mark.parametrize("stage", ["MAP", "REVIEW", "REDUCE"])
-def test_stage_instruction_only_teaches_requested_role_and_has_two_complete_examples(
+def test_stage_instruction_only_teaches_requested_role_without_fictional_response_examples(
     audience, stage
 ):
     instruction = report_stage_instruction([audience], stage)
     assert len(instruction) < 3300
     assert audience in instruction
     assert all(role not in instruction for role in ROLES if role != audience)
-    assert instruction.count('"assessments":') == (0 if stage == "REDUCE" else 2)
-    assert instruction.count('"insights":') == (2 if stage == "REDUCE" else 0)
+    assert '"assessments":' not in instruction
+    assert '"insights":' not in instruction
+    assert '"finding11"' not in instruction
+    assert "가상 원문" not in instruction
     if stage == "REDUCE":
-        assert "report-importance.v4" not in instruction
+        assert "report-importance.v5" not in instruction
     else:
-        assert "report-importance.v4" in instruction
+        assert "report-importance.v5" in instruction
 
 
-@pytest.mark.parametrize("audience", ROLES)
-def test_pending_approval_is_an_outcome_condition_not_uncertain_role_relevance(audience):
-    instruction = report_stage_instruction([audience], "MAP")
-    lines = instruction.splitlines()
-    source_text = next(line.partition("=")[2] for line in lines if line.startswith("가상 원문"))
-    output = json.loads(next(line for line in lines if line.startswith('{"assessments"')))
-    known = output["assessments"][audience]["finding11"]
-    assert known["connection"]["relation"] == "DIRECT"
-    assert known["connection"]["condition"] is None
-    assert known["effect"]["impactScope"] == "LIMITED_PREPARATION"
-    assert known["timing"]["urgencyState"] == "SCHEDULED_PREPARATION"
-    source = request(ids=(11,), audiences=(audience,), text=source_text)
-    Draft202012Validator(draft_schema(source)).validate(output)
+def test_customer_supply_contract_guidance_preserves_direct_relationship_without_invented_specs():
+    instruction = report_stage_instruction(["CHIP_MAKER"], "MAP")
+    assert "실제 고객 공급 계약" in instruction
+    assert "공정·수율이 없다는 이유로 그 계약을 무관 처리하지 않는다" in instruction
+    assert "계약은 생산 증가·규격 승인·납품 완료를 뜻하지 않는다" in instruction
 
 
 def test_reassessment_context_is_independent_and_preserves_source_identity_and_time():
@@ -124,7 +121,7 @@ def test_reassessment_context_is_independent_and_preserves_source_identity_and_t
     assert context["reportReferenceDate"] == "2026-09-25"
     assert [item["claims"][0]["id"] for item in context["findings"]] == ["101:0", "102:0"]
     assert source.model_dump_json(by_alias=True) == original
-    assert result.meta.prompt_version == "report-insight.ko.v5"
+    assert result.meta.prompt_version == "report-insight.ko.v6"
 
 
 def test_native_contract_emits_proof_before_categories_without_changing_accepted_wire():
