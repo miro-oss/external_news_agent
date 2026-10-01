@@ -11,6 +11,7 @@ import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.reports.service.ReportDocument;
 import com.example.be.domain.reports.service.ReportPersistenceService;
+import com.example.be.global.config.ApiTimeZone;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -52,23 +53,23 @@ class ReportInsightJobOracleIntegrationTests {
 
     private NewsReport report(boolean requested, ReportStatus status) {
         var run = runs.saveAndFlush(CollectionRun.builder().status(RunStatus.SUCCESS)
-                .triggerType(TriggerType.MANUAL).startedAt(LocalDateTime.now()).build());
+                .triggerType(TriggerType.MANUAL).startedAt(LocalDateTime.now(ApiTimeZone.ZONE)).build());
         createdRuns.add(run.getId());
         var report = reports.saveAndFlush(NewsReport.builder().reportScope(ReportScope.RUN).run(run)
                 .title("자동 관점 분석 통합 검증").markdownBody("검증 자료").modelName("test")
-                .automaticInsightsRequested(requested).reportStatus(status).generatedAt(LocalDateTime.now()).build());
+                .automaticInsightsRequested(requested).reportStatus(status).generatedAt(LocalDateTime.now(ApiTimeZone.ZONE)).build());
         created.add(report.getId());
         return report;
     }
 
     @Test void completionPersistsMarkerAndAllFourJobsAfterCommitAndIgnoresLateCompletion() {
         var pending = report(false, ReportStatus.PENDING);
-        reportPersistence.complete(pending.getId(), new ReportDocument("완료", "검증된 보고서", "fallback"), LocalDateTime.now());
+        reportPersistence.complete(pending.getId(), new ReportDocument("완료", "검증된 보고서", "fallback"), LocalDateTime.now(ApiTimeZone.ZONE));
         assertTrue(reports.findById(pending.getId()).orElseThrow().isAutomaticInsightsRequested());
         assertEquals("FALLBACK", jdbc.queryForObject("SELECT report_status FROM news_reports WHERE id = ?", String.class, pending.getId()));
         assertEquals(4, jdbc.queryForObject("SELECT COUNT(*) FROM news_report_insight_jobs WHERE report_id = ?", Integer.class, pending.getId()));
         persistence.enqueue(pending.getId());
-        reportPersistence.complete(pending.getId(), new ReportDocument("뒤늦은 완료", "대체 본문", "fallback"), LocalDateTime.now());
+        reportPersistence.complete(pending.getId(), new ReportDocument("뒤늦은 완료", "대체 본문", "fallback"), LocalDateTime.now(ApiTimeZone.ZONE));
         assertEquals(4, jdbc.queryForObject("SELECT COUNT(*) FROM news_report_insight_jobs WHERE report_id = ?", Integer.class, pending.getId()));
         assertEquals("검증된 보고서", reports.findById(pending.getId()).orElseThrow().getMarkdownBody());
     }
@@ -76,7 +77,7 @@ class ReportInsightJobOracleIntegrationTests {
     @Test void rolledBackCompletionHasNeitherRequestedMarkerNorJobs() {
         var pending = report(false, ReportStatus.PENDING);
         new TransactionTemplate(transactions).executeWithoutResult(transaction -> {
-            reportPersistence.complete(pending.getId(), new ReportDocument("롤백", "검증", "fallback"), LocalDateTime.now());
+            reportPersistence.complete(pending.getId(), new ReportDocument("롤백", "검증", "fallback"), LocalDateTime.now(ApiTimeZone.ZONE));
             transaction.setRollbackOnly();
         });
         var reloaded = reports.findById(pending.getId()).orElseThrow();
@@ -91,7 +92,7 @@ class ReportInsightJobOracleIntegrationTests {
         var hidden = report(true, ReportStatus.GENERATED);
         jdbc.update("UPDATE news_reports SET deleted_at = SYSTIMESTAMP WHERE id = ?", hidden.getId());
         var pending = report(true, ReportStatus.PENDING);
-        jobs.enqueue(requested.getId(), Audience.CHIP_MAKER, LocalDateTime.now());
+        jobs.enqueue(requested.getId(), Audience.CHIP_MAKER, LocalDateTime.now(ApiTimeZone.ZONE));
         var missing = jobs.missingJobs();
         assertTrue(missing.contains(requested.getId()));
         assertFalse(missing.contains(legacy.getId()));
@@ -118,7 +119,11 @@ class ReportInsightJobOracleIntegrationTests {
         }
         assertEquals("RUNNING", status(job));
         assertTrue(jobs.isPending(job.reportId(), job.audience()));
-        jobs.expireRunning(LocalDateTime.now().plusMinutes(1), LocalDateTime.now());
+        // Claims and expiry cutoffs use the application time zone, including on UTC CI hosts.
+        var now = LocalDateTime.now(ApiTimeZone.ZONE);
+        jobs.expireRunning(now.minusMinutes(1), now);
+        assertEquals("RUNNING", status(job));
+        jobs.expireRunning(now.plusMinutes(1), now);
         assertEquals("FAILED", status(job));
         assertFalse(jobs.isPending(job.reportId(), job.audience()));
         assertFalse(persistence.claim(job));

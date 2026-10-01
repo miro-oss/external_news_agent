@@ -70,20 +70,21 @@ public class ReportInsightService {
                 if (!cached.containsKey(audience) && jobs.isPending(reportId, audience)) throw inflight();
             }
         }
-        String key = reportId + ":" + snapshot.inputHash();
-        if (!active.add(key)) throw inflight();
-        try {
-            // One provider execution/reservation per perspective. Earlier successes remain cached if a later one fails.
-            cached = cached(snapshot, audiences);
-            boolean generated = false;
-            for (Audience audience : audiences) {
+        boolean generated = false;
+        for (Audience audience : audiences) {
+            if (cached.containsKey(audience)) continue;
+            // Independent perspectives may run concurrently; only duplicate executions share a guard.
+            String key = reportId + ":" + snapshot.inputHash() + ":" + audience.name();
+            if (!active.add(key)) throw inflight();
+            try {
+                cached.putAll(cached(snapshot, List.of(audience)));
                 if (cached.containsKey(audience)) continue;
                 var saved = generate(snapshot, audience);
                 cached.put(saved.getAudience(), saved);
                 generated = true;
-            }
-            return result(!generated, snapshot, audiences, cached);
-        } finally { active.remove(key); }
+            } finally { active.remove(key); }
+        }
+        return result(!generated, snapshot, audiences, cached);
     }
 
     public ReportInsightDTO.Result get(Long reportId, String audienceValue) {
