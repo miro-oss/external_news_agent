@@ -60,8 +60,10 @@ import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ReportQueryServiceImplTest {
@@ -114,6 +116,109 @@ class ReportQueryServiceImplTest {
         ReportResDTO.Summary summary = result.getContent().getFirst();
         assertEquals(0, summary.getFindingCount());
         assertEquals("NOT_SENT", summary.getDeliveryStatus());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void fullListPageFetchesReviewStatesOnceWithoutLoadingFindingsSnapshotsOrReportBodies() {
+        List<NewsReport> reports = LongStream.rangeClosed(1, 100).mapToObj(id -> spy(NewsReport.builder()
+                .id(id).run(CollectionRun.builder().id(1000L + id).build()).title("보고서 " + id)
+                .generatedAt(LocalDateTime.of(2026, 10, 1, 10, 0)).build())).toList();
+        when(reportRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(reports));
+        when(feedbackStore.eventReviewStates(reports.stream().map(NewsReport::getId).toList()))
+                .thenReturn(List.of());
+
+        var result = service.getReports(null, null, 0, 100);
+
+        assertEquals(100, result.getContent().size());
+        verify(feedbackStore, times(1)).eventReviewStates(reports.stream().map(NewsReport::getId).toList());
+        verify(feedbackStore, never()).eventFeedback(org.mockito.ArgumentMatchers.anyLong());
+        verify(findingRepository, never()).findForReportByRunId(any());
+        verify(findingRepository, never()).findForReportByIdIn(anyCollection());
+        verifyNoInteractions(eventSnapshots);
+        reports.forEach(report -> {
+            verify(report, never()).getMarkdownBody();
+            verify(report, never()).getStructuredContent();
+            verify(report, never()).getWeeklyInput();
+        });
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void emptyListPageDoesNotReadFeedbackOrSnapshots() {
+        when(reportRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+
+        assertTrue(service.getReports(null, null, 0, 20).getContent().isEmpty());
+
+        verifyNoInteractions(feedbackStore, eventSnapshots);
+        verify(findingRepository, never()).findForReportByRunId(any());
+        verify(findingRepository, never()).findForReportByIdIn(anyCollection());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void batchReviewStatesOnlyRecalculateTheReportWithCompletedConfirmedFactErrors() {
+        var stored = new ReportContent(List.of("원본 요약"), List.of(
+                new ReportContent.ImportantEvent("잘못된 이슈", "오류 요약", "영향", List.of(1L)),
+                new ReportContent.ImportantEvent("남은 이슈", "정상 요약", "영향", List.of(2L))), List.of(), List.of());
+        List<NewsReport> reports = LongStream.rangeClosed(1, 8).mapToObj(id -> spy(NewsReport.builder()
+                .id(id).reportScope(ReportScope.DAILY).reflectedFindingIds(List.of(1L, 2L))
+                .title("보고서 " + id).structuredContent(stored).markdownBody("저장된 본문")
+                .generatedAt(LocalDateTime.of(2026, 10, 1, 10, 0)).build())).toList();
+        when(reportRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(reports));
+        List<FindingRepository.DailyReportCount> counts = reports.stream().map(report -> {
+            long reportId = report.getId();
+            var count = mock(FindingRepository.DailyReportCount.class);
+            when(count.getReportId()).thenReturn(reportId);
+            when(count.getFindingCount()).thenReturn(2L);
+            when(count.getHighSensitivityCount()).thenReturn(1L);
+            return count;
+        }).toList();
+        List<Long> ids = reports.stream().map(NewsReport::getId).toList();
+        when(findingRepository.countForDailyReports(eq(ids), any())).thenReturn(counts);
+        // Every review intentionally shares the same event key, so an error cannot leak to another report.
+        when(feedbackStore.eventReviewStates(ids)).thenReturn(List.of(
+                eventReview(1L, FeedbackModels.Category.SUMMARY_ERROR, FeedbackModels.Status.PENDING, "CONFIRMED_ERROR"),
+                eventReview(2L, FeedbackModels.Category.SUMMARY_ERROR, FeedbackModels.Status.PROCESSING, "CONFIRMED_ERROR"),
+                eventReview(3L, FeedbackModels.Category.SUMMARY_ERROR, FeedbackModels.Status.FAILED, "CONFIRMED_ERROR"),
+                eventReview(4L, FeedbackModels.Category.SUMMARY_ERROR, FeedbackModels.Status.COMPLETED, "NOT_CONFIRMED"),
+                eventReview(5L, FeedbackModels.Category.SUMMARY_ERROR, FeedbackModels.Status.COMPLETED, "INSUFFICIENT_EVIDENCE"),
+                eventReview(6L, FeedbackModels.Category.PREFERENCE, FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR"),
+                eventReview(7L, FeedbackModels.Category.WRONG_CLUSTER, FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR")));
+        when(findingRepository.findForReportByIdIn(List.of(1L, 2L))).thenReturn(List.of(
+                finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT),
+                finding(2L, SensitivityLevel.LOW, Relevance.REFERENCE)));
+        NewsReport affected = reports.get(6);
+        when(eventSnapshots.capture(eq(affected), any())).thenReturn(List.of(
+                eventItem('a', 0, stored.importantEvents().getFirst()),
+                eventItem('b', 1, stored.importantEvents().getLast())));
+
+        var result = service.getReports(null, null, 0, 20);
+
+        assertEquals(ids, result.getContent().stream().map(ReportResDTO.Summary::getId).toList());
+        assertEquals(List.of(2L, 2L, 2L, 2L, 2L, 2L, 1L, 2L), result.getContent().stream()
+                .map(ReportResDTO.Summary::getFindingCount).toList());
+        assertEquals(List.of(1L, 1L, 1L, 1L, 1L, 1L, 0L, 1L), result.getContent().stream()
+                .map(ReportResDTO.Summary::getHighSensitivityCount).toList());
+        verify(feedbackStore, times(1)).eventReviewStates(ids);
+        verify(feedbackStore, never()).eventFeedback(org.mockito.ArgumentMatchers.anyLong());
+        verify(findingRepository, times(1)).findForReportByIdIn(List.of(1L, 2L));
+        verify(findingRepository, never()).findForReportByRunId(any());
+        verify(eventSnapshots, times(1)).capture(eq(affected), any());
+        reports.stream().filter(report -> report != affected).forEach(report -> {
+            verify(eventSnapshots, never()).capture(eq(report), any());
+            verify(report, never()).getMarkdownBody();
+            verify(report, never()).getStructuredContent();
+        });
+    }
+
+    private static FeedbackModels.Feedback eventReview(long reportId, FeedbackModels.Category category,
+                                                       FeedbackModels.Status status, String verdict) {
+        return new FeedbackModels.Feedback(reportId, null, null, reportId, null, category, "의견", false,
+                "request-hash", status, verdict, null, LocalDateTime.of(2026, 10, 1, 10, 1), null, "a".repeat(64));
     }
 
     @Test
@@ -298,10 +403,12 @@ class ReportQueryServiceImplTest {
         var first = eventItem('a', 0, stored.importantEvents().getFirst());
         var second = eventItem('b', 1, stored.importantEvents().getLast());
         when(eventSnapshots.capture(eq(report), any())).thenReturn(List.of(first, second));
-        when(feedbackStore.eventFeedback(17L)).thenReturn(List.of(new FeedbackModels.Feedback(
+        var reviews = List.of(new FeedbackModels.Feedback(
                 9L, null, null, 17L, null, FeedbackModels.Category.SUMMARY_ERROR, "오류입니다", false,
                 "request-hash", FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR", "검토 설명",
-                LocalDateTime.of(2026, 10, 1, 10, 1), first, first.event().key())));
+                LocalDateTime.of(2026, 10, 1, 10, 1), first, first.event().key()));
+        when(feedbackStore.eventFeedback(17L)).thenReturn(reviews);
+        when(feedbackStore.eventReviewStates(List.of(17L))).thenReturn(reviews);
 
         for (boolean includeFindings : List.of(false, true)) {
             var detail = service.getReport(17L, includeFindings);

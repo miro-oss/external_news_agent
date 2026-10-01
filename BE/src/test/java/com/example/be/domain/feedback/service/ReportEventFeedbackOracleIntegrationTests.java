@@ -79,6 +79,34 @@ class ReportEventFeedbackOracleIntegrationTests {
         assertThrows(ReportException.class,()->service.context(report));
     }
 
+    @Test void batchReviewStatesKeepReportIsolationOrderAndLeaveFrozenInputsOnSingleReportReads() {
+        long first=report(List.of(item('a',2,null),item('b',2,null)));
+        long second=report(List.of(item('a',2,null)));
+        long untouched=report(List.of(item('a',2,null)));
+        var firstReview=service.submit(first,request('a',"first-batch","SUMMARY_ERROR"));
+        var secondReview=service.submit(second,request('a',"second-batch","SUMMARY_ERROR"));
+        var laterReview=service.submit(first,request('b',"later-batch","WRONG_CLUSTER"));
+        service.submit(untouched,request('a',"outside-batch","SUMMARY_ERROR"));
+        store.reviewed(store.byId(firstReview.id()).orElseThrow(),"CONFIRMED_ERROR","오류 확인",result("CONFIRMED_ERROR"),now());
+        clearInvocations(snapshots);
+
+        var states=store.eventReviewStates(List.of(second,first,first));
+
+        assertEquals(List.of(firstReview.id(),secondReview.id(),laterReview.id()),states.stream().map(Feedback::id).toList());
+        assertEquals(List.of(first,second,first),states.stream().map(Feedback::reportId).toList());
+        assertEquals(List.of(Status.COMPLETED,Status.PENDING,Status.PENDING),states.stream().map(Feedback::status).toList());
+        assertEquals("CONFIRMED_ERROR",states.getFirst().verdict());
+        assertEquals("a".repeat(64),states.getFirst().eventKey());
+        assertEquals("a".repeat(64),states.get(1).eventKey());
+        assertTrue(states.stream().allMatch(feedback->feedback.input()==null && feedback.diagnosis()==null));
+        assertTrue(store.eventReviewStates(List.of()).isEmpty());
+        var complete=store.eventFeedback(first);
+        assertEquals(List.of(firstReview.id(),laterReview.id()),complete.stream().map(Feedback::id).toList());
+        assertEquals(inputs.get(first).getFirst(),complete.getFirst().input());
+        assertEquals("오류 확인",complete.getFirst().diagnosis());
+        verifyNoInteractions(snapshots,gateway);
+    }
+
     @Test void concurrentRetriesReserveAllKeysAndSeparateEventsWorkWithOracleNullOwnership() throws Exception {
         long report=report(List.of(item('a',2,null),item('b',2,null)));
         var latch=new CountDownLatch(1);

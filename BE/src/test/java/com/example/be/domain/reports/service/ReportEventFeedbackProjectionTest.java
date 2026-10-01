@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static com.example.be.domain.feedback.model.FeedbackModels.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -18,6 +19,26 @@ class ReportEventFeedbackProjectionTest {
     private final FeedbackStore store = mock(FeedbackStore.class);
     private final ReportEventSnapshotFactory snapshots = mock(ReportEventSnapshotFactory.class);
     private final ReportEventFeedbackProjection projection = new ReportEventFeedbackProjection(store, snapshots);
+
+    @Test void batchReviewsGroupByReportWithoutLosingReviewOrder() {
+        var first = review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", null);
+        var second = review('b', Category.WRONG_CLUSTER, Status.PENDING, null, null);
+        var other = new Feedback(2L, null, null, 18L, null, first.category(), first.comment(), false,
+                first.requestHash(), first.status(), first.verdict(), null, first.createdAt(), null, first.eventKey());
+        when(store.eventReviewStates(List.of(17L, 18L, 19L))).thenReturn(List.of(first, other, second));
+
+        assertEquals(Map.of(17L, List.of(first, second), 18L, List.of(other)),
+                projection.reviewsByReport(List.of(17L, 18L, 19L)));
+
+        verify(store, times(1)).eventReviewStates(List.of(17L, 18L, 19L));
+        verify(store, never()).eventFeedback(anyLong());
+        verifyNoInteractions(snapshots);
+    }
+
+    @Test void emptyBatchDoesNotReadFeedback() {
+        assertTrue(projection.reviewsByReport(List.of()).isEmpty());
+        verifyNoInteractions(store, snapshots);
+    }
 
     @Test void onlyCompletedLocalFactErrorsHideAnEventAndItsExclusiveEvidence() {
         var bad = event("잘못된 사건", "잘못된 요약", 11L, 12L);

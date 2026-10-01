@@ -11,6 +11,7 @@ import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.feedback.model.FeedbackModels.Feedback;
 import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
@@ -95,10 +96,13 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         Map<Long, FindingRepository.ReportCount> counts = countsByRun(reports.getContent());
         Map<Long, FindingRepository.DailyReportCount> aggregateCounts = aggregateCounts(reports.getContent());
         Map<Long, String> deliveryStatuses = deliveryStatuses(reports.getContent());
+        Map<Long, List<Feedback>> reviewsByReport = feedbackProjection.reviewsByReport(
+                reports.getContent().stream().map(NewsReport::getId).toList());
         List<ReportResDTO.Summary> content = reports.getContent().stream()
                 .map(report -> toSummary(report, report.getRunId() == null ? null : counts.get(report.getRunId()),
                         aggregateCounts.get(report.getId()),
-                        deliveryStatuses.getOrDefault(report.getId(), DELIVERY_STATUS_NOT_SENT)))
+                        deliveryStatuses.getOrDefault(report.getId(), DELIVERY_STATUS_NOT_SENT),
+                        reviewsByReport.getOrDefault(report.getId(), List.of())))
                 .toList();
         return PageResponse.of(content, page, size, reports.getTotalElements());
     }
@@ -126,14 +130,14 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     private ReportResDTO.Summary toSummary(NewsReport report,
                                            FindingRepository.ReportCount count,
-                                           FindingRepository.DailyReportCount aggregateCount, String deliveryStatus) {
+                                           FindingRepository.DailyReportCount aggregateCount, String deliveryStatus,
+                                           List<Feedback> reviews) {
         long findingCount = report.getReportScope() != ReportScope.RUN
                 ? aggregateCount == null ? 0 : aggregateCount.getFindingCount()
                 : count == null ? 0 : count.getFindingCount();
         long highSensitivityCount = report.getReportScope() != ReportScope.RUN
                 ? aggregateCount == null ? 0 : aggregateCount.getHighSensitivityCount()
                 : count == null ? 0 : count.getHighSensitivityCount();
-        var reviews = feedbackProjection.reviews(report.getId());
         if (feedbackProjection.hasConfirmedErrors(reviews)) {
             var view = feedbackProjection.project(report,
                     ReportFindings.loadVisible(report, findingRepository, relevancePolicy), reviews);

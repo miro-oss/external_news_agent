@@ -2,6 +2,7 @@ package com.example.be.domain.feedback.repository;
 
 import com.example.be.domain.feedback.exception.FeedbackErrors;
 import com.example.be.domain.feedback.util.FeedbackTokens;
+import com.example.be.global.database.OracleInClause;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -13,6 +14,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 
@@ -40,6 +44,18 @@ public class FeedbackStore {
     public void lockRecipient(long id) { jdbc.queryForObject("SELECT id FROM notification_recipients WHERE id=? FOR UPDATE",Long.class,id); }
     public List<Feedback> eventFeedback(long reportId) {
         return jdbc.query("SELECT * FROM news_feedback WHERE report_id=? AND event_key IS NOT NULL ORDER BY id",this::feedback,reportId);
+    }
+    /** List reads need review state only; diagnosis and frozen input CLOBs stay on single-report reads. */
+    public List<Feedback> eventReviewStates(Collection<Long> reportIds) {
+        return OracleInClause.batches(new LinkedHashSet<>(reportIds)).stream().flatMap(ids -> {
+            String placeholders = String.join(",", java.util.Collections.nCopies(ids.size(), "?"));
+            return jdbc.query("""
+                    SELECT id,capability_id,recipient_id,report_id,item_id,category,user_comment,
+                      allow_personalization,request_hash,status,verdict,created_at,event_key
+                    FROM news_feedback WHERE report_id IN (
+                    """ + placeholders + ") AND event_key IS NOT NULL ORDER BY id", this::eventReviewState,
+                    ids.toArray()).stream();
+        }).sorted(Comparator.comparingLong(Feedback::id)).toList();
     }
     public Optional<Feedback> eventByRequest(long reportId,String key) {
         return jdbc.query("SELECT f.* FROM news_feedback f JOIN news_feedback_event_requests r ON r.feedback_id=f.id WHERE r.report_id=? AND r.idempotency_key=?",this::feedback,reportId,key).stream().findFirst();
@@ -81,6 +97,12 @@ public class FeedbackStore {
                 rs.getObject("item_id",Long.class),Category.valueOf(rs.getString("category")),rs.getString("user_comment"),
                 "Y".equals(rs.getString("allow_personalization")),rs.getString("request_hash"),Status.valueOf(rs.getString("status")),
                 rs.getString("verdict"),rs.getString("diagnosis"),time(rs,"created_at"),json.readValue(rs.getString("input_json"),Item.class),rs.getString("event_key"));
+    }
+    private Feedback eventReviewState(ResultSet rs,int row) throws SQLException {
+        return new Feedback(rs.getLong("id"),rs.getObject("capability_id",Long.class),rs.getObject("recipient_id",Long.class),rs.getLong("report_id"),
+                rs.getObject("item_id",Long.class),Category.valueOf(rs.getString("category")),rs.getString("user_comment"),
+                "Y".equals(rs.getString("allow_personalization")),rs.getString("request_hash"),Status.valueOf(rs.getString("status")),
+                rs.getString("verdict"),null,time(rs,"created_at"),null,rs.getString("event_key"));
     }
     public List<Policy> policies(long recipientId) {
         return jdbc.query("SELECT * FROM news_feedback_policies WHERE recipient_id=? ORDER BY id",this::policy,recipientId);

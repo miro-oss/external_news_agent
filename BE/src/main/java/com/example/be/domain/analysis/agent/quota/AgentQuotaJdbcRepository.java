@@ -61,7 +61,8 @@ public class AgentQuotaJdbcRepository {
                   run.status = 'FAILED'
                   AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
                   AND (run.timeout_phase IS NULL OR run.timeout_phase <> 'READ')
-                  AND NOT (run.agent_task IN ('REPORT_CHANGES', 'TOPIC_RELEVANCE', 'FEEDBACK_REVIEW', 'FEEDBACK_EVALUATE') AND COALESCE(run.credits, 0) > 0)
+                  AND NOT ((run.agent_task IN ('REPORT_CHANGES', 'TOPIC_RELEVANCE', 'FEEDBACK_REVIEW', 'FEEDBACK_EVALUATE')
+                      OR (run.agent_task = 'INSIGHT' AND run.target_type = 'REPORT')) AND COALESCE(run.credits, 0) > 0)
               )
               AND NOT EXISTS (
                   SELECT 1 FROM agent_quota_reservations reservation
@@ -95,7 +96,8 @@ public class AgentQuotaJdbcRepository {
                   run.status = 'FAILED'
                   AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
                   AND (run.timeout_phase IS NULL OR run.timeout_phase <> 'READ')
-                  AND NOT (run.agent_task IN ('REPORT_CHANGES', 'TOPIC_RELEVANCE', 'FEEDBACK_REVIEW', 'FEEDBACK_EVALUATE') AND COALESCE(run.credits, 0) > 0)
+                  AND NOT ((run.agent_task IN ('REPORT_CHANGES', 'TOPIC_RELEVANCE', 'FEEDBACK_REVIEW', 'FEEDBACK_EVALUATE')
+                      OR (run.agent_task = 'INSIGHT' AND run.target_type = 'REPORT')) AND COALESCE(run.credits, 0) > 0)
               )
               AND NOT EXISTS (
                   SELECT 1 FROM agent_quota_reservations reservation
@@ -147,6 +149,14 @@ public class AgentQuotaJdbcRepository {
                 FIND_STATUS_SQL,
                 (rs, rowNum) -> rs.getString("status"),
                 idempotencyKey).stream().findFirst();
+    }
+
+    public boolean isFailedReportInsight(String idempotencyKey) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM agent_runs WHERE idempotency_key = ?
+                  AND agent_task = 'INSIGHT' AND target_type = 'REPORT' AND status = 'FAILED'
+                """, Integer.class, idempotencyKey);
+        return count != null && count > 0;
     }
 
     public void insert(Long collectionRunId,

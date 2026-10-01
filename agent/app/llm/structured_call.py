@@ -18,6 +18,13 @@ class StructuredCallResult[OutputT]:
     usage: ProviderUsage
 
 
+@dataclass(frozen=True)
+class StructuredCallRepair[OutputT]:
+    prompt: str
+    response_schema: dict[str, object]
+    validate: Callable[[ProviderResponse], OutputT]
+
+
 def structured_call[OutputT](
     provider: AnalyzeProvider,
     *,
@@ -32,11 +39,18 @@ def structured_call[OutputT](
     logger: logging.Logger,
     include_failure_details: bool = True,
     failure_prompt_version: str | None = None,
+    repair_prompt_factory: Callable[[str, str, Exception], str] | None = None,
+    repair_factory: Callable[
+        [str, dict[str, object], str, Exception], StructuredCallRepair[OutputT]
+    ]
+    | None = None,
 ) -> StructuredCallResult[OutputT]:
     """구조화 provider 호출의 검증·1회 repair 계약을 모든 엔드포인트에 적용한다."""
     usage = ProviderUsage()
     truncated = False
     current_prompt = prompt
+    current_schema = response_schema
+    current_validate = validate
     last_error: Exception | None = None
     last_response: ProviderResponse | None = None
 
@@ -45,7 +59,7 @@ def structured_call[OutputT](
             response = provider.generate(
                 system_instruction=system_instruction,
                 prompt=current_prompt,
-                response_schema=response_schema,
+                response_schema=current_schema,
             )
         except AgentError as error:
             if failure_prompt_version is not None and include_failure_details:
@@ -65,7 +79,7 @@ def structured_call[OutputT](
         usage += response.usage
         truncated = truncated or response.truncated
         try:
-            output = validate(response)
+            output = current_validate(response)
         except (JsonObjectParseError, ValidationError, ValueError) as error:
             last_error = error
             _log_validation_failure(
@@ -84,13 +98,23 @@ def structured_call[OutputT](
                     response=response,
                     failure_prompt_version=failure_prompt_version,
                 ) from error
-            current_prompt = _repair_prompt(
-                prompt,
-                response.text,
-                error,
-                task_name=task_name,
-                input_tag=input_tag,
-            )
+            if repair_factory is not None:
+                repair = repair_factory(prompt, response_schema, response.text, error)
+                current_prompt = repair.prompt
+                current_schema = repair.response_schema
+                current_validate = repair.validate
+            else:
+                current_prompt = (
+                    repair_prompt_factory(prompt, response.text, error)
+                    if repair_prompt_factory is not None
+                    else _repair_prompt(
+                        prompt,
+                        response.text,
+                        error,
+                        task_name=task_name,
+                        input_tag=input_tag,
+                    )
+                )
             continue
         return StructuredCallResult(response=response, output=output, usage=usage)
 
@@ -130,9 +154,14 @@ def _log_validation_failure(
         error_kinds = sorted(set(error.error_kinds))[:5]
     elif isinstance(error, ValidationError):
         error_count = error.error_count()
-        error_kinds = sorted({item["type"] for item in error.errors(
-            include_input=False, include_context=False, include_url=False
-        )})[:5]
+        error_kinds = sorted(
+            {
+                item["type"]
+                for item in error.errors(
+                    include_input=False, include_context=False, include_url=False
+                )
+            }
+        )[:5]
     else:
         error_count = 1
         error_kinds = []
@@ -205,7 +234,10 @@ def _provider_failure_usage_completeness(
     if isinstance(failure_usage, dict) and any(
         _known_usage_value(failure_usage.get(key), integer) is not None
         for key, integer in (
-            ("inputTokens", True), ("outputTokens", True), ("costUsd", False), ("credits", False)
+            ("inputTokens", True),
+            ("outputTokens", True),
+            ("costUsd", False),
+            ("credits", False),
         )
     ):
         return "PARTIAL"

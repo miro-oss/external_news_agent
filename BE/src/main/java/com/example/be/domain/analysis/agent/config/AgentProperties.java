@@ -13,6 +13,8 @@ public class AgentProperties implements InitializingBean {
 
     public static final int MAX_INSIGHT_FINDINGS = 16;
     public static final int MAX_CURRENT_INSIGHT_FINDINGS = 10;
+    // Report-insight's entire pipeline is bounded to 180 seconds; leave time for its final response.
+    private static final Duration MIN_REPORT_INSIGHT_TIMEOUT = Duration.ofSeconds(210);
 
     private boolean enabled = false;
     private String baseUrl = "http://127.0.0.1:8088";
@@ -23,6 +25,7 @@ public class AgentProperties implements InitializingBean {
     private Duration relevanceTimeout = Duration.ofSeconds(240);
     private Duration insightTimeout = Duration.ofSeconds(60);
     private Duration reportTimeout = Duration.ofSeconds(120);
+    private Duration reportInsightTimeout = MIN_REPORT_INSIGHT_TIMEOUT;
     private AgentPlan defaultPlan = AgentPlan.FREE;
     private boolean allowRunOverride = true;
     private String analysisPromptVersion =
@@ -39,6 +42,10 @@ public class AgentProperties implements InitializingBean {
 
     @Override
     public void afterPropertiesSet() {
+        if (reportInsightTimeout == null || reportInsightTimeout.compareTo(MIN_REPORT_INSIGHT_TIMEOUT) < 0) {
+            throw new IllegalStateException(
+                    "news.agent.report-insight-timeout은 Agent 최대 기한 180초에 여유 30초를 더한 210초 이상이어야 합니다.");
+        }
         if (relevanceTimeout == null || relevanceTimeout.isNegative() || relevanceTimeout.isZero()) {
             throw new IllegalStateException("news.agent.relevance-timeout은 양수여야 합니다.");
         }
@@ -132,6 +139,9 @@ public class AgentProperties implements InitializingBean {
     public Duration getReportTimeout() {
         return reportTimeout;
     }
+
+    public Duration getReportInsightTimeout() { return reportInsightTimeout; }
+    public void setReportInsightTimeout(Duration timeout) { this.reportInsightTimeout = timeout; }
 
     public Duration getInsightTimeout() {
         return insightTimeout;

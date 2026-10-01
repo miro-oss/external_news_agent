@@ -14,6 +14,7 @@ from app.api.v1.insight import router as insight_router
 from app.api.v1.keyword_strategy import router as keyword_strategy_router
 from app.api.v1.report import router as report_router
 from app.api.v1.report_changes import router as report_changes_router
+from app.api.v1.report_insight import router as report_insight_router
 from app.api.v1.topic_relevance import router as topic_relevance_router
 from app.api.v1.weekly_report import router as weekly_report_router
 from app.core.config import Settings, get_settings
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
         topic_relevance_router,
         report_router,
         report_changes_router,
+        report_insight_router,
         weekly_report_router,
     )
     for router in protected_routers:

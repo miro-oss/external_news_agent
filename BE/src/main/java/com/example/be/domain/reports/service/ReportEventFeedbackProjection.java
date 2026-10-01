@@ -12,8 +12,10 @@ import com.example.be.domain.reports.entity.ReportContent;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -26,6 +28,11 @@ public class ReportEventFeedbackProjection {
 
     public List<Feedback> reviews(long reportId) {
         return store.eventFeedback(reportId);
+    }
+
+    public Map<Long, List<Feedback>> reviewsByReport(Collection<Long> reportIds) {
+        if (reportIds.isEmpty()) return Map.of();
+        return store.eventReviewStates(reportIds).stream().collect(Collectors.groupingBy(Feedback::reportId));
     }
 
     public boolean hasConfirmedErrors(List<Feedback> reviews) {

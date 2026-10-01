@@ -110,6 +110,8 @@ news:
     # Agent provider 기본 60초보다 네트워크·응답 직렬화 여유를 둔다.
     insight-timeout: ${AGENT_INSIGHT_TIMEOUT:75s}
     report-timeout: 120s
+    # Agent report-insight 전체 최대 기한 180초 + 응답 직렬화·전송 여유 30초. 210초 미만은 시작 시 거부한다.
+    report-insight-timeout: ${AGENT_REPORT_INSIGHT_TIMEOUT:210s}
     default-plan: FREE
     allow-run-override: true
     # 분석 캐시는 콘텐츠뿐 아니라 현재 프롬프트·플랜별 모델 계약까지 같을 때만 사용한다.

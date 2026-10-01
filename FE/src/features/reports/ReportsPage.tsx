@@ -33,6 +33,8 @@ import { ReportSharePanel } from '../notifications/ReportSharePanel'
 import { ReportReadingWithFeedback } from './ReportReadingWithFeedback'
 import { ReportChangesPanel } from './ReportChangesPanel'
 import { refreshReportReading } from './reportRefresh'
+import { ReportInsightsPanel } from './ReportInsightsPanel'
+import { reportInsightSnapshotKey } from '../../api/reportInsights'
 import { IssueTonePanel } from './IssueTonePanel'
 import { collectionHighlightTerms, collectionKeywords } from './reportReading'
 import { ReportKeywordText } from './ReportKeywordText'
@@ -453,6 +455,10 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
       <ReportReadingWithFeedback report={report} onEvidenceSelect={onEvidenceSelect} onRefreshReport={onRefreshReport}
         beforeOtherAnalysis={report.reportScope === 'DAILY' ? <ReportChangesPanel reportId={report.id} /> : undefined} />
 
+      <ReportInsightsPanel key={`${report.id}:${audience}:${reportInsightSnapshotKey(report)}`} report={report} audience={audience}
+        selector={<ReportPerspectiveSelector audience={audience} defaultAudience={defaultAudience} onSelect={onAudienceSelect} />}
+        onEvidenceSelect={onEvidenceSelect} />
+
       <section className="report-findings">
         <div className="section-heading report-section-heading">
           <div><h3>주요 이슈</h3><p className="report-issue-description">같은 소식을 다룬 기사들을 모아 정리했어요.</p></div>
@@ -464,11 +470,6 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
           </span>
         </div>
         <div className="report-finding-controls">
-          <ReportPerspectiveSelector
-            audience={audience}
-            defaultAudience={defaultAudience}
-            onSelect={onAudienceSelect}
-          />
           <ReportFindingFilterBar
             filters={filters}
             onChange={(_, value) => setSensitivityOverride(value)}
