@@ -542,6 +542,58 @@ def test_claimful_unknown_cannot_falsely_claim_the_source_claims_are_absent(reas
     assert "원문 claim이 존재" in str(caught.value)
 
 
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "claim claims=[]; 원문에 구체적 업무 연결 근거가 없으며, 관계 판단이 불확실하다.",
+        "claim=[]; 업무 연결 조건이 미확인이다.",
+        "CLAIMS = [ ]; 업무 연결 조건이 미확인이다.",
+        "cLaIm\n=\t[ \n]; 업무 연결 조건이 미확인이다.",
+        "업무 연결 조건이 미확인이다; CLAIMS = [ ].",
+    ],
+)
+def test_claimful_reason_rejects_standalone_empty_input_assignment(reason):
+    source = request()
+    value = payload(source, relation="UNDETERMINED")
+    value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = reason
+    native = response(value, source)
+    Draft202012Validator(draft_schema(source)).validate(json.loads(native.text))
+    with pytest.raises(ReportAssessmentDraftValidationError) as caught:
+        validate_draft(native, source)
+    assert caught.value.failed_finding_ids == (101,)
+    assert "claims=[] 같은 빈 입력 선언" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "원문 claim은 있지만 해당 업무의 연결 조건을 판단할 근거는 없다.",
+        "업무 연결 근거가 원문에 없어 해당 업무의 관계 판단을 보류한다.",
+        'claims=["101:0"]; 해당 업무의 연결 조건은 미확인이다.',
+        "원문은 claimIds=[]라는 코드 표기를 포함하지만 업무 연결 조건은 미확인이다.",
+        "claims=[]가 아니다; 원문은 있지만 관점 업무의 관계는 미확인이다.",
+        "`claims=[]`라는 표기가 원문 부재를 뜻하는 것은 아니다.",
+        "빈 claim을 선언하지 않음; 업무 연결 조건은 미확인이다.",
+    ],
+)
+def test_claimful_reason_preserves_uncertainty_and_nonempty_or_different_identifier(reason):
+    source = request()
+    value = payload(source, relation="UNDETERMINED")
+    value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = reason
+    result = validate_draft(response(value, source), source)
+    assert result.evidence["CHIP_MAKER"][101].reason == reason
+    assert result.mapped.insights[0].assessments[0].axes.directness is None
+
+
+def test_literal_empty_claim_marker_in_source_quote_is_preserved_separately_from_reason():
+    source = request(text="제조사는 생산라인 검증 코드의 claims=[] 초기화 예시를 소개했다.")
+    value = payload(source)
+    result = validate_draft(response(value, source), source)
+    assert (
+        result.evidence["CHIP_MAKER"][101].relation_basis.quote == source.findings[0].claims[0].text
+    )
+
+
 def test_unknown_work_connection_with_existing_claim_is_preserved_as_unknown():
     source = request()
     value = payload(source, relation="UNDETERMINED")

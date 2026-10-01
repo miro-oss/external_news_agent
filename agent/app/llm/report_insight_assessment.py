@@ -100,6 +100,13 @@ _CLAIM_ABSENCE = re.compile(
     r"\bno\s+(?:verified|validated|provided|stored)\s+claims?\b",
     re.IGNORECASE,
 )
+# Match a standalone empty-input assignment, rather than prose discussing its
+# spelling. Quoted markers and "claims=[]가 아니다" are not absence declarations.
+# Source quotations remain separate and are never inspected by this reason gate.
+_EMPTY_CLAIM_MARKER = re.compile(
+    r"(?:\A|[;；])\s*(?:claim\s+)?claims?\s*=\s*\[\s*\]\s*(?=\Z|[;；.,。])",
+    re.IGNORECASE,
+)
 # A missing document or an undecidable relation is not a business prerequisite.
 # This intentionally recognizes only metadata-only statements, rather than
 # deciding relevance from industry keywords or rewriting a model's category.
@@ -660,6 +667,11 @@ def _assessment_errors(
         errors.append(
             "reason: 원문 claim이 존재합니다. claim이 없다고 단정하지 말고 "
             "관점 업무와 연결되는 조건·범위의 판단 한계를 설명해야 합니다."
+        )
+    if _EMPTY_CLAIM_MARKER.search(item.reason):
+        errors.append(
+            "reason: 원문 claim이 존재하는 항목에는 claims=[] 같은 빈 입력 선언을 "
+            "쓰지 말고 관점 업무의 판단 한계를 설명해야 합니다."
         )
     if item.relation != "UNDETERMINED" and _UNDECIDABLE_RELATION_REASON.search(item.reason):
         errors.append(
