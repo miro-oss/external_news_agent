@@ -9,6 +9,7 @@ from app.core.config import Settings
 from app.core.errors import AgentError
 from app.core.safecast import safe_int
 from app.llm.base import ProviderResponse, ProviderUsage
+from app.llm.deadline_transport import DeadlineHttpxTransport
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +34,17 @@ MINDLOGIC_UNSUPPORTED_STRICT_SCHEMA_KEYS = frozenset(
 
 
 class MindlogicAnalyzeProvider:
-    def __init__(self, settings: Settings, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        client: httpx.Client | None = None,
+        *,
+        request_deadline: float | None = None,
+    ) -> None:
         self._model = settings.mindlogic_claude_model
         self._max_output_tokens = settings.max_output_tokens
         self._credits_per_request = Decimal(str(settings.mindlogic_credits_per_request))
-        self._endpoint = (
-            settings.mindlogic_base_url.rstrip("/") + "/chat/completions/"
-        )
+        self._endpoint = settings.mindlogic_base_url.rstrip("/") + "/chat/completions/"
         self._headers = {
             "Authorization": f"Bearer {settings.mindlogic_api_key}",
             "Content-Type": "application/json",
@@ -47,6 +52,9 @@ class MindlogicAnalyzeProvider:
         self._owns_client = client is None
         self._client = client or httpx.Client(
             timeout=settings.provider_timeout_seconds,
+            transport=DeadlineHttpxTransport(request_deadline)
+            if request_deadline is not None
+            else None,
         )
 
     def generate(
@@ -111,9 +119,7 @@ class MindlogicAnalyzeProvider:
             raise
         except Exception as exc:
             status_code = (
-                exc.response.status_code
-                if isinstance(exc, httpx.HTTPStatusError)
-                else None
+                exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
             )
             logger.warning(
                 "Mindlogic provider 호출에 실패했습니다. model=%s status=%s errorType=%s",

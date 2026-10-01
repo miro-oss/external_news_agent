@@ -7,13 +7,14 @@ from decimal import Decimal
 from email.utils import parsedate_to_datetime
 from typing import Any
 
-from openai import APIStatusError, OpenAI
+from openai import APIStatusError, DefaultHttpx2Client, OpenAI
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
 
 from app.core.config import Settings
 from app.core.errors import AgentError
 from app.core.safecast import safe_int
 from app.llm.base import ProviderResponse, ProviderUsage
+from app.llm.deadline_transport import DeadlineHttpx2Transport
 from app.llm.openai_contract import output_contract
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,13 @@ _ERROR_CODES = {
 
 
 class OpenAIAnalyzeProvider:
-    def __init__(self, settings: Settings, client: OpenAI | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        client: OpenAI | None = None,
+        *,
+        request_deadline: float | None = None,
+    ) -> None:
         self._model = settings.openai_model
         self._max_output_tokens = settings.max_output_tokens
         self._retry_attempts = settings.provider_retry_attempts
@@ -60,12 +67,21 @@ class OpenAIAnalyzeProvider:
                 "OpenAI 모델 단가 미설정: costUsd는 0으로 기록됩니다. model=%s", self._model
             )
         self._owns_client = client is None
+        http_client = (
+            DefaultHttpx2Client(
+                timeout=settings.provider_timeout_seconds,
+                transport=DeadlineHttpx2Transport(request_deadline),
+            )
+            if client is None and request_deadline is not None
+            else None
+        )
         self._client = client or OpenAI(
             api_key=settings.openai_api_key,
             base_url="https://api.openai.com/v1",
             timeout=settings.provider_timeout_seconds,
             # 429 is retried by the shared coordinator; avoid hidden SDK retries.
             max_retries=0,
+            http_client=http_client,
         )
 
     def generate(
@@ -138,11 +154,7 @@ class OpenAIAnalyzeProvider:
         effort = {"gpt-5-mini": "low", "gpt-5.6-terra": "medium"}.get(
             _MODEL_ALIASES.get(self._model, self._model)
         )
-        options = (
-            {"reasoning": {"effort": effort}}
-            if effort is not None
-            else {"temperature": 0}
-        )
+        options = {"reasoning": {"effort": effort}} if effort is not None else {"temperature": 0}
         for attempt in range(self._retry_attempts + 1):
             try:
                 return self._client.responses.create(

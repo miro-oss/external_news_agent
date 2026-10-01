@@ -77,8 +77,13 @@ class ProviderRequestCoordinator:
         self._last_call_started_at: float | None = None
         self._blocked_until = 0.0
 
-    def wait_before_call(self) -> None:
-        with self._lock:
+    def wait_before_call(self, *, deadline: float | None = None) -> None:
+        acquired = self._lock.acquire(
+            timeout=max(0.0, deadline - self._clock()) if deadline is not None else -1,
+        )
+        if not acquired:
+            raise _deadline_exceeded()
+        try:
             now = self._clock()
             next_call_at = self._blocked_until
             if self._last_call_started_at is not None:
@@ -87,10 +92,14 @@ class ProviderRequestCoordinator:
                     self._last_call_started_at + self.policy.request_interval_seconds,
                 )
             remaining = next_call_at - now
+            if deadline is not None and max(now, next_call_at) >= deadline:
+                raise _deadline_exceeded()
             if remaining > 0:
                 self._sleep(remaining)
                 now = self._clock()
             self._last_call_started_at = now
+        finally:
+            self._lock.release()
 
     def wait_after_rate_limit(self, error: AgentError, retry_number: int) -> float:
         """429를 만나면 공유 대기 상태를 늘린다. 재시도 여부와 무관하게 항상 부른다.
@@ -183,11 +192,18 @@ def _retry_after_seconds(error: AgentError) -> float | None:
 def run_with_request_policy[ResponseT](
     coordinator: ProviderRequestCoordinator,
     call: Callable[[], ResponseT],
+    *,
+    deadline: float | None = None,
+    retry_attempts: int | None = None,
 ) -> ResponseT:
     """Apply the shared pacing and explicit 429 retry policy to any provider call."""
     policy = coordinator.policy
-    for attempt in range(policy.rate_limit_retry_attempts + 1):
-        coordinator.wait_before_call()
+    attempts = policy.rate_limit_retry_attempts if retry_attempts is None else retry_attempts
+    for attempt in range(attempts + 1):
+        if deadline is None:
+            coordinator.wait_before_call()
+        else:
+            coordinator.wait_before_call(deadline=deadline)
         try:
             return call()
         except AgentError as error:
@@ -195,7 +211,7 @@ def run_with_request_policy[ResponseT](
                 raise
             retry_number = attempt + 1
             delay = coordinator.wait_after_rate_limit(error, retry_number)
-            if attempt >= policy.rate_limit_retry_attempts:
+            if attempt >= attempts:
                 logger.warning(
                     "Provider rate limit 재시도를 모두 소진했습니다. "
                     "이후 호출을 %.3f초 동안 함께 미룹니다.",
@@ -203,10 +219,18 @@ def run_with_request_policy[ResponseT](
                 )
                 raise
             logger.warning(
-                "Provider rate limit 대기를 공유하고 재시도합니다. "
-                "retry=%d/%d delaySeconds=%.3f",
+                "Provider rate limit 대기를 공유하고 재시도합니다. retry=%d/%d delaySeconds=%.3f",
                 retry_number,
-                policy.rate_limit_retry_attempts,
+                attempts,
                 delay,
             )
     raise RuntimeError("provider 재시도 상태가 올바르지 않습니다.")
+
+
+def _deadline_exceeded() -> AgentError:
+    return AgentError(
+        status_code=503,
+        code="PROVIDER_UNAVAILABLE",
+        message="리포트 관점 인사이트 요청의 전체 시간 예산을 초과했습니다.",
+        details={"requestDeadlineExceeded": True},
+    )

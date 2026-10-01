@@ -14,6 +14,8 @@ import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyRequest;
 import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentReportInsightRequest;
+import com.example.be.domain.analysis.agent.dto.AgentReportInsightResponse;
 import com.example.be.domain.analysis.agent.dto.AgentWeeklyReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportChangesRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportChangesResponse;
@@ -47,6 +49,7 @@ public class AgentClient {
     private final RestClient relevanceClient;
     private final RestClient insightClient;
     private final RestClient reportClient;
+    private final RestClient reportInsightClient;
 
     @Autowired
     public AgentClient(RestClientFactory restClientFactory, AgentProperties properties) {
@@ -59,6 +62,8 @@ public class AgentClient {
                         properties.getConnectTimeout(), properties.getReportTimeout()),
                 restClientFactory.create(
                         properties.getConnectTimeout(), properties.getRelevanceTimeout()),
+                restClientFactory.create(
+                        properties.getConnectTimeout(), properties.getReportInsightTimeout()),
                 properties);
     }
 
@@ -78,11 +83,18 @@ public class AgentClient {
                 RestClient.Builder reportBuilder,
                 RestClient.Builder relevanceBuilder,
                 AgentProperties properties) {
+        this(analyzeBuilder, insightBuilder, reportBuilder, relevanceBuilder, reportBuilder, properties);
+    }
+
+    AgentClient(RestClient.Builder analyzeBuilder, RestClient.Builder insightBuilder,
+                RestClient.Builder reportBuilder, RestClient.Builder relevanceBuilder,
+                RestClient.Builder reportInsightBuilder, AgentProperties properties) {
         validateSecureBaseUrl(properties);
         this.analyzeClient = configured(analyzeBuilder, properties).build();
         this.insightClient = configured(insightBuilder, properties).build();
         this.reportClient = configured(reportBuilder, properties).build();
         this.relevanceClient = configured(relevanceBuilder, properties).build();
+        this.reportInsightClient = configured(reportInsightBuilder, properties).build();
     }
 
     private RestClient.Builder configured(RestClient.Builder builder, AgentProperties properties) {
@@ -139,6 +151,10 @@ public class AgentClient {
 
     public AgentReportResponse weeklyReport(AgentWeeklyReportRequest request) {
         return post(reportClient, "/v1/weekly-report", request, AgentReportResponse.class);
+    }
+
+    public AgentReportInsightResponse reportInsight(AgentReportInsightRequest request) {
+        return post(reportInsightClient, "/v1/report-insight", request, AgentReportInsightResponse.class);
     }
 
     public AgentReportChangesResponse reportChanges(AgentReportChangesRequest request) {
