@@ -5,7 +5,7 @@ from pathlib import Path
 from app.schemas.analyze import Audience
 
 _ROOT = Path(__file__).resolve().parents[1] / "prompts"
-_BASE = (_ROOT / "report-insight.ko.v6.md").read_text(encoding="utf-8").strip()
+_BASE = (_ROOT / "report-insight.ko.v7.md").read_text(encoding="utf-8").strip()
 _RUBRIC = (_ROOT / "report-importance.v5.md").read_text(encoding="utf-8").strip()
 _ROLES = {
     "CHIP_MAKER": "칩 제조: 공정/인증 PROCESS_QUALIFICATION, 생산 일정 PRODUCTION_SCHEDULE, "
@@ -39,7 +39,7 @@ def report_stage_instruction(audiences: list[Audience], stage: str) -> str:
             "판단한다. 각 finding의 사건에 맞는 reason을 새로 쓰고 다른 항목의 문장을 "
             "반복하지 않는다. basis가 지원하지 않는 팀·규격·승인·검증 절차를 추가하지 않는다. "
             "업무를 특정할 수 없으면 relation=UNDETERMINED이며 work/condition/basis=null이다. "
-            "claims=[]만 고정 reason='검증을 통과한 claim 근거가 없어 중요도 판단을 보류합니다.'다."
+            "실제 claims=[]인 항목의 고정 reason은 해당 항목의 Schema const만 따른다."
         )
         if stage == "REVIEW":
             stage_text += " 이전 답변은 제공되지 않는다. 원문으로 독립 재판정한다."

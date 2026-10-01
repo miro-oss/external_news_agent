@@ -51,7 +51,7 @@ from app.schemas.report_insight import (
     ReportInsightResponse,
 )
 
-PROMPT_VERSION = "report-insight.ko.v6"
+PROMPT_VERSION = "report-insight.ko.v7"
 RUBRIC_VERSION = "report-importance.v5"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"

@@ -168,3 +168,24 @@ def test_failed_unplanned_audience_is_not_counted_as_a_planned_attempt(source_ca
     }
     with pytest.raises(ValueError, match="라벨에 없는"):
         review_generation_records(labels, [record])
+
+
+def test_all_unrelated_accuracy_cannot_hide_missing_a_known_role_connection(source_case):
+    report, request, candidate = source_case
+    audience = request.audiences[0]
+    for index, item in enumerate(report["assessmentLabels"]):
+        item["audiences"][audience].update(
+            directness=[3] if index == 0 else [0], labelConfidence="strong"
+        )
+    report["audienceSynthesisLabels"][0]["priorityClaimGroups"][0]["priority"] = "core"
+    insight = candidate["insights"][0]
+    insight["headline"] = "이 관점의 관련 근거가 부족합니다."
+    insight["overview"] = []
+    for item in insight["assessments"]:
+        item["axes"]["directness"] = 0
+    result = review_source_case(report, request, candidate)
+    assert result["contractPassed"] is True
+    assert result["axisCalibration"]["directness"]["matched"] > 0
+    assert result["strongRoleConnectionRecall"] == {"matched": 0, "total": 1, "rate": 0}
+    assert result["corePriorityCitationCoverage"]["rate"] == 0
+    assert result["semanticQualityMeasured"] is False

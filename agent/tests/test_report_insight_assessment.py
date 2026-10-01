@@ -344,10 +344,9 @@ def test_request_bound_native_schema_fixes_all_keys_role_work_and_local_claims()
     findings = audience_object["properties"]["CHIP_MAKER"]
     assert set(findings["required"]) == {"finding101", "finding102"}
     assert findings["additionalProperties"] is False
-    assert all(
-        branch["properties"]["findingId"]["const"] == 101
-        for branch in findings["properties"]["finding101"]["anyOf"]
-    )
+    record = findings["properties"]["finding101"]
+    assert "anyOf" not in record
+    assert record["properties"]["findingId"]["const"] == 101
     assert "ReportFindingAssessmentDraft" not in wire["$defs"]
     for change in ("missing", "extra", "role", "claim", "cross_id"):
         value = draft_to_wire(payload(source), source)
@@ -749,14 +748,13 @@ def test_claimful_reason_schema_and_map_review_prompts_explain_business_unknown_
     source = request(ids=(101, 102))
     schema = draft_schema(source)
     for finding in source.findings:
-        branches = schema["properties"]["assessments"]["properties"]["CHIP_MAKER"]["properties"][
+        record = schema["properties"]["assessments"]["properties"]["CHIP_MAKER"]["properties"][
             f"finding{finding.id}"
-        ]["anyOf"]
-        for branch in branches:
-            description = branch["properties"]["reason"]["description"]
-            assert f"finding{finding.id}" in description
-            assert "원문 claim 1개가 있다" in description
-            assert "UNDETERMINED" in description and "claims=[]" in description
+        ]
+        description = record["properties"]["reason"]["description"]
+        assert f"finding{finding.id}" in description
+        assert "원문 claim 1개가 있다" in description
+        assert "UNDETERMINED" in description and "claims=[]" in description
     for prompt in (draft_prompt(source), review_prompt(source)):
         assert "sourceSpanId" in prompt and "sourceQuoteChoices" in prompt
         assert "claims=[]" in prompt
@@ -891,8 +889,8 @@ def test_four_audience_twelve_finding_sdk_review_schema_stays_within_all_size_li
         for finding in source.findings
         for quotes in source_quote_choices(finding).values()
     )
-    # Only the four five-value work enums and two four-value axis enums repeat no longer.
-    assert metrics["enum_values"] == proof_choice_count + 20 + 4 + 4
+    # Four five-value work enums and three five-value categories are shared once.
+    assert metrics["enum_values"] == proof_choice_count + 20 + 5 + 5 + 5
     assert metrics["enum_values"] <= 1000
     assert metrics["properties"] <= 5000
     assert metrics["string_characters"] <= 120_000
@@ -908,38 +906,38 @@ def test_four_audience_twelve_finding_sdk_review_schema_stays_within_all_size_li
     assert len(validate_draft(response(payload(source), source), source).mapped.insights) == 4
 
 
-def test_shared_category_defs_do_not_duplicate_enums_or_relax_native_correlations():
+def test_uniform_shared_categories_move_correlations_to_existing_post_validation():
     source = request(ids=(101, 102), audiences=tuple(ROLE_WORK))
     wire = OpenAIJsonSchemaTransformer(draft_schema(source), strict=True).walk()
     definitions = wire["$defs"]
-    assert definitions["ReportKnownImpactScope"]["enum"] == [
-        value for value in IMPACT_SCORES if value != "UNDETERMINED"
-    ]
-    assert definitions["ReportKnownUrgencyState"]["enum"] == [
-        value for value in URGENCY_SCORES if value != "UNDETERMINED"
-    ]
+    assert definitions["ReportRelation"]["enum"] == list(RELATION_SCORES)
+    assert definitions["ReportImpactScope"]["enum"] == list(IMPACT_SCORES)
+    assert definitions["ReportUrgencyState"]["enum"] == list(URGENCY_SCORES)
     for audience in source.audiences:
         name = f"ReportWork{audience}"
         assert definitions[name]["enum"] == list(ROLE_WORK[audience])
         audience_schema = wire["properties"]["assessments"]["properties"][audience]
         for finding in source.findings:
-            related = audience_schema["properties"][f"finding{finding.id}"]["anyOf"][0]
-            props = related["properties"]
-            for branch in props["connection"]["anyOf"]:
-                assert branch["properties"]["work"] == {"$ref": f"#/$defs/{name}"}
+            record = audience_schema["properties"][f"finding{finding.id}"]
+            assert "anyOf" not in record
+            props = record["properties"]
+            assert props["connection"]["properties"]["work"] == {
+                "anyOf": [{"$ref": f"#/$defs/{name}"}, {"type": "null"}]
+            }
             for field, category, definition in (
-                ("effect", "impactScope", "ReportKnownImpactScope"),
-                ("timing", "urgencyState", "ReportKnownUrgencyState"),
+                ("effect", "impactScope", "ReportImpactScope"),
+                ("timing", "urgencyState", "ReportUrgencyState"),
             ):
-                assert props[field]["anyOf"][0]["properties"][category] == {
-                    "$ref": f"#/$defs/{definition}"
-                }
+                assert props[field]["properties"][category] == {"$ref": f"#/$defs/{definition}"}
     validator = Draft202012Validator(wire)
     for field in ("connection", "effect", "timing"):
         native = draft_to_wire(payload(source), source)
         native["assessments"]["CHIP_MAKER"]["finding101"][field]["basis"] = None
-        with pytest.raises(JsonSchemaValidationError):
-            validator.validate(native)
+        validator.validate(native)
+        with pytest.raises(ReportAssessmentDraftValidationError):
+            validate_draft(
+                ProviderResponse(json.dumps(native), "openai", "offline", ProviderUsage()), source
+            )
 
 
 @pytest.mark.parametrize(

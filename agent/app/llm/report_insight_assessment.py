@@ -194,17 +194,25 @@ def source_span_choices(finding: ReportInsightFinding) -> dict[str, dict[str, st
 
 
 def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
-    """Bind category/proof correlations natively, as well as role and source IDs."""
+    """Use uniform records; keep role/source choices closed and validate axes locally.
+
+    Category-specific record branches duplicated the full source/work/axis
+    shape and encouraged nano to choose the short unrelated record. Independent
+    nullable fields keep every record the same size. Existing post-validation
+    still enforces category/basis/work/condition correlations without rewriting
+    any model judgment.
+    """
     generic = ReportAssessmentDraft.model_json_schema(by_alias=True)
     properties = generic["$defs"]["ReportFindingAssessmentDraft"]["properties"]
     definitions = {
-        "ReportKnownImpactScope": {
+        "ReportRelation": {"type": "string", "enum": list(RELATION_SCORES)},
+        "ReportImpactScope": {
             "type": "string",
-            "enum": [value for value in IMPACT_SCORES if value != "UNDETERMINED"],
+            "enum": list(IMPACT_SCORES),
         },
-        "ReportKnownUrgencyState": {
+        "ReportUrgencyState": {
             "type": "string",
-            "enum": [value for value in URGENCY_SCORES if value != "UNDETERMINED"],
+            "enum": list(URGENCY_SCORES),
         },
     }
     audiences = {}
@@ -262,33 +270,7 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                         for claim_id, spans in source_span_choices(finding).items()
                     ]
                 }
-                basis = {"$ref": f"#/$defs/{source_name}"}
-
-                def connection(relation, *, allowed_work=work, source_basis=basis):
-                    related = relation != "UNRELATED"
-                    return _object(
-                        {
-                            "basis": deepcopy(source_basis),
-                            "work": deepcopy(allowed_work) if related else {"type": "null"},
-                            "condition": {"type": "string", "minLength": 1, "maxLength": 120}
-                            if relation in {"CONDITIONAL", "BACKGROUND"}
-                            else {"type": "null"},
-                            "relation": {"type": "string", "const": relation},
-                        }
-                    )
-
-                def known_axis(field, definition, unknown, *, source_basis=basis):
-                    return {
-                        "anyOf": [
-                            _object(
-                                {
-                                    "basis": deepcopy(source_basis),
-                                    field: {"$ref": f"#/$defs/{definition}"},
-                                }
-                            ),
-                            deepcopy(unknown),
-                        ]
-                    }
+                nullable_basis = {"anyOf": [{"$ref": f"#/$defs/{source_name}"}, {"type": "null"}]}
 
                 reason = deepcopy(properties["reason"])
                 reason["description"] = (
@@ -297,30 +279,34 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                     "UNDETERMINED여도 원문/claim 부재를 선언하거나 "
                     "claims=[] 전용 문구를 쓰지 않는다."
                 )
-                entries[f"finding{finding.id}"] = {
-                    "anyOf": [
-                        record(
-                            {
+                entries[f"finding{finding.id}"] = record(
+                    _object(
+                        {
+                            "basis": deepcopy(nullable_basis),
+                            "work": {"anyOf": [deepcopy(work), {"type": "null"}]},
+                            "condition": {
                                 "anyOf": [
-                                    connection(value)
-                                    for value in ("DIRECT", "CONDITIONAL", "BACKGROUND")
+                                    {"type": "string", "minLength": 1, "maxLength": 120},
+                                    {"type": "null"},
                                 ]
                             },
-                            known_axis("impactScope", "ReportKnownImpactScope", unknown_effect),
-                            known_axis("urgencyState", "ReportKnownUrgencyState", unknown_timing),
-                            deepcopy(reason),
-                        ),
-                        record(
-                            connection("UNRELATED"),
-                            deepcopy(unknown_effect),
-                            deepcopy(unknown_timing),
-                            deepcopy(reason),
-                        ),
-                        record(
-                            unknown_connection, unknown_effect, unknown_timing, deepcopy(reason)
-                        ),
-                    ]
-                }
+                            "relation": {"$ref": "#/$defs/ReportRelation"},
+                        }
+                    ),
+                    _object(
+                        {
+                            "basis": deepcopy(nullable_basis),
+                            "impactScope": {"$ref": "#/$defs/ReportImpactScope"},
+                        }
+                    ),
+                    _object(
+                        {
+                            "basis": deepcopy(nullable_basis),
+                            "urgencyState": {"$ref": "#/$defs/ReportUrgencyState"},
+                        }
+                    ),
+                    reason,
+                )
             else:
                 entries[f"finding{finding.id}"] = record(
                     unknown_connection,

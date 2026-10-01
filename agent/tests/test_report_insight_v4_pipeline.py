@@ -339,7 +339,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v6"
+    assert result.meta.prompt_version == "report-insight.ko.v7"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -563,7 +563,7 @@ def test_native_span_restores_quotes_and_newlines_exactly_after_one_repair(stage
         "work_for_another_audience",
     ],
 )
-def test_native_category_correlations_repair_invalid_structure_once(defect):
+def test_post_validated_category_correlations_repair_invalid_structure_once(defect):
     source = request()
 
     def wire_hook(stage, occurrence, _, value):
@@ -593,7 +593,10 @@ def test_native_category_correlations_repair_invalid_structure_once(defect):
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
     result = generate(provider, source)
     assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REDUCE-001"]
-    assert provider.schema_validity == [False, True, True, True]
+    # The uniform wire keeps category fields independent; the unchanged local
+    # consistency guard rejects the first draft and performs exactly one repair.
+    first_native_valid = defect != "work_for_another_audience"
+    assert provider.schema_validity == [first_native_valid, True, True, True]
     assert provider.calls[0]["response_schema"] == provider.calls[1]["response_schema"]
     assert all(name in provider.calls[1]["prompt"] for name in ("connection", "effect", "timing"))
     assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
@@ -619,7 +622,7 @@ def test_invalid_native_structure_stops_after_one_repair_and_reports_observed_us
         valid
         for valid, label in zip(provider.schema_validity, stages(provider), strict=True)
         if label == stage
-    ] == [False, False]
+    ] == [True, True]
     assert caught.value.details["usage"]["inputTokens"] == len(provider.calls) * 11
     assert caught.value.details["usage"]["credits"] == float(
         Decimal(len(provider.calls)) * Decimal("0.2")
@@ -790,7 +793,7 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v6"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v7"
     assert output["meta"]["mock"] is True
     assert RUBRIC_VERSION == "report-importance.v5"
     assert set(output) == {"insights", "meta"}

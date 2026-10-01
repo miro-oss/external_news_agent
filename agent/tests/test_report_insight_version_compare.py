@@ -722,19 +722,22 @@ def test_actual_correlated_native_shape_preserves_stage_raw_response_and_public_
         ("connection", "relation", "UNRELATED"),
     ],
 )
-def test_native_schema_rejects_null_category_correlation_mismatches(prepared, block, field, value):
+def test_uniform_native_fields_keep_category_correlations_in_post_validation(
+    prepared, block, field, value
+):
     _, directory, _ = prepared
     provider, sdk = start_provider(directory)
     source, native, schema = native_draft_call(provider)
     sdk.handler = lambda wire, count: RawResponse(native)
-    provider.generate(
+    generated = provider.generate(
         system_instruction="same report instruction", prompt="source", response_schema=schema
     )
     native_schema = sdk.calls[0]["text"]["format"]["schema"]
     invalid = deepcopy(native)
     invalid["assessments"]["CHIP_MAKER"]["finding501"][block][field] = value
-    with pytest.raises(JsonSchemaValidationError):
-        Draft202012Validator(native_schema).validate(invalid)
+    Draft202012Validator(native_schema).validate(invalid)
+    with pytest.raises(assessment.ReportAssessmentDraftValidationError):
+        assessment.validate_draft(replace(generated, text=json.dumps(invalid)), source)
 
 
 def test_native_schema_rejects_unknown_and_other_finding_source_span_ids(prepared):

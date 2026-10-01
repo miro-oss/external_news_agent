@@ -106,10 +106,19 @@ def review_source_case(report: dict, request: ReportInsightRequest, candidate: d
         flags.append("wrong_finding_coverage")
     metrics = {axis: [0, 0] for axis in (*AXES, "importance")}
     strong_metrics = {axis: [0, 0] for axis in (*AXES, "importance")}
+    strong_role_connections = [0, 0]
     for item in report["assessmentLabels"]:
         finding_id = item["findingId"]
         allowed = item["audiences"][audience]
         actual = assessments.get(finding_id)
+        # A high micro accuracy can hide missing the few relevant core events.
+        # Count only strong labels that unambiguously require a positive link.
+        if allowed.get("labelConfidence") == "strong" and all(
+            value is not None and value > 0 for value in allowed["directness"]
+        ):
+            strong_role_connections[1] += 1
+            if actual is not None and actual.axes.directness in allowed["directness"]:
+                strong_role_connections[0] += 1
         for axis in (*AXES, "importance"):
             metrics[axis][1] += 1
             strong = allowed.get("labelConfidence") == "strong"
@@ -147,6 +156,9 @@ def review_source_case(report: dict, request: ReportInsightRequest, candidate: d
     calibration_eligible = result["contractPassed"] and "wrong_finding_coverage" not in flags
     metrics_key = "axisCalibration" if calibration_eligible else "diagnosticAxisCalibration"
     strong_key = "strongAxisCalibration" if calibration_eligible else "diagnosticStrongAxes"
+    connection_key = (
+        "strongRoleConnectionRecall" if calibration_eligible else "diagnosticRoleConnectionRecall"
+    )
     return {
         **result,
         "schemaParsed": True,
@@ -154,6 +166,7 @@ def review_source_case(report: dict, request: ReportInsightRequest, candidate: d
         "calibrationEligible": calibration_eligible,
         metrics_key: {name: _ratio(*counts) for name, counts in metrics.items()},
         strong_key: {name: _ratio(*counts) for name, counts in strong_metrics.items()},
+        connection_key: _ratio(*strong_role_connections),
         "importanceAvailability": _ratio(
             sum(
                 importance_grade(assessments[finding_id].axes) != "unavailable"
