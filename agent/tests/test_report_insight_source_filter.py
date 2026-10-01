@@ -12,7 +12,6 @@ from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
 from app.core.config import Settings
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.openai_contract import output_contract
-from app.llm.prompt_data import escape_prompt_text
 from app.llm.report_insight_service import (
     ReportInsightService,
     _eligible_report_request,
@@ -110,9 +109,11 @@ def test_source_filter_preserves_valid_claims_and_original_snapshot_exactly():
     ).walk()
     validator = Draft202012Validator(native)
     candidate = stage_payload(output(), "MAP")
-    candidate["insights"][0]["assessments"][0]["basisClaimIds"] = ["501:2"]
+    assessment = candidate["insights"][0]["assessments"][0]
+    candidate["insights"][0]["assessments"] = {"finding501": assessment}
+    assessment["basisClaimIds"] = ["501:2"]
     validator.validate(candidate)
-    candidate["insights"][0]["assessments"][0]["basisClaimIds"] = ["501:1"]
+    assessment["basisClaimIds"] = ["501:1"]
     with pytest.raises(JsonSchemaValidationError):
         validator.validate(candidate)
 
@@ -146,10 +147,17 @@ def test_claimless_finding_remains_assessed_without_exposing_its_sources_to_any_
 def test_native_map_contract_for_claimless_finding_rejects_scores_refs_and_factual_reason(axis):
     request = _eligible_report_request(mixed_request())
     schema = report_insight_map_schema(request)
-    transformed = OpenAIJsonSchemaTransformer(output_contract(schema).schema, strict=True).walk()
+    contract = output_contract(schema)
+    transformed = OpenAIJsonSchemaTransformer(contract.schema, strict=True).walk()
     validator = Draft202012Validator(transformed)
     payload = stage_payload(mixed_output(), "MAP")
+    public_payload = deepcopy(payload)
+    payload["insights"][0]["assessments"] = {
+        f"finding{assessment['findingId']}": assessment
+        for assessment in payload["insights"][0]["assessments"]
+    }
     validator.validate(payload)
+    assert json.loads(contract.public_text(json.dumps(payload))) == public_payload
 
     for change in (
         {"axes": {"directness": None, "impact": None, "urgency": None, "novelty": None, axis: 0}},
@@ -157,7 +165,7 @@ def test_native_map_contract_for_claimless_finding_rejects_scores_refs_and_factu
         {"reason": "기사 제목에 따르면 장비 도입이 완료됐다."},
     ):
         invalid = deepcopy(payload)
-        invalid["insights"][0]["assessments"][1].update(change)
+        invalid["insights"][0]["assessments"]["finding502"].update(change)
         with pytest.raises(JsonSchemaValidationError):
             validator.validate(invalid)
 
@@ -206,10 +214,26 @@ def test_filtered_refs_are_rejected_and_repaired_with_same_eligible_bound_schema
     assert first["response_schema"] == repair["response_schema"]
     preserved_input = (
         repair["prompt"]
-        .split("<original-report-insight-input>", 1)[1]
-        .split("</original-report-insight-input>", 1)[0]
+        .split("<report-insight-input>", 1)[1]
+        .split("</report-insight-input>", 1)[0]
     )
-    assert preserved_input.strip() == escape_prompt_text(first["prompt"])
+    original_input = json.loads(
+        first["prompt"].split("<report-insight-input>", 1)[1].split("</report-insight-input>", 1)[0]
+    )
+
+    def without_metadata(value):
+        if isinstance(value, dict):
+            return {
+                key: without_metadata(item)
+                for key, item in value.items()
+                if key not in {"title", "articleTitle", "canonicalUrl", "topicName", "score"}
+            }
+        if isinstance(value, list):
+            return [without_metadata(item) for item in value]
+        return value
+
+    assert json.loads(preserved_input) == without_metadata(original_input)
+    assert "<invalid-output>" not in repair["prompt"]
     assert result.insights[0].assessments[1].basis_claim_ids == []
     assert result.insights[0].overview[0].basis_claim_ids == ["501:0"]
 

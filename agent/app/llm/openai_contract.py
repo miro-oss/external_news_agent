@@ -37,6 +37,7 @@ class OpenAIOutputContract:
     evidence_keys: tuple[str, ...] = ()
     promotion_conflict: bool = False
     report_change_keys: tuple[str, ...] = ()
+    report_insight_keys: tuple[tuple[str, int], ...] = ()
 
     def instructions(self, original: str) -> str:
         if self.analysis:
@@ -63,6 +64,15 @@ class OpenAIOutputContract:
                 "가진 객체다. 고정 candidateId를 각각 정확히 한 번 사용한다. "
                 "previousClaimIds와 currentClaimIds에는 각 방향에 허용된 ID만 넣는다."
             )
+        if self.report_insight_keys:
+            original += (
+                "\n\nOpenAI REPORT_INSIGHT MAP의 insights[].assessments는 배열 대신 "
+                "JSON Schema가 정한 finding<ID> 키를 모두 갖는 객체다. 각 키의 고정 "
+                "findingId와 그 finding에 허용된 basisClaimIds만 사용한다. 모든 키를 "
+                "정확히 한 번 반환하고 reason과 axes를 작성한다. 근거가 없는 finding은 "
+                "고정 판단 보류 이유, 빈 basisClaimIds와 모든 축 null을 유지한다. "
+                "서버가 입력 finding 순서대로 assessments 배열로 변환한다."
+            )
         if self.wrapped:
             original += (
                 "\n\n출력은 result 키 하나를 가진 객체로 감싸세요. 제안은 result 안에 넣으세요."
@@ -70,10 +80,19 @@ class OpenAIOutputContract:
         return original
 
     def public_text(self, raw: str) -> str:
-        if not (self.wrapped or self.analysis or self.evidence_keys or self.report_change_keys):
+        if not (
+            self.wrapped
+            or self.analysis
+            or self.evidence_keys
+            or self.report_change_keys
+            or self.report_insight_keys
+        ):
             return raw
         try:
-            value = json.loads(raw)
+            value = json.loads(
+                raw,
+                object_pairs_hook=_unique_json_object if self.report_insight_keys else None,
+            )
         except (ValueError, TypeError):
             # Keep malformed/truncated output for the existing bounded repair flow.
             return raw
@@ -101,6 +120,10 @@ class OpenAIOutputContract:
             items = value.get("items")
             if isinstance(items, dict) and set(items) == set(self.report_change_keys):
                 value["items"] = [items[key] for key in self.report_change_keys]
+        if self.report_insight_keys and not _public_report_insight_map(
+            value, self.report_insight_keys
+        ):
+            return raw
         return json.dumps(value, ensure_ascii=False)
 
 
@@ -123,6 +146,11 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
         if schema.get("title") == "ReportChangesOutput" and changes.get("type") == "object"
         else ()
     )
+    report_insight_keys = (
+        _constrain_report_insight_map(schema)
+        if schema.get("title") == "ReportInsightMapOutput"
+        else ()
+    )
     wrapped = schema.get("type") != "object"
     if wrapped:
         # Keep #/$defs references at the document root.
@@ -142,7 +170,62 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
         evidence_keys=evidence_keys,
         promotion_conflict=promotion_conflict,
         report_change_keys=report_change_keys,
+        report_insight_keys=report_insight_keys,
     )
+
+
+def _constrain_report_insight_map(schema: dict[str, Any]) -> tuple[tuple[str, int], ...]:
+    definitions = schema.get("$defs", {})
+    branches = definitions.get("ReportInsightAssessment", {}).get("anyOf", [])
+    entries = {}
+    keys = []
+    for branch in branches:
+        finding_id = branch.get("properties", {}).get("findingId", {}).get("const")
+        if type(finding_id) is not int or finding_id <= 0:
+            return ()
+        key = f"finding{finding_id}"
+        if key in entries:
+            return ()
+        entries[key] = deepcopy(branch)
+        keys.append((key, finding_id))
+    if not entries:
+        # Generic, unbound model schemas retain their public array contract.
+        return ()
+    definitions["ReportInsightMapAudience"]["properties"]["assessments"] = _object(entries)
+    del definitions["ReportInsightAssessment"]
+    return tuple(keys)
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("Duplicate JSON object key")
+        value[key] = item
+    return value
+
+
+def _public_report_insight_map(value: Any, keys: tuple[tuple[str, int], ...]) -> bool:
+    insights = value.get("insights") if isinstance(value, dict) else None
+    if not isinstance(insights, list) or not insights:
+        return False
+    expected = {key for key, _ in keys}
+    for insight in insights:
+        assessments = insight.get("assessments") if isinstance(insight, dict) else None
+        if not isinstance(assessments, dict) or set(assessments) != expected:
+            return False
+        for key, finding_id in keys:
+            assessment = assessments[key]
+            if (
+                not isinstance(assessment, dict)
+                or type(assessment.get("findingId")) is not int
+                or assessment["findingId"] != finding_id
+            ):
+                return False
+    # Convert only after every audience passed: malformed output is never repaired here.
+    for insight in insights:
+        insight["assessments"] = [insight["assessments"][key] for key, _ in keys]
+    return True
 
 
 def _public_promotion(value: dict[str, Any]) -> None:
