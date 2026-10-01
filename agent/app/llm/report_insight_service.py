@@ -28,6 +28,7 @@ from app.llm.report_insight_guard import (
     validate_report_citations,
     validate_report_time,
 )
+from app.llm.report_insight_instructions import report_stage_instruction
 from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
 from app.llm.report_insight_retrieval import retrieve_report_insight_evidence
 from app.llm.report_insight_synthesis_quality import (
@@ -49,8 +50,8 @@ from app.schemas.report_insight import (
     ReportInsightResponse,
 )
 
-PROMPT_VERSION = "report-insight.ko.v4"
-RUBRIC_VERSION = "report-importance.v3"
+PROMPT_VERSION = "report-insight.ko.v5"
+RUBRIC_VERSION = "report-importance.v4"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"
 MAX_ASSESSMENT_BATCH = 8
@@ -104,6 +105,15 @@ _PREPARATION_RECOMMENDATION = re.compile(r"(?:필요|조건|확인|검토|부족
 _ASSERTED_NEGATION = re.compile(
     r"(?:없(?:다|었|으|어|는|다는)|않(?:았|는다|는|아)|아니(?:다|었|므로)|"
     r"(?:취소|중단|무산)(?:됐|되었|했|되어|돼|되므로|됨))"
+)
+_METADATA_ONLY_OVERVIEW = re.compile(
+    r"^(?:원문(?:에|에서)|원문(?:은|는)?있(?:지만|으나))?"
+    r"(?:구체적(?:인)?)?(?:관점(?:의)?|장비|제조|시스템|투자)?"
+    r"업무(?:와)?연결(?:되는)?(?:조건(?:범위)?|경로)"
+    r"(?:(?:을|를)판단할정보)?(?:이|가|은|는)?"
+    r"(?:명확하지않(?:아|음|습니다)|명시되지않(?:음|습니다)|"
+    r"제시되지않(?:음|습니다)|미확인(?:입니다|이다)?|불명(?:입니다|이다)?|부족(?:합니다|하다)?)"
+    r"(?:(?:관계)?판단(?:을)?보류(?:합니다|한다))?$"
 )
 _ASSERTED_EVENTS = (
     (
@@ -321,7 +331,7 @@ class ReportInsightService(ReportInsightLegacyService):
                 drafts.append(
                     self._call(
                         pipeline,
-                        instruction=SYSTEM_INSTRUCTION,
+                        instruction=report_stage_instruction(request.audiences, "MAP"),
                         prompt=draft_prompt(subset, reference_date=reference_date),
                         schema=schema,
                         validate=lambda response, subset=subset: assess(response, subset),
@@ -342,8 +352,8 @@ class ReportInsightService(ReportInsightLegacyService):
                 schema["description"] = "reportInsightCall:REVIEW-001"
                 reviewed = self._call(
                     pipeline,
-                    instruction=SYSTEM_INSTRUCTION,
-                    prompt=review_prompt(subset, validated, reference_date=reference_date),
+                    instruction=report_stage_instruction(request.audiences, "REVIEW"),
+                    prompt=review_prompt(subset, reference_date=reference_date),
                     schema=schema,
                     validate=lambda response: assess(response, subset),
                     stage="REVIEW",
@@ -360,7 +370,10 @@ class ReportInsightService(ReportInsightLegacyService):
             )
             retrieved = {
                 insight.audience: retrieve_report_insight_evidence(
-                    request, insight.audience, insight.assessments
+                    request,
+                    insight.audience,
+                    insight.assessments,
+                    preserve_assessment_bases=True,
                 )
                 for insight in mapped.insights
             }
@@ -370,8 +383,8 @@ class ReportInsightService(ReportInsightLegacyService):
                 schema["description"] = "reportInsightCall:REDUCE-001"
                 output = self._call(
                     pipeline,
-                    instruction=SYSTEM_INSTRUCTION,
-                    prompt=_reduce_v4_prompt(request, mapped, retrieved, allowed),
+                    instruction=report_stage_instruction(request.audiences, "REDUCE"),
+                    prompt=_reduce_v4_prompt(request, validated, retrieved, allowed),
                     schema=schema,
                     validate=lambda response: _validated_v4_reduce_output(
                         response, request, mapped, allowed
@@ -406,6 +419,18 @@ class ReportInsightService(ReportInsightLegacyService):
 def _validated_v4_reduce_output(response, request, mapped, allowed):
     output = _validated_reduce_output(response, request, mapped, allowed)
     for insight in output.insights:
+        for overview in insight.overview:
+            # Only a complete standalone metadata statement is rejected. A
+            # known contract/event followed by a missing-scope caveat is useful
+            # grounded synthesis and must not be caught by a prefix heuristic.
+            compact = re.sub(r"[\s.,。!?·]", "", overview.text)
+            if _METADATA_ONLY_OVERVIEW.fullmatch(compact):
+                raise OutputValidationError(
+                    "overview는 업무 연결 정보의 부재만 반복할 수 없습니다. "
+                    "인용 원문의 알려진 사건과 그 사건에 연결되는 구체 업무, "
+                    "결정하거나 보류할 판단을 함께 설명하세요.",
+                    error_kinds=("report_synthesis_metadata_only",),
+                )
         validate_synthesis_quality(insight, request, allowed[insight.audience])
     return output
 
@@ -481,7 +506,82 @@ def _partial_assessment_repair(prompt, schema, raw, error, validate, fallback):
     )
 
 
-def _reduce_v4_prompt(request, mapped, retrieved, allowed):
+def _decision_candidates(request, validated, allowed):
+    """Carry source-bound private work decisions into REDUCE without prose anchors.
+
+    Grouping by work is navigation, not an assertion that separate events share
+    an owner, project or causal path. The model still reads the original sources.
+    Each quote comes from the validated draft's literal original span selection.
+    """
+    claims = {claim.id: claim for finding in request.findings for claim in finding.claims}
+    candidates = {}
+    for audience in request.audiences:
+        permitted = set(allowed[audience])
+        groups = {}
+        priorities = {
+            item.finding_id: item
+            for insight in validated.mapped.insights
+            if insight.audience == audience
+            for item in insight.assessments
+        }
+        snapshot_order = {finding.id: index for index, finding in enumerate(request.findings)}
+        ordered = sorted(
+            request.findings,
+            key=lambda finding: (
+                importance_score(priorities[finding.id].axes) is None,
+                -(importance_score(priorities[finding.id].axes) or 0),
+                snapshot_order[finding.id],
+            ),
+        )
+
+        def proof(basis, finding_id, *, permitted=permitted):
+            if basis is None or basis.claim_id not in permitted:
+                return None
+            claim = claims[basis.claim_id]
+            spans = validated.source_spans[finding_id][basis.claim_id]
+            handle = next(handle for handle, text in spans.items() if text == basis.quote)
+            return {
+                "claimId": basis.claim_id,
+                "sourceSpanId": handle,
+                "text": basis.quote,
+                "claimType": claim.claim_type,
+                "attributedTo": claim.attributed_to,
+            }
+
+        for rank, finding in enumerate(ordered, 1):
+            item = validated.evidence[audience][finding.id]
+            if (
+                item.work is None
+                or item.relation_basis is None
+                or item.relation_basis.claim_id not in permitted
+            ):
+                continue
+            impact_basis = proof(item.impact_basis, finding.id)
+            urgency_basis = proof(item.urgency_basis, finding.id)
+            axes = priorities[finding.id].axes
+            groups.setdefault(item.work, []).append(
+                {
+                    "findingId": finding.id,
+                    "priorityRank": rank,
+                    "importanceScore": importance_score(axes),
+                    "importanceGrade": importance_grade(axes),
+                    "connectionBasis": proof(item.relation_basis, finding.id),
+                    "relation": item.relation,
+                    "condition": item.condition,
+                    "impactBasis": impact_basis,
+                    "impactScope": item.impact_scope if impact_basis else "UNDETERMINED",
+                    "urgencyBasis": urgency_basis,
+                    "urgencyState": item.urgency_state if urgency_basis else "UNDETERMINED",
+                }
+            )
+        candidates[audience] = [
+            {"work": work, "priorityRank": findings[0]["priorityRank"], "findings": findings}
+            for work, findings in groups.items()
+        ]
+    return candidates
+
+
+def _reduce_v4_prompt(request, validated, retrieved, allowed):
     payload = {
         "report": {
             key: value
@@ -492,8 +592,21 @@ def _reduce_v4_prompt(request, mapped, retrieved, allowed):
             report_reference_date(request).isoformat() if report_reference_date(request) else None
         ),
         "audiences": request.audiences,
-        "assessedPriorities": mapped.model_dump(by_alias=True, mode="json"),
-        "retrievedEvidence": [retrieved[audience].to_payload() for audience in request.audiences],
+        "decisionCandidates": _decision_candidates(request, validated, allowed),
+        "retrievedEvidence": [
+            {
+                "audience": audience,
+                "evidence": [
+                    {
+                        key: value
+                        for key, value in evidence.to_payload().items()
+                        if key not in {"articleTitle", "canonicalUrl", "topicName", "score"}
+                    }
+                    for evidence in retrieved[audience].evidence
+                ],
+            }
+            for audience in request.audiences
+        ],
         "evidenceFrames": {
             audience: synthesis_evidence_frames(request, allowed[audience])
             for audience in request.audiences
@@ -501,7 +614,7 @@ def _reduce_v4_prompt(request, mapped, retrieved, allowed):
     }
     return (
         "현재 단계는 REDUCE입니다. 각 관점의 검색 claim과 연결 sentence만 사실 근거입니다. "
-        "assessedPriorities의 이유와 evidenceFrames는 판단 보조이며 사실 원문이 아닙니다. "
+        "decisionCandidates의 범주와 evidenceFrames는 판단 보조이며 사실 원문이 아닙니다. "
         "원문의 주체, 사건, 계획·전망·실행 상태를 유지하고 투자 계획을 다른 회사의 확정 "
         "수주나 현재 성과로 옮기지 마세요. mechanism에는 원문 사건→업무 변수→판단을 "
         "구체적으로 쓰세요. assumption은 미확인 조건, falsifiedBy는 그 해석을 반박하는 "

@@ -421,7 +421,7 @@ def test_review_prompt_sends_only_current_subset_and_keeps_time_anchor():
     previous = validate_draft(response(payload(source), source), source)
     subset = source.model_copy(update={"findings": source.findings[1:]})
     data = framed(review_prompt(subset, previous, reference_date=date(2026, 9, 20)))
-    assert set(data["previousDraft"]["CHIP_MAKER"]) == {"finding102"}
+    assert "previousDraft" not in data
     assert data["reportReferenceDate"] == "2026-09-20"
     assert data["findings"][0]["id"] == 102
 

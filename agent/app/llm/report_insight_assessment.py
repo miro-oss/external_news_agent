@@ -99,6 +99,18 @@ _CLAIM_ABSENCE = re.compile(
     r"\bno\s+(?:verified|validated|provided|stored)\s+claims?\b",
     re.IGNORECASE,
 )
+# A missing document or an undecidable relation is not a business prerequisite.
+# This intentionally recognizes only metadata-only statements, rather than
+# deciding relevance from industry keywords or rewriting a model's category.
+_METADATA_CONDITION = re.compile(
+    r"^(?:(?:원문|근거|정보|자료)(?:에|에서|상)?(?:는|은|이|가)?\s*)?"
+    r"(?:구체적(?:인)?\s*)?(?:관점(?:의)?\s*)?(?:업무\s*)?"
+    r"(?:연결\s*)?(?:조건|경로|정보|근거|범위)(?:이|가|은|는)?\s*"
+    r"(?:명확(?:히|하게)?\s*)?(?:명시|제시|확인)?(?:하|되|되어|돼|된)?\s*"
+    r"(?:지\s*않|없|미확인|불명|부족)|"
+    r"^(?:원문|근거|정보|자료)(?:이|가|은|는)?\s*(?:없|미확인|불명|부족)",
+    re.IGNORECASE,
+)
 
 
 class ReportAssessmentDraftValidationError(OutputValidationError):
@@ -196,22 +208,22 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
         for finding in request.findings:
             unknown_connection = _object(
                 {
-                    "relation": {"type": "string", "const": "UNDETERMINED"},
+                    "basis": {"type": "null"},
                     "work": {"type": "null"},
                     "condition": {"type": "null"},
-                    "basis": {"type": "null"},
+                    "relation": {"type": "string", "const": "UNDETERMINED"},
                 }
             )
             unknown_effect = _object(
                 {
-                    "impactScope": {"type": "string", "const": "UNDETERMINED"},
                     "basis": {"type": "null"},
+                    "impactScope": {"type": "string", "const": "UNDETERMINED"},
                 }
             )
             unknown_timing = _object(
                 {
-                    "urgencyState": {"type": "string", "const": "UNDETERMINED"},
                     "basis": {"type": "null"},
+                    "urgencyState": {"type": "string", "const": "UNDETERMINED"},
                 }
             )
 
@@ -248,12 +260,12 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                     related = relation != "UNRELATED"
                     return _object(
                         {
-                            "relation": {"type": "string", "const": relation},
+                            "basis": deepcopy(source_basis),
                             "work": deepcopy(allowed_work) if related else {"type": "null"},
                             "condition": {"type": "string", "minLength": 1, "maxLength": 120}
                             if relation in {"CONDITIONAL", "BACKGROUND"}
                             else {"type": "null"},
-                            "basis": deepcopy(source_basis),
+                            "relation": {"type": "string", "const": relation},
                         }
                     )
 
@@ -262,8 +274,8 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                         "anyOf": [
                             _object(
                                 {
-                                    field: {"$ref": f"#/$defs/{definition}"},
                                     "basis": deepcopy(source_basis),
+                                    field: {"$ref": f"#/$defs/{definition}"},
                                 }
                             ),
                             deepcopy(unknown),
@@ -453,22 +465,8 @@ def review_prompt(
     reference_date: date | None = None,
 ) -> str:
     payload = _prompt_payload(request, reference_date)
-    if previous is not None:
-        previous_draft = (
-            previous.draft if isinstance(previous, ValidatedAssessmentDraft) else previous
-        )
-        keys = {f"finding{finding.id}" for finding in request.findings}
-        subset_draft = ReportAssessmentDraft(
-            assessments={
-                audience: {
-                    key: value
-                    for key, value in previous_draft.assessments.get(audience, {}).items()
-                    if key in keys
-                }
-                for audience in request.audiences
-            }
-        )
-        payload["previousDraft"] = draft_to_wire(subset_draft, request)["assessments"]
+    # Previous categories/reasons select candidates on the server only. Sending
+    # them here made nano repeat an erroneous draft instead of rereading sources.
     return (
         "현재 단계는 상위 후보와 누락 가능 항목의 독립 재검토입니다. 이전 범주를 정답으로 "
         "보지 말고 같은 원문과 역할 업무에서 다시 판정하세요. 유명 기업·큰 금액·일반적인 "
@@ -649,6 +647,16 @@ def _assessment_errors(
     conditional = item.relation in {"CONDITIONAL", "BACKGROUND"}
     if conditional and (item.condition is None or not item.condition.strip()):
         errors.append("connection.condition에 업무 연결의 미확인 중간 조건을 명시해야 합니다.")
+    if (
+        conditional
+        and item.condition is not None
+        and _METADATA_CONDITION.search(item.condition.strip())
+    ):
+        errors.append(
+            "connection.condition은 원문 사건에서 해당 업무로 이어지는 구체적 전제여야 합니다. "
+            "정보 부재·연결 조건 미확인만으로 BACKGROUND/CONDITIONAL을 만들 수 없습니다. "
+            "실제 전제를 특정할 수 없으면 UNDETERMINED로 판단하세요."
+        )
     if not conditional and item.condition is not None:
         errors.append("DIRECT/UNRELATED/UNDETERMINED에서는 connection.condition=null이어야 합니다.")
     claims = {claim.id: claim for claim in finding.claims}

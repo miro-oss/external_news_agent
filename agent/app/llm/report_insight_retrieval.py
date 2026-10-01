@@ -367,6 +367,7 @@ def retrieve_report_insight_evidence(
     assessments: Sequence[ReportInsightAssessment],
     *,
     limit: int = MAX_RETRIEVAL_CLAIMS,
+    preserve_assessment_bases: bool = False,
 ) -> ReportInsightRetrievalResult:
     """Rank only original snapshot evidence for this audience's reduce stage.
 
@@ -430,17 +431,23 @@ def retrieve_report_insight_evidence(
         if role_score > 0 and _has_role_match(document, role_query):
             ranked.append(scored[document.claim.id])
     ranked.sort(key=lambda item: (-item[0], item[1].source_order))
-    primary: list[tuple[ReportInsightAssessment, tuple[float, _Document]]] = []
+    primary: list[list[tuple[float, _Document]]] = []
     for assessment in priorities[:5]:
-        basis = sorted(
-            (scored[claim_id] for claim_id in assessment.basis_claim_ids),
-            key=lambda item: (-item[0], item[1].source_order),
-        )
-        primary.append((assessment, basis[0]))
+        # The public projection of the evidence-first draft keeps relation,
+        # impact, then timing proof order. Lexical score must not replace the
+        # actual work-connection proof with an incidental axis quote.
+        basis = [scored[claim_id] for claim_id in assessment.basis_claim_ids]
+        if not preserve_assessment_bases:
+            # Preserve the legacy-v3 replay's lexical primary-basis selection.
+            basis.sort(key=lambda item: (-item[0], item[1].source_order))
+        primary.append(basis)
     # Keep public importance order, including the snapshot's equal-score ties.
-    # Relevance chooses a basis within one finding, never changes which five
-    # findings receive seeds. Known importance precedes unavailable impact.
-    seeded = [item for _, item in primary]
+    # Give each top finding its first proof before taking additional axis
+    # proofs. Up to three unique axes per top-five draft fit the 24-claim cap.
+    # Short caller limits still preserve fair top-finding coverage.
+    seeded = [basis[0] for basis in primary]
+    if preserve_assessment_bases:
+        seeded.extend(item for basis in primary for item in basis[1:])
     seen: set[tuple[Any, ...]] = set()
     selected: list[RetrievedReportInsightClaim] = []
     for score, document in [*seeded, *ranked]:

@@ -339,14 +339,15 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v4"
+    assert result.meta.prompt_version == "report-insight.ko.v5"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
     reduce_input = framed(provider.calls[-1]["prompt"])
-    assert reduce_input["assessedPriorities"]["insights"][0]["assessments"] == [
-        entry.model_dump(by_alias=True) for entry in final
-    ]
+    assert "assessedPriorities" not in reduce_input
+    candidate_groups = reduce_input["decisionCandidates"]["CHIP_MAKER"]
+    assert candidate_groups[0]["work"] == "PROCESS_QUALIFICATION"
+    assert candidate_groups[0]["findings"][0]["connectionBasis"]["claimId"] == "101:0"
     assert "evidenceFrames" in reduce_input and "retrievedEvidence" in reduce_input
     assert all(provider.schema_validity)
     for value in provider.wire_payloads[:-1]:
@@ -359,9 +360,8 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
                 basis = draft[field]["basis"]
                 assert set(basis) == {"claimId", "sourceSpanId"}
                 assert basis["sourceSpanId"].isascii()
-    # REVIEW sees the same native shape as MAP; public assessments keep their API shape.
-    assert "connection" in review["previousDraft"]["CHIP_MAKER"]["finding101"]
-    assert "relationBasis" not in review["previousDraft"]["CHIP_MAKER"]["finding101"]
+    # REVIEW sees original sources without anchoring on previous categories/reasons.
+    assert "previousDraft" not in review
     assert set(final[0].model_dump(by_alias=True)) == {
         "findingId",
         "reason",
@@ -389,9 +389,10 @@ def test_review_replaces_only_selected_values_and_final_order_is_original():
     assert assessments[0].axes.directness is None and assessments[0].basis_claim_ids == []
     assert all(entry.axes.directness == 3 for entry in assessments[1:])
     reduce_input = framed(provider.calls[-1]["prompt"])
-    assert (
-        reduce_input["assessedPriorities"]["insights"][0]["assessments"][0]["axes"]["directness"]
-        is None
+    assert all(
+        finding["findingId"] != 101
+        for group in reduce_input["decisionCandidates"]["CHIP_MAKER"]
+        for finding in group["findings"]
     )
 
 
@@ -789,9 +790,9 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v4"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v5"
     assert output["meta"]["mock"] is True
-    assert RUBRIC_VERSION == "report-importance.v3"
+    assert RUBRIC_VERSION == "report-importance.v4"
     assert set(output) == {"insights", "meta"}
     assessment = output["insights"][0]["assessments"][0]
     assert set(assessment) == {"findingId", "reason", "basisClaimIds", "axes"}

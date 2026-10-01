@@ -189,6 +189,56 @@ def test_map_reasons_expand_queries_to_choose_a_primary_basis_within_one_finding
     assert (
         retrieve_report_insight_evidence(request, "EQUIPMENT_MAKER", mapped).claim_ids[0] == "1:1"
     )
+    # Evidence-first assessment order is opt-in; legacy replay keeps the above
+    # lexical choice while the current service retains its connection proof.
+    current = retrieve_report_insight_evidence(
+        request, "EQUIPMENT_MAKER", mapped, preserve_assessment_bases=True
+    )
+    assert current.claim_ids == ("1:0", "1:1")
+
+
+def test_evidence_first_seeds_each_top_finding_then_all_axis_proofs_before_lexical_fill():
+    items = []
+    for finding_id in range(1, 8):
+        value = finding(finding_id, f"대상 {finding_id}의 고객 승인 조건을 확인한다.")
+        for index, source in enumerate(
+            (
+                "같은 프로젝트 설치팀의 준비 범위를 조정한다.",
+                "같은 현장 승인 전에 준비 순서를 바꾼다.",
+            ),
+            1,
+        ):
+            value["claims"].append(
+                {
+                    "id": f"{finding_id}:{index}",
+                    "text": source,
+                    "claimType": "FACT",
+                    "attributedTo": None,
+                    "evidenceSentenceIds": [index],
+                }
+            )
+            value["sentences"].append({"index": index, "text": source})
+        items.append(value)
+    request = ReportInsightRequest.model_validate(request_body(items))
+    original = request.model_dump_json(by_alias=True)
+    mapped = [
+        assessment(value.id, basis=[f"{value.id}:{index}" for index in range(3)])
+        for value in request.findings
+    ]
+    result = retrieve_report_insight_evidence(
+        request, "EQUIPMENT_MAKER", mapped, preserve_assessment_bases=True
+    )
+    assert result.claim_ids[:5] == tuple(f"{finding_id}:0" for finding_id in range(1, 6))
+    assert result.claim_ids[5:15] == tuple(
+        f"{finding_id}:{index}" for finding_id in range(1, 6) for index in (1, 2)
+    )
+    assert len(result.claim_ids) <= MAX_RETRIEVAL_CLAIMS
+    assert len(result.claim_ids) == len(set(result.claim_ids))
+    limited = retrieve_report_insight_evidence(
+        request, "EQUIPMENT_MAKER", mapped, preserve_assessment_bases=True, limit=3
+    )
+    assert limited.claim_ids == ("1:0", "2:0", "3:0")
+    assert request.model_dump_json(by_alias=True) == original
 
 
 def test_importance_breaks_matching_source_ties_between_findings():
