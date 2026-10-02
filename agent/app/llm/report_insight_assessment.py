@@ -232,12 +232,12 @@ def source_span_choices(finding: ReportInsightFinding) -> dict[str, dict[str, st
 
 
 def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
-    """Keep fixed records with compact category-first branches inside each axis.
+    """Keep fixed records and couple relatedness to the two remaining axes.
 
-    The native schema enforces each category's source/work/condition contract.
-    Every branch references the same finding-bound proof definition; no full
-    record or proof choice set is duplicated. Local validation still checks
-    cross-axis consistency and whether the selected sources support the prose.
+    Two private decision branches enforce cross-axis and source/work/condition
+    contracts without duplicating the finding record. Proof choices and known
+    effect/timing schemas are shared per finding across audiences. Server
+    validation independently retains the same checks and grounds the prose.
     """
     generic = ReportAssessmentDraft.model_json_schema(by_alias=True)
     properties = generic["$defs"]["ReportFindingAssessmentDraft"]["properties"]
@@ -324,12 +324,44 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
             unknown_timing = {"$ref": "#/$defs/ReportUnknownTiming"}
 
             def record(connection, effect, timing, reason, *, finding_id=finding.id):
+                if "anyOf" in connection:
+                    effect_name = f"Finding{finding_id}Effect"
+                    timing_name = f"Finding{finding_id}Timing"
+                    unrelated_name = f"Finding{finding_id}UnrelatedConnection"
+                    definitions[effect_name] = effect
+                    definitions[timing_name] = timing
+                    definitions[unrelated_name] = connection["anyOf"][2]
+                    decision = {
+                        "anyOf": [
+                            _object(
+                                {
+                                    "connection": {"anyOf": connection["anyOf"][:2]},
+                                    "effect": {"$ref": f"#/$defs/{effect_name}"},
+                                    "timing": {"$ref": f"#/$defs/{timing_name}"},
+                                }
+                            ),
+                            _object(
+                                {
+                                    "connection": {
+                                        "anyOf": [
+                                            {"$ref": f"#/$defs/{unrelated_name}"},
+                                            connection["anyOf"][3],
+                                        ]
+                                    },
+                                    "effect": {"$ref": "#/$defs/ReportUnknownEffect"},
+                                    "timing": {"$ref": "#/$defs/ReportUnknownTiming"},
+                                }
+                            ),
+                        ]
+                    }
+                else:
+                    decision = _object(
+                        {"connection": connection, "effect": effect, "timing": timing}
+                    )
                 return _object(
                     {
                         "findingId": {"type": "integer", "const": finding_id},
-                        "connection": connection,
-                        "effect": effect,
-                        "timing": timing,
+                        "decision": decision,
                         "reason": reason,
                     }
                 )
@@ -398,6 +430,11 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                                         "type": "string",
                                         "minLength": 1,
                                         "maxLength": 120,
+                                        "description": (
+                                            "원문 사건을 선택한 업무로 연결하는 구체적인 "
+                                            "미확인 전제를 한국어로 쓴다. claimId/sourceSpanId "
+                                            "같은 근거 식별자나 JSON을 넣지 않는다."
+                                        ),
                                     },
                                     "basis": deepcopy(basis),
                                 }
@@ -531,19 +568,21 @@ def draft_to_wire(
             audience: {
                 key: {
                     "findingId": item.finding_id,
-                    "connection": {
-                        "relation": item.relation,
-                        "work": item.work,
-                        "condition": item.condition,
-                        "basis": native_basis(item.finding_id, item.relation_basis),
-                    },
-                    "effect": {
-                        "impactScope": item.impact_scope,
-                        "basis": native_basis(item.finding_id, item.impact_basis),
-                    },
-                    "timing": {
-                        "urgencyState": item.urgency_state,
-                        "basis": native_basis(item.finding_id, item.urgency_basis),
+                    "decision": {
+                        "connection": {
+                            "relation": item.relation,
+                            "work": item.work,
+                            "condition": item.condition,
+                            "basis": native_basis(item.finding_id, item.relation_basis),
+                        },
+                        "effect": {
+                            "impactScope": item.impact_scope,
+                            "basis": native_basis(item.finding_id, item.impact_basis),
+                        },
+                        "timing": {
+                            "urgencyState": item.urgency_state,
+                            "basis": native_basis(item.finding_id, item.urgency_basis),
+                        },
                     },
                     "reason": item.reason,
                 }
@@ -584,7 +623,8 @@ def draft_prompt(request: ReportInsightRequest, *, reference_date: date | None =
     return (
         "현재 단계는 내부 MAP 근거 초안입니다. 숫자 점수나 종합을 작성하지 마세요. "
         "각 audience와 finding<ID> 키를 정확히 한 번 반환하세요. 각 항목은 findingId, "
-        "connection, effect, timing, reason입니다. connection의 relation/work/condition/basis, "
+        "decision, reason입니다. decision 안의 connection/effect/timing을 작성합니다. "
+        "connection의 relation/work/condition/basis, "
         "effect의 impactScope/basis, timing의 urgencyState/basis를 Schema에 맞게 함께 "
         "작성하세요. basis는 {claimId,sourceSpanId}입니다. 같은 finding의 "
         "sourceQuoteChoices에서 실제 원문을 읽고 Schema의 해당 claimId branch에 있는 "

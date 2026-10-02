@@ -52,7 +52,7 @@ def test_sdk_transformed_assessment_schema_enforces_reason_length_and_nonblank_t
     assert schema == original
 
 
-def test_wire_bound_changes_only_claimful_reasons_and_preserves_exact_claimless_branch():
+def test_wire_bounds_change_only_generated_prose_and_preserve_exact_claimless_branch():
     source = request(ids=(101, 102), audiences=("CHIP_MAKER", "IT_INFRA"))
     source.findings[1].claims = []
     schema = draft_schema(source)
@@ -66,6 +66,9 @@ def test_wire_bound_changes_only_claimful_reasons_and_preserves_exact_claimless_
             "const": CLAIMLESS_ASSESSMENT_REASON,
         }
         records["finding101"]["properties"]["reason"].pop("pattern")
+        related = records["finding101"]["properties"]["decision"]["anyOf"][0]["properties"]
+        conditional = related["connection"]["anyOf"][1]["properties"]["condition"]
+        assert conditional.pop("pattern")
     assert contract.schema == snapshot
     assert schema == snapshot
 

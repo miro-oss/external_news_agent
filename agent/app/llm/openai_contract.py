@@ -135,13 +135,17 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
         _constrain_analysis(schema)
         _preserve_string_lengths(schema)
     if schema.get("title") == "ReportAssessmentDraft":
-        # Bound only the generated explanation. Source spans, categories and
-        # the exact claimless reason must retain their existing wire contract.
-        audiences = schema.get("properties", {}).get("assessments", {}).get("properties", {})
-        for audience in audiences.values():
-            for record in audience.get("properties", {}).values():
-                reason = record.get("properties", {}).get("reason", {})
-                _preserve_string_lengths(reason)
+        # Preserve bounds on generated prose through the SDK, including nested
+        # decision conditions. Exact source choices and category enums stay intact.
+        pending = [schema]
+        while pending:
+            node = pending.pop()
+            if isinstance(node, list):
+                pending.extend(node)
+            elif isinstance(node, dict):
+                for field in ("reason", "condition"):
+                    _preserve_string_lengths(node.get("properties", {}).get(field, {}))
+                pending.extend(node.values())
     results = schema.get("properties", {}).get("results", {})
     evidence_keys = (
         tuple(results["properties"])

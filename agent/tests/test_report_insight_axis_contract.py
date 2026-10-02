@@ -9,7 +9,13 @@ from copy import deepcopy
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
-from test_report_insight_assessment import payload, request, resolve_schema_node, response
+from test_report_insight_assessment import (
+    decision_axis_schemas,
+    payload,
+    request,
+    resolve_schema_node,
+    response,
+)
 
 from app.core.report_importance import score_importance
 from app.llm.openai_contract import output_contract
@@ -29,14 +35,12 @@ def _wire(schema):
 def _record(schema, audience="CHIP_MAKER", finding_id=101):
     return schema["properties"]["assessments"]["properties"][audience]["properties"][
         f"finding{finding_id}"
-    ]["properties"]
+    ]
 
 
 def _without_descriptions(value, *, unwrap_references=False):
     if isinstance(value, list):
-        return [
-            _without_descriptions(item, unwrap_references=unwrap_references) for item in value
-        ]
+        return [_without_descriptions(item, unwrap_references=unwrap_references) for item in value]
     if not isinstance(value, dict):
         return value
     result = {
@@ -88,7 +92,9 @@ def test_sdk_keeps_axis_and_proof_guidance_without_changing_validation_keywords(
     for audience in source.audiences:
         original_record = _record(schema, audience)
         wire_record = _record(wire, audience)
-        assert list(wire_record) == ["findingId", "connection", "effect", "timing", "reason"]
+        assert list(wire_record["properties"]) == ["findingId", "decision", "reason"]
+        original_record = decision_axis_schemas(schema, original_record)
+        wire_record = decision_axis_schemas(wire, wire_record)
         for axis, category in (
             ("connection", "relation"),
             ("effect", "impactScope"),
@@ -99,14 +105,17 @@ def test_sdk_keeps_axis_and_proof_guidance_without_changing_validation_keywords(
             assert list(wire_known)[0] == category
             assert original_known["basis"]["description"].strip()
             assert wire_known["basis"]["description"] == original_known["basis"]["description"]
-            assert resolve_schema_node(wire, wire_known["basis"]) == wire["$defs"][
-                "Finding101SourceSpan"
-            ]
+            assert (
+                resolve_schema_node(wire, wire_known["basis"])
+                == wire["$defs"]["Finding101SourceSpan"]
+            )
         for index in (0, 2):
-            original_relation = original_record["connection"]["anyOf"][index]["properties"][
-                "relation"
-            ]
-            wire_relation = wire_record["connection"]["anyOf"][index]["properties"]["relation"]
+            original_relation = resolve_schema_node(
+                schema, original_record["connection"]["anyOf"][index]
+            )["properties"]["relation"]
+            wire_relation = resolve_schema_node(wire, wire_record["connection"]["anyOf"][index])[
+                "properties"
+            ]["relation"]
             assert original_relation["description"].strip()
             assert wire_relation["description"] == original_relation["description"]
 
@@ -135,7 +144,10 @@ def test_described_effect_choices_keep_cited_zero_and_uncited_unknown_distinct(
         assessment["impactBasis"] = None
     schema = _wire(draft_schema(source))
     assert schema["$defs"]["ReportKnownImpactScope"]["enum"] == [
-        "CORE_CONSTRAINT", "PROJECT_CHANGE", "LIMITED_PREPARATION", "NO_CHANGE"
+        "CORE_CONSTRAINT",
+        "PROJECT_CHANGE",
+        "LIMITED_PREPARATION",
+        "NO_CHANGE",
     ]
     native = draft_to_wire(flat, source)
     Draft202012Validator(schema).validate(native)
@@ -146,9 +158,9 @@ def test_described_effect_choices_keep_cited_zero_and_uncited_unknown_distinct(
 
     # Zero remains an evidence-backed choice. Unknown remains null; neither
     # can borrow the other branch's proof contract after SDK transformation.
-    effect = native["assessments"]["CHIP_MAKER"]["finding101"]["effect"]
+    effect = native["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["effect"]
     effect["basis"] = (
-        native["assessments"]["CHIP_MAKER"]["finding101"]["connection"]["basis"]
+        native["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["connection"]["basis"]
         if category == "UNDETERMINED"
         else None
     )
@@ -181,27 +193,27 @@ def test_described_wire_still_rejects_invalid_choices_and_source_bindings(change
     validator.validate(native)
     record = native["assessments"]["CHIP_MAKER"]["finding101"]
     if change == "cross_finding_proof":
-        record["effect"]["basis"] = native["assessments"]["CHIP_MAKER"]["finding102"][
-            "effect"
-        ]["basis"]
+        record["decision"]["effect"]["basis"] = native["assessments"]["CHIP_MAKER"]["finding102"][
+            "decision"
+        ]["effect"]["basis"]
     elif change == "cross_claim_span":
-        record["effect"]["basis"]["sourceSpanId"] = next(
+        record["decision"]["effect"]["basis"]["sourceSpanId"] = next(
             iter(source_span_choices(source.findings[0])["101:1"])
         )
     elif change == "foreign_work":
-        record["connection"]["work"] = "SYSTEM_PROCUREMENT"
+        record["decision"]["connection"]["work"] = "SYSTEM_PROCUREMENT"
     elif change == "invented_scope":
-        record["effect"]["impactScope"] = "POSSIBLE_CHANGE"
+        record["decision"]["effect"]["impactScope"] = "POSSIBLE_CHANGE"
     elif change == "numeric_scope":
-        record["effect"]["impactScope"] = 0
+        record["decision"]["effect"]["impactScope"] = 0
     elif change == "known_timing_without_proof":
-        record["timing"]["basis"] = None
+        record["decision"]["timing"]["basis"] = None
     elif change == "unknown_timing_with_proof":
-        record["timing"]["urgencyState"] = "UNDETERMINED"
+        record["decision"]["timing"]["urgencyState"] = "UNDETERMINED"
     elif change == "direct_without_proof":
-        record["connection"]["basis"] = None
+        record["decision"]["connection"]["basis"] = None
     elif change == "unknown_connection_with_proof":
-        record["connection"].update(relation="UNDETERMINED", work=None)
+        record["decision"]["connection"].update(relation="UNDETERMINED", work=None)
     elif change == "added_observation":
-        record["effect"]["observation"] = "원문에서 실제 변경을 확인했다."
+        record["decision"]["effect"]["observation"] = "원문에서 실제 변경을 확인했다."
     assert not validator.is_valid(native)

@@ -283,8 +283,9 @@ class ReportInsightService(ReportInsightLegacyService):
             return super()._repair_call(prompt, schema, raw, error, validate)
         fallback = StructuredCallRepair(
             prompt=(
-                "현재 단계는 내부 근거 평가 수리입니다. 각 finding의 connection, effect, "
-                "timing 객체를 현재 Schema 그대로 작성하세요. 원문 인용이 필요한 범주는 "
+                "현재 단계는 내부 근거 평가 수리입니다. 각 finding의 decision 안에 "
+                "connection, effect, timing 객체를 현재 Schema 그대로 작성하세요. "
+                "원문 인용이 필요한 범주는 "
                 "원문을 읽고 해당 claimId에 연결된 sourceSpanId를 선택하세요. claims가 실제 빈 "
                 "finding만 고정 근거 부족 문구를 사용합니다. 원문이 있는 항목은 사건과 연결 "
                 "업무를 다시 대조하고, 미확인인 축만 그 한계를 설명하세요. 모든 항목의 "

@@ -1317,7 +1317,7 @@ def test_native_axis_branches_and_post_validation_both_reject_invalid_correlatio
     )
     native_schema = sdk.calls[0]["text"]["format"]["schema"]
     invalid = deepcopy(native)
-    invalid["assessments"]["CHIP_MAKER"]["finding501"][block][field] = value
+    invalid["assessments"]["CHIP_MAKER"]["finding501"]["decision"][block][field] = value
     with pytest.raises(JsonSchemaValidationError):
         Draft202012Validator(native_schema).validate(invalid)
     with pytest.raises(assessment.ReportAssessmentDraftValidationError):
@@ -1333,12 +1333,12 @@ def test_native_schema_rejects_unknown_and_other_finding_source_span_ids(prepare
         system_instruction="same report instruction", prompt="source", response_schema=schema
     )
     native_schema = sdk.calls[0]["text"]["format"]["schema"]
-    other_span_id = native["assessments"]["CHIP_MAKER"]["finding502"]["connection"]["basis"][
-        "sourceSpanId"
-    ]
+    other_span_id = native["assessments"]["CHIP_MAKER"]["finding502"]["decision"]["connection"][
+        "basis"
+    ]["sourceSpanId"]
     for wrong_span_id in ("unknown_source_span", other_span_id):
         invalid = deepcopy(native)
-        invalid["assessments"]["CHIP_MAKER"]["finding501"]["connection"]["basis"][
+        invalid["assessments"]["CHIP_MAKER"]["finding501"]["decision"]["connection"]["basis"][
             "sourceSpanId"
         ] = wrong_span_id
         with pytest.raises(JsonSchemaValidationError):

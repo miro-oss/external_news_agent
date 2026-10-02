@@ -108,7 +108,9 @@ def test_literal_source_selection_failure_also_collects_other_public_failures():
         if stage == "MAP-001" and occurrence == 1:
             entries = value["assessments"]["CHIP_MAKER"]
             entries["finding101"]["reason"] = reasons[101]
-            entries["finding101"]["connection"]["basis"]["sourceSpanId"] = "s101_0_99999"
+            entries["finding101"]["decision"]["connection"]["basis"]["sourceSpanId"] = (
+                "s101_0_99999"
+            )
         return value
 
     provider = V4Provider(
@@ -155,9 +157,9 @@ def test_ambiguous_native_structure_falls_back_to_full_batch(defect):
         elif defect in {"duplicate_id", "wrong_id"}:
             entries["finding106"]["findingId"] = 105 if defect == "duplicate_id" else 999
         elif defect == "missing_field":
-            del entries["finding106"]["timing"]
+            del entries["finding106"]["decision"]["timing"]
         elif defect == "bad_enum":
-            entries["finding106"]["effect"]["impactScope"] = "INVALID"
+            entries["finding106"]["decision"]["effect"]["impactScope"] = "INVALID"
         return value
 
     def raw_hook(stage, occurrence, _, raw):

@@ -6,6 +6,7 @@ from copy import deepcopy
 import pytest
 from jsonschema import Draft202012Validator
 from test_report_insight_assessment import (
+    decision_axis_schemas,
     framed,
     payload,
     request,
@@ -202,18 +203,19 @@ def test_reassessment_context_is_independent_and_preserves_source_identity_and_t
     assert result.meta.prompt_version == "report-insight.ko.v9"
 
 
-def test_native_contract_selects_category_before_fields_without_changing_accepted_wire():
+def test_native_decision_contract_keeps_axis_category_before_source_fields():
     source = request()
     schema = draft_schema(source)
     record = schema["properties"]["assessments"]["properties"]["CHIP_MAKER"]["properties"][
         "finding101"
-    ]["properties"]
+    ]
+    axes = decision_axis_schemas(schema, record)
     for field, category in (
         ("connection", "relation"),
         ("effect", "impactScope"),
         ("timing", "urgencyState"),
     ):
-        for branch in record[field]["anyOf"]:
+        for branch in axes[field]["anyOf"]:
             if "$ref" in branch:
                 branch = schema["$defs"][branch["$ref"].split("/")[-1]]
             assert list(branch["properties"])[0] == category

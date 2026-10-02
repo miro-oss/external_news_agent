@@ -45,8 +45,9 @@ def report_stage_instruction(audiences: list[Audience], stage: str) -> str:
         stage_text = (
             f"현재 단계는 {stage}. finding마다 원문의 주체·대상·사건·단계를 확인하고, "
             "연결되는 업무와 실제로 명시된 변경 범위·시점을 각각 찾는다. 그 근거로 "
-            "connection.relation, effect.impactScope, timing.urgencyState를 독립 판정한 뒤 "
-            "해당 범주의 Schema 필드를 작성한다. 관계를 찾았다고 영향 확인을 생략하거나 "
+            "decision 안의 relation부터 판정한다. UNRELATED/UNDETERMINED이면 "
+            "effect/timing도 미확인이다. 그 외에는 영향·시점을 각각 판정한다. "
+            "관계를 찾았다고 영향 확인을 생략하거나 "
             "모든 effect를 같은 값으로 채우지 않는다. 알려진 축의 basis는 같은 "
             "finding/claim의 실제 원문을 선택하며 축별로 다른 claim을 사용할 수 있다. "
             "알려진 축은 basis 필수, UNDETERMINED인 축은 basis=null이다. "

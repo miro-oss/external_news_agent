@@ -78,12 +78,16 @@ def test_sdk_preserves_shared_unknowns_and_the_previous_contract_order():
             records = wire["properties"]["assessments"]["properties"][audience]["properties"]
             for finding in source.findings:
                 record = records[f"finding{finding.id}"]["properties"]
-                assert list(record) == ["findingId", "connection", "effect", "timing", "reason"]
+                assert list(record) == ["findingId", "decision", "reason"]
                 assert record["findingId"] == {"type": "integer", "const": finding.id}
                 if finding.claims:
-                    assert record[field]["anyOf"][-1] == {"$ref": f"#/$defs/{name}"}
+                    unknown_decision = record["decision"]["anyOf"][1]["properties"]
+                    axis = unknown_decision[field]
+                    if field == "connection":
+                        axis = axis["anyOf"][-1]
+                    assert axis == {"$ref": f"#/$defs/{name}"}
                 else:
-                    assert record[field] == {"$ref": f"#/$defs/{name}"}
+                    assert record["decision"]["properties"][field] == {"$ref": f"#/$defs/{name}"}
                     assert record["reason"] == {
                         "type": "string",
                         "const": CLAIMLESS_ASSESSMENT_REASON,
@@ -100,7 +104,7 @@ def test_shared_unknowns_retain_closed_null_only_contract(field, change):
     validators = [Draft202012Validator(schema), Draft202012Validator(_inline_unknowns(schema))]
     for validator in validators:
         validator.validate(native)
-    axis = native["assessments"]["CHIP_MAKER"]["finding101"][field]
+    axis = native["assessments"]["CHIP_MAKER"]["finding101"]["decision"][field]
     if change == "extra":
         axis["unexpected"] = None
     elif change == "missing_basis":

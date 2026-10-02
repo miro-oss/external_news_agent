@@ -356,9 +356,9 @@ def test_request_bound_native_schema_fixes_all_keys_role_work_and_local_claims()
         elif change == "extra":
             items["finding103"] = deepcopy(items["finding101"])
         elif change == "role":
-            items["finding101"]["connection"]["work"] = "SYSTEM_PROCUREMENT"
+            items["finding101"]["decision"]["connection"]["work"] = "SYSTEM_PROCUREMENT"
         elif change == "claim":
-            items["finding101"]["connection"]["basis"]["claimId"] = "102:0"
+            items["finding101"]["decision"]["connection"]["basis"]["claimId"] = "102:0"
         else:
             items["finding101"]["findingId"] = 102
         with pytest.raises(JsonSchemaValidationError):
@@ -749,9 +749,7 @@ def test_native_to_flat_roundtrip_keeps_every_original_field_and_source_quote():
     assert draft_to_wire(validated) == native == snapshot
     assert set(native["assessments"]["CHIP_MAKER"]["finding101"]) == {
         "findingId",
-        "connection",
-        "effect",
-        "timing",
+        "decision",
         "reason",
     }
 
@@ -861,7 +859,7 @@ def test_native_span_choices_bind_claim_id_and_original_source_handle_together(f
     schema = OpenAIJsonSchemaTransformer(draft_schema(source), strict=True).walk()
     native = draft_to_wire(payload(source), source)
     Draft202012Validator(schema).validate(native)
-    basis = native["assessments"]["CHIP_MAKER"]["finding101"][field]["basis"]
+    basis = native["assessments"]["CHIP_MAKER"]["finding101"]["decision"][field]["basis"]
     if change == "different_claim":
         basis["sourceSpanId"] = "s101_1_0"
     elif change == "different_finding":
@@ -881,9 +879,9 @@ def test_unrelated_zero_basis_is_bound_to_original_quote_choices_too():
     native = draft_to_wire(payload(source, relation="UNRELATED"), source)
     validator = Draft202012Validator(draft_schema(source))
     validator.validate(native)
-    native["assessments"]["CHIP_MAKER"]["finding101"]["connection"]["basis"]["sourceSpanId"] = (
-        "s101_1_0"
-    )
+    native["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["connection"]["basis"][
+        "sourceSpanId"
+    ] = "s101_1_0"
     with pytest.raises(JsonSchemaValidationError):
         validator.validate(native)
 
@@ -941,6 +939,13 @@ def test_complete_prompt_example_preserves_positive_unknown_and_claimless_source
     path = Path(__file__).resolve().parents[1] / "app/prompts/report-insight.ko.v4.md"
     prompt = path.read_text()
     native = json.loads(prompt.split("```json\n", 1)[1].split("\n```", 1)[0])
+    # The archived v4 prompt's example predates the private decision envelope.
+    # Its evidence/category content still roundtrips through the current shape.
+    for entries in native["assessments"].values():
+        for entry in entries.values():
+            entry["decision"] = {
+                field: entry.pop(field) for field in ("connection", "effect", "timing")
+            }
     texts = (
         "제조사는 공정 검증 준비를 계획했다.",
         "합병 대상은 방산 사업이며 장비 사업은 포함하지 않는다.",
@@ -1083,14 +1088,27 @@ def test_four_audience_twelve_finding_sdk_review_schema_stays_within_all_size_li
 
 def resolve_schema_node(schema, node):
     # The SDK wraps annotated references in a single-choice anyOf.
-    while "$ref" in node or (
-        len(node.get("anyOf", [])) == 1 and "$ref" in node["anyOf"][0]
-    ):
+    while "$ref" in node or (len(node.get("anyOf", [])) == 1 and "$ref" in node["anyOf"][0]):
         if "$ref" in node:
             node = schema["$defs"][node["$ref"].removeprefix("#/$defs/")]
         else:
             node = node["anyOf"][0]
     return node
+
+
+def decision_axis_schemas(schema, record):
+    """Inspect all axis choices while keeping decision coupling tests separate."""
+    decision = record["properties"]["decision"]
+    if "anyOf" not in decision:
+        return decision["properties"]
+    related, unrelated = [branch["properties"] for branch in decision["anyOf"]]
+    return {
+        "connection": {
+            "anyOf": [*related["connection"]["anyOf"], *unrelated["connection"]["anyOf"]]
+        },
+        "effect": resolve_schema_node(schema, related["effect"]),
+        "timing": resolve_schema_node(schema, related["timing"]),
+    }
 
 
 def test_compact_native_axes_enforce_categories_without_duplicating_source_choices():
@@ -1116,7 +1134,7 @@ def test_compact_native_axes_enforce_categories_without_duplicating_source_choic
         for finding in source.findings:
             record = audience_schema["properties"][f"finding{finding.id}"]
             assert "anyOf" not in record
-            props = record["properties"]
+            props = decision_axis_schemas(wire, record)
             branches = [
                 resolve_schema_node(wire, branch) for branch in props["connection"]["anyOf"]
             ]
@@ -1126,9 +1144,10 @@ def test_compact_native_axes_enforce_categories_without_duplicating_source_choic
             for branch in branches[:2]:
                 assert branch["properties"]["work"] == {"$ref": f"#/$defs/{name}"}
             for branch in branches[:3]:
-                assert resolve_schema_node(wire, branch["properties"]["basis"]) == definitions[
-                    f"Finding{finding.id}SourceSpan"
-                ]
+                assert (
+                    resolve_schema_node(wire, branch["properties"]["basis"])
+                    == definitions[f"Finding{finding.id}SourceSpan"]
+                )
             assert branches[-1]["properties"]["basis"] == {"type": "null"}
             for field, category, definition in (
                 ("effect", "impactScope", "ReportKnownImpactScope"),
@@ -1139,14 +1158,15 @@ def test_compact_native_axes_enforce_categories_without_duplicating_source_choic
                 ]
                 assert list(known["properties"])[0] == category
                 assert known["properties"][category] == {"$ref": f"#/$defs/{definition}"}
-                assert resolve_schema_node(wire, known["properties"]["basis"]) == definitions[
-                    f"Finding{finding.id}SourceSpan"
-                ]
+                assert (
+                    resolve_schema_node(wire, known["properties"]["basis"])
+                    == definitions[f"Finding{finding.id}SourceSpan"]
+                )
                 assert unknown["properties"]["basis"] == {"type": "null"}
     validator = Draft202012Validator(wire)
     for field in ("connection", "effect", "timing"):
         native = draft_to_wire(payload(source), source)
-        native["assessments"]["CHIP_MAKER"]["finding101"][field]["basis"] = None
+        native["assessments"]["CHIP_MAKER"]["finding101"]["decision"][field]["basis"] = None
         with pytest.raises(JsonSchemaValidationError):
             validator.validate(native)
         with pytest.raises(ReportAssessmentDraftValidationError):
@@ -1175,7 +1195,7 @@ def test_safe_native_span_ids_restore_quotes_newlines_and_spacing_without_source
             if isinstance(value, str):
                 assert '"' not in value and "\n" not in value
     native = draft_to_wire(payload(source), request=source)
-    basis = native["assessments"]["CHIP_MAKER"]["finding101"]["connection"]["basis"]
+    basis = native["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["connection"]["basis"]
     assert basis == {"claimId": "101:0", "sourceSpanId": "s101_0_0"}
     Draft202012Validator(wire).validate(native)
     validated = validate_draft(response(payload(source), source), source)
@@ -1206,9 +1226,9 @@ def test_unknown_or_cross_source_span_ids_are_rejected_locally_with_typed_findin
     source = source.model_copy(update={"findings": [*source.findings, other]})
     native = draft_to_wire(payload(source), source)
     invalid = {"unknown": "s101_0_99999", "other_finding": "s102_0_0", "other_claim": "s101_1_0"}
-    native["assessments"]["CHIP_MAKER"]["finding101"]["effect"]["basis"]["sourceSpanId"] = invalid[
-        change
-    ]
+    native["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["effect"]["basis"][
+        "sourceSpanId"
+    ] = invalid[change]
     with pytest.raises(JsonSchemaValidationError):
         Draft202012Validator(draft_schema(source)).validate(native)
     with pytest.raises(ReportAssessmentDraftValidationError) as caught:
@@ -1223,7 +1243,7 @@ def test_unknown_or_cross_source_span_ids_are_rejected_locally_with_typed_findin
 def test_old_raw_quote_native_basis_cannot_bypass_source_span_resolution():
     source = request()
     native = draft_to_wire(payload(source), source)
-    native["assessments"]["CHIP_MAKER"]["finding101"]["connection"]["basis"] = {
+    native["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["connection"]["basis"] = {
         "claimId": "101:0",
         "quote": source.findings[0].claims[0].text,
     }

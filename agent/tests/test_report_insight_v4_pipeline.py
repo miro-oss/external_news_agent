@@ -354,12 +354,17 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(provider.schema_validity)
     for value in provider.wire_payloads[:-1]:
         for draft in value["assessments"]["CHIP_MAKER"].values():
-            assert set(draft) == {"findingId", "connection", "effect", "timing", "reason"}
-            assert set(draft["connection"]) == {"relation", "work", "condition", "basis"}
-            assert set(draft["effect"]) == {"impactScope", "basis"}
-            assert set(draft["timing"]) == {"urgencyState", "basis"}
+            assert set(draft) == {"findingId", "decision", "reason"}
+            assert set(draft["decision"]["connection"]) == {
+                "relation",
+                "work",
+                "condition",
+                "basis",
+            }
+            assert set(draft["decision"]["effect"]) == {"impactScope", "basis"}
+            assert set(draft["decision"]["timing"]) == {"urgencyState", "basis"}
             for field in ("connection", "effect", "timing"):
-                basis = draft[field]["basis"]
+                basis = draft["decision"][field]["basis"]
                 assert set(basis) == {"claimId", "sourceSpanId"}
                 assert basis["sourceSpanId"].isascii()
     # REVIEW sees original sources without anchoring on previous categories/reasons.
@@ -414,10 +419,10 @@ def test_all_unrelated_findings_skip_review_without_keywords_and_skip_reduce():
     assert all(provider.schema_validity)
     for payload in provider.wire_payloads:
         for entry in payload["assessments"]["CHIP_MAKER"].values():
-            assert entry["connection"]["relation"] == "UNRELATED"
-            assert entry["connection"]["basis"] is not None
-            assert entry["effect"] == {"impactScope": "UNDETERMINED", "basis": None}
-            assert entry["timing"] == {"urgencyState": "UNDETERMINED", "basis": None}
+            assert entry["decision"]["connection"]["relation"] == "UNRELATED"
+            assert entry["decision"]["connection"]["basis"] is not None
+            assert entry["decision"]["effect"] == {"impactScope": "UNDETERMINED", "basis": None}
+            assert entry["decision"]["timing"] == {"urgencyState": "UNDETERMINED", "basis": None}
     assert result.meta.credits == 0.4
 
 
@@ -435,9 +440,9 @@ def test_map_span_repair_keeps_same_batch_schema_and_sums_all_stages():
 
     def wire_hook(stage, occurrence, _, value):
         if stage == "MAP-001" and occurrence == 1:
-            value["assessments"]["CHIP_MAKER"]["finding101"]["effect"]["basis"]["sourceSpanId"] = (
-                "s101_0_99999"
-            )
+            value["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["effect"]["basis"][
+                "sourceSpanId"
+            ] = "s101_0_99999"
         return value
 
     # A malformed provider can still return bytes that violate its native schema.
@@ -476,8 +481,8 @@ def test_shifted_finding_span_is_native_invalid_and_locally_repaired_without_usa
     def wire_hook(stage, occurrence, _, value):
         if stage == "MAP-001" and occurrence == 1:
             entries = value["assessments"]["CHIP_MAKER"]
-            basis = entries["finding101"]["effect"]["basis"]
-            foreign_span = entries["finding102"]["effect"]["basis"]["sourceSpanId"]
+            basis = entries["finding101"]["decision"]["effect"]["basis"]
+            foreign_span = entries["finding102"]["decision"]["effect"]["basis"]["sourceSpanId"]
             assert basis["claimId"] == "101:0"
             assert basis["sourceSpanId"] != foreign_span
             basis["sourceSpanId"] = foreign_span
@@ -505,7 +510,7 @@ def test_native_invalid_span_still_gets_local_validation_and_at_most_one_repair(
 
     def wire_hook(current, _, data, value):
         if current == stage:
-            value["assessments"]["CHIP_MAKER"]["finding101"]["connection"]["basis"][
+            value["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["connection"]["basis"][
                 "sourceSpanId"
             ] = "s101_0_99999"
         return value
@@ -532,9 +537,9 @@ def test_native_span_restores_quotes_and_newlines_exactly_after_one_repair(stage
 
     def wire_hook(current, occurrence, _, value):
         if current == stage and occurrence == 1:
-            value["assessments"]["CHIP_MAKER"]["finding101"]["effect"]["basis"]["sourceSpanId"] = (
-                "s101_0_99999"
-            )
+            value["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["effect"]["basis"][
+                "sourceSpanId"
+            ] = "s101_0_99999"
         return value
 
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
@@ -554,7 +559,7 @@ def test_native_span_restores_quotes_and_newlines_exactly_after_one_repair(stage
         basis.quote == text
         for basis in (draft.relation_basis, draft.impact_basis, draft.urgency_basis)
     )
-    native_basis = wire["assessments"]["CHIP_MAKER"]["finding101"]["effect"]["basis"]
+    native_basis = wire["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["effect"]["basis"]
     assert set(native_basis) == {"claimId", "sourceSpanId"}
     choices = framed(provider.calls[repair_index]["prompt"])["findings"][0]["sourceQuoteChoices"]
     assert json.dumps(text, ensure_ascii=False) in json.dumps(choices, ensure_ascii=False)
@@ -585,23 +590,23 @@ def test_post_validated_category_correlations_repair_invalid_structure_once(defe
             return value
         draft = value["assessments"]["CHIP_MAKER"]["finding101"]
         if defect == "direct_without_work":
-            draft["connection"]["work"] = None
+            draft["decision"]["connection"]["work"] = None
         elif defect == "direct_without_basis":
-            draft["connection"]["basis"] = None
+            draft["decision"]["connection"]["basis"] = None
         elif defect == "direct_with_condition":
-            draft["connection"]["condition"] = "추가 업무 연결을 확인하는 경우"
+            draft["decision"]["connection"]["condition"] = "추가 업무 연결을 확인하는 경우"
         elif defect == "conditional_without_condition":
-            draft["connection"]["relation"] = "CONDITIONAL"
+            draft["decision"]["connection"]["relation"] = "CONDITIONAL"
         elif defect == "unknown_effect_with_basis":
-            draft["effect"]["impactScope"] = "UNDETERMINED"
+            draft["decision"]["effect"]["impactScope"] = "UNDETERMINED"
         elif defect == "known_effect_without_basis":
-            draft["effect"]["basis"] = None
+            draft["decision"]["effect"]["basis"] = None
         elif defect == "unknown_timing_with_basis":
-            draft["timing"]["urgencyState"] = "UNDETERMINED"
+            draft["decision"]["timing"]["urgencyState"] = "UNDETERMINED"
         elif defect == "known_timing_without_basis":
-            draft["timing"]["basis"] = None
+            draft["decision"]["timing"]["basis"] = None
         else:
-            draft["connection"]["work"] = "POWER_COOLING"
+            draft["decision"]["connection"]["work"] = "POWER_COOLING"
         return value
 
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
@@ -622,7 +627,7 @@ def test_invalid_native_structure_stops_after_one_repair_and_reports_observed_us
 
     def wire_hook(current, _, data, value):
         if current == stage:
-            value["assessments"]["CHIP_MAKER"]["finding101"]["effect"]["basis"] = None
+            value["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["effect"]["basis"] = None
         return value
 
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
