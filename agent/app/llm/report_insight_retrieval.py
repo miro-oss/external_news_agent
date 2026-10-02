@@ -37,9 +37,11 @@ _ROLE_QUERIES: dict[Audience, str] = {
     "MARKET_INVESTOR": "매출 실적 수익성 영업이익 순이익 시장점유율 수요 공급계약 "
     "재무 현금흐름 투자수익 earnings revenue margins profitability valuation "
     "demand market cashflow financial profit guidance",
-    "IT_INFRA": "데이터센터 서버 GPU 가속기 대역폭 냉각 전력 조달 도입 구축 "
+    "IT_INFRA": "데이터센터 서버 GPU 가속기 메모리 저장장치 "
+    "대역폭 냉각 전력 조달 도입 구축 "
     "시스템 운영 인프라 납기 datacenter server accelerator bandwidth cooling "
-    "power procurement deployment infrastructure latency availability data-center",
+    "power procurement deployment infrastructure latency availability data-center "
+    "memory storage dram ddr hbm nand ssd",
 }
 _WORDS = re.compile(r"[가-힣]+|[a-z0-9]+(?:[._-][a-z0-9]+)*")
 _KOREAN = re.compile(r"^[가-힣]+$")

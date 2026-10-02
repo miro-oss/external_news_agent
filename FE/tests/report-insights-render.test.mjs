@@ -65,13 +65,27 @@ test('forecasts and attributed opinions retain their original type and unsafe UR
 })
 test('empty and unavailable analysis preserve uncertainty and do not offer paid regeneration inside saved content', () => {
   const empty = render(reportInsightFixture(report, 'CHIP_MAKER', 'empty'))
-  assert.match(empty, /직접 연결되는 검증된 분석이 없습니다/)
+  assert.match(empty, /이 관점의 종합 해석이 없습니다/)
+  assert.doesNotMatch(empty, /아래 이슈별 판단/)
   assert.doesNotMatch(empty, /먼저 살펴볼 이슈|크레딧 사용/)
   const uncertain = render(reportInsightFixture(report, 'CHIP_MAKER', 'unavailable'))
   assert.match(uncertain, /리포트 중요도 판단 보류/)
   assert.match(uncertain, /<dt>직접 관련성<\/dt><dd>미확인/)
   assert.match(uncertain, /관련성 미확인 · 이 관점의 업무와 연결되는지 판단할 근거가 부족합니다/)
   assert.doesNotMatch(uncertain, /영향 규모 미확인 · 업무 관련성은 확인/)
+})
+test('empty synthesis with assessed issues points to reasons and preserved evidence without claiming no source', () => {
+  const result = reportInsightFixture(report, 'CHIP_MAKER', 'unavailable')
+  Object.assign(result.insights[0], { overview: [], implications: [], watchItems: [],
+    headline: '원문 근거는 있으나 이 관점의 업무 관련성을 판단하지 못했습니다.' })
+  const html = render(result)
+  assert.match(html, /이 관점의 종합 해석이 없습니다/)
+  assert.match(html, /아래 이슈별 판단 사유와 원문 근거를 확인해 주세요/)
+  assert.match(html, /원문 근거 문장 1 보기/)
+  assert.match(html, /리포트 중요도 판단 보류/)
+  assert.ok(html.includes(result.insights[0].issues[0].reason))
+  assert.doesNotMatch(html, /직접 연결되는 검증된 분석이 없습니다|새 근거가 추가되면/)
+  assert.doesNotMatch(render(reportInsightFixture(report)), /이 관점의 종합 해석이 없습니다/)
 })
 test('unavailable issues distinguish unknown relatedness from unknown impact without changing their importance', () => {
   const cases = [

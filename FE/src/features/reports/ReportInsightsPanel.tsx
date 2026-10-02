@@ -84,14 +84,14 @@ export function ReportInsightsContent({ result, insight, findings, onEvidenceSel
   const byFinding = new Map(findings.map(finding => [finding.id, finding]))
   const facts = new Map(insight.facts.map(fact => [fact.id, fact]))
   const evidence = (ids: string[]) => <ClaimEvidence ids={ids} facts={facts} findings={byFinding} onEvidenceSelect={onEvidenceSelect} />
-  const hasAnalysis = insight.overview.length + insight.issues.length + insight.implications.length + insight.watchItems.length > 0
+  const hasSynthesis = insight.overview.length + insight.implications.length + insight.watchItems.length > 0
   return <div className="report-insights-content">
     <div className="report-insights-meta"><Importance value={insight.importance} report />
       <span>{AUDIENCE_LABELS[insight.audience]} 관점</span><span>{result.cached ? '저장된 분석' : '새로 생성한 분석'}</span>
       <span>근거 이슈 {result.inputFindingCount}건</span><time dateTime={insight.createdAt}>{formatFullDate(insight.createdAt)}</time>
     </div>
     <h4 className="report-insights-headline">{insight.headline}</h4>
-    {!hasAnalysis && <p>이 관점과 직접 연결되는 검증된 분석이 없습니다. 새 근거가 추가되면 다시 확인해 주세요.</p>}
+    {!hasSynthesis && <p>이 관점의 종합 해석이 없습니다.{insight.issues.length > 0 && ' 아래 이슈별 판단 사유와 원문 근거를 확인해 주세요.'}</p>}
     {insight.overview.length > 0 && <ul className="report-insights-overview" aria-label="리포트 종합 판단">{insight.overview.map((item, index) => <li key={index}>
       <p>{item.text}</p><p className="report-insights-condition">해석의 조건 · {item.assumption}</p>{evidence(item.basisClaimIds)}
     </li>)}</ul>}

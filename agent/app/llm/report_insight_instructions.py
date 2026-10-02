@@ -65,6 +65,7 @@ def report_stage_instruction(audiences: list[Audience], stage: str) -> str:
         "특정할 수 없으면 implications를 비우고 알려진 사건은 overview에 남긴다. watchItems는 "
         "원문의 실제 대상·변수·조건과 그 결과가 바꾸는 판단을 쓴다. 자료 부재는 반증이 아니다. "
         "priorityRank는 기존 중요도 순서이며 unavailable은 무관을 뜻하지 않는다. 모두 "
-        "무관/미확인이면 관련 근거 부족 headline과 빈 배열이다. assessments는 작성하지 않는다."
+        "무관/미확인이면 종합 배열을 비운다. 원문 부재와 업무 관련성 미확인은 다르며 "
+        "최종 빈 해석 안내는 서버가 판정한다. assessments는 작성하지 않는다."
     )
     return common + "\n\n" + stage_text

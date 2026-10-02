@@ -403,6 +403,7 @@ class ReportInsightService(ReportInsightLegacyService):
         last = pipeline.last_response
         if last is None:
             raise RuntimeError("리포트 인사이트 단계가 Provider 응답 없이 완료되었습니다.")
+        output = _explain_empty_synthesis(output, request)
         return ReportInsightResponse(
             insights=output.insights,
             meta=ReportResponseMeta(
@@ -417,6 +418,40 @@ class ReportInsightService(ReportInsightLegacyService):
                 truncated=False,
             ),
         )
+
+
+def _explain_empty_synthesis(
+    output: ReportInsightOutput, request: ReportInsightRequest
+) -> ReportInsightOutput:
+    """Describe validated abstention without equating an unknown role with no source.
+
+    The request has already passed source eligibility checks. These are server
+    diagnostics, not model synthesis, and must never change assessments or facts.
+    """
+    grounded_ids = {finding.id for finding in request.findings if finding.claims}
+    if not grounded_ids:
+        return output
+    insights = []
+    for insight in output.insights:
+        assessments = [
+            item for item in insight.assessments if item.finding_id in grounded_ids
+        ]
+        if (
+            not assessments
+            or insight.overview
+            or insight.implications
+            or insight.watch_items
+            or any(item.axes.directness not in (None, 0) for item in assessments)
+        ):
+            insights.append(insight)
+            continue
+        headline = (
+            "원문 근거는 있으나 이 관점의 업무 관련성을 판단하지 못했습니다."
+            if any(item.axes.directness is None for item in assessments)
+            else "원문을 검토했으나 이 관점과 직접 관련된 이슈는 확인되지 않았습니다."
+        )
+        insights.append(insight.model_copy(update={"headline": headline}))
+    return output.model_copy(update={"insights": insights})
 
 
 def _validated_v4_reduce_output(response, request, mapped, allowed):

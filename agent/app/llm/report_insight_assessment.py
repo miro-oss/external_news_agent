@@ -846,21 +846,33 @@ def _role_candidate(finding, audience: Audience) -> bool:
 def select_review(
     request: ReportInsightRequest, draft: ValidatedAssessmentDraft
 ) -> tuple[int, ...]:
-    """Sample role top-five candidates fairly, then omission suspects, at most 12.
+    """Share at most 12 reviews between top candidates and possible omissions.
 
-    Four disjoint role lists cannot all fit this bound. Round-robin avoids giving
-    the first roles the entire allowance; it does not promise full top-five review.
+    Seed each role's leading candidate, then alternate omissions and remaining
+    top candidates in role round-robin order. Confirmed relevance must not fill
+    the entire allowance before unknown relevance or impact can be reviewed.
+    These two abstention causes share capacity with possible false negatives.
+    This selects work for independent assessment; it never changes a verdict.
     """
     full = merge_drafts(request, draft)
     selected: list[int] = []
     order = {finding.id: index for index, finding in enumerate(request.findings)}
-    by_id = {finding.id: finding for finding in request.findings}
 
     def add(finding_id):
         if finding_id not in selected and len(selected) < MAX_REVIEW_FINDINGS:
             selected.append(finding_id)
 
-    role_priorities = []
+    def fair_order(groups):
+        return list(
+            dict.fromkeys(
+                candidates[rank]
+                for rank in range(max(map(len, groups), default=0))
+                for candidates in groups
+                if rank < len(candidates)
+            )
+        )
+
+    role_priorities, role_omissions = [], []
     for insight in full.mapped.insights:
         relevant = [item for item in insight.assessments if item.axes.directness not in (None, 0)]
         ranked = sorted(
@@ -871,25 +883,38 @@ def select_review(
                 order[item.finding_id],
             ),
         )
-        role_priorities.append(ranked[:TOP_REVIEW_FINDINGS])
-    for rank in range(TOP_REVIEW_FINDINGS):
-        for candidates in role_priorities:
-            if rank < len(candidates):
-                add(candidates[rank].finding_id)
-    suspects, undecidable = [], []
+        role_priorities.append([item.finding_id for item in ranked[:TOP_REVIEW_FINDINGS]])
     for audience in request.audiences:
+        suspects, unknown_relation, unknown_impact = [], [], []
         for finding in request.findings:
             if not finding.claims:
                 continue
             item = full.evidence[audience][finding.id]
-            if item.relation in {"UNRELATED", "UNDETERMINED"} and _role_candidate(
-                finding, audience
-            ):
+            if item.relation == "UNRELATED" and _role_candidate(finding, audience):
                 suspects.append(finding.id)
             if item.relation == "UNDETERMINED":
-                undecidable.append(finding.id)
-    for finding_id in [*suspects, *undecidable]:
-        if by_id[finding_id].claims:
-            add(finding_id)
+                unknown_relation.append(finding.id)
+            if (
+                item.relation in {"DIRECT", "CONDITIONAL", "BACKGROUND"}
+                and item.impact_scope == "UNDETERMINED"
+            ):
+                unknown_impact.append(finding.id)
+        # Known work connections do not need a vocabulary match to receive an
+        # impact review. Unknown urgency alone does not withhold importance.
+        role_omissions.append(fair_order([suspects, unknown_relation, unknown_impact]))
+    for candidates in role_priorities:
+        if candidates:
+            add(candidates[0])
+    remaining_top = [
+        finding_id for finding_id in fair_order(role_priorities) if finding_id not in selected
+    ]
+    omissions = [
+        finding_id for finding_id in fair_order(role_omissions) if finding_id not in selected
+    ]
+    for rank in range(max(len(remaining_top), len(omissions))):
+        if rank < len(omissions):
+            add(omissions[rank])
+        if rank < len(remaining_top):
+            add(remaining_top[rank])
     # Review/merge payloads retain original snapshot ordering.
     return tuple(finding.id for finding in request.findings if finding.id in selected)

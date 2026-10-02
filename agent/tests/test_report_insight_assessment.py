@@ -504,7 +504,11 @@ def test_missing_role_keywords_do_not_remove_existing_relevance_and_metadata_can
 
 
 def test_four_disjoint_role_top_fives_receive_fair_review_under_shared_twelve_cap():
-    source = request(ids=tuple(range(101, 121)), audiences=tuple(ROLE_WORK))
+    source = request(
+        ids=tuple(range(101, 121)),
+        audiences=tuple(ROLE_WORK),
+        text="협정의 이행 조건이 바뀌었다.",
+    )
     value = payload(source, relation="UNRELATED")
     role_top_fives = {}
     for index, audience in enumerate(source.audiences):
@@ -521,6 +525,126 @@ def test_four_disjoint_role_top_fives_receive_fair_review_under_shared_twelve_ca
     assert all(len(set(selected) & top_five) == 3 for top_five in role_top_fives.values())
     assert all(len(set(selected) & top_five) < 5 for top_five in role_top_fives.values())
     assert all(len(insight.assessments) == 20 for insight in full.mapped.insights)
+
+
+@pytest.mark.parametrize("relation", ["UNRELATED", "UNDETERMINED"])
+def test_review_preserves_late_omissions_for_each_role_when_top_candidates_exceed_cap(relation):
+    source = request(
+        ids=tuple(range(101, 126)),
+        audiences=tuple(ROLE_WORK),
+        text="협정의 이행 조건이 바뀌었다.",
+    )
+    source_texts = (
+        "웨이퍼 수율 조건이 바뀌었다.",
+        "식각 장비의 납품 계획이 바뀌었다.",
+        "영업이익 전망이 바뀌었다.",
+        "대역폭 운영 조건이 바뀌었다.",
+    )
+    for finding, text in zip(source.findings[20:24], source_texts, strict=True):
+        finding.claims[0].text = text
+        finding.sentences[0].text = text
+    value = payload(source, relation="UNRELATED")
+    leading = []
+    for index, audience in enumerate(source.audiences):
+        top = source.findings[index * 5 : (index + 1) * 5]
+        leading.append(top[0].id)
+        for finding in top:
+            value["assessments"][audience][f"finding{finding.id}"] = item(
+                finding, audience=audience
+            )
+        omitted = source.findings[20 + index]
+        value["assessments"][audience][f"finding{omitted.id}"] = item(
+            omitted, audience=audience, relation=relation
+        )
+        claimless = value["assessments"][audience]["finding125"]
+        claimless.update(
+            relation="UNDETERMINED", relationBasis=None, reason=CLAIMLESS_ASSESSMENT_REASON
+        )
+    source.findings[-1].claims = []
+    source.findings[-1].sentences = []
+    full = validate_draft(response(value, source), source)
+    before = full.draft.model_dump_json()
+
+    selected = select_review(source, full)
+
+    assert len(selected) == 12
+    assert set(leading) <= set(selected)
+    assert {121, 122, 123, 124} <= set(selected)
+    assert 125 not in selected
+    assert selected == tuple(sorted(selected))
+    assert full.draft.model_dump_json() == before
+
+
+def test_review_unknown_without_role_keywords_gets_capacity_beside_disjoint_top_candidates():
+    source = request(
+        ids=tuple(range(101, 122)),
+        audiences=tuple(ROLE_WORK),
+        text="협정의 이행 조건이 바뀌었다.",
+    )
+    value = payload(source, relation="UNRELATED")
+    for index, audience in enumerate(source.audiences):
+        for finding in source.findings[index * 5 : (index + 1) * 5]:
+            value["assessments"][audience][f"finding{finding.id}"] = item(
+                finding, audience=audience
+            )
+    value["assessments"]["IT_INFRA"]["finding121"] = item(
+        source.findings[-1], audience="IT_INFRA", relation="UNDETERMINED"
+    )
+    full = validate_draft(response(value, source), source)
+
+    selected = select_review(source, full)
+
+    assert len(selected) == 12
+    assert 121 in selected
+    assert {101, 106, 111, 116} <= set(selected)
+
+
+def test_single_role_review_shares_capacity_between_unknown_relation_and_unknown_impact():
+    source = request(ids=tuple(range(101, 121)), text="협정의 이행 조건이 바뀌었다.")
+    value = payload(source)
+    entries = value["assessments"]["CHIP_MAKER"]
+    # Seven scored findings precede the abstentions. Only five enter the top
+    # candidate list, so later known connections need their own review path.
+    for finding in source.findings[7:17]:
+        entries[f"finding{finding.id}"] = item(finding, relation="UNDETERMINED")
+    for finding, relation in zip(
+        source.findings[17:19], ("DIRECT", "BACKGROUND"), strict=True
+    ):
+        entry = item(finding, relation=relation)
+        entry.update(impactScope="UNDETERMINED", impactBasis=None)
+        entries[f"finding{finding.id}"] = entry
+    entries["finding120"].update(urgencyState="UNDETERMINED", urgencyBasis=None)
+    full = validate_draft(response(value, source), source)
+    before = full.draft.model_dump_json()
+
+    selected = select_review(source, full)
+
+    assert len(selected) == 12
+    assert set(range(101, 106)) <= set(selected)
+    assert {108, 118, 119} <= set(selected)
+    assert 120 not in selected  # Unknown urgency alone does not cause abstention.
+    assert selected == tuple(sorted(selected))
+    assert full.draft.model_dump_json() == before
+    assessments = {item.finding_id: item for item in full.mapped.insights[0].assessments}
+    assert assessments[108].axes.directness is None
+    assert assessments[118].axes.directness == 3
+    assert assessments[119].axes.directness == 1
+    assert assessments[118].axes.impact is None and assessments[119].axes.impact is None
+
+
+@pytest.mark.parametrize(
+    "text", ["메모리 가격이 올랐다.", "DRAM prices increased.", "SSD shipments declined."]
+)
+def test_infra_component_sources_trigger_review_without_promoting_generic_ai_or_metadata(text):
+    source = request(ids=(101, 102), audiences=("IT_INFRA",), text=text)
+    source.findings[1].claims[0].text = "회사는 AI 협력 계획을 발표했다."
+    source.findings[1].sentences[0].text = "회사는 AI 협력 계획을 발표했다."
+    source.findings[1].article_title = "메모리 DRAM SSD"
+    source.findings[1].topic_name = "데이터센터 memory"
+    full = validate_draft(response(payload(source, relation="UNRELATED"), source), source)
+
+    assert select_review(source, full) == (101,)
+    assert all(item.axes.directness == 0 for item in full.mapped.insights[0].assessments)
 
 
 @pytest.mark.parametrize(
