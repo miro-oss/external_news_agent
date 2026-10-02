@@ -197,6 +197,223 @@ def test_prepare_rejects_synthetic_and_shared_runtime(prepared):
         runner.prepare(dataset, directory, runner.ledger.AGENT_ROOT)
 
 
+@pytest.fixture
+def prepared_v8_v9(prepared, tmp_path, monkeypatch):
+    dataset, _, baseline = prepared
+    candidate = tmp_path / "frozen-candidate-agent"
+    policy = runner.COMPARISON_PROFILES["v8-v9"]
+
+    def info(root):
+        version = "baseline" if Path(root).resolve() == baseline.resolve() else "candidate"
+        return {
+            "runtimeRoot": str(Path(root).resolve()),
+            "runtimeSourceSha256s": {"service.py": version},
+            "dependencyVersions": {"openai": "3.7.0"},
+            "pythonVersion": "3.13.5",
+            "promptVersion": policy[f"{version}PromptVersion"],
+            "rubricVersion": policy[f"{version}RubricVersion"],
+        }
+
+    monkeypatch.setattr(runner, "_runtime_info", info)
+    monkeypatch.setattr(runner, "runtime_info", lambda: info(candidate))
+    directory = tmp_path / "current-comparison"
+    runner.prepare(
+        dataset,
+        directory,
+        baseline,
+        candidate_root=candidate,
+        comparison_profile="v8-v9",
+        max_calls=32,
+        max_cost_usd=Decimal("0.50"),
+    )
+    return dataset, directory, baseline, candidate
+
+
+def test_current_comparison_freezes_both_staged_runtimes_and_same_inputs(prepared_v8_v9):
+    dataset, directory, baseline, candidate = prepared_v8_v9
+    manifest = runner._read(directory / "manifest.json")
+    assert manifest["baseCallUpperBound"] == 8
+    assert manifest["repairCallUpperBound"] == 16
+    assert manifest["jobs"][0]["request"] == manifest["jobs"][1]["request"]
+    assert manifest["jobs"][0]["inputSha256"] == manifest["jobs"][1]["inputSha256"]
+    assert manifest["policy"]["maxCalls"] == 32
+    assert manifest["policy"]["maxCostEstimatedUsd"] == "0.50"
+    assert manifest["provenance"]["model"] == "gpt-4.1-nano"
+    assert manifest["provenance"]["baselineCommit"] == ("e75f2d851f1a3b61d86232a94d59f71072055318")
+    runtimes = manifest["provenance"]["runtimeVersions"]
+    assert runtimes["baseline"]["runtimeRoot"] == str(baseline.resolve())
+    assert runtimes["candidate"]["runtimeRoot"] == str(candidate.resolve())
+    assert runtimes["baseline"]["promptVersion"] == "report-insight.ko.v8"
+    assert runtimes["candidate"]["promptVersion"] == "report-insight.ko.v9"
+    assert runtimes["baseline"]["rubricVersion"] == "report-importance.v5"
+    assert runtimes["candidate"]["rubricVersion"] == "report-importance.v6"
+    assert runner.summary(directory)["comparisonScope"] == (
+        "frozen v8 versus v9 on the same actual report inputs"
+    )
+    assert runner._adapter(read_state(directory))["importanceRubricVersions"] == {
+        "single_call": "report-importance.v5",
+        "staged": "report-importance.v6",
+    }
+    assert (
+        runner.prepare(
+            dataset,
+            directory,
+            baseline,
+            candidate_root=candidate,
+            comparison_profile="v8-v9",
+            max_calls=32,
+            max_cost_usd=Decimal("0.50"),
+        )
+        == manifest
+    )
+
+
+@pytest.mark.parametrize("variant", ["baseline", "candidate"])
+def test_current_comparison_requires_and_accounts_for_staged_call_ids(prepared_v8_v9, variant):
+    _, directory, _, _ = prepared_v8_v9
+    provider, sdk = start_provider(directory, variant)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="CALL_ID_REQUIRED"):
+        invoke(provider, "MAP-001", baseline=True)
+    assert not sdk.calls
+    for identifier in ("MAP-001", "MAP-002", "REVIEW-001", "REDUCE-001"):
+        invoke(provider, identifier)
+    runner.verify(directory, provider.manifest, provider.state)
+    assert len(sdk.calls) == 4
+    assert all(call["model"] == "gpt-4.1-nano" for call in sdk.calls)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="UNKNOWN_STAGE"):
+        invoke(provider, "MAP-003")
+    assert len(sdk.calls) == 4
+
+
+@pytest.mark.parametrize(
+    "field,value,code",
+    [
+        ("promptVersion", "report-insight.ko.v8", "VERSION_RUNTIME_MISMATCH"),
+        ("rubricVersion", "report-importance.v5", "RUBRIC_RUNTIME_MISMATCH"),
+    ],
+)
+def test_current_comparison_rejects_wrong_candidate_version(
+    prepared_v8_v9, monkeypatch, field, value, code
+):
+    dataset, directory, baseline, candidate = prepared_v8_v9
+    original = runner._runtime_info
+
+    def changed(root):
+        info = original(root)
+        if Path(root).resolve() == candidate.resolve():
+            info[field] = value
+        return info
+
+    monkeypatch.setattr(runner, "_runtime_info", changed)
+    with pytest.raises(runner.ledger.EvaluationStopped, match=code):
+        runner.prepare(
+            dataset,
+            directory,
+            baseline,
+            candidate_root=candidate,
+            comparison_profile="v8-v9",
+        )
+
+
+def test_current_comparison_rejects_shared_roots_and_changed_resume_root(prepared_v8_v9, tmp_path):
+    dataset, directory, baseline, _ = prepared_v8_v9
+    with pytest.raises(runner.ledger.EvaluationStopped, match="BASELINE_MUST_BE_ISOLATED"):
+        runner.prepare(
+            dataset, directory, baseline, candidate_root=baseline, comparison_profile="v8-v9"
+        )
+    with pytest.raises(runner.ledger.EvaluationStopped, match="PREPARED_RUN_CHANGED"):
+        runner.prepare(
+            dataset,
+            directory,
+            baseline,
+            candidate_root=tmp_path / "different-candidate",
+            comparison_profile="v8-v9",
+            max_calls=32,
+            max_cost_usd=Decimal("0.50"),
+        )
+
+
+def test_current_comparison_rejects_profile_downgrade_in_checkpoint(prepared_v8_v9):
+    _, directory, _, _ = prepared_v8_v9
+    manifest = runner._read(directory / "manifest.json")
+    state = read_state(directory)
+    manifest["policy"].pop("comparisonProfile")
+    rebind(directory, manifest, state)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="POLICY_CHANGED"):
+        runner.verify(directory, manifest, state)
+
+
+@pytest.mark.parametrize(
+    "kwargs,code",
+    [
+        ({"baseline_commit": "cbfb174"}, "BASELINE_COMMIT_CHANGED"),
+        ({"max_calls": 145}, "INVALID_CALL_LIMIT"),
+        ({"max_cost_usd": Decimal("1.01")}, "INVALID_COST_LIMIT"),
+    ],
+)
+def test_current_comparison_preserves_hard_limits(prepared_v8_v9, kwargs, code):
+    dataset, directory, baseline, candidate = prepared_v8_v9
+    with pytest.raises(runner.ledger.EvaluationStopped, match=code):
+        runner.prepare(
+            dataset,
+            directory,
+            baseline,
+            candidate_root=candidate,
+            comparison_profile="v8-v9",
+            **kwargs,
+        )
+
+
+def test_current_comparison_resume_rechecks_frozen_candidate_before_admission(
+    prepared_v8_v9, monkeypatch
+):
+    _, directory, _, candidate = prepared_v8_v9
+    original = runner._runtime_info
+
+    def changed(root):
+        info = original(root)
+        if Path(root).resolve() == candidate.resolve():
+            info["runtimeSourceSha256s"] = {"service.py": "changed"}
+        return info
+
+    monkeypatch.setattr(runner, "_runtime_info", changed)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="RUNTIME_CHANGED"):
+        runner.run(directory, api_key="offline-key")
+    assert not read_state(directory)["attempts"]
+
+
+@pytest.mark.parametrize("operation", ["status", "run", "review", "score"])
+def test_current_comparison_binds_coordinator_helpers_separately_from_frozen_runtimes(
+    prepared_v8_v9, tmp_path, monkeypatch, operation
+):
+    dataset, _, baseline, candidate = prepared_v8_v9
+    coordinator = tmp_path / "coordinator-agent"
+    coordinator.mkdir()
+    helper = coordinator / "report_insight_compare.py"
+    helper.write_text("original renderer")
+    monkeypatch.setattr(runner.ledger, "AGENT_ROOT", coordinator)
+    monkeypatch.setattr(
+        runner.ledger, "runtime_hashes", lambda: {helper.name: runner.ledger.file_digest(helper)}
+    )
+    directory = tmp_path / "coordinator-binding"
+    manifest = runner.prepare(
+        dataset, directory, baseline, candidate_root=candidate, comparison_profile="v8-v9"
+    )
+    assert manifest["provenance"]["coordinatorSources"]["root"] == str(coordinator)
+    helper.write_text("changed renderer")
+    actions = {
+        "status": lambda: runner.summary(directory),
+        "run": lambda: runner.run(directory, api_key="offline-key"),
+        "review": lambda: runner.export_review(directory),
+        "score": lambda: runner.score(directory, {}),
+    }
+    with pytest.raises(runner.ledger.EvaluationStopped, match="COORDINATOR_CHANGED"):
+        actions[operation]()
+    assert not read_state(directory)["attempts"]
+    assert not (directory / "blind-review.html").exists()
+    assert not (directory / "quality-summary.json").exists()
+
+
 def test_each_map_chunk_review_reduce_has_independent_repair_budget_and_exact_wire(prepared):
     _, directory, _ = prepared
 
