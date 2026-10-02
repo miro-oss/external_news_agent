@@ -32,6 +32,7 @@ from app.llm.report_insight_guard import (
 )
 from app.llm.report_insight_instructions import report_stage_instruction
 from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
+from app.llm.report_insight_prefix import closed_assessment_prefix
 from app.llm.report_insight_retrieval import retrieve_report_insight_evidence
 from app.llm.report_insight_synthesis_quality import (
     synthesis_evidence_frames,
@@ -72,6 +73,29 @@ class ReportAssessmentValidationError(OutputValidationError):
     ) -> None:
         super().__init__(message, error_kinds=error_kinds)
         self.failed_finding_ids: tuple[int, ...] = tuple(failed_finding_ids)
+
+
+class _TruncatedAssessmentRepairError(ReportAssessmentValidationError):
+    """Carry only server-validated complete records into the one allowed repair."""
+
+    def __init__(self, request, preserved, failed_ids, errors):
+        super().__init__(
+            "출력이 완성된 항목 뒤에서 잘렸습니다. 검증된 항목은 서버가 보존합니다. "
+            "수리 입력의 누락·실패 항목만 현재 Schema로 완성하세요.\n"
+            + "\n".join(f"findingId={identifier}: {error}" for identifier, error in errors)
+            + "\n"
+            + "\n".join(
+                f"findingId={identifier}: 잘린 출력에 완성된 항목이 없습니다."
+                for identifier in failed_ids
+                if identifier not in {failed_id for failed_id, _ in errors}
+            ),
+            error_kinds=("report_assessment_truncated_prefix",)
+            + tuple(kind for _, error in errors for kind in error.error_kinds),
+            failed_finding_ids=tuple(failed_ids),
+        )
+        self.expected_finding_ids = tuple(finding.id for finding in request.findings)
+        self.audience = request.audiences[0]
+        self.preserved_wire = deepcopy({"assessments": {self.audience: preserved}})
 
 
 class ReportSynthesisValidationError(OutputValidationError):
@@ -318,6 +342,10 @@ class ReportInsightService(ReportInsightLegacyService):
                         )
                     }
                 )
+            if response.truncated:
+                recovery = _truncated_assessment_repair_error(response, validation_request)
+                if recovery is not None:
+                    raise recovery
             try:
                 draft = validate_draft(response, subset)
             except ReportAssessmentDraftValidationError as error:
@@ -483,6 +511,48 @@ def _validated_v4_reduce_output(response, request, mapped, allowed):
     return output
 
 
+def _truncated_assessment_repair_error(response, request):
+    if not response.truncated or len(request.audiences) != 1:
+        return None
+    audience = request.audiences[0]
+    ordered_ids = [finding.id for finding in request.findings]
+    records = closed_assessment_prefix(response.text, audience, ordered_ids)
+    if records is None:
+        return None
+    preserved = {}
+    errors = []
+    for finding in request.findings[: len(records)]:
+        key = f"finding{finding.id}"
+        subset = request.model_copy(update={"findings": [finding]})
+        # Only the already closed object is examined as a complete singleton.
+        # The original response stays truncated and its usage remains charged.
+        local_response = replace(
+            response,
+            text=prompt_json({"assessments": {audience: {key: records[key]}}}),
+            truncated=False,
+        )
+        try:
+            draft = validate_draft(local_response, subset)
+            _validated_map_output(
+                replace(local_response, text=draft.mapped.model_dump_json(by_alias=True)),
+                subset,
+            )
+        except (ReportAssessmentDraftValidationError, ReportAssessmentValidationError) as error:
+            if error.failed_finding_ids != (finding.id,):
+                return None
+            errors.append((finding.id, error))
+            continue
+        except ValueError:
+            return None
+        preserved[key] = records[key]
+    if not preserved:
+        return None
+    failed_ids = [
+        identifier for identifier in ordered_ids if f"finding{identifier}" not in preserved
+    ]
+    return _TruncatedAssessmentRepairError(request, preserved, failed_ids, errors)
+
+
 def _native_assessment_repair_errors(response, request):
     """Identify local failures only after both guards visit every retained record.
 
@@ -558,16 +628,23 @@ def _partial_assessment_repair(prompt, schema, raw, error, validate, fallback):
         or any(type(finding_id) is not int for finding_id in error.failed_finding_ids)
     ):
         return fallback
-    try:
-        native = parse_wire_draft(raw)
-    except ValueError:
-        return fallback
     audience = audiences[0]
     expected = {f"finding{finding_id}" for finding_id in ordered_ids}
-    if set(native.assessments) != {audience} or set(native.assessments[audience]) != expected:
-        return fallback
-    preserved = native.model_dump(by_alias=True, mode="json")
     failed_keys = {f"finding{finding_id}" for finding_id in failed_ids}
+    if isinstance(error, _TruncatedAssessmentRepairError):
+        if error.expected_finding_ids != tuple(ordered_ids) or error.audience != audience:
+            return fallback
+        preserved = deepcopy(error.preserved_wire)
+        if set(preserved["assessments"][audience]) != expected - failed_keys:
+            return fallback
+    else:
+        try:
+            native = parse_wire_draft(raw)
+        except ValueError:
+            return fallback
+        if set(native.assessments) != {audience} or set(native.assessments[audience]) != expected:
+            return fallback
+        preserved = native.model_dump(by_alias=True, mode="json")
     payload["findings"] = [finding for finding in findings if finding["id"] in failed_ids]
     subset_schema = deepcopy(schema)
     entries = subset_schema["properties"]["assessments"]["properties"][audience]
