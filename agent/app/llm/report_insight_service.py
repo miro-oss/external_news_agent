@@ -1009,10 +1009,18 @@ def _validated_output(
                     )
                 continue
             field = "reason"
+            # An undecidable relation has no selected basis by contract, even
+            # when its source exists. Check its explanation against this
+            # finding's eligible sources without promoting them to score proof.
+            reason_refs = assessment.basis_claim_ids
+            if not reason_refs and all(
+                value is None for value in assessment.axes.model_dump().values()
+            ):
+                reason_refs = [claim.id for claim in findings[assessment.finding_id].claims]
             try:
                 _validate_prose(
                     [assessment.reason],
-                    assessment.basis_claim_ids,
+                    reason_refs,
                     evidence,
                     claims,
                     request=request,
@@ -1020,7 +1028,7 @@ def _validated_output(
                 field = "axes.urgency"
                 validate_report_time(
                     assessment.reason,
-                    assessment.basis_claim_ids,
+                    reason_refs,
                     request,
                     urgency=assessment.axes.urgency,
                 )
