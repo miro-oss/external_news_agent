@@ -291,6 +291,11 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                 reason = deepcopy(properties["reason"])
                 reason["description"] = (
                     f"finding{finding.id}에는 원문 claim {len(finding.claims)}개가 있다. "
+                    "원문을 그대로 복사하지 않고 한국어 1~2문장, 180자 이내로 작성한다. "
+                    "basis가 있는 축이 있으면 reason의 사실은 선택한 claim과 그 연결 "
+                    "sentence만으로 뒷받침한다. 모든 축이 UNDETERMINED이면 같은 finding의 "
+                    "제공된 claim·연결 sentence 안에서 보류 사유를 설명하고 basis=null을 "
+                    "유지한다. "
                     f"원문의 대상·사건이 {audience}의 어떤 업무와 연결되는지 설명한다. "
                     "미확인 축이 있으면 그 축의 판단 한계를 구분한다. "
                     "UNDETERMINED여도 원문/claim 부재를 선언하거나 "
