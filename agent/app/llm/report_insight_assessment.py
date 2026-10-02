@@ -150,6 +150,46 @@ _METADATA_CONDITION = re.compile(
     r"(?:구체적(?:인)?\s*)?미확인\s*업무\s*연결\s*조건)\s*[.!。]?",
     re.IGNORECASE,
 )
+# Only complete evaluation statements qualify. Field names in a real API source,
+# quoted definitions, denials and added business prerequisites are not this case.
+_SCHEMA_FIELD = r"(?:claimId|sourceSpanId)"
+_SCHEMA_FIELDS = rf"{_SCHEMA_FIELD}(?:\s*(?:/|·|,|와|과|및)\s*{_SCHEMA_FIELD})*"
+_SCHEMA_MATCH_CONDITION = re.compile(
+    rf"{_SCHEMA_FIELDS}(?:이|가|은|는)?\s*"
+    r"(?:해당\s*)?원문(?:의)?\s*(?:내용|문장|근거)?(?:와|과)\s*"
+    r"일치(?:함|한다|합니다|하며)"
+    r"(?:\s*[,，]?\s*(?:관련\s*)?업무(?:의)?\s*(?:구체적(?:인)?\s*)?"
+    r"영향\s*범위(?:와\s*시점)?(?:이|가|은|는)?\s*"
+    r"(?:명확히\s*)?확인(?:됨|된다|됩니다))?\s*[.!。]?",
+    re.IGNORECASE,
+)
+_RELATION_DEFINITION_CONDITION = re.compile(
+    r"원문(?:의)?\s*사건\s*(?:[·/]|과)\s*조건(?:이|은)?\s*"
+    r"(?:해당\s*)?관점(?:의)?\s*업무\s*자체(?:다|이다|입니다|임)\s*[.!。]?"
+)
+
+
+def _metadata_only_condition(condition: str, selected_source: str) -> bool:
+    condition = condition.strip()
+    if _METADATA_CONDITION.fullmatch(condition) or _RELATION_DEFINITION_CONDITION.fullmatch(
+        condition
+    ):
+        return True
+    if not _SCHEMA_MATCH_CONDITION.fullmatch(condition):
+        return False
+    # Source prose, not the surrounding input JSON, must support these fields.
+    # Do not reject a genuine source API's field-matching prerequisite.
+    mentioned_fields = re.findall(_SCHEMA_FIELD, condition, flags=re.IGNORECASE)
+    return not all(
+        re.search(
+            rf"(?<![A-Za-z0-9_]){re.escape(field)}(?![A-Za-z0-9_])",
+            selected_source,
+            re.IGNORECASE,
+        )
+        for field in mentioned_fields
+    )
+
+
 _UNDECIDABLE_RELATION_REASON = re.compile(
     r"(?:관점(?:의)?\s*)?업무\s*(?:연결|관계|관련성)\s*(?:자체)?\s*"
     r"(?:판단)?(?:이|은|을|가|는|를)?\s*(?:불가능|불확실|불명|보류|미확인|할\s*수\s*없)|"
@@ -432,8 +472,8 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                                         "maxLength": 120,
                                         "description": (
                                             "원문 사건을 선택한 업무로 연결하는 구체적인 "
-                                            "미확인 전제를 한국어로 쓴다. claimId/sourceSpanId "
-                                            "같은 근거 식별자나 JSON을 넣지 않는다."
+                                            "미확인 전제를 한국어로 쓴다. 평가용 claimId/"
+                                            "sourceSpanId 일치 여부나 범주 정의를 복사하지 않는다."
                                         ),
                                     },
                                     "basis": deepcopy(basis),
@@ -848,16 +888,6 @@ def _assessment_errors(
     conditional = item.relation in {"CONDITIONAL", "BACKGROUND"}
     if conditional and (item.condition is None or not item.condition.strip()):
         errors.append("connection.condition에 업무 연결의 미확인 중간 조건을 명시해야 합니다.")
-    if (
-        conditional
-        and item.condition is not None
-        and _METADATA_CONDITION.fullmatch(item.condition.strip())
-    ):
-        errors.append(
-            "connection.condition은 원문 사건에서 해당 업무로 이어지는 구체적 전제여야 합니다. "
-            "정보 부재·연결 조건 미확인만으로 BACKGROUND/CONDITIONAL을 만들 수 없습니다. "
-            "실제 전제를 특정할 수 없으면 UNDETERMINED로 판단하세요."
-        )
     if not conditional and item.condition is not None:
         errors.append("DIRECT/UNRELATED/UNDETERMINED에서는 connection.condition=null이어야 합니다.")
     claims = {claim.id: claim for claim in finding.claims}
@@ -879,6 +909,17 @@ def _assessment_errors(
             *(sentences[index] for index in claims[claim_id].evidence_sentence_ids),
         ]
     )
+    if (
+        conditional
+        and item.condition is not None
+        and _metadata_only_condition(item.condition, selected_source)
+    ):
+        errors.append(
+            "connection.condition은 원문 사건에서 해당 업무로 이어지는 구체적 전제여야 합니다. "
+            "정보 부재·연결 조건 미확인·평가용 식별자 일치·범주 정의 복사만으로 "
+            "BACKGROUND/CONDITIONAL을 만들 수 없습니다. "
+            "실제 전제를 특정할 수 없으면 UNDETERMINED로 판단하세요."
+        )
     for field, prose in (("reason", item.reason), ("condition", item.condition)):
         if prose is not None:
             for problem in work_prose_problems(prose, selected_source):

@@ -85,19 +85,52 @@ _WORK_NONRELATION = {work: _nonrelation_pattern(text) for work, text in _WORK_OB
 _IMPACT_SUBJECT = (
     r"(?:(?:이|해당)\s*)?(?:관점(?:의|에서의)?\s*)?"
     r"(?:업무(?:상|의|에\s*미치는)?\s*)?"
-    r"영향(?:의?\s*범위)?(?:\s*자체)?(?:이|가|은|는|을|를)?\s*"
+    r"(?:구체적(?:인)?\s*)?영향(?:의?\s*범위)?(?:\s*자체)?"
+    r"(?:\s*(?:와|과|및|·)\s*(?:적용\s*)?시점)?"
+    r"(?:이|가|은|는|을|를)?\s*"
 )
 _UNKNOWN_IMPACT = re.compile(
     _PREFIX
     + _IMPACT_SUBJECT
     + r"(?:"
-    + r"불명확(?:하다|합니다|함|해요)?|불명(?:이다|입니다|임)?|"
+    + r"불명확(?:하다|합니다|함|해요)?|불확실(?:하다|합니다|함|해요)?|"
+    + r"불명(?:이다|입니다|임)?|"
     + r"미확인(?:이다|입니다|임)?|"
     + r"(?:판단|확인)(?:이)?\s*불가(?:하다|합니다|함|능하다|능합니다)?|"
     + r"(?:판단할|확인할|알)\s*수\s*없(?:다|습니다|음)|"
     + r"명확하지\s*않(?:다|습니다|음)"
     + r")"
 )
+_IMPACT_CAUSE_BREAK = re.compile(r"(?<=때문에)\s+")
+_NARROW_CAUSE_TOPIC = re.compile(
+    _PREFIX + r"(?:(?:다른|별도(?:의)?|추가(?:적인)?|후속|장기(?:적인)?)\s*"
+    r"(?:업무|사건|대상|프로젝트)|"
+    r"(?:자사|독자\s*회사|고객사)(?:의)?\s*(?:전체\s*)?(?:손익|실적)|"
+    r"정량(?:적인)?\s*(?:규모|금액|비용))"
+    r"(?:은|는|이|가|을|를|의|에(?:서는|는)?)\s*"
+)
+_CAUSAL_WORK_TOPICS = {
+    work: re.compile(_PREFIX + text + r"(?:은|는|이|가|의|에(?:서는|는)?)\s*")
+    for work, text in _WORK_OBJECTS.items()
+}
+
+
+def _declares_unknown_impact(clause: str, selected_work: str | None) -> bool:
+    if _UNKNOWN_IMPACT.fullmatch(clause):
+        return True
+    # A causal premise can precede an explicit whole-axis conclusion. Match
+    # that complete conclusion, never an impact phrase inside another subject,
+    # a negation, or a hypothetical. Retain a narrower inherited topic rather
+    # than treating its subject-less conclusion as the whole finding's impact.
+    parts = _IMPACT_CAUSE_BREAK.split(clause)
+    if len(parts) != 2 or _NARROW_CAUSE_TOPIC.match(parts[0]):
+        return False
+    selected_topic = _CAUSAL_WORK_TOPICS.get(selected_work)
+    if not (selected_topic and selected_topic.match(parts[0])) and any(
+        topic.match(parts[0]) for topic in _CAUSAL_WORK_TOPICS.values()
+    ):
+        return False
+    return _UNKNOWN_IMPACT.fullmatch(parts[1]) is not None
 
 
 def _unquoted_declarations(reason: str):
@@ -136,7 +169,9 @@ def assessment_coherence_errors(item: ReportFindingAssessmentDraft) -> list[str]
             "connection.relation: DIRECT와 reason의 명시적 직접 업무 관계 부정이 모순됩니다. "
             "해당 축과 설명을 근거에 맞게 함께 재검토하세요."
         )
-    if item.impact_scope != "UNDETERMINED" and any(_UNKNOWN_IMPACT.fullmatch(c) for c in clauses):
+    if item.impact_scope != "UNDETERMINED" and any(
+        _declares_unknown_impact(c, item.work) for c in clauses
+    ):
         errors.append(
             "effect.impactScope: 판정 가능한 영향 범주와 reason의 전체 영향 범위 미확인이 "
             "모순됩니다. 미확인을 변경 없음으로 바꾸지 말고 해당 축과 설명을 함께 재검토하세요."
