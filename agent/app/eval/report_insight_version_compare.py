@@ -368,6 +368,22 @@ def verify(output_dir: Path, manifest: dict, state: dict) -> None:
         all(manifest["policy"].get(key) == value for key, value in expected_policy.items()),
         "POLICY_CHANGED",
     )
+    # A profile without variant overrides still fixes their effective values.
+    # Additional checkpoint keys must not widen stage admission after hashing.
+    ledger.require(
+        all(
+            manifest["policy"].get(
+                f"{variant}{stage}ChunkFindingLimit", manifest["policy"][fallback]
+            )
+            == expected_policy.get(f"{variant}{stage}ChunkFindingLimit", expected_policy[fallback])
+            for variant in VERSIONS
+            for stage, fallback in (
+                ("Map", "mapChunkFindingLimit"),
+                ("Review", "reviewFindingLimit"),
+            )
+        ),
+        "POLICY_CHANGED",
+    )
     ledger.require(
         provenance["baselineCommit"] == expected_policy["baselineCommit"],
         "BASELINE_COMMIT_CHANGED",

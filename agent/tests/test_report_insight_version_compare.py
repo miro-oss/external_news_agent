@@ -548,6 +548,38 @@ def test_bounded_review_profile_reserves_each_versions_actual_batch_limits(
     assert not runner.summary(directory)["qualityMeasured"]
 
 
+@pytest.mark.parametrize("profile", ["v9-refinement", "v9-bounded-review"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "baselineMapChunkFindingLimit",
+        "baselineReviewChunkFindingLimit",
+        "candidateMapChunkFindingLimit",
+        "candidateReviewChunkFindingLimit",
+    ],
+)
+def test_profile_rejects_rehashed_variant_chunk_overrides(
+    prepared_refinement, tmp_path, profile, key
+):
+    dataset, _, baseline, candidate = prepared_refinement
+    directory = tmp_path / "injected-variant-chunk-limit"
+    manifest = runner.prepare(
+        dataset,
+        directory,
+        baseline,
+        candidate_root=candidate,
+        comparison_profile=profile,
+    )
+    state = read_state(directory)
+    manifest["policy"][key] = 1
+    # Even a self-consistent rewritten manifest/checkpoint cannot change the
+    # fixed profile's effective stage limits through formerly absent keys.
+    rebind(directory, manifest, state)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="POLICY_CHANGED"):
+        runner.verify(directory, manifest, state)
+    assert not read_state(directory)["attempts"]
+
+
 @pytest.mark.parametrize("variant", ["baseline", "candidate"])
 def test_bounded_review_admission_keeps_review_chunks_and_repairs_separate(
     prepared_refinement, tmp_path, variant
