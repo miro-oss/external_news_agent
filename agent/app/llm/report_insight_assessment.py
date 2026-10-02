@@ -130,16 +130,24 @@ _EMPTY_CLAIM_MARKER = re.compile(
     re.IGNORECASE,
 )
 # A missing document or an undecidable relation is not a business prerequisite.
-# This intentionally recognizes only metadata-only statements, rather than
-# deciding relevance from industry keywords or rewriting a model's category.
+# Match the entire condition with explicit endings: a quoted absence, double
+# negation, or absence followed by a concrete prerequisite is not metadata-only.
+# Do not split clauses or infer relevance from industry keywords here.
+_METADATA_ABSENCE = (
+    r"(?:(?:(?:명확히|명확하게)\s*)?(?:명시|제시|확인)(?:되(?:어\s*있)?|하)|명확하)"
+    r"지\s*않(?:음|다|습니다|았다|았습니다)|"
+    r"없(?:음|다|습니다|었다|었습니다)?|"
+    r"(?:미확인|불명|불확실)(?:이다|입니다|임)?|"
+    r"불명확(?:함|하다|합니다)?|부족(?:함|하다|합니다)?"
+)
 _METADATA_CONDITION = re.compile(
-    r"^(?:(?:원문|근거|정보|자료)(?:에|에서|상)?(?:는|은|이|가)?\s*)?"
-    r"(?:구체적(?:인)?\s*)?(?:관점(?:의)?\s*)?(?:업무\s*)?"
+    r"(?:(?:(?:원문|근거|정보|자료)(?:에|에서|상)?(?:는|은|이|가)?\s*)?"
+    r"(?:(?:구체적(?:인)?|명확한)\s*)?(?:관점(?:의)?\s*)?(?:업무\s*)?"
     r"(?:연결\s*)?(?:조건|경로|정보|근거|범위)(?:이|가|은|는)?\s*"
-    r"(?:명확(?:히|하게)?\s*)?(?:명시|제시|확인)?(?:하|되|되어|돼|된)?\s*"
-    r"(?:지\s*않|없|미확인|불명|부족)|"
-    r"^(?:원문|근거|정보|자료)(?:이|가|은|는)?\s*(?:없|미확인|불명|부족)|"
-    r"^(?:미확인|불명|판단\s*보류|알\s*수\s*없음)[.!。]?$",
+    rf"(?:{_METADATA_ABSENCE})|"
+    rf"(?:원문|근거|정보|자료)(?:이|가|은|는)?\s*(?:{_METADATA_ABSENCE})|"
+    r"(?:미확인|불명|판단\s*보류|알\s*수\s*없음)|"
+    r"(?:구체적(?:인)?\s*)?미확인\s*업무\s*연결\s*조건)\s*[.!。]?",
     re.IGNORECASE,
 )
 _UNDECIDABLE_RELATION_REASON = re.compile(
@@ -803,7 +811,7 @@ def _assessment_errors(
     if (
         conditional
         and item.condition is not None
-        and _METADATA_CONDITION.search(item.condition.strip())
+        and _METADATA_CONDITION.fullmatch(item.condition.strip())
     ):
         errors.append(
             "connection.condition은 원문 사건에서 해당 업무로 이어지는 구체적 전제여야 합니다. "
