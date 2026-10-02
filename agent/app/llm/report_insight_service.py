@@ -10,6 +10,7 @@ from app.core.config import Settings
 from app.core.errors import AgentError, OutputValidationError
 from app.core.evidence import factual_mismatches, modality_overreach
 from app.core.parser import parse_json_object
+from app.core.report_importance import score_importance
 from app.llm.base import AnalyzeProvider, ProviderResponse
 from app.llm.prompt_data import escape_prompt_text, prompt_json
 from app.llm.report_insight_assessment import (
@@ -51,8 +52,8 @@ from app.schemas.report_insight import (
     ReportInsightResponse,
 )
 
-PROMPT_VERSION = "report-insight.ko.v8"
-RUBRIC_VERSION = "report-importance.v5"
+PROMPT_VERSION = "report-insight.ko.v9"
+RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"
 MAX_ASSESSMENT_BATCH = 8
@@ -284,8 +285,9 @@ class ReportInsightService(ReportInsightLegacyService):
                 "현재 단계는 내부 근거 평가 수리입니다. 각 finding의 connection, effect, "
                 "timing 객체를 현재 Schema 그대로 작성하세요. 원문 인용이 필요한 범주는 "
                 "원문을 읽고 해당 claimId에 연결된 sourceSpanId를 선택하세요. claims가 실제 빈 "
-                "finding만 고정 근거 부족 문구를 사용합니다. 원문이 있는 항목은 업무 연결의 "
-                "어떤 조건이 미확인인지 설명하며, 모든 항목의 원문이 없다고 바꾸지 마세요.\n\n"
+                "finding만 고정 근거 부족 문구를 사용합니다. 원문이 있는 항목은 사건과 연결 "
+                "업무를 다시 대조하고, 미확인인 축만 그 한계를 설명하세요. 모든 항목의 "
+                "원문이 없다고 바꾸지 마세요.\n\n"
                 + _report_insight_repair_prompt(prompt, raw, error)
             ),
             response_schema=schema,
@@ -1181,13 +1183,7 @@ def _report_factual_mismatches(value: str, source: str) -> list[str]:
 
 
 def importance_score(axes: ReportImportanceAxes) -> float | None:
-    """Use only available evidence-backed axes; v2 retains the original formula."""
-    if axes.directness is None or axes.impact is None:
-        return None
-    if axes.directness == 0:
-        return 0.0
-    weighted = axes.directness * 0.4 + axes.impact * 0.4
-    return (weighted / 0.8) if axes.urgency is None else weighted + axes.urgency * 0.2
+    return score_importance(axes)
 
 
 def importance_grade(axes: ReportImportanceAxes) -> str:

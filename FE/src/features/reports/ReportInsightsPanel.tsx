@@ -3,7 +3,7 @@ import { ApiError } from '../../api/client'
 import {
   isReportInsightAbsent, isReportInsightPreparing, reportInsightSnapshotKey, selectReportInsight,
   useGenerateReportInsight, useReportInsight, useReportInsightGenerating,
-  type ReportAudienceInsight, type ReportImportance, type ReportInsightFact, type ReportInsightResult,
+  type ReportAudienceInsight, type ReportImportance, type ReportInsightFact, type ReportInsightIssue, type ReportInsightResult,
 } from '../../api/reportInsights'
 import { AUDIENCE_LABELS, type Audience, type ReportDetail, type ReportFinding } from '../../api/types'
 import { formatFullDate } from '../../lib/datetime'
@@ -99,6 +99,7 @@ export function ReportInsightsContent({ result, insight, findings, onEvidenceSel
       <ol className="report-insights-issues">{insight.issues.map(issue => <li className="report-insights-issue" key={issue.findingId}>
         <div className="report-insights-issue-header"><span className="report-insights-rank">우선순위 {issue.rank}</span><Importance value={issue.importance} /></div>
         <h5>{byFinding.get(issue.findingId)?.articleTitle ?? `보고서 근거 #${issue.findingId}`}</h5><p>{issue.reason}</p>
+        <IssueAssessmentNote issue={issue} />
         <dl className="report-insights-axes">
           <div><dt>직접 관련성</dt><dd>{axisScore(issue.axes.directness)}</dd></div>
           <div><dt>영향 크기</dt><dd>{axisScore(issue.axes.impact)}</dd></div>
@@ -119,11 +120,24 @@ export function ReportInsightsContent({ result, insight, findings, onEvidenceSel
       onEvidenceSelect={onEvidenceSelect} label={`리포트에 저장된 주장 ${insight.facts.length}개 보기`} />}
     <p className="report-insights-footnote">리포트 중요도는 이 관점에서 가장 우선하는 이슈의 중요도입니다. 저장된 주장 목록은 원본이며, 분석에 인용한 근거는 각 항목에 표시됩니다. 계획·전망과 의견은 확인된 사실과 구분해 읽어 주세요.</p>
     <details className="report-insights-rubric"><summary>중요도 판단 기준 보기</summary>
-      <p>직접 관련성·영향 크기·시급성을 각각 0~3점으로 평가합니다. 직접 관련성과 영향 크기의 비중은 각각 40%, 시급성은 20%입니다. 시급성 근거가 없으면 나머지 기준으로 계산합니다. 2.25점 이상은 높음, 1.25점 이상은 중간입니다. 직접 관련성이나 영향 크기가 미확인이면 먼저 판단을 보류합니다. 두 기준을 판단할 수 있고 직접 관련성이 0이면 낮음입니다. 이전 보고서와의 비교 근거가 없어 새 변화는 평가하지 않습니다.</p>
+      <p>직접 관련성·영향 크기·시급성을 각각 0~3점으로 평가합니다. 직접 관련성과 영향 크기의 비중은 각각 40%, 시급성은 20%입니다. 시급성 근거가 없으면 나머지 기준으로 계산합니다. 2.25점 이상은 높음, 1.25점 이상은 중간입니다. 직접 관련성이 0이면 영향 크기가 미확인이어도 낮음입니다. 그 외에 직접 관련성이 미확인이면 관련성 미확인으로, 관련성은 확인했지만 영향 크기가 미확인이면 영향 규모 미확인으로 표시하고 중요도 판단을 보류합니다. 이전 보고서와의 비교 근거가 없어 새 변화는 평가하지 않습니다.</p>
     </details>
   </div>
 }
-function axisScore(value: number | null) { return value === null ? '판단 보류' : `${value} / 3` }
+function axisScore(value: number | null) { return value === null ? '미확인' : `${value} / 3` }
+function IssueAssessmentNote({ issue }: { issue: ReportInsightIssue }) {
+  if (issue.importance === 'low' && issue.axes.directness === 0) {
+    return <p className="report-insights-condition">관련성 낮음 · 이 관점의 업무와 직접 연결되지 않아 중요도를 낮음으로 분류했습니다.</p>
+  }
+  if (issue.importance !== 'unavailable') return null
+  if (issue.axes.directness === null) {
+    return <p className="report-insights-condition">관련성 미확인 · 이 관점의 업무와 연결되는지 판단할 근거가 부족합니다.</p>
+  }
+  if (issue.axes.directness > 0 && issue.axes.impact === null) {
+    return <p className="report-insights-condition">영향 규모 미확인 · 업무 관련성은 확인했지만 영향 크기의 근거가 부족해 중요도 판단을 보류합니다.</p>
+  }
+  return null
+}
 function Importance({ value, report = false }: { value: ReportImportance; report?: boolean }) {
   return <span className="report-insight-importance" data-importance={value}>{report ? '리포트 중요도' : '중요도'} {IMPORTANCE_LABELS[value]}</span>
 }

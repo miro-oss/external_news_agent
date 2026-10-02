@@ -811,7 +811,8 @@ def test_claimful_reason_schema_and_map_review_prompts_explain_business_unknown_
         assert "sourceSpanId" in prompt and "sourceQuoteChoices" in prompt
         assert "claims=[]" in prompt
         assert "condition은 기사 재요약이 아닌" in prompt
-        assert "관계 판단을 보류" in prompt
+        assert "업무 전체와 사건을 대조" in prompt
+        assert "미확인 축" in prompt
 
 
 def test_complete_prompt_example_preserves_positive_unknown_and_claimless_sources():

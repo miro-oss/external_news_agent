@@ -49,6 +49,18 @@ class ReportInsightPersistenceServiceTest {
                 response(List.of(assessment(40, 3, 3, 3), assessment(50, 3, 3, 3)), java.math.BigDecimal.ONE)).getFirst());
         assertEquals(List.of(50L, 40L), dto.issues().stream().map(ReportInsightDTO.Issue::findingId).toList());
     }
+    @Test void confirmedUnrelatedFindingRanksAboveUnassessedFindingWithoutFillingUnknownAxes() {
+        var dto = service.toDto(service.saveGenerated(snapshot("a".repeat(64)),
+                response(List.of(assessment(50, null, 3, 3), assessment(40, 0, null, null)),
+                        java.math.BigDecimal.ONE)).getFirst());
+        assertEquals("low", dto.importance());
+        assertEquals(List.of(40L, 50L), dto.issues().stream().map(ReportInsightDTO.Issue::findingId).toList());
+        assertEquals(List.of("low", "unavailable"), dto.issues().stream().map(ReportInsightDTO.Issue::importance).toList());
+        assertEquals(0, dto.issues().getFirst().axes().directness());
+        assertNull(dto.issues().getFirst().axes().impact());
+        assertNull(dto.issues().getFirst().axes().urgency());
+        assertNull(dto.issues().getLast().axes().directness());
+    }
     @Test void reportLockAndExactCacheAvoidDuplicateInsert() {
         var existing = NewsReportInsight.builder().audience(Audience.CHIP_MAKER).build();
         when(repository.findByReportIdAndInputHashAndPromptVersionAndRubricVersionAndAudienceIn(

@@ -21,6 +21,8 @@ from app.llm.report_insight_service import (
     PROMPT_VERSION,
     RUBRIC_VERSION,
     ReportInsightService,
+    importance_grade,
+    importance_score,
 )
 from app.main import create_app
 
@@ -339,7 +341,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v8"
+    assert result.meta.prompt_version == "report-insight.ko.v9"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -404,6 +406,18 @@ def test_all_unrelated_findings_skip_review_without_keywords_and_skip_reduce():
     insight = result.insights[0]
     assert insight.overview == insight.implications == insight.watch_items == []
     assert all(entry.axes.directness == 0 for entry in insight.assessments)
+    assert all(
+        entry.axes.impact is None and entry.axes.urgency is None for entry in insight.assessments
+    )
+    assert all(importance_score(entry.axes) == 0.0 for entry in insight.assessments)
+    assert all(importance_grade(entry.axes) == "low" for entry in insight.assessments)
+    assert all(provider.schema_validity)
+    for payload in provider.wire_payloads:
+        for entry in payload["assessments"]["CHIP_MAKER"].values():
+            assert entry["connection"]["relation"] == "UNRELATED"
+            assert entry["connection"]["basis"] is not None
+            assert entry["effect"] == {"impactScope": "UNDETERMINED", "basis": None}
+            assert entry["timing"] == {"urgencyState": "UNDETERMINED", "basis": None}
     assert result.meta.credits == 0.4
 
 
@@ -792,9 +806,9 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v8"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v9"
     assert output["meta"]["mock"] is True
-    assert RUBRIC_VERSION == "report-importance.v5"
+    assert RUBRIC_VERSION == "report-importance.v6"
     assert set(output) == {"insights", "meta"}
     assessment = output["insights"][0]["assessments"][0]
     assert set(assessment) == {"findingId", "reason", "basisClaimIds", "axes"}

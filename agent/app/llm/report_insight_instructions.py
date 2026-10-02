@@ -5,23 +5,28 @@ from pathlib import Path
 from app.schemas.analyze import Audience
 
 _ROOT = Path(__file__).resolve().parents[1] / "prompts"
-_BASE = (_ROOT / "report-insight.ko.v8.md").read_text(encoding="utf-8").strip()
-_RUBRIC = (_ROOT / "report-importance.v5.md").read_text(encoding="utf-8").strip()
+_BASE = (_ROOT / "report-insight.ko.v9.md").read_text(encoding="utf-8").strip()
+_RUBRIC = (_ROOT / "report-importance.v6.md").read_text(encoding="utf-8").strip()
 _ROLES = {
-    "CHIP_MAKER": "칩 제조: 공정/인증 PROCESS_QUALIFICATION, 생산 일정 PRODUCTION_SCHEDULE, "
+    "CHIP_MAKER": "칩 제조: 공정 인증·설계 IP/공정 적용 PROCESS_QUALIFICATION, "
+    "생산 일정 PRODUCTION_SCHEDULE, "
     "수율/능력 YIELD_CAPACITY, 고객 요구·공급 약정 CUSTOMER_REQUIREMENTS, 소재 확보 "
     "MATERIAL_SUPPLY. 메모리/HBM 제조사의 실제 고객 공급 계약은 CUSTOMER_REQUIREMENTS의 "
     "직접 관계일 수 있다. 공정·수율이 없다는 이유로 그 계약을 무관 처리하지 않는다. "
-    "계약은 생산 증가·규격 승인·납품 완료를 뜻하지 않는다.",
+    "계약은 생산 증가·규격 승인·납품 완료를 뜻하지 않는다. 공정 인증·설계 적용은 "
+    "고객 계약이 없어도 PROCESS_QUALIFICATION에서 판단한다. 생산능력·생산 배분은 "
+    "YIELD_CAPACITY/PRODUCTION_SCHEDULE에서 판단한다.",
     "EQUIPMENT_MAKER": "장비 공급: 공정 검증 PROCESS_VALIDATION, 설계 채택 DESIGN_IN, "
     "실제 발주/수주 ORDER_BOOKING, 납품/설치 DELIVERY_INSTALLATION, 서비스 "
-    "MAINTENANCE_SERVICE. 제조사 증설 계획은 장비 발주가 아니다.",
+    "MAINTENANCE_SERVICE. 공정 검증·설계 채택은 발주 확인을 전제로 하지 않는다. "
+    "제조사 증설 계획은 장비 발주가 아니다.",
     "MARKET_INVESTOR": "투자 판단: 전망 GUIDANCE, 투자 집행 CAPEX_EXECUTION, 매출 인식 "
     "REVENUE_RECOGNITION, 이익률 PROFITABILITY, 수급 제약 SUPPLY_DEMAND_CONSTRAINT. "
     "공시 전망과 실제 실적을 구분하며 매수·매도·목표가는 쓰지 않는다.",
     "IT_INFRA": "IT 운영: 시스템 조달 SYSTEM_PROCUREMENT, 호환성 COMPATIBILITY, "
     "전력/냉각 POWER_COOLING, 네트워크 NETWORK, 도입/운영 DEPLOYMENT_OPERATIONS. "
-    "실제 메모리 가격·공급 조건은 시스템 조달 판단에 연결될 수 있다. 그것만으로 이미 "
+    "시스템 구성품의 가격·공급 조건과 전망은 시스템 조달 판단에 연결될 수 있다. "
+    "확정 공급 조건과 전망을 구분한다. 그것만으로 이미 "
     "조달 비용이 변했거나 냉각 승인 절차가 존재한다고 만들지 않는다. 소재 공장은 서버 "
     "운영이 아니다.",
 }

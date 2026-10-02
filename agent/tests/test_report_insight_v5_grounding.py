@@ -34,6 +34,10 @@ ROLES = ["CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR", "IT_INFRA"]
         "원문에 구체적인 연결 조건이 제시되지 않음",
         "업무 연결 경로가 미확인",
         "원문 정보가 부족함",
+        "미확인",
+        "불명.",
+        "판단 보류",
+        "알 수 없음",
     ],
 )
 def test_missing_metadata_cannot_mint_a_background_work_connection(condition):
@@ -88,7 +92,7 @@ def test_stage_instruction_only_teaches_requested_role_without_fictional_respons
     audience, stage
 ):
     instruction = report_stage_instruction([audience], stage)
-    assert len(instruction) < 3300
+    assert len(instruction) < 3500
     assert audience in instruction
     assert all(role not in instruction for role in ROLES if role != audience)
     assert '"assessments":' not in instruction
@@ -96,9 +100,9 @@ def test_stage_instruction_only_teaches_requested_role_without_fictional_respons
     assert '"finding11"' not in instruction
     assert "가상 원문" not in instruction
     if stage == "REDUCE":
-        assert "report-importance.v5" not in instruction
+        assert "report-importance.v6" not in instruction
     else:
-        assert "report-importance.v5" in instruction
+        assert "report-importance.v6" in instruction
 
 
 def test_customer_supply_contract_guidance_preserves_direct_relationship_without_invented_specs():
@@ -121,7 +125,7 @@ def test_reassessment_context_is_independent_and_preserves_source_identity_and_t
     assert context["reportReferenceDate"] == "2026-09-25"
     assert [item["claims"][0]["id"] for item in context["findings"]] == ["101:0", "102:0"]
     assert source.model_dump_json(by_alias=True) == original
-    assert result.meta.prompt_version == "report-insight.ko.v8"
+    assert result.meta.prompt_version == "report-insight.ko.v9"
 
 
 def test_native_contract_selects_category_before_fields_without_changing_accepted_wire():
