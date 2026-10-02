@@ -7,12 +7,14 @@ from dataclasses import replace
 from pathlib import Path
 
 from app.core.config import Settings
-from app.core.errors import AgentError, OutputValidationError
+from app.core.errors import AgentError, OutputValidationError, StructuredOutputExhaustedError
 from app.core.evidence import factual_mismatches, modality_overreach
 from app.core.parser import parse_json_object
+from app.core.report_importance import score_importance
 from app.llm.base import AnalyzeProvider, ProviderResponse
 from app.llm.prompt_data import escape_prompt_text, prompt_json
 from app.llm.report_insight_assessment import (
+    ReportAssessmentDraftValidationError,
     draft_prompt,
     draft_schema,
     merge_drafts,
@@ -30,6 +32,7 @@ from app.llm.report_insight_guard import (
 )
 from app.llm.report_insight_instructions import report_stage_instruction
 from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
+from app.llm.report_insight_prefix import closed_assessment_prefix
 from app.llm.report_insight_retrieval import retrieve_report_insight_evidence
 from app.llm.report_insight_synthesis_quality import (
     synthesis_evidence_frames,
@@ -51,11 +54,11 @@ from app.schemas.report_insight import (
     ReportInsightResponse,
 )
 
-PROMPT_VERSION = "report-insight.ko.v8"
-RUBRIC_VERSION = "report-importance.v5"
+PROMPT_VERSION = "report-insight.ko.v9"
+RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"
-MAX_ASSESSMENT_BATCH = 8
+MAX_ASSESSMENT_BATCH = 6
 
 
 class ReportAssessmentValidationError(OutputValidationError):
@@ -70,6 +73,29 @@ class ReportAssessmentValidationError(OutputValidationError):
     ) -> None:
         super().__init__(message, error_kinds=error_kinds)
         self.failed_finding_ids: tuple[int, ...] = tuple(failed_finding_ids)
+
+
+class _TruncatedAssessmentRepairError(ReportAssessmentValidationError):
+    """Carry only server-validated complete records into the one allowed repair."""
+
+    def __init__(self, request, preserved, failed_ids, errors):
+        super().__init__(
+            "출력이 완성된 항목 뒤에서 잘렸습니다. 검증된 항목은 서버가 보존합니다. "
+            "수리 입력의 누락·실패 항목만 현재 Schema로 완성하세요.\n"
+            + "\n".join(f"findingId={identifier}: {error}" for identifier, error in errors)
+            + "\n"
+            + "\n".join(
+                f"findingId={identifier}: 잘린 출력에 완성된 항목이 없습니다."
+                for identifier in failed_ids
+                if identifier not in {failed_id for failed_id, _ in errors}
+            ),
+            error_kinds=("report_assessment_truncated_prefix",)
+            + tuple(kind for _, error in errors for kind in error.error_kinds),
+            failed_finding_ids=tuple(failed_ids),
+        )
+        self.expected_finding_ids = tuple(finding.id for finding in request.findings)
+        self.audience = request.audiences[0]
+        self.preserved_wire = deepcopy({"assessments": {self.audience: preserved}})
 
 
 class ReportSynthesisValidationError(OutputValidationError):
@@ -281,11 +307,13 @@ class ReportInsightService(ReportInsightLegacyService):
             return super()._repair_call(prompt, schema, raw, error, validate)
         fallback = StructuredCallRepair(
             prompt=(
-                "현재 단계는 내부 근거 평가 수리입니다. 각 finding의 connection, effect, "
-                "timing 객체를 현재 Schema 그대로 작성하세요. 원문 인용이 필요한 범주는 "
+                "현재 단계는 내부 근거 평가 수리입니다. 각 finding의 decision 안에 "
+                "connection, effect, timing 객체를 현재 Schema 그대로 작성하세요. "
+                "원문 인용이 필요한 범주는 "
                 "원문을 읽고 해당 claimId에 연결된 sourceSpanId를 선택하세요. claims가 실제 빈 "
-                "finding만 고정 근거 부족 문구를 사용합니다. 원문이 있는 항목은 업무 연결의 "
-                "어떤 조건이 미확인인지 설명하며, 모든 항목의 원문이 없다고 바꾸지 마세요.\n\n"
+                "finding만 고정 근거 부족 문구를 사용합니다. 원문이 있는 항목은 사건과 연결 "
+                "업무를 다시 대조하고, 미확인인 축만 그 한계를 설명하세요. 모든 항목의 "
+                "원문이 없다고 바꾸지 마세요.\n\n"
                 + _report_insight_repair_prompt(prompt, raw, error)
             ),
             response_schema=schema,
@@ -301,9 +329,15 @@ class ReportInsightService(ReportInsightLegacyService):
             self._report_settings, request.plan, self._provider
         )
         reference_date = report_reference_date(request)
+        full_validation_request = request
+        if reference_date is not None:
+            full_validation_request = request.model_copy(
+                update={
+                    "report": request.report.model_copy(update={"report_end_date": reference_date})
+                }
+            )
 
         def assess(response, subset):
-            draft = validate_draft(response, subset)
             # Keep the original full-report date during batch validation. This
             # local copy is never persisted or used to hash the source snapshot.
             validation_request = subset
@@ -315,11 +349,40 @@ class ReportInsightService(ReportInsightLegacyService):
                         )
                     }
                 )
+            if response.truncated:
+                recovery = _truncated_assessment_repair_error(response, validation_request)
+                if recovery is not None:
+                    raise recovery
+            try:
+                draft = validate_draft(response, subset)
+            except ReportAssessmentDraftValidationError as error:
+                collected = _native_assessment_repair_errors(response, validation_request)
+                if collected is not None:
+                    raise collected from error
+                raise
             _validated_map_output(
                 replace(response, text=draft.mapped.model_dump_json(by_alias=True)),
                 validation_request,
             )
             return draft
+
+        def validated_merge(*parts):
+            # Reparse all native records and their source fingerprints, then
+            # rerun public grounding/time guards on the entire original report.
+            draft = merge_drafts(request, *parts)
+            last = pipeline.last_response
+            if last is None:
+                raise RuntimeError("검증할 MAP에 Provider 응답이 없습니다.")
+            mapped = _validated_map_output(
+                ProviderResponse(
+                    text=draft.mapped.model_dump_json(by_alias=True),
+                    provider=last.provider,
+                    model=last.model,
+                    usage=last.usage,
+                ),
+                full_validation_request,
+            )
+            return draft, mapped
 
         try:
             drafts = []
@@ -339,36 +402,44 @@ class ReportInsightService(ReportInsightLegacyService):
                         stage="MAP",
                     ).output
                 )
-            validated = merge_drafts(request, *drafts)
+            validated, _ = validated_merge(*drafts)
             review_ids = set(select_review(request, validated))
-            if review_ids:
+            review_findings = [finding for finding in request.findings if finding.id in review_ids]
+            reviews = []
+            for review_index, offset in enumerate(
+                range(0, len(review_findings), MAX_ASSESSMENT_BATCH), start=1
+            ):
                 subset = request.model_copy(
-                    update={
-                        "findings": [
-                            finding for finding in request.findings if finding.id in review_ids
-                        ]
-                    }
+                    update={"findings": review_findings[offset : offset + MAX_ASSESSMENT_BATCH]}
                 )
                 schema = draft_schema(subset)
-                schema["description"] = "reportInsightCall:REVIEW-001"
-                reviewed = self._call(
-                    pipeline,
-                    instruction=report_stage_instruction(request.audiences, "REVIEW"),
-                    prompt=review_prompt(subset, reference_date=reference_date),
-                    schema=schema,
-                    validate=lambda response: assess(response, subset),
-                    stage="REVIEW",
-                ).output
-                validated = merge_drafts(request, validated, reviewed)
-            mapped = _validated_map_output(
-                ProviderResponse(
-                    text=validated.mapped.model_dump_json(by_alias=True),
-                    provider=pipeline.last_response.provider,
-                    model=pipeline.last_response.model,
-                    usage=pipeline.last_response.usage,
-                ),
-                request,
-            )
+                schema["description"] = f"reportInsightCall:REVIEW-{review_index:03d}"
+                try:
+                    review = self._call(
+                        pipeline,
+                        instruction=report_stage_instruction(request.audiences, "REVIEW"),
+                        prompt=review_prompt(subset, reference_date=reference_date),
+                        schema=schema,
+                        validate=lambda response, subset=subset: assess(response, subset),
+                        stage="REVIEW",
+                    ).output
+                except StructuredOutputExhaustedError:
+                    # This independent refinement failed. Keep the original
+                    # validated MAP for its IDs; never accept its invalid draft.
+                    # Provider/routing, deadline, budget and unknown-usage errors
+                    # remain ordinary AgentErrors and must leave the pipeline.
+                    validated, _ = validated_merge(validated)
+                    logger.warning(
+                        "Report insight stage=REVIEW-%03d outcome=VALIDATION_FAILED "
+                        "fallback=VALIDATED_MAP_RETAINED findingCount=%d",
+                        review_index,
+                        len(subset.findings),
+                    )
+                else:
+                    reviews.append(review)
+            # Select once from the complete MAP, then merge all independent
+            # reviews. An earlier review cannot alter later selection or input.
+            validated, mapped = validated_merge(validated, *reviews)
             retrieved = {
                 insight.audience: retrieve_report_insight_evidence(
                     request,
@@ -401,6 +472,7 @@ class ReportInsightService(ReportInsightLegacyService):
         last = pipeline.last_response
         if last is None:
             raise RuntimeError("리포트 인사이트 단계가 Provider 응답 없이 완료되었습니다.")
+        output = _explain_empty_synthesis(output, request)
         return ReportInsightResponse(
             insights=output.insights,
             meta=ReportResponseMeta(
@@ -415,6 +487,38 @@ class ReportInsightService(ReportInsightLegacyService):
                 truncated=False,
             ),
         )
+
+
+def _explain_empty_synthesis(
+    output: ReportInsightOutput, request: ReportInsightRequest
+) -> ReportInsightOutput:
+    """Describe validated abstention without equating an unknown role with no source.
+
+    The request has already passed source eligibility checks. These are server
+    diagnostics, not model synthesis, and must never change assessments or facts.
+    """
+    grounded_ids = {finding.id for finding in request.findings if finding.claims}
+    if not grounded_ids:
+        return output
+    insights = []
+    for insight in output.insights:
+        assessments = [item for item in insight.assessments if item.finding_id in grounded_ids]
+        if (
+            not assessments
+            or insight.overview
+            or insight.implications
+            or insight.watch_items
+            or any(item.axes.directness not in (None, 0) for item in assessments)
+        ):
+            insights.append(insight)
+            continue
+        headline = (
+            "원문 근거는 있으나 이 관점의 업무 관련성을 판단하지 못했습니다."
+            if any(item.axes.directness is None for item in assessments)
+            else "원문을 검토했으나 이 관점과 직접 관련된 이슈는 확인되지 않았습니다."
+        )
+        insights.append(insight.model_copy(update={"headline": headline}))
+    return output.model_copy(update={"insights": insights})
 
 
 def _validated_v4_reduce_output(response, request, mapped, allowed):
@@ -437,12 +541,107 @@ def _validated_v4_reduce_output(response, request, mapped, allowed):
     return output
 
 
+def _truncated_assessment_repair_error(response, request):
+    if not response.truncated or len(request.audiences) != 1:
+        return None
+    audience = request.audiences[0]
+    ordered_ids = [finding.id for finding in request.findings]
+    records = closed_assessment_prefix(response.text, audience, ordered_ids)
+    if records is None:
+        return None
+    preserved = {}
+    errors = []
+    for finding in request.findings[: len(records)]:
+        key = f"finding{finding.id}"
+        subset = request.model_copy(update={"findings": [finding]})
+        # Only the already closed object is examined as a complete singleton.
+        # The original response stays truncated and its usage remains charged.
+        local_response = replace(
+            response,
+            text=prompt_json({"assessments": {audience: {key: records[key]}}}),
+            truncated=False,
+        )
+        try:
+            draft = validate_draft(local_response, subset)
+            _validated_map_output(
+                replace(local_response, text=draft.mapped.model_dump_json(by_alias=True)),
+                subset,
+            )
+        except (ReportAssessmentDraftValidationError, ReportAssessmentValidationError) as error:
+            if error.failed_finding_ids != (finding.id,):
+                return None
+            errors.append((finding.id, error))
+            continue
+        except ValueError:
+            return None
+        preserved[key] = records[key]
+    if not preserved:
+        return None
+    failed_ids = [
+        identifier for identifier in ordered_ids if f"finding{identifier}" not in preserved
+    ]
+    return _TruncatedAssessmentRepairError(request, preserved, failed_ids, errors)
+
+
+def _native_assessment_repair_errors(response, request):
+    """Identify local failures only after both guards visit every retained record.
+
+    The first native failure can hide public prose/time failures elsewhere in
+    the batch. Strict wire shape and singleton validation establish a complete
+    repair set without treating the initial exception's IDs as exhaustive.
+    """
+    if response.truncated or len(request.audiences) != 1:
+        return None
+    ordered_ids = [finding.id for finding in request.findings]
+    if not ordered_ids or len(ordered_ids) != len(set(ordered_ids)):
+        return None
+    try:
+        native = parse_wire_draft(response.text)
+    except ValueError:
+        return None
+    audience = request.audiences[0]
+    expected = {f"finding{finding_id}" for finding_id in ordered_ids}
+    if set(native.assessments) != {audience} or set(native.assessments[audience]) != expected:
+        return None
+    if any(
+        native.assessments[audience][f"finding{finding_id}"].finding_id != finding_id
+        for finding_id in ordered_ids
+    ):
+        return None
+    wire = native.model_dump(by_alias=True, mode="json")["assessments"][audience]
+    failures = []
+    for finding in request.findings:
+        key = f"finding{finding.id}"
+        subset = request.model_copy(update={"findings": [finding]})
+        local_response = replace(
+            response, text=prompt_json({"assessments": {audience: {key: wire[key]}}})
+        )
+        try:
+            draft = validate_draft(local_response, subset)
+            _validated_map_output(
+                replace(response, text=draft.mapped.model_dump_json(by_alias=True)), subset
+            )
+        except (ReportAssessmentDraftValidationError, ReportAssessmentValidationError) as error:
+            if error.failed_finding_ids != (finding.id,):
+                return None
+            failures.append((finding.id, error))
+        except ValueError:
+            # Structural or otherwise unlocalized failures retain full repair.
+            return None
+    if not failures:
+        return None
+    return ReportAssessmentValidationError(
+        "아래 항목의 내부 근거 계약과 공개 평가 검증 오류를 모두 수정하세요.\n"
+        + "\n".join(f"findingId={finding_id}: {error}" for finding_id, error in failures),
+        error_kinds=tuple(kind for _, error in failures for kind in error.error_kinds),
+        failed_finding_ids=tuple(finding_id for finding_id, _ in failures),
+    )
+
+
 def _partial_assessment_repair(prompt, schema, raw, error, validate, fallback):
     """Repair only server-identified native entries, then revalidate the full batch."""
-    # Draft failures occur before the public prose/time guards have visited the
-    # other records. Regenerate the full batch once so a later hidden error is
-    # not preserved outside the only allowed repair. Partial repair is safe only
-    # after the complete draft and all public assessment guards have run.
+    # Only errors collected after both native and public guards may preserve
+    # other records. Unlocalized/structural draft failures regenerate the batch.
     if not isinstance(error, ReportAssessmentValidationError):
         return fallback
     instructions, framed_input = prompt.split("<report-insight-input>", 1)
@@ -459,16 +658,23 @@ def _partial_assessment_repair(prompt, schema, raw, error, validate, fallback):
         or any(type(finding_id) is not int for finding_id in error.failed_finding_ids)
     ):
         return fallback
-    try:
-        native = parse_wire_draft(raw)
-    except ValueError:
-        return fallback
     audience = audiences[0]
     expected = {f"finding{finding_id}" for finding_id in ordered_ids}
-    if set(native.assessments) != {audience} or set(native.assessments[audience]) != expected:
-        return fallback
-    preserved = native.model_dump(by_alias=True, mode="json")
     failed_keys = {f"finding{finding_id}" for finding_id in failed_ids}
+    if isinstance(error, _TruncatedAssessmentRepairError):
+        if error.expected_finding_ids != tuple(ordered_ids) or error.audience != audience:
+            return fallback
+        preserved = deepcopy(error.preserved_wire)
+        if set(preserved["assessments"][audience]) != expected - failed_keys:
+            return fallback
+    else:
+        try:
+            native = parse_wire_draft(raw)
+        except ValueError:
+            return fallback
+        if set(native.assessments) != {audience} or set(native.assessments[audience]) != expected:
+            return fallback
+        preserved = native.model_dump(by_alias=True, mode="json")
     payload["findings"] = [finding for finding in findings if finding["id"] in failed_ids]
     subset_schema = deepcopy(schema)
     entries = subset_schema["properties"]["assessments"]["properties"][audience]
@@ -511,11 +717,12 @@ def _partial_assessment_repair(prompt, schema, raw, error, validate, fallback):
 def _decision_candidates(request, validated, allowed):
     """Carry source-bound private work decisions into REDUCE without prose anchors.
 
-    Grouping by work is navigation, not an assertion that separate events share
-    an owner, project or causal path. The model still reads the original sources.
+    Each group belongs to one finding, even when several findings share a work
+    category. Shared work never merges owners, projects or source dates.
     Each quote comes from the validated draft's literal original span selection.
     """
     claims = {claim.id: claim for finding in request.findings for claim in finding.claims}
+    sources = {finding.id: finding for finding in request.findings}
     candidates = {}
     for audience in request.audiences:
         permitted = set(allowed[audience])
@@ -561,7 +768,7 @@ def _decision_candidates(request, validated, allowed):
             impact_basis = proof(item.impact_basis, finding.id)
             urgency_basis = proof(item.urgency_basis, finding.id)
             axes = priorities[finding.id].axes
-            groups.setdefault(item.work, []).append(
+            groups.setdefault((item.work, finding.id), []).append(
                 {
                     "findingId": finding.id,
                     "priorityRank": rank,
@@ -577,8 +784,19 @@ def _decision_candidates(request, validated, allowed):
                 }
             )
         candidates[audience] = [
-            {"work": work, "priorityRank": findings[0]["priorityRank"], "findings": findings}
-            for work, findings in groups.items()
+            {
+                "work": work,
+                "findingId": finding_id,
+                "articleId": sources[finding_id].article_id,
+                "publishedAt": (
+                    sources[finding_id].published_at.isoformat()
+                    if sources[finding_id].published_at
+                    else None
+                ),
+                "priorityRank": findings[0]["priorityRank"],
+                "findings": findings,
+            }
+            for (work, finding_id), findings in groups.items()
         ]
     return candidates
 
@@ -972,10 +1190,18 @@ def _validated_output(
                     )
                 continue
             field = "reason"
+            # An undecidable relation has no selected basis by contract, even
+            # when its source exists. Check its explanation against this
+            # finding's eligible sources without promoting them to score proof.
+            reason_refs = assessment.basis_claim_ids
+            if not reason_refs and all(
+                value is None for value in assessment.axes.model_dump().values()
+            ):
+                reason_refs = [claim.id for claim in findings[assessment.finding_id].claims]
             try:
                 _validate_prose(
                     [assessment.reason],
-                    assessment.basis_claim_ids,
+                    reason_refs,
                     evidence,
                     claims,
                     request=request,
@@ -983,7 +1209,7 @@ def _validated_output(
                 field = "axes.urgency"
                 validate_report_time(
                     assessment.reason,
-                    assessment.basis_claim_ids,
+                    reason_refs,
                     request,
                     urgency=assessment.axes.urgency,
                 )
@@ -1181,13 +1407,7 @@ def _report_factual_mismatches(value: str, source: str) -> list[str]:
 
 
 def importance_score(axes: ReportImportanceAxes) -> float | None:
-    """Use only available evidence-backed axes; v2 retains the original formula."""
-    if axes.directness is None or axes.impact is None:
-        return None
-    if axes.directness == 0:
-        return 0.0
-    weighted = axes.directness * 0.4 + axes.impact * 0.4
-    return (weighted / 0.8) if axes.urgency is None else weighted + axes.urgency * 0.2
+    return score_importance(axes)
 
 
 def importance_grade(axes: ReportImportanceAxes) -> str:

@@ -19,9 +19,10 @@ from urllib.parse import urlsplit
 from pydantic import ValidationError
 
 from app.eval.report_insight_review import QUALITY_RUBRIC
-from app.llm.report_insight_service import importance_grade, importance_score
+from app.llm.report_insight_service import importance_score
 from app.schemas.report_insight import (
     ReportAudienceInsight,
+    ReportImportanceAxes,
     ReportInsightOutput,
     ReportInsightRequest,
 )
@@ -185,19 +186,37 @@ def _render_sources(request: ReportInsightRequest | None, review_id: str) -> str
     return "".join(sections)
 
 
+def _rubric_score(axes: ReportImportanceAxes, rubric: str | None) -> float | None:
+    # v6 resolves a known unrelated issue before looking for an effect. Earlier
+    # saved outputs must retain the ordering and grade their own runtime showed.
+    if rubric is not None and rubric != "report-importance.v6":
+        if axes.directness is None or axes.impact is None:
+            return None
+    return importance_score(axes)
+
+
+def _grade(score: float | None) -> str:
+    if score is None:
+        return "unavailable"
+    return "high" if score >= 2.25 else "medium" if score >= 1.25 else "low"
+
+
 def _render_insight(
-    insight: ReportAudienceInsight, request: ReportInsightRequest, review_id: str
+    insight: ReportAudienceInsight,
+    request: ReportInsightRequest,
+    review_id: str,
+    rubric: str | None = None,
 ) -> str:
     snapshot_order = {finding.id: index for index, finding in enumerate(request.findings)}
     ordered = sorted(
         insight.assessments,
         key=lambda item: (
-            importance_score(item.axes) is None,
-            -(importance_score(item.axes) or 0),
+            _rubric_score(item.axes, rubric) is None,
+            -(_rubric_score(item.axes, rubric) or 0),
             snapshot_order[item.finding_id],
         ),
     )
-    overall = _GRADES[importance_grade(ordered[0].axes)]
+    overall = _GRADES[_grade(_rubric_score(ordered[0].axes, rubric))]
     parts = [
         f'<h3 class="headline">{_escape(insight.headline)}</h3>',
         f'<p class="meta">최고 이슈 중요도: <strong>{overall}</strong> · '
@@ -218,7 +237,7 @@ def _render_insight(
         '<h4>이슈 중요도와 근거</h4><p class="meta">상위 이슈부터 표시 · 판단 보류는 뒤에 표시</p>'
     )
     for position, item in enumerate(ordered, 1):
-        score = importance_score(item.axes)
+        score = _rubric_score(item.axes, rubric)
         score_label = "판단 보류" if score is None else f"{score:.2f}/3"
         axes = " · ".join(
             f"{label} "
@@ -227,7 +246,7 @@ def _render_insight(
         )
         parts.append(
             '<section class="output-item">'
-            f"<h5>{position}. 이슈 {item.finding_id} · {_GRADES[importance_grade(item.axes)]}</h5>"
+            f"<h5>{position}. 이슈 {item.finding_id} · {_GRADES[_grade(score)]}</h5>"
             f'<p class="meta">{score_label} · {axes}</p>'
             + _paragraph("판정 이유", item.reason)
             + _refs(review_id, item.basis_claim_ids)
@@ -309,6 +328,16 @@ def render_comparison(bundle: dict) -> tuple[str, dict]:
     """
     if bundle.get("schemaVersion") != 1 or not isinstance(bundle.get("results"), list):
         raise ValueError("expected runner schemaVersion=1 with a results array")
+    rubrics = bundle.get("importanceRubricVersions", {})
+    if (
+        not isinstance(rubrics, dict)
+        or not set(rubrics) <= set(_VARIANTS)
+        or any(
+            value not in {"report-importance.v5", "report-importance.v6"}
+            for value in rubrics.values()
+        )
+    ):
+        raise ValueError("unsupported importance rubric mapping")
     grouped: dict[str, list[dict]] = defaultdict(list)
     for entry in bundle["results"]:
         if (
@@ -339,6 +368,8 @@ def render_comparison(bundle: dict) -> tuple[str, dict]:
         "provenance": provenance,
         "cases": [],
     }
+    if rubrics:
+        private_key["importanceRubricVersions"] = rubrics
     public_cases = []
     sections = []
     counts = {
@@ -434,7 +465,12 @@ def render_comparison(bundle: dict) -> tuple[str, dict]:
         for side in ("A", "B"):
             output = outputs[side]
             rendered = (
-                _render_insight(output.insights[0], request, review_id)
+                _render_insight(
+                    output.insights[0],
+                    request,
+                    review_id,
+                    rubrics.get(identity["sides"][side]["variant"]),
+                )
                 if output is not None and request is not None
                 else '<p class="empty">비교할 수 있는 유효 결과가 없습니다. '
                 "이 사례는 미채점으로 남습니다.</p>"

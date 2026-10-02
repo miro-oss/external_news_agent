@@ -7,7 +7,13 @@ import pytest
 from jsonschema import Draft202012Validator
 from jsonschema import ValidationError as JsonSchemaValidationError
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
-from test_report_insight_assessment import payload, request, response
+from test_report_insight_assessment import (
+    decision_axis_schemas,
+    payload,
+    request,
+    resolve_schema_node,
+    response,
+)
 
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.report_insight_assessment import (
@@ -40,6 +46,10 @@ def _record(schema, audience, finding_id):
     ]
 
 
+def _without_description(node):
+    return {key: value for key, value in node.items() if key != "description"}
+
+
 @pytest.mark.parametrize("audience", ROLES)
 def test_claimful_record_has_fixed_keys_and_category_first_axis_branches(audience):
     source = request(ids=(4261,), audiences=(audience,))
@@ -50,14 +60,13 @@ def test_claimful_record_has_fixed_keys_and_category_first_axis_branches(audienc
     assert record["additionalProperties"] is False
     assert set(record["required"]) == {
         "findingId",
-        "connection",
-        "effect",
-        "timing",
+        "decision",
         "reason",
     }
-    properties = record["properties"]
+    properties = decision_axis_schemas(schema, record)
     for field in ("connection", "effect", "timing"):
         for branch in properties[field]["anyOf"]:
+            branch = resolve_schema_node(schema, branch)
             assert branch["type"] == "object"
             assert branch["additionalProperties"] is False
             assert set(branch["required"]) == set(branch["properties"])
@@ -65,15 +74,22 @@ def test_claimful_record_has_fixed_keys_and_category_first_axis_branches(audienc
         ("effect", "impactScope", "ReportKnownImpactScope", IMPACT_SCORES),
         ("timing", "urgencyState", "ReportKnownUrgencyState", URGENCY_SCORES),
     ):
-        known, unknown = properties[field]["anyOf"]
+        known, unknown = [
+            resolve_schema_node(schema, branch) for branch in properties[field]["anyOf"]
+        ]
         assert list(known["properties"])[0] == category
         assert known["properties"][category] == {"$ref": f"#/$defs/{definition}"}
-        assert schema["$defs"][definition] == {
+        assert _without_description(schema["$defs"][definition]) == {
             "type": "string",
             "enum": [value for value in values if value != "UNDETERMINED"],
         }
-        assert unknown["properties"][category] == {"type": "string", "const": "UNDETERMINED"}
-    direct, conditional, unrelated, unknown = properties["connection"]["anyOf"]
+        assert _without_description(unknown["properties"][category]) == {
+            "type": "string",
+            "const": "UNDETERMINED",
+        }
+    direct, conditional, unrelated, unknown = [
+        resolve_schema_node(schema, branch) for branch in properties["connection"]["anyOf"]
+    ]
     assert direct["properties"]["relation"]["const"] == "DIRECT"
     assert conditional["properties"]["relation"] == {"$ref": "#/$defs/ReportConditionalRelation"}
     assert unrelated["properties"]["relation"]["const"] == "UNRELATED"
@@ -81,6 +97,7 @@ def test_claimful_record_has_fixed_keys_and_category_first_axis_branches(audienc
     assert schema["$defs"]["ReportConditionalRelation"]["enum"] == ["CONDITIONAL", "BACKGROUND"]
     assert schema["$defs"][f"ReportWork{audience}"]["enum"] == list(ROLE_WORK[audience])
     for branch in properties["connection"]["anyOf"]:
+        branch = resolve_schema_node(schema, branch)
         assert list(branch["properties"]) == ["relation", "work", "condition", "basis"]
     Draft202012Validator.check_schema(schema)
 
@@ -116,7 +133,10 @@ def test_same_native_record_roundtrips_every_consistent_relation_without_source_
         assert public.axes.impact is None
         assert public.axes.urgency is None
     if relation == "DIRECT":
-        assert native["assessments"][audience]["finding4261"]["connection"]["basis"] is not None
+        assert (
+            native["assessments"][audience]["finding4261"]["decision"]["connection"]["basis"]
+            is not None
+        )
         assert public.basis_claim_ids == ["4261:0"]
     elif relation == "UNDETERMINED":
         assert public.basis_claim_ids == []
@@ -161,7 +181,7 @@ def test_native_axis_branches_and_local_validator_reject_category_contradictions
     known = draft_to_wire(payload(source), source)["assessments"]["CHIP_MAKER"]["finding4261"]
     changes = {
         "connection_null_basis": ("connection", "basis", None),
-        "connection_known_basis": ("connection", "basis", known["connection"]["basis"]),
+        "connection_known_basis": ("connection", "basis", known["decision"]["connection"]["basis"]),
         "connection_null_work": ("connection", "work", None),
         "connection_known_work": ("connection", "work", ROLE_WORK["CHIP_MAKER"][0]),
         "connection_nonnull_condition": ("connection", "condition", "같은 준비가 필요한 경우"),
@@ -173,21 +193,19 @@ def test_native_axis_branches_and_local_validator_reject_category_contradictions
         "timing_unknown_known_basis": ("timing", "urgencyState", "UNDETERMINED"),
     }
     if change == "effect_known":
-        item["effect"] = deepcopy(known["effect"])
+        item["decision"]["effect"] = deepcopy(known["decision"]["effect"])
     elif change == "timing_known":
-        item["timing"] = deepcopy(known["timing"])
+        item["decision"]["timing"] = deepcopy(known["decision"]["timing"])
     else:
         field, category, value = changes[change]
-        item[field][category] = deepcopy(value)
+        item["decision"][field][category] = deepcopy(value)
     snapshot = deepcopy(native)
     wire = OpenAIJsonSchemaTransformer(draft_schema(source), strict=True).walk()
     validator = Draft202012Validator(wire)
-    # Relation-to-effect/timing consistency is still checked across axes locally.
-    if change in {"effect_known", "timing_known"}:
+    # The native decision branch and local validator independently reject
+    # relation-to-effect/timing contradictions as well as each axis contract.
+    with pytest.raises(JsonSchemaValidationError):
         validator.validate(native)
-    else:
-        with pytest.raises(JsonSchemaValidationError):
-            validator.validate(native)
     with pytest.raises(ReportAssessmentDraftValidationError, match=message):
         validate_draft(_native_response(native), source)
     assert native == snapshot
@@ -202,13 +220,13 @@ def test_uniform_records_still_close_role_work_and_claim_bound_literal_proof_cho
     native = draft_to_wire(payload(source), source)
     item = native["assessments"]["CHIP_MAKER"]["finding4261"]
     if change == "foreign_claim":
-        item["connection"]["basis"]["claimId"] = "4262:0"
+        item["decision"]["connection"]["basis"]["claimId"] = "4262:0"
     elif change == "foreign_span":
-        item["connection"]["basis"]["sourceSpanId"] = "s4262_0_0"
+        item["decision"]["connection"]["basis"]["sourceSpanId"] = "s4262_0_0"
     elif change == "unknown_span":
-        item["connection"]["basis"]["sourceSpanId"] = "s4261_0_9999"
+        item["decision"]["connection"]["basis"]["sourceSpanId"] = "s4261_0_9999"
     else:
-        item["connection"]["work"] = "SYSTEM_PROCUREMENT"
+        item["decision"]["connection"]["work"] = "SYSTEM_PROCUREMENT"
     with pytest.raises(JsonSchemaValidationError):
         Draft202012Validator(draft_schema(source)).validate(native)
 
@@ -224,12 +242,12 @@ def test_captured_v7_unknown_field_combinations_fail_native_schema(failure):
     item["reason"] = "원문에 구체적 업무 연결 조건이 명확히 제시되지 않아 관계 판단이 불확실함."
     basis = {"claimId": "4261:0", "sourceSpanId": "s4261_0_0"}
     if failure == "connection_citation":
-        item["connection"]["basis"] = basis
+        item["decision"]["connection"]["basis"] = basis
     elif failure == "all_axis_citations":
         for field in ("connection", "effect", "timing"):
-            item[field]["basis"] = deepcopy(basis)
+            item["decision"][field]["basis"] = deepcopy(basis)
     else:
-        item["connection"]["condition"] = (
+        item["decision"]["connection"]["condition"] = (
             "원문에 구체적인 업무 연결 조건이 명확히 제시되지 않음."
             if failure == "metadata_condition"
             else "claims=[]"
@@ -276,8 +294,10 @@ def test_claimless_record_keeps_fixed_schema_constants_and_canonical_roundtrip()
         ("effect", "impactScope"),
         ("timing", "urgencyState"),
     ):
-        props = record["properties"][field]["properties"]
-        assert props[category] == {"type": "string", "const": "UNDETERMINED"}
+        props = resolve_schema_node(schema, record["properties"]["decision"]["properties"][field])[
+            "properties"
+        ]
+        assert _without_description(props[category]) == {"type": "string", "const": "UNDETERMINED"}
         assert props["basis"] == {"type": "null"}
     native = draft_to_wire(flat, source)
     snapshot = deepcopy(native)

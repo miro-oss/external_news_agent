@@ -91,12 +91,17 @@ class ReportAssessmentTiming(AgentModel):
     basis: ReportAssessmentSourceSpan | None
 
 
-class ReportFindingAssessmentWire(AgentModel):
+class ReportAssessmentDecision(AgentModel):
     model_config = ConfigDict(strict=True)
-    finding_id: StrictInt = Field(gt=0)
     connection: ReportAssessmentConnection
     effect: ReportAssessmentEffect
     timing: ReportAssessmentTiming
+
+
+class ReportFindingAssessmentWire(AgentModel):
+    model_config = ConfigDict(strict=True)
+    finding_id: StrictInt = Field(gt=0)
+    decision: ReportAssessmentDecision
     reason: str = Field(min_length=1, max_length=180)
 
     def flattened(self, source_spans: dict[str, dict[str, str]]) -> ReportFindingAssessmentDraft:
@@ -112,14 +117,14 @@ class ReportFindingAssessmentWire(AgentModel):
 
         return ReportFindingAssessmentDraft(
             finding_id=self.finding_id,
-            work=self.connection.work,
-            relation=self.connection.relation,
-            relation_basis=literal(self.connection.basis, "connection.basis"),
-            condition=self.connection.condition,
-            impact_scope=self.effect.impact_scope,
-            impact_basis=literal(self.effect.basis, "effect.basis"),
-            urgency_state=self.timing.urgency_state,
-            urgency_basis=literal(self.timing.basis, "timing.basis"),
+            work=self.decision.connection.work,
+            relation=self.decision.connection.relation,
+            relation_basis=literal(self.decision.connection.basis, "connection.basis"),
+            condition=self.decision.connection.condition,
+            impact_scope=self.decision.effect.impact_scope,
+            impact_basis=literal(self.decision.effect.basis, "effect.basis"),
+            urgency_state=self.decision.timing.urgency_state,
+            urgency_basis=literal(self.decision.timing.basis, "timing.basis"),
             reason=self.reason,
         )
 

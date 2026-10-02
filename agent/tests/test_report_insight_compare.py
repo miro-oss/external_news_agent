@@ -182,6 +182,61 @@ def test_variant_model_attempt_and_cost_metadata_are_only_in_private_key():
     assert "caseId" not in manifest(page)["cases"][0]
 
 
+def test_bound_runtime_rubrics_preserve_native_grades_and_ranking_without_unblinding():
+    data = bundle()
+    data["importanceRubricVersions"] = {
+        "single_call": "report-importance.v5",
+        "staged": "report-importance.v6",
+    }
+    for entry in data["results"]:
+        finding = deepcopy(entry["request"]["findings"][0])
+        finding["id"] = 11
+        finding["claims"][0]["id"] = "11:0"
+        entry["request"]["findings"].append(finding)
+        assessment = entry["response"]["insights"][0]["assessments"][0]
+        assessment["axes"].update(directness=0, impact=None)
+        known = deepcopy(assessment)
+        known.update(findingId=11, basisClaimIds=["11:0"])
+        known["axes"]["impact"] = 0
+        entry["response"]["insights"][0]["assessments"].append(known)
+    page, key = render_comparison(data)
+    panels = page.split('<section class="result panel">')[1:]
+    assert len(panels) == 2
+    for side, panel in zip(("A", "B"), panels, strict=True):
+        variant = key["cases"][0]["sides"][side]["variant"]
+        if variant == "single_call":
+            assert "1. 이슈 11 · 낮음" in panel
+            assert "2. 이슈 10 · 판단 보류" in panel
+        else:
+            assert "1. 이슈 10 · 낮음" in panel
+            assert "2. 이슈 11 · 낮음" in panel
+    assert "report-importance" not in page
+    assert key["importanceRubricVersions"] == data["importanceRubricVersions"]
+    changed = deepcopy(data)
+    changed["importanceRubricVersions"]["single_call"] = "report-importance.v6"
+    assert render_comparison(changed)[1]["manifestHash"] != key["manifestHash"]
+
+
+def test_bound_runtime_rubrics_preserve_native_overall_grade():
+    data = bundle()
+    data["importanceRubricVersions"] = {
+        "single_call": "report-importance.v5",
+        "staged": "report-importance.v6",
+    }
+    for entry in data["results"]:
+        entry["response"]["insights"][0]["assessments"][0]["axes"].update(directness=0, impact=None)
+    page, _ = render_comparison(data)
+    assert page.count("최고 이슈 중요도: <strong>판단 보류</strong>") == 1
+    assert page.count("최고 이슈 중요도: <strong>낮음</strong>") == 1
+
+
+def test_unknown_importance_rubric_does_not_silently_use_current_grading():
+    data = bundle()
+    data["importanceRubricVersions"] = {"single_call": "report-importance.v100"}
+    with pytest.raises(ValueError, match="unsupported importance rubric"):
+        render_comparison(data)
+
+
 def test_untrusted_content_is_text_and_cannot_break_out_of_json_or_html():
     attack = '</script><img src=x onerror="alert(1)"><script>bad()</script>\u2028&\u2029END'
     data = bundle()

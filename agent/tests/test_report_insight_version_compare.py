@@ -197,6 +197,492 @@ def test_prepare_rejects_synthetic_and_shared_runtime(prepared):
         runner.prepare(dataset, directory, runner.ledger.AGENT_ROOT)
 
 
+@pytest.fixture
+def prepared_v8_v9(prepared, tmp_path, monkeypatch):
+    dataset, _, baseline = prepared
+    candidate = tmp_path / "frozen-candidate-agent"
+    policy = runner.COMPARISON_PROFILES["v8-v9"]
+
+    def info(root):
+        version = "baseline" if Path(root).resolve() == baseline.resolve() else "candidate"
+        return {
+            "runtimeRoot": str(Path(root).resolve()),
+            "runtimeSourceSha256s": {"service.py": version},
+            "dependencyVersions": {"openai": "3.7.0"},
+            "pythonVersion": "3.13.5",
+            "promptVersion": policy[f"{version}PromptVersion"],
+            "rubricVersion": policy[f"{version}RubricVersion"],
+        }
+
+    monkeypatch.setattr(runner, "_runtime_info", info)
+    monkeypatch.setattr(runner, "runtime_info", lambda: info(candidate))
+    directory = tmp_path / "current-comparison"
+    runner.prepare(
+        dataset,
+        directory,
+        baseline,
+        candidate_root=candidate,
+        comparison_profile="v8-v9",
+        max_calls=32,
+        max_cost_usd=Decimal("0.50"),
+    )
+    return dataset, directory, baseline, candidate
+
+
+def test_current_comparison_freezes_both_staged_runtimes_and_same_inputs(prepared_v8_v9):
+    dataset, directory, baseline, candidate = prepared_v8_v9
+    manifest = runner._read(directory / "manifest.json")
+    assert manifest["baseCallUpperBound"] == 8
+    assert manifest["repairCallUpperBound"] == 16
+    assert manifest["jobs"][0]["request"] == manifest["jobs"][1]["request"]
+    assert manifest["jobs"][0]["inputSha256"] == manifest["jobs"][1]["inputSha256"]
+    assert manifest["policy"]["maxCalls"] == 32
+    assert manifest["policy"]["maxCostEstimatedUsd"] == "0.50"
+    assert manifest["provenance"]["model"] == "gpt-4.1-nano"
+    assert manifest["provenance"]["baselineCommit"] == ("e75f2d851f1a3b61d86232a94d59f71072055318")
+    runtimes = manifest["provenance"]["runtimeVersions"]
+    assert runtimes["baseline"]["runtimeRoot"] == str(baseline.resolve())
+    assert runtimes["candidate"]["runtimeRoot"] == str(candidate.resolve())
+    assert runtimes["baseline"]["promptVersion"] == "report-insight.ko.v8"
+    assert runtimes["candidate"]["promptVersion"] == "report-insight.ko.v9"
+    assert runtimes["baseline"]["rubricVersion"] == "report-importance.v5"
+    assert runtimes["candidate"]["rubricVersion"] == "report-importance.v6"
+    assert runner.summary(directory)["comparisonScope"] == (
+        "frozen v8 versus v9 on the same actual report inputs"
+    )
+    assert runner._adapter(read_state(directory))["importanceRubricVersions"] == {
+        "single_call": "report-importance.v5",
+        "staged": "report-importance.v6",
+    }
+    assert (
+        runner.prepare(
+            dataset,
+            directory,
+            baseline,
+            candidate_root=candidate,
+            comparison_profile="v8-v9",
+            max_calls=32,
+            max_cost_usd=Decimal("0.50"),
+        )
+        == manifest
+    )
+
+
+@pytest.mark.parametrize("variant", ["baseline", "candidate"])
+def test_current_comparison_requires_and_accounts_for_staged_call_ids(prepared_v8_v9, variant):
+    _, directory, _, _ = prepared_v8_v9
+    provider, sdk = start_provider(directory, variant)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="CALL_ID_REQUIRED"):
+        invoke(provider, "MAP-001", baseline=True)
+    assert not sdk.calls
+    for identifier in ("MAP-001", "MAP-002", "REVIEW-001", "REDUCE-001"):
+        invoke(provider, identifier)
+    runner.verify(directory, provider.manifest, provider.state)
+    assert len(sdk.calls) == 4
+    assert all(call["model"] == "gpt-4.1-nano" for call in sdk.calls)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="UNKNOWN_STAGE"):
+        invoke(provider, "MAP-003")
+    assert len(sdk.calls) == 4
+
+
+@pytest.mark.parametrize(
+    "field,value,code",
+    [
+        ("promptVersion", "report-insight.ko.v8", "VERSION_RUNTIME_MISMATCH"),
+        ("rubricVersion", "report-importance.v5", "RUBRIC_RUNTIME_MISMATCH"),
+    ],
+)
+def test_current_comparison_rejects_wrong_candidate_version(
+    prepared_v8_v9, monkeypatch, field, value, code
+):
+    dataset, directory, baseline, candidate = prepared_v8_v9
+    original = runner._runtime_info
+
+    def changed(root):
+        info = original(root)
+        if Path(root).resolve() == candidate.resolve():
+            info[field] = value
+        return info
+
+    monkeypatch.setattr(runner, "_runtime_info", changed)
+    with pytest.raises(runner.ledger.EvaluationStopped, match=code):
+        runner.prepare(
+            dataset,
+            directory,
+            baseline,
+            candidate_root=candidate,
+            comparison_profile="v8-v9",
+        )
+
+
+def test_current_comparison_rejects_shared_roots_and_changed_resume_root(prepared_v8_v9, tmp_path):
+    dataset, directory, baseline, _ = prepared_v8_v9
+    with pytest.raises(runner.ledger.EvaluationStopped, match="BASELINE_MUST_BE_ISOLATED"):
+        runner.prepare(
+            dataset, directory, baseline, candidate_root=baseline, comparison_profile="v8-v9"
+        )
+    with pytest.raises(runner.ledger.EvaluationStopped, match="PREPARED_RUN_CHANGED"):
+        runner.prepare(
+            dataset,
+            directory,
+            baseline,
+            candidate_root=tmp_path / "different-candidate",
+            comparison_profile="v8-v9",
+            max_calls=32,
+            max_cost_usd=Decimal("0.50"),
+        )
+
+
+def test_current_comparison_rejects_profile_downgrade_in_checkpoint(prepared_v8_v9):
+    _, directory, _, _ = prepared_v8_v9
+    manifest = runner._read(directory / "manifest.json")
+    state = read_state(directory)
+    manifest["policy"].pop("comparisonProfile")
+    rebind(directory, manifest, state)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="POLICY_CHANGED"):
+        runner.verify(directory, manifest, state)
+
+
+@pytest.mark.parametrize(
+    "kwargs,code",
+    [
+        ({"baseline_commit": "cbfb174"}, "BASELINE_COMMIT_CHANGED"),
+        ({"max_calls": 145}, "INVALID_CALL_LIMIT"),
+        ({"max_cost_usd": Decimal("1.01")}, "INVALID_COST_LIMIT"),
+    ],
+)
+def test_current_comparison_preserves_hard_limits(prepared_v8_v9, kwargs, code):
+    dataset, directory, baseline, candidate = prepared_v8_v9
+    with pytest.raises(runner.ledger.EvaluationStopped, match=code):
+        runner.prepare(
+            dataset,
+            directory,
+            baseline,
+            candidate_root=candidate,
+            comparison_profile="v8-v9",
+            **kwargs,
+        )
+
+
+def test_current_comparison_resume_rechecks_frozen_candidate_before_admission(
+    prepared_v8_v9, monkeypatch
+):
+    _, directory, _, candidate = prepared_v8_v9
+    original = runner._runtime_info
+
+    def changed(root):
+        info = original(root)
+        if Path(root).resolve() == candidate.resolve():
+            info["runtimeSourceSha256s"] = {"service.py": "changed"}
+        return info
+
+    monkeypatch.setattr(runner, "_runtime_info", changed)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="RUNTIME_CHANGED"):
+        runner.run(directory, api_key="offline-key")
+    assert not read_state(directory)["attempts"]
+
+
+@pytest.mark.parametrize("operation", ["status", "run", "review", "score"])
+def test_current_comparison_binds_coordinator_helpers_separately_from_frozen_runtimes(
+    prepared_v8_v9, tmp_path, monkeypatch, operation
+):
+    dataset, _, baseline, candidate = prepared_v8_v9
+    coordinator = tmp_path / "coordinator-agent"
+    coordinator.mkdir()
+    helper = coordinator / "report_insight_compare.py"
+    helper.write_text("original renderer")
+    monkeypatch.setattr(runner.ledger, "AGENT_ROOT", coordinator)
+    monkeypatch.setattr(
+        runner.ledger, "runtime_hashes", lambda: {helper.name: runner.ledger.file_digest(helper)}
+    )
+    directory = tmp_path / "coordinator-binding"
+    manifest = runner.prepare(
+        dataset, directory, baseline, candidate_root=candidate, comparison_profile="v8-v9"
+    )
+    assert manifest["provenance"]["coordinatorSources"]["root"] == str(coordinator)
+    helper.write_text("changed renderer")
+    actions = {
+        "status": lambda: runner.summary(directory),
+        "run": lambda: runner.run(directory, api_key="offline-key"),
+        "review": lambda: runner.export_review(directory),
+        "score": lambda: runner.score(directory, {}),
+    }
+    with pytest.raises(runner.ledger.EvaluationStopped, match="COORDINATOR_CHANGED"):
+        actions[operation]()
+    assert not read_state(directory)["attempts"]
+    assert not (directory / "blind-review.html").exists()
+    assert not (directory / "quality-summary.json").exists()
+
+
+@pytest.fixture
+def prepared_refinement(prepared, tmp_path, monkeypatch):
+    dataset, _, baseline = prepared
+    corpus = runner._read(dataset)
+    prototype = corpus["cases"][0]
+    cases = []
+    for index, count in enumerate((28, 27)):
+        case = deepcopy(prototype)
+        case["caseId"] = f"refinement-report-{index}"
+        finding = case["request"]["findings"][0]
+        case["request"]["findings"] = []
+        for offset in range(count):
+            item = deepcopy(finding)
+            item.update(id=100 + offset, articleId=200 + offset)
+            item["claims"][0]["id"] = f"{100 + offset}:0"
+            case["request"]["findings"].append(item)
+        cases.append(case)
+    corpus["cases"] = cases
+    dataset.write_text(json.dumps(corpus, ensure_ascii=False))
+    candidate = tmp_path / "refinement-candidate"
+    policy = runner.COMPARISON_PROFILES["v9-refinement"]
+
+    def info(root):
+        variant = "baseline" if Path(root).resolve() == baseline.resolve() else "candidate"
+        return {
+            "runtimeRoot": str(Path(root).resolve()),
+            "runtimeSourceSha256s": {"service.py": runner.ledger.digest(variant)},
+            "dependencyVersions": {"openai": "3.7.0"},
+            "pythonVersion": "3.13.5",
+            "promptVersion": policy[f"{variant}PromptVersion"],
+            "rubricVersion": policy[f"{variant}RubricVersion"],
+        }
+
+    monkeypatch.setattr(runner, "_runtime_info", info)
+    monkeypatch.setattr(runner, "runtime_info", lambda: info(candidate))
+    directory = tmp_path / "refinement-comparison"
+    runner.prepare(
+        dataset,
+        directory,
+        baseline,
+        candidate_root=candidate,
+        comparison_profile="v9-refinement",
+        max_calls=48,
+        max_cost_usd=Decimal("0.50"),
+    )
+    return dataset, directory, baseline, candidate
+
+
+def test_refinement_preserves_legacy_policy_bytes():
+    # Saved checkpoints bind these exact policies; adding a profile must not
+    # silently reinterpret an earlier experiment or its costs and versions.
+    assert runner.ledger.digest(runner.COMPARISON_PROFILES["v3-v4"]) == (
+        "ac0d7947218d403ddf58c7a893a4803e911ae2240993e5497e2ac793e91774e7"
+    )
+    assert runner.ledger.digest(runner.COMPARISON_PROFILES["v8-v9"]) == (
+        "45796d285d99a5da238e950b19cb02649b9dbe6f63a0ad93bbc3ce0cdbbfdb4f"
+    )
+    assert runner.ledger.digest(runner.COMPARISON_PROFILES["v9-refinement"]) == (
+        "5fd85c17d466f674cbfee1ccaa1c6d89530f5c949c55d924ff41af09de5c0fb6"
+    )
+
+
+def test_refinement_preserves_same_inputs_and_versions_with_distinct_code(prepared_refinement):
+    dataset, directory, baseline, candidate = prepared_refinement
+    manifest = runner._read(directory / "manifest.json")
+    assert manifest["baseCallUpperBound"] == 24
+    assert manifest["repairCallUpperBound"] == 48
+    assert manifest["policy"]["maxCalls"] == 48
+    assert manifest["policy"]["maxCostEstimatedUsd"] == "0.50"
+    assert manifest["provenance"]["model"] == "gpt-4.1-nano"
+    assert manifest["provenance"]["baselineCommit"] == ("c555596e7ab22d13a46087888de95024585f6093")
+    runtimes = manifest["provenance"]["runtimeVersions"]
+    assert all(info["promptVersion"] == "report-insight.ko.v9" for info in runtimes.values())
+    assert all(info["rubricVersion"] == "report-importance.v6" for info in runtimes.values())
+    assert (
+        runtimes["baseline"]["runtimeSourceSha256s"]
+        != runtimes["candidate"]["runtimeSourceSha256s"]
+    )
+    assert manifest["provenance"]["coordinatorSources"]["sourceSha256s"]
+    for index in (0, 2):
+        before, after = manifest["jobs"][index : index + 2]
+        assert before["request"] == after["request"]
+        assert before["inputSha256"] == after["inputSha256"]
+    assert runner._adapter(read_state(directory))["importanceRubricVersions"] == {
+        "single_call": "report-importance.v6",
+        "staged": "report-importance.v6",
+    }
+    summary = runner.summary(directory)
+    assert summary["comparisonScope"] == (
+        "frozen v9 code refinement from c555596 versus the candidate on the same actual "
+        "report inputs; both runtimes identified by source hashes"
+    )
+    assert summary["eligiblePairs"] == 0 and summary["excludedPairs"] == 2
+    assert not summary["qualityMeasured"] and not summary["qualityImprovementClaimed"]
+    assert (
+        runner.prepare(
+            dataset,
+            directory,
+            baseline,
+            candidate_root=candidate,
+            comparison_profile="v9-refinement",
+            max_calls=48,
+            max_cost_usd=Decimal("0.50"),
+        )
+        == manifest
+    )
+
+
+def test_bounded_review_profile_reserves_each_versions_actual_batch_limits(
+    prepared_refinement, tmp_path
+):
+    dataset, _, baseline, candidate = prepared_refinement
+    directory = tmp_path / "bounded-review"
+    manifest = runner.prepare(
+        dataset,
+        directory,
+        baseline,
+        candidate_root=candidate,
+        comparison_profile="v9-bounded-review",
+        max_calls=36,
+        max_cost_usd=Decimal("0.4634084"),
+    )
+    assert manifest["baseCallUpperBound"] == 28
+    assert manifest["repairCallUpperBound"] == 56
+    assert manifest["policy"]["maxCalls"] == 36
+    assert manifest["policy"]["maxCostEstimatedUsd"] == "0.4634084"
+    jobs = manifest["jobs"]
+    for left, right in (jobs[:2], jobs[2:]):
+        assert left["request"] == right["request"]
+        assert left["inputSha256"] == right["inputSha256"]
+    assert runner.summary(directory)["eligiblePairs"] == 0
+    assert not runner.summary(directory)["qualityMeasured"]
+
+
+@pytest.mark.parametrize("profile", ["v9-refinement", "v9-bounded-review"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "baselineMapChunkFindingLimit",
+        "baselineReviewChunkFindingLimit",
+        "candidateMapChunkFindingLimit",
+        "candidateReviewChunkFindingLimit",
+    ],
+)
+def test_profile_rejects_rehashed_variant_chunk_overrides(
+    prepared_refinement, tmp_path, profile, key
+):
+    dataset, _, baseline, candidate = prepared_refinement
+    directory = tmp_path / "injected-variant-chunk-limit"
+    manifest = runner.prepare(
+        dataset,
+        directory,
+        baseline,
+        candidate_root=candidate,
+        comparison_profile=profile,
+    )
+    state = read_state(directory)
+    manifest["policy"][key] = 1
+    # Even a self-consistent rewritten manifest/checkpoint cannot change the
+    # fixed profile's effective stage limits through formerly absent keys.
+    rebind(directory, manifest, state)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="POLICY_CHANGED"):
+        runner.verify(directory, manifest, state)
+    assert not read_state(directory)["attempts"]
+
+
+@pytest.mark.parametrize("variant", ["baseline", "candidate"])
+def test_bounded_review_admission_keeps_review_chunks_and_repairs_separate(
+    prepared_refinement, tmp_path, variant
+):
+    dataset, _, baseline, candidate = prepared_refinement
+    directory = tmp_path / "bounded-review"
+    runner.prepare(
+        dataset,
+        directory,
+        baseline,
+        candidate_root=candidate,
+        comparison_profile="v9-bounded-review",
+        max_calls=36,
+    )
+    provider, sdk = start_provider(directory, variant)
+    stages = ["MAP-001", "MAP-002", "MAP-003", "MAP-004"]
+    if variant == "candidate":
+        stages.append("MAP-005")
+    stages.append("REVIEW-001")
+    if variant == "candidate":
+        stages.append("REVIEW-002")
+    stages.append("REDUCE-001")
+    for stage in stages:
+        invoke(provider, stage)
+        invoke(provider, stage)
+    assert len(sdk.calls) == (16 if variant == "candidate" else 12)
+    runner.verify(directory, provider.manifest, provider.state)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="EXCESS_SCHEMA_REPAIR"):
+        invoke(provider, "REVIEW-001")
+    invalid = "REVIEW-003" if variant == "candidate" else "REVIEW-002"
+    with pytest.raises(runner.ledger.EvaluationStopped, match="UNKNOWN_STAGE"):
+        invoke(provider, invalid)
+    invalid_map = "MAP-006" if variant == "candidate" else "MAP-005"
+    with pytest.raises(runner.ledger.EvaluationStopped, match="UNKNOWN_STAGE"):
+        invoke(provider, invalid_map)
+
+
+@pytest.mark.parametrize("variant", ["baseline", "candidate"])
+def test_refinement_accepts_both_staged_call_sequences(prepared_refinement, variant):
+    _, directory, _, _ = prepared_refinement
+    provider, sdk = start_provider(directory, variant)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="CALL_ID_REQUIRED"):
+        invoke(provider, "MAP-001", baseline=True)
+    assert not sdk.calls
+    for identifier in (
+        "MAP-001",
+        "MAP-002",
+        "MAP-003",
+        "MAP-004",
+        "REVIEW-001",
+        "REDUCE-001",
+    ):
+        invoke(provider, identifier)
+    runner.verify(directory, provider.manifest, provider.state)
+    assert len(sdk.calls) == 6
+    assert all(call["model"] == "gpt-4.1-nano" for call in sdk.calls)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="UNKNOWN_STAGE"):
+        invoke(provider, "MAP-005")
+    assert len(sdk.calls) == 6
+
+
+def test_refinement_rejects_old_baseline_and_changed_candidate_sources(
+    prepared_refinement, monkeypatch
+):
+    dataset, directory, baseline, candidate = prepared_refinement
+    with pytest.raises(runner.ledger.EvaluationStopped, match="BASELINE_COMMIT_CHANGED"):
+        runner.prepare(
+            dataset,
+            directory,
+            baseline,
+            candidate_root=candidate,
+            comparison_profile="v9-refinement",
+            baseline_commit=runner.COMPARISON_PROFILES["v8-v9"]["baselineCommit"],
+        )
+    original = runner._runtime_info
+
+    def changed(root):
+        info = original(root)
+        if Path(root).resolve() == candidate.resolve():
+            info["runtimeSourceSha256s"] = {"service.py": "changed"}
+        return info
+
+    monkeypatch.setattr(runner, "_runtime_info", changed)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="RUNTIME_CHANGED"):
+        runner.run(directory, api_key="offline-key")
+    assert not read_state(directory)["attempts"]
+
+
+def test_refinement_rechecks_coordinator_before_reporting(prepared_refinement, monkeypatch):
+    _, directory, _, _ = prepared_refinement
+    original = runner.ledger.file_digest
+    monkeypatch.setattr(
+        runner.ledger,
+        "file_digest",
+        lambda path: (
+            "changed" if Path(path).name == "report_insight_compare.py" else original(path)
+        ),
+    )
+    with pytest.raises(runner.ledger.EvaluationStopped, match="COORDINATOR_CHANGED"):
+        runner.summary(directory)
+    assert not read_state(directory)["attempts"]
+
+
 def test_each_map_chunk_review_reduce_has_independent_repair_budget_and_exact_wire(prepared):
     _, directory, _ = prepared
 
@@ -315,23 +801,29 @@ def test_error_body_keeps_only_numeric_usage_no_key_or_message(prepared):
 
 
 @pytest.mark.parametrize(
-    "status,code,expected",
+    "status,code,kind,retry_after,expected,expected_retry",
     [
-        (400, "invalid_json_schema", "invalid_json_schema"),
-        (429, "rate_limit_exceeded", "rate_limit_exceeded"),
-        (503, "private-provider-code", "UNKNOWN"),
-        (500, None, "UNKNOWN"),
+        (400, "invalid_json_schema", None, None, "invalid_json_schema", None),
+        (429, "rate_limit_exceeded", None, "3.5", "rate_limit_exceeded", 3.5),
+        (503, "private-provider-code", None, None, "UNKNOWN", None),
+        (500, None, None, None, "UNKNOWN", None),
+        (429, None, "rate_limit_exceeded", "8", "rate_limit_exceeded", 8.0),
+        (429, None, "insufficient_quota", "0", "insufficient_quota", 0.0),
+        (429, None, "private-provider-type", "invalid-private-header", "UNKNOWN", None),
     ],
 )
 def test_http_diagnostics_keep_only_status_allowlisted_code_and_unknown_reservation(
-    prepared, status, code, expected
+    prepared, status, code, kind, retry_after, expected, expected_retry
 ):
     _, directory, _ = prepared
 
     def fail(wire, count):
         response = httpx2.Response(
             status,
-            headers={"authorization": "private-response-header"},
+            headers={
+                "authorization": "private-response-header",
+                **({"retry-after": retry_after} if retry_after is not None else {}),
+            },
             request=httpx2.Request(
                 "POST",
                 "https://api.openai.com/v1/responses",
@@ -341,7 +833,7 @@ def test_http_diagnostics_keep_only_status_allowlisted_code_and_unknown_reservat
         raise APIStatusError(
             "private-exception-message",
             response=response,
-            body={"code": code, "message": "private-body-message"},
+            body={"code": code, "type": kind, "message": "private-body-message"},
         )
 
     provider, sdk = start_provider(directory, sdk=FakeSDK(fail))
@@ -350,6 +842,9 @@ def test_http_diagnostics_keep_only_status_allowlisted_code_and_unknown_reservat
     state = read_state(directory)
     record = state["attempts"][0]
     assert record["providerHttpStatus"] == status and record["providerErrorCode"] == expected
+    assert record.get("providerRetryAfterSeconds") == expected_retry
+    if expected_retry is None:
+        assert "providerRetryAfterSeconds" not in record
     assert record["unsettledReservedUsd"] == record["reservedCostUsd"]
     assert Decimal(record["costEstimatedUsd"]) == 0 and record["providerRawResponse"] is None
     assert len(sdk.calls) == 1
@@ -362,6 +857,8 @@ def test_http_diagnostics_keep_only_status_allowlisted_code_and_unknown_reservat
             "private-exception-message",
             "private-body-message",
             "private-provider-code",
+            "private-provider-type",
+            "invalid-private-header",
         )
     )
     runner.verify(directory, provider.manifest, state)
@@ -371,15 +868,99 @@ def test_http_diagnostics_keep_only_status_allowlisted_code_and_unknown_reservat
         runner.run(directory, api_key="offline-key")
 
 
-def test_http_diagnostic_fields_do_not_make_unknown_usage_job_safe_to_continue(prepared):
+@pytest.mark.parametrize(
+    "header,expected",
+    [
+        ("0", 0.0),
+        ("86400", 86400.0),
+        ("86400.1", None),
+        ("-1", None),
+        ("NaN", None),
+        ("Infinity", None),
+        ("1e300", None),
+        ("private-header-text", None),
+        ("Thu, 01 Jan 1970 00:00:00 GMT", 0.0),
+    ],
+)
+def test_retry_after_diagnostics_normalize_headers_without_shortening_oversized_waits(
+    header, expected
+):
+    error = APIStatusError(
+        "private-error-message",
+        response=httpx2.Response(
+            429,
+            headers={"retry-after": header},
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+        ),
+        body={"code": None, "type": "rate_limit_exceeded"},
+    )
+    diagnostics = runner._provider_failure_diagnostics(error)
+    assert diagnostics["providerErrorCode"] == "rate_limit_exceeded"
+    assert diagnostics.get("providerRetryAfterSeconds") == expected
+    if expected is None:
+        assert "providerRetryAfterSeconds" not in diagnostics
+
+
+@pytest.mark.parametrize("value", [True, "8", -1, 86_400.1, float("nan"), float("inf")])
+def test_checkpoint_rejects_invalid_retry_after_metadata(prepared, value):
+    _, directory, _ = prepared
+    provider, _ = start_provider(directory)
+    invoke(provider, "MAP-001")
+    record = deepcopy(provider.state["attempts"][0])
+    record.update(
+        status="failed",
+        providerHttpStatus=429,
+        providerErrorCode="rate_limit_exceeded",
+        providerRetryAfterSeconds=value,
+    )
+    with pytest.raises(
+        runner.ledger.EvaluationStopped, match="CHECKPOINT_PROVIDER_DIAGNOSTICS_CHANGED"
+    ):
+        runner._verify_record(record, 1)
+
+
+def test_optional_retry_after_metadata_preserves_legacy_records_and_requires_http_failure(prepared):
+    _, directory, _ = prepared
+    provider, _ = start_provider(directory)
+    invoke(provider, "MAP-001")
+    record = deepcopy(provider.state["attempts"][0])
+    assert "providerRetryAfterSeconds" not in record
+    runner._verify_record(record, 1)
+    record["providerRetryAfterSeconds"] = None
+    runner._verify_record(record, 1)
+    record["providerRetryAfterSeconds"] = 8.0
+    with pytest.raises(
+        runner.ledger.EvaluationStopped, match="CHECKPOINT_PROVIDER_DIAGNOSTICS_CHANGED"
+    ):
+        runner._verify_record(record, 1)
+    record["status"] = "failed"
+    with pytest.raises(
+        runner.ledger.EvaluationStopped, match="CHECKPOINT_PROVIDER_DIAGNOSTICS_CHANGED"
+    ):
+        runner._verify_record(record, 1)
+
+
+@pytest.mark.parametrize(
+    "status,code,kind,expected",
+    [
+        (400, "invalid_json_schema", None, "invalid_json_schema"),
+        (429, None, "rate_limit_exceeded", "rate_limit_exceeded"),
+        (429, None, "insufficient_quota", "insufficient_quota"),
+    ],
+)
+def test_http_diagnostic_fields_do_not_make_unknown_usage_job_safe_to_continue(
+    prepared, status, code, kind, expected
+):
     _, directory, _ = prepared
 
     def fail(wire, count):
         response = httpx2.Response(
-            400, request=httpx2.Request("POST", "https://api.openai.com/v1/responses")
+            status,
+            headers={"retry-after": "8"},
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
         )
         raise APIStatusError(
-            "private-message", response=response, body={"code": "invalid_json_schema"}
+            "private-message", response=response, body={"code": code, "type": kind}
         )
 
     index = next(
@@ -392,7 +973,9 @@ def test_http_diagnostic_fields_do_not_make_unknown_usage_job_safe_to_continue(p
     assert state["status"] == "stopped"
     assert state["results"][index]["terminalFailureSafe"] is False
     assert state["errors"][0]["safeToContinue"] is False
-    assert state["attempts"][0]["providerHttpStatus"] == 400
+    assert state["attempts"][0]["providerHttpStatus"] == status
+    assert state["attempts"][0]["providerErrorCode"] == expected
+    assert state["attempts"][0]["providerRetryAfterSeconds"] == 8.0
     assert Decimal(state["totals"]["unsettledReservedUsd"]) > 0
     with pytest.raises(runner.ledger.EvaluationStopped, match="RECORDED_FAILURE_REQUIRES_REVIEW"):
         runner.run(directory, api_key="offline-key")
@@ -734,7 +1317,7 @@ def test_native_axis_branches_and_post_validation_both_reject_invalid_correlatio
     )
     native_schema = sdk.calls[0]["text"]["format"]["schema"]
     invalid = deepcopy(native)
-    invalid["assessments"]["CHIP_MAKER"]["finding501"][block][field] = value
+    invalid["assessments"]["CHIP_MAKER"]["finding501"]["decision"][block][field] = value
     with pytest.raises(JsonSchemaValidationError):
         Draft202012Validator(native_schema).validate(invalid)
     with pytest.raises(assessment.ReportAssessmentDraftValidationError):
@@ -750,12 +1333,12 @@ def test_native_schema_rejects_unknown_and_other_finding_source_span_ids(prepare
         system_instruction="same report instruction", prompt="source", response_schema=schema
     )
     native_schema = sdk.calls[0]["text"]["format"]["schema"]
-    other_span_id = native["assessments"]["CHIP_MAKER"]["finding502"]["connection"]["basis"][
-        "sourceSpanId"
-    ]
+    other_span_id = native["assessments"]["CHIP_MAKER"]["finding502"]["decision"]["connection"][
+        "basis"
+    ]["sourceSpanId"]
     for wrong_span_id in ("unknown_source_span", other_span_id):
         invalid = deepcopy(native)
-        invalid["assessments"]["CHIP_MAKER"]["finding501"]["connection"]["basis"][
+        invalid["assessments"]["CHIP_MAKER"]["finding501"]["decision"]["connection"]["basis"][
             "sourceSpanId"
         ] = wrong_span_id
         with pytest.raises(JsonSchemaValidationError):
