@@ -1082,7 +1082,15 @@ def test_four_audience_twelve_finding_sdk_review_schema_stays_within_all_size_li
 
 
 def resolve_schema_node(schema, node):
-    return schema["$defs"][node["$ref"].removeprefix("#/$defs/")] if "$ref" in node else node
+    # The SDK wraps annotated references in a single-choice anyOf.
+    while "$ref" in node or (
+        len(node.get("anyOf", [])) == 1 and "$ref" in node["anyOf"][0]
+    ):
+        if "$ref" in node:
+            node = schema["$defs"][node["$ref"].removeprefix("#/$defs/")]
+        else:
+            node = node["anyOf"][0]
+    return node
 
 
 def test_compact_native_axes_enforce_categories_without_duplicating_source_choices():
@@ -1118,9 +1126,9 @@ def test_compact_native_axes_enforce_categories_without_duplicating_source_choic
             for branch in branches[:2]:
                 assert branch["properties"]["work"] == {"$ref": f"#/$defs/{name}"}
             for branch in branches[:3]:
-                assert branch["properties"]["basis"] == {
-                    "$ref": f"#/$defs/Finding{finding.id}SourceSpan"
-                }
+                assert resolve_schema_node(wire, branch["properties"]["basis"]) == definitions[
+                    f"Finding{finding.id}SourceSpan"
+                ]
             assert branches[-1]["properties"]["basis"] == {"type": "null"}
             for field, category, definition in (
                 ("effect", "impactScope", "ReportKnownImpactScope"),
@@ -1131,9 +1139,9 @@ def test_compact_native_axes_enforce_categories_without_duplicating_source_choic
                 ]
                 assert list(known["properties"])[0] == category
                 assert known["properties"][category] == {"$ref": f"#/$defs/{definition}"}
-                assert known["properties"]["basis"] == {
-                    "$ref": f"#/$defs/Finding{finding.id}SourceSpan"
-                }
+                assert resolve_schema_node(wire, known["properties"]["basis"]) == definitions[
+                    f"Finding{finding.id}SourceSpan"
+                ]
                 assert unknown["properties"]["basis"] == {"type": "null"}
     validator = Draft202012Validator(wire)
     for field in ("connection", "effect", "timing"):

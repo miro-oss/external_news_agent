@@ -19,6 +19,7 @@ from app.core.report_importance import score_importance
 from app.llm.base import ProviderResponse
 from app.llm.openai_contract import _object
 from app.llm.prompt_data import prompt_json
+from app.llm.report_insight_assessment_coherence import assessment_coherence_errors
 from app.llm.report_insight_guard import report_reference_date
 from app.llm.report_insight_retrieval import _ROLE_QUERIES, tokenize_report_evidence
 from app.llm.report_insight_work_grounding import work_prose_problems
@@ -72,6 +73,26 @@ ROLE_WORK: dict[Audience, tuple[str, ...]] = {
         "POWER_COOLING",
         "NETWORK",
         "DEPLOYMENT_OPERATIONS",
+    ),
+}
+_WORK_SCOPE = {
+    "CHIP_MAKER": (
+        "반도체 칩·웨이퍼·메모리 제조의 업무다. 원문의 실제 제조 대상과 사건을 확인한다. "
+        "공정 검증, 생산 일정, 수율·능력, 고객 공급 조건, 제조 소재 확보 중 연결된 업무를 "
+        "고른다. 다른 산업의 생산·시설·소재라는 이유만으로 반도체 제조 업무가 되지 않는다."
+    ),
+    "EQUIPMENT_MAKER": (
+        "반도체 장비 공급자의 공정 검증·설계 채택·수주·납품·설치·서비스 업무다. "
+        "제조사의 일반 투자 계획과 공급자의 실제 장비 수주를 구분한다."
+    ),
+    "MARKET_INVESTOR": (
+        "투자 판단을 위한 전망·투자 집행·매출 인식·이익률·수급 제약 업무다. "
+        "전망·계약·실제 실적을 구분하고 해당 축을 명시한 원문을 고른다."
+    ),
+    "IT_INFRA": (
+        "서버·데이터센터·기업 IT 시스템의 조달·호환·전력/냉각·네트워크·도입/운영 업무다. "
+        "실제 시스템·구성품·서비스의 조건과 업무를 대조한다. AI 기업의 인사·금융·"
+        "브랜드·교육이라는 사실만으로 시스템 조달이나 운영에 직접 연결되지 않는다."
     ),
 }
 RELATION_SCORES = {
@@ -216,20 +237,43 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
         "ReportConditionalRelation": {
             "type": "string",
             "enum": ["CONDITIONAL", "BACKGROUND"],
+            "description": (
+                "CONDITIONAL은 원문 사건과 업무 사이에 구체적인 미확인 중간 전제가 하나 "
+                "필요하다. BACKGROUND는 여러 전제가 필요한 배경이다. 정보 부족이나 "
+                "같은 산업·기업이라는 사실만으로 이 범주를 선택하지 않는다."
+            ),
         },
         "ReportKnownImpactScope": {
             "type": "string",
             "enum": [value for value in IMPACT_SCORES if value != "UNDETERMINED"],
+            "description": (
+                "원문에서 해당 업무에 연결된 대상의 영향 범위를 확인한 경우만 선택한다. "
+                "CORE_CONSTRAINT=핵심 대상의 실제 제약, PROJECT_CHANGE=특정 프로젝트의 "
+                "조건·일정·자원 변경, LIMITED_PREPARATION=제한된 대상의 준비, "
+                "NO_CHANGE=해당 대상의 변경 없음이 원문에 명시됨. 변화에 대한 언급이 "
+                "없거나 영향 범위를 모르는 것은 NO_CHANGE가 아니라 UNDETERMINED다. "
+                "구체 대상과 범위가 있으면 정량 수치·최종 이행 결과가 없어도 판정한다."
+            ),
         },
         "ReportKnownUrgencyState": {
             "type": "string",
             "enum": [value for value in URGENCY_SCORES if value != "UNDETERMINED"],
+            "description": (
+                "원문에 있는 실제 업무 행동 시점을 판정한다. IMMEDIATE=현재 즉시 적용·"
+                "계속된 중단·임박 마감, SCHEDULED_PREPARATION=준비 순서를 바꾸는 실제 "
+                "일정, MONITOR=후속 이행 관찰, NOT_URGENT=시급하지 않음이 명시됨. "
+                "기사 발행일이나 기업의 유명세는 행동 시점의 근거가 아니다."
+            ),
         },
         # These closed branches are identical for every finding and audience.
         # Share their schemas without changing output fields or choice order.
         "ReportUnknownConnection": _object(
             {
-                "relation": {"type": "string", "const": "UNDETERMINED"},
+                "relation": {
+                    "type": "string",
+                    "const": "UNDETERMINED",
+                    "description": "원문 사건과 관점 업무의 연결 자체를 판정할 근거가 부족하다.",
+                },
                 "work": {"type": "null"},
                 "condition": {"type": "null"},
                 "basis": {"type": "null"},
@@ -237,7 +281,15 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
         ),
         "ReportUnknownEffect": _object(
             {
-                "impactScope": {"type": "string", "const": "UNDETERMINED"},
+                "impactScope": {
+                    "type": "string",
+                    "const": "UNDETERMINED",
+                    "description": (
+                        "관련성은 알아도 변화·준비 대상 또는 범위를 확인하지 못하면 선택한다. "
+                        "변경 없음이 확인된 NO_CHANGE와 다르다. 관계가 무관/미확인이어도 "
+                        "이 범주를 선택한다."
+                    ),
+                },
                 "basis": {"type": "null"},
             }
         ),
@@ -251,7 +303,11 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
     audiences = {}
     for audience in request.audiences:
         work_name = f"ReportWork{audience}"
-        definitions[work_name] = {"type": "string", "enum": list(ROLE_WORK[audience])}
+        definitions[work_name] = {
+            "type": "string",
+            "enum": list(ROLE_WORK[audience]),
+            "description": _WORK_SCOPE[audience],
+        }
         work = {"$ref": f"#/$defs/{work_name}"}
         entries = {}
         for finding in request.findings:
@@ -306,10 +362,24 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                         "anyOf": [
                             _object(
                                 {
-                                    "relation": {"type": "string", "const": "DIRECT"},
+                                    "relation": {
+                                        "type": "string",
+                                        "const": "DIRECT",
+                                        "description": (
+                                            "원문 사건·조건이 선택한 관점 업무 자체일 때만 "
+                                            "선택한다. 같은 기업·산업·AI라는 이유만으로 업무가 "
+                                            "연결되지 않는다. 원문의 실제 대상과 work를 대조한다."
+                                        ),
+                                    },
                                     "work": deepcopy(work),
                                     "condition": {"type": "null"},
-                                    "basis": deepcopy(basis),
+                                    "basis": {
+                                        **deepcopy(basis),
+                                        "description": (
+                                            "선택한 work 자체인 사건·조건의 원문을 고른다. "
+                                            "다른 산업의 유사 업무를 관점 업무로 바꾸지 않는다."
+                                        ),
+                                    },
                                 }
                             ),
                             _object(
@@ -326,7 +396,15 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                             ),
                             _object(
                                 {
-                                    "relation": {"type": "string", "const": "UNRELATED"},
+                                    "relation": {
+                                        "type": "string",
+                                        "const": "UNRELATED",
+                                        "description": (
+                                            "원문에 명시된 사건이 관점의 업무들과 무관한 경우다. "
+                                            "연결 근거가 부족해 판정할 수 없는 경우는 "
+                                            "UNDETERMINED다."
+                                        ),
+                                    },
                                     "work": {"type": "null"},
                                     "condition": {"type": "null"},
                                     "basis": deepcopy(basis),
@@ -340,7 +418,16 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                             _object(
                                 {
                                     "impactScope": {"$ref": "#/$defs/ReportKnownImpactScope"},
-                                    "basis": deepcopy(basis),
+                                    "basis": {
+                                        **deepcopy(basis),
+                                        "description": (
+                                            "이 업무와 연결된 영향 대상과 변경·준비 범위의 근거를 "
+                                            "선택한다. 관계 근거를 재사용할 때도 영향 범위를 "
+                                            "지원하는지 별도로 확인한다. NO_CHANGE이면 반드시 "
+                                            "해당 대상의 변경 없음을 명시한 구절이어야 한다. "
+                                            "다른 claim에 범위 근거가 있으면 그 claim을 선택한다."
+                                        ),
+                                    },
                                 }
                             ),
                             unknown_effect,
@@ -351,7 +438,14 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                             _object(
                                 {
                                     "urgencyState": {"$ref": "#/$defs/ReportKnownUrgencyState"},
-                                    "basis": deepcopy(basis),
+                                    "basis": {
+                                        **deepcopy(basis),
+                                        "description": (
+                                            "선택한 행동 시점을 지원하는 실제 일정·현재 상태·"
+                                            "후속 이행의 원문을 고른다. 영향이 크다고 시점이 "
+                                            "확정되는 것은 아니다."
+                                        ),
+                                    },
                                 }
                             ),
                             unknown_timing,
@@ -693,6 +787,7 @@ def _assessment_errors(
             "reason은 업무 관계의 판단 불가를 선언하지만 connection.relation은 판정 가능합니다. "
             "원문으로 구체 업무 관계를 설명하거나 관계가 불명인 경우 UNDETERMINED로 판정하세요."
         )
+    errors.extend(assessment_coherence_errors(item))
     related = item.relation not in {"UNRELATED", "UNDETERMINED"}
     if related and item.work not in ROLE_WORK[audience]:
         errors.append("connection.work는 해당 audience에 허용된 구체 업무여야 합니다.")

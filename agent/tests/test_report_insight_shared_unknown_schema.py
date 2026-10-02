@@ -64,7 +64,10 @@ def test_sdk_preserves_shared_unknowns_and_the_previous_contract_order():
             category: {"type": "string", "const": "UNDETERMINED"},
             **{key: {"type": "null"} for key in nulls},
         }
-        definition = wire["$defs"][name]
+        definition = deepcopy(wire["$defs"][name])
+        # Guidance is an annotation; the shared branch must retain every
+        # validation keyword and its original category-first property order.
+        definition["properties"][category].pop("description", None)
         assert definition == {
             "type": "object",
             "properties": expected_properties,

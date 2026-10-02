@@ -40,6 +40,10 @@ def _record(schema, audience, finding_id):
     ]
 
 
+def _without_description(node):
+    return {key: value for key, value in node.items() if key != "description"}
+
+
 @pytest.mark.parametrize("audience", ROLES)
 def test_claimful_record_has_fixed_keys_and_category_first_axis_branches(audience):
     source = request(ids=(4261,), audiences=(audience,))
@@ -71,11 +75,13 @@ def test_claimful_record_has_fixed_keys_and_category_first_axis_branches(audienc
         ]
         assert list(known["properties"])[0] == category
         assert known["properties"][category] == {"$ref": f"#/$defs/{definition}"}
-        assert schema["$defs"][definition] == {
+        assert _without_description(schema["$defs"][definition]) == {
             "type": "string",
             "enum": [value for value in values if value != "UNDETERMINED"],
         }
-        assert unknown["properties"][category] == {"type": "string", "const": "UNDETERMINED"}
+        assert _without_description(unknown["properties"][category]) == {
+            "type": "string", "const": "UNDETERMINED"
+        }
     direct, conditional, unrelated, unknown = [
         resolve_schema_node(schema, branch) for branch in properties["connection"]["anyOf"]
     ]
@@ -283,7 +289,9 @@ def test_claimless_record_keeps_fixed_schema_constants_and_canonical_roundtrip()
         ("timing", "urgencyState"),
     ):
         props = resolve_schema_node(schema, record["properties"][field])["properties"]
-        assert props[category] == {"type": "string", "const": "UNDETERMINED"}
+        assert _without_description(props[category]) == {
+            "type": "string", "const": "UNDETERMINED"
+        }
         assert props["basis"] == {"type": "null"}
     native = draft_to_wire(flat, source)
     snapshot = deepcopy(native)
