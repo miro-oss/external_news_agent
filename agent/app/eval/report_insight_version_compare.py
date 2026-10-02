@@ -70,12 +70,27 @@ COMPARISON_PROFILES = {
         "candidateRubricVersion": "report-importance.v6",
         "baselinePipeline": "staged",
     },
+    "v9-refinement": {
+        **POLICY,
+        "comparisonProfile": "v9-refinement",
+        "comparisonKind": "frozen-same-version-refinement",
+        "baselineCommit": "c555596e7ab22d13a46087888de95024585f6093",
+        "baselinePromptVersion": "report-insight.ko.v9",
+        "candidatePromptVersion": "report-insight.ko.v9",
+        "baselineRubricVersion": "report-importance.v6",
+        "candidateRubricVersion": "report-importance.v6",
+        "baselinePipeline": "staged",
+    },
 }
 
 
 def _comparison_policy(profile: str) -> dict:
     ledger.require(profile in COMPARISON_PROFILES, "UNKNOWN_COMPARISON_PROFILE")
     return COMPARISON_PROFILES[profile]
+
+
+def _is_staged_comparison(policy: dict) -> bool:
+    return policy.get("baselinePipeline") == "staged"
 
 
 def _validate_runtime_versions(policy: dict, runtimes: dict) -> None:
@@ -93,6 +108,11 @@ def _comparison_scope(policy: dict, *, snapshots: bool = False) -> str:
     baseline = policy["baselinePromptVersion"].rsplit(".", 1)[1]
     candidate = policy["candidatePromptVersion"].rsplit(".", 1)[1]
     inputs = "identical actual report snapshots" if snapshots else "the same actual report inputs"
+    if policy.get("comparisonKind") == "frozen-same-version-refinement":
+        return (
+            f"frozen {baseline} code refinement from {policy['baselineCommit'][:7]} "
+            f"versus the candidate on {inputs}; both runtimes identified by source hashes"
+        )
     return f"frozen {baseline} versus {candidate} on {inputs}"
 
 
@@ -239,7 +259,7 @@ def prepare(
         "model": ledger.MODEL,
         "baselineCommit": baseline_commit,
     }
-    if comparison_profile == "v8-v9":
+    if _is_staged_comparison(expected_policy):
         provenance["coordinatorSources"] = {
             "root": str(ledger.AGENT_ROOT.resolve()),
             "sourceSha256s": ledger.runtime_hashes(),
@@ -339,7 +359,7 @@ def verify(output_dir: Path, manifest: dict, state: dict) -> None:
         "BASELINE_COMMIT_CHANGED",
     )
     _validate_runtime_versions(expected_policy, provenance["runtimeVersions"])
-    if expected_policy.get("comparisonProfile") == "v8-v9":
+    if _is_staged_comparison(expected_policy):
         # Workers inspect these declared coordinator files, not their own frozen
         # package. The renderer/metrics may intentionally postdate both runtimes.
         _verify_coordinator(provenance)
@@ -1000,7 +1020,7 @@ def run(output_dir: Path, *, api_key: str | None = None, max_jobs: int | None = 
 def _adapter(state: dict) -> dict:
     result = deepcopy(state)
     result["schemaVersion"] = 1
-    if state["policy"].get("comparisonProfile") == "v8-v9":
+    if _is_staged_comparison(state["policy"]):
         result["importanceRubricVersions"] = {
             ADAPTER_VARIANTS[name]: state["provenance"]["runtimeVersions"][name]["rubricVersion"]
             for name in VERSIONS

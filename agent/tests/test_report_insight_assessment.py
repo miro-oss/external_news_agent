@@ -607,9 +607,7 @@ def test_single_role_review_shares_capacity_between_unknown_relation_and_unknown
     # candidate list, so later known connections need their own review path.
     for finding in source.findings[7:17]:
         entries[f"finding{finding.id}"] = item(finding, relation="UNDETERMINED")
-    for finding, relation in zip(
-        source.findings[17:19], ("DIRECT", "BACKGROUND"), strict=True
-    ):
+    for finding, relation in zip(source.findings[17:19], ("DIRECT", "BACKGROUND"), strict=True):
         entry = item(finding, relation=relation)
         entry.update(impactScope="UNDETERMINED", impactBasis=None)
         entries[f"finding{finding.id}"] = entry
@@ -1083,6 +1081,10 @@ def test_four_audience_twelve_finding_sdk_review_schema_stays_within_all_size_li
     assert len(validate_draft(response(payload(source), source), source).mapped.insights) == 4
 
 
+def resolve_schema_node(schema, node):
+    return schema["$defs"][node["$ref"].removeprefix("#/$defs/")] if "$ref" in node else node
+
+
 def test_compact_native_axes_enforce_categories_without_duplicating_source_choices():
     source = request(ids=(101, 102), audiences=tuple(ROLE_WORK))
     wire = OpenAIJsonSchemaTransformer(draft_schema(source), strict=True).walk()
@@ -1107,7 +1109,9 @@ def test_compact_native_axes_enforce_categories_without_duplicating_source_choic
             record = audience_schema["properties"][f"finding{finding.id}"]
             assert "anyOf" not in record
             props = record["properties"]
-            branches = props["connection"]["anyOf"]
+            branches = [
+                resolve_schema_node(wire, branch) for branch in props["connection"]["anyOf"]
+            ]
             assert len(branches) == 4
             for branch in branches:
                 assert list(branch["properties"]) == ["relation", "work", "condition", "basis"]
@@ -1122,7 +1126,9 @@ def test_compact_native_axes_enforce_categories_without_duplicating_source_choic
                 ("effect", "impactScope", "ReportKnownImpactScope"),
                 ("timing", "urgencyState", "ReportKnownUrgencyState"),
             ):
-                known, unknown = props[field]["anyOf"]
+                known, unknown = [
+                    resolve_schema_node(wire, branch) for branch in props[field]["anyOf"]
+                ]
                 assert list(known["properties"])[0] == category
                 assert known["properties"][category] == {"$ref": f"#/$defs/{definition}"}
                 assert known["properties"]["basis"] == {

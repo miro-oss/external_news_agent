@@ -7,7 +7,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from jsonschema import ValidationError as JsonSchemaValidationError
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
-from test_report_insight_assessment import payload, request, response
+from test_report_insight_assessment import payload, request, resolve_schema_node, response
 
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.report_insight_assessment import (
@@ -58,6 +58,7 @@ def test_claimful_record_has_fixed_keys_and_category_first_axis_branches(audienc
     properties = record["properties"]
     for field in ("connection", "effect", "timing"):
         for branch in properties[field]["anyOf"]:
+            branch = resolve_schema_node(schema, branch)
             assert branch["type"] == "object"
             assert branch["additionalProperties"] is False
             assert set(branch["required"]) == set(branch["properties"])
@@ -65,7 +66,9 @@ def test_claimful_record_has_fixed_keys_and_category_first_axis_branches(audienc
         ("effect", "impactScope", "ReportKnownImpactScope", IMPACT_SCORES),
         ("timing", "urgencyState", "ReportKnownUrgencyState", URGENCY_SCORES),
     ):
-        known, unknown = properties[field]["anyOf"]
+        known, unknown = [
+            resolve_schema_node(schema, branch) for branch in properties[field]["anyOf"]
+        ]
         assert list(known["properties"])[0] == category
         assert known["properties"][category] == {"$ref": f"#/$defs/{definition}"}
         assert schema["$defs"][definition] == {
@@ -73,7 +76,9 @@ def test_claimful_record_has_fixed_keys_and_category_first_axis_branches(audienc
             "enum": [value for value in values if value != "UNDETERMINED"],
         }
         assert unknown["properties"][category] == {"type": "string", "const": "UNDETERMINED"}
-    direct, conditional, unrelated, unknown = properties["connection"]["anyOf"]
+    direct, conditional, unrelated, unknown = [
+        resolve_schema_node(schema, branch) for branch in properties["connection"]["anyOf"]
+    ]
     assert direct["properties"]["relation"]["const"] == "DIRECT"
     assert conditional["properties"]["relation"] == {"$ref": "#/$defs/ReportConditionalRelation"}
     assert unrelated["properties"]["relation"]["const"] == "UNRELATED"
@@ -81,6 +86,7 @@ def test_claimful_record_has_fixed_keys_and_category_first_axis_branches(audienc
     assert schema["$defs"]["ReportConditionalRelation"]["enum"] == ["CONDITIONAL", "BACKGROUND"]
     assert schema["$defs"][f"ReportWork{audience}"]["enum"] == list(ROLE_WORK[audience])
     for branch in properties["connection"]["anyOf"]:
+        branch = resolve_schema_node(schema, branch)
         assert list(branch["properties"]) == ["relation", "work", "condition", "basis"]
     Draft202012Validator.check_schema(schema)
 
@@ -276,7 +282,7 @@ def test_claimless_record_keeps_fixed_schema_constants_and_canonical_roundtrip()
         ("effect", "impactScope"),
         ("timing", "urgencyState"),
     ):
-        props = record["properties"][field]["properties"]
+        props = resolve_schema_node(schema, record["properties"][field])["properties"]
         assert props[category] == {"type": "string", "const": "UNDETERMINED"}
         assert props["basis"] == {"type": "null"}
     native = draft_to_wire(flat, source)

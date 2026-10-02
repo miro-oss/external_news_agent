@@ -548,11 +548,12 @@ def _partial_assessment_repair(prompt, schema, raw, error, validate, fallback):
 def _decision_candidates(request, validated, allowed):
     """Carry source-bound private work decisions into REDUCE without prose anchors.
 
-    Grouping by work is navigation, not an assertion that separate events share
-    an owner, project or causal path. The model still reads the original sources.
+    Each group belongs to one finding, even when several findings share a work
+    category. Shared work never merges owners, projects or source dates.
     Each quote comes from the validated draft's literal original span selection.
     """
     claims = {claim.id: claim for finding in request.findings for claim in finding.claims}
+    sources = {finding.id: finding for finding in request.findings}
     candidates = {}
     for audience in request.audiences:
         permitted = set(allowed[audience])
@@ -598,7 +599,7 @@ def _decision_candidates(request, validated, allowed):
             impact_basis = proof(item.impact_basis, finding.id)
             urgency_basis = proof(item.urgency_basis, finding.id)
             axes = priorities[finding.id].axes
-            groups.setdefault(item.work, []).append(
+            groups.setdefault((item.work, finding.id), []).append(
                 {
                     "findingId": finding.id,
                     "priorityRank": rank,
@@ -614,8 +615,19 @@ def _decision_candidates(request, validated, allowed):
                 }
             )
         candidates[audience] = [
-            {"work": work, "priorityRank": findings[0]["priorityRank"], "findings": findings}
-            for work, findings in groups.items()
+            {
+                "work": work,
+                "findingId": finding_id,
+                "articleId": sources[finding_id].article_id,
+                "publishedAt": (
+                    sources[finding_id].published_at.isoformat()
+                    if sources[finding_id].published_at
+                    else None
+                ),
+                "priorityRank": findings[0]["priorityRank"],
+                "findings": findings,
+            }
+            for (work, finding_id), findings in groups.items()
         ]
     return candidates
 

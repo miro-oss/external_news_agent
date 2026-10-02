@@ -225,6 +225,28 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
             "type": "string",
             "enum": [value for value in URGENCY_SCORES if value != "UNDETERMINED"],
         },
+        # These closed branches are identical for every finding and audience.
+        # Share their schemas without changing output fields or choice order.
+        "ReportUnknownConnection": _object(
+            {
+                "relation": {"type": "string", "const": "UNDETERMINED"},
+                "work": {"type": "null"},
+                "condition": {"type": "null"},
+                "basis": {"type": "null"},
+            }
+        ),
+        "ReportUnknownEffect": _object(
+            {
+                "impactScope": {"type": "string", "const": "UNDETERMINED"},
+                "basis": {"type": "null"},
+            }
+        ),
+        "ReportUnknownTiming": _object(
+            {
+                "urgencyState": {"type": "string", "const": "UNDETERMINED"},
+                "basis": {"type": "null"},
+            }
+        ),
     }
     audiences = {}
     for audience in request.audiences:
@@ -233,26 +255,9 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
         work = {"$ref": f"#/$defs/{work_name}"}
         entries = {}
         for finding in request.findings:
-            unknown_connection = _object(
-                {
-                    "relation": {"type": "string", "const": "UNDETERMINED"},
-                    "work": {"type": "null"},
-                    "condition": {"type": "null"},
-                    "basis": {"type": "null"},
-                }
-            )
-            unknown_effect = _object(
-                {
-                    "impactScope": {"type": "string", "const": "UNDETERMINED"},
-                    "basis": {"type": "null"},
-                }
-            )
-            unknown_timing = _object(
-                {
-                    "urgencyState": {"type": "string", "const": "UNDETERMINED"},
-                    "basis": {"type": "null"},
-                }
-            )
+            unknown_connection = {"$ref": "#/$defs/ReportUnknownConnection"}
+            unknown_effect = {"$ref": "#/$defs/ReportUnknownEffect"}
+            unknown_timing = {"$ref": "#/$defs/ReportUnknownTiming"}
 
             def record(connection, effect, timing, reason, *, finding_id=finding.id):
                 return _object(

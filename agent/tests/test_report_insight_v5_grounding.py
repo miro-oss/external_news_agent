@@ -140,6 +140,8 @@ def test_native_contract_selects_category_before_fields_without_changing_accepte
         ("timing", "urgencyState"),
     ):
         for branch in record[field]["anyOf"]:
+            if "$ref" in branch:
+                branch = schema["$defs"][branch["$ref"].split("/")[-1]]
             assert list(branch["properties"])[0] == category
     native = response(payload(source), source)
     Draft202012Validator(schema).validate(json.loads(native.text))
@@ -208,9 +210,13 @@ def test_priority_navigation_uses_existing_score_then_original_equal_score_order
         draft["impactScope"] = "UNDETERMINED"
         draft["impactBasis"] = None
     validated = validate_flat(values, source)
-    candidates = _decision_candidates(
-        source, validated, {"CHIP_MAKER": ("103:0", "101:0", "102:0")}
-    )["CHIP_MAKER"][0]["findings"]
+    candidates = [
+        finding
+        for group in _decision_candidates(
+            source, validated, {"CHIP_MAKER": ("103:0", "101:0", "102:0")}
+        )["CHIP_MAKER"]
+        for finding in group["findings"]
+    ]
     assert [finding["findingId"] for finding in candidates] == [102, 103, 101]
     assert [finding["priorityRank"] for finding in candidates] == [1, 2, 3]
     assert [finding["importanceGrade"] for finding in candidates] == [

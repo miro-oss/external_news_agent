@@ -414,6 +414,177 @@ def test_current_comparison_binds_coordinator_helpers_separately_from_frozen_run
     assert not (directory / "quality-summary.json").exists()
 
 
+@pytest.fixture
+def prepared_refinement(prepared, tmp_path, monkeypatch):
+    dataset, _, baseline = prepared
+    corpus = runner._read(dataset)
+    prototype = corpus["cases"][0]
+    cases = []
+    for index, count in enumerate((28, 27)):
+        case = deepcopy(prototype)
+        case["caseId"] = f"refinement-report-{index}"
+        finding = case["request"]["findings"][0]
+        case["request"]["findings"] = []
+        for offset in range(count):
+            item = deepcopy(finding)
+            item.update(id=100 + offset, articleId=200 + offset)
+            item["claims"][0]["id"] = f"{100 + offset}:0"
+            case["request"]["findings"].append(item)
+        cases.append(case)
+    corpus["cases"] = cases
+    dataset.write_text(json.dumps(corpus, ensure_ascii=False))
+    candidate = tmp_path / "refinement-candidate"
+    policy = runner.COMPARISON_PROFILES["v9-refinement"]
+
+    def info(root):
+        variant = "baseline" if Path(root).resolve() == baseline.resolve() else "candidate"
+        return {
+            "runtimeRoot": str(Path(root).resolve()),
+            "runtimeSourceSha256s": {"service.py": runner.ledger.digest(variant)},
+            "dependencyVersions": {"openai": "3.7.0"},
+            "pythonVersion": "3.13.5",
+            "promptVersion": policy[f"{variant}PromptVersion"],
+            "rubricVersion": policy[f"{variant}RubricVersion"],
+        }
+
+    monkeypatch.setattr(runner, "_runtime_info", info)
+    monkeypatch.setattr(runner, "runtime_info", lambda: info(candidate))
+    directory = tmp_path / "refinement-comparison"
+    runner.prepare(
+        dataset,
+        directory,
+        baseline,
+        candidate_root=candidate,
+        comparison_profile="v9-refinement",
+        max_calls=48,
+        max_cost_usd=Decimal("0.50"),
+    )
+    return dataset, directory, baseline, candidate
+
+
+def test_refinement_preserves_legacy_policy_bytes():
+    # Saved checkpoints bind these exact policies; adding a profile must not
+    # silently reinterpret an earlier experiment or its costs and versions.
+    assert runner.ledger.digest(runner.COMPARISON_PROFILES["v3-v4"]) == (
+        "ac0d7947218d403ddf58c7a893a4803e911ae2240993e5497e2ac793e91774e7"
+    )
+    assert runner.ledger.digest(runner.COMPARISON_PROFILES["v8-v9"]) == (
+        "45796d285d99a5da238e950b19cb02649b9dbe6f63a0ad93bbc3ce0cdbbfdb4f"
+    )
+
+
+def test_refinement_preserves_same_inputs_and_versions_with_distinct_code(prepared_refinement):
+    dataset, directory, baseline, candidate = prepared_refinement
+    manifest = runner._read(directory / "manifest.json")
+    assert manifest["baseCallUpperBound"] == 24
+    assert manifest["repairCallUpperBound"] == 48
+    assert manifest["policy"]["maxCalls"] == 48
+    assert manifest["policy"]["maxCostEstimatedUsd"] == "0.50"
+    assert manifest["provenance"]["model"] == "gpt-4.1-nano"
+    assert manifest["provenance"]["baselineCommit"] == ("c555596e7ab22d13a46087888de95024585f6093")
+    runtimes = manifest["provenance"]["runtimeVersions"]
+    assert all(info["promptVersion"] == "report-insight.ko.v9" for info in runtimes.values())
+    assert all(info["rubricVersion"] == "report-importance.v6" for info in runtimes.values())
+    assert (
+        runtimes["baseline"]["runtimeSourceSha256s"]
+        != runtimes["candidate"]["runtimeSourceSha256s"]
+    )
+    assert manifest["provenance"]["coordinatorSources"]["sourceSha256s"]
+    for index in (0, 2):
+        before, after = manifest["jobs"][index : index + 2]
+        assert before["request"] == after["request"]
+        assert before["inputSha256"] == after["inputSha256"]
+    assert runner._adapter(read_state(directory))["importanceRubricVersions"] == {
+        "single_call": "report-importance.v6",
+        "staged": "report-importance.v6",
+    }
+    summary = runner.summary(directory)
+    assert summary["comparisonScope"] == (
+        "frozen v9 code refinement from c555596 versus the candidate on the same actual "
+        "report inputs; both runtimes identified by source hashes"
+    )
+    assert summary["eligiblePairs"] == 0 and summary["excludedPairs"] == 2
+    assert not summary["qualityMeasured"] and not summary["qualityImprovementClaimed"]
+    assert (
+        runner.prepare(
+            dataset,
+            directory,
+            baseline,
+            candidate_root=candidate,
+            comparison_profile="v9-refinement",
+            max_calls=48,
+            max_cost_usd=Decimal("0.50"),
+        )
+        == manifest
+    )
+
+
+@pytest.mark.parametrize("variant", ["baseline", "candidate"])
+def test_refinement_accepts_both_staged_call_sequences(prepared_refinement, variant):
+    _, directory, _, _ = prepared_refinement
+    provider, sdk = start_provider(directory, variant)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="CALL_ID_REQUIRED"):
+        invoke(provider, "MAP-001", baseline=True)
+    assert not sdk.calls
+    for identifier in (
+        "MAP-001",
+        "MAP-002",
+        "MAP-003",
+        "MAP-004",
+        "REVIEW-001",
+        "REDUCE-001",
+    ):
+        invoke(provider, identifier)
+    runner.verify(directory, provider.manifest, provider.state)
+    assert len(sdk.calls) == 6
+    assert all(call["model"] == "gpt-4.1-nano" for call in sdk.calls)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="UNKNOWN_STAGE"):
+        invoke(provider, "MAP-005")
+    assert len(sdk.calls) == 6
+
+
+def test_refinement_rejects_old_baseline_and_changed_candidate_sources(
+    prepared_refinement, monkeypatch
+):
+    dataset, directory, baseline, candidate = prepared_refinement
+    with pytest.raises(runner.ledger.EvaluationStopped, match="BASELINE_COMMIT_CHANGED"):
+        runner.prepare(
+            dataset,
+            directory,
+            baseline,
+            candidate_root=candidate,
+            comparison_profile="v9-refinement",
+            baseline_commit=runner.COMPARISON_PROFILES["v8-v9"]["baselineCommit"],
+        )
+    original = runner._runtime_info
+
+    def changed(root):
+        info = original(root)
+        if Path(root).resolve() == candidate.resolve():
+            info["runtimeSourceSha256s"] = {"service.py": "changed"}
+        return info
+
+    monkeypatch.setattr(runner, "_runtime_info", changed)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="RUNTIME_CHANGED"):
+        runner.run(directory, api_key="offline-key")
+    assert not read_state(directory)["attempts"]
+
+
+def test_refinement_rechecks_coordinator_before_reporting(prepared_refinement, monkeypatch):
+    _, directory, _, _ = prepared_refinement
+    original = runner.ledger.file_digest
+    monkeypatch.setattr(
+        runner.ledger,
+        "file_digest",
+        lambda path: (
+            "changed" if Path(path).name == "report_insight_compare.py" else original(path)
+        ),
+    )
+    with pytest.raises(runner.ledger.EvaluationStopped, match="COORDINATOR_CHANGED"):
+        runner.summary(directory)
+    assert not read_state(directory)["attempts"]
+
+
 def test_each_map_chunk_review_reduce_has_independent_repair_budget_and_exact_wire(prepared):
     _, directory, _ = prepared
 

@@ -141,6 +141,28 @@ _OBSERVED_RESULT = re.compile(
     r"결과.{0,20}(?:확인|관측|측정|보고)|\b(?:observed|measured|reported)\s+result\b",
     re.IGNORECASE,
 )
+# A planned production date is still a factual relation: citing a process in one
+# article and a different factory's schedule in another does not join the two.
+_PRODUCTION_CONTEXT = re.compile(
+    r"양산|생산|공장|가동|\b(?:production|manufacturing|factory|plant|fab)\b", re.I
+)
+_PROCESS_TARGET = re.compile(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?\s*(?:nm|나노미터)(?![A-Za-z])", re.I)
+_PRODUCTION_TIME = re.compile(
+    r"(?:내년|올해|금년|20\d{2}\s*년)\s*"
+    r"(?:(?:상|하)반기|[1-4]\s*분기|\d{1,2}\s*월)?|"
+    r"\b(?:20\d{2}|(?:first|second)\s+half\s+of\s+(?:next\s+year|20\d{2}))\b",
+    re.I,
+)
+_INDEPENDENT_EVENT_BREAK = re.compile(
+    r",|，|(?:했으며|됐으며|되었으며|했고|됐고|되었고|하며|이며|하지만|반면)\s+"
+)
+_UNASSERTED_SCHEDULE = re.compile(
+    r"(?:일정|시점|시기|계획).{0,45}"
+    r"(?:미정|미확정|(?:확정|확인)(?:하|되)지\s*않|정해지지\s*않)|"
+    r"(?:생산|양산|가동).{0,30}(?:시작|개시|돌입)(?:하|되)지\s*않|"
+    r"\b(?:schedule|timing|date).{0,40}(?:unconfirmed|not\s+(?:confirmed|set|determined))\b",
+    re.I,
+)
 
 
 @dataclass(frozen=True)
@@ -150,6 +172,7 @@ class EvidenceText:
     attributed_to: str | None
     sentence_id: int | None
     text: str
+    finding_id: int
 
 
 @dataclass(frozen=True)
@@ -172,11 +195,18 @@ def _texts(request: ReportInsightRequest, claim_ids: Collection[str]) -> list[Ev
             if claim.id not in claim_ids:
                 continue
             rows.append(
-                EvidenceText(claim.id, claim.claim_type, claim.attributed_to, None, claim.text)
+                EvidenceText(
+                    claim.id, claim.claim_type, claim.attributed_to, None, claim.text, finding.id
+                )
             )
             rows.extend(
                 EvidenceText(
-                    claim.id, claim.claim_type, claim.attributed_to, index, sentences[index]
+                    claim.id,
+                    claim.claim_type,
+                    claim.attributed_to,
+                    index,
+                    sentences[index],
+                    finding.id,
                 )
                 for index in claim.evidence_sentence_ids
             )
@@ -367,6 +397,118 @@ def _event_problems(
     return problems
 
 
+def _possessive_actors(value: str, aliases: dict[str, str]) -> set[str]:
+    """Explicit names only; a bare factory or an unnamed sentence is not an owner."""
+    return {
+        _canonical(match["actor"], aliases)
+        for pattern in (_KOREAN_OWNER, _ENGLISH_OWNER)
+        for match in pattern.finditer(value)
+        if match.groupdict().get("link", "의") == "의"
+    }
+
+
+def _binding_terms(pattern: re.Pattern, value: str) -> set[str]:
+    return {_normalize(match[0]).replace(" ", "") for match in pattern.finditer(value)}
+
+
+def _mentions_owner(value: str, owner: str, aliases: dict[str, str]) -> bool:
+    names = {owner, *(name for name, canonical in aliases.items() if canonical == owner)}
+    boundary = r"(?=$|[^가-힣A-Za-z0-9]|(?:의|은|는|이|가|에|과|와|도|을|를)(?:\s|$))"
+    return any(
+        re.search(r"(?<![가-힣A-Za-z0-9])" + re.escape(name) + boundary, _normalize(value))
+        for name in names
+    )
+
+
+def _production_binding_problems(
+    value: str, rows: list[EvidenceText], global_rows: list[EvidenceText]
+) -> list[tuple[str, str]]:
+    """Detect explicit cross-article schedule transfers, not general entailment.
+
+    Source identities may use the other eligible claims of the *same* finding
+    to resolve an unnamed factory. They cannot supply an uncited date. Unknown
+    owners/aliases and corroborating articles about the same actor stay open.
+    """
+    source_ids = {row.finding_id for row in rows}
+    if len(source_ids) < 2:
+        return []
+    aliases = _aliases(global_rows)
+    context = {
+        finding_id: "\n".join(row.text for row in global_rows if row.finding_id == finding_id)
+        for finding_id in source_ids
+    }
+    owners = {finding_id: _possessive_actors(text, aliases) for finding_id, text in context.items()}
+    known_owners = set().union(*owners.values())
+    targets = {
+        finding_id: _binding_terms(_PROCESS_TARGET, text) for finding_id, text in context.items()
+    }
+    cited = {
+        finding_id: "\n".join(row.text for row in rows if row.finding_id == finding_id)
+        for finding_id in source_ids
+    }
+    schedules = {
+        finding_id: _binding_terms(_PRODUCTION_TIME, text)
+        for finding_id, text in cited.items()
+        if _PRODUCTION_CONTEXT.search(text)
+    }
+    problems = []
+    for sentence in _CLAUSE_BREAK.split(value):
+        for clause in _INDEPENDENT_EVENT_BREAK.split(sentence):
+            if (
+                not _PRODUCTION_CONTEXT.search(clause)
+                or _CONDITIONAL.search(clause)
+                or _LIMITATION.search(clause)
+                or _UNASSERTED_SCHEDULE.search(clause)
+            ):
+                continue
+            generated_owners = _possessive_actors(clause, aliases)
+            # An undeclared group/acronym may refer to a source actor. Lexical
+            # inequality is insufficient to reject it as a different company.
+            if not generated_owners or generated_owners - known_owners:
+                continue
+            generated_targets = _binding_terms(_PROCESS_TARGET, clause)
+            generated_times = _binding_terms(_PRODUCTION_TIME, clause)
+            for time in generated_times:
+                providers = {key for key, times in schedules.items() if time in times}
+                if not providers or any(not owners[key] for key in providers):
+                    continue
+                # Separate named events can share a sentence/list. Only bind a
+                # date when every named owner points away from its source.
+                if any(
+                    _mentions_owner(clause, owner, aliases)
+                    for key in providers
+                    for owner in owners[key]
+                ):
+                    continue
+                anchors = {
+                    key
+                    for key in source_ids
+                    if _PRODUCTION_CONTEXT.search(cited[key])
+                    and (
+                        generated_targets & _binding_terms(_PROCESS_TARGET, cited[key])
+                        or generated_owners & owners[key]
+                    )
+                }
+                if not anchors or anchors & providers or any(not owners[key] for key in anchors):
+                    continue
+                # Distinct articles can corroborate a shared company's project;
+                # absent an explicit contradiction, preserve that possibility.
+                if any(owners[left] & owners[right] for left in anchors for right in providers):
+                    continue
+                if any(generated_targets & targets[key] for key in providers):
+                    continue
+                problems.append(
+                    (
+                        "report_synthesis_source_binding",
+                        "생산 사건의 명시 주체·공정과 일정이 서로 다른 기사의 근거에 "
+                        "연결됩니다. 다른 공장·프로젝트의 일정을 하나의 사건으로 "
+                        "합치지 말고, 각각의 주체·대상·시점과 인용을 분리해야 합니다.",
+                    )
+                )
+                break
+    return problems
+
+
 def _placeholder(value: str) -> bool:
     segments = [_normalize(segment).replace(" ", "") for segment in _MECHANISM_BREAK.split(value)]
     return bool(segments) and all(
@@ -433,7 +575,11 @@ def validate_synthesis_quality(
             for field in ("text", "mechanism")
         ],
     ]:
-        for kind, message in _event_problems(value, _texts(request, refs), global_rows):
+        rows = _texts(request, refs)
+        for kind, message in [
+            *_event_problems(value, rows, global_rows),
+            *_production_binding_problems(value, rows, global_rows),
+        ]:
             violations.append((kind, f"{path}: {message}"))
     for path, item in [
         *[(f"overview[{index}].assumption", item) for index, item in enumerate(insight.overview)],
