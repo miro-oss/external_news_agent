@@ -491,8 +491,8 @@ def test_shifted_finding_span_is_native_invalid_and_locally_repaired_without_usa
     repair_entries = repair["response_schema"]["properties"]["assessments"]["properties"][
         "CHIP_MAKER"
     ]
-    assert set(repair_entries["properties"]) == {"finding101", "finding102"}
-    assert [finding["id"] for finding in framed(repair["prompt"])["findings"]] == [101, 102]
+    assert set(repair_entries["properties"]) == {"finding101"}
+    assert [finding["id"] for finding in framed(repair["prompt"])["findings"]] == [101]
     assert "sourceSpanId" in repair["prompt"] and "findingId=101" in repair["prompt"]
     assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
     assert result.meta.cost_usd == 0.012 and result.meta.credits == 0.8
@@ -815,7 +815,7 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
     assert assessment["axes"]["novelty"] is None
 
 
-def test_draft_error_repairs_whole_batch_before_unvisited_prose_guards():
+def test_draft_error_repairs_native_and_previously_unvisited_prose_failures():
     source, reasons, _ = partial_repair_fixture()
 
     def hook(stage, occurrence, _, value):
@@ -834,8 +834,6 @@ def test_draft_error_repairs_whole_batch_before_unvisited_prose_guards():
     result = generate(provider, source)
     assert stages(provider) == ["MAP-001", "MAP-001", "MAP-002"]
     assert provider.schema_validity == [True, True, True]
-    assert [f["id"] for f in framed(provider.calls[1]["prompt"])["findings"]] == list(
-        range(101, 107)
-    )
+    assert [f["id"] for f in framed(provider.calls[1]["prompt"])["findings"]] == [101, 103]
     assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
     assert result.meta.input_tokens == 33 and result.meta.cost_usd == 0.009

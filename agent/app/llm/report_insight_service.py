@@ -14,6 +14,7 @@ from app.core.report_importance import score_importance
 from app.llm.base import AnalyzeProvider, ProviderResponse
 from app.llm.prompt_data import escape_prompt_text, prompt_json
 from app.llm.report_insight_assessment import (
+    ReportAssessmentDraftValidationError,
     draft_prompt,
     draft_schema,
     merge_drafts,
@@ -305,7 +306,6 @@ class ReportInsightService(ReportInsightLegacyService):
         reference_date = report_reference_date(request)
 
         def assess(response, subset):
-            draft = validate_draft(response, subset)
             # Keep the original full-report date during batch validation. This
             # local copy is never persisted or used to hash the source snapshot.
             validation_request = subset
@@ -317,6 +317,13 @@ class ReportInsightService(ReportInsightLegacyService):
                         )
                     }
                 )
+            try:
+                draft = validate_draft(response, subset)
+            except ReportAssessmentDraftValidationError as error:
+                collected = _native_assessment_repair_errors(response, validation_request)
+                if collected is not None:
+                    raise collected from error
+                raise
             _validated_map_output(
                 replace(response, text=draft.mapped.model_dump_json(by_alias=True)),
                 validation_request,
@@ -475,12 +482,65 @@ def _validated_v4_reduce_output(response, request, mapped, allowed):
     return output
 
 
+def _native_assessment_repair_errors(response, request):
+    """Identify local failures only after both guards visit every retained record.
+
+    The first native failure can hide public prose/time failures elsewhere in
+    the batch. Strict wire shape and singleton validation establish a complete
+    repair set without treating the initial exception's IDs as exhaustive.
+    """
+    if response.truncated or len(request.audiences) != 1:
+        return None
+    ordered_ids = [finding.id for finding in request.findings]
+    if not ordered_ids or len(ordered_ids) != len(set(ordered_ids)):
+        return None
+    try:
+        native = parse_wire_draft(response.text)
+    except ValueError:
+        return None
+    audience = request.audiences[0]
+    expected = {f"finding{finding_id}" for finding_id in ordered_ids}
+    if set(native.assessments) != {audience} or set(native.assessments[audience]) != expected:
+        return None
+    if any(
+        native.assessments[audience][f"finding{finding_id}"].finding_id != finding_id
+        for finding_id in ordered_ids
+    ):
+        return None
+    wire = native.model_dump(by_alias=True, mode="json")["assessments"][audience]
+    failures = []
+    for finding in request.findings:
+        key = f"finding{finding.id}"
+        subset = request.model_copy(update={"findings": [finding]})
+        local_response = replace(
+            response, text=prompt_json({"assessments": {audience: {key: wire[key]}}})
+        )
+        try:
+            draft = validate_draft(local_response, subset)
+            _validated_map_output(
+                replace(response, text=draft.mapped.model_dump_json(by_alias=True)), subset
+            )
+        except (ReportAssessmentDraftValidationError, ReportAssessmentValidationError) as error:
+            if error.failed_finding_ids != (finding.id,):
+                return None
+            failures.append((finding.id, error))
+        except ValueError:
+            # Structural or otherwise unlocalized failures retain full repair.
+            return None
+    if not failures:
+        return None
+    return ReportAssessmentValidationError(
+        "아래 항목의 내부 근거 계약과 공개 평가 검증 오류를 모두 수정하세요.\n"
+        + "\n".join(f"findingId={finding_id}: {error}" for finding_id, error in failures),
+        error_kinds=tuple(kind for _, error in failures for kind in error.error_kinds),
+        failed_finding_ids=tuple(finding_id for finding_id, _ in failures),
+    )
+
+
 def _partial_assessment_repair(prompt, schema, raw, error, validate, fallback):
     """Repair only server-identified native entries, then revalidate the full batch."""
-    # Draft failures occur before the public prose/time guards have visited the
-    # other records. Regenerate the full batch once so a later hidden error is
-    # not preserved outside the only allowed repair. Partial repair is safe only
-    # after the complete draft and all public assessment guards have run.
+    # Only errors collected after both native and public guards may preserve
+    # other records. Unlocalized/structural draft failures regenerate the batch.
     if not isinstance(error, ReportAssessmentValidationError):
         return fallback
     instructions, framed_input = prompt.split("<report-insight-input>", 1)
