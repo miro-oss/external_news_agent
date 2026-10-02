@@ -14,6 +14,12 @@ _QUOTED = re.compile(
     r"'(?:\\.|[^'\\])*'|“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』"
 )
 _QUOTE_MARKS = frozenset("\"'`“”‘’「」『』")
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?。！？])")
+_DENIED_INTERPRETATION = re.compile(
+    r"(?:다는|라는)\s*(?:뜻|의미|해석|판단|주장)(?:은|는|이|가)?\s*"
+    r"(?:아니(?:다|에요|라는)|(?:타당|적절|정확)하지\s*않(?:다|습니다))"
+    r"[.!。！\s]*$"
+)
 _CLAUSE_BREAK = re.compile(
     r"(?<=[.!?。！？;；,，\n])|\s+(?=(?:다만|그러나|하지만)\s)|"
     r"(?<=며)\s+|(?<=으나)\s+|(?<=하나)\s+"
@@ -89,9 +95,7 @@ _UNKNOWN_IMPACT = re.compile(
     + r"미확인(?:이다|입니다|임)?|"
     + r"(?:판단|확인)(?:이)?\s*불가(?:하다|합니다|함|능하다|능합니다)?|"
     + r"(?:판단할|확인할|알)\s*수\s*없(?:다|습니다|음)|"
-    + r"명확하지\s*않(?:다|습니다|음)|"
-    + r"불명확(?:하여|하므로)\s+.+|"
-    + r"미확인이므로\s+.+"
+    + r"명확하지\s*않(?:다|습니다|음)"
     + r")"
 )
 
@@ -100,12 +104,17 @@ def _unquoted_declarations(reason: str):
     # Mask rather than delete quoted text, so its surrounding words cannot join
     # into a new assertion. An unmatched quote makes its clause too ambiguous.
     unquoted = _QUOTED.sub(lambda match: " " * len(match.group()), reason)
-    for part in _CLAUSE_BREAK.split(unquoted):
-        if "?" in part or "？" in part or any(char in _QUOTE_MARKS for char in part):
+    for sentence in _SENTENCE_BREAK.split(unquoted):
+        # A final denial can scope over several coordinated clauses. Do not
+        # split it into apparently affirmative declarations of their negations.
+        if _DENIED_INTERPRETATION.search(sentence):
             continue
-        clause = re.sub(r"\s+", " ", part).strip(" \t\r\n.;,。；，!！")
-        if clause:
-            yield clause
+        for part in _CLAUSE_BREAK.split(sentence):
+            if "?" in part or "？" in part or any(char in _QUOTE_MARKS for char in part):
+                continue
+            clause = re.sub(r"\s+", " ", part).strip(" \t\r\n.;,。；，!！")
+            if clause:
+                yield clause
 
 
 def assessment_coherence_errors(item: ReportFindingAssessmentDraft) -> list[str]:

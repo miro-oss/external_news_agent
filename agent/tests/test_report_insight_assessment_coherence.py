@@ -73,7 +73,6 @@ def test_direct_rejects_explicit_current_work_nonrelation(reason):
         "해당 관점의 업무 영향 범위 자체는 미확인이다.",
         "연결 업무는 있다, 영향 범위를 판단할 수 없다.",
         "현재로서는 영향은 명확하지 않다.",
-        "영향은 불명확하여 판정을 보류한다.",
     ],
 )
 def test_known_impact_rejects_whole_axis_unknown_declaration(impact, reason):
@@ -174,6 +173,31 @@ def test_both_contradictions_are_reported_once_without_mutating_any_field():
     assert errors[0].startswith("connection.relation:")
     assert errors[1].startswith("effect.impactScope:")
     assert entry.model_dump() == before
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "업무와 직접 관련이 없으며 영향도 없다는 뜻은 아니다.",
+        "영향은 불명확하므로 보류해야 한다는 해석은 타당하지 않다.",
+        "영향이 불명확하여 미확인으로 판단해야 한다는 뜻은 아니다.",
+    ],
+)
+def test_sentence_wide_denial_is_not_split_into_asserted_contradictions(reason):
+    entry = assessment(reason, impact="NO_CHANGE")
+    before = entry.model_dump()
+    assert assessment_coherence_errors(entry) == []
+    assert entry.model_dump() == before
+
+
+def test_denied_interpretation_does_not_mask_a_separate_asserted_sentence():
+    entry = assessment(
+        "업무와 직접 관련이 없으며 영향도 없다는 뜻은 아니다. 영향 범위는 미확인이다.",
+        impact="NO_CHANGE",
+    )
+    errors = assessment_coherence_errors(entry)
+    assert len(errors) == 1
+    assert errors[0].startswith("effect.impactScope:")
 
 
 @pytest.mark.parametrize(
