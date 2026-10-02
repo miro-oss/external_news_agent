@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from app.core.config import Settings
-from app.core.errors import AgentError, OutputValidationError
+from app.core.errors import AgentError, OutputValidationError, StructuredOutputExhaustedError
 from app.core.evidence import factual_mismatches, modality_overreach
 from app.core.parser import parse_json_object
 from app.core.report_importance import score_importance
@@ -329,6 +329,13 @@ class ReportInsightService(ReportInsightLegacyService):
             self._report_settings, request.plan, self._provider
         )
         reference_date = report_reference_date(request)
+        full_validation_request = request
+        if reference_date is not None:
+            full_validation_request = request.model_copy(
+                update={
+                    "report": request.report.model_copy(update={"report_end_date": reference_date})
+                }
+            )
 
         def assess(response, subset):
             # Keep the original full-report date during batch validation. This
@@ -359,6 +366,24 @@ class ReportInsightService(ReportInsightLegacyService):
             )
             return draft
 
+        def validated_merge(*parts):
+            # Reparse all native records and their source fingerprints, then
+            # rerun public grounding/time guards on the entire original report.
+            draft = merge_drafts(request, *parts)
+            last = pipeline.last_response
+            if last is None:
+                raise RuntimeError("검증할 MAP에 Provider 응답이 없습니다.")
+            mapped = _validated_map_output(
+                ProviderResponse(
+                    text=draft.mapped.model_dump_json(by_alias=True),
+                    provider=last.provider,
+                    model=last.model,
+                    usage=last.usage,
+                ),
+                full_validation_request,
+            )
+            return draft, mapped
+
         try:
             drafts = []
             for offset in range(0, len(request.findings), MAX_ASSESSMENT_BATCH):
@@ -377,18 +402,20 @@ class ReportInsightService(ReportInsightLegacyService):
                         stage="MAP",
                     ).output
                 )
-            validated = merge_drafts(request, *drafts)
+            validated, _ = validated_merge(*drafts)
             review_ids = set(select_review(request, validated))
             review_findings = [finding for finding in request.findings if finding.id in review_ids]
             reviews = []
-            for offset in range(0, len(review_findings), MAX_ASSESSMENT_BATCH):
+            for review_index, offset in enumerate(
+                range(0, len(review_findings), MAX_ASSESSMENT_BATCH), start=1
+            ):
                 subset = request.model_copy(
                     update={"findings": review_findings[offset : offset + MAX_ASSESSMENT_BATCH]}
                 )
                 schema = draft_schema(subset)
-                schema["description"] = f"reportInsightCall:REVIEW-{len(reviews) + 1:03d}"
-                reviews.append(
-                    self._call(
+                schema["description"] = f"reportInsightCall:REVIEW-{review_index:03d}"
+                try:
+                    review = self._call(
                         pipeline,
                         instruction=report_stage_instruction(request.audiences, "REVIEW"),
                         prompt=review_prompt(subset, reference_date=reference_date),
@@ -396,20 +423,23 @@ class ReportInsightService(ReportInsightLegacyService):
                         validate=lambda response, subset=subset: assess(response, subset),
                         stage="REVIEW",
                     ).output
-                )
+                except StructuredOutputExhaustedError:
+                    # This independent refinement failed. Keep the original
+                    # validated MAP for its IDs; never accept its invalid draft.
+                    # Provider/routing, deadline, budget and unknown-usage errors
+                    # remain ordinary AgentErrors and must leave the pipeline.
+                    validated, _ = validated_merge(validated)
+                    logger.warning(
+                        "Report insight stage=REVIEW-%03d outcome=VALIDATION_FAILED "
+                        "fallback=VALIDATED_MAP_RETAINED findingCount=%d",
+                        review_index,
+                        len(subset.findings),
+                    )
+                else:
+                    reviews.append(review)
             # Select once from the complete MAP, then merge all independent
             # reviews. An earlier review cannot alter later selection or input.
-            if reviews:
-                validated = merge_drafts(request, validated, *reviews)
-            mapped = _validated_map_output(
-                ProviderResponse(
-                    text=validated.mapped.model_dump_json(by_alias=True),
-                    provider=pipeline.last_response.provider,
-                    model=pipeline.last_response.model,
-                    usage=pipeline.last_response.usage,
-                ),
-                request,
-            )
+            validated, mapped = validated_merge(validated, *reviews)
             retrieved = {
                 insight.audience: retrieve_report_insight_evidence(
                     request,

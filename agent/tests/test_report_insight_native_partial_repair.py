@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import date
 
 import pytest
-from test_report_insight_assessment import framed
+from test_report_insight_assessment import framed, request
 from test_report_insight_v4_pipeline import (
     V4Provider,
     generate,
@@ -247,13 +247,24 @@ def test_native_partial_repair_uses_existing_stage_and_credit_limit():
     assert caught.value.details["usage"]["credits"] == 0.4
 
 
-def test_native_failure_during_review_preserves_review_stage_and_repair_bound():
-    source, reasons, _ = partial_repair_fixture()
-    hook = mixed_failures(reasons, stage_name="REVIEW-001", permanent=True)
+def test_native_failure_during_review_preserves_review_stage_and_repair_bound(caplog):
+    _, reasons, _ = partial_repair_fixture()
+    source = request(ids=tuple(reasons))
+    fail_review = mixed_failures(reasons, stage_name="REVIEW-001", permanent=True)
+
+    def hook(stage, occurrence, data, value):
+        return value if stage == "REDUCE-001" else fail_review(stage, occurrence, data, value)
+
     provider = V4Provider(source, hook=hook)
-    with pytest.raises(AgentError) as caught:
-        generate(provider, source)
-    assert caught.value.code == "SCHEMA_VIOLATION"
-    assert stages(provider) == ["MAP-001", "MAP-002", "REVIEW-001", "REVIEW-001"]
-    assert [f["id"] for f in framed(provider.calls[-1]["prompt"])["findings"]] == [101, 103]
-    assert caught.value.details["usage"]["inputTokens"] == 44
+    output = generate(provider, source)
+    assert stages(provider) == ["MAP-001", "MAP-002", "REVIEW-001", "REVIEW-001", "REDUCE-001"]
+    assert [f["id"] for f in framed(provider.calls[3]["prompt"])["findings"]] == [101, 103]
+    assert [item.reason for item in output.insights[0].assessments] == list(reasons.values())
+    assert all(
+        item.axes.directness == item.axes.impact == 3 for item in output.insights[0].assessments
+    )
+    assert output.meta.input_tokens == 55 and output.meta.output_tokens == 35
+    assert output.meta.cost_usd == 0.015 and output.meta.credits == 1.0
+    assert (
+        "stage=REVIEW-001 outcome=VALIDATION_FAILED fallback=VALIDATED_MAP_RETAINED" in caplog.text
+    )

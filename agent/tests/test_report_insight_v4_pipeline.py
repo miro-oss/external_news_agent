@@ -504,8 +504,23 @@ def test_shifted_finding_span_is_native_invalid_and_locally_repaired_without_usa
     assert source.model_dump_json(by_alias=True) == snapshot
 
 
+def _assert_failed_review_retains_exact_map(provider, source, result, caplog):
+    original = validate_draft(
+        ProviderResponse(provider.response_texts[0], "openai", "gpt-4.1-nano", ProviderUsage()),
+        source,
+    )
+    assert result.insights[0].assessments == original.mapped.insights[0].assessments
+    assert stages(provider) == ["MAP-001", "REVIEW-001", "REVIEW-001", "REDUCE-001"]
+    assert provider.schema_validity == [True, False, False, True]
+    assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
+    assert result.meta.cost_usd == 0.012 and result.meta.credits == 0.8
+    assert (
+        "stage=REVIEW-001 outcome=VALIDATION_FAILED fallback=VALIDATED_MAP_RETAINED" in caplog.text
+    )
+
+
 @pytest.mark.parametrize("stage", ["MAP-001", "REVIEW-001"])
-def test_native_invalid_span_still_gets_local_validation_and_at_most_one_repair(stage):
+def test_native_invalid_span_still_gets_local_validation_and_at_most_one_repair(stage, caplog):
     source = request()
 
     def wire_hook(current, _, data, value):
@@ -516,6 +531,10 @@ def test_native_invalid_span_still_gets_local_validation_and_at_most_one_repair(
         return value
 
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
+    if stage == "REVIEW-001":
+        result = generate(provider, source)
+        _assert_failed_review_retains_exact_map(provider, source, result, caplog)
+        return
     with pytest.raises(AgentError) as caught:
         generate(provider, source)
     assert caught.value.code == "SCHEMA_VIOLATION"
@@ -622,7 +641,7 @@ def test_post_validated_category_correlations_repair_invalid_structure_once(defe
 
 
 @pytest.mark.parametrize("stage", ["MAP-001", "REVIEW-001"])
-def test_invalid_native_structure_stops_after_one_repair_and_reports_observed_usage(stage):
+def test_invalid_native_structure_stops_after_one_repair_and_reports_observed_usage(stage, caplog):
     source = request()
 
     def wire_hook(current, _, data, value):
@@ -631,6 +650,10 @@ def test_invalid_native_structure_stops_after_one_repair_and_reports_observed_us
         return value
 
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
+    if stage == "REVIEW-001":
+        result = generate(provider, source)
+        _assert_failed_review_retains_exact_map(provider, source, result, caplog)
+        return
     with pytest.raises(AgentError) as caught:
         generate(provider, source)
     assert caught.value.code == "SCHEMA_VIOLATION"

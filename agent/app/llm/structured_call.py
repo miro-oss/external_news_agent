@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 
 from pydantic import ValidationError
 
-from app.core.errors import AgentError, OutputValidationError
+from app.core.errors import AgentError, OutputValidationError, StructuredOutputExhaustedError
 from app.core.parser import JsonObjectParseError
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.prompt_data import escape_prompt_text
@@ -186,7 +186,7 @@ def _schema_violation(
     include_failure_details: bool,
     response: ProviderResponse,
     failure_prompt_version: str | None,
-) -> AgentError:
+) -> StructuredOutputExhaustedError:
     details = None
     if include_failure_details:
         details = {
@@ -202,7 +202,7 @@ def _schema_violation(
             details["executionMetadata"] = _execution_metadata(
                 response, failure_prompt_version, "COMPLETE"
             )
-    return AgentError(
+    return StructuredOutputExhaustedError(
         status_code=502,
         code="SCHEMA_VIOLATION",
         message=message,

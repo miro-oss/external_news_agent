@@ -129,6 +129,8 @@ _EMPTY_CLAIM_MARKER = re.compile(
     r"(?:\A|[;；])\s*(?:claim\s+)?claims?\s*=\s*\[\s*\]\s*(?=\Z|[;；.,。])",
     re.IGNORECASE,
 )
+_EMPTY_CLAIM_CONDITION = re.compile(r"/?\s*claims?\s*=\s*\[\s*\]\s*[.!。]?", re.IGNORECASE)
+_SOURCE_EMPTY_CLAIM_FIELD = re.compile(r"(?<![A-Za-z0-9_])claims?\s*=\s*\[\s*\]", re.IGNORECASE)
 # A missing document or an undecidable relation is not a business prerequisite.
 # Match the entire condition with explicit endings: a quoted absence, double
 # negation, or absence followed by a concrete prerequisite is not metadata-only.
@@ -171,6 +173,10 @@ _RELATION_DEFINITION_CONDITION = re.compile(
 
 def _metadata_only_condition(condition: str, selected_source: str) -> bool:
     condition = condition.strip()
+    # Called only after the claimless branch has returned. A bare empty-input
+    # assertion is not a premise; an actual source API's empty field can be.
+    if _EMPTY_CLAIM_CONDITION.fullmatch(condition):
+        return _SOURCE_EMPTY_CLAIM_FIELD.search(selected_source) is None
     if _METADATA_CONDITION.fullmatch(condition) or _RELATION_DEFINITION_CONDITION.fullmatch(
         condition
     ):
@@ -916,7 +922,8 @@ def _assessment_errors(
     ):
         errors.append(
             "connection.condition은 원문 사건에서 해당 업무로 이어지는 구체적 전제여야 합니다. "
-            "정보 부재·연결 조건 미확인·평가용 식별자 일치·범주 정의 복사만으로 "
+            "존재하는 원문을 claims=[]로 표기하거나 정보 부재·연결 조건 미확인·"
+            "평가용 식별자 일치·범주 정의 복사만으로 "
             "BACKGROUND/CONDITIONAL을 만들 수 없습니다. "
             "실제 전제를 특정할 수 없으면 UNDETERMINED로 판단하세요."
         )

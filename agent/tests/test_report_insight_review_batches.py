@@ -104,7 +104,7 @@ def test_review_selection_is_once_and_late_partial_repair_preserves_full_source_
 
 
 @pytest.mark.parametrize("failure", ["repair_exhausted", "deadline", "budget"])
-def test_later_review_failure_ends_pipeline_with_all_observed_usage(monkeypatch, failure):
+def test_later_review_failure_keeps_usage_and_only_validation_can_retain_map(monkeypatch, failure):
     source = source_request()
     clock = [0.0]
     monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])
@@ -120,13 +120,22 @@ def test_later_review_failure_ends_pipeline_with_all_observed_usage(monkeypatch,
     settings = {"AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS": 10} if failure == "deadline" else {}
     if failure == "budget":
         settings["AGENT_HARD_CAP_CREDITS_PER_REQUEST"] = 0.95
+    if failure == "repair_exhausted":
+        output = generate(provider, source, **settings)
+        assert stages(provider)[-3:] == ["REVIEW-002", "REVIEW-002", "REDUCE-001"]
+        assert len(provider.calls) == 7
+        final = output.insights[0].assessments
+        assert all(item.axes.directness is None for item in final[:6])
+        assert all(item.axes.impact is None for item in final[6:])
+        assert output.meta.input_tokens == 77 and output.meta.output_tokens == 49
+        assert output.meta.cost_usd == 0.021 and output.meta.credits == 1.4
+        return
     with pytest.raises(AgentError) as caught:
         generate(provider, source, **settings)
-    count = 6 if failure == "repair_exhausted" else 5
+    count = 5
     assert (
         caught.value.code
         == {
-            "repair_exhausted": "SCHEMA_VIOLATION",
             "deadline": "PROVIDER_UNAVAILABLE",
             "budget": "BUDGET_EXCEEDED",
         }[failure]
