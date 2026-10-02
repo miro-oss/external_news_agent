@@ -56,7 +56,7 @@ PROMPT_VERSION = "report-insight.ko.v9"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"
-MAX_ASSESSMENT_BATCH = 8
+MAX_ASSESSMENT_BATCH = 6
 
 
 class ReportAssessmentValidationError(OutputValidationError):
@@ -343,25 +343,28 @@ class ReportInsightService(ReportInsightLegacyService):
                 )
             validated = merge_drafts(request, *drafts)
             review_ids = set(select_review(request, validated))
-            if review_ids:
+            review_findings = [finding for finding in request.findings if finding.id in review_ids]
+            reviews = []
+            for offset in range(0, len(review_findings), MAX_ASSESSMENT_BATCH):
                 subset = request.model_copy(
-                    update={
-                        "findings": [
-                            finding for finding in request.findings if finding.id in review_ids
-                        ]
-                    }
+                    update={"findings": review_findings[offset : offset + MAX_ASSESSMENT_BATCH]}
                 )
                 schema = draft_schema(subset)
-                schema["description"] = "reportInsightCall:REVIEW-001"
-                reviewed = self._call(
-                    pipeline,
-                    instruction=report_stage_instruction(request.audiences, "REVIEW"),
-                    prompt=review_prompt(subset, reference_date=reference_date),
-                    schema=schema,
-                    validate=lambda response: assess(response, subset),
-                    stage="REVIEW",
-                ).output
-                validated = merge_drafts(request, validated, reviewed)
+                schema["description"] = f"reportInsightCall:REVIEW-{len(reviews) + 1:03d}"
+                reviews.append(
+                    self._call(
+                        pipeline,
+                        instruction=report_stage_instruction(request.audiences, "REVIEW"),
+                        prompt=review_prompt(subset, reference_date=reference_date),
+                        schema=schema,
+                        validate=lambda response, subset=subset: assess(response, subset),
+                        stage="REVIEW",
+                    ).output
+                )
+            # Select once from the complete MAP, then merge all independent
+            # reviews. An earlier review cannot alter later selection or input.
+            if reviews:
+                validated = merge_drafts(request, validated, *reviews)
             mapped = _validated_map_output(
                 ProviderResponse(
                     text=validated.mapped.model_dump_json(by_alias=True),
@@ -433,9 +436,7 @@ def _explain_empty_synthesis(
         return output
     insights = []
     for insight in output.insights:
-        assessments = [
-            item for item in insight.assessments if item.finding_id in grounded_ids
-        ]
+        assessments = [item for item in insight.assessments if item.finding_id in grounded_ids]
         if (
             not assessments
             or insight.overview

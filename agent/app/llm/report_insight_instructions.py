@@ -8,14 +8,17 @@ _ROOT = Path(__file__).resolve().parents[1] / "prompts"
 _BASE = (_ROOT / "report-insight.ko.v9.md").read_text(encoding="utf-8").strip()
 _RUBRIC = (_ROOT / "report-importance.v6.md").read_text(encoding="utf-8").strip()
 _ROLES = {
-    "CHIP_MAKER": "칩 제조: 공정 인증·설계 IP/공정 적용 PROCESS_QUALIFICATION, "
+    "CHIP_MAKER": "칩 제조: 공정 인증·설계 IP/공정 적용·계측/공정 제어 검증 "
+    "PROCESS_QUALIFICATION, "
     "생산 일정 PRODUCTION_SCHEDULE, "
-    "수율/능력 YIELD_CAPACITY, 고객 요구·공급 약정 CUSTOMER_REQUIREMENTS, 소재 확보 "
-    "MATERIAL_SUPPLY. 메모리/HBM 제조사의 실제 고객 공급 계약은 CUSTOMER_REQUIREMENTS의 "
-    "직접 관계일 수 있다. 공정·수율이 없다는 이유로 그 계약을 무관 처리하지 않는다. "
+    "수율/능력·품질/처리량 분석 YIELD_CAPACITY, 고객 요구·공급 약정 CUSTOMER_REQUIREMENTS, "
+    "소재 확보 "
+    "MATERIAL_SUPPLY. 메모리/HBM 제조사의 실제 고객 공급 계약도 직접 관계일 수 있다. "
+    "공정·수율이 없다는 이유로 그 계약을 무관 처리하지 않는다. "
     "계약은 생산 증가·규격 승인·납품 완료를 뜻하지 않는다. 공정 인증·설계 적용은 "
     "고객 계약이 없어도 PROCESS_QUALIFICATION에서 판단한다. 생산능력·생산 배분은 "
-    "YIELD_CAPACITY/PRODUCTION_SCHEDULE에서 판단한다.",
+    "YIELD_CAPACITY/PRODUCTION_SCHEDULE에서 판단한다. 기술 검토가 실제 채택·효과 달성을 "
+    "뜻하지 않는다.",
     "EQUIPMENT_MAKER": "장비 공급: 공정 검증 PROCESS_VALIDATION, 설계 채택 DESIGN_IN, "
     "실제 발주/수주 ORDER_BOOKING, 납품/설치 DELIVERY_INSTALLATION, 서비스 "
     "MAINTENANCE_SERVICE. 공정 검증·설계 채택은 발주 확인을 전제로 하지 않는다. "

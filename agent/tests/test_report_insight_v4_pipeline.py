@@ -181,7 +181,7 @@ def partial_repair_fixture():
     return source, reasons, hook
 
 
-def test_partial_native_prose_repair_preserves_other_seven_records_and_full_date(monkeypatch):
+def test_partial_native_prose_repair_preserves_other_five_records_and_full_date(monkeypatch):
     source, reasons, hook = partial_repair_fixture()
     snapshot = source.model_dump_json(by_alias=True)
     native_inputs, public_contexts = [], []
@@ -205,28 +205,28 @@ def test_partial_native_prose_repair_preserves_other_seven_records_and_full_date
     monkeypatch.setattr(insight_service, "_validated_map_output", capture_map)
     provider = V4Provider(source, relation="UNRELATED", hook=hook)
     result = generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
-    first_input, repair_input = [framed(call["prompt"]) for call in provider.calls]
-    assert [finding["id"] for finding in first_input["findings"]] == list(range(101, 109))
+    assert stages(provider) == ["MAP-001", "MAP-001", "MAP-002"]
+    first_input, repair_input = [framed(call["prompt"]) for call in provider.calls[:2]]
+    assert [finding["id"] for finding in first_input["findings"]] == list(range(101, 107))
     assert [finding["id"] for finding in repair_input["findings"]] == [104]
     assert first_input["reportReferenceDate"] == repair_input["reportReferenceDate"] == "2026-09-30"
     repair_schema = provider.calls[1]["response_schema"]
     entries = repair_schema["properties"]["assessments"]["properties"]["CHIP_MAKER"]
     assert set(entries["properties"]) == {"finding104"} and entries["required"] == ["finding104"]
     assert repair_schema["description"] == provider.calls[0]["response_schema"]["description"]
-    assert provider.schema_validity == [True, True]
-    assert len(native_inputs) == 2
-    original, merged = [value["assessments"]["CHIP_MAKER"] for value in native_inputs]
-    assert list(merged) == [f"finding{finding_id}" for finding_id in range(101, 109)]
+    assert provider.schema_validity == [True, True, True]
+    assert len(native_inputs) == 3
+    original, merged = [value["assessments"]["CHIP_MAKER"] for value in native_inputs[:2]]
+    assert list(merged) == [f"finding{finding_id}" for finding_id in range(101, 107)]
     for key, record in original.items():
         if key != "finding104":
             assert merged[key] == record
     assert merged["finding104"]["reason"] == reasons[104]
-    assert public_contexts[:2] == [(list(range(101, 109)), date(2026, 9, 30))] * 2
+    assert public_contexts[:2] == [(list(range(101, 107)), date(2026, 9, 30))] * 2
     assert [record.finding_id for record in result.insights[0].assessments] == list(range(101, 109))
     assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
-    assert result.meta.input_tokens == 22 and result.meta.output_tokens == 14
-    assert result.meta.cost_usd == 0.006 and result.meta.credits == 0.4
+    assert result.meta.input_tokens == 33 and result.meta.output_tokens == 21
+    assert result.meta.cost_usd == 0.009 and result.meta.credits == 0.6
     assert source.model_dump_json(by_alias=True) == snapshot
 
 
@@ -315,13 +315,13 @@ def test_partial_native_repair_keeps_existing_fenced_json_support():
 
     provider = V4Provider(source, relation="UNRELATED", hook=hook, raw_hook=raw_hook)
     result = generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
-    assert all(raw.startswith("```json\n") for raw in provider.response_texts)
+    assert stages(provider) == ["MAP-001", "MAP-001", "MAP-002"]
+    assert all(raw.startswith("```json\n") for raw in provider.response_texts[:2])
     assert [finding["id"] for finding in framed(provider.calls[1]["prompt"])["findings"]] == [104]
     assert [record.finding_id for record in result.insights[0].assessments] == list(range(101, 109))
     assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
-    assert result.meta.input_tokens == 22 and result.meta.output_tokens == 14
-    assert result.meta.cost_usd == 0.006 and result.meta.credits == 0.4
+    assert result.meta.input_tokens == 33 and result.meta.output_tokens == 21
+    assert result.meta.cost_usd == 0.009 and result.meta.credits == 0.6
 
 
 def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes():
@@ -331,7 +331,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     result = generate(provider, source)
     assert stages(provider) == ["MAP-001", "MAP-002", "MAP-003", "REVIEW-001", "REDUCE-001"]
     batches = [framed(call["prompt"])["findings"] for call in provider.calls[:3]]
-    assert list(map(len, batches)) == [8, 8, 1]
+    assert list(map(len, batches)) == [6, 6, 5]
     assert [finding["id"] for batch in batches for finding in batch] == list(range(101, 118))
     review = framed(provider.calls[3]["prompt"])
     assert [finding["id"] for finding in review["findings"]] == list(range(101, 106))
@@ -832,10 +832,10 @@ def test_draft_error_repairs_whole_batch_before_unvisited_prose_guards():
 
     provider = V4Provider(source, relation="UNRELATED", hook=hook)
     result = generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
-    assert provider.schema_validity == [True, True]
+    assert stages(provider) == ["MAP-001", "MAP-001", "MAP-002"]
+    assert provider.schema_validity == [True, True, True]
     assert [f["id"] for f in framed(provider.calls[1]["prompt"])["findings"]] == list(
-        range(101, 109)
+        range(101, 107)
     )
     assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
-    assert result.meta.input_tokens == 22 and result.meta.cost_usd == 0.006
+    assert result.meta.input_tokens == 33 and result.meta.cost_usd == 0.009

@@ -37,12 +37,13 @@ from app.eval.report_insight_compare import render_comparison
 from app.eval.report_insight_corpus import load_corpus
 from app.eval.report_insight_measure import aggregate_judgments, generation_metrics
 from app.llm.deadline_transport import DeadlineHttpx2Transport
-from app.llm.openai_provider import _ERROR_CODES, OpenAIAnalyzeProvider
+from app.llm.openai_provider import _ERROR_CODES, OpenAIAnalyzeProvider, _provider_error_details
 from app.llm.report_insight_service import PROMPT_VERSION, RUBRIC_VERSION, ReportInsightService
 from app.schemas.report_insight import ReportInsightRequest, ReportInsightResponse
 
 DRIVER = Path(__file__).resolve()
 MAX_OUTPUT = 8192
+MAX_DIAGNOSTIC_RETRY_AFTER_SECONDS = 86_400
 VERSIONS = ("baseline", "candidate")
 ADAPTER_VARIANTS = {"baseline": "single_call", "candidate": "staged"}
 CALL_DESCRIPTION = re.compile(r"^reportInsightCall:(MAP|REVIEW|REDUCE)-(\d{3})$")
@@ -80,6 +81,19 @@ COMPARISON_PROFILES = {
         "baselineRubricVersion": "report-importance.v6",
         "candidateRubricVersion": "report-importance.v6",
         "baselinePipeline": "staged",
+    },
+    "v9-bounded-review": {
+        **POLICY,
+        "comparisonProfile": "v9-bounded-review",
+        "comparisonKind": "frozen-same-version-refinement",
+        "baselineCommit": "c555596e7ab22d13a46087888de95024585f6093",
+        "baselinePromptVersion": "report-insight.ko.v9",
+        "candidatePromptVersion": "report-insight.ko.v9",
+        "baselineRubricVersion": "report-importance.v6",
+        "candidateRubricVersion": "report-importance.v6",
+        "baselinePipeline": "staged",
+        "candidateMapChunkFindingLimit": 6,
+        "candidateReviewChunkFindingLimit": 6,
     },
 }
 
@@ -488,8 +502,19 @@ def _verify_attempts(manifest: dict, state: dict) -> None:
 def _allowed_calls(result: dict, policy: dict = POLICY) -> set[str]:
     if result["variant"] == "baseline" and policy.get("baselinePipeline") != "staged":
         return {"MAP-001", "REDUCE-001"}
-    count = math.ceil(len(result["request"]["findings"]) / policy["mapChunkFindingLimit"])
-    return {*(f"MAP-{index:03d}" for index in range(1, count + 1)), "REVIEW-001", "REDUCE-001"}
+    variant = result["variant"]
+    finding_count = len(result["request"]["findings"])
+    map_limit = policy.get(f"{variant}MapChunkFindingLimit", policy["mapChunkFindingLimit"])
+    review_limit = policy.get(f"{variant}ReviewChunkFindingLimit", policy["reviewFindingLimit"])
+    map_count = math.ceil(finding_count / map_limit)
+    review_count = max(
+        1, math.ceil(min(finding_count, policy["reviewFindingLimit"]) / review_limit)
+    )
+    return {
+        *(f"MAP-{index:03d}" for index in range(1, map_count + 1)),
+        *(f"REVIEW-{index:03d}" for index in range(1, review_count + 1)),
+        "REDUCE-001",
+    }
 
 
 def reservation(wire: dict) -> tuple[int, Decimal]:
@@ -525,6 +550,16 @@ def _verify_record(record: dict, index: int) -> None:
             and 100 <= http_status <= 599
             and isinstance(provider_code, str)
             and provider_code in _ERROR_CODES | {"UNKNOWN"}
+        ),
+        "CHECKPOINT_PROVIDER_DIAGNOSTICS_CHANGED",
+    )
+    retry_after = record.get("providerRetryAfterSeconds")
+    ledger.require(
+        retry_after is None
+        or (
+            _valid_diagnostic_retry_after(retry_after)
+            and record["status"] == "failed"
+            and http_status is not None
         ),
         "CHECKPOINT_PROVIDER_DIAGNOSTICS_CHANGED",
     )
@@ -812,18 +847,27 @@ def _partial_cost(record: dict, usage: dict, maximum: Decimal) -> None:
     )
 
 
+def _valid_diagnostic_retry_after(value) -> bool:
+    # Oversized values stay unknown; clamping could suggest retrying too early.
+    return type(value) in (int, float) and 0 <= value <= MAX_DIAGNOSTIC_RETRY_AFTER_SECONDS
+
+
 def _provider_failure_diagnostics(error: Exception) -> dict:
-    """Persist only numeric status and a closed code; never stringify SDK errors."""
+    """Keep closed provider metadata, never raw error bodies or response headers."""
     if not isinstance(error, APIStatusError):
         return {"providerHttpStatus": None, "providerErrorCode": None}
     status = error.status_code
     if type(status) is not int or not 100 <= status <= 599:
         return {"providerHttpStatus": None, "providerErrorCode": None}
-    code = error.code
-    return {
+    details = _provider_error_details(error)
+    diagnostics = {
         "providerHttpStatus": status,
-        "providerErrorCode": code if isinstance(code, str) and code in _ERROR_CODES else "UNKNOWN",
+        "providerErrorCode": details["providerStatus"],
     }
+    retry_after = details.get("retryAfterSeconds")
+    if _valid_diagnostic_retry_after(retry_after):
+        diagnostics["providerRetryAfterSeconds"] = retry_after
+    return diagnostics
 
 
 def _settings(api_key: str) -> Settings:

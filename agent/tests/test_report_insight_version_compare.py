@@ -471,6 +471,9 @@ def test_refinement_preserves_legacy_policy_bytes():
     assert runner.ledger.digest(runner.COMPARISON_PROFILES["v8-v9"]) == (
         "45796d285d99a5da238e950b19cb02649b9dbe6f63a0ad93bbc3ce0cdbbfdb4f"
     )
+    assert runner.ledger.digest(runner.COMPARISON_PROFILES["v9-refinement"]) == (
+        "5fd85c17d466f674cbfee1ccaa1c6d89530f5c949c55d924ff41af09de5c0fb6"
+    )
 
 
 def test_refinement_preserves_same_inputs_and_versions_with_distinct_code(prepared_refinement):
@@ -517,6 +520,69 @@ def test_refinement_preserves_same_inputs_and_versions_with_distinct_code(prepar
         )
         == manifest
     )
+
+
+def test_bounded_review_profile_reserves_each_versions_actual_batch_limits(
+    prepared_refinement, tmp_path
+):
+    dataset, _, baseline, candidate = prepared_refinement
+    directory = tmp_path / "bounded-review"
+    manifest = runner.prepare(
+        dataset,
+        directory,
+        baseline,
+        candidate_root=candidate,
+        comparison_profile="v9-bounded-review",
+        max_calls=36,
+        max_cost_usd=Decimal("0.4634084"),
+    )
+    assert manifest["baseCallUpperBound"] == 28
+    assert manifest["repairCallUpperBound"] == 56
+    assert manifest["policy"]["maxCalls"] == 36
+    assert manifest["policy"]["maxCostEstimatedUsd"] == "0.4634084"
+    jobs = manifest["jobs"]
+    for left, right in (jobs[:2], jobs[2:]):
+        assert left["request"] == right["request"]
+        assert left["inputSha256"] == right["inputSha256"]
+    assert runner.summary(directory)["eligiblePairs"] == 0
+    assert not runner.summary(directory)["qualityMeasured"]
+
+
+@pytest.mark.parametrize("variant", ["baseline", "candidate"])
+def test_bounded_review_admission_keeps_review_chunks_and_repairs_separate(
+    prepared_refinement, tmp_path, variant
+):
+    dataset, _, baseline, candidate = prepared_refinement
+    directory = tmp_path / "bounded-review"
+    runner.prepare(
+        dataset,
+        directory,
+        baseline,
+        candidate_root=candidate,
+        comparison_profile="v9-bounded-review",
+        max_calls=36,
+    )
+    provider, sdk = start_provider(directory, variant)
+    stages = ["MAP-001", "MAP-002", "MAP-003", "MAP-004"]
+    if variant == "candidate":
+        stages.append("MAP-005")
+    stages.append("REVIEW-001")
+    if variant == "candidate":
+        stages.append("REVIEW-002")
+    stages.append("REDUCE-001")
+    for stage in stages:
+        invoke(provider, stage)
+        invoke(provider, stage)
+    assert len(sdk.calls) == (16 if variant == "candidate" else 12)
+    runner.verify(directory, provider.manifest, provider.state)
+    with pytest.raises(runner.ledger.EvaluationStopped, match="EXCESS_SCHEMA_REPAIR"):
+        invoke(provider, "REVIEW-001")
+    invalid = "REVIEW-003" if variant == "candidate" else "REVIEW-002"
+    with pytest.raises(runner.ledger.EvaluationStopped, match="UNKNOWN_STAGE"):
+        invoke(provider, invalid)
+    invalid_map = "MAP-006" if variant == "candidate" else "MAP-005"
+    with pytest.raises(runner.ledger.EvaluationStopped, match="UNKNOWN_STAGE"):
+        invoke(provider, invalid_map)
 
 
 @pytest.mark.parametrize("variant", ["baseline", "candidate"])
@@ -703,23 +769,29 @@ def test_error_body_keeps_only_numeric_usage_no_key_or_message(prepared):
 
 
 @pytest.mark.parametrize(
-    "status,code,expected",
+    "status,code,kind,retry_after,expected,expected_retry",
     [
-        (400, "invalid_json_schema", "invalid_json_schema"),
-        (429, "rate_limit_exceeded", "rate_limit_exceeded"),
-        (503, "private-provider-code", "UNKNOWN"),
-        (500, None, "UNKNOWN"),
+        (400, "invalid_json_schema", None, None, "invalid_json_schema", None),
+        (429, "rate_limit_exceeded", None, "3.5", "rate_limit_exceeded", 3.5),
+        (503, "private-provider-code", None, None, "UNKNOWN", None),
+        (500, None, None, None, "UNKNOWN", None),
+        (429, None, "rate_limit_exceeded", "8", "rate_limit_exceeded", 8.0),
+        (429, None, "insufficient_quota", "0", "insufficient_quota", 0.0),
+        (429, None, "private-provider-type", "invalid-private-header", "UNKNOWN", None),
     ],
 )
 def test_http_diagnostics_keep_only_status_allowlisted_code_and_unknown_reservation(
-    prepared, status, code, expected
+    prepared, status, code, kind, retry_after, expected, expected_retry
 ):
     _, directory, _ = prepared
 
     def fail(wire, count):
         response = httpx2.Response(
             status,
-            headers={"authorization": "private-response-header"},
+            headers={
+                "authorization": "private-response-header",
+                **({"retry-after": retry_after} if retry_after is not None else {}),
+            },
             request=httpx2.Request(
                 "POST",
                 "https://api.openai.com/v1/responses",
@@ -729,7 +801,7 @@ def test_http_diagnostics_keep_only_status_allowlisted_code_and_unknown_reservat
         raise APIStatusError(
             "private-exception-message",
             response=response,
-            body={"code": code, "message": "private-body-message"},
+            body={"code": code, "type": kind, "message": "private-body-message"},
         )
 
     provider, sdk = start_provider(directory, sdk=FakeSDK(fail))
@@ -738,6 +810,9 @@ def test_http_diagnostics_keep_only_status_allowlisted_code_and_unknown_reservat
     state = read_state(directory)
     record = state["attempts"][0]
     assert record["providerHttpStatus"] == status and record["providerErrorCode"] == expected
+    assert record.get("providerRetryAfterSeconds") == expected_retry
+    if expected_retry is None:
+        assert "providerRetryAfterSeconds" not in record
     assert record["unsettledReservedUsd"] == record["reservedCostUsd"]
     assert Decimal(record["costEstimatedUsd"]) == 0 and record["providerRawResponse"] is None
     assert len(sdk.calls) == 1
@@ -750,6 +825,8 @@ def test_http_diagnostics_keep_only_status_allowlisted_code_and_unknown_reservat
             "private-exception-message",
             "private-body-message",
             "private-provider-code",
+            "private-provider-type",
+            "invalid-private-header",
         )
     )
     runner.verify(directory, provider.manifest, state)
@@ -759,15 +836,99 @@ def test_http_diagnostics_keep_only_status_allowlisted_code_and_unknown_reservat
         runner.run(directory, api_key="offline-key")
 
 
-def test_http_diagnostic_fields_do_not_make_unknown_usage_job_safe_to_continue(prepared):
+@pytest.mark.parametrize(
+    "header,expected",
+    [
+        ("0", 0.0),
+        ("86400", 86400.0),
+        ("86400.1", None),
+        ("-1", None),
+        ("NaN", None),
+        ("Infinity", None),
+        ("1e300", None),
+        ("private-header-text", None),
+        ("Thu, 01 Jan 1970 00:00:00 GMT", 0.0),
+    ],
+)
+def test_retry_after_diagnostics_normalize_headers_without_shortening_oversized_waits(
+    header, expected
+):
+    error = APIStatusError(
+        "private-error-message",
+        response=httpx2.Response(
+            429,
+            headers={"retry-after": header},
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+        ),
+        body={"code": None, "type": "rate_limit_exceeded"},
+    )
+    diagnostics = runner._provider_failure_diagnostics(error)
+    assert diagnostics["providerErrorCode"] == "rate_limit_exceeded"
+    assert diagnostics.get("providerRetryAfterSeconds") == expected
+    if expected is None:
+        assert "providerRetryAfterSeconds" not in diagnostics
+
+
+@pytest.mark.parametrize("value", [True, "8", -1, 86_400.1, float("nan"), float("inf")])
+def test_checkpoint_rejects_invalid_retry_after_metadata(prepared, value):
+    _, directory, _ = prepared
+    provider, _ = start_provider(directory)
+    invoke(provider, "MAP-001")
+    record = deepcopy(provider.state["attempts"][0])
+    record.update(
+        status="failed",
+        providerHttpStatus=429,
+        providerErrorCode="rate_limit_exceeded",
+        providerRetryAfterSeconds=value,
+    )
+    with pytest.raises(
+        runner.ledger.EvaluationStopped, match="CHECKPOINT_PROVIDER_DIAGNOSTICS_CHANGED"
+    ):
+        runner._verify_record(record, 1)
+
+
+def test_optional_retry_after_metadata_preserves_legacy_records_and_requires_http_failure(prepared):
+    _, directory, _ = prepared
+    provider, _ = start_provider(directory)
+    invoke(provider, "MAP-001")
+    record = deepcopy(provider.state["attempts"][0])
+    assert "providerRetryAfterSeconds" not in record
+    runner._verify_record(record, 1)
+    record["providerRetryAfterSeconds"] = None
+    runner._verify_record(record, 1)
+    record["providerRetryAfterSeconds"] = 8.0
+    with pytest.raises(
+        runner.ledger.EvaluationStopped, match="CHECKPOINT_PROVIDER_DIAGNOSTICS_CHANGED"
+    ):
+        runner._verify_record(record, 1)
+    record["status"] = "failed"
+    with pytest.raises(
+        runner.ledger.EvaluationStopped, match="CHECKPOINT_PROVIDER_DIAGNOSTICS_CHANGED"
+    ):
+        runner._verify_record(record, 1)
+
+
+@pytest.mark.parametrize(
+    "status,code,kind,expected",
+    [
+        (400, "invalid_json_schema", None, "invalid_json_schema"),
+        (429, None, "rate_limit_exceeded", "rate_limit_exceeded"),
+        (429, None, "insufficient_quota", "insufficient_quota"),
+    ],
+)
+def test_http_diagnostic_fields_do_not_make_unknown_usage_job_safe_to_continue(
+    prepared, status, code, kind, expected
+):
     _, directory, _ = prepared
 
     def fail(wire, count):
         response = httpx2.Response(
-            400, request=httpx2.Request("POST", "https://api.openai.com/v1/responses")
+            status,
+            headers={"retry-after": "8"},
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
         )
         raise APIStatusError(
-            "private-message", response=response, body={"code": "invalid_json_schema"}
+            "private-message", response=response, body={"code": code, "type": kind}
         )
 
     index = next(
@@ -780,7 +941,9 @@ def test_http_diagnostic_fields_do_not_make_unknown_usage_job_safe_to_continue(p
     assert state["status"] == "stopped"
     assert state["results"][index]["terminalFailureSafe"] is False
     assert state["errors"][0]["safeToContinue"] is False
-    assert state["attempts"][0]["providerHttpStatus"] == 400
+    assert state["attempts"][0]["providerHttpStatus"] == status
+    assert state["attempts"][0]["providerErrorCode"] == expected
+    assert state["attempts"][0]["providerRetryAfterSeconds"] == 8.0
     assert Decimal(state["totals"]["unsettledReservedUsd"]) > 0
     with pytest.raises(runner.ledger.EvaluationStopped, match="RECORDED_FAILURE_REQUIRES_REVIEW"):
         runner.run(directory, api_key="offline-key")
