@@ -96,23 +96,35 @@ function verifyResult(result: ReportInsightResult, reportId: number, audience: A
   return result
 }
 const PREPARING_POLL_INTERVAL_MS = 10_000
-const PREPARING_WAIT_MS = 15 * 60_000
-export function reportInsightOptions(reportId: number, audience: Audience, snapshot: string, preparingWaitMs = PREPARING_WAIT_MS) {
-  let preparingStartedAt = 0
+const PREPARING_SLOW_POLL_INTERVAL_MS = 30_000
+const PREPARING_SLOW_AFTER_MS = 15 * 60_000
+export function reportInsightOptions(reportId: number, audience: Audience, snapshot: string) {
+  let preparingStartedAt: number | null = null
   return queryOptions({
     queryKey: reportInsightKey(reportId, audience, snapshot),
-    queryFn: async ({ signal }) => verifyResult(await get<ReportInsightResult>(`/reports/${reportId}/insights`,
-      { audience }, AbortSignal.any([signal, AbortSignal.timeout(30_000)])), reportId, audience),
-    staleTime: 0,
-    // Only an automatic job in progress is polled. Missing results and real failures stay actionable.
-    retry: (failureCount, error) => {
-      if (!isReportInsightPreparing(error)) return false
-      if (failureCount === 0) preparingStartedAt = Date.now()
-      return Date.now() - preparingStartedAt < preparingWaitMs
+    queryFn: async ({ signal }) => {
+      try {
+        const result = verifyResult(await get<ReportInsightResult>(`/reports/${reportId}/insights`,
+          { audience }, AbortSignal.any([signal, AbortSignal.timeout(30_000)])), reportId, audience)
+        preparingStartedAt = null
+        return result
+      } catch (error) {
+        if (isReportInsightPreparing(error)) preparingStartedAt ??= Date.now()
+        else preparingStartedAt = null
+        throw error
+      }
     },
-    retryDelay: Math.min(PREPARING_POLL_INTERVAL_MS, preparingWaitMs),
+    staleTime: 0,
+    retry: false,
+    // Keep observing queued work even when earlier reports take longer than fifteen minutes.
+    // The timer belongs to the mounted observer; missing results and real failures stop it.
+    refetchInterval: query => {
+      if (!isReportInsightPreparing(query.state.error)) return false
+      return preparingStartedAt !== null && Date.now() - preparingStartedAt >= PREPARING_SLOW_AFTER_MS
+        ? PREPARING_SLOW_POLL_INTERVAL_MS : PREPARING_POLL_INTERVAL_MS
+    },
     retryOnMount: true,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: query => isReportInsightPreparing(query.state.error),
     refetchOnMount: 'always',
   })
 }

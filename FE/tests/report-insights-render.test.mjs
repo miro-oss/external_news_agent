@@ -163,17 +163,19 @@ test('an automatically queued report shows preparation and no manual generation 
   assert.match(html, /조회와 관점 전환은 추가 크레딧을 사용하지 않습니다/)
   assert.doesNotMatch(html, /<button|분석 결과가 없습니다|생성하지 못했습니다/)
 })
-test('pending preparation after the poll budget offers only a stored-result refresh', () => {
+test('preparation between stored-result polls still promises automatic completion without a manual refresh', () => {
   const reason = new ApiError('COMMON409', '동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.', 409)
   const html = renderPanel({ status: 'error', fetchStatus: 'idle', error: reason, fetchFailureReason: reason })
-  assert.match(html, /관점 분석 준비가 계속되고 있습니다/)
-  assert.match(html, /저장된 분석 다시 확인/)
-  assert.doesNotMatch(html, /분석 다시 준비 · 크레딧 사용|불러오지 못했습니다/)
+  assert.match(html, /관점 분석을 자동으로 준비하고 있습니다/)
+  assert.match(html, /저장된 결과를 계속 확인/)
+  assert.match(html, /완료되면 분석 결과가 자동으로 표시됩니다/)
+  assert.doesNotMatch(html, /<button|저장된 분석 다시 확인|분석 다시 준비 · 크레딧 사용|불러오지 못했습니다/)
 })
 test('terminal or legacy absence offers an explicit retry with its usage notice', () => {
   const reason = new ApiError('COMMON404', '저장된 리포트 관점 인사이트가 없습니다.', 404)
   const html = renderPanel({ status: 'error', fetchStatus: 'idle', error: reason, fetchFailureReason: reason })
   assert.match(html, /이 관점의 분석 결과가 없습니다/)
+  assert.match(html, /자동 분석에 실패했거나 보고서 근거가 변경되었거나 아직 저장된 분석이 없는 경우/)
   assert.match(html, /이 관점 분석 다시 준비 · 크레딧 사용/)
   assert.match(html, /새 분석 생성 시 인사이트 크레딧을 사용/)
   assert.doesNotMatch(html, /이 관점으로 리포트 분석 생성|관점 분석을 자동으로 준비하고 있습니다/)

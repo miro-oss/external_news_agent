@@ -47,10 +47,8 @@ export function ReportInsightsPanel({ report, audience, selector, onEvidenceSele
     <p className="report-insights-usage">자동 분석에는 인사이트 크레딧을 사용합니다. 저장된 분석 조회와 관점 전환은 추가 크레딧을 사용하지 않습니다.</p>
     {(stored.isPending || stored.isFetching) && !preparing && !generating && <div className="report-insights-state" role="status"><p>이 리포트의 저장된 {AUDIENCE_LABELS[audience]} 관점 분석을 확인하고 있습니다.</p></div>}
     {preparing && <div className="report-insights-state" role="status">
-      <strong>{stored.isFetching ? '관점 분석을 자동으로 준비하고 있습니다.' : '관점 분석 준비가 계속되고 있습니다.'}</strong>
-      <p>{stored.isFetching ? '여러 관점의 근거를 종합하므로 몇 분이 걸릴 수 있습니다. 완료되면 분석 결과가 자동으로 표시됩니다.'
-        : '완료까지 시간이 더 걸리고 있습니다. 잠시 후 다시 확인해 주세요.'}</p>
-      {!stored.isFetching && <button type="button" className="text-button" onClick={() => { void refresh() }}>저장된 분석 다시 확인</button>}
+      <strong>관점 분석을 자동으로 준비하고 있습니다.</strong>
+      <p>먼저 요청된 분석이 있으면 시간이 더 걸릴 수 있습니다. 이 화면을 열어 두면 저장된 결과를 계속 확인하고, 완료되면 분석 결과가 자동으로 표시됩니다.</p>
     </div>}
     {generating && <div className="report-insights-state" role="status"><strong>리포트 전체를 분석하고 있습니다.</strong><p>주요 이슈의 우선순위와 근거를 종합하는 동안 잠시 기다려 주세요.</p></div>}
     {generationError && !isReportInsightPreparing(generationError) && <div className="report-insights-state" role="alert"><strong>관점 분석을 생성하지 못했습니다.</strong><p>{generationError.message}</p>
@@ -62,7 +60,7 @@ export function ReportInsightsPanel({ report, audience, selector, onEvidenceSele
     </div>}
     {missing && !generating && !blockedGeneration && <div className="report-insights-state">
       <strong>이 관점의 분석 결과가 없습니다.</strong>
-      <p>{(report.findings?.length ?? 0) > 0 ? '자동 분석이 완료되지 않았거나 이전에 만든 보고서일 수 있습니다. 저장된 분석을 다시 확인하거나 이 관점의 분석을 다시 준비할 수 있습니다.'
+      <p>{(report.findings?.length ?? 0) > 0 ? '자동 분석에 실패했거나 보고서 근거가 변경되었거나 아직 저장된 분석이 없는 경우입니다. 저장된 분석을 다시 확인하거나 현재 근거로 이 관점의 분석을 다시 준비할 수 있습니다.'
         : '이 보고서에 포함된 주요 이슈가 없어 관점 분석을 생성할 수 없습니다.'}</p>
       <button type="button" className="text-button" onClick={() => { void refresh() }}>저장된 분석 다시 확인</button>
       {canGenerate && <><p className="report-insights-usage">새 분석 생성 시 인사이트 크레딧을 사용합니다. 저장된 결과 조회는 크레딧을 사용하지 않습니다.</p>
