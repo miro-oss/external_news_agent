@@ -69,7 +69,7 @@ def test_native_and_public_failure_union_preserves_every_other_record_and_full_d
         "report_fact_mismatch",
     )
     assert [(ids, day) for ids, day in public_calls if len(ids) == 1] == [
-        ([finding_id], date(2026, 9, 30)) for finding_id in (102, 103, 104, 105, 106)
+        ([finding_id], date(2026, 9, 30)) for finding_id in (101, 102, 103, 104, 105, 106)
     ]
     full_inputs = [wire for wire, ids in native_calls if ids == list(range(101, 107))]
     assert len(full_inputs) == 2

@@ -542,6 +542,11 @@ def test_native_invalid_span_still_gets_local_validation_and_at_most_one_repair(
     assert not any(label.startswith("REDUCE") for label in stages(provider))
     assert caught.value.details["usage"]["inputTokens"] == len(provider.calls) * 11
     assert caught.value.details["executionMetadata"]["promptVersion"] == PROMPT_VERSION
+    assert caught.value.details["validationFailure"]["stage"] == stage
+    assert caught.value.details["validationFailure"]["attempt"] == 2
+    assert caught.value.details["validationFailure"]["errorKinds"] == [
+        "report_assessment_draft_invalid"
+    ]
     assert provider.schema_validity == [label != stage for label in stages(provider)]
     assert caught.value.details["usage"]["costUsd"] == float(
         Decimal(len(provider.calls)) * Decimal("0.003")

@@ -3,6 +3,7 @@ package com.example.be.domain.analysis.agent.dto;
 import com.example.be.domain.analysis.agent.client.AgentClientException;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -12,6 +13,36 @@ public record AgentErrorResponse(ErrorDetail error) {
             Set.of("provider", "model", "promptVersion", "source", "usageCompleteness");
     private static final Set<String> USAGE_COMPLETENESS_VALUES =
             Set.of("COMPLETE", "PARTIAL", "UNKNOWN");
+    private static final Set<String> VALIDATION_FAILURE_FIELDS =
+            Set.of("stage", "attempt", "errorType", "errorCount", "errorKinds");
+
+    public AgentClientException.ValidationFailure validationFailure() {
+        if (error == null || !"SCHEMA_VIOLATION".equals(error.code())
+                || !(error.details() instanceof Map<?, ?> details)
+                || !(details.get("validationFailure") instanceof Map<?, ?> failure)
+                || !VALIDATION_FAILURE_FIELDS.equals(failure.keySet())
+                || !(failure.get("stage") instanceof String stage)
+                || !(failure.get("errorType") instanceof String type)
+                || !(failure.get("errorKinds") instanceof List<?> kinds)
+                || kinds.size() > 5 || kinds.stream().anyMatch(value -> !(value instanceof String))) {
+            return null;
+        }
+        try {
+            return new AgentClientException.ValidationFailure(stage,
+                    diagnosticInteger(failure.get("attempt")), type,
+                    diagnosticInteger(failure.get("errorCount")),
+                    kinds.stream().map(String.class::cast).toList());
+        } catch (IllegalArgumentException | ArithmeticException ignored) {
+            return null;
+        }
+    }
+
+    private static int diagnosticInteger(Object value) {
+        if (!(value instanceof Number number)) {
+            throw new IllegalArgumentException("Invalid validation failure count");
+        }
+        return new BigDecimal(number.toString()).intValueExact();
+    }
 
     public AgentClientException.ExecutionMetadata executionMetadata() {
         if (error == null || !(error.details() instanceof Map<?, ?> details)

@@ -205,6 +205,9 @@ def test_reduce_schema_failure_preserves_all_calls_including_map():
     assert error.value.code == "SCHEMA_VIOLATION"
     assert error.value.details["usage"]["credits"] == 3
     assert error.value.details["usage"]["inputTokens"] == 300
+    assert error.value.details["validationFailure"]["stage"] == "REDUCE"
+    assert error.value.details["validationFailure"]["attempt"] == 2
+    assert error.value.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
 
 
 def test_overall_deadline_stops_reduce_and_keeps_observed_charge(monkeypatch):

@@ -1,5 +1,8 @@
 package com.example.be.domain.reports.insight;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.example.be.domain.analysis.agent.client.*;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.*;
@@ -39,8 +42,13 @@ import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -55,6 +63,8 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class ReportInsightServiceTest {
+    private final Logger logger = (Logger) LoggerFactory.getLogger(ReportInsightService.class);
+    private final ListAppender<ILoggingEvent> logs = new ListAppender<>();
     AgentProperties properties = new AgentProperties();
     ReportInsightSnapshotAssembler assembler = mock(ReportInsightSnapshotAssembler.class);
     ReportInsightPersistenceService persistence = mock(ReportInsightPersistenceService.class);
@@ -66,6 +76,8 @@ class ReportInsightServiceTest {
     ReportInsightService service = new ReportInsightService(properties, assembler, persistence,
             new ReportInsightValidator(), client, quota, plans, recorder, new ReportInsightExecutionRecorder(recorder, quota, persistence), jobs);
     @BeforeEach void setup() {
+        logs.start();
+        logger.addAppender(logs);
         properties.setEnabled(true);
         when(recorder.recordReportInsightSuccess(any(), any(), any(), any(), any())).thenReturn(true);
         when(recorder.recordReportInsightFailure(any(), any(), any(), any(), any())).thenReturn(true);
@@ -81,6 +93,10 @@ class ReportInsightServiceTest {
             return List.of(row(Audience.valueOf(response.insights().getFirst().audience())));
         });
         when(persistence.toDto(any())).thenAnswer(call -> dto(((NewsReportInsight) call.getArgument(0)).getAudience()));
+    }
+    @AfterEach void detachLogs() {
+        logger.detachAppender(logs);
+        logs.stop();
     }
     @Test void eachMissingAudienceHasDistinctSingleAudienceReservationAndProviderExecution() {
         var result = service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER", "IT_INFRA")));
@@ -286,6 +302,7 @@ class ReportInsightServiceTest {
         verify(quota).completeObservedFailure(any(), failure.capture());
         assertEquals("BUDGET_EXCEEDED", failure.getValue().getCode());
         assertEquals(BigDecimal.TWO, failure.getValue().getUsage().credits());
+        assertDiagnostic("USAGE_CHECK", "BUDGET_EXCEEDED", AgentClientException.TimeoutPhase.NONE, true);
         verify(persistence, never()).saveGenerated(any(), any());
         verify(recorder, never()).recordReportInsightSuccess(any(), any(), any(), any(), any());
     }
@@ -303,6 +320,75 @@ class ReportInsightServiceTest {
         verify(quota).completeObservedFailure(any(), same(failure));
         verify(quota, never()).completeFailure(any(), anyString());
     }
+    @Test void agentFailureLogsBoundedMetadataAndKeepsPublicErrorAndUsageAccounting() {
+        var failure = new AgentClientException("SCHEMA_VIOLATION", "private-response-payload",
+                new IllegalStateException("private-cause-payload"),
+                new AgentClientException.Usage(100L, 50L, BigDecimal.ONE, BigDecimal.ONE),
+                AgentClientException.TimeoutPhase.NONE, null,
+                new AgentClientException.ValidationFailure("REDUCE-001", 2, "OutputValidationError", 2,
+                        List.of("report_fact_mismatch", "private-kind\nforged-log")));
+        doThrow(failure).when(client).reportInsight(any());
+
+        var publicError = assertThrows(GeneralException.class,
+                () -> service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER"))));
+
+        assertEquals(GeneralErrorCode.INTERNAL_SERVER_ERROR, publicError.getCode());
+        assertEquals("리포트 관점 인사이트 생성에 실패했습니다.", publicError.getMessage());
+        assertNull(publicError.getResult());
+        assertNull(publicError.getCause());
+        assertDiagnostic("AGENT_CALL", "SCHEMA_VIOLATION", AgentClientException.TimeoutPhase.NONE, true);
+        var arguments = logs.list.stream().filter(event -> event.getMessage().contains("failureCode={}"))
+                .findFirst().orElseThrow().getArgumentArray();
+        assertEquals("REDUCE-001", arguments[6]);
+        assertEquals(2, arguments[7]);
+        assertEquals("OutputValidationError", arguments[8]);
+        assertEquals(2, arguments[9]);
+        assertEquals(List.of("report_fact_mismatch"), arguments[10]);
+        verify(recorder).recordReportInsightFailure(eq(20L), any(), same(failure), any(), any());
+        verify(quota).completeObservedFailure(any(), same(failure));
+    }
+    @ParameterizedTest @NullSource @ValueSource(strings = {"private-code-payload\nforged-log", "PRIVATE_CODE_PAYLOAD"})
+    void unrecognizedAgentCodesCannotInjectDiagnostics(String code) {
+        doThrow(new AgentClientException(code, "private-response-payload", null, null,
+                AgentClientException.TimeoutPhase.READ)).when(client).reportInsight(any());
+
+        assertThrows(GeneralException.class,
+                () -> service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER"))));
+
+        assertDiagnostic("AGENT_CALL", "UNKNOWN", AgentClientException.TimeoutPhase.READ, true);
+    }
+    @Test void invalidReturnedResponseIsDistinguishedFromAgentRejection() {
+        doReturn(response(List.of(assessment(50, 3, 2, 2)), BigDecimal.ONE)).when(client).reportInsight(any());
+
+        assertThrows(GeneralException.class,
+                () -> service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER"))));
+
+        assertDiagnostic("RESPONSE_VALIDATION", "SCHEMA_VIOLATION", AgentClientException.TimeoutPhase.NONE, true);
+        verify(persistence, never()).saveGenerated(any(), any());
+        verify(quota).completeObservedFailure(any(), argThat(failure -> BigDecimal.ONE.equals(failure.getUsage().credits())));
+    }
+    @Test void persistenceFailureIsDistinguishedWithoutLoggingDatabaseDetails() {
+        doThrow(new IllegalStateException("private-database-payload")).when(persistence).saveGenerated(any(), any());
+
+        assertThrows(GeneralException.class,
+                () -> service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER"))));
+
+        assertDiagnostic("PERSISTENCE", "PERSISTENCE_FAILED", AgentClientException.TimeoutPhase.NONE, true);
+        verify(quota).completeObservedFailure(any(), argThat(failure -> BigDecimal.ONE.equals(failure.getUsage().credits())));
+    }
+    @Test void failedAuditStillLogsOriginalFailureAndPreservesReservation() {
+        doThrow(new AgentClientException("PROVIDER_UNAVAILABLE", "private-response-payload"))
+                .when(client).reportInsight(any());
+        doThrow(new IllegalStateException("private-audit-payload"))
+                .when(recorder).recordReportInsightFailure(any(), any(), any(), any(), any());
+
+        assertThrows(GeneralException.class,
+                () -> service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER"))));
+
+        assertDiagnostic("AGENT_CALL", "PROVIDER_UNAVAILABLE", AgentClientException.TimeoutPhase.NONE, false);
+        verify(quota, never()).completeObservedFailure(any(), any());
+        verify(quota, never()).completeFailure(any(), anyString());
+    }
     @Test void earlierPerspectiveRemainsSavedWhenLaterPerspectiveFails() {
         doReturn(response()).doThrow(new AgentClientException("PROVIDER_UNAVAILABLE", "실패")).when(client).reportInsight(any());
         assertThrows(GeneralException.class, () -> service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER", "IT_INFRA"))));
@@ -315,6 +401,22 @@ class ReportInsightServiceTest {
         var insight = original.insights().getFirst();
         return new AgentReportInsightResponse(List.of(new AgentReportInsightResponse.Insight(request.audiences().getFirst(),
                 insight.headline(), insight.overview(), insight.assessments(), insight.implications(), insight.watchItems())), original.meta());
+    }
+    private void assertDiagnostic(String phase, String code, AgentClientException.TimeoutPhase timeout, boolean auditPersisted) {
+        var diagnostics = logs.list.stream().filter(event -> event.getMessage().contains("failureCode={}")).toList();
+        assertEquals(1, diagnostics.size());
+        var arguments = diagnostics.getFirst().getArgumentArray();
+        assertEquals(10L, arguments[0]);
+        assertEquals(Audience.CHIP_MAKER, arguments[1]);
+        assertEquals(phase, arguments[2].toString());
+        assertEquals(code, arguments[3]);
+        assertEquals(timeout, arguments[4]);
+        assertEquals(auditPersisted, arguments[5]);
+        for (var event : logs.list) {
+            assertNull(event.getThrowableProxy());
+            assertFalse(event.getFormattedMessage().toLowerCase(Locale.ROOT).contains("private"));
+            assertFalse(event.getFormattedMessage().contains("forged-log"));
+        }
     }
     private NewsReportInsight row(Audience audience) { return NewsReportInsight.builder().reportId(10L).audience(audience).inputHash("a".repeat(64)).build(); }
     private ReportInsightDTO.AudienceInsight dto(Audience audience) { return new ReportInsightDTO.AudienceInsight(audience,

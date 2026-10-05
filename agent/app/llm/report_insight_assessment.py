@@ -778,6 +778,30 @@ def validate_draft(
     return _validate_draft(_parse_draft(response.text, request), request)
 
 
+def project_public_assessment(item: ReportFindingAssessmentDraft) -> ReportInsightAssessment:
+    """Project parsed fields mechanically; this never establishes draft validity.
+
+    Diagnostic callers may inspect a rejected draft's public prose, but only
+    _validate_draft can return the evidence-validated object used by the pipeline.
+    """
+    bases = (item.relation_basis, item.impact_basis, item.urgency_basis)
+    refs = list(dict.fromkeys(basis.claim_id for basis in bases if basis is not None))
+    reason = item.reason
+    if item.condition is not None:
+        reason += f" 미확인 조건: {item.condition}"
+    return ReportInsightAssessment(
+        finding_id=item.finding_id,
+        reason=reason,
+        basis_claim_ids=refs,
+        axes=ReportImportanceAxes(
+            directness=RELATION_SCORES[item.relation],
+            impact=IMPACT_SCORES[item.impact_scope],
+            urgency=URGENCY_SCORES[item.urgency_state],
+            novelty=None,
+        ),
+    )
+
+
 def _validate_draft(
     draft: ReportAssessmentDraft, request: ReportInsightRequest
 ) -> ValidatedAssessmentDraft:
@@ -799,24 +823,7 @@ def _validate_draft(
                     f"audience={audience} findingId={finding.id} {message}" for message in messages
                 )
                 continue
-            bases = (item.relation_basis, item.impact_basis, item.urgency_basis)
-            refs = list(dict.fromkeys(basis.claim_id for basis in bases if basis is not None))
-            reason = item.reason
-            if item.condition is not None:
-                reason += f" 미확인 조건: {item.condition}"
-            public.append(
-                ReportInsightAssessment(
-                    finding_id=finding.id,
-                    reason=reason,
-                    basis_claim_ids=refs,
-                    axes=ReportImportanceAxes(
-                        directness=RELATION_SCORES[item.relation],
-                        impact=IMPACT_SCORES[item.impact_scope],
-                        urgency=URGENCY_SCORES[item.urgency_state],
-                        novelty=None,
-                    ),
-                )
-            )
+            public.append(project_public_assessment(item))
             proof[finding.id] = item
         mapped.append((audience, public))
         evidence[audience] = proof
