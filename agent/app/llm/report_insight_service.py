@@ -33,6 +33,7 @@ from app.llm.report_insight_guard import (
     validate_report_time,
 )
 from app.llm.report_insight_instructions import report_stage_instruction
+from app.llm.report_insight_map_execution import run_report_maps
 from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
 from app.llm.report_insight_prefix import closed_assessment_prefix
 from app.llm.report_insight_retrieval import retrieve_report_insight_evidence
@@ -58,7 +59,7 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v16"
+PROMPT_VERSION = "report-insight.ko.v17"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -440,23 +441,31 @@ class ReportInsightService(ReportInsightLegacyService):
             return draft, mapped
 
         try:
-            drafts = []
-            for offset in range(0, len(request.findings), MAX_ASSESSMENT_BATCH):
-                subset = request.model_copy(
+            subsets = [
+                request.model_copy(
                     update={"findings": request.findings[offset : offset + MAX_ASSESSMENT_BATCH]}
                 )
+                for offset in range(0, len(request.findings), MAX_ASSESSMENT_BATCH)
+            ]
+
+            def evaluate_map(index, subset):
                 schema = draft_schema(subset)
-                schema["description"] = f"reportInsightCall:MAP-{len(drafts) + 1:03d}"
-                drafts.append(
-                    self._call(
-                        pipeline,
-                        instruction=report_stage_instruction(request.audiences, "MAP"),
-                        prompt=draft_prompt(subset, reference_date=reference_date),
-                        schema=schema,
-                        validate=lambda response, subset=subset: assess(response, subset),
-                        stage="MAP",
-                    ).output
-                )
+                schema["description"] = f"reportInsightCall:MAP-{index + 1:03d}"
+                return self._call(
+                    pipeline,
+                    instruction=report_stage_instruction(request.audiences, "MAP"),
+                    prompt=draft_prompt(subset, reference_date=reference_date),
+                    schema=schema,
+                    validate=lambda response: assess(response, subset),
+                    stage="MAP",
+                ).output
+
+            drafts = run_report_maps(
+                subsets,
+                evaluate_map,
+                concurrency=pipeline.map_concurrency,
+                cancel_pending=pipeline.cancel_pending_calls,
+            )
             validated, _ = validated_merge(*drafts)
             review_ids = set(select_review(request, validated))
             review_findings = [finding for finding in request.findings if finding.id in review_ids]

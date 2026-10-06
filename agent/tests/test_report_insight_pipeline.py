@@ -289,7 +289,9 @@ def test_native_clients_are_scoped_closed_and_get_remaining_deadline(
     captured_settings = []
     captured_deadlines = []
     closed = []
-    results = [response(map_output()), response(reduce_output())]
+    # Native OpenAI reports monetary cost but always zero Mindlogic credits.
+    credit = "0" if plan == "FREE" else "1"
+    results = [response(map_output(), credits=credit), response(reduce_output(), credits=credit)]
 
     class Transport:
         def __init__(self, config, *, request_deadline=None):

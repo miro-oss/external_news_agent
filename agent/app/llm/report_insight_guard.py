@@ -15,6 +15,10 @@ from app.schemas.report_insight import ReportInsightRequest
 
 _POLARITY_MESSAGE = "근거와 반대되는 부정 표현이 포함되어 있습니다."
 _NUMERIC_CONTEXT_MESSAGE = "근거와 연결이 다른 숫자: "
+_UNSUPPORTED_COMPANY_MESSAGE = "근거에서 확인되지 않는 기업명: "
+_MICRON_UNIT = re.compile(
+    r"(?<![A-Za-z가-힣])마이크론(?=\s*단위(?:의|로|에서|마다|를|는|가|에)?(?:$|[\s,.;。]))"
+)
 # An explicit ordered series pairs years with percentages; the following fact
 # does not inherit the last year (e.g. a separately stated product yield).
 _YEAR_PERCENT_SERIES = re.compile(
@@ -281,6 +285,16 @@ def report_prose_mismatches(
     # source's positive/negative event polarity does not constrain that analysis.
     has_factual_state = bool(states)
     remaining = list(mismatches)
+    if _MICRON_UNIT.search(value) and any(
+        item.startswith(_UNSUPPORTED_COMPANY_MESSAGE) for item in remaining
+    ):
+        # Recheck only entity diagnostics after disambiguating the literal
+        # physical-unit phrase. Keep every original number/date/state error,
+        # and keep Micron when another occurrence names the company itself.
+        entity_checked = factual_mismatches(_MICRON_UNIT.sub("μm", value), source)
+        remaining = [
+            item for item in remaining if not item.startswith(_UNSUPPORTED_COMPANY_MESSAGE)
+        ] + [item for item in entity_checked if item.startswith(_UNSUPPORTED_COMPANY_MESSAGE)]
     if any(item.startswith(_NUMERIC_CONTEXT_MESSAGE) for item in remaining) and (
         _independent_parallel_numbers(value, source)
         or _ordered_year_percentages(value, source)
