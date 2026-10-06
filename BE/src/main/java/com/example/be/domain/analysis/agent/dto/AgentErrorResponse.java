@@ -15,12 +15,16 @@ public record AgentErrorResponse(ErrorDetail error) {
             Set.of("COMPLETE", "PARTIAL", "UNKNOWN");
     private static final Set<String> VALIDATION_FAILURE_FIELDS =
             Set.of("stage", "attempt", "errorType", "errorCount", "errorKinds");
+    private static final Set<String> VALIDATION_OPTIONAL_FIELDS = Set.of("issues", "issuesTruncated");
+    private static final Set<String> VALIDATION_ISSUE_FIELDS = Set.of("audience", "field", "errorKind", "claimIds");
 
     public AgentClientException.ValidationFailure validationFailure() {
         if (error == null || !"SCHEMA_VIOLATION".equals(error.code())
                 || !(error.details() instanceof Map<?, ?> details)
                 || !(details.get("validationFailure") instanceof Map<?, ?> failure)
-                || !VALIDATION_FAILURE_FIELDS.equals(failure.keySet())
+                || !failure.keySet().containsAll(VALIDATION_FAILURE_FIELDS)
+                || !failure.keySet().stream().allMatch(key -> VALIDATION_FAILURE_FIELDS.contains(key)
+                    || VALIDATION_OPTIONAL_FIELDS.contains(key))
                 || !(failure.get("stage") instanceof String stage)
                 || !(failure.get("errorType") instanceof String type)
                 || !(failure.get("errorKinds") instanceof List<?> kinds)
@@ -31,10 +35,37 @@ public record AgentErrorResponse(ErrorDetail error) {
             return new AgentClientException.ValidationFailure(stage,
                     diagnosticInteger(failure.get("attempt")), type,
                     diagnosticInteger(failure.get("errorCount")),
-                    kinds.stream().map(String.class::cast).toList());
+                    kinds.stream().map(String.class::cast).toList(),
+                    validationIssues(failure), issuesTruncated(failure));
         } catch (IllegalArgumentException | ArithmeticException ignored) {
             return null;
         }
+    }
+
+    private static List<AgentClientException.ValidationIssue> validationIssues(Map<?, ?> failure) {
+        if (!failure.containsKey("issues") && !failure.containsKey("issuesTruncated")) {
+            return List.of();
+        }
+        if (!(failure.get("issues") instanceof List<?> issues) || issues.size() > 8
+                || !(failure.get("issuesTruncated") instanceof Boolean)) {
+            throw new IllegalArgumentException("Invalid validation issues");
+        }
+        return issues.stream().map(value -> {
+            if (!(value instanceof Map<?, ?> issue) || !VALIDATION_ISSUE_FIELDS.equals(issue.keySet())
+                    || !(issue.get("audience") instanceof String audience)
+                    || !(issue.get("field") instanceof String field)
+                    || !(issue.get("errorKind") instanceof String errorKind)
+                    || !(issue.get("claimIds") instanceof List<?> refs)
+                    || refs.size() > 8 || refs.stream().anyMatch(ref -> !(ref instanceof String))) {
+                throw new IllegalArgumentException("Invalid validation issue");
+            }
+            return new AgentClientException.ValidationIssue(audience, field, errorKind,
+                    refs.stream().map(String.class::cast).toList());
+        }).toList();
+    }
+
+    private static boolean issuesTruncated(Map<?, ?> failure) {
+        return Boolean.TRUE.equals(failure.get("issuesTruncated"));
     }
 
     private static int diagnosticInteger(Object value) {

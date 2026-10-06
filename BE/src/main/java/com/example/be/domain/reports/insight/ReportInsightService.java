@@ -29,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service @RequiredArgsConstructor @Slf4j
 public class ReportInsightService {
-    public static final String PROMPT_VERSION = "report-insight.ko.v24";
+    public static final String PROMPT_VERSION = "report-insight.ko.v25";
     public static final String RUBRIC_VERSION = "report-importance.v6";
     private final AgentProperties properties;
     private final ReportInsightSnapshotAssembler assembler;
@@ -141,11 +141,13 @@ public class ReportInsightService {
             }
             // Agent error messages, codes and causes can contain response data. Log only bounded metadata.
             var validation = failure.getValidationFailure();
-            log.warn("리포트 관점 인사이트 생성 실패. reportId={}, audience={}, phase={}, failureCode={}, timeoutPhase={}, auditPersisted={}, validationStage={}, validationAttempt={}, validationErrorType={}, validationErrorCount={}, validationErrorKinds={}",
+            log.warn("리포트 관점 인사이트 생성 실패. reportId={}, audience={}, phase={}, failureCode={}, timeoutPhase={}, auditPersisted={}, validationStage={}, validationAttempt={}, validationErrorType={}, validationErrorCount={}, validationErrorKinds={}, validationIssues={}, validationIssuesTruncated={}",
                     snapshot.reportId(), audience, phase, diagnosticFailureCode(failure), failure.getTimeoutPhase(), auditPersisted,
                     validation == null ? null : validation.stage(), validation == null ? null : validation.attempt(),
                     validation == null ? null : validation.errorType(), validation == null ? null : validation.errorCount(),
-                    validation == null ? null : validation.errorKinds());
+                    validation == null ? null : validation.errorKinds(),
+                    validation == null ? null : validation.issues(),
+                    validation == null ? null : validation.issuesTruncated());
             throw new GeneralException(GeneralErrorCode.INTERNAL_SERVER_ERROR, "리포트 관점 인사이트 생성에 실패했습니다.");
         }
         return saved;

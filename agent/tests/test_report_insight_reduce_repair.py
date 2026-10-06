@@ -1,5 +1,6 @@
 """All REDUCE grounding failures reach the single repair; no live provider calls."""
 
+import json
 import logging
 from copy import deepcopy
 
@@ -109,7 +110,7 @@ def test_original_fail_fast_path_hides_other_reduce_errors(monkeypatch):
     assert "falsifiedBy" not in details
 
 
-def test_many_reduce_errors_keep_late_field_and_bounded_diagnostics():
+def test_many_reduce_errors_keep_late_field_and_exact_partial_units():
     source = request()
 
     def hook(stage, occurrence, _, value):
@@ -140,11 +141,31 @@ def test_many_reduce_errors_keep_late_field_and_bounded_diagnostics():
 
     provider = V4Provider(source, hook=hook)
     generate(provider, source)
-    details = diagnostic(provider.calls[-1]["prompt"])
-    assert "report_fact_mismatch" in details
-    assert "headline" in details and "overview[0].text" in details
-    assert "watchItems[4].trigger" in details
-    assert len(details.strip()) <= 6_000
+    first, repair = provider.calls[-2:]
+    jobs = json.loads(
+        repair["prompt"]
+        .split("<report-insight-repair-items>", 1)[1]
+        .split("</report-insight-repair-items>", 1)[0]
+    )
+    assert len(jobs) == 14
+    fields = {item["field"] for job in jobs for item in job["diagnostics"]}
+    assert {"headline", "overview[0].text", "watchItems[4].trigger"} <= fields
+    assert all(
+        item["errorKind"] == "report_fact_mismatch" for job in jobs for item in job["diagnostics"]
+    )
+    assert set(provider.wire_payloads[-1]["repairs"]) == {job["key"] for job in jobs}
+    assert (
+        first["prompt"].split("<report-insight-input>", 1)[1]
+        == repair["prompt"].split("<report-insight-input>", 1)[1]
+    )
+    original = json.loads(provider.response_texts[-2])["insights"][0]
+    for job in jobs:
+        expected = (
+            original["headline"]
+            if job["group"] == "headline"
+            else original[job["group"]][job["index"]]
+        )
+        assert job["original"] == expected
 
 
 def test_aggregate_repair_diagnostic_escapes_untrusted_prose_and_omits_raw_output():

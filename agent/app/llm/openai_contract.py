@@ -135,7 +135,7 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
     if analysis:
         _constrain_analysis(schema)
         _preserve_string_lengths(schema)
-    if schema.get("title") == "ReportInsightReduceOutput":
+    if schema.get("title") in {"ReportInsightReduceOutput", "ReportInsightReduceRepair"}:
         # Strict SDK conversion otherwise drops the public nonempty prose
         # bounds, allowing empty assumptions even during a bounded repair.
         _preserve_string_lengths(schema)

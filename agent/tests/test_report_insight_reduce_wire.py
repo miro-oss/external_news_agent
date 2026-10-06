@@ -60,3 +60,61 @@ def test_reduce_nonempty_constraints_keep_empty_arrays_and_exact_refs():
     payload["insights"][0].update(overview=[], implications=[], watchItems=[])
     validator.validate(payload)
     ReportInsightReduceOutput.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "unit,field,maximum",
+    [
+        ("headline", None, 200),
+        ("overview", "text", 600),
+        ("overview", "assumption", 500),
+        ("implications", "text", 700),
+        ("implications", "mechanism", 500),
+        ("implications", "assumption", 500),
+        ("implications", "falsifiedBy", 500),
+        ("watchItems", "topic", 200),
+        ("watchItems", "indicator", 400),
+        ("watchItems", "trigger", 400),
+    ],
+)
+def test_partial_reduce_prose_bounds_survive_sdk_conversion(unit, field, maximum):
+    request = ReportInsightRequest.model_validate(request_body())
+    full = report_insight_reduce_schema(request, {"CHIP_MAKER": ("501:0",)})
+    properties = full["$defs"]["ReportInsightReduceAudience"]["anyOf"][0]["properties"]
+    unit_schema = properties[unit] if field is None else properties[unit]["items"]
+    schema = {
+        "title": "ReportInsightReduceRepair",
+        "type": "object",
+        "properties": {
+            "repairs": {
+                "type": "object",
+                "properties": {"repair0": deepcopy(unit_schema)},
+                "required": ["repair0"],
+                "additionalProperties": False,
+            }
+        },
+        "required": ["repairs"],
+        "additionalProperties": False,
+    }
+    snapshot = deepcopy(schema)
+    wire = OpenAIJsonSchemaTransformer(output_contract(schema).schema, strict=True).walk()
+    assert schema == snapshot
+    validator = Draft202012Validator(wire)
+    original = output()["insights"][0][unit]
+    payload = {"repairs": {"repair0": original if field is None else deepcopy(original[0])}}
+
+    def set_value(value):
+        if field is None:
+            payload["repairs"]["repair0"] = value
+        else:
+            payload["repairs"]["repair0"][field] = value
+
+    for value in ("", " \n\t", None, "가" * (maximum + 1)):
+        set_value(value)
+        assert not validator.is_valid(payload)
+    for value in ("가", "가" * maximum, "같은 대상의\n변경 범위"):
+        set_value(value)
+        validator.validate(payload)
+    if field is not None:
+        payload["repairs"]["repair0"]["basisClaimIds"] = ["foreign:0"]
+        assert not validator.is_valid(payload)

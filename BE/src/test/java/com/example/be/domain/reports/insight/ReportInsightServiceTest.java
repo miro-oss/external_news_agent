@@ -326,7 +326,9 @@ class ReportInsightServiceTest {
                 new AgentClientException.Usage(100L, 50L, BigDecimal.ONE, BigDecimal.ONE),
                 AgentClientException.TimeoutPhase.NONE, null,
                 new AgentClientException.ValidationFailure("REDUCE-001", 2, "OutputValidationError", 2,
-                        List.of("report_fact_mismatch", "private-kind\nforged-log")));
+                        List.of("report_fact_mismatch", "private-kind\nforged-log"),
+                        List.of(new AgentClientException.ValidationIssue("CHIP_MAKER", "overview[0].text",
+                                "report_fact_mismatch", List.of("101:0"))), true));
         doThrow(failure).when(client).reportInsight(any());
 
         var publicError = assertThrows(GeneralException.class,
@@ -344,6 +346,9 @@ class ReportInsightServiceTest {
         assertEquals("OutputValidationError", arguments[8]);
         assertEquals(2, arguments[9]);
         assertEquals(List.of("report_fact_mismatch"), arguments[10]);
+        assertEquals(List.of(new AgentClientException.ValidationIssue("CHIP_MAKER", "overview[0].text",
+                "report_fact_mismatch", List.of("101:0"))), arguments[11]);
+        assertEquals(true, arguments[12]);
         verify(recorder).recordReportInsightFailure(eq(20L), any(), same(failure), any(), any());
         verify(quota).completeObservedFailure(any(), same(failure));
     }

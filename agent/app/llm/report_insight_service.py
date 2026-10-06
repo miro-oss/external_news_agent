@@ -37,12 +37,14 @@ from app.llm.report_insight_instructions import report_stage_instruction
 from app.llm.report_insight_map_execution import run_report_maps
 from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
 from app.llm.report_insight_prefix import closed_assessment_prefix
+from app.llm.report_insight_reduce_repair import ReduceRepairContext, partial_reduce_repair
 from app.llm.report_insight_retrieval import retrieve_report_insight_evidence
 from app.llm.report_insight_synthesis_quality import (
     synthesis_evidence_frames,
     validate_synthesis_quality,
 )
 from app.llm.report_insight_work_grounding import validate_work_synthesis
+from app.llm.report_validation_diagnostics import ReportValidationIssue
 from app.llm.request_contract import report_insight_map_schema, report_insight_reduce_schema
 from app.llm.structured_call import StructuredCallRepair, structured_call
 from app.schemas.report import ReportResponseMeta
@@ -60,7 +62,7 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v24"
+PROMPT_VERSION = "report-insight.ko.v25"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -150,11 +152,16 @@ class ReportReduceValidationError(OutputValidationError):
         repair_summary,
         repair_diagnostics,
         repair_action_diagnostics=(),
+        validation_issues=(),
+        partial_repair_eligible=False,
     ):
         super().__init__(message, error_kinds=error_kinds)
         self.repair_summary = repair_summary
         self.repair_diagnostics = tuple(repair_diagnostics)
         self.repair_action_diagnostics = tuple(repair_action_diagnostics)
+        self.validation_issues = tuple(validation_issues)
+        self.partial_repair_eligible = partial_repair_eligible
+        self.repair_context = None
 
 
 _PROMPT_ROOT = Path(__file__).resolve().parents[1] / "prompts"
@@ -530,14 +537,24 @@ class ReportInsightService(ReportInsightLegacyService):
             if any(allowed.values()):
                 schema = report_insight_reduce_schema(request, allowed)
                 schema["description"] = "reportInsightCall:REDUCE-001"
+                reduce_prompt = _reduce_v4_prompt(request, validated, retrieved, allowed)
+
+                def reduce(response):
+                    try:
+                        return _validated_v4_reduce_output(response, request, mapped, allowed)
+                    except ReportReduceValidationError as error:
+                        if error.partial_repair_eligible:
+                            error.repair_context = ReduceRepairContext.capture(
+                                response.text, reduce_prompt, schema, error.validation_issues
+                            )
+                        raise
+
                 output = self._call(
                     pipeline,
                     instruction=report_stage_instruction(request.audiences, "REDUCE"),
-                    prompt=_reduce_v4_prompt(request, validated, retrieved, allowed),
+                    prompt=reduce_prompt,
                     schema=schema,
-                    validate=lambda response: _validated_v4_reduce_output(
-                        response, request, mapped, allowed
-                    ),
+                    validate=reduce,
                     stage="REDUCE",
                 ).output
             else:
@@ -656,7 +673,8 @@ def _reduce_repair_diagnostics(response, request, allowed):
             if len(refs) != len(set(refs)) or not set(refs) <= permitted:
                 return None
 
-    errors, actions = [], []
+    errors, actions, validation_issues = [], [], []
+    partial_repair_eligible = True
     fields_by_kind = {}
     diagnostic_paths = {f"{insight.audience}.headline" for insight in reduced.insights}
     for insight in reduced.insights:
@@ -673,9 +691,19 @@ def _reduce_repair_diagnostics(response, request, allowed):
                 )
 
     def record(path, refs, message, kinds):
+        nonlocal partial_repair_eligible
         label = f"{path} refs={list(refs)}"
         errors.append((f"{label}: {message}", kinds))
         actions.append(f"{label}: {_repair_action_message(message, kinds)}")
+        if path in diagnostic_paths:
+            audience, _, field = path.partition(".")
+            validation_issues.extend(
+                ReportValidationIssue(audience, field, kind, tuple(refs)) for kind in kinds
+            )
+        else:
+            # Compound messages can explain a failure, but their prose cannot
+            # authorize replacing/preserving individual synthesis units.
+            partial_repair_eligible = False
         # Direct prose diagnostics already have a server-owned path. Compound
         # guards prefix lines with fixed labels; accept only schema-bounded
         # fields actually present in this output, never a path quoted in prose.
@@ -716,6 +744,22 @@ def _reduce_repair_diagnostics(response, request, allowed):
     for insight in reduced.insights:
         audience = insight.audience
         headline_refs = [claim_id for claim_id in claims if claim_id in allowed[audience]]
+        # These public-output guards also inspect otherwise grounded prose.
+        # Their failures cannot be left in a supposedly unaffected unit.
+        if audience == "MARKET_INVESTOR" and _INVESTMENT_ADVICE.search(insight.model_dump_json()):
+            record(
+                audience,
+                headline_refs,
+                "MARKET_INVESTOR는 투자 자문 표현을 포함할 수 없습니다.",
+                ("report_synthesis_invalid",),
+            )
+        if headline_refs and has_blanket_insufficient_headline(insight.headline):
+            record(
+                audience,
+                headline_refs,
+                "관련 근거가 있는데 headline에서 관련 근거 부족을 선언할 수 없습니다.",
+                ("report_synthesis_invalid",),
+            )
         capture(
             f"{audience}.headline",
             headline_refs,
@@ -779,6 +823,8 @@ def _reduce_repair_diagnostics(response, request, allowed):
         repair_summary=summary,
         repair_diagnostics=tuple(message for message, _ in errors),
         repair_action_diagnostics=tuple(actions),
+        validation_issues=tuple(validation_issues),
+        partial_repair_eligible=partial_repair_eligible,
     )
 
 
@@ -1374,6 +1420,10 @@ def _reduce_v4_prompt(request, validated, retrieved, allowed):
 
 
 def _report_insight_repair_call(prompt, schema, raw, error, validate):
+    if isinstance(error, ReportReduceValidationError):
+        repair = partial_reduce_repair(prompt, schema, raw, error.repair_context, validate)
+        if repair is not None:
+            return repair
     fallback = StructuredCallRepair(
         prompt=_report_insight_repair_prompt(prompt, raw, error),
         response_schema=schema,
