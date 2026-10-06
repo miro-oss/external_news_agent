@@ -135,6 +135,11 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
     if analysis:
         _constrain_analysis(schema)
         _preserve_string_lengths(schema)
+    if schema.get("title") == "ReportInsightReduceOutput":
+        # Strict SDK conversion otherwise drops the public nonempty prose
+        # bounds, allowing empty assumptions even during a bounded repair.
+        _preserve_string_lengths(schema)
+        _drop_redundant_fixed_string_constraints(schema)
     if schema.get("title") == "ReportAssessmentDraft":
         # Partial repair keeps the original validation closure, but its wire
         # schema only needs definitions reachable from the failed records.

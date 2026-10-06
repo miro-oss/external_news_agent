@@ -297,6 +297,14 @@ def _actor(clause: str, event: re.Match) -> tuple[str | None, str | None]:
             # A prior investment is not the grammatical owner of a later order
             # expansion. Only directly coordinated nouns inherit their subject.
             link = match.groupdict().get("link", "의")
+            if (
+                match["actor"] == "진행"
+                and link in {"은", "는", "이", "가"}
+                and re.search(r"(?:투자|증설|수주|양산)\s+$", prefix[: match.start()])
+            ):
+                # In '투자 진행은 … 증설', 진행 names the earlier action's
+                # progress, not a company that owns the later expansion.
+                continue
             coordinated = re.fullmatch(
                 r"\s*(?:투자|증설|수주|양산)(?:\s*확대)?\s*(?:와|과|및|·)\s*", gap
             )

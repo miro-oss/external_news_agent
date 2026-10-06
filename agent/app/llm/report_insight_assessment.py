@@ -219,10 +219,26 @@ _UNDECIDABLE_RELATION_REASON = re.compile(
 )
 
 
+@dataclass(frozen=True)
+class ReportAssessmentWorkDiagnostic:
+    audience: Audience
+    finding_id: int
+    native_field: str
+    problem: str
+    claim_ids: tuple[str, ...]
+
+
 class ReportAssessmentDraftValidationError(OutputValidationError):
-    def __init__(self, message: str, *, failed_finding_ids: tuple[int, ...]):
+    def __init__(
+        self,
+        message: str,
+        *,
+        failed_finding_ids: tuple[int, ...],
+        work_diagnostics: tuple[ReportAssessmentWorkDiagnostic, ...] = (),
+    ):
         super().__init__(message, error_kinds=("report_assessment_draft_invalid",))
         self.failed_finding_ids = failed_finding_ids
+        self.work_diagnostics = tuple(work_diagnostics)
 
 
 @dataclass(frozen=True)
@@ -826,13 +842,13 @@ def _validate_draft(
         set(items) != expected for items in draft.assessments.values()
     ):
         raise ValueError("내부 MAP은 요청한 모든 audience와 finding 키만 정확히 반환해야 합니다.")
-    errors, failed = [], []
+    errors, failed, work_diagnostics = [], [], []
     mapped, evidence = [], {}
     for audience in request.audiences:
         public, proof = [], {}
         for finding in request.findings:
             item = draft.assessments[audience][f"finding{finding.id}"]
-            messages = _assessment_errors(item, finding, audience)
+            messages = _assessment_errors(item, finding, audience, work_diagnostics)
             if messages:
                 failed.append(finding.id)
                 errors.extend(
@@ -847,6 +863,7 @@ def _validate_draft(
         raise ReportAssessmentDraftValidationError(
             "내부 MAP 근거 계약 위반: " + "; ".join(errors),
             failed_finding_ids=tuple(dict.fromkeys(failed)),
+            work_diagnostics=tuple(work_diagnostics),
         )
     return ValidatedAssessmentDraft(
         draft=draft,
@@ -867,7 +884,10 @@ def _validate_draft(
 
 
 def _assessment_errors(
-    item: ReportFindingAssessmentDraft, finding, audience: Audience
+    item: ReportFindingAssessmentDraft,
+    finding,
+    audience: Audience,
+    work_diagnostics: list[ReportAssessmentWorkDiagnostic],
 ) -> list[str]:
     errors = []
     if item.finding_id != finding.id:
@@ -953,6 +973,17 @@ def _assessment_errors(
     for field, prose in (("reason", item.reason), ("condition", item.condition)):
         if prose is not None:
             for problem in work_prose_problems(prose, selected_source):
+                work_diagnostics.append(
+                    ReportAssessmentWorkDiagnostic(
+                        audience=audience,
+                        finding_id=finding.id,
+                        native_field=(
+                            "reason" if field == "reason" else "decision.connection.condition"
+                        ),
+                        problem=problem,
+                        claim_ids=tuple(sorted(reason_source_ids)),
+                    )
+                )
                 errors.append(
                     f"{field}: {problem}. 같은 finding의 claim과 연결 원문이 지원하지 않는 "
                     "구체 업무 "

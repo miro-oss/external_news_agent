@@ -13,7 +13,6 @@ from app.llm.openai_contract import output_contract
 from app.llm.report_insight_service import _eligible_report_request, _validated_map_output
 from app.llm.request_contract import (
     report_insight_map_schema,
-    report_insight_reduce_schema,
     report_insight_schema,
 )
 from app.schemas.report_insight import (
@@ -213,12 +212,11 @@ def test_map_instructions_explain_native_object_and_server_array_conversion():
     assert "입력 finding 순서대로 assessments 배열" in instructions
 
 
-def test_generic_map_and_single_reduce_contracts_are_unchanged():
+def test_generic_map_and_public_contracts_are_unchanged():
     request, _, _, _, _, _ = bound_case()
     schemas = [
         ReportInsightMapOutput.model_json_schema(by_alias=True),
         report_insight_schema(request),
-        report_insight_reduce_schema(request, {"CHIP_MAKER": ("501:0", "502:0")}),
     ]
     raw = '{"unchanged": true}'
     for schema in schemas:
