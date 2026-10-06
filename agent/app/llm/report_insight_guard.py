@@ -9,7 +9,8 @@ import calendar
 import re
 from datetime import date, timedelta
 
-from app.core.evidence import factual_mismatches
+from app.core.evidence import _companies, factual_mismatches
+from app.llm.report_insight_year_ranges import supported_year_range_context
 from app.schemas.report_insight import ReportInsightRequest
 
 _POLARITY_MESSAGE = "근거와 반대되는 부정 표현이 포함되어 있습니다."
@@ -37,6 +38,22 @@ _NONFACTUAL_SIGNING = re.compile(
     re.IGNORECASE,
 )
 _NEGATED_SIGNING = re.compile(r"(?:\bnot|\bnever|n't)(?:\s+[a-z]+){0,4}\s+$", re.IGNORECASE)
+_MADE_CONTRACT = re.compile(r"계약(?:을)?\s*맺었다(?=$|[\s.!?;]|고)")
+_UNMADE_CONTRACT = re.compile(r"계약(?:을)?\s*맺지\s*않(?:았다|는다)(?=$|[\s.!?;]|고)")
+_SIGNED_LEASE = re.compile(
+    r"\bsigned\s+(?:(?:an?|the)\s+)?(?:long-term\s+)?lease\b"
+    r"(?!\s+(?:proposal|draft|plan|template|outline)\b)",
+    re.IGNORECASE,
+)
+_CONTRACT_SENTENCE_BREAK = re.compile(r"(?<!\d)[.!?](?!\d)|[。！？;\n]")
+_NONFACTUAL_CONTRACT_CONTEXT = re.compile(
+    r"만약|가정|전제|예시|부인|부정|거짓|미체결|사실(?:이|은)?\s*아니|"
+    r"\b(?:denied|denies|deny|disputed|false|untrue|hypothetical|suppose|assume|assuming)\b",
+    re.IGNORECASE,
+)
+_UNASSERTED_CONTRACT_REPORT = re.compile(
+    r"고\s*(?:(?:보도|공시|발표|확인)(?:되|하)지|알려지지)\s*않"
+)
 # An explicit report summary can coordinate two independent nominal facts.
 # Do not split ordinary conjunctions: they may share an actor, date or action.
 _PARALLEL_SUMMARY = re.compile(
@@ -130,6 +147,38 @@ _CURRENT_ACTION = re.compile(
 )
 
 
+def _contract_alias_events(value: str):
+    """Narrow observed past-tense synonyms, not proposed or quoted contracts."""
+    for pattern, positive in (
+        (_MADE_CONTRACT, True),
+        (_UNMADE_CONTRACT, False),
+        (_SIGNED_LEASE, True),
+    ):
+        for match in pattern.finditer(value):
+            prefix = _CONTRACT_SENTENCE_BREAK.split(value[: match.start()])[-1]
+            rest = value[match.end() :]
+            ending = _CONTRACT_SENTENCE_BREAK.search(rest)
+            suffix = rest[: ending.start()] if ending else rest
+            if ending and ending[0] in {"?", "？"}:
+                continue
+            clause = prefix + match[0] + suffix
+            # The new aliases intentionally leave reported denials and quoted
+            # propositions to the existing conservative unknown-state path.
+            if any(mark in clause for mark in "\"'“”‘’「」『』") or (
+                _NONFACTUAL_CONTRACT_CONTEXT.search(clause)
+                or _HYPOTHETICAL_SUFFIX.match(suffix)
+                or _UNASSERTED_CONTRACT_REPORT.match(suffix)
+            ):
+                continue
+            if pattern is _SIGNED_LEASE:
+                if _NEGATED_SIGNING.search(prefix):
+                    yield False, clause
+                    continue
+                if _NONFACTUAL_SIGNING.search(prefix):
+                    continue
+            yield positive, clause
+
+
 def factual_states(value: str) -> dict[str, set[bool]]:
     """Known asserted states, True for positive and False for negative."""
     states = {}
@@ -158,6 +207,8 @@ def factual_states(value: str) -> dict[str, set[bool]]:
             states.setdefault("contract", set()).add(False)
         elif not _NONFACTUAL_SIGNING.search(prefix):
             states.setdefault("contract", set()).add(True)
+    for positive, _ in _contract_alias_events(value):
+        states.setdefault("contract", set()).add(positive)
     return states
 
 
@@ -224,13 +275,16 @@ def report_prose_mismatches(
     """Scope report interpretations while retaining source-bound factual checks."""
     states = factual_states(value)
     source_states = factual_states(source)
+    source_aliases = list(_contract_alias_events(source))
     # Interpretive prose without an asserted event may discuss missing relevance,
     # a status question, uncertainty, or a missing-information limitation. The
     # source's positive/negative event polarity does not constrain that analysis.
     has_factual_state = bool(states)
     remaining = list(mismatches)
     if any(item.startswith(_NUMERIC_CONTEXT_MESSAGE) for item in remaining) and (
-        _independent_parallel_numbers(value, source) or _ordered_year_percentages(value, source)
+        _independent_parallel_numbers(value, source)
+        or _ordered_year_percentages(value, source)
+        or supported_year_range_context(value, source)
     ):
         remaining = [item for item in remaining if not item.startswith(_NUMERIC_CONTEXT_MESSAGE)]
     if _POLARITY_MESSAGE in remaining:
@@ -264,6 +318,26 @@ def report_prose_mismatches(
             remaining.append(_POLARITY_MESSAGE)
     if any(name != "information" and name not in source_states for name in states):
         remaining.append("근거에서 확인되지 않는 완료·착수·계약·중단 사실입니다.")
+    if source_aliases and True in states.get("contract", set()):
+        # A newly recognized contract cannot borrow an organization that only
+        # occurs in an unrelated source sentence. Reuse the factual guard's
+        # company normalization, preserving its existing unsupported-actor rule.
+        asserted_actors = set().union(
+            *(
+                _companies(clause)
+                for clause in _CONTRACT_SENTENCE_BREAK.split(value)
+                if True in factual_states(clause).get("contract", set())
+            )
+        )
+        source_actors = set().union(
+            *(
+                _companies(clause)
+                for clause in _CONTRACT_SENTENCE_BREAK.split(source)
+                if True in factual_states(clause).get("contract", set())
+            )
+        )
+        if asserted_actors - source_actors:
+            remaining.append("근거의 계약 체결 주체와 다른 기업명입니다.")
     # Stored sources can use short anonymized organization names outside the
     # shared company dictionary. They remain factual entities, including when a
     # different finding is the only place that names them.

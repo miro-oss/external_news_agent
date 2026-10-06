@@ -9,9 +9,9 @@ _BASE = (_ROOT / "report-insight.ko.v15.md").read_text(encoding="utf-8").strip()
 _RUBRIC = (_ROOT / "report-importance.v6.md").read_text(encoding="utf-8").strip()
 _REDUCE_RULES = (_ROOT / "report-insight-reduce.ko.v1.md").read_text(encoding="utf-8").strip()
 ASSESSMENT_REASON_RULE = (
-    "reason은 원문 대상·사건 단계와 관점 업무의 연결 근거 또는 한계를 "
-    "한국어 1~2문장, 180자 이내로 설명한다. 업무 코드·claim ID·기업명·수치 나열이나 "
-    "기사 재요약을 쓰지 않는다."
+    "reason은 업무 연결·영향·시점의 근거나 한계를 1~2문장 180자 이내로 설명한다. "
+    "영향·시점도 원문의 변경·준비·기한으로 뒷받침한다. "
+    "코드·ID·기업명·수치 나열이나 재요약은 쓰지 않는다."
 )
 
 _ROLES = {
