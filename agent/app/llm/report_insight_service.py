@@ -60,7 +60,7 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v23"
+PROMPT_VERSION = "report-insight.ko.v24"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -1021,10 +1021,13 @@ def _preserve_native_connection(repair, raw, error):
     return StructuredCallRepair(
         prompt=(
             "이번 수리에서 connection의 관계·업무·조건·근거는 검증되어 Schema const로 "
-            "고정됩니다. effect/timing의 범주와 근거, reason을 수정하세요. 같은 finding의 "
-            "다른 원문이 해당 축을 지원하면 선택할 수 있고, 근거가 부족한 축은 미확인으로 "
-            "남깁니다. reason은 고정된 관계 및 수정한 영향·시점과 일치해야 합니다.\n\n"
-            + repair.prompt
+            "고정됩니다. 진단은 실패한 축의 기존 basis에 대한 것이며 finding 전체의 근거 "
+            "부정이 아닙니다. 고정된 connection.basis와 같은 finding의 모든 원문 선택지를 "
+            "재대조해 effect/timing의 근거를 다시 선택하세요. 연결 근거가 영향·시점도 "
+            "지원한다는 보장은 없습니다. effect는 기사 대상의 변경·제약·준비 범위이며, "
+            "즉시성이나 독자 회사의 내부 운영자료는 필수 요건이 아닙니다. timing은 별도로 "
+            "판단하세요. 해당 축을 지원하는 근거가 없으면 미확인을 유지합니다. reason은 "
+            "고정된 관계 및 수정한 영향·시점과 일치해야 합니다.\n\n" + repair.prompt
         ),
         response_schema=schema,
         validate=validate_repair,

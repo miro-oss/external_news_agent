@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
-from test_report_insight_assessment import draft_to_wire, payload, request, response
+from test_report_insight_assessment import draft_to_wire, framed, payload, request, response
 from test_report_insight_axis_support_repair import case
 from test_report_insight_core_forecast_support import CURRENT_CAPACITY, recorded_case
 from test_report_insight_preserved_decision_repair import repair_payload, wire_validator
@@ -155,6 +155,7 @@ def test_mixed_or_genuine_relation_failure_does_not_preserve_connection(defect):
     repair, error, raw = repair_for(source, value)
     assert not error.native_connection_repairs
     assert repair.response_schema == draft_schema(source)
+    assert "finding 전체의 근거 부정이 아닙니다" not in repair.prompt
     if defect == "relation":
         fixed = deepcopy(value)
         fixed["assessments"]["IT_INFRA"]["finding101"].update(
@@ -187,3 +188,27 @@ def test_stale_or_untrusted_context_retains_ordinary_repair(defect):
         draft_prompt(source), schema, raw.text, error, lambda result: full_validate(result, source)
     )
     assert repair.response_schema == schema
+    assert "finding 전체의 근거 부정이 아닙니다" not in repair.prompt
+
+
+def test_authenticated_axis_repair_separates_impact_from_urgency_without_changing_sources():
+    source, value = recorded_case()
+    repair, _, raw = repair_for(source, value)
+    assert "finding 전체의 근거 부정이 아닙니다" in repair.prompt
+    assert "즉시성이나 독자 회사의 내부 운영자료는 필수 요건이 아닙니다" in repair.prompt
+    assert "연결 근거가 영향·시점도 지원한다는 보장은 없습니다" in repair.prompt
+    assert "해당 축을 지원하는 근거가 없으면 미확인을 유지합니다" in repair.prompt
+    assert framed(repair.prompt) == framed(draft_prompt(source))
+    fixed = corrected_capacity(value)
+    wire = repair_payload(repair, source, fixed)
+    wire_validator(repair).validate(wire)
+    accepted = repair.validate(replace(raw, text=json.dumps(wire, ensure_ascii=False)))
+    assert accepted.evidence["CHIP_MAKER"][101].impact_scope == "CORE_CONSTRAINT"
+    # The wording permits a recheck; it does not populate a missing effect itself.
+    fixed["assessments"]["CHIP_MAKER"]["finding101"].update(
+        impactScope="UNDETERMINED", impactBasis=None
+    )
+    unknown = repair_payload(repair, source, fixed)
+    wire_validator(repair).validate(unknown)
+    accepted = repair.validate(replace(raw, text=json.dumps(unknown, ensure_ascii=False)))
+    assert score_importance(accepted.mapped.insights[0].assessments[0].axes) is None
