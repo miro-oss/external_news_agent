@@ -527,7 +527,7 @@ def test_four_disjoint_role_top_fives_receive_fair_review_under_shared_twelve_ca
     assert all(len(insight.assessments) == 20 for insight in full.mapped.insights)
 
 
-@pytest.mark.parametrize("relation", ["UNRELATED", "UNDETERMINED"])
+@pytest.mark.parametrize("relation", ["UNRELATED", "UNDETERMINED", "NO_CHANGE"])
 def test_review_preserves_late_omissions_for_each_role_when_top_candidates_exceed_cap(relation):
     source = request(
         ids=tuple(range(101, 126)),
@@ -554,8 +554,10 @@ def test_review_preserves_late_omissions_for_each_role_when_top_candidates_excee
             )
         omitted = source.findings[20 + index]
         value["assessments"][audience][f"finding{omitted.id}"] = item(
-            omitted, audience=audience, relation=relation
+            omitted, audience=audience, relation="DIRECT" if relation == "NO_CHANGE" else relation
         )
+        if relation == "NO_CHANGE":
+            value["assessments"][audience][f"finding{omitted.id}"]["impactScope"] = "NO_CHANGE"
         claimless = value["assessments"][audience]["finding125"]
         claimless.update(
             relation="UNDETERMINED", relationBasis=None, reason=CLAIMLESS_ASSESSMENT_REASON
@@ -628,6 +630,54 @@ def test_single_role_review_shares_capacity_between_unknown_relation_and_unknown
     assert assessments[118].axes.directness == 3
     assert assessments[119].axes.directness == 1
     assert assessments[118].axes.impact is None and assessments[119].axes.impact is None
+
+
+@pytest.mark.parametrize(
+    "source_text",
+    [
+        "생산라인은 2029년까지 월 4만4000장 생산능력 확보를 계획하고 있다.",
+        "생산라인의 생산능력과 공정 검증 일정은 기존과 동일하게 유지된다.",
+    ],
+)
+def test_no_change_outside_top_candidates_gets_review_without_changing_verdict(source_text):
+    source = request(ids=tuple(range(101, 108)))
+    finding = source.findings[-1]
+    finding.claims[0].text = source_text
+    finding.sentences[0].text = source_text
+    value = payload(source)
+    value["assessments"]["CHIP_MAKER"]["finding107"]["impactScope"] = "NO_CHANGE"
+    full = validate_draft(response(value, source), source)
+    before = full.draft.model_dump_json(), full.mapped.model_dump_json()
+
+    selected = select_review(source, full)
+
+    assert selected == (101, 102, 103, 104, 105, 107)
+    assert (full.draft.model_dump_json(), full.mapped.model_dump_json()) == before
+    assessment = full.mapped.insights[0].assessments[-1]
+    assert full.evidence["CHIP_MAKER"][107].impact_scope == "NO_CHANGE"
+    assert assessment.axes.impact == 0
+
+
+def test_no_change_shares_review_cap_with_unknown_relation_and_unknown_impact():
+    source = request(ids=tuple(range(101, 131)), text="협정의 이행 조건이 바뀌었다.")
+    value = payload(source)
+    entries = value["assessments"]["CHIP_MAKER"]
+    for finding in source.findings[5:15]:
+        entries[f"finding{finding.id}"] = item(finding, relation="UNDETERMINED")
+    for finding in source.findings[15:25]:
+        entries[f"finding{finding.id}"].update(impactScope="UNDETERMINED", impactBasis=None)
+    for finding in source.findings[25:]:
+        entries[f"finding{finding.id}"]["impactScope"] = "NO_CHANGE"
+    full = validate_draft(response(value, source), source)
+    before = full.draft.model_dump_json(), full.mapped.model_dump_json()
+
+    selected = select_review(source, full)
+
+    assert len(selected) == 12
+    assert set(range(101, 106)) <= set(selected)
+    assert {106, 107, 116, 117, 126, 127} <= set(selected)
+    assert selected == tuple(sorted(selected))
+    assert (full.draft.model_dump_json(), full.mapped.model_dump_json()) == before
 
 
 @pytest.mark.parametrize(

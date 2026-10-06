@@ -1071,7 +1071,8 @@ def select_review(
     Seed each role's leading candidate, then alternate omissions and remaining
     top candidates in role round-robin order. Confirmed relevance must not fill
     the entire allowance before unknown relevance or impact can be reviewed.
-    These two abstention causes share capacity with possible false negatives.
+    These two abstention causes share capacity with possible false negatives,
+    including a known NO_CHANGE verdict that can otherwise miss the top list.
     This selects work for independent assessment; it never changes a verdict.
     """
     full = merge_drafts(request, draft)
@@ -1105,7 +1106,7 @@ def select_review(
         )
         role_priorities.append([item.finding_id for item in ranked[:TOP_REVIEW_FINDINGS]])
     for audience in request.audiences:
-        suspects, unknown_relation, unknown_impact = [], [], []
+        suspects, unknown_relation, unknown_impact, no_change = [], [], [], []
         for finding in request.findings:
             if not finding.claims:
                 continue
@@ -1119,9 +1120,14 @@ def select_review(
                 and item.impact_scope == "UNDETERMINED"
             ):
                 unknown_impact.append(finding.id)
+            if (
+                item.relation in {"DIRECT", "CONDITIONAL", "BACKGROUND"}
+                and item.impact_scope == "NO_CHANGE"
+            ):
+                no_change.append(finding.id)
         # Known work connections do not need a vocabulary match to receive an
         # impact review. Unknown urgency alone does not withhold importance.
-        role_omissions.append(fair_order([suspects, unknown_relation, unknown_impact]))
+        role_omissions.append(fair_order([suspects, unknown_relation, unknown_impact, no_change]))
     for candidates in role_priorities:
         if candidates:
             add(candidates[0])
