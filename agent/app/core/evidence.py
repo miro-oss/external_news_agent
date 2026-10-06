@@ -62,11 +62,16 @@ _CURRENCY_COMPONENT = re.compile(
     rf"({_CURRENCY_NUMBER})\s*({_CURRENCY_SCALE_PATTERN})?", re.IGNORECASE
 )
 _UNITLESS_SCALED_AMOUNT = re.compile(
-    rf"(?<![A-Za-z0-9])(?P<sign>[-+]?)(?P<amount>{_CURRENCY_NUMBER}\s*"
+    rf"(?<![A-Za-z0-9])(?P<sign>[-+]?)(?P<amount>(?>{_CURRENCY_NUMBER}\s*"
     rf"(?:{_CURRENCY_SCALE_PATTERN})(?:\s*{_CURRENCY_NUMBER}\s*"
-    rf"(?:{_CURRENCY_SCALE_PATTERN}))*)"
+    rf"(?:{_CURRENCY_SCALE_PATTERN}))*))"
     r"(?=$|[^A-Za-z0-9가-힣]|(?:을|를|은|는|만|이다|이고|이며)(?![가-힣]))",
     re.IGNORECASE,
+)
+_SCALED_COUNT_UNIT = re.compile(
+    r"\s*(?:개|명|건|톤|배)(?=$|[^A-Za-z0-9가-힣]|"
+    r"(?:으로|에서|까지|부터|보다|이다|이고|이며|을|를|은|는|이|가|의|에|로|와|과|만|도|당|씩)+"
+    r"(?![가-힣]))"
 )
 _SIGNED_CURRENCY_PREFIX = re.compile(r"(?P<sign>[-+])(?P<currency>us\$|\$|€|₩|usd|eur|krw)\s*$")
 _DATE_NUMBER_UNIT = re.compile(r"\s*(년|월|일|분기)")
@@ -644,6 +649,10 @@ def _unitless_scaled_amounts(value, currency_amounts):
     amounts = []
     for match in _UNITLESS_SCALED_AMOUNT.finditer(value):
         if any(start <= match.start() < end for start, end, _ in currency_amounts):
+            continue
+        # A spaced count suffix is still a unit. Check after the maximal atomic
+        # amount match so rejection cannot backtrack to '1억' in '1억 7천만개'.
+        if _SCALED_COUNT_UNIT.match(value, match.end()):
             continue
         amount = _scaled_amount_value(match["amount"], match["sign"])
         if amount is not None:

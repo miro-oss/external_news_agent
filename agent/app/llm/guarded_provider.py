@@ -114,7 +114,7 @@ def run_guarded[ResponseT](
             status_code=503,
             code="PROVIDER_UNAVAILABLE",
             message="Provider 동시 호출 한도에 도달했습니다.",
-            details={"concurrencyLimited": True},
+            details={"concurrencyLimited": True, "requestNotStarted": True},
         )
 
     try:

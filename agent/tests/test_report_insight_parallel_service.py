@@ -50,7 +50,7 @@ def test_explicit_provider_parallelism_preserves_full_output_and_exact_usage(pla
     source = request(ids=tuple(range(101, 121))).model_copy(update={"plan": plan})
     before = source.model_dump_json(by_alias=True)
     provider = ParallelProvider(source)
-    output = generate(provider, source, AGENT_PROVIDER_CONCURRENCY=3)
+    output = generate(provider, source, AGENT_PROVIDER_CONCURRENCY=6)
     assert provider.peak == 3
     assert provider.completed_maps == {"MAP-001", "MAP-002", "MAP-003", "MAP-004"}
     assert [item.finding_id for item in output.insights[0].assessments] == list(range(101, 121))

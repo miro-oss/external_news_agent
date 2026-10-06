@@ -69,7 +69,9 @@ class ReportInsightPipelineProvider:
         if self._credit_reservation is None:
             return 1
         explicit = 3 if self.provider is None else self.provider.report_insight_max_concurrency
-        return min(3, self.settings.provider_concurrency, explicit)
+        # Leave capacity for another report using the same provider guard.
+        report_slots = max(1, self.settings.provider_concurrency // 2)
+        return min(3, report_slots, explicit)
 
     def cancel_pending_calls(self) -> None:
         """Stop admission/repairs; already issued calls still settle their usage."""

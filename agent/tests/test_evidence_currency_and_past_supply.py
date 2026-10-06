@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.core.evidence import factual_mismatches, modality_overreach
+from app.core.evidence import _unitless_scaled_amounts, factual_mismatches, modality_overreach
 
 GAS_SOURCE = (
     "Air Liquide announces a new investment of more than 170 million euros "
@@ -71,6 +71,56 @@ def test_approximate_money_keeps_actor_and_year_context():
 
 def test_unitless_scale_does_not_discard_a_different_count_unit():
     assert factual_mismatches("1억명을 고용한다.", "1억원을 투자한다.")
+
+
+@pytest.mark.parametrize("unit", ["개", "명", "건", "톤", "배"])
+@pytest.mark.parametrize("separator", ["", " "])
+@pytest.mark.parametrize("amount", ["1억", "1억 7천만"])
+def test_scaled_count_units_cannot_become_currency(amount, separator, unit):
+    count = f"{amount}{separator}{unit}"
+    money = f"{amount}원"
+    assert factual_mismatches(count, money)
+    assert factual_mismatches(money, count)
+    assert factual_mismatches(count, count) == []
+    assert _unitless_scaled_amounts(count, []) == []
+
+
+@pytest.mark.parametrize(
+    "count",
+    [
+        "1억 개를",
+        "1억\t명은",
+        "1억\n건이",
+        "1억 톤으로",
+        "1억 배까지는",
+        "1억 개와",
+        "1억 명과",
+        "1억 7천만 건과는",
+        "6조 7800억 톤과도",
+        "1억 7천만개",
+        "1억7천만 명을",
+        "1억 7000만 건의",
+        "6조 7800억 톤",
+    ],
+)
+def test_count_suffixes_do_not_backtrack_to_a_shorter_unitless_amount(count):
+    assert _unitless_scaled_amounts(count, []) == []
+
+
+@pytest.mark.parametrize(
+    "claim,source",
+    [
+        ("1억을 투자한다.", "1억원을 투자한다."),
+        ("1억 개발비", "1억원 개발비"),
+        ("1억 명시", "1억원 명시"),
+        ("1억 배정", "1억원 배정"),
+        ("1억 7천만을 투자한다.", "1억7000만원을 투자한다."),
+        ("6조 7800억 규모의 투자", "6조7800억원 규모의 투자"),
+        ("1억 7천만 유로", "170 million euros"),
+    ],
+)
+def test_count_unit_boundary_preserves_money_and_unrelated_following_words(claim, source):
+    assert factual_mismatches(claim, source) == []
 
 
 @pytest.mark.parametrize(

@@ -12,11 +12,13 @@ from app.core.errors import AgentError
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.guarded_provider import ProviderGuard
 from app.llm.rate_limit_provider import ProviderRequestCoordinator, ProviderRequestPolicy
+from app.llm.report_insight_map_execution import run_report_maps
 from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
 
 
 def config(**kwargs):
-    return Settings(AGENT_MOCK=False, AGENT_PROVIDER_CONCURRENCY=3, **kwargs)
+    values = {"AGENT_MOCK": False, "AGENT_PROVIDER_CONCURRENCY": 4, **kwargs}
+    return Settings(_env_file=None, **values)
 
 
 def call(pipeline, name="one"):
@@ -50,17 +52,28 @@ class SafeProvider:
 
 
 def test_only_scoped_openai_or_explicit_bound_and_safe_injection_can_parallelize():
-    assert ReportInsightPipelineProvider(config(), "FREE").map_concurrency == 3
+    assert ReportInsightPipelineProvider(config(), "FREE").map_concurrency == 2
     assert ReportInsightPipelineProvider(config(), "PAID").map_concurrency == 1
     assert ReportInsightPipelineProvider(config(), "FREE", object()).map_concurrency == 1
     safe = SafeProvider(lambda _: answer())
     # Evaluation injects OpenAI into a stored PAID case; explicit capability is
     # about the real delegate, not the original request's routing label.
-    assert ReportInsightPipelineProvider(config(), "PAID", safe).map_concurrency == 3
-    limited = Settings(AGENT_PROVIDER_CONCURRENCY=2)
-    assert ReportInsightPipelineProvider(limited, "FREE", safe).map_concurrency == 2
+    assert ReportInsightPipelineProvider(config(), "PAID", safe).map_concurrency == 2
+    limited = config(AGENT_PROVIDER_CONCURRENCY=2)
+    assert ReportInsightPipelineProvider(limited, "FREE", safe).map_concurrency == 1
     safe.report_insight_max_concurrency = 1
     assert ReportInsightPipelineProvider(config(), "FREE", safe).map_concurrency == 1
+
+
+@pytest.mark.parametrize(
+    "slots,expected", [(1, 1), (2, 1), (3, 1), (4, 2), (5, 2), (6, 3), (10, 3)]
+)
+def test_report_uses_at_most_half_the_shared_slots_with_a_three_worker_ceiling(slots, expected):
+    settings = config(AGENT_PROVIDER_CONCURRENCY=slots)
+    assert ReportInsightPipelineProvider(settings, "FREE").map_concurrency == expected
+    safe = SafeProvider(lambda _: answer())
+    safe.report_insight_max_concurrency = 2
+    assert ReportInsightPipelineProvider(settings, "FREE", safe).map_concurrency == min(expected, 2)
 
 
 @pytest.mark.parametrize(
@@ -213,6 +226,146 @@ def test_unknown_exception_closes_admission_without_inventing_usage():
     with pytest.raises(AgentError):
         call(pipeline, "next")
     assert len(provider.calls) == 1
+
+
+def test_two_reports_share_four_guard_slots_without_rejecting_their_map_batches(monkeypatch):
+    gate = Barrier(4, timeout=3)
+    lock = Lock()
+    active = {"first": 0, "second": 0}
+    peaks = {"first": 0, "second": 0, "total": 0}
+    issued, closed = [], []
+
+    class Transport:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def generate(self, **kwargs):
+            name = kwargs["prompt"]
+            report = name.split(":")[0]
+            with lock:
+                issued.append(name)
+                active[report] += 1
+                peaks[report] = max(peaks[report], active[report])
+                peaks["total"] = max(peaks["total"], sum(active.values()))
+            try:
+                gate.wait()
+                return answer()
+            finally:
+                with lock:
+                    active[report] -= 1
+
+        def close(self):
+            with lock:
+                closed.append(self)
+
+    guard = ProviderGuard(
+        concurrency=4,
+        acquire_timeout_seconds=0.01,
+        failure_threshold=1,
+        cooldown_seconds=30,
+        hard_cap_credits=Decimal(5),
+    )
+    coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0))
+    monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
+    monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
+    monkeypatch.setattr(
+        "app.llm.report_insight_pipeline.get_provider_coordinator", lambda *_: coordinator
+    )
+    pipelines = [
+        ReportInsightPipelineProvider(config(OPENAI_API_KEY="offline-test-only"), "FREE")
+        for _ in range(2)
+    ]
+    assert all(pipeline.map_concurrency == 2 for pipeline in pipelines)
+
+    def report_maps(pipeline, report):
+        def evaluate(index, item):
+            call(pipeline, f"{report}:{item}")
+            return item
+
+        return run_report_maps(
+            list(range(4)),
+            evaluate,
+            concurrency=pipeline.map_concurrency,
+            cancel_pending=pipeline.cancel_pending_calls,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(report_maps, pipeline, name)
+            for pipeline, name in zip(pipelines, ("first", "second"), strict=True)
+        ]
+        assert [future.result(timeout=5) for future in futures] == [list(range(4))] * 2
+
+    assert peaks == {"first": 2, "second": 2, "total": 4}
+    assert len(issued) == len(set(issued)) == len(closed) == 8
+    assert guard.breaker.state is CircuitState.CLOSED
+    for pipeline in pipelines:
+        assert pipeline.calls == 4
+        assert pipeline.usage == ProviderUsage(40, 20, Decimal(".04"), Decimal(0))
+        assert not pipeline.unknown_failure_usage
+        assert pipeline._reserved_credits == 0
+
+
+def test_guard_rejection_does_not_make_drained_usage_partial(monkeypatch):
+    started, release = Event(), Event()
+    issued, closed = [], []
+
+    class Transport:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def generate(self, **kwargs):
+            issued.append(kwargs["prompt"])
+            started.set()
+            assert release.wait(3)
+            return answer()
+
+        def close(self):
+            closed.append(self)
+
+    guard = ProviderGuard(
+        concurrency=1,
+        acquire_timeout_seconds=0.01,
+        failure_threshold=1,
+        cooldown_seconds=30,
+        hard_cap_credits=Decimal(5),
+    )
+    coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0))
+    monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
+    monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
+    monkeypatch.setattr(
+        "app.llm.report_insight_pipeline.get_provider_coordinator", lambda *_: coordinator
+    )
+    pipeline = ReportInsightPipelineProvider(config(OPENAI_API_KEY="offline-test-only"), "FREE")
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        running = pool.submit(call, pipeline, "running")
+        assert started.wait(3)
+        try:
+            with pytest.raises(AgentError) as caught:
+                call(pipeline, "not-issued")
+            assert caught.value.details == {
+                "concurrencyLimited": True,
+                "requestNotStarted": True,
+            }
+        finally:
+            release.set()
+        running.result(timeout=3)
+
+    pipeline.annotate_failure(caught.value, "offline-version")
+    assert issued == ["running"]
+    assert len(closed) == 2
+    assert pipeline.calls == 1
+    assert pipeline.usage == ProviderUsage(10, 5, Decimal(".01"), Decimal(0))
+    assert caught.value.details["usage"] == {
+        "inputTokens": 10,
+        "outputTokens": 5,
+        "costUsd": 0.01,
+        "credits": 0.0,
+    }
+    assert caught.value.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
+    assert not pipeline.unknown_failure_usage
+    assert pipeline._reserved_credits == 0
+    assert guard.breaker.state is CircuitState.CLOSED
 
 
 def test_scoped_native_parallel_calls_own_and_close_separate_clients(monkeypatch):
