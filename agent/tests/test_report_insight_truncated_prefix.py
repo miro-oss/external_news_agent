@@ -150,6 +150,9 @@ def test_recovers_only_missing_and_invalid_items_and_revalidates_full_batch(monk
     assert "findingId=106: 잘린 출력에 완성된 항목이 없습니다." in str(error)
     if invalid:
         assert "findingId=103" in str(error) and "2031" in str(error)
+        details = provider.calls[1]["prompt"].split("<validation-error>", 1)[1]
+        assert "findingId=103" in details and "findingId=106" in details
+        assert "report_fact_mismatch" in details and "2031" not in details
     original = provider.wire_payloads[0]["assessments"]["CHIP_MAKER"]
     merged = next(w for w, ids in validations if ids == list(range(101, 107)))
     for key, value in error.preserved_wire["assessments"]["CHIP_MAKER"].items():

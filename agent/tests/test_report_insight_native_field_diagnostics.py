@@ -81,7 +81,9 @@ def test_recorded_condition_failure_names_native_field_and_rejects_bad_repair():
     assert provider.schema_validity == [True, True]
     repair = provider.calls[1]["prompt"]
     assert "field=assessments.reason nativeFields=decision.connection.condition" in repair
-    assert "근거에서 확인되지 않는 기업명: 삼성전자" in repair
+    details = repair.split("<validation-error>", 1)[1].split("</validation-error>", 1)[0]
+    assert "report_fact_mismatch" in details
+    assert "삼성전자" not in details
     assert "refs=['7815:2']" in repair
     assert "condition 오류를 reason 수정만으로 해결하지 마세요" in repair
 

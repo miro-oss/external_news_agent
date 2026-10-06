@@ -99,7 +99,7 @@ def test_four_audience_sdk_schema_shares_proofs_and_stays_within_all_limits(size
         for finding in source.findings:
             record = records[f"finding{finding.id}"]
             assert "anyOf" not in record
-            assert list(record["properties"]) == ["findingId", "decision", "reason"]
+            assert list(record["properties"]) == ["findingId", "reason", "decision"]
             related, unrelated = record["properties"]["decision"]["anyOf"]
             for branch in (related, unrelated):
                 assert list(branch["properties"]) == ["connection", "effect", "timing"]

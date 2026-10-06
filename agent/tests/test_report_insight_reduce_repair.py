@@ -47,8 +47,9 @@ def test_one_reduce_repair_receives_fact_and_falsification_failures_together(cap
     assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001", "REDUCE-001"]
     repair = provider.calls[-1]
     details = diagnostic(repair["prompt"])
-    assert "CHIP_MAKER.headline" in details and "TSMC" in details
-    assert "CHIP_MAKER.overview[0].text" in details and "999" in details
+    assert "CHIP_MAKER.headline" in details and "TSMC" not in details
+    assert "CHIP_MAKER.overview[0].text" in details and "999" not in details
+    assert "report_fact_mismatch" in details
     assert "refs=['101:0']" in details
     assert "implications[0].falsifiedBy" in details and "반증 관측" in details
     assert repair["response_schema"] == provider.calls[-2]["response_schema"]
@@ -103,7 +104,7 @@ def test_original_fail_fast_path_hides_other_reduce_errors(monkeypatch):
     with pytest.raises(StructuredOutputExhaustedError):
         generate(provider, source)
     details = diagnostic(provider.calls[-1]["prompt"])
-    assert "TSMC" in details
+    assert "report_fact_mismatch" in details and "TSMC" not in details
     assert "999" not in details
     assert "falsifiedBy" not in details
 

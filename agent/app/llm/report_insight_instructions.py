@@ -5,8 +5,14 @@ from pathlib import Path
 from app.schemas.analyze import Audience
 
 _ROOT = Path(__file__).resolve().parents[1] / "prompts"
-_BASE = (_ROOT / "report-insight.ko.v9.md").read_text(encoding="utf-8").strip()
+_BASE = (_ROOT / "report-insight.ko.v10.md").read_text(encoding="utf-8").strip()
 _RUBRIC = (_ROOT / "report-importance.v6.md").read_text(encoding="utf-8").strip()
+ASSESSMENT_REASON_RULE = (
+    "reason은 원문 대상의 종류·사건 단계와 관점 업무의 연결 근거 또는 한계를 먼저 "
+    "한국어 1~2문장, 180자 이내로 쓴다. 기업명·수치 나열이나 기사 재요약보다 업무 "
+    "판단 이유를 설명한다."
+)
+
 _ROLES = {
     "CHIP_MAKER": "칩 제조: 공정 인증·설계 IP/공정 적용·계측/공정 제어 검증 "
     "PROCESS_QUALIFICATION, "
@@ -18,7 +24,8 @@ _ROLES = {
     "계약은 생산 증가·규격 승인·납품 완료를 뜻하지 않는다. 공정 인증·설계 적용은 "
     "고객 계약이 없어도 PROCESS_QUALIFICATION에서 판단한다. 생산능력·생산 배분은 "
     "YIELD_CAPACITY/PRODUCTION_SCHEDULE에서 판단한다. 기술 검토가 실제 채택·효과 달성을 "
-    "뜻하지 않는다.",
+    "뜻하지 않는다. 주가·수출액·시장점유율의 변화는 생산 일정·생산능력의 변화와 "
+    "구분한다. 소자·칩의 실험과 특성 분석은 실제 고객 요구 변경과 구분한다.",
     "EQUIPMENT_MAKER": "장비 공급: 공정 검증 PROCESS_VALIDATION, 설계 채택 DESIGN_IN, "
     "실제 발주/수주 ORDER_BOOKING, 납품/설치 DELIVERY_INSTALLATION, 서비스 "
     "MAINTENANCE_SERVICE. 공정 검증·설계 채택은 발주 확인을 전제로 하지 않는다. "
@@ -43,25 +50,21 @@ def report_stage_instruction(audiences: list[Audience], stage: str) -> str:
     common = _BASE + "\n\n" + roles
     if stage in {"MAP", "REVIEW"}:
         stage_text = (
-            f"현재 단계는 {stage}. finding마다 원문의 주체·대상·사건·단계를 확인하고, "
-            "연결되는 업무와 실제로 명시된 변경 범위·시점을 각각 찾는다. 그 근거로 "
-            "decision 안의 relation부터 판정한다. UNRELATED/UNDETERMINED이면 "
-            "effect/timing도 미확인이다. 그 외에는 영향·시점을 각각 판정한다. "
-            "관계를 찾았다고 영향 확인을 생략하거나 "
-            "모든 effect를 같은 값으로 채우지 않는다. 알려진 축의 basis는 같은 "
-            "finding/claim의 실제 원문을 선택하며 축별로 다른 claim을 사용할 수 있다. "
-            "알려진 축은 basis 필수, UNDETERMINED인 축은 basis=null이다. "
-            "확인된 업무 관계를 유지하면서 영향·시점만 UNDETERMINED로 둘 수 있다. "
-            "reason은 180자 이내로 이 사건의 업무 연결, 확인된 영향 범위 또는 영향 범위를 "
-            "판정하지 못한 구체적 이유를 설명한다. 다른 항목의 이유를 복사하지 않는다. "
-            "관계를 판정했다면 reason에 관계 판단 불가를 동시에 선언하지 않는다. "
-            "실제 claims=[]인 항목의 고정 reason은 해당 항목의 Schema const만 따른다."
+            f"현재 단계는 {stage}.\n"
+            "1. 연결 sentence의 주체·대상·사건 단계를 읽는다. claim 요약이 강해도 원문의 "
+            "실험·계획·전망 수준을 유지한다. "
+            + ASSESSMENT_REASON_RULE
+            + "\n2. 관점 업무 전체를 대조하여 connection을 판정한다. 이미 원문에서 확인된 "
+            "사실을 미확인 condition으로 반복하지 않는다.\n"
+            "3. 같은 업무 대상의 변경·준비 범위를 따로 찾는다. 규모·성장률·기술 사양은 "
+            "실제 제약이 아니다. 구체 계획은 그 자원·일정, 시제품은 준비 범위로 판단한다. "
+            "범위를 모르면 관계는 유지하고 effect만 UNDETERMINED로 둔다.\n"
+            "4. 각 축은 범주 선택 후 필수/null을 지킨다. reason은 선택한 "
+            "claim·연결 sentence(모든 축 미확인이면 같은 finding 원문)로 뒷받침한다. "
+            "실제 claims=[]만 Schema const의 고정 reason을 쓴다."
         )
         if stage == "REVIEW":
-            stage_text += (
-                " 이전 답변은 제공되지 않는다. 원문으로 독립 재판정한다. 검토 대상으로 "
-                "선정됐다는 사실은 오답·보류·고득점의 근거가 아니다."
-            )
+            stage_text += " 검토 선정은 승격 근거가 아니며 원문만 독립 재판정한다."
         return common + "\n\n" + _RUBRIC + "\n\n" + stage_text
     stage_text = (
         "현재 단계는 REDUCE. decisionCandidates의 범주·순위는 판단 보조이며 원문은 "

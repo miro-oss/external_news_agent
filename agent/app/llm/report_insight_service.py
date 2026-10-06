@@ -57,7 +57,7 @@ from app.schemas.report_insight import (
     ReportInsightResponse,
 )
 
-PROMPT_VERSION = "report-insight.ko.v9"
+PROMPT_VERSION = "report-insight.ko.v10"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"
@@ -75,11 +75,13 @@ class ReportAssessmentValidationError(OutputValidationError):
         failed_finding_ids: tuple[int, ...],
         repair_diagnostics: tuple[str, ...] = (),
         repair_summary: str = "",
+        repair_action_diagnostics: tuple[str, ...] = (),
     ) -> None:
         super().__init__(message, error_kinds=error_kinds)
         self.failed_finding_ids: tuple[int, ...] = tuple(failed_finding_ids)
         self.repair_diagnostics = tuple(repair_diagnostics)
         self.repair_summary = repair_summary
+        self.repair_action_diagnostics = tuple(repair_action_diagnostics)
 
 
 class _TruncatedAssessmentRepairError(ReportAssessmentValidationError):
@@ -99,6 +101,14 @@ class _TruncatedAssessmentRepairError(ReportAssessmentValidationError):
             error_kinds=("report_assessment_truncated_prefix",)
             + tuple(kind for _, error in errors for kind in error.error_kinds),
             failed_finding_ids=tuple(failed_ids),
+            repair_action_diagnostics=tuple(
+                diagnostic for _, error in errors for diagnostic in _repair_action_entries(error)
+            )
+            + tuple(
+                f"findingId={identifier}: 잘린 출력에 완성된 항목이 없습니다."
+                for identifier in failed_ids
+                if identifier not in {failed_id for failed_id, _ in errors}
+            ),
         )
         self.expected_finding_ids = tuple(finding.id for finding in request.findings)
         self.audience = request.audiences[0]
@@ -122,10 +132,19 @@ class ReportSynthesisValidationError(OutputValidationError):
 class ReportReduceValidationError(OutputValidationError):
     """Aggregate source-bound synthesis diagnostics for the one bounded repair."""
 
-    def __init__(self, message, *, error_kinds, repair_summary, repair_diagnostics):
+    def __init__(
+        self,
+        message,
+        *,
+        error_kinds,
+        repair_summary,
+        repair_diagnostics,
+        repair_action_diagnostics=(),
+    ):
         super().__init__(message, error_kinds=error_kinds)
         self.repair_summary = repair_summary
         self.repair_diagnostics = tuple(repair_diagnostics)
+        self.repair_action_diagnostics = tuple(repair_action_diagnostics)
 
 
 _PROMPT_ROOT = Path(__file__).resolve().parents[1] / "prompts"
@@ -602,7 +621,7 @@ def _reduce_repair_diagnostics(response, request, allowed):
             if len(refs) != len(set(refs)) or not set(refs) <= permitted:
                 return None
 
-    errors = []
+    errors, actions = [], []
     fields_by_kind = {}
     diagnostic_paths = {f"{insight.audience}.headline" for insight in reduced.insights}
     for insight in reduced.insights:
@@ -619,7 +638,9 @@ def _reduce_repair_diagnostics(response, request, allowed):
                 )
 
     def record(path, refs, message, kinds):
-        errors.append((f"{path} refs={list(refs)}: {message}", kinds))
+        label = f"{path} refs={list(refs)}"
+        errors.append((f"{label}: {message}", kinds))
+        actions.append(f"{label}: {_repair_action_message(message, kinds)}")
         # Direct prose diagnostics already have a server-owned path. Compound
         # guards prefix lines with fixed labels; accept only schema-bounded
         # fields actually present in this output, never a path quoted in prose.
@@ -722,6 +743,7 @@ def _reduce_repair_diagnostics(response, request, allowed):
         error_kinds=tuple(kind for _, kinds in errors for kind in kinds),
         repair_summary=summary,
         repair_diagnostics=tuple(message for message, _ in errors),
+        repair_action_diagnostics=tuple(actions),
     )
 
 
@@ -859,6 +881,9 @@ def _native_assessment_repair_errors(response, request):
                 or (f"findingId={finding_id} kinds={','.join(error.error_kinds)}: {error}",)
             )
         ),
+        repair_action_diagnostics=tuple(
+            diagnostic for _, error in failures for diagnostic in _repair_action_entries(error)
+        ),
     )
 
 
@@ -930,8 +955,8 @@ def _partial_assessment_repair(prompt, schema, raw, error, validate, fallback):
             "이번 부분 수리는 아래 실패 항목만 작성합니다. 이미 검증된 나머지는 서버가 "
             "원래 값 그대로 결합하므로 다시 출력하거나 수정하지 마세요. reason은 "
             "기업·숫자·연도·매출을 재요약하지 말고 해당 관점의 업무 판단과 "
-            "미확인 조건만 설명하세요. basis는 같은 claimId의 sourceSpanId를 선택하세요.\n\n"
-            + _report_insight_repair_prompt(subset_prompt, "", error)
+            "미확인 조건만 설명하세요. 각 basis의 sourceSpanId는 함께 선택한 claimId에 "
+            "속해야 합니다.\n\n" + _report_insight_repair_prompt(subset_prompt, "", error)
         ),
         response_schema=subset_schema,
         validate=validate_repair,
@@ -1197,11 +1222,41 @@ def _report_insight_repair_call(prompt, schema, raw, error, validate):
     )
 
 
-def _repair_validation_diagnostics(error: Exception) -> str:
+def _repair_action_message(message: str, kinds: tuple[str, ...]) -> str:
+    if "report_fact_mismatch" in kinds:
+        return (
+            "report_fact_mismatch: 선택 근거가 이 필드의 사실값을 지원하지 않습니다. "
+            "원문에서 필드를 다시 작성하고 근거 없는 사실이나 그 사실의 부재 설명을 "
+            "반복하지 마세요."
+        )
+    return message
+
+
+def _repair_action_entries(error: Exception) -> tuple[str, ...]:
+    """Use owned diagnostic metadata; never parse rejected prose into a path."""
+    actions = getattr(error, "repair_action_diagnostics", ())
+    if actions:
+        return actions
+    if "report_fact_mismatch" in getattr(error, "error_kinds", ()):
+        # An unlocalized failure has no trustworthy field/ref metadata. Do not
+        # infer it from a message that can contain generated factual literals.
+        finding_ids = getattr(error, "failed_finding_ids", ())
+        label = f"findingIds={list(finding_ids)}: " if finding_ids else ""
+        return (label + _repair_action_message("", error.error_kinds),)
+    return getattr(error, "repair_diagnostics", ()) or (str(error),)
+
+
+def _repair_validation_diagnostics(error: Exception, *, for_prompt: bool = False) -> str:
     diagnostics = getattr(error, "repair_diagnostics", ())
+    summary = getattr(error, "repair_summary", "")
+    if for_prompt:
+        actions = getattr(error, "repair_action_diagnostics", ())
+        if actions:
+            diagnostics = actions
+        elif "report_fact_mismatch" in getattr(error, "error_kinds", ()):
+            diagnostics, summary = _repair_action_entries(error), ""
     if not diagnostics:
         return str(error)[:1_000]
-    summary = getattr(error, "repair_summary", "")
     # Reserve room for every diagnostic instead of taking a prefix that can
     # silently hide the last finding/field from the only allowed repair.
     remaining = max(0, 6_000 - len(summary) - 2 - len(diagnostics))
@@ -1234,7 +1289,10 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
         "근거에서 확인된 사건의 종류와 연결되는 업무·미확인 조건을 설명하세요. "
         "원문 사실은 서버가 별도 facts로 보존합니다. 다른 finding의 주체나 사건을 "
         "대입하지 마세요. 같은 finding의 reason과 timing 진단이 함께 있으면 "
-        "둘 다 수정하세요. 지난 기한은 현재의 대응 필요를 입증하지 않습니다.\n\n"
+        "둘 다 수정하세요. 지난 기한은 현재의 대응 필요를 입증하지 않습니다. "
+        "진단의 refs는 실패한 출력이 선택했던 근거입니다. 필요하면 같은 finding의 다른 "
+        "claimId/sourceSpanId 중 판단을 직접 지원하는 근거를 다시 선택할 수 있습니다. "
+        "다른 finding의 근거는 사용할 수 없습니다.\n\n"
         if "findings" in payload
         else ""
     )
@@ -1242,8 +1300,9 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
         "공개 assessments.reason에는 내부 reason과 decision.connection.condition이 함께 "
         "들어갑니다. 진단에 nativeFields가 있으면 그 내부 필드를 수정하세요. "
         "condition 오류를 reason 수정만으로 해결하지 마세요. 두 필드가 함께 표시되면 "
-        "결합 문맥도 확인하고 원래 참조 근거 범위를 유지하세요.\n\n"
-        if any("nativeFields=" in value for value in getattr(error, "repair_diagnostics", ()))
+        "결합 문맥도 확인하세요. condition은 사건 재요약이나 근거 부재 설명이 아니라 "
+        "해당 업무로 연결되는 구체적인 전제로 작성하세요.\n\n"
+        if any("nativeFields=" in value for value in _repair_action_entries(error))
         else ""
     )
     reduce_guidance = (
@@ -1267,7 +1326,8 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
         f"{reduce_guidance}"
         f"{instructions}\n"
         f"<report-insight-input>\n{prompt_json(grounded_input(payload))}\n</report-insight-input>\n\n"
-        f"<validation-error>\n{escape_prompt_text(_repair_validation_diagnostics(error))}"
+        f"<validation-error>\n"
+        f"{escape_prompt_text(_repair_validation_diagnostics(error, for_prompt=True))}"
         "\n</validation-error>"
     )
 
@@ -1552,6 +1612,12 @@ def _validated_output(
                     )
                 ),
                 repair_diagnostics=diagnostics,
+                repair_action_diagnostics=tuple(
+                    f"findingId={assessment.finding_id} field=assessments.{field} "
+                    f"refs={assessment.basis_claim_ids}: "
+                    + _repair_action_message(str(error), getattr(error, "error_kinds", ()))
+                    for assessment, field, error in assessment_errors
+                ),
             )
         for item in [*insight.overview, *insight.implications, *insight.watch_items]:
             refs = item.basis_claim_ids

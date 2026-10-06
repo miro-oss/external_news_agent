@@ -135,6 +135,10 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
         _constrain_analysis(schema)
         _preserve_string_lengths(schema)
     if schema.get("title") == "ReportAssessmentDraft":
+        # Partial repair keeps the original validation closure, but its wire
+        # schema only needs definitions reachable from the failed records.
+        # Unreachable records otherwise dominate a one-finding repair request.
+        _retain_referenced_definitions(schema)
         # Preserve bounds on generated prose through the SDK, including nested
         # decision conditions. Exact source choices and category enums stay intact.
         pending = [schema]
@@ -184,6 +188,41 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
         report_change_keys=report_change_keys,
         report_insight_keys=report_insight_keys,
     )
+
+
+def _retain_referenced_definitions(schema: dict[str, Any]) -> None:
+    """Drop unreachable root definitions without altering any reachable schema.
+
+    Report drafts use root-local references only. Preserve the original schema
+    if a future contract introduces other reference scopes or unresolved refs.
+    """
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, dict):
+        return
+    pending = [{key: value for key, value in schema.items() if key != "$defs"}]
+    used: set[str] = set()
+    while pending:
+        node = pending.pop()
+        if isinstance(node, list):
+            pending.extend(node)
+        elif isinstance(node, dict):
+            if {"$id", "$anchor", "$dynamicRef", "$recursiveRef"} & node.keys():
+                return
+            if "$ref" in node:
+                reference = node["$ref"]
+                if not isinstance(reference, str) or not reference.startswith("#/$defs/"):
+                    return
+                name = reference.removeprefix("#/$defs/")
+                if "/" in name:
+                    return
+                name = name.replace("~1", "/").replace("~0", "~")
+                if name not in definitions:
+                    return
+                if name not in used:
+                    used.add(name)
+                    pending.append(definitions[name])
+            pending.extend(value for key, value in node.items() if key != "$defs")
+    schema["$defs"] = {name: value for name, value in definitions.items() if name in used}
 
 
 def _constrain_report_insight_map(schema: dict[str, Any]) -> tuple[tuple[str, int], ...]:

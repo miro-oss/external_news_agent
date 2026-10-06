@@ -7,6 +7,7 @@ from test_report_insight_assessment import framed, payload, request
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
 from app.core.errors import AgentError
+from app.llm import report_insight_service as service
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.report_insight_assessment import draft_to_wire
 from app.llm.report_insight_service import _native_assessment_repair_errors
@@ -52,6 +53,7 @@ def test_diagnostic_projection_cannot_resolve_a_foreign_source_handle():
 @pytest.mark.parametrize("retained_defect", [None, "native", "public"])
 def test_partial_repair_gets_both_causes_and_full_validation_still_gates_acceptance(
     retained_defect,
+    monkeypatch,
 ):
     source = request(
         ids=(101, 102), text="도서관은 독서 모임의 참가 신청이 현재 계속된다고 밝혔다."
@@ -60,6 +62,16 @@ def test_partial_repair_gets_both_causes_and_full_validation_still_gates_accepta
         101: "관점 업무와의 연결 조건을 확인해야 한다.",
         102: "원문 사건과 관점 업무의 연결 여부를 검토해야 한다.",
     }
+    captured = []
+    collect = service._native_assessment_repair_errors
+
+    def record_error(response, request):
+        error = collect(response, request)
+        if error is not None:
+            captured.append((error, str(error), error.repair_diagnostics, error.error_kinds))
+        return error
+
+    monkeypatch.setattr(service, "_native_assessment_repair_errors", record_error)
 
     def hook(stage, occurrence, _, value):
         for record in value["assessments"]["CHIP_MAKER"].values():
@@ -92,8 +104,20 @@ def test_partial_repair_gets_both_causes_and_full_validation_still_gates_accepta
     assert provider.schema_validity == [True, True]
     repair = provider.calls[1]
     assert [finding["id"] for finding in framed(repair["prompt"])["findings"]] == [101]
-    assert "reason: 원문 claim이 존재합니다." in repair["prompt"]
-    assert "근거에서 확인되지 않는 숫자: 9999" in repair["prompt"]
+    actions = repair["prompt"].split("<validation-error>", 1)[1].split("</validation-error>", 1)[0]
+    assert "reason: 원문 claim이 존재합니다." in actions
+    assert "report_fact_mismatch" in actions
+    assert "findingId=101 field=assessments.reason refs=['101:0']" in actions
+    assert "9999" not in actions
+    error, message, diagnostics, kinds = captured[0]
+    assert error.failed_finding_ids == (101,)
+    assert kinds == ("report_assessment_draft_invalid", "report_fact_mismatch")
+    assert "근거에서 확인되지 않는 숫자: 9999" in message
+    assert (str(error), error.repair_diagnostics, error.error_kinds) == (
+        message,
+        diagnostics,
+        kinds,
+    )
     assert (
         framed(repair["prompt"])["findings"][0]
         == framed(provider.calls[0]["prompt"])["findings"][0]
