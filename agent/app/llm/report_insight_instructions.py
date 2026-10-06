@@ -5,7 +5,7 @@ from pathlib import Path
 from app.schemas.analyze import Audience
 
 _ROOT = Path(__file__).resolve().parents[1] / "prompts"
-_BASE = (_ROOT / "report-insight.ko.v12.md").read_text(encoding="utf-8").strip()
+_BASE = (_ROOT / "report-insight.ko.v15.md").read_text(encoding="utf-8").strip()
 _RUBRIC = (_ROOT / "report-importance.v6.md").read_text(encoding="utf-8").strip()
 _REDUCE_RULES = (_ROOT / "report-insight-reduce.ko.v1.md").read_text(encoding="utf-8").strip()
 ASSESSMENT_REASON_RULE = (
@@ -25,7 +25,8 @@ _ROLES = {
     "계약은 생산 증가·규격 승인·납품 완료를 뜻하지 않는다. 공정 인증·설계 적용은 "
     "고객 계약이 없어도 PROCESS_QUALIFICATION에서 판단한다. 생산능력·생산 배분은 "
     "YIELD_CAPACITY/PRODUCTION_SCHEDULE에서 판단한다. 기술 검토가 실제 채택·효과 달성을 "
-    "뜻하지 않는다. 주가·수출액·시장점유율의 변화는 생산 일정·생산능력의 변화와 "
+    "뜻하지 않는다. 기판·패키징의 실제 공정 기술 적용도 업무 대상과 대조한다. "
+    "주가·수출액·시장점유율의 변화는 생산 일정·생산능력의 변화와 "
     "구분한다. 소자·칩의 실험과 특성 분석은 실제 고객 요구 변경과 구분한다.",
     "EQUIPMENT_MAKER": "장비 공급: 공정 검증 PROCESS_VALIDATION, 설계 채택 DESIGN_IN, "
     "실제 발주/수주 ORDER_BOOKING, 납품/설치 DELIVERY_INSTALLATION, 서비스 "

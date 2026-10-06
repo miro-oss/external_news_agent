@@ -58,8 +58,8 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v14"
-COMMON_PROMPT_VERSION = "report-insight.ko.v12"
+PROMPT_VERSION = "report-insight.ko.v15"
+COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"
@@ -996,7 +996,9 @@ def _preserve_native_decisions(repair, raw, error):
     return StructuredCallRepair(
         prompt=(
             "이번 수리는 진단된 reason/condition의 사실 표현만 수정합니다. Schema const로 "
-            "고정된 관계·업무·영향·시점과 오류 없는 문구를 유지하세요. 같은 finding 안에서 "
+            "고정된 관계·업무·영향·시점과 오류 없는 문구를 유지하세요. "
+            "고정된 판정과 reason의 의미도 일치해야 합니다. 무관 판정을 직접 업무에 "
+            "연결된다고 설명하지 마세요. 같은 finding 안에서 "
             "필요한 basis를 다시 선택할 수 있으며 원문 근거 검증은 그대로 적용됩니다.\n\n"
             + repair.prompt
         ),

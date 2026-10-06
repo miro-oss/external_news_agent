@@ -904,7 +904,7 @@ def _assessment_errors(
             "reason은 업무 관계의 판단 불가를 선언하지만 connection.relation은 판정 가능합니다. "
             "원문으로 구체 업무 관계를 설명하거나 관계가 불명인 경우 UNDETERMINED로 판정하세요."
         )
-    errors.extend(assessment_coherence_errors(item))
+    errors.extend(assessment_coherence_errors(item, audience=audience))
     related = item.relation not in {"UNRELATED", "UNDETERMINED"}
     if related and item.work not in ROLE_WORK[audience]:
         errors.append("connection.work는 해당 audience에 허용된 구체 업무여야 합니다.")

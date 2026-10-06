@@ -7,6 +7,7 @@ are deliberately left to semantic review. This is not a category classifier.
 
 import re
 
+from app.schemas.analyze import Audience
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
 _QUOTED = re.compile(
@@ -82,6 +83,47 @@ def _nonrelation_pattern(subject: str) -> re.Pattern[str]:
 
 _NO_DIRECT_RELATION = _nonrelation_pattern(_WORK)
 _WORK_NONRELATION = {work: _nonrelation_pattern(text) for work, text in _WORK_OBJECTS.items()}
+_POSITIVE_LINK = (
+    r"(?:와|과)\s*직접(?:적|적인|적으로)?\s*"
+    r"(?:(?:연결|관련)(?:된다|됩니다)|(?:관련|연관|연결)(?:이|가)\s*있(?:다|습니다))"
+)
+_CURRENT_WORK_LINK = re.compile(_PREFIX + _WORK + _POSITIVE_LINK)
+_AUDIENCE_NAMES = {
+    "CHIP_MAKER": r"(?:칩\s*제조|반도체\s*제조|CHIP_MAKER)",
+    "EQUIPMENT_MAKER": r"(?:장비\s*제조|EQUIPMENT_MAKER)",
+    "MARKET_INVESTOR": r"(?:시장\s*투자자?|MARKET_INVESTOR)",
+    "IT_INFRA": r"(?:IT\s*인프라|IT_INFRA)",
+}
+# Literal work names establish what the reason itself claims, not whether the
+# article actually belongs to that work. No source-to-category inference occurs.
+_POSITIVE_WORK = (
+    r"(?:" + "|".join(_WORK_OBJECTS.values()) + r"|고객\s*요구[·/]공급\s*약정)"
+    r"(?:\s*업무)?"
+)
+_AUDIENCE_WORK_LINK = {
+    audience: re.compile(
+        r"(?<![가-힣A-Z_])"
+        + name
+        + r"\s*관점(?:에서(?:는)?|의)\s*"
+        + _POSITIVE_WORK
+        + _POSITIVE_LINK
+        + r"$"
+    )
+    for audience, name in _AUDIENCE_NAMES.items()
+}
+_QUALIFIED_POSITIVE_CONTEXT = re.compile(
+    r"과거|이전|당시|종전|가정|만약|예컨대|예를\s*들어|경우|"
+    r"[가-힣]+면(?=\s|[,，])|때(?=\s|[,，])|전제|조건부|"
+    r"(?:어|아|여|해|돼|져|라)야(?=\s)|(?:다른|타)\s*관점"
+)
+_NAMED_PERSPECTIVES = {
+    audience: re.compile(name + r"\s*관점") for audience, name in _AUDIENCE_NAMES.items()
+}
+_CURRENT_PERSPECTIVE = re.compile(r"(?<![가-힣])(?:이|해당)\s*관점")
+_REPORTED_POSITIVE_CONTEXT = re.compile(
+    r"(?:원문|기사|자료|출처)(?:은|는|에서는?)\s*[^.!?]*?"
+    r"(?:주장|설명|서술|언급|보도)한다\s*[:：]"
+)
 _IMPACT_SUBJECT = (
     r"(?:(?:이|해당)\s*)?(?:관점(?:의|에서의)?\s*)?"
     r"(?:업무(?:상|의|에\s*미치는)?\s*)?"
@@ -134,7 +176,7 @@ def _declares_unknown_impact(clause: str, selected_work: str | None) -> bool:
     return _UNKNOWN_IMPACT.fullmatch(parts[1]) is not None
 
 
-def _unquoted_declarations(reason: str):
+def _unquoted_sentences(reason: str):
     # Mask rather than delete quoted text, so its surrounding words cannot join
     # into a new assertion. An unmatched quote makes its clause too ambiguous.
     unquoted = _QUOTED.sub(lambda match: " " * len(match.group()), reason)
@@ -143,6 +185,11 @@ def _unquoted_declarations(reason: str):
         # split it into apparently affirmative declarations of their negations.
         if _DENIED_INTERPRETATION.search(sentence):
             continue
+        yield sentence
+
+
+def _unquoted_declarations(reason: str):
+    for sentence in _unquoted_sentences(reason):
         for part in _CLAUSE_BREAK.split(sentence):
             if "?" in part or "？" in part or any(char in _QUOTE_MARKS for char in part):
                 continue
@@ -151,7 +198,30 @@ def _unquoted_declarations(reason: str):
                 yield clause
 
 
-def assessment_coherence_errors(item: ReportFindingAssessmentDraft) -> list[str]:
+def _declares_current_direct_relation(reason: str, audience: Audience | None) -> bool:
+    named_work = _AUDIENCE_WORK_LINK.get(audience)
+    current_perspective = _NAMED_PERSPECTIVES.get(audience)
+    for sentence in _unquoted_sentences(reason):
+        # Keep a qualifier's scope across commas: "확인되면, 업무와 연결된다"
+        # is not a present assertion. Other perspectives are not this decision.
+        if _QUALIFIED_POSITIVE_CONTEXT.search(sentence) or _REPORTED_POSITIVE_CONTEXT.search(
+            sentence
+        ):
+            continue
+        # A generic clause can inherit a different perspective before a comma.
+        # Unknown perspective names are ambiguous too; do not guess aliases.
+        remaining = current_perspective.sub("", sentence) if current_perspective else sentence
+        if "관점" in _CURRENT_PERSPECTIVE.sub("", remaining):
+            continue
+        for clause in _unquoted_declarations(sentence):
+            if _CURRENT_WORK_LINK.fullmatch(clause) or (named_work and named_work.search(clause)):
+                return True
+    return False
+
+
+def assessment_coherence_errors(
+    item: ReportFindingAssessmentDraft, *, audience: Audience | None = None
+) -> list[str]:
     """Report explicit self-contradictions; never mutate a category or its proof.
 
     A smaller unknown (such as cost, magnitude, timing, or the reader company's
@@ -161,6 +231,12 @@ def assessment_coherence_errors(item: ReportFindingAssessmentDraft) -> list[str]
     """
     clauses = tuple(_unquoted_declarations(item.reason))
     errors = []
+    if item.relation == "UNRELATED" and _declares_current_direct_relation(item.reason, audience):
+        errors.append(
+            "reason nativeFields=reason,decision.connection.relation: UNRELATED와 reason의 "
+            "명시적 직접 업무 연결 긍정이 모순됩니다. 해당 판정과 설명을 근거에 맞게 "
+            "함께 재검토하세요. 고정된 판정을 수리하는 경우 설명도 그 의미와 일치해야 합니다."
+        )
     work_pattern = _WORK_NONRELATION.get(item.work)
     if item.relation == "DIRECT" and any(
         _NO_DIRECT_RELATION.fullmatch(c) or (work_pattern and work_pattern.fullmatch(c))

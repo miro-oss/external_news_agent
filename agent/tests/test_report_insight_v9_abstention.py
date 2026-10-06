@@ -83,7 +83,7 @@ def test_assessment_instructions_distinguish_work_scope_from_evidence_absence(st
     assert "정량 금액·비율 없이도 정성적으로 판정" in instruction
     assert "미확인을 NO_CHANGE로 바꾸지 않는다" in instruction
     assert "전망·목표를 현재 집행·수주·납품·효과로 바꾸지 않는다" in instruction
-    assert "기사에 독자의 직무명이나 대응 지시가 그대로 적혀 있을 필요는 없다" in instruction
+    assert "직무명·대응 지시가 기사에 없어도 업무 연결을 해석할 수 있다" in instruction
 
 
 @pytest.mark.parametrize(
