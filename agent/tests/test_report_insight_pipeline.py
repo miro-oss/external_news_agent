@@ -210,6 +210,32 @@ def test_reduce_schema_failure_preserves_all_calls_including_map():
     assert error.value.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
 
 
+@pytest.mark.parametrize(
+    "configured_timeout,expected_budget,review_seconds",
+    [(None, 180, 60), (90, 90, 30), (120, 120, 40), (300, 180, 60)],
+)
+def test_insight_deadline_is_independent_and_bounds_review_and_synthesis(
+    monkeypatch, configured_timeout, expected_budget, review_seconds
+):
+    monkeypatch.delenv("AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS", raising=False)
+    clock = [0.0]
+    monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])
+    values = {"AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS": 9}
+    if configured_timeout is not None:
+        values["AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS"] = configured_timeout
+    pipeline = ReportInsightPipelineProvider(Settings(**values), "FREE")
+
+    assert pipeline.deadline == expected_budget
+    # Starting REVIEW needs room for its whole window and the same REDUCE reserve.
+    clock[0] = expected_budget - 2 * review_seconds
+    assert pipeline.can_start_optional_review()
+    with pipeline.optional_review_deadline():
+        assert pipeline.deadline == expected_budget - review_seconds
+    assert pipeline.deadline == expected_budget
+    clock[0] += 0.001
+    assert not pipeline.can_start_optional_review()
+
+
 def test_overall_deadline_stops_reduce_and_keeps_observed_charge(monkeypatch):
     clock = [0.0]
     monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])
@@ -222,7 +248,7 @@ def test_overall_deadline_stops_reduce_and_keeps_observed_charge(monkeypatch):
 
     provider = SlowProvider(response(map_output()))
     with pytest.raises(AgentError) as error:
-        generate(provider, AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=9)
+        generate(provider, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=9)
     assert error.value.details["requestDeadlineExceeded"] is True
     assert error.value.details["usage"]["credits"] == 1
     assert len(provider.calls) == 1
@@ -298,6 +324,7 @@ def test_native_clients_are_scoped_closed_and_get_remaining_deadline(
         MINDLOGIC_CLAUDE_MODEL="offline-model",
         OPENAI_REQUEST_INTERVAL_SECONDS=0,
         AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=configured_timeout,
+        AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=configured_timeout,
     )
     body = request_body()
     body["plan"] = plan
@@ -358,7 +385,7 @@ def test_pipeline_coordinator_rejects_wait_beyond_its_bounded_deadline(
     settings = Settings(
         AGENT_MOCK=False,
         OPENAI_API_KEY="offline-test-only",
-        AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=configured_timeout,
+        AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=configured_timeout,
     )
     pipeline = ReportInsightPipelineProvider(settings, "FREE")
 

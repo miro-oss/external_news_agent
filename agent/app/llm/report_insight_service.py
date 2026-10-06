@@ -58,7 +58,7 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v13"
+PROMPT_VERSION = "report-insight.ko.v14"
 COMMON_PROMPT_VERSION = "report-insight.ko.v12"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -211,6 +211,12 @@ _ASSERTED_EVENTS = (
     ),
 )
 _HYPOTHETICAL_EVENT_SUFFIX = re.compile(r"(?:다)?(?:면|\s*(?:경우|때)|(?:고|다고)\s*(?:가정|전제))")
+_UNREPORTED_PRODUCTION_EXPANSION_SUFFIX = re.compile(
+    r"\s+생산\s*증설(?:은|이)\s+"
+    r"(?:(?:원문|기사|자료)(?:에|에는|에서)\s+)?"
+    r"명시(?:되지|되어\s*있지)\s*않(?:는다|았다|다)"
+    r"(?=\s*(?:[.!?;。]|$))"
+)
 logger = logging.getLogger(__name__)
 MAP_INSTRUCTION = LEGACY_SYSTEM_INSTRUCTION + (
     "\n\n현재 단계는 MAP이다. findings[].claims[]와 연결 sentences를 읽어 insights의 "
@@ -1962,6 +1968,12 @@ def _asserted_event_stage(value: str, *, include_hypothetical: bool = False) -> 
         for match in pattern.finditer(value):
             suffix = value[match.end() :]
             prefix = value[: match.start()]
+            # "확정된 생산 증설은 명시되지 않는다" describes a missing
+            # source statement, not an executed event or its actual negation.
+            # Keep this recorded case literal: absence of an expansion's
+            # subsequent schedule, amount or effect still presupposes the event.
+            if match.group() == "확정된" and _UNREPORTED_PRODUCTION_EXPANSION_SUFFIX.match(suffix):
+                continue
             if not include_hypothetical and (
                 _HYPOTHETICAL_EVENT_SUFFIX.match(suffix)
                 or re.search(

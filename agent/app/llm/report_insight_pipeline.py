@@ -26,10 +26,10 @@ class ReportInsightPipelineProvider:
         self.settings = settings
         self.plan = plan
         self.provider = provider
-        # Bound this pipeline even when ordinary reports have a longer provider timeout.
+        # This whole-request budget is independent of ordinary report provider timeouts.
         # The BE's read timeout covers this maximum plus response serialization/transport time.
         request_budget = min(
-            settings.report_provider_timeout_seconds, MAX_REPORT_INSIGHT_DEADLINE_SECONDS
+            settings.report_insight_timeout_seconds, MAX_REPORT_INSIGHT_DEADLINE_SECONDS
         )
         self.deadline = monotonic() + request_budget
         self._review_budget_seconds = min(REPORT_INSIGHT_REVIEW_BUDGET_SECONDS, request_budget / 3)

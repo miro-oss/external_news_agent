@@ -59,7 +59,7 @@ def test_review_admission_preserves_all_mandatory_map_records_and_selection(
     source, provider, _clock, mapped, selection = timed_report(monkeypatch, map_elapsed=map_elapsed)
     snapshot = source.model_dump_json(by_alias=True)
 
-    result = generate(provider, source, AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=request_seconds)
+    result = generate(provider, source, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=request_seconds)
 
     expected = [f"MAP-{index:03d}" for index in range(1, 6)]
     expected.extend(f"REVIEW-{index:03d}" for index in range(1, review_count + 1))
@@ -94,7 +94,7 @@ def test_later_review_is_skipped_after_first_review_consumes_admission_headroom(
         monkeypatch, map_elapsed=40.0, first_review_elapsed=90.0
     )
 
-    result = generate(provider, source, AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=180)
+    result = generate(provider, source, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=180)
 
     assert stages(provider) == [
         "MAP-001",
@@ -141,7 +141,7 @@ def test_review_draft_and_repair_share_one_deadline_and_restore_request_deadline
     provider.raw_hook = malformed_first_review
 
     with pytest.raises(AgentError) as caught:
-        generate(provider, source, AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=180)
+        generate(provider, source, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=180)
 
     assert caught.value.code == "PROVIDER_UNAVAILABLE"
     assert caught.value.details["requestDeadlineExceeded"] is True
@@ -174,7 +174,7 @@ def test_started_call_and_final_validation_deadlines_still_fail_with_cumulative_
         monkeypatch.setattr(service, "_validated_v4_reduce_output", expire_after_validation)
 
     with pytest.raises(AgentError) as caught:
-        generate(provider, source, AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=180)
+        generate(provider, source, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=180)
 
     assert caught.value.code == "PROVIDER_UNAVAILABLE"
     assert caught.value.details["requestDeadlineExceeded"] is True

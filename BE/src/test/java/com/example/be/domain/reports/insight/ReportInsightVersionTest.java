@@ -88,6 +88,9 @@ class ReportInsightVersionTest {
         stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
                 .promptVersion("report-insight.ko.v12").rubricVersion("report-importance.v6")
                 .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v13").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
         when(repository.findByReportIdAndInputHashAndPromptVersionAndRubricVersionAndAudienceIn(
                 anyLong(), anyString(), anyString(), anyString(), anyCollection())).thenAnswer(call -> {
             Collection<Audience> audiences = call.getArgument(4);
@@ -114,18 +117,19 @@ class ReportInsightVersionTest {
         assertEquals(GeneralErrorCode.NOT_FOUND, missing.getCode());
         assertEquals("저장된 리포트 관점 인사이트가 없습니다.", missing.getMessage());
         verify(repository).findByReportIdAndInputHashAndPromptVersionAndRubricVersionAndAudienceIn(
-                10L, HASH, "report-insight.ko.v13", "report-importance.v6", List.of(Audience.CHIP_MAKER));
+                10L, HASH, "report-insight.ko.v14", "report-importance.v6", List.of(Audience.CHIP_MAKER));
         verify(repository, never()).saveAndFlush(any());
         verifyNoInteractions(client, quota, plans, recorder, reports);
-        assertEquals(10, stored.size());
+        assertEquals(11, stored.size());
     }
 
-    @Test void createBypassesLegacyCacheAndStoresV13WithDistinctReservationThenGetReadsIt() {
+    @Test void createBypassesLegacyCacheAndStoresV14WithDistinctReservationThenGetReadsIt() {
         var result = service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER")));
         assertFalse(result.cached());
-        assertEquals("report-insight.ko.v13", result.promptVersion());
+        assertEquals("report-insight.ko.v14", result.promptVersion());
         assertEquals("report-importance.v6", result.rubricVersion());
-        assertEquals(11, stored.size());
+        assertEquals(12, stored.size());
+        assertEquals("report-insight.ko.v13", stored.get(10).getPromptVersion());
         assertEquals("report-insight.ko.v12", stored.get(9).getPromptVersion());
         assertEquals("report-insight.ko.v11", stored.get(8).getPromptVersion());
         assertEquals("report-insight.ko.v10", stored.get(7).getPromptVersion());
@@ -137,17 +141,17 @@ class ReportInsightVersionTest {
         assertEquals("report-insight.ko.v4", stored.get(1).getPromptVersion());
         assertEquals("report-insight.ko.v3", stored.getFirst().getPromptVersion());
         var generated = stored.getLast();
-        assertEquals("report-insight.ko.v13", generated.getPromptVersion());
+        assertEquals("report-insight.ko.v14", generated.getPromptVersion());
         assertEquals("report-importance.v6", generated.getRubricVersion());
         assertEquals(result.insights().getFirst(), persistence.toDto(generated));
         var request = ArgumentCaptor.forClass(AgentReportInsightRequest.class);
         verify(client).reportInsight(request.capture());
-        String expectedKey = "report-insight:10:" + HASH + ":report-insight.ko.v13:report-importance.v6:CHIP_MAKER";
+        String expectedKey = "report-insight:10:" + HASH + ":report-insight.ko.v14:report-importance.v6:CHIP_MAKER";
         assertEquals(expectedKey, request.getValue().idempotencyKey());
         verify(quota).reserveReportInsight(20L, expectedKey, AgentPlan.PAID);
         var context = ArgumentCaptor.forClass(ReportInsightAuditContext.class);
         verify(recorder).recordReportInsightSuccess(eq(20L), any(), any(), context.capture(), any());
-        assertEquals("report-insight.ko.v13", context.getValue().promptVersion());
+        assertEquals("report-insight.ko.v14", context.getValue().promptVersion());
         assertEquals("report-importance.v6", context.getValue().rubricVersion());
         clearInvocations(client, quota, plans, recorder, repository, reports);
 

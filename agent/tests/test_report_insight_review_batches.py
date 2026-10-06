@@ -117,7 +117,7 @@ def test_later_review_failure_keeps_usage_and_only_validation_can_retain_map(mon
             clock=clock if failure == "deadline" else None,
         ),
     )
-    settings = {"AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS": 180} if failure == "deadline" else {}
+    settings = {"AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS": 180} if failure == "deadline" else {}
     if failure == "budget":
         settings["AGENT_HARD_CAP_CREDITS_PER_REQUEST"] = 0.95
     if failure == "repair_exhausted":
