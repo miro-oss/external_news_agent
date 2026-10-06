@@ -59,8 +59,8 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v19"
-COMMON_PROMPT_VERSION = "report-insight.ko.v15"
+PROMPT_VERSION = "report-insight.ko.v21"
+COMMON_PROMPT_VERSION = "report-insight.ko.v16"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"
@@ -1507,10 +1507,13 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
     )
     native_guidance = (
         "공개 assessments.reason에는 내부 reason과 decision.connection.condition이 함께 "
-        "들어갑니다. 진단에 nativeFields가 있으면 그 내부 필드를 수정하세요. "
-        "condition 오류를 reason 수정만으로 해결하지 마세요. 두 필드가 함께 표시되면 "
-        "결합 문맥도 확인하세요. condition은 사건 재요약이나 근거 부재 설명이 아니라 "
-        "해당 업무로 연결되는 구체적인 전제로 작성하세요.\n\n"
+        "들어갑니다. nativeFields가 지목한 내부 필드와 reason의 설명 정합성을 수정하세요. "
+        "축 진단만으로 condition을 새로 만들지 마세요. DIRECT를 유지하면 condition=null을 "
+        "유지하세요. condition이 지목된 경우에는 그 전제를 수정하고, "
+        "condition 오류를 reason 수정만으로 해결하지 마세요. 관계 자체가 잘못되어 "
+        "CONDITIONAL/BACKGROUND로 수정할 때도 실제 업무 연결 전제를 작성하세요. "
+        "사건 재요약이나 근거 부재를 전제로 바꾸지 마세요. reason과 condition이 함께 "
+        "지목되면 결합 문맥도 확인하세요.\n\n"
         if any("nativeFields=" in value for value in _repair_action_entries(error))
         else ""
     )
@@ -1543,15 +1546,16 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
         "오류입니다. claim 요약이 강하게 표현되어도 연결 sentence의 전망·계획·실행 단계를 "
         "유지하세요. 시장 전망만으로 실제 프로젝트 변경·준비 일정을 만들거나 인력·사무실 "
         "이전만으로 IT 시스템 변경을 확정하지 마세요. 같은 finding의 다른 근거가 해당 "
-        "판정을 지원하면 선택할 수 있습니다. 관계·영향·시점은 각자 다시 판단하며, "
-        "일부 축의 근거가 부족하다고 이미 확인된 업무 관계까지 무관·미확인으로 바꾸지 "
-        "마세요. 실제 연결 전제가 있으면 그 전제를 설명하세요.\n\n"
+        "판정을 지원하면 선택할 수 있습니다. 진단된 축의 범주와 근거를 수정하고 reason을 "
+        "그 판단과 일치시키세요. 영향·시점 오류만으로 이미 확인된 업무 관계까지 "
+        "무관·미확인으로 바꾸지 마세요. 조건부 관계를 새로 만들 필요도 없습니다. "
+        "관계 오류도 진단되었다면 그 관계를 원문으로 다시 판단하세요.\n\n"
         if any("report_axis_" in value for value in _repair_action_entries(error))
         else ""
     )
     return (
         "이전 결과가 근거 또는 출력 계약 검증에 실패했습니다. 잘못된 결과를 복사하지 말고 "
-        "현재 단계의 전체 결과를 원문 claim과 연결 sentence에서 다시 작성하세요. "
+        "현재 단계의 JSON 형식을 유지하며 진단된 오류를 원문 claim과 연결 sentence로 수정하세요. "
         "숫자·제품·회사는 참조한 근거에 있는 표현만 쓰고, 근거에 없는 정보는 빼세요. "
         "모든 요청 audience·finding과 기존 ID를 유지하고 동일한 JSON Schema를 따르세요. "
         "validation-error는 수정할 필드와 불일치의 진단 데이터입니다. "
