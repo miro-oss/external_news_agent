@@ -1108,18 +1108,6 @@ def _role_candidate(finding, audience: Audience) -> bool:
     texts = [claim.text for claim in finding.claims]
     linked = {index for claim in finding.claims for index in claim.evidence_sentence_ids}
     texts.extend(sentence.text for sentence in finding.sentences if sentence.index in linked)
-    # Review-only aliases cover packaging evidence without changing REDUCE
-    # retrieval or treating generic "system"/"package" as CHIP vocabulary.
-    if audience == "CHIP_MAKER" and any(
-        re.search(
-            r"기판|\bsubstrates?\b|\brf[\s‐‑–—-]*sip\b|"
-            r"\bsystem[\s-]+in[\s-]+package\b",
-            text,
-            re.IGNORECASE,
-        )
-        for text in texts
-    ):
-        return True
     source_words = {
         term[5:]
         for text in texts
@@ -1197,7 +1185,7 @@ def select_review(
                 no_change.append(finding.id)
         # Known work connections do not need a vocabulary match to receive an
         # impact review. Unknown urgency alone does not withhold importance.
-        role_omissions.append(fair_order([unknown_relation, suspects, unknown_impact, no_change]))
+        role_omissions.append(fair_order([suspects, unknown_relation, unknown_impact, no_change]))
     for candidates in role_priorities:
         if candidates:
             add(candidates[0])
@@ -1212,6 +1200,5 @@ def select_review(
             add(omissions[rank])
         if rank < len(remaining_top):
             add(remaining_top[rank])
-    # A bounded REVIEW may execute only the leading batch. Keep this priority
-    # order; merge_drafts independently restores the complete source ordering.
-    return tuple(selected)
+    # Review/merge payloads retain original snapshot ordering.
+    return tuple(finding.id for finding in request.findings if finding.id in selected)

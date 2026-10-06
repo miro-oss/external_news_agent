@@ -20,7 +20,6 @@ MAX_REPORT_INSIGHT_DEADLINE_SECONDS = 180.0
 # a fixed third to each stage. Synthesis includes its draft and one repair.
 REPORT_INSIGHT_REDUCE_RESERVE_SECONDS = 60.0
 REPORT_INSIGHT_REVIEW_BUDGET_SECONDS = 60.0
-REPORT_INSIGHT_REVIEW_MINIMUM_SECONDS = 30.0
 
 
 class ReportInsightPipelineProvider:
@@ -35,9 +34,6 @@ class ReportInsightPipelineProvider:
         )
         self.deadline = monotonic() + request_budget
         self._review_budget_seconds = min(REPORT_INSIGHT_REVIEW_BUDGET_SECONDS, request_budget / 3)
-        self._review_minimum_seconds = min(
-            REPORT_INSIGHT_REVIEW_MINIMUM_SECONDS, request_budget / 6
-        )
         self._reduce_reserve_seconds = min(
             REPORT_INSIGHT_REDUCE_RESERVE_SECONDS, request_budget / 3
         )
@@ -191,15 +187,13 @@ class ReportInsightPipelineProvider:
             raise self._deadline_error()
 
     def can_start_optional_review(self) -> bool:
-        """Require a useful review window while preserving synthesis headroom.
+        """Leave synthesis headroom before starting another optional review.
 
         This is admission only. Once started, every provider/deadline failure
         still propagates normally and all calls share the original deadline.
-        The draft and its repair may use the available window up to the usual
-        cap; starting does not require that entire maximum to remain.
         """
         return self.deadline - monotonic() >= (
-            self._reduce_reserve_seconds + self._review_minimum_seconds
+            self._reduce_reserve_seconds + self._review_budget_seconds
         )
 
     @contextmanager

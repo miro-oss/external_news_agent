@@ -59,7 +59,7 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v20"
+PROMPT_VERSION = "report-insight.ko.v19"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -467,15 +467,11 @@ class ReportInsightService(ReportInsightLegacyService):
                 cancel_pending=pipeline.cancel_pending_calls,
             )
             validated, _ = validated_merge(*drafts)
-            review_ids = select_review(request, validated)
-            findings_by_id = {finding.id: finding for finding in request.findings}
-            review_findings = [findings_by_id[finding_id] for finding_id in review_ids]
+            review_ids = set(select_review(request, validated))
+            review_findings = [finding for finding in request.findings if finding.id in review_ids]
             reviews = []
-            # Keep omission priorities in the first bounded review window. The
-            # final merge below independently restores the full snapshot order.
-            review_batch_size = 3
             for review_index, offset in enumerate(
-                range(0, len(review_findings), review_batch_size), start=1
+                range(0, len(review_findings), MAX_ASSESSMENT_BATCH), start=1
             ):
                 if not pipeline.can_start_optional_review():
                     logger.info(
@@ -486,7 +482,7 @@ class ReportInsightService(ReportInsightLegacyService):
                     )
                     break
                 subset = request.model_copy(
-                    update={"findings": review_findings[offset : offset + review_batch_size]}
+                    update={"findings": review_findings[offset : offset + MAX_ASSESSMENT_BATCH]}
                 )
                 schema = draft_schema(subset)
                 schema["description"] = f"reportInsightCall:REVIEW-{review_index:03d}"

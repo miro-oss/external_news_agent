@@ -211,11 +211,11 @@ def test_reduce_schema_failure_preserves_all_calls_including_map():
 
 
 @pytest.mark.parametrize(
-    "configured_timeout,expected_budget,review_seconds,minimum_seconds",
-    [(None, 180, 60, 30), (9, 9, 3, 1.5), (90, 90, 30, 15), (120, 120, 40, 20), (300, 180, 60, 30)],
+    "configured_timeout,expected_budget,review_seconds",
+    [(None, 180, 60), (90, 90, 30), (120, 120, 40), (300, 180, 60)],
 )
 def test_insight_deadline_is_independent_and_bounds_review_and_synthesis(
-    monkeypatch, configured_timeout, expected_budget, review_seconds, minimum_seconds
+    monkeypatch, configured_timeout, expected_budget, review_seconds
 ):
     monkeypatch.delenv("AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS", raising=False)
     clock = [0.0]
@@ -223,38 +223,17 @@ def test_insight_deadline_is_independent_and_bounds_review_and_synthesis(
     values = {"AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS": 9}
     if configured_timeout is not None:
         values["AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS"] = configured_timeout
-    pipeline = ReportInsightPipelineProvider(Settings(_env_file=None, **values), "FREE")
+    pipeline = ReportInsightPipelineProvider(Settings(**values), "FREE")
 
     assert pipeline.deadline == expected_budget
-    # Admission needs only the scaled minimum, retaining the full REDUCE reserve.
-    clock[0] = expected_budget - review_seconds - minimum_seconds
+    # Starting REVIEW needs room for its whole window and the same REDUCE reserve.
+    clock[0] = expected_budget - 2 * review_seconds
     assert pipeline.can_start_optional_review()
     with pipeline.optional_review_deadline():
         assert pipeline.deadline == expected_budget - review_seconds
-        assert pipeline.deadline - clock[0] == minimum_seconds
     assert pipeline.deadline == expected_budget
     clock[0] += 0.001
     assert not pipeline.can_start_optional_review()
-
-
-@pytest.mark.parametrize(
-    "elapsed,expected_window", [(10, 60), (67.125, 52.875), (75.4, 44.6), (90, 30)]
-)
-def test_review_uses_available_window_without_reducing_synthesis_reserve(
-    monkeypatch, elapsed, expected_window
-):
-    clock = [0.0]
-    monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])
-    pipeline = ReportInsightPipelineProvider(
-        Settings(_env_file=None, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=180), "FREE"
-    )
-    clock[0] = elapsed
-
-    assert pipeline.can_start_optional_review()
-    with pipeline.optional_review_deadline():
-        assert pipeline.deadline - clock[0] == pytest.approx(expected_window)
-        assert pipeline.deadline <= 120
-    assert pipeline.deadline == 180
 
 
 def test_overall_deadline_stops_reduce_and_keeps_observed_charge(monkeypatch):

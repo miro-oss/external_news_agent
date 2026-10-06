@@ -329,28 +329,21 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     snapshot = source.model_dump_json(by_alias=True)
     provider = V4Provider(source)
     result = generate(provider, source)
-    assert stages(provider) == [
-        "MAP-001",
-        "MAP-002",
-        "MAP-003",
-        "REVIEW-001",
-        "REVIEW-002",
-        "REDUCE-001",
-    ]
+    assert stages(provider) == ["MAP-001", "MAP-002", "MAP-003", "REVIEW-001", "REDUCE-001"]
     batches = [framed(call["prompt"])["findings"] for call in provider.calls[:3]]
     assert list(map(len, batches)) == [6, 6, 5]
     assert [finding["id"] for batch in batches for finding in batch] == list(range(101, 118))
     review = framed(provider.calls[3]["prompt"])
-    assert [finding["id"] for finding in review["findings"]] == list(range(101, 104))
-    assert len(review["findings"]) <= 3
+    assert [finding["id"] for finding in review["findings"]] == list(range(101, 106))
+    assert len(review["findings"]) <= 12
     final = result.insights[0].assessments
     assert [entry.finding_id for entry in final] == list(range(101, 118))
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v20"
-    assert result.meta.input_tokens == 66 and result.meta.output_tokens == 42
-    assert result.meta.cost_usd == 0.018 and result.meta.credits == 1.2
+    assert result.meta.prompt_version == "report-insight.ko.v19"
+    assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
+    assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
     reduce_input = framed(provider.calls[-1]["prompt"])
     assert "assessedPriorities" not in reduce_input
@@ -846,7 +839,7 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v20"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v19"
     assert output["meta"]["mock"] is True
     assert RUBRIC_VERSION == "report-importance.v6"
     assert set(output) == {"insights", "meta"}
