@@ -56,8 +56,9 @@ from app.schemas.report_insight import (
     ReportInsightRequest,
     ReportInsightResponse,
 )
+from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v10"
+PROMPT_VERSION = "report-insight.ko.v11"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"
@@ -76,12 +77,16 @@ class ReportAssessmentValidationError(OutputValidationError):
         repair_diagnostics: tuple[str, ...] = (),
         repair_summary: str = "",
         repair_action_diagnostics: tuple[str, ...] = (),
+        native_prose_repairs: dict[int, tuple[ReportFindingAssessmentDraft, tuple[str, ...]]]
+        | None = None,
     ) -> None:
         super().__init__(message, error_kinds=error_kinds)
         self.failed_finding_ids: tuple[int, ...] = tuple(failed_finding_ids)
         self.repair_diagnostics = tuple(repair_diagnostics)
         self.repair_summary = repair_summary
         self.repair_action_diagnostics = tuple(repair_action_diagnostics)
+        # Created from authenticated native projections, never diagnostic prose.
+        self.native_prose_repairs = deepcopy(native_prose_repairs or {})
 
 
 class _TruncatedAssessmentRepairError(ReportAssessmentValidationError):
@@ -359,7 +364,8 @@ class ReportInsightService(ReportInsightLegacyService):
             response_schema=schema,
             validate=validate,
         )
-        return _partial_assessment_repair(prompt, schema, raw, error, validate, fallback)
+        repair = _partial_assessment_repair(prompt, schema, raw, error, validate, fallback)
+        return _preserve_native_decisions(repair, raw, error)
 
     def generate(self, request: ReportInsightRequest) -> ReportInsightResponse:
         request = _eligible_report_request(request)
@@ -884,7 +890,147 @@ def _native_assessment_repair_errors(response, request):
         repair_action_diagnostics=tuple(
             diagnostic for _, error in failures for diagnostic in _repair_action_entries(error)
         ),
+        native_prose_repairs=(
+            {
+                finding_id: context
+                for _, error in failures
+                for finding_id, context in error.native_prose_repairs.items()
+            }
+            if all(getattr(error, "native_prose_repairs", None) for _, error in failures)
+            else None
+        ),
     )
+
+
+def _preserve_native_decisions(repair, raw, error):
+    """Narrow only authenticated prose-only fact repairs, including full batches.
+
+    The model still produces the answer. Both its schema and our validator keep
+    unaffected values fixed; basis choices remain inside the original finding.
+    Mixed/unlocalized failures retain the ordinary repair contract.
+    """
+    contexts = getattr(error, "native_prose_repairs", {})
+    if (
+        not isinstance(error, ReportAssessmentValidationError)
+        or not contexts
+        or set(error.error_kinds) != {"report_fact_mismatch"}
+        or set(contexts) != set(error.failed_finding_ids)
+    ):
+        return repair
+    try:
+        original = parse_wire_draft(raw)
+        payload = parse_json_object(
+            repair.prompt.split("<report-insight-input>", 1)[1].split("</report-insight-input>", 1)[
+                0
+            ]
+        )
+        if len(payload["audiences"]) != 1:
+            return repair
+        audience = payload["audiences"][0]
+        if set(original.assessments) != {audience}:
+            return repair
+        sources = {finding["id"]: finding["sourceQuoteChoices"] for finding in payload["findings"]}
+        schema = deepcopy(repair.response_schema)
+        entries = schema["properties"]["assessments"]["properties"][audience]["properties"]
+        if set(entries) != {f"finding{identifier}" for identifier in contexts}:
+            return repair
+        frozen = {}
+        for identifier, (snapshot, fields) in contexts.items():
+            key = f"finding{identifier}"
+            item = original.assessments[audience][key]
+            if item.flattened(sources[identifier]) != snapshot or not set(fields) <= {
+                "reason",
+                "decision.connection.condition",
+            }:
+                return repair
+            values = item.model_dump(by_alias=True, mode="json")
+            fixed = {
+                "decision.connection.relation": values["decision"]["connection"]["relation"],
+                "decision.connection.work": values["decision"]["connection"]["work"],
+                "decision.effect.impactScope": values["decision"]["effect"]["impactScope"],
+                "decision.timing.urgencyState": values["decision"]["timing"]["urgencyState"],
+            }
+            for path in ("reason", "decision.connection.condition"):
+                if path not in fields:
+                    fixed[path] = _native_path_value(values, path)
+            frozen[key] = fixed
+            for path, value in fixed.items():
+                _fix_native_schema_value(entries[key], path.split("."), value, schema["$defs"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        # Unknown future shapes must not accidentally narrow a different field.
+        return repair
+
+    def validate_repair(response):
+        actual = parse_wire_draft(response.text).model_dump(by_alias=True, mode="json")
+        records = actual["assessments"].get(audience, {})
+        if any(
+            key not in records or _native_path_value(records[key], path) != expected
+            for key, fixed in frozen.items()
+            for path, expected in fixed.items()
+        ):
+            raise OutputValidationError(
+                "사실 표현만 수정하는 수리에서 검증된 관계·업무·영향·시점 또는 "
+                "오류 없는 문구를 변경할 수 없습니다.",
+                error_kinds=("report_assessment_invalid",),
+            )
+        # Partial repair merges preserved records here; the full original
+        # source, time, coherence and citation validators still run afterward.
+        return repair.validate(response)
+
+    return StructuredCallRepair(
+        prompt=(
+            "이번 수리는 진단된 reason/condition의 사실 표현만 수정합니다. Schema const로 "
+            "고정된 관계·업무·영향·시점과 오류 없는 문구를 유지하세요. 같은 finding 안에서 "
+            "필요한 basis를 다시 선택할 수 있으며 원문 근거 검증은 그대로 적용됩니다.\n\n"
+            + repair.prompt
+        ),
+        response_schema=schema,
+        validate=validate_repair,
+    )
+
+
+def _native_path_value(value, path):
+    for part in path.split("."):
+        value = value[part]
+    return value
+
+
+def _fix_native_schema_value(node, path, value, definitions):
+    """Intersect a closed native schema with one known-valid scalar value."""
+    if "$ref" in node:
+        reference = node.pop("$ref")
+        if not reference.startswith("#/$defs/"):
+            raise ValueError("Unsupported native reference scope")
+        resolved = deepcopy(definitions[reference.removeprefix("#/$defs/")])
+        resolved.update(node)
+        node.clear()
+        node.update(resolved)
+    if "anyOf" in node:
+        choices = []
+        for branch in node["anyOf"]:
+            candidate = deepcopy(branch)
+            try:
+                _fix_native_schema_value(candidate, path, value, definitions)
+            except ValueError:
+                continue
+            choices.append(candidate)
+        if not choices:
+            raise ValueError("No native branch accepts the original value")
+        if len(choices) == 1:
+            node.pop("anyOf")
+            node.update(choices[0])
+        else:
+            node["anyOf"] = choices
+    elif path:
+        _fix_native_schema_value(node["properties"][path[0]], path[1:], value, definitions)
+    else:
+        if ("const" in node and node["const"] != value) or (
+            "enum" in node and value not in node["enum"]
+        ):
+            raise ValueError("Original value does not match this native branch")
+        if (value is None) != (node.get("type") == "null"):
+            raise ValueError("Original native scalar type changed")
+        node["const"] = value
 
 
 def _partial_assessment_repair(prompt, schema, raw, error, validate, fallback):
@@ -1502,6 +1648,30 @@ def _native_reason_diagnostic_field(
     return "reason nativeFields=" + ",".join(matched or fields)
 
 
+def _native_prose_repair_context(errors, native_assessments, audience):
+    """Authenticate editable fields before diagnostic text is formatted."""
+    contexts = {}
+    for assessment, field, error in errors:
+        if getattr(error, "error_kinds", ()) != ("report_fact_mismatch",):
+            return {}
+        native = (native_assessments or {}).get(audience, {}).get(assessment.finding_id)
+        if native is None or project_public_assessment(native) != assessment:
+            return {}
+        if field == "reason" and native.condition is None:
+            fields = ("reason",)
+        elif field.startswith("reason nativeFields="):
+            # field is the return value of our attribution helper, not text
+            # extracted from a provider answer or a validation message.
+            fields = tuple(field.removeprefix("reason nativeFields=").split(","))
+        else:
+            return {}
+        if not fields or not set(fields) <= {"reason", "decision.connection.condition"}:
+            return {}
+        previous = contexts.get(assessment.finding_id, (native, ()))[1]
+        contexts[assessment.finding_id] = (native, tuple(dict.fromkeys((*previous, *fields))))
+    return contexts
+
+
 def _validated_output(
     response: ProviderResponse,
     request: ReportInsightRequest,
@@ -1617,6 +1787,9 @@ def _validated_output(
                     f"refs={assessment.basis_claim_ids}: "
                     + _repair_action_message(str(error), getattr(error, "error_kinds", ()))
                     for assessment, field, error in assessment_errors
+                ),
+                native_prose_repairs=_native_prose_repair_context(
+                    assessment_errors, native_assessments, insight.audience
                 ),
             )
         for item in [*insight.overview, *insight.implications, *insight.watch_items]:

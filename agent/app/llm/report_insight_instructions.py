@@ -5,12 +5,12 @@ from pathlib import Path
 from app.schemas.analyze import Audience
 
 _ROOT = Path(__file__).resolve().parents[1] / "prompts"
-_BASE = (_ROOT / "report-insight.ko.v10.md").read_text(encoding="utf-8").strip()
+_BASE = (_ROOT / "report-insight.ko.v11.md").read_text(encoding="utf-8").strip()
 _RUBRIC = (_ROOT / "report-importance.v6.md").read_text(encoding="utf-8").strip()
 ASSESSMENT_REASON_RULE = (
-    "reason은 원문 대상의 종류·사건 단계와 관점 업무의 연결 근거 또는 한계를 먼저 "
-    "한국어 1~2문장, 180자 이내로 쓴다. 기업명·수치 나열이나 기사 재요약보다 업무 "
-    "판단 이유를 설명한다."
+    "reason은 원문 대상·사건 단계와 관점 업무의 연결 근거 또는 한계를 "
+    "한국어 1~2문장, 180자 이내로 설명한다. 업무 코드·claim ID·기업명·수치 나열이나 "
+    "기사 재요약을 쓰지 않는다."
 )
 
 _ROLES = {
@@ -38,7 +38,8 @@ _ROLES = {
     "시스템 구성품의 가격·공급 조건과 전망은 시스템 조달 판단에 연결될 수 있다. "
     "확정 공급 조건과 전망을 구분한다. 그것만으로 이미 "
     "조달 비용이 변했거나 냉각 승인 절차가 존재한다고 만들지 않는다. 소재 공장은 서버 "
-    "운영이 아니다.",
+    "운영이 아니다. 시장 수급·가격 전망만으로 특정 프로젝트 변경이나 준비 활동을 "
+    "만들지 않는다. 전망의 연도·사업 발표일은 대응 기한이 아니다.",
 }
 
 

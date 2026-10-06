@@ -43,7 +43,8 @@ def recorded_source():
 def test_recorded_condition_failure_names_native_field_and_rejects_bad_repair():
     # Real MAP attempts 13/14: the first reason has no unsupported company;
     # Samsung occurs in the appended condition. The repair then moves that
-    # unsupported company into reason and must still fail selected-claim checks.
+    # unsupported company into the previously valid reason. The narrowed schema
+    # and server-side preservation check must both reject that change.
     source = recorded_source()
 
     def hook(stage, occurrence, _, value):
@@ -65,6 +66,11 @@ def test_recorded_condition_failure_names_native_field_and_rejects_bad_repair():
                     ),
                 )
             else:
+                item.update(
+                    relation="CONDITIONAL",
+                    work="DEPLOYMENT_OPERATIONS",
+                    condition="화웨이의 스마트폰 출고가 인상이 해당 업무에 연결되는 경우",
+                )
                 item["reason"] = (
                     "원문에 명시된 화웨이의 스마트폰 출고가 인상과 관련된 사건을 근거로 "
                     "해당 업무와 연결되었으며, 삼성전자에 대한 언급은 원문에 포함되어 "
@@ -72,13 +78,15 @@ def test_recorded_condition_failure_names_native_field_and_rejects_bad_repair():
                 )
         return value
 
-    provider = V4Provider(source, relation="UNRELATED", hook=hook)
+    # Deliberately emulate a provider violating its strict schema, so the
+    # independent server-side guard must also reject the invalid repair.
+    provider = V4Provider(source, relation="UNRELATED", hook=hook, validate_wire=False)
     with pytest.raises(AgentError) as caught:
         generate(provider, source)
 
     assert caught.value.code == "SCHEMA_VIOLATION"
     assert stages(provider) == ["MAP-001", "MAP-001"]
-    assert provider.schema_validity == [True, True]
+    assert provider.schema_validity == [True, False]
     repair = provider.calls[1]["prompt"]
     assert "field=assessments.reason nativeFields=decision.connection.condition" in repair
     details = repair.split("<validation-error>", 1)[1].split("</validation-error>", 1)[0]
