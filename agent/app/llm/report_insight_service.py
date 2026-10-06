@@ -845,8 +845,12 @@ def _native_assessment_repair_errors(response, request):
             for finding_id, error in failures
         ),
         repair_diagnostics=tuple(
-            f"findingId={finding_id} kinds={','.join(error.error_kinds)}: {error}"
+            diagnostic
             for finding_id, error in failures
+            for diagnostic in (
+                getattr(error, "repair_diagnostics", ())
+                or (f"findingId={finding_id} kinds={','.join(error.error_kinds)}: {error}",)
+            )
         ),
     )
 
@@ -1221,9 +1225,9 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
         "수정 대상의 assessment.reason은 사실의 재요약이 아니라 관점의 업무 판단 이유입니다. "
         "기업·기관·제품의 고유명사, 숫자와 날짜를 reason에 다시 쓰지 말고 "
         "근거에서 확인된 사건의 종류와 연결되는 업무·미확인 조건을 설명하세요. "
-        "원문 사실은 서버가 별도 facts로 보존합니다. "
-        "예: 회사명이 없는 매출 근거는 '제시된 매출 변화의 고객 수요 연결 여부 확인'으로 "
-        "설명하고 다른 finding의 회사를 그 매출의 주체로 대입하지 않습니다.\n\n"
+        "원문 사실은 서버가 별도 facts로 보존합니다. 다른 finding의 주체나 사건을 "
+        "대입하지 마세요. 같은 finding의 reason과 timing 진단이 함께 있으면 "
+        "둘 다 수정하세요. 지난 기한은 현재의 대응 필요를 입증하지 않습니다.\n\n"
         if "findings" in payload
         else ""
     )
@@ -1429,7 +1433,6 @@ def _validated_output(
                         "근거 부족에 따른 판단 보류만 설명해야 합니다."
                     )
                 continue
-            field = "reason"
             # An undecidable relation has no selected basis by contract, even
             # when its source exists. Check its explanation against this
             # finding's eligible sources without promoting them to score proof.
@@ -1438,25 +1441,25 @@ def _validated_output(
                 value is None for value in assessment.axes.model_dump().values()
             ):
                 reason_refs = [claim.id for claim in findings[assessment.finding_id].claims]
-            try:
-                _validate_prose(
-                    [assessment.reason],
-                    reason_refs,
-                    evidence,
-                    claims,
-                    request=request,
+            assessment_errors.extend(
+                (assessment, "reason", error)
+                for error in _prose_validation_errors(
+                    [assessment.reason], reason_refs, evidence, claims, request=request
                 )
-                field = "axes.urgency"
+            )
+            try:
+                # Check the axis even if prose grounding failed. Its repair
+                # must not wait for a second provider call to reveal urgency.
                 validate_report_time(
-                    assessment.reason,
+                    "",
                     reason_refs,
                     request,
                     urgency=assessment.axes.urgency,
                 )
             except ValueError as error:
-                assessment_errors.append((assessment, field, error))
+                assessment_errors.append((assessment, "axes.urgency", error))
         if assessment_errors:
-            details = "\n".join(
+            diagnostics = tuple(
                 f"findingId={assessment.finding_id} field=assessments.{field} "
                 f"refs={assessment.basis_claim_ids}: {error}"
                 for assessment, field, error in assessment_errors
@@ -1471,12 +1474,20 @@ def _validated_output(
                 )
             )
             raise ReportAssessmentValidationError(
-                "아래 평가 이유를 모두 참조 claim·연결 sentence만으로 수정하세요. "
-                "제목에만 있는 제품·회사·숫자를 사실로 복원하지 마세요.\n" + details,
+                "아래 평가 사유·시급성 오류를 모두 참조 claim·연결 sentence만으로 수정하세요. "
+                "제목에만 있는 제품·회사·숫자를 사실로 복원하지 마세요.\n" + "\n".join(diagnostics),
                 error_kinds=kinds,
                 failed_finding_ids=tuple(
-                    assessment.finding_id for assessment, _, _ in assessment_errors
+                    dict.fromkeys(assessment.finding_id for assessment, _, _ in assessment_errors)
                 ),
+                repair_summary="MAP 수정 대상: "
+                + "; ".join(
+                    dict.fromkeys(
+                        f"findingId={assessment.finding_id} field=assessments.{field}"
+                        for assessment, field, _ in assessment_errors
+                    )
+                ),
+                repair_diagnostics=diagnostics,
             )
         for item in [*insight.overview, *insight.implications, *insight.watch_items]:
             refs = item.basis_claim_ids
@@ -1551,10 +1562,31 @@ def _validate_prose(
     topic: bool = False,
     request: ReportInsightRequest | None = None,
 ) -> None:
+    errors = _prose_validation_errors(
+        values, refs, evidence, claims, conditional=conditional, topic=topic, request=request
+    )
+    if errors:
+        raise errors[0]
+
+
+def _prose_validation_errors(
+    values: list[str],
+    refs: list[str],
+    evidence: dict[str, str],
+    claims: dict,
+    *,
+    conditional: bool = False,
+    topic: bool = False,
+    request: ReportInsightRequest | None = None,
+) -> list[ValueError]:
+    """Collect independent guards for repair without changing acceptance rules."""
+    errors: list[ValueError] = []
     source = "\n".join(evidence[ref] + "\n" + claims[ref].text for ref in refs)
     for value in values:
         if _UNSUPPORTED_COMPARISON.search(value) and not _UNSUPPORTED_COMPARISON.search(source):
-            raise ValueError("이전 보고서 기준선이 없어 신규성·기간 비교를 판정할 수 없습니다.")
+            errors.append(
+                ValueError("이전 보고서 기준선이 없어 신규성·기간 비교를 판정할 수 없습니다.")
+            )
         mismatches = _report_factual_mismatches(value, source)
         modality = modality_overreach(value, source)
         mismatches = report_prose_mismatches(
@@ -1590,14 +1622,23 @@ def _validate_prose(
                 if any(marker in mismatch for marker in ("숫자", "날짜", "기업명"))
             ]
         if mismatches:
-            raise OutputValidationError(
-                "생성 문장의 사실값이 basisClaimIds 근거와 일치하지 않습니다. "
-                + "; ".join(mismatches),
-                error_kinds=("report_fact_mismatch",),
+            errors.append(
+                OutputValidationError(
+                    "생성 문장의 사실값이 basisClaimIds 근거와 일치하지 않습니다. "
+                    + "; ".join(mismatches),
+                    error_kinds=("report_fact_mismatch",),
+                )
             )
-        validate_report_citations(value, refs, source, conditional=conditional, topic=topic)
+        try:
+            validate_report_citations(value, refs, source, conditional=conditional, topic=topic)
+        except ValueError as error:
+            errors.append(error)
         if request is not None:
-            validate_report_time(value, refs, request, conditional=conditional)
+            try:
+                validate_report_time(value, refs, request, conditional=conditional)
+            except ValueError as error:
+                errors.append(error)
+    return errors
 
 
 def _asserted_event_stage(value: str, *, include_hypothetical: bool = False) -> int:

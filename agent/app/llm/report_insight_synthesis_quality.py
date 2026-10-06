@@ -118,6 +118,40 @@ _NO_ADDITIONAL_SUPPLY = re.compile(
 _WITHDRAWN_ABSENCE = re.compile(
     r"없(?:다는|던).{0,25}(?:철회|반박|부정)|없지\s*않|없는\s*것이\s*아니"
 )
+_EXPANSION_EVENT = re.compile(
+    r"증설|생산\s*(?:능력|영역|량)?(?:을|를|이|가)?\s*"
+    r"(?:확대|확장|향상|증가|넓|늘)|\bcapacity\s+expansion\b",
+    re.I,
+)
+_FACTORY_SITE = re.compile(r"(?P<site>[가-힣A-Za-z][가-힣A-Za-z0-9.-]+)\s*공장")
+_GENERIC_FACTORY_SITE = frozenset({"반도체", "생산", "신규", "기존", "해당", "새로운"})
+_EXPLICIT_EXPANSION_OWNER = re.compile(_KOREAN_OWNER.pattern + r"(?=\s|$)")
+_CANCELLATION = re.compile(r"철회|취소|연기|중단|지연")
+_CANCELLATION_DENIAL = re.compile(
+    r"(?:철회|취소|연기|중단|지연)(?:하|되)지\s*않|"
+    r"(?:철회|취소|연기|중단|지연)(?:나|와|과|\s|하는|되는|한|된|사건|일|상황|적|사례|이|가|은|는|도)*"
+    r"(?:없|발생(?:하|되)지\s*않)"
+)
+# Only a denial that ends the condition is decisive. Additional substantive
+# text may describe a real setback even when the expansion itself continues.
+_DENIAL_END = re.compile(r"(?:았|었)?(?:다|음|습니다|(?:는|은|을|던)\s*(?:경우|때))?\s*$")
+_EXPANSION_TO_DENIAL = re.compile(
+    r"\s*(?:계획|사업|일정)?(?:이|가|을|를|은|는|에|의)?\s*"
+    r"(?:(?:철회|취소|연기|중단|지연)(?:하|되)?(?:거나|나|와|과)\s*)*"
+)
+_REVERSED_DENIAL = re.compile(
+    r"(?:않|없).{0,15}(?:것|주장|판단|설명|발표|보도)(?:이|은|는|가)?\s*"
+    r"(?:아니|아닌|틀리|틀린|철회|반박|부정)|"
+    r"(?:없지|않지)\s*않|않은\s*것은?\s*아니"
+)
+_EXPANSION_BENEFIT = re.compile(
+    r"(?:생산\s*능력|생산량|공급\s*능력|공급량).{0,15}(?:향상|증가|확대|늘)"
+)
+_EXPANSION_RESULT_FAILURE = re.compile(
+    r"(?:생산\s*능력|생산량|공급\s*능력|공급량).{0,15}"
+    r"(?:향상|증가|확대|늘어나|늘)(?:하|되)?지\s*(?:않|못)|"
+    r"(?:생산\s*능력|생산량|공급\s*능력|공급량).{0,15}(?:감소|하락)"
+)
 _INFORMATION_GAP = re.compile(
     r"(?:업무|연결|조건|범위|시급성|영향).{0,50}"
     r"(?:미확인|불명|(?:명시|제시|확인)(?:되|되어|되어\s*있|되었)?지\s*않)|"
@@ -534,6 +568,86 @@ def _auction_halted(rows: list[EvidenceText]) -> bool:
     )
 
 
+def _site_mentioned(value: str, site: str) -> bool:
+    return bool(
+        re.search(
+            r"(?<![가-힣A-Za-z0-9])"
+            + re.escape(site)
+            + r"(?=$|[^가-힣A-Za-z0-9]|공장|(?:에서|에|의|은|는|이|가)(?:\s|$))",
+            _normalize(value),
+        )
+    )
+
+
+def _expansion_actor(value: str, event: re.Match, *, at_start: bool = False) -> str | None:
+    # An internal 이/가 is part of a company name, not a grammatical particle.
+    # Keep this conservative parsing local instead of changing other event guards.
+    owners = [
+        (2 if match["link"] == "의" else 1, match.end(), match["actor"])
+        for match in _EXPLICIT_EXPANSION_OWNER.finditer(value[: event.start()])
+        if event.start() - match.end() <= 100
+        and not _EVENTS.search(value[match.end() : event.start()])
+        and (not at_start or not value[: match.start()].strip())
+    ]
+    return max(owners, default=(0, 0, None))[2]
+
+
+def _expansion_falsifier_reversed(
+    proposition: str, falsifier: str, rows: list[EvidenceText]
+) -> bool:
+    """Recognize a denied cancellation of the cited actor's same factory expansion.
+
+    A negation alone is not a direction error: failed capacity gains can refute
+    expansion benefits, and cancellation itself may be the hypothesis. Require
+    an explicit shared owner and named facility; ambiguous subjects/projects
+    remain undecided by this narrow guard.
+    """
+    if (
+        not _EXPANSION_BENEFIT.search(proposition)
+        or _CANCELLATION.search(proposition)
+        or _EXPANSION_RESULT_FAILURE.search(proposition)
+        or _REVERSED_DENIAL.search(falsifier)
+        or _EXPANSION_RESULT_FAILURE.search(falsifier)
+        or len([part for part in _CLAUSE_BREAK.split(falsifier) if part.strip()]) != 1
+    ):
+        return False
+    aliases = _aliases(rows)
+    for clause in _CLAUSE_BREAK.split(proposition):
+        for event in _EXPANSION_EVENT.finditer(clause):
+            actor = _expansion_actor(clause, event)
+            if actor is None:
+                continue
+            sites = {
+                _normalize(match["site"])
+                for match in _FACTORY_SITE.finditer(clause[: event.end()])
+                if _normalize(match["site"]) not in _GENERIC_FACTORY_SITE
+            }
+            for site in sites:
+                if not any(
+                    _mentions_owner(source, _canonical(actor, aliases), aliases)
+                    and _site_mentioned(source, site)
+                    and _EXPANSION_EVENT.search(source)
+                    and not _CANCELLATION.search(source)
+                    for row in rows
+                    for source in _CLAUSE_BREAK.split(row.text)
+                ):
+                    continue
+                for condition in _CLAUSE_BREAK.split(falsifier):
+                    if not _site_mentioned(condition, site):
+                        continue
+                    for target in _EXPANSION_EVENT.finditer(condition):
+                        target_actor = _expansion_actor(condition, target, at_start=True)
+                        if target_actor is not None and _canonical(
+                            target_actor, aliases
+                        ) == _canonical(actor, aliases):
+                            for denial in _CANCELLATION_DENIAL.finditer(condition, target.end()):
+                                if _EXPANSION_TO_DENIAL.fullmatch(
+                                    condition[target.end() : denial.start()]
+                                ) and _DENIAL_END.fullmatch(condition[denial.end() :]):
+                                    return True
+    return False
+
+
 def _assumption_unconfirmed(value: str, rows: list[EvidenceText]) -> bool:
     if not (
         _auction_halted(rows)
@@ -633,6 +747,16 @@ def validate_synthesis_quality(
         rows = _texts(request, item.basis_claim_ids)
         source_halt = _auction_halted(rows)
         proposition = item.text + "\n" + item.mechanism
+        if _expansion_falsifier_reversed(proposition, item.falsified_by, rows):
+            violations.append(
+                (
+                    "report_falsification_direction",
+                    f"implications[{index}].falsifiedBy: 동일 공장 증설 계획의 철회·연기가 "
+                    "발생하지 않았다는 관측은 증설 효과를 반증하지 않습니다. 실제 계획 "
+                    "철회·연기 또는 예상 생산 능력 향상 실패처럼 해석을 약화시키는 "
+                    "관측 조건을 작성해야 합니다.",
+                )
+            )
         if (
             source_halt
             and _POWER_EFFECT.search(proposition)
