@@ -59,7 +59,7 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v18"
+PROMPT_VERSION = "report-insight.ko.v19"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -1405,6 +1405,31 @@ def _repair_action_message(message: str, kinds: tuple[str, ...]) -> str:
     return message
 
 
+_WORK_REPAIR_ACTIONS = {
+    "compatibility_procedure": (
+        "report_work_compatibility_procedure_unsupported: "
+        "선택 근거가 호환성 검증 절차의 존재·의무를 지원하지 않습니다. "
+        "원문으로 연결 전제와 판정을 다시 확인하세요."
+    ),
+    "market_forecast_only_project_change": (
+        "report_axis_market_forecast_only_project_change: "
+        "선택 근거는 시장 수급·가격 전망이며 특정 프로젝트의 실제 변경을 명시하지 않습니다. "
+        "영향 범주와 근거를 다시 대조하세요."
+    ),
+    "market_forecast_only_scheduled_preparation": (
+        "report_axis_market_forecast_only_scheduled_preparation: "
+        "선택 근거의 전망 시점은 업무 준비 순서를 바꾸는 실제 일정이 아닙니다. "
+        "시점 범주와 근거를 다시 대조하세요."
+    ),
+    "physical_relocation_only_it_direct": (
+        "report_axis_physical_relocation_only_it_direct: "
+        "선택 관계 근거는 인력·본사의 물리 이동만 명시하며 IT 시스템·네트워크 이전이나 "
+        "조달 사건을 명시하지 않습니다. IT 변경이 수반될 것이라는 전제를 DIRECT의 "
+        "사실 근거로 사용할 수 없습니다."
+    ),
+}
+
+
 def _repair_action_entries(error: Exception) -> tuple[str, ...]:
     """Use owned diagnostic metadata; never parse rejected prose into a path."""
     actions = getattr(error, "repair_action_diagnostics", ())
@@ -1421,11 +1446,9 @@ def _repair_action_entries(error: Exception) -> tuple[str, ...]:
         diagnostics += tuple(
             f"audience={item.audience} findingId={item.finding_id} "
             f"nativeFields={item.native_field} refs={list(item.claim_ids)}: "
-            "report_work_compatibility_procedure_unsupported: "
-            "선택 근거가 호환성 검증 절차의 존재·의무를 지원하지 않습니다. "
-            "원문으로 연결 전제와 판정을 다시 확인하세요."
+            + _WORK_REPAIR_ACTIONS[item.problem]
             for item in error.work_diagnostics
-            if item.problem == "compatibility_procedure"
+            if item.problem in _WORK_REPAIR_ACTIONS
         )
     return diagnostics
 
@@ -1515,6 +1538,17 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
         if isinstance(error, ReportReduceValidationError)
         else ""
     )
+    axis_guidance = (
+        "범주 근거 진단은 원문 인용의 철자가 아니라 그 인용이 지원하는 사건의 범위에 대한 "
+        "오류입니다. claim 요약이 강하게 표현되어도 연결 sentence의 전망·계획·실행 단계를 "
+        "유지하세요. 시장 전망만으로 실제 프로젝트 변경·준비 일정을 만들거나 인력·사무실 "
+        "이전만으로 IT 시스템 변경을 확정하지 마세요. 같은 finding의 다른 근거가 해당 "
+        "판정을 지원하면 선택할 수 있습니다. 관계·영향·시점은 각자 다시 판단하며, "
+        "일부 축의 근거가 부족하다고 이미 확인된 업무 관계까지 무관·미확인으로 바꾸지 "
+        "마세요. 실제 연결 전제가 있으면 그 전제를 설명하세요.\n\n"
+        if any("report_axis_" in value for value in _repair_action_entries(error))
+        else ""
+    )
     return (
         "이전 결과가 근거 또는 출력 계약 검증에 실패했습니다. 잘못된 결과를 복사하지 말고 "
         "현재 단계의 전체 결과를 원문 claim과 연결 sentence에서 다시 작성하세요. "
@@ -1525,6 +1559,7 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
         f"{map_guidance}"
         f"{native_guidance}"
         f"{work_guidance}"
+        f"{axis_guidance}"
         f"{reduce_guidance}"
         f"{instructions}\n"
         f"<report-insight-input>\n{prompt_json(grounded_input(payload))}\n</report-insight-input>\n\n"

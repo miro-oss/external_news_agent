@@ -20,8 +20,10 @@ from app.llm.base import ProviderResponse
 from app.llm.openai_contract import _object
 from app.llm.prompt_data import prompt_json
 from app.llm.report_insight_assessment_coherence import assessment_coherence_errors
+from app.llm.report_insight_axis_support import assessment_axis_support_problems
 from app.llm.report_insight_guard import report_reference_date
 from app.llm.report_insight_instructions import ASSESSMENT_REASON_RULE
+from app.llm.report_insight_relocation_support import relocation_support_problems
 from app.llm.report_insight_retrieval import _ROLE_QUERIES, tokenize_report_evidence
 from app.llm.report_insight_work_grounding import work_prose_problems
 from app.schemas.analyze import Audience
@@ -354,6 +356,7 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                 "NO_CHANGE=해당 대상의 변경 없음이 원문에 명시됨. 변화에 대한 언급이 "
                 "없거나 영향 범위를 모르는 것은 NO_CHANGE가 아니라 UNDETERMINED다. "
                 "구체 대상과 범위가 있으면 정량 수치·최종 이행 결과가 없어도 판정한다."
+                " 시장 수급·가격 전망은 실제 프로젝트 변경·준비 범위가 아니다."
             ),
         },
         "ReportKnownUrgencyState": {
@@ -364,6 +367,7 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                 "계속된 중단·임박 마감, SCHEDULED_PREPARATION=준비 순서를 바꾸는 실제 "
                 "일정, MONITOR=후속 이행 관찰, NOT_URGENT=시급하지 않음이 명시됨. "
                 "기사 발행일이나 기업의 유명세는 행동 시점의 근거가 아니다."
+                " 전망의 대상 연도와 실제 준비 일정은 구분한다."
             ),
         },
         # These closed branches are identical for every finding and audience.
@@ -502,6 +506,8 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                                             "원문 사건·조건이 선택한 관점 업무 자체일 때만 "
                                             "선택한다. 같은 기업·산업·AI라는 이유만으로 업무가 "
                                             "연결되지 않는다. 원문의 실제 대상과 work를 대조한다."
+                                            " 인력·사무실 이전만으로 IT 시스템 이전을 "
+                                            "확정하지 않는다."
                                         ),
                                     },
                                     "work": deepcopy(work),
@@ -1010,6 +1016,23 @@ def _assessment_errors(
             errors.append(
                 f"{field}.quote는 해당 claim/연결 sentence 구절을 공백까지 그대로 인용해야 합니다."
             )
+    for problem in (
+        *assessment_axis_support_problems(item, finding),
+        *relocation_support_problems(item, finding, audience),
+    ):
+        work_diagnostics.append(
+            ReportAssessmentWorkDiagnostic(
+                audience=audience,
+                finding_id=finding.id,
+                native_field=problem.native_field,
+                problem=problem.problem,
+                claim_ids=problem.claim_ids,
+            )
+        )
+        errors.append(
+            f"{problem.native_field}: {problem.problem}. 선택 인용의 존재만으로 해당 "
+            "범주가 지원되는 것은 아닙니다. 연결 원문의 실제 대상·사건 단계와 범주를 대조하세요."
+        )
     return errors
 
 
