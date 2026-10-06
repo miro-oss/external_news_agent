@@ -152,6 +152,16 @@ _METADATA_CONDITION = re.compile(
     r"(?:구체적(?:인)?\s*)?미확인\s*업무\s*연결\s*조건)\s*[.!。]?",
     re.IGNORECASE,
 )
+# Recorded answers repeat the request for an unknown premise instead of naming
+# one. Match only complete affirmative placeholders, including their endings;
+# quoted text, negation and an added business prerequisite must remain undecided.
+_PLACEHOLDER_CONDITION = re.compile(
+    r"(?:(?:구체적(?:인)?\s*)?미확인\s*업무\s*연결\s*조건"
+    r"(?:이다|입니다|임|(?:이|은)?\s*필요(?:하다|합니다|함))|"
+    r"원문(?:의)?\s*사건(?:을\s*(?:해당\s*)?업무로|과\s*(?:해당\s*)?업무를)\s*"
+    r"연결하는\s*(?:구체적(?:인)?\s*)?미확인\s*조건(?:이|은)?\s*"
+    r"필요(?:하다|합니다|함))\s*[.!。]?"
+)
 # Only complete evaluation statements qualify. Field names in a real API source,
 # quoted definitions, denials and added business prerequisites are not this case.
 _SCHEMA_FIELD = r"(?:claimId|sourceSpanId)"
@@ -177,8 +187,10 @@ def _metadata_only_condition(condition: str, selected_source: str) -> bool:
     # assertion is not a premise; an actual source API's empty field can be.
     if _EMPTY_CLAIM_CONDITION.fullmatch(condition):
         return _SOURCE_EMPTY_CLAIM_FIELD.search(selected_source) is None
-    if _METADATA_CONDITION.fullmatch(condition) or _RELATION_DEFINITION_CONDITION.fullmatch(
-        condition
+    if (
+        _METADATA_CONDITION.fullmatch(condition)
+        or _PLACEHOLDER_CONDITION.fullmatch(condition)
+        or _RELATION_DEFINITION_CONDITION.fullmatch(condition)
     ):
         return True
     if not _SCHEMA_MATCH_CONDITION.fullmatch(condition):

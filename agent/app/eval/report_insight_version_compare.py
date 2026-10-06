@@ -95,6 +95,21 @@ COMPARISON_PROFILES = {
         "candidateMapChunkFindingLimit": 6,
         "candidateReviewChunkFindingLimit": 6,
     },
+    "v9-postmerge": {
+        **POLICY,
+        "comparisonProfile": "v9-postmerge",
+        "comparisonKind": "frozen-same-version-refinement",
+        "baselineCommit": "199075b69d3eea1dde231df4450cf1eec638d636",
+        "baselinePromptVersion": "report-insight.ko.v9",
+        "candidatePromptVersion": "report-insight.ko.v9",
+        "baselineRubricVersion": "report-importance.v6",
+        "candidateRubricVersion": "report-importance.v6",
+        "baselinePipeline": "staged",
+        "baselineMapChunkFindingLimit": 6,
+        "baselineReviewChunkFindingLimit": 6,
+        "candidateMapChunkFindingLimit": 6,
+        "candidateReviewChunkFindingLimit": 6,
+    },
 }
 
 

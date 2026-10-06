@@ -128,9 +128,9 @@ def test_recovers_only_missing_and_invalid_items_and_revalidates_full_batch(monk
         validations.append((json.loads(response.text), [f.id for f in request.findings]))
         return native(response, request)
 
-    def validate_public(response, request):
+    def validate_public(response, request, **kwargs):
         assert request.report.report_end_date == date(2026, 9, 30) or len(request.findings) == 8
-        return public(response, request)
+        return public(response, request, **kwargs)
 
     def repair(prompt, schema, raw, error, validate, fallback):
         recovery_errors.append(error)

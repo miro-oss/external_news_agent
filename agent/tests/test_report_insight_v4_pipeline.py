@@ -192,14 +192,14 @@ def test_partial_native_prose_repair_preserves_other_five_records_and_full_date(
         native_inputs.append(json.loads(response.text))
         return original_draft_validator(response, validation_request)
 
-    def capture_map(response, validation_request):
+    def capture_map(response, validation_request, **kwargs):
         public_contexts.append(
             (
                 [finding.id for finding in validation_request.findings],
                 validation_request.report.report_end_date,
             )
         )
-        return original_map_validator(response, validation_request)
+        return original_map_validator(response, validation_request, **kwargs)
 
     monkeypatch.setattr(insight_service, "validate_draft", capture_draft)
     monkeypatch.setattr(insight_service, "_validated_map_output", capture_map)

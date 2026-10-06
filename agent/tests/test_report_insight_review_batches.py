@@ -54,11 +54,11 @@ def test_review_selection_is_once_and_late_partial_repair_preserves_full_source_
         assert [item.axes.impact for item in draft.mapped.insights[0].assessments] == [None] * 13
         return original_select(full_source, draft)
 
-    def validate(response, context):
+    def validate(response, context, **kwargs):
         validation_contexts.append(
             ([f.id for f in context.findings], context.report.report_end_date)
         )
-        return original_validate(response, context)
+        return original_validate(response, context, **kwargs)
 
     monkeypatch.setattr(service, "select_review", select)
     monkeypatch.setattr(service, "_validated_map_output", validate)
