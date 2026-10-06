@@ -14,6 +14,7 @@ from app.core.report_importance import score_importance
 from app.llm.base import AnalyzeProvider, ProviderResponse
 from app.llm.prompt_data import escape_prompt_text, prompt_json
 from app.llm.report_insight_assessment import (
+    ReportAssessmentConnectionRepairContext,
     ReportAssessmentDraftValidationError,
     draft_prompt,
     draft_schema,
@@ -59,7 +60,7 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v22"
+PROMPT_VERSION = "report-insight.ko.v23"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -81,6 +82,7 @@ class ReportAssessmentValidationError(OutputValidationError):
         repair_action_diagnostics: tuple[str, ...] = (),
         native_prose_repairs: dict[int, tuple[ReportFindingAssessmentDraft, tuple[str, ...]]]
         | None = None,
+        native_connection_repairs: dict[int, ReportAssessmentConnectionRepairContext] | None = None,
     ) -> None:
         super().__init__(message, error_kinds=error_kinds)
         self.failed_finding_ids: tuple[int, ...] = tuple(failed_finding_ids)
@@ -89,6 +91,7 @@ class ReportAssessmentValidationError(OutputValidationError):
         self.repair_action_diagnostics = tuple(repair_action_diagnostics)
         # Created from authenticated native projections, never diagnostic prose.
         self.native_prose_repairs = deepcopy(native_prose_repairs or {})
+        self.native_connection_repairs = deepcopy(native_connection_repairs or {})
 
 
 class _TruncatedAssessmentRepairError(ReportAssessmentValidationError):
@@ -373,7 +376,8 @@ class ReportInsightService(ReportInsightLegacyService):
             validate=validate,
         )
         repair = _partial_assessment_repair(prompt, schema, raw, error, validate, fallback)
-        return _preserve_native_decisions(repair, raw, error)
+        repair = _preserve_native_decisions(repair, raw, error)
+        return _preserve_native_connection(repair, raw, error)
 
     def generate(self, request: ReportInsightRequest) -> ReportInsightResponse:
         request = _eligible_report_request(request)
@@ -924,6 +928,106 @@ def _native_assessment_repair_errors(response, request):
             if all(getattr(error, "native_prose_repairs", None) for _, error in failures)
             else None
         ),
+        native_connection_repairs=(
+            {
+                finding_id: context
+                for _, error in failures
+                for finding_id, context in error.native_connection_repairs.items()
+            }
+            if all(getattr(error, "native_connection_repairs", None) for _, error in failures)
+            else None
+        ),
+    )
+
+
+def _preserve_native_connection(repair, raw, error):
+    """Keep a verified connection when only owned effect/timing support failed."""
+    contexts = getattr(error, "native_connection_repairs", {})
+    if (
+        not isinstance(error, ReportAssessmentValidationError)
+        or not contexts
+        or set(error.error_kinds) != {"report_assessment_draft_invalid"}
+        or set(contexts) != set(error.failed_finding_ids)
+    ):
+        return repair
+    try:
+        original = parse_wire_draft(raw)
+        payload = parse_json_object(
+            repair.prompt.split("<report-insight-input>", 1)[1].split("</report-insight-input>", 1)[
+                0
+            ]
+        )
+        if len(payload["audiences"]) != 1:
+            return repair
+        audience = payload["audiences"][0]
+        if set(original.assessments) != {audience}:
+            return repair
+        sources = {finding["id"]: finding for finding in payload["findings"]}
+        schema = deepcopy(repair.response_schema)
+        entries = schema["properties"]["assessments"]["properties"][audience]["properties"]
+        if set(entries) != {f"finding{identifier}" for identifier in contexts}:
+            return repair
+        frozen = {}
+        for identifier, context in contexts.items():
+            key = f"finding{identifier}"
+            item = original.assessments[audience][key]
+            if not isinstance(
+                context, ReportAssessmentConnectionRepairContext
+            ) or not context.matches(
+                item.flattened(sources[identifier]["sourceQuoteChoices"]), sources[identifier]
+            ):
+                return repair
+            connection = item.model_dump(by_alias=True, mode="json")["decision"]["connection"]
+            frozen[key] = connection
+            for field in ("relation", "work", "condition"):
+                _fix_native_schema_value(
+                    entries[key],
+                    ["decision", "connection", field],
+                    connection[field],
+                    schema["$defs"],
+                )
+            basis = connection["basis"]
+            paths = (
+                {"basis": None}
+                if basis is None
+                else {
+                    "basis.claimId": basis["claimId"],
+                    "basis.sourceSpanId": basis["sourceSpanId"],
+                }
+            )
+            for path, value in paths.items():
+                _fix_native_schema_value(
+                    entries[key],
+                    ["decision", "connection", *path.split(".")],
+                    value,
+                    schema["$defs"],
+                )
+    except (KeyError, IndexError, TypeError, ValueError):
+        return repair
+
+    def validate_repair(response):
+        actual = parse_wire_draft(response.text).model_dump(by_alias=True, mode="json")
+        records = actual["assessments"].get(audience, {})
+        if any(
+            key not in records or records[key]["decision"]["connection"] != connection
+            for key, connection in frozen.items()
+        ):
+            raise OutputValidationError(
+                "영향·시점 근거만 실패한 수리에서 검증된 connection을 변경할 수 없습니다.",
+                error_kinds=("report_assessment_invalid",),
+            )
+        return repair.validate(response)
+
+    return StructuredCallRepair(
+        prompt=(
+            "이번 수리에서 connection의 관계·업무·조건·근거는 검증되어 Schema const로 "
+            "고정됩니다. effect/timing의 범주와 근거, reason을 수정하세요. 같은 finding의 "
+            "다른 원문이 해당 축을 지원하면 선택할 수 있고, 근거가 부족한 축은 미확인으로 "
+            "남깁니다. reason은 고정된 관계 및 수정한 영향·시점과 일치해야 합니다.\n\n"
+            + repair.prompt
+        ),
+        response_schema=schema,
+        validate=validate_repair,
     )
 
 

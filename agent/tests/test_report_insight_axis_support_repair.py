@@ -65,7 +65,8 @@ def test_selected_category_failure_has_typed_path_refs_and_does_not_freeze_decis
     assert "refs=['101:0']" in repair.prompt
     assert "연결 sentence의 전망·계획·실행 단계" in repair.prompt
     assert "무관·미확인으로 바꾸지" in repair.prompt
-    assert repair.response_schema == draft_schema(source)
+    assert bool(error.native_connection_repairs) == (kind == "forecast")
+    assert (repair.response_schema == draft_schema(source)) == (kind == "relocation")
     with pytest.raises(ReportAssessmentDraftValidationError):
         repair.validate(raw)
 

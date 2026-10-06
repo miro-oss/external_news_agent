@@ -230,6 +230,15 @@ class ReportAssessmentWorkDiagnostic:
     claim_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ReportAssessmentConnectionRepairContext:
+    snapshot: ReportFindingAssessmentDraft
+    source_fingerprint: str
+
+    def matches(self, item: ReportFindingAssessmentDraft, source_payload: dict) -> bool:
+        return item == self.snapshot and _fingerprint(source_payload) == self.source_fingerprint
+
+
 class ReportAssessmentDraftValidationError(OutputValidationError):
     def __init__(
         self,
@@ -237,10 +246,12 @@ class ReportAssessmentDraftValidationError(OutputValidationError):
         *,
         failed_finding_ids: tuple[int, ...],
         work_diagnostics: tuple[ReportAssessmentWorkDiagnostic, ...] = (),
+        native_connection_repairs: dict[int, ReportAssessmentConnectionRepairContext] | None = None,
     ):
         super().__init__(message, error_kinds=("report_assessment_draft_invalid",))
         self.failed_finding_ids = failed_finding_ids
         self.work_diagnostics = tuple(work_diagnostics)
+        self.native_connection_repairs = deepcopy(native_connection_repairs or {})
 
 
 @dataclass(frozen=True)
@@ -849,13 +860,39 @@ def _validate_draft(
     ):
         raise ValueError("내부 MAP은 요청한 모든 audience와 finding 키만 정확히 반환해야 합니다.")
     errors, failed, work_diagnostics = [], [], []
+    connection_repairs = {}
+    sources = {item["id"]: item for item in _prompt_payload(request, None)["findings"]}
     mapped, evidence = [], {}
     for audience in request.audiences:
         public, proof = [], {}
         for finding in request.findings:
             item = draft.assessments[audience][f"finding{finding.id}"]
-            messages = _assessment_errors(item, finding, audience, work_diagnostics)
+            local_diagnostics = []
+            messages = _assessment_errors(item, finding, audience, local_diagnostics)
+            work_diagnostics.extend(local_diagnostics)
             if messages:
+                # Each owned diagnostic appends exactly one error. Additional
+                # shape, source, coherence or prose errors prevent preservation;
+                # no text from an error message grants repair authority.
+                if (
+                    len(request.audiences) == 1
+                    and len(messages) == len(local_diagnostics)
+                    and all(
+                        diagnostic.native_field
+                        in {"decision.effect.impactScope", "decision.timing.urgencyState"}
+                        and diagnostic.problem
+                        in {
+                            "market_forecast_only_core_constraint",
+                            "market_forecast_only_project_change",
+                            "market_forecast_only_scheduled_preparation",
+                        }
+                        for diagnostic in local_diagnostics
+                    )
+                ):
+                    connection_repairs[finding.id] = ReportAssessmentConnectionRepairContext(
+                        snapshot=item.model_copy(deep=True),
+                        source_fingerprint=_fingerprint(sources[finding.id]),
+                    )
                 failed.append(finding.id)
                 errors.extend(
                     f"audience={audience} findingId={finding.id} {message}" for message in messages
@@ -870,6 +907,9 @@ def _validate_draft(
             "내부 MAP 근거 계약 위반: " + "; ".join(errors),
             failed_finding_ids=tuple(dict.fromkeys(failed)),
             work_diagnostics=tuple(work_diagnostics),
+            native_connection_repairs=(
+                connection_repairs if set(connection_repairs) == set(failed) else None
+            ),
         )
     return ValidatedAssessmentDraft(
         draft=draft,

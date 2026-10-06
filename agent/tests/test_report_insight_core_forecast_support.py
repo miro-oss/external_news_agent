@@ -91,7 +91,8 @@ def test_core_repair_can_keep_category_by_selecting_actual_capacity_basis():
     )
     assert "report_axis_market_forecast_only_core_constraint" in repair.prompt
     assert "nativeFields=decision.effect.impactScope refs=['101:0']" in repair.prompt
-    assert repair.response_schema == draft_schema(source)
+    assert error.native_connection_repairs
+    assert repair.response_schema != draft_schema(source)
     with pytest.raises(ReportAssessmentDraftValidationError):
         repair.validate(raw)
 

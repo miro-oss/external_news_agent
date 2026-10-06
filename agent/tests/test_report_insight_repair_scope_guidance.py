@@ -67,7 +67,8 @@ def test_recorded_forecast_axis_repair_does_not_request_a_new_connection_conditi
     assert "진단된 축의 범주와 근거를 수정" in repair.prompt
     assert "관계·영향·시점은 각자 다시 판단하며" not in repair.prompt
     assert "현재 단계의 전체 결과를 원문" not in repair.prompt
-    assert repair.response_schema == draft_schema(source)
+    assert error.native_connection_repairs
+    assert repair.response_schema != draft_schema(source)
     assert framed(repair.prompt) == framed(draft_prompt(source))
     with pytest.raises(ReportAssessmentDraftValidationError):
         repair.validate(raw)
