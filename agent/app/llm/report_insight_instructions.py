@@ -7,6 +7,7 @@ from app.schemas.analyze import Audience
 _ROOT = Path(__file__).resolve().parents[1] / "prompts"
 _BASE = (_ROOT / "report-insight.ko.v12.md").read_text(encoding="utf-8").strip()
 _RUBRIC = (_ROOT / "report-importance.v6.md").read_text(encoding="utf-8").strip()
+_REDUCE_RULES = (_ROOT / "report-insight-reduce.ko.v1.md").read_text(encoding="utf-8").strip()
 ASSESSMENT_REASON_RULE = (
     "reason은 원문 대상·사건 단계와 관점 업무의 연결 근거 또는 한계를 "
     "한국어 1~2문장, 180자 이내로 설명한다. 업무 코드·claim ID·기업명·수치 나열이나 "
@@ -93,4 +94,4 @@ def report_stage_instruction(audiences: list[Audience], stage: str) -> str:
         "무관/미확인이면 종합 배열을 비운다. 원문 부재와 업무 관련성 미확인은 다르며 "
         "최종 빈 해석 안내는 서버가 판정한다. assessments는 작성하지 않는다."
     )
-    return common + "\n\n" + stage_text
+    return common + "\n\n" + _REDUCE_RULES + "\n\n" + stage_text

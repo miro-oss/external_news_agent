@@ -58,7 +58,8 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v12"
+PROMPT_VERSION = "report-insight.ko.v13"
+COMMON_PROMPT_VERSION = "report-insight.ko.v12"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"
@@ -155,7 +156,7 @@ class ReportReduceValidationError(OutputValidationError):
 _PROMPT_ROOT = Path(__file__).resolve().parents[1] / "prompts"
 SYSTEM_INSTRUCTION = "\n\n".join(
     (_PROMPT_ROOT / f"{version}.md").read_text(encoding="utf-8").strip()
-    for version in (PROMPT_VERSION, RUBRIC_VERSION)
+    for version in (COMMON_PROMPT_VERSION, RUBRIC_VERSION)
 )
 LEGACY_SYSTEM_INSTRUCTION = "\n\n".join(
     (_PROMPT_ROOT / f"{version}.md").read_text(encoding="utf-8").strip()
@@ -1462,6 +1463,8 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
     )
     reduce_guidance = (
         "REDUCE의 진단 field와 refs를 각각 확인하세요. 근거 없는 회사·숫자는 빼고 "
+        "각 서술 필드를 한국어 1~2문장, 180자 이내로 작성하세요. refs의 근거 ID와 "
+        "목록 번호를 본문에 복사하지 말고, 근거 ID는 basisClaimIds에만 넣으세요. "
         "같은 사건의 검증된 표현을 사용하세요. falsifiedBy에는 같은 대상의 해석을 "
         "약화시키는 관측 조건을 쓰세요. 자료 부족 자체는 관측이 아니며, 반증 조건을 "
         "근거와 연결할 수 없는 implication은 제외할 수 있습니다. 관련 근거가 있으면 "

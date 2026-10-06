@@ -14,6 +14,29 @@ from app.schemas.report_insight import ReportInsightRequest
 
 _POLARITY_MESSAGE = "근거와 반대되는 부정 표현이 포함되어 있습니다."
 _NUMERIC_CONTEXT_MESSAGE = "근거와 연결이 다른 숫자: "
+# An explicit ordered series pairs years with percentages; the following fact
+# does not inherit the last year (e.g. a separately stated product yield).
+_YEAR_PERCENT_SERIES = re.compile(
+    r"(?P<reporter>(?:원문|기사|자료)(?:은|는)\s+)"
+    r"(?P<first_year>20\d{2})\s*→\s*(?P<second_year>20\d{2})\s*년\s+"
+    r"(?P<metric>[^\d\n;:,.%→]{1,40}?)\s*"
+    r"(?P<first_percent>\d+(?:\.\d+)?)\s*%\s*→\s*"
+    r"(?P<second_percent>\d+(?:\.\d+)?)\s*%(?![A-Za-z])"
+)
+_SIGNED_CONTRACT = re.compile(
+    r"\bsigned\s+(?:(?:an?|the)\s+)?"
+    r"(?:(?:new|expansive|strategic|definitive|binding|commercial|"
+    r"supply|licensing|distribution|development|collaboration|[a-z0-9]+-year),?\s+){0,4}"
+    r"(?:agreement|contract)\b(?!\s+(?:proposal|draft|plan|template|outline)\b)",
+    re.IGNORECASE,
+)
+_NONFACTUAL_SIGNING = re.compile(
+    r"\b(?:if|unless|whether|when|once|until|would|could|may|might|will|"
+    r"plans?|planned|intends?|intended|expects?|expected|hopes?|hoped|"
+    r"denied|denies|deny|disputed|false|untrue)\b",
+    re.IGNORECASE,
+)
+_NEGATED_SIGNING = re.compile(r"(?:\bnot|\bnever|n't)(?:\s+[a-z]+){0,4}\s+$", re.IGNORECASE)
 # An explicit report summary can coordinate two independent nominal facts.
 # Do not split ordinary conjunctions: they may share an actor, date or action.
 _PARALLEL_SUMMARY = re.compile(
@@ -127,6 +150,14 @@ def factual_states(value: str) -> dict[str, set[bool]]:
             values.add(True)
         if values:
             states[name] = values
+    # The supplied English sentence may establish the same signed-contract
+    # state as a Korean translation. Modal/conditional clauses are not execution.
+    for match in _SIGNED_CONTRACT.finditer(value):
+        prefix = re.split(r"[.!?;\n]|\bbut\b", value[: match.start()])[-1]
+        if _NEGATED_SIGNING.search(prefix) or re.search(r"\b(?:no|neither|not)\b", match[0], re.I):
+            states.setdefault("contract", set()).add(False)
+        elif not _NONFACTUAL_SIGNING.search(prefix):
+            states.setdefault("contract", set()).add(True)
     return states
 
 
@@ -153,6 +184,35 @@ def _independent_parallel_numbers(value: str, source: str) -> bool:
     return all(not factual_mismatches(fact, source) for fact in facts)
 
 
+def _ordered_year_percentages(value: str, source: str) -> bool:
+    """Expand one explicit series only after verifying both ordered source pairs.
+
+    Rechecking the entire expanded prose preserves every remaining number,
+    company, date and polarity check. An ordinary conjunction or reversed pair
+    cannot use this exception merely because all its numbers appear somewhere.
+    """
+    matches = list(_YEAR_PERCENT_SERIES.finditer(value))
+    if len(matches) != 1:
+        return False
+    match = matches[0]
+    pairs = [
+        (match["first_year"], match["first_percent"]),
+        (match["second_year"], match["second_percent"]),
+    ]
+    # No intervening year or percentage may replace the stated owner/value.
+    gap = r"(?:(?!20\d{2}\s*년|\d+(?:\.\d+)?\s*%)[^\n;.!?])*?"
+    source_series = gap.join(
+        rf"(?<!\d){year}\s*년{gap}(?<![\d.]){re.escape(percent)}\s*%" for year, percent in pairs
+    )
+    if re.search(source_series, source) is None:
+        return False
+    expanded = "; ".join(
+        f"{match['reporter']}{year}년 {match['metric']} {percent}%" for year, percent in pairs
+    )
+    scoped = value[: match.start()] + expanded + "; " + value[match.end() :]
+    return not factual_mismatches(scoped, source)
+
+
 def report_prose_mismatches(
     value: str,
     source: str,
@@ -170,7 +230,7 @@ def report_prose_mismatches(
     has_factual_state = bool(states)
     remaining = list(mismatches)
     if any(item.startswith(_NUMERIC_CONTEXT_MESSAGE) for item in remaining) and (
-        _independent_parallel_numbers(value, source)
+        _independent_parallel_numbers(value, source) or _ordered_year_percentages(value, source)
     ):
         remaining = [item for item in remaining if not item.startswith(_NUMERIC_CONTEXT_MESSAGE)]
     if _POLARITY_MESSAGE in remaining:

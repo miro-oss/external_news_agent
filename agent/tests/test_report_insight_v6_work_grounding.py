@@ -33,6 +33,45 @@ ENGLISH_PROCEDURE_SOURCE = (
     "The operations team prepares compatibility testing of the cooling module. "
     "Customer approval of the specification is required before deployment."
 )
+INTEGRATION_SOURCE = (
+    "The companies signed an expansive, multi-year agreement to jointly develop "
+    "a specialized model, optimized to use EDA tools to perform semiconductor design workflows."
+)
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "원문은 모델·도구 간의 기능적 통합 및 호환성 검증 업무와 직접적으로 연결된다.",
+        "도구와 모델의 통합은 호환성 검증 업무에 해당한다.",
+        "모델을 도구와 연동하는 사건은 호환성 검증 업무와 관련된다.",
+    ],
+)
+def test_model_tool_integration_can_be_interpreted_as_compatibility_work(prose):
+    # Recorded IT MAP16: a work interpretation does not assert a required test.
+    assert work_prose_problems(prose, INTEGRATION_SOURCE) == ()
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "모델 도입에는 도구 간 호환성 검증이 필요하다.",
+        "모델의 호환성 검증 업무를 완료해야 도입할 수 있다.",
+        "호환성 검증 업무와 직접 연결되며 검증 통과가 필수이다.",
+        "호환성 검증 업무와 직접 연결되므로 시험을 수행해야 한다.",
+        "호환성 검증 업무와 직접 연결된다. 호환성 검증을 진행했다.",
+    ],
+)
+def test_integration_does_not_establish_an_actual_compatibility_procedure(prose):
+    assert "compatibility_procedure" in work_prose_problems(prose, INTEGRATION_SOURCE)
+
+
+def test_generic_work_phrase_does_not_supply_its_own_source_or_hide_another_procedure():
+    prose = "원문은 호환성 검증 업무와 직접적으로 연결된다."
+    assert "compatibility_procedure" in work_prose_problems(prose, PRICE_SOURCE)
+    assert "approval_prerequisite" in work_prose_problems(
+        prose + " 고객 승인 전에는 도입하지 않는다.", INTEGRATION_SOURCE
+    )
 
 
 def _source(text, *, finding_id=4901, audience="IT_INFRA", linked_text=None):

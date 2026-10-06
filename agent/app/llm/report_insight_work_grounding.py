@@ -77,6 +77,14 @@ _REQUIRED_GATE = re.compile(
     r"전제|필수|통과(?:해야|가)|없이는|(?:승인|검수|검증|인증)\s*전(?:에는|에|까지)?|"
     r"(?:요건|조건).{0,10}(?:유지|충족|삭제|있어야)"
 )
+_INTEGRATION_SOURCE = re.compile(
+    r"통합|결합|연동|\bintegrat\w*|\b(?:optimized|designed)\s+to\s+use\b", re.I
+)
+_COMPATIBILITY_WORK = re.compile(
+    r"호환성\s*(?:검증|시험)\s*업무(?:와|에)\s*"
+    r"(?:직접(?:적(?:으로)?)?\s*)?(?:연결|관련|해당)"
+)
+_PROCEDURE_ACTION = re.compile(r"필요|요구|수행|진행|통과|실시|완료")
 _TEAM_TRANSLATIONS = {
     "운영팀": r"\b(?:operations?|operating)\s+team\b",
     "인증팀": r"\b(?:certification|qualification)\s+team\b",
@@ -105,6 +113,19 @@ def _team_supported(team: str, source: str) -> bool:
     return bool(translation and re.search(translation, source, re.I))
 
 
+def _generic_compatibility_work(kind: str, match, clause: str, source: str) -> bool:
+    # Integration can be interpreted as compatibility work without inventing
+    # an actual test or prerequisite. Keep this exemption local to the matched
+    # work phrase; any required/performed procedure still needs literal support.
+    return bool(
+        kind == "compatibility_procedure"
+        and _COMPATIBILITY_WORK.match(clause, match.start())
+        and _INTEGRATION_SOURCE.search(source)
+        and not _REQUIRED_GATE.search(clause)
+        and not _PROCEDURE_ACTION.search(clause)
+    )
+
+
 def work_prose_problems(value: str, source: str) -> tuple[str, ...]:
     """Recognize explicit unsupported procedures; absence statements stay open."""
     problems = []
@@ -117,6 +138,7 @@ def work_prose_problems(value: str, source: str) -> tuple[str, ...]:
         for kind, emitted, supported in _RULES:
             unsupported = any(
                 not any(start <= match.start() and match.end() <= end for start, end in absent)
+                and not _generic_compatibility_work(kind, match, clause, source)
                 for match in emitted.finditer(clause)
             )
             if unsupported and not supported.search(source):
