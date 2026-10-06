@@ -59,8 +59,8 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v21"
-COMMON_PROMPT_VERSION = "report-insight.ko.v16"
+PROMPT_VERSION = "report-insight.ko.v22"
+COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"
@@ -1410,6 +1410,11 @@ _WORK_REPAIR_ACTIONS = {
         "report_work_compatibility_procedure_unsupported: "
         "선택 근거가 호환성 검증 절차의 존재·의무를 지원하지 않습니다. "
         "원문으로 연결 전제와 판정을 다시 확인하세요."
+    ),
+    "market_forecast_only_core_constraint": (
+        "report_axis_market_forecast_only_core_constraint: "
+        "선택 근거는 시장 수급·가격 전망이며 현재 핵심 대상의 실제 제약을 명시하지 않습니다. "
+        "현재 제약을 지원하는 같은 finding의 근거가 있는지 영향 범주와 함께 다시 대조하세요."
     ),
     "market_forecast_only_project_change": (
         "report_axis_market_forecast_only_project_change: "

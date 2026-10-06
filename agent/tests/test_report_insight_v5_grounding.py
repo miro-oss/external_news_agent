@@ -200,7 +200,7 @@ def test_reassessment_context_is_independent_and_preserves_source_identity_and_t
     assert context["reportReferenceDate"] == "2026-09-25"
     assert [item["claims"][0]["id"] for item in context["findings"]] == ["101:0", "102:0"]
     assert source.model_dump_json(by_alias=True) == original
-    assert result.meta.prompt_version == "report-insight.ko.v21"
+    assert result.meta.prompt_version == "report-insight.ko.v22"
 
 
 def test_native_decision_contract_keeps_axis_category_before_source_fields():

@@ -1,4 +1,4 @@
-"""Reject only explicit market forecasts used as confirmed work changes/schedules.
+"""Reject forecasts used as current constraints or confirmed work changes/schedules.
 
 This is a narrow source-stage check, not a general entailment or scoring model.
 Ambiguous mixed events remain with the model and the other validators. Evidence,
@@ -50,6 +50,17 @@ _FIXED_PRICE = re.compile(
 _NOT_ASSERTED_SUFFIX = re.compile(
     r"^(?:다)?(?:면|거나)|^(?:다)?(?:고|는|다는)\s*(?:가정|소문)|"
     r"^.{0,16}(?:부인|사실이\s*아니)"
+)
+# CORE needs a stricter forecast-only boundary: current/past states, capacity,
+# causes, or subordinate clauses may carry a constraint alongside the forecast.
+# These markers only abstain; they never establish that a constraint is real.
+# Even hypothetical capacity is deliberately left to the model/other validators.
+_CORE_MIXED_CONTEXT = re.compile(
+    r"현재|이미|지금|과거|지난|종전|기존|발생|현실화|"
+    r"생산\s*(?:능력|용량)|캐파|능력\s*부족|수요\s*미충족|"
+    r"못\s*미쳐|못해|못하여|"
+    r"(?:부족|제약|차질|미달)(?:해|하여|돼|되어|로|이어서|이라)|"
+    r"때문|탓|여파|원인|인해|따라|조건|경우|면|지만|는데|으므로"
 )
 # Only strong discourse boundaries, never numeric commas or decimal points.
 _BOUNDARY = re.compile(
@@ -116,6 +127,13 @@ def assessment_axis_support_problems(
         (
             "decision.effect.impactScope",
             item.impact_scope,
+            "CORE_CONSTRAINT",
+            item.impact_basis,
+            "market_forecast_only_core_constraint",
+        ),
+        (
+            "decision.effect.impactScope",
+            item.impact_scope,
             "PROJECT_CHANGE",
             item.impact_basis,
             "market_forecast_only_project_change",
@@ -131,6 +149,10 @@ def assessment_axis_support_problems(
         if category != rejected or basis is None:
             continue
         contexts = _selected_contexts(basis, finding)
-        if contexts and all(_market_forecast_only(context) for context in contexts):
+        if contexts and all(
+            _market_forecast_only(context)
+            and not (rejected == "CORE_CONSTRAINT" and _CORE_MIXED_CONTEXT.search(context))
+            for context in contexts
+        ):
             problems.append(AxisSupportProblem(field, problem, (basis.claim_id,)))
     return tuple(problems)

@@ -5,7 +5,7 @@ from pathlib import Path
 from app.schemas.analyze import Audience
 
 _ROOT = Path(__file__).resolve().parents[1] / "prompts"
-_BASE = (_ROOT / "report-insight.ko.v16.md").read_text(encoding="utf-8").strip()
+_BASE = (_ROOT / "report-insight.ko.v15.md").read_text(encoding="utf-8").strip()
 _RUBRIC = (_ROOT / "report-importance.v6.md").read_text(encoding="utf-8").strip()
 _REDUCE_RULES = (_ROOT / "report-insight-reduce.ko.v1.md").read_text(encoding="utf-8").strip()
 ASSESSMENT_REASON_RULE = (
@@ -43,8 +43,6 @@ _ROLES = {
     "운영이 아니다. 시장 수급·가격 전망만으로 특정 프로젝트 변경이나 준비 활동을 "
     "만들지 않는다. 전망의 연도·사업 발표일은 대응 기한이 아니다. "
     "직원·본사·사무공간의 물리 이전은 IT 시스템·네트워크 이전의 사실 근거가 아니다. "
-    "업무용 소프트웨어·온라인 서비스의 실제 통합·배포·운영도 도입/운영 업무다. "
-    "서비스 소개·이용 혜택만으로 실제 도입 사건을 만들지 않는다. "
     "시스템 변경이 원문에 있으면 직접 업무로 판단하고, 수반될 것이라는 가정만 있으면 "
     "그 구체적 연결 전제를 구분한다.",
 }
