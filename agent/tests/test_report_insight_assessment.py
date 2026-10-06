@@ -983,8 +983,8 @@ def test_claimful_reason_schema_and_map_review_prompts_explain_business_unknown_
         assert "claims=[]" in prompt
         assert "findingId, reason, decision 순서" in prompt
         instruction = report_stage_instruction(source.audiences, stage)
-        assert "이미 원문에서 확인된 사실을 미확인 condition으로 반복하지 않는다" in instruction
-        assert "관점 업무 전체를 대조" in instruction
+        assert "원문에서 확인된 사실을 미확인 condition으로 반복하지 않는다" in instruction
+        assert "관점의 모든 업무로 connection을 판정한다" in instruction
         assert "관계는 유지하고 effect만 UNDETERMINED" in instruction
 
 

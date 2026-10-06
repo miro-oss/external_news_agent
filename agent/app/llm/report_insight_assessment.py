@@ -45,7 +45,7 @@ MAX_REVIEW_FINDINGS = 12
 TOP_REVIEW_FINDINGS = 5
 MAX_SOURCE_QUOTE_LENGTH = 200
 MAX_NATIVE_ENUM_VALUES = 1000
-_SOURCE_CLAUSE_BOUNDARY = re.compile(r"[.!?。！？](?=\s|$)|[,，;；:：]\s*|\n+")
+_SOURCE_SENTENCE_BOUNDARY = re.compile(r"[.!?。！？](?=\s|$)|\n+")
 ROLE_WORK: dict[Audience, tuple[str, ...]] = {
     "CHIP_MAKER": (
         "PROCESS_QUALIFICATION",
@@ -238,28 +238,45 @@ class ValidatedAssessmentDraft:
 def _source_quote_fragments(text: str) -> tuple[str, ...]:
     """Select literal spans, keeping every nonblank source region available.
 
-    Short sources remain available whole. Natural clauses and consecutive
-    bounded chunks offer usable choices for long sources without trimming,
-    rewriting, or replacing any characters. Blank-only spans cannot be proof.
+    Short sources stay whole instead of offering detached dependent clauses.
+    Long sources use sentence boundaries, then bounded word-boundary chunks;
+    commas/colons never split numbers or separate their subject and qualifier.
+    Only a token longer than the limit needs a hard character boundary. Every
+    nonblank source region stays available without rewriting any characters.
     The complete original source is still supplied to the model and validator.
     """
+    if len(text) <= MAX_SOURCE_QUOTE_LENGTH:
+        return (text,) if text.strip() else ()
     choices: dict[str, None] = {}
+    numbers = tuple(re.finditer(r"\d+(?:[.,]\d+)*", text))
 
     def add_range(start: int, end: int) -> None:
-        for offset in range(start, end, MAX_SOURCE_QUOTE_LENGTH):
-            span = text[offset : min(offset + MAX_SOURCE_QUOTE_LENGTH, end)]
+        while start < end:
+            limit = min(start + MAX_SOURCE_QUOTE_LENGTH, end)
+            stop = limit
+            if limit < end:
+                boundary = next(
+                    (index for index in range(limit, start, -1) if text[index - 1].isspace()),
+                    None,
+                )
+                if boundary is not None and text[start:boundary].strip():
+                    stop = boundary
+                for number in numbers:
+                    if start < number.start() < stop < number.end():
+                        stop = number.start()
+                        break
+            span = text[start:stop]
             if span.strip():
                 choices.setdefault(span, None)
+            start = stop
 
-    if len(text) <= MAX_SOURCE_QUOTE_LENGTH and text.strip():
-        choices[text] = None
     start = 0
-    for boundary in _SOURCE_CLAUSE_BOUNDARY.finditer(text):
+    for boundary in _SOURCE_SENTENCE_BOUNDARY.finditer(text):
+        if not text[boundary.end() :].strip():
+            break
         add_range(start, boundary.end())
         start = boundary.end()
     add_range(start, len(text))
-    # Fixed contiguous windows cover text crossing natural clause boundaries.
-    add_range(0, len(text))
     return tuple(choices)
 
 

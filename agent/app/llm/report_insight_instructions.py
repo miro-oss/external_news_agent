@@ -5,7 +5,7 @@ from pathlib import Path
 from app.schemas.analyze import Audience
 
 _ROOT = Path(__file__).resolve().parents[1] / "prompts"
-_BASE = (_ROOT / "report-insight.ko.v11.md").read_text(encoding="utf-8").strip()
+_BASE = (_ROOT / "report-insight.ko.v12.md").read_text(encoding="utf-8").strip()
 _RUBRIC = (_ROOT / "report-importance.v6.md").read_text(encoding="utf-8").strip()
 ASSESSMENT_REASON_RULE = (
     "reason은 원문 대상·사건 단계와 관점 업무의 연결 근거 또는 한계를 "
@@ -55,17 +55,18 @@ def report_stage_instruction(audiences: list[Audience], stage: str) -> str:
             "1. 연결 sentence의 주체·대상·사건 단계를 읽는다. claim 요약이 강해도 원문의 "
             "실험·계획·전망 수준을 유지한다. "
             + ASSESSMENT_REASON_RULE
-            + "\n2. 관점 업무 전체를 대조하여 connection을 판정한다. 이미 원문에서 확인된 "
+            + "\n2. 관점의 모든 업무로 connection을 판정한다. 원문에서 확인된 "
             "사실을 미확인 condition으로 반복하지 않는다.\n"
-            "3. 같은 업무 대상의 변경·준비 범위를 따로 찾는다. 규모·성장률·기술 사양은 "
-            "실제 제약이 아니다. 구체 계획은 그 자원·일정, 시제품은 준비 범위로 판단한다. "
+            "3. 업무 대상의 변경·준비 범위를 찾는다. 규모·성장률·기술 사양은 "
+            "실제 제약이 아니며 수요·가격 전망은 프로젝트 변경·준비가 아니다. "
+            "구체 계획의 자원·일정과 시제품의 준비 범위를 판단한다. "
             "범위를 모르면 관계는 유지하고 effect만 UNDETERMINED로 둔다.\n"
-            "4. 각 축은 범주 선택 후 필수/null을 지킨다. reason은 선택한 "
-            "claim·연결 sentence(모든 축 미확인이면 같은 finding 원문)로 뒷받침한다. "
+            "4. 축별 범주와 필수/null을 지킨다. reason은 선택한 "
+            "claim·연결 sentence(모든 축 미확인이면 finding 원문)로 뒷받침한다. "
             "실제 claims=[]만 Schema const의 고정 reason을 쓴다."
         )
         if stage == "REVIEW":
-            stage_text += " 검토 선정은 승격 근거가 아니며 원문만 독립 재판정한다."
+            stage_text += " 검토 선정은 승격 근거가 아니며 원문으로 독립 재판정한다."
         return common + "\n\n" + _RUBRIC + "\n\n" + stage_text
     stage_text = (
         "현재 단계는 REDUCE. decisionCandidates의 범주·순위는 판단 보조이며 원문은 "

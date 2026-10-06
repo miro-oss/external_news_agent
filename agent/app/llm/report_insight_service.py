@@ -58,7 +58,7 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v11"
+PROMPT_VERSION = "report-insight.ko.v12"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
 LEGACY_RUBRIC_VERSION = "report-importance.v2"
@@ -457,20 +457,29 @@ class ReportInsightService(ReportInsightLegacyService):
             for review_index, offset in enumerate(
                 range(0, len(review_findings), MAX_ASSESSMENT_BATCH), start=1
             ):
+                if not pipeline.can_start_optional_review():
+                    logger.info(
+                        "Report insight stage=REVIEW-%03d outcome=SKIPPED_TIME_BUDGET "
+                        "fallback=VALIDATED_ASSESSMENTS_RETAINED findingCount=%d",
+                        review_index,
+                        len(review_findings) - offset,
+                    )
+                    break
                 subset = request.model_copy(
                     update={"findings": review_findings[offset : offset + MAX_ASSESSMENT_BATCH]}
                 )
                 schema = draft_schema(subset)
                 schema["description"] = f"reportInsightCall:REVIEW-{review_index:03d}"
                 try:
-                    review = self._call(
-                        pipeline,
-                        instruction=report_stage_instruction(request.audiences, "REVIEW"),
-                        prompt=review_prompt(subset, reference_date=reference_date),
-                        schema=schema,
-                        validate=lambda response, subset=subset: assess(response, subset),
-                        stage="REVIEW",
-                    ).output
+                    with pipeline.optional_review_deadline():
+                        review = self._call(
+                            pipeline,
+                            instruction=report_stage_instruction(request.audiences, "REVIEW"),
+                            prompt=review_prompt(subset, reference_date=reference_date),
+                            schema=schema,
+                            validate=lambda response, subset=subset: assess(response, subset),
+                            stage="REVIEW",
+                        ).output
                 except StructuredOutputExhaustedError:
                     # This independent refinement failed. Keep the original
                     # validated MAP for its IDs; never accept its invalid draft.

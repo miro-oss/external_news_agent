@@ -1,10 +1,11 @@
 """Request-scoped cumulative budget, usage ledger and deadline for map/reduce."""
 
+from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from time import monotonic
 
 from app.core.config import Settings
-from app.core.errors import AgentError
+from app.core.errors import AgentError, StructuredOutputExhaustedError
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.guarded_provider import GuardedAnalyzeProvider
 from app.llm.mindlogic_provider import MindlogicAnalyzeProvider
@@ -14,6 +15,10 @@ from app.llm.router import get_provider_coordinator, get_provider_guard
 from app.schemas.analyze import Plan
 
 MAX_REPORT_INSIGHT_DEADLINE_SECONDS = 180.0
+# Maximum headroom for optional refinement. Shorter configured requests allocate
+# a fixed third to each stage. Synthesis includes its draft and one repair.
+REPORT_INSIGHT_REDUCE_RESERVE_SECONDS = 60.0
+REPORT_INSIGHT_REVIEW_BUDGET_SECONDS = 60.0
 
 
 class ReportInsightPipelineProvider:
@@ -23,8 +28,13 @@ class ReportInsightPipelineProvider:
         self.provider = provider
         # Bound this pipeline even when ordinary reports have a longer provider timeout.
         # The BE's read timeout covers this maximum plus response serialization/transport time.
-        self.deadline = monotonic() + min(
+        request_budget = min(
             settings.report_provider_timeout_seconds, MAX_REPORT_INSIGHT_DEADLINE_SECONDS
+        )
+        self.deadline = monotonic() + request_budget
+        self._review_budget_seconds = min(REPORT_INSIGHT_REVIEW_BUDGET_SECONDS, request_budget / 3)
+        self._reduce_reserve_seconds = min(
+            REPORT_INSIGHT_REDUCE_RESERVE_SECONDS, request_budget / 3
         )
         self.cap = Decimal(str(settings.hard_cap_credits_per_request))
         self.usage = ProviderUsage()
@@ -81,6 +91,41 @@ class ReportInsightPipelineProvider:
     def ensure_time_remaining(self) -> None:
         if monotonic() >= self.deadline:
             raise self._deadline_error()
+
+    def can_start_optional_review(self) -> bool:
+        """Leave synthesis headroom before starting another optional review.
+
+        This is admission only. Once started, every provider/deadline failure
+        still propagates normally and all calls share the original deadline.
+        """
+        return self.deadline - monotonic() >= (
+            self._reduce_reserve_seconds + self._review_budget_seconds
+        )
+
+    @contextmanager
+    def optional_review_deadline(self):
+        """Share one bounded window across a REVIEW draft and its repair.
+
+        Scoped production providers inherit this deadline for their HTTP call.
+        The response check also applies it to injected providers. Exceptions
+        leave the pipeline normally; this context never converts them to success.
+        """
+        request_deadline = self.deadline
+        self.deadline = min(
+            monotonic() + self._review_budget_seconds,
+            request_deadline - self._reduce_reserve_seconds,
+        )
+        try:
+            yield
+        except StructuredOutputExhaustedError:
+            # A late validation failure cannot bypass the REVIEW window via
+            # the service's ordinary validated-MAP fallback.
+            self.ensure_time_remaining()
+            raise
+        else:
+            self.ensure_time_remaining()
+        finally:
+            self.deadline = request_deadline
 
     def _generate_scoped(self, **kwargs) -> ProviderResponse:
         # Share admission/circuit/pacing, but own short-lived HTTP clients. No
