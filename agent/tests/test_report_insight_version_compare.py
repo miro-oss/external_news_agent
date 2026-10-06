@@ -548,7 +548,43 @@ def test_bounded_review_profile_reserves_each_versions_actual_batch_limits(
     assert not runner.summary(directory)["qualityMeasured"]
 
 
-@pytest.mark.parametrize("profile", ["v9-refinement", "v9-bounded-review"])
+def test_postmerge_profile_compares_merged_runtime_with_matching_batch_limits(
+    prepared_refinement, tmp_path
+):
+    dataset, _, baseline, candidate = prepared_refinement
+    directory = tmp_path / "postmerge"
+    manifest = runner.prepare(
+        dataset,
+        directory,
+        baseline,
+        candidate_root=candidate,
+        comparison_profile="v9-postmerge",
+        max_calls=64,
+        max_cost_usd=Decimal("0.50"),
+    )
+    assert manifest["provenance"]["baselineCommit"] == ("199075b69d3eea1dde231df4450cf1eec638d636")
+    assert manifest["baseCallUpperBound"] == 32
+    assert manifest["repairCallUpperBound"] == 64
+    expected = {
+        "MAP-001",
+        "MAP-002",
+        "MAP-003",
+        "MAP-004",
+        "MAP-005",
+        "REVIEW-001",
+        "REVIEW-002",
+        "REDUCE-001",
+    }
+    for job in manifest["jobs"]:
+        assert runner._allowed_calls(job, manifest["policy"]) == expected
+    for left, right in (manifest["jobs"][:2], manifest["jobs"][2:]):
+        assert left["request"] == right["request"]
+        assert left["inputSha256"] == right["inputSha256"]
+    assert "199075b" in runner.summary(directory)["comparisonScope"]
+    runner.verify(directory, manifest, read_state(directory))
+
+
+@pytest.mark.parametrize("profile", ["v9-refinement", "v9-bounded-review", "v9-postmerge"])
 @pytest.mark.parametrize(
     "key",
     [

@@ -100,6 +100,27 @@ class V4Provider:
         # actual provider contract before the service receives its response.
         if value is not None and schema["title"] == "ReportAssessmentDraft":
             value = draft_to_wire(value, self.source)
+        if value is not None and schema["title"] == "ReportInsightReduceRepair":
+            jobs = json.loads(
+                kwargs["prompt"]
+                .split("<report-insight-repair-items>", 1)[1]
+                .split("</report-insight-repair-items>", 1)[0]
+            )
+            by_audience = {insight["audience"]: insight for insight in value["insights"]}
+            value = {
+                "repairs": {
+                    job["key"]: deepcopy(
+                        by_audience[job["audience"]]["headline"]
+                        if job["group"] == "headline"
+                        else (
+                            by_audience[job["audience"]][job["group"]][job["index"]]
+                            if job["index"] < len(by_audience[job["audience"]][job["group"]])
+                            else None
+                        )
+                    )
+                    for job in jobs
+                }
+            }
         if self.wire_hook is not None:
             value = self.wire_hook(stage, self.stages[stage], data, value)
         self.wire_payloads.append(value)
@@ -192,14 +213,14 @@ def test_partial_native_prose_repair_preserves_other_five_records_and_full_date(
         native_inputs.append(json.loads(response.text))
         return original_draft_validator(response, validation_request)
 
-    def capture_map(response, validation_request):
+    def capture_map(response, validation_request, **kwargs):
         public_contexts.append(
             (
                 [finding.id for finding in validation_request.findings],
                 validation_request.report.report_end_date,
             )
         )
-        return original_map_validator(response, validation_request)
+        return original_map_validator(response, validation_request, **kwargs)
 
     monkeypatch.setattr(insight_service, "validate_draft", capture_draft)
     monkeypatch.setattr(insight_service, "_validated_map_output", capture_map)
@@ -341,7 +362,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v9"
+    assert result.meta.prompt_version == "report-insight.ko.v25"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -701,7 +722,7 @@ def test_all_batches_share_deadline_and_observed_usage(monkeypatch):
 
     provider = V4Provider(source, hook=hook)
     with pytest.raises(AgentError) as caught:
-        generate(provider, source, AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=10)
+        generate(provider, source, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=10)
     assert stages(provider) == ["MAP-001", "MAP-002"]
     assert caught.value.details["requestDeadlineExceeded"] is True
     assert caught.value.details["usage"]["credits"] == 0.4
@@ -839,7 +860,7 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v9"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v25"
     assert output["meta"]["mock"] is True
     assert RUBRIC_VERSION == "report-importance.v6"
     assert set(output) == {"insights", "meta"}

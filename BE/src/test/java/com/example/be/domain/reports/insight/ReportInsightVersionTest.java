@@ -76,6 +76,54 @@ class ReportInsightVersionTest {
         stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
                 .promptVersion("report-insight.ko.v8").rubricVersion("report-importance.v5")
                 .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v9").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v10").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v11").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v12").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v13").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v14").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v15").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v16").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v17").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v18").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v19").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v20").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v21").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v22").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v23").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
+        stored.add(NewsReportInsight.builder().reportId(10L).audience(Audience.CHIP_MAKER).inputHash(HASH)
+                .promptVersion("report-insight.ko.v24").rubricVersion("report-importance.v6")
+                .payloadJson("{}").build());
         when(repository.findByReportIdAndInputHashAndPromptVersionAndRubricVersionAndAudienceIn(
                 anyLong(), anyString(), anyString(), anyString(), anyCollection())).thenAnswer(call -> {
             Collection<Audience> audiences = call.getArgument(4);
@@ -102,18 +150,34 @@ class ReportInsightVersionTest {
         assertEquals(GeneralErrorCode.NOT_FOUND, missing.getCode());
         assertEquals("저장된 리포트 관점 인사이트가 없습니다.", missing.getMessage());
         verify(repository).findByReportIdAndInputHashAndPromptVersionAndRubricVersionAndAudienceIn(
-                10L, HASH, "report-insight.ko.v9", "report-importance.v6", List.of(Audience.CHIP_MAKER));
+                10L, HASH, "report-insight.ko.v25", "report-importance.v6", List.of(Audience.CHIP_MAKER));
         verify(repository, never()).saveAndFlush(any());
         verifyNoInteractions(client, quota, plans, recorder, reports);
-        assertEquals(6, stored.size());
+        assertEquals(22, stored.size());
     }
 
-    @Test void createBypassesLegacyCacheAndStoresV9WithDistinctReservationThenGetReadsIt() {
+    @Test void createBypassesLegacyCacheAndStoresV25WithDistinctReservationThenGetReadsIt() {
         var result = service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER")));
         assertFalse(result.cached());
-        assertEquals("report-insight.ko.v9", result.promptVersion());
+        assertEquals("report-insight.ko.v25", result.promptVersion());
         assertEquals("report-importance.v6", result.rubricVersion());
-        assertEquals(7, stored.size());
+        assertEquals(23, stored.size());
+        assertEquals("report-insight.ko.v24", stored.get(21).getPromptVersion());
+        assertEquals("report-insight.ko.v23", stored.get(20).getPromptVersion());
+        assertEquals("report-insight.ko.v22", stored.get(19).getPromptVersion());
+        assertEquals("report-insight.ko.v21", stored.get(18).getPromptVersion());
+        assertEquals("report-insight.ko.v20", stored.get(17).getPromptVersion());
+        assertEquals("report-insight.ko.v19", stored.get(16).getPromptVersion());
+        assertEquals("report-insight.ko.v18", stored.get(15).getPromptVersion());
+        assertEquals("report-insight.ko.v17", stored.get(14).getPromptVersion());
+        assertEquals("report-insight.ko.v16", stored.get(13).getPromptVersion());
+        assertEquals("report-insight.ko.v15", stored.get(12).getPromptVersion());
+        assertEquals("report-insight.ko.v14", stored.get(11).getPromptVersion());
+        assertEquals("report-insight.ko.v13", stored.get(10).getPromptVersion());
+        assertEquals("report-insight.ko.v12", stored.get(9).getPromptVersion());
+        assertEquals("report-insight.ko.v11", stored.get(8).getPromptVersion());
+        assertEquals("report-insight.ko.v10", stored.get(7).getPromptVersion());
+        assertEquals("report-insight.ko.v9", stored.get(6).getPromptVersion());
         assertEquals("report-insight.ko.v8", stored.get(5).getPromptVersion());
         assertEquals("report-insight.ko.v7", stored.get(4).getPromptVersion());
         assertEquals("report-insight.ko.v6", stored.get(3).getPromptVersion());
@@ -121,17 +185,17 @@ class ReportInsightVersionTest {
         assertEquals("report-insight.ko.v4", stored.get(1).getPromptVersion());
         assertEquals("report-insight.ko.v3", stored.getFirst().getPromptVersion());
         var generated = stored.getLast();
-        assertEquals("report-insight.ko.v9", generated.getPromptVersion());
+        assertEquals("report-insight.ko.v25", generated.getPromptVersion());
         assertEquals("report-importance.v6", generated.getRubricVersion());
         assertEquals(result.insights().getFirst(), persistence.toDto(generated));
         var request = ArgumentCaptor.forClass(AgentReportInsightRequest.class);
         verify(client).reportInsight(request.capture());
-        String expectedKey = "report-insight:10:" + HASH + ":report-insight.ko.v9:report-importance.v6:CHIP_MAKER";
+        String expectedKey = "report-insight:10:" + HASH + ":report-insight.ko.v25:report-importance.v6:CHIP_MAKER";
         assertEquals(expectedKey, request.getValue().idempotencyKey());
         verify(quota).reserveReportInsight(20L, expectedKey, AgentPlan.PAID);
         var context = ArgumentCaptor.forClass(ReportInsightAuditContext.class);
         verify(recorder).recordReportInsightSuccess(eq(20L), any(), any(), context.capture(), any());
-        assertEquals("report-insight.ko.v9", context.getValue().promptVersion());
+        assertEquals("report-insight.ko.v25", context.getValue().promptVersion());
         assertEquals("report-importance.v6", context.getValue().rubricVersion());
         clearInvocations(client, quota, plans, recorder, repository, reports);
 

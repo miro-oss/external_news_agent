@@ -435,7 +435,7 @@ class AgentClientTest {
                 .andRespond(withStatus(HttpStatus.BAD_GATEWAY).contentType(MediaType.APPLICATION_JSON)
                         .body("""
                                 {"error":{"code":"SCHEMA_VIOLATION","message":"출력 오류","details":{
-                                "validationFailure":{"stage":"REDUCE-001","attempt":2,"errorType":"OutputValidationError","errorCount":1,"errorKinds":["report_falsification_missing_observation"]},
+                                "validationFailure":{"stage":"REDUCE-001","attempt":2,"errorType":"OutputValidationError","errorCount":1,"errorKinds":["report_falsification_missing_observation"],"issues":[{"audience":"CHIP_MAKER","field":"implications[0].falsifiedBy","errorKind":"report_falsification_missing_observation","claimIds":["101:0"]}],"issuesTruncated":false},
                                 "usage":{"inputTokens":30,"outputTokens":15,"costUsd":0.25,"credits":2},
                                 "executionMetadata":{"provider":"openai","model":"%s","promptVersion":"report-insight.ko.v9","source":"AGENT_ERROR","usageCompleteness":"COMPLETE"}}}}
                                 """.formatted("m".repeat(900))));
@@ -446,11 +446,15 @@ class AgentClientTest {
         var failure = assertThrows(AgentClientException.class, () -> client.reportInsight(request));
 
         assertEquals(new AgentClientException.ValidationFailure("REDUCE-001", 2,
-                "OutputValidationError", 1, List.of("report_falsification_missing_observation")),
+                "OutputValidationError", 1, List.of("report_falsification_missing_observation"),
+                        List.of(new AgentClientException.ValidationIssue("CHIP_MAKER", "implications[0].falsifiedBy",
+                                "report_falsification_missing_observation", List.of("101:0"))), false),
                 failure.getValidationFailure());
         assertEquals(30L, failure.getUsage().inputTokens());
         assertNull(failure.getExecutionMetadata());
         assertTrue(failure.getMessage().substring(0, 1000).contains("report_falsification_missing_observation"));
+        assertTrue(failure.getMessage().substring(0, 1000).contains("implications[0].falsifiedBy"));
+        assertTrue(failure.getMessage().substring(0, 1000).contains("101:0"));
         server.verify();
     }
 

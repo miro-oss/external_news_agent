@@ -64,11 +64,11 @@ def test_review_exhaustion_keeps_exact_map_and_valid_reviews_with_one_budget(
         map_snapshots.append(deepcopy(draft.mapped.insights[0].assessments))
         return original_select(request, draft)
 
-    def validate(response, request):
+    def validate(response, request, **kwargs):
         contexts.append(
             ([finding.id for finding in request.findings], request.report.report_end_date)
         )
-        return original_validate(response, request)
+        return original_validate(response, request, **kwargs)
 
     monkeypatch.setattr(service, "select_review", select)
     monkeypatch.setattr(service, "_validated_map_output", validate)

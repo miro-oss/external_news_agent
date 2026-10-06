@@ -12,37 +12,13 @@ from app.core.errors import AgentError, OutputValidationError, StructuredOutputE
 from app.core.parser import JsonObjectParseError
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.prompt_data import escape_prompt_text
+from app.llm.report_validation_diagnostics import (
+    REPORT_VALIDATION_ERROR_KINDS,
+    report_validation_issue_details,
+)
 
 _REPORT_FAILURE_STAGE = re.compile(r"(?:MAP|REVIEW|REDUCE)(?:-[0-9]{3})?")
 _PYDANTIC_ERROR_KINDS = frozenset(get_args(ErrorType))
-_REPORT_ERROR_KINDS = frozenset(
-    {
-        "report_assessment_draft_invalid",
-        "report_assessment_invalid",
-        "report_assessment_truncated_prefix",
-        "report_assumption_unconfirmed",
-        "report_fact_mismatch",
-        "report_falsification_direction",
-        "report_falsification_missing_observation",
-        "report_synthesis_empty",
-        "report_synthesis_information_gap",
-        "report_synthesis_invalid",
-        "report_synthesis_metadata_only",
-        "report_synthesis_placeholder",
-        "report_synthesis_reference_gap",
-        "report_synthesis_source_binding",
-        "report_synthesis_stage_overreach",
-        "report_synthesis_subject_mismatch",
-        "report_work_approval_prerequisite_unsupported",
-        "report_work_certification_prerequisite_unsupported",
-        "report_work_compatibility_procedure_unsupported",
-        "report_work_cooling_procedure_unsupported",
-        "report_work_inspection_prerequisite_unsupported",
-        "report_work_organization_prerequisite_unsupported",
-        "report_work_physical_module_unsupported",
-        "report_work_specification_procedure_unsupported",
-    }
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +108,9 @@ def structured_call[OutputT](
                     include_failure_details=include_failure_details,
                     response=response,
                     failure_prompt_version=failure_prompt_version,
-                    validation_failure=_validation_failure(error, failure_stage, attempt),
+                    validation_failure=_validation_failure(
+                        error, failure_stage, attempt, current_schema
+                    ),
                 ) from error
             if repair_factory is not None:
                 repair = repair_factory(prompt, response_schema, response.text, error)
@@ -255,7 +233,7 @@ def _schema_violation(
 
 
 def _validation_failure(
-    error: Exception, stage: str | None, attempt: int
+    error: Exception, stage: str | None, attempt: int, response_schema: dict | None = None
 ) -> dict[str, object] | None:
     """Bounded internal audit data, never exception prose, inputs or dynamic names."""
     if stage is None or _REPORT_FAILURE_STAGE.fullmatch(stage) is None:
@@ -263,7 +241,7 @@ def _validation_failure(
     if isinstance(error, OutputValidationError):
         error_type = "OutputValidationError"
         count = len(error.error_kinds)
-        kinds = {kind for kind in error.error_kinds if kind in _REPORT_ERROR_KINDS}
+        kinds = {kind for kind in error.error_kinds if kind in REPORT_VALIDATION_ERROR_KINDS}
     elif isinstance(error, ValidationError):
         error_type = "ValidationError"
         count = error.error_count()
@@ -276,13 +254,16 @@ def _validation_failure(
         error_type, count, kinds = "JsonObjectParseError", 1, {"json_object_parse"}
     else:
         error_type, count, kinds = "ValueError", 1, {"value_error"}
-    return {
+    details = {
         "stage": stage,
         "attempt": attempt,
         "errorType": error_type,
         "errorCount": count,
         "errorKinds": sorted(kinds)[:5],
     }
+    if stage == "REDUCE" or stage.startswith("REDUCE-"):
+        details.update(report_validation_issue_details(error, response_schema or {}))
+    return details
 
 
 def _execution_metadata(

@@ -1,6 +1,7 @@
 """OpenAI wire constraints; public validators still decide whether output is usable."""
 
 import json
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, get_args
@@ -134,7 +135,16 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
     if analysis:
         _constrain_analysis(schema)
         _preserve_string_lengths(schema)
+    if schema.get("title") in {"ReportInsightReduceOutput", "ReportInsightReduceRepair"}:
+        # Strict SDK conversion otherwise drops the public nonempty prose
+        # bounds, allowing empty assumptions even during a bounded repair.
+        _preserve_string_lengths(schema)
+        _drop_redundant_fixed_string_constraints(schema)
     if schema.get("title") == "ReportAssessmentDraft":
+        # Partial repair keeps the original validation closure, but its wire
+        # schema only needs definitions reachable from the failed records.
+        # Unreachable records otherwise dominate a one-finding repair request.
+        _retain_referenced_definitions(schema)
         # Preserve bounds on generated prose through the SDK, including nested
         # decision conditions. Exact source choices and category enums stay intact.
         pending = [schema]
@@ -146,6 +156,7 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
                 for field in ("reason", "condition"):
                     _preserve_string_lengths(node.get("properties", {}).get(field, {}))
                 pending.extend(node.values())
+        _drop_redundant_fixed_string_constraints(schema)
     results = schema.get("properties", {}).get("results", {})
     evidence_keys = (
         tuple(results["properties"])
@@ -184,6 +195,106 @@ def output_contract(response_schema: dict[str, Any]) -> OpenAIOutputContract:
         report_change_keys=report_change_keys,
         report_insight_keys=report_insight_keys,
     )
+
+
+def _drop_redundant_fixed_string_constraints(schema: dict[str, Any]) -> None:
+    """Keep exact repair values while avoiding redundant decoder intersections."""
+    pending: list[Any] = [schema]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, list):
+            pending.extend(node)
+        elif isinstance(node, dict):
+            value = node.get("const")
+            minimum, maximum = node.get("minLength", 0), node.get("maxLength")
+            if (
+                node.get("type") == "string"
+                and isinstance(value, str)
+                and type(minimum) is int
+                and minimum >= 0
+                and len(value) >= minimum
+                and (maximum is None or type(maximum) is int and len(value) <= maximum)
+            ):
+                choices = node.get("enum")
+                if (
+                    isinstance(choices, list)
+                    and all(isinstance(choice, str) for choice in choices)
+                    and value in choices
+                ):
+                    node.pop("enum")
+                if _fixed_string_matches_trimmed_pattern(value, node.get("pattern")):
+                    node.pop("pattern")
+            # These values are JSON data, not nested schemas.
+            pending.extend(
+                child
+                for key, child in node.items()
+                if key not in {"const", "enum", "default", "examples"}
+            )
+
+
+def _fixed_string_matches_trimmed_pattern(value: str, pattern: Any) -> bool:
+    # Only recognize our own length/trim patterns. Preserve other regexes and
+    # Unicode cases where Python and provider regex character rules can differ.
+    if (
+        not isinstance(pattern, str)
+        or not value
+        or value[0].isspace()
+        or value[-1].isspace()
+        or value[0] == "\ufeff"
+        or value[-1] == "\ufeff"
+        or any(ord(char) > 0xFFFF or 0xD800 <= ord(char) <= 0xDFFF for char in value)
+    ):
+        return False
+    if pattern == r"^\S$":
+        return len(value) == 1
+    optional = re.fullmatch(
+        re.escape(r"^\S(?:[\s\S]{0,") + r"([0-9]*)" + re.escape(r"}\S)?$"), pattern
+    )
+    if optional is not None:
+        upper = optional.group(1)
+        return not upper or len(value) <= int(upper) + 2
+    required = re.fullmatch(
+        re.escape(r"^\S[\s\S]{") + r"([0-9]+),([0-9]*)" + re.escape(r"}\S$"), pattern
+    )
+    if required is None:
+        return False
+    lower, upper = required.groups()
+    return len(value) >= int(lower) + 2 and (not upper or len(value) <= int(upper) + 2)
+
+
+def _retain_referenced_definitions(schema: dict[str, Any]) -> None:
+    """Drop unreachable root definitions without altering any reachable schema.
+
+    Report drafts use root-local references only. Preserve the original schema
+    if a future contract introduces other reference scopes or unresolved refs.
+    """
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, dict):
+        return
+    pending = [{key: value for key, value in schema.items() if key != "$defs"}]
+    used: set[str] = set()
+    while pending:
+        node = pending.pop()
+        if isinstance(node, list):
+            pending.extend(node)
+        elif isinstance(node, dict):
+            if {"$id", "$anchor", "$dynamicRef", "$recursiveRef"} & node.keys():
+                return
+            if "$ref" in node:
+                reference = node["$ref"]
+                if not isinstance(reference, str) or not reference.startswith("#/$defs/"):
+                    return
+                name = reference.removeprefix("#/$defs/")
+                if "/" in name:
+                    return
+                name = name.replace("~1", "/").replace("~0", "~")
+                if name not in definitions:
+                    return
+                if name not in used:
+                    used.add(name)
+                    pending.append(definitions[name])
+            pending.extend(value for key, value in node.items() if key != "$defs")
+    schema["$defs"] = {name: value for name, value in definitions.items() if name in used}
 
 
 def _constrain_report_insight_map(schema: dict[str, Any]) -> tuple[tuple[str, int], ...]:

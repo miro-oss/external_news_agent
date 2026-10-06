@@ -1,5 +1,6 @@
 """All REDUCE grounding failures reach the single repair; no live provider calls."""
 
+import json
 import logging
 from copy import deepcopy
 
@@ -47,8 +48,9 @@ def test_one_reduce_repair_receives_fact_and_falsification_failures_together(cap
     assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001", "REDUCE-001"]
     repair = provider.calls[-1]
     details = diagnostic(repair["prompt"])
-    assert "CHIP_MAKER.headline" in details and "TSMC" in details
-    assert "CHIP_MAKER.overview[0].text" in details and "999" in details
+    assert "CHIP_MAKER.headline" in details and "TSMC" not in details
+    assert "CHIP_MAKER.overview[0].text" in details and "999" not in details
+    assert "report_fact_mismatch" in details
     assert "refs=['101:0']" in details
     assert "implications[0].falsifiedBy" in details and "반증 관측" in details
     assert repair["response_schema"] == provider.calls[-2]["response_schema"]
@@ -103,12 +105,12 @@ def test_original_fail_fast_path_hides_other_reduce_errors(monkeypatch):
     with pytest.raises(StructuredOutputExhaustedError):
         generate(provider, source)
     details = diagnostic(provider.calls[-1]["prompt"])
-    assert "TSMC" in details
+    assert "report_fact_mismatch" in details and "TSMC" not in details
     assert "999" not in details
     assert "falsifiedBy" not in details
 
 
-def test_many_reduce_errors_keep_late_field_and_bounded_diagnostics():
+def test_many_reduce_errors_keep_late_field_and_exact_partial_units():
     source = request()
 
     def hook(stage, occurrence, _, value):
@@ -139,11 +141,31 @@ def test_many_reduce_errors_keep_late_field_and_bounded_diagnostics():
 
     provider = V4Provider(source, hook=hook)
     generate(provider, source)
-    details = diagnostic(provider.calls[-1]["prompt"])
-    assert "report_fact_mismatch" in details
-    assert "headline" in details and "overview[0].text" in details
-    assert "watchItems[4].trigger" in details
-    assert len(details.strip()) <= 6_000
+    first, repair = provider.calls[-2:]
+    jobs = json.loads(
+        repair["prompt"]
+        .split("<report-insight-repair-items>", 1)[1]
+        .split("</report-insight-repair-items>", 1)[0]
+    )
+    assert len(jobs) == 14
+    fields = {item["field"] for job in jobs for item in job["diagnostics"]}
+    assert {"headline", "overview[0].text", "watchItems[4].trigger"} <= fields
+    assert all(
+        item["errorKind"] == "report_fact_mismatch" for job in jobs for item in job["diagnostics"]
+    )
+    assert set(provider.wire_payloads[-1]["repairs"]) == {job["key"] for job in jobs}
+    assert (
+        first["prompt"].split("<report-insight-input>", 1)[1]
+        == repair["prompt"].split("<report-insight-input>", 1)[1]
+    )
+    original = json.loads(provider.response_texts[-2])["insights"][0]
+    for job in jobs:
+        expected = (
+            original["headline"]
+            if job["group"] == "headline"
+            else original[job["group"]][job["index"]]
+        )
+        assert job["original"] == expected
 
 
 def test_aggregate_repair_diagnostic_escapes_untrusted_prose_and_omits_raw_output():

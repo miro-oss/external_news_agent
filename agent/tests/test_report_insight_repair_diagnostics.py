@@ -198,7 +198,8 @@ def test_one_map_repair_receives_all_causes_and_logs_only_safe_error_kinds(caplo
                     (504, "TSMC"),
                 ):
                     assert f"findingId={finding_id}" in diagnostic
-                    assert company in diagnostic
+                    assert company not in diagnostic
+                assert diagnostic.count("report_fact_mismatch") == 4
                 return response(stage_output(valid))
             assert len(calls) == 3
             assert kwargs["response_schema"]["title"] == "ReportInsightReduceOutput"

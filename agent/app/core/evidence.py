@@ -5,9 +5,75 @@ from decimal import Decimal, InvalidOperation
 
 from app.schemas.evidence import EvidenceSentence
 
-_NUMBER = re.compile(
-    r"(?<![A-Za-z0-9])[-+]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])"
+_NUMBER = re.compile(r"(?<![A-Za-z0-9])[-+]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])")
+_CURRENCY_SCALES = {
+    "trillion": 10**12,
+    "billion": 10**9,
+    "million": 10**6,
+    "thousand": 10**3,
+    "조": 10**12,
+    "억": 10**8,
+    "천만": 10**7,
+    "백만": 10**6,
+    "십만": 10**5,
+    "만": 10**4,
+    "천": 10**3,
+    "백": 10**2,
+    "십": 10,
+}
+_CURRENCY_ALIASES = {
+    "유로": "eur",
+    "euro": "eur",
+    "euros": "eur",
+    "eur": "eur",
+    "달러": "usd",
+    "dollar": "usd",
+    "dollars": "usd",
+    "usd": "usd",
+    "원": "krw",
+    "won": "krw",
+    "krw": "krw",
+    "$": "usd",
+    "us$": "usd",
+    "€": "eur",
+    "₩": "krw",
+}
+_CURRENCY_NUMBER = r"\d+(?:,\d{3})*(?:\.\d+)?"
+_CURRENCY_SCALE_PATTERN = "|".join(sorted(_CURRENCY_SCALES, key=len, reverse=True))
+_CURRENCY_ALIAS_PATTERN = "|".join(
+    re.escape(alias) for alias in sorted(_CURRENCY_ALIASES, key=len, reverse=True)
 )
+_CURRENCY_EXPRESSION = (
+    rf"{_CURRENCY_NUMBER}\s*(?:(?:{_CURRENCY_SCALE_PATTERN})"
+    rf"(?:\s*{_CURRENCY_NUMBER}\s*(?:{_CURRENCY_SCALE_PATTERN}))*)?"
+)
+_CURRENCY_AMOUNT = re.compile(
+    rf"(?<![A-Za-z0-9])(?P<sign>[-+]?)(?P<amount>{_CURRENCY_EXPRESSION})\s*"
+    rf"(?P<currency>{_CURRENCY_ALIAS_PATTERN})"
+    r"(?![A-Za-z])",
+    re.IGNORECASE,
+)
+_PREFIX_CURRENCY_AMOUNT = re.compile(
+    r"(?<![A-Za-z0-9])(?P<prefix_sign>[-+]?)(?P<currency>us\$|\$|€|₩|usd|eur|krw)\s*"
+    rf"(?P<sign>[-+]?)(?P<amount>{_CURRENCY_EXPRESSION})(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+_CURRENCY_COMPONENT = re.compile(
+    rf"({_CURRENCY_NUMBER})\s*({_CURRENCY_SCALE_PATTERN})?", re.IGNORECASE
+)
+_UNITLESS_SCALED_AMOUNT = re.compile(
+    rf"(?<![A-Za-z0-9])(?P<sign>[-+]?)(?P<amount>(?>{_CURRENCY_NUMBER}\s*"
+    rf"(?:{_CURRENCY_SCALE_PATTERN})(?:\s*{_CURRENCY_NUMBER}\s*"
+    rf"(?:{_CURRENCY_SCALE_PATTERN}))*))"
+    r"(?=$|[^A-Za-z0-9가-힣]|(?:을|를|은|는|만|이다|이고|이며)(?![가-힣]))",
+    re.IGNORECASE,
+)
+_SCALED_COUNT_UNIT = re.compile(
+    r"\s*(?:개|명|건|톤|배)(?=$|[^A-Za-z0-9가-힣]|"
+    r"(?:으로|에서|까지|부터|보다|이다|이고|이며|을|를|은|는|이|가|의|에|로|와|과|만|도|당|씩)+"
+    r"(?![가-힣]))"
+)
+_SIGNED_CURRENCY_PREFIX = re.compile(r"(?P<sign>[-+])(?P<currency>us\$|\$|€|₩|usd|eur|krw)\s*$")
 _DATE_NUMBER_UNIT = re.compile(r"\s*(년|월|일|분기)")
 _QUANTITY_UNIT = re.compile(
     r"\s*(퍼센트|억원|만원|달러|조원|%|억|만|조|원|usd|배|개|건|명|톤|gb|tb)",
@@ -26,9 +92,7 @@ _KOREAN_ORGANIZATION = re.compile(
     r"(?:전자|하이닉스|반도체|디스플레이|테크놀로지|테크|그룹|홀딩스|은행|증권|공사|협회|위원회|연구원)"
 )
 _WORD = re.compile(r"[A-Za-z0-9가-힣]+")
-_TECHNICAL_ANCHOR = re.compile(
-    r"\b(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)\b"
-)
+_TECHNICAL_ANCHOR = re.compile(r"\b(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)\b")
 _AMBIGUOUS_RELATION = re.compile(
     r"(?:때문|따라서|영향|기여|유발|결과|전망|예상|가능성|목적|위해|"
     r"\b(?:because|therefore|due\s+to|lead(?:s|ing)?\s+to|caus(?:e|es|ed|ing)|"
@@ -39,6 +103,15 @@ _CONDITIONAL_MODALITY = re.compile(
     r"(?:가능성|전망|예정|예상|계획|(?:할|일)\s*수도|수\s*있(?:다|습니다|을)|"
     r"\b(?:may|might|could|possibly|likely)\b)",
     re.IGNORECASE,
+)
+_PAST_SUPPLY_CONTINUATION = re.compile(
+    r"(?:지난\s*(?:\d{1,4}\s*(?:년|월|일)|해|주)|작년|어제)"
+    r"[^.!?。\n]{0,160}?공급하며\s[^.!?。\n]{0,80}?"
+    r"(?:했|됐|졌|냈|였|았|었)(?:다|습니다|다고)(?![가-힣])"
+)
+_UNREAL_SUPPLY_CONTEXT = re.compile(
+    r"(?:내년|다음|향후|앞으로|가정|다면|경우|겠|부인|"
+    r"(?:할|될|낼|갈|올|줄|볼|일|을)\s*것)"
 )
 _MODALITY_LADDER = (
     (
@@ -218,10 +291,7 @@ class ModalityAssessment:
 
     @property
     def reason(self) -> str:
-        return (
-            f"근거는 '{self.evidence_term}' 단계인데 주장은 "
-            f"'{self.claim_term}' 단계입니다."
-        )
+        return f"근거는 '{self.evidence_term}' 단계인데 주장은 '{self.claim_term}' 단계입니다."
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,9 +338,7 @@ def cross_source_signal(reference_text: str, candidate_text: str) -> CrossSource
         extra_companies=frozenset(_companies(candidate) - _companies(reference)),
         polarity_mismatch=_polarity_mismatch(candidate, reference),
         number_mismatch=bool(
-            reference_numbers
-            and candidate_numbers
-            and reference_numbers != candidate_numbers
+            reference_numbers and candidate_numbers and reference_numbers != candidate_numbers
         ),
     )
 
@@ -281,17 +349,25 @@ def factual_mismatches(claim: str, evidence_text: str) -> list[str]:
     normalized_evidence = _normalize(evidence_text)
     mismatches: list[str] = []
 
-    missing_numbers = _numbers(normalized_claim) - _numbers(normalized_evidence)
+    evidence_numbers = _numbers(normalized_evidence)
+    numeric_claim = _approximate_currency_comparison(normalized_claim, normalized_evidence)
+    missing_numbers = _numbers(numeric_claim) - evidence_numbers
     if missing_numbers:
         mismatches.append("근거에서 확인되지 않는 숫자: " + ", ".join(sorted(missing_numbers)))
-
-    contextual_numbers = _contextual_number_mismatches(
-        normalized_claim, normalized_evidence
-    )
-    if contextual_numbers:
+    source_currency = {amount for _, _, amount in _currency_amounts(normalized_evidence)}
+    unsupported_currency = {
+        amount
+        for _, _, amount in _currency_amounts(numeric_claim)
+        if amount not in source_currency and amount[:-3] in evidence_numbers
+    }
+    if unsupported_currency:
         mismatches.append(
-            "근거와 연결이 다른 숫자: " + ", ".join(contextual_numbers)
+            "근거와 일치하지 않는 통화·금액 숫자: " + ", ".join(sorted(unsupported_currency))
         )
+
+    contextual_numbers = _contextual_number_mismatches(numeric_claim, normalized_evidence)
+    if contextual_numbers:
+        mismatches.append("근거와 연결이 다른 숫자: " + ", ".join(contextual_numbers))
 
     missing_dates = _date_terms(normalized_claim) - _date_terms(normalized_evidence)
     if missing_dates:
@@ -327,8 +403,7 @@ def modality_overreach(claim: str, evidence_text: str) -> ModalityAssessment | N
 
 def has_forecast_qualifier(value: str) -> bool:
     return _CONDITIONAL_MODALITY.search(_normalize(value)) is not None or any(
-        marker in _normalize(value)
-        for marker in ("예상", "예정", "계획", "목표", "전망")
+        marker in _normalize(value) for marker in ("예상", "예정", "계획", "목표", "전망")
     )
 
 
@@ -357,9 +432,7 @@ def assess_with_rules(
 
     accepted: list[EvidenceSentence] = []
     covered_tokens: set[str] = set()
-    for sentence, shared, _ in sorted(
-        candidates, key=lambda candidate: candidate[2], reverse=True
-    ):
+    for sentence, shared, _ in sorted(candidates, key=lambda candidate: candidate[2], reverse=True):
         if shared - covered_tokens:
             accepted.append(sentence)
             covered_tokens.update(shared)
@@ -373,7 +446,9 @@ def assess_with_rules(
     status = (
         "weak"
         if modality is not None and modality.difference == 1
-        else "grounded" if coverage >= grounded_overlap else "weak"
+        else "grounded"
+        if coverage >= grounded_overlap
+        else "weak"
     )
     reason = (
         "주장의 핵심 표현과 사실값이 근거 문장에서 확인됩니다."
@@ -458,6 +533,10 @@ def _modality_stage(value: str) -> tuple[int, str]:
             continue
         for stage, label, pattern in _MODALITY_LADDER:
             match = pattern.search(searchable)
+            if stage == 5 and match is None and not _UNREAL_SUPPLY_CONTEXT.search(clause):
+                # A past-dated connective followed by a past result describes
+                # actual supply. Bare/future '공급하며' remains non-executed.
+                match = _PAST_SUPPLY_CONTINUATION.search(clause)
             if match is not None:
                 clause_stages.append((stage, match.group().strip() or label))
                 break
@@ -480,9 +559,7 @@ def _bilingual_direct_match(claim: str, evidence: str) -> bool:
         return False
     claim_anchors = _stable_anchors(claim)
     evidence_anchors = _stable_anchors(evidence)
-    distinct_claim_anchors = {
-        anchor.partition(":")[2] for anchor in claim_anchors
-    }
+    distinct_claim_anchors = {anchor.partition(":")[2] for anchor in claim_anchors}
     return len(distinct_claim_anchors) >= 2 and claim_anchors <= evidence_anchors
 
 
@@ -496,8 +573,13 @@ def _stable_anchors(value: str) -> set[str]:
 
 
 def _numbers(value: str) -> set[str]:
-    normalized: set[str] = set()
+    currency_amounts = _currency_amounts(value)
+    scaled_amounts = _unitless_scaled_amounts(value, currency_amounts)
+    normalized = {amount[:-3] for _, _, amount in currency_amounts}
+    normalized.update(amount for _, _, amount in scaled_amounts)
     for match in _NUMBER.finditer(value):
+        if any(start <= match.start() < end for start, end, _ in currency_amounts + scaled_amounts):
+            continue
         raw = match.group().replace(",", "")
         try:
             number = Decimal(raw)
@@ -507,12 +589,119 @@ def _numbers(value: str) -> set[str]:
     return normalized
 
 
+def _currency_amounts(value: str) -> list[tuple[int, int, str]]:
+    """Normalize only explicit monetary units, keeping currencies distinct."""
+    amounts = []
+    matches = [
+        match
+        for pattern in (_CURRENCY_AMOUNT, _PREFIX_CURRENCY_AMOUNT)
+        for match in pattern.finditer(value)
+    ]
+    for match in matches:
+        prefix_sign = match.groupdict().get("prefix_sign", "")
+        if prefix_sign and match["sign"]:
+            continue
+        currency = _CURRENCY_ALIASES[match["currency"].casefold()]
+        sign = prefix_sign or match["sign"]
+        if not sign:
+            preceding = _SIGNED_CURRENCY_PREFIX.search(value[: match.start()])
+            if preceding and _CURRENCY_ALIASES[preceding["currency"]] == currency:
+                sign = preceding["sign"]
+        amount = _scaled_amount_value(match["amount"], sign)
+        if amount is not None:
+            amounts.append((match.start(), match.end(), amount + currency))
+    # Redundant '$100 dollars' is one amount. Conflicting '$100 euros' cannot
+    # establish either currency, so leave that ambiguous span unnormalized.
+    unambiguous = [
+        item
+        for item in amounts
+        if not any(
+            max(item[0], other[0]) < min(item[1], other[1]) and item[2] != other[2]
+            for other in amounts
+        )
+    ]
+    merged = []
+    for start, end, amount in sorted(unambiguous):
+        if merged and start < merged[-1][1]:
+            previous_start, previous_end, _ = merged[-1]
+            merged[-1] = (previous_start, max(previous_end, end), amount)
+        else:
+            merged.append((start, end, amount))
+    return merged
+
+
+def _scaled_amount_value(expression: str, sign: str) -> str | None:
+    components = _CURRENCY_COMPONENT.findall(expression)
+    scales = [_CURRENCY_SCALES.get(scale.casefold(), 1) for _, scale in components]
+    if any(left <= right for left, right in zip(scales, scales[1:], strict=False)):
+        return None
+    total = sum(
+        (
+            Decimal(number.replace(",", "")) * scale
+            for (number, _), scale in zip(components, scales, strict=True)
+        ),
+        Decimal(0),
+    )
+    return format((-total if sign == "-" else total).normalize(), "f")
+
+
+def _unitless_scaled_amounts(value, currency_amounts):
+    amounts = []
+    for match in _UNITLESS_SCALED_AMOUNT.finditer(value):
+        if any(start <= match.start() < end for start, end, _ in currency_amounts):
+            continue
+        # A spaced count suffix is still a unit. Check after the maximal atomic
+        # amount match so rejection cannot backtrack to '1억' in '1억 7천만개'.
+        if _SCALED_COUNT_UNIT.match(value, match.end()):
+            continue
+        amount = _scaled_amount_value(match["amount"], match["sign"])
+        if amount is not None:
+            amounts.append((match.start(), match.end(), amount))
+    return amounts
+
+
+def _approximate_currency_comparison(claim: str, evidence: str) -> str:
+    """Normalize only marked spans for comparison, never the accepted prose."""
+    source_amounts = {amount for _, _, amount in _currency_amounts(evidence)}
+    replacements = []
+    for start, end, amount in _currency_amounts(claim):
+        if not (
+            re.search(r"(?<![가-힣])약\s*$", claim[:start]) or re.match(r"\s*가까이", claim[end:])
+        ):
+            continue
+        number, scale = _CURRENCY_COMPONENT.findall(claim[start:end])[-1]
+        decimals = len(number.partition(".")[2])
+        place = Decimal(_CURRENCY_SCALES.get(scale.casefold(), 1)) / (10**decimals)
+        matching = {
+            source
+            for source in source_amounts
+            if source[-3:] == amount[-3:]
+            and abs(Decimal(source[:-3]) - Decimal(amount[:-3])) < place / 2
+        }
+        # Ambiguous nearby amounts do not establish the referenced event.
+        # Actor/year checks still run against the one matching source amount.
+        if len(matching) == 1:
+            matched = next(iter(matching))
+            replacements.append((start, end, matched[:-3] + " " + matched[-3:]))
+    for start, end, value in reversed(replacements):
+        claim = claim[:start] + value + claim[end:]
+    return claim
+
+
+def _canonical_numeric_text(value: str) -> str:
+    # Canonicalize before clause splitting so grouping commas inside amounts
+    # cannot split their company/date context into unrelated fragments.
+    currency_amounts = _currency_amounts(value)
+    replacements = [
+        (start, end, amount[:-3] + " " + amount[-3:]) for start, end, amount in currency_amounts
+    ] + _unitless_scaled_amounts(value, currency_amounts)
+    for start, end, amount in sorted(replacements, reverse=True):
+        value = value[:start] + amount + value[end:]
+    return value
+
+
 def _date_terms(value: str) -> set[str]:
-    return {
-        canonical
-        for term, canonical in _DATE_TERM_ALIASES.items()
-        if term in value
-    }
+    return {canonical for term, canonical in _DATE_TERM_ALIASES.items() if term in value}
 
 
 def _companies(value: str) -> set[str]:
@@ -536,7 +725,7 @@ def _contains_alias(value: str, alias: str) -> bool:
         token_end = match.end()
         while token_end < len(value) and value[token_end].isalnum():
             token_end += 1
-        suffix = value[match.end():token_end]
+        suffix = value[match.end() : token_end]
         if not suffix or _is_korean_suffix_chain(suffix):
             return True
     return False
@@ -551,7 +740,7 @@ def _is_korean_suffix_chain(value: str) -> bool:
         )
         if suffix is None:
             return False
-        remaining = remaining[len(suffix):]
+        remaining = remaining[len(suffix) :]
     return True
 
 
@@ -565,18 +754,23 @@ def _contextual_number_mismatches(claim: str, evidence: str) -> list[str]:
             for evidence_anchors, evidence_values in evidence_facts
             if anchors <= evidence_anchors
         ]
-        if matching_contexts and any(values <= candidate for candidate in matching_contexts):
+        if matching_contexts and any(
+            all(
+                value in candidate
+                or any(value + currency in candidate for currency in ("eur", "usd", "krw"))
+                for value in values
+            )
+            for candidate in matching_contexts
+        ):
             continue
         if matching_contexts:
-            mismatches.append(
-                f"{'/'.join(sorted(anchors))}→{'/'.join(sorted(values))}"
-            )
+            mismatches.append(f"{'/'.join(sorted(anchors))}→{'/'.join(sorted(values))}")
     return list(dict.fromkeys(mismatches))
 
 
 def _numeric_facts(value: str) -> list[tuple[frozenset[str], frozenset[str]]]:
     facts: list[tuple[frozenset[str], frozenset[str]]] = []
-    for clause in _clauses(value):
+    for clause in _clauses(_canonical_numeric_text(value)):
         anchors = frozenset(_date_number_anchors(clause) | _date_terms(clause) | _companies(clause))
         values = frozenset(_quantity_values(clause))
         if anchors and values:
@@ -597,8 +791,13 @@ def _date_number_anchors(value: str) -> set[str]:
 
 
 def _quantity_values(value: str) -> set[str]:
-    quantities: set[str] = set()
+    currency_amounts = _currency_amounts(value)
+    scaled_amounts = _unitless_scaled_amounts(value, currency_amounts)
+    quantities = {amount for _, _, amount in currency_amounts}
+    quantities.update(amount for _, _, amount in scaled_amounts)
     for match in _NUMBER.finditer(value):
+        if any(start <= match.start() < end for start, end, _ in currency_amounts + scaled_amounts):
+            continue
         if _DATE_NUMBER_UNIT.match(value, match.end()) is not None:
             continue
         number = _normalized_number(match.group())
@@ -630,8 +829,7 @@ def _polarity_mismatch(claim: str, evidence: str) -> bool:
             if not claim_tokens or claim_tokens & _tokens(evidence_clause)
         ]
         if candidates and not any(
-            _has_negation(claim_clause) == _has_negation(candidate)
-            for candidate in candidates
+            _has_negation(claim_clause) == _has_negation(candidate) for candidate in candidates
         ):
             return True
     return False

@@ -3,12 +3,13 @@
 import hashlib
 import itertools
 import json
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 
-from app.llm.report_insight_assessment import RELATION_SCORES, ROLE_WORK, source_span_choices
+from app.llm.report_insight_assessment import RELATION_SCORES, ROLE_WORK
 from app.llm.report_insight_guard import report_reference_date
 from app.llm.report_insight_service import _eligible_report_request, importance_grade
 from app.schemas.report_insight import ReportImportanceAxes, ReportInsightRequest
@@ -26,16 +27,24 @@ def source_labels():
 
 
 def _assert_basis(basis, eligible):
-    spans = {
-        claim_id: claim_spans
-        for finding in eligible.findings
-        for claim_id, claim_spans in source_span_choices(finding).items()
-    }
+    # These immutable reference labels predate the current fragment policy.
+    # Their historical handles need not be current model choice indices; the
+    # literal must still belong to this exact claim or its linked sentences.
+    sources = {}
+    for finding in eligible.findings:
+        sentences = {sentence.index: sentence.text for sentence in finding.sentences}
+        for claim in finding.claims:
+            sources[claim.id] = [
+                claim.text,
+                *(sentences[index] for index in claim.evidence_sentence_ids),
+            ]
     ids = [(item["claimId"], item["sourceSpanId"]) for item in basis]
     assert len(ids) == len(set(ids))
     for item in basis:
-        assert spans[item["claimId"]][item["sourceSpanId"]] == item["quote"]
-        assert item["quote"].strip()
+        prefix = "s" + item["claimId"].replace(":", "_") + "_"
+        assert re.fullmatch(re.escape(prefix) + r"(?:0|[1-9][0-9]*)", item["sourceSpanId"])
+        assert item["quote"].strip() and len(item["quote"]) <= 200
+        assert any(item["quote"] in source for source in sources[item["claimId"]])
 
 
 def test_real_reference_labels_disclose_ai_draft_and_unmeasured_quality(source_labels):

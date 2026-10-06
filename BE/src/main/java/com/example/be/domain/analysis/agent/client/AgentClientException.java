@@ -94,7 +94,12 @@ public class AgentClientException extends RuntimeException {
 
     /** Bounded diagnostics only; never response text, exception prose or arbitrary identifiers. */
     public record ValidationFailure(String stage, int attempt, String errorType, int errorCount,
-                                    List<String> errorKinds) {
+                                    List<String> errorKinds, List<ValidationIssue> issues,
+                                    boolean issuesTruncated) {
+        public ValidationFailure(String stage, int attempt, String errorType, int errorCount,
+                                 List<String> errorKinds) {
+            this(stage, attempt, errorType, errorCount, errorKinds, List.of(), false);
+        }
         private static final Set<String> TYPES = Set.of(
                 "OutputValidationError", "ValidationError", "JsonObjectParseError", "ValueError");
         private static final Set<String> KINDS = Set.of((
@@ -136,7 +141,37 @@ public class AgentClientException extends RuntimeException {
                     || errorKinds.size() > 5 || errorKinds.stream().anyMatch(value -> value == null)) {
                 throw new IllegalArgumentException("Invalid validation failure diagnostics");
             }
+            if (issues == null || issues.size() > 8 || issues.stream().anyMatch(value -> value == null)
+                    || ((!issues.isEmpty() || issuesTruncated) && !stage.matches("REDUCE(?:-[0-9]{3})?"))) {
+                throw new IllegalArgumentException("Invalid validation issues");
+            }
             errorKinds = errorKinds.stream().filter(KINDS::contains).distinct().sorted().toList();
+            issues = List.copyOf(issues);
+        }
+    }
+
+    /** Closed field paths and numeric references only; no model text or dynamic locations. */
+    public record ValidationIssue(String audience, String field, String errorKind, List<String> claimIds) {
+        private static final Set<String> AUDIENCES = Set.of(
+                "CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR", "IT_INFRA");
+        private static final Set<String> LENGTH_KINDS = Set.of(
+                "string_too_long", "string_too_short", "too_long", "too_short");
+        private static final String FIELD = "(?:headline|overview|implications|watchItems|"
+                + "overview\\[[0-2]\\]\\.(?:text|assumption|basisClaimIds)|"
+                + "implications\\[[0-4]\\]\\.(?:text|mechanism|assumption|falsifiedBy|basisClaimIds)|"
+                + "watchItems\\[[0-4]\\]\\.(?:topic|indicator|trigger|basisClaimIds))";
+
+        public ValidationIssue {
+            if (audience == null || !AUDIENCES.contains(audience)
+                    || field == null || !field.matches(FIELD)
+                    || errorKind == null || !(LENGTH_KINDS.contains(errorKind)
+                        || errorKind.startsWith("report_") && ValidationFailure.KINDS.contains(errorKind))
+                    || claimIds == null || claimIds.size() > 8
+                    || claimIds.stream().anyMatch(value -> value == null
+                        || !value.matches("[1-9][0-9]{0,18}:(?:0|[1-9][0-9]{0,18})"))) {
+                throw new IllegalArgumentException("Invalid validation issue");
+            }
+            claimIds = List.copyOf(claimIds);
         }
     }
 

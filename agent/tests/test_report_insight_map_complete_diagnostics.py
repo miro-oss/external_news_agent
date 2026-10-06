@@ -58,6 +58,11 @@ def test_six_native_valid_public_failures_keep_last_finding_and_cause_in_bounded
     for finding in source.findings:
         assert f"findingId={finding.id}" in details
         assert long_fact_reason(finding.id)[1] in details
+    actions = service._repair_validation_diagnostics(error, for_prompt=True)
+    assert actions.count("report_fact_mismatch") == len(source.findings)
+    for finding in source.findings:
+        assert f"findingId={finding.id}" in actions
+        assert long_fact_reason(finding.id)[1] not in actions
 
 
 def test_one_full_map_repair_receives_every_late_public_cause_without_extra_calls():
@@ -81,7 +86,8 @@ def test_one_full_map_repair_receives_every_late_public_cause_without_extra_call
     assert len(details.strip()) <= 6_000
     for finding in source.findings:
         assert f"findingId={finding.id}" in details
-        assert long_fact_reason(finding.id)[1] in details
+        assert long_fact_reason(finding.id)[1] not in details
+    assert details.count("report_fact_mismatch") == len(source.findings)
     assert [item.reason for item in result.insights[0].assessments] == [clean_reason] * 6
     assert result.meta.input_tokens == 22
     assert result.meta.output_tokens == 14
@@ -190,6 +196,16 @@ def test_mixed_native_errors_keep_each_nested_public_cause_within_diagnostic_lim
         "이미 지난 기한만으로 urgency=3",
     ):
         assert details.count(cause) >= len(source.findings)
+    actions = service._repair_validation_diagnostics(error, for_prompt=True)
+    assert "삼성전자" not in actions and "9912" not in actions
+    for cause in (
+        "effect.impactScope",
+        "report_fact_mismatch",
+        "양쪽 claim 근거가 필요합니다",
+        "이미 지난 근거 기한",
+        "이미 지난 기한만으로 urgency=3",
+    ):
+        assert actions.count(cause) >= len(source.findings)
 
 
 @pytest.mark.parametrize("retained_defect", [None, "company", "urgency"])
@@ -248,7 +264,7 @@ def test_one_partial_repair_must_correct_both_public_defects_and_preserve_other_
     repair = provider.calls[1]
     assert [finding["id"] for finding in framed(repair["prompt"])["findings"]] == [101]
     details = diagnostic(repair["prompt"])
-    assert "엔비디아" in details
+    assert "report_fact_mismatch" in details and "엔비디아" not in details
     assert "이미 지난 기한만으로 urgency=3" in details
     assert "<invalid-output>" not in repair["prompt"]
     assert all(provider.schema_validity)

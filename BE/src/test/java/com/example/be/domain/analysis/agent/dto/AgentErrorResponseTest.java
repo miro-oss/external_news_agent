@@ -153,6 +153,83 @@ class AgentErrorResponseTest {
         assertNull(error(Map.of("validationFailure", "invalid")).validationFailure());
     }
 
+    @Test
+    void readsClosedReduceIssuesAndLegacyMessagesRemainCompatible() {
+        var failure = reduceIssues(List.of(issue()), false);
+        var parsed = error(Map.of("validationFailure", failure)).validationFailure();
+        assertEquals(List.of(new AgentClientException.ValidationIssue("CHIP_MAKER",
+                "implications[1].falsifiedBy", "report_fact_mismatch", List.of("7869:1"))), parsed.issues());
+        assertEquals(false, parsed.issuesTruncated());
+        assertEquals(List.of(), error(Map.of("validationFailure", validation())).validationFailure().issues());
+        assertEquals(false, error(Map.of("validationFailure", validation())).validationFailure().issuesTruncated());
+    }
+
+    @Test
+    void rejectsIssueProseAndUnboundedMetadataWithoutLosingUsage() {
+        var invalidIssues = List.of(
+                changedIssue("audience", "CHIP_MAKER\nforged"),
+                changedIssue("field", "implications[5].text"),
+                changedIssue("field", "overview[-1].text"),
+                changedIssue("field", "private-prose"),
+                changedIssue("field", "watchItems[0].private-prose"),
+                changedIssue("errorKind", "report_private_prose"),
+                changedIssue("errorKind", "value_error"),
+                changedIssue("claimIds", List.of("7869:1\nforged")),
+                changedIssue("claimIds", List.of("0:0")),
+                changedIssue("claimIds", List.of("1".repeat(20) + ":0")),
+                changedIssue("claimIds", List.of(123)),
+                changedIssue("claimIds", java.util.Collections.nCopies(9, "7869:1")),
+                changedIssue("message", "private prose"));
+        for (var issue : invalidIssues) {
+            var response = error(Map.of("validationFailure", reduceIssues(List.of(issue), false),
+                    "usage", Map.of("inputTokens", 10)));
+            assertNull(response.validationFailure());
+            assertEquals(10L, response.usage().inputTokens());
+        }
+        assertNull(error(Map.of("validationFailure", reduceIssues(java.util.Collections.nCopies(9, issue()), true)))
+                .validationFailure());
+        var mapFailure = reduceIssues(List.of(issue()), false);
+        mapFailure.put("stage", "MAP-001");
+        assertNull(error(Map.of("validationFailure", mapFailure)).validationFailure());
+        var missingFlag = reduceIssues(List.of(issue()), false);
+        missingFlag.remove("issuesTruncated");
+        assertNull(error(Map.of("validationFailure", missingFlag)).validationFailure());
+        var wrongFlag = reduceIssues(List.of(issue()), false);
+        wrongFlag.put("issuesTruncated", "true");
+        assertNull(error(Map.of("validationFailure", wrongFlag)).validationFailure());
+    }
+
+    @Test
+    void preservesBoundedTruncationMarkerAndCopiesIssueLists() {
+        var refs = new java.util.ArrayList<>(List.of("7869:1"));
+        var issue = new AgentClientException.ValidationIssue("CHIP_MAKER", "headline", "string_too_long", refs);
+        refs.clear();
+        assertEquals(List.of("7869:1"), issue.claimIds());
+        var parsed = error(Map.of("validationFailure", reduceIssues(java.util.Collections.nCopies(8, issue()), true)))
+                .validationFailure();
+        assertEquals(8, parsed.issues().size());
+        assertEquals(true, parsed.issuesTruncated());
+    }
+
+    private Map<String, Object> issue() {
+        return Map.of("audience", "CHIP_MAKER", "field", "implications[1].falsifiedBy",
+                "errorKind", "report_fact_mismatch", "claimIds", List.of("7869:1"));
+    }
+
+    private Map<String, Object> changedIssue(String key, Object value) {
+        var result = new HashMap<>(issue());
+        result.put(key, value);
+        return result;
+    }
+
+    private Map<String, Object> reduceIssues(List<?> issues, boolean truncated) {
+        var result = new HashMap<>(validation());
+        result.put("stage", "REDUCE-001");
+        result.put("issues", issues);
+        result.put("issuesTruncated", truncated);
+        return result;
+    }
+
     private Map<String, Object> validation() {
         return Map.of("stage", "MAP-002", "attempt", 2, "errorType", "OutputValidationError",
                 "errorCount", 2, "errorKinds", List.of("report_assessment_draft_invalid", "report_fact_mismatch"));

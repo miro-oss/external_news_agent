@@ -32,7 +32,7 @@ def responses(source, *, late_error=False, permanent=False, clock=None):
                 value["assessments"]["CHIP_MAKER"][f"finding{finding['id']}"] = record
         if stage == "REVIEW-002":
             if clock is not None:
-                clock[0] = 11.0
+                clock[0] = 181.0
             if late_error and (occurrence == 1 or permanent):
                 value["assessments"]["CHIP_MAKER"]["finding110"]["reason"] = (
                     "2031년 생산 중단에 따른 검증 준비를 확인한다."
@@ -54,11 +54,11 @@ def test_review_selection_is_once_and_late_partial_repair_preserves_full_source_
         assert [item.axes.impact for item in draft.mapped.insights[0].assessments] == [None] * 13
         return original_select(full_source, draft)
 
-    def validate(response, context):
+    def validate(response, context, **kwargs):
         validation_contexts.append(
             ([f.id for f in context.findings], context.report.report_end_date)
         )
-        return original_validate(response, context)
+        return original_validate(response, context, **kwargs)
 
     monkeypatch.setattr(service, "select_review", select)
     monkeypatch.setattr(service, "_validated_map_output", validate)
@@ -117,7 +117,7 @@ def test_later_review_failure_keeps_usage_and_only_validation_can_retain_map(mon
             clock=clock if failure == "deadline" else None,
         ),
     )
-    settings = {"AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS": 10} if failure == "deadline" else {}
+    settings = {"AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS": 180} if failure == "deadline" else {}
     if failure == "budget":
         settings["AGENT_HARD_CAP_CREDITS_PER_REQUEST"] = 0.95
     if failure == "repair_exhausted":

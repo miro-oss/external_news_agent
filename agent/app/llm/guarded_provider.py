@@ -89,6 +89,15 @@ def _is_rate_limited(error: AgentError) -> bool:
     return isinstance(error.details, dict) and error.details.get("rateLimited") is True
 
 
+def _is_cancelled_before_call(error: AgentError) -> bool:
+    return (
+        error.code == "PROVIDER_UNAVAILABLE"
+        and isinstance(error.details, dict)
+        and error.details.get("pipelineCancelled") is True
+        and error.details.get("requestNotStarted") is True
+    )
+
+
 def run_guarded[ResponseT](
     guard: ProviderGuard,
     call: Callable[[], ResponseT],
@@ -105,13 +114,13 @@ def run_guarded[ResponseT](
             status_code=503,
             code="PROVIDER_UNAVAILABLE",
             message="Provider 동시 호출 한도에 도달했습니다.",
-            details={"concurrencyLimited": True},
+            details={"concurrencyLimited": True, "requestNotStarted": True},
         )
 
     try:
         response = call()
     except AgentError as error:
-        if _is_rate_limited(error):
+        if _is_rate_limited(error) or _is_cancelled_before_call(error):
             guard.breaker.cancel_call()
         elif error.code == "PROVIDER_UNAVAILABLE":
             guard.breaker.record_failure()

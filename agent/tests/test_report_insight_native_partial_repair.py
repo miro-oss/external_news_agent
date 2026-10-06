@@ -45,9 +45,9 @@ def test_native_and_public_failure_union_preserves_every_other_record_and_full_d
         native_calls.append((json.loads(response.text), [f.id for f in request.findings]))
         return native_validate(response, request)
 
-    def capture_public(response, request):
+    def capture_public(response, request, **kwargs):
         public_calls.append(([f.id for f in request.findings], request.report.report_end_date))
-        return public_validate(response, request)
+        return public_validate(response, request, **kwargs)
 
     def capture_repair(prompt, schema, raw, error, validate, fallback):
         repair_errors.append(error)
@@ -88,10 +88,10 @@ def test_unlocalized_public_error_falls_back_to_full_repair(monkeypatch):
     source, reasons, _ = partial_repair_fixture()
     original = service._validated_map_output
 
-    def validate(response, request):
+    def validate(response, request, **kwargs):
         if [finding.id for finding in request.findings] == [102]:
             raise ValueError("Unlocalized public validation failure")
-        return original(response, request)
+        return original(response, request, **kwargs)
 
     monkeypatch.setattr(service, "_validated_map_output", validate)
     provider = V4Provider(source, relation="UNRELATED", hook=mixed_failures(reasons))

@@ -546,7 +546,10 @@ def test_markdown_escapes_markdown_metacharacters_without_html_entities() -> Non
     assert "TSMC & \\*삼성\\* \\[HBM\\]" in response.markdown_body
 
 
-def test_uses_report_specific_provider_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("report_timeout,expected_timeout", [(None, 120.0), (90, 90.0)])
+def test_uses_report_specific_provider_budget(
+    monkeypatch: pytest.MonkeyPatch, report_timeout, expected_timeout
+) -> None:
     captured: dict[str, float | int] = {}
     provider = FakeProvider(provider_response(valid_output()))
 
@@ -556,12 +559,17 @@ def test_uses_report_specific_provider_budget(monkeypatch: pytest.MonkeyPatch) -
         return provider
 
     monkeypatch.setattr("app.llm.report_service.get_analyze_provider", provider_for_report)
+    monkeypatch.delenv("AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS", raising=False)
+    report_settings = (
+        {} if report_timeout is None else {"AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS": report_timeout}
+    )
     settings = Settings(
         AGENT_MOCK=False,
         AGENT_REPORT_MAX_OUTPUT_TOKENS=12_000,
-        AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=90,
+        AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=180,
+        **report_settings,
     )
 
     ReportWriterService(settings).write(request())
 
-    assert captured == {"tokens": 12_000, "timeout": 90.0}
+    assert captured == {"tokens": 12_000, "timeout": expected_timeout}
