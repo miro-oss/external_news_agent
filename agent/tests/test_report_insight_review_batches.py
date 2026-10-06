@@ -30,7 +30,7 @@ def responses(source, *, late_error=False, permanent=False, clock=None):
                 record = item(original, relation="UNDETERMINED")
                 record["reason"] = "생산 중단 사건의 업무 연결 판단에 필요한 조건이 미확인이다."
                 value["assessments"]["CHIP_MAKER"][f"finding{finding['id']}"] = record
-        if stage == "REVIEW-002":
+        if stage == "REVIEW-004":
             if clock is not None:
                 clock[0] = 181.0
             if late_error and (occurrence == 1 or permanent):
@@ -71,7 +71,9 @@ def test_review_selection_is_once_and_late_partial_repair_preserves_full_source_
         "MAP-003",
         "REVIEW-001",
         "REVIEW-002",
-        "REVIEW-002",
+        "REVIEW-003",
+        "REVIEW-004",
+        "REVIEW-004",
         "REDUCE-001",
     ]
     assert len(selected) == 1
@@ -80,8 +82,10 @@ def test_review_selection_is_once_and_late_partial_repair_preserves_full_source_
         list(range(101, 107)),
         list(range(107, 113)),
         [113],
-        list(range(101, 107)),
-        list(range(107, 113)),
+        list(range(101, 104)),
+        list(range(104, 107)),
+        list(range(107, 110)),
+        list(range(110, 113)),
         [110],
     ]
     assert all(data["reportReferenceDate"] == "2026-09-30" for data in inputs)
@@ -92,14 +96,14 @@ def test_review_selection_is_once_and_late_partial_repair_preserves_full_source_
             assert finding["articleId"] == original.article_id
             assert finding["claims"] == [c.model_dump(by_alias=True) for c in original.claims]
             assert finding["sentences"] == [s.model_dump(by_alias=True) for s in original.sentences]
-    assert validation_contexts.count((list(range(107, 113)), date(2026, 9, 30))) == 3
+    assert validation_contexts.count((list(range(110, 113)), date(2026, 9, 30))) == 2
     final = result.insights[0].assessments
     assert [record.finding_id for record in final] == list(range(101, 114))
-    assert all(record.axes.directness is None for record in final[:6])
-    assert all(record.axes.impact == 3 for record in final[6:12])
+    assert all(record.axes.directness is None for record in final[:3])
+    assert all(record.axes.impact == 3 for record in final[3:12])
     assert final[-1].axes.directness == 3 and final[-1].axes.impact is None
-    assert result.meta.input_tokens == 77 and result.meta.output_tokens == 49
-    assert result.meta.cost_usd == 0.021 and result.meta.credits == 1.4
+    assert result.meta.input_tokens == 99 and result.meta.output_tokens == 63
+    assert result.meta.cost_usd == 0.027 and result.meta.credits == 1.8
     assert source.model_dump_json(by_alias=True) == snapshot
 
 
@@ -119,20 +123,21 @@ def test_later_review_failure_keeps_usage_and_only_validation_can_retain_map(mon
     )
     settings = {"AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS": 180} if failure == "deadline" else {}
     if failure == "budget":
-        settings["AGENT_HARD_CAP_CREDITS_PER_REQUEST"] = 0.95
+        settings["AGENT_HARD_CAP_CREDITS_PER_REQUEST"] = 1.35
     if failure == "repair_exhausted":
         output = generate(provider, source, **settings)
-        assert stages(provider)[-3:] == ["REVIEW-002", "REVIEW-002", "REDUCE-001"]
-        assert len(provider.calls) == 7
+        assert stages(provider)[-3:] == ["REVIEW-004", "REVIEW-004", "REDUCE-001"]
+        assert len(provider.calls) == 9
         final = output.insights[0].assessments
-        assert all(item.axes.directness is None for item in final[:6])
-        assert all(item.axes.impact is None for item in final[6:])
-        assert output.meta.input_tokens == 77 and output.meta.output_tokens == 49
-        assert output.meta.cost_usd == 0.021 and output.meta.credits == 1.4
+        assert all(item.axes.directness is None for item in final[:3])
+        assert all(item.axes.impact == 3 for item in final[3:9])
+        assert all(item.axes.impact is None for item in final[9:])
+        assert output.meta.input_tokens == 99 and output.meta.output_tokens == 63
+        assert output.meta.cost_usd == 0.027 and output.meta.credits == 1.8
         return
     with pytest.raises(AgentError) as caught:
         generate(provider, source, **settings)
-    count = 5
+    count = 7
     assert (
         caught.value.code
         == {
@@ -141,7 +146,7 @@ def test_later_review_failure_keeps_usage_and_only_validation_can_retain_map(mon
         }[failure]
     )
     assert len(provider.calls) == count
-    assert stages(provider)[-1] == "REVIEW-002"
+    assert stages(provider)[-1] == "REVIEW-004"
     assert "REDUCE-001" not in stages(provider)
     assert caught.value.details["usage"]["inputTokens"] == 11 * count
     assert caught.value.details["usage"]["credits"] == pytest.approx(0.2 * count)

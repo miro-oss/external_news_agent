@@ -257,14 +257,21 @@ def test_native_failure_during_review_preserves_review_stage_and_repair_bound(ca
 
     provider = V4Provider(source, hook=hook)
     output = generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-002", "REVIEW-001", "REVIEW-001", "REDUCE-001"]
+    assert stages(provider) == [
+        "MAP-001",
+        "MAP-002",
+        "REVIEW-001",
+        "REVIEW-001",
+        "REVIEW-002",
+        "REDUCE-001",
+    ]
     assert [f["id"] for f in framed(provider.calls[3]["prompt"])["findings"]] == [101, 103]
     assert [item.reason for item in output.insights[0].assessments] == list(reasons.values())
     assert all(
         item.axes.directness == item.axes.impact == 3 for item in output.insights[0].assessments
     )
-    assert output.meta.input_tokens == 55 and output.meta.output_tokens == 35
-    assert output.meta.cost_usd == 0.015 and output.meta.credits == 1.0
+    assert output.meta.input_tokens == 66 and output.meta.output_tokens == 42
+    assert output.meta.cost_usd == 0.018 and output.meta.credits == 1.2
     assert (
         "stage=REVIEW-001 outcome=VALIDATION_FAILED fallback=VALIDATED_MAP_RETAINED" in caplog.text
     )

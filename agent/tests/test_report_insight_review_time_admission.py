@@ -51,7 +51,17 @@ def assert_usage(actual, calls):
 
 @pytest.mark.parametrize(
     "request_seconds,map_elapsed,review_count",
-    [(180, 60.0, 2), (180, 60.001, 0), (180, 119.0, 0), (120, 40.0, 2), (120, 40.001, 0)],
+    [
+        (180, 60.0, 4),
+        (180, 67.125, 4),
+        (180, 75.4, 4),
+        (180, 90.0, 4),
+        (180, 90.001, 0),
+        (180, 119.0, 0),
+        (120, 60.0, 4),
+        (120, 60.001, 0),
+        (18, 9.0, 4),
+    ],
 )
 def test_review_admission_preserves_all_mandatory_map_records_and_selection(
     monkeypatch, request_seconds, map_elapsed, review_count
@@ -91,7 +101,7 @@ def test_review_admission_preserves_all_mandatory_map_records_and_selection(
 
 def test_later_review_is_skipped_after_first_review_consumes_admission_headroom(monkeypatch):
     source, provider, _clock, mapped, selection = timed_report(
-        monkeypatch, map_elapsed=40.0, first_review_elapsed=90.0
+        monkeypatch, map_elapsed=40.0, first_review_elapsed=90.001
     )
 
     result = generate(provider, source, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=180)
@@ -108,13 +118,21 @@ def test_later_review_is_skipped_after_first_review_consumes_admission_headroom(
     assert len(selection) == 1 and len(selection[0]) == 12
     final = result.insights[0].assessments
     assert [entry.finding_id for entry in final] == [finding.id for finding in source.findings]
-    assert all(entry.axes.impact == 3 for entry in final[:6])
-    assert final[6:] == mapped[6:]
+    assert all(entry.axes.impact == 3 for entry in final[:3])
+    assert final[3:] == mapped[3:]
     assert_usage(result.meta.model_dump(by_alias=True), 7)
 
 
-def test_review_draft_and_repair_share_one_deadline_and_restore_request_deadline(monkeypatch):
-    source, provider, clock, _mapped, _selection = timed_report(monkeypatch, map_elapsed=40.0)
+@pytest.mark.parametrize(
+    "map_elapsed,draft_end,repair_end,review_deadline",
+    [(40.0, 80.0, 101.0, 100.0), (75.0, 100.0, 121.0, 120.0)],
+)
+def test_review_draft_and_repair_share_one_deadline_and_restore_request_deadline(
+    monkeypatch, map_elapsed, draft_end, repair_end, review_deadline
+):
+    source, provider, clock, _mapped, _selection = timed_report(
+        monkeypatch, map_elapsed=map_elapsed
+    )
     instances, review_deadlines = [], []
     pipeline_class = service.ReportInsightPipelineProvider
     original_hook = provider.hook
@@ -128,9 +146,9 @@ def test_review_draft_and_repair_share_one_deadline_and_restore_request_deadline
         value = original_hook(stage, occurrence, data, value)
         if stage == "REVIEW-001":
             review_deadlines.append(instances[0].deadline)
-            # The initial draft consumes 40 seconds. Its repair consumes 21
-            # more, exceeding their shared 60-second window before REDUCE.
-            clock[0] = 80.0 if occurrence == 1 else 101.0
+            # The repair must use the first draft's existing deadline even
+            # when admission allows a window shorter than the 60-second cap.
+            clock[0] = draft_end if occurrence == 1 else repair_end
         return value
 
     def malformed_first_review(stage, occurrence, _data, raw):
@@ -149,9 +167,30 @@ def test_review_draft_and_repair_share_one_deadline_and_restore_request_deadline
         "REVIEW-001",
         "REVIEW-001",
     ]
-    assert review_deadlines == [100.0, 100.0]
+    assert review_deadlines == [review_deadline, review_deadline]
     assert len(instances) == 1 and instances[0].deadline == 180.0
     assert_usage(caught.value.details["usage"], 7)
+
+
+def test_provider_failure_in_short_review_window_is_fatal_with_unknown_usage(monkeypatch):
+    source, provider, clock, _mapped, _selection = timed_report(monkeypatch, map_elapsed=75.0)
+    original_hook = provider.hook
+
+    def fail_review(stage, occurrence, data, value):
+        value = original_hook(stage, occurrence, data, value)
+        if stage == "REVIEW-001":
+            clock[0] = 120.0
+            raise AgentError(503, "PROVIDER_UNAVAILABLE", "offline timeout")
+        return value
+
+    provider.hook = fail_review
+    with pytest.raises(AgentError) as caught:
+        generate(provider, source, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=180)
+
+    assert caught.value.code == "PROVIDER_UNAVAILABLE"
+    assert stages(provider) == [f"MAP-{index:03d}" for index in range(1, 6)] + ["REVIEW-001"]
+    assert_usage(caught.value.details["usage"], 5)
+    assert caught.value.details["executionMetadata"]["usageCompleteness"] == "PARTIAL"
 
 
 @pytest.mark.parametrize("expired_at", ["REVIEW-001", "REDUCE-001", "REDUCE_VALIDATION"])

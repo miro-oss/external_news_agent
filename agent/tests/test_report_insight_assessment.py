@@ -488,7 +488,8 @@ def test_review_includes_top_five_and_lexical_omission_suspects_without_keyword_
     )
     full = validate_draft(response(value, source), source)
     selected = select_review(source, full)
-    assert selected == tuple(range(101, 113)) and len(selected) == 12
+    assert tuple(sorted(selected)) == tuple(range(101, 113)) and len(selected) == 12
+    assert selected[:4] == (101, 107, 102, 106)
     assert full.evidence["CHIP_MAKER"][106].relation == "UNRELATED"
     assert len(full.mapped.insights[0].assessments) == 15
 
@@ -522,7 +523,7 @@ def test_four_disjoint_role_top_fives_receive_fair_review_under_shared_twelve_ca
     full = validate_draft(response(value, source), source)
     selected = select_review(source, full)
     assert len(selected) == 12
-    assert selected == (101, 102, 103, 106, 107, 108, 111, 112, 113, 116, 117, 118)
+    assert selected == (101, 106, 111, 116, 102, 107, 112, 117, 103, 108, 113, 118)
     assert all(len(set(selected) & top_five) == 3 for top_five in role_top_fives.values())
     assert all(len(set(selected) & top_five) < 5 for top_five in role_top_fives.values())
     assert all(len(insight.assessments) == 20 for insight in full.mapped.insights)
@@ -574,7 +575,8 @@ def test_review_preserves_late_omissions_for_each_role_when_top_candidates_excee
     assert set(leading) <= set(selected)
     assert {121, 122, 123, 124} <= set(selected)
     assert 125 not in selected
-    assert selected == tuple(sorted(selected))
+    assert selected[:4] == tuple(leading)
+    assert selected[4::2] == (121, 122, 123, 124)
     assert full.draft.model_dump_json() == before
 
 
@@ -624,7 +626,7 @@ def test_single_role_review_shares_capacity_between_unknown_relation_and_unknown
     assert set(range(101, 106)) <= set(selected)
     assert {108, 118, 119} <= set(selected)
     assert 120 not in selected  # Unknown urgency alone does not cause abstention.
-    assert selected == tuple(sorted(selected))
+    assert selected[:4] == (101, 108, 102, 118)
     assert full.draft.model_dump_json() == before
     assessments = {item.finding_id: item for item in full.mapped.insights[0].assessments}
     assert assessments[108].axes.directness is None
@@ -652,7 +654,7 @@ def test_no_change_outside_top_candidates_gets_review_without_changing_verdict(s
 
     selected = select_review(source, full)
 
-    assert selected == (101, 102, 103, 104, 105, 107)
+    assert selected == (101, 107, 102, 103, 104, 105)
     assert (full.draft.model_dump_json(), full.mapped.model_dump_json()) == before
     assessment = full.mapped.insights[0].assessments[-1]
     assert full.evidence["CHIP_MAKER"][107].impact_scope == "NO_CHANGE"
@@ -677,7 +679,7 @@ def test_no_change_shares_review_cap_with_unknown_relation_and_unknown_impact():
     assert len(selected) == 12
     assert set(range(101, 106)) <= set(selected)
     assert {106, 107, 116, 117, 126, 127} <= set(selected)
-    assert selected == tuple(sorted(selected))
+    assert selected[1:6:2] == (106, 116, 126)
     assert (full.draft.model_dump_json(), full.mapped.model_dump_json()) == before
 
 

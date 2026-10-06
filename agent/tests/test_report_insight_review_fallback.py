@@ -48,7 +48,7 @@ class ReviewProvider(V4Provider):
 @pytest.mark.parametrize("failure", ["native", "public", "malformed", "truncated"])
 @pytest.mark.parametrize(
     "failed_stages",
-    [("REVIEW-001",), ("REVIEW-002",), ("REVIEW-001", "REVIEW-002")],
+    [("REVIEW-001",), ("REVIEW-004",), ("REVIEW-001", "REVIEW-004")],
 )
 def test_review_exhaustion_keeps_exact_map_and_valid_reviews_with_one_budget(
     monkeypatch, caplog, failure, failed_stages
@@ -75,7 +75,7 @@ def test_review_exhaustion_keeps_exact_map_and_valid_reviews_with_one_budget(
     provider = ReviewProvider(source, failed_stages=failed_stages, failure=failure)
     output = generate(provider, source)
     expected_stages = ["MAP-001", "MAP-002", "MAP-003"]
-    for stage in ("REVIEW-001", "REVIEW-002"):
+    for stage in ("REVIEW-001", "REVIEW-002", "REVIEW-003", "REVIEW-004"):
         expected_stages.extend([stage] * (2 if stage in failed_stages else 1))
     expected_stages.append("REDUCE-001")
     assert stages(provider) == expected_stages
@@ -83,7 +83,7 @@ def test_review_exhaustion_keeps_exact_map_and_valid_reviews_with_one_budget(
     final = output.insights[0].assessments
     assert [entry.finding_id for entry in final] == list(range(101, 114))
     for index, entry in enumerate(final):
-        review_stage = f"REVIEW-{index // 6 + 1:03d}"
+        review_stage = f"REVIEW-{index // 3 + 1:03d}"
         if index == 12 or review_stage in failed_stages:
             assert entry == map_snapshots[0][index]
             assert entry.axes.impact is None
