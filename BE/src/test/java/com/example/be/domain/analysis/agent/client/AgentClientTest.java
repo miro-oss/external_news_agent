@@ -427,6 +427,34 @@ class AgentClientTest {
     }
 
     @Test
+    void reportValidationDiagnosticSurvivesLongProviderMetadataAndKeepsUsage() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/report-insight"))
+                .andRespond(withStatus(HttpStatus.BAD_GATEWAY).contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"error":{"code":"SCHEMA_VIOLATION","message":"출력 오류","details":{
+                                "validationFailure":{"stage":"REDUCE-001","attempt":2,"errorType":"OutputValidationError","errorCount":1,"errorKinds":["report_falsification_missing_observation"]},
+                                "usage":{"inputTokens":30,"outputTokens":15,"costUsd":0.25,"credits":2},
+                                "executionMetadata":{"provider":"openai","model":"%s","promptVersion":"report-insight.ko.v9","source":"AGENT_ERROR","usageCompleteness":"COMPLETE"}}}}
+                                """.formatted("m".repeat(900))));
+
+        var request = new AgentReportInsightRequest("diagnostic", AgentPlan.FREE, List.of("CHIP_MAKER"),
+                new AgentReportInsightRequest.ReportPayload(101L, "보고서", "DAILY",
+                        java.time.LocalDate.of(2026, 9, 30), null), List.of());
+        var failure = assertThrows(AgentClientException.class, () -> client.reportInsight(request));
+
+        assertEquals(new AgentClientException.ValidationFailure("REDUCE-001", 2,
+                "OutputValidationError", 1, List.of("report_falsification_missing_observation")),
+                failure.getValidationFailure());
+        assertEquals(30L, failure.getUsage().inputTokens());
+        assertNull(failure.getExecutionMetadata());
+        assertTrue(failure.getMessage().substring(0, 1000).contains("report_falsification_missing_observation"));
+        server.verify();
+    }
+
+    @Test
     void includesStatusAndBodyWhenAgentReturnsNonContractError() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();

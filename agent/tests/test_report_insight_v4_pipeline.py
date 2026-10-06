@@ -21,6 +21,8 @@ from app.llm.report_insight_service import (
     PROMPT_VERSION,
     RUBRIC_VERSION,
     ReportInsightService,
+    importance_grade,
+    importance_score,
 )
 from app.main import create_app
 
@@ -179,7 +181,7 @@ def partial_repair_fixture():
     return source, reasons, hook
 
 
-def test_partial_native_prose_repair_preserves_other_seven_records_and_full_date(monkeypatch):
+def test_partial_native_prose_repair_preserves_other_five_records_and_full_date(monkeypatch):
     source, reasons, hook = partial_repair_fixture()
     snapshot = source.model_dump_json(by_alias=True)
     native_inputs, public_contexts = [], []
@@ -203,28 +205,28 @@ def test_partial_native_prose_repair_preserves_other_seven_records_and_full_date
     monkeypatch.setattr(insight_service, "_validated_map_output", capture_map)
     provider = V4Provider(source, relation="UNRELATED", hook=hook)
     result = generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
-    first_input, repair_input = [framed(call["prompt"]) for call in provider.calls]
-    assert [finding["id"] for finding in first_input["findings"]] == list(range(101, 109))
+    assert stages(provider) == ["MAP-001", "MAP-001", "MAP-002"]
+    first_input, repair_input = [framed(call["prompt"]) for call in provider.calls[:2]]
+    assert [finding["id"] for finding in first_input["findings"]] == list(range(101, 107))
     assert [finding["id"] for finding in repair_input["findings"]] == [104]
     assert first_input["reportReferenceDate"] == repair_input["reportReferenceDate"] == "2026-09-30"
     repair_schema = provider.calls[1]["response_schema"]
     entries = repair_schema["properties"]["assessments"]["properties"]["CHIP_MAKER"]
     assert set(entries["properties"]) == {"finding104"} and entries["required"] == ["finding104"]
     assert repair_schema["description"] == provider.calls[0]["response_schema"]["description"]
-    assert provider.schema_validity == [True, True]
-    assert len(native_inputs) == 2
-    original, merged = [value["assessments"]["CHIP_MAKER"] for value in native_inputs]
-    assert list(merged) == [f"finding{finding_id}" for finding_id in range(101, 109)]
+    assert provider.schema_validity == [True, True, True]
+    assert len(native_inputs) == 3
+    original, merged = [value["assessments"]["CHIP_MAKER"] for value in native_inputs[:2]]
+    assert list(merged) == [f"finding{finding_id}" for finding_id in range(101, 107)]
     for key, record in original.items():
         if key != "finding104":
             assert merged[key] == record
     assert merged["finding104"]["reason"] == reasons[104]
-    assert public_contexts[:2] == [(list(range(101, 109)), date(2026, 9, 30))] * 2
+    assert public_contexts[:2] == [(list(range(101, 107)), date(2026, 9, 30))] * 2
     assert [record.finding_id for record in result.insights[0].assessments] == list(range(101, 109))
     assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
-    assert result.meta.input_tokens == 22 and result.meta.output_tokens == 14
-    assert result.meta.cost_usd == 0.006 and result.meta.credits == 0.4
+    assert result.meta.input_tokens == 33 and result.meta.output_tokens == 21
+    assert result.meta.cost_usd == 0.009 and result.meta.credits == 0.6
     assert source.model_dump_json(by_alias=True) == snapshot
 
 
@@ -313,13 +315,13 @@ def test_partial_native_repair_keeps_existing_fenced_json_support():
 
     provider = V4Provider(source, relation="UNRELATED", hook=hook, raw_hook=raw_hook)
     result = generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
-    assert all(raw.startswith("```json\n") for raw in provider.response_texts)
+    assert stages(provider) == ["MAP-001", "MAP-001", "MAP-002"]
+    assert all(raw.startswith("```json\n") for raw in provider.response_texts[:2])
     assert [finding["id"] for finding in framed(provider.calls[1]["prompt"])["findings"]] == [104]
     assert [record.finding_id for record in result.insights[0].assessments] == list(range(101, 109))
     assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
-    assert result.meta.input_tokens == 22 and result.meta.output_tokens == 14
-    assert result.meta.cost_usd == 0.006 and result.meta.credits == 0.4
+    assert result.meta.input_tokens == 33 and result.meta.output_tokens == 21
+    assert result.meta.cost_usd == 0.009 and result.meta.credits == 0.6
 
 
 def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes():
@@ -329,7 +331,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     result = generate(provider, source)
     assert stages(provider) == ["MAP-001", "MAP-002", "MAP-003", "REVIEW-001", "REDUCE-001"]
     batches = [framed(call["prompt"])["findings"] for call in provider.calls[:3]]
-    assert list(map(len, batches)) == [8, 8, 1]
+    assert list(map(len, batches)) == [6, 6, 5]
     assert [finding["id"] for batch in batches for finding in batch] == list(range(101, 118))
     review = framed(provider.calls[3]["prompt"])
     assert [finding["id"] for finding in review["findings"]] == list(range(101, 106))
@@ -339,7 +341,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v8"
+    assert result.meta.prompt_version == "report-insight.ko.v9"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -352,12 +354,17 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(provider.schema_validity)
     for value in provider.wire_payloads[:-1]:
         for draft in value["assessments"]["CHIP_MAKER"].values():
-            assert set(draft) == {"findingId", "connection", "effect", "timing", "reason"}
-            assert set(draft["connection"]) == {"relation", "work", "condition", "basis"}
-            assert set(draft["effect"]) == {"impactScope", "basis"}
-            assert set(draft["timing"]) == {"urgencyState", "basis"}
+            assert set(draft) == {"findingId", "decision", "reason"}
+            assert set(draft["decision"]["connection"]) == {
+                "relation",
+                "work",
+                "condition",
+                "basis",
+            }
+            assert set(draft["decision"]["effect"]) == {"impactScope", "basis"}
+            assert set(draft["decision"]["timing"]) == {"urgencyState", "basis"}
             for field in ("connection", "effect", "timing"):
-                basis = draft[field]["basis"]
+                basis = draft["decision"][field]["basis"]
                 assert set(basis) == {"claimId", "sourceSpanId"}
                 assert basis["sourceSpanId"].isascii()
     # REVIEW sees original sources without anchoring on previous categories/reasons.
@@ -404,6 +411,18 @@ def test_all_unrelated_findings_skip_review_without_keywords_and_skip_reduce():
     insight = result.insights[0]
     assert insight.overview == insight.implications == insight.watch_items == []
     assert all(entry.axes.directness == 0 for entry in insight.assessments)
+    assert all(
+        entry.axes.impact is None and entry.axes.urgency is None for entry in insight.assessments
+    )
+    assert all(importance_score(entry.axes) == 0.0 for entry in insight.assessments)
+    assert all(importance_grade(entry.axes) == "low" for entry in insight.assessments)
+    assert all(provider.schema_validity)
+    for payload in provider.wire_payloads:
+        for entry in payload["assessments"]["CHIP_MAKER"].values():
+            assert entry["decision"]["connection"]["relation"] == "UNRELATED"
+            assert entry["decision"]["connection"]["basis"] is not None
+            assert entry["decision"]["effect"] == {"impactScope": "UNDETERMINED", "basis": None}
+            assert entry["decision"]["timing"] == {"urgencyState": "UNDETERMINED", "basis": None}
     assert result.meta.credits == 0.4
 
 
@@ -421,9 +440,9 @@ def test_map_span_repair_keeps_same_batch_schema_and_sums_all_stages():
 
     def wire_hook(stage, occurrence, _, value):
         if stage == "MAP-001" and occurrence == 1:
-            value["assessments"]["CHIP_MAKER"]["finding101"]["effect"]["basis"]["sourceSpanId"] = (
-                "s101_0_99999"
-            )
+            value["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["effect"]["basis"][
+                "sourceSpanId"
+            ] = "s101_0_99999"
         return value
 
     # A malformed provider can still return bytes that violate its native schema.
@@ -462,8 +481,8 @@ def test_shifted_finding_span_is_native_invalid_and_locally_repaired_without_usa
     def wire_hook(stage, occurrence, _, value):
         if stage == "MAP-001" and occurrence == 1:
             entries = value["assessments"]["CHIP_MAKER"]
-            basis = entries["finding101"]["effect"]["basis"]
-            foreign_span = entries["finding102"]["effect"]["basis"]["sourceSpanId"]
+            basis = entries["finding101"]["decision"]["effect"]["basis"]
+            foreign_span = entries["finding102"]["decision"]["effect"]["basis"]["sourceSpanId"]
             assert basis["claimId"] == "101:0"
             assert basis["sourceSpanId"] != foreign_span
             basis["sourceSpanId"] = foreign_span
@@ -477,26 +496,45 @@ def test_shifted_finding_span_is_native_invalid_and_locally_repaired_without_usa
     repair_entries = repair["response_schema"]["properties"]["assessments"]["properties"][
         "CHIP_MAKER"
     ]
-    assert set(repair_entries["properties"]) == {"finding101", "finding102"}
-    assert [finding["id"] for finding in framed(repair["prompt"])["findings"]] == [101, 102]
+    assert set(repair_entries["properties"]) == {"finding101"}
+    assert [finding["id"] for finding in framed(repair["prompt"])["findings"]] == [101]
     assert "sourceSpanId" in repair["prompt"] and "findingId=101" in repair["prompt"]
     assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
     assert result.meta.cost_usd == 0.012 and result.meta.credits == 0.8
     assert source.model_dump_json(by_alias=True) == snapshot
 
 
+def _assert_failed_review_retains_exact_map(provider, source, result, caplog):
+    original = validate_draft(
+        ProviderResponse(provider.response_texts[0], "openai", "gpt-4.1-nano", ProviderUsage()),
+        source,
+    )
+    assert result.insights[0].assessments == original.mapped.insights[0].assessments
+    assert stages(provider) == ["MAP-001", "REVIEW-001", "REVIEW-001", "REDUCE-001"]
+    assert provider.schema_validity == [True, False, False, True]
+    assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
+    assert result.meta.cost_usd == 0.012 and result.meta.credits == 0.8
+    assert (
+        "stage=REVIEW-001 outcome=VALIDATION_FAILED fallback=VALIDATED_MAP_RETAINED" in caplog.text
+    )
+
+
 @pytest.mark.parametrize("stage", ["MAP-001", "REVIEW-001"])
-def test_native_invalid_span_still_gets_local_validation_and_at_most_one_repair(stage):
+def test_native_invalid_span_still_gets_local_validation_and_at_most_one_repair(stage, caplog):
     source = request()
 
     def wire_hook(current, _, data, value):
         if current == stage:
-            value["assessments"]["CHIP_MAKER"]["finding101"]["connection"]["basis"][
+            value["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["connection"]["basis"][
                 "sourceSpanId"
             ] = "s101_0_99999"
         return value
 
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
+    if stage == "REVIEW-001":
+        result = generate(provider, source)
+        _assert_failed_review_retains_exact_map(provider, source, result, caplog)
+        return
     with pytest.raises(AgentError) as caught:
         generate(provider, source)
     assert caught.value.code == "SCHEMA_VIOLATION"
@@ -504,6 +542,11 @@ def test_native_invalid_span_still_gets_local_validation_and_at_most_one_repair(
     assert not any(label.startswith("REDUCE") for label in stages(provider))
     assert caught.value.details["usage"]["inputTokens"] == len(provider.calls) * 11
     assert caught.value.details["executionMetadata"]["promptVersion"] == PROMPT_VERSION
+    assert caught.value.details["validationFailure"]["stage"] == stage
+    assert caught.value.details["validationFailure"]["attempt"] == 2
+    assert caught.value.details["validationFailure"]["errorKinds"] == [
+        "report_assessment_draft_invalid"
+    ]
     assert provider.schema_validity == [label != stage for label in stages(provider)]
     assert caught.value.details["usage"]["costUsd"] == float(
         Decimal(len(provider.calls)) * Decimal("0.003")
@@ -518,9 +561,9 @@ def test_native_span_restores_quotes_and_newlines_exactly_after_one_repair(stage
 
     def wire_hook(current, occurrence, _, value):
         if current == stage and occurrence == 1:
-            value["assessments"]["CHIP_MAKER"]["finding101"]["effect"]["basis"]["sourceSpanId"] = (
-                "s101_0_99999"
-            )
+            value["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["effect"]["basis"][
+                "sourceSpanId"
+            ] = "s101_0_99999"
         return value
 
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
@@ -540,7 +583,7 @@ def test_native_span_restores_quotes_and_newlines_exactly_after_one_repair(stage
         basis.quote == text
         for basis in (draft.relation_basis, draft.impact_basis, draft.urgency_basis)
     )
-    native_basis = wire["assessments"]["CHIP_MAKER"]["finding101"]["effect"]["basis"]
+    native_basis = wire["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["effect"]["basis"]
     assert set(native_basis) == {"claimId", "sourceSpanId"}
     choices = framed(provider.calls[repair_index]["prompt"])["findings"][0]["sourceQuoteChoices"]
     assert json.dumps(text, ensure_ascii=False) in json.dumps(choices, ensure_ascii=False)
@@ -571,23 +614,23 @@ def test_post_validated_category_correlations_repair_invalid_structure_once(defe
             return value
         draft = value["assessments"]["CHIP_MAKER"]["finding101"]
         if defect == "direct_without_work":
-            draft["connection"]["work"] = None
+            draft["decision"]["connection"]["work"] = None
         elif defect == "direct_without_basis":
-            draft["connection"]["basis"] = None
+            draft["decision"]["connection"]["basis"] = None
         elif defect == "direct_with_condition":
-            draft["connection"]["condition"] = "추가 업무 연결을 확인하는 경우"
+            draft["decision"]["connection"]["condition"] = "추가 업무 연결을 확인하는 경우"
         elif defect == "conditional_without_condition":
-            draft["connection"]["relation"] = "CONDITIONAL"
+            draft["decision"]["connection"]["relation"] = "CONDITIONAL"
         elif defect == "unknown_effect_with_basis":
-            draft["effect"]["impactScope"] = "UNDETERMINED"
+            draft["decision"]["effect"]["impactScope"] = "UNDETERMINED"
         elif defect == "known_effect_without_basis":
-            draft["effect"]["basis"] = None
+            draft["decision"]["effect"]["basis"] = None
         elif defect == "unknown_timing_with_basis":
-            draft["timing"]["urgencyState"] = "UNDETERMINED"
+            draft["decision"]["timing"]["urgencyState"] = "UNDETERMINED"
         elif defect == "known_timing_without_basis":
-            draft["timing"]["basis"] = None
+            draft["decision"]["timing"]["basis"] = None
         else:
-            draft["connection"]["work"] = "POWER_COOLING"
+            draft["decision"]["connection"]["work"] = "POWER_COOLING"
         return value
 
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
@@ -603,15 +646,19 @@ def test_post_validated_category_correlations_repair_invalid_structure_once(defe
 
 
 @pytest.mark.parametrize("stage", ["MAP-001", "REVIEW-001"])
-def test_invalid_native_structure_stops_after_one_repair_and_reports_observed_usage(stage):
+def test_invalid_native_structure_stops_after_one_repair_and_reports_observed_usage(stage, caplog):
     source = request()
 
     def wire_hook(current, _, data, value):
         if current == stage:
-            value["assessments"]["CHIP_MAKER"]["finding101"]["effect"]["basis"] = None
+            value["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["effect"]["basis"] = None
         return value
 
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
+    if stage == "REVIEW-001":
+        result = generate(provider, source)
+        _assert_failed_review_retains_exact_map(provider, source, result, caplog)
+        return
     with pytest.raises(AgentError) as caught:
         generate(provider, source)
     assert caught.value.code == "SCHEMA_VIOLATION"
@@ -792,16 +839,16 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v8"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v9"
     assert output["meta"]["mock"] is True
-    assert RUBRIC_VERSION == "report-importance.v5"
+    assert RUBRIC_VERSION == "report-importance.v6"
     assert set(output) == {"insights", "meta"}
     assessment = output["insights"][0]["assessments"][0]
     assert set(assessment) == {"findingId", "reason", "basisClaimIds", "axes"}
     assert assessment["axes"]["novelty"] is None
 
 
-def test_draft_error_repairs_whole_batch_before_unvisited_prose_guards():
+def test_draft_error_repairs_native_and_previously_unvisited_prose_failures():
     source, reasons, _ = partial_repair_fixture()
 
     def hook(stage, occurrence, _, value):
@@ -818,10 +865,8 @@ def test_draft_error_repairs_whole_batch_before_unvisited_prose_guards():
 
     provider = V4Provider(source, relation="UNRELATED", hook=hook)
     result = generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
-    assert provider.schema_validity == [True, True]
-    assert [f["id"] for f in framed(provider.calls[1]["prompt"])["findings"]] == list(
-        range(101, 109)
-    )
+    assert stages(provider) == ["MAP-001", "MAP-001", "MAP-002"]
+    assert provider.schema_validity == [True, True, True]
+    assert [f["id"] for f in framed(provider.calls[1]["prompt"])["findings"]] == [101, 103]
     assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
-    assert result.meta.input_tokens == 22 and result.meta.cost_usd == 0.006
+    assert result.meta.input_tokens == 33 and result.meta.cost_usd == 0.009

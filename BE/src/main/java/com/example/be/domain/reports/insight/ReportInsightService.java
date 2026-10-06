@@ -29,8 +29,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service @RequiredArgsConstructor @Slf4j
 public class ReportInsightService {
-    public static final String PROMPT_VERSION = "report-insight.ko.v8";
-    public static final String RUBRIC_VERSION = "report-importance.v5";
+    public static final String PROMPT_VERSION = "report-insight.ko.v9";
+    public static final String RUBRIC_VERSION = "report-importance.v6";
     private final AgentProperties properties;
     private final ReportInsightSnapshotAssembler assembler;
     private final ReportInsightPersistenceService persistence;
@@ -116,24 +116,50 @@ public class ReportInsightService {
         LocalDateTime startedAt = now();
         AgentReportInsightResponse response = null;
         boolean validated = false;
+        GenerationPhase phase = GenerationPhase.AGENT_CALL;
         NewsReportInsight saved;
         try {
             response = client.reportInsight(request);
+            phase = GenerationPhase.RESPONSE_VALIDATION;
             validator.validate(response, request);
             validated = true;
+            phase = GenerationPhase.USAGE_CHECK;
             var actualUnits = plan == AgentPlan.FREE ? java.math.BigDecimal.ONE : response.meta().credits();
             if (actualUnits.compareTo(reservation.reservedUnits()) > 0)
                 throw new AgentClientException("BUDGET_EXCEEDED", "실제 LLM 사용량이 요청당 예약 상한을 초과했습니다.");
+            phase = GenerationPhase.PERSISTENCE;
             saved = executions.success(snapshot, request, response, audit, startedAt, reservation);
         } catch (RuntimeException exception) {
             var failure = observedFailure(exception, response, validated);
-            try { executions.failure(snapshot.runId(), request, failure, audit, startedAt, reservation); }
+            boolean auditPersisted = false;
+            try {
+                executions.failure(snapshot.runId(), request, failure, audit, startedAt, reservation);
+                auditPersisted = true;
+            }
             catch (RuntimeException accountingFailure) {
                 log.error("리포트 인사이트 비용 기록 실패. 예약을 유지합니다. reportId={}", snapshot.reportId());
             }
+            // Agent error messages, codes and causes can contain response data. Log only bounded metadata.
+            var validation = failure.getValidationFailure();
+            log.warn("리포트 관점 인사이트 생성 실패. reportId={}, audience={}, phase={}, failureCode={}, timeoutPhase={}, auditPersisted={}, validationStage={}, validationAttempt={}, validationErrorType={}, validationErrorCount={}, validationErrorKinds={}",
+                    snapshot.reportId(), audience, phase, diagnosticFailureCode(failure), failure.getTimeoutPhase(), auditPersisted,
+                    validation == null ? null : validation.stage(), validation == null ? null : validation.attempt(),
+                    validation == null ? null : validation.errorType(), validation == null ? null : validation.errorCount(),
+                    validation == null ? null : validation.errorKinds());
             throw new GeneralException(GeneralErrorCode.INTERNAL_SERVER_ERROR, "리포트 관점 인사이트 생성에 실패했습니다.");
         }
         return saved;
+    }
+
+    private enum GenerationPhase { AGENT_CALL, RESPONSE_VALIDATION, USAGE_CHECK, PERSISTENCE }
+
+    private String diagnosticFailureCode(AgentClientException failure) {
+        if (failure.getCode() == null) return "UNKNOWN";
+        return switch (failure.getCode()) {
+            case "SCHEMA_VIOLATION", "PROVIDER_UNAVAILABLE", "BUDGET_EXCEEDED", "API_KEY_MISSING",
+                    "UNAUTHORIZED", "PERSISTENCE_FAILED" -> failure.getCode();
+            default -> "UNKNOWN";
+        };
     }
 
     private AgentClientException observedFailure(RuntimeException exception, AgentReportInsightResponse response, boolean validated) {

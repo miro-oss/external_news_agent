@@ -356,9 +356,9 @@ def test_request_bound_native_schema_fixes_all_keys_role_work_and_local_claims()
         elif change == "extra":
             items["finding103"] = deepcopy(items["finding101"])
         elif change == "role":
-            items["finding101"]["connection"]["work"] = "SYSTEM_PROCUREMENT"
+            items["finding101"]["decision"]["connection"]["work"] = "SYSTEM_PROCUREMENT"
         elif change == "claim":
-            items["finding101"]["connection"]["basis"]["claimId"] = "102:0"
+            items["finding101"]["decision"]["connection"]["basis"]["claimId"] = "102:0"
         else:
             items["finding101"]["findingId"] = 102
         with pytest.raises(JsonSchemaValidationError):
@@ -504,7 +504,11 @@ def test_missing_role_keywords_do_not_remove_existing_relevance_and_metadata_can
 
 
 def test_four_disjoint_role_top_fives_receive_fair_review_under_shared_twelve_cap():
-    source = request(ids=tuple(range(101, 121)), audiences=tuple(ROLE_WORK))
+    source = request(
+        ids=tuple(range(101, 121)),
+        audiences=tuple(ROLE_WORK),
+        text="협정의 이행 조건이 바뀌었다.",
+    )
     value = payload(source, relation="UNRELATED")
     role_top_fives = {}
     for index, audience in enumerate(source.audiences):
@@ -521,6 +525,124 @@ def test_four_disjoint_role_top_fives_receive_fair_review_under_shared_twelve_ca
     assert all(len(set(selected) & top_five) == 3 for top_five in role_top_fives.values())
     assert all(len(set(selected) & top_five) < 5 for top_five in role_top_fives.values())
     assert all(len(insight.assessments) == 20 for insight in full.mapped.insights)
+
+
+@pytest.mark.parametrize("relation", ["UNRELATED", "UNDETERMINED"])
+def test_review_preserves_late_omissions_for_each_role_when_top_candidates_exceed_cap(relation):
+    source = request(
+        ids=tuple(range(101, 126)),
+        audiences=tuple(ROLE_WORK),
+        text="협정의 이행 조건이 바뀌었다.",
+    )
+    source_texts = (
+        "웨이퍼 수율 조건이 바뀌었다.",
+        "식각 장비의 납품 계획이 바뀌었다.",
+        "영업이익 전망이 바뀌었다.",
+        "대역폭 운영 조건이 바뀌었다.",
+    )
+    for finding, text in zip(source.findings[20:24], source_texts, strict=True):
+        finding.claims[0].text = text
+        finding.sentences[0].text = text
+    value = payload(source, relation="UNRELATED")
+    leading = []
+    for index, audience in enumerate(source.audiences):
+        top = source.findings[index * 5 : (index + 1) * 5]
+        leading.append(top[0].id)
+        for finding in top:
+            value["assessments"][audience][f"finding{finding.id}"] = item(
+                finding, audience=audience
+            )
+        omitted = source.findings[20 + index]
+        value["assessments"][audience][f"finding{omitted.id}"] = item(
+            omitted, audience=audience, relation=relation
+        )
+        claimless = value["assessments"][audience]["finding125"]
+        claimless.update(
+            relation="UNDETERMINED", relationBasis=None, reason=CLAIMLESS_ASSESSMENT_REASON
+        )
+    source.findings[-1].claims = []
+    source.findings[-1].sentences = []
+    full = validate_draft(response(value, source), source)
+    before = full.draft.model_dump_json()
+
+    selected = select_review(source, full)
+
+    assert len(selected) == 12
+    assert set(leading) <= set(selected)
+    assert {121, 122, 123, 124} <= set(selected)
+    assert 125 not in selected
+    assert selected == tuple(sorted(selected))
+    assert full.draft.model_dump_json() == before
+
+
+def test_review_unknown_without_role_keywords_gets_capacity_beside_disjoint_top_candidates():
+    source = request(
+        ids=tuple(range(101, 122)),
+        audiences=tuple(ROLE_WORK),
+        text="협정의 이행 조건이 바뀌었다.",
+    )
+    value = payload(source, relation="UNRELATED")
+    for index, audience in enumerate(source.audiences):
+        for finding in source.findings[index * 5 : (index + 1) * 5]:
+            value["assessments"][audience][f"finding{finding.id}"] = item(
+                finding, audience=audience
+            )
+    value["assessments"]["IT_INFRA"]["finding121"] = item(
+        source.findings[-1], audience="IT_INFRA", relation="UNDETERMINED"
+    )
+    full = validate_draft(response(value, source), source)
+
+    selected = select_review(source, full)
+
+    assert len(selected) == 12
+    assert 121 in selected
+    assert {101, 106, 111, 116} <= set(selected)
+
+
+def test_single_role_review_shares_capacity_between_unknown_relation_and_unknown_impact():
+    source = request(ids=tuple(range(101, 121)), text="협정의 이행 조건이 바뀌었다.")
+    value = payload(source)
+    entries = value["assessments"]["CHIP_MAKER"]
+    # Seven scored findings precede the abstentions. Only five enter the top
+    # candidate list, so later known connections need their own review path.
+    for finding in source.findings[7:17]:
+        entries[f"finding{finding.id}"] = item(finding, relation="UNDETERMINED")
+    for finding, relation in zip(source.findings[17:19], ("DIRECT", "BACKGROUND"), strict=True):
+        entry = item(finding, relation=relation)
+        entry.update(impactScope="UNDETERMINED", impactBasis=None)
+        entries[f"finding{finding.id}"] = entry
+    entries["finding120"].update(urgencyState="UNDETERMINED", urgencyBasis=None)
+    full = validate_draft(response(value, source), source)
+    before = full.draft.model_dump_json()
+
+    selected = select_review(source, full)
+
+    assert len(selected) == 12
+    assert set(range(101, 106)) <= set(selected)
+    assert {108, 118, 119} <= set(selected)
+    assert 120 not in selected  # Unknown urgency alone does not cause abstention.
+    assert selected == tuple(sorted(selected))
+    assert full.draft.model_dump_json() == before
+    assessments = {item.finding_id: item for item in full.mapped.insights[0].assessments}
+    assert assessments[108].axes.directness is None
+    assert assessments[118].axes.directness == 3
+    assert assessments[119].axes.directness == 1
+    assert assessments[118].axes.impact is None and assessments[119].axes.impact is None
+
+
+@pytest.mark.parametrize(
+    "text", ["메모리 가격이 올랐다.", "DRAM prices increased.", "SSD shipments declined."]
+)
+def test_infra_component_sources_trigger_review_without_promoting_generic_ai_or_metadata(text):
+    source = request(ids=(101, 102), audiences=("IT_INFRA",), text=text)
+    source.findings[1].claims[0].text = "회사는 AI 협력 계획을 발표했다."
+    source.findings[1].sentences[0].text = "회사는 AI 협력 계획을 발표했다."
+    source.findings[1].article_title = "메모리 DRAM SSD"
+    source.findings[1].topic_name = "데이터센터 memory"
+    full = validate_draft(response(payload(source, relation="UNRELATED"), source), source)
+
+    assert select_review(source, full) == (101,)
+    assert all(item.axes.directness == 0 for item in full.mapped.insights[0].assessments)
 
 
 @pytest.mark.parametrize(
@@ -627,9 +749,7 @@ def test_native_to_flat_roundtrip_keeps_every_original_field_and_source_quote():
     assert draft_to_wire(validated) == native == snapshot
     assert set(native["assessments"]["CHIP_MAKER"]["finding101"]) == {
         "findingId",
-        "connection",
-        "effect",
-        "timing",
+        "decision",
         "reason",
     }
 
@@ -739,7 +859,7 @@ def test_native_span_choices_bind_claim_id_and_original_source_handle_together(f
     schema = OpenAIJsonSchemaTransformer(draft_schema(source), strict=True).walk()
     native = draft_to_wire(payload(source), source)
     Draft202012Validator(schema).validate(native)
-    basis = native["assessments"]["CHIP_MAKER"]["finding101"][field]["basis"]
+    basis = native["assessments"]["CHIP_MAKER"]["finding101"]["decision"][field]["basis"]
     if change == "different_claim":
         basis["sourceSpanId"] = "s101_1_0"
     elif change == "different_finding":
@@ -759,9 +879,9 @@ def test_unrelated_zero_basis_is_bound_to_original_quote_choices_too():
     native = draft_to_wire(payload(source, relation="UNRELATED"), source)
     validator = Draft202012Validator(draft_schema(source))
     validator.validate(native)
-    native["assessments"]["CHIP_MAKER"]["finding101"]["connection"]["basis"]["sourceSpanId"] = (
-        "s101_1_0"
-    )
+    native["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["connection"]["basis"][
+        "sourceSpanId"
+    ] = "s101_1_0"
     with pytest.raises(JsonSchemaValidationError):
         validator.validate(native)
 
@@ -811,13 +931,21 @@ def test_claimful_reason_schema_and_map_review_prompts_explain_business_unknown_
         assert "sourceSpanId" in prompt and "sourceQuoteChoices" in prompt
         assert "claims=[]" in prompt
         assert "condition은 기사 재요약이 아닌" in prompt
-        assert "관계 판단을 보류" in prompt
+        assert "업무 전체와 사건을 대조" in prompt
+        assert "미확인 축" in prompt
 
 
 def test_complete_prompt_example_preserves_positive_unknown_and_claimless_sources():
     path = Path(__file__).resolve().parents[1] / "app/prompts/report-insight.ko.v4.md"
     prompt = path.read_text()
     native = json.loads(prompt.split("```json\n", 1)[1].split("\n```", 1)[0])
+    # The archived v4 prompt's example predates the private decision envelope.
+    # Its evidence/category content still roundtrips through the current shape.
+    for entries in native["assessments"].values():
+        for entry in entries.values():
+            entry["decision"] = {
+                field: entry.pop(field) for field in ("connection", "effect", "timing")
+            }
     texts = (
         "제조사는 공정 검증 준비를 계획했다.",
         "합병 대상은 방산 사업이며 장비 사업은 포함하지 않는다.",
@@ -958,6 +1086,31 @@ def test_four_audience_twelve_finding_sdk_review_schema_stays_within_all_size_li
     assert len(validate_draft(response(payload(source), source), source).mapped.insights) == 4
 
 
+def resolve_schema_node(schema, node):
+    # The SDK wraps annotated references in a single-choice anyOf.
+    while "$ref" in node or (len(node.get("anyOf", [])) == 1 and "$ref" in node["anyOf"][0]):
+        if "$ref" in node:
+            node = schema["$defs"][node["$ref"].removeprefix("#/$defs/")]
+        else:
+            node = node["anyOf"][0]
+    return node
+
+
+def decision_axis_schemas(schema, record):
+    """Inspect all axis choices while keeping decision coupling tests separate."""
+    decision = record["properties"]["decision"]
+    if "anyOf" not in decision:
+        return decision["properties"]
+    related, unrelated = [branch["properties"] for branch in decision["anyOf"]]
+    return {
+        "connection": {
+            "anyOf": [*related["connection"]["anyOf"], *unrelated["connection"]["anyOf"]]
+        },
+        "effect": resolve_schema_node(schema, related["effect"]),
+        "timing": resolve_schema_node(schema, related["timing"]),
+    }
+
+
 def test_compact_native_axes_enforce_categories_without_duplicating_source_choices():
     source = request(ids=(101, 102), audiences=tuple(ROLE_WORK))
     wire = OpenAIJsonSchemaTransformer(draft_schema(source), strict=True).walk()
@@ -981,33 +1134,39 @@ def test_compact_native_axes_enforce_categories_without_duplicating_source_choic
         for finding in source.findings:
             record = audience_schema["properties"][f"finding{finding.id}"]
             assert "anyOf" not in record
-            props = record["properties"]
-            branches = props["connection"]["anyOf"]
+            props = decision_axis_schemas(wire, record)
+            branches = [
+                resolve_schema_node(wire, branch) for branch in props["connection"]["anyOf"]
+            ]
             assert len(branches) == 4
             for branch in branches:
                 assert list(branch["properties"]) == ["relation", "work", "condition", "basis"]
             for branch in branches[:2]:
                 assert branch["properties"]["work"] == {"$ref": f"#/$defs/{name}"}
             for branch in branches[:3]:
-                assert branch["properties"]["basis"] == {
-                    "$ref": f"#/$defs/Finding{finding.id}SourceSpan"
-                }
+                assert (
+                    resolve_schema_node(wire, branch["properties"]["basis"])
+                    == definitions[f"Finding{finding.id}SourceSpan"]
+                )
             assert branches[-1]["properties"]["basis"] == {"type": "null"}
             for field, category, definition in (
                 ("effect", "impactScope", "ReportKnownImpactScope"),
                 ("timing", "urgencyState", "ReportKnownUrgencyState"),
             ):
-                known, unknown = props[field]["anyOf"]
+                known, unknown = [
+                    resolve_schema_node(wire, branch) for branch in props[field]["anyOf"]
+                ]
                 assert list(known["properties"])[0] == category
                 assert known["properties"][category] == {"$ref": f"#/$defs/{definition}"}
-                assert known["properties"]["basis"] == {
-                    "$ref": f"#/$defs/Finding{finding.id}SourceSpan"
-                }
+                assert (
+                    resolve_schema_node(wire, known["properties"]["basis"])
+                    == definitions[f"Finding{finding.id}SourceSpan"]
+                )
                 assert unknown["properties"]["basis"] == {"type": "null"}
     validator = Draft202012Validator(wire)
     for field in ("connection", "effect", "timing"):
         native = draft_to_wire(payload(source), source)
-        native["assessments"]["CHIP_MAKER"]["finding101"][field]["basis"] = None
+        native["assessments"]["CHIP_MAKER"]["finding101"]["decision"][field]["basis"] = None
         with pytest.raises(JsonSchemaValidationError):
             validator.validate(native)
         with pytest.raises(ReportAssessmentDraftValidationError):
@@ -1036,7 +1195,7 @@ def test_safe_native_span_ids_restore_quotes_newlines_and_spacing_without_source
             if isinstance(value, str):
                 assert '"' not in value and "\n" not in value
     native = draft_to_wire(payload(source), request=source)
-    basis = native["assessments"]["CHIP_MAKER"]["finding101"]["connection"]["basis"]
+    basis = native["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["connection"]["basis"]
     assert basis == {"claimId": "101:0", "sourceSpanId": "s101_0_0"}
     Draft202012Validator(wire).validate(native)
     validated = validate_draft(response(payload(source), source), source)
@@ -1067,9 +1226,9 @@ def test_unknown_or_cross_source_span_ids_are_rejected_locally_with_typed_findin
     source = source.model_copy(update={"findings": [*source.findings, other]})
     native = draft_to_wire(payload(source), source)
     invalid = {"unknown": "s101_0_99999", "other_finding": "s102_0_0", "other_claim": "s101_1_0"}
-    native["assessments"]["CHIP_MAKER"]["finding101"]["effect"]["basis"]["sourceSpanId"] = invalid[
-        change
-    ]
+    native["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["effect"]["basis"][
+        "sourceSpanId"
+    ] = invalid[change]
     with pytest.raises(JsonSchemaValidationError):
         Draft202012Validator(draft_schema(source)).validate(native)
     with pytest.raises(ReportAssessmentDraftValidationError) as caught:
@@ -1084,7 +1243,7 @@ def test_unknown_or_cross_source_span_ids_are_rejected_locally_with_typed_findin
 def test_old_raw_quote_native_basis_cannot_bypass_source_span_resolution():
     source = request()
     native = draft_to_wire(payload(source), source)
-    native["assessments"]["CHIP_MAKER"]["finding101"]["connection"]["basis"] = {
+    native["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["connection"]["basis"] = {
         "claimId": "101:0",
         "quote": source.findings[0].claims[0].text,
     }

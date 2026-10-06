@@ -97,6 +97,73 @@ class AgentErrorResponseTest {
         assertEquals("observed-model", response.executionMetadata().model());
     }
 
+    @Test
+    void readsBoundedValidationFailureWithoutDiscardingUsageOrExecutionMetadata() {
+        var response = error(Map.of("validationFailure", validation(),
+                "executionMetadata", metadata(), "usage", Map.of("inputTokens", 10)));
+
+        assertEquals(new AgentClientException.ValidationFailure("MAP-002", 2,
+                "OutputValidationError", 2, List.of("report_assessment_draft_invalid", "report_fact_mismatch")),
+                response.validationFailure());
+        assertEquals(10L, response.usage().inputTokens());
+        assertEquals("observed-model", response.executionMetadata().model());
+        assertNull(new AgentClientException("SCHEMA_VIOLATION", "legacy").getValidationFailure());
+    }
+
+    @Test
+    void unrecognizedKindsAreOmittedWithoutInventingACause() {
+        var failure = new HashMap<>(validation());
+        failure.put("errorKinds", List.of("private-kind\nforged", "report_fact_mismatch", "report_fact_mismatch"));
+        assertEquals(List.of("report_fact_mismatch"), error(Map.of("validationFailure", failure))
+                .validationFailure().errorKinds());
+        failure.put("errorKinds", List.of("private-kind"));
+        assertEquals(List.of(), error(Map.of("validationFailure", failure)).validationFailure().errorKinds());
+    }
+
+    @Test
+    void rejectsMalformedValidationContextWithoutDiscardingUsage() {
+        var invalid = List.of(
+                changedValidation("stage", "MAP-002\nforged"),
+                changedValidation("stage", "PRIVATE_STAGE"),
+                changedValidation("stage", "MAP-1000"),
+                changedValidation("attempt", 3),
+                changedValidation("attempt", "2"),
+                changedValidation("attempt", 1.5),
+                changedValidation("errorType", "PrivateDynamicException"),
+                changedValidation("errorCount", -1),
+                changedValidation("errorCount", 1_000_001),
+                changedValidation("errorKinds", List.of("value_error", "value_error", "value_error",
+                        "value_error", "value_error", "value_error")),
+                changedValidation("errorKinds", List.of(123)),
+                changedValidation("message", "private response"));
+        for (var failure : invalid) {
+            var response = error(Map.of("validationFailure", failure, "usage", Map.of("inputTokens", 10)));
+            assertNull(response.validationFailure());
+            assertEquals(10L, response.usage().inputTokens());
+        }
+    }
+
+    @Test
+    void providerErrorsCannotClaimOldValidationDiagnostics() {
+        var response = new AgentErrorResponse(new AgentErrorResponse.ErrorDetail(
+                "PROVIDER_UNAVAILABLE", "failed repair provider", Map.of("validationFailure", validation())));
+        assertNull(response.validationFailure());
+        assertNull(new AgentErrorResponse(null).validationFailure());
+        assertNull(error(null).validationFailure());
+        assertNull(error(Map.of("validationFailure", "invalid")).validationFailure());
+    }
+
+    private Map<String, Object> validation() {
+        return Map.of("stage", "MAP-002", "attempt", 2, "errorType", "OutputValidationError",
+                "errorCount", 2, "errorKinds", List.of("report_assessment_draft_invalid", "report_fact_mismatch"));
+    }
+
+    private Map<String, Object> changedValidation(String key, Object value) {
+        var result = new HashMap<>(validation());
+        result.put(key, value);
+        return result;
+    }
+
     private Map<String, Object> metadata() {
         return Map.of("provider", "openai", "model", "observed-model",
                 "promptVersion", "insight.ko.v2", "source", "AGENT_ERROR");

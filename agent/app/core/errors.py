@@ -9,6 +9,10 @@ class AgentError(Exception):
     details: object | None = None
 
 
+class StructuredOutputExhaustedError(AgentError):
+    """Only structured_call's exhausted local output validation, not provider errors."""
+
+
 class OutputValidationError(ValueError):
     """Carry one application-defined kind per output violation for safe diagnostics.
 

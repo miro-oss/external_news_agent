@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { QueryClient, QueryObserver } from '@tanstack/react-query'
+import { environmentManager, focusManager, QueryClient, QueryObserver } from '@tanstack/react-query'
 import { ApiError } from '../src/api/client.ts'
 import { generateReportInsightOptions, isReportInsightAbsent, isReportInsightPreparing, reportInsightKey, reportInsightOptions, reportInsightSnapshotKey, selectReportInsight } from '../src/api/reportInsights.ts'
 import { reportInsightFixture } from '../scripts/report-insight-fixtures.mjs'
@@ -11,6 +11,14 @@ const envelope = result => new Response(JSON.stringify({ isSuccess: true, code: 
 const fail = (code, message, status) => new Response(JSON.stringify({ isSuccess: false, code, message, result: {} }), { status })
 const preparingMessage = '동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.'
 function clientFor(context) { const client = new QueryClient(); context.after(() => client.clear()); return client }
+const settle = () => new Promise(resolve => setImmediate(resolve))
+function pollingClock(context) {
+  const server = environmentManager.isServer()
+  environmentManager.setIsServer(() => false)
+  context.after(() => { environmentManager.setIsServer(() => server); focusManager.setFocused(undefined) })
+  context.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'], now: 1_000_000 })
+  return async milliseconds => { context.mock.timers.tick(milliseconds); await settle() }
+}
 
 test('report/audience/snapshot are independent, and stored lookup sends only one audience without generation', async context => {
   const client = clientFor(context), calls = []
@@ -77,95 +85,142 @@ test('only the exact COMMON409 automatic-preparation response is polled', () => 
 })
 
 test('automatic preparation polls stored GETs until ready without generation or usage invalidation', async context => {
+  const advance = pollingClock(context)
   const client = clientFor(context), calls = [], states = [], invalidations = []
   context.mock.method(client, 'invalidateQueries', options => { invalidations.push(options); return Promise.resolve() })
   context.mock.method(globalThis, 'fetch', async (url, init) => {
     calls.push({ url, method: init.method ?? 'GET' })
     return calls.length < 3 ? fail('COMMON409', preparingMessage, 409) : envelope(reportInsightFixture(report))
   })
-  const options = { ...reportInsightOptions(report.id, 'CHIP_MAKER', snapshot), retryDelay: 0 }
-  const observer = new QueryObserver(client, options)
+  const observer = new QueryObserver(client, reportInsightOptions(report.id, 'CHIP_MAKER', snapshot))
   context.after(observer.subscribe(state => states.push(state)))
-  const result = await client.fetchQuery(options)
-  assert.equal(result.insights[0].audience, 'CHIP_MAKER')
-  assert.ok(states.some(state => state.isPending && isReportInsightPreparing(state.failureReason)))
+  await settle()
+  await advance(10_000)
+  await advance(10_000)
+  assert.equal(observer.getCurrentResult().data.insights[0].audience, 'CHIP_MAKER')
+  assert.ok(states.some(state => isReportInsightPreparing(state.error)))
   assert.equal(observer.getCurrentResult().isSuccess, true)
+  await advance(60_000)
   assert.equal(calls.length, 3)
   assert.ok(calls.every(call => call.method === 'GET' && call.url.endsWith('?audience=CHIP_MAKER')))
   assert.deepEqual(invalidations, [])
 })
 
 test('a terminal missing result after preparation stops polling and remains eligible for explicit retry', async context => {
+  const advance = pollingClock(context)
   const client = clientFor(context), calls = []
   context.mock.method(globalThis, 'fetch', async (_url, init) => {
     calls.push(init.method ?? 'GET')
     return calls.length === 1 ? fail('COMMON409', preparingMessage, 409)
       : fail('COMMON404', '저장된 리포트 관점 인사이트가 없습니다.', 404)
   })
-  await assert.rejects(client.fetchQuery({ ...reportInsightOptions(report.id, 'CHIP_MAKER', snapshot), retryDelay: 0 }), isReportInsightAbsent)
+  const observer = new QueryObserver(client, reportInsightOptions(report.id, 'CHIP_MAKER', snapshot))
+  context.after(observer.subscribe(() => {}))
+  await settle()
+  await advance(10_000)
+  assert.ok(isReportInsightAbsent(observer.getCurrentResult().error))
+  await advance(60_000)
   assert.deepEqual(calls, ['GET', 'GET'])
 })
 
-test('preparation polling stops after fifteen minutes and a refresh can read the eventual result', async context => {
+test('a queue longer than fifteen minutes continues at a slower cadence and shows the eventual result automatically', async context => {
+  const advance = pollingClock(context)
   const client = clientFor(context), calls = []
-  let now = 0
-  context.mock.method(Date, 'now', () => now)
-  context.mock.method(globalThis, 'fetch', async (_url, init) => {
-    now += 5 * 60_000
-    calls.push(init.method ?? 'GET')
-    return fail('COMMON409', preparingMessage, 409)
-  })
-  const options = { ...reportInsightOptions(report.id, 'CHIP_MAKER', snapshot), retryDelay: 0 }
-  await assert.rejects(client.fetchQuery(options), isReportInsightPreparing)
-  assert.deepEqual(calls, ['GET', 'GET', 'GET', 'GET'])
+  let ready = false
   context.mock.method(globalThis, 'fetch', async (_url, init) => {
     calls.push(init.method ?? 'GET')
-    return envelope(reportInsightFixture(report))
+    return ready ? envelope(reportInsightFixture(report)) : fail('COMMON409', preparingMessage, 409)
   })
-  assert.equal((await client.fetchQuery(options)).insights[0].audience, 'CHIP_MAKER')
-  assert.deepEqual(calls, ['GET', 'GET', 'GET', 'GET', 'GET'])
+  const observer = new QueryObserver(client, reportInsightOptions(report.id, 'CHIP_MAKER', snapshot))
+  context.after(observer.subscribe(() => {}))
+  await settle()
+  for (let poll = 0; poll < 90; poll++) await advance(10_000)
+  assert.equal(calls.length, 91)
+  assert.ok(isReportInsightPreparing(observer.getCurrentResult().error))
+  await advance(29_999)
+  assert.equal(calls.length, 91)
+  await advance(1)
+  assert.equal(calls.length, 92)
+  ready = true
+  await advance(30_000)
+  assert.equal(observer.getCurrentResult().data.insights[0].audience, 'CHIP_MAKER')
+  assert.equal(observer.getCurrentResult().isSuccess, true)
+  await advance(60_000)
+  assert.equal(calls.length, 93)
+  assert.ok(calls.every(method => method === 'GET'))
 })
 
-test('leaving a report during automatic preparation cancels further polling', async context => {
-  const client = clientFor(context), polled = Promise.withResolvers()
+test('leaving a report cancels an in-flight lookup and all future automatic polls', async context => {
+  const advance = pollingClock(context)
+  const client = clientFor(context)
   let calls = 0, signal
   context.mock.method(globalThis, 'fetch', async (_url, init) => {
     calls++
     signal = init.signal
-    return fail('COMMON409', preparingMessage, 409)
+    return calls === 1 ? fail('COMMON409', preparingMessage, 409)
+      : new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }))
   })
-  const observer = new QueryObserver(client, { ...reportInsightOptions(report.id, 'CHIP_MAKER', snapshot), retryDelay: 10 })
-  const stop = observer.subscribe(state => { if (isReportInsightPreparing(state.failureReason)) polled.resolve() })
-  await polled.promise
+  const observer = new QueryObserver(client, reportInsightOptions(report.id, 'CHIP_MAKER', snapshot))
+  const stop = observer.subscribe(() => {})
+  context.after(stop)
+  await settle()
+  await advance(10_000)
+  assert.equal(calls, 2)
   stop()
   assert.equal(signal.aborted, true)
-  await new Promise(resolve => setTimeout(resolve, 20))
-  assert.equal(calls, 1)
+  await advance(60_000)
+  assert.equal(calls, 2)
 })
 
 test('switching perspectives while preparing cancels the old poll and reads only the selected stored result', async context => {
-  const client = clientFor(context), preparing = Promise.withResolvers(), calls = []
-  let oldSignal
+  const advance = pollingClock(context)
+  const client = clientFor(context), calls = []
   context.mock.method(globalThis, 'fetch', async (url, init) => {
     const audience = new URL(url, 'https://example.invalid').searchParams.get('audience')
     calls.push({ audience, method: init.method ?? 'GET' })
     if (audience === 'CHIP_MAKER') {
-      oldSignal = init.signal
       return fail('COMMON409', preparingMessage, 409)
     }
     return envelope(reportInsightFixture(report, audience))
   })
-  const observer = new QueryObserver(client, { ...reportInsightOptions(report.id, 'CHIP_MAKER', snapshot), retryDelay: 10 })
-  context.after(observer.subscribe(state => { if (isReportInsightPreparing(state.failureReason)) preparing.resolve() }))
-  await preparing.promise
+  const observer = new QueryObserver(client, reportInsightOptions(report.id, 'CHIP_MAKER', snapshot))
+  context.after(observer.subscribe(() => {}))
+  await settle()
   observer.setOptions(reportInsightOptions(report.id, 'IT_INFRA', snapshot))
-  assert.equal(oldSignal.aborted, true)
   assert.equal(observer.getCurrentResult().data, undefined)
-  await client.fetchQuery(reportInsightOptions(report.id, 'IT_INFRA', snapshot))
-  await new Promise(resolve => setTimeout(resolve, 20))
+  await settle()
+  await advance(60_000)
   assert.equal(observer.getCurrentResult().data.insights[0].audience, 'IT_INFRA')
   assert.equal(calls.filter(call => call.audience === 'CHIP_MAKER').length, 1)
   assert.ok(calls.every(call => call.method === 'GET'))
+})
+
+test('background preparation pauses polling and checks promptly on return without refetching terminal errors', async context => {
+  const advance = pollingClock(context)
+  const client = clientFor(context)
+  client.mount()
+  context.after(() => client.unmount())
+  let calls = 0, ready = false
+  context.mock.method(globalThis, 'fetch', async () => {
+    calls++
+    return ready ? fail('COMMON500', '조회 실패', 500) : fail('COMMON409', preparingMessage, 409)
+  })
+  const observer = new QueryObserver(client, reportInsightOptions(report.id, 'CHIP_MAKER', snapshot))
+  context.after(observer.subscribe(() => {}))
+  await settle()
+  focusManager.setFocused(false)
+  await advance(60_000)
+  assert.equal(calls, 1)
+  ready = true
+  focusManager.setFocused(true)
+  await settle()
+  assert.equal(calls, 2)
+  assert.equal(observer.getCurrentResult().error.code, 'COMMON500')
+  await advance(60_000)
+  focusManager.setFocused(false)
+  focusManager.setFocused(true)
+  await settle()
+  assert.equal(calls, 2)
 })
 
 test('an explicit retry racing an automatic job refreshes stored lookup without repeating its POST', async context => {

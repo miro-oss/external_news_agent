@@ -9,9 +9,29 @@ import calendar
 import re
 from datetime import date, timedelta
 
+from app.core.evidence import factual_mismatches
 from app.schemas.report_insight import ReportInsightRequest
 
 _POLARITY_MESSAGE = "근거와 반대되는 부정 표현이 포함되어 있습니다."
+_NUMERIC_CONTEXT_MESSAGE = "근거와 연결이 다른 숫자: "
+# An explicit report summary can coordinate two independent nominal facts.
+# Do not split ordinary conjunctions: they may share an actor, date or action.
+_PARALLEL_SUMMARY = re.compile(
+    r"(?:원문|기사(?:\s*내용)?|보고서|자료)(?:은|는|이|가)\s+"
+    r"(?P<left>.+(?:기대|전망|계획|도입|전환|변경))(?:과|와)\s+"
+    r"(?P<right>[A-Za-z가-힣][A-Za-z0-9가-힣&.-]*의\s+"
+    r".+(?:기대|전망|계획|도입|전환|변경))(?:을|를)\s+"
+    r"각각\s+(?:언급|설명|제시)(?:한다|했다|하였다|하고\s*있다)[.!。]?"
+)
+_SHARED_PARALLEL_CONTEXT = re.compile(
+    r"[\n\"'“”‘’;；]|(?<!\d)[.!?](?!\d)|"
+    r"(?<!\d)(?:19|20)\d{2}(?:[-/]\d{1,2}){1,2}(?!\d)|"
+    r"(?:\d\s*(?:년|월|일|분기)|오늘|내일|올해|내년|작년|지난해|상반기|하반기)|"
+    r"같은|동일|해당|상기|전술|전자의|후자의|"
+    r"(?:^|\s)(?:그|이|위|앞선)(?:\s|러한|런|$)|"
+    r"에\s*따르면|(?:밝힌|말한|설명한|전한|발표한)|(?:측|관계자)의|"
+    r"(?:이라는|라는|이라고|라고)"
+)
 # State nouns (미완료, 미제공) and conjugated predicates share the same polarity.
 # A noun such as a watch topic '인증 완료 여부' is deliberately not a predicate.
 _FACT_STATES = {
@@ -116,6 +136,23 @@ def has_asserted_event(value: str) -> bool:
     )
 
 
+def _independent_parallel_numbers(value: str, source: str) -> bool:
+    """Recheck explicit, unshared facts instead of joining their numeric owners.
+
+    The neutral reporting subject and the second fact's explicit possessive
+    actor rule out an elided shared subject. Dates, attribution, back references
+    and nested sentences keep the original conservative check. All factual checks
+    run on both complete noun phrases, so an actor/number misbinding survives.
+    """
+    match = _PARALLEL_SUMMARY.fullmatch(value.strip())
+    if match is None:
+        return False
+    facts = (match["left"], match["right"])
+    if any(_SHARED_PARALLEL_CONTEXT.search(fact) for fact in facts):
+        return False
+    return all(not factual_mismatches(fact, source) for fact in facts)
+
+
 def report_prose_mismatches(
     value: str,
     source: str,
@@ -124,7 +161,7 @@ def report_prose_mismatches(
     modality_reason: str | None,
     topic: bool = False,
 ) -> list[str]:
-    """Replace only report polarity/modality checks, retaining all factual values."""
+    """Scope report interpretations while retaining source-bound factual checks."""
     states = factual_states(value)
     source_states = factual_states(source)
     # Interpretive prose without an asserted event may discuss missing relevance,
@@ -132,6 +169,10 @@ def report_prose_mismatches(
     # source's positive/negative event polarity does not constrain that analysis.
     has_factual_state = bool(states)
     remaining = list(mismatches)
+    if any(item.startswith(_NUMERIC_CONTEXT_MESSAGE) for item in remaining) and (
+        _independent_parallel_numbers(value, source)
+    ):
+        remaining = [item for item in remaining if not item.startswith(_NUMERIC_CONTEXT_MESSAGE)]
     if _POLARITY_MESSAGE in remaining:
         asserted_reversal = any(
             name in source_states and not values <= source_states[name]

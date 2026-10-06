@@ -37,12 +37,13 @@ from app.eval.report_insight_compare import render_comparison
 from app.eval.report_insight_corpus import load_corpus
 from app.eval.report_insight_measure import aggregate_judgments, generation_metrics
 from app.llm.deadline_transport import DeadlineHttpx2Transport
-from app.llm.openai_provider import _ERROR_CODES, OpenAIAnalyzeProvider
+from app.llm.openai_provider import _ERROR_CODES, OpenAIAnalyzeProvider, _provider_error_details
 from app.llm.report_insight_service import PROMPT_VERSION, RUBRIC_VERSION, ReportInsightService
 from app.schemas.report_insight import ReportInsightRequest, ReportInsightResponse
 
 DRIVER = Path(__file__).resolve()
 MAX_OUTPUT = 8192
+MAX_DIAGNOSTIC_RETRY_AFTER_SECONDS = 86_400
 VERSIONS = ("baseline", "candidate")
 ADAPTER_VARIANTS = {"baseline": "single_call", "candidate": "staged"}
 CALL_DESCRIPTION = re.compile(r"^reportInsightCall:(MAP|REVIEW|REDUCE)-(\d{3})$")
@@ -57,6 +58,94 @@ POLICY = {
     "mapChunkFindingLimit": 8,
     "reviewFindingLimit": 12,
 }
+COMPARISON_PROFILES = {
+    # Keep the original policy byte-for-byte compatible with saved checkpoints.
+    "v3-v4": POLICY,
+    "v8-v9": {
+        **POLICY,
+        "comparisonProfile": "v8-v9",
+        "baselineCommit": "e75f2d851f1a3b61d86232a94d59f71072055318",
+        "baselinePromptVersion": "report-insight.ko.v8",
+        "candidatePromptVersion": "report-insight.ko.v9",
+        "baselineRubricVersion": "report-importance.v5",
+        "candidateRubricVersion": "report-importance.v6",
+        "baselinePipeline": "staged",
+    },
+    "v9-refinement": {
+        **POLICY,
+        "comparisonProfile": "v9-refinement",
+        "comparisonKind": "frozen-same-version-refinement",
+        "baselineCommit": "c555596e7ab22d13a46087888de95024585f6093",
+        "baselinePromptVersion": "report-insight.ko.v9",
+        "candidatePromptVersion": "report-insight.ko.v9",
+        "baselineRubricVersion": "report-importance.v6",
+        "candidateRubricVersion": "report-importance.v6",
+        "baselinePipeline": "staged",
+    },
+    "v9-bounded-review": {
+        **POLICY,
+        "comparisonProfile": "v9-bounded-review",
+        "comparisonKind": "frozen-same-version-refinement",
+        "baselineCommit": "c555596e7ab22d13a46087888de95024585f6093",
+        "baselinePromptVersion": "report-insight.ko.v9",
+        "candidatePromptVersion": "report-insight.ko.v9",
+        "baselineRubricVersion": "report-importance.v6",
+        "candidateRubricVersion": "report-importance.v6",
+        "baselinePipeline": "staged",
+        "candidateMapChunkFindingLimit": 6,
+        "candidateReviewChunkFindingLimit": 6,
+    },
+}
+
+
+def _comparison_policy(profile: str) -> dict:
+    ledger.require(profile in COMPARISON_PROFILES, "UNKNOWN_COMPARISON_PROFILE")
+    return COMPARISON_PROFILES[profile]
+
+
+def _is_staged_comparison(policy: dict) -> bool:
+    return policy.get("baselinePipeline") == "staged"
+
+
+def _validate_runtime_versions(policy: dict, runtimes: dict) -> None:
+    for name in VERSIONS:
+        info = runtimes[name]
+        ledger.require(
+            info["promptVersion"] == policy[f"{name}PromptVersion"],
+            "VERSION_RUNTIME_MISMATCH",
+        )
+        rubric = policy.get(f"{name}RubricVersion")
+        ledger.require(rubric is None or info["rubricVersion"] == rubric, "RUBRIC_RUNTIME_MISMATCH")
+
+
+def _comparison_scope(policy: dict, *, snapshots: bool = False) -> str:
+    baseline = policy["baselinePromptVersion"].rsplit(".", 1)[1]
+    candidate = policy["candidatePromptVersion"].rsplit(".", 1)[1]
+    inputs = "identical actual report snapshots" if snapshots else "the same actual report inputs"
+    if policy.get("comparisonKind") == "frozen-same-version-refinement":
+        return (
+            f"frozen {baseline} code refinement from {policy['baselineCommit'][:7]} "
+            f"versus the candidate on {inputs}; both runtimes identified by source hashes"
+        )
+    return f"frozen {baseline} versus {candidate} on {inputs}"
+
+
+def _verify_coordinator(provenance: dict) -> None:
+    source = provenance.get("coordinatorSources")
+    ledger.require(isinstance(source, dict), "COORDINATOR_PROVENANCE_MISSING")
+    root = Path(source.get("root", ""))
+    hashes = source.get("sourceSha256s")
+    ledger.require(
+        root.is_absolute() and isinstance(hashes, dict) and hashes, "COORDINATOR_CHANGED"
+    )
+    for relative, expected in hashes.items():
+        path = Path(relative)
+        ledger.require(not path.is_absolute() and ".." not in path.parts, "COORDINATOR_CHANGED")
+        full_path = root / path
+        ledger.require(
+            full_path.is_file() and ledger.file_digest(full_path) == expected,
+            "COORDINATOR_CHANGED",
+        )
 
 
 def _process_environment(api_key: str | None = None) -> dict[str, str]:
@@ -127,24 +216,29 @@ def prepare(
     output_dir: Path,
     baseline_root: Path,
     *,
-    baseline_commit: str = "cbfb174",
+    baseline_commit: str | None = None,
+    comparison_profile: str = "v3-v4",
+    candidate_root: Path | None = None,
     max_cost_usd: Decimal = Decimal("1.00"),
     max_calls: int = 144,
 ) -> dict:
-    ledger.require(baseline_commit == POLICY["baselineCommit"], "BASELINE_COMMIT_CHANGED")
+    expected_policy = _comparison_policy(comparison_profile)
+    if baseline_commit is None:
+        baseline_commit = expected_policy["baselineCommit"]
+    ledger.require(baseline_commit == expected_policy["baselineCommit"], "BASELINE_COMMIT_CHANGED")
     ledger.require(
         ledger.number(max_cost_usd) is not None and 0 < max_cost_usd <= 1, "INVALID_COST_LIMIT"
     )
     ledger.require(type(max_calls) is int and 1 <= max_calls <= 144, "INVALID_CALL_LIMIT")
     corpus = load_corpus(dataset)
     ledger.require(not corpus.synthetic, "REAL_REPORT_CORPUS_REQUIRED")
-    roots = {"baseline": baseline_root.resolve(), "candidate": ledger.AGENT_ROOT.resolve()}
+    roots = {
+        "baseline": baseline_root.resolve(),
+        "candidate": (candidate_root or ledger.AGENT_ROOT).resolve(),
+    }
     ledger.require(roots["baseline"] != roots["candidate"], "BASELINE_MUST_BE_ISOLATED")
     runtimes = {name: _runtime_info(root) for name, root in roots.items()}
-    for name, info in runtimes.items():
-        ledger.require(
-            info["promptVersion"] == POLICY[f"{name}PromptVersion"], "VERSION_RUNTIME_MISMATCH"
-        )
+    _validate_runtime_versions(expected_policy, runtimes)
     ledger.require(
         runtimes["baseline"]["dependencyVersions"] == runtimes["candidate"]["dependencyVersions"],
         "DEPENDENCIES_DIFFER",
@@ -166,7 +260,7 @@ def prepare(
                     "inputSha256": ledger.digest(request),
                 }
             )
-    policy = {**POLICY, "maxCostEstimatedUsd": str(max_cost_usd), "maxCalls": max_calls}
+    policy = {**expected_policy, "maxCostEstimatedUsd": str(max_cost_usd), "maxCalls": max_calls}
     provenance = {
         "datasetVersion": corpus.version,
         "datasetSha256": ledger.file_digest(dataset),
@@ -179,7 +273,12 @@ def prepare(
         "model": ledger.MODEL,
         "baselineCommit": baseline_commit,
     }
-    maximum_base = sum(2 + math.ceil(len(case.request.findings) / 8) + 2 for case in corpus.cases)
+    if _is_staged_comparison(expected_policy):
+        provenance["coordinatorSources"] = {
+            "root": str(ledger.AGENT_ROOT.resolve()),
+            "sourceSha256s": ledger.runtime_hashes(),
+        }
+    maximum_base = sum(len(_allowed_calls(job, policy)) for job in jobs)
     manifest = {
         "schemaVersion": 2,
         "provenance": provenance,
@@ -264,9 +363,36 @@ def verify(output_dir: Path, manifest: dict, state: dict) -> None:
         and ledger.digest(manifest["policy"]) == provenance["policySha256"],
         "MANIFEST_CHANGED",
     )
+    expected_policy = _comparison_policy(manifest["policy"].get("comparisonProfile", "v3-v4"))
     ledger.require(
-        all(manifest["policy"].get(key) == value for key, value in POLICY.items()), "POLICY_CHANGED"
+        all(manifest["policy"].get(key) == value for key, value in expected_policy.items()),
+        "POLICY_CHANGED",
     )
+    # A profile without variant overrides still fixes their effective values.
+    # Additional checkpoint keys must not widen stage admission after hashing.
+    ledger.require(
+        all(
+            manifest["policy"].get(
+                f"{variant}{stage}ChunkFindingLimit", manifest["policy"][fallback]
+            )
+            == expected_policy.get(f"{variant}{stage}ChunkFindingLimit", expected_policy[fallback])
+            for variant in VERSIONS
+            for stage, fallback in (
+                ("Map", "mapChunkFindingLimit"),
+                ("Review", "reviewFindingLimit"),
+            )
+        ),
+        "POLICY_CHANGED",
+    )
+    ledger.require(
+        provenance["baselineCommit"] == expected_policy["baselineCommit"],
+        "BASELINE_COMMIT_CHANGED",
+    )
+    _validate_runtime_versions(expected_policy, provenance["runtimeVersions"])
+    if _is_staged_comparison(expected_policy):
+        # Workers inspect these declared coordinator files, not their own frozen
+        # package. The renderer/metrics may intentionally postdate both runtimes.
+        _verify_coordinator(provenance)
     cap = ledger.number(manifest["policy"].get("maxCostEstimatedUsd"))
     ledger.require(
         cap is not None
@@ -312,10 +438,15 @@ def _verify_attempts(manifest: dict, state: dict) -> None:
         )
         wire_format = record["wireRequest"]["text"]["format"]
         ledger.require(
-            _logical_call(wire_format["schema"], key[1], wire_format.get("name")) == call_id,
+            _logical_call(
+                wire_format["schema"], key[1], wire_format.get("name"), policy=manifest["policy"]
+            )
+            == call_id,
             "CHECKPOINT_CALL_ID_CHANGED",
         )
-        ledger.require(call_id in _allowed_calls(results[key]), "CHECKPOINT_STAGE_CHANGED")
+        ledger.require(
+            call_id in _allowed_calls(results[key], manifest["policy"]), "CHECKPOINT_STAGE_CHANGED"
+        )
         identity = ledger.digest([*key, call_id])
         count = groups.get(identity, 0)
         ledger.require(count < 2 and record["repairIndex"] == count, "CHECKPOINT_REPAIR_CHANGED")
@@ -384,11 +515,22 @@ def _verify_attempts(manifest: dict, state: dict) -> None:
     ledger.require(state["errors"] == failures, "CHECKPOINT_FAILURE_MAPPING_CHANGED")
 
 
-def _allowed_calls(result: dict) -> set[str]:
-    if result["variant"] == "baseline":
+def _allowed_calls(result: dict, policy: dict = POLICY) -> set[str]:
+    if result["variant"] == "baseline" and policy.get("baselinePipeline") != "staged":
         return {"MAP-001", "REDUCE-001"}
-    count = math.ceil(len(result["request"]["findings"]) / POLICY["mapChunkFindingLimit"])
-    return {*(f"MAP-{index:03d}" for index in range(1, count + 1)), "REVIEW-001", "REDUCE-001"}
+    variant = result["variant"]
+    finding_count = len(result["request"]["findings"])
+    map_limit = policy.get(f"{variant}MapChunkFindingLimit", policy["mapChunkFindingLimit"])
+    review_limit = policy.get(f"{variant}ReviewChunkFindingLimit", policy["reviewFindingLimit"])
+    map_count = math.ceil(finding_count / map_limit)
+    review_count = max(
+        1, math.ceil(min(finding_count, policy["reviewFindingLimit"]) / review_limit)
+    )
+    return {
+        *(f"MAP-{index:03d}" for index in range(1, map_count + 1)),
+        *(f"REVIEW-{index:03d}" for index in range(1, review_count + 1)),
+        "REDUCE-001",
+    }
 
 
 def reservation(wire: dict) -> tuple[int, Decimal]:
@@ -424,6 +566,16 @@ def _verify_record(record: dict, index: int) -> None:
             and 100 <= http_status <= 599
             and isinstance(provider_code, str)
             and provider_code in _ERROR_CODES | {"UNKNOWN"}
+        ),
+        "CHECKPOINT_PROVIDER_DIAGNOSTICS_CHANGED",
+    )
+    retry_after = record.get("providerRetryAfterSeconds")
+    ledger.require(
+        retry_after is None
+        or (
+            _valid_diagnostic_retry_after(retry_after)
+            and record["status"] == "failed"
+            and http_status is not None
         ),
         "CHECKPOINT_PROVIDER_DIAGNOSTICS_CHANGED",
     )
@@ -491,11 +643,15 @@ def _verify_record(record: dict, index: int) -> None:
         )
 
 
-def _logical_call(schema: dict, variant: str, format_name: str | None = None) -> str:
+def _logical_call(
+    schema: dict, variant: str, format_name: str | None = None, *, policy: dict = POLICY
+) -> str:
     match = CALL_DESCRIPTION.fullmatch(schema.get("description", ""))
     if match:
         return f"{match[1]}-{match[2]}"
-    ledger.require(variant == "baseline", "CALL_ID_REQUIRED")
+    ledger.require(
+        variant == "baseline" and policy.get("baselinePipeline") != "staged", "CALL_ID_REQUIRED"
+    )
     title = schema.get("title") or format_name or ""
     stage = "MAP" if "MapOutput" in title else "REDUCE" if "ReduceOutput" in title else None
     ledger.require(stage is not None, "UNKNOWN_STAGE")
@@ -531,8 +687,12 @@ class VersionAttemptProvider:
         verify(self.output_dir, self.manifest, self.state)
         remaining = self.deadline - self.clock()
         ledger.require(remaining > 0, "REPORT_DEADLINE_EXCEEDED")
-        call_id = _logical_call(response_schema, self.result["variant"])
-        ledger.require(call_id in _allowed_calls(self.result), "UNKNOWN_STAGE")
+        call_id = _logical_call(
+            response_schema, self.result["variant"], policy=self.manifest["policy"]
+        )
+        ledger.require(
+            call_id in _allowed_calls(self.result, self.manifest["policy"]), "UNKNOWN_STAGE"
+        )
         self.call_counts[call_id] = self.call_counts.get(call_id, 0) + 1
         ledger.require(self.call_counts[call_id] <= 2, "EXCESS_SCHEMA_REPAIR")
         attempt_deadline = min(self.deadline, self.clock() + POLICY["attemptTimeoutSeconds"])
@@ -703,18 +863,27 @@ def _partial_cost(record: dict, usage: dict, maximum: Decimal) -> None:
     )
 
 
+def _valid_diagnostic_retry_after(value) -> bool:
+    # Oversized values stay unknown; clamping could suggest retrying too early.
+    return type(value) in (int, float) and 0 <= value <= MAX_DIAGNOSTIC_RETRY_AFTER_SECONDS
+
+
 def _provider_failure_diagnostics(error: Exception) -> dict:
-    """Persist only numeric status and a closed code; never stringify SDK errors."""
+    """Keep closed provider metadata, never raw error bodies or response headers."""
     if not isinstance(error, APIStatusError):
         return {"providerHttpStatus": None, "providerErrorCode": None}
     status = error.status_code
     if type(status) is not int or not 100 <= status <= 599:
         return {"providerHttpStatus": None, "providerErrorCode": None}
-    code = error.code
-    return {
+    details = _provider_error_details(error)
+    diagnostics = {
         "providerHttpStatus": status,
-        "providerErrorCode": code if isinstance(code, str) and code in _ERROR_CODES else "UNKNOWN",
+        "providerErrorCode": details["providerStatus"],
     }
+    retry_after = details.get("retryAfterSeconds")
+    if _valid_diagnostic_retry_after(retry_after):
+        diagnostics["providerRetryAfterSeconds"] = retry_after
+    return diagnostics
 
 
 def _settings(api_key: str) -> Settings:
@@ -911,6 +1080,11 @@ def run(output_dir: Path, *, api_key: str | None = None, max_jobs: int | None = 
 def _adapter(state: dict) -> dict:
     result = deepcopy(state)
     result["schemaVersion"] = 1
+    if _is_staged_comparison(state["policy"]):
+        result["importanceRubricVersions"] = {
+            ADAPTER_VARIANTS[name]: state["provenance"]["runtimeVersions"][name]["rubricVersion"]
+            for name in VERSIONS
+        }
     for item in [*result["results"], *result["attempts"]]:
         item["variant"] = ADAPTER_VARIANTS[item["variant"]]
     return result
@@ -952,7 +1126,7 @@ def summary(output_dir: Path) -> dict:
     )
     return {
         "schemaVersion": 2,
-        "comparisonScope": "frozen v3 versus v4 on the same actual report inputs",
+        "comparisonScope": _comparison_scope(state["policy"]),
         "provenance": state["provenance"],
         "status": state["status"],
         "model": ledger.MODEL,
@@ -1028,7 +1202,7 @@ def score(output_dir: Path, judgments: dict) -> dict:
             },
             qualityMeasured=bool(decoded["judgedCount"]),
             humanQualityMeasured=reviewer_kind == "HUMAN" and bool(decoded["judgedCount"]),
-            comparisonScope="frozen v3 versus v4 on identical actual report snapshots",
+            comparisonScope=_comparison_scope(state["policy"], snapshots=True),
             candidateWinShareOfJudged=decoded.pop("stagedWinShareOfJudged"),
             limitations=[
                 "Selected actual report snapshots; production-wide quality is unmeasured.",
@@ -1074,6 +1248,10 @@ def main() -> None:
     parser.add_argument("--dataset", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--baseline-root", type=Path)
+    parser.add_argument("--candidate-root", type=Path)
+    parser.add_argument("--comparison-profile", choices=tuple(COMPARISON_PROFILES), default="v3-v4")
+    parser.add_argument("--max-cost-usd", type=Decimal, default=Decimal("1.00"))
+    parser.add_argument("--max-calls", type=int, default=144)
     parser.add_argument("--runtime-root", type=Path)
     parser.add_argument("--job-index", type=int)
     parser.add_argument("--max-jobs", type=int)
@@ -1089,7 +1267,15 @@ def main() -> None:
                     args.dataset is not None and args.baseline_root is not None,
                     "DATASET_AND_BASELINE_REQUIRED",
                 )
-                value = prepare(args.dataset, args.output_dir, args.baseline_root)
+                value = prepare(
+                    args.dataset,
+                    args.output_dir,
+                    args.baseline_root,
+                    candidate_root=args.candidate_root,
+                    comparison_profile=args.comparison_profile,
+                    max_cost_usd=args.max_cost_usd,
+                    max_calls=args.max_calls,
+                )
                 value = {
                     key: value[key]
                     for key in (

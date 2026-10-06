@@ -209,7 +209,8 @@ public class AgentClient {
                     exception,
                     error == null ? null : error.usage(),
                     AgentClientException.TimeoutPhase.NONE,
-                    error == null ? null : error.executionMetadata());
+                    error == null ? null : error.executionMetadata(),
+                    error == null ? null : error.validationFailure());
         } catch (RestClientException exception) {
             AgentClientException.TimeoutPhase timeoutPhase = timeoutPhase(exception);
             throw new AgentClientException(

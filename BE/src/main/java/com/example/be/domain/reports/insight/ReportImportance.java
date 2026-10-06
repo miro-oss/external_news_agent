@@ -1,19 +1,21 @@
 package com.example.be.domain.reports.insight;
 
-/** Evidence limits the grade; missing values never become invented zeroes. */
+/** Confirmed lack of relevance is low; missing evidence never becomes an invented zero. */
 public final class ReportImportance {
     private ReportImportance() { }
 
     public static String grade(Integer directness, Integer impact, Integer urgency) {
-        if (directness == null || impact == null) return "unavailable";
+        if (directness == null) return "unavailable";
         if (directness == 0) return "low";
+        if (impact == null) return "unavailable";
         double score = score(directness, impact, urgency);
         return score >= 2.25 ? "high" : score >= 1.25 ? "medium" : "low";
     }
 
     public static double score(Integer directness, Integer impact, Integer urgency) {
-        if (directness == null || impact == null) return -1;
+        if (directness == null) return -1;
         if (directness == 0) return 0;
+        if (impact == null) return -1;
         return (directness * .4 + impact * .4 + (urgency == null ? 0 : urgency * .2))
                 / (urgency == null ? .8 : 1);
     }

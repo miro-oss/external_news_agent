@@ -6,6 +6,7 @@ from copy import deepcopy
 import pytest
 from jsonschema import Draft202012Validator
 from test_report_insight_assessment import (
+    decision_axis_schemas,
     framed,
     payload,
     request,
@@ -18,6 +19,7 @@ from app.core.errors import AgentError
 from app.llm.report_insight_assessment import (
     ReportAssessmentDraftValidationError,
     draft_schema,
+    draft_to_wire,
     validate_draft,
 )
 from app.llm.report_insight_instructions import report_stage_instruction
@@ -34,6 +36,10 @@ ROLES = ["CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR", "IT_INFRA"]
         "원문에 구체적인 연결 조건이 제시되지 않음",
         "업무 연결 경로가 미확인",
         "원문 정보가 부족함",
+        "미확인",
+        "불명.",
+        "판단 보류",
+        "알 수 없음",
     ],
 )
 def test_missing_metadata_cannot_mint_a_background_work_connection(condition):
@@ -43,6 +49,79 @@ def test_missing_metadata_cannot_mint_a_background_work_connection(condition):
     with pytest.raises(ReportAssessmentDraftValidationError, match="구체적 전제"):
         validate_flat(candidate, source)
     assert source.findings[0].claims[0].text == "지역 문화센터는 생활 강좌 모집을 시작했다."
+
+
+@pytest.mark.parametrize("relation", ["CONDITIONAL", "BACKGROUND"])
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "원문에 명확한 업무 연결 조건이 제시되지 않음",
+        "구체적 미확인 업무 연결 조건",
+        "미확인 업무 연결 조건",
+        "원문에 명확한 업무 연결 조건이 제시되지 않았다.",
+        "원문에 명확한 업무 연결 조건이 제시되지 않습니다.",
+        "원문에 구체적인 업무 연결 조건이 명시되어 있지 않습니다.",
+        "업무 연결 조건이 불명확함",
+    ],
+)
+def test_native_metadata_condition_is_rejected_only_for_its_finding_without_mutation(
+    relation, condition
+):
+    source = request(ids=(101, 102))
+    candidate = payload(source, relation=relation)
+    candidate["assessments"]["CHIP_MAKER"]["finding101"]["condition"] = condition
+    native = draft_to_wire(candidate, source)
+    original_native = deepcopy(native)
+    original_candidate = deepcopy(candidate)
+    original_source = source.model_dump_json(by_alias=True)
+    Draft202012Validator(draft_schema(source)).validate(native)
+
+    with pytest.raises(ReportAssessmentDraftValidationError, match="구체적 전제") as caught:
+        validate_draft(response(candidate, source), source)
+
+    assert caught.value.failed_finding_ids == (101,)
+    assert native == original_native
+    assert candidate == original_candidate
+    assert source.model_dump_json(by_alias=True) == original_source
+
+
+@pytest.mark.parametrize("relation", ["CONDITIONAL", "BACKGROUND"])
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "고객이 해당 공정을 검증 대상으로 채택하는 경우",
+        "업무 연결 조건이 미확인인 계약에 고객의 공정 검증 승인이 필요한 경우",
+        "원문에 명확한 업무 연결 조건이 제시되지 않은 계약에서 고객의 승인이 필요한 경우",
+        "원문에 구체적 업무 연결 조건이 명시되지 않았다는 뜻은 아니다. "
+        "고객이 해당 공정을 검증 대상으로 채택하는 경우",
+        "업무 연결 조건이 미확인이 아니다. 고객의 공정 검증 승인이 필요한 경우",
+        "업무 연결 조건이 없는 것은 아니며 고객의 공정 검증 승인이 필요한 경우",
+        "원문 정보가 부족하지 않고 고객의 공정 검증 승인이 필요한 경우",
+        "‘원문에 명확한 업무 연결 조건이 제시되지 않음’이라는 설명에도 "
+        "고객의 공정 검증 승인이 필요한 경우",
+        "업무 연결 조건이 미확인; 고객의 공정 검증 승인이 필요한 경우",
+        "고객의 공정 검증 승인이 필요한 경우. 원문에 명확한 업무 연결 조건이 제시되지 않음",
+    ],
+)
+def test_metadata_condition_guard_preserves_business_prerequisites_quotes_and_negation(
+    relation, condition
+):
+    source = request(text="제조사는 고객의 공정 검증 승인에 따라 계약의 납품 일정을 정한다.")
+    candidate = payload(source, relation=relation)
+    record = candidate["assessments"]["CHIP_MAKER"]["finding101"]
+    record.update(
+        condition=condition,
+        impactScope="UNDETERMINED",
+        impactBasis=None,
+        urgencyState="UNDETERMINED",
+        urgencyBasis=None,
+    )
+    original = deepcopy(candidate)
+    validated = validate_draft(response(candidate, source), source)
+
+    assert validated.draft.model_dump(by_alias=True) == original == candidate
+    assert validated.mapped.insights[0].assessments[0].axes.impact is None
+    assert validated.mapped.insights[0].assessments[0].axes.urgency is None
 
 
 @pytest.mark.parametrize(
@@ -88,7 +167,7 @@ def test_stage_instruction_only_teaches_requested_role_without_fictional_respons
     audience, stage
 ):
     instruction = report_stage_instruction([audience], stage)
-    assert len(instruction) < 3300
+    assert len(instruction) < 3500
     assert audience in instruction
     assert all(role not in instruction for role in ROLES if role != audience)
     assert '"assessments":' not in instruction
@@ -96,9 +175,9 @@ def test_stage_instruction_only_teaches_requested_role_without_fictional_respons
     assert '"finding11"' not in instruction
     assert "가상 원문" not in instruction
     if stage == "REDUCE":
-        assert "report-importance.v5" not in instruction
+        assert "report-importance.v6" not in instruction
     else:
-        assert "report-importance.v5" in instruction
+        assert "report-importance.v6" in instruction
 
 
 def test_customer_supply_contract_guidance_preserves_direct_relationship_without_invented_specs():
@@ -121,21 +200,24 @@ def test_reassessment_context_is_independent_and_preserves_source_identity_and_t
     assert context["reportReferenceDate"] == "2026-09-25"
     assert [item["claims"][0]["id"] for item in context["findings"]] == ["101:0", "102:0"]
     assert source.model_dump_json(by_alias=True) == original
-    assert result.meta.prompt_version == "report-insight.ko.v8"
+    assert result.meta.prompt_version == "report-insight.ko.v9"
 
 
-def test_native_contract_selects_category_before_fields_without_changing_accepted_wire():
+def test_native_decision_contract_keeps_axis_category_before_source_fields():
     source = request()
     schema = draft_schema(source)
     record = schema["properties"]["assessments"]["properties"]["CHIP_MAKER"]["properties"][
         "finding101"
-    ]["properties"]
+    ]
+    axes = decision_axis_schemas(schema, record)
     for field, category in (
         ("connection", "relation"),
         ("effect", "impactScope"),
         ("timing", "urgencyState"),
     ):
-        for branch in record[field]["anyOf"]:
+        for branch in axes[field]["anyOf"]:
+            if "$ref" in branch:
+                branch = schema["$defs"][branch["$ref"].split("/")[-1]]
             assert list(branch["properties"])[0] == category
     native = response(payload(source), source)
     Draft202012Validator(schema).validate(json.loads(native.text))
@@ -204,9 +286,13 @@ def test_priority_navigation_uses_existing_score_then_original_equal_score_order
         draft["impactScope"] = "UNDETERMINED"
         draft["impactBasis"] = None
     validated = validate_flat(values, source)
-    candidates = _decision_candidates(
-        source, validated, {"CHIP_MAKER": ("103:0", "101:0", "102:0")}
-    )["CHIP_MAKER"][0]["findings"]
+    candidates = [
+        finding
+        for group in _decision_candidates(
+            source, validated, {"CHIP_MAKER": ("103:0", "101:0", "102:0")}
+        )["CHIP_MAKER"]
+        for finding in group["findings"]
+    ]
     assert [finding["findingId"] for finding in candidates] == [102, 103, 101]
     assert [finding["priorityRank"] for finding in candidates] == [1, 2, 3]
     assert [finding["importanceGrade"] for finding in candidates] == [

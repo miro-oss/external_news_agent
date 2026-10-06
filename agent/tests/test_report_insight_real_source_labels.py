@@ -48,6 +48,7 @@ def test_real_reference_labels_disclose_ai_draft_and_unmeasured_quality(source_l
     assert provenance["candidateOutputsReadBeforeLabeling"] is False
     assert provenance["sourceKind"] == "EXISTING_REPORT_REQUEST_SNAPSHOT"
     assert len(provenance["limitations"]) >= 3
+    assert provenance["importancePolicy"].startswith("#291: directness=0 derives low")
 
 
 def test_split_is_whole_report_and_shared_event_family_is_disclosed(source_labels):
