@@ -102,6 +102,15 @@ public class AgentReportOrchestrator {
             return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
 
+        LearningInput learning;
+        try {
+            learning = learningInput(context, eligible, generatedAt);
+        } catch (RuntimeException exception) {
+            log.warn("보고서 피드백 입력을 불러오지 못해 안전한 fallback을 사용한다. runId={} reportId={}",
+                    context.runId(), context.reportId());
+            return fallback(context, representativeFindings, generatedAt, sourceStats);
+        }
+        // Freeze database-backed learning input before reserving any paid work.
         ReservationSelection selection = reserve(context);
         if (selection == null) {
             return fallback(context, representativeFindings, generatedAt, sourceStats);
@@ -115,6 +124,7 @@ public class AgentReportOrchestrator {
                     eligible,
                     generatedAt,
                     sourceStats,
+                    learning,
                     selection.plan(),
                     selection.reservation().idempotencyKey());
             AgentReportResponse response = client.report(request);
@@ -152,11 +162,38 @@ public class AgentReportOrchestrator {
                                        List<Finding> findings,
                                        LocalDateTime generatedAt,
                                        ReportSourceStats sourceStats,
+                                       LearningInput learning,
                                        AgentPlan plan,
                                        String idempotencyKey) {
         CollectionRun run = context.run();
         LocalDateTime finishedAt = run == null ? context.date().plusDays(1).atStartOfDay()
                 : run.getFinishedAt() == null ? generatedAt : run.getFinishedAt();
+        return new AgentReportRequest(
+                idempotencyKey,
+                plan,
+                new AgentReportRequest.RunPayload(
+                        context.runId(),
+                        toOffset(run == null ? context.date().atStartOfDay() : run.getStartedAt()),
+                        toOffset(finishedAt),
+                        topics(run, findings),
+                        context.daily() ? ReportScope.DAILY : ReportScope.RUN,
+                        context.reportId(), context.date()),
+                findings.stream().map(finding -> findingPayload(finding, context.daily(), learning.topicIds())).toList(),
+                List.of(),
+                new AgentReportRequest.SourceStatsPayload(
+                        sourceStats.collected(),
+                        sourceStats.blocked(),
+                        sourceStats.failed(),
+                        sourceStats.paywalled(),
+                        sourceStats.stubExcluded()),
+                context.daily()
+                        ? dailySourceNotes(context.date(), sourceStats)
+                        : ReportSourceNotes.from(sourceStats), learning.examples());
+    }
+
+    private LearningInput learningInput(GenerationContext context, List<Finding> findings,
+                                        LocalDateTime generatedAt) {
+        CollectionRun run = context.run();
         Map<Long, Set<Long>> topicIds = relevancePolicy.relevantTopicIdsByFinding(findings);
         Set<Long> selectedTopics = findings.stream().flatMap(finding -> findingTopicIds(finding, topicIds).stream())
                 .collect(Collectors.toSet());
@@ -168,27 +205,7 @@ public class AgentReportOrchestrator {
         LocalDateTime asOf = run == null || run.getStartedAt() == null ? generatedAt : run.getStartedAt();
         List<AgentFeedbackExample> examples = feedbackLearning.forSnapshots(scopes, asOf,
                 Set.of(Category.TOPIC_MISMATCH, Category.SUMMARY_ERROR, Category.WRONG_CLUSTER, Category.OTHER));
-        return new AgentReportRequest(
-                idempotencyKey,
-                plan,
-                new AgentReportRequest.RunPayload(
-                        context.runId(),
-                        toOffset(run == null ? context.date().atStartOfDay() : run.getStartedAt()),
-                        toOffset(finishedAt),
-                        topics(run, findings),
-                        context.daily() ? ReportScope.DAILY : ReportScope.RUN,
-                        context.reportId(), context.date()),
-                findings.stream().map(finding -> findingPayload(finding, context.daily(), topicIds)).toList(),
-                List.of(),
-                new AgentReportRequest.SourceStatsPayload(
-                        sourceStats.collected(),
-                        sourceStats.blocked(),
-                        sourceStats.failed(),
-                        sourceStats.paywalled(),
-                        sourceStats.stubExcluded()),
-                context.daily()
-                        ? dailySourceNotes(context.date(), sourceStats)
-                        : ReportSourceNotes.from(sourceStats), examples);
+        return new LearningInput(topicIds, examples);
     }
 
     private List<String> dailySourceNotes(LocalDate date, ReportSourceStats stats) {
@@ -620,5 +637,8 @@ public class AgentReportOrchestrator {
     }
 
     private record ReservationSelection(AgentPlan plan, QuotaReservation reservation) {
+    }
+
+    private record LearningInput(Map<Long, Set<Long>> topicIds, List<AgentFeedbackExample> examples) {
     }
 }

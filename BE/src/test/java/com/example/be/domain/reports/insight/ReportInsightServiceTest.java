@@ -231,6 +231,54 @@ class ReportInsightServiceTest {
         verify(jobs, never()).isPending(10L, Audience.CHIP_MAKER);
         verify(client).reportInsight(argThat(request -> request.audiences().equals(List.of("IT_INFRA"))));
     }
+    @Test void laterFeedbackOnAnotherReportDoesNotHideSavedInsightOrTriggerReadSideEffects() {
+        var reportRepository = mock(NewsReportRepository.class);
+        var findingRepository = mock(FindingRepository.class);
+        var relevance = mock(TopicRelevancePolicy.class);
+        var feedback = mock(FeedbackStore.class);
+        var events = mock(ReportEventSnapshotFactory.class);
+        var learning = mock(FeedbackLearningService.class);
+        var realAssembler = new ReportInsightSnapshotAssembler(reportRepository, findingRepository, relevance,
+                new ObjectMapper(), new ReportEventFeedbackProjection(feedback, events), learning);
+        var realService = new ReportInsightService(properties, realAssembler, persistence, new ReportInsightValidator(),
+                client, quota, plans, recorder, new ReportInsightExecutionRecorder(recorder, quota, persistence), jobs);
+        var generatedAt = LocalDateTime.of(2026, 9, 30, 10, 0);
+        var topic = Topic.builder().id(1L).name("주제").build();
+        var scope = com.example.be.domain.collection.entity.CollectionTopicSnapshot.capture(topic);
+        var report = NewsReport.builder().id(10L).title("저장된 리포트").reportScope(ReportScope.DAILY)
+                .generatedAt(generatedAt).reflectedFindingIds(List.of(50L)).reportStatus(ReportStatus.GENERATED)
+                .collectionContexts(List.of(new com.example.be.domain.reports.entity.ReportCollectionContext(42L, List.of(scope)))).build();
+        var article = Article.builder().id(150L).title("기사").canonicalUrl("https://example.com/150")
+                .topic(topic).body("원문").fetchStatus(FetchStatus.FULLTEXT).build();
+        var finding = Finding.builder().id(50L).article(article).analysisSource(AnalysisSource.LLM)
+                .keyPoints(List.of(new FindingKeyPoint("검증된 주장", List.of(0), "grounded")))
+                .sections(List.of(new FindingSection(0, "원문"))).build();
+        var laterReview = new AgentFeedbackExample(13L, 1L, "SUMMARY_ERROR", "다른 리포트 사건", "나중에 검토한 요약",
+                "발표와 시행을 구분합니다.", List.of(new AgentFeedbackExample.Evidence(14L, "발표했다")));
+        var newFeedbackArrived = new java.util.concurrent.atomic.AtomicBoolean(false);
+        when(reportRepository.findByIdAndReportStatusNot(10L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(findingRepository.findForReportByIdIn(List.of(50L))).thenReturn(List.of(finding));
+        when(relevance.filterFindings(anyList())).thenAnswer(call -> call.getArgument(0));
+        when(learning.forSnapshots(anyList(), any(), any())).thenAnswer(call ->
+                newFeedbackArrived.get() && ((LocalDateTime) call.getArgument(1)).isAfter(generatedAt)
+                        ? List.of(laterReview) : List.of());
+        var original = realAssembler.assemble(10L);
+        when(persistence.findCached(10L, original.inputHash(), List.of(Audience.CHIP_MAKER)))
+                .thenReturn(List.of(row(Audience.CHIP_MAKER)));
+        assertTrue(realService.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER"))).cached());
+        clearInvocations(persistence, client, quota, plans, recorder, jobs, learning);
+
+        newFeedbackArrived.set(true);
+        var read = realService.get(10L, "CHIP_MAKER");
+
+        assertTrue(read.cached());
+        assertEquals(original.inputHash(), read.inputHash());
+        verify(learning).forSnapshots(eq(List.of(scope)), eq(generatedAt), any());
+        verify(persistence).findCached(10L, original.inputHash(), List.of(Audience.CHIP_MAKER));
+        verify(persistence, never()).saveGenerated(any(), any());
+        verifyNoInteractions(client, quota, plans, recorder, jobs);
+    }
+
     @Test void allConfirmedErrorEvidenceReturnsReadNotFoundAndCreateConflictWithoutExecutionOrWrites() {
         var reportRepository = mock(NewsReportRepository.class);
         var findingRepository = mock(FindingRepository.class);

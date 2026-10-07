@@ -47,6 +47,12 @@ MAX_DIAGNOSTIC_RETRY_AFTER_SECONDS = 86_400
 VERSIONS = ("baseline", "candidate")
 ADAPTER_VARIANTS = {"baseline": "single_call", "candidate": "staged"}
 CALL_DESCRIPTION = re.compile(r"^reportInsightCall:(MAP|REVIEW|REDUCE)-(\d{3})$")
+FROZEN_LEARNING_ERROR = "FROZEN_COMPARISON_LEARNING_FIELDS_UNSUPPORTED"
+FROZEN_LEARNING_MESSAGE = (
+    "현재 모든 고정 버전 비교 프로필은 feedbackExamples와 finding.topicIds를 지원하지 않습니다. "
+    "입력 필드를 제거하거나 비교 결과를 저장하지 않았습니다. "
+    "학습 메타데이터를 포함한 평가는 현행 런타임의 single/staged 평가를 사용하세요."
+)
 POLICY = {
     **ledger.POLICY,
     "maxOutputTokens": MAX_OUTPUT,
@@ -120,6 +126,18 @@ def _comparison_policy(profile: str) -> dict:
 
 def _is_staged_comparison(policy: dict) -> bool:
     return policy.get("baselinePipeline") == "staged"
+
+
+def _validate_frozen_request(request: dict) -> None:
+    # Every pinned baseline in COMPARISON_PROFILES predates these fields and
+    # forbids extras, including explicitly empty lists. Runtime version labels
+    # do not prove schema compatibility. Keep the snapshot intact and reject it
+    # before either runtime executes; a future profile needs an explicit contract.
+    ledger.require(
+        "feedbackExamples" not in request
+        and all("topicIds" not in finding for finding in request["findings"]),
+        FROZEN_LEARNING_ERROR,
+    )
 
 
 def _validate_runtime_versions(policy: dict, runtimes: dict) -> None:
@@ -251,6 +269,9 @@ def prepare(
     ledger.require(type(max_calls) is int and 1 <= max_calls <= 144, "INVALID_CALL_LIMIT")
     corpus = load_corpus(dataset)
     ledger.require(not corpus.synthetic, "REAL_REPORT_CORPUS_REQUIRED")
+    requests = [request_snapshot(case.request) for case in corpus.cases]
+    for request in requests:
+        _validate_frozen_request(request)
     roots = {
         "baseline": baseline_root.resolve(),
         "candidate": (candidate_root or ledger.AGENT_ROOT).resolve(),
@@ -263,8 +284,7 @@ def prepare(
         "DEPENDENCIES_DIFFER",
     )
     jobs = []
-    for case in corpus.cases:
-        request = request_snapshot(case.request)
+    for case, request in zip(corpus.cases, requests, strict=True):
         request.update(plan="FREE", idempotencyKey=f"version-eval:{ledger.digest(request)[:24]}")
         request = request_snapshot(ReportInsightRequest.model_validate(request))
         order = VERSIONS if int(ledger.digest(case.case_id)[0], 16) % 2 == 0 else VERSIONS[::-1]
@@ -385,6 +405,8 @@ def verify(output_dir: Path, manifest: dict, state: dict) -> None:
         all(manifest["policy"].get(key) == value for key, value in expected_policy.items()),
         "POLICY_CHANGED",
     )
+    for job in manifest["jobs"]:
+        _validate_frozen_request(job["request"])
     # A profile without variant overrides still fixes their effective values.
     # Additional checkpoint keys must not widen stage admission after hashing.
     ledger.require(
@@ -1319,7 +1341,10 @@ def main() -> None:
                 value = summary(args.output_dir)
         print(json.dumps(value, ensure_ascii=False, indent=2))
     except ledger.EvaluationStopped as error:
-        print(json.dumps({"status": "stopped", "code": str(error)}))
+        result = {"status": "stopped", "code": str(error)}
+        if str(error) == FROZEN_LEARNING_ERROR:
+            result["message"] = FROZEN_LEARNING_MESSAGE
+        print(json.dumps(result, ensure_ascii=False))
         raise SystemExit(2) from None
     except Exception:
         print(json.dumps({"status": "stopped", "code": "VERSION_COMPARISON_FAILED"}))

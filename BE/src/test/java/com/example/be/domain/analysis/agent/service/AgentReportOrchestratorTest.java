@@ -41,6 +41,8 @@ import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.entity.NewsIssue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
@@ -55,8 +57,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class AgentReportOrchestratorTest {
@@ -109,7 +113,39 @@ class AgentReportOrchestratorTest {
         verify(client).report(request.capture());
         assertEquals(List.of(example), request.getValue().feedbackExamples());
         assertEquals(List.of(3L, 8L), request.getValue().findings().getFirst().topicIds());
-        verify(feedbackLearning).forSnapshots(eq(List.of(relevant.getTopicSnapshot())), eq(run.getStartedAt()), any());
+        var order = inOrder(runItems, feedbackLearning, quotaService, client);
+        order.verify(runItems).findExecutionItemsByRunId(42L);
+        order.verify(feedbackLearning).forSnapshots(eq(List.of(relevant.getTopicSnapshot())), eq(run.getStartedAt()), any());
+        order.verify(quotaService).reserve(42L, "run:42:report", AgentTask.REPORT, AgentPlan.FREE);
+        order.verify(client).report(any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void learningReadFailureUsesFallbackWithoutReservingQuota(boolean daily, boolean feedbackLookup) {
+        var run = run(AgentPlan.PAID);
+        var finding = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "검증된 보고서 근거");
+        org.springframework.test.util.ReflectionTestUtils.setField(finding, "run", run);
+        var generatedAt = LocalDateTime.of(2026, 8, 22, 0, 0);
+        var date = generatedAt.toLocalDate().minusDays(1);
+        var stats = com.example.be.domain.reports.service.ReportSourceStats.empty();
+        var failure = new org.springframework.dao.DataAccessResourceFailureException("test database unavailable");
+        if (feedbackLookup) {
+            when(feedbackLearning.forSnapshots(anyList(), any(), any())).thenThrow(failure);
+        } else {
+            when(runItems.findExecutionItemsByRunId(42L)).thenThrow(failure);
+        }
+
+        if (daily) {
+            orchestrator.generateDaily(77L, date, List.of(finding), stats, generatedAt);
+            verify(fallback).generateDaily(List.of(finding), date, stats);
+        } else {
+            orchestrator.generate(run, List.of(finding), generatedAt);
+            verify(fallback).generate(eq(List.of(finding)), eq(generatedAt), any());
+        }
+
+        verifyNoInteractions(quotaService, planService, client, recorder);
+        if (!feedbackLookup) verifyNoInteractions(feedbackLearning);
     }
 
     @Test

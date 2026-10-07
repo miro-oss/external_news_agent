@@ -27,7 +27,6 @@ import org.springframework.util.StringUtils;
 import tools.jackson.databind.ObjectMapper;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.LocalDateTime;
 import java.util.*;
 
 @Component
@@ -80,8 +79,11 @@ public class ReportInsightSnapshotAssembler {
                 java.util.stream.Collectors.toSet());
         var scopes = report.getCollectionContexts().stream().flatMap(context -> context.topics().stream())
                 .filter(topic -> selectedTopics.contains(topic.topicId())).distinct().toList();
-        var examples = feedbackLearning.forSnapshots(scopes, LocalDateTime.now(ApiTimeZone.ZONE),
-                Set.of(Category.TOPIC_MISMATCH, Category.SUMMARY_ERROR, Category.WRONG_CLUSTER, Category.OTHER));
+        // Both generation and read reconstruct the same report-time learning input. Later reviews
+        // belong to later reports; this report's own rejected evidence is still projected above.
+        var examples = report.getGeneratedAt() == null ? List.<AgentFeedbackExample>of()
+                : feedbackLearning.forSnapshots(scopes, report.getGeneratedAt(),
+                        Set.of(Category.TOPIC_MISMATCH, Category.SUMMARY_ERROR, Category.WRONG_CLUSTER, Category.OTHER));
         return new Snapshot(report.getId(), report.getRunId(), hash(new Fingerprint(reportPayload, selected, examples)),
                 reportPayload, selected, examples);
     }

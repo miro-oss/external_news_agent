@@ -43,29 +43,61 @@ class ReportInsightSnapshotAssemblerTest {
             new ReportEventFeedbackProjection(feedback, events), feedbackLearning);
     @BeforeEach void setup() { when(relevance.filterFindings(anyList())).thenAnswer(call -> call.getArgument(0)); }
 
-    @Test void learnedReviewChangesOnlyHashAndUsesFrozenScopeOfSelectedFindings() {
-        var scope = com.example.be.domain.collection.entity.CollectionTopicSnapshot.capture(Topic.builder().id(1L).name("주제").build());
-        var unrelated = com.example.be.domain.collection.entity.CollectionTopicSnapshot.capture(Topic.builder().id(99L).name("다른 주제").build());
+    @Test void createAndReadKeepReportTimeLearningWhileLaterReportsReceiveNewReviews() {
+        var scope = CollectionTopicSnapshot.capture(Topic.builder().id(1L).name("주제").build());
+        var unrelated = CollectionTopicSnapshot.capture(Topic.builder().id(99L).name("다른 주제").build());
+        var generatedAt = LocalDateTime.of(2026, 9, 30, 10, 0);
         var report = NewsReport.builder().id(10L).title("일일 리포트").reportScope(ReportScope.DAILY)
-                .reflectedFindingIds(List.of(50L)).reportStatus(ReportStatus.GENERATED)
-                .collectionContexts(List.of(new com.example.be.domain.reports.entity.ReportCollectionContext(42L, List.of(scope, unrelated)))).build();
+                .reflectedFindingIds(List.of(50L)).reportStatus(ReportStatus.GENERATED).generatedAt(generatedAt)
+                .collectionContexts(List.of(new ReportCollectionContext(42L, List.of(scope, unrelated)))).build();
         var example = new AgentFeedbackExample(12L, 1L, "SUMMARY_ERROR", "과거 사건", "과거 요약",
                 "추정과 확정을 구분합니다.", List.of(new AgentFeedbackExample.Evidence(11L, "추정했다")));
+        var laterExample = new AgentFeedbackExample(13L, 1L, "SUMMARY_ERROR", "다른 리포트 사건", "새로 검토한 요약",
+                "발표와 시행을 구분합니다.", List.of(new AgentFeedbackExample.Evidence(14L, "발표했다")));
+        var reviewed = new LinkedHashMap<LocalDateTime, AgentFeedbackExample>();
+        reviewed.put(generatedAt.minusHours(1), example);
         when(reports.findByIdAndReportStatusNot(10L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
         when(findings.findForReportByIdIn(List.of(50L))).thenReturn(List.of(finding(50, "현재 근거",
                 List.of(new FindingKeyPoint("현재 주장", List.of(0), "grounded")))));
-        when(feedbackLearning.forSnapshots(eq(List.of(scope)), any(), any()))
-                .thenReturn(List.of(), List.of(example), List.of(example));
+        when(feedbackLearning.forSnapshots(eq(List.of(scope)), any(), any())).thenAnswer(call -> {
+            LocalDateTime cutoff = call.getArgument(1);
+            return reviewed.entrySet().stream().filter(entry -> !entry.getKey().isAfter(cutoff))
+                    .map(Map.Entry::getValue).toList();
+        });
 
-        var before = assembler.assemble(10L);
-        var after = assembler.assemble(10L);
-        var unchanged = assembler.assembleForRead(10L);
+        var created = assembler.assemble(10L);
+        reviewed.put(generatedAt.plusHours(1), laterExample);
+        var read = assembler.assembleForRead(10L);
+        var recreated = assembler.assemble(10L);
 
-        assertNotEquals(before.inputHash(), after.inputHash());
-        assertEquals(after.inputHash(), unchanged.inputHash());
-        assertEquals(before.findings(), after.findings());
-        assertEquals(List.of(1L), after.findings().getFirst().topicIds());
-        assertEquals(List.of(example), after.feedbackExamples());
+        assertEquals(created.inputHash(), read.inputHash());
+        assertEquals(created.inputHash(), recreated.inputHash());
+        assertEquals(List.of(example), read.feedbackExamples());
+        assertEquals(List.of(1L), read.findings().getFirst().topicIds());
+        verify(feedbackLearning, times(3)).forSnapshots(eq(List.of(scope)), eq(generatedAt), any());
+
+        var laterReport = NewsReport.builder().id(11L).title("다음 리포트").reportScope(ReportScope.DAILY)
+                .reflectedFindingIds(List.of(50L)).reportStatus(ReportStatus.GENERATED).generatedAt(generatedAt.plusDays(1))
+                .collectionContexts(report.getCollectionContexts()).build();
+        when(reports.findByIdAndReportStatusNot(11L, ReportStatus.PENDING)).thenReturn(Optional.of(laterReport));
+        assertEquals(List.of(example, laterExample), assembler.assemble(11L).feedbackExamples());
+    }
+
+    @Test void missingReportGenerationTimeUsesDeterministicEmptyLearningWithoutLookup() {
+        var scope = CollectionTopicSnapshot.capture(Topic.builder().id(1L).name("주제").build());
+        var report = NewsReport.builder().id(10L).title("과거 리포트").reportScope(ReportScope.DAILY)
+                .reflectedFindingIds(List.of(50L)).reportStatus(ReportStatus.GENERATED)
+                .collectionContexts(List.of(new ReportCollectionContext(42L, List.of(scope)))).build();
+        when(reports.findByIdAndReportStatusNot(10L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(findings.findForReportByIdIn(List.of(50L))).thenReturn(List.of(finding(50, "현재 근거",
+                List.of(new FindingKeyPoint("현재 주장", List.of(0), "grounded")))));
+
+        var created = assembler.assemble(10L);
+        var read = assembler.assembleForRead(10L);
+
+        assertTrue(created.feedbackExamples().isEmpty());
+        assertEquals(created.inputHash(), read.inputHash());
+        verifyNoInteractions(feedbackLearning);
     }
 
     @Test void snapshotUsesOnlyReportSelectionAndResolvableGroundedStoredClaims() {
