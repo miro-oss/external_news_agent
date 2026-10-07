@@ -124,7 +124,7 @@ export function ReportEventFeedbackComposer({ reportId, target, disabled = false
       </label>
       <div className="report-feedback-help report-feedback-count" id={`${id}-count`}><span>1~2,000자</span><span>{comment.length.toLocaleString()} / 2,000</span></div>
     </fieldset>
-    <p className="report-feedback-help" id={`${id}-scope`}>보고서 검토용 의견입니다. 개인 알림 기준에는 적용하지 않습니다.</p>
+    <p className="report-feedback-help" id={`${id}-scope`}>확인된 오류는 같은 주제·수집 조건의 다음 분석에서 참고합니다. 개인 알림 기준에는 적용하지 않습니다.</p>
     {error && <div className="report-feedback-error" role="alert"><p>{error}</p>
       {conflict ? <><p>이미 의견이 접수되었거나 보고서 내용이 바뀌었을 수 있습니다. 새로고침 후 확인해 주세요.</p>
         <button type="button" className="text-button" disabled={disabled} onClick={() => { void onRefreshReport() }}>보고서 새로고침</button></>

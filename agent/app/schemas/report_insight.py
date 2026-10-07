@@ -7,6 +7,7 @@ from pydantic import ConfigDict, Field, StrictInt, model_validator
 
 from app.schemas.analyze import Audience, ClaimType, Plan
 from app.schemas.common import AgentModel
+from app.schemas.feedback_learning import FeedbackLearningRequest
 from app.schemas.report import MAX_REPORT_FINDINGS, ReportResponseMeta
 
 ClaimId = Annotated[str, Field(min_length=1, max_length=50)]
@@ -60,6 +61,7 @@ class ReportInsightClaim(AgentModel):
 
 
 class ReportInsightFinding(AgentModel):
+    topic_ids: list[Annotated[int, Field(gt=0)]] = Field(default_factory=list, max_length=100)
     id: int = Field(gt=0)
     article_id: int = Field(gt=0)
     article_title: str = Field(min_length=1, max_length=1000)
@@ -71,6 +73,8 @@ class ReportInsightFinding(AgentModel):
 
     @model_validator(mode="after")
     def validate_claim_sources(self) -> "ReportInsightFinding":
+        if len(self.topic_ids) != len(set(self.topic_ids)):
+            raise ValueError("finding의 topicIds는 중복될 수 없습니다.")
         indices = [sentence.index for sentence in self.sentences]
         if len(indices) != len(set(indices)):
             raise ValueError("sentence index는 finding 안에서 유일해야 합니다.")
@@ -92,7 +96,7 @@ class ReportInsightFinding(AgentModel):
         return self
 
 
-class ReportInsightRequest(AgentModel):
+class ReportInsightRequest(FeedbackLearningRequest):
     idempotency_key: str = Field(min_length=1, max_length=200)
     plan: Plan
     audiences: list[Audience] = Field(min_length=1, max_length=4)
@@ -101,6 +105,9 @@ class ReportInsightRequest(AgentModel):
 
     @model_validator(mode="after")
     def validate_unique_values(self) -> "ReportInsightRequest":
+        self.validate_feedback_scope(
+            {topic_id for finding in self.findings for topic_id in finding.topic_ids}
+        )
         if len(self.audiences) != len(set(self.audiences)):
             raise ValueError("audiences는 중복될 수 없습니다.")
         ids = [finding.id for finding in self.findings]

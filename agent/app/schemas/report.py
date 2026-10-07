@@ -6,6 +6,7 @@ from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from app.schemas.analyze import ClaimType, Groundedness, Plan
 from app.schemas.common import AgentModel
+from app.schemas.feedback_learning import FeedbackLearningRequest
 
 NonEmptyString = Annotated[str, Field(min_length=1)]
 ExecutiveSummaryString = Annotated[str, Field(min_length=1, max_length=100)]
@@ -56,6 +57,7 @@ class ReportKeyPointInput(AgentModel):
 
 
 class ReportFindingInput(AgentModel):
+    topic_ids: list[Annotated[int, Field(gt=0)]] = Field(default_factory=list, max_length=100)
     id: int = Field(gt=0)
     article_id: int = Field(gt=0)
     article_title: str = Field(min_length=1, max_length=1000)
@@ -85,6 +87,13 @@ class ReportFindingInput(AgentModel):
         parsed = urlsplit(value)
         if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
             raise ValueError("canonicalUrl은 hostname이 있는 HTTP(S) URL이어야 합니다.")
+        return value
+
+    @field_validator("topic_ids")
+    @classmethod
+    def validate_topic_ids(cls, value: list[int]) -> list[int]:
+        if len(value) != len(set(value)):
+            raise ValueError("finding의 topicIds는 중복될 수 없습니다.")
         return value
 
 
@@ -138,7 +147,7 @@ class SourceStats(AgentModel):
         return self
 
 
-class ReportRequest(AgentModel):
+class ReportRequest(FeedbackLearningRequest):
     idempotency_key: str = Field(min_length=1, max_length=200)
     plan: Plan
     run: ReportRunInput
@@ -149,6 +158,9 @@ class ReportRequest(AgentModel):
 
     @model_validator(mode="after")
     def validate_event_finding_ids(self) -> "ReportRequest":
+        self.validate_feedback_scope(
+            {topic_id for finding in self.findings for topic_id in finding.topic_ids}
+        )
         finding_id_list = [finding.id for finding in self.findings]
         finding_ids = set(finding_id_list)
         if len(finding_id_list) != len(finding_ids):

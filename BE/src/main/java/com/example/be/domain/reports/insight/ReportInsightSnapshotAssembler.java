@@ -1,6 +1,9 @@
 package com.example.be.domain.reports.insight;
 
 import com.example.be.domain.analysis.agent.dto.AgentReportInsightRequest;
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+import com.example.be.domain.feedback.model.FeedbackModels.Category;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
@@ -24,6 +27,7 @@ import org.springframework.util.StringUtils;
 import tools.jackson.databind.ObjectMapper;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDateTime;
 import java.util.*;
 
 @Component
@@ -35,6 +39,7 @@ public class ReportInsightSnapshotAssembler {
     private final TopicRelevancePolicy relevancePolicy;
     private final ObjectMapper mapper;
     private final ReportEventFeedbackProjection feedbackProjection;
+    private final FeedbackLearningService feedbackLearning;
 
     @Transactional(readOnly = true)
     public Snapshot assemble(Long reportId) {
@@ -60,18 +65,25 @@ public class ReportInsightSnapshotAssembler {
             visible.forEach(finding -> byId.put(finding.getId(), finding));
             visible = report.getReflectedFindingIds().stream().filter(byId::containsKey).map(byId::get).toList();
         }
+        var topicIds = relevancePolicy.relevantTopicIdsByFinding(visible);
         var selected = visible.stream()
                 .filter(finding -> reflectedInReport(report, finding))
                 .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
                 .filter(finding -> finding.getArticle().getTopic() != null
                         && StringUtils.hasText(finding.getArticle().getTopic().getName()))
-                .map(this::payload).filter(finding -> !finding.claims().isEmpty()).toList();
+                .map(finding -> payload(finding, topicIds)).filter(finding -> !finding.claims().isEmpty()).toList();
         if (validateGeneration && selected.isEmpty()) throw new GeneralException(GeneralErrorCode.CONFLICT,
                 "이 리포트는 인사이트에 사용할 검증된 근거가 없습니다.");
         if (validateGeneration && selected.size() > MAX_FINDINGS) throw new GeneralException(GeneralErrorCode.CONFLICT,
                 "리포트 관점 인사이트는 검증된 근거 50개까지 지원합니다.");
-        return new Snapshot(report.getId(), report.getRunId(), hash(new Fingerprint(reportPayload, selected)),
-                reportPayload, selected);
+        var selectedTopics = selected.stream().flatMap(finding -> finding.topicIds().stream()).collect(
+                java.util.stream.Collectors.toSet());
+        var scopes = report.getCollectionContexts().stream().flatMap(context -> context.topics().stream())
+                .filter(topic -> selectedTopics.contains(topic.topicId())).distinct().toList();
+        var examples = feedbackLearning.forSnapshots(scopes, LocalDateTime.now(ApiTimeZone.ZONE),
+                Set.of(Category.TOPIC_MISMATCH, Category.SUMMARY_ERROR, Category.WRONG_CLUSTER, Category.OTHER));
+        return new Snapshot(report.getId(), report.getRunId(), hash(new Fingerprint(reportPayload, selected, examples)),
+                reportPayload, selected, examples);
     }
 
     private boolean reflectedInReport(NewsReport report, Finding finding) {
@@ -82,7 +94,7 @@ public class ReportInsightSnapshotAssembler {
                 && !finding.getAnalyzedAt().isAfter(report.getGeneratedAt());
     }
 
-    private AgentReportInsightRequest.FindingPayload payload(Finding finding) {
+    private AgentReportInsightRequest.FindingPayload payload(Finding finding, Map<Long, Set<Long>> topicIds) {
         Map<Integer, String> sentenceTexts = new TreeMap<>();
         Set<Integer> ambiguous = new HashSet<>();
         if (finding.getSections() != null) for (var section : finding.getSections()) {
@@ -113,7 +125,9 @@ public class ReportInsightSnapshotAssembler {
         return new AgentReportInsightRequest.FindingPayload(finding.getId(), article.getId(), article.getTitle(),
                 article.getCanonicalUrl(), article.getPublishedAt() == null ? null : article.getPublishedAt()
                 .atZoneSameInstant(ApiTimeZone.ZONE).toLocalDate().toString(),
-                article.getTopic() == null ? "" : article.getTopic().getName(), List.copyOf(claims), sentences);
+                article.getTopic() == null ? "" : article.getTopic().getName(), List.copyOf(claims), sentences,
+                topicIds.getOrDefault(finding.getId(), article.getTopic() == null || article.getTopic().getId() == null
+                        ? Set.of() : Set.of(article.getTopic().getId())).stream().sorted().toList());
     }
 
     private String hash(Object input) {
@@ -121,7 +135,14 @@ public class ReportInsightSnapshotAssembler {
         catch (NoSuchAlgorithmException exception) { throw new IllegalStateException(exception); }
     }
     private record Fingerprint(AgentReportInsightRequest.ReportPayload report,
-            List<AgentReportInsightRequest.FindingPayload> findings) { }
+            List<AgentReportInsightRequest.FindingPayload> findings, List<AgentFeedbackExample> feedbackExamples) { }
     public record Snapshot(Long reportId, Long runId, String inputHash,
-            AgentReportInsightRequest.ReportPayload report, List<AgentReportInsightRequest.FindingPayload> findings) { }
+            AgentReportInsightRequest.ReportPayload report, List<AgentReportInsightRequest.FindingPayload> findings,
+            List<AgentFeedbackExample> feedbackExamples) {
+        public Snapshot { feedbackExamples = feedbackExamples == null ? List.of() : List.copyOf(feedbackExamples); }
+        public Snapshot(Long reportId, Long runId, String inputHash,
+                        AgentReportInsightRequest.ReportPayload report, List<AgentReportInsightRequest.FindingPayload> findings) {
+            this(reportId, runId, inputHash, report, findings, List.of());
+        }
+    }
 }

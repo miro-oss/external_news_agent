@@ -959,7 +959,7 @@ def test_provider_receives_isolated_validated_json_at_original_batch_input_limit
         single = bounded.model_copy(update={"articles": [article]})
         assert serialized == single.provider_input_json()
         assert len(serialized) <= MAX_RELEVANCE_INPUT_CHARS
-        assert json.loads(serialized) == single.model_dump(by_alias=True, mode="json")
+        assert TopicRelevanceRequest.model_validate(json.loads(serialized)) == single
         assert "<" not in serialized and ">" not in serialized
 
 

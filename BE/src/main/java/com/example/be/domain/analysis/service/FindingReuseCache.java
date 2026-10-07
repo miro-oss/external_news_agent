@@ -139,6 +139,24 @@ public class FindingReuseCache {
             fields.add("self-critique-eligible");
         }
         appendTopic(fields, context.topic());
+        // The cache and provider consume the same frozen correction examples.
+        if (!context.feedbackExamples().isEmpty()) {
+            fields.add("feedback-examples-v1");
+            fields.add(Integer.toString(context.feedbackExamples().size()));
+            context.feedbackExamples().forEach(example -> {
+                fields.add(Long.toString(example.feedbackId()));
+                fields.add(Long.toString(example.topicId()));
+                fields.add(example.category());
+                fields.add(example.eventTitle());
+                fields.add(example.eventSummary());
+                fields.add(example.diagnosis());
+                fields.add(Integer.toString(example.evidence().size()));
+                example.evidence().forEach(evidence -> {
+                    fields.add(Long.toString(evidence.articleId()));
+                    fields.add(evidence.quote());
+                });
+            });
+        }
         return ArticleHasher.analysisInputHash(fields.toArray(String[]::new));
     }
 

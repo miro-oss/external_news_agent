@@ -1,5 +1,9 @@
 package com.example.be.domain.reports.insight;
 
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
+
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+
 import com.example.be.domain.analysis.entity.*;
 import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.repository.FindingRepository;
@@ -32,11 +36,37 @@ class ReportInsightSnapshotAssemblerTest {
     NewsReportRepository reports = mock(NewsReportRepository.class);
     FindingRepository findings = mock(FindingRepository.class);
     TopicRelevancePolicy relevance = mock(TopicRelevancePolicy.class);
+    FeedbackLearningService feedbackLearning = mock(FeedbackLearningService.class);
     FeedbackStore feedback = mock(FeedbackStore.class);
     ReportEventSnapshotFactory events = mock(ReportEventSnapshotFactory.class);
     ReportInsightSnapshotAssembler assembler = new ReportInsightSnapshotAssembler(reports, findings, relevance, new ObjectMapper(),
-            new ReportEventFeedbackProjection(feedback, events));
+            new ReportEventFeedbackProjection(feedback, events), feedbackLearning);
     @BeforeEach void setup() { when(relevance.filterFindings(anyList())).thenAnswer(call -> call.getArgument(0)); }
+
+    @Test void learnedReviewChangesOnlyHashAndUsesFrozenScopeOfSelectedFindings() {
+        var scope = com.example.be.domain.collection.entity.CollectionTopicSnapshot.capture(Topic.builder().id(1L).name("주제").build());
+        var unrelated = com.example.be.domain.collection.entity.CollectionTopicSnapshot.capture(Topic.builder().id(99L).name("다른 주제").build());
+        var report = NewsReport.builder().id(10L).title("일일 리포트").reportScope(ReportScope.DAILY)
+                .reflectedFindingIds(List.of(50L)).reportStatus(ReportStatus.GENERATED)
+                .collectionContexts(List.of(new com.example.be.domain.reports.entity.ReportCollectionContext(42L, List.of(scope, unrelated)))).build();
+        var example = new AgentFeedbackExample(12L, 1L, "SUMMARY_ERROR", "과거 사건", "과거 요약",
+                "추정과 확정을 구분합니다.", List.of(new AgentFeedbackExample.Evidence(11L, "추정했다")));
+        when(reports.findByIdAndReportStatusNot(10L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(findings.findForReportByIdIn(List.of(50L))).thenReturn(List.of(finding(50, "현재 근거",
+                List.of(new FindingKeyPoint("현재 주장", List.of(0), "grounded")))));
+        when(feedbackLearning.forSnapshots(eq(List.of(scope)), any(), any()))
+                .thenReturn(List.of(), List.of(example), List.of(example));
+
+        var before = assembler.assemble(10L);
+        var after = assembler.assemble(10L);
+        var unchanged = assembler.assembleForRead(10L);
+
+        assertNotEquals(before.inputHash(), after.inputHash());
+        assertEquals(after.inputHash(), unchanged.inputHash());
+        assertEquals(before.findings(), after.findings());
+        assertEquals(List.of(1L), after.findings().getFirst().topicIds());
+        assertEquals(List.of(example), after.feedbackExamples());
+    }
 
     @Test void snapshotUsesOnlyReportSelectionAndResolvableGroundedStoredClaims() {
         var report = daily(List.of(50L));

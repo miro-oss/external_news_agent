@@ -1,5 +1,10 @@
 package com.example.be.domain.analysis.relevance;
 
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
+import com.example.be.domain.feedback.model.FeedbackModels.Category;
+
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+
 import com.example.be.domain.analysis.agent.client.AgentClient;
 import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
@@ -41,6 +46,8 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class TopicRelevanceGateTest {
+    @Mock FeedbackLearningService feedbackLearning;
+    @Mock com.example.be.domain.collection.repository.CollectionRunRepository runs;
     @Mock AgentClient client;
     @Mock AgentQuotaService quota;
     @Mock TopicRelevanceStore store;
@@ -52,7 +59,41 @@ class TopicRelevanceGateTest {
     @BeforeEach void setup() {
         properties = new AgentProperties();
         properties.setEnabled(true);
-        gate = new TopicRelevanceGate(properties, client, quota, store, finalizer, writer, new ObjectMapper());
+        gate = new TopicRelevanceGate(properties, client, quota, store, finalizer, writer, new ObjectMapper(), feedbackLearning, runs);
+    }
+
+    @Test void reviewedMismatchChangesRequestAndCachedInputWhileUsingRunStartCutoff() {
+        reserve();
+        var started = java.time.LocalDateTime.of(2026, 10, 7, 9, 0);
+        when(runs.findById(42L)).thenReturn(java.util.Optional.of(
+                com.example.be.domain.collection.entity.CollectionRun.builder().id(42L).startedAt(started).build()));
+        var input = candidate(1L, 7L);
+        var example = new AgentFeedbackExample(12L, 7L, "TOPIC_MISMATCH", "과거 사건", "과거 요약",
+                "단순 언급을 실질적 관련으로 보지 않습니다.", List.of(new AgentFeedbackExample.Evidence(11L, "단순 언급")));
+        when(feedbackLearning.forTopic(input.topic(), started, Set.of(Category.TOPIC_MISMATCH)))
+                .thenReturn(List.of(), List.of(example), List.of(example));
+        Map<TopicRelevanceGate.Key, TopicRelevanceStore.Assessment> saved = new HashMap<>();
+        when(store.findByRun(42L)).thenAnswer(call -> new ArrayList<>(saved.values()));
+        doAnswer(call -> {
+            List<TopicRelevanceStore.Assessment> values = call.getArgument(3);
+            values.forEach(a -> saved.put(new TopicRelevanceGate.Key(a.articleId(), a.topicId()), a));
+            return null;
+        }).when(finalizer).success(eq(42L), any(), any(), anyList(), anyString(), any(), any());
+        when(client.topicRelevance(any())).thenAnswer(call -> {
+            AgentTopicRelevanceRequest request = call.getArgument(0);
+            return response(List.of(new AgentTopicRelevanceResponse.Decision(1L, "RELEVANT", "관련", List.of(request.articles().getFirst().title()))));
+        });
+
+        gate.assess(42L, AgentPlan.FREE, List.of(input));
+        String originalHash = saved.values().iterator().next().inputHash();
+        gate.assess(42L, AgentPlan.FREE, List.of(input));
+        gate.assess(42L, AgentPlan.FREE, List.of(input));
+
+        var requests = org.mockito.ArgumentCaptor.forClass(AgentTopicRelevanceRequest.class);
+        verify(client, times(2)).topicRelevance(requests.capture());
+        assertEquals(List.of(example), requests.getValue().feedbackExamples());
+        assertNotEquals(originalHash, saved.values().iterator().next().inputHash());
+        verify(feedbackLearning, times(3)).forTopic(input.topic(), started, Set.of(Category.TOPIC_MISMATCH));
     }
 
     @Test void isolatesEachArticleAndAcceptsOnlyExplicitlyRelevantDecisions() {

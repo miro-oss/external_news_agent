@@ -47,6 +47,7 @@ class ReportEventFeedbackOracleIntegrationTests {
     @Autowired FeedbackService deliveredFeedback;
     @Autowired FeedbackStore store;
     @Autowired FeedbackWorker worker;
+    @Autowired FeedbackLearningService learning;
     @Autowired ObjectMapper json;
     @MockitoBean ReportEventSnapshotFactory snapshots;
     @MockitoBean FeedbackAgentGateway gateway;
@@ -151,6 +152,40 @@ class ReportEventFeedbackOracleIntegrationTests {
         assertEquals("검색1",exported.path("request").path("topic").path("queryText").asString());
         assertEquals("필수1",exported.path("request").path("topic").path("requiredKeywords").get(0).asString());
         assertEquals("선택1",exported.path("request").path("topic").path("optionalKeywords").get(0).asString());
+    }
+
+    @Test void reviewedEventAutomaticallyBecomesScopedInputForTheNextAnalysisAcrossRestarts() {
+        var original=item('a',2,null);
+        long report=report(List.of(original));
+        var scopes=original.event().sources().stream().flatMap(source->source.collectionTopics().stream()).toList();
+        var submitted=service.submit(report,request('a',"learn-next-run","SUMMARY_ERROR"));
+        var beforeReview=now().minusSeconds(1);
+        assertTrue(learning.forSnapshots(scopes,now(),Set.of(Category.SUMMARY_ERROR)).isEmpty());
+        when(gateway.review(isNull(),eq(report),any())).thenReturn(json.readTree("""
+                {"verdict":"CONFIRMED_ERROR","diagnosis":"원문에서 확인한 범위로 요약한다.",
+                 "evidence":[{"articleId":401,"quote":"원문 근거 1"},{"articleId":402,"quote":"원문 근거 2"}],
+                 "proposedPolicy":null,"meta":{"provider":"openai","truncated":false,"mock":false}}
+                """));
+
+        worker.process(job(submitted.id()));
+
+        assertTrue(learning.forSnapshots(scopes,beforeReview,Set.of(Category.SUMMARY_ERROR)).isEmpty());
+        var examples=learning.forSnapshots(scopes,now().plusSeconds(1),Set.of(Category.SUMMARY_ERROR));
+        assertEquals(List.of(701L,702L),examples.stream().map(example->example.topicId()).toList());
+        assertTrue(examples.stream().allMatch(example->example.feedbackId()==submitted.id()));
+        assertEquals(List.of(401L),examples.getFirst().evidence().stream().map(evidence->evidence.articleId()).toList());
+        assertEquals(List.of(402L),examples.getLast().evidence().stream().map(evidence->evidence.articleId()).toList());
+        assertEquals(examples,new FeedbackLearningService(jdbc,json)
+                .forSnapshots(scopes,now().plusSeconds(1),Set.of(Category.SUMMARY_ERROR)));
+        assertTrue(learning.forSnapshots(scopes,now().plusSeconds(1),Set.of(Category.TOPIC_MISMATCH)).isEmpty());
+        var prior=scopes.getFirst();
+        var changed=new CollectionTopicSnapshot(prior.topicId(),prior.topicName(),"바뀐 검색 범위",
+                prior.requiredKeywords(),prior.optionalKeywords(),prior.excludedKeywords(),100,1440);
+        assertTrue(learning.forSnapshots(List.of(changed),now().plusSeconds(1),Set.of(Category.SUMMARY_ERROR)).isEmpty());
+        jdbc.update("UPDATE news_reports SET deleted_at=? WHERE id=?",now(),report);
+        assertTrue(learning.forSnapshots(scopes,now().plusSeconds(1),Set.of(Category.SUMMARY_ERROR)).isEmpty());
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM news_feedback_policies WHERE source_feedback_id=?",
+                Integer.class,submitted.id()));
     }
 
     @Test void confirmedErrorDisappearsAcrossReloadsWithoutChangingOtherEventsOrSavedEvidence() {

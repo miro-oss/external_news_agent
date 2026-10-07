@@ -1,10 +1,12 @@
 package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.topics.entity.Topic;
 
 import java.util.Objects;
+import java.util.List;
 
 /** 수집 실행과 분석 대상을 묶어 오케스트레이션 계층에만 전달한다. */
 public record AnalysisContext(
@@ -13,7 +15,8 @@ public record AnalysisContext(
         AgentPlan plan,
         IssueAnalysisContext issue,
         boolean selfCritiqueEligible,
-        Topic topicOverride
+        Topic topicOverride,
+        List<AgentFeedbackExample> feedbackExamples
 ) {
 
     public AnalysisContext {
@@ -21,6 +24,12 @@ public record AnalysisContext(
         Objects.requireNonNull(article, "article은 필수입니다.");
         Objects.requireNonNull(plan, "plan은 필수입니다.");
         issue = issue == null ? IssueAnalysisContext.empty() : issue;
+        feedbackExamples = feedbackExamples == null ? List.of() : List.copyOf(feedbackExamples);
+    }
+
+    public AnalysisContext(Long runId, Article article, AgentPlan plan, IssueAnalysisContext issue,
+                           boolean selfCritiqueEligible, Topic topicOverride) {
+        this(runId, article, plan, issue, selfCritiqueEligible, topicOverride, List.of());
     }
 
     public AnalysisContext(Long runId, Article article, AgentPlan plan) {
@@ -45,6 +54,6 @@ public record AnalysisContext(
     }
 
     public AnalysisContext withArticle(Article target) {
-        return new AnalysisContext(runId, target, plan, issue, selfCritiqueEligible, topicOverride);
+        return new AnalysisContext(runId, target, plan, issue, selfCritiqueEligible, topicOverride, feedbackExamples);
     }
 }

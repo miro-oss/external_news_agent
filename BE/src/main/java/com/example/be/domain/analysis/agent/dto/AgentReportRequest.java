@@ -15,8 +15,18 @@ public record AgentReportRequest(
         List<FindingPayload> findings,
         List<EventPayload> events,
         SourceStatsPayload sourceStats,
-        List<String> sourceNotes
+        List<String> sourceNotes,
+        List<AgentFeedbackExample> feedbackExamples
 ) {
+
+    public AgentReportRequest {
+        feedbackExamples = feedbackExamples == null ? List.of() : List.copyOf(feedbackExamples);
+    }
+    public AgentReportRequest(String idempotencyKey, AgentPlan plan, RunPayload run,
+                              List<FindingPayload> findings, List<EventPayload> events,
+                              SourceStatsPayload sourceStats, List<String> sourceNotes) {
+        this(idempotencyKey, plan, run, findings, events, sourceStats, sourceNotes, List.of());
+    }
 
     public record RunPayload(
             Long id,
@@ -47,8 +57,16 @@ public record AgentReportRequest(
             SensitivityPayload sensitivity,
             String relevance,
             String category,
-            String fetchStatus
+            String fetchStatus,
+            List<Long> topicIds
     ) {
+        public FindingPayload(Long id, Long articleId, String articleTitle, String canonicalUrl,
+                              String sourceName, String changeType, String summaryKo,
+                              List<KeyPointPayload> keyPoints, String intent, String sentiment,
+                              SensitivityPayload sensitivity, String relevance, String category, String fetchStatus) {
+            this(id, articleId, articleTitle, canonicalUrl, sourceName, changeType, summaryKo, keyPoints,
+                    intent, sentiment, sensitivity, relevance, category, fetchStatus, List.of());
+        }
     }
 
     public record SensitivityPayload(

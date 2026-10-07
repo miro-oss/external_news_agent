@@ -1,6 +1,9 @@
 package com.example.be.domain.analysis.service;
 
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+import com.example.be.domain.feedback.model.FeedbackModels.Category;
 import com.example.be.domain.analysis.config.AnalysisSelectionProperties;
 import com.example.be.domain.analysis.relevance.TopicRelevanceGate;
 import com.example.be.domain.collection.entity.Article;
@@ -15,12 +18,14 @@ import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.database.OracleInClause;
+import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -48,6 +53,7 @@ public class ArticleAnalysisPipeline {
     private final AnalysisSelectionProperties selectionProperties;
     private final TopicFitScorer topicFitScorer;
     private final TopicRelevanceGate relevanceGate;
+    private final FeedbackLearningService feedbackLearning;
 
     public void analyze(Long runId) {
         analyze(runId, Set.of());
@@ -168,6 +174,14 @@ public class ArticleAnalysisPipeline {
                 ? issueContexts(runId, plan, targets)
                 : Map.of();
         Set<Long> selfCritiqueTargets = selfCritiqueTargets(targets, issues);
+        LocalDateTime asOf = runRepository.findById(runId).map(run -> run.getStartedAt())
+                .orElseGet(() -> LocalDateTime.now(ApiTimeZone.ZONE));
+        Map<Topic, List<AgentFeedbackExample>> examples = new LinkedHashMap<>();
+        targets.forEach(target -> {
+            Topic topic = target.topicOverride() == null ? target.article().getTopic() : target.topicOverride();
+            examples.computeIfAbsent(topic, ignored -> feedbackLearning.forTopic(topic, asOf,
+                    Set.of(Category.SUMMARY_ERROR, Category.OTHER)));
+        });
         Map<Long, AnalysisContext> contexts = new LinkedHashMap<>();
         targets.forEach(target -> contexts.put(
                 target.article().getId(),
@@ -178,7 +192,8 @@ public class ArticleAnalysisPipeline {
                         issues.getOrDefault(
                                 target.article().getId(), IssueAnalysisContext.empty()),
                         selfCritiqueTargets.contains(target.article().getId()),
-                        target.topicOverride())));
+                        target.topicOverride(),
+                        examples.get(target.topicOverride() == null ? target.article().getTopic() : target.topicOverride()))));
         return Map.copyOf(contexts);
     }
 

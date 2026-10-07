@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.insight;
 
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -236,7 +238,7 @@ class ReportInsightServiceTest {
         var feedback = mock(FeedbackStore.class);
         var events = mock(ReportEventSnapshotFactory.class);
         var realAssembler = new ReportInsightSnapshotAssembler(reportRepository, findingRepository, relevance, new ObjectMapper(),
-                new ReportEventFeedbackProjection(feedback, events));
+                new ReportEventFeedbackProjection(feedback, events), mock(FeedbackLearningService.class));
         var realService = new ReportInsightService(properties, realAssembler, persistence, new ReportInsightValidator(),
                 client, quota, plans, recorder, new ReportInsightExecutionRecorder(recorder, quota, persistence), jobs);
         var rejected = new ReportContent.ImportantEvent("오류 사건", "오류 요약", "판단 이유", List.of(50L));

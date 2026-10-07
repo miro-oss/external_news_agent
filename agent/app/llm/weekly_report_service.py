@@ -10,6 +10,7 @@ from pathlib import Path
 from app.core.config import Settings
 from app.core.parser import parse_json_object
 from app.llm.base import AnalyzeProvider, ProviderResponse
+from app.llm.feedback_learning import feedback_learning_instruction, feedback_request_payload
 from app.llm.prompt_data import prompt_json
 from app.llm.request_contract import _integer_choices
 from app.llm.router import get_analyze_provider
@@ -81,16 +82,11 @@ class WeeklyReportWriterService:
                 provider,
                 system_instruction=SYSTEM_INSTRUCTION,
                 prompt=(
-                    f"아래 저장된 {source_label} 스냅샷만 사용하세요.\n<weekly-report-input>\n"
+                    f"아래 저장된 {source_label} 스냅샷만 사용하세요.\n"
+                    + feedback_learning_instruction(request.feedback_examples)
+                    + "<weekly-report-input>\n"
                     + prompt_json(
-                        request.model_dump(
-                            by_alias=True,
-                            mode="json",
-                            exclude={
-                                "idempotency_key",
-                                "plan",
-                            },
-                        )
+                        feedback_request_payload(request, exclude={"idempotency_key", "plan"})
                     )
                     + "\n</weekly-report-input>"
                 ),
