@@ -6,6 +6,7 @@ import com.example.be.domain.collection.cluster.IssueClusteringService;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
+import com.example.be.domain.collection.entity.RunStage;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.insights.service.InsightHypothesisTracker;
 import com.example.be.domain.reports.service.ReportCreationService;
@@ -36,9 +37,13 @@ public class CollectionRunExecutionService {
     private final ReportCreationService reportCreationService;
     private final TopicKeywordStrategyOrchestrator keywordStrategyOrchestrator;
     private final CollectionResultWriter resultWriter;
+    private final CollectionRunStageWriter stageWriter;
 
     public void executeRun(Long runId) {
         try {
+            if (!stageWriter.updateStage(runId, RunStage.COLLECTING)) {
+                return;
+            }
             List<CollectionRunItem> items = runItemRepository.findExecutionItemsByRunId(runId);
             Map<Long, List<CollectionRunItem>> itemsByTopic = new LinkedHashMap<>();
             items.forEach(item -> itemsByTopic
@@ -50,9 +55,12 @@ public class CollectionRunExecutionService {
             // 메타데이터를 다 모은 뒤에 본문을 받는다. 조합마다 섞으면 같은 호스트를 번갈아 두드리게 된다.
             Set<Long> refreshedArticleIds = contentEnricher.enrich(runId);
             // FULLTEXT가 확정된 뒤에만 SimHash를 계산하고, 대표를 정한 다음 분석한다.
+            if (!stageWriter.updateStage(runId, RunStage.CLUSTERING)) {
+                return;
+            }
             boolean clustered = true;
             try {
-                issueClusteringService.cluster(runId);
+                issueClusteringService.cluster(runId, refreshedArticleIds);
             } catch (RuntimeException exception) {
                 clustered = false;
                 log.error("이슈 클러스터링에 실패해 기사 단위 분석으로 전환한다. runId={} error={}",
@@ -62,6 +70,9 @@ public class CollectionRunExecutionService {
             // 분석도 외부 어댑터 경계다. Stub 단계부터 실행 트랜잭션과 분리해 실제 LLM 교체 시에도 DB를 잡지 않는다.
             // 기사 루프 안의 실패는 파이프라인이 직접 경고로 남긴다. 여기서 잡는 것은 대상 선별처럼
             // 루프 바깥에서 터지는 예외다. 이걸 흘려보내면 수집이 성공했는데도 RUN_REJECTED로 닫힌다.
+            if (!stageWriter.updateStage(runId, RunStage.ANALYZING)) {
+                return;
+            }
             try {
                 if (clustered) {
                     analysisPipeline.analyze(runId, refreshedArticleIds);
@@ -75,6 +86,9 @@ public class CollectionRunExecutionService {
             }
             // 분석 결과에서 결정론적으로 조사 대상을 고른 뒤 Agent 제안을 Spring guard로 승인·실행한다.
             // 실패하거나 예산이 끝나도 기존 finding으로 보고서를 만드는 것이 기본 동작이다.
+            if (!stageWriter.updateStage(runId, RunStage.INVESTIGATING)) {
+                return;
+            }
             try {
                 investigationOrchestrator.investigate(runId);
             } catch (RuntimeException exception) {
@@ -98,11 +112,17 @@ public class CollectionRunExecutionService {
                         "가설 추적에 실패해 기존 관련 기사 연결을 유지했습니다.");
             }
             // M5 보고서는 findings를 모두 저장한 뒤 만든다. 생성과 reportId 연결은 별도 짧은 트랜잭션이다.
+            if (!stageWriter.updateStage(runId, RunStage.GENERATING_REPORT)) {
+                return;
+            }
             try {
                 reportCreationService.generate(runId);
             } catch (RuntimeException exception) {
                 log.error("보고서를 생성하지 못했다. runId={} error={}", runId, exception.getMessage(), exception);
                 resultWriter.addReportGenerationFailedWarning(runId, exception.getMessage());
+            }
+            if (!stageWriter.updateStage(runId, RunStage.FINALIZING)) {
+                return;
             }
             try {
                 keywordStrategyOrchestrator.strategize(runId);

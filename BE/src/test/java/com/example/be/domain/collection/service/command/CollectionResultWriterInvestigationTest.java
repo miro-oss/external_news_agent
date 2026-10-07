@@ -64,7 +64,12 @@ class CollectionResultWriterInvestigationTest {
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(topicRepository.findById(7L)).thenReturn(Optional.of(topic));
         when(sourceRepository.findById(11L)).thenAnswer(ignored -> Optional.of(source));
-        when(articleRepository.save(any(Article.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        java.util.concurrent.atomic.AtomicLong ids = new java.util.concurrent.atomic.AtomicLong(1000);
+        when(articleRepository.save(any(Article.class))).thenAnswer(invocation -> {
+            Article article = invocation.getArgument(0);
+            org.springframework.test.util.ReflectionTestUtils.setField(article, "id", ids.incrementAndGet());
+            return article;
+        });
     }
 
     @ParameterizedTest
@@ -82,7 +87,7 @@ class CollectionResultWriterInvestigationTest {
 
         var result = write(stock, etf, evidence, education, realEstate, missingRequired, missingOptional);
 
-        assertEquals(new CollectionResultWriter.InvestigationWriteResult(3, 3), result);
+        assertEquals(new CollectionResultWriter.InvestigationWriteResult(3, 3, java.util.Set.of(1001L, 1002L, 1003L), java.util.Set.of(1001L, 1002L, 1003L)), result);
         assertEquals(List.of(stock.title(), etf.title(), evidence.title()), savedArticles(3).stream()
                 .map(Article::getTitle).toList());
         for (CollectedArticle rejected : List.of(education, realEstate, missingRequired, missingOptional)) {
@@ -104,7 +109,7 @@ class CollectionResultWriterInvestigationTest {
                 article("excluded", "HBM 메모리", "교육 과정"),
                 article("unrelated", "지역 행사", "문화 소식"));
 
-        assertEquals(new CollectionResultWriter.InvestigationWriteResult(0, 0), result);
+        assertEquals(new CollectionResultWriter.InvestigationWriteResult(0, 0, java.util.Set.of(), java.util.Set.of()), result);
         verifyNoInteractions(articleRepository, versionRepository, observationRepository, itemRepository);
         assertEquals(List.of(), run.getWarnings());
     }
@@ -120,7 +125,7 @@ class CollectionResultWriterInvestigationTest {
         when(articleRepository.findByUrlHash(ArticleHasher.urlHash(excluded.canonicalUrl())))
                 .thenReturn(Optional.of(existing));
 
-        assertEquals(new CollectionResultWriter.InvestigationWriteResult(0, 0), write(excluded));
+        assertEquals(new CollectionResultWriter.InvestigationWriteResult(0, 0, java.util.Set.of(), java.util.Set.of()), write(excluded));
 
         verifyNoInteractions(articleRepository, versionRepository, observationRepository);
         assertEquals("HBM 메모리 공급", existing.getTitle());
@@ -136,7 +141,7 @@ class CollectionResultWriterInvestigationTest {
         CollectedArticle accepted = article("same?fbclid=search", "HBM 메모리 공급 확인", "제조사 추가 입장");
         CollectedArticle duplicate = article("same", "HBM DRAM 생산 일정", "동일 URL 재노출");
 
-        assertEquals(new CollectionResultWriter.InvestigationWriteResult(1, 1), write(excluded, accepted, duplicate));
+        assertEquals(new CollectionResultWriter.InvestigationWriteResult(1, 1, java.util.Set.of(1001L), java.util.Set.of(1001L)), write(excluded, accepted, duplicate));
 
         Article saved = savedArticles(1).getFirst();
         assertEquals(accepted.title(), saved.getTitle());
@@ -156,7 +161,7 @@ class CollectionResultWriterInvestigationTest {
         CollectedArticle currentOnly = article("current", "GPU inference", "수정한 조건에서만 일치");
         CollectedArticle originallyExcluded = article("captured-excluded", "HBM DRAM 교육", "접수 당시 제외");
 
-        assertEquals(new CollectionResultWriter.InvestigationWriteResult(1, 1),
+        assertEquals(new CollectionResultWriter.InvestigationWriteResult(1, 1, java.util.Set.of(1001L), java.util.Set.of(1001L)),
                 write(accepted, currentOnly, originallyExcluded));
 
         Article saved = savedArticles(1).getFirst();
@@ -176,7 +181,7 @@ class CollectionResultWriterInvestigationTest {
         topic.update("수정한 주제", "GPU", List.of("GPU"), List.of(), List.of("교육"), 10, 60, true);
         CollectedArticle accepted = article("legacy", "GPU 투자", "현재 조건 적용");
 
-        assertEquals(new CollectionResultWriter.InvestigationWriteResult(1, 1), write(
+        assertEquals(new CollectionResultWriter.InvestigationWriteResult(1, 1, java.util.Set.of(1001L), java.util.Set.of(1001L)), write(
                 accepted,
                 article("old", "HBM 메모리", "예전 조건"),
                 article("excluded", "GPU 교육", "제외 조건")));
@@ -190,7 +195,7 @@ class CollectionResultWriterInvestigationTest {
         addItem(topic, source, true);
         CollectedArticle evidence = article("response", "다른 이해관계자의 입장", "새로 확인한 근거");
 
-        assertEquals(new CollectionResultWriter.InvestigationWriteResult(1, 1), write(evidence));
+        assertEquals(new CollectionResultWriter.InvestigationWriteResult(1, 1, java.util.Set.of(1001L), java.util.Set.of(1001L)), write(evidence));
 
         assertEquals(evidence.title(), savedArticles(1).getFirst().getTitle());
     }
@@ -224,7 +229,7 @@ class CollectionResultWriterInvestigationTest {
         when(articleRepository.findByUrlHash(ArticleHasher.urlHash(unchanged.canonicalUrl())))
                 .thenReturn(Optional.of(existingUnchanged));
 
-        assertEquals(new CollectionResultWriter.InvestigationWriteResult(3, 2), write(
+        assertEquals(new CollectionResultWriter.InvestigationWriteResult(3, 2, java.util.Set.of(1001L, 101L, 102L), java.util.Set.of(1001L, 101L)), write(
                 fresh, updated, unchanged, article("excluded", "HBM 교육", "메모리 과정")));
 
         ArgumentCaptor<CollectionRunArticle> observations = ArgumentCaptor.forClass(CollectionRunArticle.class);

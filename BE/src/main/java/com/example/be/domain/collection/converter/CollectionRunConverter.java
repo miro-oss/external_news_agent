@@ -4,6 +4,7 @@ import com.example.be.domain.collection.dto.res.CollectionRunResDTO;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
+import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.service.query.CollectionRunCoverage;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.global.config.ApiTimeZone;
@@ -50,6 +51,7 @@ public class CollectionRunConverter {
         return CollectionRunResDTO.Summary.builder()
                 .runId(run.getId())
                 .status(run.getStatus().name())
+                .stage(currentStage(run))
                 .triggerType(run.getTriggerType().name())
                 .queuedAt(toOffset(run.getQueuedAt()))
                 .startedAt(toOffset(run.getStartedAt()))
@@ -71,6 +73,7 @@ public class CollectionRunConverter {
         return CollectionRunResDTO.Detail.builder()
                 .runId(run.getId())
                 .status(run.getStatus().name())
+                .stage(currentStage(run))
                 .triggerType(run.getTriggerType().name())
                 .idempotencyKey(run.getIdempotencyKey())
                 .queuedAt(toOffset(run.getQueuedAt()))
@@ -86,6 +89,12 @@ public class CollectionRunConverter {
                 .breakdown(toBreakdown(items))
                 .warnings(toWarnings(warnings))
                 .build();
+    }
+
+    private static String currentStage(CollectionRun run) {
+        return run.getStatus() == RunStatus.RUNNING && run.getStage() != null
+                ? run.getStage().name()
+                : null;
     }
 
     private static CollectionRunResDTO.Coverage toCoverage(CollectionRunCoverage coverage) {

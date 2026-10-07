@@ -8,6 +8,8 @@
 .active-runs-list > li > div { display: grid; gap: .35rem; min-width: 0; }
 .active-runs-list strong { color: var(--fg-2); font-size: .9rem; overflow-wrap: anywhere; }
 .active-runs-list span { color: var(--fg-3); font-size: .78rem; }
+.active-run-title { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .6rem; }
+.active-runs-list .active-run-stage { flex: none; padding: .2rem .55rem; border-radius: 999px; background: var(--primary-weak); color: var(--primary-strong); font-size: .72rem; font-weight: 600; line-height: 1.4; white-space: nowrap; }
 .active-runs-list button { flex: none; font-size: .8rem; }
 .active-runs-pagination { display: flex; justify-content: flex-end; align-items: center; gap: .75rem; margin-top: .75rem; color: var(--fg-3); font-size: .8rem; }
 .active-runs-error { display: flex; align-items: center; gap: 1rem; color: var(--danger-strong); font-size: .85rem; }

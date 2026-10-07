@@ -145,6 +145,7 @@ class CollectionRunControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("COMMON200"))
                 .andExpect(jsonPath("$.result.content[0].runId").value(42))
+                .andExpect(jsonPath("$.result.content[0].stage").value(nullValue()))
                 .andExpect(jsonPath("$.result.content[0].warningCount").value(1))
                 .andExpect(jsonPath("$.result.totalElements").value(1))
                 .andExpect(jsonPath("$.result.hasNext").value(false));
@@ -172,8 +173,27 @@ class CollectionRunControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("COMMON200"))
                 .andExpect(jsonPath("$.result.status").value("PARTIAL"))
+                .andExpect(jsonPath("$.result.stage").value(nullValue()))
                 .andExpect(jsonPath("$.result.breakdown[0].topicName").value("HBM"))
                 .andExpect(jsonPath("$.result.warnings[0].code").value("FULLTEXT_BLOCKED"));
+    }
+
+    @Test
+    void getRunsAndDetailExposeRunningStageWhileKeepingRunStatus() throws Exception {
+        when(runQueryService.getRuns(eq("RUNNING"), eq(null), eq(null), eq(null), eq(null), eq(0), eq(20)))
+                .thenReturn(PageResponse.of(List.of(CollectionRunResDTO.Summary.builder()
+                        .runId(42L).status("RUNNING").stage("INVESTIGATING").build()), 0, 20, 1L));
+        when(runQueryService.getRun(42L)).thenReturn(CollectionRunResDTO.Detail.builder()
+                .runId(42L).status("RUNNING").stage("GENERATING_REPORT").build());
+
+        mockMvc.perform(get("/api/news/runs").param("status", "RUNNING"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.content[0].status").value("RUNNING"))
+                .andExpect(jsonPath("$.result.content[0].stage").value("INVESTIGATING"));
+        mockMvc.perform(get("/api/news/runs/42"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.status").value("RUNNING"))
+                .andExpect(jsonPath("$.result.stage").value("GENERATING_REPORT"));
     }
 
     @Test

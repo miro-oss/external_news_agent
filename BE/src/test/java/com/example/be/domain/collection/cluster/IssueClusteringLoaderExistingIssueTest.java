@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.cluster;
 
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
@@ -41,6 +42,75 @@ class IssueClusteringLoaderExistingIssueTest {
             observationRepository, issueArticleRepository, new IssueClusteringProperties());
     private final Topic topic = Topic.builder().id(7L).name("반도체").build();
     private final Source source = Source.builder().id(9L).name("신문").reliabilityScore(new BigDecimal("0.8")).build();
+
+    @Test
+    void unchangedAssignedArticlesSkipHistoricalLoading() {
+        var observed = article(102L, FetchStatus.FULLTEXT, "검증된 기사 본문");
+        var issue = NewsIssue.builder().id(74L).topic(topic).build();
+        current(List.of(observed), List.of(membership(issue, observed, IssueArticleRole.REPRESENTATIVE)));
+
+        var changes = loader.loadInitialChanges(42L, Set.of());
+
+        assertTrue(changes.articles().isEmpty());
+        assertTrue(changes.changedArticleIds().isEmpty());
+        verify(issueArticleRepository, never()).findRecentByTopicIds(any(), any());
+    }
+
+    @Test
+    void unchangedFullTextWithoutThisTopicsMembershipStillCreatesAnIssue() {
+        var observed = article(102L, FetchStatus.FULLTEXT, "검증된 기사 본문");
+        current(List.of(observed), List.of());
+
+        var changes = loader.loadChanges(42L, Set.of(), Set.of(102L));
+
+        assertEquals(Set.of(102L), changes.changedArticleIds());
+        assertEquals(1, changes.articles().size());
+        verify(issueArticleRepository).findRecentByTopicIds(any(), any());
+    }
+
+    @Test
+    void fullTextStatusWithAnEmptyBodyDoesNotRepeatedlyReclusterAnUnassignedArticle() {
+        var observed = article(102L, FetchStatus.FULLTEXT, " ");
+        current(List.of(observed), List.of());
+
+        assertTrue(loader.loadChanges(42L, Set.of(), Set.of(102L)).changedArticleIds().isEmpty());
+        verify(issueArticleRepository, never()).findRecentByTopicIds(any(), any());
+    }
+
+    @Test
+    void refreshedUnchangedArticleActivatesItsExistingIssue() {
+        var observed = article(102L, FetchStatus.FULLTEXT, "새로 확보한 기사 본문");
+        var issue = NewsIssue.builder().id(74L).topic(topic).build();
+        var member = membership(issue, observed, IssueArticleRole.REPRESENTATIVE);
+        current(List.of(observed), List.of(member));
+        when(issueArticleRepository.findRecentByTopicIds(any(), any())).thenReturn(List.of(member));
+
+        assertEquals(Set.of(102L), loader.loadInitialChanges(42L, Set.of(102L)).changedArticleIds());
+    }
+
+    @Test
+    void explicitUpdatedArticleRemainsChangedWhenItsBodyFetchFailed() {
+        var observed = article(102L, FetchStatus.FETCH_FAILED, "옛 본문");
+        when(observationRepository.findClusterTargetsByRunId(42L)).thenReturn(List.of(
+                CollectionRunArticle.builder().article(observed).topic(topic).changeType(ChangeType.UPDATED)
+                        .observedAt(LocalDateTime.of(2027, 10, 12, 12, 0)).build()));
+
+        assertEquals(Set.of(102L), loader.loadInitialChanges(42L, Set.of()).changedArticleIds());
+    }
+
+    @Test
+    void investigationDoesNotReprocessAnEarlierNewObservationWhenTheActionChangedNothing() {
+        var observed = article(102L, FetchStatus.FULLTEXT, "검증된 기사 본문");
+        var issue = NewsIssue.builder().id(74L).topic(topic).build();
+        when(observationRepository.findClusterTargetsByRunId(42L)).thenReturn(List.of(
+                CollectionRunArticle.builder().article(observed).topic(topic).changeType(ChangeType.NEW)
+                        .observedAt(LocalDateTime.of(2027, 10, 12, 12, 0)).build()));
+        when(issueArticleRepository.findByArticleIds(any())).thenReturn(
+                List.of(membership(issue, observed, IssueArticleRole.REPRESENTATIVE)));
+
+        assertTrue(loader.loadChanges(42L, Set.of(), Set.of(102L)).changedArticleIds().isEmpty());
+        verify(issueArticleRepository, never()).findRecentByTopicIds(any(), any());
+    }
 
     @Test
     void reobservedOldIssueRetainsItsFullTextRepresentativeOutsideTheRecentWindow() {
@@ -195,6 +265,7 @@ class IssueClusteringLoaderExistingIssueTest {
     private void current(List<Article> articles, List<IssueArticle> memberships) {
         when(observationRepository.findClusterTargetsByRunId(42L)).thenReturn(articles.stream()
                 .map(article -> CollectionRunArticle.builder().article(article).topic(topic)
+                        .changeType(ChangeType.UNCHANGED)
                         .observedAt(LocalDateTime.of(2027, 10, 12, 12, 0)).build()).toList());
         when(issueArticleRepository.findByArticleIds(any())).thenReturn(memberships);
     }
