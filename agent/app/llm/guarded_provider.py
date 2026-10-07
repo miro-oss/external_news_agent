@@ -93,7 +93,6 @@ def _is_cancelled_before_call(error: AgentError) -> bool:
     return (
         error.code == "PROVIDER_UNAVAILABLE"
         and isinstance(error.details, dict)
-        and error.details.get("pipelineCancelled") is True
         and error.details.get("requestNotStarted") is True
     )
 
@@ -104,18 +103,45 @@ def run_guarded[ResponseT](
     *,
     credits: Callable[[ResponseT], Decimal],
     usage_details: Callable[[ResponseT], dict[str, int | float]],
+    admission_remaining_seconds: Callable[[], float] | None = None,
 ) -> ResponseT:
     """Apply the shared provider guard to any non-streaming provider call."""
-    guard.breaker.before_call()
-    acquired = guard.semaphore.acquire(timeout=guard.acquire_timeout_seconds)
-    if not acquired:
-        guard.breaker.cancel_call()
-        raise AgentError(
-            status_code=503,
-            code="PROVIDER_UNAVAILABLE",
-            message="Provider 동시 호출 한도에 도달했습니다.",
-            details={"concurrencyLimited": True, "requestNotStarted": True},
-        )
+    if admission_remaining_seconds is None:
+        guard.breaker.before_call()
+    try:
+        while True:
+            timeout = guard.acquire_timeout_seconds
+            if admission_remaining_seconds is not None:
+                # Reports share the same semaphore but can queue within their
+                # request budget. Recheck cancellation between short waits.
+                timeout = min(timeout, admission_remaining_seconds())
+            if guard.semaphore.acquire(timeout=timeout):
+                break
+            if admission_remaining_seconds is None:
+                raise AgentError(
+                    status_code=503,
+                    code="PROVIDER_UNAVAILABLE",
+                    message="Provider 동시 호출 한도에 도달했습니다.",
+                    details={"concurrencyLimited": True, "requestNotStarted": True},
+                )
+    except BaseException:
+        if admission_remaining_seconds is None:
+            guard.breaker.cancel_call()
+        raise
+
+    if admission_remaining_seconds is not None:
+        try:
+            admission_remaining_seconds()
+            # The circuit may have opened while this report waited. Do not
+            # reserve a half-open probe until the call actually has capacity.
+            guard.breaker.before_call()
+        except BaseException as error:
+            if isinstance(error, AgentError):
+                details = dict(error.details) if isinstance(error.details, dict) else {}
+                details["requestNotStarted"] = True
+                error.details = details
+            guard.semaphore.release()
+            raise
 
     try:
         response = call()

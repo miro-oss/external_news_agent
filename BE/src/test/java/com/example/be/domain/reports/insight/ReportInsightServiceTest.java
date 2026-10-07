@@ -45,6 +45,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
@@ -320,14 +321,17 @@ class ReportInsightServiceTest {
         verify(quota).completeObservedFailure(any(), same(failure));
         verify(quota, never()).completeFailure(any(), anyString());
     }
-    @Test void agentFailureLogsBoundedMetadataAndKeepsPublicErrorAndUsageAccounting() {
+    @ParameterizedTest
+    @CsvSource({"REDUCE-001, overview[0].text", "MAP-001, assessments[101].reason",
+            "REVIEW-001, assessments[101].decision.connection.condition"})
+    void agentFailureLogsBoundedMetadataAndKeepsPublicErrorAndUsageAccounting(String stage, String field) {
         var failure = new AgentClientException("SCHEMA_VIOLATION", "private-response-payload",
                 new IllegalStateException("private-cause-payload"),
                 new AgentClientException.Usage(100L, 50L, BigDecimal.ONE, BigDecimal.ONE),
                 AgentClientException.TimeoutPhase.NONE, null,
-                new AgentClientException.ValidationFailure("REDUCE-001", 2, "OutputValidationError", 2,
+                new AgentClientException.ValidationFailure(stage, 2, "OutputValidationError", 2,
                         List.of("report_fact_mismatch", "private-kind\nforged-log"),
-                        List.of(new AgentClientException.ValidationIssue("CHIP_MAKER", "overview[0].text",
+                        List.of(new AgentClientException.ValidationIssue("CHIP_MAKER", field,
                                 "report_fact_mismatch", List.of("101:0"))), true));
         doThrow(failure).when(client).reportInsight(any());
 
@@ -341,12 +345,12 @@ class ReportInsightServiceTest {
         assertDiagnostic("AGENT_CALL", "SCHEMA_VIOLATION", AgentClientException.TimeoutPhase.NONE, true);
         var arguments = logs.list.stream().filter(event -> event.getMessage().contains("failureCode={}"))
                 .findFirst().orElseThrow().getArgumentArray();
-        assertEquals("REDUCE-001", arguments[6]);
+        assertEquals(stage, arguments[6]);
         assertEquals(2, arguments[7]);
         assertEquals("OutputValidationError", arguments[8]);
         assertEquals(2, arguments[9]);
         assertEquals(List.of("report_fact_mismatch"), arguments[10]);
-        assertEquals(List.of(new AgentClientException.ValidationIssue("CHIP_MAKER", "overview[0].text",
+        assertEquals(List.of(new AgentClientException.ValidationIssue("CHIP_MAKER", field,
                 "report_fact_mismatch", List.of("101:0"))), arguments[11]);
         assertEquals(true, arguments[12]);
         verify(recorder).recordReportInsightFailure(eq(20L), any(), same(failure), any(), any());

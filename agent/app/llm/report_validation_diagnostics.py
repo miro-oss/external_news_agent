@@ -1,4 +1,4 @@
-"""Bounded server-owned REDUCE diagnostics; never provider prose or input values."""
+"""Bounded server-owned report diagnostics; never provider prose or input values."""
 
 import re
 from dataclasses import dataclass
@@ -6,11 +6,16 @@ from dataclasses import dataclass
 from pydantic import ValidationError
 
 _AUDIENCES = frozenset({"CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR", "IT_INFRA"})
-_FIELD = re.compile(
+_REDUCE_FIELD = re.compile(
     r"(?:headline|overview|implications|watchItems|"
     r"overview\[[0-2]\]\.(?:text|assumption|basisClaimIds)|"
     r"implications\[[0-4]\]\.(?:text|mechanism|assumption|falsifiedBy|basisClaimIds)|"
     r"watchItems\[[0-4]\]\.(?:topic|indicator|trigger|basisClaimIds))"
+)
+_MAP_FIELD = re.compile(
+    r"assessments\[[1-9][0-9]{0,18}\](?:\.(?:reason|axes\.urgency|"
+    r"decision\.connection\.(?:condition|relation|work)|"
+    r"decision\.effect\.impactScope|decision\.timing\.urgencyState))?"
 )
 _CLAIM_ID = re.compile(r"[1-9][0-9]{0,18}:(?:0|[1-9][0-9]{0,18})")
 _LENGTH_KINDS = frozenset({"string_too_long", "string_too_short", "too_long", "too_short"})
@@ -55,13 +60,19 @@ class ReportValidationIssue:
     claim_ids: tuple[str, ...]
 
 
-def _safe_issue(issue: object) -> bool:
+def _safe_issue(issue: object, stage: str | None = None) -> bool:
+    if stage is None:
+        fields = (_REDUCE_FIELD, _MAP_FIELD)
+    elif stage in {"MAP", "REVIEW"} or stage.startswith(("MAP-", "REVIEW-")):
+        fields = (_MAP_FIELD,)
+    else:
+        fields = (_REDUCE_FIELD,)
     return (
         type(issue) is ReportValidationIssue
         and type(issue.audience) is str
         and issue.audience in _AUDIENCES
         and type(issue.field) is str
-        and _FIELD.fullmatch(issue.field) is not None
+        and any(field.fullmatch(issue.field) is not None for field in fields)
         and type(issue.error_kind) is str
         and issue.error_kind in REPORT_VALIDATION_ERROR_KINDS | _LENGTH_KINDS
         and type(issue.claim_ids) is tuple
@@ -69,14 +80,16 @@ def _safe_issue(issue: object) -> bool:
     )
 
 
-def report_validation_issue_details(error: Exception, schema: dict) -> dict[str, object]:
+def report_validation_issue_details(
+    error: Exception, schema: dict, *, stage: str | None = None
+) -> dict[str, object]:
     """Project typed diagnostics only, including an explicit bounded-output marker."""
     supplied = getattr(error, "validation_issues", None)
     if supplied is None and isinstance(error, ValidationError):
         supplied = pydantic_reduce_issues(error, schema)
     if type(supplied) is not tuple:
         return {}
-    safe = tuple(issue for issue in supplied if _safe_issue(issue))
+    safe = tuple(issue for issue in supplied if _safe_issue(issue, stage))
     if not safe:
         return {}
     unique = tuple(dict.fromkeys(safe))
@@ -141,7 +154,7 @@ def _closed_field(loc: tuple) -> str | None:
         field = f"{aliases.get(loc[0], loc[0])}[{loc[1]}].{aliases.get(loc[2], loc[2])}"
     else:
         return None
-    return field if _FIELD.fullmatch(field) else None
+    return field if _REDUCE_FIELD.fullmatch(field) else None
 
 
 def pydantic_reduce_issues(

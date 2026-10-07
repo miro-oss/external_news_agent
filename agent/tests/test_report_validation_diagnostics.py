@@ -96,7 +96,7 @@ def test_invalid_issue_parts_cannot_become_metadata(mutation):
     assert report_validation_issue_details(error, {}) == {}
 
 
-def test_only_typed_tuples_are_accepted_and_non_reduce_stages_omit_issues():
+def test_only_typed_tuples_and_stage_matching_fields_are_accepted():
     error = ValueError("PRIVATE")
     error.validation_issues = ({"audience": "CHIP_MAKER", "field": "PRIVATE"},)
     assert report_validation_issue_details(error, {}) == {}
@@ -104,7 +104,192 @@ def test_only_typed_tuples_are_accepted_and_non_reduce_stages_omit_issues():
     assert report_validation_issue_details(error, {}) == {}
     error.validation_issues = (issue(),)
     assert "issues" not in _validation_failure(error, "MAP-001", 2, schema("CHIP_MAKER"))
+    assert "issues" not in _validation_failure(error, "REVIEW-001", 2, schema("CHIP_MAKER"))
     assert _validation_failure(error, None, 2, schema("CHIP_MAKER")) is None
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "assessments[7869]",
+        "assessments[7869].reason",
+        "assessments[7869].axes.urgency",
+        "assessments[7869].decision.connection.condition",
+        "assessments[7869].decision.effect.impactScope",
+        "assessments[7869].decision.timing.urgencyState",
+    ],
+)
+def test_closed_assessment_fields_survive_map_and_review_diagnostics(field):
+    error = OutputValidationError("PRIVATE_PROSE", error_kinds=("report_fact_mismatch",))
+    error.validation_issues = (replace(issue(), field=field),)
+    for stage in ("MAP", "MAP-001", "REVIEW", "REVIEW-001"):
+        failure = _validation_failure(error, stage, 2, {})
+        assert failure["issues"][0]["field"] == field
+        assert failure["issues"][0]["claimIds"] == ["7869:1"]
+        assert "PRIVATE" not in json.dumps(failure)
+    for stage in ("REDUCE", "REDUCE-001"):
+        assert "issues" not in _validation_failure(error, stage, 2, {})
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "assessments[0].reason",
+        "assessments[-1].reason",
+        "assessments[01].reason",
+        "assessments[１].reason",
+        "assessments[" + "1" * 20 + "].reason",
+        "assessments[PRIVATE].reason",
+        "assessments[7869].reason\nPRIVATE",
+        "assessments[7869].PRIVATE",
+        "assessments[7869].decision.connection.basis.PRIVATE",
+        "assessments[7869].reason nativeFields=PRIVATE",
+    ],
+)
+def test_map_field_injection_is_omitted(field):
+    error = ValueError("PRIVATE_PROSE")
+    error.validation_issues = (replace(issue(), field=field),)
+    assert "issues" not in _validation_failure(error, "MAP-001", 2, {})
+
+
+def test_final_map_retry_keeps_all_finding_locations_without_provider_prose():
+    from test_report_insight_map_complete_diagnostics import long_fact_reason, long_fact_source
+    from test_report_insight_v4_pipeline import V4Provider, generate, stages
+
+    source = long_fact_source()
+
+    def hook(stage, occurrence, _, value):
+        for record in value["assessments"]["CHIP_MAKER"].values():
+            record["reason"] = long_fact_reason(record["findingId"])[0]
+        return value
+
+    provider = V4Provider(source, relation="UNRELATED", hook=hook)
+    with pytest.raises(AgentError) as caught:
+        generate(provider, source)
+    assert stages(provider) == ["MAP-001", "MAP-001"]
+    failure = caught.value.details["validationFailure"]
+    assert failure["stage"] == "MAP-001" and failure["attempt"] == 2
+    assert failure["errorCount"] == 6
+    assert {item["field"] for item in failure["issues"]} == {
+        f"assessments[{finding.id}].reason" for finding in source.findings
+    }
+    assert all(item["errorKind"] == "report_fact_mismatch" for item in failure["issues"])
+    assert all(
+        item["claimIds"] == [f"{finding.id}:0"]
+        for finding, item in zip(source.findings, failure["issues"], strict=True)
+    )
+    assert not failure["issuesTruncated"]
+    assert caught.value.details["usage"]["inputTokens"] == 22
+    assert "NVIDIA" not in json.dumps(caught.value.details)
+    assert "9101" not in json.dumps(caught.value.details)
+
+
+def test_native_and_public_diagnostics_survive_aggregation_and_truncated_prefix():
+    from test_report_insight_assessment import payload, request, response
+
+    from app.llm import report_insight_service as service
+
+    source = request(ids=(101, 102), text="검증 장비 도입의 마감은 2026년 9월 20일이다.")
+    value = payload(source)
+    for record in value["assessments"]["CHIP_MAKER"].values():
+        record["reason"] = "영향 범위는 미확인이다. NVIDIA의 9901억원 마감이 임박한다."
+    error = service._native_assessment_repair_errors(response(value, source), source)
+    details = report_validation_issue_details(error, {}, stage="MAP-001")
+    assert {item["field"] for item in details["issues"]} >= {
+        "assessments[101]",
+        "assessments[101].reason",
+        "assessments[101].axes.urgency",
+    }
+    assert "NVIDIA" not in json.dumps(details)
+    singleton = source.model_copy(update={"findings": source.findings[:1]})
+    nested = service._native_assessment_repair_errors(
+        response(
+            {
+                "assessments": {
+                    "CHIP_MAKER": {"finding101": value["assessments"]["CHIP_MAKER"]["finding101"]}
+                }
+            },
+            singleton,
+        ),
+        singleton,
+    )
+    truncated = service._TruncatedAssessmentRepairError(source, {}, (101, 102), [(101, nested)])
+    assert truncated.validation_issues[:-1] == nested.validation_issues
+    assert truncated.validation_issues[-1] == ReportValidationIssue(
+        "CHIP_MAKER", "assessments[102]", "report_assessment_truncated_prefix", ()
+    )
+
+
+def test_final_review_retry_keeps_diagnostics_before_validated_map_fallback(monkeypatch):
+    from test_report_insight_assessment import request
+    from test_report_insight_map_complete_diagnostics import long_fact_reason
+    from test_report_insight_v4_pipeline import V4Provider, generate, stages
+
+    from app.core.errors import StructuredOutputExhaustedError
+    from app.llm import report_insight_service as service
+
+    source = request()
+    failures = []
+    original = service.structured_call
+
+    def capture(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except StructuredOutputExhaustedError as error:
+            failures.append(error)
+            raise
+
+    monkeypatch.setattr(service, "structured_call", capture)
+
+    def hook(stage, occurrence, _, value):
+        if stage.startswith("REVIEW"):
+            value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = long_fact_reason(101)[0]
+        return value
+
+    provider = V4Provider(source, hook=hook)
+    output = generate(provider, source)
+    assert stages(provider) == ["MAP-001", "REVIEW-001", "REVIEW-001", "REDUCE-001"]
+    assert len(failures) == 1
+    failure = failures[0].details["validationFailure"]
+    assert failure["stage"] == "REVIEW-001" and failure["attempt"] == 2
+    assert failure["issues"] == [
+        {
+            "audience": "CHIP_MAKER",
+            "field": "assessments[101].reason",
+            "errorKind": "report_fact_mismatch",
+            "claimIds": ["101:0"],
+        }
+    ]
+    assert "NVIDIA" not in json.dumps(failures[0].details)
+    assert "9101" not in output.model_dump_json()
+    assert output.meta.input_tokens == 44
+
+
+def test_native_shape_diagnostic_uses_requested_finding_id_not_rejected_provider_id():
+    from test_report_insight_assessment import payload, request, response
+
+    from app.llm.report_insight_assessment import (
+        ReportAssessmentDraftValidationError,
+        validate_draft,
+    )
+
+    source = request()
+    value = payload(source)
+    raw = response(value, source)
+    wire = json.loads(raw.text)
+    wire["assessments"]["CHIP_MAKER"]["finding101"]["findingId"] = 999999
+    with pytest.raises(ReportAssessmentDraftValidationError) as caught:
+        validate_draft(replace(raw, text=json.dumps(wire)), source)
+    details = _validation_failure(caught.value, "MAP-001", 2, {})
+    assert details["issues"] == [
+        {
+            "audience": "CHIP_MAKER",
+            "field": "assessments[101]",
+            "errorKind": "report_assessment_draft_invalid",
+            "claimIds": [],
+        }
+    ]
+    assert "999999" not in json.dumps(details)
 
 
 def test_issue_and_reference_caps_are_explicit_and_do_not_mutate_original():

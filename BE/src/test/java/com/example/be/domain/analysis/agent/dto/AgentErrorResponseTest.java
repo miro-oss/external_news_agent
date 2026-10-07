@@ -165,6 +165,39 @@ class AgentErrorResponseTest {
     }
 
     @Test
+    void readsClosedMapAndReviewFindingLocationsAndRejectsStageMixing() {
+        var fields = List.of("assessments[7869]", "assessments[7869].reason",
+                "assessments[7869].axes.urgency", "assessments[7869].decision.connection.condition",
+                "assessments[7869].decision.effect.impactScope", "assessments[7869].decision.timing.urgencyState");
+        for (var stage : List.of("MAP", "MAP-001", "REVIEW", "REVIEW-001")) {
+            for (var field : fields) {
+                var failure = reduceIssues(List.of(changedIssue("field", field)), false);
+                failure.put("stage", stage);
+                var parsed = error(Map.of("validationFailure", failure)).validationFailure();
+                assertEquals(List.of(new AgentClientException.ValidationIssue("CHIP_MAKER", field,
+                        "report_fact_mismatch", List.of("7869:1"))), parsed.issues());
+                failure.put("stage", "REDUCE-001");
+                assertNull(error(Map.of("validationFailure", failure)).validationFailure());
+            }
+        }
+    }
+
+    @Test
+    void rejectsUnboundedOrInjectedFindingPathsWithoutLosingUsage() {
+        for (var field : List.of("assessments[0].reason", "assessments[-1].reason", "assessments[01].reason",
+                "assessments[１].reason", "assessments[" + "1".repeat(20) + "].reason",
+                "assessments[PRIVATE].reason", "assessments[7869].reason\nPRIVATE",
+                "assessments[7869].PRIVATE", "assessments[7869].decision.connection.basis.PRIVATE",
+                "assessments[7869].reason nativeFields=PRIVATE")) {
+            var failure = reduceIssues(List.of(changedIssue("field", field)), false);
+            failure.put("stage", "MAP-001");
+            var response = error(Map.of("validationFailure", failure, "usage", Map.of("inputTokens", 10)));
+            assertNull(response.validationFailure());
+            assertEquals(10L, response.usage().inputTokens());
+        }
+    }
+
+    @Test
     void rejectsIssueProseAndUnboundedMetadataWithoutLosingUsage() {
         var invalidIssues = List.of(
                 changedIssue("audience", "CHIP_MAKER\nforged"),

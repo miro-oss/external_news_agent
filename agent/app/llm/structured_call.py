@@ -261,8 +261,7 @@ def _validation_failure(
         "errorCount": count,
         "errorKinds": sorted(kinds)[:5],
     }
-    if stage == "REDUCE" or stage.startswith("REDUCE-"):
-        details.update(report_validation_issue_details(error, response_schema or {}))
+    details.update(report_validation_issue_details(error, response_schema or {}, stage=stage))
     return details
 
 

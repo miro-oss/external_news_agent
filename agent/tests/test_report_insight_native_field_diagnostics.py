@@ -15,6 +15,7 @@ from app.llm.report_insight_service import (
     _source_context,
     _validated_map_output,
 )
+from app.llm.report_validation_diagnostics import report_validation_issue_details
 
 
 def recorded_source():
@@ -144,6 +145,11 @@ def test_native_diagnostic_attributes_actual_components_without_weakening_public
     assert "nativeFields=" not in str(legacy)
     assert diagnostic.error_kinds == legacy.error_kinds == ("report_fact_mismatch",)
     assert diagnostic.failed_finding_ids == legacy.failed_finding_ids == (7815,)
+    details = report_validation_issue_details(diagnostic, {}, stage="MAP-001")
+    assert {issue["field"] for issue in details["issues"]} == {
+        f"assessments[7815].{path}" for path in paths
+    }
+    assert all(issue["claimIds"] == ["7815:2"] for issue in details["issues"])
     assert "근거에서 확인되지 않는 기업명: 삼성전자" in str(diagnostic)
     assert value == original
 

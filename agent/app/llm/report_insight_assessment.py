@@ -26,6 +26,7 @@ from app.llm.report_insight_instructions import ASSESSMENT_REASON_RULE
 from app.llm.report_insight_relocation_support import relocation_support_problems
 from app.llm.report_insight_retrieval import _ROLE_QUERIES, tokenize_report_evidence
 from app.llm.report_insight_work_grounding import work_prose_problems
+from app.llm.report_validation_diagnostics import ReportValidationIssue
 from app.schemas.analyze import Audience
 from app.schemas.report_insight import (
     CLAIMLESS_ASSESSMENT_REASON,
@@ -246,11 +247,13 @@ class ReportAssessmentDraftValidationError(OutputValidationError):
         *,
         failed_finding_ids: tuple[int, ...],
         work_diagnostics: tuple[ReportAssessmentWorkDiagnostic, ...] = (),
+        validation_issues: tuple[ReportValidationIssue, ...] = (),
         native_connection_repairs: dict[int, ReportAssessmentConnectionRepairContext] | None = None,
     ):
         super().__init__(message, error_kinds=("report_assessment_draft_invalid",))
         self.failed_finding_ids = failed_finding_ids
         self.work_diagnostics = tuple(work_diagnostics)
+        self.validation_issues = tuple(validation_issues)
         self.native_connection_repairs = deepcopy(native_connection_repairs or {})
 
 
@@ -800,7 +803,7 @@ def _parse_draft(raw: str, request: ReportInsightRequest) -> ReportAssessmentDra
     wire = parse_wire_draft(raw)
     sources = {f"finding{finding.id}": source_span_choices(finding) for finding in request.findings}
     assessments = {}
-    errors, failed = [], []
+    errors, failed, validation_issues = [], [], []
     for audience, items in wire.assessments.items():
         assessments[audience] = {}
         for key, item in items.items():
@@ -811,10 +814,20 @@ def _parse_draft(raw: str, request: ReportInsightRequest) -> ReportAssessmentDra
             except ValueError as error:
                 errors.append(f"audience={audience} findingId={key[7:]} {error}")
                 failed.append(int(key[7:]))
+                if audience in request.audiences:
+                    validation_issues.append(
+                        ReportValidationIssue(
+                            audience,
+                            f"assessments[{int(key[7:])}]",
+                            "report_assessment_draft_invalid",
+                            (),
+                        )
+                    )
     if errors:
         raise ReportAssessmentDraftValidationError(
             "내부 MAP 원문 선택 계약 위반: " + "; ".join(errors),
             failed_finding_ids=tuple(dict.fromkeys(failed)),
+            validation_issues=tuple(validation_issues),
         )
     return ReportAssessmentDraft(assessments=assessments)
 
@@ -859,7 +872,7 @@ def _validate_draft(
         set(items) != expected for items in draft.assessments.values()
     ):
         raise ValueError("내부 MAP은 요청한 모든 audience와 finding 키만 정확히 반환해야 합니다.")
-    errors, failed, work_diagnostics = [], [], []
+    errors, failed, work_diagnostics, validation_issues = [], [], [], []
     connection_repairs = {}
     sources = {item["id"]: item for item in _prompt_payload(request, None)["findings"]}
     mapped, evidence = [], {}
@@ -871,6 +884,24 @@ def _validate_draft(
             messages = _assessment_errors(item, finding, audience, local_diagnostics)
             work_diagnostics.extend(local_diagnostics)
             if messages:
+                validation_issues.extend(
+                    ReportValidationIssue(
+                        audience,
+                        f"assessments[{finding.id}].{diagnostic.native_field}",
+                        "report_assessment_draft_invalid",
+                        diagnostic.claim_ids,
+                    )
+                    for diagnostic in local_diagnostics
+                )
+                if len(messages) > len(local_diagnostics):
+                    validation_issues.append(
+                        ReportValidationIssue(
+                            audience,
+                            f"assessments[{finding.id}]",
+                            "report_assessment_draft_invalid",
+                            (),
+                        )
+                    )
                 # Each owned diagnostic appends exactly one error. Additional
                 # shape, source, coherence or prose errors prevent preservation;
                 # no text from an error message grants repair authority.
@@ -907,6 +938,7 @@ def _validate_draft(
             "내부 MAP 근거 계약 위반: " + "; ".join(errors),
             failed_finding_ids=tuple(dict.fromkeys(failed)),
             work_diagnostics=tuple(work_diagnostics),
+            validation_issues=tuple(validation_issues),
             native_connection_repairs=(
                 connection_repairs if set(connection_repairs) == set(failed) else None
             ),

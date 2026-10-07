@@ -142,7 +142,7 @@ public class AgentClientException extends RuntimeException {
                 throw new IllegalArgumentException("Invalid validation failure diagnostics");
             }
             if (issues == null || issues.size() > 8 || issues.stream().anyMatch(value -> value == null)
-                    || ((!issues.isEmpty() || issuesTruncated) && !stage.matches("REDUCE(?:-[0-9]{3})?"))) {
+                    || issues.stream().anyMatch(issue -> !issue.matchesStage(stage))) {
                 throw new IllegalArgumentException("Invalid validation issues");
             }
             errorKinds = errorKinds.stream().filter(KINDS::contains).distinct().sorted().toList();
@@ -156,14 +156,21 @@ public class AgentClientException extends RuntimeException {
                 "CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR", "IT_INFRA");
         private static final Set<String> LENGTH_KINDS = Set.of(
                 "string_too_long", "string_too_short", "too_long", "too_short");
-        private static final String FIELD = "(?:headline|overview|implications|watchItems|"
+        private static final String REDUCE_FIELD = "(?:headline|overview|implications|watchItems|"
                 + "overview\\[[0-2]\\]\\.(?:text|assumption|basisClaimIds)|"
                 + "implications\\[[0-4]\\]\\.(?:text|mechanism|assumption|falsifiedBy|basisClaimIds)|"
                 + "watchItems\\[[0-4]\\]\\.(?:topic|indicator|trigger|basisClaimIds))";
+        private static final String MAP_FIELD = "assessments\\[[1-9][0-9]{0,18}\\]"
+                + "(?:\\.(?:reason|axes\\.urgency|decision\\.connection\\.(?:condition|relation|work)|"
+                + "decision\\.effect\\.impactScope|decision\\.timing\\.urgencyState))?";
+
+        private boolean matchesStage(String stage) {
+            return field.matches(stage.matches("(?:MAP|REVIEW)(?:-[0-9]{3})?") ? MAP_FIELD : REDUCE_FIELD);
+        }
 
         public ValidationIssue {
             if (audience == null || !AUDIENCES.contains(audience)
-                    || field == null || !field.matches(FIELD)
+                    || field == null || !(field.matches(REDUCE_FIELD) || field.matches(MAP_FIELD))
                     || errorKind == null || !(LENGTH_KINDS.contains(errorKind)
                         || errorKind.startsWith("report_") && ValidationFailure.KINDS.contains(errorKind))
                     || claimIds == null || claimIds.size() > 8

@@ -26,6 +26,7 @@ from app.llm.report_insight_assessment import (
     source_span_choices,
     validate_draft,
 )
+from app.llm.report_insight_fact_repair import fact_repair_guidance, fact_repair_kinds
 from app.llm.report_insight_guard import (
     has_blanket_insufficient_headline,
     report_prose_mismatches,
@@ -62,7 +63,7 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v25"
+PROMPT_VERSION = "report-insight.ko.v26"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -82,6 +83,7 @@ class ReportAssessmentValidationError(OutputValidationError):
         repair_diagnostics: tuple[str, ...] = (),
         repair_summary: str = "",
         repair_action_diagnostics: tuple[str, ...] = (),
+        validation_issues: tuple[ReportValidationIssue, ...] = (),
         native_prose_repairs: dict[int, tuple[ReportFindingAssessmentDraft, tuple[str, ...]]]
         | None = None,
         native_connection_repairs: dict[int, ReportAssessmentConnectionRepairContext] | None = None,
@@ -91,6 +93,7 @@ class ReportAssessmentValidationError(OutputValidationError):
         self.repair_diagnostics = tuple(repair_diagnostics)
         self.repair_summary = repair_summary
         self.repair_action_diagnostics = tuple(repair_action_diagnostics)
+        self.validation_issues = tuple(validation_issues)
         # Created from authenticated native projections, never diagnostic prose.
         self.native_prose_repairs = deepcopy(native_prose_repairs or {})
         self.native_connection_repairs = deepcopy(native_connection_repairs or {})
@@ -113,6 +116,19 @@ class _TruncatedAssessmentRepairError(ReportAssessmentValidationError):
             error_kinds=("report_assessment_truncated_prefix",)
             + tuple(kind for _, error in errors for kind in error.error_kinds),
             failed_finding_ids=tuple(failed_ids),
+            validation_issues=tuple(
+                issue for _, error in errors for issue in error.validation_issues
+            )
+            + tuple(
+                ReportValidationIssue(
+                    request.audiences[0],
+                    f"assessments[{identifier}]",
+                    "report_assessment_truncated_prefix",
+                    (),
+                )
+                for identifier in failed_ids
+                if identifier not in {failed_id for failed_id, _ in errors}
+            ),
             repair_action_diagnostics=tuple(
                 diagnostic for _, error in errors for diagnostic in _repair_action_entries(error)
             )
@@ -690,11 +706,11 @@ def _reduce_repair_diagnostics(response, request, allowed):
                     for field in item.model_dump(by_alias=by_alias, exclude={"basis_claim_ids"})
                 )
 
-    def record(path, refs, message, kinds):
+    def record(path, refs, message, kinds, *, fact_kinds=()):
         nonlocal partial_repair_eligible
         label = f"{path} refs={list(refs)}"
         errors.append((f"{label}: {message}", kinds))
-        actions.append(f"{label}: {_repair_action_message(message, kinds)}")
+        actions.append(f"{label}: {_repair_action_message(message, kinds, fact_kinds=fact_kinds)}")
         if path in diagnostic_paths:
             audience, _, field = path.partition(".")
             validation_issues.extend(
@@ -739,7 +755,13 @@ def _reduce_repair_diagnostics(response, request, allowed):
                 if isinstance(error, OutputValidationError)
                 else ("report_synthesis_invalid",)
             )
-            record(path, refs, str(error), kinds)
+            record(
+                path,
+                refs,
+                str(error),
+                kinds,
+                fact_kinds=getattr(error, "fact_repair_kinds", ()),
+            )
 
     for insight in reduced.insights:
         audience = insight.audience
@@ -949,6 +971,9 @@ def _native_assessment_repair_errors(response, request):
         + "\n".join(f"findingId={finding_id}: {error}" for finding_id, error in failures),
         error_kinds=tuple(kind for _, error in failures for kind in error.error_kinds),
         failed_finding_ids=tuple(dict.fromkeys(finding_id for finding_id, _ in failures)),
+        validation_issues=tuple(
+            issue for _, error in failures for issue in error.validation_issues
+        ),
         repair_summary="MAP 수정 대상: "
         + "; ".join(
             f"findingId={finding_id} kinds={','.join(error.error_kinds)}"
@@ -1552,13 +1577,17 @@ def _report_insight_repair_call(prompt, schema, raw, error, validate):
     )
 
 
-def _repair_action_message(message: str, kinds: tuple[str, ...]) -> str:
+def _repair_action_message(
+    message: str, kinds: tuple[str, ...], *, fact_kinds: tuple[str, ...] = ()
+) -> str:
     if "report_fact_mismatch" in kinds:
-        return (
+        generic = (
             "report_fact_mismatch: 선택 근거가 이 필드의 사실값을 지원하지 않습니다. "
             "원문에서 필드를 다시 작성하고 근거 없는 사실이나 그 사실의 부재 설명을 "
             "반복하지 마세요."
         )
+        guidance = fact_repair_guidance(fact_kinds)
+        return generic + (" " + guidance if guidance else "")
     return message
 
 
@@ -1602,7 +1631,12 @@ def _repair_action_entries(error: Exception) -> tuple[str, ...]:
         # infer it from a message that can contain generated factual literals.
         finding_ids = getattr(error, "failed_finding_ids", ())
         label = f"findingIds={list(finding_ids)}: " if finding_ids else ""
-        return (label + _repair_action_message("", error.error_kinds),)
+        return (
+            label
+            + _repair_action_message(
+                "", error.error_kinds, fact_kinds=getattr(error, "fact_repair_kinds", ())
+            ),
+        )
     diagnostics = getattr(error, "repair_diagnostics", ()) or (str(error),)
     if isinstance(error, ReportAssessmentDraftValidationError):
         diagnostics += tuple(
@@ -2039,10 +2073,30 @@ def _validated_output(
                     )
                 ),
                 repair_diagnostics=diagnostics,
+                validation_issues=tuple(
+                    ReportValidationIssue(
+                        insight.audience,
+                        f"assessments[{assessment.finding_id}].{native_field}",
+                        kind,
+                        tuple(assessment.basis_claim_ids),
+                    )
+                    for assessment, field, error in assessment_errors
+                    # This field comes from our attribution helper, never provider text.
+                    for native_field in (
+                        field.removeprefix("reason nativeFields=").split(",")
+                        if field.startswith("reason nativeFields=")
+                        else (field,)
+                    )
+                    for kind in getattr(error, "error_kinds", ("report_assessment_invalid",))
+                ),
                 repair_action_diagnostics=tuple(
                     f"findingId={assessment.finding_id} field=assessments.{field} "
                     f"refs={assessment.basis_claim_ids}: "
-                    + _repair_action_message(str(error), getattr(error, "error_kinds", ()))
+                    + _repair_action_message(
+                        str(error),
+                        getattr(error, "error_kinds", ()),
+                        fact_kinds=getattr(error, "fact_repair_kinds", ()),
+                    )
                     for assessment, field, error in assessment_errors
                 ),
                 native_prose_repairs=_native_prose_repair_context(
@@ -2182,13 +2236,13 @@ def _prose_validation_errors(
                 if any(marker in mismatch for marker in ("숫자", "날짜", "기업명"))
             ]
         if mismatches:
-            errors.append(
-                OutputValidationError(
-                    "생성 문장의 사실값이 basisClaimIds 근거와 일치하지 않습니다. "
-                    + "; ".join(mismatches),
-                    error_kinds=("report_fact_mismatch",),
-                )
+            error = OutputValidationError(
+                "생성 문장의 사실값이 basisClaimIds 근거와 일치하지 않습니다. "
+                + "; ".join(mismatches),
+                error_kinds=("report_fact_mismatch",),
             )
+            error.fact_repair_kinds = fact_repair_kinds(value, source, mismatches, refs=refs)
+            errors.append(error)
         try:
             validate_report_citations(value, refs, source, conditional=conditional, topic=topic)
         except ValueError as error:
