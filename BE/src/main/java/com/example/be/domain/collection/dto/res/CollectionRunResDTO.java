@@ -60,7 +60,7 @@ public class CollectionRunResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "runId", "status", "triggerType", "queuedAt", "startedAt", "finishedAt",
+            "runId", "status", "stage", "triggerType", "queuedAt", "startedAt", "finishedAt",
             "scannedCount", "newCount", "updatedCount", "skippedCount", "warningCount", "reportId", "llmPlan"
     })
     @Schema(name = "CollectionRunSummaryResponse", description = "수집 실행 내역 목록 항목")
@@ -71,6 +71,13 @@ public class CollectionRunResDTO {
 
         @Schema(description = "실행 상태", example = "SUCCESS")
         private final String status;
+
+        @JsonInclude(JsonInclude.Include.ALWAYS)
+        @Schema(description = "현재 처리 단계. RUNNING에서만 유효하며 대기·종료 또는 기존 단계 미상 실행이면 null",
+                example = "ANALYZING", nullable = true,
+                allowableValues = {"COLLECTING", "CLUSTERING", "ANALYZING", "INVESTIGATING",
+                        "GENERATING_REPORT", "FINALIZING"})
+        private final String stage;
 
         @Schema(description = "실행 트리거", example = "MANUAL")
         private final String triggerType;
@@ -110,7 +117,7 @@ public class CollectionRunResDTO {
     @Builder
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
-            "runId", "status", "triggerType", "idempotencyKey", "queuedAt", "startedAt", "finishedAt",
+            "runId", "status", "stage", "triggerType", "idempotencyKey", "queuedAt", "startedAt", "finishedAt",
             "scannedCount", "newCount", "updatedCount", "skippedCount", "reportId", "llmPlan",
             "coverage", "breakdown", "warnings"
     })
@@ -122,6 +129,13 @@ public class CollectionRunResDTO {
 
         @Schema(description = "실행 상태", example = "PARTIAL")
         private final String status;
+
+        @JsonInclude(JsonInclude.Include.ALWAYS)
+        @Schema(description = "현재 처리 단계. RUNNING에서만 유효하며 대기·종료 또는 기존 단계 미상 실행이면 null",
+                example = "ANALYZING", nullable = true,
+                allowableValues = {"COLLECTING", "CLUSTERING", "ANALYZING", "INVESTIGATING",
+                        "GENERATING_REPORT", "FINALIZING"})
+        private final String stage;
 
         @Schema(description = "실행 트리거", example = "MANUAL")
         private final String triggerType;

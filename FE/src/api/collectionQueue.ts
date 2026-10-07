@@ -2,9 +2,13 @@ import { useQuery } from '@tanstack/react-query'
 import { get } from './client'
 import type { PageResult } from './types'
 
+export type CollectionRunStage = 'COLLECTING' | 'CLUSTERING' | 'ANALYZING'
+  | 'INVESTIGATING' | 'GENERATING_REPORT' | 'FINALIZING'
+
 export interface CollectionProgress {
   runId: number
   status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'PARTIAL' | 'FAILED'
+  stage: CollectionRunStage | null
   queuedAt: string
   startedAt: string | null
   reportId: number | null

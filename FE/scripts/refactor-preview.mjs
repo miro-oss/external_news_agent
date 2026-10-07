@@ -141,16 +141,23 @@ function runSettings(run) {
 // Seed before opening the page to verify that old active runs survive browser reloads.
 // These controls change fixtures only and never send or schedule notifications.
 function notificationSettingsFixtures(variant) {
-    const count = variant === 'many-runs' ? 205 : 2;
+    const stages = ['COLLECTING', 'CLUSTERING', 'ANALYZING', 'INVESTIGATING', 'GENERATING_REPORT', 'FINALIZING', null];
+    const count = variant === 'many-runs' ? 205 : variant === 'stages' ? stages.length : 2;
     notificationSettingsSaveError = variant === 'save-error';
     completeRunOnSettingsSave = variant === 'completion-race';
     runs = Array.from({ length: count }, (_, index) => ({
         runId: 601 + index, status: index % 2 ? 'PENDING' : 'RUNNING', triggerType: index % 2 ? 'MANUAL' : 'SCHEDULED',
+        stage: index % 2 ? null : 'COLLECTING',
         idempotencyKey: `fixture-existing-${index}`, llmPlan: 'FREE', targetTopicIds: index % 2 ? [31, 29] : [31],
         targetCombinationCount: index % 2 ? 4 : 2, queuedAt: new Date(Date.now() - (count - index) * 60000).toISOString(),
         startedAt: index % 2 ? null : new Date(Date.now() - (count - index) * 60000 + 1000).toISOString(),
         finishedAt: null, reportId: null,
     }));
+    if (variant === 'stages') runs.forEach((run, index) => {
+        run.status = 'RUNNING';
+        run.stage = stages[index];
+        run.startedAt = run.queuedAt;
+    });
     const delivery = variant === 'stale-targets'
         ? { enabled: true, run: true, daily: false, channelIds: [3, 99], groupIds: [2, 99], recipientIds: [3, 99] }
         : { enabled: true, run: true, daily: false, channelIds: [1], groupIds: [1], recipientIds: [] };
@@ -430,7 +437,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             }
                             if (path === '/__qa/notification-settings') {
                                 const variant = body.variant ?? url.searchParams.get('variant') ?? 'existing';
-                                const variants = ['existing', 'many-runs', 'save-error', 'completion-race', 'stale-targets'];
+                                const variants = ['existing', 'many-runs', 'save-error', 'completion-race', 'stale-targets', 'stages'];
                                 if (!variants.includes(variant)) return json(res, { variants }, 400);
                                 return json(res, notificationSettingsFixtures(variant));
                             }
@@ -531,6 +538,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 if (!run)
                                     return json(res, { error: '먼저 수집 요청을 눌러 주세요.' }, 404);
                                 run.status = body.status || url.searchParams.get('status') || (run.status === 'PENDING' ? 'RUNNING' : 'SUCCESS');
+                                run.stage = run.status === 'RUNNING' ? body.stage ?? run.stage ?? 'COLLECTING' : null;
                                 run.startedAt = run.status === 'PENDING' ? null : run.startedAt || now();
                                 run.finishedAt = ['PENDING', 'RUNNING'].includes(run.status) ? null : now();
                                 run.reportId = ['SUCCESS', 'PARTIAL'].includes(run.status) ? 17 : null;
@@ -676,11 +684,12 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         }
                         else if (path === '/api/news/runs') {
                             const status = url.searchParams.get('status');
-                            result = requestedPage(runs.filter(r => !status || r.status === status).toReversed(), url);
+                            result = requestedPage(runs.filter(r => !status || r.status === status)
+                                .map(run => ({ ...run, stage: run.status === 'RUNNING' ? run.stage ?? null : null })).toReversed(), url);
                         }
                         else if ((match = path.match(/^\/api\/news\/runs\/(\d+)$/))) {
                             const run = runs.find(r => r.runId === Number(match[1]));
-                            result = run ? { ...run, breakdown: run.targetTopicIds.flatMap(topicId => sources.map(source => ({
+                            result = run ? { ...run, stage: run.status === 'RUNNING' ? run.stage ?? null : null, breakdown: run.targetTopicIds.flatMap(topicId => sources.map(source => ({
                                 topicId, topicName: topics.find(topic => topic.id === topicId)?.name ?? `주제 ${topicId}`,
                                 sourceId: source.id, sourceName: source.name,
                                 status: run.status, scannedCount: 0, newCount: 0, updatedCount: 0,

@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.cluster;
 
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRunArticle;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.issues.entity.IssueArticle;
@@ -34,23 +35,69 @@ public class IssueClusteringLoader {
     @Transactional(readOnly = true)
     public List<ClusterArticle> load(Long runId) {
         List<CollectionRunArticle> current = observationRepository.findClusterTargetsByRunId(runId);
+        return load(current, memberships(current));
+    }
+
+    @Transactional(readOnly = true)
+    public Changes loadInitialChanges(Long runId, Set<Long> refreshedArticleIds) {
+        List<CollectionRunArticle> current = observationRepository.findClusterTargetsByRunId(runId);
+        Set<Long> changed = new LinkedHashSet<>(refreshedArticleIds);
+        current.stream().filter(observation -> observation.getChangeType() == ChangeType.NEW
+                        || observation.getChangeType() == ChangeType.UPDATED)
+                .forEach(observation -> changed.add(observation.getArticle().getId()));
+        return changes(current, changed, current.stream().map(value -> value.getArticle().getId())
+                .collect(java.util.stream.Collectors.toSet()));
+    }
+
+    @Transactional(readOnly = true)
+    public Changes loadChanges(Long runId, Set<Long> changedArticleIds, Set<Long> observedArticleIds) {
+        if (changedArticleIds.isEmpty() && observedArticleIds.isEmpty()) {
+            return new Changes(List.of(), Set.of());
+        }
+        return changes(observationRepository.findClusterTargetsByRunId(runId),
+                changedArticleIds, observedArticleIds);
+    }
+
+    private Changes changes(List<CollectionRunArticle> current, Set<Long> changedArticleIds,
+                            Set<Long> observedArticleIds) {
+        Map<ArticleTopicKey, Long> memberships = memberships(current);
+        Set<Long> changed = new LinkedHashSet<>(changedArticleIds);
+        // Globally unchanged full text may be new to this topic, or left unassigned by an earlier failure.
+        current.stream().filter(observation -> observedArticleIds.contains(observation.getArticle().getId()))
+                .filter(observation -> observation.getArticle().hasFullText())
+                .filter(observation -> !memberships.containsKey(new ArticleTopicKey(
+                        observation.getArticle().getId(), observation.getTopic().getId())))
+                .forEach(observation -> changed.add(observation.getArticle().getId()));
+        if (changed.isEmpty()) {
+            return new Changes(List.of(), Set.of());
+        }
+        return new Changes(load(current, memberships), changed);
+    }
+
+    private Map<ArticleTopicKey, Long> memberships(List<CollectionRunArticle> current) {
+        if (current.isEmpty()) {
+            return Map.of();
+        }
+        Set<Long> articleIds = current.stream().map(observation -> observation.getArticle().getId())
+                .collect(java.util.stream.Collectors.toSet());
+        return membershipsByArticleTopic(issueArticleRepository.findByArticleIds(articleIds));
+    }
+
+    private List<ClusterArticle> load(List<CollectionRunArticle> current,
+                                      Map<ArticleTopicKey, Long> issueByCurrentArticle) {
         if (current.isEmpty()) {
             return List.of();
         }
 
-        Set<Long> currentArticleIds = new LinkedHashSet<>();
         Set<Long> topicIds = new LinkedHashSet<>();
         OffsetDateTime earliest = null;
         for (CollectionRunArticle observation : current) {
             Article article = observation.getArticle();
-            currentArticleIds.add(article.getId());
             topicIds.add(observation.getTopic().getId());
             OffsetDateTime eventTime = eventTime(article, observedAt(article, observation));
             earliest = earliest == null || eventTime.isBefore(earliest) ? eventTime : earliest;
         }
 
-        Map<ArticleTopicKey, Long> issueByCurrentArticle = membershipsByArticleTopic(
-                issueArticleRepository.findByArticleIds(currentArticleIds));
         OffsetDateTime since = earliest.minus(properties.getEntityTimeWindow());
         List<IssueArticle> historical = new ArrayList<>(issueArticleRepository.findRecentByTopicIds(topicIds, since));
         Set<Long> missingExistingIssueIds = new LinkedHashSet<>();
@@ -165,5 +212,12 @@ public class IssueClusteringLoader {
     }
 
     private record ArticleTopicKey(long articleId, long topicId) {
+    }
+
+    public record Changes(List<ClusterArticle> articles, Set<Long> changedArticleIds) {
+        public Changes {
+            articles = List.copyOf(articles);
+            changedArticleIds = Set.copyOf(changedArticleIds);
+        }
     }
 }

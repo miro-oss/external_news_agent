@@ -10,6 +10,7 @@ import { TransientStatus } from '../../components/TransientStatus'
 import { formatShortDate } from '../../lib/datetime'
 import { CollectionDeliveryDialog } from './CollectionDeliveryPicker'
 import { deliveryPolicySummary, toDeliveryPolicy } from './deliverySettings'
+import { collectionRunStageLabel } from './collectionRunStages'
 import './active-collection-runs.css'
 
 export function ActiveCollectionRuns() {
@@ -73,9 +74,13 @@ function ActiveCollectionRunItem({ run, loadingRun, editing, dialogId, onOpen }:
 }) {
   const topics = useCollectionRunTopics(run.runId)
   const name = topics.data?.join(', ') || '수집 주제 정보 없음'
+  const stage = collectionRunStageLabel(run)
   return <li>
     <div>
-      <strong>{topics.data ? name : topics.isError ? '주제명을 불러오지 못했습니다.' : '주제명 불러오는 중…'}</strong>
+      <div className="active-run-title">
+        <strong>{topics.data ? name : topics.isError ? '주제명을 불러오지 못했습니다.' : '주제명 불러오는 중…'}</strong>
+        {stage && <span className="active-run-stage" role="status" aria-label={`현재 단계: ${stage}`}>{stage}</span>}
+      </div>
       <span>#{run.runId} · {run.triggerType === 'SCHEDULED' ? '정기 수집' : '직접 실행'} · {formatShortDate(run.queuedAt)} 접수</span>
       {topics.isError && <button type="button" className="text-button" onClick={() => void topics.refetch()}>주제명 다시 불러오기</button>}
     </div>

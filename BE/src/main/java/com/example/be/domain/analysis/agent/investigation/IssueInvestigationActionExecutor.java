@@ -68,7 +68,9 @@ public class IssueInvestigationActionExecutor {
             throw new IllegalStateException("추가 수집 실패: " + outcome.fetch().failureMessage());
         }
         Set<Long> refreshedArticleIds = contentEnricher.enrich(runId);
-        issueClusteringService.cluster(runId);
+        Set<Long> changedArticleIds = new LinkedHashSet<>(write.changedArticleIds());
+        changedArticleIds.addAll(refreshedArticleIds);
+        issueClusteringService.clusterChanges(runId, changedArticleIds, write.observedArticleIds());
         InvestigationContext after = analyzeChanges(
                 runId, before, refreshedArticleIds, contextService.current(runId, before.issueId()));
         return new InvestigationActionResult(
@@ -83,7 +85,7 @@ public class IssueInvestigationActionExecutor {
                                                    Long articleId) {
         Set<Long> refreshedArticleIds = contentEnricher.enrichArticle(runId, articleId);
         if (!refreshedArticleIds.isEmpty()) {
-            issueClusteringService.cluster(runId);
+            issueClusteringService.clusterChanges(runId, refreshedArticleIds, refreshedArticleIds);
         }
         InvestigationContext after = analyzeChanges(
                 runId, before, refreshedArticleIds, contextService.current(runId, before.issueId()));

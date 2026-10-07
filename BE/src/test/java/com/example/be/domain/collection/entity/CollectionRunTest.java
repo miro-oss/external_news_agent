@@ -6,11 +6,45 @@ import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class CollectionRunTest {
 
     private static final LocalDateTime FINISHED_AT = LocalDateTime.of(2026, 8, 14, 9, 0);
+
+    @Test
+    void startingAndReturningToQueueResetTheStage() {
+        CollectionRun run = CollectionRun.builder()
+                .status(RunStatus.PENDING)
+                .triggerType(TriggerType.MANUAL)
+                .build();
+        assertNull(run.getStage());
+
+        run.start(FINISHED_AT.minusMinutes(10));
+        assertEquals(RunStage.COLLECTING, run.getStage());
+
+        run.returnToQueue();
+        assertEquals(RunStatus.PENDING, run.getStatus());
+        assertNull(run.getStage());
+        assertNull(run.getStartedAt());
+    }
+
+    @Test
+    void everyTerminalPathClearsTheStage() {
+        CollectionRun completed = run();
+        completed.finish(FINISHED_AT);
+        assertNull(completed.getStage());
+
+        CollectionRun failed = run();
+        failed.fail(FINISHED_AT);
+        assertNull(failed.getStage());
+
+        CollectionRun aborted = run();
+        aborted.addItem(item(RunItemStatus.RUNNING));
+        aborted.abort(FINISHED_AT);
+        assertNull(aborted.getStage());
+    }
 
     @Test
     void abortClosesUnfinishedItemsAndMarksRunFailedWhenNothingSucceeded() {
@@ -97,6 +131,7 @@ class CollectionRunTest {
     private CollectionRun run() {
         return CollectionRun.builder()
                 .status(RunStatus.RUNNING)
+                .stage(RunStage.ANALYZING)
                 .triggerType(TriggerType.MANUAL)
                 .startedAt(LocalDateTime.of(2026, 8, 14, 8, 0))
                 .build();

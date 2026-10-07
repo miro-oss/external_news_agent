@@ -92,18 +92,37 @@ public class IssueClusterer {
 
     /** pair score는 오프라인 측정 전용이다. 프로덕션에서는 O(n²) 진단 목록을 보관하지 않는다. */
     public ClusterPlan cluster(List<ClusterArticle> rawArticles, boolean includePairScores) {
+        return cluster(rawArticles, null, includePairScores);
+    }
+
+    /** Saved components are the baseline; only changed evidence can create new connections. */
+    public ClusterPlan clusterChanges(List<ClusterArticle> rawArticles, Set<Long> changedArticleIds) {
+        return clusterChanges(rawArticles, changedArticleIds, false);
+    }
+
+    ClusterPlan clusterChanges(List<ClusterArticle> rawArticles, Set<Long> changedArticleIds,
+                               boolean includePairScores) {
+        if (changedArticleIds.isEmpty()) {
+            return new ClusterPlan(List.of(), List.of(), List.of());
+        }
+        return cluster(rawArticles, Set.copyOf(changedArticleIds), includePairScores);
+    }
+
+    private ClusterPlan cluster(List<ClusterArticle> rawArticles, Set<Long> changedArticleIds,
+                                boolean includePairScores) {
         List<ClusterArticle> articles = deduplicate(rawArticles);
         if (articles.isEmpty()) {
             return new ClusterPlan(List.of(), List.of(), List.of());
         }
 
-        ContentGrouping contentGrouping = contentGroups(articles);
+        ContentGrouping contentGrouping = contentGroups(articles, changedArticleIds);
         List<ClusterPlan.PairScore> pairScores = new ArrayList<>();
         List<ClusterPlan.IssueAssignment> issues = new ArrayList<>();
         articles.stream().collect(Collectors.groupingBy(
                         ClusterArticle::topicId, LinkedHashMap::new, Collectors.toList()))
                 .forEach((topicId, topicArticles) -> issues.addAll(
-                        clusterTopic(topicId, topicArticles, contentGrouping, pairScores, includePairScores)));
+                        clusterTopic(topicId, topicArticles, contentGrouping, pairScores,
+                                includePairScores, changedArticleIds != null)));
 
         return new ClusterPlan(contentGrouping.assignments(), issues, pairScores);
     }
@@ -117,7 +136,7 @@ public class IssueClusterer {
         return List.copyOf(unique.values());
     }
 
-    private ContentGrouping contentGroups(List<ClusterArticle> articles) {
+    private ContentGrouping contentGroups(List<ClusterArticle> articles, Set<Long> changedArticleIds) {
         Map<Long, ClusterArticle> fullTextById = new LinkedHashMap<>();
         Map<Long, Long> fingerprintByArticle = new LinkedHashMap<>();
         Set<Long> rejectedFullTextIds = new HashSet<>();
@@ -136,8 +155,30 @@ public class IssueClusterer {
         UnionFind union = new UnionFind(fullText.stream().map(ClusterArticle::articleId).toList(),
                 Map.of(), versionedProduct::conflicts);
 
+        if (changedArticleIds != null) {
+            // Retain saved duplicate groups without comparing every historical pair again.
+            Map<Long, List<ClusterArticle>> savedGroups = fullText.stream()
+                    .filter(article -> article.contentGroupId() != null)
+                    .collect(Collectors.groupingBy(ClusterArticle::contentGroupId));
+            savedGroups.values().forEach(component -> joinAll(union, component));
+        }
+        Set<Long> contentChanges = changedArticleIds == null ? null : new HashSet<>(changedArticleIds);
+        if (contentChanges != null) {
+            // An updated representative may have lost its usable body. Its surviving saved group
+            // still needs a new representative and must activate proxies in other topics.
+            Set<Long> changedGroupIds = articles.stream()
+                    .filter(article -> changedArticleIds.contains(article.articleId()))
+                    .map(ClusterArticle::contentGroupId).filter(id -> id != null).collect(Collectors.toSet());
+            fullText.stream().filter(article -> changedGroupIds.contains(article.contentGroupId()))
+                    .forEach(article -> contentChanges.add(article.articleId()));
+        }
+        Set<Long> comparisonIds = contentChanges == null ? null
+                : affectedComponents(fullText, union, contentChanges);
+        ComparisonPairs pairs = new ComparisonPairs(fullText, comparisonIds);
+
         for (int left = 0; left < fullText.size(); left++) {
-            for (int right = left + 1; right < fullText.size(); right++) {
+            for (int right = pairs.nextRight(left, left + 1); right < fullText.size();
+                 right = pairs.nextRight(left, right + 1)) {
                 ClusterArticle first = fullText.get(left);
                 ClusterArticle second = fullText.get(right);
                 boolean alreadyGrouped = first.contentGroupId() != null
@@ -160,8 +201,15 @@ public class IssueClusterer {
         List<ClusterPlan.ContentGroupAssignment> assignments = new ArrayList<>();
         Map<Long, String> contentKeyByArticle = new HashMap<>();
         Map<Long, Long> representativeByArticle = new HashMap<>();
+        Set<Long> affectedArticleIds = changedArticleIds == null ? new HashSet<>()
+                : new HashSet<>(changedArticleIds);
 
         for (List<ClusterArticle> component : components.values()) {
+            boolean affected = changedArticleIds == null
+                    || component.stream().anyMatch(article -> comparisonIds.contains(article.articleId()));
+            if (affected) {
+                component.forEach(article -> affectedArticleIds.add(article.articleId()));
+            }
             List<Long> existingIds = component.stream()
                     .map(ClusterArticle::contentGroupId)
                     .filter(value -> value != null)
@@ -181,12 +229,14 @@ public class IssueClusterer {
                     ? "new-group:" + representative.articleId()
                     : "content-group:" + existingId;
             List<Long> articleIds = component.stream().map(ClusterArticle::articleId).sorted().toList();
-            assignments.add(new ClusterPlan.ContentGroupAssignment(
-                    existingId,
-                    existingIds.stream().filter(id -> !id.equals(existingId)).toList(),
-                    representative.articleId(),
-                    SimHash.toHex(fingerprintByArticle.get(representative.articleId())),
-                    articleIds));
+            if (affected) {
+                assignments.add(new ClusterPlan.ContentGroupAssignment(
+                        existingId,
+                        existingIds.stream().filter(id -> !id.equals(existingId)).toList(),
+                        representative.articleId(),
+                        SimHash.toHex(fingerprintByArticle.get(representative.articleId())),
+                        articleIds));
+            }
             articleIds.forEach(articleId -> {
                 contentKeyByArticle.put(articleId, key);
                 representativeByArticle.put(articleId, representative.articleId());
@@ -204,14 +254,50 @@ public class IssueClusterer {
         Map<Long, ClusterArticle> articleById = articles.stream().collect(Collectors.toMap(
                 ClusterArticle::articleId, Function.identity(), (left, right) -> left));
         return new ContentGrouping(
-                List.copyOf(assignments), contentKeyByArticle, representativeByArticle, articleById);
+                List.copyOf(assignments), contentKeyByArticle, representativeByArticle, articleById,
+                Set.copyOf(affectedArticleIds));
+    }
+
+    private static Set<Long> affectedComponents(List<ClusterArticle> articles, UnionFind union,
+                                                Set<Long> changedArticleIds) {
+        Set<Long> roots = articles.stream()
+                .filter(article -> changedArticleIds.contains(article.articleId()))
+                .map(article -> union.root(article.articleId()))
+                .collect(Collectors.toSet());
+        return articles.stream()
+                .filter(article -> roots.contains(union.root(article.articleId())))
+                .map(ClusterArticle::articleId).collect(Collectors.toSet());
+    }
+
+    /** Enumerate changed-to-all pairs in the original order without walking historical pairs. */
+    private static final class ComparisonPairs {
+        private final List<ClusterArticle> articles;
+        private final Set<Long> changedIds;
+        private final int[] nextChanged;
+
+        private ComparisonPairs(List<ClusterArticle> articles, Set<Long> changedIds) {
+            this.articles = articles;
+            this.changedIds = changedIds;
+            this.nextChanged = new int[articles.size() + 1];
+            nextChanged[articles.size()] = articles.size();
+            for (int index = articles.size() - 1; index >= 0; index--) {
+                nextChanged[index] = changedIds == null || changedIds.contains(articles.get(index).articleId())
+                        ? index : nextChanged[index + 1];
+            }
+        }
+
+        private int nextRight(int left, int start) {
+            return changedIds == null || changedIds.contains(articles.get(left).articleId())
+                    ? start : nextChanged[start];
+        }
     }
 
     private List<ClusterPlan.IssueAssignment> clusterTopic(long topicId,
                                                             List<ClusterArticle> articles,
                                                             ContentGrouping contentGrouping,
                                                             List<ClusterPlan.PairScore> pairScores,
-                                                            boolean includePairScores) {
+                                                            boolean includePairScores,
+                                                            boolean incremental) {
         Map<Long, ClusterArticle> byId = articles.stream().collect(Collectors.toMap(
                 ClusterArticle::articleId,
                 Function.identity(),
@@ -269,6 +355,14 @@ public class IssueClusterer {
                         article -> contentGrouping.contentKeyByArticle().get(article.articleId())));
         byContent.values().forEach(component -> joinAll(union, component));
 
+        // A changed member can replace a representative or alter the component's merge guards.
+        // Include every saved issue/content member in its component, including historical proxies.
+        Set<Long> comparisonIds = incremental
+                ? affectedComponents(unique, union, contentGrouping.affectedArticleIds()) : null;
+        if (incremental && comparisonIds.isEmpty()) {
+            return List.of();
+        }
+
         // 같은 본문 중복군에서는 대표만 사건 유사도 투표에 참여한다.
         List<ClusterArticle> voting = evidenceArticles.stream()
                 .filter(article -> contentGrouping.representativeByArticle().get(article.articleId())
@@ -279,8 +373,10 @@ public class IssueClusterer {
         Set<String> commonOrganizations = commonOrganizations(voting, organizations);
         EventTextEvidence eventEvidence = new EventTextEvidence(voting, breakingNewsDetector);
         FocalEventEvidence focalEvidence = new FocalEventEvidence(voting, breakingNewsDetector);
+        ComparisonPairs pairs = new ComparisonPairs(voting, comparisonIds);
         for (int left = 0; left < voting.size(); left++) {
-            for (int right = left + 1; right < voting.size(); right++) {
+            for (int right = pairs.nextRight(left, left + 1); right < voting.size();
+                 right = pairs.nextRight(left, right + 1)) {
                 ClusterArticle first = voting.get(left);
                 ClusterArticle second = voting.get(right);
                 double jaccard = jaccard(
@@ -345,6 +441,9 @@ public class IssueClusterer {
                         article -> union.root(article.articleId()), LinkedHashMap::new, Collectors.toList()));
         List<ClusterPlan.IssueAssignment> assignments = new ArrayList<>();
         for (List<ClusterArticle> component : components.values()) {
+            if (incremental && component.stream().noneMatch(article -> comparisonIds.contains(article.articleId()))) {
+                continue;
+            }
             List<ClusterArticle> evidenceMembers = component.stream().filter(ClusterArticle::hasFullText).toList();
             if (evidenceMembers.isEmpty()) {
                 // New candidates remain collection records; an existing metadata-only issue is untouched.
@@ -535,7 +634,8 @@ public class IssueClusterer {
             List<ClusterPlan.ContentGroupAssignment> assignments,
             Map<Long, String> contentKeyByArticle,
             Map<Long, Long> representativeByArticle,
-            Map<Long, ClusterArticle> articleById
+            Map<Long, ClusterArticle> articleById,
+            Set<Long> affectedArticleIds
     ) {
     }
 
