@@ -26,6 +26,7 @@ _CATEGORIES = (
     ("polarity", "근거와 반대되는 부정 표현이 포함되어 있습니다."),
     ("event_state", "근거에서 확인되지 않는 완료·착수·계약·중단 사실입니다."),
     ("event_state", "근거보다 확정적인 완료·착수·계약 사실을 단정했습니다."),
+    ("source_binding", "근거의 주체·사건 연결과 다릅니다:"),
 )
 _GUIDANCE = {
     "internal_reference_in_prose": (
@@ -53,6 +54,10 @@ _GUIDANCE = {
     "event_state": (
         "완료·착수·계약 등 사건 단계가 근거보다 확정적입니다. 계획·전망·실행·완료를 "
         "구분하고 원문에서 확인된 단계까지만 설명하세요."
+    ),
+    "source_binding": (
+        "같은 주체·대상에 연결된 사건 상태를 유지하세요. 다른 회사·시설의 완료 사실을 "
+        "빌려 계획을 실행·완료로 바꾸지 말고 원문 구간별로 대조하세요."
     ),
 }
 
@@ -90,9 +95,13 @@ def fact_repair_kinds(
     return tuple(dict.fromkeys(kinds))
 
 
+def safe_fact_repair_kinds(kinds: object) -> tuple[str, ...]:
+    """Closed rule identifiers suitable for logs; no rejected values or prose."""
+    if type(kinds) is not tuple or not all(type(kind) is str for kind in kinds):
+        return ()
+    return tuple(kind for kind in _GUIDANCE if kind in kinds)
+
+
 def fact_repair_guidance(kinds: tuple[str, ...]) -> str:
     """Unknown metadata cannot insert prose or values into a repair prompt."""
-    if type(kinds) is not tuple:
-        return ""
-    safe = tuple(kind for kind in _GUIDANCE if kind in kinds)
-    return " ".join(f"[{kind}] {_GUIDANCE[kind]}" for kind in safe)
+    return " ".join(f"[{kind}] {_GUIDANCE[kind]}" for kind in safe_fact_repair_kinds(kinds))

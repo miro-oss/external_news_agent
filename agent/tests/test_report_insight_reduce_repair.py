@@ -68,7 +68,8 @@ def test_one_reduce_repair_receives_fact_and_falsification_failures_together(cap
     assert source.model_dump_json(by_alias=True) == snapshot
     assert "report_fact_mismatch" in caplog.text
     assert "report_falsification_missing_observation" in caplog.text
-    for private in ("TSMC", "999", "refs=", "falsifiedBy"):
+    assert "implications[0].falsifiedBy" in caplog.text
+    for private in ("TSMC", "999", "refs=", "생산 제약과 검증 준비 간의 연결 근거가 없는 경우"):
         assert private not in caplog.text
 
 

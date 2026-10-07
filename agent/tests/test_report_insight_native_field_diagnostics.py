@@ -9,12 +9,12 @@ from jsonschema import Draft202012Validator
 from test_report_insight_assessment import payload, request, response
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
-from app.core.errors import AgentError, OutputValidationError
+from app.core.errors import AgentError
 from app.llm.report_insight_assessment import draft_prompt, draft_schema, validate_draft
 from app.llm.report_insight_service import (
     ReportAssessmentValidationError,
     ReportInsightService,
-    _native_reason_diagnostic_field,
+    _assessment_prose_errors,
     _prose_validation_errors,
     _source_context,
     _validated_map_output,
@@ -158,7 +158,7 @@ def test_native_diagnostic_attributes_actual_components_without_weakening_public
     assert value == original
 
 
-def test_combined_context_failure_keeps_original_error_and_names_both_native_fields():
+def test_native_condition_does_not_turn_historical_reason_into_current_deadline():
     source = request(audiences=("IT_INFRA",), text="2026년 9월 1일에 계약 신청이 마감된다.")
     finding = source.findings[0]
     finding.claims.append(
@@ -187,10 +187,26 @@ def test_combined_context_failure_keeps_original_error_and_names_both_native_fie
             [item[field]], ["101:0", "101:1"], evidence, claims, request=source
         )
     legacy = rejected_projection(source, value, with_native=False)
+    assert legacy.error_kinds == ("report_assessment_invalid",)
+    assert "이미 지난 근거 기한" in str(legacy)
+    raw = response(value, source)
+    draft = validate_draft(raw, source)
+    validated = _validated_map_output(
+        replace(raw, text=draft.mapped.model_dump_json(by_alias=True)),
+        source,
+        native_assessments=draft.evidence,
+    )
+    assert (
+        validated.insights[0].assessments[0].reason
+        == draft.mapped.insights[0].assessments[0].reason
+    )
+
+    # The same claim as an assertion in reason remains invalid. A provider's
+    # text label cannot authorize treating an actual statement as a condition.
+    item["reason"] = "2026년 9월 1일 마감이 임박하다."
     diagnostic = rejected_projection(source, value)
-    assert diagnostic.error_kinds == legacy.error_kinds == ("report_assessment_invalid",)
     assert "이미 지난 근거 기한" in str(diagnostic)
-    assert "nativeFields=reason,decision.connection.condition" in diagnostic.repair_summary
+    assert "nativeFields=reason" in diagnostic.repair_summary
 
 
 @pytest.mark.parametrize("extra_number_field", ["reason", "condition"])
@@ -245,20 +261,71 @@ def test_overlapping_fact_failures_keep_both_fields_editable_in_the_only_repair(
     assert value == before
 
 
-def test_unattributed_combined_error_conservatively_names_both_components():
+def test_mismatched_native_context_cannot_change_public_prose_semantics():
     source = recorded_source()
     value = conditional_payload(source)
+    value["assessments"]["IT_INFRA"]["finding7815"]["reason"] = (
+        "삼성전자의 스마트폰 출고가 인상 사건을 검토한다."
+    )
     draft = validate_draft(response(value, source), source)
     assessment = draft.mapped.insights[0].assessments[0]
     claims, evidence = _source_context(source)
-    unknown = OutputValidationError("Unknown combined guard", error_kinds=("unknown_guard",))
-    field = _native_reason_diagnostic_field(
-        assessment,
-        unknown,
-        draft.evidence["IT_INFRA"][7815],
-        assessment.basis_claim_ids,
-        evidence,
-        claims,
-        source,
+    foreign = draft.evidence["IT_INFRA"][7815].model_copy(update={"reason": "다른 설명"})
+    errors = _assessment_prose_errors(
+        assessment, foreign, assessment.basis_claim_ids, evidence, claims, source
     )
-    assert field == "reason nativeFields=reason,decision.connection.condition"
+    assert errors
+    assert all(field == "reason" for field, _ in errors)
+    assert any("기업명: 삼성전자" in str(error) for _, error in errors)
+
+
+def construction_condition_payload(condition):
+    source = request(
+        audiences=("IT_INFRA",),
+        text="삼성전자는 공장을 건설할 계획이다. 공급 수요는 추후 확인한다.",
+    )
+    value = conditional_payload(source)
+    value["assessments"]["IT_INFRA"]["finding101"].update(
+        reason="공장 건설 계획의 업무 연결 조건을 확인한다.",
+        condition=condition,
+    )
+    return source, value
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "삼성전자는 공장을 완공했고 공급 수요가 늘어날 경우",
+        "삼성전자는 공장을 완공했으며 공급 수요가 늘어날 경우",
+        "삼성전자는 공장을 완공했다, 공급 수요가 늘어날 경우",
+        "삼성전자는 공장을 완공했다. 공급 수요가 늘어날 경우",
+    ],
+)
+def test_native_condition_cannot_hide_asserted_fact_before_its_final_premise(condition):
+    source, value = construction_condition_payload(condition)
+    diagnostic = rejected_projection(source, value)
+    assert diagnostic.error_kinds == ("report_fact_mismatch",)
+    assert diagnostic.native_prose_repairs[101][1] == ("decision.connection.condition",)
+    assert "event_state" in diagnostic.fact_repair_kinds
+    assert "근거에서 확인되지 않는 완료·착수·계약·중단 사실" in str(diagnostic)
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "삼성전자가 공장을 완공할 경우",
+        "삼성전자가 공장을 완공했다면",
+        "공급 수요가 늘어날 경우",
+    ],
+)
+def test_single_native_hypothetical_premise_still_validates(condition):
+    source, value = construction_condition_payload(condition)
+    raw = response(value, source)
+    draft = validate_draft(raw, source)
+    output = _validated_map_output(
+        replace(raw, text=draft.mapped.model_dump_json(by_alias=True)),
+        source,
+        native_assessments=draft.evidence,
+    )
+    assert output == draft.mapped
+    assert draft.evidence["IT_INFRA"][101].condition == condition

@@ -62,6 +62,7 @@ _CURRENT_OBSERVATION = re.compile(
     re.IGNORECASE,
 )
 _BENEFICIARY = re.compile(r"\s*(?:확대\s*)?(?:수혜|혜택)|\s+benefit", re.IGNORECASE)
+_INVESTMENT_SENTIMENT_SUFFIX = re.compile(r"\s*(?:심리|sentiment\b)", re.IGNORECASE)
 _LIMITATION = re.compile(r"여부|미확인|불명|판단\s*보류|확인.{0,8}필요|검토.{0,8}필요|알\s*수\s*없")
 _GENERIC_MECHANISM = frozenset(
     {
@@ -329,6 +330,12 @@ def _frames(value: str, *, claim_type: str = "FACT") -> list[EventFrame]:
     for clause in _CLAUSE_BREAK.split(value):
         matches = list(_EVENTS.finditer(clause))
         for index, event in enumerate(matches):
+            if event.lastgroup == "investment" and _INVESTMENT_SENTIMENT_SUFFIX.match(
+                clause[event.end() :]
+            ):
+                # Sentiment is a market attitude, not capital deployed by an
+                # actor. It cannot borrow an owner or stage from a capex event.
+                continue
             if _BENEFICIARY.match(clause[event.end() :]):
                 continue
             end = matches[index + 1].start() if index + 1 < len(matches) else len(clause)

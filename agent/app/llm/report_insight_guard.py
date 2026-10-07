@@ -32,7 +32,7 @@ _SIGNED_CONTRACT = re.compile(
     r"\bsigned\s+(?:(?:an?|the)\s+)?"
     r"(?:(?:new|expansive|strategic|definitive|binding|commercial|"
     r"supply|licensing|distribution|development|collaboration|[a-z0-9]+-year),?\s+){0,4}"
-    r"(?:agreement|contract)\b(?!\s+(?:proposal|draft|plan|template|outline)\b)",
+    r"(?:agreements?|contracts?)\b(?!\s+(?:proposals?|drafts?|plans?|templates?|outlines?)\b)",
     re.IGNORECASE,
 )
 _NONFACTUAL_SIGNING = re.compile(
@@ -41,12 +41,40 @@ _NONFACTUAL_SIGNING = re.compile(
     r"denied|denies|deny|disputed|false|untrue)\b",
     re.IGNORECASE,
 )
-_NEGATED_SIGNING = re.compile(r"(?:\bnot|\bnever|n't)(?:\s+[a-z]+){0,4}\s+$", re.IGNORECASE)
+_SIGNING_NEGATION = re.compile(r"\b(?:not|never)\b|n't\b", re.IGNORECASE)
+_NEGATED_SIGNING = re.compile(
+    r"(?:\bnot|\bnever|n't)\s+"
+    r"(?:(?:yet|ever|already|previously|formally|officially|actually|"
+    r"fully|finally|have|has|had|been)\s+)*$",
+    re.IGNORECASE,
+)
+_CLOSED_SIGNING_ADJUNCT = re.compile(
+    r"^\s*(?:after|before|following|despite|although|even\s+though)\b[^,]*,\s*",
+    re.IGNORECASE,
+)
+_DO_NEGATED_COORDINATE = re.compile(
+    r"\b(?:did\s+not|didn't)\s+(?P<verb>[a-z]+)\b"
+    r"(?P<object>[^,;.!?]*)\band\s+(?:[a-z]+ly\s+)*$",
+    re.IGNORECASE,
+)
+# Only known non-clausal verb/object constructions may establish a separate
+# finite coordinate. An unknown verb may embed a clause without 'that'
+# (e.g. 'did not reveal they reviewed and signed'); it must stay unasserted.
+_NONCLAUSAL_DO_VERB = re.compile(
+    r"^(?:change|alter|adjust|raise|lower|increase|decrease|reduce|"
+    r"remove|replace|renew|cancel|amend|update)$",
+    re.IGNORECASE,
+)
+_EMBEDDED_SIGNING_CLAUSE = re.compile(
+    r"\b(?:that|whether|if|who|whom|whose|which|when|where|why|how|to|"
+    r"i|we|you|he|she|they|it|have|has|had|is|are|was|were|do|does|did|[a-z]+ed)\b",
+    re.IGNORECASE,
+)
 _MADE_CONTRACT = re.compile(r"계약(?:을)?\s*맺었다(?=$|[\s.!?;]|고)")
 _UNMADE_CONTRACT = re.compile(r"계약(?:을)?\s*맺지\s*않(?:았다|는다)(?=$|[\s.!?;]|고)")
 _SIGNED_LEASE = re.compile(
-    r"\bsigned\s+(?:(?:an?|the)\s+)?(?:long-term\s+)?lease\b"
-    r"(?!\s+(?:proposal|draft|plan|template|outline)\b)",
+    r"\bsigned\s+(?:(?:an?|the)\s+)?(?:long-term\s+)?leases?\b"
+    r"(?!\s+(?:proposals?|drafts?|plans?|templates?|outlines?)\b)",
     re.IGNORECASE,
 )
 _CONTRACT_SENTENCE_BREAK = re.compile(r"(?<!\d)[.!?](?!\d)|[。！？;\n]")
@@ -89,7 +117,9 @@ _FACT_STATES = {
     ),
     "contract": (
         re.compile(
-            r"(?:계약|체결)(?:이|은|을|를)?\s*(?:없|취소|무산|되지\s*않|하지\s*않)|(?:체결|계약)(?:이|은)?\s*미(?:완료|체결)"
+            r"(?:계약|체결)(?:이|은|을|를)?\s*(?:없|취소|무산|되지\s*않|하지\s*않)|"
+            r"(?:체결|계약)(?:이|은)?\s*미(?:완료|체결)|계약\s*사실(?:이|은)?\s*없"
+            r"(?=(?:다|습니다|었다|었습니다|음|고|으며|다고\s*밝혔다)(?=$|[\s,.!?;。]))"
         ),
         re.compile(
             r"체결(?:했|됐|되었|하였|한|된|됨)|계약(?:이|은)?\s*(?:성립|확정)|계약(?:이|은)?\s*(?:별도\s*)?사실"
@@ -135,6 +165,18 @@ _HYPOTHETICAL_SUFFIX = re.compile(r"(?:다)?(?:면|\s*(?:경우|때)|(?:고|다�
 _NOMINAL_CONTRACT_HYPOTHETICAL_SUFFIX = re.compile(
     r"(?:되|하)면(?![가-힣])|(?:될|할|되는|하는)\s*(?:경우|때)"
 )
+# "계약 사실" alone is an asserted-state cue, but its immediately attached
+# reporting predicate can explicitly leave execution unknown. Match only this
+# noun's information absence, never a different event elsewhere in the sentence.
+# Closed endings exclude quoted/double-negated absence ("않았다는 뜻은 아니다").
+_CONTRACT_INFORMATION_ABSENCE_SUFFIX = re.compile(
+    r"(?:이|은|을)?\s*"
+    r"(?:(?:원문|기사|자료|보고서)(?:에는|에서|에)\s*)?"
+    r"(?:(?:별도로|별도|직접|명확히|아직|구체적으로)\s*){0,2}"
+    r"(?:명시|제시|언급|확인)(?:되지|되어\s*있지|하지)\s*"
+    r"않(?:았습니다|았으며|았지만|았으나|았는데|았고|았다|습니다|는다|아서|아|으며|으나|는데|고|지만|음)"
+    r"(?=$|[\s,.!?;。])"
+)
 _NEGATIVE_HYPOTHETICAL_SUFFIX = re.compile(
     r"(?:으)?면|(?:될|할|되는|하는|된|한)\s*(?:경우|때)|\s*여부"
 )
@@ -155,6 +197,43 @@ _CURRENT_ACTION = re.compile(
     r"(?:복구|해결)(?:하|되)지\s*않|즉시\s*(?:적용|중단|시행|전환|대응)|"
     r"(?:현재|지금).{0,30}(?:적용|시행|전환|대응)"
 )
+
+
+def _signing_polarity(prefix: str) -> bool | None:
+    """Resolve only explicit local syntax; ambiguous scope stays unasserted.
+
+    A closed temporal/concessive adjunct does not condition the main event.
+    Conversely, an initial if/unless/whether clause still governs its event.
+    This is a bounded surface check, not a proof of arbitrary English entailment.
+    """
+    scope = prefix.replace("’", "'")
+    while adjunct := _CLOSED_SIGNING_ADJUNCT.match(scope):
+        scope = scope[adjunct.end() :]
+    contrast = re.split(r"\bbut\b", scope, flags=re.IGNORECASE)
+    if len(contrast) > 1 and not _NONFACTUAL_SIGNING.search("but".join(contrast[:-1])):
+        scope = contrast[-1]
+    if _NONFACTUAL_SIGNING.search(scope):
+        return None
+    if _NEGATED_SIGNING.search(scope):
+        return False
+    if _SIGNING_NEGATION.search(scope):
+        coordinate = _DO_NEGATED_COORDINATE.search(scope)
+        if (
+            coordinate
+            and _NONCLAUSAL_DO_VERB.fullmatch(coordinate["verb"])
+            and not (
+                not coordinate["object"].strip()
+                or _EMBEDDED_SIGNING_CLAUSE.search(coordinate["object"])
+                or _SIGNING_NEGATION.search(scope[: coordinate.start()] + coordinate["object"])
+            )
+        ):
+            # 'did not change ... and signed' contains two finite predicates:
+            # do-support requires 'sign', so it cannot negate past-tense 'signed'.
+            # In contrast, 'have not reviewed and signed' shares an auxiliary;
+            # that form intentionally remains unasserted below.
+            return True
+        return None
+    return True
 
 
 def _contract_alias_events(value: str):
@@ -181,12 +260,18 @@ def _contract_alias_events(value: str):
             ):
                 continue
             if pattern is _SIGNED_LEASE:
-                if _NEGATED_SIGNING.search(prefix):
-                    yield False, clause
+                signing_polarity = _signing_polarity(prefix)
+                if signing_polarity is None:
                     continue
-                if _NONFACTUAL_SIGNING.search(prefix):
-                    continue
+                yield signing_polarity, clause
+                continue
             yield positive, clause
+
+
+def _unreported_contract_fact(match, value: str) -> bool:
+    return match[0].endswith("사실") and bool(
+        _CONTRACT_INFORMATION_ABSENCE_SUFFIX.match(value[match.end() :])
+    )
 
 
 def factual_states(value: str) -> dict[str, set[bool]]:
@@ -204,6 +289,8 @@ def factual_states(value: str) -> dict[str, set[bool]]:
         for match in positive.finditer(value):
             if any(start <= match.start() < end for start, end in negative_spans):
                 continue
+            if name == "contract" and _unreported_contract_fact(match, value):
+                continue
             suffix = value[match.end() :]
             if _HYPOTHETICAL_SUFFIX.match(suffix) or (
                 name == "contract"
@@ -217,11 +304,10 @@ def factual_states(value: str) -> dict[str, set[bool]]:
     # The supplied English sentence may establish the same signed-contract
     # state as a Korean translation. Modal/conditional clauses are not execution.
     for match in _SIGNED_CONTRACT.finditer(value):
-        prefix = re.split(r"[.!?;\n]|\bbut\b", value[: match.start()])[-1]
-        if _NEGATED_SIGNING.search(prefix) or re.search(r"\b(?:no|neither|not)\b", match[0], re.I):
-            states.setdefault("contract", set()).add(False)
-        elif not _NONFACTUAL_SIGNING.search(prefix):
-            states.setdefault("contract", set()).add(True)
+        prefix = _CONTRACT_SENTENCE_BREAK.split(value[: match.start()])[-1]
+        signing_polarity = _signing_polarity(prefix)
+        if signing_polarity is not None:
+            states.setdefault("contract", set()).add(signing_polarity)
     for positive, _ in _contract_alias_events(value):
         states.setdefault("contract", set()).add(positive)
     return states

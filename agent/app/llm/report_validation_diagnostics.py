@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from uuid import uuid4
 
 from pydantic import ValidationError
 
@@ -58,6 +59,34 @@ class ReportValidationIssue:
     field: str
     error_kind: str
     claim_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReportValidationContext:
+    """One server-created identity shared by parallel stages and their repairs."""
+
+    trace_id: str
+    report_id: int
+    audiences: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.trace_id) is not str
+            or re.fullmatch(r"[0-9a-f]{32}", self.trace_id) is None
+            or type(self.report_id) is not int
+            or self.report_id <= 0
+            or type(self.audiences) is not tuple
+            or not self.audiences
+            or not all(type(item) is str and item in _AUDIENCES for item in self.audiences)
+        ):
+            raise ValueError("Invalid report diagnostic context")
+
+    @classmethod
+    def create(cls, report_id: int, audiences: list[str]) -> "ReportValidationContext":
+        return cls(uuid4().hex, report_id, tuple(audiences))
+
+    def log_fields(self) -> tuple[str, int, tuple[str, ...]]:
+        return self.trace_id, self.report_id, self.audiences
 
 
 def _safe_issue(issue: object, stage: str | None = None) -> bool:

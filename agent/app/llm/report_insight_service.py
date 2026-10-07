@@ -44,13 +44,14 @@ from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
 from app.llm.report_insight_prefix import closed_assessment_prefix
 from app.llm.report_insight_reduce_repair import ReduceRepairContext, partial_reduce_repair
 from app.llm.report_insight_retrieval import retrieve_report_insight_evidence
+from app.llm.report_insight_source_facts import source_fact_hints, source_fact_mismatches
 from app.llm.report_insight_synthesis_quality import (
     ReportSynthesisQualityValidationError,
     synthesis_evidence_frames,
     validate_synthesis_quality,
 )
-from app.llm.report_insight_work_grounding import validate_work_synthesis
-from app.llm.report_validation_diagnostics import ReportValidationIssue
+from app.llm.report_insight_work_grounding import ReportWorkValidationError, validate_work_synthesis
+from app.llm.report_validation_diagnostics import ReportValidationContext, ReportValidationIssue
 from app.llm.request_contract import report_insight_map_schema, report_insight_reduce_schema
 from app.llm.structured_call import StructuredCallRepair, structured_call
 from app.schemas.report import ReportResponseMeta
@@ -68,7 +69,7 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v27"
+PROMPT_VERSION = "report-insight.ko.v28"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -89,6 +90,7 @@ class ReportAssessmentValidationError(OutputValidationError):
         repair_summary: str = "",
         repair_action_diagnostics: tuple[str, ...] = (),
         validation_issues: tuple[ReportValidationIssue, ...] = (),
+        fact_repair_kinds: tuple[str, ...] = (),
         native_prose_repairs: dict[int, tuple[ReportFindingAssessmentDraft, tuple[str, ...]]]
         | None = None,
         native_connection_repairs: dict[int, ReportAssessmentConnectionRepairContext] | None = None,
@@ -99,6 +101,7 @@ class ReportAssessmentValidationError(OutputValidationError):
         self.repair_summary = repair_summary
         self.repair_action_diagnostics = tuple(repair_action_diagnostics)
         self.validation_issues = tuple(validation_issues)
+        self.fact_repair_kinds = tuple(fact_repair_kinds)
         # Created from authenticated native projections, never diagnostic prose.
         self.native_prose_repairs = deepcopy(native_prose_repairs or {})
         self.native_connection_repairs = deepcopy(native_connection_repairs or {})
@@ -175,6 +178,7 @@ class ReportReduceValidationError(OutputValidationError):
         repair_action_diagnostics=(),
         validation_issues=(),
         partial_repair_eligible=False,
+        fact_repair_kinds=(),
     ):
         super().__init__(message, error_kinds=error_kinds)
         self.repair_summary = repair_summary
@@ -182,6 +186,7 @@ class ReportReduceValidationError(OutputValidationError):
         self.repair_action_diagnostics = tuple(repair_action_diagnostics)
         self.validation_issues = tuple(validation_issues)
         self.partial_repair_eligible = partial_repair_eligible
+        self.fact_repair_kinds = tuple(fact_repair_kinds)
         self.repair_context = None
 
 
@@ -289,6 +294,9 @@ class ReportInsightLegacyService:
         pipeline = ReportInsightPipelineProvider(
             self._report_settings, request.plan, self._provider
         )
+        pipeline.validation_context = ReportValidationContext.create(
+            request.report.id, request.audiences
+        )
         if self._settings.mock:
             response = _mock_response(request)
             return response.model_copy(
@@ -367,6 +375,7 @@ class ReportInsightLegacyService:
             ),
             logger=logger,
             failure_prompt_version=self.prompt_version,
+            validation_context=getattr(pipeline, "validation_context", None),
             failure_stage=(
                 schema["description"].removeprefix("reportInsightCall:")
                 if schema.get("description", "").startswith("reportInsightCall:")
@@ -413,6 +422,9 @@ class ReportInsightService(ReportInsightLegacyService):
             return _mock_response(request)
         pipeline = ReportInsightPipelineProvider(
             self._report_settings, request.plan, self._provider
+        )
+        pipeline.validation_context = ReportValidationContext.create(
+            request.report.id, request.audiences
         )
         reference_date = report_reference_date(request)
         full_validation_request = request
@@ -562,7 +574,13 @@ class ReportInsightService(ReportInsightLegacyService):
 
                 def reduce(response):
                     try:
-                        return _validated_v4_reduce_output(response, request, mapped, allowed)
+                        return _validated_v4_reduce_output(
+                            response,
+                            request,
+                            mapped,
+                            allowed,
+                            native_assessments=validated.evidence,
+                        )
                     except ReportReduceValidationError as error:
                         if error.partial_repair_eligible:
                             error.repair_context = ReduceRepairContext.capture(
@@ -636,9 +654,11 @@ def _explain_empty_synthesis(
     return output.model_copy(update={"insights": insights})
 
 
-def _validated_v4_reduce_output(response, request, mapped, allowed):
+def _validated_v4_reduce_output(response, request, mapped, allowed, *, native_assessments=None):
     try:
-        return _validated_v4_reduce(response, request, mapped, allowed)
+        return _validated_v4_reduce(
+            response, request, mapped, allowed, native_assessments=native_assessments
+        )
     except ValueError as error:
         if isinstance(error, (ReportAssessmentValidationError, ReportSynthesisValidationError)):
             raise
@@ -648,8 +668,10 @@ def _validated_v4_reduce_output(response, request, mapped, allowed):
         raise diagnostics from error
 
 
-def _validated_v4_reduce(response, request, mapped, allowed):
-    output = _validated_reduce_output(response, request, mapped, allowed)
+def _validated_v4_reduce(response, request, mapped, allowed, *, native_assessments=None):
+    output = _validated_reduce_output(
+        response, request, mapped, allowed, native_assessments=native_assessments
+    )
     validate_work_synthesis(output, request, allowed)
     for insight in output.insights:
         for overview in insight.overview:
@@ -681,6 +703,7 @@ def _reduce_repair_diagnostics(response, request, allowed):
         reduced = ReportInsightReduceOutput.model_validate(parse_json_object(response.text))
     except ValueError:
         return None
+    reduced = _normalized_reduce_references(reduced)
     audiences = [insight.audience for insight in reduced.insights]
     if len(audiences) != len(set(audiences)) or set(audiences) != set(request.audiences):
         return None
@@ -691,10 +714,11 @@ def _reduce_repair_diagnostics(response, request, allowed):
             return None
         for item in [*insight.overview, *insight.implications, *insight.watch_items]:
             refs = item.basis_claim_ids
-            if len(refs) != len(set(refs)) or not set(refs) <= permitted:
+            if not set(refs) <= permitted:
                 return None
 
     errors, actions, validation_issues = [], [], []
+    factual_rules = []
     partial_repair_eligible = True
     fields_by_kind = {}
     diagnostic_refs = {
@@ -719,6 +743,7 @@ def _reduce_repair_diagnostics(response, request, allowed):
         nonlocal partial_repair_eligible
         label = f"{path} refs={list(refs)}"
         errors.append((f"{label}: {message}", kinds))
+        factual_rules.extend(fact_kinds)
         actions.append(f"{label}: {_repair_action_message(message, kinds, fact_kinds=fact_kinds)}")
         if path in diagnostic_paths:
             audience, _, field = path.partition(".")
@@ -764,10 +789,12 @@ def _reduce_repair_diagnostics(response, request, allowed):
                 if isinstance(error, OutputValidationError)
                 else ("report_synthesis_invalid",)
             )
-            if isinstance(error, ReportSynthesisQualityValidationError):
+            if isinstance(
+                error, (ReportSynthesisQualityValidationError, ReportWorkValidationError)
+            ):
                 issues = error.validation_issues
                 messages = error.repair_diagnostics
-                # Complete typed diagnostics come from the quality guard's
+                # Complete typed diagnostics come from each guard's
                 # own traversal, never from paths parsed out of provider prose.
                 # Any stale/partial/foreign attribution keeps full repair.
                 if (
@@ -775,7 +802,7 @@ def _reduce_repair_diagnostics(response, request, allowed):
                     and len(issues) == len(messages) == len(kinds)
                     and all(
                         type(issue) is ReportValidationIssue
-                        and issue.audience == path
+                        and issue.audience in (audiences if path == "synthesis" else (path,))
                         and issue.error_kind == kind
                         and diagnostic_refs.get(f"{issue.audience}.{issue.field}")
                         == issue.claim_ids
@@ -882,6 +909,7 @@ def _reduce_repair_diagnostics(response, request, allowed):
         repair_action_diagnostics=tuple(actions),
         validation_issues=tuple(validation_issues),
         partial_repair_eligible=partial_repair_eligible,
+        fact_repair_kinds=tuple(dict.fromkeys(factual_rules)),
     )
 
 
@@ -1485,10 +1513,34 @@ def _reduce_v4_prompt(request, validated, retrieved, allowed):
             audience: synthesis_evidence_frames(request, allowed[audience])
             for audience in request.audiences
         },
+        "sourceFactHints": {
+            audience: [
+                {
+                    "claimId": evidence.claim_id,
+                    "claim": source_fact_hints({evidence.claim_id: evidence.text}).get(
+                        evidence.claim_id
+                    ),
+                    "sentences": source_fact_hints(
+                        {str(sentence.index): sentence.text for sentence in evidence.sentences}
+                    ),
+                }
+                for evidence in retrieved[audience].evidence
+            ]
+            for audience in request.audiences
+        },
     }
+    for audience, hints in payload["sourceFactHints"].items():
+        payload["sourceFactHints"][audience] = [
+            hint for hint in hints if hint["claim"] or hint["sentences"]
+        ]
+    if not any(payload["sourceFactHints"].values()):
+        del payload["sourceFactHints"]
     return (
         "현재 단계는 REDUCE입니다. 각 관점의 검색 claim과 연결 sentence만 사실 근거입니다. "
         "decisionCandidates의 범주와 evidenceFrames는 판단 보조이며 사실 원문이 아닙니다. "
+        "sourceFactHints는 원문 위치에 결속된 일부 명시적 관계의 파싱 보조입니다. "
+        "미추출·불확실·잘린 항목을 근거 부재로 해석하지 말고 원문을 우선하세요. "
+        "같은 주체·대상·시점에 속한 수치와 사건 상태를 함께 유지하세요. "
         "원문의 주체, 사건, 계획·전망·실행 상태를 유지하고 투자 계획을 다른 회사의 확정 "
         "수주나 현재 성과로 옮기지 마세요. mechanism에는 원문 사건→업무 변수→판단을 "
         "구체적으로 쓰세요. assumption은 미확인 조건, falsifiedBy는 그 해석을 반박하는 "
@@ -1861,8 +1913,41 @@ def _empty_synthesis(mapped: ReportInsightMapOutput) -> ReportInsightOutput:
     )
 
 
-def _validated_reduce_output(response, request, mapped, allowed, *, require_synthesis=True):
-    reduced = ReportInsightReduceOutput.model_validate(parse_json_object(response.text))
+def _normalized_reduce_references(reduced: ReportInsightReduceOutput) -> ReportInsightReduceOutput:
+    """Canonicalize only identical typed IDs, preserving first order and all input objects.
+
+    Validation and repair attribution must inspect the same citation view. The
+    original raw response remains untouched in any partial repair context.
+    """
+    return reduced.model_copy(
+        update={
+            "insights": [
+                insight.model_copy(
+                    update={
+                        group: [
+                            item.model_copy(
+                                update={
+                                    "basis_claim_ids": list(dict.fromkeys(item.basis_claim_ids))
+                                }
+                            )
+                            for item in getattr(insight, group)
+                        ]
+                        for group in ("overview", "implications", "watch_items")
+                    }
+                )
+                for insight in reduced.insights
+            ]
+        }
+    )
+
+
+def _validated_reduce_output(
+    response, request, mapped, allowed, *, require_synthesis=True, native_assessments=None
+):
+    # Parsing still rejects malformed IDs before any duplicate normalization.
+    reduced = _normalized_reduce_references(
+        ReportInsightReduceOutput.model_validate(parse_json_object(response.text))
+    )
     map_by_audience = {insight.audience: insight for insight in mapped.insights}
     claims, evidence = _source_context(request)
     combined = []
@@ -1895,6 +1980,7 @@ def _validated_reduce_output(response, request, mapped, allowed, *, require_synt
         ),
         request,
         require_synthesis=require_synthesis,
+        native_assessments=native_assessments,
     )
 
 
@@ -1965,48 +2051,6 @@ def _eligible_report_request(request: ReportInsightRequest) -> ReportInsightRequ
     return request.model_copy(update={"findings": findings})
 
 
-def _native_reason_diagnostic_field(
-    assessment, error, native, refs, evidence, claims, request
-) -> str:
-    """Attribute an already rejected projection; never change its acceptance.
-
-    Only the native record that exactly produced this public assessment can
-    identify its constituent fields. Each constituent uses the same references
-    and guards as the rejected whole. A failure found only in their combined
-    context remains a whole-projection failure and names both inputs.
-    """
-    if (
-        native is None
-        or native.condition is None
-        or project_public_assessment(native) != assessment
-    ):
-        return "reason"
-    fields = ("reason", "decision.connection.condition")
-
-    def matches_failure(component_error):
-        if type(component_error) is not type(error):
-            return False
-        if getattr(error, "error_kinds", ()) == ("report_fact_mismatch",):
-            # A combined factual error aggregates all mismatches into one
-            # message. One component can repeat only a subset (company), while
-            # the other contains that same company plus a number. Comparing
-            # whole messages would freeze the still-invalid first component.
-            return getattr(component_error, "error_kinds", ()) == error.error_kinds
-        return str(component_error) == str(error)
-
-    matched = [
-        field
-        for field, value in zip(fields, (native.reason, native.condition), strict=True)
-        if any(
-            matches_failure(component_error)
-            for component_error in _prose_validation_errors(
-                [value], refs, evidence, claims, request=request
-            )
-        )
-    ]
-    return "reason nativeFields=" + ",".join(matched or fields)
-
-
 def _native_prose_repair_context(errors, native_assessments, audience):
     """Authenticate editable fields before diagnostic text is formatted."""
     contexts = {}
@@ -2029,6 +2073,85 @@ def _native_prose_repair_context(errors, native_assessments, audience):
         previous = contexts.get(assessment.finding_id, (native, ()))[1]
         contexts[assessment.finding_id] = (native, tuple(dict.fromkeys((*previous, *fields))))
     return contexts
+
+
+def _explicit_condition(value: str) -> bool:
+    """Only an explicit single premise gets counterfactual predicate semantics.
+
+    A condition field is not permission to append an asserted outcome, or hide
+    an earlier completed-event sentence behind a final '경우'. Unknown forms
+    retain ordinary factual validation rather than being silently exempted.
+    """
+    prose = value.strip().rstrip(".!?。")
+    if re.search(r"(?<!\d)[.!?](?!\d)|[。;；\n]", prose):
+        return False
+    if re.search(r"(?:경우|때|다면|전제하에|조건하에)$", prose):
+        # The final premise does not make an earlier asserted event hypothetical.
+        # This existing guard keeps local hypothetical suffixes such as
+        # "완공했다면" while recognizing an independent "완공했고" assertion.
+        return not _asserted_event_stage(prose)
+    return bool(re.match(r"^(?:if|when)\b", prose, re.I)) and not re.search(
+        r",|\bthen\b", prose, re.I
+    )
+
+
+def _assessment_prose_errors(assessment, native, refs, evidence, claims, request):
+    """Preserve native assertion/assumption boundaries through public rendering.
+
+    Only an exact server-authenticated projection may supply field semantics.
+    A provider-written label inside public prose never grants this treatment.
+    Citation/entity/number guards still apply to assumptions; work and native
+    decision guards have already checked their concrete prerequisites.
+    """
+    if (
+        native is None
+        or native.condition is None
+        or project_public_assessment(native) != assessment
+    ):
+        return [
+            ("reason", error)
+            for error in _prose_validation_errors(
+                [assessment.reason], refs, evidence, claims, request=request
+            )
+        ]
+    found = [
+        (field, error)
+        for field, value, conditional in (
+            ("reason", native.reason, False),
+            (
+                "decision.connection.condition",
+                native.condition,
+                _explicit_condition(native.condition),
+            ),
+        )
+        for error in _prose_validation_errors(
+            [value], refs, evidence, claims, conditional=conditional, request=request
+        )
+    ]
+    # Keep one factual failure per assessment and every editable native field.
+    # Other guard failures remain individually attributable.
+    factual = [
+        (field, error)
+        for field, error in found
+        if getattr(error, "error_kinds", ()) == ("report_fact_mismatch",)
+    ]
+    result = [
+        (f"reason nativeFields={field}", error)
+        for field, error in found
+        if getattr(error, "error_kinds", ()) != ("report_fact_mismatch",)
+    ]
+    if factual:
+        error = OutputValidationError(
+            "\n".join(str(error) for _, error in factual), error_kinds=("report_fact_mismatch",)
+        )
+        error.fact_repair_kinds = tuple(
+            dict.fromkeys(
+                kind for _, issue in factual for kind in getattr(issue, "fact_repair_kinds", ())
+            )
+        )
+        fields = ",".join(dict.fromkeys(field for field, _ in factual))
+        result.insert(0, (f"reason nativeFields={fields}", error))
+    return result
 
 
 def _validated_output(
@@ -2081,23 +2204,14 @@ def _validated_output(
             ):
                 reason_refs = [claim.id for claim in findings[assessment.finding_id].claims]
             assessment_errors.extend(
-                (
+                (assessment, field, error)
+                for field, error in _assessment_prose_errors(
                     assessment,
-                    _native_reason_diagnostic_field(
-                        assessment,
-                        error,
-                        (native_assessments or {})
-                        .get(insight.audience, {})
-                        .get(assessment.finding_id),
-                        reason_refs,
-                        evidence,
-                        claims,
-                        request,
-                    ),
-                    error,
-                )
-                for error in _prose_validation_errors(
-                    [assessment.reason], reason_refs, evidence, claims, request=request
+                    (native_assessments or {}).get(insight.audience, {}).get(assessment.finding_id),
+                    reason_refs,
+                    evidence,
+                    claims,
+                    request,
                 )
             )
             try:
@@ -2130,6 +2244,13 @@ def _validated_output(
                 "아래 평가 사유·시급성 오류를 모두 참조 claim·연결 sentence만으로 수정하세요. "
                 "제목에만 있는 제품·회사·숫자를 사실로 복원하지 마세요.\n" + "\n".join(diagnostics),
                 error_kinds=kinds,
+                fact_repair_kinds=tuple(
+                    dict.fromkeys(
+                        kind
+                        for _, _, error in assessment_errors
+                        for kind in getattr(error, "fact_repair_kinds", ())
+                    )
+                ),
                 failed_finding_ids=tuple(
                     dict.fromkeys(assessment.finding_id for assessment, _, _ in assessment_errors)
                 ),
@@ -2264,12 +2385,14 @@ def _prose_validation_errors(
     """Collect independent guards for repair without changing acceptance rules."""
     errors: list[ValueError] = []
     source = "\n".join(evidence[ref] + "\n" + claims[ref].text for ref in refs)
+    # Summaries remain lexical context, but cannot override raw-source bindings.
+    binding_source = "\n".join(dict.fromkeys(evidence[ref] for ref in refs))
     for value in values:
         if _UNSUPPORTED_COMPARISON.search(value) and not _UNSUPPORTED_COMPARISON.search(source):
             errors.append(
                 ValueError("이전 보고서 기준선이 없어 신규성·기간 비교를 판정할 수 없습니다.")
             )
-        mismatches = _report_factual_mismatches(value, source)
+        mismatches = _report_factual_mismatches(value, source, binding_source=binding_source)
         modality = modality_overreach(value, source)
         mismatches = report_prose_mismatches(
             value,
@@ -2277,6 +2400,10 @@ def _prose_validation_errors(
             mismatches,
             modality_reason=modality.reason if modality else None,
             topic=topic,
+        )
+        # Generic lexical exceptions cannot erase an explicit relational conflict.
+        mismatches = list(
+            dict.fromkeys([*mismatches, *source_fact_mismatches(value, binding_source)])
         )
         possible_assertion = modality_overreach(value, "")
         if (
@@ -2358,7 +2485,9 @@ def _asserted_event_overreach(value: str, source: str) -> bool:
     return claimed - observed >= 2
 
 
-def _report_factual_mismatches(value: str, source: str) -> list[str]:
+def _report_factual_mismatches(
+    value: str, source: str, *, binding_source: str | None = None
+) -> list[str]:
     mismatches = factual_mismatches(value, source)
     modality = modality_overreach(value, source)
     only_hypothetical = not _asserted_event_stage(value) and _asserted_event_stage(
@@ -2372,7 +2501,16 @@ def _report_factual_mismatches(value: str, source: str) -> list[str]:
         mismatches = [mismatch for mismatch in mismatches if mismatch != modality.reason]
     if _asserted_event_overreach(value, source):
         mismatches.append("근거보다 확정적인 완료·착수·계약 사실을 단정했습니다.")
-    return mismatches
+    return list(
+        dict.fromkeys(
+            [
+                *mismatches,
+                *source_fact_mismatches(
+                    value, source if binding_source is None else binding_source
+                ),
+            ]
+        )
+    )
 
 
 def importance_score(axes: ReportImportanceAxes) -> float | None:

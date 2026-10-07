@@ -28,6 +28,7 @@ from app.llm.report_insight_instructions import (
 )
 from app.llm.report_insight_relocation_support import relocation_support_problems
 from app.llm.report_insight_retrieval import _ROLE_QUERIES, tokenize_report_evidence
+from app.llm.report_insight_source_facts import source_fact_hints
 from app.llm.report_insight_work_grounding import work_prose_problems
 from app.llm.report_validation_diagnostics import ReportValidationIssue
 from app.schemas.analyze import Audience
@@ -719,7 +720,7 @@ def draft_to_wire(
 
 def _prompt_payload(request: ReportInsightRequest, reference_date: date | None) -> dict:
     reference = reference_date if reference_date is not None else report_reference_date(request)
-    return {
+    payload = {
         "report": {
             key: value
             for key, value in request.report.model_dump(mode="json", by_alias=True).items()
@@ -737,10 +738,20 @@ def _prompt_payload(request: ReportInsightRequest, reference_date: date | None) 
                 ],
                 "sentences": [sentence.model_dump(by_alias=True) for sentence in finding.sentences],
                 "sourceQuoteChoices": source_span_choices(finding),
+                "sourceFactHints": {
+                    "claims": source_fact_hints({claim.id: claim.text for claim in finding.claims}),
+                    "sentences": source_fact_hints(
+                        {str(sentence.index): sentence.text for sentence in finding.sentences}
+                    ),
+                },
             }
             for finding in request.findings
         ],
     }
+    for finding in payload["findings"]:
+        if not any(finding["sourceFactHints"].values()):
+            del finding["sourceFactHints"]
+    return payload
 
 
 _ASSESSMENT_OUTPUT_INSTRUCTIONS = (
@@ -751,6 +762,11 @@ _ASSESSMENT_OUTPUT_INSTRUCTIONS = (
     "basis는 {claimId,sourceSpanId}입니다. 같은 finding의 sourceQuoteChoices에서 "
     "실제 원문을 읽고 같은 claimId branch의 sourceSpanId 하나를 선택하세요. "
     "quote 문자열은 출력하지 않으며 서버가 공백·문장부호까지 원문 그대로 복원합니다. "
+    "sourceFactHints는 원문 위치와 일부 명시적 관계만 보존한 파싱 보조입니다. "
+    "그 안의 미추출·불확실 항목은 사실 부정이나 근거 부재가 아닙니다. "
+    "같은 주체·대상·시점의 수치와 계획/완료 상태를 연결하고 원문과 대조하세요. "
+    "원문 사실은 facts에 보존되므로 reason에는 관점의 업무 판단을 설명하고, "
+    "미확인 가정은 condition에 분리하며 이미 발생한 사실처럼 쓰지 마세요. "
     "reason의 사실을 뒷받침할 claim과 연결 sentence를 함께 확인하세요. 전체 원문은 "
     "아래 입력에 그대로 있으며 관계 미확인은 원문 부재가 아닙니다. "
     "고정 claimless reason은 실제 claims=[]인 키에만 허용됩니다. "

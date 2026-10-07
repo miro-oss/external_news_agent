@@ -228,7 +228,6 @@ def test_sorts_audiences_to_request_order_and_assesses_every_finding():
         "duplicate-audience",
         "novelty",
         "empty-basis",
-        "duplicate-basis",
         "invented-number",
         "swapped-year",
         "invented-company",
@@ -261,8 +260,6 @@ def test_adversarial_output_is_repaired_with_same_bound_schema(invalid_case):
         insight["assessments"][0]["axes"]["novelty"] = 3
     elif invalid_case == "empty-basis":
         insight["assessments"][0]["basisClaimIds"] = []
-    elif invalid_case == "duplicate-basis":
-        insight["implications"][0]["basisClaimIds"] *= 2
     elif invalid_case == "invented-number":
         insight["headline"] = "생산능력이 20% 늘었다."
     elif invalid_case == "swapped-year":
@@ -297,6 +294,23 @@ def test_adversarial_output_is_repaired_with_same_bound_schema(invalid_case):
         == provider.calls[repaired]["response_schema"]
     )
     assert result.insights[0].headline == fixed["insights"][0]["headline"]
+
+
+def test_legacy_reduce_normalizes_duplicate_citations_without_a_provider_repair():
+    body = request_body(second=True)
+    value = output(second=True)
+    expected = deepcopy(value)
+    value["insights"][0]["implications"][0]["basisClaimIds"] *= 2
+    before = deepcopy(value)
+    provider = FakeProvider(value)
+    result = run(provider, body)
+    assert len(provider.calls) == 2
+    assert all("validation-error" not in call["prompt"] for call in provider.calls)
+    assert (
+        result.insights[0].implications[0].basis_claim_ids
+        == (expected["insights"][0]["implications"][0]["basisClaimIds"])
+    )
+    assert value == before
 
 
 def test_repeated_invalid_output_preserves_costs_and_metadata():
