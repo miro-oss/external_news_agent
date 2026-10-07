@@ -37,11 +37,13 @@ _MODEL_ALIASES = {
 }
 _ERROR_CODES = {
     "insufficient_quota",
+    "credit_balance_exhausted",
     "rate_limit_exceeded",
     "invalid_api_key",
     "invalid_json_schema",
     "invalid_request_error",
 }
+_QUOTA_ERROR_CODES = ("insufficient_quota", "credit_balance_exhausted")
 
 
 class OpenAIAnalyzeProvider:
@@ -233,16 +235,24 @@ def _output_error(usage: ProviderUsage, truncated: bool) -> AgentError:
 
 def _provider_error_details(error: Exception) -> dict[str, object]:
     status = error.status_code if isinstance(error, APIStatusError) else 0
-    code = getattr(error, "code", None)
-    if code is None:
-        code = getattr(error, "type", None)
-    safe_code = code if isinstance(code, str) and code in _ERROR_CODES else "UNKNOWN"
+    safe_codes = [
+        value
+        for value in (getattr(error, "code", None), getattr(error, "type", None))
+        if isinstance(value, str) and value in _ERROR_CODES
+    ]
+    # A specific/unknown code must not hide an insufficient_quota type.
+    # Quota exhaustion is terminal even when HTTP 429 also denotes throttling.
+    safe_code = next(
+        (code for code in _QUOTA_ERROR_CODES if code in safe_codes),
+        next(iter(safe_codes), "UNKNOWN"),
+    )
     details: dict[str, object] = {
         "provider": "openai",
         "providerStatusCode": status,
         "providerStatus": safe_code,
         "rateLimited": status == 429,
-        "retryable": (status in {408, 429} or status >= 500) and safe_code != "insufficient_quota",
+        "retryable": (status in {408, 429} or status >= 500)
+        and safe_code not in _QUOTA_ERROR_CODES,
     }
     if isinstance(error, APIStatusError):
         retry_after = _retry_after_header_seconds(error.response.headers.get("retry-after"))

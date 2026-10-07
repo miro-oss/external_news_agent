@@ -978,13 +978,25 @@ def test_claimful_reason_schema_and_map_review_prompts_explain_business_unknown_
         assert f"finding{finding.id}" in description
         assert "원문 claim 1개가 있다" in description
         assert "UNDETERMINED" in description and "claims=[]" in description
+        assert "basis의 claimId/sourceSpanId 필드에만" in description
+        assert "내부 ID·ID 범위·미완성 ID·업무 범주 코드" in description
+        assert (
+            "원문에 없는 절차는 완료 여부가 미확인이라는 설명으로도 추가하지 않는다" in description
+        )
+        assert "원문에 명시된 절차와 그 판단 한계는 유지한다" in description
     for stage, prompt in (("MAP", draft_prompt(source)), ("REVIEW", review_prompt(source))):
         assert "sourceSpanId" in prompt and "sourceQuoteChoices" in prompt
         assert "claims=[]" in prompt
         assert "findingId, reason, decision 순서" in prompt
+        assert "basis의 claimId/sourceSpanId 필드에만" in prompt
+        assert "내부 ID·ID 범위·미완성 ID·업무 범주 코드" in prompt
         instruction = report_stage_instruction(source.audiences, stage)
         assert "원문에서 확인된 사실을 미확인 condition으로 반복하지 않는다" in instruction
         assert "관점의 모든 업무로 connection을 판정한다" in instruction
+        assert (
+            "원문에 없는 절차는 완료 여부가 미확인이라는 설명으로도 추가하지 않는다" in instruction
+        )
+        assert "원문에 명시된 절차와 그 판단 한계는 유지한다" in instruction
         assert "관계는 유지하고 effect만 UNDETERMINED" in instruction
 
 

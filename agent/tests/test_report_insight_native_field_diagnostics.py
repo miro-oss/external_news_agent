@@ -1,16 +1,20 @@
 """Native condition failures retain their origin after public reason projection."""
 
+import json
 from copy import deepcopy
 from dataclasses import replace
 
 import pytest
+from jsonschema import Draft202012Validator
 from test_report_insight_assessment import payload, request, response
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
-from app.core.errors import AgentError
-from app.llm.report_insight_assessment import validate_draft
+from app.core.errors import AgentError, OutputValidationError
+from app.llm.report_insight_assessment import draft_prompt, draft_schema, validate_draft
 from app.llm.report_insight_service import (
     ReportAssessmentValidationError,
+    ReportInsightService,
+    _native_reason_diagnostic_field,
     _prose_validation_errors,
     _source_context,
     _validated_map_output,
@@ -187,3 +191,74 @@ def test_combined_context_failure_keeps_original_error_and_names_both_native_fie
     assert diagnostic.error_kinds == legacy.error_kinds == ("report_assessment_invalid",)
     assert "이미 지난 근거 기한" in str(diagnostic)
     assert "nativeFields=reason,decision.connection.condition" in diagnostic.repair_summary
+
+
+@pytest.mark.parametrize("extra_number_field", ["reason", "condition"])
+def test_overlapping_fact_failures_keep_both_fields_editable_in_the_only_repair(
+    extra_number_field,
+):
+    source = recorded_source()
+    source = source.model_copy(update={"findings": source.findings[:1]})
+    value = conditional_payload(source)
+    entry = value["assessments"]["IT_INFRA"]["finding7815"]
+    entry["reason"] = "삼성전자의 스마트폰 출고가 인상 사건의 업무 연결 조건을 확인한다."
+    entry["condition"] = "삼성전자의 스마트폰 출고가 인상이 해당 업무에 연결되는 경우"
+    entry[extra_number_field] = entry[extra_number_field].replace("삼성전자의", "삼성전자의 9999년")
+    before = deepcopy(value)
+    raw = response(value, source)
+
+    def validate(candidate):
+        draft = validate_draft(candidate, source)
+        _validated_map_output(
+            replace(candidate, text=draft.mapped.model_dump_json(by_alias=True)),
+            source,
+            native_assessments=draft.evidence,
+        )
+        return draft
+
+    with pytest.raises(ReportAssessmentValidationError) as caught:
+        validate(raw)
+    error = caught.value
+    assert error.native_prose_repairs[7815][1] == ("reason", "decision.connection.condition")
+    assert "근거에서 확인되지 않는 숫자: 9999" in str(error)
+    assert "근거에서 확인되지 않는 기업명: 삼성전자" in str(error)
+    assert error.error_kinds == ("report_fact_mismatch",)
+    engine = object.__new__(ReportInsightService)
+    repair = engine._repair_call(
+        draft_prompt(source), draft_schema(source), raw.text, error, validate
+    )
+
+    corrected = deepcopy(value)
+    repaired = corrected["assessments"]["IT_INFRA"]["finding7815"]
+    repaired["reason"] = "스마트폰 출고가 인상 사건의 업무 연결 조건을 확인한다."
+    # Fixing only the more detailed failure must still reject the repeated
+    # unsupported company; exposing both fields never relaxes acceptance.
+    with pytest.raises(ReportAssessmentValidationError, match="기업명: 삼성전자"):
+        repair.validate(response(corrected, source))
+    repaired["condition"] = "스마트폰 출고가 인상이 해당 업무에 연결되는 경우"
+    candidate = response(corrected, source)
+    Draft202012Validator(repair.response_schema).validate(json.loads(candidate.text))
+    result = repair.validate(candidate)
+    assert result.evidence["IT_INFRA"][7815].reason == repaired["reason"]
+    assert result.evidence["IT_INFRA"][7815].condition == repaired["condition"]
+    assert result.evidence["IT_INFRA"][7815].relation_basis.claim_id == "7815:2"
+    assert value == before
+
+
+def test_unattributed_combined_error_conservatively_names_both_components():
+    source = recorded_source()
+    value = conditional_payload(source)
+    draft = validate_draft(response(value, source), source)
+    assessment = draft.mapped.insights[0].assessments[0]
+    claims, evidence = _source_context(source)
+    unknown = OutputValidationError("Unknown combined guard", error_kinds=("unknown_guard",))
+    field = _native_reason_diagnostic_field(
+        assessment,
+        unknown,
+        draft.evidence["IT_INFRA"][7815],
+        assessment.basis_claim_ids,
+        evidence,
+        claims,
+        source,
+    )
+    assert field == "reason nativeFields=reason,decision.connection.condition"

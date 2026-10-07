@@ -8,10 +8,20 @@ _ROOT = Path(__file__).resolve().parents[1] / "prompts"
 _BASE = (_ROOT / "report-insight.ko.v15.md").read_text(encoding="utf-8").strip()
 _RUBRIC = (_ROOT / "report-importance.v6.md").read_text(encoding="utf-8").strip()
 _REDUCE_RULES = (_ROOT / "report-insight-reduce.ko.v1.md").read_text(encoding="utf-8").strip()
+ASSESSMENT_PROCEDURE_RULE = (
+    "원문에 없는 절차는 완료 여부가 미확인이라는 설명으로도 추가하지 않는다. "
+    "원문에 명시된 절차와 그 판단 한계는 유지한다."
+)
+ASSESSMENT_CONDITION_RULE = (
+    "condition은 원문 대상이 어떤 실제 업무 대상에 사용·적용되는 경우인지 "
+    "간결한 가정으로 쓴다. 그 가정의 성립이나 영향·완료를 확정하지 않는다. "
+    "절차·조직·부품은 선택한 claim과 연결 sentence에 명시된 경우만 전제로 쓰며, "
+    "원문에 있는 선행 절차는 유지한다."
+)
 ASSESSMENT_REASON_RULE = (
     "reason은 업무 연결·영향·시점의 근거나 한계를 1~2문장 180자 이내로 설명한다. "
     "영향·시점도 원문의 변경·준비·기한으로 뒷받침한다. "
-    "코드·ID·기업명·수치 나열이나 재요약은 쓰지 않는다."
+    "코드·ID·기업명·수치 나열이나 재요약은 쓰지 않는다. " + ASSESSMENT_PROCEDURE_RULE
 )
 
 _ROLES = {
@@ -23,11 +33,10 @@ _ROLES = {
     "MATERIAL_SUPPLY. 메모리/HBM 제조사의 실제 고객 공급 계약도 직접 관계일 수 있다. "
     "공정·수율이 없다는 이유로 그 계약을 무관 처리하지 않는다. "
     "계약은 생산 증가·규격 승인·납품 완료를 뜻하지 않는다. 공정 인증·설계 적용은 "
-    "고객 계약이 없어도 PROCESS_QUALIFICATION에서 판단한다. 생산능력·생산 배분은 "
-    "YIELD_CAPACITY/PRODUCTION_SCHEDULE에서 판단한다. 기술 검토가 실제 채택·효과 달성을 "
-    "뜻하지 않는다. 기판·패키징의 실제 공정 기술 적용도 업무 대상과 대조한다. "
-    "주가·수출액·시장점유율의 변화는 생산 일정·생산능력의 변화와 "
-    "구분한다. 소자·칩의 실험과 특성 분석은 실제 고객 요구 변경과 구분한다.",
+    "고객 계약이 없어도 판단한다. 생산능력·생산 배분은 각각 능력·생산 일정 업무로 판단한다. "
+    "기술 검토는 실제 채택·효과 달성이 아니다. 기판·패키징 공정 적용도 업무와 대조한다. "
+    "주가·수출액·시장점유율과 생산 일정·능력의 변화를 구분한다. "
+    "소자·칩 실험·특성 분석은 고객 요구 변경과 구분한다.",
     "EQUIPMENT_MAKER": "장비 공급: 공정 검증 PROCESS_VALIDATION, 설계 채택 DESIGN_IN, "
     "실제 발주/수주 ORDER_BOOKING, 납품/설치 DELIVERY_INSTALLATION, 서비스 "
     "MAINTENANCE_SERVICE. 공정 검증·설계 채택은 발주 확인을 전제로 하지 않는다. "

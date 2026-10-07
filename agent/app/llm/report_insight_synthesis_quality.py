@@ -12,6 +12,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 
 from app.core.errors import OutputValidationError
+from app.llm.report_validation_diagnostics import ReportValidationIssue
 from app.schemas.report_insight import (
     ReportAudienceInsight,
     ReportInsightReduceAudience,
@@ -675,6 +676,18 @@ def _assumption_unconfirmed(value: str, rows: list[EvidenceText]) -> bool:
     )
 
 
+class ReportSynthesisQualityValidationError(OutputValidationError):
+    """One server-owned field/reference diagnostic per quality violation."""
+
+    def __init__(self, diagnostics):
+        self.validation_issues = tuple(issue for issue, _ in diagnostics)
+        self.repair_diagnostics = tuple(message for _, message in diagnostics)
+        super().__init__(
+            "\n".join(self.repair_diagnostics),
+            error_kinds=tuple(issue.error_kind for issue in self.validation_issues),
+        )
+
+
 def validate_synthesis_quality(
     insight: ReportAudienceInsight | ReportInsightReduceAudience,
     request: ReportInsightRequest,
@@ -682,6 +695,12 @@ def validate_synthesis_quality(
 ) -> None:
     """Raise typed repair diagnostics for explicit synthesis quality violations."""
     violations = []
+
+    def record(kind, path, refs, message):
+        violations.append(
+            (ReportValidationIssue(insight.audience, path, kind, tuple(refs)), f"{path}: {message}")
+        )
+
     global_rows = _texts(
         request, [claim.id for finding in request.findings for claim in finding.claims]
     )
@@ -702,7 +721,7 @@ def validate_synthesis_quality(
             *_event_problems(value, rows, global_rows),
             *_production_binding_problems(value, rows, global_rows),
         ]:
-            violations.append((kind, f"{path}: {message}"))
+            record(kind, path, refs, message)
     for path, item in [
         *[(f"overview[{index}].assumption", item) for index, item in enumerate(insight.overview)],
         *[
@@ -711,30 +730,30 @@ def validate_synthesis_quality(
         ],
     ]:
         if _assumption_unconfirmed(item.assumption, _texts(request, item.basis_claim_ids)):
-            violations.append(
-                (
-                    "report_assumption_unconfirmed",
-                    f"{path}: 경매 중단 사실과 실제 전력 공급 영향의 확인은 다릅니다. "
-                    "확인되지 않은 영향은 조건으로 명시해야 합니다.",
-                )
+            record(
+                "report_assumption_unconfirmed",
+                path,
+                item.basis_claim_ids,
+                "경매 중단 사실과 실제 전력 공급 영향의 확인은 다릅니다. "
+                "확인되지 않은 영향은 조건으로 명시해야 합니다.",
             )
     for index, item in enumerate(insight.implications):
         if _placeholder(item.mechanism):
-            violations.append(
-                (
-                    "report_synthesis_placeholder",
-                    f"implications[{index}].mechanism: 일반 자리표시자 대신 근거 사건과 "
-                    "해당 관점의 구체적 업무 판단을 잇는 경로를 작성해야 합니다.",
-                )
+            record(
+                "report_synthesis_placeholder",
+                f"implications[{index}].mechanism",
+                item.basis_claim_ids,
+                "일반 자리표시자 대신 근거 사건과 "
+                "해당 관점의 구체적 업무 판단을 잇는 경로를 작성해야 합니다.",
             )
         if _information_gap_only(item.mechanism):
-            violations.append(
-                (
-                    "report_synthesis_information_gap",
-                    f"implications[{index}].mechanism: 정보 부족만 잇는 문장은 인과 경로가 "
-                    "아닙니다. 인용한 실제 사건과 관점 업무 사이의 조건을 설명하거나 "
-                    "연결 경로를 만들 수 없는 implication을 제외해야 합니다.",
-                )
+            record(
+                "report_synthesis_information_gap",
+                f"implications[{index}].mechanism",
+                item.basis_claim_ids,
+                "정보 부족만 잇는 문장은 인과 경로가 "
+                "아닙니다. 인용한 실제 사건과 관점 업무 사이의 조건을 설명하거나 "
+                "연결 경로를 만들 수 없는 implication을 제외해야 합니다.",
             )
         if (
             _MISSING_EVIDENCE.search(item.falsified_by)
@@ -744,26 +763,26 @@ def validate_synthesis_quality(
                 and _OBSERVED_RESULT.search(item.falsified_by)
             )
         ):
-            violations.append(
-                (
-                    "report_falsification_missing_observation",
-                    f"implications[{index}].falsifiedBy: 근거·정보 부족은 반증 관측이 "
-                    "아닙니다. 같은 대상의 계약 철회·검증 실패·대체 공급 확보처럼 "
-                    "해석을 바꾸는 관측을 쓰거나 해당 implication을 제외해야 합니다.",
-                )
+            record(
+                "report_falsification_missing_observation",
+                f"implications[{index}].falsifiedBy",
+                item.basis_claim_ids,
+                "근거·정보 부족은 반증 관측이 "
+                "아닙니다. 같은 대상의 계약 철회·검증 실패·대체 공급 확보처럼 "
+                "해석을 바꾸는 관측을 쓰거나 해당 implication을 제외해야 합니다.",
             )
         rows = _texts(request, item.basis_claim_ids)
         source_halt = _auction_halted(rows)
         proposition = item.text + "\n" + item.mechanism
         if _expansion_falsifier_reversed(proposition, item.falsified_by, rows):
-            violations.append(
-                (
-                    "report_falsification_direction",
-                    f"implications[{index}].falsifiedBy: 동일 공장 증설 계획의 철회·연기가 "
-                    "발생하지 않았다는 관측은 증설 효과를 반증하지 않습니다. 실제 계획 "
-                    "철회·연기 또는 예상 생산 능력 향상 실패처럼 해석을 약화시키는 "
-                    "관측 조건을 작성해야 합니다.",
-                )
+            record(
+                "report_falsification_direction",
+                f"implications[{index}].falsifiedBy",
+                item.basis_claim_ids,
+                "동일 공장 증설 계획의 철회·연기가 "
+                "발생하지 않았다는 관측은 증설 효과를 반증하지 않습니다. 실제 계획 "
+                "철회·연기 또는 예상 생산 능력 향상 실패처럼 해석을 약화시키는 "
+                "관측 조건을 작성해야 합니다.",
             )
         if (
             source_halt
@@ -772,16 +791,13 @@ def validate_synthesis_quality(
             and not _WITHDRAWN_ABSENCE.search(item.falsified_by)
             and not _POSITIVE_SUPPLY_HYPOTHESIS.search(proposition)
         ):
-            violations.append(
-                (
-                    "report_falsification_direction",
-                    f"implications[{index}].falsifiedBy: 추가 공급의 부재는 전력 부족·차질 "
-                    "위험을 반증하지 않습니다. 대체 공급 확보처럼 위험을 약화시키는 "
-                    "관측 가능한 조건을 작성해야 합니다.",
-                )
+            record(
+                "report_falsification_direction",
+                f"implications[{index}].falsifiedBy",
+                item.basis_claim_ids,
+                "추가 공급의 부재는 전력 부족·차질 "
+                "위험을 반증하지 않습니다. 대체 공급 확보처럼 위험을 약화시키는 "
+                "관측 가능한 조건을 작성해야 합니다.",
             )
     if violations:
-        raise OutputValidationError(
-            "\n".join(message for _, message in violations),
-            error_kinds=tuple(kind for kind, _ in violations),
-        )
+        raise ReportSynthesisQualityValidationError(violations)

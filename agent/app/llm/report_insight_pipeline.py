@@ -265,7 +265,10 @@ class ReportInsightPipelineProvider:
                     coordinator,
                     call,
                     deadline=self.deadline,
-                    retry_attempts=0,
+                    # Retry only the coordinator's explicit retryable-429
+                    # policy. Each attempt rechecks cancellation/deadline;
+                    # transport/SDK retries above remain disabled.
+                    retry_attempts=self.settings.rate_limit_retry_attempts,
                 )
             except AgentError as error:
                 # Coordinator timeouts occur before a request is sent and

@@ -1,11 +1,14 @@
 """Safe causes make the single repair actionable without accepting bad facts."""
 
+from dataclasses import replace
+
 import pytest
-from test_report_insight_assessment import request
+from test_report_insight_assessment import payload, request, response
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
 from app.core.errors import AgentError, OutputValidationError
 from app.llm import report_insight_service as service
+from app.llm.report_insight_assessment import validate_draft
 from app.llm.report_insight_fact_repair import fact_repair_guidance, fact_repair_kinds
 
 
@@ -159,3 +162,41 @@ def test_unchanged_internal_ids_still_fail_after_the_one_repair():
         generate(provider, source)
     assert caught.value.code == "SCHEMA_VIOLATION"
     assert stages(provider) == ["MAP-001", "MAP-001"]
+
+
+@pytest.mark.parametrize("citation", ["claim 101:0", "claim 101:0~2", "claim 101:"])
+def test_inline_reference_prose_is_rejected_and_clean_reason_keeps_same_basis(citation):
+    source = request()
+    snapshot = source.model_dump_json()
+    value = payload(source)
+    record = value["assessments"]["CHIP_MAKER"]["finding101"]
+    clean = record["reason"]
+    record["reason"] = f"{clean} 근거: {citation}"
+    raw = response(value, source)
+    draft = validate_draft(raw, source)
+
+    with pytest.raises(service.ReportAssessmentValidationError) as caught:
+        service._validated_map_output(
+            replace(raw, text=draft.mapped.model_dump_json(by_alias=True)),
+            source,
+            native_assessments=draft.evidence,
+        )
+
+    assert caught.value.error_kinds == ("report_fact_mismatch",)
+    assert caught.value.failed_finding_ids == (101,)
+    assert "근거에서 확인되지 않는 숫자" in str(caught.value)
+    record["reason"] = clean
+    repaired_raw = response(value, source)
+    repaired = validate_draft(repaired_raw, source)
+    output = service._validated_map_output(
+        replace(repaired_raw, text=repaired.mapped.model_dump_json(by_alias=True)),
+        source,
+        native_assessments=repaired.evidence,
+    )
+
+    assert output.insights[0].assessments[0].reason == clean
+    assert output.insights[0].assessments[0].basis_claim_ids == ["101:0"]
+    assert repaired.evidence["CHIP_MAKER"][101] == (
+        draft.evidence["CHIP_MAKER"][101].model_copy(update={"reason": clean})
+    )
+    assert source.model_dump_json() == snapshot

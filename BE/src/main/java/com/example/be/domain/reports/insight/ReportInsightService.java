@@ -29,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service @RequiredArgsConstructor @Slf4j
 public class ReportInsightService {
-    public static final String PROMPT_VERSION = "report-insight.ko.v26";
+    public static final String PROMPT_VERSION = "report-insight.ko.v27";
     public static final String RUBRIC_VERSION = "report-importance.v6";
     private final AgentProperties properties;
     private final ReportInsightSnapshotAssembler assembler;

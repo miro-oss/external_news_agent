@@ -81,7 +81,16 @@ def test_provider_sends_reason_bound_without_transforming_the_model_response():
 
     def handler(http_request):
         data = json.loads(http_request.content)
-        validator = Draft202012Validator(data["text"]["format"]["schema"])
+        wire_schema = data["text"]["format"]["schema"]
+        record = wire_schema["properties"]["assessments"]["properties"]["CHIP_MAKER"]["properties"][
+            "finding101"
+        ]["properties"]
+        assert list(record) == ["findingId", "reason", "decision"]
+        conditional = record["decision"]["anyOf"][0]["properties"]["connection"]["anyOf"][1]
+        for prose in (record["reason"], conditional["properties"]["condition"]):
+            assert "basis의 claimId/sourceSpanId 필드에만" in prose["description"]
+            assert "내부 ID·ID 범위·미완성 ID·업무 범주 코드" in prose["description"]
+        validator = Draft202012Validator(wire_schema)
         validator.validate(native)
         too_long = deepcopy(native)
         too_long["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = "가" * 181

@@ -129,6 +129,12 @@ _ASSERTION = re.compile(
     r"(?:양산|가동|출하)(?:을|를)?\s*(?:했다|개시했다|돌입했다|중이다)"
 )
 _HYPOTHETICAL_SUFFIX = re.compile(r"(?:다)?(?:면|\s*(?:경우|때)|(?:고|다고)\s*(?:가정|전제))")
+# The contract pattern ends at the nominal 확정/성립, before its verb ending.
+# Inspect only the immediately attached conditional ending; a condition elsewhere
+# in the sentence cannot hide an independently asserted contract.
+_NOMINAL_CONTRACT_HYPOTHETICAL_SUFFIX = re.compile(
+    r"(?:되|하)면(?![가-힣])|(?:될|할|되는|하는)\s*(?:경우|때)"
+)
 _NEGATIVE_HYPOTHETICAL_SUFFIX = re.compile(
     r"(?:으)?면|(?:될|할|되는|하는|된|한)\s*(?:경우|때)|\s*여부"
 )
@@ -198,7 +204,12 @@ def factual_states(value: str) -> dict[str, set[bool]]:
         for match in positive.finditer(value):
             if any(start <= match.start() < end for start, end in negative_spans):
                 continue
-            if _HYPOTHETICAL_SUFFIX.match(value[match.end() :]):
+            suffix = value[match.end() :]
+            if _HYPOTHETICAL_SUFFIX.match(suffix) or (
+                name == "contract"
+                and match[0].endswith(("확정", "성립"))
+                and _NOMINAL_CONTRACT_HYPOTHETICAL_SUFFIX.match(suffix)
+            ):
                 continue
             values.add(True)
         if values:

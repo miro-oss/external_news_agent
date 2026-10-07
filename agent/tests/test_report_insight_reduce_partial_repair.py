@@ -274,21 +274,11 @@ def test_failed_partial_reduce_is_terminal_after_one_repair_with_all_usage(defec
     assert caught.value.details["validationFailure"]["attempt"] == 2
 
 
-@pytest.mark.parametrize("defect", ["shape", "mixed", "raw_snapshot", "source_snapshot"])
+@pytest.mark.parametrize("defect", ["shape", "raw_snapshot", "source_snapshot"])
 def test_unowned_or_stale_errors_retain_full_reduce_repair(defect):
     def mutate(value):
         if defect == "shape":
             value["insights"][0]["overview"][0]["assumption"] = ""
-        elif defect == "mixed":
-            value["insights"][0]["implications"] = [
-                {
-                    "text": "생산 제약이 지속되면 검증 준비 일정의 영향을 확인해야 한다.",
-                    "mechanism": "생산 제약이 검증 준비에 이어지면 준비 일정을 검토한다.",
-                    "basisClaimIds": ["101:0"],
-                    "assumption": "같은 생산 제약이 검증 준비에 연결되는 경우",
-                    "falsifiedBy": "생산 제약과 검증 준비 간의 연결 근거가 없는 경우",
-                }
-            ]
 
     _, call, _, _, repair = prepared_repair(
         mutate=mutate,

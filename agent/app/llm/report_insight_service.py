@@ -34,13 +34,18 @@ from app.llm.report_insight_guard import (
     validate_report_citations,
     validate_report_time,
 )
-from app.llm.report_insight_instructions import report_stage_instruction
+from app.llm.report_insight_instructions import (
+    ASSESSMENT_CONDITION_RULE,
+    ASSESSMENT_PROCEDURE_RULE,
+    report_stage_instruction,
+)
 from app.llm.report_insight_map_execution import run_report_maps
 from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
 from app.llm.report_insight_prefix import closed_assessment_prefix
 from app.llm.report_insight_reduce_repair import ReduceRepairContext, partial_reduce_repair
 from app.llm.report_insight_retrieval import retrieve_report_insight_evidence
 from app.llm.report_insight_synthesis_quality import (
+    ReportSynthesisQualityValidationError,
     synthesis_evidence_frames,
     validate_synthesis_quality,
 )
@@ -63,7 +68,7 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v26"
+PROMPT_VERSION = "report-insight.ko.v27"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -692,7 +697,10 @@ def _reduce_repair_diagnostics(response, request, allowed):
     errors, actions, validation_issues = [], [], []
     partial_repair_eligible = True
     fields_by_kind = {}
-    diagnostic_paths = {f"{insight.audience}.headline" for insight in reduced.insights}
+    diagnostic_refs = {
+        f"{insight.audience}.headline": tuple(allowed[insight.audience])
+        for insight in reduced.insights
+    }
     for insight in reduced.insights:
         for group, items in (
             ("overview", insight.overview),
@@ -700,11 +708,12 @@ def _reduce_repair_diagnostics(response, request, allowed):
             ("watchItems", insight.watch_items),
         ):
             for index, item in enumerate(items):
-                diagnostic_paths.update(
-                    f"{insight.audience}.{group}[{index}].{field}"
+                diagnostic_refs.update(
+                    (f"{insight.audience}.{group}[{index}].{field}", tuple(item.basis_claim_ids))
                     for by_alias in (False, True)
                     for field in item.model_dump(by_alias=by_alias, exclude={"basis_claim_ids"})
                 )
+    diagnostic_paths = diagnostic_refs.keys()
 
     def record(path, refs, message, kinds, *, fact_kinds=()):
         nonlocal partial_repair_eligible
@@ -755,6 +764,32 @@ def _reduce_repair_diagnostics(response, request, allowed):
                 if isinstance(error, OutputValidationError)
                 else ("report_synthesis_invalid",)
             )
+            if isinstance(error, ReportSynthesisQualityValidationError):
+                issues = error.validation_issues
+                messages = error.repair_diagnostics
+                # Complete typed diagnostics come from the quality guard's
+                # own traversal, never from paths parsed out of provider prose.
+                # Any stale/partial/foreign attribution keeps full repair.
+                if (
+                    issues
+                    and len(issues) == len(messages) == len(kinds)
+                    and all(
+                        type(issue) is ReportValidationIssue
+                        and issue.audience == path
+                        and issue.error_kind == kind
+                        and diagnostic_refs.get(f"{issue.audience}.{issue.field}")
+                        == issue.claim_ids
+                        for issue, kind in zip(issues, kinds, strict=True)
+                    )
+                ):
+                    for issue, message in zip(issues, messages, strict=True):
+                        record(
+                            f"{issue.audience}.{issue.field}",
+                            issue.claim_ids,
+                            message,
+                            (issue.error_kind,),
+                        )
+                    return
             record(
                 path,
                 refs,
@@ -1109,7 +1144,7 @@ def _preserve_native_decisions(repair, raw, error):
     """Narrow only authenticated prose-only fact repairs, including full batches.
 
     The model still produces the answer. Both its schema and our validator keep
-    unaffected values fixed; basis choices remain inside the original finding.
+    unaffected values fixed, including the already validated literal bases.
     Mixed/unlocalized failures retain the ordinary repair contract.
     """
     contexts = getattr(error, "native_prose_repairs", {})
@@ -1153,6 +1188,18 @@ def _preserve_native_decisions(repair, raw, error):
                 "decision.effect.impactScope": values["decision"]["effect"]["impactScope"],
                 "decision.timing.urgencyState": values["decision"]["timing"]["urgencyState"],
             }
+            # All three axes passed native validation against these exact
+            # source choices. Re-selecting a basis while keeping its category
+            # can create a new support/coherence failure in a prose-only retry.
+            # The flattened snapshot check above authenticates every basis.
+            for axis in ("connection", "effect", "timing"):
+                basis = values["decision"][axis]["basis"]
+                path = f"decision.{axis}.basis"
+                if basis is None:
+                    fixed[path] = None
+                else:
+                    fixed[f"{path}.claimId"] = basis["claimId"]
+                    fixed[f"{path}.sourceSpanId"] = basis["sourceSpanId"]
             for path in ("reason", "decision.connection.condition"):
                 if path not in fields:
                     fixed[path] = _native_path_value(values, path)
@@ -1166,13 +1213,20 @@ def _preserve_native_decisions(repair, raw, error):
     def validate_repair(response):
         actual = parse_wire_draft(response.text).model_dump(by_alias=True, mode="json")
         records = actual["assessments"].get(audience, {})
-        if any(
-            key not in records or _native_path_value(records[key], path) != expected
-            for key, fixed in frozen.items()
-            for path, expected in fixed.items()
-        ):
+        try:
+            changed = any(
+                key not in records or _native_path_value(records[key], path) != expected
+                for key, fixed in frozen.items()
+                for path, expected in fixed.items()
+            )
+        except (KeyError, TypeError):
+            # A provider can violate the wire schema by returning null for an
+            # originally nonnull basis. Reject that drift as a validation
+            # failure instead of dereferencing it into an unhandled TypeError.
+            changed = True
+        if changed:
             raise OutputValidationError(
-                "사실 표현만 수정하는 수리에서 검증된 관계·업무·영향·시점 또는 "
+                "사실 표현만 수정하는 수리에서 검증된 관계·업무·영향·시점·원문 근거 또는 "
                 "오류 없는 문구를 변경할 수 없습니다.",
                 error_kinds=("report_assessment_invalid",),
             )
@@ -1183,10 +1237,10 @@ def _preserve_native_decisions(repair, raw, error):
     return StructuredCallRepair(
         prompt=(
             "이번 수리는 진단된 reason/condition의 사실 표현만 수정합니다. Schema const로 "
-            "고정된 관계·업무·영향·시점과 오류 없는 문구를 유지하세요. "
+            "고정된 관계·업무·영향·시점·원문 근거와 오류 없는 문구를 유지하세요. "
             "고정된 판정과 reason의 의미도 일치해야 합니다. 무관 판정을 직접 업무에 "
-            "연결된다고 설명하지 마세요. 같은 finding 안에서 "
-            "필요한 basis를 다시 선택할 수 있으며 원문 근거 검증은 그대로 적용됩니다.\n\n"
+            "연결된다고 설명하지 마세요. basis의 claimId/sourceSpanId도 검증된 값으로 "
+            "고정됩니다. 선택된 원문에 맞춰 진단된 문구만 고치고 근거를 바꾸지 마세요.\n\n"
             + repair.prompt
         ),
         response_schema=schema,
@@ -1594,8 +1648,9 @@ def _repair_action_message(
 _WORK_REPAIR_ACTIONS = {
     "compatibility_procedure": (
         "report_work_compatibility_procedure_unsupported: "
-        "선택 근거가 호환성 검증 절차의 존재·의무를 지원하지 않습니다. "
-        "원문으로 연결 전제와 판정을 다시 확인하세요."
+        "선택 근거 밖의 절차를 업무 연결 사유로 추가했습니다. "
+        "원문의 대상·행동·단계에 한정해 업무 관계를 다시 판정하고, "
+        "지목된 문구를 그 판정의 이유로 새로 작성하세요."
     ),
     "market_forecast_only_core_constraint": (
         "report_axis_market_forecast_only_core_constraint: "
@@ -1697,7 +1752,7 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
         "둘 다 수정하세요. 지난 기한은 현재의 대응 필요를 입증하지 않습니다. "
         "진단의 refs는 실패한 출력이 선택했던 근거입니다. 필요하면 같은 finding의 다른 "
         "claimId/sourceSpanId 중 판단을 직접 지원하는 근거를 다시 선택할 수 있습니다. "
-        "다른 finding의 근거는 사용할 수 없습니다.\n\n"
+        "다른 finding의 근거는 사용할 수 없습니다. " + ASSESSMENT_PROCEDURE_RULE + "\n\n"
         if "findings" in payload
         else ""
     )
@@ -1709,17 +1764,18 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
         "condition 오류를 reason 수정만으로 해결하지 마세요. 관계 자체가 잘못되어 "
         "CONDITIONAL/BACKGROUND로 수정할 때도 실제 업무 연결 전제를 작성하세요. "
         "사건 재요약이나 근거 부재를 전제로 바꾸지 마세요. reason과 condition이 함께 "
-        "지목되면 결합 문맥도 확인하세요.\n\n"
+        "지목되면 결합 문맥도 확인하세요. " + ASSESSMENT_CONDITION_RULE + "\n\n"
         if any("nativeFields=" in value for value in _repair_action_entries(error))
         else ""
     )
     work_guidance = (
-        "compatibility_procedure 진단은 검증 결과가 아니라 검증 절차 자체의 근거가 "
-        "없다는 뜻입니다. 원문에 없는 호환성 시험·승인·선행 검증을 조건으로 유지하거나 "
-        "결과만 미확인으로 바꾸지 마세요. 원문 대상의 실제 사용·적용 여부 같은 업무 "
-        "연결 전제와 의무 절차를 구분하세요. 원문에 명시된 검증 절차는 유지합니다. "
-        "reason과 condition 모두에서 같은 허구 절차를 반복하지 마세요. 원문으로 "
-        "연결·영향·시점을 각각 다시 판단하고 특정 범주나 null로 일괄 전환하지 마세요.\n\n"
+        "지목된 설명은 원문의 대상·행동·단계에서 새로 작성하세요. 원문 대상과 선택한 "
+        "work의 실제 업무 대상을 먼저 대조하고, 사건 자체가 그 업무인지 실제 사용·적용 "
+        "여부 같은 중간 전제가 필요한지 구분해 relation을 판단하세요. reason은 이 대응 "
+        "관계만 한 문장으로 설명하고, condition은 필요한 구체적 연결 전제만 쓰세요. "
+        "오류 문구를 없애려고 다른 work나 DIRECT로 바꾸지 마세요. 원문에 명시된 절차는 "
+        "유지하되, 근거 밖 개념의 부재를 설명하는 문장은 빼세요. 이 기준으로 영향·시점도 "
+        "각각 판단하고 특정 범주나 null로 일괄 전환하지 마세요.\n\n"
         if any(
             "report_work_compatibility_procedure_unsupported" in value
             for value in _repair_action_entries(error)
@@ -1926,11 +1982,23 @@ def _native_reason_diagnostic_field(
     ):
         return "reason"
     fields = ("reason", "decision.connection.condition")
+
+    def matches_failure(component_error):
+        if type(component_error) is not type(error):
+            return False
+        if getattr(error, "error_kinds", ()) == ("report_fact_mismatch",):
+            # A combined factual error aggregates all mismatches into one
+            # message. One component can repeat only a subset (company), while
+            # the other contains that same company plus a number. Comparing
+            # whole messages would freeze the still-invalid first component.
+            return getattr(component_error, "error_kinds", ()) == error.error_kinds
+        return str(component_error) == str(error)
+
     matched = [
         field
         for field, value in zip(fields, (native.reason, native.condition), strict=True)
         if any(
-            type(component_error) is type(error) and str(component_error) == str(error)
+            matches_failure(component_error)
             for component_error in _prose_validation_errors(
                 [value], refs, evidence, claims, request=request
             )

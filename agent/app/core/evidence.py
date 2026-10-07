@@ -91,6 +91,12 @@ _KOREAN_ORGANIZATION = re.compile(
     r"[A-Za-z가-힣][A-Za-z0-9가-힣&.-]{1,30}"
     r"(?:전자|하이닉스|반도체|디스플레이|테크놀로지|테크|그룹|홀딩스|은행|증권|공사|협회|위원회|연구원)"
 )
+# These are device/industry categories, not organization names. Keep this exact
+# set narrow: real names ending in 반도체 (including unknown companies) still
+# need source support, as do names containing one of these category terms.
+_SEMICONDUCTOR_CATEGORY_TERMS = frozenset(
+    {"전력반도체", "시스템반도체", "화합물반도체", "메모리반도체", "비메모리반도체"}
+)
 _WORD = re.compile(r"[A-Za-z0-9가-힣]+")
 _TECHNICAL_ANCHOR = re.compile(r"\b(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)\b")
 _AMBIGUOUS_RELATION = re.compile(
@@ -714,6 +720,7 @@ def _companies(value: str) -> set[str]:
         match.group()
         for match in _KOREAN_ORGANIZATION.finditer(value)
         if _normalize(match.group()) not in _KNOWN_COMPANY_ALIASES
+        and _normalize(match.group()) not in _SEMICONDUCTOR_CATEGORY_TERMS
     )
     return companies
 

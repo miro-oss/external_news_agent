@@ -66,6 +66,42 @@ def test_integration_does_not_establish_an_actual_compatibility_procedure(prose)
     assert "compatibility_procedure" in work_prose_problems(prose, INTEGRATION_SOURCE)
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "The proposed layout complies with commercial foundry design rules.",
+        "제안한 배치는 상업 파운드리의 설계규칙을 준수한다.",
+    ],
+)
+@pytest.mark.parametrize("separator", ["·", ", ", "/"])
+def test_design_rule_work_enumeration_does_not_assert_a_compatibility_procedure(source, separator):
+    prose = (
+        f"설계규칙 준수는 파운드리 호환성{separator}공정검증 관점에서 "
+        "공정인증 업무와 직접 연결된다."
+    )
+    assert work_prose_problems(prose, source) == ()
+    assert "compatibility_procedure" in work_prose_problems(prose, PRICE_SOURCE)
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "호환성·공정검증 관점에서 공정인증 업무와 직접 연결되려면 검증 통과가 필수다.",
+        "호환성·공정검증 관점에서 공정인증 업무와 직접 연결되며 호환성 검증이 필요하다.",
+        "호환성·공정검증 관점에서 공정인증 업무와 직접 연결되며 호환성 검증을 완료했다.",
+        "호환성·공정검증 관점에서 공정인증 업무와 직접 연결된다. 호환성 검증이 필수다.",
+        "호환성·공정검증 관점에서 공정인증 업무와 직접 연결된다. 호환성 검증을 완료했다.",
+        "호환성·공정검증을 완료해야 공정인증 업무와 직접 연결된다.",
+        "호환성·성능 검증을 완료해야 한다.",
+        "호환성·공정검증 관점에서 공정인증 업무와 직접 연결되며 호환성 검증은 예정됐다.",
+    ],
+)
+def test_design_rules_do_not_exempt_actual_joined_compatibility_procedures(prose):
+    source = "The proposed layout complies with commercial foundry design rules."
+    assert "compatibility_procedure" in work_prose_problems(prose, source)
+    assert work_prose_problems(prose, source + " Compatibility testing was completed.") == ()
+
+
 def test_generic_work_phrase_does_not_supply_its_own_source_or_hide_another_procedure():
     prose = "원문은 호환성 검증 업무와 직접적으로 연결된다."
     assert "compatibility_procedure" in work_prose_problems(prose, PRICE_SOURCE)
@@ -368,3 +404,91 @@ def test_claimless_map_keeps_the_existing_fixed_all_null_contract():
     assert public.basis_claim_ids == []
     assert public.reason == CLAIMLESS_ASSESSMENT_REASON
     assert public.axes.directness is None
+
+
+@pytest.mark.parametrize("join", ["나", "이나", "와", "과", " 및 "])
+def test_coordinated_procedure_and_impact_absence_does_not_assert_a_prerequisite(join):
+    prose = (
+        "기사는 IT 인프라의 특정 조달·검수 절차"
+        f"{join} 영향을 명시하지 않아 운영 업무 변경으로 단정할 근거가 없다."
+    )
+    assert work_prose_problems(prose, AI_CAPEX_SOURCE) == ()
+
+
+@pytest.mark.parametrize(
+    "prose,expected",
+    [
+        (
+            "검수 절차가 필수이나 기사는 검수 절차나 영향을 명시하지 않았다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 검수 절차나 영향을 명시하지 않아 추가 검수를 진행해야 한다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 검수 절차나 영향을 명시하지 않아 검수 완료가 선행되어야 한다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 검수 절차나 영향을 명시하지 않으며 검수 절차를 완료했다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 필요한 검수 절차나 영향을 명시하지 않았다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 선행 검수 절차나 영향을 명시하지 않았다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 거쳐야 하는 검수 절차나 영향을 명시하지 않았다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 의무 검수 절차나 영향을 명시하지 않았다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 반드시 거치는 검수 절차나 영향을 명시하지 않았다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 강제 검수 절차나 영향을 명시하지 않았다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 검수 완료 여부나 영향을 명시하지 않았다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 검수 승인 여부나 영향을 명시하지 않았다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 검수 절차의 이행 여부나 영향을 명시하지 않았다.",
+            "inspection_prerequisite",
+        ),
+        (
+            "기사는 호환성 검증 여부나 영향을 명시하지 않았다.",
+            "compatibility_procedure",
+        ),
+        (
+            "기사는 검수 절차나 영향을 명시하지 않아 냉각 모듈 검증을 준비한다.",
+            "cooling_procedure",
+        ),
+        (
+            "기사는 검수 절차나 영향을 명시하지 않아 고객 승인 전에는 적용할 수 없다.",
+            "approval_prerequisite",
+        ),
+        (
+            "원문은 시스템 수준 호환성 검증 절차를 제시하지 않아 호환성 검증 여부는 미확인이다.",
+            "compatibility_procedure",
+        ),
+    ],
+)
+def test_local_description_absence_does_not_hide_required_completed_or_separate_procedure(
+    prose, expected
+):
+    assert expected in work_prose_problems(prose, AI_CAPEX_SOURCE)

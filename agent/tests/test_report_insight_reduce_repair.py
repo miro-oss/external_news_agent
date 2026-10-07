@@ -6,6 +6,7 @@ from copy import deepcopy
 
 import pytest
 from test_report_insight_assessment import request
+from test_report_insight_reduce_partial_repair import repair_jobs
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
 from app.core.errors import OutputValidationError, StructuredOutputExhaustedError
@@ -47,13 +48,19 @@ def test_one_reduce_repair_receives_fact_and_falsification_failures_together(cap
 
     assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001", "REDUCE-001"]
     repair = provider.calls[-1]
-    details = diagnostic(repair["prompt"])
-    assert "CHIP_MAKER.headline" in details and "TSMC" not in details
-    assert "CHIP_MAKER.overview[0].text" in details and "999" not in details
-    assert "report_fact_mismatch" in details
-    assert "refs=['101:0']" in details
-    assert "implications[0].falsifiedBy" in details and "반증 관측" in details
-    assert repair["response_schema"] == provider.calls[-2]["response_schema"]
+    jobs = repair_jobs(repair["prompt"])
+    details = [diagnostic for job in jobs for diagnostic in job["diagnostics"]]
+    assert details == [
+        {"field": "headline", "errorKind": "report_fact_mismatch", "claimIds": ["101:0", "102:0"]},
+        {"field": "overview[0].text", "errorKind": "report_fact_mismatch", "claimIds": ["101:0"]},
+        {
+            "field": "implications[0].falsifiedBy",
+            "errorKind": "report_falsification_missing_observation",
+            "claimIds": ["101:0"],
+        },
+    ]
+    assert all(private not in json.dumps(details) for private in ("TSMC", "999"))
+    assert repair["response_schema"]["title"] == "ReportInsightReduceRepair"
     assert all(provider.schema_validity)
     assert [item.finding_id for item in result.insights[0].assessments] == [101, 102]
     assert result.insights[0].overview and result.insights[0].implications == []

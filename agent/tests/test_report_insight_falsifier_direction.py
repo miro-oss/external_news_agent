@@ -2,7 +2,7 @@
 
 import pytest
 from test_report_insight_assessment import request as pipeline_request
-from test_report_insight_reduce_repair import diagnostic
+from test_report_insight_reduce_partial_repair import repair_jobs
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
 from app.core.errors import OutputValidationError, StructuredOutputExhaustedError
@@ -204,9 +204,15 @@ def test_direction_error_reaches_the_single_reduce_repair_and_cannot_bypass_it(r
         assert caught.value.details["usage"]["credits"] == pytest.approx(0.8)
 
     assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001", "REDUCE-001"]
-    details = diagnostic(provider.calls[-1]["prompt"])
-    assert "implications[0].falsifiedBy" in details
-    assert "report_falsification_direction" in details
-    assert provider.calls[-1]["response_schema"] == provider.calls[-2]["response_schema"]
+    jobs = repair_jobs(provider.calls[-1]["prompt"])
+    assert len(jobs) == 1
+    assert jobs[0]["diagnostics"] == [
+        {
+            "field": "implications[0].falsifiedBy",
+            "errorKind": "report_falsification_direction",
+            "claimIds": ["101:0"],
+        }
+    ]
+    assert provider.calls[-1]["response_schema"]["title"] == "ReportInsightReduceRepair"
     assert all(provider.schema_validity)
     assert source.model_dump_json(by_alias=True) == snapshot

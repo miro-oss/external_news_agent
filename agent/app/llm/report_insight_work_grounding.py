@@ -70,6 +70,16 @@ _NO_REQUIREMENT = re.compile(
     r"(?:(?:있는지|필요한지)(?:는|도)?\s*)?(?:원문(?:에|에서|에는)?\s*)?"
     r"(?:미확인|불명|(?:확인|명시|제시)(?:되|되어)?지\s*않|알\s*수\s*없)"
 )
+# A coordinated "절차나 영향" object can explicitly describe source silence.
+# Cover only its procedure noun phrase, not an unknown completion;
+# a separate positive procedure elsewhere in the clause must still be checked.
+_NO_PROCEDURE_DESCRIPTION = re.compile(
+    r"(?P<object>(?:(?:고객|메모리|규격|냉각|호환성|검증|검수|인증|승인)"
+    r"(?:의)?[\s/·-]*){1,6}(?:요건|절차|필요성|존재))"
+    r"\s*(?:나|이나|와|과|및)\s*영향(?:을|를)\s*"
+    r"(?:명시|제시)하지\s*않"
+)
+_DESCRIPTION_GATE = re.compile(r"선행|거쳐야|의무|강제|반드시")
 _EXISTENCE_OBJECT = re.compile(r"요건|절차|필요성|여부|존재|규격|조건")
 _OUTCOME_OBJECT = re.compile(r"결과|완료|통과|납품|설치")
 _CLAUSE_JOIN = re.compile(r"[.!?。;；\n]|지만|으나|이고|이며|하고|그리고|\bbut\b", re.I)
@@ -84,6 +94,12 @@ _COMPATIBILITY_WORK = re.compile(
     r"호환성\s*(?:검증|시험)\s*업무(?:와|에)\s*"
     r"(?:직접(?:적(?:으로)?)?\s*)?(?:연결|관련|해당)"
 )
+# A coordinated list of work perspectives is not one compatibility test.
+# Require source design-rule context and an explicit work interpretation; actual
+# required/performed procedures in the same clause remain subject to the guard.
+_COORDINATED_PROCESS_WORK = re.compile(r"호환성\s*[·,/]\s*공정\s*(?:검증|시험)\s*(?:관점|업무)")
+_WORK_RELATION = re.compile(r"업무(?:와|에)\s*(?:직접(?:적(?:으로)?)?\s*)?(?:연결|관련|해당)")
+_DESIGN_RULE_SOURCE = re.compile(r"설계\s*규칙|\bdesign\s+rules?\b", re.I)
 _PROCEDURE_ACTION = re.compile(r"필요|요구|수행|진행|통과|실시|완료")
 _TEAM_TRANSLATIONS = {
     "운영팀": r"\b(?:operations?|operating)\s+team\b",
@@ -99,11 +115,17 @@ _TEAM_TRANSLATIONS = {
 def _absence_ranges(clause: str) -> list[tuple[int, int]]:
     if _REQUIRED_GATE.search(clause):
         return []
-    return [
+    ranges = [
         (match.start(), match.end())
         for match in _NO_REQUIREMENT.finditer(clause)
         if _EXISTENCE_OBJECT.search(match["object"]) and not _OUTCOME_OBJECT.search(match["object"])
     ]
+    if not _PROCEDURE_ACTION.search(clause) and not _DESCRIPTION_GATE.search(clause):
+        ranges.extend(
+            (match.start("object"), match.end("object"))
+            for match in _NO_PROCEDURE_DESCRIPTION.finditer(clause)
+        )
+    return ranges
 
 
 def _team_supported(team: str, source: str) -> bool:
@@ -119,8 +141,17 @@ def _generic_compatibility_work(kind: str, match, clause: str, source: str) -> b
     # work phrase; any required/performed procedure still needs literal support.
     return bool(
         kind == "compatibility_procedure"
-        and _COMPATIBILITY_WORK.match(clause, match.start())
-        and _INTEGRATION_SOURCE.search(source)
+        and (
+            (
+                _COMPATIBILITY_WORK.match(clause, match.start())
+                and _INTEGRATION_SOURCE.search(source)
+            )
+            or (
+                _COORDINATED_PROCESS_WORK.match(clause, match.start())
+                and _WORK_RELATION.search(clause)
+                and _DESIGN_RULE_SOURCE.search(source)
+            )
+        )
         and not _REQUIRED_GATE.search(clause)
         and not _PROCEDURE_ACTION.search(clause)
     )

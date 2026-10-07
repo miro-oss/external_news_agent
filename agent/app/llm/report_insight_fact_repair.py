@@ -9,6 +9,14 @@ _INTERNAL_REFERENCE = re.compile(
     r"(?![A-Za-z0-9_:])",
     re.IGNORECASE,
 )
+_REFERENCE_ID = r"(?:[1-9]\d*:\d+|s[1-9]\d*_\d+_\d+)(?![A-Za-z0-9_:])"
+_SELECTED_REFERENCE_LIST = re.compile(
+    r"(?:[\[(]\s*(?:(?:근거|원문|참조|인용)\s*[:：]?\s*)?|"
+    r"(?<!\w)(?:근거|원문|참조|인용)\s*[:：]\s*)"
+    rf"(?P<refs>{_REFERENCE_ID}(?:\s*[,;·、]\s*{_REFERENCE_ID})*)"
+    r"(?=\s*(?:[,;·、\])]|$))"
+)
+_REFERENCE_TOKEN = re.compile(_REFERENCE_ID)
 _CATEGORIES = (
     ("unsupported_number", "근거에서 확인되지 않는 숫자: "),
     ("currency_amount", "근거와 일치하지 않는 통화·금액 숫자: "),
@@ -69,11 +77,13 @@ def fact_repair_kinds(
     ):
         kinds.append("event_state")
     labeled_reference = any(match[0] not in source for match in _INTERNAL_REFERENCE.finditer(value))
-    # Recorded outputs cite selected IDs as "원문(7868:2)" without a field label.
-    # Require a real selected reference inside citation brackets; bare numbers
-    # or colon-separated values cannot claim this category through error prose.
+    # Recorded outputs also use "(근거: 101:0, 101:4, 연결 문장)".
+    # Read citation lists in the actual rejected value and require a selected
+    # reference. Guard/error prose cannot supply an identifier or a repair kind.
     selected_reference = any(
-        ref not in source and re.search(rf"[\[(]\s*{re.escape(ref)}\s*[\])]", value) for ref in refs
+        token[0] in refs and token[0] not in source
+        for citation in _SELECTED_REFERENCE_LIST.finditer(value)
+        for token in _REFERENCE_TOKEN.finditer(citation["refs"])
     )
     if labeled_reference or selected_reference:
         kinds.insert(0, "internal_reference_in_prose")
