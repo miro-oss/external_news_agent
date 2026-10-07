@@ -133,13 +133,22 @@ def test_partial_reduce_preserves_valid_items_assessments_sources_and_usage():
         "overview",
         1,
     )
-    assert jobs[0]["diagnostics"] == [
+    assert [
+        {key: value for key, value in entry.items() if key != "rules"}
+        for entry in jobs[0]["diagnostics"]
+    ] == [
         {
             "field": "overview[1].text",
             "errorKind": "report_fact_mismatch",
             "claimIds": ["101:0"],
         }
     ]
+    rules = jobs[0]["diagnostics"][0]["rules"]
+    assert {row["rule"] for row in rules} == {
+        "report_fact_template_required",
+        "report_fact_mismatch",
+    }
+    assert all(row["reason"] for row in rules)
     original = json.loads(provider.response_texts[-2])["insights"][0]
     assert jobs[0]["original"] == original["overview"][1]
     assert set(provider.wire_payloads[-1]) == {"repairs"}
@@ -294,7 +303,7 @@ def test_unowned_or_stale_errors_retain_full_reduce_repair(defect):
 
 
 @pytest.mark.parametrize("global_failure", ["investment_advice", "blanket_headline"])
-def test_fact_error_with_global_policy_failure_uses_full_repair_and_recovers(global_failure):
+def test_fact_and_located_policy_failures_repair_both_units_and_preserve_neighbors(global_failure):
     source = request(ids=(101, 102), audiences=("MARKET_INVESTOR",))
     source_snapshot = source.model_dump_json(by_alias=True)
 
@@ -313,9 +322,15 @@ def test_fact_error_with_global_policy_failure_uses_full_repair_and_recovers(glo
         call for call in provider.calls if "REDUCE-001" in call["response_schema"]["description"]
     ]
     assert len(calls) == 2
-    assert calls[1]["response_schema"] == calls[0]["response_schema"]
-    assert calls[1]["response_schema"]["title"] == "ReportInsightReduceOutput"
-    assert "<report-insight-repair-items>" not in calls[1]["prompt"]
+    assert calls[1]["response_schema"]["title"] == "ReportInsightReduceRepair"
+    jobs = repair_jobs(calls[1]["prompt"])
+    assert {(job["group"], job["index"]) for job in jobs} == {
+        ("overview", 1),
+        ("watchItems", 0) if global_failure == "investment_advice" else ("headline", None),
+    }
+    initial = json.loads(provider.response_texts[-2])["insights"][0]
+    assert result.insights[0].overview[0].model_dump(by_alias=True) == initial["overview"][0]
+    assert result.insights[0].implications == []
     final = result.insights[0]
     assert final.audience == "MARKET_INVESTOR"
     assert "999" not in final.overview[1].text

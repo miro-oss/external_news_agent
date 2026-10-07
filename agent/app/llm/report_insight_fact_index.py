@@ -13,13 +13,18 @@ from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date
+from typing import TYPE_CHECKING
 
 from app.llm.report_insight_fact_graph import Analysis, Mention, Relation, Span, analyze_sentence
 from app.schemas.analyze import ClaimType
 from app.schemas.report_insight import ReportInsightRequest
 
+if TYPE_CHECKING:
+    from app.llm.report_insight_source_extraction import SourceRoleProposal
+
 MAX_PROMPT_FACTS_PER_FINDING = 24
 MAX_PROMPT_UNCERTAINTIES_PER_FINDING = 2
+MAX_PROMPT_ROLE_PROPOSALS_PER_FINDING = 12
 
 
 @dataclass(frozen=True)
@@ -53,6 +58,7 @@ class IndexedFact:
 class FactIndex:
     evidence: tuple[SourceEvidence, ...]
     facts: tuple[IndexedFact, ...]
+    role_proposals: tuple[SourceRoleProposal, ...] = ()
 
 
 def _stable_id(prefix: str, value: object) -> str:
@@ -120,7 +126,9 @@ def build_fact_index(
                         relation=relation,
                     )
                 )
-    return FactIndex(tuple(rows), tuple(facts))
+    from app.llm.report_insight_source_extraction import request_source_proposals
+
+    return FactIndex(tuple(rows), tuple(facts), request_source_proposals(request, rows))
 
 
 def _span_payload(span: Span) -> dict:
@@ -254,6 +262,8 @@ def prompt_fact_index(
     uncertainty_signatures: dict[int, set[tuple[str, tuple[str, ...]]]] = {}
     reason_counts: Counter[str] = Counter()
     facts: list[dict] = []
+    proposals: list[dict] = []
+    proposal_counts: Counter[int] = Counter()
     uncertainty: list[dict] = []
     uncertainty_total = 0
     for fact in index.facts:
@@ -270,6 +280,35 @@ def prompt_fact_index(
             }
         )
         emitted_ids.add(fact.evidence_id)
+    for proposal in index.role_proposals:
+        row = rows_by_id[proposal.evidence_id]
+        if proposal_counts[row.finding_id] >= MAX_PROMPT_ROLE_PROPOSALS_PER_FINDING:
+            continue
+        proposal_counts[row.finding_id] += 1
+        proposals.append(
+            {
+                "proposalId": proposal.proposal_id,
+                "evidenceId": proposal.evidence_id,
+                "authority": "source_anchored_role_proposal_only",
+                "uncertainty": list(proposal.relation.uncertainty),
+                **_prompt_relation(proposal.relation),
+                "selectedSlots": [
+                    {"role": role, "span": _offsets(span)} for role, span in proposal.slot_spans
+                ],
+                "anchorProvenance": [
+                    {
+                        "role": anchor.role,
+                        "span": _offsets(anchor.span),
+                        "reportedOccurrence": anchor.reported_occurrence,
+                        "resolvedOccurrence": anchor.resolved_occurrence,
+                        "bindingMethod": anchor.binding_method,
+                    }
+                    for anchor in proposal.anchor_resolutions
+                    if anchor.binding_method != "exact_occurrence"
+                ],
+            }
+        )
+        emitted_ids.add(proposal.evidence_id)
     for row in index.evidence:
         unresolved = [
             {
@@ -323,11 +362,13 @@ def prompt_fact_index(
             _evidence_payload(row) for row in index.evidence if row.evidence_id in emitted_ids
         ],
         "facts": facts,
+        "roleProposals": proposals,
         "uncertainty": uncertainty,
         "uncertaintyReasonCounts": dict(sorted(reason_counts.items())),
         "limitsPerFinding": {
             "facts": MAX_PROMPT_FACTS_PER_FINDING,
             "uncertaintyExamples": MAX_PROMPT_UNCERTAINTIES_PER_FINDING,
+            "roleProposals": MAX_PROMPT_ROLE_PROPOSALS_PER_FINDING,
         },
         "counts": {
             "sourceSentences": len(index.evidence),
@@ -337,6 +378,12 @@ def prompt_fact_index(
             "uncertainties": uncertainty_total,
             "emittedFacts": len(facts),
             "emittedUncertainties": len(uncertainty),
+            "sourceAnchoredRoleProposals": len(index.role_proposals),
+            "emittedRoleProposals": len(proposals),
         },
-        "truncated": len(facts) < len(index.facts) or len(uncertainty) < uncertainty_total,
+        "truncated": (
+            len(facts) < len(index.facts)
+            or len(uncertainty) < uncertainty_total
+            or len(proposals) < len(index.role_proposals)
+        ),
     }

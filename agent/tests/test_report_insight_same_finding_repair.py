@@ -65,8 +65,8 @@ def test_partial_repair_gets_both_causes_and_full_validation_still_gates_accepta
     captured = []
     collect = service._native_assessment_repair_errors
 
-    def record_error(response, request):
-        error = collect(response, request)
+    def record_error(response, request, **kwargs):
+        error = collect(response, request, **kwargs)
         if error is not None:
             captured.append((error, str(error), error.repair_diagnostics, error.error_kinds))
         return error
@@ -107,11 +107,12 @@ def test_partial_repair_gets_both_causes_and_full_validation_still_gates_accepta
     actions = repair["prompt"].split("<validation-error>", 1)[1].split("</validation-error>", 1)[0]
     assert "reason: 원문 claim이 존재합니다." in actions
     assert "report_fact_mismatch" in actions
-    assert "findingId=101 field=assessments.reason refs=['101:0']" in actions
+    assert "findingId=101 nativeFields=reason refs=['101:0']" in actions
+    assert "rule=report_fact_template_required" in actions
     assert "9999" not in actions
     error, message, diagnostics, kinds = captured[0]
     assert error.failed_finding_ids == (101,)
-    assert kinds == ("report_assessment_draft_invalid", "report_fact_mismatch")
+    assert set(kinds) == {"report_assessment_draft_invalid", "report_fact_mismatch"}
     assert "근거에서 확인되지 않는 숫자: 9999" in message
     assert (str(error), error.repair_diagnostics, error.error_kinds) == (
         message,

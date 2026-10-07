@@ -97,7 +97,17 @@ def test_duplicate_normalization_does_not_hide_unknown_or_malformed_references(r
     before = (source.model_dump_json(), mapped.model_dump_json(), raw.text)
     with pytest.raises(ValueError):
         _validated_reduce_output(raw, source, mapped, allowed)
-    assert _reduce_repair_diagnostics(raw, source, allowed) is None
+    diagnostics = _reduce_repair_diagnostics(raw, source, allowed)
+    if all(isinstance(ref, str) for ref in refs):
+        assert diagnostics is not None
+        assert diagnostics.partial_repair_eligible
+        assert any(
+            issue.field == "overview[0].basisClaimIds"
+            for issue in diagnostics.validation_issues
+        )
+        assert all("999:0" not in issue.claim_ids for issue in diagnostics.validation_issues)
+    else:
+        assert diagnostics is None
     assert (source.model_dump_json(), mapped.model_dump_json(), raw.text) == before
 
 

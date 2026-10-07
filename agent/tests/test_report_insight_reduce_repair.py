@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from copy import deepcopy
 
 import pytest
@@ -50,7 +51,7 @@ def test_one_reduce_repair_receives_fact_and_falsification_failures_together(cap
     repair = provider.calls[-1]
     jobs = repair_jobs(repair["prompt"])
     details = [diagnostic for job in jobs for diagnostic in job["diagnostics"]]
-    assert details == [
+    assert [{key: value for key, value in item.items() if key != "rules"} for item in details] == [
         {"field": "headline", "errorKind": "report_fact_mismatch", "claimIds": ["101:0", "102:0"]},
         {"field": "overview[0].text", "errorKind": "report_fact_mismatch", "claimIds": ["101:0"]},
         {
@@ -59,6 +60,12 @@ def test_one_reduce_repair_receives_fact_and_falsification_failures_together(cap
             "claimIds": ["101:0"],
         },
     ]
+    assert [{rule["rule"] for rule in item["rules"]} for item in details] == [
+        {"report_fact_template_required", "report_fact_mismatch"},
+        {"report_fact_template_required", "report_fact_mismatch"},
+        {"report_falsification_missing_observation"},
+    ]
+    assert all(rule["reason"] for item in details for rule in item["rules"])
     assert all(private not in json.dumps(details) for private in ("TSMC", "999"))
     assert repair["response_schema"]["title"] == "ReportInsightReduceRepair"
     assert all(provider.schema_validity)
@@ -69,8 +76,10 @@ def test_one_reduce_repair_receives_fact_and_falsification_failures_together(cap
     assert "report_fact_mismatch" in caplog.text
     assert "report_falsification_missing_observation" in caplog.text
     assert "implications[0].falsifiedBy" in caplog.text
+    # Random trace IDs may contain the same digits as a rejected quantity.
+    logged = re.sub(r"traceId=[0-9a-f]+", "traceId=<id>", caplog.text)
     for private in ("TSMC", "999", "refs=", "생산 제약과 검증 준비 간의 연결 근거가 없는 경우"):
-        assert private not in caplog.text
+        assert private not in logged
 
 
 @pytest.mark.parametrize("repair_failure", ["falsifier", "fact", "citation", "work"])
@@ -104,7 +113,13 @@ def test_repaired_reduce_still_requires_every_guard_and_has_no_second_repair(rep
 
 def test_original_fail_fast_path_hides_other_reduce_errors(monkeypatch):
     source = request()
-    monkeypatch.setattr(service, "_validated_v4_reduce_output", service._validated_v4_reduce)
+
+    def legacy_fail_fast(response, request, mapped, allowed, *, template_wire=False, **kwargs):
+        # Reproduce the old validator deliberately; production still enforces
+        # the new template contract and complete diagnostic collection.
+        return service._validated_v4_reduce(response, request, mapped, allowed, **kwargs)
+
+    monkeypatch.setattr(service, "_validated_v4_reduce_output", legacy_fail_fast)
 
     def hook(stage, occurrence, _, value):
         return broken_synthesis(value) if stage == "REDUCE-001" else value

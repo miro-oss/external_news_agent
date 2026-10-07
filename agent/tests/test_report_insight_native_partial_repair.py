@@ -64,9 +64,13 @@ def test_native_and_public_failure_union_preserves_every_other_record_and_full_d
     assert [f["id"] for f in repair["findings"]] == [101, 103]
     assert repair["reportReferenceDate"] == "2026-09-30"
     assert repair_errors[0].failed_finding_ids == (101, 103)
-    assert repair_errors[0].error_kinds == (
+    assert set(repair_errors[0].error_kinds) == {
         "report_assessment_draft_invalid",
         "report_fact_mismatch",
+    }
+    assert any(
+        issue.rule_id == "report_fact_template_required"
+        for issue in repair_errors[0].validation_issues
     )
     assert [(ids, day) for ids, day in public_calls if len(ids) == 1] == [
         ([finding_id], date(2026, 9, 30)) for finding_id in (101, 102, 103, 104, 105, 106)

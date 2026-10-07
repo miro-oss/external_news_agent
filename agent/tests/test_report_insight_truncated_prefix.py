@@ -149,7 +149,12 @@ def test_recovers_only_missing_and_invalid_items_and_revalidates_full_batch(monk
     assert error.failed_finding_ids == tuple(expected_repair)
     assert "findingId=106: 잘린 출력에 완성된 항목이 없습니다." in str(error)
     if invalid:
-        assert "findingId=103" in str(error) and "2031" in str(error)
+        assert "findingId=103" in str(error)
+        assert any(
+            issue.field == "assessments[103].reason"
+            and issue.rule_id == "report_fact_template_required"
+            for issue in error.validation_issues
+        )
         details = provider.calls[1]["prompt"].split("<validation-error>", 1)[1]
         assert "findingId=103" in details and "findingId=106" in details
         assert "report_fact_mismatch" in details and "2031" not in details

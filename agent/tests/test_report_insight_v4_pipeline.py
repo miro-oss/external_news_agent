@@ -236,14 +236,18 @@ def test_partial_native_prose_repair_preserves_other_five_records_and_full_date(
     assert set(entries["properties"]) == {"finding104"} and entries["required"] == ["finding104"]
     assert repair_schema["description"] == provider.calls[0]["response_schema"]["description"]
     assert provider.schema_validity == [True, True, True]
-    assert len(native_inputs) == 3
-    original, merged = [value["assessments"]["CHIP_MAKER"] for value in native_inputs[:2]]
+    # A strict template failure also visits each singleton to collect all
+    # native/public failures before preserving the other records.
+    batch_inputs = [value for value in native_inputs if len(value["assessments"]["CHIP_MAKER"]) > 1]
+    assert len(batch_inputs) == 3
+    original, merged = [value["assessments"]["CHIP_MAKER"] for value in batch_inputs[:2]]
     assert list(merged) == [f"finding{finding_id}" for finding_id in range(101, 107)]
     for key, record in original.items():
         if key != "finding104":
             assert merged[key] == record
     assert merged["finding104"]["reason"] == reasons[104]
-    assert public_contexts[:2] == [(list(range(101, 107)), date(2026, 9, 30))] * 2
+    full_contexts = [context for context in public_contexts if len(context[0]) > 1]
+    assert full_contexts[0] == (list(range(101, 107)), date(2026, 9, 30))
     assert [record.finding_id for record in result.insights[0].assessments] == list(range(101, 109))
     assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
     assert result.meta.input_tokens == 33 and result.meta.output_tokens == 21
@@ -362,7 +366,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v29"
+    assert result.meta.prompt_version == "report-insight.ko.v30"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -860,7 +864,7 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v29"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v30"
     assert output["meta"]["mock"] is True
     assert RUBRIC_VERSION == "report-importance.v6"
     assert set(output) == {"insights", "meta"}

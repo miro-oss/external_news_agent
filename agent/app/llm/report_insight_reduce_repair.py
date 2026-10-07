@@ -9,12 +9,15 @@ from pydantic import ValidationError
 
 from app.core.parser import JsonObjectParseError
 from app.llm.prompt_data import prompt_json
-from app.llm.report_validation_diagnostics import ReportValidationIssue, pydantic_reduce_issues
+from app.llm.report_validation_diagnostics import (
+    ReportValidationIssue,
+    attach_report_validation_diagnostics,
+)
 from app.llm.structured_call import StructuredCallRepair
 
 _UNIT_FIELD = re.compile(
-    r"(overview|implications|watchItems)\[([0-4])\]\."
-    r"(?:text|assumption|mechanism|falsifiedBy|topic|indicator|trigger)"
+    r"(overview|implications|watchItems)\[([0-4])\](?:\."
+    r"(?:text|assumption|mechanism|falsifiedBy|topic|indicator|trigger|basisClaimIds))?"
 )
 
 
@@ -87,11 +90,11 @@ def partial_reduce_repair(prompt, schema, raw, context, validate):
         }
         units = {}
         for issue in context.issues:
-            if not isinstance(issue, ReportValidationIssue):
+            if not isinstance(issue, ReportValidationIssue) or not issue.located:
                 return None
             audience_index = by_audience[issue.audience]
-            if issue.field == "headline":
-                group, index = "headline", None
+            if issue.field in {"headline", "overview", "implications", "watchItems"}:
+                group, index = issue.field, None
             else:
                 match = _UNIT_FIELD.fullmatch(issue.field)
                 if match is None:
@@ -105,7 +108,9 @@ def partial_reduce_repair(prompt, schema, raw, context, validate):
                     value = record[group][index]
                     unit_schema = unit_schema["items"]
                 else:
-                    value = record[group]
+                    # A missing required field is repairable without replacing
+                    # a sibling. Its value is data, never the field's authority.
+                    value = record.get(group)
                 units[identity] = {
                     "key": f"repair{len(units)}",
                     "audience": issue.audience,
@@ -120,10 +125,44 @@ def partial_reduce_repair(prompt, schema, raw, context, validate):
                     "field": issue.field,
                     "errorKind": issue.error_kind,
                     "claimIds": list(issue.claim_ids),
+                    "rules": [{"rule": issue.rule, "reason": issue.reason}],
                 }
             )
         if not units:
             return None
+        # A length/shape failure owns its collection. Coalesce nested failures
+        # into that single job so one patch cannot overwrite another patch.
+        for identity, unit in list(units.items()):
+            audience_index, group, index = identity
+            parent = units.get((audience_index, group, None))
+            if index is not None and parent is not None:
+                parent["diagnostics"].extend(unit["diagnostics"])
+                del units[identity]
+        for index, unit in enumerate(units.values()):
+            unit["key"] = f"repair{index}"
+            # Multiple internal rules can identify the same public edit target.
+            # Preserve internal diagnostics on the error, but do not duplicate
+            # an identical public instruction inside the provider repair job.
+            unique = []
+            for diagnostic in unit["diagnostics"]:
+                previous = next(
+                    (
+                        item
+                        for item in unique
+                        if all(
+                            item[key] == diagnostic[key]
+                            for key in ("field", "errorKind", "claimIds")
+                        )
+                    ),
+                    None,
+                )
+                if previous is None:
+                    unique.append(diagnostic)
+                else:
+                    previous["rules"].extend(
+                        rule for rule in diagnostic["rules"] if rule not in previous["rules"]
+                    )
+            unit["diagnostics"] = unique
     except (KeyError, IndexError, TypeError, ValueError):
         return None
 
@@ -174,7 +213,7 @@ def partial_reduce_repair(prompt, schema, raw, context, validate):
             # again, with the same MAP and immutable original source request.
             return validate(replace(response, text=prompt_json(merged)))
         except ValidationError as error:
-            error.validation_issues = pydantic_reduce_issues(error, context.schema)
+            attach_report_validation_diagnostics(error, context.schema, stage="REDUCE")
             raise
 
     jobs = [

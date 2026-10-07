@@ -180,7 +180,7 @@ def test_direction_error_reaches_the_single_reduce_repair_and_cannot_bypass_it(r
     denied = event + "발생하지 않았다."
     observed = event + "발생하는 경우"
 
-    def hook(stage, occurrence, _, value):
+    def hook(stage, occurrence, data, value):
         if stage == "REDUCE-001":
             falsifier = observed if occurrence == 2 and repair_succeeds else denied
             value["insights"][0]["implications"] = [
@@ -188,12 +188,27 @@ def test_direction_error_reaches_the_single_reduce_repair_and_cannot_bypass_it(r
                 .implications[0]
                 .model_dump(by_alias=True, mode="json")
             ]
+            if occurrence == 2 and repair_succeeds:
+                slot = next(
+                    slot
+                    for slot in data["factTextSlots"]["CHIP_MAKER"]
+                    if "101:0" in slot["claimIds"]
+                )["slotId"]
+                record = value["insights"][0]["implications"][0]
+                record.update(
+                    text="{{fact:" + slot + "}} 생산 확대는 생산 능력 향상에 기여할 수 있다.",
+                    mechanism="생산 영역이 넓어지면 후속 생산 능력의 변화를 확인해야 한다.",
+                    falsifiedBy="해당 생산 확대 계획을 철회하거나 연기하는 사건이 발생하는 경우",
+                )
         return value
 
     provider = V4Provider(source, hook=hook)
     if repair_succeeds:
         result = generate(provider, source)
-        assert result.insights[0].implications[0].falsified_by == observed
+        assert result.insights[0].implications[0].falsified_by == (
+            "해당 생산 확대 계획을 철회하거나 연기하는 사건이 발생하는 경우"
+        )
+        assert result.insights[0].implications[0].text.startswith("원문: 「가람전자")
         assert result.meta.credits == pytest.approx(0.8)
     else:
         with pytest.raises(StructuredOutputExhaustedError) as caught:
@@ -206,13 +221,18 @@ def test_direction_error_reaches_the_single_reduce_repair_and_cannot_bypass_it(r
     assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001", "REDUCE-001"]
     jobs = repair_jobs(provider.calls[-1]["prompt"])
     assert len(jobs) == 1
-    assert jobs[0]["diagnostics"] == [
-        {
-            "field": "implications[0].falsifiedBy",
-            "errorKind": "report_falsification_direction",
-            "claimIds": ["101:0"],
-        }
-    ]
+    assert {
+        "field": "implications[0].falsifiedBy",
+        "errorKind": "report_falsification_direction",
+        "claimIds": ["101:0"],
+        "rules": [
+            {
+                "rule": "report_falsification_direction",
+                "reason": "반증 조건이 해석을 반박하는 방향으로 작성되지 않았습니다.",
+            }
+        ],
+    } in jobs[0]["diagnostics"]
+    assert all(entry["field"].startswith("implications[0].") for entry in jobs[0]["diagnostics"])
     assert provider.calls[-1]["response_schema"]["title"] == "ReportInsightReduceRepair"
     assert all(provider.schema_validity)
     assert source.model_dump_json(by_alias=True) == snapshot

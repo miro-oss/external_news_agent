@@ -1,5 +1,6 @@
 from decimal import Decimal
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -70,6 +71,15 @@ class Settings(BaseSettings):
         default=180.0,
         gt=0,
         validation_alias="AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS",
+    )
+    report_insight_source_cache_dir: str = Field(
+        default=str(Path(__file__).resolve().parents[2] / ".cache/report-insight/source-relations"),
+        validation_alias="AGENT_REPORT_INSIGHT_SOURCE_CACHE_DIR",
+    )
+    report_insight_source_extraction_model: str = Field(
+        default="gpt-5-mini",
+        min_length=1,
+        validation_alias="AGENT_REPORT_INSIGHT_SOURCE_EXTRACTION_MODEL",
     )
     provider_retry_attempts: int = Field(
         default=1,

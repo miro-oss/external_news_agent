@@ -92,7 +92,12 @@ def test_review_selection_is_once_and_late_partial_repair_preserves_full_source_
             assert finding["articleId"] == original.article_id
             assert finding["claims"] == [c.model_dump(by_alias=True) for c in original.claims]
             assert finding["sentences"] == [s.model_dump(by_alias=True) for s in original.sentences]
-    assert validation_contexts.count((list(range(107, 113)), date(2026, 9, 30))) == 3
+    # Initial MAP + repaired REVIEW validate the complete batch. The rejected
+    # strict template is checked per finding before those records are merged.
+    assert validation_contexts.count((list(range(107, 113)), date(2026, 9, 30))) == 2
+    assert all(
+        ([identifier], date(2026, 9, 30)) in validation_contexts for identifier in range(107, 113)
+    )
     final = result.insights[0].assessments
     assert [record.finding_id for record in final] == list(range(101, 114))
     assert all(record.axes.directness is None for record in final[:6])

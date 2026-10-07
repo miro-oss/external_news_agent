@@ -27,10 +27,11 @@ def source_request():
     return source
 
 
-def scoped_synthesis(stage, occurrence, _, value):
+def scoped_synthesis(stage, occurrence, data, value):
     if stage != "REDUCE-001":
         return value
     insight = value["insights"][0]
+    slots = {slot["findingId"]: slot["slotId"] for slot in data["factTextSlots"]["CHIP_MAKER"]}
     insight["implications"] = [
         {
             "text": "생산 제약이 지속되면 준비 일정의 영향을 확인해야 한다.",
@@ -42,7 +43,7 @@ def scoped_synthesis(stage, occurrence, _, value):
         {
             "text": "2030년 장비 20개 설치 계획에 따른 준비 조건을 확인한다."
             if occurrence == 1
-            else "2030년 장비 10개 설치 계획에 따른 준비 조건을 확인한다.",
+            else "{{fact:" + slots[103] + "}} 설치 계획에 따른 준비 조건을 확인한다.",
             "mechanism": "설치 계획에 맞춰 준비할 대상과 일정을 검토한다.",
             "assumption": "설치 계획이 유지되는 경우",
             "falsifiedBy": "설치 계획이 철회되는 경우",
@@ -51,7 +52,7 @@ def scoped_synthesis(stage, occurrence, _, value):
         {
             "text": "태성의 FC-BGA 투자가 현재 집행되고 있다."
             if occurrence == 1
-            else "삼성전기의 FC-BGA 투자가 현재 집행되고 있다.",
+            else "{{fact:" + slots[102] + "}} 투자 집행에 따른 후속 업무 조건을 확인한다.",
             "mechanism": "투자 집행에 따른 후속 업무 조건을 확인한다.",
             "assumption": "투자 집행이 유지되는 경우",
             "falsifiedBy": "투자 집행이 중단되는 경우",
@@ -62,7 +63,9 @@ def scoped_synthesis(stage, occurrence, _, value):
         {
             "topic": "생산라인 가동 상태",
             "indicator": "동일 생산라인의 가동 재개 여부",
-            "trigger": "삼성전자의 가동 재개가 확인되면 준비 일정을 다시 판단한다.",
+            "trigger": "{{fact:"
+            + slots[101]
+            + "}} 가동 재개가 확인되면 준비 일정을 다시 판단한다.",
             # Reproduces a full retry dropping the company-supporting source.
             # Partial repair must discard this unsolicited change entirely.
             "basisClaimIds": ["101:0", "104:0"] if occurrence == 1 else ["104:0"],
@@ -83,28 +86,27 @@ def test_fact_and_subject_failures_repair_only_two_implications_and_preserve_val
         ("implications", 1),
         ("implications", 2),
     ]
-    assert [job["diagnostics"] for job in jobs] == [
-        [
-            {
-                "field": "implications[1].text",
-                "errorKind": "report_fact_mismatch",
-                "claimIds": ["103:0"],
-            }
-        ],
-        [
-            {
-                "field": "implications[2].text",
-                "errorKind": "report_synthesis_subject_mismatch",
-                "claimIds": ["102:0"],
-            }
-        ],
-    ]
+    diagnostics = {
+        (entry["field"], entry["errorKind"], tuple(entry["claimIds"]))
+        for job in jobs
+        for entry in job["diagnostics"]
+    }
+    assert ("implications[1].text", "report_fact_mismatch", ("103:0",)) in diagnostics
+    assert ("implications[2].text", "report_synthesis_subject_mismatch", ("102:0",)) in diagnostics
+    assert all(
+        field in {"implications[1].text", "implications[2].text"} for field, _, _ in diagnostics
+    )
     original = json.loads(provider.response_texts[-2])["insights"][0]
     final = result.insights[0].model_dump(by_alias=True, mode="json")
-    for field in ("headline", "overview", "watchItems"):
+    for field in ("headline", "overview"):
         assert final[field] == original[field]
     assert final["implications"][0] == original["implications"][0]
     assert final["watchItems"][0]["basisClaimIds"] == ["101:0", "104:0"]
+    assert original["watchItems"][0]["trigger"].startswith("{{fact:")
+    assert final["watchItems"][0]["trigger"].startswith("원문: 「삼성전자는")
+    assert final["watchItems"][0]["trigger"].endswith(
+        "가동 재개가 확인되면 준비 일정을 다시 판단한다."
+    )
     assert "10개" in final["implications"][1]["text"]
     assert "삼성전기" in final["implications"][2]["text"]
     assert source.model_dump_json(by_alias=True) == original_source

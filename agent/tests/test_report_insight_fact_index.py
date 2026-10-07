@@ -156,7 +156,11 @@ def test_prompt_limits_report_full_counts_without_truncating_runtime_index():
     assert payload["counts"]["boundFacts"] == 30
     assert payload["counts"]["uncertainties"] == 8
     assert payload["uncertaintyReasonCounts"] == {"no_explicit_relation": 8}
-    assert payload["limitsPerFinding"] == {"facts": 24, "uncertaintyExamples": 2}
+    assert payload["limitsPerFinding"] == {
+        "facts": 24,
+        "uncertaintyExamples": 2,
+        "roleProposals": 12,
+    }
     assert payload["truncated"] is True
 
 

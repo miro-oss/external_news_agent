@@ -169,7 +169,9 @@ def test_final_map_retry_keeps_all_finding_locations_without_provider_prose():
     assert stages(provider) == ["MAP-001", "MAP-001"]
     failure = caught.value.details["validationFailure"]
     assert failure["stage"] == "MAP-001" and failure["attempt"] == 2
-    assert failure["errorCount"] == 6
+    # Each location violates both the new fact-template contract and the
+    # existing grounding rule; the public location list remains deduplicated.
+    assert failure["errorCount"] == 12
     assert {item["field"] for item in failure["issues"]} == {
         f"assessments[{finding.id}].reason" for finding in source.findings
     }

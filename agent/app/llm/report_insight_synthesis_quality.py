@@ -49,6 +49,15 @@ _CONDITIONAL = re.compile(
     r"(?:할|될|하는|되는|한|된|없는|있는)\s*(?:경우|때)",
     re.IGNORECASE,
 )
+_OBSERVATION_CONDITION = re.compile(r"(?:확인|관측)\s*시(?=\s|[,.!?]|$)")
+# Questions about a transition or its occurrence are not observations of it.
+# Match the predicate and its interrogative ending together, so a separate
+# affirmative predicate in the same step remains visible to the stage guard.
+_OBSERVATION_QUERY = re.compile(
+    r"(?:전환|집행|진행|이행|완료|착수|확대|증가|감소|수주|확인|관측)"
+    r"(?:(?:하|되|됐|했|되었|하였)?(?:는지|는가|었는지|았는지)|"
+    r"(?:된|한)\s*지|\s*(?:여부|유무))(?:를|을)?\s*(?:확인|점검|검토)"
+)
 _REALIZED = re.compile(
     r"집행(?:했|됐|되었|중)|진행\s*중|착수(?:했|한)|"
     r"(?:확대|증가|감소)(?:했|됐|되었|했다|하였다)|늘어나|늘어났|길어졌|"
@@ -89,7 +98,8 @@ _GENERIC_MECHANISM = frozenset(
 )
 _MECHANISM_BREAK = re.compile(r"→|⇒|➜|->|=>|>")
 _CONFIRMED = re.compile(
-    r"확인(?:됨|됐다|되었다|되었|된\s*사실)|관측(?:됨|됐다|되었다)|"
+    r"확인(?:됨|됐(?:다|으며|고)|되었다|되었|된\s*사실)|"
+    r"관측(?:됨|됐(?:다|으며|고)|되었다)|"
     r"\b(?:confirmed|established|verified)\b",
     re.IGNORECASE,
 )
@@ -327,7 +337,17 @@ def _actor(clause: str, event: re.Match) -> tuple[str | None, str | None]:
 
 def _frames(value: str, *, claim_type: str = "FACT") -> list[EventFrame]:
     frames = []
-    for clause in _CLAUSE_BREAK.split(value):
+    # Each mechanism step owns its modality. A later conditional or observation
+    # cannot qualify an earlier assertion on the other side of an arrow.
+    clauses = (
+        step for sentence in _CLAUSE_BREAK.split(value) for step in _MECHANISM_BREAK.split(sentence)
+    )
+    for clause in clauses:
+        observed = _OBSERVATION_QUERY.sub(lambda match: " " * len(match[0]), clause)
+        # "확인 시" describes what to watch for, not an observation that occurred.
+        # Suppress only that phrase's observation token; do not lower the stage
+        # of other completed/current assertions elsewhere in the same step.
+        observed = _OBSERVATION_CONDITION.sub(lambda match: " " * len(match[0]), observed)
         matches = list(_EVENTS.finditer(clause))
         for index, event in enumerate(matches):
             if event.lastgroup == "investment" and _INVESTMENT_SENTIMENT_SUFFIX.match(
@@ -340,13 +360,22 @@ def _frames(value: str, *, claim_type: str = "FACT") -> list[EventFrame]:
                 continue
             end = matches[index + 1].start() if index + 1 < len(matches) else len(clause)
             local = clause[event.start() : end]
-            if _CONDITIONAL.search(clause) or _FUTURE.search(local) or claim_type != "FACT":
+            local_observed = observed[event.start() : end]
+            if (
+                _CONDITIONAL.search(clause)
+                or _FUTURE.search(local)
+                or claim_type != "FACT"
+            ):
                 stage = 0
-            elif _COMPLETED.search(local):
+            elif _COMPLETED.search(local_observed):
                 stage = 3
-            elif _REALIZED.search(local) or _CURRENT_OBSERVATION.search(clause):
+            elif (
+                _REALIZED.search(local_observed)
+                or _CONFIRMED.search(local_observed)
+                or _CURRENT_OBSERVATION.search(observed)
+            ):
                 stage = 2
-            elif _FUTURE.search(clause):
+            elif _FUTURE.search(clause) or local != local_observed:
                 stage = 0
             else:
                 stage = 1

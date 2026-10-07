@@ -40,6 +40,19 @@ class Judgment(ClosedModel):
     anchors: list[SourceAnchor]
 
 
+class AnnotationProvenance(ClosedModel):
+    """Reviewer attestation, not a cryptographic proof of human authorship."""
+
+    origin: Literal["external_human_review", "model_generated"]
+    reference: str = Field(min_length=1)
+    reviewed_at: str = Field(min_length=1)
+    independent_of_judge: bool
+    source_presentation: Literal["original_sentences", "faithful_condensed_sources"] = (
+        "original_sentences"
+    )
+    anchor_origin: Literal["reviewer_offsets", "system_context_mapping"] = "reviewer_offsets"
+
+
 class AssessmentExpectation(ClosedModel):
     assessment_id: str
     decidable_axes: list[Literal["directness", "impact", "urgency"]]
@@ -53,6 +66,7 @@ class AnnotationSet(ClosedModel):
     judgments: list[Judgment]
     # Human expectations are not passed to production generation or judge inputs.
     assessments: list[AssessmentExpectation] = Field(default_factory=list)
+    provenance: AnnotationProvenance | None = None
 
 
 def export_packet(manifest: dict, state: dict) -> dict:
@@ -167,6 +181,11 @@ def _annotations(packet: dict, raw: dict, kind: str):
     annotation = AnnotationSet.model_validate(raw)
     require(annotation.kind == kind, "ANNOTATION_KIND_MISMATCH")
     require(annotation.packet_hash == packet["packetHash"], "ANNOTATION_PACKET_MISMATCH")
+    if annotation.provenance is not None:
+        require(
+            (annotation.provenance.origin == "external_human_review") == (kind == "human"),
+            "ANNOTATION_PROVENANCE_KIND_MISMATCH",
+        )
     units = {unit["unitId"]: unit for unit in packet["units"]}
     labels = {}
     for judgment in annotation.judgments:

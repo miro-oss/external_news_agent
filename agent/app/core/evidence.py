@@ -212,6 +212,7 @@ _COMPANY_ALIASES = {
     "TSMC": ("tsmc", "대만반도체"),
     "엔비디아": ("엔비디아", "nvidia"),
     "AMD": ("amd",),
+    "IBM": ("ibm", "아이비엠"),
     "인텔": ("인텔", "intel"),
     "마이크론": ("마이크론", "micron"),
     "브로드컴": ("브로드컴", "broadcom"),
