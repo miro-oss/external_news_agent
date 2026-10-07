@@ -26,7 +26,9 @@ from app.llm.report_insight_assessment import (
     source_span_choices,
     validate_draft,
 )
+from app.llm.report_insight_fact_index import build_fact_index, prompt_fact_index
 from app.llm.report_insight_fact_repair import fact_repair_guidance, fact_repair_kinds
+from app.llm.report_insight_fact_verification import fact_graph_mismatches, fact_index_mismatches
 from app.llm.report_insight_guard import (
     has_blanket_insufficient_headline,
     report_prose_mismatches,
@@ -44,7 +46,7 @@ from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
 from app.llm.report_insight_prefix import closed_assessment_prefix
 from app.llm.report_insight_reduce_repair import ReduceRepairContext, partial_reduce_repair
 from app.llm.report_insight_retrieval import retrieve_report_insight_evidence
-from app.llm.report_insight_source_facts import source_fact_hints, source_fact_mismatches
+from app.llm.report_insight_source_facts import source_fact_mismatches
 from app.llm.report_insight_synthesis_quality import (
     ReportSynthesisQualityValidationError,
     synthesis_evidence_frames,
@@ -69,7 +71,7 @@ from app.schemas.report_insight import (
 )
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 
-PROMPT_VERSION = "report-insight.ko.v28"
+PROMPT_VERSION = "report-insight.ko.v29"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -1513,33 +1515,19 @@ def _reduce_v4_prompt(request, validated, retrieved, allowed):
             audience: synthesis_evidence_frames(request, allowed[audience])
             for audience in request.audiences
         },
-        "sourceFactHints": {
-            audience: [
-                {
-                    "claimId": evidence.claim_id,
-                    "claim": source_fact_hints({evidence.claim_id: evidence.text}).get(
-                        evidence.claim_id
-                    ),
-                    "sentences": source_fact_hints(
-                        {str(sentence.index): sentence.text for sentence in evidence.sentences}
-                    ),
-                }
-                for evidence in retrieved[audience].evidence
-            ]
+        "sourceFactIndex": {
+            audience: prompt_fact_index(request, claim_ids=allowed[audience])
             for audience in request.audiences
         },
     }
-    for audience, hints in payload["sourceFactHints"].items():
-        payload["sourceFactHints"][audience] = [
-            hint for hint in hints if hint["claim"] or hint["sentences"]
-        ]
-    if not any(payload["sourceFactHints"].values()):
-        del payload["sourceFactHints"]
     return (
         "현재 단계는 REDUCE입니다. 각 관점의 검색 claim과 연결 sentence만 사실 근거입니다. "
         "decisionCandidates의 범주와 evidenceFrames는 판단 보조이며 사실 원문이 아닙니다. "
-        "sourceFactHints는 원문 위치에 결속된 일부 명시적 관계의 파싱 보조입니다. "
-        "미추출·불확실·잘린 항목을 근거 부재로 해석하지 말고 원문을 우선하세요. "
+        "sourceFactIndex는 MAP/REVIEW와 같은 원문 문장·factId·필드 연결을 사용합니다. "
+        "facts의 원문 위치와 claimType·발언자 attributedTo를 함께 읽고 "
+        "불확실한 연결은 uncertainty에 표시된 이유를 확인하세요. "
+        "파싱이 원문의 의미를 모두 검증하지는 않습니다. 미추출·불확실·잘린 항목을 "
+        "근거 부재로 해석하지 말고 원문을 우선하세요. "
         "같은 주체·대상·시점에 속한 수치와 사건 상태를 함께 유지하세요. "
         "원문의 주체, 사건, 계획·전망·실행 상태를 유지하고 투자 계획을 다른 회사의 확정 "
         "수주나 현재 성과로 옮기지 마세요. mechanism에는 원문 사건→업무 변수→판단을 "
@@ -2008,7 +1996,15 @@ def _validate_source_claims(request: ReportInsightRequest) -> None:
         sentences = {sentence.index: sentence.text for sentence in finding.sentences}
         for claim in finding.claims:
             source = "\n".join(sentences[index] for index in claim.evidence_sentence_ids)
-            if _report_factual_mismatches(claim.text, source):
+            if _report_factual_mismatches(
+                claim.text,
+                source,
+                relation_mismatches=fact_index_mismatches(
+                    claim.text,
+                    build_fact_index(request, [claim.id]),
+                    reference_date=finding.published_at,
+                ),
+            ):
                 raise AgentError(
                     status_code=422,
                     code="SCHEMA_VIOLATION",
@@ -2033,6 +2029,11 @@ def _eligible_report_request(request: ReportInsightRequest) -> ReportInsightRequ
             if not _report_factual_mismatches(
                 claim.text,
                 "\n".join(sentences[index] for index in claim.evidence_sentence_ids),
+                relation_mismatches=fact_index_mismatches(
+                    claim.text,
+                    build_fact_index(request, [claim.id]),
+                    reference_date=finding.published_at,
+                ),
             )
         ]
         eligible_sentence_ids = {index for claim in claims for index in claim.evidence_sentence_ids}
@@ -2387,12 +2388,24 @@ def _prose_validation_errors(
     source = "\n".join(evidence[ref] + "\n" + claims[ref].text for ref in refs)
     # Summaries remain lexical context, but cannot override raw-source bindings.
     binding_source = "\n".join(dict.fromkeys(evidence[ref] for ref in refs))
+    # Keep provenance and publication clocks through validation, using the same
+    # original-sentence index as MAP/REVIEW/REDUCE, with only cited claims.
+    fact_index = build_fact_index(request, refs) if request is not None else None
     for value in values:
         if _UNSUPPORTED_COMPARISON.search(value) and not _UNSUPPORTED_COMPARISON.search(source):
             errors.append(
                 ValueError("이전 보고서 기준선이 없어 신규성·기간 비교를 판정할 수 없습니다.")
             )
-        mismatches = _report_factual_mismatches(value, source, binding_source=binding_source)
+        relation_mismatches = (
+            fact_index_mismatches(
+                value, fact_index, reference_date=report_reference_date(request)
+            )
+            if fact_index is not None
+            else fact_graph_mismatches(value, list(dict.fromkeys(evidence[ref] for ref in refs)))
+        )
+        mismatches = _report_factual_mismatches(
+            value, source, binding_source=binding_source, relation_mismatches=relation_mismatches
+        )
         modality = modality_overreach(value, source)
         mismatches = report_prose_mismatches(
             value,
@@ -2403,7 +2416,13 @@ def _prose_validation_errors(
         )
         # Generic lexical exceptions cannot erase an explicit relational conflict.
         mismatches = list(
-            dict.fromkeys([*mismatches, *source_fact_mismatches(value, binding_source)])
+            dict.fromkeys(
+                [
+                    *mismatches,
+                    *source_fact_mismatches(value, binding_source),
+                    *relation_mismatches,
+                ]
+            )
         )
         possible_assertion = modality_overreach(value, "")
         if (
@@ -2486,7 +2505,11 @@ def _asserted_event_overreach(value: str, source: str) -> bool:
 
 
 def _report_factual_mismatches(
-    value: str, source: str, *, binding_source: str | None = None
+    value: str,
+    source: str,
+    *,
+    binding_source: str | None = None,
+    relation_mismatches: list[str] | None = None,
 ) -> list[str]:
     mismatches = factual_mismatches(value, source)
     modality = modality_overreach(value, source)
@@ -2507,6 +2530,13 @@ def _report_factual_mismatches(
                 *mismatches,
                 *source_fact_mismatches(
                     value, source if binding_source is None else binding_source
+                ),
+                *(
+                    relation_mismatches
+                    if relation_mismatches is not None
+                    else fact_graph_mismatches(
+                        value, [source if binding_source is None else binding_source]
+                    )
                 ),
             ]
         )

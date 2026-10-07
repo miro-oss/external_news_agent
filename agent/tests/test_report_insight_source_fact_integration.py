@@ -39,6 +39,8 @@ def test_unparsed_sources_do_not_add_empty_hints_or_remove_original_context():
     source = request(text="원문은 시스템의 구성 변경을 설명한다.")
     finding = framed(draft_prompt(source))["findings"][0]
     assert "sourceFactHints" not in finding
+    assert finding["sourceFactIndex"]["facts"] == []
+    assert finding["sourceFactIndex"]["uncertainty"]
     assert finding["sentences"][0]["text"] == source.findings[0].sentences[0].text
     assert finding["sourceQuoteChoices"]
 
@@ -50,9 +52,11 @@ def test_map_and_independent_review_share_original_bound_hints_and_keep_claim_ty
     original = source.model_dump_json(by_alias=True)
     for prompt in (draft_prompt(source), review_prompt(source)):
         item = framed(prompt)["findings"][0]
-        hints = item["sourceFactHints"]["sentences"]["0"]
-        assert hints["hintOnly"]
-        assert [(fact["subject"], fact["quantity"]) for fact in hints["facts"]] == [
+        hints = item["sourceFactIndex"]
+        assert hints["extractionScope"] == "partial_explicit_relations"
+        assert [
+            (fact["subjects"][0]["value"], fact["quantity"]["value"]) for fact in hints["facts"]
+        ] == [
             ("삼성전자", "20"),
             ("sk하이닉스", "10"),
         ]
