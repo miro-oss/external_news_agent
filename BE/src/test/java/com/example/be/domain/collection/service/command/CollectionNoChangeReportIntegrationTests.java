@@ -11,6 +11,7 @@ import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.RunItemStatus;
+import com.example.be.domain.collection.entity.RunStage;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.feed.FeedClient;
@@ -88,6 +89,7 @@ class CollectionNoChangeReportIntegrationTests {
     @MockitoBean private RobotsPolicyService robotsPolicyService;
     @MockitoBean private ReportNotificationAutomationService notificationAutomation;
     @MockitoBean private TopicKeywordStrategyOrchestrator keywordStrategyOrchestrator;
+    @MockitoBean private CollectionRunStageWriter stageWriter;
 
     private Topic topic;
     private Source source;
@@ -95,6 +97,9 @@ class CollectionNoChangeReportIntegrationTests {
 
     @BeforeEach
     void setUp() {
+        // Report fixtures stay uncommitted for rollback isolation. The real worker receives a
+        // committed run; independent stage commits are covered by CollectionRunStageWriterIntegrationTests.
+        when(stageWriter.updateStage(anyLong(), any(RunStage.class))).thenReturn(true);
         // These HBM fixtures test change/report history; relevance itself has separate gate tests.
         when(relevanceGate.assess(anyLong(), any(), anyList())).thenAnswer(invocation -> {
             List<TopicRelevanceGate.Candidate> candidates = invocation.getArgument(2);
