@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+
 import com.example.be.domain.analysis.agent.client.AgentClient;
 import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
@@ -39,8 +41,9 @@ class AgentWeeklyReportOrchestratorTest {
     private final AgentQuotaService quota = mock(AgentQuotaService.class);
     private final LlmPlanService plans = mock(LlmPlanService.class);
     private final WeeklyReportGenerator fallback = new WeeklyReportGenerator();
+    private final FeedbackLearningService feedbackLearning = mock(FeedbackLearningService.class);
     private final AgentWeeklyReportOrchestrator subject = new AgentWeeklyReportOrchestrator(
-            properties, client, recorder, fallback, quota, plans);
+            properties, client, recorder, fallback, quota, plans, feedbackLearning);
     private final QuotaReservation reservation = new QuotaReservation(
             1L, null, "weekly-report:77", AgentTask.REPORT, AgentPlan.FREE, BigDecimal.ONE);
 
@@ -49,6 +52,13 @@ class AgentWeeklyReportOrchestratorTest {
         properties.setEnabled(true);
         when(plans.resolveRunPlan(null)).thenReturn(AgentPlan.FREE);
         when(quota.reserve(null, "weekly-report:77", AgentTask.REPORT, AgentPlan.FREE)).thenReturn(reservation);
+    }
+
+    @Test void feedbackReadFailureFallsBackBeforeReservingPaidWork() {
+        when(feedbackLearning.forSnapshots(anyList(), any(), any()))
+                .thenThrow(new IllegalStateException("unavailable"));
+        assertEquals(ReportStatus.FALLBACK, subject.generate(77L, input(), LocalDateTime.now()).status());
+        verifyNoInteractions(client, quota, recorder);
     }
 
     @Test

@@ -4,6 +4,7 @@ from typing import Annotated, Literal, get_args
 from pydantic import Field, model_validator
 
 from app.schemas.common import AgentModel
+from app.schemas.feedback_learning import FeedbackLearningRequest
 
 Plan = Literal["FREE", "PAID"]
 Groundedness = Literal["grounded", "weak", "ungrounded"]
@@ -32,6 +33,7 @@ class ArticleInput(AgentModel):
 
 
 class TopicInput(AgentModel):
+    topic_id: int | None = Field(default=None, gt=0)
     name: str = Field(min_length=1, max_length=200)
     query_text: str | None = Field(default=None, max_length=500)
     required_keywords: list[str] = Field(default_factory=list)
@@ -215,7 +217,7 @@ class PreviousFinding(AgentModel):
     cross_source: CrossSource
 
 
-class AnalyzeRequest(AgentModel):
+class AnalyzeRequest(FeedbackLearningRequest):
     idempotency_key: str = Field(min_length=1, max_length=200)
     plan: Plan
     article: ArticleInput
@@ -228,6 +230,10 @@ class AnalyzeRequest(AgentModel):
 
     @model_validator(mode="after")
     def validate_request(self) -> "AnalyzeRequest":
+        self.validate_feedback_scope(
+            {self.topic.topic_id} if self.topic.topic_id is not None else set(),
+            categories={"SUMMARY_ERROR", "OTHER"},
+        )
         member_ids = [member.id for member in self.issue_members]
         if len(member_ids) != len(set(member_ids)):
             raise ValueError("issueMembers의 기사 ID는 중복될 수 없습니다.")

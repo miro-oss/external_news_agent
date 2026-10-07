@@ -5,6 +5,7 @@ from pydantic import Field, model_validator
 
 from app.schemas.analyze import Plan
 from app.schemas.common import AgentModel
+from app.schemas.feedback_learning import FeedbackLearningRequest
 from app.schemas.report import NonEmptyString
 
 PositiveId = Annotated[int, Field(gt=0)]
@@ -56,7 +57,7 @@ class DailyReportSnapshot(AgentModel):
         return self
 
 
-class WeeklyReportRequest(AgentModel):
+class WeeklyReportRequest(FeedbackLearningRequest):
     idempotency_key: str = Field(min_length=1, max_length=200)
     plan: Plan
     report_id: PositiveId
@@ -70,6 +71,7 @@ class WeeklyReportRequest(AgentModel):
 
     @model_validator(mode="after")
     def validate_week(self) -> "WeeklyReportRequest":
+        self.validate_feedback_scope({self.topic_id} if self.topic_id is not None else set())
         if (self.topic_id is None) != (self.topic_name is None):
             raise ValueError("주제별 주간 보고서는 topicId와 topicName이 함께 필요합니다.")
         if self.topic_id is None:

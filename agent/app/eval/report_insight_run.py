@@ -22,7 +22,7 @@ from openai import OpenAI
 
 from app.core.config import Settings
 from app.core.errors import AgentError
-from app.eval.report_insight_corpus import DEFAULT_DATASET, load_corpus
+from app.eval.report_insight_corpus import DEFAULT_DATASET, load_corpus, request_snapshot
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.openai_provider import OpenAIAnalyzeProvider
 from app.llm.report_insight_service import (
@@ -225,11 +225,11 @@ def prepare(
     corpus = load_corpus(dataset)
     jobs = []
     for index, case in enumerate(corpus.cases):
-        source = case.request.model_dump(mode="json", by_alias=True)
+        source = request_snapshot(case.request)
         source.update(plan=PLAN, idempotencyKey=f"eval:{index + 1}:{file_digest(dataset)[:16]}")
         request = ReportInsightRequest.model_validate(source)
         require(len(request.audiences) == 1, "SINGLE_AUDIENCE_REQUIRED")
-        payload = request.model_dump(mode="json", by_alias=True)
+        payload = request_snapshot(request)
         variants = (
             VARIANTS if int(digest(case.case_id)[0], 16) % 2 == 0 else tuple(reversed(VARIANTS))
         )

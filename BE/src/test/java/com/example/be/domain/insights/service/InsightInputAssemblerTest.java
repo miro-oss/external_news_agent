@@ -1,5 +1,9 @@
 package com.example.be.domain.insights.service;
 
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
+
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
 import com.example.be.domain.analysis.entity.AnalysisSource;
@@ -43,6 +47,7 @@ class InsightInputAssemblerTest {
     private IssueArticleRepository issueArticleRepository;
     private FindingRepository findingRepository;
     private InsightInputAssembler assembler;
+    private FeedbackLearningService feedbackLearning;
 
     @BeforeEach
     void setUp() {
@@ -50,13 +55,41 @@ class InsightInputAssemblerTest {
         issueRepository = mock(NewsIssueRepository.class);
         issueArticleRepository = mock(IssueArticleRepository.class);
         findingRepository = mock(FindingRepository.class);
+        feedbackLearning = mock(FeedbackLearningService.class);
         assembler = new InsightInputAssembler(
                 properties,
                 issueRepository,
                 issueArticleRepository,
                 findingRepository,
                 new ObjectMapper(),
-                new InsightEntityNormalizer());
+                new InsightEntityNormalizer(), feedbackLearning);
+    }
+
+    @Test
+    void newReviewedExamplesInvalidateInsightHashWithoutChangingCurrentEvidence() {
+        var topic = Topic.builder().id(3L).name("HBM").build();
+        var issue = NewsIssue.builder().id(88L).topic(topic).build();
+        var article = Article.builder().id(10L).title("기사").build();
+        var finding = Finding.builder().id(501L).article(article).run(CollectionRun.builder().id(42L).build())
+                .summary("현재 요약").analysisSource(AnalysisSource.LLM).entities(FindingEntities.empty())
+                .sections(List.of(new FindingSection(0, "현재 근거"))).build();
+        var example = new AgentFeedbackExample(12L, 3L, "SUMMARY_ERROR", "과거 사건", "과거 요약",
+                "추정과 확정을 구분합니다.", List.of(new AgentFeedbackExample.Evidence(11L, "추정했다")));
+        when(issueRepository.findById(88L)).thenReturn(Optional.of(issue));
+        when(issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(88L))
+                .thenReturn(List.of(IssueArticle.builder().issue(issue).article(article).build()));
+        when(findingRepository.findLatestByArticleIds(List.of(10L))).thenReturn(List.of(finding));
+        when(feedbackLearning.forTopic(eq(topic), any(), any())).thenReturn(List.of(), List.of(example), List.of(example));
+
+        var before = assembler.assemble(88L);
+        var after = assembler.assemble(88L);
+        var unchanged = assembler.assemble(88L);
+
+        org.junit.jupiter.api.Assertions.assertNotEquals(before.inputHash(), after.inputHash());
+        assertEquals(after.inputHash(), unchanged.inputHash());
+        assertEquals(before.findings(), after.findings());
+        assertEquals(3L, after.topic().topicId());
+        assertEquals(List.of(example), after.feedbackExamples());
     }
 
     @Test

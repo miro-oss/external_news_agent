@@ -1,5 +1,9 @@
 package com.example.be.domain.analysis.agent.service;
 
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
+
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+
 import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.relevance.TopicRelevanceTestSupport;
 import com.example.be.domain.analysis.agent.client.AgentClient;
@@ -37,6 +41,8 @@ import com.example.be.domain.issues.entity.IssueArticleRole;
 import com.example.be.domain.issues.entity.NewsIssue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
@@ -51,13 +57,17 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class AgentReportOrchestratorTest {
     private final TopicRelevancePolicy relevancePolicy = TopicRelevanceTestSupport.legacyPolicy();
 
+    private final FeedbackLearningService feedbackLearning = mock(FeedbackLearningService.class);
+    private final com.example.be.domain.collection.repository.CollectionRunItemRepository runItems = mock(com.example.be.domain.collection.repository.CollectionRunItemRepository.class);
     private final AgentProperties properties = enabledProperties();
     private final AgentClient client = mock(AgentClient.class);
     private final AgentRunRecorder recorder = mock(AgentRunRecorder.class);
@@ -73,12 +83,69 @@ class AgentReportOrchestratorTest {
             new AgentReportOrchestrator(
                     properties, client, recorder, fallback, observationRepository,
                     quotaService, planService, resultWriter, issueArticleRepository,
-                    com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy);
+                    com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy, feedbackLearning, runItems);
 
     @BeforeEach
     void reserveQuota() {
         when(quotaService.reserve(42L, "run:42:report", AgentTask.REPORT, AgentPlan.FREE))
                 .thenReturn(reservation);
+    }
+
+    @Test
+    void loadsOnlySelectedFrozenTopicExamplesAndTransmitsSharedTopicIds() {
+        var run = run();
+        var relevant = CollectionRunItem.builder().topic(run.getItems().getFirst().getTopic()).build();
+        relevant.captureTopicSnapshot();
+        var unrelated = CollectionRunItem.builder().topic(Topic.builder().id(99L).name("다른 주제").build()).build();
+        unrelated.captureTopicSnapshot();
+        var finding = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "관련 요약");
+        var example = new AgentFeedbackExample(12L, 3L, "SUMMARY_ERROR", "과거 사건", "잘못된 요약",
+                "추정과 확정을 구분합니다.", List.of(new AgentFeedbackExample.Evidence(11L, "추정했다")));
+        when(runItems.findExecutionItemsByRunId(42L)).thenReturn(List.of(relevant, unrelated));
+        when(relevancePolicy.relevantTopicIdsByFinding(List.of(finding))).thenReturn(java.util.Map.of(501L, java.util.Set.of(3L, 8L)));
+        when(feedbackLearning.forSnapshots(eq(List.of(relevant.getTopicSnapshot())), eq(run.getStartedAt()), any()))
+                .thenReturn(List.of(example));
+        when(client.report(any())).thenReturn(response(List.of(501L)));
+
+        orchestrator.generate(run, List.of(finding), LocalDateTime.now());
+
+        var request = ArgumentCaptor.forClass(AgentReportRequest.class);
+        verify(client).report(request.capture());
+        assertEquals(List.of(example), request.getValue().feedbackExamples());
+        assertEquals(List.of(3L, 8L), request.getValue().findings().getFirst().topicIds());
+        var order = inOrder(runItems, feedbackLearning, quotaService, client);
+        order.verify(runItems).findExecutionItemsByRunId(42L);
+        order.verify(feedbackLearning).forSnapshots(eq(List.of(relevant.getTopicSnapshot())), eq(run.getStartedAt()), any());
+        order.verify(quotaService).reserve(42L, "run:42:report", AgentTask.REPORT, AgentPlan.FREE);
+        order.verify(client).report(any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void learningReadFailureUsesFallbackWithoutReservingQuota(boolean daily, boolean feedbackLookup) {
+        var run = run(AgentPlan.PAID);
+        var finding = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "검증된 보고서 근거");
+        org.springframework.test.util.ReflectionTestUtils.setField(finding, "run", run);
+        var generatedAt = LocalDateTime.of(2026, 8, 22, 0, 0);
+        var date = generatedAt.toLocalDate().minusDays(1);
+        var stats = com.example.be.domain.reports.service.ReportSourceStats.empty();
+        var failure = new org.springframework.dao.DataAccessResourceFailureException("test database unavailable");
+        if (feedbackLookup) {
+            when(feedbackLearning.forSnapshots(anyList(), any(), any())).thenThrow(failure);
+        } else {
+            when(runItems.findExecutionItemsByRunId(42L)).thenThrow(failure);
+        }
+
+        if (daily) {
+            orchestrator.generateDaily(77L, date, List.of(finding), stats, generatedAt);
+            verify(fallback).generateDaily(List.of(finding), date, stats);
+        } else {
+            orchestrator.generate(run, List.of(finding), generatedAt);
+            verify(fallback).generate(eq(List.of(finding)), eq(generatedAt), any());
+        }
+
+        verifyNoInteractions(quotaService, planService, client, recorder);
+        if (!feedbackLookup) verifyNoInteractions(feedbackLearning);
     }
 
     @Test
@@ -202,7 +269,7 @@ class AgentReportOrchestratorTest {
         AgentReportOrchestrator disabledOrchestrator = new AgentReportOrchestrator(
                 disabled, client, recorder, fallback, observationRepository,
                 quotaService, planService, resultWriter, issueArticleRepository,
-                com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy);
+                com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy, feedbackLearning, runItems);
         Finding representative = finding(501L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "대표 요약");
         Finding member = finding(502L, AnalysisSource.LLM, FetchStatus.FULLTEXT, "멤버 요약");
         NewsIssue issue = NewsIssue.builder().id(88L).build();
@@ -248,7 +315,7 @@ class AgentReportOrchestratorTest {
                 new AgentReportOrchestrator(
                         disabled, client, recorder, fallback, observationRepository,
                         quotaService, planService, resultWriter, issueArticleRepository,
-                        com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy);
+                        com.example.be.domain.analysis.service.SensitivityCalculator.defaults(), relevancePolicy, feedbackLearning, runItems);
         Finding stub = finding(502L, AnalysisSource.STUB, FetchStatus.FULLTEXT, "STUB 요약");
         ReportDocument fallbackDocument = new ReportDocument("fallback", "# fallback", "safe");
         when(fallback.generate(eq(List.of(stub)), any(), any())).thenReturn(fallbackDocument);

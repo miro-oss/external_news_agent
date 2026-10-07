@@ -1,5 +1,10 @@
 package com.example.be.domain.analysis.service;
 
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
+import com.example.be.domain.feedback.model.FeedbackModels.Category;
+
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.config.AnalysisSelectionProperties;
 import com.example.be.domain.analysis.relevance.TopicRelevanceGate;
@@ -53,6 +58,7 @@ class ArticleAnalysisPipelineTest {
     private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
     private final ArticleAnalysisOrchestrator orchestrator = mock(ArticleAnalysisOrchestrator.class);
     private final FindingReuseCache reuseCache = mock(FindingReuseCache.class);
+    private final FeedbackLearningService feedbackLearning = mock(FeedbackLearningService.class);
     private final TopicRelevanceGate relevanceGate = mock(TopicRelevanceGate.class);
     private final FindingWriter findingWriter = mock(FindingWriter.class);
     private final AnalysisSelectionProperties selectionProperties = new AnalysisSelectionProperties();
@@ -61,7 +67,7 @@ class ArticleAnalysisPipelineTest {
             new ArticleAnalysisPipeline(
                     runArticleRepository, runRepository, runItemRepository, issueArticleRepository,
                     orchestrator, reuseCache, findingWriter, selectionProperties,
-                    new TopicFitScorer((language, keywords) -> topicWeights), relevanceGate);
+                    new TopicFitScorer((language, keywords) -> topicWeights), relevanceGate, feedbackLearning);
 
     @BeforeEach
     void loadRunPlan() {
@@ -83,6 +89,30 @@ class ArticleAnalysisPipelineTest {
                             FindingReuseCache.inputHash(context), Optional.empty())));
             return Map.copyOf(lookups);
         });
+    }
+
+    @Test
+    void freezesReviewedExamplesAtRunStartForBothCacheAndProvider() {
+        var started = java.time.LocalDateTime.of(2026, 10, 7, 9, 0);
+        var topic = Topic.builder().id(7L).name("HBM").build();
+        var article = Article.builder().id(10L).title("기사").topic(topic).body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
+        var example = new AgentFeedbackExample(12L, 7L, "SUMMARY_ERROR", "과거 사건", "과거 요약",
+                "추정과 확정을 구분해야 합니다.", List.of(new AgentFeedbackExample.Evidence(11L, "추정했다")));
+        when(runRepository.findById(42L)).thenReturn(Optional.of(CollectionRun.builder().id(42L)
+                .startedAt(started).llmPlan(AgentPlan.FREE).build()));
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
+                .thenReturn(List.of(observation(article, ChangeType.NEW)));
+        when(feedbackLearning.forTopic(topic, started, Set.of(Category.SUMMARY_ERROR, Category.OTHER)))
+                .thenReturn(List.of(example));
+        when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
+
+        pipeline.analyze(42L);
+
+        var provider = ArgumentCaptor.forClass(AnalysisContext.class);
+        verify(orchestrator).analyze(provider.capture());
+        assertEquals(List.of(example), provider.getValue().feedbackExamples());
+        verify(reuseCache).lookupContexts(List.of(provider.getValue()), AgentPlan.FREE);
+        verify(feedbackLearning).forTopic(topic, started, Set.of(Category.SUMMARY_ERROR, Category.OTHER));
     }
 
     @Test

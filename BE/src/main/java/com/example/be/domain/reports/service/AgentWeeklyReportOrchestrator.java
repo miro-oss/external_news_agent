@@ -5,6 +5,9 @@ import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
 import com.example.be.domain.analysis.agent.dto.AgentWeeklyReportRequest;
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+import com.example.be.domain.feedback.model.FeedbackModels.Category;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
 import com.example.be.domain.analysis.agent.entity.AgentTimeoutPhase;
@@ -42,6 +45,7 @@ public class AgentWeeklyReportOrchestrator {
     private final WeeklyReportGenerator fallbackGenerator;
     private final AgentQuotaService quotaService;
     private final LlmPlanService planService;
+    private final FeedbackLearningService feedbackLearning;
 
     public ReportDocument generate(Long reportId, WeeklyReportInput input, LocalDateTime generatedAt) {
         if (!properties.isEnabled() || input.sources().stream().noneMatch(source ->
@@ -49,10 +53,25 @@ public class AgentWeeklyReportOrchestrator {
                         || !source.structuredContent().watchItems().isEmpty()))) {
             return fallbackGenerator.generate(input);
         }
+        List<AgentFeedbackExample> examples;
+        try {
+            // Only topic-specific weeks have an unambiguous learning scope in this wire contract.
+            var scopes = input.topicId() == null ? List.<com.example.be.domain.collection.entity.CollectionTopicSnapshot>of()
+                    : input.sources().stream().map(WeeklyReportInput.DailySource::evidenceSnapshot)
+                            .filter(java.util.Objects::nonNull).flatMap(snapshot -> snapshot.scopes().stream())
+                            .flatMap(scope -> scope.topics().stream()).filter(topic -> input.topicId().equals(topic.topicId()))
+                            .distinct().toList();
+            examples = feedbackLearning.forSnapshots(scopes, generatedAt,
+                    Set.of(Category.TOPIC_MISMATCH, Category.SUMMARY_ERROR, Category.WRONG_CLUSTER, Category.OTHER));
+        } catch (RuntimeException error) {
+            log.warn("주간 보고서 피드백 입력을 불러오지 못해 저장된 내용의 fallback을 사용합니다. reportId={}", reportId, error);
+            return fallbackGenerator.generate(input);
+        }
+        // Build learning input before reserving paid work, so a database read failure cannot leak a hold.
         QuotaReservation reservation = reserve(reportId);
         if (reservation == null) return fallbackGenerator.generate(input);
         AgentWeeklyReportRequest request = AgentWeeklyReportRequest.from(
-                reservation.idempotencyKey(), reservation.plan(), reportId, input);
+                reservation.idempotencyKey(), reservation.plan(), reportId, input, examples);
         LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
         AgentReportResponse response = null;
         try {

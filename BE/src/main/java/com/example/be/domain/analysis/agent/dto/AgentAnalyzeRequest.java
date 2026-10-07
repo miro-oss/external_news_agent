@@ -13,8 +13,19 @@ public record AgentAnalyzeRequest(
         List<IssueMemberPayload> issueMembers,
         TopicPayload topic,
         PreviousFindingPayload previousFinding,
-        boolean selfCritique
+        boolean selfCritique,
+        List<AgentFeedbackExample> feedbackExamples
 ) {
+
+    public AgentAnalyzeRequest {
+        feedbackExamples = feedbackExamples == null ? List.of() : List.copyOf(feedbackExamples);
+    }
+
+    public AgentAnalyzeRequest(String idempotencyKey, AgentPlan plan, ArticlePayload article,
+                               List<IssueMemberPayload> issueMembers, TopicPayload topic,
+                               PreviousFindingPayload previousFinding, boolean selfCritique) {
+        this(idempotencyKey, plan, article, issueMembers, topic, previousFinding, selfCritique, List.of());
+    }
 
     public AgentAnalyzeRequest(String idempotencyKey,
                                AgentPlan plan,
@@ -66,8 +77,13 @@ public record AgentAnalyzeRequest(
             String queryText,
             List<String> requiredKeywords,
             List<String> optionalKeywords,
-            List<String> excludedKeywords
+            List<String> excludedKeywords,
+            Long topicId
     ) {
+        public TopicPayload(String name, String queryText, List<String> requiredKeywords,
+                            List<String> optionalKeywords, List<String> excludedKeywords) {
+            this(name, queryText, requiredKeywords, optionalKeywords, excludedKeywords, null);
+        }
     }
 
     public record PreviousFindingPayload(

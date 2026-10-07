@@ -111,7 +111,7 @@ public class ReportInsightService {
             throw inflight();
         }
         var request = new AgentReportInsightRequest(reservation.idempotencyKey(), plan, List.of(audience.name()),
-                snapshot.report(), snapshot.findings());
+                snapshot.report(), snapshot.findings(), snapshot.feedbackExamples());
         var audit = context(snapshot, 1, 0, true);
         LocalDateTime startedAt = now();
         AgentReportInsightResponse response = null;
