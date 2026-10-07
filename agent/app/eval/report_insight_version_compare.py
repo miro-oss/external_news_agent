@@ -237,6 +237,10 @@ def prepare(
     max_cost_usd: Decimal = Decimal("1.00"),
     max_calls: int = 144,
 ) -> dict:
+    # Workers import this driver against frozen application packages, which may
+    # predate learning metadata. Only the current coordinator prepares snapshots.
+    from app.eval.report_insight_corpus import request_snapshot
+
     expected_policy = _comparison_policy(comparison_profile)
     if baseline_commit is None:
         baseline_commit = expected_policy["baselineCommit"]
@@ -260,11 +264,9 @@ def prepare(
     )
     jobs = []
     for case in corpus.cases:
-        request = case.request.model_dump(mode="json", by_alias=True)
+        request = request_snapshot(case.request)
         request.update(plan="FREE", idempotencyKey=f"version-eval:{ledger.digest(request)[:24]}")
-        request = ReportInsightRequest.model_validate(request).model_dump(
-            mode="json", by_alias=True
-        )
+        request = request_snapshot(ReportInsightRequest.model_validate(request))
         order = VERSIONS if int(ledger.digest(case.case_id)[0], 16) % 2 == 0 else VERSIONS[::-1]
         for name in order:
             jobs.append(
