@@ -126,6 +126,12 @@ _UNREAL_SUPPLY_CONTEXT = re.compile(
     r"(?:내년|다음|향후|앞으로|가정|다면|경우|겠|부인|"
     r"(?:할|될|낼|갈|올|줄|볼|일|을)\s*것)"
 )
+# In "체결을 검토한다", the event is the object of review, not a
+# confirmation. Keep this suffix local so another asserted event still counts.
+_NOMINAL_EVENT_REVIEW_SUFFIX = re.compile(
+    r"(?:을|를)\s*(?:검토|논의|협의|고려|계획|준비|추진)"
+    r"(?=$|[^가-힣]|[하한할했함합해중])"
+)
 _MODALITY_LADDER = (
     (
         6,
@@ -546,7 +552,20 @@ def _modality_stage(value: str) -> tuple[int, str]:
             clause_stages.append((0, "부정 표현"))
             continue
         for stage, label, pattern in _MODALITY_LADDER:
-            match = pattern.search(searchable)
+            if stage == 4:
+                # The token-normalized copy strips 을/를 and would recreate
+                # a false confirmation after the original match was skipped.
+                # Inspect every original match, preserving later assertions.
+                match = next(
+                    (
+                        candidate
+                        for candidate in pattern.finditer(clause)
+                        if not _NOMINAL_EVENT_REVIEW_SUFFIX.match(clause[candidate.end() :])
+                    ),
+                    None,
+                )
+            else:
+                match = pattern.search(searchable)
             if stage == 5 and match is None and not _UNREAL_SUPPLY_CONTEXT.search(clause):
                 # A past-dated connective followed by a past result describes
                 # actual supply. Bare/future '공급하며' remains non-executed.

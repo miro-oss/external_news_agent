@@ -53,6 +53,7 @@ from app.llm.report_insight_fact_repair import (
 from app.llm.report_insight_fact_verification import fact_graph_mismatches, fact_index_mismatches
 from app.llm.report_insight_guard import _HYPOTHETICAL_SUFFIX as _HYPOTHETICAL_EVENT_SUFFIX
 from app.llm.report_insight_guard import (
+    event_is_unasserted,
     has_blanket_insufficient_headline,
     report_prose_mismatches,
     report_reference_date,
@@ -338,12 +339,6 @@ _ASSERTED_EVENTS = (
             re.IGNORECASE,
         ),
     ),
-)
-_UNREPORTED_PRODUCTION_EXPANSION_SUFFIX = re.compile(
-    r"\s+생산\s*증설(?:은|이)\s+"
-    r"(?:(?:원문|기사|자료)(?:에|에는|에서)\s+)?"
-    r"명시(?:되지|되어\s*있지)\s*않(?:는다|았다|다)"
-    r"(?=\s*(?:[.!?;。]|$))"
 )
 logger = logging.getLogger(__name__)
 MAP_INSTRUCTION = LEGACY_SYSTEM_INSTRUCTION + (
@@ -3365,11 +3360,7 @@ def _asserted_event_stage(value: str, *, include_hypothetical: bool = False) -> 
         for match in pattern.finditer(value):
             suffix = value[match.end() :]
             prefix = value[: match.start()]
-            # "확정된 생산 증설은 명시되지 않는다" describes a missing
-            # source statement, not an executed event or its actual negation.
-            # Keep this recorded case literal: absence of an expansion's
-            # subsequent schedule, amount or effect still presupposes the event.
-            if match.group() == "확정된" and _UNREPORTED_PRODUCTION_EXPANSION_SUFFIX.match(suffix):
+            if event_is_unasserted(value, match):
                 continue
             if not include_hypothetical and (
                 _HYPOTHETICAL_EVENT_SUFFIX.match(suffix)

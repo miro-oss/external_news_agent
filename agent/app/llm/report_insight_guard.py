@@ -170,7 +170,23 @@ _HYPOTHETICAL_SUFFIX = re.compile(
 # Inspect only the immediately attached conditional ending; a condition elsewhere
 # in the sentence cannot hide an independently asserted contract.
 _NOMINAL_CONTRACT_HYPOTHETICAL_SUFFIX = re.compile(
-    r"(?:되|하)면(?![가-힣])|(?:될|할|되는|하는)\s*(?:경우|때)"
+    r"(?:되|하)면(?![가-힣])|(?:될|할|되는|하는)\s*(?:경우|때)|"
+    r"\s*여부(?:를\s*(?:확인|점검|검토)(?:한다|해야\s*한다|할\s*필요가\s*있다))?"
+    r"(?=\s*(?:[,.!?;。]|$))"
+)
+_CHECKED_DOCUMENT = r"(?:계약서|서면\s*약정|설계|승인|조달\s*조건)"
+_CHECKED_DOCUMENTS = _CHECKED_DOCUMENT + rf"(?:\s*(?:·|와|과|나|또는)\s*{_CHECKED_DOCUMENT}){{0,3}}"
+_UNASSERTED_DOCUMENT_SUFFIX = re.compile(
+    rf"\s+{_CHECKED_DOCUMENTS}\s*(?:등)?(?:의)?\s*(?:"
+    r"존재(?:는|가)?\s+명시(?:되지|되어\s*있지)\s*않(?:다|는다|았다|습니다)|"
+    r"(?:존재\s*여부(?:의)?\s*)?(?:추가\s*)?확인(?:이|은)?\s*필요(?:하다|합니다)"
+    r")(?=\s*(?:[.!?;。]|$))"
+)
+_UNREPORTED_PRODUCTION_EXPANSION_SUFFIX = re.compile(
+    r"\s+생산\s*증설(?:은|이)\s+"
+    r"(?:(?:원문|기사|자료)(?:에|에는|에서)\s+)?"
+    r"명시(?:되지|되어\s*있지)\s*않(?:는다|았다|다)"
+    r"(?=\s*(?:[.!?;。]|$))"
 )
 # "계약 사실" alone is an asserted-state cue, but its immediately attached
 # reporting predicate can explicitly leave execution unknown. Match only this
@@ -359,6 +375,8 @@ def factual_states(value: str, *, conditional: bool = False) -> dict[str, set[bo
                 continue
             if name == "contract" and _unreported_contract_fact(match, value):
                 continue
+            if event_is_unasserted(value, match):
+                continue
             suffix = value[match.end() :]
             if _HYPOTHETICAL_SUFFIX.match(suffix) or (
                 name == "contract"
@@ -383,7 +401,33 @@ def factual_states(value: str, *, conditional: bool = False) -> dict[str, set[bo
 
 def has_asserted_event(value: str) -> bool:
     return any(
-        not _HYPOTHETICAL_SUFFIX.match(value[match.end() :]) for match in _ASSERTION.finditer(value)
+        not _HYPOTHETICAL_SUFFIX.match(value[match.end() :])
+        and not event_is_unasserted(value, match)
+        for match in _ASSERTION.finditer(value)
+    )
+
+
+def event_is_unasserted(value: str, match: re.Match) -> bool:
+    """Recognize a local existence check, never absence elsewhere in the field.
+
+    A contract's amount/schedule remains a presupposition of that contract;
+    only the document's existence or required confirmation is left open here.
+    """
+    if match[0] != "확정된":
+        return False
+    prefix = _CONTRACT_SENTENCE_BREAK.split(value[: match.start()])[-1]
+    if re.search(r"(?:이미|실제로)\s*$", prefix):
+        return False
+    suffix = value[match.end() :]
+    if _UNASSERTED_DOCUMENT_SUFFIX.match(suffix) or (
+        _UNREPORTED_PRODUCTION_EXPANSION_SUFFIX.match(suffix)
+    ):
+        return True
+    # "...확인되어야 업무로 확정된다" classifies a work connection after
+    # verification; it does not claim an underlying event has been finalized.
+    return bool(
+        re.search(r"확인(?:되어야|돼야)[^.!?;。\n]{0,60}업무로\s*$", prefix)
+        and re.match(r"다(?=\s*(?:[.!?;。]|$))", suffix)
     )
 
 
