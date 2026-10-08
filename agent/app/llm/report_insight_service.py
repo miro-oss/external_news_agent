@@ -305,6 +305,7 @@ LEGACY_SYSTEM_INSTRUCTION = "\n\n".join(
 _INVESTMENT_ADVICE = re.compile(
     r"(?:매수|매도|목표가(?:를|는|의)?\s*(?:[0-9]|상향|하향|인상|인하|조정|변경|추천|제시|전망|높|낮))"
 )
+_INVESTMENT_ADVICE_MESSAGE = "MARKET_INVESTOR는 투자 자문 표현을 포함할 수 없습니다."
 _UNSUPPORTED_COMPARISON = re.compile(
     r"(?:전주\s*(?:대비|보다)|지난주\s*(?:대비|보다)|지난\s*보고서|이전\s*보고서|"
     r"직전\s*보고서|신규\s*(?:변화|진입)|처음으로|새롭게\s*(?:확인|부각))"
@@ -1304,7 +1305,7 @@ def _reduce_repair_diagnostics(response, request, allowed, *, native_synthesis=N
                     record(
                         f"{audience}.{field}",
                         refs,
-                        "MARKET_INVESTOR는 투자 자문 표현을 포함할 수 없습니다.",
+                        _INVESTMENT_ADVICE_MESSAGE,
                         ("report_synthesis_invalid",),
                     )
         if headline_refs and has_blanket_insufficient_headline(insight.headline):
@@ -2395,6 +2396,8 @@ def _report_insight_repair_call(prompt, schema, raw, error, validate):
 def _repair_action_message(
     message: str, kinds: tuple[str, ...], *, fact_kinds: tuple[str, ...] = ()
 ) -> str:
+    if message == _INVESTMENT_ADVICE_MESSAGE and "report_expression_policy" in kinds:
+        return message
     if _PROSE_FACT_KINDS.intersection(kinds):
         generic = (
             "report_fact_mismatch: 선택 근거가 이 필드의 사실값을 지원하지 않습니다. "
@@ -2997,7 +3000,7 @@ def _assessment_fact_repair_kinds(error, field):
     )
 
 
-def _assessment_prose_errors(assessment, native, refs, evidence, claims, request):
+def _assessment_prose_errors(assessment, native, refs, evidence, claims, request, *, audience=None):
     """Preserve native assertion/assumption boundaries through public rendering.
 
     Only an exact server-authenticated projection may supply field semantics.
@@ -3005,13 +3008,21 @@ def _assessment_prose_errors(assessment, native, refs, evidence, claims, request
     Citation/entity/number guards still apply to assumptions; work and native
     decision guards have already checked their concrete prerequisites.
     """
-    if native is None or project_public_assessment(native) != assessment:
-        return [
-            ("reason", error)
-            for error in _prose_validation_errors(
-                [assessment.reason], refs, evidence, claims, request=request
+
+    def field_errors(value, *, conditional=False):
+        errors = _prose_validation_errors(
+            [value], refs, evidence, claims, conditional=conditional, request=request
+        )
+        if audience == "MARKET_INVESTOR" and _INVESTMENT_ADVICE.search(value):
+            errors.append(
+                OutputValidationError(
+                    _INVESTMENT_ADVICE_MESSAGE, error_kinds=("report_expression_policy",)
+                )
             )
-        ]
+        return errors
+
+    if native is None or project_public_assessment(native) != assessment:
+        return [("reason", error) for error in field_errors(assessment.reason)]
     catalog = build_fact_text_catalog(request, refs)
     reason = split_rendered_prose(native.reason, catalog, refs).interpretation
     condition = (
@@ -3030,9 +3041,7 @@ def _assessment_prose_errors(assessment, native, refs, evidence, claims, request
             ),
         )
         if value is not None
-        for error in _prose_validation_errors(
-            [value], refs, evidence, claims, conditional=conditional, request=request
-        )
+        for error in field_errors(value, conditional=conditional)
     ]
     # Each native field keeps its own semantic kind and exact validated-field
     # coordinate space. Do not collapse contradictions and unsupported prose.
@@ -3101,6 +3110,7 @@ def _validated_output(
                     evidence,
                     claims,
                     request,
+                    audience=insight.audience,
                 )
             )
             try:
@@ -3214,9 +3224,11 @@ def _validated_output(
             [semantic_insight.headline], list(claims), evidence, claims, request=request
         )
         if insight.audience == "MARKET_INVESTOR" and _INVESTMENT_ADVICE.search(
-            insight.model_dump_json()
+            # Assessment reason/condition were checked with their authenticated
+            # native boundaries above; source quotes are not model advice.
+            semantic_insight.model_dump_json(exclude={"assessments"})
         ):
-            raise ValueError("MARKET_INVESTOR는 투자 자문 표현을 포함할 수 없습니다.")
+            raise ValueError(_INVESTMENT_ADVICE_MESSAGE)
         related = {
             assessment.finding_id
             for assessment in insight.assessments
