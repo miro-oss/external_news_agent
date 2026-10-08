@@ -70,6 +70,7 @@ from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
 from app.llm.report_insight_prefix import closed_assessment_prefix
 from app.llm.report_insight_reduce_repair import ReduceRepairContext, partial_reduce_repair
 from app.llm.report_insight_reduce_shape_scan import build_reduce_shape_scan
+from app.llm.report_insight_research_facts import supported_research_novelty
 from app.llm.report_insight_retrieval import retrieve_report_insight_evidence
 from app.llm.report_insight_source_extraction import (
     SourceExtractionError,
@@ -3274,7 +3275,15 @@ def _prose_validation_errors(
     # original-sentence index as MAP/REVIEW/REDUCE, with only cited claims.
     fact_index = build_fact_index(request, refs) if request is not None else None
     for value in values:
-        if _UNSUPPORTED_COMPARISON.search(value) and not _UNSUPPORTED_COMPARISON.search(source):
+        comparisons = list(_UNSUPPORTED_COMPARISON.finditer(value))
+        if (
+            comparisons
+            and not _UNSUPPORTED_COMPARISON.search(source)
+            and not (
+                all(match[0] == "처음으로" for match in comparisons)
+                and supported_research_novelty(value, binding_source)
+            )
+        ):
             errors.append(
                 ValueError("이전 보고서 기준선이 없어 신규성·기간 비교를 판정할 수 없습니다.")
             )

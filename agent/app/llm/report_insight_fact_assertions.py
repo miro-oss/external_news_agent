@@ -10,6 +10,7 @@ import re
 
 from app.llm.report_insight_fact_graph import analyze_sentence
 from app.llm.report_insight_guard import _UNASSERTED_STATE_SUFFIX, factual_states
+from app.llm.report_insight_research_facts import supported_paper_publication
 
 _CLAUSE_END = re.compile(r"[.!?。;；\n]")
 _EVENT_PREDICATE = re.compile(
@@ -102,6 +103,10 @@ def unsupported_fact_assertions(value: str, source: str) -> list[str]:
                 _UNSUPPORTED_REPORTED_CLAIM.match(suffix)
             ):
                 continue
+        if mention.value == "disclosure" and supported_paper_publication(
+            value, mention.span.start, source
+        ):
+            continue
         label = "사건 단정" if mention.kind == "event" else "수치 지표 단정"
         errors.append(f"연결 원문에 없는 {label}: {mention.span.text}")
     if _WRITTEN_MULTIPLE.search(value):

@@ -165,6 +165,25 @@ def test_smoke_and_resume_share_ledger_and_keep_paired_review_control(prepared, 
         operational.run(output, api_key="test-key", resume=True)
 
 
+@pytest.mark.parametrize("audiences", [["CHIP_MAKER"], ["MARKET_INVESTOR", "IT_INFRA"]])
+def test_targeted_remeasurement_never_schedules_unrequested_audiences(
+    prepared,  # noqa: F811
+    monkeypatch,
+    audiences,
+):
+    output, source, policy, cases = prepared
+    cases[0]["request"]["audiences"] = audiences
+    sdk = FakeSDK(source, monkeypatch)
+    manifest = operational.prepare(cases, policy, output)
+    expected = [audience for audience in operational.AUDIENCES if audience in audiences]
+    assert [job["audience"] for job in manifest["jobs"]] == expected
+    result = operational.run(output, api_key="test-key")
+    assert [job["audience"] for job in result["results"]] == expected
+    assert result["summary"]["successResults"] == len(expected)
+    assert len(sdk.calls) == 3 * len(expected)
+    assert len(result["attempts"]) == len(sdk.calls)
+
+
 def test_resume_does_not_reset_global_call_cap(prepared, monkeypatch):  # noqa: F811
     output, source, policy, cases = prepared
     policy["max_calls"] = 3

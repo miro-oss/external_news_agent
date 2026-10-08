@@ -153,7 +153,6 @@ def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
     require(len({case.case_id for case in parsed}) == len(parsed), "DUPLICATE_CASE")
     for case in parsed:
         require(case.request.plan == "FREE", "ONLY_OPENAI_FREE_PLAN_SUPPORTED")
-        require(set(case.request.audiences) == set(AUDIENCES), "FOUR_AUDIENCES_REQUIRED")
     manifest = {
         "schemaVersion": 1,
         "kind": "current-report-insight-service",
@@ -188,6 +187,7 @@ def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
         for index, case in enumerate(parsed)
         for repeat in range(settings.repeats)
         for audience in AUDIENCES
+        if audience in case.request.audiences
     ]
     manifest["jobs"] = [
         {key: value for key, value in job.items() if key not in {"status", "attemptIds"}}
