@@ -600,11 +600,12 @@ def summarize(state: dict) -> dict:
         if latencies
         else None,
         "fourAudienceSuccessReports": sum(
-            all(
-                job["status"] == "success"
+            Counter(
+                (job["audience"], job["status"])
                 for job in results
                 if (job["caseIndex"], job["repeat"]) == group
             )
+            == Counter((audience, "success") for audience in AUDIENCES)
             for group in groups
         ),
         "providerAttemptsByStage": dict(

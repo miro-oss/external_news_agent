@@ -229,3 +229,53 @@ def test_cli_only_uses_process_key_with_explicit_opt_in(tmp_path, monkeypatch, c
     operational.main()
     assert keys == ["injected-test-value" if injected else "typed-test-value"]
     assert "test-value" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("audiences", "statuses", "expected"),
+    [
+        (operational.AUDIENCES, ("success",) * 4, 1),
+        (operational.AUDIENCES[:2], ("success",) * 2, 0),
+        (operational.AUDIENCES, ("success", "success", "success", "failed"), 0),
+        (operational.AUDIENCES, ("success", "success", "success", "pending"), 0),
+        (("CHIP_MAKER", "CHIP_MAKER", "IT_INFRA", "MARKET_INVESTOR"), ("success",) * 4, 0),
+        ((*operational.AUDIENCES, "UNKNOWN"), ("success",) * 5, 0),
+    ],
+)
+def test_four_audience_summary_requires_exactly_one_success_per_canonical_audience(
+    audiences, statuses, expected
+):
+    results = [
+        {
+            "caseIndex": 0,
+            "repeat": 0,
+            "audience": audience,
+            "status": status,
+            "variant": "staged",
+            "attemptIds": [],
+            "response": {"insights": []},
+        }
+        for audience, status in zip(audiences, statuses, strict=True)
+    ]
+    state = {"results": results, "attempts": [], "stages": []}
+    assert operational.summarize(state)["fourAudienceSuccessReports"] == expected
+
+
+@pytest.mark.parametrize("group_field", ["caseIndex", "repeat"])
+def test_four_audience_summary_does_not_combine_different_case_or_repeat_groups(group_field):
+    results = [
+        {
+            "caseIndex": 0,
+            "repeat": 0,
+            group_field: index // 2,
+            "audience": audience,
+            "status": "success",
+            "variant": "staged",
+            "attemptIds": [],
+            "response": {"insights": []},
+        }
+        for index, audience in enumerate(operational.AUDIENCES)
+    ]
+    state = {"results": results, "attempts": [], "stages": []}
+    assert operational.summarize(state)["successResults"] == 4
+    assert operational.summarize(state)["fourAudienceSuccessReports"] == 0

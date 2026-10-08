@@ -180,6 +180,7 @@ def test_targeted_remeasurement_never_schedules_unrequested_audiences(
     result = operational.run(output, api_key="test-key")
     assert [job["audience"] for job in result["results"]] == expected
     assert result["summary"]["successResults"] == len(expected)
+    assert result["summary"]["fourAudienceSuccessReports"] == 0
     assert len(sdk.calls) == 3 * len(expected)
     assert len(result["attempts"]) == len(sdk.calls)
 
