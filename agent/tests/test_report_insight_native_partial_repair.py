@@ -66,10 +66,12 @@ def test_native_and_public_failure_union_preserves_every_other_record_and_full_d
     assert repair_errors[0].failed_finding_ids == (101, 103)
     assert set(repair_errors[0].error_kinds) == {
         "report_assessment_draft_invalid",
-        "report_fact_mismatch",
+        "report_evidence_insufficient",
     }
     assert any(
-        issue.rule_id == "report_fact_template_required"
+        issue.error_kind == "report_evidence_insufficient"
+        and issue.field == "assessments[103].reason"
+        and issue.claim_ids == ("103:0",)
         for issue in repair_errors[0].validation_issues
     )
     assert [(ids, day) for ids, day in public_calls if len(ids) == 1] == [

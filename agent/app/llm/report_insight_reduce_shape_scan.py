@@ -1,9 +1,10 @@
 """Diagnostic-only REDUCE projection for collecting mixed shape/semantic failures.
 
 The returned candidate must never become an accepted response or repair base.
-Only the original wire object is repaired. Invalid units are absent from this
-scan, so any cross-unit diagnosis that depends on their absence is unlocalized
-and deliberately requires whole-output repair.
+Only the original wire object is repaired. Invalid units are absent from the
+candidate; their intact scalar fields remain separate diagnostic inputs. Any
+cross-unit diagnosis that depends on removal is unlocalized and deliberately
+requires whole-output repair.
 """
 
 import re
@@ -13,7 +14,16 @@ from dataclasses import dataclass, replace
 from pydantic import ValidationError
 
 from app.llm.report_validation_diagnostics import ReportValidationIssue
-from app.schemas.report_insight import ReportInsightReduceOutput
+from app.schemas.report_insight import (
+    ReportInsightImplication,
+    ReportInsightOverview,
+    ReportInsightReduceOutput,
+    ReportInsightWatchItem,
+)
+from app.schemas.report_insight_source_quotes import (
+    SOURCE_QUOTE_ID_PATTERN,
+    ReportInsightStructuredReduceOutput,
+)
 
 _GROUPS = frozenset({"overview", "implications", "watchItems"})
 _RECORD_FIELDS = _GROUPS | {"audience", "headline"}
@@ -26,6 +36,11 @@ _SHAPE_KINDS = frozenset(
 )
 _HEADLINE_PLACEHOLDER = "업무 연결 조건을 확인한다."
 _ALIASES = {"watch_items": "watchItems"}
+_UNIT_MODELS = {
+    "overview": ReportInsightOverview,
+    "implications": ReportInsightImplication,
+    "watchItems": ReportInsightWatchItem,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,10 +58,70 @@ class ShapeOwnedUnit:
 
 
 @dataclass(frozen=True, slots=True)
+class IncompleteReduceUnit:
+    """Original scalar fields from an authenticated shape-invalid unit.
+
+    These values are diagnostic inputs, never a substitute accepted object.
+    Missing/malformed references remain unknown instead of borrowing evidence.
+    """
+
+    audience: str
+    group: str
+    index: int
+    prose: tuple[tuple[str, str, int], ...]
+    claim_ids: tuple[str, ...] | None
+    source_quotes: tuple[tuple[str, str | None], ...] | None = None
+
+
+def _incomplete_unit(audience, group, index, raw, *, structured=False):
+    if type(raw) is not dict:
+        return None
+    prose = []
+    for name, field in _UNIT_MODELS[group].model_fields.items():
+        if field.annotation is not str:
+            continue
+        keys = {name, field.alias} & raw.keys()
+        if len(keys) != 1:
+            continue
+        value = raw[next(iter(keys))]
+        limit = next(item.max_length for item in field.metadata if hasattr(item, "max_length"))
+        if type(value) is str and value.strip() and len(value.strip()) <= limit:
+            prose.append((field.alias, value.strip(), limit))
+    reference_keys = {"basisClaimIds", "basis_claim_ids"} & raw.keys()
+    refs = raw[next(iter(reference_keys))] if len(reference_keys) == 1 else None
+    claim_ids = (
+        tuple(dict.fromkeys(refs))
+        if type(refs) is list and refs and all(type(ref) is str and ref for ref in refs)
+        else None
+    )
+    selections = None
+    selection_keys = {"sourceQuotes", "source_quotes"} & raw.keys()
+    if structured and len(selection_keys) == 1:
+        supplied = raw[next(iter(selection_keys))]
+        if type(supplied) is dict:
+            selections = tuple(
+                (name, selected)
+                for name, selected in supplied.items()
+                if name
+                in {
+                    field.alias
+                    for field in _UNIT_MODELS[group].model_fields.values()
+                    if field.annotation is str
+                }
+                and (
+                    selected is None
+                    or (type(selected) is str and re.fullmatch(SOURCE_QUOTE_ID_PATTERN, selected))
+                )
+            )
+    return IncompleteReduceUnit(audience, group, index, tuple(prose), claim_ids, selections)
+
+
+@dataclass(frozen=True, slots=True)
 class ReduceShapeScan:
-    candidate: ReportInsightReduceOutput
+    candidate: ReportInsightReduceOutput | ReportInsightStructuredReduceOutput
     original_indexes: tuple[tuple[str, str, int, int], ...]
     shape_owned: tuple[ShapeOwnedUnit, ...]
+    incomplete_units: tuple[IncompleteReduceUnit, ...] = ()
 
     def remap(
         self, issues: tuple[ReportValidationIssue, ...]
@@ -116,6 +191,8 @@ def _error_unit(loc: tuple, audience_order: list[str]) -> ShapeOwnedUnit | None:
         return None
     audience = audience_order[loc[1]]
     group = _ALIASES.get(loc[2], loc[2])
+    if group == "sourceQuotes" and (len(loc) == 3 or (len(loc) == 4 and loc[3] == "headline")):
+        return ShapeOwnedUnit(audience, "headline", None)
     if group == "headline" and len(loc) == 3:
         return ShapeOwnedUnit(audience, group, None)
     if group not in _GROUPS:
@@ -131,6 +208,8 @@ def build_reduce_shape_scan(
     raw: dict,
     shape_issues: tuple[ReportValidationIssue, ...],
     audiences,
+    *,
+    structured: bool = False,
 ) -> ReduceShapeScan | None:
     """Remove only units authenticated both by schema issues and actual errors.
 
@@ -151,7 +230,8 @@ def build_reduce_shape_scan(
     for insight in raw["insights"]:
         if (
             type(insight) is not dict
-            or not set(insight) <= _RECORD_FIELDS
+            or not set(insight)
+            <= (_RECORD_FIELDS | {"sourceQuotes"} if structured else _RECORD_FIELDS)
             or type(insight.get("audience")) is not str
         ):
             return None
@@ -172,8 +252,9 @@ def build_reduce_shape_scan(
             return None
         owned.append(unit)
     owned = list(dict.fromkeys(owned))
+    model = ReportInsightStructuredReduceOutput if structured else ReportInsightReduceOutput
     try:
-        ReportInsightReduceOutput.model_validate(raw)
+        model.model_validate(raw)
     except ValidationError as error:
         actual = [
             _error_unit(entry["loc"], order)
@@ -190,10 +271,13 @@ def build_reduce_shape_scan(
         return None
     candidate = deepcopy(raw)
     indexes = []
+    incomplete = []
     for insight in candidate["insights"]:
         audience = insight["audience"]
         if ShapeOwnedUnit(audience, "headline", None) in owned:
             insight["headline"] = _HEADLINE_PLACEHOLDER
+            if structured:
+                insight["sourceQuotes"] = {"headline": None}
         for group in _GROUPS:
             if ShapeOwnedUnit(audience, group, None) in owned:
                 insight[group] = []
@@ -204,12 +288,15 @@ def build_reduce_shape_scan(
             kept = []
             for index, entry in enumerate(entries):
                 if ShapeOwnedUnit(audience, group, index) in owned:
+                    unit = _incomplete_unit(audience, group, index, entry, structured=structured)
+                    if unit is not None:
+                        incomplete.append(unit)
                     continue
                 indexes.append((audience, group, len(kept), index))
                 kept.append(entry)
             insight[group] = kept
     try:
-        parsed = ReportInsightReduceOutput.model_validate(candidate)
+        parsed = model.model_validate(candidate)
     except ValidationError:
         return None
-    return ReduceShapeScan(parsed, tuple(indexes), tuple(owned))
+    return ReduceShapeScan(parsed, tuple(indexes), tuple(owned), tuple(incomplete))

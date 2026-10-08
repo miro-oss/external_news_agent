@@ -9,13 +9,15 @@ import calendar
 import re
 from datetime import date, timedelta
 
-from app.core.evidence import _companies, factual_mismatches
+from app.core.evidence import _COMPANY_ALIASES, _companies, factual_mismatches
+from app.llm.report_insight_amount_context import supported_labeled_amount_context
 from app.llm.report_insight_year_ranges import supported_year_range_context
 from app.schemas.report_insight import ReportInsightRequest
 
 _POLARITY_MESSAGE = "근거와 반대되는 부정 표현이 포함되어 있습니다."
 _NUMERIC_CONTEXT_MESSAGE = "근거와 연결이 다른 숫자: "
 _UNSUPPORTED_COMPANY_MESSAGE = "근거에서 확인되지 않는 기업명: "
+_UNSUPPORTED_IDENTIFIER_MESSAGE = "근거에서 확인되지 않는 식별자: "
 _MICRON_UNIT = re.compile(
     r"(?<![A-Za-z가-힣])마이크론(?=\s*단위(?:의|로|에서|마다|를|는|가|에)?(?:$|[\s,.;。]))"
 )
@@ -158,7 +160,12 @@ _ASSERTION = re.compile(
     r"(?:했|됐|되었|하였|한|된|함|됨|했다)|"
     r"(?:양산|가동|출하)(?:을|를)?\s*(?:했다|개시했다|돌입했다|중이다)"
 )
-_HYPOTHETICAL_SUFFIX = re.compile(r"(?:다)?(?:면|\s*(?:경우|때)|(?:고|다고)\s*(?:가정|전제))")
+_HYPOTHETICAL_SUFFIX = re.compile(
+    r"(?:다)?면|(?:을|는|은)?\s*(?:경우|때)|"
+    r"(?:고|다고|다는)\s*(?:가정|전제)|"
+    r"\s*상태(?:라면|일\s*(?:경우|때))|"
+    r"는지(?:를)?\s*(?:확인|점검|검토)|\s+시(?=$|[\s,.!?;。]|에는|에|엔)"
+)
 # The contract pattern ends at the nominal 확정/성립, before its verb ending.
 # Inspect only the immediately attached conditional ending; a condition elsewhere
 # in the sentence cannot hide an independently asserted contract.
@@ -178,7 +185,8 @@ _CONTRACT_INFORMATION_ABSENCE_SUFFIX = re.compile(
     r"(?=$|[\s,.!?;。])"
 )
 _NEGATIVE_HYPOTHETICAL_SUFFIX = re.compile(
-    r"(?:으)?면|(?:될|할|되는|하는|된|한)\s*(?:경우|때)|\s*여부"
+    r"(?:으)?면|(?:될|할|되는|하는|된|한)\s*(?:경우|때)|\s*여부|"
+    r"(?:(?:되|하|된|한|됐|했|되었|하였|았|었))?(?:" + _HYPOTHETICAL_SUFFIX.pattern + r")"
 )
 _DATE = re.compile(
     r"(?<!\d)(?P<year>20\d{2})(?:\s*년\s*|[-/])"
@@ -196,6 +204,46 @@ _CURRENT_ACTION = re.compile(
     r"(?:중단|장애|차질|지연)(?:된|이|은)?\s*(?:상태|중)|"
     r"(?:복구|해결)(?:하|되)지\s*않|즉시\s*(?:적용|중단|시행|전환|대응)|"
     r"(?:현재|지금).{0,30}(?:적용|시행|전환|대응)"
+)
+# These two observed recovery expressions are aliases of a production state,
+# not new forbidden words. Compare them only with an explicitly continuing halt
+# of the same operation and facility in a cited source clause.
+_PRODUCTION_RECOVERY = re.compile(
+    r"(?P<resolved>양산|가동|출하)\s*중단(?:은|는|이|가)?\s*(?:해소|해결)(?:됐다|되었다)|"
+    r"정상\s*(?P<normal>양산|가동|출하)\s*상태(?:다|이다)"
+)
+_CONTINUING_HALT = re.compile(
+    r"중단(?:은|는|이|가)?\s*(?:상태(?:가|는)?\s*)?"
+    r"(?:(?:현재|지금|아직|여전히)\s*)?(?:계속|지속)(?:된다|되고\s*있다)"
+)
+_STATE_CLAUSE_BREAK = re.compile(
+    r",|，|(?:했으며|됐으며|되었으며|했고|됐고|되었고|하며|이며|하지만|반면)\s+"
+)
+_STATE_QUOTATION = re.compile(
+    r'"[^"\n]*"|\'[^\'\n]*\'|“[^”\n]*”|‘[^’\n]*’|「[^」\n]*」|『[^』\n]*』'
+)
+_FACILITY = re.compile(
+    r"(?P<label>(?<![A-Za-z0-9가-힣])(?:제?\d+|[A-Z][A-Za-z0-9-]*)\s*)?"
+    r"(?P<kind>생산\s*라인|라인|공장|공정|설비)"
+)
+_UNASSERTED_STATE_SUFFIX = re.compile(
+    r"는\s*(?:것|뜻|의미|사실)(?:은|이)?\s*(?:아니|없)|"
+    r"(?:라고|고)\s*(?:가정|전제|부인|부정)|"
+    r"(?:라는|는)\s*(?:주장|사실)(?:을|은)?\s*(?:부인|부정)|"
+    r"고\s*(?:단정|확정|확인)(?:할\s*수\s*없|하기\s*어렵)"
+)
+_STATE_ASSUMPTION_PREFIX = re.compile(r"^\s*(?:만약(?:에)?\s+|(?:가정|전제|예시)\s*[:：])")
+_LATIN_IDENTIFIER = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9]*(?![A-Za-z0-9_])")
+# Capitalization alone is not evidence of an organization: Yield, Foundry and
+# technical acronyms can all describe ordinary work. Unknown names require an
+# explicit organization/fund naming construction, rather than a vocabulary list.
+_NAMED_ENTITY_PREFIX = re.compile(
+    r"(?:^|[\s(])(?:기업|회사|주식회사|업체|제조사|공급사|기관)\s+[\"'“‘]?$"
+)
+_NAMED_ENTITY_SUFFIX = re.compile(
+    r"\s*,?\s+(?:Inc|Corp|Corporation|Ltd|LLC|PLC)\.?(?=$|[\s가-힣,.])|"
+    r"사(?=$|[은는이가의\s,.])|\s+ETF(?=$|[\s가-힣,.])",
+    re.I,
 )
 
 
@@ -274,7 +322,26 @@ def _unreported_contract_fact(match, value: str) -> bool:
     )
 
 
-def factual_states(value: str) -> dict[str, set[bool]]:
+def _conditional_state_label(match, value: str) -> bool:
+    """Only an entire nominal observation label, never a finite assertion.
+
+    The field may ask to watch for '공급 계약 취소' or '인증 미완료'. Any
+    following predicate or earlier recognized state keeps ordinary validation.
+    """
+    if not (match[0].endswith("취소") or match[0] == "미완료"):
+        return False
+    if value[match.end() :].strip(" .。"):
+        return False
+    prefix = value[: match.start()]
+    return not (
+        _CONTRACT_SENTENCE_BREAK.search(prefix)
+        or _ASSERTION.search(prefix)
+        or _PRODUCTION_RECOVERY.search(prefix)
+        or any(pattern.search(prefix) for patterns in _FACT_STATES.values() for pattern in patterns)
+    )
+
+
+def factual_states(value: str, *, conditional: bool = False) -> dict[str, set[bool]]:
     """Known asserted states, True for positive and False for negative."""
     states = {}
     for name, (negative, positive) in _FACT_STATES.items():
@@ -283,6 +350,7 @@ def factual_states(value: str) -> dict[str, set[bool]]:
             match.span()
             for match in negative.finditer(value)
             if not _NEGATIVE_HYPOTHETICAL_SUFFIX.match(value[match.end() :])
+            and not (conditional and _conditional_state_label(match, value))
         ]
         if negative_spans:
             values.add(False)
@@ -317,6 +385,151 @@ def has_asserted_event(value: str) -> bool:
     return any(
         not _HYPOTHETICAL_SUFFIX.match(value[match.end() :]) for match in _ASSERTION.finditer(value)
     )
+
+
+def _state_clauses(value: str):
+    start = 0
+    quotations = [match.span() for match in _STATE_QUOTATION.finditer(value)]
+    boundaries = sorted(
+        [*_CONTRACT_SENTENCE_BREAK.finditer(value), *_STATE_CLAUSE_BREAK.finditer(value)],
+        key=lambda match: match.start(),
+    )
+    for boundary in boundaries:
+        # Retain a quotation's attached denial/assumption even if its sentence
+        # contains punctuation: '"정상 상태다."는 주장을 부인했다'.
+        if any(left < boundary.start() < right for left, right in quotations):
+            continue
+        yield value[start : boundary.end()]
+        start = boundary.end()
+    yield value[start:]
+
+
+def _asserted_state_alias(match, clause: str) -> bool:
+    # Quotation marks do not change the state: publishers commonly quote a
+    # factual assertion directly, and an unrelated quoted word cannot erase it.
+    # Inspect the predicate's attached reporting/conditional suffix instead.
+    suffix = clause[match.end() :]
+    suffix = re.sub(r"^[.。](?=[\"'”’」』])", "", suffix).lstrip("\"'”’」』 ")
+    return not (
+        _STATE_ASSUMPTION_PREFIX.match(clause[: match.start()])
+        or _HYPOTHETICAL_SUFFIX.match(suffix)
+        or _UNASSERTED_STATE_SUFFIX.match(suffix)
+        or _UNASSERTED_CONTRACT_REPORT.match(suffix)
+        or suffix.startswith(("?", "？"))
+    )
+
+
+def _facility_refs(clause: str) -> set[tuple[str, str]]:
+    return {
+        ((match["label"] or "").strip(), match["kind"].replace("생산", "").replace(" ", ""))
+        for match in _FACILITY.finditer(clause)
+    }
+
+
+def _known_company_spans(value: str) -> list[tuple[int, int]]:
+    """Leave complete bilingual aliases to the shared company guard.
+
+    Match the whole alias before examining individual words, so 'Samsung
+    Electronics' is not reclassified as two unknown entities. Alphanumeric
+    boundaries deliberately exclude 'Samsung Electronics2'.
+    """
+    return [
+        match.span()
+        for aliases in _COMPANY_ALIASES.values()
+        for alias in aliases
+        if re.search(r"[A-Za-z]", alias)
+        for match in re.finditer(
+            r"(?<![A-Za-z0-9_])" + re.escape(alias).replace(r"\ ", r"\s+") + r"(?![A-Za-z0-9_])",
+            value,
+            re.I,
+        )
+    ]
+
+
+def _source_identifier_mismatches(value: str, source: str) -> list[str]:
+    known_spans = _known_company_spans(value)
+    errors = []
+    for match in _LATIN_IDENTIFIER.finditer(value):
+        if any(start <= match.start() and match.end() <= end for start, end in known_spans):
+            continue
+        identifier = match[0]
+        numbered = any(char.isdigit() for char in identifier)
+        named_entity = _NAMED_ENTITY_PREFIX.search(value[: match.start()]) or (
+            _NAMED_ENTITY_SUFFIX.match(value[match.end() :])
+        )
+        if not numbered and not named_entity:
+            continue
+        if not re.search(
+            rf"(?<![A-Za-z0-9_]){re.escape(identifier)}(?![A-Za-z0-9_])", source, re.I
+        ):
+            prefix = _UNSUPPORTED_IDENTIFIER_MESSAGE if numbered else _UNSUPPORTED_COMPANY_MESSAGE
+            errors.append(prefix + identifier)
+    return errors
+
+
+def _production_reversal(value: str, source: str) -> bool:
+    """Recognize bounded recovery aliases without merging unrelated states.
+
+    The ordinary state map deliberately discards actors and targets. Do not add
+    recovery aliases there: that would combine a halted line with another line's
+    normal operation. Ambiguous subjects, time changes and hypothetical clauses
+    stay outside this narrow deterministic check.
+    """
+    source_clauses = list(_state_clauses(source))
+    source_facilities = set().union(*(_facility_refs(clause) for clause in source_clauses))
+    for clause in _state_clauses(value):
+        for recovery in _PRODUCTION_RECOVERY.finditer(clause):
+            if not _asserted_state_alias(recovery, clause):
+                continue
+            operation = recovery["resolved"] or recovery["normal"]
+            actors, facilities = _companies(clause), _facility_refs(clause)
+            # An omitted facility cannot pick one of several named source lines.
+            if len(source_facilities) > 1 and not any(label for label, _ in facilities):
+                continue
+            # A source may itself describe a later recovery. A matching source
+            # assertion defeats this narrow reversal proof; chronology belongs
+            # to the richer fact relation checks, not this synonym guard.
+            if any(
+                (prior["resolved"] or prior["normal"]) == operation
+                and _asserted_state_alias(prior, source_clause)
+                and (not actors or actors <= _companies(source_clause))
+                and (not facilities or facilities <= _facility_refs(source_clause))
+                for source_clause in source_clauses
+                for prior in _PRODUCTION_RECOVERY.finditer(source_clause)
+            ):
+                continue
+            for source_clause in source_clauses:
+                halt = _FACT_STATES["production"][0].search(source_clause)
+                continuing = _CONTINUING_HALT.search(source_clause)
+                if (
+                    halt is None
+                    or not halt[0].startswith(operation)
+                    or continuing is None
+                    or not _asserted_state_alias(continuing, source_clause)
+                ):
+                    continue
+                source_actors, source_targets = (
+                    _companies(source_clause),
+                    _facility_refs(source_clause),
+                )
+                if actors and source_actors and not actors <= source_actors:
+                    continue
+                if (
+                    facilities
+                    and source_targets
+                    and any(
+                        not any(
+                            kind == source_kind and (not label or label == source_label)
+                            for source_label, source_kind in source_targets
+                        )
+                        for label, kind in facilities
+                    )
+                ):
+                    continue
+                if re.search(r"작년|지난해|당시|과거", source_clause):
+                    continue
+                return True
+    return False
 
 
 def _independent_parallel_numbers(value: str, source: str) -> bool:
@@ -372,9 +585,11 @@ def report_prose_mismatches(
     *,
     modality_reason: str | None,
     topic: bool = False,
+    fact_source: str | None = None,
+    conditional: bool = False,
 ) -> list[str]:
     """Scope report interpretations while retaining source-bound factual checks."""
-    states = factual_states(value)
+    states = factual_states(value, conditional=conditional)
     source_states = factual_states(source)
     source_aliases = list(_contract_alias_events(source))
     # Interpretive prose without an asserted event may discuss missing relevance,
@@ -382,6 +597,9 @@ def report_prose_mismatches(
     # source's positive/negative event polarity does not constrain that analysis.
     has_factual_state = bool(states)
     remaining = list(mismatches)
+    # Ground product generations and explicitly named unknown entities in raw
+    # source text. General English work vocabulary is not itself a company.
+    actor_source = source if fact_source is None else fact_source
     if _MICRON_UNIT.search(value) and any(
         item.startswith(_UNSUPPORTED_COMPANY_MESSAGE) for item in remaining
     ):
@@ -392,12 +610,17 @@ def report_prose_mismatches(
         remaining = [
             item for item in remaining if not item.startswith(_UNSUPPORTED_COMPANY_MESSAGE)
         ] + [item for item in entity_checked if item.startswith(_UNSUPPORTED_COMPANY_MESSAGE)]
+    remaining.extend(_source_identifier_mismatches(value, actor_source))
     if any(item.startswith(_NUMERIC_CONTEXT_MESSAGE) for item in remaining) and (
         _independent_parallel_numbers(value, source)
         or _ordered_year_percentages(value, source)
         or supported_year_range_context(value, source)
     ):
         remaining = [item for item in remaining if not item.startswith(_NUMERIC_CONTEXT_MESSAGE)]
+    elif any(item.startswith(_NUMERIC_CONTEXT_MESSAGE) for item in remaining):
+        proven = supported_labeled_amount_context(value, actor_source)
+        if proven is not None:
+            remaining = [item for item in remaining if item != _NUMERIC_CONTEXT_MESSAGE + proven]
     if _POLARITY_MESSAGE in remaining:
         asserted_reversal = any(
             name in source_states and not values <= source_states[name]
@@ -427,6 +650,8 @@ def report_prose_mismatches(
     ):
         if _POLARITY_MESSAGE not in remaining:
             remaining.append(_POLARITY_MESSAGE)
+    if _production_reversal(value, actor_source):
+        remaining.append("근거에서 확인되지 않는 완료·착수·계약·중단 사실입니다.")
     if any(name != "information" and name not in source_states for name in states):
         remaining.append("근거에서 확인되지 않는 완료·착수·계약·중단 사실입니다.")
     if source_aliases and True in states.get("contract", set()):

@@ -4,6 +4,7 @@ import json
 
 import pytest
 from test_report_insight_assessment import framed, payload, request
+from test_report_insight_repair_actions import structured_diagnostics
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
 from app.core.errors import AgentError
@@ -27,7 +28,7 @@ def test_native_semantic_failure_does_not_hide_same_finding_fact_mismatch():
     error = _native_assessment_repair_errors(response, source)
 
     assert error.failed_finding_ids == (101,)
-    assert error.error_kinds == ("report_assessment_draft_invalid", "report_fact_mismatch")
+    assert error.error_kinds == ("report_assessment_draft_invalid", "report_evidence_insufficient")
     assert "effect.impactScope" in str(error)
     assert "근거에서 확인되지 않는 숫자: 9999" in str(error)
     assert json.loads(response.text) == wire
@@ -106,13 +107,19 @@ def test_partial_repair_gets_both_causes_and_full_validation_still_gates_accepta
     assert [finding["id"] for finding in framed(repair["prompt"])["findings"]] == [101]
     actions = repair["prompt"].split("<validation-error>", 1)[1].split("</validation-error>", 1)[0]
     assert "reason: 원문 claim이 존재합니다." in actions
-    assert "report_fact_mismatch" in actions
-    assert "findingId=101 nativeFields=reason refs=['101:0']" in actions
-    assert "rule=report_fact_template_required" in actions
-    assert "9999" not in actions
+    assert "report_evidence_insufficient" in actions
+    assert "findingId=101" in actions and "reason" in actions
+    rows = structured_diagnostics(repair["prompt"])
+    assert {row["field"] for row in rows} == {"assessments[101]", "assessments[101].reason"}
+    (fact,) = [row for row in rows if row["rule"] == "unsupported_number"]
+    assert fact["field"] == "assessments[101].reason"
+    assert fact["claimIds"] == ["101:0"]
+    span = fact["details"][0]["generatedSpan"]
+    original = provider.wire_payloads[0]["assessments"]["CHIP_MAKER"]["finding101"]["reason"]
+    assert original[span["start"] : span["end"]] == span["text"] == "9999"
     error, message, diagnostics, kinds = captured[0]
     assert error.failed_finding_ids == (101,)
-    assert set(kinds) == {"report_assessment_draft_invalid", "report_fact_mismatch"}
+    assert set(kinds) == {"report_assessment_draft_invalid", "report_evidence_insufficient"}
     assert "근거에서 확인되지 않는 숫자: 9999" in message
     assert (str(error), error.repair_diagnostics, error.error_kinds) == (
         message,

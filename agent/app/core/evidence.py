@@ -5,7 +5,14 @@ from decimal import Decimal, InvalidOperation
 
 from app.schemas.evidence import EvidenceSentence
 
-_NUMBER = re.compile(r"(?<![A-Za-z0-9])[-+]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])")
+# Read the entire decimal before checking its boundary: ``3.59GW`` must not
+# backtrack into ``3``. Only supported adjacent unit suffixes form a number
+# boundary; digits inside product identifiers (HBM4, PCIe5.0) remain excluded.
+_NUMBER = re.compile(
+    r"(?<![A-Za-z0-9.])[-+]?(?>\d[\d,]*(?:\.\d+)?)"
+    r"(?=(?:[gmk]?w|nm|gb|tb|usd|eur|krw)(?![A-Za-z0-9])|[^A-Za-z0-9.]|$|\.(?!\d))",
+    re.IGNORECASE,
+)
 _CURRENCY_SCALES = {
     "trillion": 10**12,
     "billion": 10**9,

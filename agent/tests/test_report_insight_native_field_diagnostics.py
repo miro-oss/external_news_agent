@@ -93,11 +93,19 @@ def test_recorded_condition_failure_names_native_field_and_rejects_bad_repair():
     assert stages(provider) == ["MAP-001", "MAP-001"]
     assert provider.schema_validity == [True, False]
     repair = provider.calls[1]["prompt"]
-    assert "field=assessments.reason nativeFields=decision.connection.condition" in repair
-    details = repair.split("<validation-error>", 1)[1].split("</validation-error>", 1)[0]
-    assert "report_fact_mismatch" in details
-    assert "삼성전자" not in details
-    assert "refs=['7815:2']" in repair
+    # Import inside the test: this shared parser's fixtures import this module.
+    from test_report_insight_repair_actions import structured_diagnostics
+
+    (issue,) = structured_diagnostics(repair)
+    assert issue["field"] == "assessments[7815].decision.connection.condition"
+    assert issue["claimIds"] == ["7815:2"]
+    assert issue["errorKind"] == "report_evidence_insufficient"
+    assert issue["rule"] == "company"
+    span = issue["details"][0]["generatedSpan"]
+    original = provider.wire_payloads[0]["assessments"]["IT_INFRA"]["finding7815"]["decision"][
+        "connection"
+    ]["condition"]
+    assert original[span["start"] : span["end"]] == span["text"] == "삼성전자"
     assert "condition 오류를 reason 수정만으로 해결하지 마세요" in repair
 
 
@@ -145,9 +153,11 @@ def test_native_diagnostic_attributes_actual_components_without_weakening_public
         "reason" if field == "reason" else "decision.connection.condition"
         for field in invalid_fields
     ]
-    assert f"nativeFields={','.join(paths)}" in diagnostic.repair_summary
+    assert all(f"nativeFields={path}" in diagnostic.repair_summary for path in paths)
     assert "nativeFields=" not in str(legacy)
-    assert diagnostic.error_kinds == legacy.error_kinds == ("report_fact_mismatch",)
+    assert (
+        set(diagnostic.error_kinds) == set(legacy.error_kinds) == {"report_evidence_insufficient"}
+    )
     assert diagnostic.failed_finding_ids == legacy.failed_finding_ids == (7815,)
     details = report_validation_issue_details(diagnostic, {}, stage="MAP-001")
     assert {issue["field"] for issue in details["issues"]} == {
@@ -238,7 +248,7 @@ def test_overlapping_fact_failures_keep_both_fields_editable_in_the_only_repair(
     assert error.native_prose_repairs[7815][1] == ("reason", "decision.connection.condition")
     assert "근거에서 확인되지 않는 숫자: 9999" in str(error)
     assert "근거에서 확인되지 않는 기업명: 삼성전자" in str(error)
-    assert error.error_kinds == ("report_fact_mismatch",)
+    assert set(error.error_kinds) == {"report_evidence_insufficient"}
     engine = object.__new__(ReportInsightService)
     repair = engine._repair_call(
         draft_prompt(source), draft_schema(source), raw.text, error, validate
@@ -304,7 +314,9 @@ def construction_condition_payload(condition):
 def test_native_condition_cannot_hide_asserted_fact_before_its_final_premise(condition):
     source, value = construction_condition_payload(condition)
     diagnostic = rejected_projection(source, value)
-    assert diagnostic.error_kinds == ("report_fact_mismatch",)
+    assert set(diagnostic.error_kinds) == (
+        {"report_evidence_insufficient"} if "," in condition else {"report_fact_contradiction"}
+    )
     assert diagnostic.native_prose_repairs[101][1] == ("decision.connection.condition",)
     assert "event_state" in diagnostic.fact_repair_kinds
     assert "근거에서 확인되지 않는 완료·착수·계약·중단 사실" in str(diagnostic)

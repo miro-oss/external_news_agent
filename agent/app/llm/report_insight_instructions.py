@@ -19,9 +19,9 @@ ASSESSMENT_CONDITION_RULE = (
     "원문에 있는 선행 절차는 유지한다."
 )
 ASSESSMENT_REASON_RULE = (
-    "reason은 업무 연결·영향·시점의 근거나 한계를 1~2문장 180자 이내로 설명한다. "
+    "reason은 업무 연결·영향·시점의 근거·한계를 180자 이내로 쓴다. "
     "영향·시점도 원문의 변경·준비·기한으로 뒷받침한다. "
-    "코드·ID·기업명·수치 나열이나 재요약은 쓰지 않는다. " + ASSESSMENT_PROCEDURE_RULE
+    "ID는 구조화 필드에 둔다. 회사·제품·수치는 근거 범위에서 쓴다. " + ASSESSMENT_PROCEDURE_RULE
 )
 
 _ROLES = {

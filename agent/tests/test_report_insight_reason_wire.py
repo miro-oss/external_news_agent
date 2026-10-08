@@ -85,7 +85,7 @@ def test_provider_sends_reason_bound_without_transforming_the_model_response():
         record = wire_schema["properties"]["assessments"]["properties"]["CHIP_MAKER"]["properties"][
             "finding101"
         ]["properties"]
-        assert list(record) == ["findingId", "reason", "decision"]
+        assert list(record) == ["findingId", "reason", "decision", "sourceQuotes"]
         conditional = record["decision"]["anyOf"][0]["properties"]["connection"]["anyOf"][1]
         for prose in (record["reason"], conditional["properties"]["condition"]):
             assert "basis의 claimId/sourceSpanId 필드에만" in prose["description"]

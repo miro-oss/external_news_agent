@@ -5,7 +5,7 @@ from test_report_insight_assessment import request as pipeline_request
 from test_report_insight_reduce_partial_repair import repair_jobs
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
-from app.core.errors import OutputValidationError, StructuredOutputExhaustedError
+from app.core.errors import OutputValidationError
 from tests.test_report_insight_synthesis_quality import insight, source_request, validate
 
 SOURCE = "가람전자 다낭이 반도체 기판으로 생산 영역을 넓힌다."
@@ -196,27 +196,30 @@ def test_direction_error_reaches_the_single_reduce_repair_and_cannot_bypass_it(r
                 )["slotId"]
                 record = value["insights"][0]["implications"][0]
                 record.update(
-                    text="{{fact:" + slot + "}} 생산 확대는 생산 능력 향상에 기여할 수 있다.",
+                    text="생산 확대는 생산 능력 향상에 기여할 수 있다.",
+                    sourceQuotes={
+                        "text": slot,
+                        "mechanism": None,
+                        "assumption": None,
+                        "falsifiedBy": None,
+                    },
                     mechanism="생산 영역이 넓어지면 후속 생산 능력의 변화를 확인해야 한다.",
                     falsifiedBy="해당 생산 확대 계획을 철회하거나 연기하는 사건이 발생하는 경우",
                 )
         return value
 
     provider = V4Provider(source, hook=hook)
+    result = generate(provider, source)
     if repair_succeeds:
-        result = generate(provider, source)
         assert result.insights[0].implications[0].falsified_by == (
             "해당 생산 확대 계획을 철회하거나 연기하는 사건이 발생하는 경우"
         )
         assert result.insights[0].implications[0].text.startswith("원문: 「가람전자")
-        assert result.meta.credits == pytest.approx(0.8)
     else:
-        with pytest.raises(StructuredOutputExhaustedError) as caught:
-            generate(provider, source)
-        failure = caught.value.details["validationFailure"]
-        assert failure["stage"] == "REDUCE-001"
-        assert "report_falsification_direction" in failure["errorKinds"]
-        assert caught.value.details["usage"]["credits"] == pytest.approx(0.8)
+        # One failed repair cannot publish the invalid optional implication.
+        assert result.insights[0].implications == []
+        assert result.insights[0].overview
+    assert result.meta.credits == pytest.approx(0.8)
 
     assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001", "REDUCE-001"]
     jobs = repair_jobs(provider.calls[-1]["prompt"])
@@ -229,6 +232,9 @@ def test_direction_error_reaches_the_single_reduce_repair_and_cannot_bypass_it(r
             {
                 "rule": "report_falsification_direction",
                 "reason": "반증 조건이 해석을 반박하는 방향으로 작성되지 않았습니다.",
+                "category": "EXPRESSION_POLICY",
+                "details": [],
+                "detailsTruncated": False,
             }
         ],
     } in jobs[0]["diagnostics"]

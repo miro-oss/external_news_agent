@@ -89,7 +89,7 @@ def test_recorded_id_number_failures_preserve_unknown_effect_in_partial_and_full
             item["reason"] = f"원문 문장(claim {finding.id}:0)이 공정 검증 업무와 관련된다."
     repair, error, raw, calls = repair_for(source, value)
     assert set(error.native_prose_repairs) == set(failed_ids)
-    assert set(error.error_kinds) == {"report_fact_mismatch"}
+    assert set(error.error_kinds) == {"report_expression_policy", "report_evidence_insufficient"}
     assert "근거에서 확인되지 않는 숫자" in str(error)
     assert set(
         repair.response_schema["properties"]["assessments"]["properties"]["CHIP_MAKER"][
@@ -244,7 +244,10 @@ def test_mixed_native_coherence_and_fact_failures_keep_the_ordinary_repair_contr
     )
     raw = response(value, source)
     error = service._native_assessment_repair_errors(raw, source)
-    assert set(error.error_kinds) == {"report_assessment_draft_invalid", "report_fact_mismatch"}
+    assert set(error.error_kinds) == {
+        "report_assessment_draft_invalid",
+        "report_evidence_insufficient",
+    }
     assert not error.native_prose_repairs
     schema = draft_schema(source)
     engine = object.__new__(service.ReportInsightService)
@@ -283,7 +286,7 @@ def test_id_prose_repair_cannot_drop_the_source_supporting_its_company():
         entry[field] = {"claimId": f"101:{index}", "quote": finding.claims[index].text}
     entry["reason"] = "삼성전자의 생산 제약에 따른 수익성 판단과 연결된다. (근거 claim 101:0)"
     repair, error, raw, calls = repair_for(source, value)
-    assert error.error_kinds == ("report_fact_mismatch",)
+    assert set(error.error_kinds) == {"report_expression_policy", "report_evidence_insufficient"}
     assert "기업명" not in str(error)
 
     corrected = deepcopy(value)

@@ -71,13 +71,77 @@ PILOT_CASES = (
 )
 
 
+# Follow-up source pairs remain unlabelled in the public repository. Actual
+# reviewer answers are imported only into a private local AnnotationSet.
+FOLLOWUP_CASES = (
+    (
+        "plan_target",
+        "청해반도체는 2028년 제2공장을 완공할 계획이다.",
+        "청해반도체의 제2공장 완공 목표 시점은 2028년이다.",
+    ),
+    (
+        "plan_target",
+        "청해반도체는 2028년 제2공장을 완공할 계획이다.",
+        "청해반도체는 제2공장을 완공했다.",
+    ),
+    (
+        "contract_negation",
+        "나래장비는 공급 계약을 협상 중이며 아직 체결하지 않았다.",
+        "나래장비는 공급 계약을 체결했다.",
+    ),
+    (
+        "joint_allocation",
+        "해솔과 은하가 공동으로 투자하는 총액은 80억 원이며 각 회사의 분담액은 공개하지 않았다.",
+        "해솔의 개별 투자액은 80억 원이다.",
+    ),
+    (
+        "owner_quantity",
+        "다솜 공장의 생산량은 31개, 누리 공장은 18개다.",
+        "다솜 공장의 생산량은 18개다.",
+    ),
+    (
+        "year_capacity",
+        "바른에너지는 설비 용량을 2027년 100MW에서 2030년 400MW로 늘릴 계획이다.",
+        "바른에너지의 2030년 설비 용량 목표는 400MW다.",
+    ),
+    (
+        "product_identity",
+        "소담전자는 HBM4 제품의 고객 인증을 진행 중이다.",
+        "소담전자는 HBM3 제품의 고객 인증을 진행 중이다.",
+    ),
+    (
+        "unmentioned_order",
+        "가람소자는 신제품의 시험 생산을 시작했다.",
+        "가람소자는 신제품용 장비를 발주했다.",
+    ),
+    (
+        "production_negation",
+        "햇살전자의 생산라인 가동 중단이 현재 계속되고 있다.",
+        "햇살전자의 생산라인은 현재 정상 가동 중이다.",
+    ),
+    (
+        "unit_price",
+        "별빛장비는 검사 장비 3대를 총 9억 원에 공급했다.",
+        "별빛장비가 공급한 검사 장비의 대당 가격은 9억 원이다.",
+    ),
+)
+
+
 def pilot_packet() -> dict:
+    return _packet(PILOT_CASES, "pilot")
+
+
+def followup_packet() -> dict:
+    return _packet(FOLLOWUP_CASES, "followup")
+
+
+def _packet(cases, prefix) -> dict:
     units = []
-    for index, (family, source, statement) in enumerate(PILOT_CASES, start=1):
-        claim_id = f"pilot-{index:02d}:0"
+    for index, (family, source, statement) in enumerate(cases, start=1):
+        claim_id = f"{prefix}-{index:02d}:0"
         units.append(
             {
-                "unitId": f"pilot-{index:02d}",
+                "unitId": f"{prefix}-{index:02d}",
                 "field": "fact",
                 "statementKind": "fact",
                 "statement": statement,

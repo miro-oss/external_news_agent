@@ -135,7 +135,7 @@ def test_remapped_locations_keep_rule_and_claim_metadata_and_reject_unknown_cand
         "overview[0].text",
         "report_fact_mismatch",
         ("101:0",),
-        "report_fact_template_required",
+        "report_fact_slot_scope",
     )
     (mapped,) = result.remap((issue,))
     assert mapped.field == "overview[1].text"

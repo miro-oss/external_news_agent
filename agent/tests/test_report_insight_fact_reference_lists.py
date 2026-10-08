@@ -2,6 +2,7 @@
 
 import pytest
 from test_report_insight_assessment import request
+from test_report_insight_repair_actions import structured_diagnostics
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
 from app.core.errors import AgentError
@@ -79,4 +80,16 @@ def test_six_list_citations_are_repaired_once_or_still_rejected(repair):
     diagnostic = (
         provider.calls[1]["prompt"].split("<validation-error>")[1].split("</validation-error>")[0]
     )
-    assert diagnostic.count("[internal_reference_in_prose]") == 6
+    rows = structured_diagnostics(provider.calls[1]["prompt"])
+    for finding in source.findings:
+        selected = [row for row in rows if row["field"] == f"assessments[{finding.id}].reason"]
+        assert {row["rule"] for row in selected} == {
+            "internal_reference_in_prose",
+            "unsupported_number",
+        }
+        assert {row["errorKind"] for row in selected} == {
+            "report_expression_policy",
+            "report_evidence_insufficient",
+        }
+        assert all(row["claimIds"] == [f"{finding.id}:0"] for row in selected)
+    assert len(diagnostic.strip()) <= 6000

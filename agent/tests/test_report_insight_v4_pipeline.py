@@ -100,6 +100,19 @@ class V4Provider:
         # actual provider contract before the service receives its response.
         if value is not None and schema["title"] == "ReportAssessmentDraft":
             value = draft_to_wire(value, self.source)
+        if value is not None and schema["title"] in {
+            "ReportInsightReduceOutput",
+            "ReportInsightReduceRepair",
+        }:
+            for insight in value["insights"]:
+                insight.setdefault("sourceQuotes", {"headline": None})
+                for group, fields in (
+                    ("overview", ("text", "assumption")),
+                    ("implications", ("text", "mechanism", "assumption", "falsifiedBy")),
+                    ("watchItems", ("topic", "indicator", "trigger")),
+                ):
+                    for unit in insight[group]:
+                        unit.setdefault("sourceQuotes", dict.fromkeys(fields))
         if value is not None and schema["title"] == "ReportInsightReduceRepair":
             jobs = json.loads(
                 kwargs["prompt"]
@@ -110,7 +123,12 @@ class V4Provider:
             value = {
                 "repairs": {
                     job["key"]: deepcopy(
-                        by_audience[job["audience"]]["headline"]
+                        {
+                            "headline": by_audience[job["audience"]]["headline"],
+                            "sourceQuotes": by_audience[job["audience"]]["sourceQuotes"],
+                        }
+                        if job["group"] == "headline" and isinstance(job["original"], dict)
+                        else by_audience[job["audience"]]["headline"]
                         if job["group"] == "headline"
                         else (
                             by_audience[job["audience"]][job["group"]][job["index"]]
@@ -366,7 +384,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v30"
+    assert result.meta.prompt_version == "report-insight.ko.v36"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -379,7 +397,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(provider.schema_validity)
     for value in provider.wire_payloads[:-1]:
         for draft in value["assessments"]["CHIP_MAKER"].values():
-            assert set(draft) == {"findingId", "decision", "reason"}
+            assert set(draft) == {"findingId", "decision", "reason", "sourceQuotes"}
             assert set(draft["decision"]["connection"]) == {
                 "relation",
                 "work",
@@ -841,12 +859,18 @@ def test_default_reduce_quality_guards_reject_and_preserve_all_observed_usage(de
         return value
 
     provider = V4Provider(source, hook=hook)
-    with pytest.raises(AgentError) as caught:
-        generate(provider, source)
+    if defect == "placeholder":
+        result = generate(provider, source)
+        assert result.insights[0].implications == []
+        assert result.insights[0].overview
+        assert result.meta.credits == 0.8 and result.meta.input_tokens == 44
+    else:
+        with pytest.raises(AgentError) as caught:
+            generate(provider, source)
+        assert caught.value.code == "SCHEMA_VIOLATION"
+        assert caught.value.details["usage"]["credits"] == 0.8
+        assert caught.value.details["usage"]["inputTokens"] == 44
     assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001", "REDUCE-001"]
-    assert caught.value.code == "SCHEMA_VIOLATION"
-    assert caught.value.details["usage"]["credits"] == 0.8
-    assert caught.value.details["usage"]["inputTokens"] == 44
     assert all(provider.schema_validity)
 
 
@@ -864,7 +888,7 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v30"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v36"
     assert output["meta"]["mock"] is True
     assert RUBRIC_VERSION == "report-importance.v6"
     assert set(output) == {"insights", "meta"}

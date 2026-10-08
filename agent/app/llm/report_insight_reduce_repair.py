@@ -12,6 +12,7 @@ from app.llm.prompt_data import prompt_json
 from app.llm.report_validation_diagnostics import (
     ReportValidationIssue,
     attach_report_validation_diagnostics,
+    compact_repair_payload,
 )
 from app.llm.structured_call import StructuredCallRepair
 
@@ -111,6 +112,16 @@ def partial_reduce_repair(prompt, schema, raw, context, validate):
                     # A missing required field is repairable without replacing
                     # a sibling. Its value is data, never the field's authority.
                     value = record.get(group)
+                    if group == "headline" and "sourceQuotes" in branches[issue.audience]:
+                        # This selector belongs to the headline's editable unit.
+                        # A string-only patch could never repair an invalid slot.
+                        unit_schema = _object(
+                            {
+                                "headline": unit_schema,
+                                "sourceQuotes": branches[issue.audience]["sourceQuotes"],
+                            }
+                        )
+                        value = {"headline": value, "sourceQuotes": record.get("sourceQuotes")}
                 units[identity] = {
                     "key": f"repair{len(units)}",
                     "audience": issue.audience,
@@ -125,7 +136,13 @@ def partial_reduce_repair(prompt, schema, raw, context, validate):
                     "field": issue.field,
                     "errorKind": issue.error_kind,
                     "claimIds": list(issue.claim_ids),
-                    "rules": [{"rule": issue.rule, "reason": issue.reason}],
+                    "rules": [
+                        {
+                            key: value
+                            for key, value in compact_repair_payload(issue).items()
+                            if key in {"rule", "reason", "category", "details", "detailsTruncated"}
+                        }
+                    ],
                 }
             )
         if not units:
@@ -197,7 +214,18 @@ def partial_reduce_repair(prompt, schema, raw, context, validate):
         for (audience_index, group, index), unit in units.items():
             replacement = patch["repairs"][unit["key"]]
             if index is None:
-                merged["insights"][audience_index][group] = replacement
+                if group == "headline" and "sourceQuotes" in branches[unit["audience"]]:
+                    if type(replacement) is not dict or set(replacement) != {
+                        "headline",
+                        "sourceQuotes",
+                    }:
+                        raise ValueError(
+                            "headline 수리는 문구와 표시용 원문 선택만 함께 반환해야 합니다."
+                        )
+                    merged["insights"][audience_index]["headline"] = replacement["headline"]
+                    merged["insights"][audience_index]["sourceQuotes"] = replacement["sourceQuotes"]
+                else:
+                    merged["insights"][audience_index][group] = replacement
             elif replacement is None:
                 removed.setdefault((audience_index, group), set()).add(index)
             else:

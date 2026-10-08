@@ -23,7 +23,7 @@ def test_bound_conflict_is_not_hidden_by_unparsed_source_or_repeated_bad_summary
     )
     factual = [error for error in errors if "수치 충돌" in str(error)]
     assert factual
-    assert factual[0].error_kinds == ("report_fact_mismatch",)
+    assert factual[0].error_kinds == ("report_fact_contradiction",)
     assert "numeric_context" in factual[0].fact_repair_kinds
 
 

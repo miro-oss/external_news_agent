@@ -5,7 +5,12 @@ from copy import deepcopy
 
 import pytest
 from test_report_insight_assessment import framed, request
-from test_report_insight_reduce_partial_repair import repair_jobs, response, synthesis
+from test_report_insight_reduce_partial_repair import (
+    public_reduce_projection,
+    repair_jobs,
+    response,
+    synthesis,
+)
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
 from app.core.config import Settings
@@ -46,7 +51,12 @@ def prepared():
         group["audience"]: [item["claimId"] for item in group["evidence"]]
         for group in framed(provider.calls[-1]["prompt"])["retrievedEvidence"]
     }
-    return source, mapped, allowed, json.loads(provider.response_texts[-1])
+    return (
+        source,
+        mapped,
+        allowed,
+        public_reduce_projection(json.loads(provider.response_texts[-1])),
+    )
 
 
 def test_repeated_valid_reduce_refs_keep_first_order_without_provider_retry_or_map_changes():
@@ -70,7 +80,10 @@ def test_repeated_valid_reduce_refs_keep_first_order_without_provider_retry_or_m
     for group in ("overview", "implications", "watchItems"):
         for before, after in zip(original[group], final[group], strict=True):
             assert before["basisClaimIds"] == ["102:0", "101:0", "102:0", "101:0"]
-            assert after == {**before, "basisClaimIds": ["102:0", "101:0"]}
+            assert after == {
+                **public_reduce_projection(before),
+                "basisClaimIds": ["102:0", "101:0"],
+            }
     assert final["headline"] == original["headline"]
     assert [item.finding_id for item in result.insights[0].assessments] == [101, 102]
     assert [item.basis_claim_ids for item in result.insights[0].assessments] == [
@@ -102,8 +115,7 @@ def test_duplicate_normalization_does_not_hide_unknown_or_malformed_references(r
         assert diagnostics is not None
         assert diagnostics.partial_repair_eligible
         assert any(
-            issue.field == "overview[0].basisClaimIds"
-            for issue in diagnostics.validation_issues
+            issue.field == "overview[0].basisClaimIds" for issue in diagnostics.validation_issues
         )
         assert all("999:0" not in issue.claim_ids for issue in diagnostics.validation_issues)
     else:
@@ -179,11 +191,11 @@ def test_duplicate_refs_with_other_errors_repair_only_failed_units_and_keep_orig
     final = result.insights[0].model_dump(by_alias=True)
     assert final["headline"] == original["headline"]
     assert final["overview"][0] == {
-        **original["overview"][0],
+        **public_reduce_projection(original["overview"][0]),
         "basisClaimIds": ["102:0", "101:0"],
     }
     assert final["implications"][0] == {
-        **original["implications"][0],
+        **public_reduce_projection(original["implications"][0]),
         "basisClaimIds": ["102:0", "101:0"],
     }
     assert [item.basis_claim_ids for item in result.insights[0].assessments] == [

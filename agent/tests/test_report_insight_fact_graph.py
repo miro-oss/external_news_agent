@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 
 from app.llm.report_insight_fact_graph import analyze_sentence
+from app.llm.report_insight_fact_verification import compare_source_facts, fact_graph_mismatches
 
 
 def metric(text, predicate="revenue"):
@@ -165,3 +166,85 @@ def test_each_source_content_has_a_distinct_immutable_identity():
     assert first.source_sha256 != second.source_sha256
     assert first is not second
     assert analyze_sentence.cache_info().maxsize == 256
+
+
+@pytest.mark.parametrize(
+    ("source", "candidate", "predicate", "state"),
+    [
+        (
+            "삼성전자는 공급 계약을 체결했다.",
+            "삼성전자의 공급 계약이 취소되면 조달 조건을 재검토한다.",
+            "contract",
+            "conditional",
+        ),
+        (
+            "삼성전자는 공장을 완공할 계획이다.",
+            "삼성전자가 공장을 완공했는지 확인한다.",
+            "construction",
+            "unknown",
+        ),
+    ],
+)
+def test_local_condition_and_completion_inquiry_are_not_opposite_facts(
+    source, candidate, predicate, state
+):
+    relation = next(r for r in analyze_sentence(candidate).relations if r.predicate == predicate)
+    assert relation.state == state
+    assert any(binding.kind == "state" and binding.value == state for binding in relation.bindings)
+    assert all(binding.span.matches(candidate) for binding in relation.bindings)
+    assert fact_graph_mismatches(candidate, [source]) == []
+    assert not any(
+        check.outcome == "supported" for check in compare_source_facts(candidate, [source])
+    )
+
+
+@pytest.mark.parametrize("assertion_first", [False, True])
+@pytest.mark.parametrize(
+    ("source", "assertion", "nonassertion"),
+    [
+        (
+            "삼성전자는 공급 계약을 체결했다.",
+            "삼성전자의 공급 계약이 취소됐다.",
+            "삼성전자의 공급 계약이 취소되면 조달 조건을 재검토한다.",
+        ),
+        (
+            "삼성전자는 공장을 완공할 계획이다.",
+            "삼성전자는 공장을 완공했다.",
+            "삼성전자가 공장을 완공했는지 확인한다.",
+        ),
+    ],
+)
+def test_inquiry_or_condition_cannot_hide_a_separate_asserted_reversal(
+    source, assertion, nonassertion, assertion_first
+):
+    parts = [assertion, nonassertion] if assertion_first else [nonassertion, assertion]
+    candidate = " ".join(parts)
+    assert fact_graph_mismatches(assertion, [source])
+    assert fact_graph_mismatches(candidate, [source])
+    assert any(
+        check.outcome == "contradicted" and check.reason == "event_state_conflict"
+        for check in compare_source_facts(candidate, [source])
+    )
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        "삼성전자는 공장을 완공했고 계약 체결 여부를 확인한다.",
+        "계약 체결 여부를 확인했으며 삼성전자는 공장을 완공했다.",
+        "삼성전자는 공장을 완공했고 삼성전자가 공장을 완공했는지 확인한다.",
+        "삼성전자가 공장을 완공했는지 확인했으며 삼성전자는 공장을 완공했다.",
+    ],
+)
+def test_coordinated_inquiry_does_not_relax_an_asserted_completion(candidate):
+    source = "삼성전자는 공장을 완공할 계획이다."
+    assert fact_graph_mismatches(candidate, [source])
+
+
+def test_event_inquiry_cannot_relax_a_metric_in_the_same_clause():
+    candidate = "삼성전자의 매출은 30억원이며 공장을 완공했는지 확인한다."
+    source = "삼성전자의 매출은 20억원이다."
+    assert any(
+        check.outcome == "contradicted" and check.reason == "quantity_conflict"
+        for check in compare_source_facts(candidate, [source])
+    )

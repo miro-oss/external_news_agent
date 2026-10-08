@@ -106,6 +106,8 @@ _METRICS = {
     "대응 용량": "cooling_capacity",
     "투자액": "investment_amount",
     "투자금": "investment_amount",
+    "투자 예산": "investment_amount",
+    "투자예산": "investment_amount",
     "사업비": "project_cost",
     "총사업비": "project_cost",
     "매출 비중": "revenue_share",
@@ -115,6 +117,8 @@ _METRICS = {
     "가동률": "utilization_rate",
     "수율": "yield_rate",
     "소비전력": "power_consumption",
+    "전력 소비량": "power_consumption",
+    "전력소비량": "power_consumption",
     "전력 용량": "power_capacity",
     "전력용량": "power_capacity",
     "production volume": "production_volume",
@@ -137,6 +141,7 @@ _METRICS = {
 }
 _METRIC = re.compile("|".join(re.escape(s) for s in sorted(_METRICS, key=len, reverse=True)), re.I)
 _COMPOSED_METRIC = re.compile(r"매출(?:에서|의)\s+[^.!?。;\n]{0,35}?비중")
+_AGGREGATE_INVESTMENT = re.compile(r"투자(?:하는|한|할)\s+총액|공동\s+투자\s*예산")
 _EVENTS = {
     "장기공급계약": "contract",
     "장기 공급 계약": "contract",
@@ -370,10 +375,15 @@ _SPEAKER = re.compile(r"증권|연구원|애널리스트|교수|관계자|연구
 _SENTENCE_END = re.compile(r"(?<!\d)[.!?](?!\d)|[。;；\n]")
 _COORDINATION = re.compile(r"(?:했으며|됐으며|되었으며|했고|됐고|되었고|하지만|반면)\s+")
 _JOINT = re.compile(r"\s*(?:와|과|및|·|,|and|&)\s*", re.I)
-_OBJECT = re.compile(
+_OBJECT_NOUN = (
     r"(?<![가-힣A-Za-z0-9])(?P<object>(?:[가-힣A-Za-z0-9&·.-]+\s+){0,2}"
     r"[가-힣A-Za-z0-9.-]*?(?:공장|팹|센터|칠러|장비|반도체|전력|사업|클러스터|계약|협약|제품|시설))"
-    r"(?:\([^()]{1,80}\))?(?:을|를|에|의|이|가|도)(?=\s)",
+)
+_OBJECT = re.compile(
+    _OBJECT_NOUN + r"(?:\([^()]{1,80}\))?(?:을|를|에|의|이|가|도)(?=\s)",
+)
+_COUNTED_OBJECT = re.compile(
+    _OBJECT_NOUN + rf"\s+(?P<count>{_NUMBER})\s*(?P<counter>대|개)(?:을|를)(?=\s)"
 )
 _EN_OBJECT = re.compile(
     r"\b(?:a\s+|the\s+|its\s+)?(?P<object>(?:semiconductor\s+)?"
@@ -385,6 +395,14 @@ _EN_OBJECT = re.compile(
 _NOMINAL_OBJECT = re.compile(
     r"(?P<object>(?:[가-힣A-Za-z0-9&·.-]+\s+){0,2}"
     r"[가-힣A-Za-z0-9.-]*?(?:공장|팹|시설|클러스터|센터))\s*$"
+)
+_FACILITY_OWNER = re.compile(
+    _NOMINAL_OBJECT.pattern.removesuffix(r"\s*$") + r"(?P<particle>은|는|이|가|의)(?=\s)"
+)
+_PRODUCT_METRIC_OWNER = re.compile(
+    r"(?<![가-힣A-Za-z0-9])(?P<name>[가-힣A-Za-z0-9.-]*(?:제품|소자|장치))"
+    r"\s+(?=" + _METRIC.pattern + ")",
+    re.I,
 )
 
 
@@ -523,11 +541,26 @@ def _actors(source: str) -> tuple[list[Mention], dict[tuple[int, int], str]]:
             name = match["name"]
             if _norm(name) in _NON_ACTORS or _METRIC.fullmatch(name) or _EVENT.fullmatch(name):
                 continue
-            if name not in aliases and re.search(
-                r"(?:에서|에게|으로|부터|까지|보다|처럼|에|되|하|있|없|넘어가|만드|이르)$", name
+            particle = match.groupdict().get("particle")
+            if name not in aliases and (
+                re.search(
+                    r"(?:에서|에게|으로|부터|까지|보다|처럼|에|되|있|없|넘어가|만드|이르)$", name
+                )
+                or (name.endswith("하") and particle not in {"이", "가", "의"})
             ):
                 continue
             span = _span(source, match.start("name"), match.end("name"))
+            if "·" in name and re.match(r"(?:은|는|이|가)\s*공동(?:으로)?\s", source[span.end :]):
+                # A literal coordinated name plus explicit 공동 establishes a
+                # joint owner; do not split arbitrary dotted organization names.
+                for part in re.finditer(r"[^·]+", name):
+                    member = _span(source, span.start + part.start(), span.start + part.end())
+                    key = (member.start, member.end)
+                    actors[key] = Mention(
+                        "actor", aliases.get(_norm(member.text), _norm(member.text)), member
+                    )
+                    roles[key] = particle
+                continue
             key = (span.start, span.end)
             # A grammatical phrase containing a known multiword name must not
             # create a second, shortened company identity.
@@ -540,11 +573,33 @@ def _actors(source: str) -> tuple[list[Mention], dict[tuple[int, int], str]]:
                 roles[key] = match.groupdict().get("particle") or (
                     "possessive" if pattern is _ENGLISH_OWNER else "subject"
                 )
+    # Named facilities can own a metric without being company names. Reuse the
+    # existing nominal facility grammar, and do not absorb another named actor.
+    for match in _FACILITY_OWNER.finditer(source):
+        left, right = match.span("object")
+        if (
+            " " not in match["object"]
+            or re.search(r"(?:^|\s)(?:이|그|해당)(?=\s)", match["object"])
+            or any(left <= a.span.start < right for a in actors.values())
+        ):
+            continue
+        span = _span(source, left, right)
+        actors[(left, right)] = Mention("actor", _norm(span.text), span)
+        roles[(left, right)] = match["particle"]
+    for match in _PRODUCT_METRIC_OWNER.finditer(source):
+        span = _span(source, match.start("name"), match.end("name"))
+        actors.setdefault((span.start, span.end), Mention("actor", _norm(span.text), span))
     return sorted(actors.values(), key=lambda m: m.span.start), roles
 
 
 def _in(items: list[Mention], span: Span) -> list[Mention]:
     return [m for m in items if span.start <= m.span.start and m.span.end <= span.end]
+
+
+_STATE_INQUIRY = re.compile(r"(?:했|됐|되었|하였)는지(?:를)?\s*(?:확인|점검|검토)")
+_NUMERIC_INQUIRY = re.compile(r"(?:인|일|이었는|였는)지(?:를)?\s*(?:확인|점검|검토)")
+_CHANGE_INQUIRY = re.compile(r"\s*(?:증가|감소|상승|하락)" + _STATE_INQUIRY.pattern)
+_EVENT_CANCELLATION_CONDITION = re.compile(r"(?:이|가|은|는)?\s*취소\s*되면(?=$|\s|[,.;])")
 
 
 def _state(text: str) -> tuple[str, tuple[str, ...]]:
@@ -668,7 +723,8 @@ def _owners(source, clause, actors, roles, target):
 
 
 _STATE_BINDINGS = {
-    "conditional": r"다면|라면|으면|경우|가정|가능성|\b(?:if|assuming|may|might|could)\b",
+    "conditional": r"다면|라면|으면|되면|경우|가정|가능성|\b(?:if|assuming|may|might|could)\b",
+    "unknown": _STATE_INQUIRY.pattern + "|" + _NUMERIC_INQUIRY.pattern,
     "negated": r"않|못|없|아니|취소|중단|무산|\b(?:not|never|cancelled|canceled)\b",
     "forecast": r"전망|예상|추산|목표|정조준|관측|것으로\s*봤|내다봤|추정|"
     r"\b(?:expects?|forecast|estimated?|projects?)\b",
@@ -759,6 +815,10 @@ def _metric_target(source, metric, owners, times):
     while start < metric.span.start and source[start].isspace():
         start += 1
     qualifier = source[start : metric.span.start].strip()
+    if metric.value == "power_consumption" and qualifier == "이전 제품보다":
+        # This is a comparison baseline, not another product whose wattage was
+        # measured. The percentage's own role retains the relative change.
+        qualifier = ""
     if not qualifier:
         return replace(metric, value=identity), []
     words = qualifier.split()
@@ -783,6 +843,24 @@ def _numeric_relations(source, clause, actors, roles, metrics, quantities, times
     result = []
     for index, metric in enumerate(metrics):
         next_metric = metrics[index + 1].span.start if index + 1 < len(metrics) else clause.end
+        # A later explicit owner starts a different quantity scope even when
+        # its repeated metric was omitted. Do not invent that omitted metric.
+        next_metric = min(
+            [
+                next_metric,
+                *(
+                    a.span.start
+                    for a in actors
+                    if metric.span.end <= a.span.start < next_metric
+                    and roles.get((a.span.start, a.span.end)) in {"은", "는", "이", "가", "의"}
+                    and any(
+                        metric.span.end <= q.span.start < q.span.end <= a.span.start
+                        and re.search(r"[,，]|이며\s", source[q.span.end : a.span.start])
+                        for q in quantities
+                    )
+                ),
+            ]
+        )
         local = [q for q in quantities if metric.span.end <= q.span.start < next_metric]
         # Nominal amounts preceding a metric (20개 생산량) lack a complete
         # predication and remain mentions rather than invented relations.
@@ -790,6 +868,10 @@ def _numeric_relations(source, clause, actors, roles, metrics, quantities, times
             continue
         owners, speaker, owner_uncertainty = _owners(source, clause, actors, roles, metric)
         target, target_uncertainty = _metric_target(source, metric, owners, times)
+        modifier = source[owners[-1].span.end : metric.span.start] if owners else ""
+        individual = bool(re.fullmatch(r"\s*(?:의|은|는|이|가)?\s*개별\s*", modifier))
+        if metric.role == "aggregate" or individual:
+            target, target_uncertainty = replace(metric, value=metric.value), []
         state_scope = _span(source, metric.span.start, next_metric)
         state, state_uncertainty = _state(state_scope.text)
         if _state(clause.text)[0] == "conditional":
@@ -820,7 +902,15 @@ def _numeric_relations(source, clause, actors, roles, metrics, quantities, times
             uncertainty.extend(time_uncertainty)
             if len(local) > 1 and not respective and not local_times:
                 uncertainty.append("multiple_quantities_without_roles")
-            role = quantity.role
+            role = (
+                "aggregate"
+                if metric.role == "aggregate"
+                else "individual"
+                if individual
+                else quantity.role
+            )
+            if re.search(r"총\s*$", source[metric.span.end : quantity.span.start]):
+                role = "aggregate"
             tail = source[quantity.span.end : min(next_metric, quantity.span.end + 22)]
             if quantity.unit == "percent":
                 role = (
@@ -830,7 +920,7 @@ def _numeric_relations(source, clause, actors, roles, metrics, quantities, times
                         "change_increase"
                         if re.search(r"증가|상승|뛰었|올랐|오를|increase", tail, re.I)
                         else "change_decrease"
-                        if re.search(r"감소|하락|decrease", tail, re.I)
+                        if re.search(r"감소|하락|낮다|낮은|decrease", tail, re.I)
                         else "level"
                     )
                 )
@@ -847,6 +937,10 @@ def _numeric_relations(source, clause, actors, roles, metrics, quantities, times
                 following_time.span.start if following_time else next_metric,
             )
             own_state, _ = _state(quantity_scope.text)
+            if _NUMERIC_INQUIRY.match(quantity_scope.text) or _CHANGE_INQUIRY.match(
+                quantity_scope.text
+            ):
+                own_state = "unknown"
             state_mention = _state_binding(source, state_scope, state)
             selected_state = state
             if _state_binding(source, quantity_scope, own_state) is not None and (
@@ -927,12 +1021,20 @@ def _event_relations(source, clause, actors, roles, events, quantities, times, m
         end = events[index + 1].span.start if index + 1 < len(events) else clause.end
         local_text = source[start:end]
         owners, speaker, uncertainty = _owners(source, clause, actors, roles, event)
-        state, state_uncertainty = _state(local_text)
+        tail = source[event.span.end : end]
+        # Bind a completion inquiry only to this event's immediate predicate.
+        # A question about another event cannot turn this event or a preceding
+        # numeric fact into an unasserted proposition.
+        if _STATE_INQUIRY.match(tail):
+            state, state_uncertainty = "unknown", ()
+        elif _EVENT_CANCELLATION_CONDITION.match(tail):
+            state, state_uncertainty = "conditional", ()
+        else:
+            state, state_uncertainty = _state(local_text)
         uncertainty.extend(state_uncertainty)
         uncertainty.extend(_scope_uncertainty(clause))
         # Event nouns need a predicate; mentions such as 투자 심리 or 공급 여부
         # must not become accomplished investments or actual supplies.
-        tail = source[event.span.end : end]
         if re.match(r"\s*(?:심리|sentiment\b|여부|수혜|benefit\b)", tail, re.I):
             continue
         if not re.search(
@@ -945,7 +1047,7 @@ def _event_relations(source, clause, actors, roles, events, quantities, times, m
         ):
             uncertainty.append("event_mention_only")
         objects = []
-        for pattern in (_OBJECT, _EN_OBJECT):
+        for pattern in (_OBJECT, _EN_OBJECT, _COUNTED_OBJECT):
             for match in pattern.finditer(source, start, end):
                 left, right = match.start("object"), match.end("object")
                 # Keep the noun phrase after grammatical subjects, dates and
@@ -958,6 +1060,12 @@ def _event_relations(source, clause, actors, roles, events, quantities, times, m
                         actor.span.end : right
                     ].startswith("의 "):
                         left = actor.span.end + 2
+                # In "A가 공급한 장비의 대당 가격", 공급한 qualifies the
+                # target; it is not part of the equipment's identity.
+                if left <= event.span.start < right and source[event.span.end : right].startswith(
+                    "한 "
+                ):
+                    left = event.span.end + 2
                 span = _span(source, left, right)
                 if any(span.start <= a.span.start < span.end for a in actors):
                     continue
@@ -981,8 +1089,39 @@ def _event_relations(source, clause, actors, roles, events, quantities, times, m
             if start <= q.span.start and q.span.end <= end and q.role != "process_node"
         ]
         quantity = local_quantities[0] if len(local_quantities) == 1 else None
-        if len(local_quantities) > 1:
+        counts = [
+            q
+            for q in local_quantities
+            if q.unit in {"count", "machines"} and q.qualifier == "exact"
+        ]
+        amounts = [q for q in local_quantities if q.unit in {"krw", "usd", "eur", "jpy"}]
+        bound_count = None
+        if (
+            event.value == "supply"
+            and len(local_quantities) == 2
+            and len(counts) == len(amounts) == 1
+        ):
+            count, amount = counts[0], amounts[0]
+            counted = _COUNTED_OBJECT.search(source, start, end)
+            if (
+                counted is not None
+                and count.span.start == counted.start("count")
+                and count.span.end == counted.end("counter")
+                and re.fullmatch(r"(?:을|를)\s+총\s*", source[count.span.end : amount.span.start])
+                and re.fullmatch(r"에\s*", source[amount.span.end : event.span.start])
+            ):
+                quantity = replace(amount, role="aggregate")
+                bound_count = count
+        if quantity is not None and event.value == "supply":
+            prefix = source[start : quantity.span.start]
+            if re.search(r"(?:대|개)당\s*가격(?:은|는|이|가)?\s*$", prefix):
+                quantity = replace(quantity, role="per_unit")
+            elif re.search(r"총\s*$", prefix):
+                quantity = replace(quantity, role="aggregate")
+        if len(local_quantities) > 1 and bound_count is None:
             uncertainty.append("multiple_event_quantities")
+        if quantity is not None and _NUMERIC_INQUIRY.match(source[quantity.span.end : end]):
+            state = "unknown"
         local_times = [t for t in times if start <= t.span.start and t.span.end <= end]
         time = local_times[0] if len(local_times) == 1 else None
         if len(local_times) > 1:
@@ -996,6 +1135,7 @@ def _event_relations(source, clause, actors, roles, events, quantities, times, m
             event,
             *((target,) if target else ()),
             *((quantity,) if quantity else ()),
+            *((replace(bound_count, role="item_count"),) if bound_count else ()),
             *((time,) if time else ()),
             *((speaker,) if speaker else ()),
             *((s,) if (s := _state_binding(source, _span(source, start, end), state)) else ()),
@@ -1032,6 +1172,10 @@ def analyze_sentence(source: str) -> Analysis:
         Mention("metric", "revenue_share", _span(source, m.start(), m.end()))
         for m in _COMPOSED_METRIC.finditer(source)
     ]
+    composed.extend(
+        Mention("metric", "investment_amount", _span(source, m.start(), m.end()), role="aggregate")
+        for m in _AGGREGATE_INVESTMENT.finditer(source)
+    )
     metrics = [
         Mention("metric", _METRICS[_norm(m.group())], _span(source, m.start(), m.end()))
         for m in _METRIC.finditer(source)

@@ -5,7 +5,12 @@ from copy import deepcopy
 
 import pytest
 from test_report_insight_assessment import request
-from test_report_insight_reduce_partial_repair import repair_jobs, response, synthesis
+from test_report_insight_reduce_partial_repair import (
+    public_reduce_projection,
+    repair_jobs,
+    response,
+    synthesis,
+)
 from test_report_insight_v4_pipeline import V4Provider, generate
 
 from app.llm import report_insight_service as service
@@ -47,7 +52,7 @@ def test_work_and_fact_errors_share_one_local_repair(with_fact_error):
         "report_work_approval_prerequisite_unsupported",
     }
     assert all(issue["claimIds"] == ["101:0"] for issue in issues)
-    original = json.loads(provider.response_texts[-2])["insights"][0]
+    original = public_reduce_projection(json.loads(provider.response_texts[-2]))["insights"][0]
     final = result.insights[0].model_dump(by_alias=True)
     assert final["headline"] == original["headline"]
     assert final["watchItems"][1] == original["watchItems"][1]
@@ -62,7 +67,7 @@ def test_work_diagnostics_cannot_authorize_foreign_or_incomplete_repair(monkeypa
     source = request()
     provider = V4Provider(source)
     generate(provider, source)
-    output = response(json.loads(provider.response_texts[-1]))
+    output = response(public_reduce_projection(json.loads(provider.response_texts[-1])))
     issue = ReportValidationIssue(
         "IT_INFRA" if defect == "audience" else "CHIP_MAKER",
         "watchItems[4].trigger" if defect == "path" else "overview[0].text",

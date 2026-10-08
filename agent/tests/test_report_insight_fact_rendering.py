@@ -6,6 +6,7 @@ from copy import deepcopy
 import pytest
 from test_report_insight_assessment import payload, request
 
+from app.core.errors import OutputValidationError
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.report_insight_assessment import (
     ReportAssessmentDraftValidationError,
@@ -23,6 +24,7 @@ from app.llm.report_insight_fact_rendering import (
     render_reduce_templates,
     split_rendered_prose,
 )
+from app.llm.report_insight_service import _validate_prose
 
 
 def response(value):
@@ -60,13 +62,10 @@ def test_complete_clause_preserves_subject_quantity_unit_and_factual_state():
     "value",
     [
         "삼성전자의 생산량은 10개다.",
-        "생산량은 20개다.",
         "매출은 100억원으로 증가했다.",
         "내년 생산 계획의 영향을 확인한다.",
         "HBM4 공급 계획을 확인한다.",
-        "삼성전자의 영향은 조건부다.",
-        "Samsung 공급 계획을 확인한다.",
-        "Acme 공급 계획을 확인한다.",
+        "기업 Acme 공급 계획을 확인한다.",
         "공장을 완공했다.",
         "장기 공급 계약을 체결했다.",
         "투자했다.",
@@ -80,10 +79,38 @@ def test_complete_clause_preserves_subject_quantity_unit_and_factual_state():
         "공급량이 두 배로 늘었다.",
     ],
 )
-def test_freehand_hard_facts_are_rejected_even_if_some_values_exist_in_source(value):
-    _, catalog, _ = context()
-    with pytest.raises(FactTemplateError, match="report_fact_template_required"):
-        render_fact_template(value, catalog, ["101:0"], max_length=700)
+def test_unsupported_facts_are_rejected_by_source_validation_after_rendering(value):
+    source, catalog, slot = context()
+    rendered = render_fact_template(value, catalog, ["101:0"], max_length=700)
+    with pytest.raises(OutputValidationError):
+        _validate_prose(
+            [rendered.interpretation],
+            ["101:0"],
+            {"101:0": slot.source_text},
+            {"101:0": source.findings[0].claims[0]},
+            request=source,
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "생산량은 20개다.",
+        "삼성전자의 영향은 조건부다.",
+        "삼성전자의 생산 일정을 확인한다.",
+    ],
+)
+def test_grounded_companies_and_quantities_do_not_require_a_quote_marker(value):
+    source, catalog, slot = context()
+    rendered = render_fact_template(value, catalog, ["101:0"], max_length=700)
+    _validate_prose(
+        [rendered.interpretation],
+        ["101:0"],
+        {"101:0": slot.source_text},
+        {"101:0": source.findings[0].claims[0]},
+        request=source,
+    )
+    assert rendered.text == value
 
 
 @pytest.mark.parametrize(
@@ -181,20 +208,13 @@ def test_layout_fallback_cannot_omit_or_truncate_an_overlong_interpretation(with
     [
         ("foreign", "report_fact_slot_scope"),
         ("unknown", "report_fact_slot_unknown"),
-        ("company", "report_fact_template_required"),
-        ("number", "report_fact_template_required"),
-        ("state", "report_fact_template_required"),
     ],
 )
-def test_long_quote_layout_fallback_never_bypasses_source_or_prose_validation(mutation, expected):
+def test_long_quote_layout_fallback_never_bypasses_source_scope_validation(mutation, expected):
     _, catalog, slot = context(
         "삼성전자의 생산량은 20개다. " + "관련 조건은 추가 확인이 필요하다. " * 8
     )
-    prose = {
-        "company": "삼성전자의 생산 일정을 확인한다.",
-        "number": "생산량은 999개다.",
-        "state": "공장 가동이 진행 중이다.",
-    }.get(mutation, "생산 조건을 확인한다.")
+    prose = "생산 조건을 확인한다."
     value = template(slot, prose)
     refs = ["102:0"] if mutation == "foreign" else ["101:0"]
     if mutation == "unknown":
@@ -217,9 +237,9 @@ def test_new_native_map_and_review_use_rendering_then_preserve_public_projection
     catalog = build_fact_text_catalog(source)
     wire = draft_to_wire(payload(source), source)
     original_reason = wire["assessments"]["CHIP_MAKER"]["finding101"]["reason"]
-    wire["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = template(
-        catalog.slots[0], original_reason
-    )
+    wire["assessments"]["CHIP_MAKER"]["finding101"]["sourceQuotes"]["reason"] = catalog.slots[
+        0
+    ].slot_id
     validated = validate_template_draft(response(wire), source)
     reason = validated.mapped.insights[0].assessments[0].reason
     assert reason.startswith("원문: 「삼성전자는")
@@ -233,14 +253,17 @@ def test_native_template_failure_is_located_and_does_not_change_neighboring_reco
     source = request(ids=(101, 102))
     wire = draft_to_wire(payload(source), source)
     unchanged = deepcopy(wire["assessments"]["CHIP_MAKER"]["finding102"])
-    wire["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = "삼성전자의 생산량은 99개다."
+    foreign_slot = build_fact_text_catalog(source, ["102:0"]).slots[0]
+    wire["assessments"]["CHIP_MAKER"]["finding101"]["sourceQuotes"]["reason"] = foreign_slot.slot_id
     with pytest.raises(ReportAssessmentDraftValidationError) as captured:
         validate_template_draft(response(wire), source)
     error = captured.value
     assert error.failed_finding_ids == (101,)
     assert error.validation_issues[0].field == "assessments[101].reason"
     assert error.validation_issues[0].claim_ids == ("101:0",)
-    assert error.validation_issues[0].rule_id == "report_fact_template_required"
+    assert error.validation_issues[0].rule_id == "report_fact_slot_scope"
+    assert error.validation_issues[0].error_kind == "report_evidence_reference_invalid"
+    assert error.validation_issues[0].category == "REFERENCE"
     assert wire["assessments"]["CHIP_MAKER"]["finding102"] == unchanged
 
 
@@ -299,9 +322,17 @@ def test_every_reduce_human_visible_field_enforces_source_owned_facts(group, fie
     value = reduce_wire()
     record = value["insights"][0] if group is None else value["insights"][0][group][0]
     record[field] = "삼성전자의 생산량은 10개다."
-    _, issues = render_reduce_templates(value, source, {"CHIP_MAKER": ["101:0"]})
-    assert len(issues) == 1
-    assert issues[0].field == (field if group is None else f"{group}[0].{field}")
+    rendered, issues = render_reduce_templates(value, source, {"CHIP_MAKER": ["101:0"]})
+    assert issues == ()
+    checked = rendered["insights"][0] if group is None else rendered["insights"][0][group][0]
+    with pytest.raises(OutputValidationError):
+        _validate_prose(
+            [checked[field]],
+            ["101:0"],
+            {"101:0": slot.source_text},
+            {"101:0": source.findings[0].claims[0]},
+            request=source,
+        )
     record[field] = template(slot)
     rendered, issues = render_reduce_templates(value, source, {"CHIP_MAKER": ["101:0"]})
     assert issues == ()

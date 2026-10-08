@@ -40,14 +40,14 @@ def length_error(loc=("insights", 0, "implications", 1, "falsifiedBy")):
 
 def issue():
     return ReportValidationIssue(
-        "CHIP_MAKER", "implications[1].falsifiedBy", "report_fact_mismatch", ("7869:1",)
+        "CHIP_MAKER", "implications[1].falsifiedBy", "report_evidence_insufficient", ("7869:1",)
     )
 
 
 def test_typed_final_attempt_metadata_survives_without_error_or_response_prose():
     first = OutputValidationError("PRIVATE_FIRST", error_kinds=("report_synthesis_invalid",))
     first.validation_issues = (replace(issue(), field="headline"),)
-    last = OutputValidationError("PRIVATE_LAST", error_kinds=("report_fact_mismatch",))
+    last = OutputValidationError("PRIVATE_LAST", error_kinds=("report_evidence_insufficient",))
     last.validation_issues = (issue(),)
     errors = iter((first, last))
 
@@ -63,7 +63,7 @@ def test_typed_final_attempt_metadata_survives_without_error_or_response_prose()
         {
             "audience": "CHIP_MAKER",
             "field": "implications[1].falsifiedBy",
-            "errorKind": "report_fact_mismatch",
+            "errorKind": "report_evidence_insufficient",
             "claimIds": ["7869:1"],
         }
     ]
@@ -120,7 +120,7 @@ def test_only_typed_tuples_and_stage_matching_fields_are_accepted():
     ],
 )
 def test_closed_assessment_fields_survive_map_and_review_diagnostics(field):
-    error = OutputValidationError("PRIVATE_PROSE", error_kinds=("report_fact_mismatch",))
+    error = OutputValidationError("PRIVATE_PROSE", error_kinds=("report_evidence_insufficient",))
     error.validation_issues = (replace(issue(), field=field),)
     for stage in ("MAP", "MAP-001", "REVIEW", "REVIEW-001"):
         failure = _validation_failure(error, stage, 2, {})
@@ -175,7 +175,7 @@ def test_final_map_retry_keeps_all_finding_locations_without_provider_prose():
     assert {item["field"] for item in failure["issues"]} == {
         f"assessments[{finding.id}].reason" for finding in source.findings
     }
-    assert all(item["errorKind"] == "report_fact_mismatch" for item in failure["issues"])
+    assert all(item["errorKind"] == "report_evidence_insufficient" for item in failure["issues"])
     assert all(
         item["claimIds"] == [f"{finding.id}:0"]
         for finding, item in zip(source.findings, failure["issues"], strict=True)
@@ -258,7 +258,7 @@ def test_final_review_retry_keeps_diagnostics_before_validated_map_fallback(monk
         {
             "audience": "CHIP_MAKER",
             "field": "assessments[101].reason",
-            "errorKind": "report_fact_mismatch",
+            "errorKind": "report_evidence_insufficient",
             "claimIds": ["101:0"],
         }
     ]

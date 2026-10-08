@@ -111,6 +111,23 @@ class AgentErrorResponseTest {
     }
 
     @Test
+    void preservesDistinctSemanticKindsAndSafeLocations() {
+        for (String kind : List.of("report_fact_contradiction", "report_evidence_insufficient",
+                "report_expression_policy", "report_evidence_reference_invalid",
+                "report_output_shape", "report_output_parse", "report_output_unlocated")) {
+            var failure = new HashMap<>(validation());
+            failure.put("errorKinds", List.of(kind));
+            failure.put("issuesTruncated", false);
+            failure.put("issues", List.of(Map.of("audience", "CHIP_MAKER",
+                    "field", "assessments[7869].reason", "errorKind", kind,
+                    "claimIds", List.of("7869:1"))));
+            var parsed = error(Map.of("validationFailure", failure)).validationFailure();
+            assertEquals(List.of(kind), parsed.errorKinds());
+            assertEquals(kind, parsed.issues().getFirst().errorKind());
+        }
+    }
+
+    @Test
     void unrecognizedKindsAreOmittedWithoutInventingACause() {
         var failure = new HashMap<>(validation());
         failure.put("errorKinds", List.of("private-kind\nforged", "report_fact_mismatch", "report_fact_mismatch"));
@@ -167,6 +184,10 @@ class AgentErrorResponseTest {
     @Test
     void readsClosedMapAndReviewFindingLocationsAndRejectsStageMixing() {
         var fields = List.of("assessments[7869]", "assessments[7869].reason",
+                "assessments[7869].basisClaimIds", "assessments[7869].decision.connection.relation",
+                "assessments[7869].decision.connection.work", "assessments[7869].decision.connection.basis",
+                "assessments[7869].decision.effect.basis.claimId",
+                "assessments[7869].decision.timing.basis.sourceSpanId",
                 "assessments[7869].axes.urgency", "assessments[7869].decision.connection.condition",
                 "assessments[7869].decision.effect.impactScope", "assessments[7869].decision.timing.urgencyState");
         for (var stage : List.of("MAP", "MAP-001", "REVIEW", "REVIEW-001")) {
@@ -179,6 +200,15 @@ class AgentErrorResponseTest {
                 failure.put("stage", "REDUCE-001");
                 assertNull(error(Map.of("validationFailure", failure)).validationFailure());
             }
+        }
+    }
+
+    @Test
+    void readsReduceUnitLocationsForIncompleteOptionalItems() {
+        for (var field : List.of("overview[0]", "implications[4]", "watchItems[4]")) {
+            var failure = reduceIssues(List.of(changedIssue("field", field)), false);
+            var parsed = error(Map.of("validationFailure", failure)).validationFailure();
+            assertEquals(field, parsed.issues().getFirst().field());
         }
     }
 

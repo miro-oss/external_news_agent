@@ -298,7 +298,7 @@ def test_fact_only_condition_repair_does_not_replace_event_state_with_invented_p
     with pytest.raises(service.ReportAssessmentValidationError) as caught:
         full_validate(raw, source)
     error = caught.value
-    assert error.error_kinds == ("report_fact_mismatch",)
+    assert set(error.error_kinds) == {"report_evidence_insufficient"}
     assert error.native_prose_repairs[101][1] == ("decision.connection.condition",)
     repair = object.__new__(service.ReportInsightService)._repair_call(
         draft_prompt(source),

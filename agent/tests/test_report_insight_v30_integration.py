@@ -60,7 +60,7 @@ def test_service_reads_original_source_cache_without_extra_provider_calls(
     )
     output = ReportInsightService(settings, provider).generate(source)
     assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001"]
-    assert output.meta.prompt_version == "report-insight.ko.v30"
+    assert output.meta.prompt_version == "report-insight.ko.v36"
     for call in provider.calls:
         data = framed(call["prompt"])
         index = (

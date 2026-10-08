@@ -361,11 +361,7 @@ def _frames(value: str, *, claim_type: str = "FACT") -> list[EventFrame]:
             end = matches[index + 1].start() if index + 1 < len(matches) else len(clause)
             local = clause[event.start() : end]
             local_observed = observed[event.start() : end]
-            if (
-                _CONDITIONAL.search(clause)
-                or _FUTURE.search(local)
-                or claim_type != "FACT"
-            ):
+            if _CONDITIONAL.search(clause) or _FUTURE.search(local) or claim_type != "FACT":
                 stage = 0
             elif _COMPLETED.search(local_observed):
                 stage = 3
@@ -724,116 +720,140 @@ class ReportSynthesisQualityValidationError(OutputValidationError):
         )
 
 
-def validate_synthesis_quality(
-    insight: ReportAudienceInsight | ReportInsightReduceAudience,
+def synthesis_unit_quality_diagnostics(
+    audience,
+    group,
+    index,
+    values: dict[str, str],
+    refs: Collection[str],
     request: ReportInsightRequest,
-    allowed_claim_ids: Collection[str],
-) -> None:
-    """Raise typed repair diagnostics for explicit synthesis quality violations."""
+    *,
+    global_rows: list[EvidenceText] | None = None,
+) -> tuple[tuple[ReportValidationIssue, str], ...]:
+    """Apply existing quality rules only to the unit's actual fields.
+
+    Callers authenticate references and render optional source templates first.
+    Missing/invalid fields are never filled in to create a synthetic unit. A
+    cross-field falsifier check requires its entire original proposition.
+    """
+    if group not in {"headline", "overview", "implications"}:
+        return ()
+    values = {field: value for field, value in values.items() if isinstance(value, str)}
+    base = "headline" if group == "headline" else f"{group}[{index}]"
     violations = []
 
-    def record(kind, path, refs, message):
+    def record(kind, field, message):
+        path = base if group == "headline" else f"{base}.{field}"
         violations.append(
-            (ReportValidationIssue(insight.audience, path, kind, tuple(refs)), f"{path}: {message}")
+            (ReportValidationIssue(audience, path, kind, tuple(refs)), f"{path}: {message}")
         )
 
-    global_rows = _texts(
-        request, [claim.id for finding in request.findings for claim in finding.claims]
-    )
-    for path, value, refs in [
-        ("headline", insight.headline, allowed_claim_ids),
-        *[
-            (f"overview[{index}].text", item.text, item.basis_claim_ids)
-            for index, item in enumerate(insight.overview)
-        ],
-        *[
-            (f"implications[{index}].{field}", getattr(item, field), item.basis_claim_ids)
-            for index, item in enumerate(insight.implications)
-            for field in ("text", "mechanism")
-        ],
-    ]:
-        rows = _texts(request, refs)
+    if global_rows is None:
+        global_rows = _texts(
+            request, [claim.id for finding in request.findings for claim in finding.claims]
+        )
+    rows = _texts(request, refs)
+    for field in ("text", "mechanism") if group == "implications" else ("text",):
+        if field not in values:
+            continue
         for kind, message in [
-            *_event_problems(value, rows, global_rows),
-            *_production_binding_problems(value, rows, global_rows),
+            *_event_problems(values[field], rows, global_rows),
+            *_production_binding_problems(values[field], rows, global_rows),
         ]:
-            record(kind, path, refs, message)
-    for path, item in [
-        *[(f"overview[{index}].assumption", item) for index, item in enumerate(insight.overview)],
-        *[
-            (f"implications[{index}].assumption", item)
-            for index, item in enumerate(insight.implications)
-        ],
-    ]:
-        if _assumption_unconfirmed(item.assumption, _texts(request, item.basis_claim_ids)):
-            record(
-                "report_assumption_unconfirmed",
-                path,
-                item.basis_claim_ids,
-                "경매 중단 사실과 실제 전력 공급 영향의 확인은 다릅니다. "
-                "확인되지 않은 영향은 조건으로 명시해야 합니다.",
-            )
-    for index, item in enumerate(insight.implications):
-        if _placeholder(item.mechanism):
+            record(kind, field, message)
+    if (
+        group in {"overview", "implications"}
+        and "assumption" in values
+        and _assumption_unconfirmed(values["assumption"], rows)
+    ):
+        record(
+            "report_assumption_unconfirmed",
+            "assumption",
+            "경매 중단 사실과 실제 전력 공급 영향의 확인은 다릅니다. "
+            "확인되지 않은 영향은 조건으로 명시해야 합니다.",
+        )
+    if group != "implications":
+        return tuple(violations)
+    if "mechanism" in values:
+        if _placeholder(values["mechanism"]):
             record(
                 "report_synthesis_placeholder",
-                f"implications[{index}].mechanism",
-                item.basis_claim_ids,
+                "mechanism",
                 "일반 자리표시자 대신 근거 사건과 "
                 "해당 관점의 구체적 업무 판단을 잇는 경로를 작성해야 합니다.",
             )
-        if _information_gap_only(item.mechanism):
+        if _information_gap_only(values["mechanism"]):
             record(
                 "report_synthesis_information_gap",
-                f"implications[{index}].mechanism",
-                item.basis_claim_ids,
+                "mechanism",
                 "정보 부족만 잇는 문장은 인과 경로가 "
                 "아닙니다. 인용한 실제 사건과 관점 업무 사이의 조건을 설명하거나 "
                 "연결 경로를 만들 수 없는 implication을 제외해야 합니다.",
             )
+    if "falsifiedBy" in values:
+        falsifier = values["falsifiedBy"]
         if (
-            _MISSING_EVIDENCE.search(item.falsified_by)
-            and not _WITHDRAWN_ABSENCE.search(item.falsified_by)
-            and not (
-                _MEASUREMENT_CONTEXT.search(item.falsified_by)
-                and _OBSERVED_RESULT.search(item.falsified_by)
-            )
+            _MISSING_EVIDENCE.search(falsifier)
+            and not _WITHDRAWN_ABSENCE.search(falsifier)
+            and not (_MEASUREMENT_CONTEXT.search(falsifier) and _OBSERVED_RESULT.search(falsifier))
         ):
             record(
                 "report_falsification_missing_observation",
-                f"implications[{index}].falsifiedBy",
-                item.basis_claim_ids,
+                "falsifiedBy",
                 "근거·정보 부족은 반증 관측이 "
                 "아닙니다. 같은 대상의 계약 철회·검증 실패·대체 공급 확보처럼 "
                 "해석을 바꾸는 관측을 쓰거나 해당 implication을 제외해야 합니다.",
             )
-        rows = _texts(request, item.basis_claim_ids)
-        source_halt = _auction_halted(rows)
-        proposition = item.text + "\n" + item.mechanism
-        if _expansion_falsifier_reversed(proposition, item.falsified_by, rows):
+    if {"text", "mechanism", "falsifiedBy"} <= values.keys():
+        falsifier = values["falsifiedBy"]
+        proposition = values["text"] + "\n" + values["mechanism"]
+        if _expansion_falsifier_reversed(proposition, falsifier, rows):
             record(
                 "report_falsification_direction",
-                f"implications[{index}].falsifiedBy",
-                item.basis_claim_ids,
+                "falsifiedBy",
                 "동일 공장 증설 계획의 철회·연기가 "
                 "발생하지 않았다는 관측은 증설 효과를 반증하지 않습니다. 실제 계획 "
                 "철회·연기 또는 예상 생산 능력 향상 실패처럼 해석을 약화시키는 "
                 "관측 조건을 작성해야 합니다.",
             )
         if (
-            source_halt
+            _auction_halted(rows)
             and _POWER_EFFECT.search(proposition)
-            and _NO_ADDITIONAL_SUPPLY.search(item.falsified_by)
-            and not _WITHDRAWN_ABSENCE.search(item.falsified_by)
+            and _NO_ADDITIONAL_SUPPLY.search(falsifier)
+            and not _WITHDRAWN_ABSENCE.search(falsifier)
             and not _POSITIVE_SUPPLY_HYPOTHESIS.search(proposition)
         ):
             record(
                 "report_falsification_direction",
-                f"implications[{index}].falsifiedBy",
-                item.basis_claim_ids,
+                "falsifiedBy",
                 "추가 공급의 부재는 전력 부족·차질 "
                 "위험을 반증하지 않습니다. 대체 공급 확보처럼 위험을 약화시키는 "
                 "관측 가능한 조건을 작성해야 합니다.",
             )
+    return tuple(violations)
+
+
+def validate_synthesis_quality(
+    insight: ReportAudienceInsight | ReportInsightReduceAudience,
+    request: ReportInsightRequest,
+    allowed_claim_ids: Collection[str],
+) -> None:
+    """Raise typed repair diagnostics for explicit synthesis quality violations."""
+    global_rows = _texts(
+        request, [claim.id for finding in request.findings for claim in finding.claims]
+    )
+    units = [("headline", None, {"text": insight.headline}, allowed_claim_ids)]
+    units.extend(
+        (group, index, item.model_dump(by_alias=True), item.basis_claim_ids)
+        for group in ("overview", "implications")
+        for index, item in enumerate(getattr(insight, group))
+    )
+    violations = [
+        diagnostic
+        for group, index, values, refs in units
+        for diagnostic in synthesis_unit_quality_diagnostics(
+            insight.audience, group, index, values, refs, request, global_rows=global_rows
+        )
+    ]
     if violations:
         raise ReportSynthesisQualityValidationError(violations)

@@ -2,12 +2,15 @@
 
 import re
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from uuid import uuid4
 
 from pydantic import ValidationError
 
 from app.core.errors import OutputValidationError
 from app.core.parser import JsonObjectParseError
+from app.llm.prompt_data import prompt_json
+from app.llm.report_repair_details import RepairDetail, diagnostic_category
 
 _AUDIENCES = frozenset({"CHIP_MAKER", "EQUIPMENT_MAKER", "MARKET_INVESTOR", "IT_INFRA"})
 _REDUCE_FIELD = re.compile(
@@ -36,6 +39,10 @@ REPORT_VALIDATION_ERROR_KINDS = frozenset(
         "report_assessment_truncated_prefix",
         "report_assumption_unconfirmed",
         "report_fact_mismatch",
+        "report_fact_contradiction",
+        "report_evidence_insufficient",
+        "report_evidence_reference_invalid",
+        "report_expression_policy",
         "report_falsification_direction",
         "report_falsification_missing_observation",
         "report_synthesis_empty",
@@ -71,6 +78,7 @@ class ReportValidationIssue:
     error_kind: str
     claim_ids: tuple[str, ...]
     rule_id: str | None = None
+    details: tuple[RepairDetail, ...] = dataclass_field(default=(), repr=False)
 
     @property
     def rule(self) -> str:
@@ -85,6 +93,30 @@ class ReportValidationIssue:
     def located(self) -> bool:
         return _safe_issue(self)
 
+    @property
+    def category(self) -> str:
+        if self.error_kind in {
+            "report_fact_contradiction",
+            "report_evidence_insufficient",
+            "report_evidence_reference_invalid",
+            "report_expression_policy",
+        }:
+            return diagnostic_category(self.error_kind)
+        details = self._repair_details()
+        if details and all(item.category == "CONTRADICTION" for item in details):
+            return "CONTRADICTION"
+        return diagnostic_category(self.rule)
+
+    def _repair_details(self) -> tuple[RepairDetail, ...]:
+        if type(self.details) is not tuple:
+            return ()
+        return tuple(
+            detail
+            for detail in self.details
+            if type(detail) is RepairDetail
+            and all(set(row.claim_ids) <= set(self.claim_ids) for row in detail.expected_evidence)
+        )
+
     def diagnostic_payload(self) -> dict[str, object]:
         """Internal uniform format; the public API projection stays unchanged."""
         if not _internal_issue(self, None):
@@ -96,14 +128,133 @@ class ReportValidationIssue:
             "claimIds": list(refs[:_MAX_CLAIMS]),
             "claimIdsTruncated": len(refs) > _MAX_CLAIMS,
             "errorKind": self.error_kind,
+            "category": self.category,
             "rule": self.rule,
             "reason": self.reason,
             "repairScope": "located" if self.located else "whole_output",
         }
 
+    def repair_payload(self) -> dict[str, object]:
+        """Private prompt data. Serialize with prompt_json, never into logs/API."""
+        payload = self.diagnostic_payload()
+        if not _internal_issue(self, None):
+            return payload
+        details = self._repair_details()
+        payload["details"] = [detail.payload() for detail in details[:4]]
+        payload["detailsTruncated"] = len(details) > 4
+        return payload
+
+
+def compact_repair_payload(issue: ReportValidationIssue) -> dict[str, object]:
+    """One exact offending/source slice per rule, solely for private repair data."""
+    payload = issue.repair_payload()
+    details = payload.get("details", [])
+    compact = []
+    for detail in details[:1]:
+        item = dict(detail)
+        evidence = detail["expectedEvidence"]
+        item["expectedEvidence"] = [dict(row) for row in evidence[:1]]
+        item["expectedEvidenceTruncated"] = detail["expectedEvidenceTruncated"] or len(evidence) > 1
+        spans = [(item, "generatedSpan")]
+        for row in item["expectedEvidence"]:
+            spans.append((row, "sourceSpan"))
+            if row["expectedValue"] is not None and len(row["expectedValue"]) > 80:
+                row["expectedValue"] = None
+                item["expectedEvidenceTruncated"] = True
+        for owner, key in spans:
+            span = owner[key]
+            if span is not None and len(span["text"]) > 80:
+                # This remains a real subrange; never retain the old end offset.
+                owner[key] = {
+                    "start": span["start"],
+                    "end": span["start"] + 80,
+                    "text": span["text"][:80],
+                }
+                payload["detailsTruncated"] = True
+        compact.append(item)
+    payload["details"] = compact
+    payload["detailsTruncated"] = payload.get("detailsTruncated", False) or len(details) > 1
+    return payload
+
+
+def bounded_repair_packet(issues, *, max_chars: int) -> dict[str, object]:
+    """Deduplicate rule explanations; spend the remaining budget only on slices.
+
+    Keep locations/rules before snippets. If even compact locations cannot fit,
+    explicitly request whole-output repair instead of silently dropping them.
+    """
+    packet = {"rules": {}, "issues": [], "detailsTruncated": False}
+    pending = []
+    for issue in issues:
+        if type(issue) is not ReportValidationIssue:
+            continue
+        payload = compact_repair_payload(issue)
+        rule = {key: payload[key] for key in ("rule", "errorKind", "category", "reason")}
+        key = next((key for key, value in packet["rules"].items() if value == rule), None)
+        if key is None:
+            key = f"r{len(packet['rules'])}"
+            packet["rules"][key] = rule
+        location = {key: payload[key] for key in ("audience", "field", "claimIds")}
+        location["rules"] = [key]
+        previous = next(
+            (
+                row
+                for row in packet["issues"]
+                if all(row[k] == location[k] for k in ("audience", "field", "claimIds"))
+            ),
+            None,
+        )
+        if previous is None:
+            previous = location
+            packet["issues"].append(previous)
+        elif key not in previous["rules"]:
+            previous["rules"].append(key)
+        pending.append((previous, key, payload.get("details", [])))
+        packet["detailsTruncated"] |= payload.get("detailsTruncated", False)
+    for location, key, details in pending:
+        if not details:
+            continue
+        location.setdefault("details", {})[key] = details
+        if len(prompt_json(packet)) > max_chars:
+            del location["details"][key]
+            if not location["details"]:
+                del location["details"]
+            packet["detailsTruncated"] = True
+    if len(prompt_json(packet)) > max_chars:
+        packet = {
+            "columns": ["audience", "field", "claimIds", "rules"],
+            "ruleColumns": ["rule", "errorKind", "category"],
+            "issues": [
+                [
+                    row["audience"],
+                    row["field"],
+                    row["claimIds"],
+                    [
+                        [packet["rules"][key][name] for name in ("rule", "errorKind", "category")]
+                        for key in row["rules"]
+                    ],
+                ]
+                for row in packet["issues"]
+            ],
+            "detailsTruncated": True,
+        }
+    if len(prompt_json(packet)) > max_chars:
+        packet = {"repairScope": "whole_output", "detailsTruncated": True}
+    return packet
+
 
 _RULE_REASONS = {
     "report_fact_mismatch": "생성한 사실값 또는 사건 연결을 선택 원문이 뒷받침하지 않습니다.",
+    "report_fact_contradiction": "생성한 사실과 동일 사건의 선택 원문이 명시적으로 모순됩니다.",
+    "report_evidence_insufficient": (
+        "선택 원문이 해당 사실을 뒷받침하지 않으며 반대 사실도 단정할 수 없습니다."
+    ),
+    "report_evidence_reference_invalid": (
+        "선택한 원문 참조가 존재하지 않거나 현재 항목의 근거 범위를 벗어났습니다."
+    ),
+    "report_expression_policy": (
+        "출력의 표현이나 사실·해석·가정 구분이 작성 규칙을 충족하지 않습니다."
+    ),
     "report_assessment_draft_invalid": "평가의 판단·업무·근거·조건 사이의 계약이 맞지 않습니다.",
     "report_assessment_invalid": "평가의 필수 항목 또는 점수·근거 계약이 맞지 않습니다.",
     "report_assessment_truncated_prefix": "응답이 잘려 해당 평가를 완성하지 못했습니다.",
@@ -151,12 +302,9 @@ _RULE_REASONS = {
     "report_fact_slot_unknown": "원문 목록에 없는 사실 표식을 선택했습니다.",
     "report_fact_slot_scope": "선택한 원문 표식이 현재 항목의 허용 근거에 속하지 않습니다.",
     "report_fact_interpretation_required": "원문 인용 뒤에 관점 해석이나 확인할 조건이 필요합니다.",
-    "report_fact_template_required": (
-        "원문 표식 뒤의 자유 문장에서도 회사·기관명, 수치, 내년 같은 시점, 사건·전망 "
-        "재서술과 내부 범주 코드를 제거하세요. 표식은 원문 전체로 복원됩니다. "
-        "남은 문장에는 어떤 업무 변수를 확인하고 무엇을 판단할지만 짧게 쓰세요."
-    ),
     "report_fact_rendered_length": "원문 인용과 해석을 합친 길이가 필드 한도를 넘었습니다.",
+    "report_fact_source_quotes_required": "표시용 원문 선택 객체를 출력 계약대로 작성해야 합니다.",
+    "report_fact_slot_without_prose": "원문 선택과 함께 관점 해석이나 확인 조건을 작성해야 합니다.",
 }
 
 
@@ -283,6 +431,15 @@ def _closed_field(loc: tuple) -> str | None:
         "falsified_by": "falsifiedBy",
         "basis_claim_ids": "basisClaimIds",
     }
+    if loc and loc[0] in {"sourceQuotes", "source_quotes"}:
+        return "headline" if len(loc) == 1 or loc[1:] == ("headline",) else None
+    if (
+        len(loc) == 4
+        and type(loc[0]) is str
+        and type(loc[1]) is int
+        and loc[2] in {"sourceQuotes", "source_quotes"}
+    ):
+        loc = (loc[0], loc[1], loc[3])
     if len(loc) == 1 and type(loc[0]) is str:
         field = aliases.get(loc[0], loc[0])
     elif len(loc) == 3 and type(loc[0]) is str and type(loc[1]) is int and type(loc[2]) is str:
@@ -387,6 +544,12 @@ def _map_schema_location(schema: dict, loc: tuple) -> tuple[str, str] | None:
     # Union labels, unexpected keys and provider-controlled suffixes cannot be
     # interpreted as editable fields. The authenticated finding is still safe.
     suffix = ".".join(loc[3:]) if all(type(part) is str for part in loc[3:]) else ""
+    suffix = {
+        "sourceQuotes.reason": "reason",
+        "source_quotes.reason": "reason",
+        "sourceQuotes.condition": "decision.connection.condition",
+        "source_quotes.condition": "decision.connection.condition",
+    }.get(suffix, suffix)
     field = f"{base}.{suffix}" if suffix else base
     return audience, field if _MAP_FIELD.fullmatch(field) else base
 

@@ -1,45 +1,57 @@
-"""Regression for unquoted event states and source-scoped technical vocabulary."""
+"""Explicit event assertions are checked against source, not renderer word bans."""
 
 import pytest
 from test_report_insight_assessment import payload, request
-from test_report_insight_fact_rendering import response
+from test_report_insight_grounded_prose import _checked_map, _checked_reduce, _reduce_payload
 
-from app.llm.report_insight_assessment import (
-    ReportAssessmentDraftValidationError,
-    draft_to_wire,
-    validate_template_draft,
+from app.llm.report_insight_fact_assertions import unsupported_fact_assertions
+
+SOURCE_WITHOUT_EVENTS = "원문에는 공정 검증 조건만 소개되어 있다."
+EVENT_ASSERTIONS = (
+    "공장 가동이 진행 중이다.",
+    "공급 계약이 체결돼 있다.",
+    "공급 계약이 체결되어 있다.",
+    "공장 건설을 추진한다.",
+    "공장 건설을 검토한다.",
+    "장비를 공급한다.",
+    "공장을 건설하고 있다.",
+    "장비 설치가 완료되어 있다.",
+    "양산이 진행되고 있다.",
+    "공장 가동이 재개되어 있다.",
+    "투자했다.",
+    "수주가 확정이다.",
+    "투자할 계획이다.",
+    "공급할 예정이다.",
+    "양산이 예정되어 있다.",
+    "공장 건설을 계획했다.",
 )
-from app.llm.report_insight_fact_rendering import (
-    FactTemplateError,
-    build_fact_text_catalog,
-    render_fact_template,
-)
-from app.llm.report_insight_service import _validated_map_output
 
 
-def rendered(value, *, source="생산라인 전체의 가동 중단이 현재 계속된다."):
-    req = request(text=source)
-    return render_fact_template(value, build_fact_text_catalog(req), ["101:0"], max_length=180)
+def checked_prose(text, source_text, stage):
+    source = request(text=source_text)
+    if stage == "MAP":
+        value = payload(source)
+        value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = text
+        _, mapped = _checked_map(source, value)
+        return mapped.insights[0].assessments[0].reason
+    value = _reduce_payload()
+    value["insights"][0]["overview"][0]["text"] = text
+    return _checked_reduce(source, value).insights[0].overview[0].text
 
 
-@pytest.mark.parametrize(
-    "value",
-    [
-        "공장 가동이 진행 중이다.",
-        "공급 계약이 체결돼 있다.",
-        "공급 계약이 체결되어 있다.",
-        "공장 건설을 추진한다.",
-        "공장 건설을 검토한다.",
-        "장비를 공급한다.",
-        "공장을 건설하고 있다.",
-        "장비 설치가 완료되어 있다.",
-        "양산이 진행되고 있다.",
-        "공장 가동이 재개되어 있다.",
-    ],
-)
-def test_asserted_current_passive_or_planning_states_require_source_slot(value):
-    with pytest.raises(FactTemplateError, match="report_fact_template_required"):
-        rendered(value)
+@pytest.mark.parametrize("value", EVENT_ASSERTIONS)
+def test_event_absence_check_is_source_aware_and_accepts_the_same_sourced_assertion(value):
+    assert unsupported_fact_assertions(value, SOURCE_WITHOUT_EVENTS)
+    assert unsupported_fact_assertions(value, SOURCE_WITHOUT_EVENTS + " " + value) == []
+
+
+@pytest.mark.parametrize("value", EVENT_ASSERTIONS[:10])
+@pytest.mark.parametrize("stage", ["MAP", "REDUCE"])
+def test_native_and_public_paths_reject_absent_events_but_accept_grounded_events(value, stage):
+    prose = value + " 공정 검증 일정을 확인한다."
+    with pytest.raises(ValueError):
+        checked_prose(prose, SOURCE_WITHOUT_EVENTS, stage)
+    assert checked_prose(prose, SOURCE_WITHOUT_EVENTS + " " + value, stage) == prose
 
 
 @pytest.mark.parametrize(
@@ -60,88 +72,58 @@ def test_asserted_current_passive_or_planning_states_require_source_slot(value):
         "공급량이 늘었는지 확인한다.",
         "수율이 증가했는지 확인한다.",
         "공급량이 늘었다는 가정에서 조달 조건을 점검한다.",
+        "공급량이 늘었다고 가정하면 조달 조건을 점검한다.",
+        "공급량이 늘었다는 가정하에 조달 조건을 점검한다.",
+        "공급량이 늘었다는 전제하에 조달 조건을 점검한다.",
+        "공급 차질이 이어지는 경우 공장 건설을 검토한다.",
+        "생산 여력이 부족하다면 장비를 공급한다.",
     ],
 )
-def test_conditional_or_investigative_work_is_not_an_asserted_state(value):
-    assert rendered(value).interpretation == value
+def test_conditional_or_investigative_work_is_not_an_asserted_new_event(value):
+    assert unsupported_fact_assertions(value, SOURCE_WITHOUT_EVENTS) == []
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        "공장 가동이 진행 중이다.",
-        "공급 계약이 체결돼 있다.",
-        "공장 건설을 추진한다.",
-    ],
-)
-def test_native_map_path_rejects_previously_accepted_unquoted_events(text):
-    source = request(text="생산라인 전체의 가동 중단이 현재 계속된다.")
-    wire = draft_to_wire(payload(source), source)
-    wire["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = text + " 공정 검증 일정을 확인한다."
-    with pytest.raises(ReportAssessmentDraftValidationError) as raised:
-        validate_template_draft(response(wire), source)
-    assert any(
-        issue.rule_id == "report_fact_template_required" for issue in raised.value.validation_issues
-    )
-
-
-@pytest.mark.parametrize(
-    "term,category",
-    [
-        ("TSV", "생산라인"),
-        ("FPGA", "반도체"),
-        ("DDR", "메모리"),
-        ("XYZ", "인터페이스"),
-    ],
-)
-def test_source_supported_technical_modifier_does_not_need_a_manual_acronym_whitelist(
-    term, category
-):
-    value = f"{term} 공정 검증 부담을 확인한다."
-    assert rendered(value, source=f"{term} {category}의 가동 중단이 현재 계속된다.").text == value
-
-
-def test_tsv_work_interpretation_passes_entire_native_map_validation():
-    source = request(text="TSV 생산라인 전체의 가동 중단이 현재 계속된다.")
-    wire = draft_to_wire(payload(source), source)
-    wire["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = "TSV 공정 검증 부담을 확인한다."
-    draft = validate_template_draft(response(wire), source)
-    output = _validated_map_output(
-        response(draft.mapped.model_dump(by_alias=True)), source, native_assessments=draft.evidence
-    )
-    assert output.insights[0].assessments[0].reason == "TSV 공정 검증 부담을 확인한다."
-
-
-@pytest.mark.parametrize("term", ["AMD", "IBM", "TSMC", "Acme"])
-def test_company_identifiers_still_require_slots_even_next_to_a_technical_noun(term):
-    with pytest.raises(FactTemplateError, match="report_fact_template_required"):
-        rendered(f"{term} 공정 검증 부담을 확인한다.", source=f"{term} 생산라인이 중단됐다.")
-
-
-@pytest.mark.parametrize("term", ["TSV", "FPGA", "DDR", "ACME", "Acme"])
-def test_absent_technical_or_proper_identifier_cannot_be_borrowed(term):
-    with pytest.raises(FactTemplateError, match="report_fact_template_required"):
-        rendered(f"{term} 공정 검증 부담을 확인한다.")
-
-
-def test_new_uppercase_name_explicitly_identified_as_company_is_not_a_technical_modifier():
-    with pytest.raises(FactTemplateError, match="report_fact_template_required"):
-        rendered(
-            "QXYZ 공정 조건을 확인한다.", source="기업 QXYZ는 QXYZ 생산라인의 가동을 중단했다."
+@pytest.mark.parametrize("stage", ["MAP", "REDUCE"])
+@pytest.mark.parametrize("value", EVENT_ASSERTIONS[1:5] + EVENT_ASSERTIONS[6:9])
+def test_halt_source_does_not_license_unrelated_contract_construction_or_installation(value, stage):
+    with pytest.raises(ValueError):
+        checked_prose(
+            value + " 공정 검증 일정을 확인한다.",
+            "생산라인 전체의 가동 중단이 현재 계속된다.",
+            stage,
         )
 
 
-def test_another_findings_technical_word_is_not_in_the_cited_source_scope():
+@pytest.mark.parametrize(
+    "term", ["TSV", "FPGA", "DDR", "XYZ", "AMD", "IBM", "TSMC", "Acme", "DDR5"]
+)
+def test_source_supported_company_and_product_identifiers_are_valid_in_work_prose(term):
+    value = f"{term} 공정 검증 부담을 확인한다."
+    assert (
+        checked_prose(value, f"{term} 생산라인 전체의 가동 중단이 현재 계속된다.", "MAP") == value
+    )
+
+
+@pytest.mark.parametrize("term", ["기업 ACME", "기업 Acme", "DDR5"])
+def test_explicit_organization_or_product_identifier_requires_selected_source(term):
+    with pytest.raises(ValueError):
+        checked_prose(f"{term} 공정 검증 부담을 확인한다.", SOURCE_WITHOUT_EVENTS, "MAP")
+
+
+@pytest.mark.parametrize("term", ["TSV", "FPGA", "DDR"])
+def test_technical_work_topic_is_not_itself_an_unsupported_company_assertion(term):
+    value = f"{term} 공정 검증 부담을 확인한다."
+    assert checked_prose(value, SOURCE_WITHOUT_EVENTS, "MAP") == value
+
+
+def test_another_findings_product_identifier_is_not_in_the_cited_source_scope():
     source = request(ids=(101, 102))
-    source.findings[1].sentences[0].text = "TSV 공정 검증 조건을 확인한다."
-    catalog = build_fact_text_catalog(source)
-    with pytest.raises(FactTemplateError, match="report_fact_template_required"):
-        render_fact_template("TSV 공정 검증 부담을 확인한다.", catalog, ["101:0"], max_length=180)
-
-
-def test_numeric_product_generations_still_belong_to_source_owned_fact_slots():
-    with pytest.raises(FactTemplateError, match="report_fact_template_required"):
-        rendered("DDR5 메모리 검증 조건을 확인한다.", source="DDR5 메모리 공정 검증이 진행 중이다.")
+    source.findings[1].claims[0].text = "DDR5 생산라인 전체의 가동 중단이 현재 계속된다."
+    source.findings[1].sentences[0].text = source.findings[1].claims[0].text
+    value = payload(source)
+    value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = "DDR5 공정 검증 부담을 확인한다."
+    with pytest.raises(ValueError):
+        _checked_map(source, value)
 
 
 @pytest.mark.parametrize(
@@ -154,7 +136,7 @@ def test_numeric_product_generations_still_belong_to_source_owned_fact_slots():
     ],
 )
 def test_generic_fund_category_is_not_a_company_identifier(value):
-    assert rendered(value).text == value
+    assert checked_prose(value, SOURCE_WITHOUT_EVENTS, "MAP") == value
 
 
 @pytest.mark.parametrize(
@@ -170,6 +152,65 @@ def test_generic_fund_category_is_not_a_company_identifier(value):
         "ETF 구성 기업의 공장 가동이 진행 중이다.",
     ],
 )
-def test_fund_category_does_not_authorize_fund_names_tickers_values_or_events(value):
-    with pytest.raises(FactTemplateError, match="report_fact_template_required"):
-        rendered(value)
+def test_fund_category_does_not_authorize_absent_identifiers_values_or_events(value):
+    with pytest.raises(ValueError):
+        checked_prose(value, SOURCE_WITHOUT_EVENTS, "MAP")
+
+
+@pytest.mark.parametrize(
+    "source", ["공급량을 확인한다.", "공급량이 세 배로 늘었다.", "공급량은 2개다."]
+)
+def test_written_multiplier_is_checked_with_quantity_values_and_units(source):
+    assert unsupported_fact_assertions("공급량이 두 배로 늘었다.", source)
+
+
+@pytest.mark.parametrize("source", ["공급량이 두 배로 늘었다.", "공급량이 2배로 늘었다."])
+def test_grounded_written_or_numeric_multiplier_is_accepted(source):
+    assert unsupported_fact_assertions("공급량이 두 배로 늘었다.", source) == []
+
+
+def test_known_event_kind_does_not_become_an_entailment_decision_by_this_helper():
+    assert (
+        unsupported_fact_assertions(
+            "공장 가동이 진행 중이다.", "생산라인 전체의 가동 중단이 현재 계속된다."
+        )
+        == []
+    )
+
+
+def test_hypothetical_prefix_does_not_hide_a_later_independent_assertion():
+    assert unsupported_fact_assertions(
+        "공급 차질이 이어지는 경우 일정 조정을 검토한다. 공장 건설을 추진한다.",
+        SOURCE_WITHOUT_EVENTS,
+    )
+
+
+def test_map_does_not_bind_a_following_metrics_predicate_to_an_earlier_question():
+    source = "제조사는 생산라인 전체의 가동 중단이 현재 계속되며 매출이 늘었다고 밝혔다."
+    prose = "수율을 확인하고 매출이 늘었다는 원문을 점검한다. 공정 검증 일정을 확인한다."
+    assert checked_prose(prose, source, "MAP") == prose
+
+
+@pytest.mark.parametrize(
+    "nonassertion",
+    [
+        "수율이 증가했다는 것은 아니다.",
+        "수율이 증가했다고 단정할 수 없다.",
+        "수율이 증가했다는 주장에 대한 근거가 없다.",
+        "공급량이 늘었다고 가정하면 조달 조건을 점검한다.",
+        "공급량이 늘었다는 가정하에 조달 조건을 점검한다.",
+        "공급량이 늘었다는 전제하에 조달 조건을 점검한다.",
+    ],
+)
+def test_map_does_not_treat_directly_attached_denial_or_assumption_as_new_fact(nonassertion):
+    prose = nonassertion + " 공정 검증 일정을 확인한다."
+    assert checked_prose(prose, SOURCE_WITHOUT_EVENTS, "MAP") == prose
+
+
+@pytest.mark.parametrize("separator", [". ", ", ", "고 "])
+def test_a_later_metrics_denial_does_not_hide_an_independent_assertion(separator):
+    value = "수율이 증가했다" + separator + "매출이 늘었다는 것은 아니다."
+    errors = unsupported_fact_assertions(value, SOURCE_WITHOUT_EVENTS)
+    assert errors == ["연결 원문에 없는 수치 지표 단정: 수율"]
+    with pytest.raises(ValueError):
+        checked_prose(value + " 공정 검증 일정을 확인한다.", SOURCE_WITHOUT_EVENTS, "MAP")

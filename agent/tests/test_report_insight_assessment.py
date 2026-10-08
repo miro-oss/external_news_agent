@@ -802,6 +802,7 @@ def test_native_to_flat_roundtrip_keeps_every_original_field_and_source_quote():
         "findingId",
         "decision",
         "reason",
+        "sourceQuotes",
     }
 
 
@@ -987,7 +988,7 @@ def test_claimful_reason_schema_and_map_review_prompts_explain_business_unknown_
     for stage, prompt in (("MAP", draft_prompt(source)), ("REVIEW", review_prompt(source))):
         assert "sourceSpanId" in prompt and "sourceQuoteChoices" in prompt
         assert "claims=[]" in prompt
-        assert "findingId, reason, decision 순서" in prompt
+        assert "findingId, reason, decision, sourceQuotes 순서" in prompt
         assert "basis의 claimId/sourceSpanId 필드에만" in prompt
         assert "내부 ID·ID 범위·미완성 ID·업무 범주 코드" in prompt
         instruction = report_stage_instruction(source.audiences, stage)
@@ -1011,6 +1012,7 @@ def test_complete_prompt_example_preserves_positive_unknown_and_claimless_source
             entry["decision"] = {
                 field: entry.pop(field) for field in ("connection", "effect", "timing")
             }
+            entry["sourceQuotes"] = {"reason": None, "condition": None}
     texts = (
         "제조사는 공정 검증 준비를 계획했다.",
         "합병 대상은 방산 사업이며 장비 사업은 포함하지 않는다.",

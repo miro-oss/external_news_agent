@@ -31,7 +31,8 @@ def test_unknown_relation_can_explain_known_source_entities_without_repair_or_sc
     def hook(stage, _, data, value):
         for record in value["assessments"]["CHIP_MAKER"].values():
             slot = data["findings"][0]["factTextSlots"][0]["slotId"]
-            record["reason"] = "{{fact:" + slot + "}} " + interpretation
+            record["reason"] = interpretation
+            record["sourceQuotes"] = {"reason": slot, "condition": None}
         return value
 
     provider = V4Provider(source, relation="UNDETERMINED", hook=hook)

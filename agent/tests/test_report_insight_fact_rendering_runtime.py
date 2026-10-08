@@ -1,4 +1,4 @@
-"""Production MAP/REVIEW/REDUCE render private source templates before returning prose."""
+"""Production stages assemble separate source selections into public prose."""
 
 from copy import deepcopy
 
@@ -11,8 +11,22 @@ from app.llm.report_insight_service import _semantic_synthesis_view
 from app.schemas.report_insight import ReportInsightReduceOutput
 
 
-def template(slot, prose):
-    return "{{fact:" + slot["slotId"] + "}} " + prose
+def select_source(record, field, slot):
+    fields = (
+        "reason",
+        "condition",
+        "headline",
+        "text",
+        "mechanism",
+        "assumption",
+        "falsifiedBy",
+        "topic",
+        "indicator",
+        "trigger",
+    )
+    record.setdefault("sourceQuotes", {name: None for name in fields if name in record})[field] = (
+        slot["slotId"]
+    )
 
 
 def test_production_stage_templates_preserve_original_source_and_display_no_internal_handles():
@@ -26,12 +40,13 @@ def test_production_stage_templates_preserve_original_source_and_display_no_inte
             finding = data["findings"][0]
             slot = finding["factTextSlots"][0]
             record = value["assessments"]["CHIP_MAKER"]["finding101"]
-            record["reason"] = template(slot, record["reason"])
+            select_source(record, "reason", slot)
         else:
             slot = data["factTextSlots"]["CHIP_MAKER"][0]
             overview = value["insights"][0]["overview"][0]
-            overview["text"] = template(slot, overview["text"])
-            overview["assumption"] = template(slot, "같은 생산 제약이 검증 준비에 연결되는 경우")
+            select_source(overview, "text", slot)
+            select_source(overview, "assumption", slot)
+            overview["assumption"] = "같은 생산 제약이 검증 준비에 연결되는 경우"
         seen.append((stage, slot["slotId"]))
         return value
 
@@ -61,15 +76,15 @@ def test_production_omits_only_long_display_quotes_and_preserves_facts_citations
             slot = data["findings"][0]["factTextSlots"][0]
             record = value["assessments"]["CHIP_MAKER"]["finding101"]
             expected["reason"] = record["reason"]
-            record["reason"] = template(slot, record["reason"])
+            select_source(record, "reason", slot)
         else:
             slot = data["factTextSlots"]["CHIP_MAKER"][0]
             insight = value["insights"][0]
             expected["headline"] = insight["headline"]
-            insight["headline"] = template(slot, insight["headline"])
+            select_source(insight, "headline", slot)
             overview = insight["overview"][0]
             expected["overview"] = deepcopy(overview)
-            overview["text"] = template(slot, overview["text"])
+            select_source(overview, "text", slot)
         return value
 
     provider = V4Provider(source, hook=hook)
@@ -98,7 +113,7 @@ def test_production_template_failure_repairs_only_failed_reduce_unit_and_keeps_g
             return value
         slot = data["factTextSlots"]["CHIP_MAKER"][0]
         overview = value["insights"][0]["overview"]
-        overview[0]["text"] = template(slot, overview[0]["text"])
+        select_source(overview[0], "text", slot)
         second = deepcopy(overview[0])
         second["text"] = "같은 생산 제약의 지속 여부에 따라 검증 순서를 조정해야 한다."
         overview.append(second)
@@ -155,10 +170,13 @@ def test_semantic_view_never_strips_an_unauthenticated_or_mutated_public_project
 
 
 @pytest.mark.parametrize("mutate_good_reason", [False, True])
-def test_template_condition_repair_freezes_original_good_template_and_decisions(mutate_good_reason):
+@pytest.mark.parametrize("finding_ids", [(101,), (101, 102)])
+def test_template_condition_repair_freezes_original_good_template_and_decisions(
+    mutate_good_reason, finding_ids
+):
     from app.core.errors import StructuredOutputExhaustedError
 
-    source = request()
+    source = request(ids=finding_ids)
     original_reason = []
 
     def hook(stage, occurrence, data, value):
@@ -166,7 +184,7 @@ def test_template_condition_repair_freezes_original_good_template_and_decisions(
             return value
         record = value["assessments"]["CHIP_MAKER"]["finding101"]
         slot = data["findings"][0]["factTextSlots"][0]
-        record["reason"] = template(slot, record["reason"])
+        select_source(record, "reason", slot)
         if stage == "MAP-001" and occurrence == 1:
             original_reason.append(record["reason"])
             record["condition"] = "삼성전자의 준비가 공정 검증 일정에 필요한 경우"

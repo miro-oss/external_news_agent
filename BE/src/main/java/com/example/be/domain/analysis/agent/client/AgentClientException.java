@@ -105,6 +105,8 @@ public class AgentClientException extends RuntimeException {
         private static final Set<String> KINDS = Set.of((
                 "report_assessment_draft_invalid report_assessment_invalid report_assessment_truncated_prefix "
                 + "report_assumption_unconfirmed report_fact_mismatch report_falsification_direction "
+                + "report_fact_contradiction report_evidence_insufficient report_expression_policy "
+                + "report_evidence_reference_invalid report_output_shape report_output_parse report_output_unlocated "
                 + "report_falsification_missing_observation report_synthesis_empty report_synthesis_information_gap "
                 + "report_synthesis_invalid report_synthesis_metadata_only report_synthesis_placeholder "
                 + "report_synthesis_reference_gap report_synthesis_source_binding report_synthesis_stage_overreach "
@@ -157,12 +159,15 @@ public class AgentClientException extends RuntimeException {
         private static final Set<String> LENGTH_KINDS = Set.of(
                 "string_too_long", "string_too_short", "too_long", "too_short");
         private static final String REDUCE_FIELD = "(?:headline|overview|implications|watchItems|"
+                + "overview\\[[0-2]\\]|(?:implications|watchItems)\\[[0-4]\\]|"
                 + "overview\\[[0-2]\\]\\.(?:text|assumption|basisClaimIds)|"
                 + "implications\\[[0-4]\\]\\.(?:text|mechanism|assumption|falsifiedBy|basisClaimIds)|"
                 + "watchItems\\[[0-4]\\]\\.(?:topic|indicator|trigger|basisClaimIds))";
         private static final String MAP_FIELD = "assessments\\[[1-9][0-9]{0,18}\\]"
-                + "(?:\\.(?:reason|axes\\.urgency|decision\\.connection\\.(?:condition|relation|work)|"
-                + "decision\\.effect\\.impactScope|decision\\.timing\\.urgencyState))?";
+                + "(?:\\.(?:reason|basisClaimIds|axes\\.(?:directness|impact|urgency|novelty)|"
+                + "decision\\.connection\\.(?:condition|relation|work)|"
+                + "decision\\.effect\\.impactScope|decision\\.timing\\.urgencyState|"
+                + "decision\\.(?:connection|effect|timing)\\.basis(?:\\.(?:claimId|sourceSpanId))?))?";
 
         private boolean matchesStage(String stage) {
             return field.matches(stage.matches("(?:MAP|REVIEW)(?:-[0-9]{3})?") ? MAP_FIELD : REDUCE_FIELD);

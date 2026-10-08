@@ -159,7 +159,7 @@ def test_public_diagnostic_bound_counts_locations_not_internal_rule_duplicates()
             rule,
         )
         for finding in range(101, 107)
-        for rule in ("report_fact_template_required", "unsupported_number")
+        for rule in ("report_fact_slot_scope", "unsupported_number")
     )
     details = report_validation_issue_details(error, {}, stage="MAP")
     assert len(details["issues"]) == 6

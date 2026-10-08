@@ -91,6 +91,15 @@ _MODULE_DASHES = str.maketrans({dash: "-" for dash in "‐‑–—"})
 _TEAMS = re.compile(r"(?<![가-힣A-Za-z0-9])[가-힣A-Za-z][가-힣A-Za-z0-9_-]{0,19}팀")
 _TEAM_RECOMMENDATION = re.compile(r"재검토|검토(?:해야|할|과제)|점검(?:해야|할)|고려")
 _TEAM_ASSERTION = re.compile(r"대상|담당|주체|승인|전제|요건|절차|준비.{0,8}조정|조정.{0,8}준비")
+_NOMINAL_PATH = re.compile(r"[A-Za-z0-9가-힣·/()\s-]*")
+_PATH_PREDICATE_OR_CASE = re.compile(
+    r"(?:은|는|이|가|을|를|에서|에게|한|하는|된|되는|하며|어|다(?:는|고)?)$"
+)
+_TEAM_PARTICLE = re.compile(r"^(?:으로|에서|에게|의|이|가|은|는)?\s*")
+_NEGATIVE_WORK_RELATION = re.compile(
+    r"(?:과|와|에)\s*(?:직접(?:적(?:으로)?)?\s*)?"
+    r"(?:연결|관련)(?:되는?\s*(?:사건|업무|대상))?(?:이|가)?\s*(?:아니|없)"
+)
 # A negative existence statement exempts only its procedure noun phrase, not
 # earlier assertions in the same clause ("... 준비하며 고객 승인 여부는 미확인").
 _NO_REQUIREMENT = re.compile(
@@ -129,7 +138,7 @@ _COMPATIBILITY_WORK = re.compile(
 _COORDINATED_PROCESS_WORK = re.compile(r"호환성\s*[·,/]\s*공정\s*(?:검증|시험)\s*(?:관점|업무)")
 _WORK_RELATION = re.compile(r"업무(?:와|에)\s*(?:직접(?:적(?:으로)?)?\s*)?(?:연결|관련|해당)")
 _DESIGN_RULE_SOURCE = re.compile(r"설계\s*규칙|\bdesign\s+rules?\b", re.I)
-_PROCEDURE_ACTION = re.compile(r"필요|요구|수행|진행|통과|실시|완료")
+_PROCEDURE_ACTION = re.compile(r"필요|요구|수행|진행|통과|실시|완료|마친|끝낸")
 # In semiconductor prose qualification is a technical evaluation, not necessarily
 # a regulator's certification. Bind it directly to an evaluated object/predicate;
 # staff qualifications, qualified opinions and distant reliability clauses do
@@ -190,6 +199,50 @@ def _team_supported(team: str, source: str) -> bool:
         return True
     translation = _TEAM_TRANSLATIONS.get(team)
     return bool(translation and re.search(translation, source, re.I))
+
+
+def _nominal_path(value: str) -> bool:
+    """A short noun path cannot cross another argument or an asserted predicate."""
+    words = value.strip().split()
+    return bool(
+        len(words) <= 6
+        and _NOMINAL_PATH.fullmatch(value)
+        and not any(_PATH_PREDICATE_OR_CASE.search(word) for word in words)
+    )
+
+
+def _negative_work_relation(match, clause: str) -> bool:
+    # Exempt only the matched work noun that an explicit relation denial owns.
+    # A completed/required procedure is still a claim even when its relevance
+    # to another event is denied ("완료된 냉각 검증과 관련이 없다").
+    if _PROCEDURE_ACTION.search(clause[: match.start()]) or _REQUIRED_GATE.search(
+        clause[: match.start()]
+    ):
+        return False
+    return any(
+        _nominal_path(clause[match.end() : relation.start()])
+        for relation in _NEGATIVE_WORK_RELATION.finditer(clause, match.end())
+    )
+
+
+def _team_asserts_work(team, clause: str) -> bool:
+    # Bind each team to its own role/procedure phrase. A later "변경 대상" of
+    # another object does not turn an earlier research subject into a work gate.
+    for assertion in _TEAM_ASSERTION.finditer(clause, team.end()):
+        between = _TEAM_PARTICLE.sub("", clause[team.end() : assertion.start()], count=1)
+        if assertion.group() == "승인" and re.match(
+            r"(?:한다|했다|하는|해야|할|하였)", clause[assertion.end() :]
+        ):
+            # In "팀이 도입안을 승인했다", the final accusative noun is the
+            # approval's object, not an intervening independent argument.
+            between = re.sub(r"(?:을|를)\s*$", "", between)
+        if not _nominal_path(between):
+            continue
+        if _TEAM_RECOMMENDATION.search(clause[assertion.start() : assertion.end() + 16]):
+            continue
+        return True
+    # Keep explicit reversed role assignments such as "승인 주체는 운영팀".
+    return bool(re.search(r"(?:대상|담당|주체)(?:은|는|이|가)\s*$", clause[: team.start()]))
 
 
 def _generic_compatibility_work(kind: str, match, clause: str, source: str) -> bool:
@@ -274,6 +327,7 @@ def work_prose_problems(value: str, source: str) -> tuple[str, ...]:
         for kind, emitted, supported in _RULES:
             unsupported = any(
                 not any(start <= match.start() and match.end() <= end for start, end in absent)
+                and not _negative_work_relation(match, clause)
                 and not _generic_compatibility_work(kind, match, clause, source)
                 and not _technical_qualification_work(kind, match, clause, source)
                 for match in emitted.finditer(clause)
@@ -282,10 +336,9 @@ def work_prose_problems(value: str, source: str) -> tuple[str, ...]:
                 problems.append(kind)
         if _unsupported_module(clause, source_modules):
             problems.append("physical_module")
-        if _TEAM_ASSERTION.search(clause) and not _TEAM_RECOMMENDATION.search(clause):
-            for match in _TEAMS.finditer(clause):
-                if not _team_supported(match.group(), source):
-                    problems.append("organization_prerequisite")
+        for match in _TEAMS.finditer(clause):
+            if _team_asserts_work(match, clause) and not _team_supported(match.group(), source):
+                problems.append("organization_prerequisite")
     return tuple(dict.fromkeys(problems))
 
 

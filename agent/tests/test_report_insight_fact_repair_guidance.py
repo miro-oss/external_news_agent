@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 from test_report_insight_assessment import payload, request, response
+from test_report_insight_repair_actions import structured_diagnostics
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
 from app.core.errors import AgentError, OutputValidationError
@@ -12,11 +13,16 @@ from app.llm.report_insight_assessment import validate_draft
 from app.llm.report_insight_fact_repair import fact_repair_guidance, fact_repair_kinds
 
 
-def fact_error(value, source):
+def fact_error(value, source, rule=None):
     data = request(text=source)
     claims, evidence = service._source_context(data)
     errors = service._prose_validation_errors([value], ["101:0"], evidence, claims)
-    return next(error for error in errors if "report_fact_mismatch" in error.error_kinds)
+    return next(
+        error
+        for error in errors
+        if service._PROSE_FACT_KINDS.intersection(error.error_kinds)
+        and (rule is None or rule in error.fact_repair_kinds)
+    )
 
 
 @pytest.mark.parametrize(
@@ -53,23 +59,36 @@ def fact_error(value, source):
 def test_actual_fact_failure_projects_closed_cause_without_rejected_values(
     value, source, kind, literal
 ):
-    error = fact_error(value, source)
+    error = fact_error(value, source, kind)
     action = service._repair_action_message(
         str(error), error.error_kinds, fact_kinds=error.fact_repair_kinds
     )
     assert kind in error.fact_repair_kinds
     assert f"[{kind}]" in action
     assert literal not in action
-    assert error.error_kinds == ("report_fact_mismatch",)
+    assert error.error_kinds == ("report_evidence_insufficient",)
 
 
 def test_currency_mismatch_gets_value_free_currency_and_scale_guidance():
-    error = fact_error("100유로 규모다.", "100달러 규모이며 100개를 공급한다.")
+    error = fact_error("100유로 규모다.", "100달러 규모이며 100개를 공급한다.", "currency_amount")
     assert "currency_amount" in error.fact_repair_kinds
     action = fact_repair_guidance(error.fact_repair_kinds)
     assert "[currency_amount]" in action
     assert "통화·금액의 값과 배율" in action
     assert "100" not in action
+
+
+def test_product_identifier_failure_is_not_misreported_as_a_company():
+    error = fact_error(
+        "HBM5의 검증 준비 영향을 확인한다.",
+        "제조사는 HBM4의 검증을 준비한다. 대상 수는 5개다.",
+        "source_binding",
+    )
+    assert "source_binding" in error.fact_repair_kinds
+    assert "company" not in error.fact_repair_kinds
+    action = fact_repair_guidance(error.fact_repair_kinds)
+    assert "제품명·세대 식별자" in action
+    assert "HBM5" not in action
 
 
 @pytest.mark.parametrize(
@@ -110,7 +129,10 @@ def test_recorded_parenthesized_reference_requires_an_actual_selected_claim():
     assert "internal_reference_in_prose" not in fact_repair_kinds(
         value, source, mismatch, refs=["102:0"]
     )
-    assert "internal_reference_in_prose" in fact_error(value, source).fact_repair_kinds
+    assert (
+        "internal_reference_in_prose"
+        in fact_error(value, source, "internal_reference_in_prose").fact_repair_kinds
+    )
 
 
 def six_id_provider(*, repair, labeled=True):
@@ -143,9 +165,11 @@ def test_six_recorded_style_id_failures_receive_one_actionable_repair_and_keep_u
     diagnostic = (
         provider.calls[1]["prompt"].split("<validation-error>")[1].split("</validation-error>")[0]
     )
-    assert diagnostic.count("[internal_reference_in_prose]") == 6
-    assert diagnostic.count("[unsupported_number]") == 6
-    assert "ID는 basis의 구조화 필드에만" in diagnostic
+    rows = structured_diagnostics(provider.calls[1]["prompt"])
+    for rule in ("internal_reference_in_prose", "unsupported_number"):
+        assert {row["field"] for row in rows if row["rule"] == rule} == {
+            f"assessments[{finding}].reason" for finding in range(101, 107)
+        }
     assert "원문 문장(claim" not in diagnostic
     assert len(diagnostic.strip()) <= 6000
     assert [item.reason for item in result.insights[0].assessments] == [clean] * 6
@@ -182,7 +206,12 @@ def test_inline_reference_prose_is_rejected_and_clean_reason_keeps_same_basis(ci
             native_assessments=draft.evidence,
         )
 
-    assert caught.value.error_kinds == ("report_fact_mismatch",)
+    expected = (
+        ("report_evidence_insufficient",)
+        if citation == "claim 101:"
+        else ("report_expression_policy", "report_evidence_insufficient")
+    )
+    assert caught.value.error_kinds == expected
     assert caught.value.failed_finding_ids == (101,)
     assert "근거에서 확인되지 않는 숫자" in str(caught.value)
     record["reason"] = clean

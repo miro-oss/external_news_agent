@@ -10,6 +10,7 @@ from test_report_insight_native_field_diagnostics import (
     recorded_source,
     rejected_projection,
 )
+from test_report_insight_repair_actions import structured_diagnostics
 from test_report_insight_work_repair_actions import full_validate
 
 from app.core.config import Settings
@@ -95,7 +96,11 @@ def test_actual_condition_diagnostic_still_requires_and_accepts_condition_repair
     )
     error = rejected_projection(source, value)
     raw, _, repair = repair_for(source, value, error)
-    assert "nativeFields=decision.connection.condition" in repair.prompt
+    (issue,) = structured_diagnostics(repair.prompt)
+    assert issue["field"] == "assessments[7815].decision.connection.condition"
+    assert issue["claimIds"] == ["7815:2"]
+    assert issue["rule"] == "company"
+    assert issue["errorKind"] == "report_evidence_insufficient"
     assert "condition이 지목된 경우에는" in repair.prompt
     assert "condition 오류를 reason 수정만으로 해결하지 마세요" in repair.prompt
     with pytest.raises(service.ReportAssessmentValidationError):

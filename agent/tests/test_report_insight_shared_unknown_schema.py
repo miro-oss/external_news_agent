@@ -78,7 +78,7 @@ def test_sdk_preserves_shared_unknowns_and_the_previous_contract_order():
             records = wire["properties"]["assessments"]["properties"][audience]["properties"]
             for finding in source.findings:
                 record = records[f"finding{finding.id}"]["properties"]
-                assert list(record) == ["findingId", "reason", "decision"]
+                assert list(record) == ["findingId", "reason", "decision", "sourceQuotes"]
                 assert record["findingId"] == {"type": "integer", "const": finding.id}
                 if finding.claims:
                     unknown_decision = record["decision"]["anyOf"][1]["properties"]

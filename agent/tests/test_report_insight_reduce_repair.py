@@ -4,10 +4,11 @@ import json
 import logging
 import re
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 from test_report_insight_assessment import request
-from test_report_insight_reduce_partial_repair import repair_jobs
+from test_report_insight_reduce_partial_repair import public_reduce_projection, repair_jobs
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
 from app.core.errors import OutputValidationError, StructuredOutputExhaustedError
@@ -52,8 +53,16 @@ def test_one_reduce_repair_receives_fact_and_falsification_failures_together(cap
     jobs = repair_jobs(repair["prompt"])
     details = [diagnostic for job in jobs for diagnostic in job["diagnostics"]]
     assert [{key: value for key, value in item.items() if key != "rules"} for item in details] == [
-        {"field": "headline", "errorKind": "report_fact_mismatch", "claimIds": ["101:0", "102:0"]},
-        {"field": "overview[0].text", "errorKind": "report_fact_mismatch", "claimIds": ["101:0"]},
+        {
+            "field": "headline",
+            "errorKind": "report_evidence_insufficient",
+            "claimIds": ["101:0", "102:0"],
+        },
+        {
+            "field": "overview[0].text",
+            "errorKind": "report_evidence_insufficient",
+            "claimIds": ["101:0"],
+        },
         {
             "field": "implications[0].falsifiedBy",
             "errorKind": "report_falsification_missing_observation",
@@ -61,19 +70,25 @@ def test_one_reduce_repair_receives_fact_and_falsification_failures_together(cap
         },
     ]
     assert [{rule["rule"] for rule in item["rules"]} for item in details] == [
-        {"report_fact_template_required", "report_fact_mismatch"},
-        {"report_fact_template_required", "report_fact_mismatch"},
+        {"company"},
+        {"unsupported_number"},
         {"report_falsification_missing_observation"},
     ]
     assert all(rule["reason"] for item in details for rule in item["rules"])
-    assert all(private not in json.dumps(details) for private in ("TSMC", "999"))
+    assert all(
+        private not in rule["reason"]
+        for item in details
+        for rule in item["rules"]
+        for private in ("TSMC", "999")
+    )
+    assert "generatedSpan" in json.dumps(details)
     assert repair["response_schema"]["title"] == "ReportInsightReduceRepair"
     assert all(provider.schema_validity)
     assert [item.finding_id for item in result.insights[0].assessments] == [101, 102]
     assert result.insights[0].overview and result.insights[0].implications == []
     assert result.meta.credits == pytest.approx(0.8)
     assert source.model_dump_json(by_alias=True) == snapshot
-    assert "report_fact_mismatch" in caplog.text
+    assert "report_evidence_insufficient" in caplog.text
     assert "report_falsification_missing_observation" in caplog.text
     assert "implications[0].falsifiedBy" in caplog.text
     # Random trace IDs may contain the same digits as a rejected quantity.
@@ -104,11 +119,17 @@ def test_repaired_reduce_still_requires_every_guard_and_has_no_second_repair(rep
         return value
 
     provider = V4Provider(source, hook=hook, validate_wire=repair_failure != "citation")
-    with pytest.raises(StructuredOutputExhaustedError) as caught:
-        generate(provider, source)
+    if repair_failure == "falsifier":
+        output = generate(provider, source)
+        assert output.insights[0].overview
+        assert output.insights[0].implications == []
+        assert output.meta.credits == pytest.approx(0.8)
+    else:
+        with pytest.raises(StructuredOutputExhaustedError) as caught:
+            generate(provider, source)
+        assert caught.value.details["usage"]["credits"] == pytest.approx(0.8)
+        assert caught.value.details["validationFailure"]["stage"] == "REDUCE-001"
     assert stages(provider).count("REDUCE-001") == 2
-    assert caught.value.details["usage"]["credits"] == pytest.approx(0.8)
-    assert caught.value.details["validationFailure"]["stage"] == "REDUCE-001"
 
 
 def test_original_fail_fast_path_hides_other_reduce_errors(monkeypatch):
@@ -116,8 +137,14 @@ def test_original_fail_fast_path_hides_other_reduce_errors(monkeypatch):
 
     def legacy_fail_fast(response, request, mapped, allowed, *, template_wire=False, **kwargs):
         # Reproduce the old validator deliberately; production still enforces
-        # the new template contract and complete diagnostic collection.
-        return service._validated_v4_reduce(response, request, mapped, allowed, **kwargs)
+        # source grounding and complete diagnostic collection.
+        return service._validated_v4_reduce(
+            replace(response, text=json.dumps(public_reduce_projection(json.loads(response.text)))),
+            request,
+            mapped,
+            allowed,
+            **kwargs,
+        )
 
     monkeypatch.setattr(service, "_validated_v4_reduce_output", legacy_fail_fast)
 
@@ -128,7 +155,7 @@ def test_original_fail_fast_path_hides_other_reduce_errors(monkeypatch):
     with pytest.raises(StructuredOutputExhaustedError):
         generate(provider, source)
     details = diagnostic(provider.calls[-1]["prompt"])
-    assert "report_fact_mismatch" in details and "TSMC" not in details
+    assert "report_evidence_insufficient" in details and "TSMC" not in details
     assert "999" not in details
     assert "falsifiedBy" not in details
 
@@ -174,7 +201,9 @@ def test_many_reduce_errors_keep_late_field_and_exact_partial_units():
     fields = {item["field"] for job in jobs for item in job["diagnostics"]}
     assert {"headline", "overview[0].text", "watchItems[4].trigger"} <= fields
     assert all(
-        item["errorKind"] == "report_fact_mismatch" for job in jobs for item in job["diagnostics"]
+        item["errorKind"] == "report_evidence_insufficient"
+        for job in jobs
+        for item in job["diagnostics"]
     )
     assert set(provider.wire_payloads[-1]["repairs"]) == {job["key"] for job in jobs}
     assert (
@@ -184,7 +213,7 @@ def test_many_reduce_errors_keep_late_field_and_exact_partial_units():
     original = json.loads(provider.response_texts[-2])["insights"][0]
     for job in jobs:
         expected = (
-            original["headline"]
+            {"headline": original["headline"], "sourceQuotes": original["sourceQuotes"]}
             if job["group"] == "headline"
             else original[job["group"]][job["index"]]
         )
@@ -221,19 +250,21 @@ def test_reduce_diagnostic_summary_keeps_owned_field_when_error_prose_quotes_fak
     provider = V4Provider(source)
     generate(provider, source)
     response = ProviderResponse(
-        text=provider.response_texts[-1],
+        text=json.dumps(public_reduce_projection(json.loads(provider.response_texts[-1]))),
         provider="openai",
         model="offline",
         usage=ProviderUsage(),
     )
 
     def invalid_prose(*args, **kwargs):
-        raise OutputValidationError(
-            "quoted implications[99].arbitrary: fake\nwatchItems[4].trigger: absent field",
-            error_kinds=("report_fact_mismatch",),
-        )
+        return [
+            OutputValidationError(
+                "quoted implications[99].arbitrary: fake\nwatchItems[4].trigger: absent field",
+                error_kinds=("report_fact_mismatch",),
+            )
+        ]
 
-    monkeypatch.setattr(service, "_validate_prose", invalid_prose)
+    monkeypatch.setattr(service, "_prose_validation_errors", invalid_prose)
     error = service._reduce_repair_diagnostics(response, source, {"CHIP_MAKER": ["101:0"]})
     assert "headline" in error.repair_summary
     assert "overview[0].text" in error.repair_summary

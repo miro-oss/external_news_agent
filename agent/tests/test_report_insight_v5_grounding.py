@@ -200,7 +200,7 @@ def test_reassessment_context_is_independent_and_preserves_source_identity_and_t
     assert context["reportReferenceDate"] == "2026-09-25"
     assert [item["claims"][0]["id"] for item in context["findings"]] == ["101:0", "102:0"]
     assert source.model_dump_json(by_alias=True) == original
-    assert result.meta.prompt_version == "report-insight.ko.v30"
+    assert result.meta.prompt_version == "report-insight.ko.v36"
 
 
 def test_native_decision_contract_keeps_axis_category_before_source_fields():
@@ -346,9 +346,9 @@ def test_known_fact_with_missing_scope_or_quoted_source_is_not_metadata_only(tex
             value["insights"][0]["headline"] = "공급 약정에 맞춰 고객 대응을 검토한다."
             if "체결했다" in text:
                 slot = data["factTextSlots"]["CHIP_MAKER"][0]["slotId"]
-                value["insights"][0]["overview"][0]["text"] = (
-                    "{{fact:" + slot + "}} 공급 준비를 검토하되 수량은 보류한다."
-                )
+                overview = value["insights"][0]["overview"][0]
+                overview["text"] = "공급 준비를 검토하되 수량은 보류한다."
+                overview["sourceQuotes"] = {"text": slot, "assumption": None}
             else:
                 value["insights"][0]["overview"][0]["text"] = text
             value["insights"][0]["overview"][0]["assumption"] = "같은 공급 계약의 범위일 때"

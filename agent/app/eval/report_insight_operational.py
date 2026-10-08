@@ -99,6 +99,8 @@ class OperationalPolicy(BaseModel):
     repeats: int = Field(default=1, ge=1)
     max_calls: int = Field(ge=1)
     max_estimated_usd: Decimal = Field(gt=0)
+    previous_calls: int = Field(default=0, ge=0)
+    previous_estimated_usd: Decimal = Field(default=Decimal(0), ge=0)
     protocol_margin_tokens: int = Field(default=16384, ge=16384)
 
     def runtime_settings(self, api_key: str = "") -> Settings:
@@ -107,6 +109,12 @@ class OperationalPolicy(BaseModel):
             "INVALID_PRICES",
         )
         require(self.max_estimated_usd.is_finite(), "INVALID_BUDGET")
+        require(
+            self.previous_estimated_usd.is_finite()
+            and self.previous_estimated_usd < self.max_estimated_usd
+            and self.previous_calls < self.max_calls,
+            "BUDGET_ALREADY_EXHAUSTED",
+        )
         values = self.settings.model_dump()
         result = Settings.model_construct(
             **values,
@@ -125,6 +133,7 @@ class ReportCase(BaseModel):
     model_config = ConfigDict(extra="forbid")
     case_id: str = Field(min_length=1, max_length=100)
     split: Literal["development", "holdout"]
+    review_policy: Literal["production", "disabled"] = "production"
     request: ReportInsightRequest
 
 
@@ -161,7 +170,7 @@ def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
         "qualityRubric": QUALITY_RUBRIC,
         "scope": "Agent service with production admission/retry/validation; no BE or HTTP",
         "credentials": "explicit run argument; CLI process key only by opt-in; no dotenv loading",
-        "budgetScope": "this prepared run; does not grant or inherit a prior live-call budget",
+        "budgetScope": "explicit cumulative baseline plus this run; never grants authorization",
         "costKind": "conservative-token-price-estimate-not-invoice",
     }
     jobs = [
@@ -172,6 +181,7 @@ def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
             "repeat": repeat,
             "audience": audience,
             "variant": "staged",
+            "reviewPolicy": case.review_policy,
             "status": "pending",
             "attemptIds": [],
         }
@@ -190,6 +200,7 @@ def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
         "attempts": [],
         "stages": [],
         "reviewAdmissions": [],
+        "repairs": [],
         "admissionDenials": [],
     }
     with evaluation_lock(output_dir):
@@ -283,7 +294,7 @@ class _Recorder:
         ) / Decimal(10**6)
         with self.lock:
             attempts = self.state["attempts"]
-            spent = sum(
+            spent = policy.previous_estimated_usd + sum(
                 (
                     Decimal(a["costEstimatedUsd"]) + Decimal(a["unsettledReservedUsd"])
                     for a in attempts
@@ -292,7 +303,7 @@ class _Recorder:
             )
             reason = self.state.get("haltReason") or (
                 "CALL_LIMIT"
-                if len(attempts) >= policy.max_calls
+                if policy.previous_calls + len(attempts) >= policy.max_calls
                 else "COST_LIMIT"
                 if spent + reserve > policy.max_estimated_usd
                 else None
@@ -410,12 +421,14 @@ def _observe(recorder):
         return original_log(target_logger, response, error, **kwargs)
 
     def review(pipeline):
-        admitted = original_review(pipeline)
+        policy = recorder.local.job.get("reviewPolicy", "production")
+        admitted = original_review(pipeline) if policy == "production" else False
         recorder.event(
             "reviewAdmissions",
             {
                 "jobId": recorder.local.job["jobId"],
                 "admitted": admitted,
+                "policy": policy,
                 "remainingSeconds": max(0, pipeline.deadline - time.monotonic()),
             },
         )
@@ -434,14 +447,26 @@ def _observe(recorder):
         _PROCESS_LOCK.release()
 
 
-def run(output_dir: Path, *, api_key: str) -> dict:
+def run(
+    output_dir: Path, *, api_key: str, job_limit: int | None = None, resume: bool = False
+) -> dict:
     require(bool(api_key), "EXPLICIT_API_KEY_REQUIRED")
     with evaluation_lock(output_dir):
         manifest, state, policy = check(output_dir)
-        require(
-            not state["attempts"] and all(job["status"] == "pending" for job in state["results"]),
-            "RUN_ALREADY_STARTED",
-        )
+        require(job_limit is None or type(job_limit) is int and job_limit > 0, "INVALID_JOB_LIMIT")
+        if resume:
+            require(
+                all(job["status"] in {"pending", "success", "failed"} for job in state["results"])
+                and all(attempt["status"] != "running" for attempt in state["attempts"]),
+                "UNSETTLED_RUN_CANNOT_RESUME",
+            )
+            require(any(job["status"] == "pending" for job in state["results"]), "NO_PENDING_JOBS")
+        else:
+            require(
+                not state["attempts"]
+                and all(job["status"] == "pending" for job in state["results"]),
+                "RUN_ALREADY_STARTED",
+            )
         recorder = _Recorder(output_dir, state, policy)
         settings = policy.runtime_settings(api_key)
 
@@ -449,6 +474,32 @@ def run(output_dir: Path, *, api_key: str) -> dict:
             def __init__(self, job):
                 super().__init__(settings)
                 self.job = job
+
+            def _repair_call(self, prompt, schema, raw, error, validate):
+                repair = super()._repair_call(prompt, schema, raw, error, validate)
+                with recorder.lock:
+                    after_attempt = max(
+                        row["attemptId"]
+                        for row in recorder.state["attempts"]
+                        if row["jobId"] == self.job["jobId"]
+                        and row["stage"] == recorder.local.stage
+                    )
+                recorder.event(
+                    "repairs",
+                    {
+                        "jobId": self.job["jobId"],
+                        "stage": recorder.local.stage,
+                        "afterAttemptId": after_attempt,
+                        "scope": (
+                            "unit"
+                            if repair.response_schema.get("title") == "ReportInsightReduceRepair"
+                            else "finding_or_field"
+                            if repair.response_schema != schema
+                            else "whole_output"
+                        ),
+                    },
+                )
+                return repair
 
             def _call(self, pipeline, **kwargs):
                 recorder.local.job = self.job
@@ -462,7 +513,23 @@ def run(output_dir: Path, *, api_key: str) -> dict:
                     "status": "success",
                 }
                 try:
-                    return super()._call(pipeline, **kwargs)
+                    result = super()._call(pipeline, **kwargs)
+                    mapped = getattr(result.output, "mapped", None)
+                    if mapped is not None:
+                        # Local measurements compare validated decisions, never
+                        # infer quality merely because REVIEW changed an axis.
+                        event["assessments"] = [
+                            {
+                                "findingId": item.finding_id,
+                                "audience": insight.audience,
+                                "axes": item.axes.model_dump(),
+                                "basisClaimIds": item.basis_claim_ids,
+                                "reasonHash": digest(item.reason),
+                            }
+                            for insight in mapped.insights
+                            for item in insight.assessments
+                        ]
+                    return result
                 except Exception as error:
                     event.update(status="failed", failure=_safe_failure(error))
                     raise
@@ -494,13 +561,21 @@ def run(output_dir: Path, *, api_key: str) -> dict:
                     recorder.save()
 
         with _observe(recorder), ThreadPoolExecutor(max_workers=policy.client_concurrency) as pool:
-            # Submit four roles together, matching a report panel; keep report repetitions separate.
-            for offset in range(0, len(state["results"]), 4):
+            # A bounded smoke run leaves pending jobs in this same durable ledger.
+            # Resume never retries an already completed or failed job.
+            pending = [job for job in state["results"] if job["status"] == "pending"][:job_limit]
+            # Keep case/repetition groups together even after one role was run alone.
+            batches = []
+            for job in pending:
+                if not batches or (job["caseIndex"], job["repeat"]) != (
+                    batches[-1][0]["caseIndex"],
+                    batches[-1][0]["repeat"],
+                ):
+                    batches.append([])
+                batches[-1].append(job)
+            for batch in batches:
                 queued = time.monotonic()
-                futures = [
-                    pool.submit(generate, job, queued)
-                    for job in state["results"][offset : offset + 4]
-                ]
+                futures = [pool.submit(generate, job, queued) for job in batch]
                 for future in futures:
                     future.result()
         state["summary"] = summarize(state)
@@ -565,7 +640,9 @@ def summarize(state: dict) -> dict:
         "semanticQualityMeasured": False,
         "requiresHumanLabels": True,
         "freshProviderResponses": True,
-        "forcedReviewSkip": False,
+        "forcedReviewSkip": any(
+            job.get("reviewPolicy", "production") == "disabled" for job in results
+        ),
         "bePersistenceVerified": False,
         "httpVerified": False,
     }
@@ -578,6 +655,8 @@ def main():
     parser.add_argument("--cases", type=Path)
     parser.add_argument("--policy", type=Path)
     parser.add_argument("--execute-live", action="store_true")
+    parser.add_argument("--job-limit", type=int)
+    parser.add_argument("--resume", action="store_true")
     parser.add_argument(
         "--use-injected-key",
         action="store_true",
@@ -612,7 +691,12 @@ def main():
                 if args.use_injected_key
                 else getpass.getpass("OpenAI API key (not saved): ")
             )
-            result = run(args.output, api_key=key)
+            options = {}
+            if args.job_limit is not None:
+                options["job_limit"] = args.job_limit
+            if args.resume:
+                options["resume"] = True
+            result = run(args.output, api_key=key, **options)
             print(json.dumps(result["summary"]))
     except EvaluationStopped as error:
         parser.exit(2, f"{error}\n")

@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from fractions import Fraction
 from typing import Literal
 
 from app.llm.report_insight_fact_graph import Analysis, Mention, Relation, analyze_sentence
@@ -230,6 +231,9 @@ def _compare(candidate: Relation, evidence: tuple[EvidenceFact, ...]) -> FactChe
     identity = _identity(candidate)
     matches = tuple(item for item in evidence if _identity(item.relation) == identity)
     if not matches:
+        scoped = _quantity_scope_check(candidate, evidence)
+        if scoped is not None:
+            return scoped
         return FactCheck("unknown", "no_matching_source_relation", candidate)
     alternatives = tuple(
         item for item in evidence if _possible_alternative(candidate, item.relation)
@@ -257,6 +261,85 @@ def _compare(candidate: Relation, evidence: tuple[EvidenceFact, ...]) -> FactChe
     if len(set(checks)) == 1:
         return FactCheck("unknown", checks[0][1], candidate, matches)
     return FactCheck("unknown", "conflicting_source_relations", candidate, matches)
+
+
+def _quantity_scope_check(
+    candidate: Relation, evidence: tuple[EvidenceFact, ...]
+) -> FactCheck | None:
+    """Reject only a changed, explicitly bound quantity role, never generic unknowns."""
+    quantity = candidate.quantity
+    if quantity is None:
+        return None
+    candidate_owners = {actor.value for actor in candidate.subjects}
+    relevant = []
+    for item in evidence:
+        source = item.relation
+        if (
+            source.uncertainty
+            or source.quantity is None
+            or source.predicate != candidate.predicate
+            or _value(source.target) != _value(candidate.target)
+            or _value(source.time) != _value(candidate.time)
+            or source.state in {"conditional", "unknown", "reported", "negated"}
+        ):
+            continue
+        owners = {actor.value for actor in source.subjects}
+        if source.quantity.unit != quantity.unit:
+            if (
+                owners == candidate_owners
+                and source.quantity.unit == "percent"
+                and source.quantity.role.startswith("change_")
+                and quantity.unit == "watt"
+                and quantity.role == "level"
+                and source.predicate == "power_consumption"
+            ):
+                relevant.append((item, "unknown", "quantity_dimension_mismatch"))
+            continue
+        if (
+            source.subject_mode == "joint"
+            and candidate_owners < owners
+            and source.quantity.role == "aggregate"
+            and quantity.role in {"individual", "level"}
+        ):
+            relevant.append((item, "unknown", "subject_group_mismatch"))
+        elif (
+            owners == candidate_owners
+            and quantity.role == "per_unit"
+            and source.quantity.role == "aggregate"
+        ):
+            counts = [mention for mention in source.bindings if mention.role == "item_count"]
+            if (
+                len(counts) == 1
+                and Decimal(counts[0].value) > 0
+                and source.quantity.qualifier == quantity.qualifier == "exact"
+                and _state_check(candidate, source)[0] == "supported"
+            ):
+                # Compare exact rational products, avoiding Decimal rounding
+                # accidentally certifying a finite decimal for a repeating price.
+                same_price = Fraction(quantity.value) * Fraction(counts[0].value) == Fraction(
+                    source.quantity.value
+                )
+                relevant.append(
+                    (
+                        item,
+                        "supported" if same_price else "contradicted",
+                        "explicit_unit_price_derived" if same_price else "quantity_conflict",
+                    )
+                )
+            else:
+                relevant.append((item, "unknown", "quantity_role_mismatch"))
+    if not relevant:
+        return None
+    outcomes = {(outcome, reason) for _, outcome, reason in relevant}
+    if len(outcomes) != 1:
+        return FactCheck(
+            "unknown",
+            "conflicting_source_relations",
+            candidate,
+            tuple(item for item, _, _ in relevant),
+        )
+    outcome, reason = outcomes.pop()
+    return FactCheck(outcome, reason, candidate, tuple(item for item, _, _ in relevant))
 
 
 def compare_source_facts(value: str, sources: Sequence[str]) -> tuple[FactCheck, ...]:
@@ -330,12 +413,30 @@ def _mismatch_messages(checks: tuple[FactCheck, ...]) -> list[str]:
         "event_state_conflict": (
             "근거의 주체·사건 연결과 다릅니다: 같은 사건의 긍정·부정 또는 계획·완료 상태 충돌"
         ),
+        "subject_group_mismatch": (
+            "근거의 주체·사건 연결과 다릅니다: 공동 총액은 개별 주체의 금액을 뒷받침하지 않습니다."
+        ),
+        "quantity_role_mismatch": (
+            "근거의 주체·사건 연결과 다릅니다: 총액과 개당 금액의 수량 역할이 다릅니다."
+        ),
+        "quantity_dimension_mismatch": (
+            "근거의 주체·사건 연결과 다릅니다: 상대 변화율은 절대 소비전력을 뒷받침하지 않습니다."
+        ),
     }
     return list(
         dict.fromkeys(
             messages[check.reason]
             for check in checks
-            if check.outcome == "contradicted" and check.reason in messages
+            if check.reason in messages
+            and (
+                check.outcome == "contradicted"
+                or check.reason
+                in {
+                    "subject_group_mismatch",
+                    "quantity_role_mismatch",
+                    "quantity_dimension_mismatch",
+                }
+            )
         )
     )
 
