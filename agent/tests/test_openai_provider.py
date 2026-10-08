@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import httpx2
 import pytest
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 from pydantic import ValidationError
 
 from app.core.config import Settings
@@ -340,13 +340,14 @@ def test_errors_are_sanitized_and_retries_are_bounded(status, code, retryable, c
     assert "private-upstream-text" not in str(error.value.details) + caplog.text
 
 
-def test_request_error_without_code_keeps_only_the_allowlisted_type(caplog):
+@pytest.mark.parametrize("code", [None, "private-unrecognized-code"])
+def test_request_error_without_recognized_code_keeps_only_the_allowlisted_type(code, caplog):
     def handler(_):
         return httpx2.Response(
             400,
             json={
                 "error": {
-                    "code": None,
+                    "code": code,
                     "type": "invalid_request_error",
                     "message": "private-schema-details",
                 }
@@ -359,6 +360,7 @@ def test_request_error_without_code_keeps_only_the_allowlisted_type(caplog):
     assert error.value.details["providerStatus"] == "invalid_request_error"
     assert error.value.details["retryable"] is False
     assert "private-schema-details" not in caplog.text + str(error.value.details)
+    assert "private-unrecognized-code" not in caplog.text + str(error.value.details)
 
 
 def test_shared_rate_limit_policy_retries_openai_429_then_succeeds():
@@ -391,18 +393,49 @@ def test_shared_rate_limit_policy_retries_openai_429_then_succeeds():
     assert waits == [2]
 
 
-def test_quota_exhaustion_is_not_retried_by_shared_policy():
+@pytest.mark.parametrize(
+    "code,error_type,expected_status",
+    [
+        ("insufficient_quota", None, "insufficient_quota"),
+        ("credit_balance_exhausted", "insufficient_quota", "insufficient_quota"),
+        ("private-unrecognized-code", "insufficient_quota", "insufficient_quota"),
+        ("credit_balance_exhausted", None, "credit_balance_exhausted"),
+        ("rate_limit_exceeded", "insufficient_quota", "insufficient_quota"),
+        ("insufficient_quota", "rate_limit_exceeded", "insufficient_quota"),
+    ],
+)
+def test_quota_exhaustion_is_not_retried_by_shared_policy(
+    code, error_type, expected_status, caplog
+):
     requests = []
 
     def handler(request):
         requests.append(request)
-        return httpx2.Response(429, json={"error": {"code": "insufficient_quota"}})
+        return httpx2.Response(
+            429,
+            headers={"retry-after": "2"},
+            json={"error": {"code": code, "type": error_type, "message": "private-quota-message"}},
+        )
 
-    coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(request_interval_seconds=0))
+    waits = []
+    coordinator = ProviderRequestCoordinator(
+        ProviderRequestPolicy(request_interval_seconds=0, rate_limit_retry_attempts=2),
+        clock=lambda: 0,
+        sleeper=waits.append,
+    )
     with client_for(handler) as client:
-        with pytest.raises(AgentError):
+        with pytest.raises(AgentError) as caught:
             generate(PacedRetryProvider(OpenAIAnalyzeProvider(Settings(), client), coordinator))
     assert len(requests) == 1
+    assert waits == []
+    assert isinstance(caught.value.__cause__, RateLimitError)
+    assert caught.value.__cause__.code == code
+    assert caught.value.__cause__.type == error_type
+    assert caught.value.details["providerStatus"] == expected_status
+    assert caught.value.details["retryable"] is False
+    assert caught.value.details["rateLimited"] is True
+    assert "private-quota-message" not in caplog.text + str(caught.value.details)
+    assert "private-unrecognized-code" not in caplog.text + str(caught.value.details)
 
 
 @pytest.mark.parametrize("header", [None, "", "nan", "inf", "-1", "invalid"])

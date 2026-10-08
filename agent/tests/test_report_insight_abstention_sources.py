@@ -24,12 +24,15 @@ def mapped_reason(source, reason):
 
 def test_unknown_relation_can_explain_known_source_entities_without_repair_or_score_promotion():
     source = request(text="마이크론은 2026년 메모리 판매 전망을 발표했다.")
-    reason = "마이크론의 2026년 메모리 판매 전망과 공정 업무의 관련성은 미확인이다."
+    interpretation = "메모리 판매 전망과 공정 업무의 관련성은 미확인이다."
+    reason = f"원문: 「{source.findings[0].sentences[0].text}」 해석: {interpretation}"
     original = source.model_dump_json()
 
     def hook(stage, _, data, value):
         for record in value["assessments"]["CHIP_MAKER"].values():
-            record["reason"] = reason
+            slot = data["findings"][0]["factTextSlots"][0]["slotId"]
+            record["reason"] = interpretation
+            record["sourceQuotes"] = {"reason": slot, "condition": None}
         return value
 
     provider = V4Provider(source, relation="UNDETERMINED", hook=hook)

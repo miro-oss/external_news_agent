@@ -2,7 +2,7 @@ import { useId, type ReactNode } from 'react'
 import { ApiError } from '../../api/client'
 import {
   isReportInsightAbsent, isReportInsightPreparing, reportInsightSnapshotKey, selectReportInsight,
-  useGenerateReportInsight, useReportInsight, useReportInsightGenerating,
+  useGenerateReportInsight, useReportInsight, useReportInsightGenerating, useReportInsightQueued,
   type ReportAudienceInsight, type ReportImportance, type ReportInsightFact, type ReportInsightIssue, type ReportInsightResult,
 } from '../../api/reportInsights'
 import { AUDIENCE_LABELS, type Audience, type ReportDetail, type ReportFinding } from '../../api/types'
@@ -27,6 +27,7 @@ export function ReportInsightsPanel({ report, audience, selector, onEvidenceSele
   const activeGeneration = generate.variables?.reportId === report.id && generate.variables.audience === audience
     && generate.variables.snapshot === snapshot
   const generating = useReportInsightGenerating(report.id, audience, snapshot)
+  const queued = useReportInsightQueued(report.id, audience, snapshot)
   const generationError = activeGeneration && generate.isError ? generate.error : null
   const insight = !stored.isFetching && !stored.isError ? selectReportInsight(stored.data, report.id, audience) : undefined
   const missing = !stored.isFetching && isReportInsightAbsent(stored.error)
@@ -50,7 +51,11 @@ export function ReportInsightsPanel({ report, audience, selector, onEvidenceSele
       <strong>관점 분석을 자동으로 준비하고 있습니다.</strong>
       <p>먼저 요청된 분석이 있으면 시간이 더 걸릴 수 있습니다. 이 화면을 열어 두면 저장된 결과를 계속 확인하고, 완료되면 분석 결과가 자동으로 표시됩니다.</p>
     </div>}
-    {generating && <div className="report-insights-state" role="status"><strong>리포트 전체를 분석하고 있습니다.</strong><p>주요 이슈의 우선순위와 근거를 종합하는 동안 잠시 기다려 주세요.</p></div>}
+    {generating && <div className="report-insights-state" role="status">
+      <strong>{queued ? '앞선 관점 분석이 끝나기를 기다리고 있습니다.' : '리포트 전체를 분석하고 있습니다.'}</strong>
+      <p>{queued ? '분석은 두 관점씩 진행합니다. 차례가 되면 자동으로 시작하며, 다른 관점을 확인해도 요청은 유지됩니다.'
+        : '주요 이슈의 우선순위와 근거를 종합하는 동안 잠시 기다려 주세요.'}</p>
+    </div>}
     {generationError && !isReportInsightPreparing(generationError) && <div className="report-insights-state" role="alert"><strong>관점 분석을 생성하지 못했습니다.</strong><p>{generationError.message}</p>
       <button type="button" className="text-button" disabled={stored.isFetching || generating} onClick={() => { void refresh() }}>저장된 분석 다시 확인</button>
     </div>}

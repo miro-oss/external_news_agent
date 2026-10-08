@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
+from report_insight_schema_assertions import assert_only_display_quotes_require_null
 from test_report_insight_assessment import framed, item, request
 
 from app.core.config import Settings, get_settings
@@ -100,6 +101,19 @@ class V4Provider:
         # actual provider contract before the service receives its response.
         if value is not None and schema["title"] == "ReportAssessmentDraft":
             value = draft_to_wire(value, self.source)
+        if value is not None and schema["title"] in {
+            "ReportInsightReduceOutput",
+            "ReportInsightReduceRepair",
+        }:
+            for insight in value["insights"]:
+                insight.setdefault("sourceQuotes", {"headline": None})
+                for group, fields in (
+                    ("overview", ("text", "assumption")),
+                    ("implications", ("text", "mechanism", "assumption", "falsifiedBy")),
+                    ("watchItems", ("topic", "indicator", "trigger")),
+                ):
+                    for unit in insight[group]:
+                        unit.setdefault("sourceQuotes", dict.fromkeys(fields))
         if value is not None and schema["title"] == "ReportInsightReduceRepair":
             jobs = json.loads(
                 kwargs["prompt"]
@@ -110,7 +124,12 @@ class V4Provider:
             value = {
                 "repairs": {
                     job["key"]: deepcopy(
-                        by_audience[job["audience"]]["headline"]
+                        {
+                            "headline": by_audience[job["audience"]]["headline"],
+                            "sourceQuotes": by_audience[job["audience"]]["sourceQuotes"],
+                        }
+                        if job["group"] == "headline" and isinstance(job["original"], dict)
+                        else by_audience[job["audience"]]["headline"]
                         if job["group"] == "headline"
                         else (
                             by_audience[job["audience"]][job["group"]][job["index"]]
@@ -236,14 +255,18 @@ def test_partial_native_prose_repair_preserves_other_five_records_and_full_date(
     assert set(entries["properties"]) == {"finding104"} and entries["required"] == ["finding104"]
     assert repair_schema["description"] == provider.calls[0]["response_schema"]["description"]
     assert provider.schema_validity == [True, True, True]
-    assert len(native_inputs) == 3
-    original, merged = [value["assessments"]["CHIP_MAKER"] for value in native_inputs[:2]]
+    # A strict template failure also visits each singleton to collect all
+    # native/public failures before preserving the other records.
+    batch_inputs = [value for value in native_inputs if len(value["assessments"]["CHIP_MAKER"]) > 1]
+    assert len(batch_inputs) == 3
+    original, merged = [value["assessments"]["CHIP_MAKER"] for value in batch_inputs[:2]]
     assert list(merged) == [f"finding{finding_id}" for finding_id in range(101, 107)]
     for key, record in original.items():
         if key != "finding104":
             assert merged[key] == record
     assert merged["finding104"]["reason"] == reasons[104]
-    assert public_contexts[:2] == [(list(range(101, 107)), date(2026, 9, 30))] * 2
+    full_contexts = [context for context in public_contexts if len(context[0]) > 1]
+    assert full_contexts[0] == (list(range(101, 107)), date(2026, 9, 30))
     assert [record.finding_id for record in result.insights[0].assessments] == list(range(101, 109))
     assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
     assert result.meta.input_tokens == 33 and result.meta.output_tokens == 21
@@ -362,7 +385,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v25"
+    assert result.meta.prompt_version == "report-insight.ko.v36"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -375,7 +398,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(provider.schema_validity)
     for value in provider.wire_payloads[:-1]:
         for draft in value["assessments"]["CHIP_MAKER"].values():
-            assert set(draft) == {"findingId", "decision", "reason"}
+            assert set(draft) == {"findingId", "decision", "reason", "sourceQuotes"}
             assert set(draft["decision"]["connection"]) == {
                 "relation",
                 "work",
@@ -470,7 +493,9 @@ def test_map_span_repair_keeps_same_batch_schema_and_sums_all_stages():
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
     result = generate(provider, source)
     assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REDUCE-001"]
-    assert provider.calls[0]["response_schema"] == provider.calls[1]["response_schema"]
+    assert_only_display_quotes_require_null(
+        provider.calls[1]["response_schema"], provider.calls[0]["response_schema"]
+    )
     repaired_prompt = provider.calls[1]["prompt"]
     assert "sourceSpanId" in repaired_prompt and "findingId=101" in repaired_prompt
     assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
@@ -660,7 +685,9 @@ def test_post_validated_category_correlations_repair_invalid_structure_once(defe
     # Native axis branches now reject these combinations. A nonconforming
     # provider response still reaches the unchanged local guard and one repair.
     assert provider.schema_validity == [False, True, True, True]
-    assert provider.calls[0]["response_schema"] == provider.calls[1]["response_schema"]
+    assert_only_display_quotes_require_null(
+        provider.calls[1]["response_schema"], provider.calls[0]["response_schema"]
+    )
     assert all(name in provider.calls[1]["prompt"] for name in ("connection", "effect", "timing"))
     assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
     assert result.meta.cost_usd == 0.012 and result.meta.credits == 0.8
@@ -837,12 +864,18 @@ def test_default_reduce_quality_guards_reject_and_preserve_all_observed_usage(de
         return value
 
     provider = V4Provider(source, hook=hook)
-    with pytest.raises(AgentError) as caught:
-        generate(provider, source)
+    if defect == "placeholder":
+        result = generate(provider, source)
+        assert result.insights[0].implications == []
+        assert result.insights[0].overview
+        assert result.meta.credits == 0.8 and result.meta.input_tokens == 44
+    else:
+        with pytest.raises(AgentError) as caught:
+            generate(provider, source)
+        assert caught.value.code == "SCHEMA_VIOLATION"
+        assert caught.value.details["usage"]["credits"] == 0.8
+        assert caught.value.details["usage"]["inputTokens"] == 44
     assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001", "REDUCE-001"]
-    assert caught.value.code == "SCHEMA_VIOLATION"
-    assert caught.value.details["usage"]["credits"] == 0.8
-    assert caught.value.details["usage"]["inputTokens"] == 44
     assert all(provider.schema_validity)
 
 
@@ -860,7 +893,7 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v25"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v36"
     assert output["meta"]["mock"] is True
     assert RUBRIC_VERSION == "report-importance.v6"
     assert set(output) == {"insights", "meta"}

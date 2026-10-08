@@ -5,7 +5,14 @@ from decimal import Decimal, InvalidOperation
 
 from app.schemas.evidence import EvidenceSentence
 
-_NUMBER = re.compile(r"(?<![A-Za-z0-9])[-+]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])")
+# Read the entire decimal before checking its boundary: ``3.59GW`` must not
+# backtrack into ``3``. Only supported adjacent unit suffixes form a number
+# boundary; digits inside product identifiers (HBM4, PCIe5.0) remain excluded.
+_NUMBER = re.compile(
+    r"(?<![A-Za-z0-9.])[-+]?(?>\d[\d,]*(?:\.\d+)?)"
+    r"(?=(?:[gmk]?w|nm|gb|tb|usd|eur|krw)(?![A-Za-z0-9])|[^A-Za-z0-9.]|$|\.(?!\d))",
+    re.IGNORECASE,
+)
 _CURRENCY_SCALES = {
     "trillion": 10**12,
     "billion": 10**9,
@@ -91,6 +98,12 @@ _KOREAN_ORGANIZATION = re.compile(
     r"[A-Za-z가-힣][A-Za-z0-9가-힣&.-]{1,30}"
     r"(?:전자|하이닉스|반도체|디스플레이|테크놀로지|테크|그룹|홀딩스|은행|증권|공사|협회|위원회|연구원)"
 )
+# These are device/industry categories, not organization names. Keep this exact
+# set narrow: real names ending in 반도체 (including unknown companies) still
+# need source support, as do names containing one of these category terms.
+_SEMICONDUCTOR_CATEGORY_TERMS = frozenset(
+    {"전력반도체", "시스템반도체", "화합물반도체", "메모리반도체", "비메모리반도체"}
+)
 _WORD = re.compile(r"[A-Za-z0-9가-힣]+")
 _TECHNICAL_ANCHOR = re.compile(r"\b(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)\b")
 _AMBIGUOUS_RELATION = re.compile(
@@ -112,6 +125,12 @@ _PAST_SUPPLY_CONTINUATION = re.compile(
 _UNREAL_SUPPLY_CONTEXT = re.compile(
     r"(?:내년|다음|향후|앞으로|가정|다면|경우|겠|부인|"
     r"(?:할|될|낼|갈|올|줄|볼|일|을)\s*것)"
+)
+# In "체결을 검토한다", the event is the object of review, not a
+# confirmation. Keep this suffix local so another asserted event still counts.
+_NOMINAL_EVENT_REVIEW_SUFFIX = re.compile(
+    r"(?:을|를)\s*(?:검토|논의|협의|고려|계획|준비|추진)"
+    r"(?=$|[^가-힣]|[하한할했함합해중])"
 )
 _MODALITY_LADDER = (
     (
@@ -206,6 +225,7 @@ _COMPANY_ALIASES = {
     "TSMC": ("tsmc", "대만반도체"),
     "엔비디아": ("엔비디아", "nvidia"),
     "AMD": ("amd",),
+    "IBM": ("ibm", "아이비엠"),
     "인텔": ("인텔", "intel"),
     "마이크론": ("마이크론", "micron"),
     "브로드컴": ("브로드컴", "broadcom"),
@@ -532,7 +552,20 @@ def _modality_stage(value: str) -> tuple[int, str]:
             clause_stages.append((0, "부정 표현"))
             continue
         for stage, label, pattern in _MODALITY_LADDER:
-            match = pattern.search(searchable)
+            if stage == 4:
+                # The token-normalized copy strips 을/를 and would recreate
+                # a false confirmation after the original match was skipped.
+                # Inspect every original match, preserving later assertions.
+                match = next(
+                    (
+                        candidate
+                        for candidate in pattern.finditer(clause)
+                        if not _NOMINAL_EVENT_REVIEW_SUFFIX.match(clause[candidate.end() :])
+                    ),
+                    None,
+                )
+            else:
+                match = pattern.search(searchable)
             if stage == 5 and match is None and not _UNREAL_SUPPLY_CONTEXT.search(clause):
                 # A past-dated connective followed by a past result describes
                 # actual supply. Bare/future '공급하며' remains non-executed.
@@ -714,6 +747,7 @@ def _companies(value: str) -> set[str]:
         match.group()
         for match in _KOREAN_ORGANIZATION.finditer(value)
         if _normalize(match.group()) not in _KNOWN_COMPANY_ALIASES
+        and _normalize(match.group()) not in _SEMICONDUCTOR_CATEGORY_TERMS
     )
     return companies
 

@@ -10,7 +10,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import { reportInsightFixture } from '../scripts/report-insight-fixtures.mjs'
-let server, emptyEnvDir, Content, Panel, ApiError, insightKey, snapshot
+let server, emptyEnvDir, Content, Panel, ApiError, insightKey, snapshot, generateOptions
 const report = JSON.parse(await readFile(new URL('./fixtures/refactor-report.json', import.meta.url), 'utf8')).report
 before(async () => {
   emptyEnvDir = await mkdtemp(join(tmpdir(), 'report-insights-render-'))
@@ -25,6 +25,7 @@ before(async () => {
   const api = await server.ssrLoadModule('/src/api/reportInsights.ts')
   insightKey = api.reportInsightKey
   snapshot = api.reportInsightSnapshotKey(report)
+  generateOptions = api.generateReportInsightOptions
 })
 after(async () => { await server?.close(); if (emptyEnvDir) await rm(emptyEnvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
 function render(result, findings = report.findings) {
@@ -195,4 +196,41 @@ test('a completed automatic result is displayed with evidence and no paid genera
   assert.match(html, /원문 근거 문장 1 보기/)
   assert.match(html, /저장된 분석 새로고침/)
   assert.doesNotMatch(html, /분석 다시 준비 · 크레딧 사용|관점 분석을 자동으로 준비하고 있습니다|분석 결과가 없습니다/)
+})
+
+test('a manually queued perspective shows waiting until admitted, including when its panel is opened later', async context => {
+  const client = new QueryClient({ defaultOptions: { queries: { enabled: false } } })
+  context.after(() => client.clear())
+  const calls = []
+  context.mock.method(globalThis, 'fetch', (_url, init) => new Promise(resolve => {
+    const audience = JSON.parse(init.body).audiences[0]
+    calls.push({ audience, finish: () => resolve(new Response(JSON.stringify({ isSuccess: true,
+      code: 'COMMON200', message: '성공입니다.', result: reportInsightFixture(report, audience) }))) })
+  }))
+  const pending = ['IT_INFRA', 'EQUIPMENT_MAKER', 'CHIP_MAKER'].map(audience =>
+    client.getMutationCache().build(client, generateOptions(client)).execute({ reportId: report.id, audience, snapshot }))
+  const settle = () => new Promise(resolve => setImmediate(resolve))
+  const markup = () => renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(Panel, {
+    report, audience: 'CHIP_MAKER', selector: createElement('span', null, '관점 선택'), onEvidenceSelect() {},
+  })))
+  await settle()
+  const waiting = markup()
+  assert.match(waiting, /앞선 관점 분석이 끝나기를 기다리고 있습니다/)
+  assert.match(waiting, /분석은 두 관점씩 진행합니다/)
+  assert.match(waiting, /차례가 되면 자동으로 시작하며, 다른 관점을 확인해도 요청은 유지됩니다/)
+  assert.match(waiting, /aria-busy="true"/)
+  assert.doesNotMatch(waiting, /리포트 전체를 분석하고 있습니다|분석 다시 준비 · 크레딧 사용/)
+  assert.equal(calls.length, 2)
+  calls[0].finish()
+  await settle()
+  const running = markup()
+  assert.match(running, /리포트 전체를 분석하고 있습니다/)
+  assert.doesNotMatch(running, /앞선 관점 분석이 끝나기를 기다리고 있습니다/)
+  assert.equal(calls[2].audience, 'CHIP_MAKER')
+  calls[1].finish()
+  calls[2].finish()
+  await Promise.all(pending)
+  const completed = markup()
+  assert.match(completed, /리포트 중요도 높음/)
+  assert.doesNotMatch(completed, /aria-busy="true"|리포트 전체를 분석하고 있습니다|앞선 관점 분석이 끝나기를 기다리고 있습니다/)
 })

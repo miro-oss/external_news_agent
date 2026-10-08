@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
+from report_insight_schema_assertions import assert_only_display_quotes_require_null
 from test_report_insight_assessment import framed, payload, request, response
 
 from app.core.config import Settings
@@ -88,9 +89,15 @@ def test_recorded_initial_repair_projects_typed_action_without_losing_public_err
     assert "report_work_compatibility_procedure_unsupported" in actions
     assert "nativeFields=decision.connection.condition refs=['7790:0']" in actions
     assert "report_fact_mismatch" in actions
-    assert "검증 절차 자체" in prompt
+    assert "원문의 대상·행동·단계에서 새로 작성" in prompt
     assert "실제 사용·적용 여부" in prompt
-    assert "원문에 명시된 검증 절차는 유지" in prompt
+    assert "원문에 명시된 절차는 유지" in prompt
+    assert "근거 밖 개념의 부재를 설명하는 문장은 빼세요" in prompt
+    assert "오류 문구를 없애려고 다른 work나 DIRECT로 바꾸지 마세요" in prompt
+    assert "호환성 시험·승인·선행 검증" not in prompt
+    assert "호환성 검증 절차의 존재·의무" not in actions
+    assert "원문에 없는 절차는 완료 여부가 미확인이라는 설명으로도 추가하지 않는다" in prompt
+    assert "원문에 명시된 절차와 그 판단 한계는 유지한다" in prompt
     assert "특정 범주나 null로 일괄 전환하지" in prompt
     assert audit == (str(error), error.repair_diagnostics, error.error_kinds)
     assert "근거에서 확인되지 않는 숫자: 0, 7790" in str(error)
@@ -202,4 +209,158 @@ def test_bounded_mock_call_delivers_action_and_does_not_accept_repeated_gate(
         assert call().output.evidence["IT_INFRA"][7790].relation == "CONDITIONAL"
     assert len(provider.calls) == 2
     assert "report_work_compatibility_procedure_unsupported" in provider.calls[1]["prompt"]
-    assert provider.calls[1]["response_schema"] == provider.calls[0]["response_schema"]
+    assert_only_display_quotes_require_null(
+        provider.calls[1]["response_schema"], provider.calls[0]["response_schema"]
+    )
+
+
+def test_lab_research_repair_rewrites_source_relation_instead_of_echoing_missing_procedure():
+    source = request(
+        audiences=("IT_INFRA",),
+        text="연구진은 소자의 전기적 특성을 실험실에서 측정했다.",
+    )
+    before = source.model_dump_json()
+    value = payload(source, relation="CONDITIONAL")
+    entry = value["assessments"]["IT_INFRA"]["finding101"]
+    entry.update(
+        work="COMPATIBILITY",
+        reason="연구 성과는 부품 호환성 검증이 필요하다는 점에서 IT 업무와 연결된다.",
+        condition="이 소자가 실제 운영 시스템에 적용되는 경우",
+        impactScope="UNDETERMINED",
+        impactBasis=None,
+        urgencyState="UNDETERMINED",
+        urgencyBasis=None,
+    )
+    raw = response(value, source)
+    error = service._native_assessment_repair_errors(raw, source)
+    assert error.error_kinds == ("report_assessment_draft_invalid",)
+    engine = object.__new__(service.ReportInsightService)
+    original_schema = draft_schema(source)
+    repair = engine._repair_call(
+        draft_prompt(source),
+        original_schema,
+        raw.text,
+        error,
+        lambda candidate: full_validate(candidate, source),
+    )
+    assert_only_display_quotes_require_null(repair.response_schema, original_schema)
+    assert "선택 원문에 없는 인증·호환성 시험" in repair.prompt
+    assert "특정 범주나 null로 일괄 전환하지 마세요" in repair.prompt
+    with pytest.raises(ReportAssessmentDraftValidationError, match="compatibility_procedure"):
+        repair.validate(raw)
+
+    echoed = deepcopy(value)
+    echoed["assessments"]["IT_INFRA"]["finding101"].update(
+        relation="DIRECT",
+        work="DEPLOYMENT_OPERATIONS",
+        condition=None,
+        reason=(
+            "소자의 실험실 측정은 도입·운영 관련 직접 근거이나 원문은 시스템 수준 "
+            "호환성 검증 절차를 제시하지 않아 호환성 검증 여부는 미확인이다."
+        ),
+    )
+    with pytest.raises(ReportAssessmentDraftValidationError, match="compatibility_procedure"):
+        repair.validate(response(echoed, source))
+
+    grounded = deepcopy(value)
+    grounded["assessments"]["IT_INFRA"]["finding101"].update(
+        relation="UNDETERMINED",
+        work=None,
+        relationBasis=None,
+        condition=None,
+        reason=(
+            "실험실에서 측정한 소자의 전기적 특성은 확인되지만 "
+            "IT 시스템 조달·운영 업무와의 연결은 판단하기 어렵다."
+        ),
+    )
+    validated = repair.validate(response(grounded, source))
+    assert validated.evidence["IT_INFRA"][101].relation == "UNDETERMINED"
+    assert validated.mapped.insights[0].assessments[0].basis_claim_ids == []
+    assert source.model_dump_json() == before
+
+
+def test_fact_only_condition_repair_does_not_replace_event_state_with_invented_procedure():
+    """A fact repair must not create a new work error on its final allowed try."""
+    from app.llm.report_insight_instructions import ASSESSMENT_CONDITION_RULE
+
+    source = request(
+        audiences=("IT_INFRA",),
+        text="연구진은 메모리 배열에 데이터 이동 셀을 추가하는 구조를 제안했다.",
+    )
+    value = payload(source, relation="CONDITIONAL")
+    entry = value["assessments"]["IT_INFRA"]["finding101"]
+    entry.update(
+        work="COMPATIBILITY",
+        reason="제안된 메모리 구조를 기존 시스템에 적용하는 경우 호환성 업무와 연결된다.",
+        condition="제안된 구조의 제품 적용이 이뤄져야 실제 호환성 영향이 확정된다.",
+        impactScope="UNDETERMINED",
+        impactBasis=None,
+        urgencyState="UNDETERMINED",
+        urgencyBasis=None,
+    )
+    raw = response(value, source)
+    validate_draft(raw, source)  # Initial failure is public fact state, not a work error.
+    with pytest.raises(service.ReportAssessmentValidationError) as caught:
+        full_validate(raw, source)
+    error = caught.value
+    assert set(error.error_kinds) == {"report_evidence_insufficient"}
+    assert error.native_prose_repairs[101][1] == ("decision.connection.condition",)
+    repair = object.__new__(service.ReportInsightService)._repair_call(
+        draft_prompt(source),
+        draft_schema(source),
+        raw.text,
+        error,
+        lambda candidate: full_validate(candidate, source),
+    )
+    # The positive condition rule also reaches pure fact retries, even though no
+    # compatibility-procedure diagnostic existed in the original response.
+    assert ASSESSMENT_CONDITION_RULE in repair.prompt
+    assert "report_work_compatibility_procedure_unsupported" not in repair.prompt
+    assert ASSESSMENT_CONDITION_RULE in json.dumps(draft_schema(source), ensure_ascii=False)
+    assert ASSESSMENT_CONDITION_RULE in json.dumps(repair.response_schema, ensure_ascii=False)
+    assert framed(repair.prompt) == framed(draft_prompt(source))
+    with pytest.raises(service.ReportAssessmentValidationError):
+        repair.validate(raw)
+
+    invented = deepcopy(value)
+    invented["assessments"]["IT_INFRA"]["finding101"]["condition"] = (
+        "제안된 구조가 실제 메모리 설계 환경에서 호환성 검증을 거쳐야 업무와 연결된다."
+    )
+    with pytest.raises(
+        ReportAssessmentDraftValidationError, match="condition: compatibility_procedure"
+    ):
+        repair.validate(response(invented, source))
+
+    fixed = deepcopy(value)
+    fixed["assessments"]["IT_INFRA"]["finding101"]["condition"] = (
+        "제안된 메모리 구조를 실제 운영 시스템의 메모리에 적용하는 경우"
+    )
+    validated = repair.validate(response(fixed, source))
+    result = validated.evidence["IT_INFRA"][101]
+    original = validate_draft(raw, source).evidence["IT_INFRA"][101]
+    assert result.model_dump(exclude={"condition"}) == original.model_dump(exclude={"condition"})
+    assert result.condition == fixed["assessments"]["IT_INFRA"]["finding101"]["condition"]
+    assert value["assessments"]["IT_INFRA"]["finding101"] == entry
+
+
+def test_condition_rule_keeps_source_supported_prerequisite_valid():
+    source = request(
+        audiences=("IT_INFRA",),
+        text=(
+            "회사는 해당 메모리를 사용하려면 기존 시스템의 호환성 검증을 "
+            "먼저 수행해야 한다고 밝혔다."
+        ),
+    )
+    value = payload(source, relation="CONDITIONAL")
+    value["assessments"]["IT_INFRA"]["finding101"].update(
+        work="COMPATIBILITY",
+        reason="해당 메모리 사용에 필요한 선행 절차는 호환성 업무와 연결된다.",
+        condition="해당 메모리를 사용하기 위한 기존 시스템의 호환성 검증이 수행되는 경우",
+        impactScope="UNDETERMINED",
+        impactBasis=None,
+        urgencyState="UNDETERMINED",
+        urgencyBasis=None,
+    )
+    result = full_validate(response(value, source), source)
+    assert result.evidence["IT_INFRA"][101].relation == "CONDITIONAL"
+    assert "호환성 검증" in result.evidence["IT_INFRA"][101].condition

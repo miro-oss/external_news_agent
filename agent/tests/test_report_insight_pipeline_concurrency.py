@@ -306,8 +306,271 @@ def test_two_reports_share_four_guard_slots_without_rejecting_their_map_batches(
         assert pipeline._reserved_credits == 0
 
 
-def test_guard_rejection_does_not_make_drained_usage_partial(monkeypatch):
-    started, release = Event(), Event()
+def test_four_audiences_wait_for_shared_capacity_without_cancelling_their_maps(monkeypatch):
+    release, queued = Event(), Event()
+    lock = Lock()
+    active = 0
+    peak = 0
+    issued, closed = [], []
+
+    class Transport:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def generate(self, **kwargs):
+            nonlocal active, peak
+            with lock:
+                issued.append(kwargs["prompt"])
+                active += 1
+                peak = max(peak, active)
+            try:
+                assert release.wait(3)
+                return answer()
+            finally:
+                with lock:
+                    active -= 1
+
+        def close(self):
+            with lock:
+                closed.append(self)
+
+    guard = ProviderGuard(
+        concurrency=4,
+        acquire_timeout_seconds=0.01,
+        failure_threshold=1,
+        cooldown_seconds=30,
+        hard_cap_credits=Decimal(5),
+    )
+    semaphore = guard.semaphore
+
+    class ObservedSemaphore:
+        def acquire(self, *, timeout):
+            acquired = semaphore.acquire(timeout=timeout)
+            if not acquired:
+                queued.set()
+            return acquired
+
+        def release(self):
+            semaphore.release()
+
+    guard.semaphore = ObservedSemaphore()
+    coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0))
+    monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
+    monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
+    monkeypatch.setattr(
+        "app.llm.report_insight_pipeline.get_provider_coordinator", lambda *_: coordinator
+    )
+    pipelines = [
+        ReportInsightPipelineProvider(config(OPENAI_API_KEY="offline-test-only"), "FREE")
+        for _ in range(4)
+    ]
+
+    def report_maps(pipeline, audience):
+        def evaluate(index, item):
+            call(pipeline, f"{audience}:{item}")
+            return item
+
+        return run_report_maps(
+            list(range(4)),
+            evaluate,
+            concurrency=pipeline.map_concurrency,
+            cancel_pending=pipeline.cancel_pending_calls,
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [
+            pool.submit(report_maps, pipeline, index) for index, pipeline in enumerate(pipelines)
+        ]
+        try:
+            # At least one MAP actually exceeds the ordinary admission timeout.
+            assert queued.wait(3)
+        finally:
+            release.set()
+        assert [future.result(timeout=5) for future in futures] == [list(range(4))] * 4
+
+    assert peak == 4
+    assert len(issued) == len(set(issued)) == len(closed) == 16
+    assert guard.breaker.state is CircuitState.CLOSED
+    for pipeline in pipelines:
+        assert pipeline.calls == 4
+        assert pipeline.usage == ProviderUsage(40, 20, Decimal(".04"), Decimal(0))
+        assert not pipeline.unknown_failure_usage
+        assert pipeline._reserved_credits == 0
+
+
+def test_queued_deadline_stops_before_provider_and_releases_half_open_probe(monkeypatch):
+    clock = [0.0]
+    waits, issued, closed = [], [], []
+    monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])
+
+    class BusySemaphore:
+        def acquire(self, *, timeout):
+            waits.append(timeout)
+            clock[0] += timeout
+            return False
+
+        def release(self):
+            pytest.fail("a queued call never acquired capacity")
+
+    class Transport:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def generate(self, **kwargs):
+            issued.append(True)
+            return answer()
+
+        def close(self):
+            closed.append(True)
+
+    guard = ProviderGuard(
+        concurrency=1,
+        acquire_timeout_seconds=0.4,
+        failure_threshold=1,
+        cooldown_seconds=0,
+        hard_cap_credits=Decimal(5),
+    )
+    guard.semaphore = BusySemaphore()
+    guard.breaker.record_failure()
+    assert guard.breaker.state is CircuitState.HALF_OPEN
+    coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0), clock=lambda: clock[0])
+    monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
+    monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
+    monkeypatch.setattr(
+        "app.llm.report_insight_pipeline.get_provider_coordinator", lambda *_: coordinator
+    )
+    pipeline = ReportInsightPipelineProvider(
+        config(OPENAI_API_KEY="offline-test-only", AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=1), "FREE"
+    )
+    with pytest.raises(AgentError) as caught:
+        call(pipeline)
+
+    assert caught.value.details == {"requestDeadlineExceeded": True, "requestNotStarted": True}
+    assert waits == pytest.approx([0.4, 0.4, 0.2])
+    assert clock[0] == 1
+    assert issued == [] and closed == []
+    assert pipeline.calls == 0 and pipeline.usage == ProviderUsage()
+    assert not pipeline.unknown_failure_usage
+    assert pipeline._reserved_credits == 0
+    assert guard.breaker.state is CircuitState.HALF_OPEN
+    guard.breaker.before_call()
+    guard.breaker.cancel_call()
+
+
+def test_queued_call_uses_latest_pacing_and_constructs_client_with_remaining_time(monkeypatch):
+    clock = [0.0]
+    sleeps, created, issued, closed = [], [], [], []
+    monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])
+
+    def advance(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    coordinator = ProviderRequestCoordinator(
+        ProviderRequestPolicy(1), clock=lambda: clock[0], sleeper=advance
+    )
+    coordinator.wait_before_call()
+    guard = ProviderGuard(
+        concurrency=1,
+        acquire_timeout_seconds=1,
+        failure_threshold=1,
+        cooldown_seconds=30,
+        hard_cap_credits=Decimal(5),
+    )
+
+    class ContendedSemaphore:
+        def acquire(self, *, timeout):
+            # Another call receives a cooldown while this request queues.
+            clock[0] = 5
+            coordinator.wait_after_rate_limit(
+                AgentError(503, "PROVIDER_UNAVAILABLE", "limited", {"retryAfterSeconds": 4}), 1
+            )
+            return True
+
+        def release(self):
+            pass
+
+    class Transport:
+        def __init__(self, settings, *, request_deadline):
+            created.append((settings.provider_timeout_seconds, request_deadline))
+
+        def generate(self, **kwargs):
+            issued.append(clock[0])
+            return answer()
+
+        def close(self):
+            closed.append(True)
+
+    guard.semaphore = ContendedSemaphore()
+    monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
+    monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
+    monkeypatch.setattr(
+        "app.llm.report_insight_pipeline.get_provider_coordinator", lambda *_: coordinator
+    )
+    pipeline = ReportInsightPipelineProvider(
+        config(OPENAI_API_KEY="offline-test-only", AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=20), "FREE"
+    )
+    call(pipeline)
+
+    assert sleeps == [4]
+    assert created == [(11, 20)]
+    assert issued == [9] and closed == [True]
+    assert pipeline.deadline == 20
+    assert pipeline.calls == 1
+    assert pipeline.usage == answer().usage
+
+
+def test_circuit_opened_while_waiting_preserves_observed_usage_without_a_second_call(monkeypatch):
+    released, created = [], []
+    guard = ProviderGuard(
+        concurrency=1,
+        acquire_timeout_seconds=0.01,
+        failure_threshold=1,
+        cooldown_seconds=30,
+        hard_cap_credits=Decimal(5),
+    )
+
+    class ContendedSemaphore:
+        def acquire(self, *, timeout):
+            guard.breaker.record_failure()
+            return True
+
+        def release(self):
+            released.append(True)
+
+    class Transport:
+        def __init__(self, *args, **kwargs):
+            created.append(True)
+
+        def generate(self, **kwargs):
+            return answer()
+
+        def close(self):
+            pass
+
+    coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0))
+    monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
+    monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
+    monkeypatch.setattr(
+        "app.llm.report_insight_pipeline.get_provider_coordinator", lambda *_: coordinator
+    )
+    pipeline = ReportInsightPipelineProvider(config(OPENAI_API_KEY="offline-test-only"), "FREE")
+    call(pipeline)
+    guard.semaphore = ContendedSemaphore()
+    with pytest.raises(AgentError) as caught:
+        call(pipeline)
+
+    assert caught.value.details == {"circuitOpen": True, "requestNotStarted": True}
+    assert released == [True] and created == [True]
+    assert pipeline.calls == 1 and pipeline.usage == answer().usage
+    assert not pipeline.unknown_failure_usage
+    pipeline.annotate_failure(caught.value, "offline-version")
+    assert caught.value.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
+    assert guard.breaker.state is CircuitState.OPEN
+
+
+def test_waiting_call_cancellation_does_not_make_drained_usage_partial(monkeypatch):
+    started, waiting, release = Event(), Event(), Event()
     issued, closed = [], []
 
     class Transport:
@@ -330,6 +593,19 @@ def test_guard_rejection_does_not_make_drained_usage_partial(monkeypatch):
         cooldown_seconds=30,
         hard_cap_credits=Decimal(5),
     )
+    semaphore = guard.semaphore
+
+    class WaitingSemaphore:
+        def acquire(self, *, timeout):
+            acquired = semaphore.acquire(timeout=timeout)
+            if not acquired:
+                waiting.set()
+            return acquired
+
+        def release(self):
+            semaphore.release()
+
+    guard.semaphore = WaitingSemaphore()
     coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0))
     monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
     monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
@@ -337,14 +613,17 @@ def test_guard_rejection_does_not_make_drained_usage_partial(monkeypatch):
         "app.llm.report_insight_pipeline.get_provider_coordinator", lambda *_: coordinator
     )
     pipeline = ReportInsightPipelineProvider(config(OPENAI_API_KEY="offline-test-only"), "FREE")
-    with ThreadPoolExecutor(max_workers=1) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:
         running = pool.submit(call, pipeline, "running")
         assert started.wait(3)
         try:
+            queued = pool.submit(call, pipeline, "not-issued")
+            assert waiting.wait(3)
+            pipeline.cancel_pending_calls()
             with pytest.raises(AgentError) as caught:
-                call(pipeline, "not-issued")
+                queued.result(timeout=3)
             assert caught.value.details == {
-                "concurrencyLimited": True,
+                "pipelineCancelled": True,
                 "requestNotStarted": True,
             }
         finally:
@@ -353,7 +632,7 @@ def test_guard_rejection_does_not_make_drained_usage_partial(monkeypatch):
 
     pipeline.annotate_failure(caught.value, "offline-version")
     assert issued == ["running"]
-    assert len(closed) == 2
+    assert len(closed) == 1
     assert pipeline.calls == 1
     assert pipeline.usage == ProviderUsage(10, 5, Decimal(".01"), Decimal(0))
     assert caught.value.details["usage"] == {
@@ -456,7 +735,7 @@ def test_cancellation_after_shared_semaphore_wait_never_calls_or_charges_provide
         with pytest.raises(AgentError) as caught:
             future.result(timeout=3)
     assert caught.value.details["pipelineCancelled"]
-    assert called == [] and closed == [True]
+    assert called == [] and closed == []
     assert pipeline.calls == 0 and pipeline.usage == ProviderUsage()
     assert not pipeline.unknown_failure_usage
     assert guard.breaker.state == CircuitState.CLOSED

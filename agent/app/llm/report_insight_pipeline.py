@@ -8,7 +8,7 @@ from time import monotonic
 from app.core.config import Settings
 from app.core.errors import AgentError, StructuredOutputExhaustedError
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
-from app.llm.guarded_provider import GuardedAnalyzeProvider
+from app.llm.guarded_provider import run_guarded
 from app.llm.mindlogic_provider import MindlogicAnalyzeProvider
 from app.llm.openai_provider import OpenAIAnalyzeProvider
 from app.llm.rate_limit_provider import run_with_request_policy
@@ -188,6 +188,15 @@ class ReportInsightPipelineProvider:
         if monotonic() >= self.deadline:
             raise self._deadline_error()
 
+    def _admission_remaining_seconds(self) -> float:
+        self._ensure_not_cancelled()
+        remaining = self.deadline - monotonic()
+        if remaining <= 0:
+            error = self._deadline_error()
+            error.details["requestNotStarted"] = True
+            raise error
+        return remaining
+
     def can_start_optional_review(self) -> bool:
         """Leave synthesis headroom before starting another optional review.
 
@@ -224,16 +233,13 @@ class ReportInsightPipelineProvider:
             self.deadline = request_deadline
 
     def _generate_scoped(self, **kwargs) -> ProviderResponse:
-        # Share admission/circuit/pacing, but own short-lived HTTP clients. No
-        # mutable shared timeout and no cache entry for each remaining duration.
+        # Capacity precedes pacing so queued calls honor the latest shared
+        # cooldown. Construct short-lived clients only when ready to issue.
         guard = get_provider_guard(self.settings, self.plan)
         coordinator = get_provider_coordinator(self.settings, self.plan)
 
         def call():
-            self._ensure_not_cancelled()
-            remaining = self.deadline - monotonic() - guard.acquire_timeout_seconds
-            if remaining <= 0:
-                raise self._deadline_error()
+            remaining = self._admission_remaining_seconds()
             scoped = self.settings.model_copy(
                 update={
                     "provider_timeout_seconds": remaining,
@@ -248,25 +254,37 @@ class ReportInsightPipelineProvider:
                 if not scoped.mindlogic_api_key.strip():
                     raise AgentError(503, "API_KEY_MISSING", "Mindlogic provider 설정이 없습니다.")
                 raw = MindlogicAnalyzeProvider(scoped, request_deadline=self.deadline)
-            provider = GuardedAnalyzeProvider(
-                _PendingScopedProvider(self, raw),
-                concurrency=scoped.provider_concurrency,
-                acquire_timeout_seconds=scoped.provider_acquire_timeout_seconds,
-                failure_threshold=scoped.circuit_failure_threshold,
-                cooldown_seconds=scoped.circuit_cooldown_seconds,
-                hard_cap_credits=self.cap,
-                guard=guard,
-            )
             try:
-                return provider.generate(**kwargs)
+                return raw.generate(**kwargs)
             finally:
-                provider.close()
+                raw.close()
 
-        return run_with_request_policy(
-            coordinator,
-            call,
-            deadline=self.deadline,
-            retry_attempts=0,
+        def paced_call():
+            try:
+                return run_with_request_policy(
+                    coordinator,
+                    call,
+                    deadline=self.deadline,
+                    # Retry only the coordinator's explicit retryable-429
+                    # policy. Each attempt rechecks cancellation/deadline;
+                    # transport/SDK retries above remain disabled.
+                    retry_attempts=self.settings.rate_limit_retry_attempts,
+                )
+            except AgentError as error:
+                # Coordinator timeouts occur before a request is sent and
+                # must not be counted as a provider outage by the guard.
+                details = error.details if isinstance(error.details, dict) else {}
+                if details.get("requestDeadlineExceeded"):
+                    details["requestNotStarted"] = True
+                    error.details = details
+                raise
+
+        return run_guarded(
+            guard,
+            paced_call,
+            credits=lambda response: response.usage.credits,
+            usage_details=lambda response: _usage_dict(response.usage),
+            admission_remaining_seconds=self._admission_remaining_seconds,
         )
 
     def annotate_failure(self, error: AgentError, prompt_version: str) -> None:
@@ -308,21 +326,6 @@ class ReportInsightPipelineProvider:
             message="리포트 관점 인사이트 전체 요청 사용량이 hard cap을 초과했습니다.",
             details={"usage": _usage_dict(current), "hardCapCredits": float(self.cap)},
         )
-
-
-class _PendingScopedProvider:
-    """Recheck cancellation after shared pacing and semaphore admission."""
-
-    def __init__(self, pipeline, delegate):
-        self.pipeline = pipeline
-        self.delegate = delegate
-
-    def generate(self, **kwargs):
-        self.pipeline._ensure_not_cancelled()
-        return self.delegate.generate(**kwargs)
-
-    def close(self):
-        self.delegate.close()
 
 
 def _usage_dict(usage: ProviderUsage) -> dict:

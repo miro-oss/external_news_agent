@@ -7,6 +7,7 @@ from datetime import date
 
 import pytest
 from test_report_insight_assessment import framed
+from test_report_insight_repair_actions import structured_diagnostics
 from test_report_insight_v4_pipeline import V4Provider, generate, partial_repair_fixture, stages
 
 from app.core.errors import AgentError
@@ -117,7 +118,9 @@ class PrefixProvider(V4Provider):
 
 
 @pytest.mark.parametrize("invalid", [(), (103,)])
-def test_recovers_only_missing_and_invalid_items_and_revalidates_full_batch(monkeypatch, invalid):
+def test_recovers_only_missing_and_invalid_items_and_revalidates_full_batch(
+    monkeypatch, invalid, caplog
+):
     source, reasons, _ = partial_repair_fixture()
     before = source.model_dump_json(by_alias=True)
     validations, recovery_errors = [], []
@@ -149,10 +152,23 @@ def test_recovers_only_missing_and_invalid_items_and_revalidates_full_batch(monk
     assert error.failed_finding_ids == tuple(expected_repair)
     assert "findingId=106: 잘린 출력에 완성된 항목이 없습니다." in str(error)
     if invalid:
-        assert "findingId=103" in str(error) and "2031" in str(error)
+        assert "findingId=103" in str(error)
+        assert any(
+            issue.field == "assessments[103].reason"
+            and issue.error_kind == "report_evidence_insufficient"
+            and issue.claim_ids == ("103:0",)
+            for issue in error.validation_issues
+        )
         details = provider.calls[1]["prompt"].split("<validation-error>", 1)[1]
-        assert "findingId=103" in details and "findingId=106" in details
-        assert "report_fact_mismatch" in details and "2031" not in details
+        assert {row["field"] for row in structured_diagnostics(provider.calls[1]["prompt"])} == {
+            "assessments[103].reason",
+            "assessments[106]",
+        }
+        assert "report_evidence_insufficient" in details
+        # The bounded offending span belongs in the private retry instruction,
+        # while the default log projection must still exclude provider values.
+        assert '"text": "2031"' in details
+        assert "2031" not in caplog.text
     original = provider.wire_payloads[0]["assessments"]["CHIP_MAKER"]
     merged = next(w for w, ids in validations if ids == list(range(101, 107)))
     for key, value in error.preserved_wire["assessments"]["CHIP_MAKER"].items():

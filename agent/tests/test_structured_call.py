@@ -413,3 +413,39 @@ def test_omitted_failure_details_also_omit_validation_diagnostics():
             include_failure_details=False,
         )
     assert caught.value.details is None
+
+
+def test_report_boundary_normalizes_unlocated_errors_before_repair_and_logging(caplog):
+    from app.llm.report_validation_diagnostics import ReportValidationContext
+    from app.llm.structured_call import StructuredCallRepair
+
+    marker = "PRIVATE_PROVIDER_PROSE"
+    error = ValueError(marker)
+    observed = []
+
+    def validate(_):
+        raise error
+
+    def repair(prompt, schema, raw, failure):
+        observed.extend(failure.validation_issues)
+        return StructuredCallRepair(prompt, schema, lambda _: "repaired")
+
+    result = structured_call(
+        SequenceProvider(response(), response()),
+        system_instruction="system",
+        prompt="prompt",
+        response_schema={},
+        validate=validate,
+        repair_attempts=1,
+        task_name="report",
+        input_tag="report",
+        schema_violation_message="invalid",
+        logger=logging.getLogger(__name__),
+        failure_stage="MAP-001",
+        validation_context=ReportValidationContext.create(1, ["CHIP_MAKER"]),
+        repair_factory=repair,
+    )
+    assert result.output == "repaired"
+    assert len(observed) == 1 and not observed[0].located
+    assert observed[0].rule == "report_output_unlocated"
+    assert "whole_output" in caplog.text and marker not in caplog.text

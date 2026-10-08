@@ -62,6 +62,7 @@ def test_claimful_record_has_fixed_keys_and_category_first_axis_branches(audienc
         "findingId",
         "decision",
         "reason",
+        "sourceQuotes",
     }
     properties = decision_axis_schemas(schema, record)
     for field in ("connection", "effect", "timing"):

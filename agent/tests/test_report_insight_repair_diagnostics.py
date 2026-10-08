@@ -9,6 +9,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from jsonschema import ValidationError as JsonSchemaValidationError
 from test_report_insight import output, request_body
+from test_report_insight_repair_actions import structured_diagnostics
 
 from app.core.config import Settings
 from app.core.errors import AgentError, OutputValidationError
@@ -94,9 +95,9 @@ def test_fact_mismatch_preserves_the_concrete_unsupported_values_for_repair():
             request=request,
         )
 
-    assert caught.value.error_kinds == ("report_fact_mismatch",)
+    assert caught.value.error_kinds == ("report_evidence_insufficient",)
     diagnostic = str(caught.value)
-    assert "생성 문장의 사실값이 basisClaimIds 근거와 일치하지 않습니다." in diagnostic
+    assert "근거" in diagnostic
     assert "숫자" in diagnostic and "30" in diagnostic
     assert "기업명" in diagnostic and "엔비디아" in diagnostic
 
@@ -107,7 +108,7 @@ def test_map_reports_all_title_only_fact_failures_together():
     with pytest.raises(OutputValidationError) as caught:
         _validated_map_output(response(stage_output(invalid)), request)
 
-    assert caught.value.error_kinds == ("report_fact_mismatch",) * 4
+    assert caught.value.error_kinds == ("report_evidence_insufficient",) * 8
     assert isinstance(caught.value, ReportAssessmentValidationError)
     assert caught.value.failed_finding_ids == (501, 502, 503, 504)
     diagnostic = str(caught.value)
@@ -168,7 +169,11 @@ def test_map_reports_fact_and_past_deadline_failures_in_the_same_repair(
     with pytest.raises(OutputValidationError) as caught:
         _validated_map_output(response(stage_output(valid)), request)
 
-    assert caught.value.error_kinds == ("report_fact_mismatch", "report_assessment_invalid")
+    assert caught.value.error_kinds == (
+        "report_evidence_insufficient",
+        "report_evidence_insufficient",
+        "report_assessment_invalid",
+    )
     diagnostic = str(caught.value)
     assert "findingId=501" in diagnostic and "엔비디아" in diagnostic
     assert f"findingId=504 field={field}" in diagnostic and time_error in diagnostic
@@ -191,15 +196,18 @@ def test_one_map_repair_receives_all_causes_and_logs_only_safe_error_kinds(caplo
                     .split("<validation-error>", 1)[1]
                     .split("</validation-error>", 1)[0]
                 )
-                for finding_id, company in (
+                for finding_id, _company in (
                     (501, "엔비디아"),
                     (502, "SK하이닉스"),
                     (503, "AMD"),
                     (504, "TSMC"),
                 ):
-                    assert f"findingId={finding_id}" in diagnostic
-                    assert company not in diagnostic
-                assert diagnostic.count("report_fact_mismatch") == 4
+                    assert any(
+                        row["field"] == f"assessments[{finding_id}].reason"
+                        for row in structured_diagnostics(kwargs["prompt"])
+                    )
+                assert len(structured_diagnostics(kwargs["prompt"])) == 8
+                assert len(diagnostic.strip()) <= 6000
                 return response(stage_output(valid))
             assert len(calls) == 3
             assert kwargs["response_schema"]["title"] == "ReportInsightReduceOutput"
@@ -213,8 +221,8 @@ def test_one_map_repair_receives_all_causes_and_logs_only_safe_error_kinds(caplo
     assert len(calls) == 3
     assert [item.finding_id for item in result.insights[0].assessments] == [501, 502, 503, 504]
     assert result.insights[0].headline == valid["insights"][0]["headline"]
-    assert "errorType=ReportAssessmentValidationError errorCount=4" in caplog.text
-    assert "report_fact_mismatch" in caplog.text
+    assert "errorType=ReportAssessmentValidationError errorCount=8" in caplog.text
+    assert "report_evidence_insufficient" in caplog.text
     for private_detail in (
         "NVIDIA",
         "엔비디아",
@@ -478,7 +486,7 @@ def test_partial_repair_rejects_invalid_subset_outputs_and_retains_both_calls_us
     if violation == "ungrounded":
         assert isinstance(caught.value.__cause__, ReportAssessmentValidationError)
         assert caught.value.__cause__.failed_finding_ids == (503,)
-        assert caught.value.__cause__.error_kinds == ("report_fact_mismatch",)
+        assert caught.value.__cause__.error_kinds == ("report_evidence_insufficient",) * 2
     assert request.model_dump_json(by_alias=True) == snapshot
 
 

@@ -278,7 +278,7 @@ def test_shared_cooldown_beyond_deadline_does_not_sleep_or_invoke_provider():
 
 
 @pytest.mark.parametrize(
-    "configured_timeout,expected_timeouts", [(90, [89, 79]), (120, [119, 109]), (300, [179, 169])]
+    "configured_timeout,expected_timeouts", [(90, [90, 80]), (120, [120, 110]), (300, [180, 170])]
 )
 @pytest.mark.parametrize("plan", ["FREE", "PAID"])
 def test_native_clients_are_scoped_closed_and_get_remaining_deadline(

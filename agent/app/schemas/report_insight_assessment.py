@@ -7,6 +7,7 @@ from pydantic import ConfigDict, Field, StrictInt
 from app.schemas.analyze import Audience
 from app.schemas.common import AgentModel
 from app.schemas.report_insight import ClaimId
+from app.schemas.report_insight_source_quotes import AssessmentSourceQuotes
 
 Relation = Literal["DIRECT", "CONDITIONAL", "BACKGROUND", "UNRELATED", "UNDETERMINED"]
 ImpactScope = Literal[
@@ -58,6 +59,10 @@ class ReportFindingAssessmentDraft(AgentModel):
     urgency_state: UrgencyState
     urgency_basis: ReportAssessmentSourceQuote | None
     reason: str = Field(min_length=1, max_length=180)
+    # Internal-only provenance travels with authenticated repair snapshots.
+    source_quotes: AssessmentSourceQuotes | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class ReportAssessmentDraft(AgentModel):
@@ -103,6 +108,8 @@ class ReportFindingAssessmentWire(AgentModel):
     finding_id: StrictInt = Field(gt=0)
     decision: ReportAssessmentDecision
     reason: str = Field(min_length=1, max_length=180)
+    # Missing metadata is accepted only by the legacy stored-draft reader.
+    source_quotes: AssessmentSourceQuotes | None = None
 
     def flattened(self, source_spans: dict[str, dict[str, str]]) -> ReportFindingAssessmentDraft:
         def literal(basis: ReportAssessmentSourceSpan | None, field: str):
@@ -126,9 +133,26 @@ class ReportFindingAssessmentWire(AgentModel):
             urgency_state=self.decision.timing.urgency_state,
             urgency_basis=literal(self.decision.timing.basis, "timing.basis"),
             reason=self.reason,
+            source_quotes=(
+                self.source_quotes
+                if self.source_quotes is not None
+                and (
+                    self.source_quotes.reason is not None
+                    or self.source_quotes.condition is not None
+                )
+                else None
+            ),
         )
 
 
 class ReportAssessmentWireDraft(AgentModel):
     model_config = ConfigDict(strict=True)
     assessments: dict[Audience, dict[str, ReportFindingAssessmentWire]]
+
+
+class ReportFindingAssessmentStructuredWire(ReportFindingAssessmentWire):
+    source_quotes: AssessmentSourceQuotes
+
+
+class ReportAssessmentStructuredWireDraft(ReportAssessmentWireDraft):
+    assessments: dict[Audience, dict[str, ReportFindingAssessmentStructuredWire]]

@@ -1,5 +1,6 @@
 """Repair actions retain owned paths without teaching the rejected factual text."""
 
+import json
 from copy import deepcopy
 from dataclasses import replace
 
@@ -18,6 +19,29 @@ from app.llm.report_insight_assessment import draft_prompt, validate_draft
 
 def diagnostics(prompt):
     return prompt.split("<validation-error>", 1)[1].split("</validation-error>", 1)[0]
+
+
+def structured_diagnostics(prompt):
+    packet = json.loads(
+        next(
+            line
+            for line in reversed(diagnostics(prompt).splitlines())
+            if line.startswith(("{", "["))
+        )
+    )
+    if isinstance(packet, list):
+        return packet
+    return [
+        {
+            "audience": row["audience"],
+            "field": row["field"],
+            "claimIds": row["claimIds"],
+            **packet["rules"][rule],
+            "details": row.get("details", {}).get(rule, []),
+        }
+        for row in packet["issues"]
+        for rule in row["rules"]
+    ]
 
 
 @pytest.mark.parametrize("attempt", ["initial13", "repair14", "targeted"])
@@ -56,10 +80,14 @@ def test_recorded_bad_repairs_keep_audit_but_project_literal_free_actions(attemp
     prompt = service._report_insight_repair_prompt(draft_prompt(source), "bad output", error)
     details = diagnostics(prompt)
 
-    assert "삼성전자" not in details
-    assert "report_fact_mismatch" in details
-    assert f"findingId=7815 field=assessments.reason nativeFields={paths}" in details
-    assert "refs=['7815:2']" in details
+    rows = structured_diagnostics(prompt)
+    assert {row["field"] for row in rows} == {
+        f"assessments[7815].{path}" for path in paths.split(",")
+    }
+    assert all(row["claimIds"] == ["7815:2"] for row in rows)
+    assert all(row["errorKind"] == "report_evidence_insufficient" for row in rows)
+    assert all("삼성전자" not in row["reason"] for row in rows)
+    assert len(details.strip()) <= 6000
     assert "삼성전자" in str(error)
     assert "삼성전자" in prompt  # The same-finding supporting source is still available.
     assert "같은 finding의 다른 claimId/sourceSpanId" in prompt

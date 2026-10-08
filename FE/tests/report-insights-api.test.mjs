@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { environmentManager, focusManager, QueryClient, QueryObserver } from '@tanstack/react-query'
+import { environmentManager, focusManager, MutationObserver, QueryClient, QueryObserver } from '@tanstack/react-query'
 import { ApiError } from '../src/api/client.ts'
 import { generateReportInsightOptions, isReportInsightAbsent, isReportInsightPreparing, reportInsightKey, reportInsightOptions, reportInsightSnapshotKey, selectReportInsight } from '../src/api/reportInsights.ts'
 import { reportInsightFixture } from '../scripts/report-insight-fixtures.mjs'
@@ -283,4 +283,94 @@ test('a slow stored-result read cannot overwrite a newly generated result', asyn
   releaseRead()
   await read
   assert.equal(client.getQueryData(reportInsightKey(report.id, 'CHIP_MAKER', snapshot)).insights[0].headline, generated.insights[0].headline)
+})
+
+test('four manual generations share two FIFO slots across panel navigation and retain their original caches', async context => {
+  const client = clientFor(context), calls = []
+  let active = 0, peak = 0
+  context.mock.method(globalThis, 'fetch', (url, init) => new Promise(resolve => {
+    const audience = JSON.parse(init.body).audiences[0]
+    active++
+    peak = Math.max(peak, active)
+    calls.push({ url, audience, finish() {
+      active--
+      resolve(envelope({ ...reportInsightFixture(report, audience), cached: false }))
+    } })
+  }))
+  const audiences = ['CHIP_MAKER', 'EQUIPMENT_MAKER', 'IT_INFRA', 'MARKET_INVESTOR']
+  const observers = audiences.map(() => new MutationObserver(client, generateReportInsightOptions(client)))
+  const unsubscribe = observers.map(observer => observer.subscribe(() => {}))
+  context.after(() => unsubscribe.forEach(stop => stop()))
+  const pending = observers.map((observer, index) => observer.mutate({ reportId: report.id, audience: audiences[index], snapshot }))
+  await settle()
+  assert.deepEqual(calls.map(call => call.audience), audiences.slice(0, 2))
+  assert.ok(observers.every(observer => observer.getCurrentResult().isPending))
+  // Switching panels removes observers but must preserve both queued and running work.
+  unsubscribe[0]()
+  unsubscribe[2]()
+  calls[1].finish()
+  await settle()
+  assert.deepEqual(calls.map(call => call.audience), audiences.slice(0, 3))
+  assert.equal(active, 2)
+  calls[0].finish()
+  await settle()
+  assert.deepEqual(calls.map(call => call.audience), audiences)
+  calls[2].finish()
+  calls[3].finish()
+  const results = await Promise.all(pending)
+  assert.equal(peak, 2)
+  assert.equal(active, 0)
+  assert.ok(calls.every(call => call.url === `/api/news/reports/${report.id}/insights`))
+  audiences.forEach((audience, index) => {
+    assert.deepEqual(client.getQueryData(reportInsightKey(report.id, audience, snapshot)), results[index])
+    assert.equal(client.getQueryData(reportInsightKey(report.id, audience, 'new-snapshot')), undefined)
+    assert.equal(client.getQueryData(reportInsightKey(report.id + 1, audience, snapshot)), undefined)
+  })
+})
+
+test('failed generation and invalid responses release slots without retrying or affecting unrelated cached results', async context => {
+  const client = clientFor(context), calls = []
+  const saved = reportInsightFixture(report)
+  client.setQueryData(reportInsightKey(report.id, 'CHIP_MAKER', 'prior-snapshot'), saved)
+  context.mock.method(globalThis, 'fetch', (_url, init) => new Promise(resolve => {
+    calls.push({ audience: JSON.parse(init.body).audiences[0], resolve })
+  }))
+  const audiences = ['CHIP_MAKER', 'EQUIPMENT_MAKER', 'IT_INFRA', 'MARKET_INVESTOR']
+  const pending = audiences.map(audience => client.getMutationCache().build(client, generateReportInsightOptions(client))
+    .execute({ reportId: report.id, audience, snapshot }))
+  const settled = Promise.allSettled(pending)
+  await settle()
+  assert.equal(calls.length, 2)
+  calls[0].resolve(fail('COMMON500', '리포트 관점 인사이트 생성에 실패했습니다.', 500))
+  calls[1].resolve(envelope(reportInsightFixture({ ...report, id: report.id + 1 }, 'EQUIPMENT_MAKER')))
+  await settle()
+  assert.deepEqual(calls.map(call => call.audience), audiences)
+  calls[2].resolve(envelope(reportInsightFixture(report, 'IT_INFRA')))
+  calls[3].resolve(envelope(reportInsightFixture(report, 'MARKET_INVESTOR')))
+  const results = await settled
+  assert.deepEqual(results.map(result => result.status), ['rejected', 'rejected', 'fulfilled', 'fulfilled'])
+  assert.equal(results[0].reason.code, 'COMMON500')
+  assert.equal(results[1].reason.code, 'CONTRACT')
+  assert.equal(calls.length, 4)
+  assert.deepEqual(client.getQueryData(reportInsightKey(report.id, 'CHIP_MAKER', 'prior-snapshot')), saved)
+  for (const audience of audiences.slice(0, 2)) assert.equal(client.getQueryData(reportInsightKey(report.id, audience, snapshot)), undefined)
+})
+
+test('admission is shared across reports but separate QueryClients do not block each other', async context => {
+  const first = clientFor(context), second = clientFor(context), calls = []
+  context.mock.method(globalThis, 'fetch', (url, init) => new Promise(resolve => {
+    const reportId = Number(url.match(/reports\/(\d+)\/insights/)[1])
+    const audience = JSON.parse(init.body).audiences[0]
+    calls.push({ reportId, finish: () => resolve(envelope(reportInsightFixture({ ...report, id: reportId }, audience))) })
+  }))
+  const start = (client, id) => client.getMutationCache().build(client, generateReportInsightOptions(client))
+    .execute({ reportId: id, audience: 'CHIP_MAKER', snapshot })
+  const pending = [start(first, 101), start(first, 102), start(first, 103), start(second, 201)]
+  await settle()
+  assert.deepEqual(calls.map(call => call.reportId), [101, 102, 201])
+  calls[0].finish()
+  await settle()
+  assert.deepEqual(calls.map(call => call.reportId), [101, 102, 201, 103])
+  calls.slice(1).forEach(call => call.finish())
+  await Promise.all(pending)
 })

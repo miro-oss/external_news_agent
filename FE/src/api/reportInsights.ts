@@ -1,5 +1,5 @@
 import { queryOptions, useIsMutating, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { useMemo } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import { ApiError, get, post } from './client.ts'
 import type { Audience, ReportDetail } from './types'
 
@@ -129,11 +129,67 @@ export function reportInsightOptions(reportId: number, audience: Audience, snaps
   })
 }
 export interface GenerateReportInsightRequest { reportId: number; audience: Audience; snapshot: string }
+type GenerationJob = { key: string; running: boolean; start: () => void }
+function generationRequestKey(request: GenerateReportInsightRequest) {
+  return JSON.stringify(reportInsightKey(request.reportId, request.audience, request.snapshot))
+}
+function createGenerationQueue() {
+  const jobs: GenerationJob[] = []
+  const listeners = new Set<() => void>()
+  let running = 0
+  function advance() {
+    for (const job of jobs) {
+      if (running >= 2) break
+      if (job.running) continue
+      job.running = true
+      running++
+      job.start()
+    }
+    listeners.forEach(listener => listener())
+  }
+  return {
+    subscribe(listener: () => void) {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+    isQueued(request: GenerateReportInsightRequest) {
+      const key = generationRequestKey(request)
+      return jobs.some(job => job.key === key && !job.running)
+    },
+    async run<T>(request: GenerateReportInsightRequest, generate: () => Promise<T>) {
+      const job: GenerationJob = { key: generationRequestKey(request), running: false, start: () => {} }
+      await new Promise<void>(resolve => {
+        job.start = resolve
+        jobs.push(job)
+        advance()
+      })
+      try { return await generate() }
+      finally {
+        jobs.splice(jobs.indexOf(job), 1)
+        running--
+        advance()
+      }
+    },
+  }
+}
+// Share admission across reports and mounted panels; navigation must not reset the limit.
+const generationQueues = new WeakMap<QueryClient, ReturnType<typeof createGenerationQueue>>()
+function generationQueue(client: QueryClient) {
+  let queue = generationQueues.get(client)
+  if (!queue) {
+    queue = createGenerationQueue()
+    generationQueues.set(client, queue)
+  }
+  return queue
+}
 export function generateReportInsightOptions(client: QueryClient) {
   return {
     mutationKey: ['report-insights', 'generate'] as const,
-    mutationFn: async ({ reportId, audience }: GenerateReportInsightRequest) => verifyResult(
-      await post<ReportInsightResult>(`/reports/${reportId}/insights`, { audiences: [audience] }), reportId, audience),
+    mutationFn: (request: GenerateReportInsightRequest) => generationQueue(client).run(request, async () => {
+      const { reportId, audience } = request
+      // Start the HTTP request only after admission, preserving the server's generation time budget.
+      return verifyResult(await post<ReportInsightResult>(`/reports/${reportId}/insights`, { audiences: [audience] }), reportId, audience)
+    }),
     retry: false,
     onSuccess: async (result: ReportInsightResult, { reportId, audience, snapshot }: GenerateReportInsightRequest) => {
       const queryKey = reportInsightKey(reportId, audience, snapshot)
@@ -155,6 +211,12 @@ export function useReportInsight(reportId: number, audience: Audience, snapshot:
 export function useGenerateReportInsight() {
   const client = useQueryClient()
   return useMutation(generateReportInsightOptions(client))
+}
+
+export function useReportInsightQueued(reportId: number, audience: Audience, snapshot: string) {
+  const queue = generationQueue(useQueryClient())
+  const getSnapshot = () => queue.isQueued({ reportId, audience, snapshot })
+  return useSyncExternalStore(queue.subscribe, getSnapshot, getSnapshot)
 }
 
 export function useReportInsightGenerating(reportId: number, audience: Audience, snapshot: string) {

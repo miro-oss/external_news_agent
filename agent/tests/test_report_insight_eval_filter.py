@@ -100,10 +100,10 @@ def test_historical_binding_remains_valid_when_current_filter_rejects_old_refere
     originals = {path.name: path.read_bytes() for path in directory.iterdir() if path.is_file()}
     original_grounding = service._report_factual_mismatches
 
-    def stricter_grounding(text, evidence):
+    def stricter_grounding(text, evidence, **kwargs):
         if text == "삼성전자는 2027년 CPO 양산을 계획했다.":
             return ["new-grounding-rule"]
-        return original_grounding(text, evidence)
+        return original_grounding(text, evidence, **kwargs)
 
     monkeypatch.setattr(service, "_report_factual_mismatches", stricter_grounding)
     runner.verify_recorded(directory, manifest, state, revalidate_outputs=False)

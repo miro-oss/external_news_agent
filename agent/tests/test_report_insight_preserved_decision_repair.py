@@ -7,6 +7,7 @@ from dataclasses import replace
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
+from report_insight_schema_assertions import assert_only_display_quotes_require_null
 from test_report_insight_assessment import payload, request, response
 from test_report_insight_native_field_diagnostics import conditional_payload, recorded_source
 
@@ -89,7 +90,7 @@ def test_recorded_id_number_failures_preserve_unknown_effect_in_partial_and_full
             item["reason"] = f"원문 문장(claim {finding.id}:0)이 공정 검증 업무와 관련된다."
     repair, error, raw, calls = repair_for(source, value)
     assert set(error.native_prose_repairs) == set(failed_ids)
-    assert set(error.error_kinds) == {"report_fact_mismatch"}
+    assert set(error.error_kinds) == {"report_expression_policy", "report_evidence_insufficient"}
     assert "근거에서 확인되지 않는 숫자" in str(error)
     assert set(
         repair.response_schema["properties"]["assessments"]["properties"]["CHIP_MAKER"][
@@ -128,7 +129,7 @@ def test_recorded_id_number_failures_preserve_unknown_effect_in_partial_and_full
     assert len(calls) == 1
 
 
-def test_condition_only_repair_keeps_relation_and_reason_but_allows_same_finding_basis_correction():
+def test_condition_only_repair_preserves_validated_basis_and_repairs_unsupported_company():
     source = recorded_source()
     value = conditional_payload(source)
     entry = value["assessments"]["IT_INFRA"]["finding7815"]
@@ -136,18 +137,16 @@ def test_condition_only_repair_keeps_relation_and_reason_but_allows_same_finding
     repair, error, raw, calls = repair_for(source, value)
     assert error.native_prose_repairs[7815][1] == ("decision.connection.condition",)
     corrected = deepcopy(value)
-    claim = source.findings[0].claims[1]
-    corrected["assessments"]["IT_INFRA"]["finding7815"]["relationBasis"] = {
-        "claimId": claim.id,
-        "quote": claim.text,
-    }
+    corrected["assessments"]["IT_INFRA"]["finding7815"]["condition"] = (
+        "스마트폰 출고가 인상이 해당 업무에 연결되는 경우"
+    )
     good = repair_payload(repair, source, corrected)
     wire_validator(repair).validate(good)
     result = repair.validate(replace(raw, text=json.dumps(good, ensure_ascii=False)))
     item = result.evidence["IT_INFRA"][7815]
     assert item.relation == "CONDITIONAL"
     assert item.reason == entry["reason"]
-    assert item.relation_basis.claim_id == "7815:0"
+    assert item.relation_basis.claim_id == "7815:2"
     bad = deepcopy(good)
     bad["assessments"]["IT_INFRA"]["finding7815"]["decision"]["connection"].update(
         relation="DIRECT", condition=None
@@ -168,9 +167,74 @@ def test_condition_only_repair_keeps_relation_and_reason_but_allows_same_finding
         "sourceSpanId": "s9999_0_0",
     }
     assert not wire_validator(repair).is_valid(foreign)
-    with pytest.raises(ValueError, match="원문 선택 계약 위반"):
+    with pytest.raises(OutputValidationError, match="변경할 수 없습니다"):
         repair.validate(replace(raw, text=json.dumps(foreign, ensure_ascii=False)))
-    assert len(calls) == 2  # Corrected output and the rejected foreign basis reach full validation.
+    # Even another claim in the same finding cannot re-open validated axes.
+    changed_basis = deepcopy(corrected)
+    claim = source.findings[0].claims[1]
+    changed_basis["assessments"]["IT_INFRA"]["finding7815"]["relationBasis"] = {
+        "claimId": claim.id,
+        "quote": claim.text,
+    }
+    changed_basis = repair_payload(repair, source, changed_basis)
+    assert not wire_validator(repair).is_valid(changed_basis)
+    with pytest.raises(OutputValidationError, match="변경할 수 없습니다"):
+        repair.validate(replace(raw, text=json.dumps(changed_basis, ensure_ascii=False)))
+    assert len(calls) == 1  # Basis drift is rejected before the full merge validator.
+
+
+@pytest.mark.parametrize("axis", ["connection", "effect", "timing"])
+@pytest.mark.parametrize("change", ["claim", "span", "null"])
+def test_prose_only_repair_keeps_every_axis_original_source_choice(axis, change):
+    source = request()
+    finding = source.findings[0]
+    finding.claims[0].evidence_sentence_ids.append(1)
+    finding.sentences.append(
+        finding.sentences[0].model_copy(
+            update={"index": 1, "text": "대체 생산라인의 가동 중단도 현재 계속된다고 밝혔다."}
+        )
+    )
+    finding.claims.append(finding.claims[0].model_copy(update={"id": "101:1"}))
+    value = payload(source)
+    value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = (
+        "원문 문장(claim 101:0)의 검증 조건을 확인한다."
+    )
+    repair, _, raw, calls = repair_for(source, value)
+    corrected = deepcopy(value)
+    corrected["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = (
+        "알려진 생산 제약에 맞춰 공정 검증 준비의 영향을 확인한다."
+    )
+    good = repair_payload(repair, source, corrected)
+    wire_validator(repair).validate(good)
+    result = repair.validate(replace(raw, text=json.dumps(good, ensure_ascii=False)))
+    restored = draft_to_wire(result.draft, source)
+    assert (
+        restored["assessments"]["CHIP_MAKER"]["finding101"]["decision"]
+        == (json.loads(raw.text)["assessments"]["CHIP_MAKER"]["finding101"]["decision"])
+    )
+
+    changed = deepcopy(corrected)
+    basis_field = {
+        "connection": "relationBasis",
+        "effect": "impactBasis",
+        "timing": "urgencyBasis",
+    }[axis]
+    basis = changed["assessments"]["CHIP_MAKER"]["finding101"][basis_field]
+    if change == "claim":
+        basis["claimId"] = "101:1"
+    elif change == "span":
+        basis["quote"] = finding.sentences[1].text
+    else:
+        changed["assessments"]["CHIP_MAKER"]["finding101"][basis_field] = None
+    changed = repair_payload(repair, source, changed)
+    # This source is real and remains native-valid; the retry still has no
+    # reason to re-evaluate an axis whose only diagnosed error was prose.
+    if change != "null":
+        validate_draft(replace(raw, text=json.dumps(changed, ensure_ascii=False)), source)
+    assert not wire_validator(repair).is_valid(changed)
+    with pytest.raises(OutputValidationError, match="변경할 수 없습니다"):
+        repair.validate(replace(raw, text=json.dumps(changed, ensure_ascii=False)))
+    assert len(calls) == 1
 
 
 def test_mixed_native_coherence_and_fact_failures_keep_the_ordinary_repair_contract():
@@ -181,15 +245,80 @@ def test_mixed_native_coherence_and_fact_failures_keep_the_ordinary_repair_contr
     )
     raw = response(value, source)
     error = service._native_assessment_repair_errors(raw, source)
-    assert set(error.error_kinds) == {"report_assessment_draft_invalid", "report_fact_mismatch"}
+    assert set(error.error_kinds) == {
+        "report_assessment_draft_invalid",
+        "report_evidence_insufficient",
+    }
     assert not error.native_prose_repairs
     schema = draft_schema(source)
     engine = object.__new__(service.ReportInsightService)
     repair = engine._repair_call(draft_prompt(source), schema, raw.text, error, lambda x: x)
-    assert repair.response_schema == schema
+    assert_only_display_quotes_require_null(repair.response_schema, schema)
 
 
-@pytest.mark.parametrize("defect", ["legacy_error", "changed_raw"])
+def test_id_prose_repair_cannot_drop_the_source_supporting_its_company():
+    # A live repair removed internal IDs, but changed all bases to an unnamed
+    # claim while retaining the company in reason. Use synthetic source text
+    # to preserve that failure shape without committing the captured report.
+    source = request(
+        audiences=("MARKET_INVESTOR",),
+        text="삼성전자는 생산라인 전체의 가동 중단이 현재 계속된다고 밝혔다.",
+    )
+    finding = source.findings[0]
+    for index, text in enumerate(
+        [
+            "생산라인 전체의 가동 중단이 현재 계속된다.",
+            "해당 생산라인의 가동 중단은 현재 계속된다.",
+        ],
+        start=1,
+    ):
+        finding.claims.append(
+            finding.claims[0].model_copy(
+                update={"id": f"101:{index}", "text": text, "evidence_sentence_ids": [index]}
+            )
+        )
+        finding.sentences.append(
+            finding.sentences[0].model_copy(update={"index": index, "text": text})
+        )
+    value = payload(source)
+    entry = value["assessments"]["MARKET_INVESTOR"]["finding101"]
+    entry["work"] = "PROFITABILITY"
+    for field, index in (("impactBasis", 1), ("urgencyBasis", 2)):
+        entry[field] = {"claimId": f"101:{index}", "quote": finding.claims[index].text}
+    entry["reason"] = "삼성전자의 생산 제약에 따른 수익성 판단과 연결된다. (근거 claim 101:0)"
+    repair, error, raw, calls = repair_for(source, value)
+    assert set(error.error_kinds) == {"report_expression_policy", "report_evidence_insufficient"}
+    assert "기업명" not in str(error)
+
+    corrected = deepcopy(value)
+    corrected_entry = corrected["assessments"]["MARKET_INVESTOR"]["finding101"]
+    corrected_entry["reason"] = "삼성전자의 생산 제약에 따른 수익성 판단과 연결된다."
+    good = response(corrected, source)
+    wire_validator(repair).validate(json.loads(good.text))
+    repair.validate(good)
+
+    drifted = deepcopy(corrected)
+    drifted_entry = drifted["assessments"]["MARKET_INVESTOR"]["finding101"]
+    for field in ("relationBasis", "impactBasis", "urgencyBasis"):
+        drifted_entry[field] = {"claimId": "101:2", "quote": finding.claims[2].text}
+    drifted_response = response(drifted, source)
+    draft = validate_draft(drifted_response, source)
+    with pytest.raises(service.ReportAssessmentValidationError, match="기업명: 삼성전자"):
+        service._validated_map_output(
+            replace(drifted_response, text=draft.mapped.model_dump_json(by_alias=True)),
+            source,
+            native_assessments=draft.evidence,
+        )
+    assert not wire_validator(repair).is_valid(json.loads(drifted_response.text))
+    with pytest.raises(OutputValidationError, match="변경할 수 없습니다"):
+        repair.validate(drifted_response)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "defect",
+    ["legacy_error", "changed_raw", "connection", "effect", "timing"],
+)
 def test_untrusted_or_stale_attribution_cannot_freeze_decisions(defect):
     source = request(ids=(101,))
     value = payload(source)
@@ -203,7 +332,11 @@ def test_untrusted_or_stale_attribution_cannot_freeze_decisions(defect):
         )
     else:
         altered = json.loads(raw.text)
-        altered["assessments"]["CHIP_MAKER"]["finding101"]["reason"] += " 수정"
+        entry = altered["assessments"]["CHIP_MAKER"]["finding101"]
+        if defect == "changed_raw":
+            entry["reason"] += " 수정"
+        else:
+            entry["decision"][defect]["basis"] = None
         raw = replace(raw, text=json.dumps(altered, ensure_ascii=False))
     schema = draft_schema(source)
     engine = object.__new__(service.ReportInsightService)

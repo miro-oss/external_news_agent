@@ -12,8 +12,12 @@ from app.core.errors import AgentError, OutputValidationError, StructuredOutputE
 from app.core.parser import JsonObjectParseError
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.prompt_data import escape_prompt_text
+from app.llm.report_insight_fact_repair import safe_fact_repair_kinds
 from app.llm.report_validation_diagnostics import (
     REPORT_VALIDATION_ERROR_KINDS,
+    ReportValidationContext,
+    attach_report_validation_diagnostics,
+    collect_report_validation_issues,
     report_validation_issue_details,
 )
 
@@ -50,6 +54,7 @@ def structured_call[OutputT](
     include_failure_details: bool = True,
     failure_prompt_version: str | None = None,
     failure_stage: str | None = None,
+    validation_context: ReportValidationContext | None = None,
     repair_prompt_factory: Callable[[str, str, Exception], str] | None = None,
     repair_factory: Callable[
         [str, dict[str, object], str, Exception], StructuredCallRepair[OutputT]
@@ -93,12 +98,18 @@ def structured_call[OutputT](
             output = current_validate(response)
         except (JsonObjectParseError, ValidationError, ValueError) as error:
             last_error = error
+            if failure_stage is not None and _REPORT_FAILURE_STAGE.fullmatch(failure_stage):
+                attach_report_validation_diagnostics(error, current_schema, stage=failure_stage)
             _log_validation_failure(
                 logger,
                 response,
                 error,
                 task_name=task_name,
                 attempt=attempt,
+                stage=failure_stage,
+                schema=current_schema,
+                context=validation_context,
+                repair_available=attempt <= repair_attempts,
             )
             if attempt > repair_attempts:
                 raise _schema_violation(
@@ -130,6 +141,14 @@ def structured_call[OutputT](
                     )
                 )
             continue
+        if validation_context is not None:
+            logger.info(
+                "Report insight traceId=%s reportId=%s audiences=%s stage=%s attempt=%d outcome=%s",
+                *validation_context.log_fields(),
+                failure_stage,
+                attempt,
+                "REPAIRED" if attempt > 1 else "VALIDATED",
+            )
         return StructuredCallResult(response=response, output=output, usage=usage)
 
     raise RuntimeError("구조화 출력 repair 상태가 올바르지 않습니다.") from last_error
@@ -160,6 +179,10 @@ def _log_validation_failure(
     *,
     task_name: str,
     attempt: int,
+    stage: str | None = None,
+    schema: dict | None = None,
+    context: ReportValidationContext | None = None,
+    repair_available: bool = False,
 ) -> None:
     # ValidationError.__str__ includes input_value; custom ValueError messages
     # can also contain provider output. Neither belongs in application logs.
@@ -179,9 +202,30 @@ def _log_validation_failure(
     else:
         error_count = 1
         error_kinds = []
+    suffix = ""
+    context_args: tuple = ()
+    if context is not None:
+        details = report_validation_issue_details(error, schema or {}, stage=stage)
+        suffix = (
+            " traceId=%s reportId=%s audiences=%s stage=%s action=%s "
+            "validationRules=%s validationIssues=%s validationIssuesTruncated=%s "
+            "diagnostics=%s"
+        )
+        context_args = (
+            *context.log_fields(),
+            stage,
+            "REPAIR" if repair_available else "EXHAUSTED",
+            safe_fact_repair_kinds(getattr(error, "fact_repair_kinds", ())),
+            details.get("issues", []),
+            details.get("issuesTruncated", False),
+            [
+                issue.diagnostic_payload()
+                for issue in collect_report_validation_issues(error, schema or {}, stage=stage)[:8]
+            ],
+        )
     target_logger.warning(
         "Provider %s 출력이 계약을 위반했습니다. provider=%s model=%s attempt=%d "
-        "errorType=%s errorCount=%d errorKinds=%s",
+        "errorType=%s errorCount=%d errorKinds=%s" + suffix,
         task_name,
         response.provider,
         response.model,
@@ -189,6 +233,7 @@ def _log_validation_failure(
         type(error).__name__,
         error_count,
         error_kinds,
+        *context_args,
     )
 
 
@@ -261,8 +306,7 @@ def _validation_failure(
         "errorCount": count,
         "errorKinds": sorted(kinds)[:5],
     }
-    if stage == "REDUCE" or stage.startswith("REDUCE-"):
-        details.update(report_validation_issue_details(error, response_schema or {}))
+    details.update(report_validation_issue_details(error, response_schema or {}, stage=stage))
     return details
 
 

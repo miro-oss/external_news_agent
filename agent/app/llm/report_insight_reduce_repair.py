@@ -9,12 +9,16 @@ from pydantic import ValidationError
 
 from app.core.parser import JsonObjectParseError
 from app.llm.prompt_data import prompt_json
-from app.llm.report_validation_diagnostics import ReportValidationIssue, pydantic_reduce_issues
+from app.llm.report_validation_diagnostics import (
+    ReportValidationIssue,
+    attach_report_validation_diagnostics,
+    compact_repair_payload,
+)
 from app.llm.structured_call import StructuredCallRepair
 
 _UNIT_FIELD = re.compile(
-    r"(overview|implications|watchItems)\[([0-4])\]\."
-    r"(?:text|assumption|mechanism|falsifiedBy|topic|indicator|trigger)"
+    r"(overview|implications|watchItems)\[([0-4])\](?:\."
+    r"(?:text|assumption|mechanism|falsifiedBy|topic|indicator|trigger|basisClaimIds))?"
 )
 
 
@@ -87,11 +91,11 @@ def partial_reduce_repair(prompt, schema, raw, context, validate):
         }
         units = {}
         for issue in context.issues:
-            if not isinstance(issue, ReportValidationIssue):
+            if not isinstance(issue, ReportValidationIssue) or not issue.located:
                 return None
             audience_index = by_audience[issue.audience]
-            if issue.field == "headline":
-                group, index = "headline", None
+            if issue.field in {"headline", "overview", "implications", "watchItems"}:
+                group, index = issue.field, None
             else:
                 match = _UNIT_FIELD.fullmatch(issue.field)
                 if match is None:
@@ -105,7 +109,19 @@ def partial_reduce_repair(prompt, schema, raw, context, validate):
                     value = record[group][index]
                     unit_schema = unit_schema["items"]
                 else:
-                    value = record[group]
+                    # A missing required field is repairable without replacing
+                    # a sibling. Its value is data, never the field's authority.
+                    value = record.get(group)
+                    if group == "headline" and "sourceQuotes" in branches[issue.audience]:
+                        # This selector belongs to the headline's editable unit.
+                        # A string-only patch could never repair an invalid slot.
+                        unit_schema = _object(
+                            {
+                                "headline": unit_schema,
+                                "sourceQuotes": branches[issue.audience]["sourceQuotes"],
+                            }
+                        )
+                        value = {"headline": value, "sourceQuotes": record.get("sourceQuotes")}
                 units[identity] = {
                     "key": f"repair{len(units)}",
                     "audience": issue.audience,
@@ -120,10 +136,50 @@ def partial_reduce_repair(prompt, schema, raw, context, validate):
                     "field": issue.field,
                     "errorKind": issue.error_kind,
                     "claimIds": list(issue.claim_ids),
+                    "rules": [
+                        {
+                            key: value
+                            for key, value in compact_repair_payload(issue).items()
+                            if key in {"rule", "reason", "category", "details", "detailsTruncated"}
+                        }
+                    ],
                 }
             )
         if not units:
             return None
+        # A length/shape failure owns its collection. Coalesce nested failures
+        # into that single job so one patch cannot overwrite another patch.
+        for identity, unit in list(units.items()):
+            audience_index, group, index = identity
+            parent = units.get((audience_index, group, None))
+            if index is not None and parent is not None:
+                parent["diagnostics"].extend(unit["diagnostics"])
+                del units[identity]
+        for index, unit in enumerate(units.values()):
+            unit["key"] = f"repair{index}"
+            # Multiple internal rules can identify the same public edit target.
+            # Preserve internal diagnostics on the error, but do not duplicate
+            # an identical public instruction inside the provider repair job.
+            unique = []
+            for diagnostic in unit["diagnostics"]:
+                previous = next(
+                    (
+                        item
+                        for item in unique
+                        if all(
+                            item[key] == diagnostic[key]
+                            for key in ("field", "errorKind", "claimIds")
+                        )
+                    ),
+                    None,
+                )
+                if previous is None:
+                    unique.append(diagnostic)
+                else:
+                    previous["rules"].extend(
+                        rule for rule in diagnostic["rules"] if rule not in previous["rules"]
+                    )
+            unit["diagnostics"] = unique
     except (KeyError, IndexError, TypeError, ValueError):
         return None
 
@@ -158,7 +214,18 @@ def partial_reduce_repair(prompt, schema, raw, context, validate):
         for (audience_index, group, index), unit in units.items():
             replacement = patch["repairs"][unit["key"]]
             if index is None:
-                merged["insights"][audience_index][group] = replacement
+                if group == "headline" and "sourceQuotes" in branches[unit["audience"]]:
+                    if type(replacement) is not dict or set(replacement) != {
+                        "headline",
+                        "sourceQuotes",
+                    }:
+                        raise ValueError(
+                            "headline 수리는 문구와 표시용 원문 선택만 함께 반환해야 합니다."
+                        )
+                    merged["insights"][audience_index]["headline"] = replacement["headline"]
+                    merged["insights"][audience_index]["sourceQuotes"] = replacement["sourceQuotes"]
+                else:
+                    merged["insights"][audience_index][group] = replacement
             elif replacement is None:
                 removed.setdefault((audience_index, group), set()).add(index)
             else:
@@ -174,7 +241,7 @@ def partial_reduce_repair(prompt, schema, raw, context, validate):
             # again, with the same MAP and immutable original source request.
             return validate(replace(response, text=prompt_json(merged)))
         except ValidationError as error:
-            error.validation_issues = pydantic_reduce_issues(error, context.schema)
+            attach_report_validation_diagnostics(error, context.schema, stage="REDUCE")
             raise
 
     jobs = [

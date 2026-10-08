@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
+from report_insight_schema_assertions import assert_only_display_quotes_require_null
 from test_report_insight_assessment import draft_to_wire, framed, payload, request, response
 from test_report_insight_axis_support_repair import case
 from test_report_insight_core_forecast_support import CURRENT_CAPACITY, recorded_case
@@ -154,7 +155,7 @@ def test_mixed_or_genuine_relation_failure_does_not_preserve_connection(defect):
         item["reason"] = "영향 범위는 미확인이다."
     repair, error, raw = repair_for(source, value)
     assert not error.native_connection_repairs
-    assert repair.response_schema == draft_schema(source)
+    assert_only_display_quotes_require_null(repair.response_schema, draft_schema(source))
     assert "finding 전체의 근거 부정이 아닙니다" not in repair.prompt
     if defect == "relation":
         fixed = deepcopy(value)

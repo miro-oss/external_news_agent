@@ -111,6 +111,23 @@ class AgentErrorResponseTest {
     }
 
     @Test
+    void preservesDistinctSemanticKindsAndSafeLocations() {
+        for (String kind : List.of("report_fact_contradiction", "report_evidence_insufficient",
+                "report_expression_policy", "report_evidence_reference_invalid",
+                "report_output_shape", "report_output_parse", "report_output_unlocated")) {
+            var failure = new HashMap<>(validation());
+            failure.put("errorKinds", List.of(kind));
+            failure.put("issuesTruncated", false);
+            failure.put("issues", List.of(Map.of("audience", "CHIP_MAKER",
+                    "field", "assessments[7869].reason", "errorKind", kind,
+                    "claimIds", List.of("7869:1"))));
+            var parsed = error(Map.of("validationFailure", failure)).validationFailure();
+            assertEquals(List.of(kind), parsed.errorKinds());
+            assertEquals(kind, parsed.issues().getFirst().errorKind());
+        }
+    }
+
+    @Test
     void unrecognizedKindsAreOmittedWithoutInventingACause() {
         var failure = new HashMap<>(validation());
         failure.put("errorKinds", List.of("private-kind\nforged", "report_fact_mismatch", "report_fact_mismatch"));
@@ -162,6 +179,52 @@ class AgentErrorResponseTest {
         assertEquals(false, parsed.issuesTruncated());
         assertEquals(List.of(), error(Map.of("validationFailure", validation())).validationFailure().issues());
         assertEquals(false, error(Map.of("validationFailure", validation())).validationFailure().issuesTruncated());
+    }
+
+    @Test
+    void readsClosedMapAndReviewFindingLocationsAndRejectsStageMixing() {
+        var fields = List.of("assessments[7869]", "assessments[7869].reason",
+                "assessments[7869].basisClaimIds", "assessments[7869].decision.connection.relation",
+                "assessments[7869].decision.connection.work", "assessments[7869].decision.connection.basis",
+                "assessments[7869].decision.effect.basis.claimId",
+                "assessments[7869].decision.timing.basis.sourceSpanId",
+                "assessments[7869].axes.urgency", "assessments[7869].decision.connection.condition",
+                "assessments[7869].decision.effect.impactScope", "assessments[7869].decision.timing.urgencyState");
+        for (var stage : List.of("MAP", "MAP-001", "REVIEW", "REVIEW-001")) {
+            for (var field : fields) {
+                var failure = reduceIssues(List.of(changedIssue("field", field)), false);
+                failure.put("stage", stage);
+                var parsed = error(Map.of("validationFailure", failure)).validationFailure();
+                assertEquals(List.of(new AgentClientException.ValidationIssue("CHIP_MAKER", field,
+                        "report_fact_mismatch", List.of("7869:1"))), parsed.issues());
+                failure.put("stage", "REDUCE-001");
+                assertNull(error(Map.of("validationFailure", failure)).validationFailure());
+            }
+        }
+    }
+
+    @Test
+    void readsReduceUnitLocationsForIncompleteOptionalItems() {
+        for (var field : List.of("overview[0]", "implications[4]", "watchItems[4]")) {
+            var failure = reduceIssues(List.of(changedIssue("field", field)), false);
+            var parsed = error(Map.of("validationFailure", failure)).validationFailure();
+            assertEquals(field, parsed.issues().getFirst().field());
+        }
+    }
+
+    @Test
+    void rejectsUnboundedOrInjectedFindingPathsWithoutLosingUsage() {
+        for (var field : List.of("assessments[0].reason", "assessments[-1].reason", "assessments[01].reason",
+                "assessments[１].reason", "assessments[" + "1".repeat(20) + "].reason",
+                "assessments[PRIVATE].reason", "assessments[7869].reason\nPRIVATE",
+                "assessments[7869].PRIVATE", "assessments[7869].decision.connection.basis.PRIVATE",
+                "assessments[7869].reason nativeFields=PRIVATE")) {
+            var failure = reduceIssues(List.of(changedIssue("field", field)), false);
+            failure.put("stage", "MAP-001");
+            var response = error(Map.of("validationFailure", failure, "usage", Map.of("inputTokens", 10)));
+            assertNull(response.validationFailure());
+            assertEquals(10L, response.usage().inputTokens());
+        }
     }
 
     @Test

@@ -23,6 +23,7 @@ from app.schemas.report_insight import (
     ReportInsightReduceOutput,
     ReportInsightRequest,
 )
+from app.schemas.report_insight_source_quotes import source_quotes_schema
 
 
 def _integer_choices(ids: list[int]) -> dict[str, Any]:
@@ -251,6 +252,8 @@ def report_insight_map_schema(request: ReportInsightRequest) -> dict[str, Any]:
 def report_insight_reduce_schema(
     request: ReportInsightRequest,
     allowed_claims: dict[str, tuple[str, ...]],
+    *,
+    structured: bool = False,
 ) -> dict[str, Any]:
     schema = ReportInsightReduceOutput.model_json_schema(by_alias=True)
     properties = schema["$defs"]["ReportInsightReduceAudience"]["properties"]
@@ -258,12 +261,21 @@ def report_insight_reduce_schema(
     for audience in request.audiences:
         refs = list(allowed_claims[audience])
         fields = {**deepcopy(properties), "audience": {"type": "string", "const": audience}}
+        if structured:
+            fields["sourceQuotes"] = source_quotes_schema(("headline",), enabled=bool(refs))
         for field, model in (
             ("overview", "ReportInsightOverview"),
             ("implications", "ReportInsightImplication"),
             ("watchItems", "ReportInsightWatchItem"),
         ):
             item = deepcopy(schema["$defs"][model]["properties"])
+            if structured:
+                prose_fields = {
+                    "overview": ("text", "assumption"),
+                    "implications": ("text", "mechanism", "assumption", "falsifiedBy"),
+                    "watchItems": ("topic", "indicator", "trigger"),
+                }[field]
+                item["sourceQuotes"] = source_quotes_schema(prose_fields, enabled=bool(refs))
             item["basisClaimIds"]["items"] = (
                 _report_claim_choices(refs) if refs else {"type": "string"}
             )

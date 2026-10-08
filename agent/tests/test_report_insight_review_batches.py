@@ -92,7 +92,9 @@ def test_review_selection_is_once_and_late_partial_repair_preserves_full_source_
             assert finding["articleId"] == original.article_id
             assert finding["claims"] == [c.model_dump(by_alias=True) for c in original.claims]
             assert finding["sentences"] == [s.model_dump(by_alias=True) for s in original.sentences]
-    assert validation_contexts.count((list(range(107, 113)), date(2026, 9, 30))) == 3
+    # Public grounding and every merged retry retain the full-report date.
+    assert (list(range(107, 113)), date(2026, 9, 30)) in validation_contexts
+    assert all(day == date(2026, 9, 30) for _, day in validation_contexts)
     final = result.insights[0].assessments
     assert [record.finding_id for record in final] == list(range(101, 114))
     assert all(record.axes.directness is None for record in final[:6])

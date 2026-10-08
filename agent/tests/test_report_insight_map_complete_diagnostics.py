@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 from test_report_insight_assessment import framed, payload, request, response
+from test_report_insight_repair_actions import structured_diagnostics
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
 from app.core.errors import AgentError
@@ -33,6 +34,20 @@ def diagnostic(prompt):
     return prompt.split("<validation-error>", 1)[1].split("</validation-error>", 1)[0]
 
 
+def assert_fact_locations(details, source):
+    rows = structured_diagnostics(f"<validation-error>{details}</validation-error>")
+    for finding in source.findings:
+        selected = [
+            row
+            for row in rows
+            if row["field"] == f"assessments[{finding.id}].reason"
+            and row["errorKind"] == "report_evidence_insufficient"
+        ]
+        assert {row["rule"] for row in selected} == {"unsupported_number", "company"}
+        assert all(row["claimIds"] == [f"{finding.id}:0"] for row in selected)
+    return rows
+
+
 def long_fact_source():
     return request(
         ids=tuple(range(101, 107)),
@@ -51,7 +66,7 @@ def test_six_native_valid_public_failures_keep_last_finding_and_cause_in_bounded
 
     error = caught.value
     assert error.failed_finding_ids == tuple(range(101, 107))
-    assert set(error.error_kinds) == {"report_fact_mismatch"}
+    assert set(error.error_kinds) == {"report_evidence_insufficient"}
     assert len(str(error)) > 1_000
     details = service._repair_validation_diagnostics(error)
     assert len(details) <= 6_000
@@ -59,9 +74,9 @@ def test_six_native_valid_public_failures_keep_last_finding_and_cause_in_bounded
         assert f"findingId={finding.id}" in details
         assert long_fact_reason(finding.id)[1] in details
     actions = service._repair_validation_diagnostics(error, for_prompt=True)
-    assert actions.count("report_fact_mismatch") == len(source.findings)
+    assert_fact_locations(actions, source)
+    assert len(actions) <= 6000
     for finding in source.findings:
-        assert f"findingId={finding.id}" in actions
         assert long_fact_reason(finding.id)[1] not in actions
 
 
@@ -85,9 +100,9 @@ def test_one_full_map_repair_receives_every_late_public_cause_without_extra_call
     details = diagnostic(provider.calls[1]["prompt"])
     assert len(details.strip()) <= 6_000
     for finding in source.findings:
-        assert f"findingId={finding.id}" in details
         assert long_fact_reason(finding.id)[1] not in details
-    assert details.count("report_fact_mismatch") == len(source.findings)
+    # Template and grounding guards can both diagnose the same finding.
+    assert_fact_locations(details, source)
     assert [item.reason for item in result.insights[0].assessments] == [clean_reason] * 6
     assert result.meta.input_tokens == 22
     assert result.meta.output_tokens == 14
@@ -128,7 +143,7 @@ def test_same_native_valid_finding_reports_company_and_expired_urgency_once():
 
     error = caught.value
     assert error.failed_finding_ids == (101,)
-    assert set(error.error_kinds) == {"report_fact_mismatch", "report_assessment_invalid"}
+    assert set(error.error_kinds) == {"report_evidence_insufficient", "report_assessment_invalid"}
     details = service._repair_validation_diagnostics(error)
     assert "엔비디아" in details
     assert "이미 지난 기한만으로 urgency=3" in details
@@ -181,7 +196,7 @@ def test_mixed_native_errors_keep_each_nested_public_cause_within_diagnostic_lim
     assert error.failed_finding_ids == tuple(range(101, 107))
     assert set(error.error_kinds) == {
         "report_assessment_draft_invalid",
-        "report_fact_mismatch",
+        "report_evidence_insufficient",
         "report_assessment_invalid",
     }
     details = service._repair_validation_diagnostics(error)
@@ -198,9 +213,12 @@ def test_mixed_native_errors_keep_each_nested_public_cause_within_diagnostic_lim
         assert details.count(cause) >= len(source.findings)
     actions = service._repair_validation_diagnostics(error, for_prompt=True)
     assert "삼성전자" not in actions and "9912" not in actions
+    rows = assert_fact_locations(actions, source)
+    assert len(actions) <= 6000
+    for finding in source.findings:
+        assert any(row["field"] == f"assessments[{finding.id}].axes.urgency" for row in rows)
     for cause in (
         "effect.impactScope",
-        "report_fact_mismatch",
         "양쪽 claim 근거가 필요합니다",
         "이미 지난 근거 기한",
         "이미 지난 기한만으로 urgency=3",
@@ -264,7 +282,7 @@ def test_one_partial_repair_must_correct_both_public_defects_and_preserve_other_
     repair = provider.calls[1]
     assert [finding["id"] for finding in framed(repair["prompt"])["findings"]] == [101]
     details = diagnostic(repair["prompt"])
-    assert "report_fact_mismatch" in details and "엔비디아" not in details
+    assert "report_evidence_insufficient" in details and "엔비디아" not in details
     assert "이미 지난 기한만으로 urgency=3" in details
     assert "<invalid-output>" not in repair["prompt"]
     assert all(provider.schema_validity)
