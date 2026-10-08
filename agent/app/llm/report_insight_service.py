@@ -510,7 +510,8 @@ class ReportInsightService(ReportInsightLegacyService):
             preservation_raw = prompt_json(closed_wire)
         repair = _partial_assessment_repair(prompt, schema, raw, error, validate, fallback)
         repair = _preserve_native_decisions(repair, preservation_raw, error)
-        return _preserve_native_connection(repair, preservation_raw, error)
+        repair = _preserve_native_connection(repair, preservation_raw, error)
+        return _omit_editable_repair_quotes(repair, error)
 
     def generate(self, request: ReportInsightRequest) -> ReportInsightResponse:
         if not self._settings.mock and self._settings.report_insight_source_cache_dir:
@@ -1902,6 +1903,78 @@ def _preserve_native_decisions(repair, raw, error):
     )
 
 
+def _omit_editable_repair_quotes(repair, error):
+    """Do not introduce optional display choices while repairing native bases.
+
+    Only server-located failed records are narrowed. Authenticated prose-only
+    repairs retain their frozen-basis enums, and independently frozen selectors
+    remain const. This requests null in the retry; it never rewrites an answer.
+    """
+    if not isinstance(error, ReportAssessmentValidationError):
+        return repair
+    try:
+        schema = deepcopy(repair.response_schema)
+        audiences = schema["properties"]["assessments"]["properties"]
+        if len(audiences) != 1:
+            return repair
+        audience, records = next(iter(audiences.items()))
+        entries = records["properties"]
+        restricted = []
+        for identifier in error.failed_finding_ids:
+            if (
+                type(identifier) is not int
+                or identifier in error.native_prose_repairs
+                or identifier in error.native_connection_repairs
+                or not any(
+                    type(issue) is ReportValidationIssue
+                    and issue.located
+                    and issue.audience == audience
+                    and issue.field.startswith(f"assessments[{identifier}]")
+                    for issue in error.validation_issues
+                )
+            ):
+                continue
+            key = f"finding{identifier}"
+            fields = entries[key]["properties"]
+            if fields["findingId"].get("const") != identifier or "sourceQuotes" not in fields:
+                continue
+            for name, selector in fields["sourceQuotes"]["properties"].items():
+                if name in {"reason", "condition"} and "const" not in selector:
+                    fields["sourceQuotes"]["properties"][name] = {"type": "null"}
+                    restricted.append((key, name))
+    except (KeyError, TypeError, ValueError):
+        return repair
+    if not restricted:
+        return repair
+
+    def validate_repair(response):
+        actual = parse_wire_draft(response.text).model_dump(by_alias=True, mode="json")
+        records = actual["assessments"].get(audience, {})
+        if any(
+            not isinstance(selection := records.get(key, {}).get("sourceQuotes"), dict)
+            or name not in selection
+            or selection[name] is not None
+            for key, name in restricted
+        ):
+            raise OutputValidationError(
+                "원문 근거를 다시 선택하는 수리에서는 고정되지 않은 표시 인용을 null로 "
+                "작성해야 합니다. 필수 basis 근거는 원문에 맞춰 유지하세요.",
+                error_kinds=("report_assessment_invalid",),
+            )
+        return repair.validate(response)
+
+    return StructuredCallRepair(
+        prompt=(
+            "이번 수리에서 근거를 다시 선택할 수 있는 실패 항목은 Schema에 지정된 "
+            "sourceQuotes 필드를 null로 작성하세요. 표시 인용만 생략하며 decision의 "
+            "필수 basis claimId/sourceSpanId와 원문 사실 검증은 그대로 유지됩니다. "
+            "const로 고정된 정상 인용은 유지하세요.\n\n" + repair.prompt
+        ),
+        response_schema=schema,
+        validate=validate_repair,
+    )
+
+
 def _native_path_value(value, path):
     for part in path.split("."):
         value = value[part]
@@ -2500,6 +2573,8 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
         "기업·기관·제품명, 숫자와 날짜는 선택 근거가 지원하는 경우에만 사용할 수 있습니다. "
         "해석에 필요한 사실 표현을 유지하고 근거에서 확인된 사건과 연결되는 업무·미확인 "
         "조건을 설명하세요. "
+        "검증 오류·진단·수리 과정이나 '수정이 필요하다'는 설명을 reason/condition에 "
+        "복사하지 말고 독자가 사용할 업무 판단을 작성하세요. "
         "원문 사실은 서버가 별도 facts로 보존합니다. 다른 finding의 주체나 사건을 "
         "대입하지 마세요. 같은 finding의 reason과 timing 진단이 함께 있으면 "
         "둘 다 수정하세요. 지난 기한은 현재의 대응 필요를 입증하지 않습니다. "
@@ -2529,6 +2604,8 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
         "work의 실제 업무 대상을 먼저 대조하고, 사건 자체가 그 업무인지 실제 사용·적용 "
         "여부 같은 중간 전제가 필요한지 구분해 relation을 판단하세요. reason은 이 대응 "
         "관계만 한 문장으로 설명하고, condition은 필요한 구체적 연결 전제만 쓰세요. "
+        "선택 원문에 없는 인증·호환성 시험을 '필요하다/전제다/해야 한다'는 조건으로 "
+        "다시 도입하지 말고, 기사 대상의 실제 사용·적용 여부 같은 연결 전제를 검토하세요. "
         "오류 문구를 없애려고 다른 work나 DIRECT로 바꾸지 마세요. 원문에 명시된 절차는 "
         "유지하되, 근거 밖 개념의 부재를 설명하는 문장은 빼세요. 이 기준으로 영향·시점도 "
         "각각 판단하고 특정 범주나 null로 일괄 전환하지 마세요.\n\n"

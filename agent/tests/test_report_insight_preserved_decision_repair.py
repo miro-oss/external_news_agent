@@ -7,6 +7,7 @@ from dataclasses import replace
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
+from report_insight_schema_assertions import assert_only_display_quotes_require_null
 from test_report_insight_assessment import payload, request, response
 from test_report_insight_native_field_diagnostics import conditional_payload, recorded_source
 
@@ -252,7 +253,7 @@ def test_mixed_native_coherence_and_fact_failures_keep_the_ordinary_repair_contr
     schema = draft_schema(source)
     engine = object.__new__(service.ReportInsightService)
     repair = engine._repair_call(draft_prompt(source), schema, raw.text, error, lambda x: x)
-    assert repair.response_schema == schema
+    assert_only_display_quotes_require_null(repair.response_schema, schema)
 
 
 def test_id_prose_repair_cannot_drop_the_source_supporting_its_company():

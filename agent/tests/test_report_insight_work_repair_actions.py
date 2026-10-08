@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
+from report_insight_schema_assertions import assert_only_display_quotes_require_null
 from test_report_insight_assessment import framed, payload, request, response
 
 from app.core.config import Settings
@@ -208,7 +209,9 @@ def test_bounded_mock_call_delivers_action_and_does_not_accept_repeated_gate(
         assert call().output.evidence["IT_INFRA"][7790].relation == "CONDITIONAL"
     assert len(provider.calls) == 2
     assert "report_work_compatibility_procedure_unsupported" in provider.calls[1]["prompt"]
-    assert provider.calls[1]["response_schema"] == provider.calls[0]["response_schema"]
+    assert_only_display_quotes_require_null(
+        provider.calls[1]["response_schema"], provider.calls[0]["response_schema"]
+    )
 
 
 def test_lab_research_repair_rewrites_source_relation_instead_of_echoing_missing_procedure():
@@ -240,7 +243,9 @@ def test_lab_research_repair_rewrites_source_relation_instead_of_echoing_missing
         error,
         lambda candidate: full_validate(candidate, source),
     )
-    assert repair.response_schema == original_schema
+    assert_only_display_quotes_require_null(repair.response_schema, original_schema)
+    assert "선택 원문에 없는 인증·호환성 시험" in repair.prompt
+    assert "특정 범주나 null로 일괄 전환하지 마세요" in repair.prompt
     with pytest.raises(ReportAssessmentDraftValidationError, match="compatibility_procedure"):
         repair.validate(raw)
 

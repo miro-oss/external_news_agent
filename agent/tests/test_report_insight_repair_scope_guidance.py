@@ -3,6 +3,7 @@
 from copy import deepcopy
 
 import pytest
+from report_insight_schema_assertions import assert_only_display_quotes_require_null
 from test_report_insight_assessment import framed, payload, request, response
 from test_report_insight_axis_support_repair import case
 from test_report_insight_native_field_diagnostics import (
@@ -121,7 +122,7 @@ def test_genuine_relation_error_can_change_category_and_supply_its_required_cond
     raw, _, repair = repair_for(source, value)
     assert "nativeFields=decision.connection.relation" in repair.prompt
     assert "관계 자체가 잘못되어 CONDITIONAL/BACKGROUND로 수정할 때" in repair.prompt
-    assert repair.response_schema == draft_schema(source)
+    assert_only_display_quotes_require_null(repair.response_schema, draft_schema(source))
     with pytest.raises(ReportAssessmentDraftValidationError):
         repair.validate(raw)
     fixed = deepcopy(value)

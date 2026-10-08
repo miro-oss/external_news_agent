@@ -9,6 +9,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
+from report_insight_schema_assertions import assert_only_display_quotes_require_null
 from test_report_insight_assessment import framed, item, request
 
 from app.core.config import Settings, get_settings
@@ -492,7 +493,9 @@ def test_map_span_repair_keeps_same_batch_schema_and_sums_all_stages():
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
     result = generate(provider, source)
     assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REDUCE-001"]
-    assert provider.calls[0]["response_schema"] == provider.calls[1]["response_schema"]
+    assert_only_display_quotes_require_null(
+        provider.calls[1]["response_schema"], provider.calls[0]["response_schema"]
+    )
     repaired_prompt = provider.calls[1]["prompt"]
     assert "sourceSpanId" in repaired_prompt and "findingId=101" in repaired_prompt
     assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
@@ -682,7 +685,9 @@ def test_post_validated_category_correlations_repair_invalid_structure_once(defe
     # Native axis branches now reject these combinations. A nonconforming
     # provider response still reaches the unchanged local guard and one repair.
     assert provider.schema_validity == [False, True, True, True]
-    assert provider.calls[0]["response_schema"] == provider.calls[1]["response_schema"]
+    assert_only_display_quotes_require_null(
+        provider.calls[1]["response_schema"], provider.calls[0]["response_schema"]
+    )
     assert all(name in provider.calls[1]["prompt"] for name in ("connection", "effect", "timing"))
     assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
     assert result.meta.cost_usd == 0.012 and result.meta.credits == 0.8
