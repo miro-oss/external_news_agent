@@ -4,6 +4,7 @@ import com.example.be.domain.analysis.agent.client.AgentClient;
 import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceRequest;
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
 import com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceResponse;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
@@ -12,6 +13,9 @@ import com.example.be.domain.analysis.agent.quota.DuplicateQuotaReservationExcep
 import com.example.be.domain.analysis.agent.quota.QuotaExceededException;
 import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.repository.CollectionRunRepository;
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+import com.example.be.domain.feedback.model.FeedbackModels.Category;
 import com.example.be.domain.collection.service.command.CollectionResultWriter;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.config.ApiTimeZone;
@@ -41,6 +45,8 @@ public class TopicRelevanceGate {
     private final TopicRelevanceFinalizer finalizer;
     private final CollectionResultWriter resultWriter;
     private final ObjectMapper mapper;
+    private final FeedbackLearningService feedbackLearning;
+    private final CollectionRunRepository runs;
 
     public Set<Key> assess(Long runId, AgentPlan plan, List<Candidate> candidates) {
         if (candidates.isEmpty()) return Set.of();
@@ -49,10 +55,15 @@ public class TopicRelevanceGate {
         Map<Long, List<Prepared>> pending = new LinkedHashMap<>();
         Set<Key> accepted = new HashSet<>();
         Set<Key> seen = new HashSet<>();
+        LocalDateTime asOf = runs.findById(runId).map(run -> run.getStartedAt())
+                .orElseGet(() -> LocalDateTime.now(ApiTimeZone.ZONE));
+        Map<Topic, List<AgentFeedbackExample>> learned = new HashMap<>();
         for (Candidate candidate : candidates) {
             Key key = new Key(candidate.article().getId(), candidate.topic().getId());
             if (!seen.add(key)) continue;
             var topic = topicInput(candidate.topic());
+            var examples = learned.computeIfAbsent(candidate.topic(), value -> feedbackLearning.forTopic(
+                    value, asOf, Set.of(Category.TOPIC_MISMATCH)));
             var article = new AgentTopicRelevanceRequest.ArticleInput(candidate.article().getId(),
                     clip(candidate.article().getTitle(), 1000), clip(candidate.article().getSummary(), 1000),
                     clip(candidate.article().getBody(), 5000));
@@ -61,6 +72,7 @@ public class TopicRelevanceGate {
                     ? properties.getRelevanceFreeModel() : properties.getPaidModel();
             String inputHash = hash(mapper.writeValueAsString(topic) + "\n" + PROMPT_VERSION + "\n" + plan
                     + "\n" + model
+                    + (examples.isEmpty() ? "" : "\n" + mapper.writeValueAsString(examples))
                     + "\n" + candidate.article().getTitle() + "\n" + candidate.article().getSummary()
                     + "\n" + candidate.article().getBody());
             var cached = previous.get(key);
@@ -69,7 +81,7 @@ public class TopicRelevanceGate {
                 continue;
             }
             pending.computeIfAbsent(topic.id(), ignored -> new ArrayList<>())
-                    .add(new Prepared(topic, article, inputHash, candidate.article().hasFullText()));
+                    .add(new Prepared(topic, article, inputHash, candidate.article().hasFullText(), examples));
         }
         for (List<Prepared> topicCandidates : pending.values()) {
             for (Prepared candidate : topicCandidates) {
@@ -94,7 +106,7 @@ public class TopicRelevanceGate {
         String batchHash = hash(mapper.writeValueAsString(ready));
         String key = "topic-relevance:" + runId + ":" + ready.getFirst().topic().id() + ":" + batchHash;
         var request = new AgentTopicRelevanceRequest(key, plan, ready.getFirst().topic(),
-                ready.stream().map(Prepared::article).toList());
+                ready.stream().map(Prepared::article).toList(), ready.getFirst().feedbackExamples());
         // The Agent escapes angle brackets before submitting JSON to the provider.
         String serialized = mapper.writeValueAsString(request);
         long providerInputLength = serialized.length()
@@ -224,5 +236,6 @@ public class TopicRelevanceGate {
     public record Candidate(Article article, Topic topic) {}
     public record Key(Long articleId, Long topicId) {}
     private record Prepared(AgentTopicRelevanceRequest.TopicInput topic,
-                            AgentTopicRelevanceRequest.ArticleInput article, String inputHash, boolean fullText) {}
+                            AgentTopicRelevanceRequest.ArticleInput article, String inputHash, boolean fullText,
+                            List<AgentFeedbackExample> feedbackExamples) {}
 }

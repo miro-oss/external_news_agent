@@ -10,8 +10,17 @@ public record AgentInsightRequest(
         List<String> audiences,
         TargetPayload target,
         TopicPayload topic,
-        List<FindingPayload> findings
+        List<FindingPayload> findings,
+        List<AgentFeedbackExample> feedbackExamples
 ) {
+
+    public AgentInsightRequest {
+        feedbackExamples = feedbackExamples == null ? List.of() : List.copyOf(feedbackExamples);
+    }
+    public AgentInsightRequest(String idempotencyKey, AgentPlan plan, List<String> audiences,
+                               TargetPayload target, TopicPayload topic, List<FindingPayload> findings) {
+        this(idempotencyKey, plan, audiences, target, topic, findings, List.of());
+    }
 
     public record TargetPayload(String type, Long id) {
     }
@@ -20,7 +29,11 @@ public record AgentInsightRequest(
                                String queryText,
                                List<String> requiredKeywords,
                                List<String> optionalKeywords,
-                               List<String> excludedKeywords) {
+                               List<String> excludedKeywords, Long topicId) {
+        public TopicPayload(String name, String queryText, List<String> requiredKeywords,
+                            List<String> optionalKeywords, List<String> excludedKeywords) {
+            this(name, queryText, requiredKeywords, optionalKeywords, excludedKeywords, null);
+        }
     }
 
     public enum FindingRole {

@@ -179,7 +179,11 @@ def test_map_review_reduce_use_identical_fact_ids_and_selected_source_provenance
     assert map_index == review_index
     monkeypatch.setattr("app.llm.report_insight_service._decision_candidates", lambda *_: {})
     raw = deepcopy(source.findings[0].claims[0].model_dump(by_alias=True))
-    retrieved = {"CHIP_MAKER": SimpleNamespace(evidence=[SimpleNamespace(to_payload=lambda: raw)])}
+    retrieved = {
+        "CHIP_MAKER": SimpleNamespace(
+            evidence=[SimpleNamespace(finding_id=source.findings[0].id, to_payload=lambda: raw)]
+        )
+    }
     reduced = framed(_reduce_v4_prompt(source, None, retrieved, {"CHIP_MAKER": ("101:0",)}))
     reduce_index = reduced["sourceFactIndex"]["CHIP_MAKER"]
     assert "sourceFactHints" not in reduced

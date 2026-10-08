@@ -1,5 +1,7 @@
 package com.example.be.domain.analysis.service;
 
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
+
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.entity.AnalysisSource;
@@ -34,6 +36,24 @@ class FindingReuseCacheTest {
     private final FindingRepository findingRepository = mock(FindingRepository.class);
     private final AgentProperties properties = properties();
     private final FindingReuseCache cache = new FindingReuseCache(findingRepository, properties);
+
+    @Test
+    void reviewedExamplesInvalidateOldFindingsAndAreFrozenAcrossPromotions() {
+        var article = article(10L, "원문");
+        var baseline = new AnalysisContext(42L, article, AgentPlan.FREE);
+        var example = new AgentFeedbackExample(12L, 7L, "SUMMARY_ERROR", "과거 사건", "잘못된 요약",
+                "추정과 확정을 구분해야 합니다.", List.of(new AgentFeedbackExample.Evidence(11L, "추정했다")));
+        var mutable = new java.util.ArrayList<>(List.of(example));
+        var learned = new AnalysisContext(42L, article, AgentPlan.FREE, null, false, null, mutable);
+        mutable.clear();
+
+        org.junit.jupiter.api.Assertions.assertNotEquals(FindingReuseCache.inputHash(baseline), FindingReuseCache.inputHash(learned));
+        assertEquals(List.of(example), learned.feedbackExamples());
+        assertEquals(learned.feedbackExamples(), learned.withArticle(article(20L, "새 기사")).feedbackExamples());
+        var lookup = cache.lookupContexts(List.of(learned), AgentPlan.FREE).get(10L);
+        assertEquals(FindingReuseCache.inputHash(learned), lookup.analysisInputHash());
+        assertTrue(lookup.cached().isEmpty());
+    }
 
     @Test
     void reusesOnlyMatchingLlmContractAndZerosUsage() {

@@ -52,7 +52,7 @@ _YEAR_METRIC = re.compile(
     re.I,
 )
 _OWNER_SEPARATOR = re.compile(r"(?:과|와)\s+|\s+및\s+|,\s*|\s+and\s+", re.I)
-_QUANTITY_SEPARATOR = re.compile(r"\s*(?:과|와|및|(?<!\d),|and)\s*", re.I)
+_QUANTITY_SEPARATOR = re.compile(r"\s*(?:과|와|및|(?<!\d),|\band\b)\s*", re.I)
 _SCALES = {
     None: 1,
     "천": 1000,

@@ -13,7 +13,17 @@ import java.util.stream.Collectors;
 public record AgentWeeklyReportRequest(
         String idempotencyKey, AgentPlan plan, Long reportId,
         LocalDate reportDate, LocalDate reportEndDate, List<DailySource> sources,
-        List<LocalDate> missingReportDates, List<String> sourceNotes, Long topicId, String topicName) {
+        List<LocalDate> missingReportDates, List<String> sourceNotes, Long topicId, String topicName,
+        List<AgentFeedbackExample> feedbackExamples) {
+    public AgentWeeklyReportRequest {
+        feedbackExamples = feedbackExamples == null ? List.of() : List.copyOf(feedbackExamples);
+    }
+    public AgentWeeklyReportRequest(String key, AgentPlan plan, Long reportId, LocalDate reportDate,
+            LocalDate reportEndDate, List<DailySource> sources, List<LocalDate> missingReportDates,
+            List<String> sourceNotes, Long topicId, String topicName) {
+        this(key, plan, reportId, reportDate, reportEndDate, sources, missingReportDates, sourceNotes,
+                topicId, topicName, List.of());
+    }
     public AgentWeeklyReportRequest(String key, AgentPlan plan, Long reportId, LocalDate reportDate,
             LocalDate reportEndDate, List<DailySource> sources, List<LocalDate> missingReportDates, List<String> sourceNotes) {
         this(key, plan, reportId, reportDate, reportEndDate, sources, missingReportDates, sourceNotes, null, null);
@@ -24,10 +34,14 @@ public record AgentWeeklyReportRequest(
 
     public static AgentWeeklyReportRequest from(String key, AgentPlan plan, Long reportId,
                                                 WeeklyReportInput input) {
+        return from(key, plan, reportId, input, List.of());
+    }
+    public static AgentWeeklyReportRequest from(String key, AgentPlan plan, Long reportId,
+                                                WeeklyReportInput input, List<AgentFeedbackExample> feedbackExamples) {
         return new AgentWeeklyReportRequest(key, plan, reportId, input.reportDate(), input.reportEndDate(),
                 input.sources().stream().map(source -> new DailySource(source.reportId(), source.reportDate(),
                         source.title(), source.structuredContent(), source.reflectedFindingIds(), issueIds(source))).toList(),
-                input.missingReportDates(), input.sourceNotes(), input.topicId(), input.topicName());
+                input.missingReportDates(), input.sourceNotes(), input.topicId(), input.topicName(), feedbackExamples);
     }
     private static Map<Long, Long> issueIds(WeeklyReportInput.DailySource source) {
         if (source.evidenceSnapshot() == null) return Map.of();

@@ -597,6 +597,10 @@ def _in(items: list[Mention], span: Span) -> list[Mention]:
 
 
 _STATE_INQUIRY = re.compile(r"(?:했|됐|되었|하였)는지(?:를)?\s*(?:확인|점검|검토)")
+_EVENT_STATE_INQUIRY = re.compile(
+    r"(?:을|를|이|가|은|는)?\s*"
+    r"(?:(?:체결|완료|확정|성사|시작|개시|착수|완공|준공|진행)\s*)?" + _STATE_INQUIRY.pattern
+)
 _NUMERIC_INQUIRY = re.compile(r"(?:인|일|이었는|였는)지(?:를)?\s*(?:확인|점검|검토)")
 _CHANGE_INQUIRY = re.compile(r"\s*(?:증가|감소|상승|하락)" + _STATE_INQUIRY.pattern)
 _EVENT_CANCELLATION_CONDITION = re.compile(r"(?:이|가|은|는)?\s*취소\s*되면(?=$|\s|[,.;])")
@@ -1025,7 +1029,7 @@ def _event_relations(source, clause, actors, roles, events, quantities, times, m
         # Bind a completion inquiry only to this event's immediate predicate.
         # A question about another event cannot turn this event or a preceding
         # numeric fact into an unasserted proposition.
-        if _STATE_INQUIRY.match(tail):
+        if _EVENT_STATE_INQUIRY.match(tail):
             state, state_uncertainty = "unknown", ()
         elif _EVENT_CANCELLATION_CONDITION.match(tail):
             state, state_uncertainty = "conditional", ()

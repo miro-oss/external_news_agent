@@ -109,6 +109,20 @@ def _state_check(candidate: Relation, source: Relation) -> tuple[str, str]:
     return "unknown", "event_state_unresolved"
 
 
+def _claim_type_issue(candidate: Relation, evidence: EvidenceFact) -> str | None:
+    if evidence.claim_types and "FACT" not in evidence.claim_types:
+        if "OPINION" in evidence.claim_types:
+            if candidate.attributed_to is None:
+                return "source_opinion_attribution_unresolved"
+            if candidate.attributed_to.value.casefold() not in {
+                name.casefold() for name in evidence.attributed_to
+            }:
+                return "source_opinion_attribution_unresolved"
+        elif "FORECAST" in evidence.claim_types and candidate.state not in {"forecast", "planned"}:
+            return "source_forecast_modality_unresolved"
+    return None
+
+
 def _pair_check(candidate: Relation, evidence: EvidenceFact) -> tuple[str, str]:
     source = evidence.relation
     if _value(candidate.attributed_to) != _value(source.attributed_to):
@@ -133,16 +147,8 @@ def _pair_check(candidate: Relation, evidence: EvidenceFact) -> tuple[str, str]:
         for result in (quantity, state):
             if result[0] == outcome:
                 return result
-    if evidence.claim_types and "FACT" not in evidence.claim_types:
-        if "OPINION" in evidence.claim_types:
-            if candidate.attributed_to is None:
-                return "unknown", "source_opinion_attribution_unresolved"
-            if candidate.attributed_to.value.casefold() not in {
-                name.casefold() for name in evidence.attributed_to
-            }:
-                return "unknown", "source_opinion_attribution_unresolved"
-        elif "FORECAST" in evidence.claim_types and candidate.state not in {"forecast", "planned"}:
-            return "unknown", "source_forecast_modality_unresolved"
+    if issue := _claim_type_issue(candidate, evidence):
+        return "unknown", issue
     return "supported", "explicit_relation_supported"
 
 
@@ -307,6 +313,12 @@ def _quantity_scope_check(
             and quantity.role == "per_unit"
             and source.quantity.role == "aggregate"
         ):
+            if _value(candidate.attributed_to) != _value(source.attributed_to):
+                relevant.append((item, "unknown", "attribution_unresolved"))
+                continue
+            if issue := _claim_type_issue(candidate, item):
+                relevant.append((item, "unknown", issue))
+                continue
             counts = [mention for mention in source.bindings if mention.role == "item_count"]
             if (
                 len(counts) == 1

@@ -17,6 +17,7 @@ from app.core.errors import OutputValidationError
 from app.core.parser import JsonObjectParseError
 from app.core.report_importance import score_importance
 from app.llm.base import ProviderResponse
+from app.llm.feedback_learning import feedback_learning_instruction, feedback_learning_payload
 from app.llm.openai_contract import _object
 from app.llm.prompt_data import prompt_json
 from app.llm.report_insight_assessment_coherence import assessment_coherence_errors
@@ -811,9 +812,14 @@ def _prompt_payload(request: ReportInsightRequest, reference_date: date | None) 
         },
         "reportReferenceDate": reference.isoformat() if reference else None,
         "audiences": list(request.audiences),
+        **feedback_learning_payload(
+            request.feedback_examples,
+            topic_ids={topic_id for finding in request.findings for topic_id in finding.topic_ids},
+        ),
         "findings": [
             {
                 "id": finding.id,
+                **({"topicIds": finding.topic_ids} if request.feedback_examples else {}),
                 "articleId": finding.article_id,
                 "publishedAt": finding.published_at.isoformat() if finding.published_at else None,
                 "claims": [
@@ -861,6 +867,7 @@ def draft_prompt(request: ReportInsightRequest, *, reference_date: date | None =
         "현재 단계는 내부 MAP 근거 초안입니다. "
         + _ASSESSMENT_OUTPUT_INSTRUCTIONS
         + SOURCE_QUOTE_INSTRUCTIONS
+        + feedback_learning_instruction(request.feedback_examples)
         + f"\n\n<report-insight-input>\n{prompt_json(_prompt_payload(request, reference_date))}"
         "\n</report-insight-input>"
     )
@@ -879,6 +886,7 @@ def review_prompt(
         "해석하지 말고 같은 원문과 관점 업무에서 다시 판정하세요. "
         + _ASSESSMENT_OUTPUT_INSTRUCTIONS
         + SOURCE_QUOTE_INSTRUCTIONS
+        + feedback_learning_instruction(request.feedback_examples)
         + f"\n\n<report-insight-input>\n{prompt_json(_prompt_payload(request, reference_date))}"
         "\n</report-insight-input>"
     )

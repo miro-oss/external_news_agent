@@ -4,6 +4,7 @@ from pydantic import Field, model_validator
 
 from app.schemas.analyze import Plan, ResponseMeta
 from app.schemas.common import AgentModel
+from app.schemas.feedback_learning import FeedbackLearningRequest
 
 MAX_RELEVANCE_ARTICLES = 10
 MAX_RELEVANCE_INPUT_CHARS = 85_000
@@ -28,7 +29,7 @@ class RelevanceArticle(AgentModel):
     body_text: str = Field(min_length=1, max_length=5000)
 
 
-class TopicRelevanceRequest(AgentModel):
+class TopicRelevanceRequest(FeedbackLearningRequest):
     idempotency_key: str = Field(min_length=1, max_length=200)
     plan: Plan
     topic: RelevanceTopic
@@ -36,10 +37,13 @@ class TopicRelevanceRequest(AgentModel):
 
     def provider_input_json(self) -> str:
         """Bound exactly the compact, delimiter-safe JSON sent to the provider."""
-        return self.model_dump_json(by_alias=True).replace("<", "\\u003c").replace(">", "\\u003e")
+        return self.model_dump_json(
+            by_alias=True, exclude={"feedback_examples"} if not self.feedback_examples else None
+        ).replace("<", "\\u003c").replace(">", "\\u003e")
 
     @model_validator(mode="after")
     def validate_request(self) -> "TopicRelevanceRequest":
+        self.validate_feedback_scope({self.topic.id}, categories={"TOPIC_MISMATCH"})
         article_ids = [article.article_id for article in self.articles]
         if len(article_ids) != len(set(article_ids)):
             raise ValueError("articles.articleId는 중복될 수 없습니다.")

@@ -95,7 +95,7 @@ def test_report_input_keeps_untrusted_topics_and_articles_as_json(field):
     request = ReportRequest.model_validate(payload)
 
     decoded = json.loads(framed_content(_report_prompt(request), "report-input"))
-    assert decoded == request.model_dump(by_alias=True, mode="json")
+    assert ReportRequest.model_validate(decoded) == request
 
 
 @pytest.mark.parametrize("field", ["claimId", "claim", "sentence"])

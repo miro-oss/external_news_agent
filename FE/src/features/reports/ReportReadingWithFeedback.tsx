@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { ApiError } from '../../api/client'
 import { submitReportEventFeedback, type ReportEventFeedback, type ReportEventFeedbackRequest, type ReportFeedbackEvent } from '../../api/reportEventFeedback'
 import type { FeedbackCategory } from '../../api/feedback'
@@ -21,16 +21,27 @@ export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOthe
   const [refreshingReport, setRefreshingReport] = useState(false)
   const [refreshError, setRefreshError] = useState('')
   const mounted = useRef(true)
+  const refreshInFlight = useRef(false)
+  const syncedEvents = useRef<string | null>(null)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
-  async function refreshReport() {
+  const refreshReport = useCallback(async () => {
+    if (refreshInFlight.current) return
+    refreshInFlight.current = true
     setRefreshingReport(true)
     setRefreshError('')
     try { await onRefreshReport(); if (mounted.current) refresh() }
     catch { if (mounted.current) setRefreshError('보고서를 새로고침하지 못했습니다. 다시 시도해 주세요.') }
-    finally { if (mounted.current) setRefreshingReport(false) }
-  }
+    finally { refreshInFlight.current = false; if (mounted.current) setRefreshingReport(false) }
+  }, [onRefreshReport, refresh])
   const mismatch = !!data && (report.structuredContent?.importantEvents ?? [])
     .some((event, index) => !matchReportFeedbackEvent(report.id, event, index, data))
+  const changedEvents = mismatch && data ? JSON.stringify([report.id, data.events]) : null
+  useEffect(() => {
+    if (!changedEvents) { syncedEvents.current = null; return }
+    if (syncedEvents.current === changedEvents || refreshInFlight.current) return
+    syncedEvents.current = changedEvents
+    void refreshReport()
+  }, [changedEvents, refreshReport, refreshingReport])
   const refreshButton = <button type="button" className="text-button" disabled={refreshingReport || busy}
     onClick={() => { void refreshReport() }}>{refreshingReport ? '새로고침 중…' : '보고서 새로고침'}</button>
   const notice = hasEvents && <>
@@ -39,7 +50,9 @@ export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOthe
       <span>의견을 불러오지 못했습니다. 보고서 내용은 계속 확인할 수 있습니다.</span>
       <button type="button" className="text-button" disabled={busy} onClick={refresh}>{busy ? '확인 중…' : '의견 다시 불러오기'}</button>
     </div>}
-    {mismatch && <div className="report-feedback-notice"><span>보고서 내용이 바뀌었습니다. 새로고침 후 이 이벤트에 의견을 남겨 주세요.</span>{refreshButton}</div>}
+    {mismatch && <div className="report-feedback-notice"><span>{refreshingReport
+      ? '검토 결과에 맞춰 보고서를 갱신하고 있습니다. 작성 중인 의견은 유지됩니다.'
+      : '보고서 내용이 바뀌었습니다. 새로고침 후 변경된 이벤트에 의견을 남겨 주세요.'}</span>{refreshButton}</div>}
     {!error && paused && <div className="report-feedback-notice"><span>검토가 이어지고 있습니다. 잠시 뒤 결과를 다시 확인해 주세요.</span>
       <button type="button" className="text-button" disabled={busy} onClick={refresh}>검토 결과 확인</button></div>}
     {refreshError && <p className="report-feedback-notice" role="alert">{refreshError}</p>}
@@ -47,11 +60,23 @@ export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOthe
   return <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect} beforeOtherAnalysis={beforeOtherAnalysis}
     feedbackNotice={notice} eventFeedback={(event, index) => {
       const target = matchReportFeedbackEvent(report.id, event, index, data)
-      if (!target) return null
-      const feedback = data?.feedback.find(item => item.eventKey === target.eventKey)
-      return <ReportEventFeedbackCard key={target.eventKey} reportId={report.id} target={target} feedback={feedback}
-        disabled={error != null || refreshingReport || mismatch} onFeedback={recordFeedback} onRefreshReport={refreshReport} />
+      return <ReportEventFeedbackSlot key={report.id} reportId={report.id} target={target} feedback={data?.feedback ?? []}
+        disabled={error != null} onFeedback={recordFeedback} onRefreshReport={refreshReport} />
     }} />
+}
+
+/** Keep a draft mounted while a newer feedback view and the report detail are being synchronized. */
+export function ReportEventFeedbackSlot({ reportId, target, feedback, disabled, onFeedback, onRefreshReport }: {
+  reportId: number; target: ReportFeedbackEvent | null; feedback: ReportEventFeedback[]; disabled: boolean
+  onFeedback: (feedback: ReportEventFeedback) => void; onRefreshReport: () => Promise<void>
+}) {
+  const [lastTarget, setLastTarget] = useState(target)
+  if (target && target !== lastTarget) setLastTarget(target)
+  const displayedTarget = target ?? lastTarget
+  if (!displayedTarget) return null
+  return <ReportEventFeedbackCard key={displayedTarget.eventKey} reportId={reportId} target={displayedTarget}
+    feedback={feedback.find(item => item.eventKey === displayedTarget.eventKey)} disabled={disabled || !target}
+    onFeedback={onFeedback} onRefreshReport={onRefreshReport} />
 }
 
 export function ReportEventFeedbackCard({ reportId, target, feedback, disabled = false, onFeedback, onRefreshReport }: {
@@ -124,7 +149,7 @@ export function ReportEventFeedbackComposer({ reportId, target, disabled = false
       </label>
       <div className="report-feedback-help report-feedback-count" id={`${id}-count`}><span>1~2,000자</span><span>{comment.length.toLocaleString()} / 2,000</span></div>
     </fieldset>
-    <p className="report-feedback-help" id={`${id}-scope`}>보고서 검토용 의견입니다. 개인 알림 기준에는 적용하지 않습니다.</p>
+    <p className="report-feedback-help" id={`${id}-scope`}>확인된 오류는 같은 주제·수집 조건의 다음 분석에서 참고합니다. 개인 알림 기준에는 적용하지 않습니다.</p>
     {error && <div className="report-feedback-error" role="alert"><p>{error}</p>
       {conflict ? <><p>이미 의견이 접수되었거나 보고서 내용이 바뀌었을 수 있습니다. 새로고침 후 확인해 주세요.</p>
         <button type="button" className="text-button" disabled={disabled} onClick={() => { void onRefreshReport() }}>보고서 새로고침</button></>

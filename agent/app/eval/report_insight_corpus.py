@@ -65,6 +65,22 @@ def load_corpus(path: Path = DEFAULT_DATASET) -> ReportReviewCorpus:
     return ReportReviewCorpus.model_validate_json(path.read_text(encoding="utf-8"))
 
 
+def request_snapshot(request: ReportInsightRequest) -> dict:
+    """Keep explicit learning metadata without inventing it in historical snapshots.
+
+    Existing fields retain their canonical defaults. The additive learning fields
+    preserve presence as well as value, including explicitly supplied empty lists;
+    provider prompt filtering must never rewrite this persisted evaluation input.
+    """
+    payload = request.model_dump(mode="json", by_alias=True)
+    if "feedback_examples" not in request.model_fields_set:
+        payload.pop("feedbackExamples")
+    for finding, serialized in zip(request.findings, payload["findings"], strict=True):
+        if "topic_ids" not in finding.model_fields_set:
+            serialized.pop("topicIds")
+    return payload
+
+
 def review_case(case: ReportReviewCase, candidate: dict) -> dict:
     diagnostics = review_saved_output(case.request, candidate)
     if not diagnostics["contractPassed"]:

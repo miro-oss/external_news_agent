@@ -16,6 +16,7 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
   const content = report.structuredContent
   const terms = collectionHighlightTerms(report.collectionContexts ?? [])
   if (!content) return <LegacyReportBody key={report.id} markdown={report.markdownBody} terms={terms} beforeOtherAnalysis={beforeOtherAnalysis} />
+  const eventKeys = importantEventKeys(report.id, content.importantEvents)
   const byId = new Map((report.findings ?? []).map(finding => [finding.id, finding]))
   const referenced = new Set([...content.importantEvents, ...content.watchItems].flatMap(item => item.sourceFindingIds))
   const other = (report.findings ?? []).filter(finding => !referenced.has(finding.id) && finding.keyPoints.length > 0)
@@ -41,7 +42,7 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
         <h3>중요 이벤트</h3>
         {feedbackNotice}
         {content.importantEvents.length > 0 ? <div className="report-event-list">
-          {content.importantEvents.map((event, index) => <article className="report-event-card" key={index}>
+          {content.importantEvents.map((event, index) => <article className="report-event-card" key={eventKeys[index]}>
             <h4><ReportKeywordText text={event.title} terms={terms} /></h4>
             <p><ReportKeywordText text={event.summaryKo} terms={terms} /></p>
             {event.significance && event.significance !== event.summaryKo && <p className="report-event-significance"><ReportKeywordText text={event.significance} terms={terms} /></p>}
@@ -67,6 +68,17 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
       {notes.length > 0 && <ReadingDisclosure title="수집 상태"><ul>{notes.map((note, index) => <li key={index}><ReportKeywordText text={note} terms={terms} /></li>)}</ul></ReadingDisclosure>}
     </div>
   )
+}
+
+function importantEventKeys(reportId: number, events: ReportContent['importantEvents']) {
+  const occurrences = new Map<string, number>()
+  return events.map(event => {
+    // A removed earlier event must not replace a surviving card and its unfinished opinion.
+    const identity = JSON.stringify([reportId, event.title, event.summaryKo, event.significance, event.sourceFindingIds])
+    const occurrence = occurrences.get(identity) ?? 0
+    occurrences.set(identity, occurrence + 1)
+    return `${identity}:${occurrence}`
+  })
 }
 
 function ReadingDisclosure({ title, children }: { title: string; children: ReactNode }) {
