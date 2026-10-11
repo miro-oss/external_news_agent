@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Local report reviews change the read view, never stored reports or recipient delivery snapshots. */
+/** Local report reviews change reading and new delivery views, preserving stored reports and already-issued snapshots. */
 @Service
 @RequiredArgsConstructor
 public class ReportEventFeedbackProjection {
@@ -111,5 +111,31 @@ public class ReportEventFeedbackProjection {
 
     public record View(List<Finding> findings, ReportReadingContent readingContent, boolean excludedEvents) {
         public View { findings = List.copyOf(findings); }
+
+        /** Apply personal source decisions without recreating an event excluded by a local review. */
+        public View suppress(NewsReport report, Set<Long> suppressedFindingIds) {
+            List<Finding> kept = findings.stream().filter(f -> !suppressedFindingIds.contains(f.getId())).toList();
+            if (kept.size() == findings.size()) return this;
+            if (!excludedEvents) {
+                return new View(kept, ReportReadingContent.from(report, new ReportFindings.Visible(kept, true)), false);
+            }
+            Set<Long> allowed = kept.stream().map(Finding::getId).collect(Collectors.toSet());
+            ReportContent current = readingContent.structuredContent();
+            var events = current.importantEvents().stream()
+                    .filter(event -> !event.sourceFindingIds().isEmpty() && allowed.containsAll(event.sourceFindingIds())).toList();
+            Set<Long> droppedSources = current.importantEvents().stream()
+                    .filter(event -> !events.contains(event)).flatMap(event -> event.sourceFindingIds().stream())
+                    .collect(Collectors.toSet());
+            Set<Long> retainedSources = events.stream().flatMap(event -> event.sourceFindingIds().stream())
+                    .collect(Collectors.toSet());
+            droppedSources.removeAll(retainedSources);
+            kept = kept.stream().filter(finding -> !droppedSources.contains(finding.getId())).toList();
+            Set<Long> finalAllowed = kept.stream().map(Finding::getId).collect(Collectors.toSet());
+            var watches = current.watchItems().stream()
+                    .filter(item -> !item.sourceFindingIds().isEmpty() && finalAllowed.containsAll(item.sourceFindingIds())).toList();
+            var content = new ReportContent(events.stream().limit(3).map(ReportContent.ImportantEvent::summaryKo).toList(),
+                    events, watches, List.of());
+            return new View(kept, new ReportReadingContent(markdown(content), content), true);
+        }
     }
 }

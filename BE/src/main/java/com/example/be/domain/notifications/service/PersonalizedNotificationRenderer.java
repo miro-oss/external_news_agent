@@ -1,6 +1,5 @@
 package com.example.be.domain.notifications.service;
 
-import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.feedback.service.FeedbackDeliveryService;
@@ -8,6 +7,7 @@ import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.reports.service.ReportFindings;
+import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +16,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
-import java.util.List;
 
 /** Reads precomputed personal decisions and creates a recipient-bound feedback capability. */
 @Service
@@ -27,6 +26,7 @@ public class PersonalizedNotificationRenderer {
     private final TopicRelevancePolicy relevance;
     private final FeedbackDeliveryService feedback;
     private final NotificationRenderer renderer;
+    private final ReportEventFeedbackProjection feedbackProjection;
 
     @Value("${news.notifications.public-base-url:}")
     private String publicBaseUrl = "";
@@ -41,11 +41,11 @@ public class PersonalizedNotificationRenderer {
     @Transactional
     public RenderedNotification render(NewsReport report, NotificationChannel channel, Long recipientId) {
         ReportFindings.Visible original = ReportFindings.loadVisible(report, findings, relevance);
-        var prepared = feedback.prepare(report, recipientId, original.findings(), original.filtered());
-        List<Finding> kept = original.findings().stream()
-                .filter(finding -> !prepared.suppressedFindingIds().contains(finding.getId())).toList();
-        var visible = new ReportFindings.Visible(kept, original.filtered() || kept.size() != original.findings().size());
-        return renderer.render(report, channel, visible, feedbackUrl(prepared.token()));
+        // Review keys belong to the complete public view, before any recipient-specific exclusion.
+        var reviewed = feedbackProjection.project(report, original, feedbackProjection.reviews(report.getId()));
+        var prepared = feedback.prepare(report, recipientId, reviewed);
+        var delivered = reviewed.suppress(report, prepared.suppressedFindingIds());
+        return renderer.render(report, channel, delivered, feedbackUrl(prepared.token()));
     }
 
     String feedbackUrl(String token) {

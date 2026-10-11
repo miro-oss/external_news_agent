@@ -12,6 +12,12 @@ import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportContent;
+import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
+import com.example.be.domain.reports.service.ReportFindings;
+import com.example.be.domain.reports.service.ReportReadingContent;
+import com.example.be.domain.feedback.model.FeedbackModels;
+import com.example.be.domain.feedback.repository.FeedbackStore;
+import com.example.be.domain.feedback.service.ReportEventSnapshotFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -29,12 +35,17 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 class NotificationRendererTest {
     private final TopicRelevancePolicy relevancePolicy = TopicRelevanceTestSupport.legacyPolicy();
 
     private final FindingRepository findingRepository = mock(FindingRepository.class);
-    private final NotificationRenderer renderer = new NotificationRenderer(findingRepository, relevancePolicy);
+    private final FeedbackStore feedbackStore = mock(FeedbackStore.class);
+    private final ReportEventSnapshotFactory eventSnapshots = mock(ReportEventSnapshotFactory.class);
+    private final ReportEventFeedbackProjection projection = new ReportEventFeedbackProjection(feedbackStore, eventSnapshots);
+    private final NotificationRenderer renderer = new NotificationRenderer(findingRepository, relevancePolicy, projection);
 
     @Test
     void personalExclusionRemovesSavedSummaryAndSourceFromBothChannels() {
@@ -45,7 +56,7 @@ class NotificationRendererTest {
                         List.of(), List.of()));
         for (ChannelType type : ChannelType.values()) {
             var rendered = renderer.render(report, channel(type, 3500),
-                    new com.example.be.domain.reports.service.ReportFindings.Visible(List.of(), true),
+                    view(report, List.of(), true),
                     "https://news.example/#/feedback?token=synthetic-test-token");
             String body = rendered.chunks().getFirst();
             assertFalse(body.contains("이전 제외 내용"));
@@ -59,9 +70,10 @@ class NotificationRendererTest {
     @Test
     void telegramReservesLengthForFeedbackLinkWithoutSplittingMessage() {
         String feedbackUrl = "https://news.example/#/feedback?token=" + "test".repeat(12);
-        var rendered = renderer.render(report("## 오늘의 핵심\n" + "긴 요약 ".repeat(300)),
+        var report = report("## 오늘의 핵심\n" + "긴 요약 ".repeat(300));
+        var rendered = renderer.render(report,
                 channel(ChannelType.TELEGRAM, 500),
-                new com.example.be.domain.reports.service.ReportFindings.Visible(List.of(finding()), false), feedbackUrl);
+                view(report, List.of(finding()), false), feedbackUrl);
         assertEquals(1, rendered.chunks().size());
         assertTrue(rendered.chunks().getFirst().length() <= 500);
         assertTrue(rendered.chunks().getFirst().contains(feedbackUrl));
@@ -72,8 +84,9 @@ class NotificationRendererTest {
     void previewNeverReceivesCapabilityLinkAndUnsafeLinksAreOmitted() {
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of());
         assertFalse(renderer.render(report(""), channel(ChannelType.EMAIL, 3500)).chunks().getFirst().contains("이슈 피드백"));
-        var body = renderer.render(report(""), channel(ChannelType.EMAIL, 3500),
-                new com.example.be.domain.reports.service.ReportFindings.Visible(List.of(), false), "javascript:alert(1)")
+        var report = report("");
+        var body = renderer.render(report, channel(ChannelType.EMAIL, 3500),
+                view(report, List.of(), false), "javascript:alert(1)")
                 .chunks().getFirst();
         assertFalse(body.contains("javascript:"));
     }
@@ -452,6 +465,88 @@ class NotificationRendererTest {
         assertTrue(body.contains("검증된 핵심 요약"));
         assertFalse(body.contains("<b>"));
         assertFalse(body.contains("반도체뉴스보고서"));
+    }
+
+    @Test
+    void confirmedErrorIsRemovedFromBothPreviewsEvenWhenValidEventSharesItsSource() {
+        var rejected = event("오류 사건", "오류 요약", "", 11L, 22L);
+        var retained = event("정상 사건", "정상 요약", "", 22L);
+        var stored = new ReportContent(List.of("오류 종합 요약"), List.of(rejected, retained),
+                List.of(watch("오류 관찰", "오류 후속 내용", 22L)), List.of("오류 참고"));
+        var report = structuredReport(stored);
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(
+                finding(11L, 101L, "오류 전용 기사", "https://example.com/rejected"),
+                finding(22L, 202L, "공유 기사", "https://example.com/shared")));
+        stubRejectedEvent(report, rejected);
+
+        for (ChannelType type : ChannelType.values()) {
+            var rendered = renderer.render(report, channel(type, 3500));
+            String body = rendered.chunks().getFirst();
+            assertFalse(body.contains("오류"), body);
+            assertFalse(body.contains("https://example.com/rejected"));
+            assertFalse(body.contains("기사별 대체 요약"));
+            assertTrue(body.contains("정상 사건"));
+            assertTrue(body.contains("정상 요약"));
+            assertTrue(body.contains("https://example.com/shared"));
+            assertFalse(body.contains("이슈 피드백"));
+            assertEquals(1, rendered.chunks().size());
+            if (type == ChannelType.TELEGRAM) assertTrue(body.length() <= 3500);
+        }
+        assertEquals(stored, report.getStructuredContent());
+    }
+
+    @Test
+    void allRejectedEventsProduceEmptyBriefingWithoutResurrectingStoredSummaryOrSources() {
+        var rejected = event("오류 사건", "오류 요약", "", 11L);
+        var report = structuredReport(new ReportContent(List.of("오류 종합 요약"), List.of(rejected),
+                List.of(watch("오류 관찰", "오류 후속 내용", 11L)), List.of()));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(
+                finding(11L, 101L, "오류 기사", "https://example.com/rejected")));
+        stubRejectedEvent(report, rejected);
+
+        for (ChannelType type : ChannelType.values()) {
+            String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
+            assertFalse(body.contains("오류"));
+            assertFalse(body.contains("https://example.com/rejected"));
+            assertFalse(body.contains("기사별 대체 요약"));
+            assertTrue(body.contains("이번 수집에서 새롭게 정리할 주요 내용이 없습니다."));
+        }
+    }
+
+    @Test
+    void pendingReviewRemainsInBothChannelsUntilTheErrorIsConfirmed() {
+        var event = event("검토 중 사건", "검토 중 요약", "", 11L);
+        var report = structuredReport(new ReportContent(List.of("기존 요약"), List.of(event), List.of(), List.of()));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(
+                finding(11L, 101L, "기사", "https://example.com/pending")));
+        when(feedbackStore.eventFeedback(17L)).thenReturn(List.of(new FeedbackModels.Feedback(
+                1L, null, null, 17L, null, FeedbackModels.Category.SUMMARY_ERROR, "검토 요청", false,
+                "request", FeedbackModels.Status.PENDING, null, null,
+                LocalDateTime.of(2026, 10, 12, 10, 0), null, "a".repeat(64))));
+        for (ChannelType type : ChannelType.values()) {
+            String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
+            assertTrue(body.contains("검토 중 사건"));
+            assertTrue(body.contains("검토 중 요약"));
+            assertTrue(body.contains("https://example.com/pending"));
+        }
+        org.mockito.Mockito.verifyNoInteractions(eventSnapshots);
+    }
+
+    private void stubRejectedEvent(NewsReport report, ReportContent.ImportantEvent event) {
+        String key = "a".repeat(64);
+        var item = new FeedbackModels.Item(null, null, null, List.of(), null, null, null, null,
+                null, null, null, new FeedbackModels.EventContext(key, 0, event.title(), event.summaryKo(),
+                event.significance(), event.sourceFindingIds(), List.of(), List.of(), null));
+        when(eventSnapshots.capture(eq(report), any(ReportFindings.Visible.class))).thenReturn(List.of(item));
+        when(feedbackStore.eventFeedback(report.getId())).thenReturn(List.of(new FeedbackModels.Feedback(
+                1L, null, null, report.getId(), null, FeedbackModels.Category.SUMMARY_ERROR, "오류 검토", false,
+                "request", FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR", "오류 확인",
+                LocalDateTime.of(2026, 10, 12, 10, 0), null, key)));
+    }
+
+    private ReportEventFeedbackProjection.View view(NewsReport report, List<Finding> findings, boolean filtered) {
+        return new ReportEventFeedbackProjection.View(findings,
+                ReportReadingContent.from(report, new ReportFindings.Visible(findings, filtered)), false);
     }
 
     private NewsReport structuredReport(ReportContent content) {

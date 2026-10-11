@@ -8,6 +8,7 @@ import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportContent;
 import com.example.be.domain.reports.service.ReportFindings;
+import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import com.example.be.domain.reports.service.ReportReadingContent;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -36,22 +37,26 @@ public class NotificationRenderer {
 
     private final FindingRepository findingRepository;
     private final TopicRelevancePolicy relevancePolicy;
+    private final ReportEventFeedbackProjection feedbackProjection;
 
-    public NotificationRenderer(FindingRepository findingRepository, TopicRelevancePolicy relevancePolicy) {
+    public NotificationRenderer(FindingRepository findingRepository, TopicRelevancePolicy relevancePolicy,
+                                ReportEventFeedbackProjection feedbackProjection) {
         this.findingRepository = findingRepository;
         this.relevancePolicy = relevancePolicy;
+        this.feedbackProjection = feedbackProjection;
     }
 
     public RenderedNotification render(NewsReport report, NotificationChannel channel) {
         ReportFindings.Visible visible = ReportFindings.loadVisible(report, findingRepository, relevancePolicy);
-        return render(report, channel, visible, null);
+        var view = feedbackProjection.project(report, visible, feedbackProjection.reviews(report.getId()));
+        return render(report, channel, view, null);
     }
 
     /** Personalization is already evaluated and persisted; rendering never calls the agent. */
     public RenderedNotification render(NewsReport report, NotificationChannel channel,
-                                       ReportFindings.Visible visible, String feedbackUrl) {
-        List<Finding> findings = visible.findings();
-        ReportReadingContent content = ReportReadingContent.from(report, visible);
+                                       ReportEventFeedbackProjection.View view, String feedbackUrl) {
+        List<Finding> findings = view.findings();
+        ReportReadingContent content = view.readingContent();
         String link = safeUrl(feedbackUrl) ? "<a href=\"" + attribute(feedbackUrl)
                 + "\">이슈 피드백 · 내 수신 기준</a>" : "";
         if (channel.getChannelType() == ChannelType.EMAIL) {

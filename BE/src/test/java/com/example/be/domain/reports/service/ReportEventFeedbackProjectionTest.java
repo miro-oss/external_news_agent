@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static com.example.be.domain.feedback.model.FeedbackModels.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -85,6 +86,55 @@ class ReportEventFeedbackProjectionTest {
         assertEquals(List.of(12L, 13L), view.findings().stream().map(Finding::getId).toList());
         assertEquals(List.of(12L, 13L), view.readingContent().structuredContent().importantEvents().getFirst().sourceFindingIds());
         assertTrue(view.readingContent().structuredContent().watchItems().isEmpty());
+    }
+
+    @Test void personalSuppressionKeepsProjectedEventsWithoutRegeneratingRejectedSharedClaims() {
+        var bad = event("잘못된 묶음", "잘못된 요약", 11L, 12L);
+        var good = event("정상 사건", "정상 요약", 12L);
+        var personal = event("개인 기준으로 숨길 사건", "개인 기준으로 숨길 요약", 13L);
+        var content = new ReportContent(List.of("잘못된 종합 요약"), List.of(bad, good, personal), List.of(
+                new ReportContent.WatchItem("숨길 관찰", "개인 기준", List.of(13L))), List.of());
+        var report = report(content);
+        var visible = visible(11L, 12L, 13L);
+        when(snapshots.capture(report, visible)).thenReturn(List.of(item('a', 0, bad), item('b', 1, good), item('c', 2, personal)));
+        var original = projection.project(report, visible,
+                List.of(review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", null)));
+
+        assertSame(original, original.suppress(report, Set.of(999L)));
+        var personalized = original.suppress(report, Set.of(13L));
+        assertEquals(List.of(12L), personalized.findings().stream().map(Finding::getId).toList());
+        assertEquals(List.of(good), personalized.readingContent().structuredContent().importantEvents());
+        assertEquals(List.of("정상 요약"), personalized.readingContent().structuredContent().executiveSummary());
+        assertTrue(personalized.readingContent().structuredContent().watchItems().isEmpty());
+        assertFalse(personalized.readingContent().markdownBody().contains("잘못된"));
+        assertFalse(personalized.readingContent().markdownBody().contains("개인 기준"));
+        assertEquals(List.of(good, personal), original.readingContent().structuredContent().importantEvents());
+        assertSame(content, report.getStructuredContent());
+
+        var empty = personalized.suppress(report, Set.of(12L));
+        assertTrue(empty.findings().isEmpty());
+        assertTrue(empty.readingContent().structuredContent().importantEvents().isEmpty());
+        assertTrue(empty.readingContent().structuredContent().executiveSummary().isEmpty());
+        assertFalse(empty.readingContent().markdownBody().contains("정상 요약"));
+    }
+
+    @Test void personalSuppressionRemovesOrphanEvidenceFromRejectedAndNowUnsupportedEvents() {
+        var bad = event("잘못된 묶음", "잘못된 요약", 11L, 12L);
+        var good = event("정상 결합 사건", "정상 결합 요약", 12L, 13L);
+        var content = new ReportContent(List.of("원래 요약"), List.of(bad, good), List.of(), List.of());
+        var report = report(content);
+        var visible = visible(11L, 12L, 13L, 14L);
+        when(snapshots.capture(report, visible)).thenReturn(List.of(item('a', 0, bad), item('b', 1, good)));
+        var original = projection.project(report, visible,
+                List.of(review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", null)));
+
+        var personalized = original.suppress(report, Set.of(13L));
+
+        assertTrue(personalized.readingContent().structuredContent().importantEvents().isEmpty());
+        assertTrue(personalized.readingContent().structuredContent().executiveSummary().isEmpty());
+        assertEquals(List.of(14L), personalized.findings().stream().map(Finding::getId).toList(),
+                "only the unrelated finding remains available to fallback content");
+        assertEquals(List.of(12L, 13L, 14L), original.findings().stream().map(Finding::getId).toList());
     }
 
     @Test void pendingFailedUnconfirmedPreferencesAndRecipientReviewsDoNotChangeStoredReading() {
