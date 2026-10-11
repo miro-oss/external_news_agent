@@ -13,6 +13,8 @@ import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportContent;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.StringReader;
 import java.time.LocalDateTime;
@@ -350,21 +352,36 @@ class NotificationRendererTest {
         }
     }
 
-    @Test
-    void telegramUsesAtMostTheFirstThreeValidStoredEvents() {
+    @ParameterizedTest
+    @ValueSource(ints = {3, 4, 5, 6})
+    void channelsKeepTheirLimitsAfterFilteringUnsupportedStoredEvents(int eventCount) {
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(finding()));
+        List<ReportContent.ImportantEvent> events = new ArrayList<>();
+        events.add(event("근거 없는 사건", "표시하면 안 되는 내용", "", 999L));
+        for (int i = 1; i <= eventCount; i++) {
+            events.add(event("사건 " + i, "사건 내용 " + i, "", 1L));
+        }
         NewsReport report = structuredReport(new ReportContent(List.of("요약"),
-                List.of(event("사건 일", "첫 내용", "", 1L), event("사건 이", "둘째 내용", "", 1L),
-                        event("사건 삼", "셋째 내용", "", 1L), event("사건 사", "넷째 내용", "", 1L)),
-                List.of(), List.of()));
+                events, List.of(), List.of()));
 
-        String body = renderer.render(report, channel(ChannelType.TELEGRAM, 3500)).chunks().getFirst();
-
-        assertTrue(body.indexOf("사건 일") < body.indexOf("사건 이"));
-        assertTrue(body.indexOf("사건 이") < body.indexOf("사건 삼"));
-        assertTrue(body.contains("셋째 내용"));
-        assertFalse(body.contains("사건 사"));
-        assertFalse(body.contains("넷째 내용"));
+        for (ChannelType type : ChannelType.values()) {
+            String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
+            int expectedCount = Math.min(type == ChannelType.EMAIL ? 5 : 3, eventCount);
+            List<String> expectedHeadings = new ArrayList<>();
+            for (int i = 1; i <= expectedCount; i++) {
+                expectedHeadings.add(type == ChannelType.EMAIL ? "사건 " + i : i + ". 사건 " + i);
+                assertTrue(body.contains("사건 내용 " + i));
+            }
+            var headings = org.jsoup.Jsoup.parse(body).select(type == ChannelType.EMAIL ? "h2" : "b")
+                    .eachText().stream().skip(1).toList();
+            assertEquals(expectedHeadings, headings, type + " with " + eventCount + " valid events");
+            assertFalse(body.contains("근거 없는 사건"));
+            assertFalse(body.contains("표시하면 안 되는 내용"));
+            for (int i = expectedCount + 1; i <= eventCount; i++) {
+                assertFalse(body.contains("사건 " + i));
+                assertFalse(body.contains("사건 내용 " + i));
+            }
+        }
     }
 
     @Test

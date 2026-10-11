@@ -24,6 +24,9 @@ import java.util.Map;
 @Component
 public class NotificationRenderer {
 
+    private static final int EMAIL_MAX_ISSUES = 5;
+    private static final int TELEGRAM_MAX_ISSUES = 3;
+
     // Inline styles and presentation tables keep the site's palette readable in mail clients.
     private static final String EMAIL_TABLE = "<table role=\"presentation\" width=\"100%\" border=\"0\" "
             + "cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;border-spacing:0;"
@@ -95,7 +98,7 @@ public class NotificationRenderer {
                         + "<td valign=\"top\" style=\"padding:4px 0;color:#191f28;font-size:15px;line-height:1.8\">")
                 .append(escape(line)).append("</td></tr>"));
         html.append("</tbody></table></td></tr></tbody></table>");
-        List<NewsCard> cards = cards(content, findings);
+        List<NewsCard> cards = cards(content, findings, EMAIL_MAX_ISSUES);
         for (int i = 0; i < cards.size(); i++) {
             NewsCard card = cards.get(i);
             html.append(EMAIL_TABLE).append("<tr><td height=\"20\" style=\"height:20px;font-size:0;line-height:0\"></td></tr>"
@@ -154,7 +157,7 @@ public class NotificationRenderer {
 
     private RenderedNotification renderTelegram(NewsReport report, List<Finding> findings,
                                                  ReportReadingContent content, int maxLength) {
-        List<NewsCard> cards = cards(content, findings);
+        List<NewsCard> cards = cards(content, findings, TELEGRAM_MAX_ISSUES);
         // Fit whole cards and links first. Shorten prose before discarding lower-priority cards.
         for (int count = cards.size(); count > 0; count--) {
             for (int summaryLimit : new int[]{480, 320, 200, 120}) {
@@ -200,7 +203,7 @@ public class NotificationRenderer {
         return body.toString();
     }
 
-    private List<NewsCard> cards(ReportReadingContent content, List<Finding> findings) {
+    private List<NewsCard> cards(ReportReadingContent content, List<Finding> findings, int maxCards) {
         if (content.structuredContent() == null) return List.of();
         Map<Long, Finding> visible = new LinkedHashMap<>();
         findings.forEach(finding -> visible.put(finding.getId(), finding));
@@ -208,7 +211,7 @@ public class NotificationRenderer {
         return structured.importantEvents().stream()
                 .filter(event -> StringUtils.hasText(event.title()) && StringUtils.hasText(event.summaryKo()))
                 .filter(event -> supported(event.sourceFindingIds(), visible))
-                .limit(3)
+                .limit(maxCards)
                 .map(event -> new NewsCard(prose(event.title()), prose(event.summaryKo()),
                         structured.watchItems().stream()
                                 .filter(watch -> supported(watch.sourceFindingIds(), visible))

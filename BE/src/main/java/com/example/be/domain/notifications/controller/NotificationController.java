@@ -153,7 +153,7 @@ public class NotificationController {
     @PostMapping("/reports/{reportId}/preview")
     @Operation(summary = "보고서 발송 미리보기", description = """
             개인 기준 적용 전 공용 보고서의 텔레그램 뉴스 카드형·이메일 브리핑형 본문을 반환합니다. DB와 발송 이력을 변경하지 않고 수신자 전용 링크를 발급하지 않습니다.
-            저장된 importantEvents 중 sourceFindingIds가 비어 있지 않고 모두 표시 가능한 finding인 이벤트를 저장 순서대로 최대 3개 사용합니다.
+            저장된 importantEvents 중 sourceFindingIds가 비어 있지 않고 모두 표시 가능한 finding인 이벤트를 저장 순서대로 이메일은 최대 5개, 텔레그램은 최대 3개 사용합니다. 유효한 이벤트가 상한보다 적으면 있는 만큼 표시합니다.
             텔레그램은 제목·요약·확인할 점·근거 원문을 채널 maxLength 안의 HTML 메시지 1개로 구성합니다.
             긴 URL은 원문 링크 수를 2개에서 1개 또는 0개로 줄여 카드 주요 내용과 가능한 전체 보고서 링크를 유지하며, 극소 길이에서만 일반 텍스트로 안전하게 축약합니다.
             이메일은 executiveSummary를 우선한 핵심 요약과 이벤트별 주요 내용·후속 확인·원문을 제공합니다.
@@ -232,7 +232,7 @@ public class NotificationController {
     @PostMapping("/reports/{reportId}/send")
     @Operation(summary = "보고서 발송", description = """
             활성 그룹·수신자·주소에 발송하고 개별 결과를 기록합니다. 수신자·채널별 중복 제거와 배치 처리 규칙을 유지합니다.
-            텔레그램 뉴스 카드형·이메일 브리핑형 본문에 저장된 개인 정책 판정을 적용하며 근거 있는 importantEvents를 최대 3개 표시합니다.
+            텔레그램 뉴스 카드형·이메일 브리핑형 본문에 저장된 개인 정책 판정을 적용하며 근거 있는 importantEvents를 저장 순서대로 이메일은 최대 5개, 텔레그램은 최대 3개 표시합니다. 유효한 이벤트가 상한보다 적으면 있는 만큼 표시합니다.
             텔레그램은 채널 maxLength 안의 메시지 1개이며, 이메일은 핵심 요약과 이벤트별 주요 내용·후속 확인·원문을 제공합니다.
             읽는 관점과 significance는 표시하지 않고, 저장된 관련 watchItems만 사용하며 AI를 다시 호출하지 않습니다.
             본문 확보·관련성 필터와 DAILY에 저장된 finding 선택·순서를 유지하며 public-base-url 설정 시 전체 보고서 링크를 추가합니다.
