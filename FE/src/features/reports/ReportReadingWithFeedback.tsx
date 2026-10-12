@@ -2,9 +2,13 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { ApiError } from '../../api/client'
 import { submitReportEventFeedback, type ReportEventFeedback, type ReportEventFeedbackRequest, type ReportFeedbackEvent } from '../../api/reportEventFeedback'
 import type { FeedbackCategory } from '../../api/feedback'
+import type { CompanyInterestCriterion } from '../../api/companyInterests'
 import type { ReportDetail } from '../../api/types'
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABELS } from '../feedback/feedbackState'
 import { formatFullDate } from '../../lib/datetime'
+import { CompanyInterestProgress } from '../interests/CompanyInterestProgress'
+import { companyInterestHash } from '../interests/companyInterestState'
+import { useCompanyInterests } from '../interests/useCompanyInterests'
 import { ReportReadingContent } from './ReportReadingContent'
 import { matchReportFeedbackEvent, prepareReportEventFeedback, reportEventDraftError } from './eventFeedbackState'
 import { useReportEventFeedback } from './useReportEventFeedback'
@@ -18,6 +22,8 @@ export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOthe
 }) {
   const hasEvents = !!report.structuredContent?.importantEvents.length
   const { data, error, busy, paused, refresh, recordFeedback } = useReportEventFeedback(report.id, hasEvents)
+  const reviewedPreferences = data?.feedback.filter(item => item.status === 'COMPLETED' && item.verdict === 'PREFERENCE') ?? []
+  const interests = useCompanyInterests(reviewedPreferences.length > 0, `${report.id}:${reviewedPreferences.map(item => item.id).join(',')}`)
   const [refreshingReport, setRefreshingReport] = useState(false)
   const [refreshError, setRefreshError] = useState('')
   const mounted = useRef(true)
@@ -56,35 +62,42 @@ export function ReportReadingWithFeedback({ report, onEvidenceSelect, beforeOthe
     {!error && paused && <div className="report-feedback-notice"><span>검토가 이어지고 있습니다. 잠시 뒤 결과를 다시 확인해 주세요.</span>
       <button type="button" className="text-button" disabled={busy} onClick={refresh}>검토 결과 확인</button></div>}
     {refreshError && <p className="report-feedback-notice" role="alert">{refreshError}</p>}
+    {interests.error != null && <div className="report-feedback-notice" role="alert"><span>의견 검토는 완료됐지만 회사 관심 기준의 현재 상태를 확인하지 못했습니다.</span>
+      <button type="button" className="text-button" disabled={interests.busy} onClick={interests.refresh}>회사 기준 다시 확인</button></div>}
   </>
   return <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect} beforeOtherAnalysis={beforeOtherAnalysis}
     feedbackNotice={notice} eventFeedback={(event, index) => {
       const target = matchReportFeedbackEvent(report.id, event, index, data)
       return <ReportEventFeedbackSlot key={report.id} reportId={report.id} target={target} feedback={data?.feedback ?? []}
-        disabled={error != null} onFeedback={recordFeedback} onRefreshReport={refreshReport} />
+        disabled={error != null} onFeedback={recordFeedback} onRefreshReport={refreshReport}
+        criteria={interests.criteria ?? []} criteriaBusy={interests.busy} criteriaError={interests.error != null} />
     }} />
 }
 
 /** Keep a draft mounted while a newer feedback view and the report detail are being synchronized. */
-export function ReportEventFeedbackSlot({ reportId, target, feedback, disabled, onFeedback, onRefreshReport }: {
+export function ReportEventFeedbackSlot({ reportId, target, feedback, disabled, onFeedback, onRefreshReport, criteria = [], criteriaBusy = false, criteriaError = false }: {
   reportId: number; target: ReportFeedbackEvent | null; feedback: ReportEventFeedback[]; disabled: boolean
   onFeedback: (feedback: ReportEventFeedback) => void; onRefreshReport: () => Promise<void>
+  criteria?: CompanyInterestCriterion[]; criteriaBusy?: boolean; criteriaError?: boolean
 }) {
   const [lastTarget, setLastTarget] = useState(target)
   if (target && target !== lastTarget) setLastTarget(target)
   const displayedTarget = target ?? lastTarget
   if (!displayedTarget) return null
+  const savedFeedback = feedback.find(item => item.eventKey === displayedTarget.eventKey)
   return <ReportEventFeedbackCard key={displayedTarget.eventKey} reportId={reportId} target={displayedTarget}
-    feedback={feedback.find(item => item.eventKey === displayedTarget.eventKey)} disabled={disabled || !target}
-    onFeedback={onFeedback} onRefreshReport={onRefreshReport} />
+    feedback={savedFeedback} disabled={disabled || !target}
+    onFeedback={onFeedback} onRefreshReport={onRefreshReport} criterion={criteria.find(item => item.feedbackId === savedFeedback?.id)}
+    criteriaBusy={criteriaBusy} criteriaError={criteriaError} />
 }
 
-export function ReportEventFeedbackCard({ reportId, target, feedback, disabled = false, onFeedback, onRefreshReport }: {
+export function ReportEventFeedbackCard({ reportId, target, feedback, disabled = false, onFeedback, onRefreshReport, criterion, criteriaBusy = false, criteriaError = false }: {
   reportId: number; target: ReportFeedbackEvent; feedback?: ReportEventFeedback; disabled?: boolean
   onFeedback: (feedback: ReportEventFeedback) => void; onRefreshReport: () => Promise<void>
+  criterion?: CompanyInterestCriterion; criteriaBusy?: boolean; criteriaError?: boolean
 }) {
   return <div className="report-event-feedback">
-    {feedback ? <ReportEventFeedbackResult feedback={feedback} />
+    {feedback ? <ReportEventFeedbackResult feedback={feedback} criterion={criterion} criteriaBusy={criteriaBusy} criteriaError={criteriaError} />
       : <details className="report-feedback-disclosure">
         <summary>의견 남기기<span aria-hidden="true"> +</span></summary>
         <ReportEventFeedbackComposer reportId={reportId} target={target} disabled={disabled}
@@ -144,12 +157,13 @@ export function ReportEventFeedbackComposer({ reportId, target, disabled = false
       <p className="report-feedback-help" id={`${id}-category-help`}>{FEEDBACK_CATEGORIES.find(option => option.value === category)?.description}</p>
       <label className="report-feedback-comment" htmlFor={`${id}-comment`}>의견
         <textarea id={`${id}-comment`} rows={3} value={comment} required maxLength={2000}
-          aria-describedby={`${id}-count ${id}-scope`} placeholder="이 이벤트에서 어떤 내용이 달랐는지 알려 주세요."
+          aria-describedby={`${id}-count ${id}-delivery ${id}-scope`} placeholder="이 이벤트에서 어떤 내용이 달랐는지 알려 주세요."
           onChange={event => { setComment(event.target.value); changed() }} />
       </label>
       <div className="report-feedback-help report-feedback-count" id={`${id}-count`}><span>1~2,000자</span><span>{comment.length.toLocaleString()} / 2,000</span></div>
     </fieldset>
-    <p className="report-feedback-help" id={`${id}-scope`}>확인된 오류는 같은 주제·수집 조건의 다음 분석에서 참고합니다. 개인 알림 기준에는 적용하지 않습니다.</p>
+    <p className="report-feedback-help" id={`${id}-delivery`}>의견이 접수되면 해당 이슈는 검토 완료를 기다리지 않고 이후 메일·텔레그램 발송에서 제외됩니다. 전달 제외는 보고서 화면의 내용을 변경하지 않습니다.</p>
+    <p className="report-feedback-help" id={`${id}-scope`}>확인된 오류는 같은 주제·수집 조건의 다음 분석에서 참고합니다. 관심 의견은 검토 후 회사 관심 기준으로 제안하며, 기준을 확인하고 적용하면 이후 보고서 선정에 사용합니다. 개인 알림 기준에는 적용하지 않습니다.</p>
     {error && <div className="report-feedback-error" role="alert"><p>{error}</p>
       {conflict ? <><p>이미 의견이 접수되었거나 보고서 내용이 바뀌었을 수 있습니다. 새로고침 후 확인해 주세요.</p>
         <button type="button" className="text-button" disabled={disabled} onClick={() => { void onRefreshReport() }}>보고서 새로고침</button></>
@@ -162,15 +176,25 @@ export function ReportEventFeedbackComposer({ reportId, target, disabled = false
 }
 
 const VERDICT_LABELS = { PREFERENCE: '관심에 대한 의견', CONFIRMED_ERROR: '오류 확인', NOT_CONFIRMED: '오류 확인 안 됨', INSUFFICIENT_EVIDENCE: '근거 부족' }
-export function ReportEventFeedbackResult({ feedback }: { feedback: ReportEventFeedback }) {
+export function ReportEventFeedbackResult({ feedback, criterion, criteriaBusy = false, criteriaError = false }: {
+  feedback: ReportEventFeedback; criterion?: CompanyInterestCriterion; criteriaBusy?: boolean; criteriaError?: boolean
+}) {
   return <div className="report-feedback-result" role="status">
     <div className="report-feedback-result-meta"><strong className={`report-feedback-status is-${feedback.status.toLowerCase()}`}>{FEEDBACK_STATUS_LABELS[feedback.status]}</strong>
       <time dateTime={feedback.createdAt}>{formatFullDate(feedback.createdAt)}</time></div>
     <p className="report-feedback-help">{FEEDBACK_CATEGORIES.find(option => option.value === feedback.category)?.label}</p>
     <p className="report-feedback-saved-comment">{feedback.comment}</p>
+    <p className="report-feedback-help"><strong>메일·텔레그램 전달 제외</strong> · 의견 접수 즉시 적용되었습니다. 검토 상태·결과와 관계없이 해당 이슈를 이후 발송에서 제외합니다. 이미 발송된 내용은 바뀌지 않습니다.</p>
     {feedback.diagnosis && <div className="report-feedback-diagnosis"><strong>{feedback.verdict ? VERDICT_LABELS[feedback.verdict] : '검토 설명'}</strong><p>{feedback.diagnosis}</p></div>}
     {feedback.status === 'COMPLETED' && !feedback.diagnosis && <p>검토를 마쳤습니다. 추가 설명이 제공되지 않았습니다.</p>}
     {feedback.status === 'FAILED' && <p>검토를 완료하지 못했습니다. 남긴 의견은 보관됩니다.</p>}
     {(feedback.status === 'PENDING' || feedback.status === 'PROCESSING') && <p className="report-feedback-help">이 이벤트의 내용과 함께 묶인 근거를 확인하고 있습니다.</p>}
+    {feedback.status === 'COMPLETED' && feedback.verdict === 'PREFERENCE' && <div className="report-feedback-company-interest">
+      <strong>회사 관심 기준</strong>
+      {criteriaError ? <p className="report-feedback-help">기준의 현재 상태를 확인하지 못했습니다. 관리 화면에서 다시 확인해 주세요.</p>
+        : criterion ? <><p className="report-feedback-help">{criterion.instruction}</p><CompanyInterestProgress criterion={criterion} /></>
+          : <p className="report-feedback-help">{criteriaBusy ? '제안된 회사 관심 기준을 확인하고 있습니다.' : '회사 관심 기준에서 제안 내용과 반영 상태를 확인해 주세요.'}</p>}
+      <a href={companyInterestHash(criterion?.id)}>회사 관심 기준 확인하기 →</a>
+    </div>}
   </div>
 }

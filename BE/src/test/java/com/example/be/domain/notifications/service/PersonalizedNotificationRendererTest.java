@@ -104,6 +104,7 @@ class PersonalizedNotificationRendererTest {
         for (var view : prepared) {
             assertTrue(view.excludedEvents());
             assertEquals(List.of(12L, 13L), view.findings().stream().map(Finding::getId).toList());
+            assertEquals(Set.of(11L, 12L), view.excludedEvidenceFindingIds());
             assertEquals(List.of("정상 사건 제목"), eventTitles(view));
             assertFalse(view.readingContent().markdownBody().contains("제외할"));
         }
@@ -175,7 +176,7 @@ class PersonalizedNotificationRendererTest {
 
     @ParameterizedTest
     @EnumSource(ChannelType.class)
-    void pendingUnconfirmedAndRecipientSpecificReviewsDoNotBecomeGlobalExclusions(ChannelType type) {
+    void localOpinionsImmediatelyChangeManualAndQueuedDeliveryWithoutChangingPublicReading(ChannelType type) {
         Fixture fixture = fixture(false);
         List<Feedback> reviews = List.of(
                 review('a', Category.SUMMARY_ERROR, Status.PENDING, "CONFIRMED_ERROR", null),
@@ -183,25 +184,38 @@ class PersonalizedNotificationRendererTest {
                 review('a', Category.SUMMARY_ERROR, Status.FAILED, "CONFIRMED_ERROR", null),
                 review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "NOT_CONFIRMED", null),
                 review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "INSUFFICIENT_EVIDENCE", null),
-                review('a', Category.PREFERENCE, Status.COMPLETED, "CONFIRMED_ERROR", null),
-                review('a', Category.SUMMARY_ERROR, Status.COMPLETED, "CONFIRMED_ERROR", RECIPIENT_ID));
+                review('a', Category.PREFERENCE, Status.COMPLETED, "PREFERENCE", null));
         prepare(fixture, List.of(), Set.of());
 
         for (Feedback review : reviews) {
             when(store.eventFeedback(17L)).thenReturn(List.of(review));
             for (boolean byId : List.of(true, false)) {
                 String body = render(fixture.report(), type, byId);
-                assertTrue(body.contains("제외할 사건 제목"), review.toString());
-                assertTrue(body.contains("제외할 사건 주요 내용"), review.toString());
-                assertTrue(body.contains("https://example.com/source-11"), review.toString());
+                assertRejectedContentAbsent(body);
                 assertTrue(body.contains("정상 사건 제목"));
             }
+            var publicView = projection.project(fixture.report(), new ReportFindings.Visible(fixture.findings(), false), List.of(review));
+            assertSame(fixture.report().getStructuredContent(), publicView.readingContent().structuredContent());
         }
 
         for (var view : preparedViews(fixture.report(), reviews.size() * 2)) {
-            assertFalse(view.excludedEvents());
-            assertSame(fixture.report().getStructuredContent(), view.readingContent().structuredContent());
+            assertTrue(view.excludedEvents());
+            assertEquals(Set.of(11L, 12L), view.excludedEvidenceFindingIds());
         }
+        assertEquals(2, fixture.report().getStructuredContent().importantEvents().size());
+    }
+
+    @ParameterizedTest
+    @EnumSource(ChannelType.class)
+    void recipientSpecificReviewNeverBecomesACompanyDeliveryExclusion(ChannelType type) {
+        Fixture fixture = fixture(false);
+        prepare(fixture, List.of(review('a', Category.PREFERENCE, Status.COMPLETED, "PREFERENCE", RECIPIENT_ID)), Set.of());
+        for (boolean byId : List.of(true, false)) {
+            String body = render(fixture.report(), type, byId);
+            assertTrue(body.contains("제외할 사건 제목"));
+            assertTrue(body.contains("https://example.com/source-11"));
+        }
+        for (var view : preparedViews(fixture.report(), 2)) assertFalse(view.excludedEvents());
         verify(snapshots, never()).capture(any(), any());
     }
 

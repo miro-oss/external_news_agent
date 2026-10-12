@@ -54,7 +54,7 @@ public class NotificationRenderer {
     public RenderedNotification render(NewsReport report, NotificationChannel channel,
                                        ReportInsightDTO.AudienceInsight insight) {
         ReportFindings.Visible visible = ReportFindings.loadVisible(report, findingRepository, relevancePolicy);
-        var view = feedbackProjection.project(report, visible, feedbackProjection.reviews(report.getId()));
+        var view = feedbackProjection.projectForDelivery(report, visible, feedbackProjection.reviews(report.getId()));
         return render(report, channel, view, null, insight);
     }
 
@@ -69,7 +69,7 @@ public class NotificationRenderer {
                                        ReportInsightDTO.AudienceInsight insight) {
         List<Finding> findings = view.findings();
         ReportReadingContent content = view.readingContent();
-        NotificationInsightBrief brief = NotificationInsightBrief.from(insight, findings);
+        NotificationInsightBrief brief = NotificationInsightBrief.from(insight, findings, view.excludedEvidenceFindingIds());
         String link = safeUrl(feedbackUrl) ? "<a href=\"" + attribute(feedbackUrl)
                 + "\">이슈 피드백 · 내 수신 기준</a>" : "";
         if (channel.getChannelType() == ChannelType.EMAIL) {

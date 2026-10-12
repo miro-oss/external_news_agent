@@ -4405,6 +4405,8 @@ body.modal-open {
   .segmented-nav .segmented-option {
     flex: 1;
     min-width: 0;
+    padding-inline: .35rem;
+    font-size: .77rem;
   }
 
   .segmented-nav .segmented-option:hover:not(.active) {

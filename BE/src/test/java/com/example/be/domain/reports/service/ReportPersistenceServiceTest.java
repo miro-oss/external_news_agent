@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.companyinterest.CompanyInterestSelectionTestSupport;
+
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
@@ -46,7 +48,7 @@ class ReportPersistenceServiceTest {
     private final ReportPersistenceService service =
             new ReportPersistenceService(runRepository, reportRepository,
                     notificationAutomation, observationRepository,
-                    events);
+                    events, CompanyInterestSelectionTestSupport.passThrough());
 
     @Test
     void manualTopicWeeklyCompletionAndRecoveryNeverEnqueueAutomaticDelivery() {

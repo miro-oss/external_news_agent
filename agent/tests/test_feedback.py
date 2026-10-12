@@ -69,6 +69,7 @@ def review_output():
             "instruction": "분기 실적만 다루는 기사는 전달에서 제외한다.",
             "reason": "사용자가 해당 전달 선호를 명시했습니다.",
         },
+        "proposedCompanyCriterion": None,
     }
 
 
@@ -106,6 +107,7 @@ def event_review_output():
             {"articleId": 20, "quote": "AI 투자가 증가했다."},
         ],
         "proposedPolicy": None,
+        "proposedCompanyCriterion": None,
     }
 
 
@@ -297,7 +299,7 @@ def test_event_api_uses_all_topics_and_event_text_without_fabricated_issue(monke
     assert response.status_code == 200
     assert response.json()["verdict"] == "CONFIRMED_ERROR"
     assert response.json()["proposedPolicy"] is None
-    assert response.json()["meta"]["promptVersion"] == "feedback-event-review.ko.v1"
+    assert response.json()["meta"]["promptVersion"] == "feedback-event-review.ko.v2"
     assert response.json()["meta"]["costUsd"] == 0.001
     assert len(provider.calls) == 1
     call = provider.calls[0]
@@ -405,9 +407,76 @@ def test_event_mock_is_safe_and_preference_is_diagnosis_only():
     result = FeedbackService(Settings(AGENT_MOCK=True), provider).review(validated)
     assert result.verdict == "INSUFFICIENT_EVIDENCE"
     assert result.proposed_policy is None
-    assert result.meta.mock and result.meta.prompt_version == "feedback-event-review.ko.v1"
+    assert result.meta.mock and result.meta.prompt_version == "feedback-event-review.ko.v2"
     assert not provider.calls
     output = event_review_output()
     output["verdict"] = "PREFERENCE"
     result = service(Provider(output)).review(validated)
     assert result.verdict == "PREFERENCE" and result.proposed_policy is None
+
+
+def test_event_preference_proposes_company_draft_without_personal_opt_in():
+    request, output = event_review_request(), event_review_output()
+    request["feedback"]["category"] = "PREFERENCE"
+    output["verdict"] = "PREFERENCE"
+    output["proposedCompanyCriterion"] = {
+        "instruction": "분기 실적만 다루는 기사는 보고서에서 제외한다.",
+        "reason": "사용자가 회사의 관심 범위를 표현했습니다.",
+    }
+    provider = Provider(output)
+    result = service(provider).review(FeedbackEventReviewRequest.model_validate(request))
+    assert result.proposed_policy is None
+    assert result.proposed_company_criterion.instruction == (
+        output["proposedCompanyCriterion"]["instruction"]
+    )
+    assert "활성화해야" in provider.calls[0]["system_instruction"]
+    schema = OpenAIJsonSchemaTransformer(
+        deepcopy(provider.calls[0]["response_schema"]), strict=True
+    ).walk()
+    Draft202012Validator(schema).validate(output)
+
+
+@pytest.mark.parametrize("change", ["personal_review", "factual_verdict", "blank_instruction"])
+def test_company_draft_is_limited_to_event_preference_review(change):
+    request, output = event_review_request(), event_review_output()
+    output["verdict"] = "PREFERENCE"
+    output["proposedCompanyCriterion"] = {
+        "instruction": "분기 실적 중심 기사는 제외한다.", "reason": "회사 관심 범위"
+    }
+    request_type = FeedbackEventReviewRequest
+    if change == "personal_review":
+        request = review_request()
+        request_type = FeedbackReviewRequest
+        output["evidence"] = output["evidence"][:1]
+    elif change == "factual_verdict":
+        output["verdict"] = "CONFIRMED_ERROR"
+    else:
+        output["proposedCompanyCriterion"]["instruction"] = "   "
+    with pytest.raises(AgentError) as error:
+        service(Provider(output)).review(request_type.model_validate(request))
+    assert error.value.code == "SCHEMA_VIOLATION"
+
+
+def test_company_evaluation_uses_separate_scope_and_preserves_evidence_contract():
+    request = evaluate_request() | {"scope": "COMPANY_REPORT"}
+    provider = Provider(evaluate_output())
+    result = service(provider).evaluate(FeedbackEvaluateRequest.model_validate(request))
+    assert result.decisions[0].status == "SUPPRESS"
+    assert result.meta.prompt_version == "feedback-company-evaluate.ko.v1"
+    assert "회사 관심 기준" in provider.calls[0]["system_instruction"]
+    assert FeedbackEvaluateRequest.model_validate(evaluate_request()).scope == "PERSONAL_DELIVERY"
+    invalid = evaluate_output()
+    invalid["decisions"][0]["evidence"][0]["quote"] = "없는 문장"
+    with pytest.raises(AgentError):
+        service(Provider(invalid)).evaluate(FeedbackEvaluateRequest.model_validate(request))
+
+
+def test_company_mock_cannot_claim_applied_suppression_or_create_draft():
+    request = FeedbackEvaluateRequest.model_validate(
+        evaluate_request() | {"scope": "COMPANY_REPORT"}
+    )
+    result = FeedbackService(Settings(AGENT_MOCK=True)).evaluate(request)
+    assert result.meta.mock
+    assert result.meta.prompt_version == "feedback-company-evaluate.ko.v1"
+    assert result.decisions[0].status == "UNCERTAIN"
+    assert not result.decisions[0].policy_ids

@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.reports.entity.ReportScope;
+import com.example.be.domain.companyinterest.CompanyInterestSelection;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.global.config.ApiTimeZone;
@@ -19,17 +20,21 @@ public class WeeklyReportCreationService {
     private final AgentWeeklyReportOrchestrator orchestrator;
     private final WeeklyReportGenerator fallback;
     private final ReportPersistenceService persistence;
+    private final CompanyInterestSelection companyInterests;
 
     public Long generate(LocalDate monday) {
         LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
         var reservation = reservationService.reserve(monday, now);
         if (!reservation.owner()) return reservation.reportId();
+        var selection = companyInterests.selectWeekly(reservation.input());
+        persistence.freezeCompanySelection(reservation.reportId(), selection.input().sourceFindingIds(), selection.input(),
+                selection.applications(), now);
         ReportDocument document;
         try {
-            document = orchestrator.generate(reservation.reportId(), reservation.input(), now);
+            document = orchestrator.generate(reservation.reportId(), selection.input(), now);
         } catch (RuntimeException exception) {
             log.error("주간 보고서 생성 실패. monday={}", monday, exception);
-            document = fallback.generate(reservation.input());
+            document = fallback.generate(selection.input());
         }
         return persistence.complete(reservation.reportId(), document, LocalDateTime.now(ApiTimeZone.ZONE));
     }

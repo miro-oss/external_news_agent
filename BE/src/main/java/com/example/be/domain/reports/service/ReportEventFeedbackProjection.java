@@ -60,18 +60,37 @@ public class ReportEventFeedbackProjection {
     /** List reads resolve inherited decisions in a batch and use the same projection as detail/delivery. */
     public View project(NewsReport report, ReportFindings.Visible visible, List<Feedback> reviews,
                         Set<Long> inherited) {
-        ReportReadingContent original = ReportReadingContent.from(report, visible);
         Set<String> excluded = confirmedKeys(report.getId(), reviews);
+        return project(report, visible, excluded, inherited, null);
+    }
+
+    /** A submitted local opinion is an immediate delivery exclusion, independently of its AI diagnosis. */
+    public View projectForDelivery(NewsReport report, ReportFindings.Visible visible, List<Feedback> reviews) {
+        List<Feedback> submitted = reviews.stream().filter(review -> localEvent(review, report.getId())).toList();
+        Set<String> keys = submitted.stream().map(Feedback::eventKey).collect(Collectors.toSet());
+        List<Item> current = keys.isEmpty() ? List.of() : snapshots.capture(report, visible);
+        Set<String> currentKeys = current.stream().map(item -> item.event().key()).collect(Collectors.toSet());
+        Set<Long> excludedSources = new HashSet<>(dailyExclusions.forDelivery(report));
+        // An edited report revision must not silently reintroduce the evidence the user already rejected.
+        submitted.stream().filter(review -> !currentKeys.contains(review.eventKey()))
+                .map(review -> submittedEvent(review, report.getId())).filter(java.util.Objects::nonNull)
+                .flatMap(event -> event.sourceFindingIds().stream()).forEach(excludedSources::add);
+        return project(report, visible, keys, excludedSources, current);
+    }
+
+    private View project(NewsReport report, ReportFindings.Visible visible, Set<String> excluded,
+                         Set<Long> inherited, List<Item> captured) {
+        ReportReadingContent original = ReportReadingContent.from(report, visible);
         if (excluded.isEmpty() && inherited.isEmpty()) {
             return new View(visible.findings(), original, false);
         }
         if (original.structuredContent() == null) {
             var kept = visible.findings().stream().filter(f -> !inherited.contains(f.getId())).toList();
             if (kept.size() == visible.findings().size()) return new View(kept, original, false);
-            return new View(kept, ReportReadingContent.from(report, new ReportFindings.Visible(kept, true)), true);
+            return new View(kept, ReportReadingContent.from(report, new ReportFindings.Visible(kept, true)), true, inherited);
         }
         // Snapshot keys depend on the complete original report and must not be recaptured from this view.
-        List<Item> rejected = excluded.isEmpty() ? List.of() : snapshots.capture(report, visible).stream()
+        List<Item> rejected = excluded.isEmpty() ? List.of() : (captured == null ? snapshots.capture(report, visible) : captured).stream()
                 .filter(item -> excluded.contains(item.event().key())).toList();
 
         Set<Integer> rejectedIndexes = rejected.stream().map(item -> item.event().index()).collect(Collectors.toSet());
@@ -98,12 +117,28 @@ public class ReportEventFeedbackProjection {
         Set<Long> hiddenFindings = new HashSet<>(rejectedSources);
         stored.watchItems().stream().filter(item -> !watches.contains(item))
                 .forEach(item -> hiddenFindings.addAll(item.sourceFindingIds()));
+        Set<Long> excludedEvidence = Set.copyOf(hiddenFindings);
         hiddenFindings.removeAll(retainedSources);
         List<Finding> findings = visible.findings().stream().filter(f -> !hiddenFindings.contains(f.getId())).toList();
         // Summary, markdown and notes lack per-sentence provenance. Rebuild them from surviving events.
         var content = new ReportContent(events.stream().limit(3).map(ReportContent.ImportantEvent::summaryKo).toList(),
                 events, watches, List.of());
-        return new View(findings, new ReportReadingContent(markdown(content), content), true);
+        return new View(findings, new ReportReadingContent(markdown(content), content), true, excludedEvidence);
+    }
+
+    static boolean localEvent(Feedback review, long reportId) {
+        return review != null && review.reportId() == reportId && review.capabilityId() == null
+                && review.recipientId() == null && review.itemId() == null && review.eventKey() != null;
+    }
+
+    /** The stale-key fallback only trusts the server's frozen, correctly bound local event input. */
+    static com.example.be.domain.feedback.model.FeedbackModels.EventContext submittedEvent(Feedback review, long reportId) {
+        if (!localEvent(review, reportId) || review.input() == null || review.input().event() == null) return null;
+        var event = review.input().event();
+        if (!review.eventKey().equals(event.key()) || event.sourceFindingIds() == null
+                || event.topics() == null || event.sources() == null
+                || event.sourceFindingIds().stream().anyMatch(id -> id == null || id < 1)) return null;
+        return event;
     }
 
     private static Set<String> confirmedKeys(long reportId, List<Feedback> reviews) {
@@ -136,15 +171,25 @@ public class ReportEventFeedbackProjection {
         return body.toString();
     }
 
-    public record View(List<Finding> findings, ReportReadingContent readingContent, boolean excludedEvents) {
-        public View { findings = List.copyOf(findings); }
+    public record View(List<Finding> findings, ReportReadingContent readingContent, boolean excludedEvents,
+                       Set<Long> excludedEvidenceFindingIds) {
+        public View {
+            findings = List.copyOf(findings);
+            excludedEvidenceFindingIds = Set.copyOf(excludedEvidenceFindingIds);
+        }
+        public View(List<Finding> findings, ReportReadingContent readingContent, boolean excludedEvents) {
+            this(findings, readingContent, excludedEvents, Set.of());
+        }
 
         /** Apply personal source decisions without recreating an event excluded by a local review. */
         public View suppress(NewsReport report, Set<Long> suppressedFindingIds) {
+            Set<Long> excludedEvidence = new HashSet<>(excludedEvidenceFindingIds);
+            findings.stream().map(Finding::getId).filter(suppressedFindingIds::contains).forEach(excludedEvidence::add);
             List<Finding> kept = findings.stream().filter(f -> !suppressedFindingIds.contains(f.getId())).toList();
-            if (kept.size() == findings.size()) return this;
-            if (!excludedEvents || readingContent.structuredContent() == null) {
-                return new View(kept, ReportReadingContent.from(report, new ReportFindings.Visible(kept, true)), excludedEvents);
+            if (kept.size() == findings.size()) return excludedEvidence.equals(excludedEvidenceFindingIds) ? this
+                    : new View(kept, readingContent, excludedEvents, excludedEvidence);
+            if (readingContent.structuredContent() == null) {
+                return new View(kept, ReportReadingContent.from(report, new ReportFindings.Visible(kept, true)), excludedEvents, excludedEvidence);
             }
             Set<Long> allowed = kept.stream().map(Finding::getId).collect(Collectors.toSet());
             ReportContent current = readingContent.structuredContent();
@@ -158,6 +203,7 @@ public class ReportEventFeedbackProjection {
                             && item.sourceFindingIds().stream().noneMatch(droppedSources::contains)).toList();
             current.watchItems().stream().filter(item -> !watches.contains(item))
                     .forEach(item -> droppedSources.addAll(item.sourceFindingIds()));
+            excludedEvidence.addAll(droppedSources);
             Set<Long> retainedSources = events.stream().flatMap(event -> event.sourceFindingIds().stream())
                     .collect(Collectors.toSet());
             watches.forEach(item -> retainedSources.addAll(item.sourceFindingIds()));
@@ -165,7 +211,7 @@ public class ReportEventFeedbackProjection {
             kept = kept.stream().filter(finding -> !droppedSources.contains(finding.getId())).toList();
             var content = new ReportContent(events.stream().limit(3).map(ReportContent.ImportantEvent::summaryKo).toList(),
                     events, watches, List.of());
-            return new View(kept, new ReportReadingContent(markdown(content), content), true);
+            return new View(kept, new ReportReadingContent(markdown(content), content), true, excludedEvidence);
         }
     }
 }

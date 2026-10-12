@@ -49,6 +49,21 @@ class FeedbackValidationTest {
         assertTrue(FeedbackWorkService.eligible(List.of(policy),next,t.minusSeconds(1)).isEmpty());
         assertNotEquals(FeedbackJobTransactions.fingerprint(List.of(policy),2),FeedbackJobTransactions.fingerprint(List.of(new Policy(1,4,2,"주제","주가 제외",2,"REVOKED",t)),2));
     }
+    @Test void companyCriterionIsOnlyADraftForEventPreferenceAndNeverAPersonalPolicy() {
+        var request=json.readTree("""
+                {"event":{"key":"event"},"articles":[{"id":1,"content":"본문 근거"}],"feedback":{"category":"PREFERENCE","allowPersonalization":false}}
+                """);
+        var result=json.readTree("""
+                {"verdict":"PREFERENCE","diagnosis":"회사 관심 의견입니다.","evidence":[{"articleId":1,"quote":"본문 근거"}],"proposedPolicy":null,"proposedCompanyCriterion":{"instruction":"순수 수학 성과 중심 기사는 제외한다.","reason":"회사 관심 범위"},"meta":{"truncated":false}}
+                """);
+        assertDoesNotThrow(()->FeedbackResultValidator.review(request,result));
+        assertThrows(IllegalArgumentException.class,()->FeedbackResultValidator.review(
+                json.readTree(request.toString().replace("\"event\"","\"issue\"")),result));
+        assertThrows(IllegalArgumentException.class,()->FeedbackResultValidator.review(request,
+                json.readTree(result.toString().replace("PREFERENCE","CONFIRMED_ERROR"))));
+        assertThrows(IllegalArgumentException.class,()->FeedbackResultValidator.review(request,
+                json.readTree(result.toString().replace("순수 수학 성과 중심 기사는 제외한다.","   "))));
+    }
     @Test void deliveredSnapshotDoesNotRetainRemovedCombinedEventOrItsSuppressedSource() {
         var now=LocalDateTime.now();var topic=new Topic(2,"HBM",List.of(),List.of());
         var first=new Article(10,"유효한 HBM 기사","HBM 생산 확대","https://example.test/10");

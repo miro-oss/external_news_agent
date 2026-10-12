@@ -97,6 +97,36 @@ class DailyReportFeedbackExclusionsTest {
         assertEquals(List.of(11L), daily.getReflectedFindingIds());
     }
 
+    @Test void everySubmittedDailyOpinionPropagatesOnlyToWeeklyDeliveryWithinTheSavedIssueAndTopic() {
+        NewsReport daily = reviewedDaily(10, monday, 11);
+        when(reports.findByReportScopeAndReportDateBetweenOrderByReportDateAsc(any(), any(), any())).thenReturn(List.of(daily));
+        when(comparisons.findInput(10)).thenReturn(Optional.of(snapshot(identity(11, 100, 1))));
+        var target = weekly(20L, null, monday, List.of(21L, 22L, 23L), snapshot(
+                identity(21, 100, 1), identity(22, 101, 1), identity(23, 100, 2)));
+        for (Category category : Category.values()) for (Status status : Status.values()) {
+            var submitted = review(10, "current", category, status, null, null, null, null);
+            when(feedback.eventFeedback(10)).thenReturn(List.of(submitted));
+            assertEquals(Set.of(21L), exclusions.forDelivery(target));
+            assertTrue(exclusions.forReport(target).isEmpty());
+        }
+    }
+
+    @Test void deliveryUsesVerifiedFrozenInputWhenTheSourceDailyEventWasRevised() {
+        NewsReport daily = reviewedDaily(10, monday, 11);
+        when(reports.findByReportScopeAndReportDateBetweenOrderByReportDateAsc(any(), any(), any())).thenReturn(List.of(daily));
+        when(comparisons.findInput(10)).thenReturn(Optional.of(snapshot(identity(11, 100, 1))));
+        var target = weekly(20L, 1L, monday, List.of(21L, 22L), snapshot(identity(21, 100, 1), identity(22, 101, 1)));
+        var submitted = review(10, "old", Category.PREFERENCE, Status.PROCESSING, null, null, null, null);
+        var original = item("old", List.of(11L), List.of(new Topic(1, "주제", List.of(), List.of())));
+        when(feedback.eventFeedback(10)).thenReturn(List.of(withInput(submitted, original)));
+        assertEquals(Set.of(21L), exclusions.forDelivery(target));
+        when(feedback.eventFeedback(10)).thenReturn(List.of(withInput(submitted, item("wrong", List.of(11L), List.of()))));
+        assertTrue(exclusions.forDelivery(target).isEmpty());
+        when(feedback.eventFeedback(10)).thenReturn(List.of(withInput(
+                review(99, "old", Category.PREFERENCE, Status.PROCESSING, null, null, null, null), original)));
+        assertTrue(exclusions.forDelivery(target).isEmpty());
+    }
+
     @Test void legacyEvidenceUsesExactFindingIdsAndKeepsAnotherTopic() {
         NewsReport daily = reviewedDaily(10, monday, 11);
         when(snapshots.capture(eq(daily), any())).thenReturn(List.of(item("current", List.of(11L), List.of(
@@ -243,5 +273,10 @@ class DailyReportFeedbackExclusionsTest {
                             Long capabilityId, Long recipientId, Long itemId) {
         return new Feedback(1, capabilityId, recipientId, reportId, itemId, category, "의견", false,
                 "request", status, verdict, null, monday.plusWeeks(1).atStartOfDay(), null, key);
+    }
+    private Feedback withInput(Feedback review, Item input) {
+        return new Feedback(review.id(), review.capabilityId(), review.recipientId(), review.reportId(), review.itemId(),
+                review.category(), review.comment(), review.allowPersonalization(), review.requestHash(), review.status(),
+                review.verdict(), review.diagnosis(), review.createdAt(), input, review.eventKey());
     }
 }

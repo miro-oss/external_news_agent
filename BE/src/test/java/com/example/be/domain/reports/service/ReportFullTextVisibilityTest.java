@@ -10,15 +10,66 @@ import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportContent;
 import com.example.be.domain.reports.entity.ReportScope;
+import com.example.be.domain.reports.entity.ReportStatus;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.LongStream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ReportFullTextVisibilityTest {
     private final FindingRepository repository = mock(FindingRepository.class);
+
+    @Test
+    void companySelectionStaysFrozenForRunReadsWithoutRewritingLegacyCoverage() {
+        Finding suppressed = finding(1, FetchStatus.FULLTEXT, "제외된 원문");
+        Finding retained = finding(2, FetchStatus.FULLTEXT, "보존된 원문");
+        when(repository.findForReportByRunId(42L)).thenReturn(List.of(suppressed, retained));
+        var legacy = NewsReport.builder().run(CollectionRun.builder().id(42L).build())
+                .coverageRecorded(true).reflectedFindingIds(List.of(2L)).build();
+        assertEquals(2, ReportFindings.loadVisible(legacy, repository).findings().size());
+        var selected = NewsReport.builder().run(CollectionRun.builder().id(42L).build())
+                .companySelectionRecorded(true).companySuppressedFindingIds(List.of(1L))
+                .coverageRecorded(true).reflectedFindingIds(List.of(2L)).build();
+        var visible = ReportFindings.loadVisible(selected, repository);
+        assertEquals(List.of(retained), visible.findings());
+        assertFalse(visible.filtered());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ReportStatus.class, names = {"GENERATED", "FALLBACK"})
+    void completedCoverageCannotHideUncoveredFindingsOrForgetCompanyExclusions(ReportStatus status) {
+        List<Finding> all = new ArrayList<>(LongStream.rangeClosed(1, 51)
+                .mapToObj(id -> finding(id, FetchStatus.FULLTEXT, "검증 원문")).toList());
+        Finding stub = finding(52, FetchStatus.FULLTEXT, "STUB 원문", AnalysisSource.STUB);
+        Finding unsupported = finding(53, FetchStatus.FULLTEXT, "근거 부족 원문");
+        Finding suppressed = finding(54, FetchStatus.FULLTEXT, "회사 기준 제외 원문");
+        all.addAll(List.of(stub, unsupported, suppressed, finding(55, FetchStatus.METADATA_ONLY, "원문 아님")));
+        when(repository.findForReportByRunId(42L)).thenReturn(all);
+        var report = NewsReport.builder().run(CollectionRun.builder().id(42L).build())
+                .reportStatus(ReportStatus.PENDING).build();
+        report.freezeCompanySelection(all.stream().map(Finding::getId).filter(id -> id != 54L).toList(),
+                List.of(54L), null);
+        List<Long> covered = LongStream.rangeClosed(1, 50).boxed().toList();
+        report.complete("보고서", "저장된 본문", "model", null, null, null, null, null, null,
+                covered, List.of(53L), status, LocalDateTime.now());
+
+        var visible = ReportFindings.loadVisible(report, repository);
+
+        assertEquals(LongStream.rangeClosed(1, 53).boxed().toList(), visible.findings().stream().map(Finding::getId).toList());
+        assertTrue(visible.findings().contains(stub), "full-text STUB remains visible despite missing generator coverage");
+        assertFalse(visible.findings().contains(suppressed));
+        assertTrue(visible.filtered(), "metadata-only evidence still triggers safe reading projection");
+        assertEquals(List.of(54L), report.getCompanySuppressedFindingIds());
+        assertEquals(covered, report.getReflectedFindingIds(), "visibility must not rewrite generator coverage");
+        assertEquals(List.of(53L), report.getExcludedFindingIds());
+    }
 
     @Test
     void runKeepsOnlyAvailableFullTextEvenWhenMetadataHasBodyText() {
@@ -79,7 +130,13 @@ class ReportFullTextVisibilityTest {
     }
 
     private Finding finding(long id, FetchStatus status, String body) {
-        return Finding.builder().id(id).analysisSource(AnalysisSource.LLM)
+        return finding(id, status, body, AnalysisSource.LLM);
+    }
+
+    private Finding finding(long id, FetchStatus status, String body, AnalysisSource source) {
+        return Finding.builder().id(id).analysisSource(source)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.builder().score(java.math.BigDecimal.ZERO).build())
+                .relevance(com.example.be.domain.analysis.entity.Relevance.IMPORTANT)
                 .article(Article.builder().id(id).title("기사 " + id).fetchStatus(status).body(body)
                         .canonicalUrl("https://example.com/" + id).build())
                 .summary("확인한 요약 " + id)

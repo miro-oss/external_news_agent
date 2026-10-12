@@ -5,6 +5,7 @@ import com.example.be.domain.analysis.relevance.TopicRelevanceTestSupport;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.Relevance;
 import com.example.be.domain.analysis.entity.SensitivityLevel;
+import com.example.be.domain.analysis.agent.dto.AgentReportInsightResponse.Overview;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.CollectionRun;
@@ -22,6 +23,7 @@ import com.example.be.domain.feedback.service.ReportEventSnapshotFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.StringReader;
 import java.time.LocalDateTime;
@@ -515,35 +517,74 @@ class NotificationRendererTest {
         }
     }
 
-    @Test
-    void pendingReviewRemainsInBothChannelsUntilTheErrorIsConfirmed() {
+    @ParameterizedTest
+    @EnumSource(FeedbackModels.Category.class)
+    void submittedOpinionImmediatelyExcludesEventRegardlessOfCategoryStatusOrVerdict(FeedbackModels.Category category) {
         var event = event("검토 중 사건", "검토 중 요약", "", 11L);
-        var report = structuredReport(new ReportContent(List.of("기존 요약"), List.of(event), List.of(), List.of()));
+        var report = structuredReport(new ReportContent(List.of("기존 요약"), List.of(event),
+                List.of(watch("검토 중 관찰", "검토 중 후속 내용", 11L)), List.of("기존 출처 설명")));
         when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(
                 finding(11L, 101L, "기사", "https://example.com/pending")));
-        when(feedbackStore.eventFeedback(17L)).thenReturn(List.of(new FeedbackModels.Feedback(
-                1L, null, null, 17L, null, FeedbackModels.Category.SUMMARY_ERROR, "검토 요청", false,
-                "request", FeedbackModels.Status.PENDING, null, null,
-                LocalDateTime.of(2026, 10, 12, 10, 0), null, "a".repeat(64))));
-        for (ChannelType type : ChannelType.values()) {
-            String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
-            assertTrue(body.contains("검토 중 사건"));
-            assertTrue(body.contains("검토 중 요약"));
-            assertTrue(body.contains("https://example.com/pending"));
+        for (FeedbackModels.Status status : FeedbackModels.Status.values()) {
+            String verdict = status == FeedbackModels.Status.COMPLETED ? "NO_ERROR" : null;
+            stubReviewedEvent(report, event, category, status, verdict);
+            for (ChannelType type : ChannelType.values()) {
+                String body = renderer.render(report, channel(type, 3500)).chunks().getFirst();
+                assertFalse(body.contains("검토 중"), category + "/" + status + "/" + type);
+                assertFalse(body.contains("기존 요약"));
+                assertFalse(body.contains("기존 출처 설명"));
+                assertFalse(body.contains("기사별 대체 요약"));
+                assertFalse(body.contains("https://example.com/pending"));
+                assertTrue(body.contains("이번 수집에서 새롭게 정리할 주요 내용이 없습니다."));
+            }
         }
-        org.mockito.Mockito.verifyNoInteractions(eventSnapshots);
+        assertEquals(List.of("기존 요약"), report.getStructuredContent().executiveSummary());
+    }
+
+    @Test
+    void excludedEventCannotReturnThroughSavedInsightWhenValidEventSharesEvidence() {
+        var rejected = event("제외 사건", "제외 요약", "", 11L, 12L);
+        var retained = event("정상 사건", "정상 요약", "", 12L, 13L);
+        var stored = new ReportContent(List.of("제외 종합 요약"), List.of(rejected, retained),
+                List.of(watch("제외 관찰", "제외 후속 내용", 12L)), List.of("제외 출처 설명"));
+        var report = structuredReport(stored);
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(
+                finding(11L, 111L, "제외 전용 기사", "https://example.com/rejected"),
+                finding(12L, 112L, "공유 기사", "https://example.com/shared"),
+                finding(13L, 113L, "정상 전용 기사", "https://example.com/retained")));
+        stubReviewedEvent(report, rejected, FeedbackModels.Category.PREFERENCE, FeedbackModels.Status.COMPLETED, "NO_ERROR");
+        var insight = NotificationInsightTestSupport.insight(List.of(
+                new Overview("제외된 공유 근거 해석", List.of("12:0"), "제외된 전제"),
+                new Overview("정상 독립 근거 해석", List.of("13:0"), "정상 전제")), List.of());
+
+        for (ChannelType type : ChannelType.values()) {
+            String body = renderer.render(report, channel(type, 3500), insight).chunks().getFirst();
+            assertFalse(body.contains("제외"), body);
+            assertFalse(body.contains("https://example.com/rejected"));
+            assertTrue(body.contains("정상 사건"));
+            assertTrue(body.contains("정상 요약"));
+            assertTrue(body.contains("정상 독립 근거 해석"));
+            assertTrue(body.contains("https://example.com/shared"));
+            assertTrue(body.contains("https://example.com/retained"));
+        }
+        assertEquals(stored, report.getStructuredContent());
     }
 
     private void stubRejectedEvent(NewsReport report, ReportContent.ImportantEvent event) {
+        stubReviewedEvent(report, event, FeedbackModels.Category.SUMMARY_ERROR, FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR");
+    }
+
+    private void stubReviewedEvent(NewsReport report, ReportContent.ImportantEvent event,
+                                   FeedbackModels.Category category, FeedbackModels.Status status, String verdict) {
         String key = "a".repeat(64);
         var item = new FeedbackModels.Item(null, null, null, List.of(), null, null, null, null,
                 null, null, null, new FeedbackModels.EventContext(key, 0, event.title(), event.summaryKo(),
                 event.significance(), event.sourceFindingIds(), List.of(), List.of(), null));
         when(eventSnapshots.capture(eq(report), any(ReportFindings.Visible.class))).thenReturn(List.of(item));
         when(feedbackStore.eventFeedback(report.getId())).thenReturn(List.of(new FeedbackModels.Feedback(
-                1L, null, null, report.getId(), null, FeedbackModels.Category.SUMMARY_ERROR, "오류 검토", false,
-                "request", FeedbackModels.Status.COMPLETED, "CONFIRMED_ERROR", "오류 확인",
-                LocalDateTime.of(2026, 10, 12, 10, 0), null, key)));
+                1L, null, null, report.getId(), null, category, "의견", false,
+                "request", status, verdict, "검토 결과",
+                LocalDateTime.of(2026, 10, 12, 10, 0), item, key)));
     }
 
     private ReportEventFeedbackProjection.View view(NewsReport report, List<Finding> findings, boolean filtered) {

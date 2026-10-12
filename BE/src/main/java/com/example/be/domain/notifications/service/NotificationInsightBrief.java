@@ -17,8 +17,16 @@ record NotificationInsightBrief(String label, List<Item> items) {
     static final String AI_NOTICE = "AI 해석 · 원문 사실과 구분해 확인하세요.";
 
     static NotificationInsightBrief from(ReportInsightDTO.AudienceInsight insight, List<Finding> findings) {
+        return from(insight, findings, Set.of());
+    }
+
+    static NotificationInsightBrief from(ReportInsightDTO.AudienceInsight insight, List<Finding> findings,
+                                          Set<Long> excludedEvidenceFindingIds) {
         if (insight == null) return null;
         Map<Long, Finding> visible = findings.stream()
+                // An allowed event can share a source with an excluded event. Saved interpretations
+                // bind to findings, not events, so that shared source cannot validate an interpretation.
+                .filter(finding -> !excludedEvidenceFindingIds.contains(finding.getId()))
                 .collect(Collectors.toMap(Finding::getId, Function.identity(), (first, duplicate) -> first));
         Set<String> allowedClaims = new HashSet<>();
         for (var fact : insight.facts()) {

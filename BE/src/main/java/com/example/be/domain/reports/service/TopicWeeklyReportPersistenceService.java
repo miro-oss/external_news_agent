@@ -42,19 +42,20 @@ public class TopicWeeklyReportPersistenceService {
         NewsReport existing = reports.findByReportScopeAndReportDateAndTopicId(ReportScope.WEEKLY, monday, topicId).orElse(null);
         if (existing != null) {
             existing.restore();
-            return new Reservation(existing.getId(), false, existing.getReportStatus() != ReportStatus.PENDING,
-                    existing.getWeeklyInput());
+            return new Reservation(existing.getId(), false, existing.getReportStatus() != ReportStatus.PENDING, existing.getWeeklyInput());
         }
         if (weekly.hasUnfinishedTopicInputs(topicId, monday)) throw new ReportException(ReportErrorCode.TOPIC_INPUT_PENDING);
-        var selections = monday.datesUntil(monday.plusWeeks(1))
-                .map(date -> selector.select(topicId, topic.getName(), date))
+        // This preparation only reads DB-backed evidence. Paid evaluation belongs to the reservation owner.
+        var prepared = monday.datesUntil(monday.plusWeeks(1))
+                .map(date -> selector.prepare(topicId, topic.getName(), date)).toList();
+        var selections = prepared.stream().map(selector::preview)
                 .filter(selection -> !selection.findings().isEmpty()).toList();
         if (selections.isEmpty()) throw new ReportException(ReportErrorCode.TOPIC_INPUT_EMPTY);
         var sourceDates = selections.stream().map(selection -> selection.source().reportDate()).toList();
         List<LocalDate> missingDates = monday.datesUntil(monday.plusWeeks(1)).filter(date -> !sourceDates.contains(date)).toList();
         var input = new WeeklyReportInput(monday, monday.plusDays(6), selections.stream()
                 .map(TopicWeeklyReportSelector.Selection::source).toList(), missingDates, topicId, topic.getName());
-        var runs = selections.stream().flatMap(selection -> selection.findings().stream()).map(Finding::getRun)
+        var runs = prepared.stream().flatMap(selection -> selection.candidates().stream()).map(Finding::getRun)
                 .distinct().sorted(Comparator.comparing(run -> run.getStartedAt())).toList();
         var contexts = runs.stream().map(ReportCollectionContext::from)
                 .map(context -> new ReportCollectionContext(context.runId(), context.topics().stream()
@@ -66,8 +67,13 @@ public class TopicWeeklyReportPersistenceService {
                 .reflectedFindingIds(input.sourceFindingIds()).coverageRecorded(true).comparisonInputUsable(false)
                 .title(input.title()).markdownBody("보고서 생성이 진행 중입니다.").modelName("pending-report-v1")
                 .reportStatus(ReportStatus.PENDING).generatedAt(now).build());
-        return new Reservation(report.getId(), true, false, input);
+        return new Reservation(report.getId(), true, false, input, prepared);
     }
 
-    public record Reservation(Long reportId, boolean owner, boolean ready, WeeklyReportInput input) { }
+    public record Reservation(Long reportId, boolean owner, boolean ready, WeeklyReportInput input,
+                              List<TopicWeeklyReportSelector.Prepared> prepared) {
+        public Reservation(Long reportId, boolean owner, boolean ready, WeeklyReportInput input) {
+            this(reportId, owner, ready, input, List.of());
+        }
+    }
 }

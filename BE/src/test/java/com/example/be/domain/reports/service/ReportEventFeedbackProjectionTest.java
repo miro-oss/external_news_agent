@@ -174,6 +174,66 @@ class ReportEventFeedbackProjectionTest {
         assertEquals(List.of(12L, 13L), view.findings().stream().map(Finding::getId).toList());
         assertEquals(List.of(12L, 13L), view.readingContent().structuredContent().importantEvents().getFirst().sourceFindingIds());
         assertTrue(view.readingContent().structuredContent().watchItems().isEmpty());
+        assertEquals(Set.of(11L, 12L), view.excludedEvidenceFindingIds());
+    }
+
+    @Test void everySubmittedLocalOpinionIsDeliveryOnlyRegardlessOfCategoryOrReviewState() {
+        var rejected = event("의견 보낸 사건", "전달 제외 요약", 11L, 12L);
+        var retained = event("남길 사건", "남길 요약", 12L, 13L);
+        var content = new ReportContent(List.of("전달 제외 내용이 섞인 요약"), List.of(rejected, retained),
+                List.of(new ReportContent.WatchItem("제외 후속", "후속 이유", List.of(12L))), List.of());
+        var report = report(content);
+        var visible = visible(11L, 12L, 13L);
+        when(snapshots.capture(report, visible)).thenReturn(List.of(item('a', 0, rejected), item('b', 1, retained)));
+        for (Category category : Category.values()) for (Status status : Status.values()) {
+            var submitted = review('a', category, status, null, null);
+            var delivered = projection.projectForDelivery(report, visible, List.of(submitted));
+            assertEquals(List.of(retained), delivered.readingContent().structuredContent().importantEvents());
+            assertEquals(List.of("남길 요약"), delivered.readingContent().structuredContent().executiveSummary());
+            assertTrue(delivered.readingContent().structuredContent().watchItems().isEmpty());
+            assertEquals(List.of(12L, 13L), delivered.findings().stream().map(Finding::getId).toList());
+            assertEquals(Set.of(11L, 12L), delivered.excludedEvidenceFindingIds());
+            assertSame(content, projection.project(report, visible, List.of(submitted)).readingContent().structuredContent());
+            var personal = delivered.suppress(report, Set.of(13L));
+            assertTrue(personal.findings().isEmpty());
+            assertEquals(Set.of(11L, 12L, 13L), personal.excludedEvidenceFindingIds());
+        }
+        assertSame(content, report.getStructuredContent());
+    }
+
+    @Test void changedEventRevisionStillOmitsVerifiedOriginalEvidenceOnlyForDelivery() {
+        var revised = event("문구가 바뀐 제출 사건", "새 문구", 11L);
+        var retained = event("다른 사건", "다른 요약", 12L);
+        var content = new ReportContent(List.of("원래 요약"), List.of(revised, retained), List.of(), List.of());
+        var report = report(content);
+        var visible = visible(11L, 12L);
+        when(snapshots.capture(report, visible)).thenReturn(List.of(item('b', 0, revised), item('c', 1, retained)));
+        var submitted = withInput(review('a', Category.PREFERENCE, Status.FAILED, null, null),
+                item('a', 0, event("원래 제출 사건", "원래 요약", 11L)), 17L);
+
+        var delivered = projection.projectForDelivery(report, visible, List.of(submitted));
+
+        assertEquals(List.of(retained), delivered.readingContent().structuredContent().importantEvents());
+        assertEquals(List.of(12L), delivered.findings().stream().map(Finding::getId).toList());
+        assertEquals(Set.of(11L), delivered.excludedEvidenceFindingIds());
+        assertSame(content, projection.project(report, visible, List.of(submitted)).readingContent().structuredContent());
+    }
+
+    @Test void staleInputMustBelongToTheSameLocalReportAndEvent() {
+        var event = event("그대로 남길 사건", "요약", 11L);
+        var content = new ReportContent(List.of("요약"), List.of(event), List.of(), List.of());
+        var report = report(content);
+        var visible = visible(11L);
+        when(snapshots.capture(report, visible)).thenReturn(List.of(item('b', 0, event)));
+        var local = review('a', Category.PREFERENCE, Status.COMPLETED, "PREFERENCE", null);
+        for (var invalid : List.of(local,
+                withInput(local, item('c', 0, event), 17L),
+                withInput(local, item('a', 0, event), 18L),
+                withInput(review('a', Category.PREFERENCE, Status.PENDING, null, 99L), item('a', 0, event), 17L))) {
+            var delivered = projection.projectForDelivery(report, visible, List.of(invalid));
+            assertSame(content, delivered.readingContent().structuredContent());
+            assertTrue(delivered.excludedEvidenceFindingIds().isEmpty());
+        }
     }
 
     @Test void personalSuppressionKeepsProjectedEventsWithoutRegeneratingRejectedSharedClaims() {
@@ -280,5 +340,10 @@ class ReportEventFeedbackProjectionTest {
     private static Feedback review(char key, Category category, Status status, String verdict, Long recipient) {
         return new Feedback(1L, null, recipient, 17L, null, category, "의견", false, "hash", status, verdict, "검토 설명",
                 LocalDateTime.of(2026, 10, 1, 12, 0), null, String.valueOf(key).repeat(64));
+    }
+    private static Feedback withInput(Feedback review, Item input, long reportId) {
+        return new Feedback(review.id(), review.capabilityId(), review.recipientId(), reportId, review.itemId(),
+                review.category(), review.comment(), review.allowPersonalization(), review.requestHash(), review.status(),
+                review.verdict(), review.diagnosis(), review.createdAt(), input, review.eventKey());
     }
 }

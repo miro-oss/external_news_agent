@@ -429,7 +429,9 @@ def test_http_response_keeps_public_contract_without_internal_assessments(monkey
             headers={"X-Agent-Token": "synthetic-test-only"},
         )
     assert response.status_code == 200
-    assert set(response.json()) == {"verdict", "diagnosis", "evidence", "proposedPolicy", "meta"}
+    assert set(response.json()) == {
+        "verdict", "diagnosis", "evidence", "proposedPolicy", "proposedCompanyCriterion", "meta"
+    }
     assert response.json()["verdict"] == "CONFIRMED_ERROR"
     assert response.json()["proposedPolicy"] is None
     assert response.json()["meta"]["promptVersion"] == PROMPT_VERSION

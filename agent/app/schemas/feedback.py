@@ -120,6 +120,7 @@ class FeedbackReviewOutput(AgentModel):
     diagnosis: str = Field(min_length=1, max_length=2000)
     evidence: list[FeedbackEvidence] = Field(max_length=10)
     proposed_policy: ProposedPolicy | None = None
+    proposed_company_criterion: ProposedPolicy | None = None
 
 
 class FeedbackPassageReference(AgentModel):
@@ -152,6 +153,7 @@ class FeedbackReviewResponse(FeedbackReviewOutput):
 
 
 class FeedbackEvaluateRequest(_ArticleRequest):
+    scope: Literal["PERSONAL_DELIVERY", "COMPANY_REPORT"] = "PERSONAL_DELIVERY"
     topic: FeedbackTopic
     policies: list[DeliveryPolicy] = Field(max_length=20)
 

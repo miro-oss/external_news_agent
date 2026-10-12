@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.entity.AnalysisSource;
+import com.example.be.domain.companyinterest.CompanyInterestSelection;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.analysis.repository.FindingRepository;
@@ -29,10 +30,15 @@ public class TopicWeeklyReportSelector {
     private final IssueArticleRepository memberships;
     private final TopicRelevancePolicy relevance;
     private final DailyReportFeedbackExclusions feedbackExclusions;
+    private final CompanyInterestSelection companyInterests;
     @org.springframework.beans.factory.annotation.Value("${news.reports.daily.max-issues:10}")
     private int maxIssues = 10;
 
     public Selection select(Long topicId, String topicName, LocalDate date) {
+        return selectPrepared(prepare(topicId, topicName, date));
+    }
+
+    public Prepared prepare(Long topicId, String topicName, LocalDate date) {
         List<Finding> candidates = findings.findDailyReportCandidates(date.atStartOfDay(), date.plusDays(1).atStartOfDay());
         var links = OracleInClause.batches(candidates.stream().map(f -> f.getArticle().getId()).distinct().toList())
                 .stream().flatMap(ids -> memberships.findByArticleIds(ids).stream())
@@ -61,7 +67,34 @@ public class TopicWeeklyReportSelector {
                 .filter(TopicWeeklyReportSelector::hasSavedSentences).toList();
         // Exclude reviewed issues after choosing their latest observations, then fill the ranking with valid issues.
         var excluded = feedbackExclusions.forSelection(date, ReportComparisonSnapshot.captureByFinding(eligible, byFinding));
-        eligible = eligible.stream().filter(finding -> !excluded.contains(finding.getId()))
+        eligible = eligible.stream().filter(finding -> !excluded.contains(finding.getId())).toList();
+        return new Prepared(topicId, topicName, date, eligible, Map.copyOf(byFinding));
+    }
+
+    public Selection preview(Prepared prepared) {
+        return finish(prepared, new CompanyInterestSelection.Result(prepared.candidates(), List.of()));
+    }
+
+    public Selection selectPrepared(Prepared prepared) {
+        return finish(prepared, companyInterests.select(prepared.candidates(), prepared.topicId()));
+    }
+
+    public WeekSelection selectWeek(List<Prepared> prepared) {
+        if (prepared.isEmpty()) return new WeekSelection(List.of(), List.of());
+        // Freeze one criterion set for the entire report, including every day before its top-N limit.
+        var result = companyInterests.select(prepared.stream().flatMap(day -> day.candidates().stream()).distinct().toList(),
+                prepared.getFirst().topicId());
+        var retained = result.findings().stream().map(Finding::getId).collect(Collectors.toSet());
+        return new WeekSelection(prepared.stream().map(day -> finish(day,
+                new CompanyInterestSelection.Result(day.candidates().stream().filter(f -> retained.contains(f.getId())).toList(), List.of()))).toList(),
+                result.applications());
+    }
+
+    private Selection finish(Prepared prepared, CompanyInterestSelection.Result companySelection) {
+        var byFinding = prepared.issues();
+        var date = prepared.date();
+        var topicName = prepared.topicName();
+        var eligible = companySelection.findings().stream()
                 .sorted(Comparator.comparing((Finding f) -> byFinding.get(f.getId()).getImportanceScore(),
                         Comparator.nullsLast(Comparator.reverseOrder())).thenComparing(f -> byFinding.get(f.getId()).getId()))
                 .limit(Math.max(1, Math.min(50, maxIssues))).toList();
@@ -74,7 +107,7 @@ public class TopicWeeklyReportSelector {
                 events, List.of(), List.of());
         var source = new WeeklyReportInput.DailySource(null, date, topicName + " · " + date + " 분석", "", content,
                 eligible.stream().map(Finding::getId).toList(), snapshot);
-        return new Selection(source, eligible);
+        return new Selection(source, eligible, companySelection.applications());
     }
 
     private static String qualified(FindingKeyPoint point) {
@@ -94,5 +127,13 @@ public class TopicWeeklyReportSelector {
                         && section.text() != null && !section.text().isBlank())));
     }
 
-    public record Selection(WeeklyReportInput.DailySource source, List<Finding> findings) { }
+    public record Prepared(Long topicId, String topicName, LocalDate date, List<Finding> candidates,
+                           Map<Long, NewsIssue> issues) { }
+
+    public record WeekSelection(List<Selection> selections, List<CompanyInterestSelection.Application> applications) { }
+
+    public record Selection(WeeklyReportInput.DailySource source, List<Finding> findings,
+                            List<CompanyInterestSelection.Application> applications) {
+        public Selection(WeeklyReportInput.DailySource source, List<Finding> findings) { this(source, findings, List.of()); }
+    }
 }

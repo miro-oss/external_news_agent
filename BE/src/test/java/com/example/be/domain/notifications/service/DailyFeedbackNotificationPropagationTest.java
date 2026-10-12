@@ -86,31 +86,31 @@ class DailyFeedbackNotificationPropagationTest {
 
     @ParameterizedTest(name = "{0}, topic weekly={1}")
     @MethodSource("channelsAndScopes")
-    void completedDailyDecisionImmediatelyFiltersExistingWeeklyPreviewAndBothDeliveryEntries(
+    void submittedDailyPreferenceImmediatelyFiltersExistingWeeklyPreviewAndBothDeliveryEntries(
             ChannelType channelType, boolean topicWeekly) {
         Fixture fixture = fixture(topicWeekly, true);
         prepare(fixture, Set.of());
-        Feedback processing = review(fixture, Status.PROCESSING);
-        Feedback completed = review(fixture, Status.COMPLETED);
-        when(store.eventReviewStates(anyCollection())).thenReturn(List.of(processing));
-        assertTrue(preview(fixture.weekly(), channelType).contains("주간 오류 제목"));
+        for (Status status : Status.values()) {
+            Feedback submitted = review(fixture, Category.PREFERENCE, status,
+                    status == Status.COMPLETED ? "NO_ERROR" : null);
+            when(store.eventFeedback(DAILY_ID)).thenReturn(List.of(submitted));
+            clearInvocations(feedback);
+            for (String body : allEntryPoints(fixture.weekly(), channelType)) {
+                assertRejectedContentAbsent(body);
+                assertTrue(body.contains("정상 주간 사건"));
+                assertTrue(body.contains("정상 주간 요약"));
+                assertTrue(body.contains("정상 후속 확인"));
+                assertTrue(body.contains("https://example.com/source-22"));
+            }
 
-        // The same already-generated report is read again after its DAILY review finishes.
-        when(store.eventReviewStates(anyCollection())).thenReturn(List.of(completed));
-        for (String body : allEntryPoints(fixture.weekly(), channelType)) {
-            assertRejectedContentAbsent(body);
-            assertTrue(body.contains("정상 주간 사건"));
-            assertTrue(body.contains("정상 주간 요약"));
-            assertTrue(body.contains("정상 후속 확인"));
-            assertTrue(body.contains("https://example.com/source-22"));
-        }
-
-        for (var view : preparedViews(fixture.weekly())) {
-            assertTrue(view.excludedEvents());
-            assertEquals(List.of(22L), view.findings().stream().map(Finding::getId).toList());
-            assertEquals(List.of("정상 주간 사건"), view.readingContent().structuredContent().importantEvents()
-                    .stream().map(ReportContent.ImportantEvent::title).toList());
-            assertFalse(view.readingContent().markdownBody().contains("주간 오류"));
+            for (var view : preparedViews(fixture.weekly())) {
+                assertTrue(view.excludedEvents());
+                assertEquals(List.of(22L), view.findings().stream().map(Finding::getId).toList());
+                assertEquals(List.of("정상 주간 사건"), view.readingContent().structuredContent().importantEvents()
+                        .stream().map(ReportContent.ImportantEvent::title).toList());
+                assertFalse(view.readingContent().markdownBody().contains("주간 오류"));
+                assertTrue(view.excludedEvidenceFindingIds().contains(21L));
+            }
         }
         verify(store, atLeastOnce()).eventFeedback(WEEKLY_ID);
         assertTrue(store.eventFeedback(WEEKLY_ID).isEmpty(), "No weekly-local review is required");
@@ -126,7 +126,7 @@ class DailyFeedbackNotificationPropagationTest {
         Fixture fixture = fixture(topicWeekly, false);
         prepare(fixture, Set.of());
         Feedback completed = review(fixture, Status.COMPLETED);
-        when(store.eventReviewStates(anyCollection())).thenReturn(List.of(completed));
+        when(store.eventFeedback(DAILY_ID)).thenReturn(List.of(completed));
 
         for (String body : allEntryPoints(fixture.weekly(), channelType)) {
             assertRejectedContentAbsent(body);
@@ -146,7 +146,7 @@ class DailyFeedbackNotificationPropagationTest {
         Fixture fixture = fixture(topicWeekly, true);
         prepare(fixture, Set.of(22L));
         Feedback completed = review(fixture, Status.COMPLETED);
-        when(store.eventReviewStates(anyCollection())).thenReturn(List.of(completed));
+        when(store.eventFeedback(DAILY_ID)).thenReturn(List.of(completed));
 
         for (boolean queued : List.of(false, true)) {
             String body = delivery(fixture.weekly(), channelType, queued);
@@ -170,11 +170,15 @@ class DailyFeedbackNotificationPropagationTest {
     }
 
     private Feedback review(Fixture fixture, Status status) {
+        return review(fixture, Category.SUMMARY_ERROR, status, "CONFIRMED_ERROR");
+    }
+
+    private Feedback review(Fixture fixture, Category category, Status status, String verdict) {
         Item original = snapshots.capture(fixture.daily(), new ReportFindings.Visible(List.of(fixture.dailyFinding()), false))
                 .getFirst();
         assertNull(original.event().unavailableReason());
-        return new Feedback(1L, null, null, DAILY_ID, null, Category.SUMMARY_ERROR, "오류 의견", false,
-                "request-hash", status, "CONFIRMED_ERROR", "확인된 오류", FROM.atTime(12, 0), original, original.event().key());
+        return new Feedback(1L, null, null, DAILY_ID, null, category, "의견", false,
+                "request-hash", status, verdict, "검토 결과", FROM.atTime(12, 0), original, original.event().key());
     }
 
     private List<ReportEventFeedbackProjection.View> preparedViews(NewsReport report) {

@@ -1,5 +1,8 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.companyinterest.CompanyInterestSelectionTestSupport;
+import com.example.be.domain.companyinterest.CompanyInterestSelection;
+
 import com.example.be.domain.analysis.entity.*;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.analysis.relevance.*;
@@ -25,8 +28,25 @@ class TopicWeeklyReportSelectorTest {
     private final TopicRelevanceStore store = mock(TopicRelevanceStore.class);
     private final DailyReportFeedbackExclusions feedbackExclusions = mock(DailyReportFeedbackExclusions.class);
     private final TopicWeeklyReportSelector selector = new TopicWeeklyReportSelector(
-            findings, memberships, new TopicRelevancePolicy(store), feedbackExclusions);
+            findings, memberships, new TopicRelevancePolicy(store), feedbackExclusions, CompanyInterestSelectionTestSupport.passThrough());
     private final LocalDate date = LocalDate.of(2026, 9, 21);
+
+    @Test
+    void companySelectionRefillsTopicTopNAndFreezesOneEvaluationForTheWholeWeek() {
+        var interests = mock(CompanyInterestSelection.class);
+        var selecting = new TopicWeeklyReportSelector(findings, memberships, new TopicRelevancePolicy(store), feedbackExclusions, interests);
+        ReflectionTestUtils.setField(selecting, "maxIssues", 1);
+        Finding high = finding(1, 1L, 1);
+        Finding replacement = finding(2, 1L, 1);
+        inputs(List.of(high, replacement), List.of(link(high, 10, 1L, 100), link(replacement, 20, 1L, 10)));
+        var prepared = selecting.prepare(1L, "AI", date);
+        assertEquals(List.of(high), selecting.preview(prepared).findings());
+        verifyNoInteractions(interests);
+        when(interests.select(anyList(), eq(1L))).thenReturn(new CompanyInterestSelection.Result(List.of(replacement), List.of()));
+        var selected = selecting.selectWeek(List.of(prepared));
+        assertEquals(List.of(replacement), selected.selections().getFirst().findings());
+        verify(interests).select(argThat(values -> values.size() == 2), eq(1L));
+    }
 
     @Test
     void selectsTopicBeforeGlobalTopTenAndKeepsDetachedSupportedClaims() {
