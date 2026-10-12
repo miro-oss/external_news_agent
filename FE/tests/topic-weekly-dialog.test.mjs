@@ -61,15 +61,27 @@ test('topic loading, empty, and error states prevent invalid submission and prov
   }
 })
 
-test('creating locks changes and dismissal; observing an existing pending report permits dismissal only', () => {
-  const pending = render({ initialTopicId: 29, pending: true })
-  const controls = pending.match(/<(?:input|select|button)\b[^>]*>/g) ?? []
-  assert.ok(controls.length >= 7)
-  assert.ok(controls.every(control => control.includes('disabled=""')))
-  const waiting = render({ initialTopicId: 29, waiting: true })
-  assert.match(waiting, /이 창을 닫아도 생성은 계속됩니다/)
-  assert.match(waiting, /<button type="button" class="secondary-button">닫기/)
-  assert.match(waiting, /<button type="submit" class="primary-button" disabled="">만드는 중/)
+test('both submitting and waiting allow dismissal while keeping changes and repeat submission locked', () => {
+  for (const state of [{ pending: true }, { waiting: true }]) {
+    const html = render({ initialTopicId: 29, ...state })
+    assert.match(html, /다른 화면/)
+    const close = html.match(/<button[^>]*aria-label="주제별 주간 보고서 만들기 닫기"[^>]*>/)?.[0]
+    assert.ok(close)
+    assert.doesNotMatch(close, /disabled/)
+    assert.match(html, /<button type="button" class="secondary-button">닫고 기다리기/)
+    assert.match(html, /<select[^>]*disabled=""/)
+    assert.match(html, /<input[^>]*type="date"[^>]*disabled=""/)
+    assert.match(html, /aria-label="이전 주 선택" disabled=""/)
+    assert.match(html, /aria-label="다음 주 선택" disabled=""/)
+    assert.match(html, /<button type="submit" class="primary-button" disabled="">만드는 중/)
+  }
+})
+
+test('reopening an active job restores its topic and requested week rather than the current default', () => {
+  const html = render({ initialTopicId: 29, initialWeekStart: '2026-09-07', pending: true })
+  assert.match(html, /<option value="29" selected="">HBM 시장/)
+  assert.match(html, /type="date"[^>]*value="2026-09-07"/)
+  assert.match(html, /dateTime="2026-09-13"/i)
 })
 
 test('API failures are shown inside the form with the selected topic retained', () => {

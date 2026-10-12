@@ -1,9 +1,9 @@
-import { useEffect, useState, type RefObject } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { ApiError } from '../../api/client'
-import { createTopicWeeklyReportOptions, type TopicWeeklyReportCreated } from '../../api/topicWeeklyReport'
-import { useReports, useTopics } from '../../api/queries'
+import type { TopicWeeklyReportCreated } from '../../api/topicWeeklyReport'
+import { useTopics } from '../../api/queries'
 import { TopicWeeklyReportDialog } from './TopicWeeklyReportDialog'
+import { useTopicWeeklyReportTask } from './topicWeeklyReportTaskContext'
 
 export function TopicWeeklyReportCreate({ id, initialTopicId, now, onDismiss, onReady, returnFocusRef }: {
   id: string
@@ -13,31 +13,33 @@ export function TopicWeeklyReportCreate({ id, initialTopicId, now, onDismiss, on
   onReady: (result: TopicWeeklyReportCreated) => void
   returnFocusRef: RefObject<HTMLButtonElement | null>
 }) {
-  const client = useQueryClient()
   const topics = useTopics(true)
-  const create = useMutation(createTopicWeeklyReportOptions())
-  const [waiting, setWaiting] = useState<TopicWeeklyReportCreated | null>(null)
-  const reports = useReports('WEEKLY', { enabled: waiting !== null, refetchInterval: waiting ? 3000 : false })
+  const { task, pollingError, start, clear } = useTopicWeeklyReportTask()
+  // Preserve the draft while a terminal task notice is cleared on the first edit.
+  const [initialDraft] = useState(task?.request)
+  const openedResult = useRef<number | null>(task?.status === 'ready' ? task.result?.reportId ?? null : null)
+  const busy = task?.status === 'creating' || task?.status === 'waiting'
+  const topicOptions = topics.data?.content ?? []
+  const visibleTopics = busy && task ? [
+    { id: task.request.topicId, name: task.topicName, active: true },
+    ...topicOptions.filter(topic => topic.id !== task.request.topicId),
+  ] : topicOptions
 
   useEffect(() => {
-    if (waiting && reports.data?.content.some(report => report.id === waiting.reportId)) {
-      onReady({ ...waiting, reportReady: true })
+    if (task?.status === 'ready' && task.result && openedResult.current !== task.result.reportId) {
+      openedResult.current = task.result.reportId
+      onReady(task.result)
     }
-  }, [onReady, reports.data, waiting])
+  }, [onReady, task])
 
-  return <TopicWeeklyReportDialog id={id} initialTopicId={initialTopicId} now={now}
-    topics={topics.data?.content ?? []} topicsLoading={topics.isPending}
+  return <TopicWeeklyReportDialog id={id} initialTopicId={initialDraft?.topicId ?? initialTopicId}
+    initialWeekStart={initialDraft?.weekStartDate} now={now}
+    topics={visibleTopics} topicsLoading={topics.isPending}
     topicsError={topics.isError ? topics.error instanceof ApiError ? topics.error.message : '주제를 불러오지 못했습니다. 다시 시도해 주세요.' : null}
-    onRetryTopics={() => { void topics.refetch() }} pending={create.isPending} waiting={waiting !== null}
-    error={waiting && reports.isError ? '완료 여부를 확인하지 못했습니다. 잠시 후 다시 확인합니다.'
-      : create.error ? create.error instanceof ApiError ? create.error.message : '보고서를 만들지 못했습니다. 다시 시도해 주세요.' : null}
-    onDraftChange={create.reset} returnFocusRef={returnFocusRef} onDismiss={onDismiss}
-    onCreate={(topicId, weekStartDate) => create.mutate({ topicId, weekStartDate }, {
-      onSuccess: result => {
-        setWaiting(result)
-        // The completed report is opened only after it appears in the existing list.
-        // A concurrent PENDING request never triggers a second POST or a premature detail request.
-        void client.invalidateQueries({ queryKey: ['reports', 'list'] })
-      },
-    })} />
+    onRetryTopics={() => { void topics.refetch() }} pending={task?.status === 'creating'} waiting={task?.status === 'waiting'}
+    error={pollingError ?? task?.error} onDraftChange={clear} returnFocusRef={returnFocusRef} onDismiss={onDismiss}
+    onCreate={(topicId, weekStartDate) => {
+      openedResult.current = null
+      start({ topicId, weekStartDate }, topics.data?.content.find(topic => topic.id === topicId)?.name ?? `주제 #${topicId}`)
+    }} />
 }

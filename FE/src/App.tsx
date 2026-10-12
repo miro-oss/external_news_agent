@@ -4,6 +4,7 @@ import bistelligenceLogo from './assets/bistelligence-logo.png'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { Segmented, type SegmentedOption } from './components/Segmented'
 import { ReportsPage } from './features/reports/ReportsPage'
+import { TopicWeeklyReportTaskBanner, TopicWeeklyReportTaskProvider } from './features/reports/TopicWeeklyReportTaskProvider'
 import { NotificationsPage } from './features/notifications/NotificationsPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { FeedbackPage } from './features/feedback/FeedbackPage'
@@ -120,6 +121,7 @@ function App() {
   </ErrorBoundary>
 
   return (
+    <TopicWeeklyReportTaskProvider>
     <div className="app-shell">
       <nav className="app-nav" aria-label="주요 화면" data-scrolled={scrolled}>
         {/* 로고는 첫 화면인 수집 설정으로 돌아간다. */}
@@ -146,6 +148,7 @@ function App() {
           activeAria="current"
         />
       </nav>
+      <TopicWeeklyReportTaskBanner />
       {/*
         key에 화면을 건다. 한 화면이 터진 뒤에도 다른 탭을 누르면 경계가 새로 붙어 상태가
         초기화된다 — key가 없으면 한 번 실패한 경계가 계속 실패 화면을 들고 있어서, 탭을
@@ -157,6 +160,7 @@ function App() {
         {page === 'settings' && <SettingsPage />}
       </ErrorBoundary>
     </div>
+    </TopicWeeklyReportTaskProvider>
   )
 }
 
