@@ -48,6 +48,7 @@ class ReportEventFeedbackOracleIntegrationTests {
     @Autowired FeedbackStore store;
     @Autowired FeedbackWorker worker;
     @Autowired FeedbackLearningService learning;
+    @Autowired com.example.be.domain.companyinterest.CompanyInterestService companyInterests;
     @Autowired ObjectMapper json;
     @MockitoBean ReportEventSnapshotFactory snapshots;
     @MockitoBean FeedbackAgentGateway gateway;
@@ -264,6 +265,10 @@ class ReportEventFeedbackOracleIntegrationTests {
         worker.process(job(submitted.id()));
         var saved=store.byId(submitted.id()).orElseThrow();assertEquals(Status.COMPLETED,saved.status());
         assertTrue(saved.diagnosis().contains("개인 전달 기준은 변경하지 않았습니다"));
+        assertTrue(saved.diagnosis().contains("회사 관심 기준 초안을 저장했습니다"));
+        var draft=companyInterests.list().criteria().stream().filter(c->c.feedbackId()==submitted.id()).findFirst().orElseThrow();
+        assertEquals(com.example.be.domain.companyinterest.CompanyInterestModels.Status.DRAFT,draft.status());
+        assertNull(draft.lastApplication());
         assertFalse(saved.allowPersonalization());assertNull(saved.recipientId());
         assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM news_feedback_policies WHERE source_feedback_id=?",Integer.class,submitted.id()));
         assertTrue(json.valueToTree(deliveredFeedback.export(submitted.id()-1,1)).path("cases").isEmpty());

@@ -1,6 +1,7 @@
 package com.example.be.domain.feedback.service;
 
 import com.example.be.domain.feedback.repository.FeedbackStore;
+import com.example.be.domain.companyinterest.CompanyInterestStore;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -16,6 +17,7 @@ import static com.example.be.domain.feedback.model.FeedbackModels.*;
 @RequiredArgsConstructor
 public class FeedbackJobTransactions {
     private final FeedbackStore store;
+    private final CompanyInterestStore companyInterests;
     @Transactional
     public Optional<Job> claim(long id) { return store.claim(id,UUID.randomUUID().toString(),LocalDateTime.now(ApiTimeZone.ZONE)); }
     @Transactional
@@ -25,7 +27,9 @@ public class FeedbackJobTransactions {
         if(!store.finish(job,result,now))return;
         String diagnosis=result.path("diagnosis").asString();
         if(feedback.recipientId()==null) {
-            if(feedback.category()==Category.PREFERENCE)diagnosis+="\n이 의견은 보고서 이벤트 검토로 저장되며 개인 전달 기준은 변경하지 않았습니다.";
+            if(companyInterests.propose(feedback,result,now))
+                diagnosis+="\n회사 관심 기준 초안을 저장했습니다. 회사 관심 기준 탭에서 문구와 적용 주제를 확인하고 활성화하면 이후 새 보고서 선정에 사용합니다. 아직 실제 보고서에 반영된 상태는 아닙니다.";
+            if(feedback.category()==Category.PREFERENCE)diagnosis+="\n개인 전달 기준은 변경하지 않았습니다.";
             store.reviewed(feedback,result.path("verdict").asString(),diagnosis,result,now);
             return;
         }

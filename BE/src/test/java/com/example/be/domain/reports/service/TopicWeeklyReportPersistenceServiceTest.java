@@ -28,8 +28,12 @@ class TopicWeeklyReportPersistenceServiceTest {
 
     @BeforeEach void setup() {
         when(topics.findById(1L)).thenReturn(Optional.of(Topic.builder().id(1L).name("HBM").active(false).build()));
-        when(selector.select(anyLong(), anyString(), any())).thenAnswer(call -> new TopicWeeklyReportSelector.Selection(
-                new WeeklyReportInput.DailySource(null, call.getArgument(2), "empty", "", null, List.of()), List.of()));
+        when(selector.prepare(anyLong(), anyString(), any())).thenAnswer(call -> new TopicWeeklyReportSelector.Prepared(
+                call.getArgument(0), call.getArgument(1), call.getArgument(2), List.of(), java.util.Map.of()));
+        when(selector.preview(any())).thenAnswer(call -> {
+            TopicWeeklyReportSelector.Prepared prepared = call.getArgument(0);
+            return new TopicWeeklyReportSelector.Selection(new WeeklyReportInput.DailySource(null, prepared.date(), "empty", "", null, List.of()), List.of());
+        });
         when(reports.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
     }
 
@@ -69,9 +73,12 @@ class TopicWeeklyReportPersistenceServiceTest {
         run.getItems().add(CollectionRunItem.builder().topicSnapshot(otherTopic).build());
         Finding evidence = Finding.builder().id(9L).run(run).build();
         var source = new WeeklyReportInput.DailySource(null, monday, "HBM 분석", "", null, List.of(9L));
-        when(selector.select(1L, "HBM", monday)).thenReturn(new TopicWeeklyReportSelector.Selection(source, List.of(evidence)));
+        var prepared = new TopicWeeklyReportSelector.Prepared(1L, "HBM", monday, List.of(evidence), java.util.Map.of());
+        when(selector.prepare(1L, "HBM", monday)).thenReturn(prepared);
+        when(selector.preview(prepared)).thenReturn(new TopicWeeklyReportSelector.Selection(source, List.of(evidence)));
         var reservation = service.reserve(1L, monday, monday.plusWeeks(1).atStartOfDay());
         assertTrue(reservation.owner());
+        verify(selector, never()).selectPrepared(any());
         var captor = org.mockito.ArgumentCaptor.forClass(NewsReport.class); verify(reports).saveAndFlush(captor.capture());
         var saved = captor.getValue();
         assertEquals(List.of(monday), saved.getSourceAnalysisDates()); assertEquals(6, saved.getMissingReportDates().size());

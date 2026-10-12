@@ -15,10 +15,16 @@ public final class FeedbackResultValidator {
         if(!"INSUFFICIENT_EVIDENCE".equals(result.path("verdict").asString()) && result.path("evidence").isEmpty())throw invalid();
         var policy=result.path("proposedPolicy");
         if(!policy.isMissingNode() && !policy.isNull()) {
-            if(!"PREFERENCE".equals(request.path("feedback").path("category").asString())
+            if(request.path("event").isObject()
+                    || !"PREFERENCE".equals(request.path("feedback").path("category").asString())
                     || !request.path("feedback").path("allowPersonalization").asBoolean()
                     || !"PREFERENCE".equals(result.path("verdict").asString())
                     || !text(policy.path("instruction"),500) || !text(policy.path("reason"),500))throw invalid();
+        }
+        var company=result.path("proposedCompanyCriterion");
+        if(!company.isMissingNode() && !company.isNull()) {
+            if(!request.path("event").isObject() || !"PREFERENCE".equals(result.path("verdict").asString())
+                    || !text(company.path("instruction"),500) || !text(company.path("reason"),500))throw invalid();
         }
     }
     public static void evaluate(JsonNode request,JsonNode result) {

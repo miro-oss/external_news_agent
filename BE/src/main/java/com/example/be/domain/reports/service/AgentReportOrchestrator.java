@@ -77,6 +77,13 @@ public class AgentReportOrchestrator {
     private final FeedbackLearningService feedbackLearning;
     private final CollectionRunItemRepository runItems;
 
+    public List<Finding> companySelectionCandidates(List<Finding> findings) {
+        return representativeFindings(relevancePolicy.filterFindings(findings)).stream()
+                .filter(ReportFindings::hasFullText)
+                .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
+                .filter(FindingEvidencePolicy::hasSupportedEvidence).toList();
+    }
+
     public ReportDocument generate(CollectionRun run,
                                    List<Finding> findings,
                                    LocalDateTime generatedAt) {

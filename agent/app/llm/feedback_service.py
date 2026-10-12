@@ -1,4 +1,4 @@
-"""Evidence-bound feedback reflection and recipient-local delivery evaluation."""
+"""Evidence-bound feedback drafts and explicitly scoped selection evaluation."""
 
 import json
 import logging
@@ -31,8 +31,9 @@ from app.schemas.feedback import (
 )
 
 REVIEW_VERSION = "feedback-review.ko.v1"
-EVENT_REVIEW_VERSION = "feedback-event-review.ko.v1"
+EVENT_REVIEW_VERSION = "feedback-event-review.ko.v2"
 EVALUATE_VERSION = "feedback-evaluate.ko.v1"
+COMPANY_EVALUATE_VERSION = "feedback-company-evaluate.ko.v1"
 TOPIC_REVIEW_VERSION = "feedback-topic-review.ko.v1"
 _PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
 logger = logging.getLogger(__name__)
@@ -95,6 +96,14 @@ class FeedbackService:
                 existing = {policy.instruction for policy in request.active_policies}
                 if result.proposed_policy.instruction in existing:
                     raise ValueError("이미 활성화된 동일한 정책을 제안할 수 없습니다.")
+            if result.proposed_company_criterion is not None:
+                criterion = result.proposed_company_criterion
+                if not (is_event and result.verdict == "PREFERENCE"):
+                    raise ValueError(
+                        "이벤트의 관심 의견에만 회사 관심 기준 초안을 제안할 수 있습니다."
+                    )
+                if not criterion.instruction.strip() or not criterion.reason.strip():
+                    raise ValueError("회사 관심 기준과 제안 이유를 비워 둘 수 없습니다.")
             return result
 
         output_type = FeedbackTopicReviewOutput if is_topic_review else FeedbackReviewOutput
@@ -104,6 +113,9 @@ class FeedbackService:
         )
 
     def evaluate(self, request: FeedbackEvaluateRequest) -> FeedbackEvaluateResponse:
+        version = (
+            COMPANY_EVALUATE_VERSION if request.scope == "COMPANY_REPORT" else EVALUATE_VERSION
+        )
         if self._settings.mock or not request.policies:
             mock = self._settings.mock
             return FeedbackEvaluateResponse(
@@ -119,7 +131,7 @@ class FeedbackService:
                     )
                     for article in request.articles
                 ],
-                meta=_mock_meta(EVALUATE_VERSION),
+                meta=_mock_meta(version),
             )
 
         def validate(response: ProviderResponse) -> FeedbackEvaluateOutput:
@@ -145,10 +157,10 @@ class FeedbackService:
             result.decisions = [by_id[article.id] for article in request.articles]
             return result
 
-        result = self._call(request, EVALUATE_VERSION, FeedbackEvaluateOutput, validate)
+        result = self._call(request, version, FeedbackEvaluateOutput, validate)
         return FeedbackEvaluateResponse(
             **result.output.model_dump(),
-            meta=_meta(result.response, result.usage, EVALUATE_VERSION),
+            meta=_meta(result.response, result.usage, version),
         )
 
     def _call(self, request, version, output_type, validate, *, model_input=None):

@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.companyinterest.CompanyInterestSelectionTestSupport;
+
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -38,7 +40,7 @@ class ReportCreationServiceTest {
     private final ReportPersistenceService persistenceService = mock(ReportPersistenceService.class);
     private final NewsReportRepository reportRepository = mock(NewsReportRepository.class);
     private final ReportCreationService service = new ReportCreationService(
-            runRepository, findingRepository, reportOrchestrator, persistenceService, reportRepository);
+            runRepository, findingRepository, reportOrchestrator, persistenceService, reportRepository, CompanyInterestSelectionTestSupport.passThrough());
 
     @Test
     void describesMissingRunInGenerationFailure() {
@@ -147,9 +149,9 @@ class ReportCreationServiceTest {
         var notifications = mock(ReportNotificationAutomationService.class);
         var events = mock(ApplicationEventPublisher.class);
         var persistence = new ReportPersistenceService(
-                runRepository, reportRepository, notifications, observations, events);
+                runRepository, reportRepository, notifications, observations, events, CompanyInterestSelectionTestSupport.passThrough());
         var creation = new ReportCreationService(
-                runRepository, findingRepository, reportOrchestrator, persistence, reportRepository);
+                runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, CompanyInterestSelectionTestSupport.passThrough());
         when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
         when(runRepository.findReportContextById(42L)).thenReturn(Optional.of(run));
         when(observations.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);

@@ -39,8 +39,12 @@ public final class ReportFindings {
     public static Visible loadVisible(NewsReport report, FindingRepository repository) {
         if (report.getReportScope() == ReportScope.RUN) {
             List<Finding> all = repository.findForReportByRunId(report.getRunId());
-            List<Finding> visible = all.stream().filter(ReportFindings::hasFullText).toList();
-            return new Visible(ReportFindingOrder.sort(visible), visible.size() != all.size());
+            // Existing coverage preserves factual exclusions for their explanations, but company-suppressed
+            // candidates are in neither stored list and must never reappear in details or delivery.
+            List<Finding> selected = report.isCompanySelectionRecorded() ? all.stream().filter(finding ->
+                    report.getReflectedFindingIds().contains(finding.getId()) || report.getExcludedFindingIds().contains(finding.getId())).toList() : all;
+            List<Finding> visible = selected.stream().filter(ReportFindings::hasFullText).toList();
+            return new Visible(ReportFindingOrder.sort(visible), visible.size() != selected.size());
         }
         List<Long> ids = report.getReflectedFindingIds();
         if (ids.isEmpty()) {

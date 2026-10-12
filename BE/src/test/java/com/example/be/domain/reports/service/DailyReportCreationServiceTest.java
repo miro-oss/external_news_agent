@@ -38,7 +38,10 @@ class DailyReportCreationServiceTest {
 
     @BeforeEach
     void selectionStats() {
-        when(selector.selectWithStats(date, 10)).thenReturn(new DailyReportSelector.Selection(List.of(), 2, 3));
+        var prepared = new DailyReportSelector.Prepared(List.of(), 2, 3, java.util.Map.of(), 10);
+        when(selector.prepare(date, 10)).thenReturn(prepared);
+        when(selector.preview(prepared)).thenReturn(new DailyReportSelector.Selection(List.of(), 2, 3));
+        when(selector.selectPrepared(prepared)).thenReturn(new DailyReportSelector.Selection(List.of(), 2, 3));
         when(daily.sourceStats(date)).thenReturn(ReportSourceStats.empty());
     }
 
@@ -55,6 +58,8 @@ class DailyReportCreationServiceTest {
                 .thenReturn(new ReportPersistenceService.Reservation(77L, false));
         assertEquals(77L, service.generate(date));
         verifyNoInteractions(orchestrator);
+        verify(selector, never()).selectPrepared(any());
+        verify(reservation, never()).freezeSelection(any(), any(), any());
     }
 
     @Test
@@ -94,6 +99,6 @@ class DailyReportCreationServiceTest {
         when(fallback.generateDaily(anyList(), any(), any())).thenReturn(new ReportDocument("복구", "근거 없음", "fallback"));
         service.recoverInterrupted(cutoff);
         verify(persistence).completeRecovered(eq(77L), any(), any());
-        verifyNoInteractions(orchestrator, reservation);
+        verifyNoInteractions(orchestrator, reservation, selector);
     }
 }

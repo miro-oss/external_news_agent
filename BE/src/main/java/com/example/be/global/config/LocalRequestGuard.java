@@ -20,7 +20,7 @@ import java.util.Map;
 
 /** Keeps the unauthenticated product API inside its local PoC trust boundary. */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.HIGHEST_PRECEDENCE + 1)
 public class LocalRequestGuard extends OncePerRequestFilter {
 
     private final ObjectMapper objectMapper;

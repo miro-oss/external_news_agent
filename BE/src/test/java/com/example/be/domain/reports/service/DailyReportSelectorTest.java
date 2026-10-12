@@ -1,5 +1,8 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.companyinterest.CompanyInterestSelectionTestSupport;
+import com.example.be.domain.companyinterest.CompanyInterestSelection;
+
 import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.relevance.TopicRelevanceTestSupport;
 import com.example.be.domain.analysis.entity.*;
@@ -22,8 +25,26 @@ class DailyReportSelectorTest {
     private final TopicRelevancePolicy relevancePolicy = TopicRelevanceTestSupport.legacyPolicy();
     private final FindingRepository findings = mock(FindingRepository.class);
     private final IssueArticleRepository memberships = mock(IssueArticleRepository.class);
-    private final DailyReportSelector selector = new DailyReportSelector(findings, memberships, relevancePolicy);
+    private final DailyReportSelector selector = new DailyReportSelector(findings, memberships, relevancePolicy, CompanyInterestSelectionTestSupport.passThrough());
     private final Topic topic = Topic.builder().id(1L).build();
+
+    @Test
+    void companyExclusionPrecedesTopNAndUnownedPreparationNeverCallsIt() {
+        var interests = mock(CompanyInterestSelection.class);
+        var selecting = new DailyReportSelector(findings, memberships, relevancePolicy, interests);
+        Finding high = finding(1, 1, "grounded");
+        Finding replacement = finding(2, 1, "grounded");
+        LocalDate date = LocalDate.of(2026, 9, 3);
+        when(findings.findDailyReportCandidates(date.atStartOfDay(), date.plusDays(1).atStartOfDay())).thenReturn(List.of(high, replacement));
+        when(memberships.findByArticleIds(List.of(1L, 2L))).thenReturn(List.of(link(high, issue(10, 100)), link(replacement, issue(20, 10))));
+        var prepared = selecting.prepare(date, 1);
+        assertEquals(List.of(high), selecting.preview(prepared).findings());
+        verifyNoInteractions(interests);
+        when(interests.select(org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new CompanyInterestSelection.Result(List.of(replacement), List.of()));
+        assertEquals(List.of(replacement), selecting.selectPrepared(prepared).findings());
+        verify(interests).select(org.mockito.ArgumentMatchers.argThat(values -> values.size() == 2), org.mockito.ArgumentMatchers.isNull());
+    }
 
     @Test
     void sharedArticleUsesAcceptedTopicMembershipInsteadOfItsOriginalRejectedTopic() {

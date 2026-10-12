@@ -21,6 +21,21 @@ class ReportFullTextVisibilityTest {
     private final FindingRepository repository = mock(FindingRepository.class);
 
     @Test
+    void companySelectionStaysFrozenForRunReadsWithoutRewritingLegacyCoverage() {
+        Finding suppressed = finding(1, FetchStatus.FULLTEXT, "제외된 원문");
+        Finding retained = finding(2, FetchStatus.FULLTEXT, "보존된 원문");
+        when(repository.findForReportByRunId(42L)).thenReturn(List.of(suppressed, retained));
+        var legacy = NewsReport.builder().run(CollectionRun.builder().id(42L).build())
+                .coverageRecorded(true).reflectedFindingIds(List.of(2L)).build();
+        assertEquals(2, ReportFindings.loadVisible(legacy, repository).findings().size());
+        var selected = NewsReport.builder().run(CollectionRun.builder().id(42L).build())
+                .companySelectionRecorded(true).coverageRecorded(true).reflectedFindingIds(List.of(2L)).build();
+        var visible = ReportFindings.loadVisible(selected, repository);
+        assertEquals(List.of(retained), visible.findings());
+        assertFalse(visible.filtered());
+    }
+
+    @Test
     void runKeepsOnlyAvailableFullTextEvenWhenMetadataHasBodyText() {
         var report = NewsReport.builder().run(CollectionRun.builder().id(42L).build()).build();
         Finding available = finding(1, FetchStatus.FULLTEXT, "원문 문장");
@@ -80,6 +95,8 @@ class ReportFullTextVisibilityTest {
 
     private Finding finding(long id, FetchStatus status, String body) {
         return Finding.builder().id(id).analysisSource(AnalysisSource.LLM)
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.builder().score(java.math.BigDecimal.ZERO).build())
+                .relevance(com.example.be.domain.analysis.entity.Relevance.IMPORTANT)
                 .article(Article.builder().id(id).title("기사 " + id).fetchStatus(status).body(body)
                         .canonicalUrl("https://example.com/" + id).build())
                 .summary("확인한 요약 " + id)

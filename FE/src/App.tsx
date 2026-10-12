@@ -5,21 +5,23 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { Segmented, type SegmentedOption } from './components/Segmented'
 import { ReportsPage } from './features/reports/ReportsPage'
 import { NotificationsPage } from './features/notifications/NotificationsPage'
+import { CompanyInterestsPage } from './features/interests/CompanyInterestsPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { FeedbackPage } from './features/feedback/FeedbackPage'
 import { feedbackTokenFromHash, isFeedbackHash } from './features/feedback/feedbackState'
 
-const PAGES = ['reports', 'notifications', 'settings'] as const
+const PAGES = ['reports', 'notifications', 'company-interests', 'settings'] as const
 
 type Page = (typeof PAGES)[number] | 'feedback'
 
 const DEFAULT_PAGE: Page = 'settings'
 
-/* 왼쪽부터 수집 설정 · 리포트 · 알림 관리 순서로 표시한다. */
+/* 회사 관심 기준은 알림 관리 바로 옆에서 관리한다. */
 const NAV_OPTIONS: ReadonlyArray<SegmentedOption<Page>> = [
   { value: 'settings', label: '수집 설정' },
   { value: 'reports', label: '리포트' },
   { value: 'notifications', label: '알림 관리' },
+  { value: 'company-interests', label: '회사 관심 기준' },
 ]
 
 function hashValue() {
@@ -154,6 +156,7 @@ function App() {
       <ErrorBoundary key={page}>
         {page === 'reports' && <ReportsPage />}
         {page === 'notifications' && <NotificationsPage />}
+        {page === 'company-interests' && <CompanyInterestsPage />}
         {page === 'settings' && <SettingsPage />}
       </ErrorBoundary>
     </div>

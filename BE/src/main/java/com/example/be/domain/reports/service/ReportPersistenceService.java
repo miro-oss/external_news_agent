@@ -1,6 +1,8 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.reports.comparison.ReportCompleted;
+import com.example.be.domain.companyinterest.CompanyInterestSelection;
+import com.example.be.domain.reports.entity.WeeklyReportInput;
 import org.springframework.context.ApplicationEventPublisher;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
@@ -31,6 +33,16 @@ public class ReportPersistenceService {
     private final ReportNotificationAutomationService notificationAutomation;
     private final CollectionRunArticleRepository observationRepository;
     private final ApplicationEventPublisher events;
+    private final CompanyInterestSelection companyInterests;
+
+    @Transactional
+    public void freezeCompanySelection(Long reportId, List<Long> findingIds, WeeklyReportInput weeklyInput,
+                                       List<CompanyInterestSelection.Application> applications, LocalDateTime now) {
+        NewsReport report = lockedReport(reportId);
+        if (report.getReportStatus() != ReportStatus.PENDING) throw new IllegalStateException("이미 완료된 보고서입니다.");
+        report.freezeCompanySelection(findingIds, weeklyInput);
+        companyInterests.record(reportId, applications, now);
+    }
 
     @Transactional
     public Reservation reserve(Long runId, LocalDateTime generatedAt) {
