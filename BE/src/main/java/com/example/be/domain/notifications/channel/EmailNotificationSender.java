@@ -19,6 +19,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -113,6 +114,9 @@ public class EmailNotificationSender implements NotificationSender {
                         message.setRecipient(Message.RecipientType.TO, recipient);
                         message.setSubject(subject, "UTF-8");
                         message.setContent(body, "text/html; charset=UTF-8");
+                        // Gmail uses References to group repeated notifications and trim their shared text.
+                        // Give every standalone delivery a separate thread without changing its subject/body.
+                        message.setHeader("References", "<news-delivery-" + UUID.randomUUID() + "@notifications.invalid>");
                         message.saveChanges();
                         transport.sendMessage(message, message.getAllRecipients());
                         return message.getMessageID();
