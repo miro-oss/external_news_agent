@@ -34,7 +34,7 @@ class ReportChangesQueryServiceTest {
     private final FindingRepository findings = mock(FindingRepository.class);
     private final FeedbackStore feedbackStore = mock(FeedbackStore.class);
     private final ReportEventSnapshotFactory eventSnapshots = mock(ReportEventSnapshotFactory.class);
-    private final ReportEventFeedbackProjection feedbackProjection = new ReportEventFeedbackProjection(feedbackStore, eventSnapshots);
+    private final ReportEventFeedbackProjection feedbackProjection = new ReportEventFeedbackProjection(feedbackStore, eventSnapshots, mock(com.example.be.domain.reports.service.DailyReportFeedbackExclusions.class));
     private final ReportChangesQueryService query = new ReportChangesQueryService(reports, comparisons, findings, relevancePolicy, feedbackProjection);
 
     private void visible(ReportScope scope) {

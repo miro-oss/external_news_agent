@@ -40,7 +40,7 @@ class ReportInsightSnapshotAssemblerTest {
     FeedbackStore feedback = mock(FeedbackStore.class);
     ReportEventSnapshotFactory events = mock(ReportEventSnapshotFactory.class);
     ReportInsightSnapshotAssembler assembler = new ReportInsightSnapshotAssembler(reports, findings, relevance, new ObjectMapper(),
-            new ReportEventFeedbackProjection(feedback, events), feedbackLearning);
+            new ReportEventFeedbackProjection(feedback, events, mock(com.example.be.domain.reports.service.DailyReportFeedbackExclusions.class)), feedbackLearning);
     @BeforeEach void setup() { when(relevance.filterFindings(anyList())).thenAnswer(call -> call.getArgument(0)); }
 
     @Test void createAndReadKeepReportTimeLearningWhileLaterReportsReceiveNewReviews() {

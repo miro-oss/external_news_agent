@@ -28,6 +28,7 @@ public class TopicWeeklyReportSelector {
     private final FindingRepository findings;
     private final IssueArticleRepository memberships;
     private final TopicRelevancePolicy relevance;
+    private final DailyReportFeedbackExclusions feedbackExclusions;
     @org.springframework.beans.factory.annotation.Value("${news.reports.daily.max-issues:10}")
     private int maxIssues = 10;
 
@@ -57,7 +58,10 @@ public class TopicWeeklyReportSelector {
                         List.of("FACT", "FORECAST", "OPINION").contains(point.claimType())
                                 && (!"OPINION".equals(point.claimType())
                                     || point.attributedTo() != null && !point.attributedTo().isBlank())))
-                .filter(TopicWeeklyReportSelector::hasSavedSentences)
+                .filter(TopicWeeklyReportSelector::hasSavedSentences).toList();
+        // Exclude reviewed issues after choosing their latest observations, then fill the ranking with valid issues.
+        var excluded = feedbackExclusions.forSelection(date, ReportComparisonSnapshot.captureByFinding(eligible, byFinding));
+        eligible = eligible.stream().filter(finding -> !excluded.contains(finding.getId()))
                 .sorted(Comparator.comparing((Finding f) -> byFinding.get(f.getId()).getImportanceScore(),
                         Comparator.nullsLast(Comparator.reverseOrder())).thenComparing(f -> byFinding.get(f.getId()).getId()))
                 .limit(Math.max(1, Math.min(50, maxIssues))).toList();

@@ -26,6 +26,10 @@ public class FeedbackSnapshotFactory {
     private final TopicRepository topics;
 
     public Snapshot capture(NewsReport report,List<Finding> findings) {
+        return capture(report, findings, ReportReadingContent.from(report, new ReportFindings.Visible(findings, false)));
+    }
+
+    public Snapshot capture(NewsReport report,List<Finding> findings,ReportReadingContent reading) {
         var scopes=report.getCollectionContexts().stream().flatMap(c->c.topics().stream()).toList();
         var items=findings.stream().filter(f->f.getArticle().hasFullText()).map(f->{
             var article=f.getArticle();
@@ -36,7 +40,7 @@ public class FeedbackSnapshotFactory {
             CollectionTopicSnapshot scope=scopes.stream().filter(t->t.topicId()==topicId).findFirst()
                     .orElseGet(()->CollectionTopicSnapshot.capture(topics.findById(topicId).orElseThrow(FeedbackErrors::missing)));
             Topic topic=new Topic(topicId,scope.topicName(),Stream.concat(scope.requiredKeywords().stream(),scope.optionalKeywords().stream()).distinct().toList(),scope.excludedKeywords());
-            var event=report.getStructuredContent()==null?null:report.getStructuredContent().importantEvents().stream()
+            var event=reading.structuredContent()==null?null:reading.structuredContent().importantEvents().stream()
                     .filter(e->e.sourceFindingIds().contains(f.getId())).findFirst().orElse(null);
             var sources=new java.util.ArrayList<Article>();
             sources.add(new Article(article.getId(),article.getTitle(),article.getBody(),article.getCanonicalUrl()));
@@ -51,8 +55,12 @@ public class FeedbackSnapshotFactory {
 
     /** Rebind frozen evidence to the final rendered view without re-fetching mutable articles. */
     static Snapshot delivered(NewsReport report,ReportFindings.Visible visible,Snapshot frozen,List<Item> delivered) {
+        return delivered(ReportReadingContent.from(report, visible), frozen, delivered);
+    }
+
+    static Snapshot delivered(ReportReadingContent finalReading,Snapshot frozen,List<Item> delivered) {
         var allowed=delivered.stream().map(Item::itemId).collect(Collectors.toSet());
-        var reading=ReportReadingContent.from(report,visible).structuredContent();
+        var reading=finalReading.structuredContent();
         var events=reading==null?List.<com.example.be.domain.reports.entity.ReportContent.ImportantEvent>of():
                 reading.importantEvents().stream().filter(e->!e.sourceFindingIds().isEmpty() && allowed.containsAll(e.sourceFindingIds())).limit(3).toList();
         Map<Long,Item> byFinding=frozen.items().stream().collect(Collectors.toMap(Item::itemId,Function.identity()));

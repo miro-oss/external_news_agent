@@ -94,7 +94,7 @@ class FeedbackOracleIntegrationTests {
                 {"decisions":[{"articleId":21,"status":"SUPPRESS","policyIds":[%d],"evidence":[{"articleId":21,"quote":"주가 전망"}],"reason":"명시한 개인 선호"}],"meta":{"truncated":false,"mock":false}}
                 """.formatted(policy.id())));
         worker.process(evaluation.id());
-        var factory=mock(FeedbackSnapshotFactory.class);when(factory.capture(eq(next.report()),anyList())).thenReturn(next.snapshot());
+        var factory=mock(FeedbackSnapshotFactory.class);when(factory.capture(eq(next.report()),anyList(),any())).thenReturn(next.snapshot());
         var delivery=new FeedbackDeliveryService(store,factory,work,json);
         var filtered=delivery.prepare(next.report(),f.recipient(),List.of());
         assertEquals(Set.of(11L),filtered.suppressedFindingIds());assertNotNull(filtered.token());
@@ -142,7 +142,7 @@ class FeedbackOracleIntegrationTests {
         verify(gateway,never()).evaluate(any(),anyLong(),any());
 
         var factory=mock(FeedbackSnapshotFactory.class);
-        when(factory.capture(eq(next.report()),anyList())).thenReturn(next.snapshot());
+        when(factory.capture(eq(next.report()),anyList(),any())).thenReturn(next.snapshot());
         var delivery=new FeedbackDeliveryService(store,factory,work,json);
         var pending=assertThrows(GeneralException.class,()->transaction.execute(tx->delivery.prepare(next.report(),f.recipient(),List.of())));
         assertEquals(GeneralErrorCode.CONFLICT,pending.getCode());

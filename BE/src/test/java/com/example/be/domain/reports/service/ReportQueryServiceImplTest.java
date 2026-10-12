@@ -78,8 +78,9 @@ class ReportQueryServiceImplTest {
             mock(IssueInvestigationJdbcRepository.class);
     private final FeedbackStore feedbackStore = mock(FeedbackStore.class);
     private final ReportEventSnapshotFactory eventSnapshots = mock(ReportEventSnapshotFactory.class);
+    private final DailyReportFeedbackExclusions dailyExclusions = mock(DailyReportFeedbackExclusions.class);
     private final ReportEventFeedbackProjection feedbackProjection =
-            new ReportEventFeedbackProjection(feedbackStore, eventSnapshots);
+            new ReportEventFeedbackProjection(feedbackStore, eventSnapshots, dailyExclusions);
     private final ReportQueryServiceImpl service = new ReportQueryServiceImpl(
             reportRepository, findingRepository, issueArticleRepository,
             newsIssueRepository, deliveryLogRepository,
@@ -440,6 +441,54 @@ class ReportQueryServiceImplTest {
                 event.title(), event.summaryKo(), event.significance(), event.sourceFindingIds(), List.of(), List.of(), null);
         return new FeedbackModels.Item(null, null, null, List.of(), null, null, null, null,
                 "report-v1", "fixture", null, context);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    @SuppressWarnings("unchecked")
+    void inheritedDailyExclusionsReachWeeklyDetailLatestAndBatchedListCounts(boolean topicWeekly) {
+        var stored = new ReportContent(List.of("일일 오류가 남은 주간 요약"), List.of(
+                new ReportContent.ImportantEvent("주간에 다시 요약된 오류", "일일 오류 주장", "", List.of(1L)),
+                new ReportContent.ImportantEvent("정상 이슈", "정상 주간 요약", "", List.of(2L))),
+                List.of(new ReportContent.WatchItem("오류 관찰", "오류 이유", List.of(1L))), List.of());
+        var report = NewsReport.builder().id(17L).reportScope(ReportScope.WEEKLY)
+                .reportDate(LocalDate.of(2026, 9, 28)).reportEndDate(LocalDate.of(2026, 10, 4))
+                .topicId(topicWeekly ? 7L : null).title("주간 보고서")
+                .sourceReportIds(topicWeekly ? List.of() : List.of(10L))
+                .reflectedFindingIds(List.of(1L, 2L)).structuredContent(stored).markdownBody("저장된 오류 본문")
+                .generatedAt(LocalDateTime.of(2026, 10, 5, 10, 0)).build();
+        var findings = List.of(finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT),
+                finding(2L, SensitivityLevel.LOW, Relevance.REFERENCE));
+        when(findingRepository.findForReportByIdIn(List.of(1L, 2L))).thenReturn(findings);
+        when(relevancePolicy.filterTopicFindings(7L, findings)).thenReturn(findings);
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(reportRepository.findFirstByReportScopeAndReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(
+                ReportScope.WEEKLY, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(reportRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(new PageImpl<>(List.of(report)));
+        when(dailyExclusions.forReport(report)).thenReturn(java.util.Set.of(1L));
+        when(dailyExclusions.forReports(List.of(report))).thenReturn(java.util.Map.of(17L, java.util.Set.of(1L)));
+
+        for (boolean includeFindings : List.of(false, true)) {
+            var detail = service.getReport(17L, includeFindings);
+            var latest = service.getLatest(includeFindings, ReportScope.WEEKLY);
+            assertEquals(1, detail.getSummaryStats().getFindingCount());
+            assertEquals(0, detail.getSummaryStats().getBySensitivityLevel().get("high"));
+            assertEquals(List.of("정상 이슈"), detail.getStructuredContent().importantEvents().stream()
+                    .map(ReportContent.ImportantEvent::title).toList());
+            assertFalse(detail.getMarkdownBody().contains("오류"));
+            assertEquals(detail.getStructuredContent(), latest.getStructuredContent());
+            if (includeFindings) assertEquals(List.of(2L), detail.getFindings().stream().map(ReportResDTO.Finding::getId).toList());
+            else assertNull(detail.getFindings());
+        }
+        org.mockito.Mockito.clearInvocations(dailyExclusions);
+        var summary = service.getReports(null, null, 0, 20, ReportScope.WEEKLY).getContent().getFirst();
+        assertEquals(1, summary.getFindingCount());
+        assertEquals(0, summary.getHighSensitivityCount());
+        verify(dailyExclusions).forReports(List.of(report));
+        verify(dailyExclusions, never()).forReport(any());
+        verifyNoInteractions(eventSnapshots);
+        assertEquals(stored, report.getStructuredContent());
+        assertEquals(List.of(1L, 2L), report.getReflectedFindingIds());
     }
 
     @Test

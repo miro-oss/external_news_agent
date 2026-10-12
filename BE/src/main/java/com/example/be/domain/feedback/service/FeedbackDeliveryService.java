@@ -6,6 +6,8 @@ import com.example.be.domain.feedback.repository.FeedbackStore;
 import com.example.be.domain.feedback.util.FeedbackTokens;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.service.ReportFindings;
+import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
+import com.example.be.domain.reports.service.ReportReadingContent;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,8 +38,15 @@ public class FeedbackDeliveryService {
 
     @Transactional
     public DeliveryFeedback prepare(NewsReport report,long recipientId,List<Finding> visibleFindings,boolean originallyFiltered) {
+        var visible=new ReportFindings.Visible(visibleFindings,originallyFiltered);
+        return prepare(report,recipientId,new ReportEventFeedbackProjection.View(visibleFindings,
+                ReportReadingContent.from(report,visible),false));
+    }
+
+    @Transactional
+    public DeliveryFeedback prepare(NewsReport report,long recipientId,ReportEventFeedbackProjection.View view) {
         if(!enabled)return new DeliveryFeedback(Set.of(),null);
-        Snapshot snapshot=snapshots.capture(report,visibleFindings);
+        Snapshot snapshot=snapshots.capture(report,view.findings(),view.readingContent());
         if(snapshot.items().isEmpty())return new DeliveryFeedback(Set.of(),null);
         if(schedulingEnabled)work.ensure(snapshot,recipientId);
         Set<Long> active=new HashSet<>();
@@ -63,11 +72,12 @@ public class FeedbackDeliveryService {
                         .forEach(i->suppressed.add(i.itemId()));
             }
         }
-        var delivered=snapshot.items().stream().filter(i->!suppressed.contains(i.itemId())).toList();
         // Even an empty delivery keeps access to the user's policy revocation controls.
         String token=FeedbackTokens.create();
-        var kept=visibleFindings.stream().filter(f->!suppressed.contains(f.getId())).toList();
-        var finalSnapshot=FeedbackSnapshotFactory.delivered(report,new ReportFindings.Visible(kept,originallyFiltered || !suppressed.isEmpty()),snapshot,delivered);
+        var finalView=view.suppress(report,suppressed);
+        var deliveredIds=finalView.findings().stream().map(Finding::getId).collect(java.util.stream.Collectors.toSet());
+        var delivered=snapshot.items().stream().filter(i->deliveredIds.contains(i.itemId())).toList();
+        var finalSnapshot=FeedbackSnapshotFactory.delivered(finalView.readingContent(),snapshot,delivered);
         store.capability(FeedbackTokens.hash(token),recipientId,finalSnapshot,LocalDateTime.now(ApiTimeZone.ZONE));
         return new DeliveryFeedback(Set.copyOf(suppressed),token);
     }
