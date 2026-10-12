@@ -45,3 +45,16 @@ export function reportShareFeedback(batch: NotificationSendBatch | undefined) {
   const recipientCount = new Set(batch.results.filter((result) => result.status === 'SENT').map((result) => result.recipientId)).size
   return { label: '전달 완료', success: `${recipientCount}명에게 전달했습니다.`, warning: null }
 }
+
+export function reportShareInsightGuidance(error: unknown): string | null {
+  if (!(error instanceof ApiError)) return null
+  if (error.code === 'COMMON404' && error.status === 404
+    && error.message === '저장된 리포트 관점 인사이트가 없습니다.') {
+    return '위의 ‘리포트 관점 분석’에서 선택한 관점의 분석을 준비한 뒤 다시 시도해 주세요. 인사이트 없이 보내려면 ‘포함 안 함’을 선택해 주세요.'
+  }
+  if (error.code === 'COMMON409' && error.status === 409
+    && error.message === '동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.') {
+    return '선택한 관점의 분석을 준비하고 있습니다. 위의 ‘리포트 관점 분석’에서 완료 여부를 확인한 뒤 다시 시도해 주세요. 인사이트 없이 보내려면 ‘포함 안 함’을 선택해 주세요.'
+  }
+  return null
+}

@@ -63,6 +63,27 @@ class PersonalizedNotificationRendererTest {
 
     @ParameterizedTest
     @EnumSource(ChannelType.class)
+    void selectedInsightsRespectPersonalAndPublicEvidenceExclusions(ChannelType type) {
+        var fixture = fixture(true);
+        prepare(fixture, List.of(confirmed('a')), Set.of(14L));
+        var insight = NotificationInsightTestSupport.insight(List.of(
+                new com.example.be.domain.analysis.agent.dto.AgentReportInsightResponse.Overview(
+                        "개인 제외 해석", List.of("14:0", "13:0"), "개인 제외 전제"),
+                new com.example.be.domain.analysis.agent.dto.AgentReportInsightResponse.Overview(
+                        "공용 제외 해석", List.of("11:0"), "공용 제외 전제"),
+                new com.example.be.domain.analysis.agent.dto.AgentReportInsightResponse.Overview(
+                        "허용된 관점 해석", List.of("13:0"), "허용된 전제")), List.of());
+        var channel = NotificationChannel.builder().id(1L).channelType(type).maxLength(3500).active(true).build();
+        String body = personalized.render(fixture.report(), channel, RECIPIENT_ID, insight).chunks().getFirst();
+        assertFalse(body.contains("개인 제외"));
+        assertFalse(body.contains("공용 제외"));
+        assertFalse(body.contains("숨겨진 헤드라인"));
+        assertTrue(body.contains("허용된 관점 해석"));
+        assertTrue(body.contains("허용된 전제"));
+    }
+
+    @ParameterizedTest
+    @EnumSource(ChannelType.class)
     void confirmedLocalErrorIsExcludedFromQueuedAndManualDeliveryEvenWithSharedEvidence(ChannelType type) {
         Fixture fixture = fixture(false);
         prepare(fixture, List.of(confirmed('a')), Set.of());

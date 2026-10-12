@@ -81,7 +81,8 @@ class ReportCompletionTransactionTest {
         var renderer = mock(NotificationRenderer.class);
         var reports = mock(NewsReportRepository.class);
         var plans = new NotificationDeliveryPlanService(reports, channels, groups, management, renderer,
-                new com.example.be.domain.notifications.config.NotificationProperties(), mock(PersonalizedNotificationRenderer.class));
+                new com.example.be.domain.notifications.config.NotificationProperties(), mock(PersonalizedNotificationRenderer.class),
+                mock(ReportNotificationInsightService.class));
         var subscriptions = mock(ReportSubscriptionStore.class);
         when(subscriptions.allowedTopics(anyLong(), any(), anyList())).thenAnswer(invocation -> invocation.getArgument(2));
         var automation = transactional(new ReportNotificationAutomationService(jdbc, topics, management,

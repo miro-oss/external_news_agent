@@ -159,7 +159,10 @@ public class NotificationController {
             이메일은 executiveSummary를 우선한 핵심 요약과 이벤트별 주요 내용·후속 확인·원문을 제공합니다.
             후속 확인은 모든 근거가 표시 가능하고 해당 이벤트와 근거가 연결된 저장 watchItems만 최대 2개 사용합니다.
             이벤트별 원문 링크는 해당 sourceFindingIds에 연결된 안전한 URL을 최대 2개 표시합니다.
-            읽는 관점과 significance는 표시하지 않습니다. 후속 확인을 새로 만들거나 AI를 다시 호출하지 않습니다.
+            insightAudience를 선택하면 현재 입력·버전과 일치하는 저장 관점 인사이트를 이메일·텔레그램에 짧게 포함합니다. 생략/null이면 기존 본문을 유지합니다.
+            최대 2개 overview의 해석·전제를 함께 표시하며 overview가 비어 있으면 근거 있는 이슈별 판단 사유를 최대 2개 사용합니다.
+            근거가 모두 표시 가능한 항목만 포함하며 headline과 significance는 표시하지 않습니다. 후속 확인이나 인사이트를 새로 생성하지 않습니다.
+            선택한 저장 인사이트가 없으면 COMMON404, 준비 중이면 COMMON409, 잘못된 관점이면 AUDIENCE400을 반환합니다.
             기존 요약 대체 경로, 본문 확보·관련성 필터와 DAILY에 저장된 finding 선택·순서를 유지합니다.
             public-base-url 설정 시 전체 보고서 링크를 추가합니다.
             """)
@@ -213,13 +216,18 @@ public class NotificationController {
                                     }
                                     """)
                     })),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "보고서 또는 활성 채널 없음",
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "지원하지 않는 관점입니다. (AUDIENCE400)"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요. (COMMON409)"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "보고서, 활성 채널 또는 선택한 저장 인사이트 없음",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = {
                             @ExampleObject(name = "보고서 없음", value = """
                                     {"isSuccess":false,"code":"REPORT404","message":"보고서를 찾을 수 없습니다.","result":{}}
                                     """),
                             @ExampleObject(name = "채널 없음", value = """
                                     {"isSuccess":false,"code":"CHANNEL404","message":"알림 채널을 찾을 수 없습니다.","result":{}}
+                                    """),
+                            @ExampleObject(name = "저장 인사이트 없음", value = """
+                                    {"isSuccess":false,"code":"COMMON404","message":"저장된 리포트 관점 인사이트가 없습니다.","result":{}}
                                     """)
                     }))
     })
@@ -234,15 +242,19 @@ public class NotificationController {
             활성 그룹·수신자·주소에 발송하고 개별 결과를 기록합니다. 수신자·채널별 중복 제거와 배치 처리 규칙을 유지합니다.
             텔레그램 뉴스 카드형·이메일 브리핑형 본문에 저장된 개인 정책 판정을 적용하며 근거 있는 importantEvents를 저장 순서대로 이메일은 최대 5개, 텔레그램은 최대 3개 표시합니다. 유효한 이벤트가 상한보다 적으면 있는 만큼 표시합니다.
             텔레그램은 채널 maxLength 안의 메시지 1개이며, 이메일은 핵심 요약과 이벤트별 주요 내용·후속 확인·원문을 제공합니다.
-            읽는 관점과 significance는 표시하지 않고, 저장된 관련 watchItems만 사용하며 AI를 다시 호출하지 않습니다.
+            insightAudience 선택 시 저장 관점 인사이트의 해석·전제를 최대 2개 포함합니다. overview가 비어 있으면 근거 있는 이슈별 판단 사유를 최대 2개 사용합니다.
+            headline과 significance는 표시하지 않고 수신자에게 허용된 근거가 모두 남은 인사이트만 포함합니다. AI를 다시 호출하지 않습니다.
+            insightAudience 생략/null 및 자동 발송은 기존 본문을 유지합니다. 선택한 저장 인사이트 없음은 COMMON404, 준비 중은 COMMON409, 잘못된 관점은 AUDIENCE400입니다.
+            같은 idempotencyKey로 재요청하면 인사이트를 다시 조회하거나 재발송하지 않고 기존 결과를 반환합니다.
             본문 확보·관련성 필터와 DAILY에 저장된 finding 선택·순서를 유지하며 public-base-url 설정 시 전체 보고서 링크를 추가합니다.
             수신자별 제외 항목은 요약·근거에서도 제거하며 공용 보고서는 변경하지 않습니다. 개인화 준비 중에는 외부 발송 없이 COMMON409를 반환합니다.
             public-base-url 설정 시 수신자·보고서에 묶인 30일 유효 피드백 링크를 추가합니다. 발송 시 AI 호출은 없습니다.
             """)
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "발송을 완료했습니다."),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "발송 대상 없음"),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "상태 충돌이 발생했습니다. 개인화 준비가 끝난 뒤 재시도할 수 있습니다."),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "발송 대상 없음 또는 지원하지 않는 관점입니다. (AUDIENCE400)"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "보고서 또는 저장된 리포트 관점 인사이트가 없습니다. (COMMON404)"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "개인화 또는 선택한 리포트 관점 인사이트 준비 중입니다. 외부 발송 없이 재시도할 수 있습니다."),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "502", description = "모든 발송 실패")
     })
     public ApiResponse<NotificationResDTO.SendBatch> send(

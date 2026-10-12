@@ -44,8 +44,40 @@ class NotificationDeliveryServiceTest {
     private final NotificationDeliveryPersistenceService persistenceService =
             mock(NotificationDeliveryPersistenceService.class);
     private final NotificationSenderRegistry senderRegistry = mock(NotificationSenderRegistry.class);
+    private final ReportNotificationInsightService insightService = mock(ReportNotificationInsightService.class);
     private final NotificationDeliveryService service = new NotificationDeliveryService(
-            reportRepository, managementService, renderer, planService, persistenceService, senderRegistry);
+            reportRepository, managementService, renderer, planService, persistenceService, senderRegistry, insightService);
+
+    @Test
+    void previewUsesSavedSelectedPerspectiveAndNoDeliverySideEffects() {
+        var report = com.example.be.domain.reports.entity.NewsReport.builder().id(17L).build();
+        var channel = channel(1L, ChannelType.TELEGRAM);
+        var insight = NotificationInsightTestSupport.insight();
+        when(reportRepository.findByIdAndReportStatusNot(17L, com.example.be.domain.reports.entity.ReportStatus.PENDING))
+                .thenReturn(Optional.of(report));
+        when(managementService.findChannel(1L, true)).thenReturn(channel);
+        when(insightService.find(17L, "EQUIPMENT_MAKER")).thenReturn(insight);
+        when(renderer.render(report, channel, insight)).thenReturn(new RenderedNotification(null, "HTML", List.of("선택 관점")));
+        var request = new NotificationReqDTO.Preview();
+        request.setChannelId(1L);
+        request.setInsightAudience("EQUIPMENT_MAKER");
+
+        assertEquals("선택 관점", service.preview(17L, request).getChunks().getFirst().getBody());
+        org.mockito.Mockito.verifyNoInteractions(persistenceService, senderRegistry, planService);
+    }
+
+    @Test
+    void missingOrPendingInsightStopsBeforeReservationAndTransport() {
+        for (var code : List.of(com.example.be.global.apiPayload.code.GeneralErrorCode.NOT_FOUND,
+                com.example.be.global.apiPayload.code.GeneralErrorCode.CONFLICT)) {
+            var request = request(null);
+            request.setInsightAudience("EQUIPMENT_MAKER");
+            var failure = new GeneralException(code);
+            when(planService.prepare(17L, request)).thenThrow(failure);
+            assertEquals(failure, assertThrows(GeneralException.class, () -> service.send(17L, request)));
+        }
+        org.mockito.Mockito.verifyNoInteractions(persistenceService, senderRegistry);
+    }
 
     @Test
     void telegramRecipientWithoutStartIsSkippedAndLogged() {
@@ -74,12 +106,15 @@ class NotificationDeliveryServiceTest {
         when(persistenceService.findByIdempotencyKey("same-key"))
                 .thenReturn(Optional.of(snapshot(17L, REQUESTED_AT)));
 
-        var response = service.send(17L, request("same-key"));
+        var request = request("same-key");
+        request.setInsightAudience("EQUIPMENT_MAKER");
+        var response = service.send(17L, request);
 
         assertEquals("batch-id", response.getDeliveryBatchId());
         assertEquals(1, response.getSentCount());
         verify(planService, never()).prepare(any(), any());
         verify(persistenceService, never()).reserve(any(), any());
+        org.mockito.Mockito.verifyNoInteractions(insightService, senderRegistry);
     }
 
     @Test

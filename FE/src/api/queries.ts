@@ -24,6 +24,7 @@ import {
 } from './notificationGroupCache'
 import { getAllNotificationPages } from './notificationPages'
 import { approveTopicKeywordProposalOptions, rejectTopicKeywordProposalOptions } from './topicKeywordProposalReview'
+import { reportPreviewOptions } from './reportShare'
 import type { CollectionRunDelivery } from './notificationConnections'
 import type {
   ArticleDetail,
@@ -44,7 +45,6 @@ import type {
   NotificationChannel,
   NotificationGroup,
   NotificationGroupMembers,
-  NotificationPreview,
   NotificationRecipient,
   NotificationSendBatch,
   PaidExhaustedAction,
@@ -483,10 +483,7 @@ export function useReplaceNotificationGroupMembers() {
 }
 
 export function usePreviewNotification() {
-  return useMutation({
-    mutationFn: ({ reportId, channelId }: { reportId: number; channelId: number }) =>
-      notificationPost<NotificationPreview>(`/reports/${reportId}/preview`, { channelId }),
-  })
+  return useMutation(reportPreviewOptions())
 }
 
 export function useSendNotification() {

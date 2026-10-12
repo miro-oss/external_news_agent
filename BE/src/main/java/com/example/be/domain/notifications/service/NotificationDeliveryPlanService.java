@@ -40,6 +40,7 @@ public class NotificationDeliveryPlanService {
     private final NotificationRenderer renderer;
     private final NotificationProperties properties;
     private final PersonalizedNotificationRenderer personalizedRenderer;
+    private final ReportNotificationInsightService insightService;
 
     @Transactional(readOnly = true)
     public void requireReport(Long reportId) {
@@ -58,14 +59,17 @@ public class NotificationDeliveryPlanService {
                     Map.of("groupIds", request.getGroupIds() == null ? List.of() : request.getGroupIds()));
         }
 
+        var insight = request.getInsightAudience() == null ? null : insightService.find(reportId, request.getInsightAudience());
         Map<Long, RenderedNotification> renderedByChannel = new LinkedHashMap<>();
-        channels.forEach(channel -> renderedByChannel.put(channel.getId(), renderer.render(report, channel)));
+        channels.forEach(channel -> renderedByChannel.put(channel.getId(), insight == null
+                ? renderer.render(report, channel) : renderer.render(report, channel, insight)));
         Map<String, RenderedNotification> renderedByTarget = new LinkedHashMap<>();
         GeneralException personalizationPending = null;
         for (PreparedTarget target : targets) {
             try {
                 renderedByTarget.put(target.recipientId() + ":" + target.channel().getId(),
-                        personalizedRenderer.render(report, target.channel(), target.recipientId()));
+                        insight == null ? personalizedRenderer.render(report, target.channel(), target.recipientId())
+                                : personalizedRenderer.render(report, target.channel(), target.recipientId(), insight));
             } catch (GeneralException failure) {
                 if (failure.getCode() != GeneralErrorCode.CONFLICT) throw failure;
                 // Every selected recipient must enqueue its evaluation before the caller waits.

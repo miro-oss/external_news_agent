@@ -39,8 +39,38 @@ class NotificationDeliveryPlanServiceTest {
     private final NotificationRenderer renderer = mock(NotificationRenderer.class);
     private final PersonalizedNotificationRenderer personalizedRenderer = mock(PersonalizedNotificationRenderer.class);
     private final NotificationProperties properties = new NotificationProperties();
+    private final ReportNotificationInsightService insightService = mock(ReportNotificationInsightService.class);
     private final NotificationDeliveryPlanService service = new NotificationDeliveryPlanService(
-            reportRepository, channelRepository, groupRepository, managementService, renderer, properties, personalizedRenderer);
+            reportRepository, channelRepository, groupRepository, managementService, renderer, properties, personalizedRenderer, insightService);
+
+    @Test
+    void loadsSelectedInsightOnceAndPersonalizesItForEveryTarget() {
+        var delivery = manualDelivery();
+        var insight = NotificationInsightTestSupport.insight();
+        delivery.request().setInsightAudience("EQUIPMENT_MAKER");
+        when(insightService.find(17L, "EQUIPMENT_MAKER")).thenReturn(insight);
+        var rendered = new RenderedNotification("보고서", null, List.of("관점 포함"));
+        when(renderer.render(delivery.report(), delivery.channel(), insight)).thenReturn(rendered);
+        for (long id : List.of(3L, 4L, 5L)) {
+            when(personalizedRenderer.render(delivery.report(), delivery.channel(), id, insight)).thenReturn(rendered);
+        }
+
+        var plan = service.prepare(17L, delivery.request());
+
+        verify(insightService, times(1)).find(17L, "EQUIPMENT_MAKER");
+        assertEquals(3, plan.renderedByTarget().size());
+        for (var target : plan.targets()) assertSame(rendered, plan.rendered(target));
+    }
+
+    @Test
+    void missingSelectedInsightStopsBeforePersonalization() {
+        var delivery = manualDelivery();
+        delivery.request().setInsightAudience("EQUIPMENT_MAKER");
+        var failure = new GeneralException(GeneralErrorCode.NOT_FOUND);
+        when(insightService.find(17L, "EQUIPMENT_MAKER")).thenThrow(failure);
+        assertSame(failure, assertThrows(GeneralException.class, () -> service.prepare(17L, delivery.request())));
+        org.mockito.Mockito.verifyNoInteractions(personalizedRenderer);
+    }
 
     @Test
     void pendingFirstRecipientStillPreparesEverySelectedRecipientBeforeRejectingThePlan() {
@@ -59,6 +89,7 @@ class NotificationDeliveryPlanServiceTest {
         verify(personalizedRenderer).render(delivery.report(), delivery.channel(), 3L);
         verify(personalizedRenderer).render(delivery.report(), delivery.channel(), 4L);
         verify(personalizedRenderer).render(delivery.report(), delivery.channel(), 5L);
+        org.mockito.Mockito.verifyNoInteractions(insightService);
     }
 
     @Test
