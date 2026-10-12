@@ -96,8 +96,8 @@ function NotificationGroupEditor({ group, recipients, onClose }: {
       event.preventDefault()
       dismiss()
     }}
-    onClick={event => {
-      if (event.target !== event.currentTarget) return
+    onMouseDown={event => {
+      if (event.button !== 0 || event.target !== event.currentTarget) return
       const bounds = event.currentTarget.getBoundingClientRect()
       if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dismiss()
     }}>
