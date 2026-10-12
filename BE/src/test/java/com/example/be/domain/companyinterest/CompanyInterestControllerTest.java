@@ -2,6 +2,8 @@ package com.example.be.domain.companyinterest;
 
 import com.example.be.domain.feedback.exception.FeedbackErrors;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -35,19 +37,26 @@ class CompanyInterestControllerTest {
                 .andExpect(jsonPath("$.result.criteria[0].createdAt").value("2026-10-12T10:00:00+09:00"));
     }
 
-    @Test void patchConflictAndMalformedRequestsRemainUncached() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"", "/news-agent"})
+    void patchConflictAndMalformedRequestsRemainUncached(String contextPath) throws Exception {
         when(service.update(eq(1L), any())).thenThrow(FeedbackErrors.conflict());
-        mvc.perform(patch("/api/news/company-interests/1").contentType("application/json").content("""
+        mvc.perform(patch(contextPath + "/api/news/company-interests/1").contextPath(contextPath)
+                .contentType("application/json").content("""
                 {"version":1,"instruction":"기준","topicId":2,"status":"ACTIVE"}
                 """))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("COMMON409"))
                 .andExpect(header().string("Cache-Control", "no-store"));
-        mvc.perform(patch("/api/news/company-interests/1").contentType("application/json").content("bad json"))
+        mvc.perform(patch(contextPath + "/api/news/company-interests/1").contextPath(contextPath)
+                .contentType("application/json").content("bad json"))
                 .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
     }
 
-    @Test void remoteCallsCannotReadOrActivateCompanyCriteria() throws Exception {
-        mvc.perform(get("/api/news/company-interests").with(request -> { request.setRemoteAddr("203.0.113.10"); return request; }))
+    @ParameterizedTest
+    @ValueSource(strings = {"", "/news-agent"})
+    void remoteCallsCannotReadOrActivateCompanyCriteria(String contextPath) throws Exception {
+        mvc.perform(get(contextPath + "/api/news/company-interests").contextPath(contextPath)
+                .with(request -> { request.setRemoteAddr("203.0.113.10"); return request; }))
                 .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
         verifyNoInteractions(service);
     }

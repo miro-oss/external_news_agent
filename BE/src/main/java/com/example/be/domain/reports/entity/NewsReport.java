@@ -203,6 +203,13 @@ public class NewsReport {
     @Column(name = "company_selection_recorded_yn", nullable = false, length = 1)
     private boolean companySelectionRecorded;
 
+    /** Independent of generator coverage: completion and recovery must preserve this exclusion snapshot. */
+    @Builder.Default
+    @Convert(converter = LongListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "company_suppressed_finding_ids", nullable = false)
+    private List<Long> companySuppressedFindingIds = List.of();
+
     @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(name = "report_status", nullable = false, length = 30)
@@ -213,8 +220,14 @@ public class NewsReport {
 
     /** Freeze selection before generation; interrupted work must never consult newly activated criteria. */
     public void freezeCompanySelection(List<Long> selectedFindingIds, WeeklyReportInput selectedWeeklyInput) {
+        freezeCompanySelection(selectedFindingIds, List.of(), selectedWeeklyInput);
+    }
+
+    public void freezeCompanySelection(List<Long> selectedFindingIds, List<Long> suppressedFindingIds,
+                                       WeeklyReportInput selectedWeeklyInput) {
         if (reportStatus != ReportStatus.PENDING) throw new IllegalStateException("완료된 보고서의 선정 근거는 변경할 수 없습니다.");
         reflectedFindingIds = List.copyOf(selectedFindingIds);
+        companySuppressedFindingIds = List.copyOf(suppressedFindingIds);
         coverageRecorded = true;
         companySelectionRecorded = true;
         if (selectedWeeklyInput != null) weeklyInput = selectedWeeklyInput;

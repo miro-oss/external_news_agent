@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.companyinterest.CompanyInterestSelectionTestSupport;
+import com.example.be.domain.companyinterest.CompanyInterestSelection;
 
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportScope;
@@ -20,7 +21,8 @@ class WeeklyReportCreationServiceTest {
     private final AgentWeeklyReportOrchestrator agent = mock(AgentWeeklyReportOrchestrator.class);
     private final WeeklyReportGenerator fallback = mock(WeeklyReportGenerator.class);
     private final ReportPersistenceService persistence = mock(ReportPersistenceService.class);
-    private final WeeklyReportCreationService service = new WeeklyReportCreationService(reservations, reports, agent, fallback, persistence, CompanyInterestSelectionTestSupport.passThrough());
+    private final CompanyInterestSelection interests = CompanyInterestSelectionTestSupport.passThrough();
+    private final WeeklyReportCreationService service = new WeeklyReportCreationService(reservations, reports, agent, fallback, persistence, interests);
     private final LocalDate monday = LocalDate.of(2026, 9, 7);
     private final WeeklyReportInput input = new WeeklyReportInput(monday, monday.plusDays(6), List.of(), List.of());
 
@@ -30,7 +32,7 @@ class WeeklyReportCreationServiceTest {
         assertEquals(1, service.generate(monday));
         when(reservations.reserve(eq(monday), any())).thenReturn(new WeeklyReportPersistenceService.Reservation(null, false, null));
         assertNull(service.generate(monday));
-        verifyNoInteractions(agent, fallback, persistence, CompanyInterestSelectionTestSupport.passThrough());
+        verifyNoInteractions(agent, fallback, persistence, interests);
     }
 
     @Test

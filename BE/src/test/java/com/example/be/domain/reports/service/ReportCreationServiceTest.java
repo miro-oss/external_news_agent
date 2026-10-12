@@ -1,11 +1,14 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.companyinterest.CompanyInterestSelectionTestSupport;
+import com.example.be.domain.companyinterest.CompanyInterestSelection;
 
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.domain.collection.entity.Article;
+import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.notifications.service.ReportNotificationAutomationService;
@@ -39,8 +42,54 @@ class ReportCreationServiceTest {
     private final AgentReportOrchestrator reportOrchestrator = mock(AgentReportOrchestrator.class);
     private final ReportPersistenceService persistenceService = mock(ReportPersistenceService.class);
     private final NewsReportRepository reportRepository = mock(NewsReportRepository.class);
+    private final CompanyInterestSelection interests = CompanyInterestSelectionTestSupport.passThrough();
     private final ReportCreationService service = new ReportCreationService(
-            runRepository, findingRepository, reportOrchestrator, persistenceService, reportRepository, CompanyInterestSelectionTestSupport.passThrough());
+            runRepository, findingRepository, reportOrchestrator, persistenceService, reportRepository, interests);
+
+    @Test
+    void freezesActualSuppressionSeparatelyAndRecoversAllOtherFindingsAfterCoverageNarrows() {
+        var run = CollectionRun.builder().id(42L).build();
+        var report = NewsReport.builder().id(17L).run(run).reportStatus(ReportStatus.PENDING).build();
+        Finding excluded = fullTextFinding(1), covered = fullTextFinding(2), uncovered = fullTextFinding(3);
+        var all = List.of(excluded, covered, uncovered);
+        var observations = mock(CollectionRunArticleRepository.class);
+        var notifications = mock(ReportNotificationAutomationService.class);
+        var events = mock(ApplicationEventPublisher.class);
+        var persistence = new ReportPersistenceService(runRepository, reportRepository, notifications, observations, events, interests);
+        var creation = new ReportCreationService(runRepository, findingRepository, reportOrchestrator, persistence, reportRepository, interests);
+        when(runRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(run));
+        when(runRepository.findReportContextById(42L)).thenReturn(Optional.of(run));
+        when(observations.existsByRunIdAndChangeTypeIn(42L, List.of(ChangeType.NEW))).thenReturn(true);
+        when(reportRepository.save(any())).thenReturn(report);
+        when(reportRepository.findRunIdById(17L)).thenReturn(Optional.of(42L));
+        when(reportRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(all);
+        when(reportOrchestrator.companySelectionCandidates(all)).thenReturn(List.of(excluded, covered));
+        when(interests.select(List.of(excluded, covered), null)).thenReturn(new CompanyInterestSelection.Result(List.of(covered), List.of()));
+        var document = new ReportDocument("보고서", "근거 본문", "model", null, null, null, null, null, null,
+                ReportStatus.GENERATED, List.of(2L), List.of());
+        when(reportOrchestrator.generate(eq(run), eq(List.of(covered, uncovered)), any())).thenReturn(document);
+
+        assertEquals(17L, creation.generate(42L));
+        assertEquals(List.of(1L), report.getCompanySuppressedFindingIds());
+        assertEquals(List.of(2L), report.getReflectedFindingIds());
+        when(reportRepository.findByRunId(42L)).thenReturn(Optional.of(report));
+        org.mockito.Mockito.clearInvocations(interests, notifications, events, reportOrchestrator);
+
+        assertEquals(17L, creation.recover(42L));
+
+        verify(reportOrchestrator).generate(eq(run), eq(List.of(covered, uncovered)), any());
+        verifyNoInteractions(interests, notifications, events);
+        assertEquals(List.of(1L), report.getCompanySuppressedFindingIds());
+        assertEquals(List.of(covered, uncovered), ReportFindings.load(report, findingRepository));
+    }
+
+    private Finding fullTextFinding(long id) {
+        return Finding.builder().id(id)
+                .article(Article.builder().id(id).title("기사 " + id).fetchStatus(FetchStatus.FULLTEXT).body("원문").build())
+                .sensitivity(com.example.be.domain.analysis.entity.FindingSensitivity.legacy(com.example.be.domain.analysis.entity.SensitivityLevel.LOW))
+                .relevance(com.example.be.domain.analysis.entity.Relevance.IMPORTANT).build();
+    }
 
     @Test
     void describesMissingRunInGenerationFailure() {

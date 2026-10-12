@@ -88,6 +88,15 @@ class CompanyInterestOracleIntegrationTests {
         assertEquals(0, criterion(feedbackId).lastApplication().suppressedCount());
         var revoked = service.update(updated.id(), new Update(updated.version(), updated.instruction(), topic, "REVOKED"));
         assertNull(revoked.lastApplication()); assertTrue(store.active(topic).isEmpty());
+        assertEquals(updated.activatedAt(), revoked.activatedAt());
+    }
+
+    @Test void revokingAnUnactivatedDraftDoesNotInventAnActivationTime() {
+        long topic = topic(), report = report(ReportStatus.GENERATED);
+        var draft = criterion(review(report, List.of(topic), "순수 수학 연구 소식은 제외", false, true));
+        var revoked = service.update(draft.id(), new Update(draft.version(), draft.instruction(), topic, "REVOKED"));
+        assertEquals(Status.REVOKED, revoked.status());
+        assertNull(revoked.activatedAt());
     }
 
     @Test void legacyBackfillPreservesFullCommentAndRequiresChoiceForMultipleTopics() throws Exception {

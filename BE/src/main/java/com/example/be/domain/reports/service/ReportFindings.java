@@ -39,10 +39,11 @@ public final class ReportFindings {
     public static Visible loadVisible(NewsReport report, FindingRepository repository) {
         if (report.getReportScope() == ReportScope.RUN) {
             List<Finding> all = repository.findForReportByRunId(report.getRunId());
-            // Existing coverage preserves factual exclusions for their explanations, but company-suppressed
-            // candidates are in neither stored list and must never reappear in details or delivery.
-            List<Finding> selected = report.isCompanySelectionRecorded() ? all.stream().filter(finding ->
-                    report.getReflectedFindingIds().contains(finding.getId()) || report.getExcludedFindingIds().contains(finding.getId())).toList() : all;
+            // Generator coverage can omit otherwise visible findings (limits, STUB or issue grouping).
+            // Only the separately frozen company exclusions restrict RUN visibility and recovery.
+            var suppressed = new java.util.HashSet<>(report.getCompanySuppressedFindingIds());
+            List<Finding> selected = report.isCompanySelectionRecorded() ? all.stream()
+                    .filter(finding -> !suppressed.contains(finding.getId())).toList() : all;
             List<Finding> visible = selected.stream().filter(ReportFindings::hasFullText).toList();
             return new Visible(ReportFindingOrder.sort(visible), visible.size() != selected.size());
         }

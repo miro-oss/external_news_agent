@@ -38,9 +38,16 @@ public class ReportPersistenceService {
     @Transactional
     public void freezeCompanySelection(Long reportId, List<Long> findingIds, WeeklyReportInput weeklyInput,
                                        List<CompanyInterestSelection.Application> applications, LocalDateTime now) {
+        freezeCompanySelection(reportId, findingIds, List.of(), weeklyInput, applications, now);
+    }
+
+    @Transactional
+    public void freezeCompanySelection(Long reportId, List<Long> findingIds, List<Long> suppressedFindingIds,
+                                       WeeklyReportInput weeklyInput,
+                                       List<CompanyInterestSelection.Application> applications, LocalDateTime now) {
         NewsReport report = lockedReport(reportId);
         if (report.getReportStatus() != ReportStatus.PENDING) throw new IllegalStateException("이미 완료된 보고서입니다.");
-        report.freezeCompanySelection(findingIds, weeklyInput);
+        report.freezeCompanySelection(findingIds, suppressedFindingIds, weeklyInput);
         companyInterests.record(reportId, applications, now);
     }
 

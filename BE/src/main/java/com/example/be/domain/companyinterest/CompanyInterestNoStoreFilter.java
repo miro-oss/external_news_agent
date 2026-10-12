@@ -18,8 +18,9 @@ public class CompanyInterestNoStoreFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
-        if (request.getRequestURI().equals("/api/news/company-interests")
-                || request.getRequestURI().startsWith("/api/news/company-interests/"))
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        if (path.equals("/api/news/company-interests")
+                || path.startsWith("/api/news/company-interests/"))
             response.setHeader("Cache-Control", "no-store");
         chain.doFilter(request, response);
     }

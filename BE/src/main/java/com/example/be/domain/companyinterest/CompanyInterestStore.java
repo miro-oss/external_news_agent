@@ -79,8 +79,9 @@ public class CompanyInterestStore {
     public boolean update(long id, long version, String instruction, Long topicId, Status status, LocalDateTime now) {
         return jdbc.update("""
                 UPDATE news_company_interests SET instruction=?,topic_id=?,status=?,version=version+1,
-                    updated_at=?,activated_at=? WHERE id=? AND version=?
-                """, instruction, topicId, status.name(), now, status == Status.ACTIVE ? now : null, id, version) == 1;
+                    updated_at=?,activated_at=CASE ? WHEN 'ACTIVE' THEN ? WHEN 'REVOKED' THEN activated_at END
+                WHERE id=? AND version=?
+                """, instruction, topicId, status.name(), now, status.name(), now, id, version) == 1;
     }
 
     public List<ActiveCriterion> active(long topicId) { return activeForTopics(Set.of(topicId)); }
