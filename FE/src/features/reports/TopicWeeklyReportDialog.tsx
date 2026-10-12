@@ -10,6 +10,7 @@ interface Props {
   topicsLoading?: boolean
   topicsError?: string | null
   initialTopicId?: number | null
+  initialWeekStart?: string
   now?: Date
   pending?: boolean
   waiting?: boolean
@@ -22,13 +23,13 @@ interface Props {
 }
 
 export function TopicWeeklyReportDialog({ id, topics, topicsLoading = false, topicsError,
-  initialTopicId, now = new Date(), pending = false, waiting = false, error, onRetryTopics, onDismiss, onCreate,
+  initialTopicId, initialWeekStart, now = new Date(), pending = false, waiting = false, error, onRetryTopics, onDismiss, onCreate,
   onDraftChange, returnFocusRef }: Props) {
   const dialog = useRef<HTMLDialogElement>(null)
   const topicSelect = useRef<HTMLSelectElement>(null)
   const closeButton = useRef<HTMLButtonElement>(null)
   const [topicId, setTopicId] = useState(initialTopicId ?? null)
-  const [weekStart, setWeekStart] = useState(() => lastCompletedReportWeek(now))
+  const [weekStart, setWeekStart] = useState(() => initialWeekStart ?? lastCompletedReportWeek(now))
   const lastWeek = lastCompletedReportWeek(now)
   const weekError = reportWeekError(weekStart, now)
   const weekEnd = shiftReportDate(weekStart, 6)
@@ -54,7 +55,7 @@ export function TopicWeeklyReportDialog({ id, topics, topicsLoading = false, top
   }, [returnFocusRef])
 
   function dismiss() {
-    if (!pending) onDismiss()
+    onDismiss()
   }
 
   function changeWeek(value: string) {
@@ -73,7 +74,7 @@ export function TopicWeeklyReportDialog({ id, topics, topicsLoading = false, top
     <header className="topic-weekly-heading">
       <div><h2 id={`${id}-title`}>주제별 주간 보고서 만들기</h2>
         <p id={`${id}-description`}>한 주제의 소식을 월요일부터 일요일까지 모아 정리합니다.</p></div>
-      <button ref={closeButton} type="button" className="text-button topic-weekly-close" disabled={pending}
+      <button ref={closeButton} type="button" className="text-button topic-weekly-close"
         aria-label="주제별 주간 보고서 만들기 닫기" onClick={dismiss}>×</button>
     </header>
     <form className="topic-weekly-form" onSubmit={event => {
@@ -117,12 +118,12 @@ export function TopicWeeklyReportDialog({ id, topics, topicsLoading = false, top
         </div>}
         {!busy && <p className="hint topic-weekly-reuse-hint">같은 주제·주차의 보고서가 있으면 기존 보고서를 엽니다.</p>}
         {busy && <p className="topic-weekly-progress" role="status">{waiting
-          ? '보고서가 준비되면 자동으로 엽니다. 이 창을 닫아도 생성은 계속됩니다.'
-          : '주간 보고서를 만들고 있습니다. 잠시 기다려 주세요.'}</p>}
+          ? '보고서가 준비되면 엽니다. 창을 닫고 다른 화면으로 이동해도 완료 상태를 확인할 수 있습니다.'
+          : '주간 보고서를 만들고 있습니다. 창을 닫고 다른 화면을 이용해도 생성은 계속됩니다.'}</p>}
       </div>
       <footer className="topic-weekly-actions">
         {error && <p className="error topic-weekly-save-error" role="alert">{error}</p>}
-        <button type="button" className="secondary-button" disabled={pending} onClick={dismiss}>{waiting ? '닫기' : '취소'}</button>
+        <button type="button" className="secondary-button" onClick={dismiss}>{busy ? '닫고 기다리기' : '취소'}</button>
         <button type="submit" className="primary-button" disabled={!canCreate}>{busy ? '만드는 중…' : '보고서 만들기'}</button>
       </footer>
     </form>
