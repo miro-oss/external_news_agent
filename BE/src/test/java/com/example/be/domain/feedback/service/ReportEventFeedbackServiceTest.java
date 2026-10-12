@@ -32,7 +32,7 @@ class ReportEventFeedbackServiceTest {
     private final ReportEventSnapshotFactory snapshots = mock(ReportEventSnapshotFactory.class);
     private final ObjectMapper json = new ObjectMapper();
     private final ReportEventFeedbackService service = new ReportEventFeedbackService(reports, findings, relevance,
-            new ReportEventFeedbackProjection(store, snapshots), store, json);
+            new ReportEventFeedbackProjection(store, snapshots, mock(com.example.be.domain.reports.service.DailyReportFeedbackExclusions.class)), store, json);
     private final NewsReport report = NewsReport.builder().id(17L).title("보고서").reportScope(ReportScope.DAILY)
             .reportStatus(ReportStatus.GENERATED).build();
     private final Item rejected = item('a', 0);

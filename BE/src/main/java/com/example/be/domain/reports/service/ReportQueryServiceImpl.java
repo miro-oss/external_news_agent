@@ -98,11 +98,13 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         Map<Long, String> deliveryStatuses = deliveryStatuses(reports.getContent());
         Map<Long, List<Feedback>> reviewsByReport = feedbackProjection.reviewsByReport(
                 reports.getContent().stream().map(NewsReport::getId).toList());
+        Map<Long, Set<Long>> inheritedByReport = feedbackProjection.inheritedFindingIdsByReport(reports.getContent());
         List<ReportResDTO.Summary> content = reports.getContent().stream()
                 .map(report -> toSummary(report, report.getRunId() == null ? null : counts.get(report.getRunId()),
                         aggregateCounts.get(report.getId()),
                         deliveryStatuses.getOrDefault(report.getId(), DELIVERY_STATUS_NOT_SENT),
-                        reviewsByReport.getOrDefault(report.getId(), List.of())))
+                        reviewsByReport.getOrDefault(report.getId(), List.of()),
+                        inheritedByReport.getOrDefault(report.getId(), Set.of())))
                 .toList();
         return PageResponse.of(content, page, size, reports.getTotalElements());
     }
@@ -131,16 +133,16 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     private ReportResDTO.Summary toSummary(NewsReport report,
                                            FindingRepository.ReportCount count,
                                            FindingRepository.DailyReportCount aggregateCount, String deliveryStatus,
-                                           List<Feedback> reviews) {
+                                           List<Feedback> reviews, Set<Long> inherited) {
         long findingCount = report.getReportScope() != ReportScope.RUN
                 ? aggregateCount == null ? 0 : aggregateCount.getFindingCount()
                 : count == null ? 0 : count.getFindingCount();
         long highSensitivityCount = report.getReportScope() != ReportScope.RUN
                 ? aggregateCount == null ? 0 : aggregateCount.getHighSensitivityCount()
                 : count == null ? 0 : count.getHighSensitivityCount();
-        if (feedbackProjection.hasConfirmedErrors(reviews)) {
+        if (feedbackProjection.hasConfirmedErrors(reviews) || !inherited.isEmpty()) {
             var view = feedbackProjection.project(report,
-                    ReportFindings.loadVisible(report, findingRepository, relevancePolicy), reviews);
+                    ReportFindings.loadVisible(report, findingRepository, relevancePolicy), reviews, inherited);
             findingCount = view.findings().size();
             highSensitivityCount = view.findings().stream().filter(finding ->
                     finding.getSensitivity().getScore().compareTo(sensitivityCalculator.highThreshold()) >= 0).count();

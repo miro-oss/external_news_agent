@@ -35,7 +35,7 @@ class ReportEventSnapshotFactoryTest {
         var original=factory.capture(report,visible);
         var review=new Feedback(5L,null,null,1L,null,Category.SUMMARY_ERROR,"의견",false,"hash",Status.COMPLETED,
                 "CONFIRMED_ERROR","설명",java.time.LocalDateTime.of(2026,10,1,10,0),original.getFirst(),original.getFirst().event().key());
-        var projection=new ReportEventFeedbackProjection(mock(FeedbackStore.class),factory);
+        var projection=new ReportEventFeedbackProjection(mock(FeedbackStore.class),factory, mock(com.example.be.domain.reports.service.DailyReportFeedbackExclusions.class));
         for(int refresh=0;refresh<3;refresh++) {
             var view=projection.project(report,visible,List.of(review));
             assertEquals(List.of(12L),view.findings().stream().map(Finding::getId).toList());

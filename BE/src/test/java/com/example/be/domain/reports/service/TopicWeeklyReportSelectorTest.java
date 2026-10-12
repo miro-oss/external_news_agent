@@ -6,6 +6,7 @@ import com.example.be.domain.analysis.relevance.*;
 import com.example.be.domain.collection.entity.*;
 import com.example.be.domain.issues.entity.*;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
+import com.example.be.domain.reports.comparison.ReportComparisonSnapshot;
 import com.example.be.domain.topics.entity.Topic;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -13,6 +14,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -21,7 +23,9 @@ class TopicWeeklyReportSelectorTest {
     private final FindingRepository findings = mock(FindingRepository.class);
     private final IssueArticleRepository memberships = mock(IssueArticleRepository.class);
     private final TopicRelevanceStore store = mock(TopicRelevanceStore.class);
-    private final TopicWeeklyReportSelector selector = new TopicWeeklyReportSelector(findings, memberships, new TopicRelevancePolicy(store));
+    private final DailyReportFeedbackExclusions feedbackExclusions = mock(DailyReportFeedbackExclusions.class);
+    private final TopicWeeklyReportSelector selector = new TopicWeeklyReportSelector(
+            findings, memberships, new TopicRelevancePolicy(store), feedbackExclusions);
     private final LocalDate date = LocalDate.of(2026, 9, 21);
 
     @Test
@@ -56,6 +60,47 @@ class TopicWeeklyReportSelectorTest {
         when(store.findByRun(2L)).thenReturn(List.of(assessment(2L, 1L, 2L, TopicRelevanceStatus.IRRELEVANT),
                 assessment(2L, 2L, 2L, TopicRelevanceStatus.RELEVANT)));
         assertTrue(selector.select(1L, "HBM", date).findings().isEmpty());
+    }
+
+    @Test
+    void confirmedDailyErrorsAreExcludedBeforeRankingAndVacanciesUseValidIssues() {
+        Finding old = finding(1, 1L, 1);
+        Finding latest = finding(2, 1L, 2);
+        Finding second = finding(3, 1L, 1);
+        Finding third = finding(4, 1L, 1);
+        inputs(List.of(old, latest, second, third), List.of(link(old, 10, 1L, 100),
+                link(latest, 10, 1L, 100), link(second, 20, 1L, 90), link(third, 30, 1L, 80)));
+        ReflectionTestUtils.setField(selector, "maxIssues", 2);
+        when(feedbackExclusions.forSelection(eq(date), any())).thenReturn(Set.of(2L));
+
+        var selected = selector.select(1L, "HBM", date);
+
+        assertEquals(List.of(3L, 4L), selected.source().reflectedFindingIds());
+        assertEquals(List.of(3L, 4L), selected.source().evidenceSnapshot().issues().stream()
+                .map(ReportComparisonSnapshot.Issue::findingId).toList());
+        assertEquals(List.of("검증된 주장 3", "검증된 주장 4"), selected.source().structuredContent().executiveSummary());
+        var candidates = org.mockito.ArgumentCaptor.forClass(ReportComparisonSnapshot.class);
+        verify(feedbackExclusions).forSelection(eq(date), candidates.capture());
+        assertEquals(Set.of(2L, 3L, 4L), candidates.getValue().issues().stream()
+                .map(ReportComparisonSnapshot.Issue::findingId).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(10L, candidates.getValue().issues().stream().filter(issue -> issue.findingId() == 2L)
+                .findFirst().orElseThrow().side().issueId());
+        assertFalse(selected.source().structuredContent().toString().contains("검증된 주장 1"));
+        assertFalse(selected.source().structuredContent().toString().contains("검증된 주장 2"));
+    }
+
+    @Test
+    void confirmedLatestDailyErrorDoesNotReviveOlderFindingForTheIssue() {
+        Finding old = finding(1, 1L, 1);
+        Finding latest = finding(2, 1L, 2);
+        inputs(List.of(old, latest), List.of(link(old, 10, 1L, 10), link(latest, 10, 1L, 10)));
+        when(feedbackExclusions.forSelection(eq(date), any())).thenReturn(Set.of(2L));
+
+        var selected = selector.select(1L, "HBM", date);
+
+        assertTrue(selected.findings().isEmpty());
+        assertTrue(selected.source().evidenceSnapshot().issues().isEmpty());
+        assertTrue(selected.source().structuredContent().importantEvents().isEmpty());
     }
 
     @Test

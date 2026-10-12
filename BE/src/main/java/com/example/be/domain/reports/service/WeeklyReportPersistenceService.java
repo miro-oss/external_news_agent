@@ -20,6 +20,7 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +31,8 @@ public class WeeklyReportPersistenceService {
     private final FindingRepository findings;
     private final TopicRelevancePolicy relevancePolicy;
     private final ReportComparisonRepository comparisons;
+    private final ReportEventFeedbackProjection feedbackProjection;
+    private final DailyReportFeedbackExclusions feedbackExclusions;
 
     @Transactional
     public Reservation reserve(LocalDate monday, LocalDateTime now) {
@@ -50,8 +53,8 @@ public class WeeklyReportPersistenceService {
         List<LocalDate> sourceDates = sources.stream().map(NewsReport::getReportDate).toList();
         List<LocalDate> missingDates = monday.datesUntil(monday.plusWeeks(1))
                 .filter(date -> !sourceDates.contains(date)).toList();
-        WeeklyReportInput input = new WeeklyReportInput(monday, monday.plusDays(6),
-                sources.stream().map(this::snapshot).toList(), missingDates);
+        WeeklyReportInput input = excludeDailyErrors(new WeeklyReportInput(monday, monday.plusDays(6),
+                sources.stream().map(this::snapshot).toList(), missingDates));
         NewsReport report = reports.saveAndFlush(NewsReport.builder()
                 .reportScope(ReportScope.WEEKLY).reportDate(monday).reportEndDate(monday.plusDays(6))
                 .sourceReportIds(sources.stream().map(NewsReport::getId).toList())
@@ -72,23 +75,75 @@ public class WeeklyReportPersistenceService {
         List<Long> allowed = visible.findings().stream().map(Finding::getId).toList();
         ReportContent content = source.getStructuredContent();
         String markdown = source.getMarkdownBody();
+        if (!visible.filtered()) {
+            var reviewed = feedbackProjection.project(source, visible, feedbackProjection.reviews(source.getId()));
+            allowed = reviewed.findings().stream().map(Finding::getId).toList();
+            content = reviewed.readingContent().structuredContent();
+            markdown = reviewed.readingContent().markdownBody();
+        }
         if (visible.filtered()) {
             // Do not reconstruct claims from live findings: retain only fully supported saved DAILY sections.
             markdown = "";
             if (content != null) {
+                List<Long> visibleIds = allowed;
                 var events = content.importantEvents().stream()
-                        .filter(event -> !event.sourceFindingIds().isEmpty() && allowed.containsAll(event.sourceFindingIds())).toList();
+                        .filter(event -> !event.sourceFindingIds().isEmpty() && visibleIds.containsAll(event.sourceFindingIds())).toList();
                 var watchItems = content.watchItems().stream()
-                        .filter(item -> !item.sourceFindingIds().isEmpty() && allowed.containsAll(item.sourceFindingIds())).toList();
+                        .filter(item -> !item.sourceFindingIds().isEmpty() && visibleIds.containsAll(item.sourceFindingIds())).toList();
                 content = new ReportContent(events.stream().map(ReportContent.ImportantEvent::summaryKo).limit(3).toList(),
                         events, watchItems, List.of("현재 본문과 관련도를 확인할 수 있는 저장된 일일 보고서 내용만 포함했습니다."));
             }
         }
+        List<Long> selected = allowed;
         var snapshot = comparisons.findInput(source.getId()).map(saved -> new ReportComparisonSnapshot(
-                saved.version(), saved.issues().stream().filter(issue -> allowed.contains(issue.findingId())).toList(),
+                saved.version(), saved.issues().stream().filter(issue -> selected.contains(issue.findingId())).toList(),
                 saved.scopes())).orElse(null);
         return new WeeklyReportInput.DailySource(source.getId(), source.getReportDate(), source.getTitle(),
                 markdown, content, allowed, snapshot);
+    }
+
+    private WeeklyReportInput excludeDailyErrors(WeeklyReportInput input) {
+        // Resolve across the entire week, including another day's observation of the same frozen issue identity.
+        var candidate = NewsReport.builder().reportScope(ReportScope.WEEKLY)
+                .reportDate(input.reportDate()).reportEndDate(input.reportEndDate())
+                .sourceReportIds(input.sources().stream().map(WeeklyReportInput.DailySource::reportId).toList())
+                .reflectedFindingIds(input.sourceFindingIds()).weeklyInput(input).build();
+        Set<Long> excluded = feedbackExclusions.forReport(candidate);
+        if (excluded.isEmpty()) return input;
+        return new WeeklyReportInput(input.reportDate(), input.reportEndDate(),
+                input.sources().stream().map(source -> withoutFindings(source, excluded)).toList(), input.missingReportDates());
+    }
+
+    private WeeklyReportInput.DailySource withoutFindings(WeeklyReportInput.DailySource source, Set<Long> excluded) {
+        List<Long> allowed = source.reflectedFindingIds().stream().filter(id -> !excluded.contains(id)).toList();
+        if (allowed.size() == source.reflectedFindingIds().size()) return source;
+        ReportContent content = source.structuredContent();
+        if (content != null) {
+            Set<Long> initiallyAllowed = Set.copyOf(allowed);
+            var events = content.importantEvents().stream()
+                    .filter(event -> !event.sourceFindingIds().isEmpty() && initiallyAllowed.containsAll(event.sourceFindingIds())).toList();
+            Set<Long> removedSources = content.importantEvents().stream().filter(event -> !events.contains(event))
+                    .flatMap(event -> event.sourceFindingIds().stream()).collect(java.util.stream.Collectors.toSet());
+            var watches = content.watchItems().stream()
+                    .filter(item -> !item.sourceFindingIds().isEmpty() && initiallyAllowed.containsAll(item.sourceFindingIds())
+                            && item.sourceFindingIds().stream().noneMatch(removedSources::contains)).toList();
+            content.watchItems().stream().filter(item -> !watches.contains(item))
+                    .flatMap(item -> item.sourceFindingIds().stream()).forEach(removedSources::add);
+            Set<Long> retainedSources = events.stream().flatMap(event -> event.sourceFindingIds().stream())
+                    .collect(java.util.stream.Collectors.toSet());
+            watches.stream().flatMap(item -> item.sourceFindingIds().stream()).forEach(retainedSources::add);
+            // Removed compound events or watches must not leave orphan evidence for later fallback views.
+            allowed = allowed.stream().filter(id -> !removedSources.contains(id) || retainedSources.contains(id)).toList();
+            content = new ReportContent(events.stream().limit(3).map(ReportContent.ImportantEvent::summaryKo).toList(),
+                    events, watches, List.of());
+        }
+        var evidence = source.evidenceSnapshot();
+        if (evidence != null) {
+            List<Long> selected = allowed;
+            evidence = new ReportComparisonSnapshot(evidence.version(),
+                    evidence.issues().stream().filter(issue -> selected.contains(issue.findingId())).toList(), evidence.scopes());
+        }
+        return new WeeklyReportInput.DailySource(source.reportId(), source.reportDate(), source.title(), "", content, allowed, evidence);
     }
 
     public record Reservation(Long reportId, boolean owner, WeeklyReportInput input) {

@@ -13,6 +13,7 @@ import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportContent;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
+import com.example.be.domain.reports.service.DailyReportFeedbackExclusions;
 import com.example.be.domain.reports.service.ReportFindings;
 import com.example.be.domain.reports.service.ReportReadingContent;
 import com.example.be.domain.feedback.model.FeedbackModels;
@@ -44,7 +45,8 @@ class NotificationRendererTest {
     private final FindingRepository findingRepository = mock(FindingRepository.class);
     private final FeedbackStore feedbackStore = mock(FeedbackStore.class);
     private final ReportEventSnapshotFactory eventSnapshots = mock(ReportEventSnapshotFactory.class);
-    private final ReportEventFeedbackProjection projection = new ReportEventFeedbackProjection(feedbackStore, eventSnapshots);
+    private final ReportEventFeedbackProjection projection = new ReportEventFeedbackProjection(
+            feedbackStore, eventSnapshots, mock(DailyReportFeedbackExclusions.class));
     private final NotificationRenderer renderer = new NotificationRenderer(findingRepository, relevancePolicy, projection);
 
     @Test

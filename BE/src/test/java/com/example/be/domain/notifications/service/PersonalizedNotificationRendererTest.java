@@ -21,6 +21,7 @@ import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportContent;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
+import com.example.be.domain.reports.service.DailyReportFeedbackExclusions;
 import com.example.be.domain.reports.service.ReportFindings;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -48,7 +49,8 @@ class PersonalizedNotificationRendererTest {
     private final FeedbackStore store = mock(FeedbackStore.class);
     private final ReportEventSnapshotFactory snapshots = mock(ReportEventSnapshotFactory.class);
     private final FeedbackDeliveryService feedback = mock(FeedbackDeliveryService.class);
-    private final ReportEventFeedbackProjection projection = new ReportEventFeedbackProjection(store, snapshots);
+    private final ReportEventFeedbackProjection projection = new ReportEventFeedbackProjection(
+            store, snapshots, mock(DailyReportFeedbackExclusions.class));
     private final NotificationRenderer renderer = new NotificationRenderer(findings, relevance, projection);
     private final PersonalizedNotificationRenderer personalized = new PersonalizedNotificationRenderer(
             reports, findings, relevance, feedback, renderer, projection);

@@ -240,7 +240,7 @@ class ReportInsightServiceTest {
         var events = mock(ReportEventSnapshotFactory.class);
         var learning = mock(FeedbackLearningService.class);
         var realAssembler = new ReportInsightSnapshotAssembler(reportRepository, findingRepository, relevance,
-                new ObjectMapper(), new ReportEventFeedbackProjection(feedback, events), learning);
+                new ObjectMapper(), new ReportEventFeedbackProjection(feedback, events, mock(com.example.be.domain.reports.service.DailyReportFeedbackExclusions.class)), learning);
         var realService = new ReportInsightService(properties, realAssembler, persistence, new ReportInsightValidator(),
                 client, quota, plans, recorder, new ReportInsightExecutionRecorder(recorder, quota, persistence), jobs);
         var generatedAt = LocalDateTime.of(2026, 9, 30, 10, 0);
@@ -287,7 +287,7 @@ class ReportInsightServiceTest {
         var feedback = mock(FeedbackStore.class);
         var events = mock(ReportEventSnapshotFactory.class);
         var realAssembler = new ReportInsightSnapshotAssembler(reportRepository, findingRepository, relevance, new ObjectMapper(),
-                new ReportEventFeedbackProjection(feedback, events), mock(FeedbackLearningService.class));
+                new ReportEventFeedbackProjection(feedback, events, mock(com.example.be.domain.reports.service.DailyReportFeedbackExclusions.class)), mock(FeedbackLearningService.class));
         var realService = new ReportInsightService(properties, realAssembler, persistence, new ReportInsightValidator(),
                 client, quota, plans, recorder, new ReportInsightExecutionRecorder(recorder, quota, persistence), jobs);
         var rejected = new ReportContent.ImportantEvent("오류 사건", "오류 요약", "판단 이유", List.of(50L));
