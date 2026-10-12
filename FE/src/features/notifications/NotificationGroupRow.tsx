@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   useDeleteNotificationGroup,
   useNotificationGroupRecipients,
@@ -23,16 +24,16 @@ export function NotificationGroupRow({ group, recipients, perspectiveLabel }: {
     <div><strong>{group.name}</strong><span>{perspectiveLabel} · {group.memberCount}명</span></div>
     <div className="recipient-actions">
       <button ref={editButton} type="button" className="text-button" aria-label={`${group.name} 편집`}
-        aria-expanded={editing} aria-controls={editing ? `group-settings-${group.id}` : undefined}
+        aria-haspopup="dialog" aria-expanded={editing} aria-controls={editing ? `group-settings-${group.id}` : undefined}
         disabled={editing || remove.isPending} onClick={() => { remove.reset(); setEditing(true) }}>편집</button>
       <button type="button" className="text-button danger" aria-label={`${group.name} 삭제`}
         disabled={editing || remove.isPending} onClick={() => remove.mutate(group.id)}>삭제</button>
     </div>
-    {editing && <NotificationGroupEditor group={group} recipients={recipients} onClose={() => {
+    {editing && createPortal(<NotificationGroupEditor group={group} recipients={recipients} onClose={() => {
       setEditing(false)
-      // 닫힌 폼에서 편집 진입점으로 키보드 포커스를 돌려준다.
+      // 편집 버튼이 다시 활성화된 뒤 키보드 포커스를 돌려준다.
       requestAnimationFrame(() => editButton.current?.focus())
-    }} />}
+    }} />, document.body)}
     <div className="group-row-status"><MutationStatus error={remove.error} success={null} /></div>
   </article>
 }
@@ -48,8 +49,20 @@ function NotificationGroupEditor({ group, recipients, onClose }: {
   const [name, setName] = useState(group.name)
   const [selected, setSelected] = useState<number[] | null>(null)
   const [savedMemberIds, setSavedMemberIds] = useState<number[] | null>(null)
+  const dialog = useRef<HTMLDialogElement>(null)
   const nameInput = useRef<HTMLInputElement>(null)
-  useEffect(() => { nameInput.current?.focus() }, [])
+  useEffect(() => {
+    const element = dialog.current
+    const previousFocus = document.activeElement
+    element?.showModal()
+    nameInput.current?.focus()
+    document.body.classList.add('modal-open')
+    return () => {
+      element?.close()
+      if (!document.querySelector('dialog[open]')) document.body.classList.remove('modal-open')
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()
+    }
+  }, [])
   const memberIds = savedMemberIds ?? members.data?.content.map(recipient => recipient.id) ?? []
   const draftIds = selected ?? memberIds
   // 비활성 구성원도 유지할 수 있으므로 활성 수신자 목록과 현재 구성원을 함께 표시한다.
@@ -58,6 +71,8 @@ function NotificationGroupEditor({ group, recipients, onClose }: {
   ].map(recipient => [recipient.id, recipient])).values()]
   const changed = draftIds.length !== memberIds.length || draftIds.some(id => !memberIds.includes(id))
   const pending = update.isPending || replace.isPending
+
+  function dismiss() { if (!pending) onClose() }
 
   function saveName(event: FormEvent) {
     event.preventDefault()
@@ -74,37 +89,52 @@ function NotificationGroupEditor({ group, recipients, onClose }: {
     } })
   }
 
-  return <div className="recipient-settings group-editor" id={`group-settings-${group.id}`}
-    role="region" aria-label={`${group.name} 그룹 편집`} aria-busy={pending}>
-    <p className="group-editor-help">그룹명과 구성원은 각각 저장됩니다.</p>
-    <form className="recipient-email-form" aria-label="그룹명 편집" onSubmit={saveName}>
-      <label htmlFor={`group-name-${group.id}`}>그룹명</label>
-      <div className="recipient-email-fields">
-        <input ref={nameInput} id={`group-name-${group.id}`} required maxLength={100} value={name} disabled={pending}
-          onChange={event => { setName(event.target.value); update.reset() }} />
-        <button type="submit" disabled={pending || !name.trim() || name.trim() === group.name}>
-          {update.isPending ? '저장 중…' : '그룹명 저장'}
-        </button>
-      </div>
-      <MutationStatus error={update.error} success={update.isSuccess ? '그룹명을 저장했습니다.' : null} />
-    </form>
-    <form className="group-members-form" aria-label="그룹 구성원 편집" onSubmit={saveMembers}>
-      {members.isPending ? <SkeletonRegion label="그룹 구성원을 불러오는 중입니다.">
-        <Skeleton className="skeleton-control" />
-      </SkeletonRegion> : members.isError ? <div>
-        <MutationStatus error={members.error} success={null} />
-        <button type="button" className="secondary-button" disabled={members.isFetching || pending}
-          onClick={() => void members.refetch()}>구성원 다시 불러오기</button>
-      </div> : <>
-        <GroupRecipientPicker recipients={choices} selected={draftIds} disabled={pending}
-          onChange={ids => { setSelected(ids); replace.reset() }} />
-        <p className="group-editor-help">선택을 해제하면 그룹에서 제외됩니다. 수신자 정보는 유지됩니다.</p>
-        <button type="submit" className="primary-button" disabled={pending || !changed}>
-          {replace.isPending ? '저장 중…' : '구성원 저장'}
-        </button>
-      </>}
-      <MutationStatus error={replace.error} success={replace.isSuccess ? '구성원을 저장했습니다.' : null} />
-    </form>
-    <button type="button" className="text-button group-editor-close" disabled={pending} onClick={onClose}>편집 닫기</button>
-  </div>
+  return <dialog ref={dialog} className="recipient-selection-dialog group-settings-dialog" id={`group-settings-${group.id}`}
+    aria-labelledby={`group-settings-title-${group.id}`} aria-busy={pending}
+    onCancel={event => {
+      if (event.target !== event.currentTarget) return
+      event.preventDefault()
+      dismiss()
+    }}
+    onMouseDown={event => {
+      if (event.button !== 0 || event.target !== event.currentTarget) return
+      const bounds = event.currentTarget.getBoundingClientRect()
+      if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dismiss()
+    }}>
+    <header className="recipient-selection-heading">
+      <div><h2 id={`group-settings-title-${group.id}`}>{group.name} 그룹 편집</h2><p>그룹명과 구성원은 각각 저장됩니다.</p></div>
+      <button type="button" className="text-button recipient-selection-close" disabled={pending} aria-label="그룹 편집 닫기" onClick={dismiss}>×</button>
+    </header>
+    <div className="group-editor">
+      <form className="recipient-email-form" aria-label="그룹명 편집" onSubmit={saveName}>
+        <label htmlFor={`group-name-${group.id}`}>그룹명</label>
+        <div className="recipient-email-fields">
+          <input ref={nameInput} id={`group-name-${group.id}`} required maxLength={100} value={name} disabled={pending}
+            onChange={event => { setName(event.target.value); update.reset() }} />
+          <button type="submit" disabled={pending || !name.trim() || name.trim() === group.name}>
+            {update.isPending ? '저장 중…' : '그룹명 저장'}
+          </button>
+        </div>
+        <MutationStatus error={update.error} success={update.isSuccess ? '그룹명을 저장했습니다.' : null} />
+      </form>
+      <form className="group-members-form" aria-label="그룹 구성원 편집" onSubmit={saveMembers}>
+        {members.isPending ? <SkeletonRegion label="그룹 구성원을 불러오는 중입니다.">
+          <Skeleton className="skeleton-control" />
+        </SkeletonRegion> : members.isError ? <div>
+          <MutationStatus error={members.error} success={null} />
+          <button type="button" className="secondary-button" disabled={members.isFetching || pending}
+            onClick={() => void members.refetch()}>구성원 다시 불러오기</button>
+        </div> : <>
+          <GroupRecipientPicker recipients={choices} selected={draftIds} disabled={pending}
+            onChange={ids => { setSelected(ids); replace.reset() }} />
+          <p className="group-editor-help">선택을 해제하면 그룹에서 제외됩니다. 수신자 정보는 유지됩니다.</p>
+          <button type="submit" className="primary-button" disabled={pending || !changed}>
+            {replace.isPending ? '저장 중…' : '구성원 저장'}
+          </button>
+        </>}
+        <MutationStatus error={replace.error} success={replace.isSuccess ? '구성원을 저장했습니다.' : null} />
+      </form>
+    </div>
+    <footer className="recipient-selection-actions"><button type="button" className="secondary-button" disabled={pending} onClick={dismiss}>닫기</button></footer>
+  </dialog>
 }

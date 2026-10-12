@@ -61,13 +61,13 @@ function RecipientSelectionDialog({ id, recipients, selected, onDismiss, onApply
     document.body.classList.add('modal-open')
     return () => {
       element?.close()
-      document.body.classList.remove('modal-open')
+      if (!document.querySelector('dialog[open]')) document.body.classList.remove('modal-open')
       if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()
     }
   }, [])
 
   return <dialog ref={dialog} id={id} className="recipient-selection-dialog" aria-labelledby={`${id}-title`}
-    onCancel={event => { event.preventDefault(); onDismiss() }}
+    onCancel={event => { event.preventDefault(); event.stopPropagation(); onDismiss() }}
     onClick={event => {
       if (event.target !== event.currentTarget) return
       const bounds = event.currentTarget.getBoundingClientRect()
