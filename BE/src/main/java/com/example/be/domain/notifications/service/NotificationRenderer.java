@@ -160,13 +160,30 @@ public class NotificationRenderer {
         if (brief.items().isEmpty()) html.append("<p>").append(NotificationInsightBrief.UNAVAILABLE).append("</p>");
         for (var item : brief.items()) {
             html.append("<p style=\"margin:0 0 12px;color:#4e5968;font-size:14px;line-height:1.8\">")
-                    .append(escape(prose(item.text())));
-            if (StringUtils.hasText(item.assumption())) {
-                html.append("<br><strong>전제:</strong> ").append(escape(prose(item.assumption())));
-            }
+                    .append(escape(emailInsightText(item.text())));
             html.append("</p>");
         }
         html.append("</td></tr></tbody></table>");
+    }
+
+    private static String emailInsightText(String value) {
+        String text = prose(value == null ? "" : value.replaceAll("\\\\[\\t ]*(?:\\r?\\n|$)", " "));
+        String prefix = "원문: 「";
+        if (!text.startsWith(prefix)) return text;
+        // Source sentences can contain quoted terms or the word '해석'; find the outer quote.
+        int depth = 1;
+        for (int index = prefix.length(); index < text.length(); index++) {
+            char character = text.charAt(index);
+            if (character == '「') depth++;
+            if (character == '」' && --depth == 0) {
+                String suffix = text.substring(index + 1).stripLeading();
+                if (suffix.startsWith("해석:") && StringUtils.hasText(suffix.substring(3))) {
+                    return suffix.substring(3).strip();
+                }
+                break;
+            }
+        }
+        return text;
     }
 
     /** An interpretation and its assumptions are indivisible; budget pressure drops whole items. */

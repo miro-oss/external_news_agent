@@ -27,7 +27,7 @@ class NotificationInsightRenderingTest {
     private final NewsReport report = NewsReport.builder().id(17L).title("뉴스 보고서").build();
 
     @ParameterizedTest @EnumSource(ChannelType.class)
-    void includesOnlyTwoGroundedInterpretationsAndCompleteAssumptions(ChannelType type) {
+    void includesOnlyTwoGroundedInterpretationsWithChannelSpecificAssumptions(ChannelType type) {
         var insight = NotificationInsightTestSupport.insight(List.of(
                 new Overview("장비 <수요> & 해석 😀", List.of("11:0"), "투자가 실제 집행되는 경우 & <전제>"),
                 new Overview("두 번째 판단", List.of("11:0", "12:0"), "전체 조건"),
@@ -36,7 +36,7 @@ class NotificationInsightRenderingTest {
         assertTrue(body.contains("관점 인사이트 · 장비·소재사"));
         assertTrue(body.contains("AI 해석"));
         assertTrue(body.contains("장비 &lt;수요&gt; &amp; 해석 😀"));
-        assertTrue(body.contains("투자가 실제 집행되는 경우 &amp; &lt;전제&gt;"));
+        assertEquals(type == ChannelType.TELEGRAM, body.contains("투자가 실제 집행되는 경우 &amp; &lt;전제&gt;"));
         assertTrue(body.contains("두 번째 판단"));
         assertFalse(body.contains("세 번째 판단"));
         assertFalse(body.contains("숨겨진 헤드라인"));
@@ -52,7 +52,57 @@ class NotificationInsightRenderingTest {
         assertFalse(body.contains("숨겨진"));
         assertFalse(body.contains("알 수 없는 해석"));
         assertTrue(body.contains("허용된 해석"));
-        assertTrue(body.contains("허용된 전제"));
+        assertEquals(type == ChannelType.TELEGRAM, body.contains("허용된 전제"));
+    }
+
+    @Test void emailShowsInterpretationWithoutSourceQuotationAssumptionOrMarkdownBreak() {
+        String interpretation = "여러 금융사 침해에서 공통 IP와 유사 수법이 확인돼 네트워크 차단·탐지 검토가 필요합니다.";
+        String second = "해외 서비스 도입이 확대될 경우 배포·연동 준비가 필요할 수 있습니다.";
+        var insight = NotificationInsightTestSupport.insight(List.of(
+                new Overview("원문: 「공통 IP가 일부 발견됐다는 원문 문장입니다.」 해석: " + interpretation + "\\\n",
+                        List.of("11:0"), "동일 공격군 또는 공유 인프라의 연속적 이용을 시사합니다."),
+                new Overview("원문: 「해외 콘텐츠 도입 확대 발표입니다.」 해석: " + second,
+                        List.of("12:0"), "별도로 저장한 조건")), List.of());
+        String body = render(ChannelType.EMAIL, 3500, List.of(finding(11), finding(12)), insight);
+        assertTrue(body.contains(interpretation));
+        assertTrue(body.contains(second));
+        assertFalse(body.contains("원문: 「"));
+        assertFalse(body.contains("해석:"));
+        assertFalse(body.contains("전제:"));
+        assertFalse(body.contains("공통 IP가 일부 발견됐다는 원문 문장"));
+        assertFalse(body.contains("동일 공격군"));
+        assertFalse(body.contains("별도로 저장한 조건"));
+        assertFalse(body.contains("\\"));
+    }
+
+    @Test void emailKeepsInterpretationPunctuationAndInternalBackslashesAfterNestedSourceQuote() {
+        String interpretation = "「운영 해석: 조건부」 지침은 C:\\ops 경로의 <설정> & 로그를 확인할 경우에만 적용할 수 있습니다.";
+        var insight = NotificationInsightTestSupport.insight(List.of(
+                new Overview("원문: 「기사 속 「용어」 해석: 내부 설명입니다.」 해석: " + interpretation,
+                        List.of("11:0"), null),
+                new Overview("원문 인용 없는 기존 판단은 유지합니다.", List.of("12:0"), null)), List.of());
+        String body = render(ChannelType.EMAIL, 3500, List.of(finding(11), finding(12)), insight);
+        assertTrue(body.contains("「운영 해석: 조건부」 지침은 C:\\ops 경로의 &lt;설정&gt; &amp; 로그를 확인할 경우에만 적용할 수 있습니다."));
+        assertTrue(body.contains("원문 인용 없는 기존 판단은 유지합니다."));
+        assertFalse(body.contains("기사 속"));
+    }
+
+    @Test void emailAlsoRemovesSourceWrapperFromGroundedIssueFallback() {
+        var insight = NotificationInsightTestSupport.insight(List.of(), List.of(
+                new ReportInsightDTO.Issue(11L, "high", "원문: 「원문 근거 문장」 해석: 설비 일정 확인이 필요할 수 있습니다.",
+                        List.of("11:0"), null, 1)));
+        String body = render(ChannelType.EMAIL, 3500, List.of(finding(11)), insight);
+        assertTrue(body.contains("설비 일정 확인이 필요할 수 있습니다."));
+        assertFalse(body.contains("원문 근거 문장"));
+        assertFalse(body.contains("해석:"));
+    }
+
+    @Test void telegramStillIncludesSourceQuotationAndAssumption() {
+        var insight = NotificationInsightTestSupport.insight(List.of(
+                new Overview("원문: 「검증된 원문 문장」 해석: 조건부 해석입니다.", List.of("11:0"), "필요한 전제입니다.")), List.of());
+        String body = render(ChannelType.TELEGRAM, 3500, List.of(finding(11)), insight);
+        assertTrue(body.contains("원문: 「검증된 원문 문장」 해석: 조건부 해석입니다."));
+        assertTrue(body.contains("전제: 필요한 전제입니다."));
     }
 
     @ParameterizedTest @EnumSource(ChannelType.class)

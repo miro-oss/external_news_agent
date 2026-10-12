@@ -79,7 +79,7 @@ class PersonalizedNotificationRendererTest {
         assertFalse(body.contains("공용 제외"));
         assertFalse(body.contains("숨겨진 헤드라인"));
         assertTrue(body.contains("허용된 관점 해석"));
-        assertTrue(body.contains("허용된 전제"));
+        assertEquals(type == ChannelType.TELEGRAM, body.contains("허용된 전제"));
     }
 
     @ParameterizedTest
