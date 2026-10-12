@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { QueryClient } from '@tanstack/react-query'
+import { MutationObserver, QueryClient } from '@tanstack/react-query'
 import { ApiError } from '../src/api/client.ts'
-import { reportShareOptions } from '../src/api/reportShare.ts'
-import { canRetryFailedReportShare, failedDeliveryBatchId, reportShareFeedback, reportShareRequestKey } from '../src/features/notifications/reportShareFeedback.ts'
+import { reportPreviewOptions, reportShareOptions } from '../src/api/reportShare.ts'
+import { canRetryFailedReportShare, failedDeliveryBatchId, reportShareFeedback, reportShareInsightGuidance, reportShareRequestKey } from '../src/features/notifications/reportShareFeedback.ts'
 
 test('all-failed responses expose the existing batch for failure lookup', () => {
   assert.equal(failedDeliveryBatchId(new ApiError('DELIVERY502', '발송에 모두 실패했습니다.', 502, {
@@ -143,7 +143,7 @@ test('an explicit new attempt rotates the key once and reuses it after a lost re
     }), { status: requests.length === 1 ? 502 : 200 })
   })
   const mutation = client.getMutationCache().build(client, reportShareOptions(client, 17))
-  const targets = { groupIds: [], recipientIds: [1], channelIds: [1] }
+  const targets = { groupIds: [], recipientIds: [1], channelIds: [1], insightAudience: 'IT_INFRA' }
   let requestKey = 'original-key'
   const share = () => {
     requestKey = reportShareRequestKey(17, requestKey, mutation.state.data, mutation.state.error)
@@ -163,4 +163,68 @@ test('an explicit new attempt rotates the key once and reuses it after a lost re
   assert.deepEqual(requests.map(request => request.body.idempotencyKey), ['original-key', newKey, newKey])
   assert.ok(requests.every(request => request.url === '/api/notifications/reports/17/send'))
   assert.ok(requests.every(request => request.body.recipientIds[0] === 1 && request.body.channelIds[0] === 1))
+  assert.ok(requests.every(request => request.body.insightAudience === 'IT_INFRA'), 'retrying retains the chosen insight')
+})
+
+test('manual email and Telegram send and preview carry the same optional insight perspective', async (context) => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const requests = []
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    requests.push({ url, body: JSON.parse(init.body) })
+    return new Response(JSON.stringify({ isSuccess: true, code: 'COMMON200', message: '성공입니다.', result: {} }))
+  })
+  for (const insightAudience of [undefined, null, 'CHIP_MAKER', 'EQUIPMENT_MAKER', 'MARKET_INVESTOR', 'IT_INFRA']) {
+    const selection = insightAudience === undefined ? {} : { insightAudience }
+    for (const channelId of [1, 2]) {
+      await client.getMutationCache().build(client, reportPreviewOptions()).execute({ reportId: 17, channelId, ...selection })
+      await client.getMutationCache().build(client, reportShareOptions(client, 17)).execute({
+        groupIds: [], recipientIds: [3], channelIds: [channelId], idempotencyKey: `key-${requests.length}`, ...selection,
+      })
+      const [preview, send] = requests.slice(-2)
+      assert.equal(preview.url, '/api/notifications/reports/17/preview')
+      assert.equal(send.url, '/api/notifications/reports/17/send')
+      assert.deepEqual(preview.body, { channelId, ...selection })
+      assert.equal(send.body.insightAudience, insightAudience)
+      assert.equal(Object.hasOwn(send.body, 'insightAudience'), insightAudience !== undefined)
+    }
+  }
+})
+
+test('clearing preview when selection changes prevents a late old perspective response from resurfacing', async (context) => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const requests = []
+  let finishOld
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    const body = JSON.parse(init.body)
+    requests.push(body)
+    if (body.insightAudience === 'CHIP_MAKER') await new Promise(resolve => { finishOld = resolve })
+    return new Response(JSON.stringify({ isSuccess: true, code: 'COMMON200', message: '성공입니다.',
+      result: { reportId: 17, channelId: 1, chunks: [{ seq: 1, body: body.insightAudience ?? '요약만' }] } }))
+  })
+  const preview = new MutationObserver(client, reportPreviewOptions())
+  const oldRequest = preview.mutate({ reportId: 17, channelId: 1, insightAudience: 'CHIP_MAKER' })
+  await new Promise(resolve => setImmediate(resolve))
+  preview.reset()
+  assert.equal(preview.getCurrentResult().data, undefined)
+  assert.equal(preview.getCurrentResult().error, null)
+  await preview.mutate({ reportId: 17, channelId: 1 })
+  finishOld()
+  await oldRequest
+  assert.equal(preview.getCurrentResult().data.chunks[0].body, '요약만')
+  assert.deepEqual(requests, [{ channelId: 1, insightAudience: 'CHIP_MAKER' }, { channelId: 1 }])
+})
+
+test('insight errors guide users to saved report analysis without confusing unrelated delivery conflicts', () => {
+  const absent = new ApiError('COMMON404', '저장된 리포트 관점 인사이트가 없습니다.', 404)
+  const preparing = new ApiError('COMMON409', '동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.', 409)
+  assert.match(reportShareInsightGuidance(absent), /리포트 관점 분석.*분석을 준비/)
+  assert.match(reportShareInsightGuidance(preparing), /완료 여부를 확인/)
+  for (const error of [absent, preparing]) assert.match(reportShareInsightGuidance(error), /포함 안 함/)
+  for (const error of [new ApiError('COMMON409', '상태 충돌이 발생했습니다.', 409),
+    new ApiError('REPORT404', '보고서를 찾을 수 없습니다.', 404),
+    new ApiError('COMMON404', '다른 리소스를 찾을 수 없습니다.', 404), new TypeError('fetch failed'), null]) {
+    assert.equal(reportShareInsightGuidance(error), null)
+  }
 })

@@ -13,6 +13,7 @@ import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
 import jakarta.mail.Session;
 import jakarta.mail.Transport;
+import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
@@ -135,6 +140,41 @@ class EmailNotificationSenderTest {
         assertFalse(messageId.isBlank());
         verify(transport).sendMessage(any(Message.class), any());
         verify(transport).close();
+        assertTrue(logs.list.isEmpty());
+    }
+
+    @Test
+    void repeatedNotificationsHaveIndependentThreadReferencesAndUnchangedContent() throws Exception {
+        String subject = "[뉴스 보고서] 같은 리포트";
+        String body = "<html><body><h2>주요 이슈 1</h2><p>반복 전달해도 보여야 할 본문</p></body></html>";
+        var returnedIds = new ArrayList<String>();
+        var channel = channel(465, true, false);
+        try (var delivery = sender.openSession(channel)) {
+            returnedIds.add(delivery.send("reader@example.test", subject, body));
+            returnedIds.add(delivery.send("reader@example.test", subject, body));
+        }
+        returnedIds.add(sender.send(channel, "reader@example.test", subject, body));
+
+        var messages = org.mockito.ArgumentCaptor.forClass(Message.class);
+        verify(transport, times(3)).sendMessage(messages.capture(), any());
+        var references = new HashSet<String>();
+        for (int index = 0; index < messages.getAllValues().size(); index++) {
+            var bytes = new ByteArrayOutputStream();
+            messages.getAllValues().get(index).writeTo(bytes);
+            var wire = new MimeMessage(Session.getInstance(new Properties(), null),
+                    new ByteArrayInputStream(bytes.toByteArray()));
+            String reference = wire.getHeader("References", null);
+            assertNotNull(reference);
+            assertTrue(reference.matches("<news-delivery-[0-9a-f-]{36}@notifications\\.invalid>"));
+            assertTrue(references.add(reference), "Each delivery needs a different thread reference");
+            assertFalse(returnedIds.contains(reference), "Must not refer to another delivered message");
+            assertNull(wire.getHeader("In-Reply-To"));
+            assertEquals(returnedIds.get(index), wire.getMessageID());
+            assertEquals(subject, wire.getSubject());
+            assertEquals(body, wire.getContent());
+            assertTrue(wire.isMimeType("text/html"));
+        }
+        assertEquals(3, new HashSet<>(returnedIds).size());
         assertTrue(logs.list.isEmpty());
     }
 

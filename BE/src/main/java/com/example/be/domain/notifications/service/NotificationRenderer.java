@@ -7,6 +7,7 @@ import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportContent;
+import com.example.be.domain.reports.insight.ReportInsightDTO;
 import com.example.be.domain.reports.service.ReportFindings;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import com.example.be.domain.reports.service.ReportReadingContent;
@@ -47,20 +48,32 @@ public class NotificationRenderer {
     }
 
     public RenderedNotification render(NewsReport report, NotificationChannel channel) {
+        return render(report, channel, (ReportInsightDTO.AudienceInsight) null);
+    }
+
+    public RenderedNotification render(NewsReport report, NotificationChannel channel,
+                                       ReportInsightDTO.AudienceInsight insight) {
         ReportFindings.Visible visible = ReportFindings.loadVisible(report, findingRepository, relevancePolicy);
         var view = feedbackProjection.project(report, visible, feedbackProjection.reviews(report.getId()));
-        return render(report, channel, view, null);
+        return render(report, channel, view, null, insight);
     }
 
     /** Personalization is already evaluated and persisted; rendering never calls the agent. */
     public RenderedNotification render(NewsReport report, NotificationChannel channel,
                                        ReportEventFeedbackProjection.View view, String feedbackUrl) {
+        return render(report, channel, view, feedbackUrl, null);
+    }
+
+    public RenderedNotification render(NewsReport report, NotificationChannel channel,
+                                       ReportEventFeedbackProjection.View view, String feedbackUrl,
+                                       ReportInsightDTO.AudienceInsight insight) {
         List<Finding> findings = view.findings();
         ReportReadingContent content = view.readingContent();
+        NotificationInsightBrief brief = NotificationInsightBrief.from(insight, findings);
         String link = safeUrl(feedbackUrl) ? "<a href=\"" + attribute(feedbackUrl)
                 + "\">이슈 피드백 · 내 수신 기준</a>" : "";
         if (channel.getChannelType() == ChannelType.EMAIL) {
-            RenderedNotification rendered = renderEmail(report, findings, content);
+            RenderedNotification rendered = renderEmail(report, findings, content, brief);
             if (link.isEmpty()) return rendered;
             String footer = "<p style=\"margin:24px 0;color:#636c78;font-size:13px\">" + link
                     + "<br>이 링크는 수신자 전용입니다.</p>";
@@ -69,8 +82,11 @@ public class NotificationRenderer {
         }
         String footer = link.isEmpty() ? "" : "\n\n" + link;
         if (footer.length() + 80 >= channel.getMaxLength()) footer = "";
-        RenderedNotification rendered = renderTelegram(report, findings, content, channel.getMaxLength() - footer.length());
-        return new RenderedNotification(rendered.subject(), rendered.parseMode(), List.of(rendered.chunks().getFirst() + footer));
+        int available = channel.getMaxLength() - footer.length();
+        String insightBlock = telegramInsight(brief, Math.max(0, Math.min(1200, available / 2)));
+        RenderedNotification rendered = renderTelegram(report, findings, content, available - insightBlock.length());
+        return new RenderedNotification(rendered.subject(), rendered.parseMode(),
+                List.of(rendered.chunks().getFirst() + insightBlock + footer));
     }
 
     public RenderedNotification renderBreakingAlert(String issueTitle,
@@ -90,7 +106,8 @@ public class NotificationRenderer {
         return new RenderedNotification(null, "HTML", List.of(body));
     }
 
-    private RenderedNotification renderEmail(NewsReport report, List<Finding> findings, ReportReadingContent content) {
+    private RenderedNotification renderEmail(NewsReport report, List<Finding> findings, ReportReadingContent content,
+                                             NotificationInsightBrief brief) {
         String subject = "[뉴스 보고서] " + singleLine(normalize(report.getTitle()));
         StringBuilder html = emailStart(report.getTitle());
         html.append(EMAIL_TABLE).append("<tr><td class=\"email-card\" bgcolor=\"#e8f3ff\" "
@@ -103,6 +120,7 @@ public class NotificationRenderer {
                         + "<td valign=\"top\" style=\"padding:4px 0;color:#191f28;font-size:15px;line-height:1.8\">")
                 .append(escape(line)).append("</td></tr>"));
         html.append("</tbody></table></td></tr></tbody></table>");
+        appendEmailInsight(html, brief);
         List<NewsCard> cards = cards(content, findings, EMAIL_MAX_ISSUES);
         for (int i = 0; i < cards.size(); i++) {
             NewsCard card = cards.get(i);
@@ -131,6 +149,58 @@ public class NotificationRenderer {
         if (cards.isEmpty()) appendSources(html, findings, true);
         appendReportLink(html, report, true);
         return new RenderedNotification(subject, null, List.of(emailEnd(html)));
+    }
+
+    private void appendEmailInsight(StringBuilder html, NotificationInsightBrief brief) {
+        if (brief == null) return;
+        html.append(EMAIL_TABLE).append("<tr><td class=\"email-card\" style=\"padding:24px 0 4px\">"
+                        + "<h2 style=\"margin:0 0 8px;color:#1b64da;font-size:16px\">")
+                .append(escape(brief.label())).append("</h2><p style=\"margin:0 0 12px;color:#636c78;font-size:12px\">")
+                .append(escape(NotificationInsightBrief.AI_NOTICE)).append("</p>");
+        if (brief.items().isEmpty()) html.append("<p>").append(NotificationInsightBrief.UNAVAILABLE).append("</p>");
+        for (var item : brief.items()) {
+            html.append("<p style=\"margin:0 0 12px;color:#4e5968;font-size:14px;line-height:1.8\">")
+                    .append(escape(emailInsightText(item.text())));
+            html.append("</p>");
+        }
+        html.append("</td></tr></tbody></table>");
+    }
+
+    private static String emailInsightText(String value) {
+        String text = prose(value == null ? "" : value.replaceAll("\\\\[\\t ]*(?:\\r?\\n|$)", " "));
+        String prefix = "원문: 「";
+        if (!text.startsWith(prefix)) return text;
+        // Source sentences can contain quoted terms or the word '해석'; find the outer quote.
+        int depth = 1;
+        for (int index = prefix.length(); index < text.length(); index++) {
+            char character = text.charAt(index);
+            if (character == '「') depth++;
+            if (character == '」' && --depth == 0) {
+                String suffix = text.substring(index + 1).stripLeading();
+                if (suffix.startsWith("해석:") && StringUtils.hasText(suffix.substring(3))) {
+                    return suffix.substring(3).strip();
+                }
+                break;
+            }
+        }
+        return text;
+    }
+
+    /** An interpretation and its assumptions are indivisible; budget pressure drops whole items. */
+    private String telegramInsight(NotificationInsightBrief brief, int budget) {
+        if (brief == null) return "";
+        String heading = "\n\n<b>" + escape(brief.label()) + "</b>\n" + escape(NotificationInsightBrief.AI_NOTICE) + "\n";
+        StringBuilder result = new StringBuilder(heading);
+        for (var item : brief.items()) {
+            String block = "• " + escape(prose(item.text()))
+                    + (StringUtils.hasText(item.assumption()) ? "\n전제: " + escape(prose(item.assumption())) : "") + "\n";
+            if (result.length() + block.length() <= budget) result.append(block);
+        }
+        if (result.length() == heading.length()) {
+            result.append(brief.items().isEmpty() ? NotificationInsightBrief.UNAVAILABLE
+                    : "길이 제한으로 인사이트를 생략했습니다. 보고서에서 확인하세요.");
+        }
+        return result.length() <= budget ? result.toString() : "";
     }
 
     private StringBuilder emailStart(String title) {

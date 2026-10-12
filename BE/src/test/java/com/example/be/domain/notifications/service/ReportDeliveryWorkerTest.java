@@ -53,6 +53,8 @@ class ReportDeliveryWorkerTest {
         worker.deliver(work);
         verify(store).finish(work,"EMAIL","SENT","message-id",null,false);
         verify(session).close();
+        // Automatic delivery uses the original overload and never opts into manual insight sharing.
+        verify(personalized, never()).render(any(com.example.be.domain.reports.entity.NewsReport.class), any(), any(), any());
     }
     @Test void changedDestinationDoesNotSendToOldAddress() {
         ready();when(store.destinationStillActive(work)).thenReturn(false);

@@ -5,6 +5,7 @@ import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.feedback.service.FeedbackDeliveryService;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.insight.ReportInsightDTO;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.reports.service.ReportFindings;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
@@ -40,12 +41,18 @@ public class PersonalizedNotificationRenderer {
 
     @Transactional
     public RenderedNotification render(NewsReport report, NotificationChannel channel, Long recipientId) {
+        return render(report, channel, recipientId, null);
+    }
+
+    @Transactional
+    public RenderedNotification render(NewsReport report, NotificationChannel channel, Long recipientId,
+                                       ReportInsightDTO.AudienceInsight insight) {
         ReportFindings.Visible original = ReportFindings.loadVisible(report, findings, relevance);
         // Review keys belong to the complete public view, before any recipient-specific exclusion.
         var reviewed = feedbackProjection.project(report, original, feedbackProjection.reviews(report.getId()));
         var prepared = feedback.prepare(report, recipientId, reviewed);
         var delivered = reviewed.suppress(report, prepared.suppressedFindingIds());
-        return renderer.render(report, channel, delivered, feedbackUrl(prepared.token()));
+        return renderer.render(report, channel, delivered, feedbackUrl(prepared.token()), insight);
     }
 
     String feedbackUrl(String token) {
