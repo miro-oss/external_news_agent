@@ -111,6 +111,7 @@ test('the management page offers loading, empty, error and populated states with
   assert.match(loaded, /다음 보고서 반영 대기/)
   assert.match(loaded, /실제 반영 완료/)
   assert.match(loaded, /검토 12건 · 제외 0건/)
+  assert.match(loaded, /메일·텔레그램 전달 제외는 기준 활성화와 별도로, 의견 접수 즉시 적용됩니다/)
   setFixture({ criteria: [companyCriterion], error: new Error('offline'), busy: false })
   const failed = renderToStaticMarkup(createElement(Page))
   assert.match(failed, /role="alert"/)

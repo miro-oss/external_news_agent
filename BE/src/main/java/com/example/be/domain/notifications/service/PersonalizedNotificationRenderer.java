@@ -49,7 +49,7 @@ public class PersonalizedNotificationRenderer {
                                        ReportInsightDTO.AudienceInsight insight) {
         ReportFindings.Visible original = ReportFindings.loadVisible(report, findings, relevance);
         // Review keys belong to the complete public view, before any recipient-specific exclusion.
-        var reviewed = feedbackProjection.project(report, original, feedbackProjection.reviews(report.getId()));
+        var reviewed = feedbackProjection.projectForDelivery(report, original, feedbackProjection.reviews(report.getId()));
         var prepared = feedback.prepare(report, recipientId, reviewed);
         var delivered = reviewed.suppress(report, prepared.suppressedFindingIds());
         return renderer.render(report, channel, delivered, feedbackUrl(prepared.token()), insight);

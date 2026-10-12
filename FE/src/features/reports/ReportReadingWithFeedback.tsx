@@ -157,11 +157,12 @@ export function ReportEventFeedbackComposer({ reportId, target, disabled = false
       <p className="report-feedback-help" id={`${id}-category-help`}>{FEEDBACK_CATEGORIES.find(option => option.value === category)?.description}</p>
       <label className="report-feedback-comment" htmlFor={`${id}-comment`}>의견
         <textarea id={`${id}-comment`} rows={3} value={comment} required maxLength={2000}
-          aria-describedby={`${id}-count ${id}-scope`} placeholder="이 이벤트에서 어떤 내용이 달랐는지 알려 주세요."
+          aria-describedby={`${id}-count ${id}-delivery ${id}-scope`} placeholder="이 이벤트에서 어떤 내용이 달랐는지 알려 주세요."
           onChange={event => { setComment(event.target.value); changed() }} />
       </label>
       <div className="report-feedback-help report-feedback-count" id={`${id}-count`}><span>1~2,000자</span><span>{comment.length.toLocaleString()} / 2,000</span></div>
     </fieldset>
+    <p className="report-feedback-help" id={`${id}-delivery`}>의견이 접수되면 해당 이슈는 검토 완료를 기다리지 않고 이후 메일·텔레그램 발송에서 제외됩니다. 전달 제외는 보고서 화면의 내용을 변경하지 않습니다.</p>
     <p className="report-feedback-help" id={`${id}-scope`}>확인된 오류는 같은 주제·수집 조건의 다음 분석에서 참고합니다. 관심 의견은 검토 후 회사 관심 기준으로 제안하며, 기준을 확인하고 적용하면 이후 보고서 선정에 사용합니다. 개인 알림 기준에는 적용하지 않습니다.</p>
     {error && <div className="report-feedback-error" role="alert"><p>{error}</p>
       {conflict ? <><p>이미 의견이 접수되었거나 보고서 내용이 바뀌었을 수 있습니다. 새로고침 후 확인해 주세요.</p>
@@ -183,6 +184,7 @@ export function ReportEventFeedbackResult({ feedback, criterion, criteriaBusy = 
       <time dateTime={feedback.createdAt}>{formatFullDate(feedback.createdAt)}</time></div>
     <p className="report-feedback-help">{FEEDBACK_CATEGORIES.find(option => option.value === feedback.category)?.label}</p>
     <p className="report-feedback-saved-comment">{feedback.comment}</p>
+    <p className="report-feedback-help"><strong>메일·텔레그램 전달 제외</strong> · 의견 접수 즉시 적용되었습니다. 검토 상태·결과와 관계없이 해당 이슈를 이후 발송에서 제외합니다. 이미 발송된 내용은 바뀌지 않습니다.</p>
     {feedback.diagnosis && <div className="report-feedback-diagnosis"><strong>{feedback.verdict ? VERDICT_LABELS[feedback.verdict] : '검토 설명'}</strong><p>{feedback.diagnosis}</p></div>}
     {feedback.status === 'COMPLETED' && !feedback.diagnosis && <p>검토를 마쳤습니다. 추가 설명이 제공되지 않았습니다.</p>}
     {feedback.status === 'FAILED' && <p>검토를 완료하지 못했습니다. 남긴 의견은 보관됩니다.</p>}

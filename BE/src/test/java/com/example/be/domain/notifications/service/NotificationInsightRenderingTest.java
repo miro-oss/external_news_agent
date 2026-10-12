@@ -16,6 +16,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import java.io.StringReader;
 import java.util.List;
+import java.util.Set;
 import javax.xml.parsers.DocumentBuilderFactory;
 import org.xml.sax.InputSource;
 import static org.junit.jupiter.api.Assertions.*;
@@ -53,6 +54,35 @@ class NotificationInsightRenderingTest {
         assertFalse(body.contains("알 수 없는 해석"));
         assertTrue(body.contains("허용된 해석"));
         assertEquals(type == ChannelType.TELEGRAM, body.contains("허용된 전제"));
+    }
+
+    @ParameterizedTest @EnumSource(ChannelType.class)
+    void sharedEvidenceExclusionVetoesWholeInterpretationButPreservesIndependentInsight(ChannelType type) {
+        var insight = NotificationInsightTestSupport.insight(List.of(
+                new Overview("공유 근거 해석", List.of("11:0"), "공유 근거 전제"),
+                new Overview("혼합 근거 해석", List.of("11:0", "12:0"), "혼합 근거 전제"),
+                new Overview("독립 근거 해석", List.of("12:0"), "독립 근거 전제")), List.of());
+        var view = new ReportEventFeedbackProjection.View(List.of(finding(11), finding(12)),
+                new ReportReadingContent("", null), true, Set.of(11L));
+        String body = renderer.render(report, channel(type, 3500), view, null, insight).chunks().getFirst();
+        assertFalse(body.contains("공유 근거"));
+        assertFalse(body.contains("혼합 근거"));
+        assertTrue(body.contains("독립 근거 해석"));
+        assertEquals(type == ChannelType.TELEGRAM, body.contains("독립 근거 전제"));
+    }
+
+    @ParameterizedTest @EnumSource(ChannelType.class)
+    void sharedEvidenceExclusionAlsoVetoesGroundedIssueFallback(ChannelType type) {
+        var insight = NotificationInsightTestSupport.insight(List.of(), List.of(
+                new ReportInsightDTO.Issue(11L, "high", "공유 근거 대체 사유", List.of("11:0"), null, 1),
+                new ReportInsightDTO.Issue(12L, "high", "혼합 근거 대체 사유", List.of("11:0", "12:0"), null, 2),
+                new ReportInsightDTO.Issue(12L, "medium", "독립 근거 대체 사유", List.of("12:0"), null, 3)));
+        var view = new ReportEventFeedbackProjection.View(List.of(finding(11), finding(12)),
+                new ReportReadingContent("", null), true, Set.of(11L));
+        String body = renderer.render(report, channel(type, 3500), view, null, insight).chunks().getFirst();
+        assertFalse(body.contains("공유 근거 대체 사유"));
+        assertFalse(body.contains("혼합 근거 대체 사유"));
+        assertTrue(body.contains("독립 근거 대체 사유"));
     }
 
     @Test void emailShowsInterpretationWithoutSourceQuotationAssumptionOrMarkdownBreak() {

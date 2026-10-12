@@ -41,7 +41,7 @@ export function CompanyInterestsPage() {
       <li><strong>2. 기준 확인 후 적용</strong><span>기준과 주제를 확인해 사용을 시작합니다.</span></li>
       <li><strong>3. 실제 반영 완료</strong><span>새 보고서의 검토·제외 결과를 확인합니다.</span></li>
     </ol>
-    <p className="company-interest-scope">적용한 기준은 선택한 주제의 이후 보고서 선정에 사용합니다. 기존 보고서는 유지되며, 개인 알림 기준에는 적용하지 않습니다.</p>
+    <p className="company-interest-scope">적용한 기준은 선택한 주제의 이후 보고서 선정에 사용합니다. 기존 보고서는 유지되며, 개인 알림 기준에는 적용하지 않습니다. 의견을 남긴 이슈의 메일·텔레그램 전달 제외는 기준 활성화와 별도로, 의견 접수 즉시 적용됩니다.</p>
     <div className="company-interest-toolbar">
       <Segmented options={FILTERS} value={filter} onSelect={setFilter} label="회사 관심 기준 상태" />
       {criteria && <span>{criteria.filter(criterion => criterion.status === 'DRAFT').length}개 확인 대기 · {criteria.filter(criterion => criterion.status === 'ACTIVE').length}개 사용 중</span>}

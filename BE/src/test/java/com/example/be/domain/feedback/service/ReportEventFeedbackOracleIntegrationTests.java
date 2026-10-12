@@ -49,6 +49,8 @@ class ReportEventFeedbackOracleIntegrationTests {
     @Autowired FeedbackWorker worker;
     @Autowired FeedbackLearningService learning;
     @Autowired com.example.be.domain.companyinterest.CompanyInterestService companyInterests;
+    @Autowired com.example.be.domain.reports.service.ReportEventFeedbackProjection deliveryProjection;
+    @Autowired com.example.be.domain.notifications.service.NotificationRenderer notificationRenderer;
     @Autowired ObjectMapper json;
     @MockitoBean ReportEventSnapshotFactory snapshots;
     @MockitoBean FeedbackAgentGateway gateway;
@@ -272,6 +274,46 @@ class ReportEventFeedbackOracleIntegrationTests {
         assertFalse(saved.allowPersonalization());assertNull(saved.recipientId());
         assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM news_feedback_policies WHERE source_feedback_id=?",Integer.class,submitted.id()));
         assertTrue(json.valueToTree(deliveredFeedback.export(submitted.id()-1,1)).path("cases").isEmpty());
+    }
+
+    @Test void submittedPreferenceImmediatelyDisappearsFromMailBeforeReviewOrCriterionActivation() {
+        var originals=List.of(item('a',1,null),item('b',2,null));
+        long reportId=report(originals);
+        var report=new TransactionTemplate(manager).execute(tx->em.find(NewsReport.class,reportId));
+        var savedReport=reportSnapshot(reportId);
+        var findings=originals.getLast().event().sources().stream().map(source->
+                com.example.be.domain.analysis.entity.Finding.builder().id(source.findingId())
+                        .article(com.example.be.domain.collection.entity.Article.builder()
+                                .id(source.article().id()).title(source.article().title())
+                                .canonicalUrl(source.article().url()).body(source.article().content()).build()).build()).toList();
+        var visible=new com.example.be.domain.reports.service.ReportFindings.Visible(findings,false);
+        var channel=com.example.be.domain.notifications.entity.NotificationChannel.builder().id(1L)
+                .channelType(com.example.be.domain.notifications.entity.ChannelType.EMAIL).maxLength(Integer.MAX_VALUE).build();
+        java.util.function.Supplier<String> mail=()->String.join("\n",notificationRenderer.render(report,channel,
+                deliveryProjection.projectForDelivery(report,visible,deliveryProjection.reviews(reportId)),null).chunks());
+        assertTrue(mail.get().contains("이벤트a"));
+
+        var submitted=service.submit(reportId,request('a',"mail-preference","PREFERENCE"));
+
+        assertEquals("PENDING",submitted.status());
+        assertFalse(mail.get().contains("이벤트a"));
+        assertTrue(mail.get().contains("이벤트b"));
+        assertEquals(2,service.context(reportId).events().size());
+        assertTrue(companyInterests.list().criteria().stream().noneMatch(c->c.feedbackId()==submitted.id()));
+        verifyNoInteractions(gateway);
+        when(gateway.review(isNull(),eq(reportId),any())).thenReturn(result("PREFERENCE"));
+        worker.process(job(submitted.id()));
+        clearInvocations(gateway);
+
+        var draft=companyInterests.list().criteria().stream().filter(c->c.feedbackId()==submitted.id()).findFirst().orElseThrow();
+        assertEquals(com.example.be.domain.companyinterest.CompanyInterestModels.Status.DRAFT,draft.status());
+        assertNull(draft.lastApplication());
+        assertFalse(mail.get().contains("이벤트a"));
+        assertTrue(mail.get().contains("이벤트b"));
+        assertEquals(2,service.context(reportId).events().size());
+        assertEquals(savedReport,reportSnapshot(reportId));
+        assertEquals(originals.getFirst(),store.byId(submitted.id()).orElseThrow().input());
+        verifyNoInteractions(gateway);
     }
 
     @Test void incompleteOrOversizedEventsCompleteWithoutProviderAndKeepAllFrozenSources() {
