@@ -131,7 +131,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v40"
+PROMPT_VERSION = "report-insight.ko.v41"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -1556,6 +1556,7 @@ def _native_assessment_repair_errors(response, request, *, template_wire=False):
     # the preserved component; a reason-only fact error can coexist with the
     # native proof of connection while effect/timing remain open for repair.
     prose_repairs, connection_repairs = {}, {}
+    connection_dependencies = []
     for finding_id in dict.fromkeys(identifier for identifier, _ in failures):
         local_errors = [error for identifier, error in failures if identifier == finding_id]
         prose_contexts = [
@@ -1570,7 +1571,20 @@ def _native_assessment_repair_errors(response, request, *, template_wire=False):
             )
         connection_context = _composed_connection_repair_context(local_errors, finding_id)
         if connection_context is not None:
-            connection_repairs[finding_id] = connection_context
+            if _connection_condition_is_supported(connection_context, request, audience):
+                connection_repairs[finding_id] = connection_context
+            else:
+                # Support from the original union can disappear when editable
+                # effect/timing bases change. Failure to prove preservation is
+                # repair guidance, not a new output-validation failure.
+                connection_dependencies.append(
+                    f"findingId={finding_id}: condition과 표시용 인용을 고정된 connection "
+                    "근거만으로 검증하지 못했으므로 connection을 고정하지 않습니다. "
+                    "effect/timing 근거를 바꾸거나 빼면 condition과 표시용 인용도 함께 "
+                    "재검토하세요. 수정한 "
+                    "condition은 남아 있는 선택 근거 및 relation/work와 정합해야 합니다. "
+                    "기존 업무 연결을 근거 없이 무관·미확인으로 바꾸지는 마세요."
+                )
     return ReportAssessmentValidationError(
         "아래 항목의 내부 근거 계약과 공개 평가 검증 오류를 모두 수정하세요.\n"
         + "\n".join(f"findingId={finding_id}: {error}" for finding_id, error in failures),
@@ -1601,7 +1615,8 @@ def _native_assessment_repair_errors(response, request, *, template_wire=False):
         ),
         repair_action_diagnostics=tuple(
             diagnostic for _, error in failures for diagnostic in _repair_action_entries(error)
-        ),
+        )
+        + tuple(connection_dependencies),
         native_prose_repairs=prose_repairs,
         native_connection_repairs=connection_repairs,
         native_prose_sources=prose_repair_sources(request, prose_repairs),
@@ -1649,6 +1664,49 @@ def _composed_connection_repair_context(local_errors, finding_id):
         if prose is None or prose[0] != context.snapshot or set(prose[1]) != {"reason"}:
             return None
     return context
+
+
+def _connection_condition_is_supported(context, request, audience):
+    """Freeze a condition only while its supporting source is also frozen.
+
+    Public prose is valid against the union of all three axes. A connection
+    repair keeps only the relation basis fixed, so effect/timing evidence cannot
+    justify freezing the condition or its optional display selector. This is a
+    preservation check only; ordinary output acceptance retains the full union.
+    """
+    item = context.snapshot
+    if item.condition is None:
+        return item.source_quotes is None or item.source_quotes.condition is None
+    if item.relation_basis is None:
+        return False
+    refs = [item.relation_basis.claim_id]
+    catalog = build_fact_text_catalog(request, refs)
+    condition = split_rendered_prose(
+        item.condition, catalog, refs, kind="assumption"
+    ).interpretation
+    try:
+        # Legacy source selectors are frozen with the condition. Authenticate
+        # their scope even when a long optional quotation would be omitted.
+        condition = render_source_prose(
+            condition,
+            item.source_quotes.condition if item.source_quotes is not None else None,
+            catalog,
+            refs,
+            max_length=120,
+            kind="assumption",
+        ).interpretation
+    except FactTemplateError:
+        return False
+    claims, evidence = _source_context(request)
+    return not _assessment_field_errors(
+        condition,
+        refs,
+        evidence,
+        claims,
+        request,
+        audience=audience,
+        conditional=_explicit_condition(condition),
+    )
 
 
 def _preserve_native_connection(repair, raw, error):
@@ -3088,6 +3146,21 @@ def _assessment_fact_repair_kinds(error, field):
     )
 
 
+def _assessment_field_errors(
+    value, refs, evidence, claims, request, *, audience=None, conditional=False
+):
+    errors = _prose_validation_errors(
+        [value], refs, evidence, claims, conditional=conditional, request=request
+    )
+    if audience == "MARKET_INVESTOR" and _INVESTMENT_ADVICE.search(value):
+        errors.append(
+            OutputValidationError(
+                _INVESTMENT_ADVICE_MESSAGE, error_kinds=("report_expression_policy",)
+            )
+        )
+    return errors
+
+
 def _assessment_prose_errors(assessment, native, refs, evidence, claims, request, *, audience=None):
     """Preserve native assertion/assumption boundaries through public rendering.
 
@@ -3098,16 +3171,9 @@ def _assessment_prose_errors(assessment, native, refs, evidence, claims, request
     """
 
     def field_errors(value, *, conditional=False):
-        errors = _prose_validation_errors(
-            [value], refs, evidence, claims, conditional=conditional, request=request
+        return _assessment_field_errors(
+            value, refs, evidence, claims, request, audience=audience, conditional=conditional
         )
-        if audience == "MARKET_INVESTOR" and _INVESTMENT_ADVICE.search(value):
-            errors.append(
-                OutputValidationError(
-                    _INVESTMENT_ADVICE_MESSAGE, error_kinds=("report_expression_policy",)
-                )
-            )
-        return errors
 
     if native is None or project_public_assessment(native) != assessment:
         return [("reason", error) for error in field_errors(assessment.reason)]
