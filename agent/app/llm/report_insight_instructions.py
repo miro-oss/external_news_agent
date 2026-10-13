@@ -8,6 +8,11 @@ _ROOT = Path(__file__).resolve().parents[1] / "prompts"
 _BASE = (_ROOT / "report-insight.ko.v15.md").read_text(encoding="utf-8").strip()
 _RUBRIC = (_ROOT / "report-importance.v6.md").read_text(encoding="utf-8").strip()
 _REDUCE_RULES = (_ROOT / "report-insight-reduce.ko.v1.md").read_text(encoding="utf-8").strip()
+REPORT_YEAR_UNIT_RULE = (
+    "모델이 작성하는 자연어 설명에 연도를 쓰면 각 값에 '년'을 붙인다. "
+    "범위 양끝의 연도·단위를 생략하거나 두 자리로 줄이지 않는다. "
+    "선택 원문의 연도와 순서를 유지하며, 다른 수치·ID·원문 인용은 바꾸지 않는다."
+)
 ASSESSMENT_PROCEDURE_RULE = (
     "원문에 없는 절차는 완료 여부가 미확인이라는 설명으로도 추가하지 않는다. "
     "원문에 명시된 절차와 그 판단 한계는 유지한다."
