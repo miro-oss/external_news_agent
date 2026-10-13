@@ -9,6 +9,7 @@ import pytest
 from test_report_insight_assessment import framed, request
 from test_report_insight_v4_pipeline import (
     V4Provider,
+    _expected_fixture_display_reason,
     generate,
     partial_repair_fixture,
     stages,
@@ -84,7 +85,10 @@ def test_native_and_public_failure_union_preserves_every_other_record_and_full_d
         if key not in {"finding101", "finding103"}:
             assert merged[key] == original[key]
     assert (list(range(101, 107)), date(2026, 9, 30)) in public_calls
-    assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
+    assert [record.reason for record in result.insights[0].assessments] == [
+        _expected_fixture_display_reason(source, identifier, reason)
+        for identifier, reason in reasons.items()
+    ]
     assert result.meta.input_tokens == 33 and result.meta.output_tokens == 21
     assert result.meta.cost_usd == 0.009 and result.meta.credits == 0.6
     assert source.model_dump_json(by_alias=True) == before
@@ -128,7 +132,10 @@ def test_literal_source_selection_failure_also_collects_other_public_failures():
     )
     result = generate(provider, source)
     assert [f["id"] for f in framed(provider.calls[1]["prompt"])["findings"]] == [101, 103]
-    assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
+    assert [record.reason for record in result.insights[0].assessments] == [
+        _expected_fixture_display_reason(source, identifier, reason)
+        for identifier, reason in reasons.items()
+    ]
 
 
 @pytest.mark.parametrize(
@@ -265,7 +272,10 @@ def test_native_failure_during_review_preserves_review_stage_and_repair_bound(ca
     output = generate(provider, source)
     assert stages(provider) == ["MAP-001", "MAP-002", "REVIEW-001", "REVIEW-001", "REDUCE-001"]
     assert [f["id"] for f in framed(provider.calls[3]["prompt"])["findings"]] == [101, 103]
-    assert [item.reason for item in output.insights[0].assessments] == list(reasons.values())
+    assert [item.reason for item in output.insights[0].assessments] == [
+        _expected_fixture_display_reason(source, identifier, reason)
+        for identifier, reason in reasons.items()
+    ]
     assert all(
         item.axes.directness == item.axes.impact == 3 for item in output.insights[0].assessments
     )

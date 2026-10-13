@@ -232,7 +232,7 @@ def test_exact_source_identity_and_claim_scope_are_required_to_split_rendered_pr
     assert split_rendered_prose(forged, catalog, ["101:0"]).slot is None
 
 
-def test_new_native_map_and_review_use_rendering_then_preserve_public_projection_on_merge():
+def test_legacy_native_quotes_preserve_projection_while_current_prompts_only_offer_basis():
     source = request(text="삼성전자는 생산라인 전체의 가동 중단이 현재 계속된다고 밝혔다.")
     catalog = build_fact_text_catalog(source)
     wire = draft_to_wire(payload(source), source)
@@ -242,11 +242,12 @@ def test_new_native_map_and_review_use_rendering_then_preserve_public_projection
     ].slot_id
     validated = validate_template_draft(response(wire), source)
     reason = validated.mapped.insights[0].assessments[0].reason
-    assert reason.startswith("원문: 「삼성전자는")
-    assert reason.endswith(original_reason)
+    assert reason == f"원문: 「{catalog.slots[0].source_text}」 해석: {original_reason}"
     assert merge_drafts(source, validated).mapped == validated.mapped
-    assert "factTextSlots" in draft_prompt(source)
-    assert "factTextSlots" in review_prompt(source)
+    assert draft_to_wire(validated, legacy_source_quotes=True) == wire
+    for prompt in (draft_prompt(source), review_prompt(source)):
+        assert "factTextSlots" not in prompt
+        assert "sourceQuoteChoices" in prompt
 
 
 def test_native_template_failure_is_located_and_does_not_change_neighboring_records():

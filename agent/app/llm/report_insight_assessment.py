@@ -20,15 +20,14 @@ from app.llm.base import ProviderResponse
 from app.llm.feedback_learning import feedback_learning_instruction, feedback_learning_payload
 from app.llm.openai_contract import _object
 from app.llm.prompt_data import prompt_json
-from app.llm.report_insight_assessment_coherence import assessment_coherence_errors
+from app.llm.report_insight_assessment_coherence import assessment_coherence_problems
 from app.llm.report_insight_axis_support import assessment_axis_support_problems
 from app.llm.report_insight_fact_index import prompt_fact_index
 from app.llm.report_insight_fact_rendering import (
-    SOURCE_QUOTE_INSTRUCTIONS,
     FactTemplateError,
     FactTextCatalog,
+    basis_source_quote_id,
     build_fact_text_catalog,
-    fact_text_slots_payload,
     render_source_prose,
     split_rendered_prose,
 )
@@ -53,13 +52,14 @@ from app.schemas.report_insight import (
     ReportInsightRequest,
 )
 from app.schemas.report_insight_assessment import (
+    ReportAssessmentBasisWireDraft,
     ReportAssessmentDraft,
     ReportAssessmentSourceQuote,
     ReportAssessmentStructuredWireDraft,
     ReportAssessmentWireDraft,
     ReportFindingAssessmentDraft,
 )
-from app.schemas.report_insight_source_quotes import source_quotes_schema
+from app.schemas.report_insight_source_quotes import AssessmentSourceQuotes, source_quotes_schema
 
 MAX_REVIEW_FINDINGS = 12
 TOP_REVIEW_FINDINGS = 5
@@ -68,8 +68,9 @@ MAX_NATIVE_ENUM_VALUES = 1000
 _ASSESSMENT_PROSE_REFERENCE_RULE = (
     "reason과 condition은 독자에게 보여주는 업무 설명입니다. 근거 식별자는 "
     "basis의 claimId/sourceSpanId 필드에만 기록하고, 자연어에는 내부 ID·ID 범위·"
-    "미완성 ID·업무 범주 코드를 넣지 마세요. 표시용 원문 선택은 sourceQuotes의 "
-    "reason/condition에만 기록하며 자연어에는 템플릿 표식을 넣지 않습니다."
+    "미완성 ID·업무 범주 코드를 넣지 마세요. sourceQuotes의 reason/condition은 항상 "
+    "null이며 서버가 검증된 basis에서 표시용 원문을 연결합니다. 자연어에는 템플릿 "
+    "표식을 넣지 않습니다."
 )
 _SOURCE_SENTENCE_BOUNDARY = re.compile(r"[.!?。！？](?=\s|$)|\n+")
 ROLE_WORK: dict[Audience, tuple[str, ...]] = {
@@ -481,7 +482,6 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                 reason,
                 *,
                 finding_id=finding.id,
-                has_claims=bool(finding.claims),
             ):
                 if "anyOf" in connection:
                     effect_name = f"Finding{finding_id}Effect"
@@ -523,7 +523,7 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                         "reason": reason,
                         "decision": decision,
                         "sourceQuotes": source_quotes_schema(
-                            ("reason", "condition"), enabled=has_claims
+                            ("reason", "condition"), enabled=False
                         ),
                     }
                 )
@@ -550,8 +550,8 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                 reason["description"] = (
                     f"finding{finding.id}에는 원문 claim {len(finding.claims)}개가 있다. "
                     f"{ASSESSMENT_REASON_RULE} {_ASSESSMENT_PROSE_REFERENCE_RULE} "
-                    "원문 인용이 필요하면 sourceQuotes.reason에 factTextSlots의 slotId를 "
-                    "선택하고 reason에는 업무 해석을 작성한다. 선택 근거가 지원하는 "
+                    "reason에는 업무 해석을 작성한다. 표시 인용은 검증된 basis에서 서버가 "
+                    "연결한다. 선택 근거가 지원하는 "
                     "회사·제품·수치·시점은 대상과 사건 상태를 유지하여 사용할 수 있다. "
                     "모든 축이 UNDETERMINED이면 같은 finding의 "
                     "제공된 claim·연결 sentence 안에서 보류 사유를 설명하고 basis=null을 "
@@ -604,8 +604,8 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                                             + " "
                                             + _ASSESSMENT_PROSE_REFERENCE_RULE
                                             + " "
-                                            + "원문 인용은 sourceQuotes.condition에서 "
-                                            "선택하고 이 필드에는 미확인 가정을 작성한다."
+                                            + "이 필드에는 미확인 가정을 작성한다. 표시 인용은 "
+                                            "검증된 connection.basis에서 서버가 연결한다."
                                         ),
                                     },
                                     "basis": deepcopy(basis),
@@ -713,8 +713,10 @@ def _enum_value_count(value: Any) -> int:
 def draft_to_wire(
     draft: ValidatedAssessmentDraft | ReportAssessmentDraft | dict,
     request: ReportInsightRequest | None = None,
+    *,
+    legacy_source_quotes: bool = False,
 ) -> dict[str, Any]:
-    """Export flat quotes using exact, request-bound safe ASCII source handles."""
+    """Export basis handles; retain old display selectors only for explicit replay."""
     authenticated_catalog = (
         draft.prose_catalog if isinstance(draft, ValidatedAssessmentDraft) else None
     )
@@ -791,7 +793,7 @@ def draft_to_wire(
                     },
                     "sourceQuotes": (
                         item.source_quotes.model_dump(by_alias=True)
-                        if item.source_quotes is not None
+                        if legacy_source_quotes and item.source_quotes is not None
                         else {"reason": None, "condition": None}
                     ),
                 }
@@ -828,7 +830,6 @@ def _prompt_payload(request: ReportInsightRequest, reference_date: date | None) 
                 "sentences": [sentence.model_dump(by_alias=True) for sentence in finding.sentences],
                 "sourceQuoteChoices": source_span_choices(finding),
                 "sourceFactIndex": prompt_fact_index(request, finding_id=finding.id),
-                "factTextSlots": fact_text_slots_payload(request, finding_id=finding.id),
             }
             for finding in request.findings
         ],
@@ -841,8 +842,8 @@ _ASSESSMENT_OUTPUT_INSTRUCTIONS = (
     "reason, decision, sourceQuotes 순서입니다. 먼저 원문 대상과 사건 단계에 맞는 업무 연결 근거를 "
     "간결하게 설명한 뒤 decision의 connection/effect/timing을 판정하세요. 각 축은 "
     "범주를 먼저 고르고 해당 범주의 필수/null 필드를 Schema에 맞게 작성합니다. "
-    "그 뒤 선택한 basis에 허용된 표시용 원문을 sourceQuotes에서 선택합니다. "
-    "condition=null이면 sourceQuotes.condition도 null입니다. "
+    "sourceQuotes.reason과 sourceQuotes.condition은 항상 null입니다. 표시용 인용은 "
+    "평가 검증 후 서버가 basis에 정확히 연결된 원문에서 조립합니다. "
     "basis는 {claimId,sourceSpanId}입니다. 같은 finding의 sourceQuoteChoices에서 "
     "실제 원문을 읽고 같은 claimId branch의 sourceSpanId 하나를 선택하세요. "
     "quote 문자열은 출력하지 않으며 서버가 공백·문장부호까지 원문 그대로 복원합니다. "
@@ -866,7 +867,6 @@ def draft_prompt(request: ReportInsightRequest, *, reference_date: date | None =
     return (
         "현재 단계는 내부 MAP 근거 초안입니다. "
         + _ASSESSMENT_OUTPUT_INSTRUCTIONS
-        + SOURCE_QUOTE_INSTRUCTIONS
         + feedback_learning_instruction(request.feedback_examples)
         + f"\n\n<report-insight-input>\n{prompt_json(_prompt_payload(request, reference_date))}"
         "\n</report-insight-input>"
@@ -885,14 +885,15 @@ def review_prompt(
         "제공되지 않습니다. 선정 사실을 낮은 평가의 정정이나 높은 평가의 확인으로 "
         "해석하지 말고 같은 원문과 관점 업무에서 다시 판정하세요. "
         + _ASSESSMENT_OUTPUT_INSTRUCTIONS
-        + SOURCE_QUOTE_INSTRUCTIONS
         + feedback_learning_instruction(request.feedback_examples)
         + f"\n\n<report-insight-input>\n{prompt_json(_prompt_payload(request, reference_date))}"
         "\n</report-insight-input>"
     )
 
 
-def parse_wire_draft(raw: str, *, structured: bool = False) -> ReportAssessmentWireDraft:
+def parse_wire_draft(
+    raw: str, *, structured: bool = False, basis_only: bool = False
+) -> ReportAssessmentWireDraft:
     """Parse native bytes before any merge can discard duplicate-key evidence."""
 
     def unique(pairs):
@@ -915,7 +916,13 @@ def parse_wire_draft(raw: str, *, structured: bool = False) -> ReportAssessmentW
         )
     except (ValueError, TypeError) as error:
         raise JsonObjectParseError("내부 MAP 응답은 중복 없는 JSON object여야 합니다.") from error
-    model = ReportAssessmentStructuredWireDraft if structured else ReportAssessmentWireDraft
+    model = (
+        ReportAssessmentBasisWireDraft
+        if basis_only
+        else ReportAssessmentStructuredWireDraft
+        if structured
+        else ReportAssessmentWireDraft
+    )
     return model.model_validate(value, strict=True)
 
 
@@ -935,14 +942,39 @@ def _parse_draft(raw: str, request: ReportInsightRequest) -> ReportAssessmentDra
                 errors.append(f"audience={audience} findingId={key[7:]} {error}")
                 failed.append(int(key[7:]))
                 if audience in request.audiences:
-                    validation_issues.append(
-                        ReportValidationIssue(
-                            audience,
-                            f"assessments[{int(key[7:])}]",
-                            "report_assessment_draft_invalid",
-                            (),
+                    # Inspect typed source selections, never parse exception
+                    # prose to decide a repair path or disclose rejected IDs.
+                    issue_count = len(validation_issues)
+                    for axis in ("connection", "effect", "timing"):
+                        basis = getattr(item.decision, axis).basis
+                        if basis is None or basis.source_span_id in sources[key].get(
+                            basis.claim_id, {}
+                        ):
+                            continue
+                        known_claim = basis.claim_id in sources[key]
+                        field = "sourceSpanId" if known_claim else "claimId"
+                        validation_issues.append(
+                            ReportValidationIssue(
+                                audience,
+                                f"assessments[{int(key[7:])}].decision.{axis}.basis.{field}",
+                                "report_assessment_draft_invalid",
+                                (basis.claim_id,) if known_claim else (),
+                                rule_id=(
+                                    "report_assessment_basis_span_invalid"
+                                    if known_claim
+                                    else "report_assessment_basis_claim_invalid"
+                                ),
+                            )
                         )
-                    )
+                    if len(validation_issues) == issue_count:
+                        validation_issues.append(
+                            ReportValidationIssue(
+                                audience,
+                                f"assessments[{int(key[7:])}]",
+                                "report_assessment_draft_invalid",
+                                (),
+                            )
+                        )
     if errors:
         raise ReportAssessmentDraftValidationError(
             "내부 MAP 원문 선택 계약 위반: " + "; ".join(errors),
@@ -965,9 +997,9 @@ def validate_source_draft(
 ) -> ValidatedAssessmentDraft:
     """Validate structured source selections, assemble prose, then validate.
 
-    The ordinary validator remains usable for previously stored drafts. New MAP
-    and REVIEW responses must enter here. Rendering authenticates optional source
-    handles; native and public validators still ground the remaining prose.
+    Retained for explicit legacy replay. Current MAP/REVIEW use the null-only
+    basis validator. Rendering authenticates legacy optional source handles;
+    native and public validators still ground the remaining prose.
     """
     if response.truncated:
         raise ValueError("내부 MAP 응답이 잘렸습니다.")
@@ -1114,9 +1146,78 @@ def validate_source_draft(
         raise
 
 
-# Import compatibility only: this name now enforces the new structured contract.
-# Legacy stored drafts use validate_draft and the explicit legacy text renderer.
+# Import compatibility for legacy structured drafts with display selectors.
+# Current MAP/REVIEW responses enter validate_basis_draft below.
 validate_template_draft = validate_source_draft
+
+
+def validate_basis_draft(
+    response: ProviderResponse, request: ReportInsightRequest
+) -> ValidatedAssessmentDraft:
+    """Validate the current wire without an independent display-quote choice."""
+    if response.truncated:
+        raise ValueError("내부 MAP 응답이 잘렸습니다.")
+    parse_wire_draft(response.text, basis_only=True)
+    return validate_source_draft(response, request)
+
+
+def render_basis_quotes(
+    validated: ValidatedAssessmentDraft, request: ReportInsightRequest
+) -> ValidatedAssessmentDraft:
+    """Add display quotes after all MAP/REVIEW repairs and validated merges.
+
+    Recheck the source-bound draft, then validate the rendered projection too.
+    The caller must still run public factual/time guards on the returned draft.
+    No model decision, basis, assumption or prose is rewritten by this step.
+    """
+    validated = merge_drafts(request, validated)
+    draft = validated.draft.model_copy(deep=True)
+    catalog = validated.prose_catalog
+    for records in draft.assessments.values():
+        for finding in request.findings:
+            item = records[f"finding{finding.id}"]
+            bases = (item.relation_basis, item.impact_basis, item.urgency_basis)
+            selected = {basis.claim_id for basis in bases if basis is not None}
+            # Re-entry must not double quote an already authenticated projection.
+            reason = split_rendered_prose(item.reason, catalog, selected).interpretation
+            condition = (
+                split_rendered_prose(
+                    item.condition, catalog, selected, kind="assumption"
+                ).interpretation
+                if item.condition is not None
+                else None
+            )
+            reason_id = basis_source_quote_id(bases, finding, catalog)
+            condition_id = (
+                basis_source_quote_id((item.relation_basis,), finding, catalog)
+                if condition is not None
+                else None
+            )
+            records[f"finding{finding.id}"] = item.model_copy(
+                update={
+                    "reason": render_source_prose(
+                        reason, reason_id, catalog, selected, max_length=180
+                    ).text,
+                    "condition": (
+                        render_source_prose(
+                            condition,
+                            condition_id,
+                            catalog,
+                            selected,
+                            max_length=120,
+                            kind="assumption",
+                        ).text
+                        if condition is not None
+                        else None
+                    ),
+                    "source_quotes": (
+                        AssessmentSourceQuotes(reason=reason_id, condition=condition_id)
+                        if reason_id is not None or condition_id is not None
+                        else None
+                    ),
+                }
+            )
+    return _validate_draft(draft, request)
 
 
 def project_public_assessment(item: ReportFindingAssessmentDraft) -> ReportInsightAssessment:
@@ -1180,7 +1281,12 @@ def _validate_draft(
                     ),
                 }
             )
-            messages = _assessment_errors(semantic_item, finding, audience, local_diagnostics)
+            # Richer locations explain rejection only. Keep them separate from
+            # work_diagnostics, which already authorize narrowly scoped repairs.
+            semantic_issues = []
+            messages = _assessment_errors(
+                semantic_item, finding, audience, local_diagnostics, semantic_issues
+            )
             work_diagnostics.extend(local_diagnostics)
             if messages:
                 validation_issues.extend(
@@ -1189,10 +1295,17 @@ def _validate_draft(
                         f"assessments[{finding.id}].{diagnostic.native_field}",
                         "report_assessment_draft_invalid",
                         diagnostic.claim_ids,
+                        rule_id=(
+                            f"report_axis_{diagnostic.problem}"
+                            if diagnostic.native_field.startswith("decision.")
+                            and diagnostic.native_field != "decision.connection.condition"
+                            else f"report_work_{diagnostic.problem}_unsupported"
+                        ),
                     )
                     for diagnostic in local_diagnostics
                 )
-                if len(messages) > len(local_diagnostics):
+                validation_issues.extend(semantic_issues)
+                if len(messages) > len(local_diagnostics) + len(semantic_issues):
                     validation_issues.append(
                         ReportValidationIssue(
                             audience,
@@ -1266,10 +1379,36 @@ def _assessment_errors(
     finding,
     audience: Audience,
     work_diagnostics: list[ReportAssessmentWorkDiagnostic],
+    semantic_issues: list[ReportValidationIssue],
 ) -> list[str]:
     errors = []
+    claims = {claim.id: claim for claim in finding.claims}
+    selected_ids = {
+        basis.claim_id
+        for basis in (item.relation_basis, item.impact_basis, item.urgency_basis)
+        if basis is not None and basis.claim_id in claims
+    }
+    reason_source_ids = selected_ids or claims.keys()
+
+    def record(message, field, rule, refs=None):
+        errors.append(message)
+        semantic_issues.append(
+            ReportValidationIssue(
+                audience,
+                f"assessments[{finding.id}]" + (f".{field}" if field else ""),
+                "report_assessment_draft_invalid",
+                tuple(sorted(reason_source_ids if refs is None else refs)),
+                rule_id=rule,
+            )
+        )
+
     if item.finding_id != finding.id:
-        errors.append("findingId는 고정 finding 키와 일치해야 합니다.")
+        record(
+            "findingId는 고정 finding 키와 일치해야 합니다.",
+            "",
+            "report_assessment_finding_id_mismatch",
+            (),
+        )
     if not finding.claims:
         if (
             item.relation != "UNDETERMINED"
@@ -1283,51 +1422,74 @@ def _assessment_errors(
                 for basis in (item.relation_basis, item.impact_basis, item.urgency_basis)
             )
         ):
-            errors.append(
-                "claims=[]는 모든 범주 미확인·basis/work/condition null·고정 보류 이유여야 합니다."
+            record(
+                "claims=[]는 모든 범주 미확인·basis/work/condition null·고정 보류 이유여야 합니다.",
+                "",
+                "report_assessment_claimless_contract",
+                (),
             )
         return errors
     if item.reason == CLAIMLESS_ASSESSMENT_REASON or _CLAIM_ABSENCE.search(item.reason):
-        errors.append(
+        record(
             "reason: 원문 claim이 존재합니다. claim이 없다고 단정하지 말고 "
-            "관점 업무와 연결되는 조건·범위의 판단 한계를 설명해야 합니다."
+            "관점 업무와 연결되는 조건·범위의 판단 한계를 설명해야 합니다.",
+            "reason",
+            "report_assessment_reason_claim_absence",
         )
     if _EMPTY_CLAIM_MARKER.search(item.reason):
-        errors.append(
+        record(
             "reason: 원문 claim이 존재하는 항목에는 claims=[] 같은 빈 입력 선언을 "
-            "쓰지 말고 관점 업무의 판단 한계를 설명해야 합니다."
+            "쓰지 말고 관점 업무의 판단 한계를 설명해야 합니다.",
+            "reason",
+            "report_assessment_reason_empty_claim_marker",
         )
     if item.relation != "UNDETERMINED" and _UNDECIDABLE_RELATION_REASON.search(item.reason):
-        errors.append(
+        record(
             "reason은 업무 관계의 판단 불가를 선언하지만 connection.relation은 판정 가능합니다. "
-            "원문으로 구체 업무 관계를 설명하거나 관계가 불명인 경우 UNDETERMINED로 판정하세요."
+            "원문으로 구체 업무 관계를 설명하거나 관계가 불명인 경우 UNDETERMINED로 판정하세요.",
+            "decision.connection.relation",
+            "report_assessment_relation_reason_undetermined",
         )
-    errors.extend(assessment_coherence_errors(item, audience=audience))
+    for problem in assessment_coherence_problems(item, audience=audience):
+        record(problem.message, problem.native_field, problem.rule)
     related = item.relation not in {"UNRELATED", "UNDETERMINED"}
     if related and item.work not in ROLE_WORK[audience]:
-        errors.append("connection.work는 해당 audience에 허용된 구체 업무여야 합니다.")
+        record(
+            "connection.work는 해당 audience에 허용된 구체 업무여야 합니다.",
+            "decision.connection.work",
+            "report_assessment_work_not_allowed",
+        )
     if not related and item.work is not None:
-        errors.append("무관 또는 관계 미확인에서는 connection.work=null이어야 합니다.")
+        record(
+            "무관 또는 관계 미확인에서는 connection.work=null이어야 합니다.",
+            "decision.connection.work",
+            "report_assessment_unrelated_work",
+        )
     if not related and (
         item.impact_scope != "UNDETERMINED" or item.urgency_state != "UNDETERMINED"
     ):
-        errors.append("관계가 무관/미확인이면 업무 영향·시급성도 UNDETERMINED여야 합니다.")
+        record(
+            "관계가 무관/미확인이면 업무 영향·시급성도 UNDETERMINED여야 합니다.",
+            "decision.connection.relation",
+            "report_assessment_unrelated_axes",
+        )
     conditional = item.relation in {"CONDITIONAL", "BACKGROUND"}
     if conditional and (item.condition is None or not item.condition.strip()):
-        errors.append("connection.condition에 업무 연결의 미확인 중간 조건을 명시해야 합니다.")
+        record(
+            "connection.condition에 업무 연결의 미확인 중간 조건을 명시해야 합니다.",
+            "decision.connection.condition",
+            "report_assessment_condition_required",
+        )
     if not conditional and item.condition is not None:
-        errors.append("DIRECT/UNRELATED/UNDETERMINED에서는 connection.condition=null이어야 합니다.")
-    claims = {claim.id: claim for claim in finding.claims}
+        record(
+            "DIRECT/UNRELATED/UNDETERMINED에서는 connection.condition=null이어야 합니다.",
+            "decision.connection.condition",
+            "report_assessment_condition_unexpected",
+        )
     sentences = {sentence.index: sentence.text for sentence in finding.sentences}
-    selected_ids = {
-        basis.claim_id
-        for basis in (item.relation_basis, item.impact_basis, item.urgency_basis)
-        if basis is not None and basis.claim_id in claims
-    }
     # Unknown axes need no public citation. Their reason still must not invent
     # concrete procedures absent from this finding's eligible source context.
     # This fallback never borrows another finding or assigns a missing basis.
-    reason_source_ids = selected_ids or claims.keys()
     selected_source = "\n".join(
         text
         for claim_id in reason_source_ids
@@ -1341,12 +1503,14 @@ def _assessment_errors(
         and item.condition is not None
         and _metadata_only_condition(item.condition, selected_source)
     ):
-        errors.append(
+        record(
             "connection.condition은 원문 사건에서 해당 업무로 이어지는 구체적 전제여야 합니다. "
             "존재하는 원문을 claims=[]로 표기하거나 정보 부재·연결 조건 미확인·"
             "평가용 식별자 일치·범주 정의 복사만으로 "
             "BACKGROUND/CONDITIONAL을 만들 수 없습니다. "
-            "실제 전제를 특정할 수 없으면 UNDETERMINED로 판단하세요."
+            "실제 전제를 특정할 수 없으면 UNDETERMINED로 판단하세요.",
+            "decision.connection.condition",
+            "report_assessment_condition_not_business_premise",
         )
     for field, prose in (("reason", item.reason), ("condition", item.condition)):
         if prose is not None:
@@ -1374,19 +1538,37 @@ def _assessment_errors(
     ):
         if category == "UNDETERMINED":
             if basis is not None:
-                errors.append(f"{field}는 UNDETERMINED에서 null이어야 합니다.")
+                record(
+                    f"{field}는 UNDETERMINED에서 null이어야 합니다.",
+                    f"decision.{field}",
+                    "report_assessment_basis_unexpected",
+                    (basis.claim_id,) if basis.claim_id in claims else (),
+                )
             continue
         if basis is None:
-            errors.append(f"{field}에는 0 판정도 해당 finding의 claimId와 원문 인용이 필요합니다.")
+            record(
+                f"{field}에는 0 판정도 해당 finding의 claimId와 원문 인용이 필요합니다.",
+                f"decision.{field}",
+                "report_assessment_basis_required",
+                (),
+            )
             continue
         claim = claims.get(basis.claim_id)
         if claim is None:
-            errors.append(f"{field}.claimId는 해당 finding에 허용된 claim이어야 합니다.")
+            record(
+                f"{field}.claimId는 해당 finding에 허용된 claim이어야 합니다.",
+                f"decision.{field}.claimId",
+                "report_assessment_basis_claim_invalid",
+                (),
+            )
             continue
         sources = [claim.text, *(sentences[index] for index in claim.evidence_sentence_ids)]
         if not basis.quote.strip() or not any(basis.quote in source for source in sources):
-            errors.append(
-                f"{field}.quote는 해당 claim/연결 sentence 구절을 공백까지 그대로 인용해야 합니다."
+            record(
+                f"{field}.quote는 해당 claim/연결 sentence 구절을 공백까지 그대로 인용해야 합니다.",
+                f"decision.{field}.sourceSpanId",
+                "report_assessment_basis_span_invalid",
+                (basis.claim_id,),
             )
     for problem in (
         *assessment_axis_support_problems(item, finding),

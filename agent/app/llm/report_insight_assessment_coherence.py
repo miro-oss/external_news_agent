@@ -6,6 +6,7 @@ are deliberately left to semantic review. This is not a category classifier.
 """
 
 import re
+from dataclasses import dataclass
 
 from app.schemas.analyze import Audience
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
@@ -219,9 +220,16 @@ def _declares_current_direct_relation(reason: str, audience: Audience | None) ->
     return False
 
 
-def assessment_coherence_errors(
+@dataclass(frozen=True)
+class AssessmentCoherenceProblem:
+    native_field: str
+    rule: str
+    message: str
+
+
+def assessment_coherence_problems(
     item: ReportFindingAssessmentDraft, *, audience: Audience | None = None
-) -> list[str]:
+) -> list[AssessmentCoherenceProblem]:
     """Report explicit self-contradictions; never mutate a category or its proof.
 
     A smaller unknown (such as cost, magnitude, timing, or the reader company's
@@ -233,9 +241,13 @@ def assessment_coherence_errors(
     errors = []
     if item.relation == "UNRELATED" and _declares_current_direct_relation(item.reason, audience):
         errors.append(
-            "reason nativeFields=reason,decision.connection.relation: UNRELATED와 reason의 "
-            "명시적 직접 업무 연결 긍정이 모순됩니다. 해당 판정과 설명을 근거에 맞게 "
-            "함께 재검토하세요. 고정된 판정을 수리하는 경우 설명도 그 의미와 일치해야 합니다."
+            AssessmentCoherenceProblem(
+                "decision.connection.relation",
+                "report_assessment_unrelated_reason_conflict",
+                "reason nativeFields=reason,decision.connection.relation: UNRELATED와 reason의 "
+                "명시적 직접 업무 연결 긍정이 모순됩니다. 해당 판정과 설명을 근거에 맞게 "
+                "함께 재검토하세요. 고정된 판정을 수리하는 경우 설명도 그 의미와 일치해야 합니다.",
+            )
         )
     work_pattern = _WORK_NONRELATION.get(item.work)
     if item.relation == "DIRECT" and any(
@@ -243,14 +255,30 @@ def assessment_coherence_errors(
         for c in clauses
     ):
         errors.append(
-            "connection.relation: DIRECT와 reason의 명시적 직접 업무 관계 부정이 모순됩니다. "
-            "해당 축과 설명을 근거에 맞게 함께 재검토하세요."
+            AssessmentCoherenceProblem(
+                "decision.connection.relation",
+                "report_assessment_direct_reason_conflict",
+                "connection.relation: DIRECT와 reason의 명시적 직접 업무 관계 부정이 모순됩니다. "
+                "해당 축과 설명을 근거에 맞게 함께 재검토하세요.",
+            )
         )
     if item.impact_scope != "UNDETERMINED" and any(
         _declares_unknown_impact(c, item.work) for c in clauses
     ):
         errors.append(
-            "effect.impactScope: 판정 가능한 영향 범주와 reason의 전체 영향 범위 미확인이 "
-            "모순됩니다. 미확인을 변경 없음으로 바꾸지 말고 해당 축과 설명을 함께 재검토하세요."
+            AssessmentCoherenceProblem(
+                "decision.effect.impactScope",
+                "report_assessment_impact_reason_conflict",
+                "effect.impactScope: 판정 가능한 영향 범주와 reason의 전체 영향 범위 미확인이 "
+                "모순됩니다. 미확인을 변경 없음으로 바꾸지 말고 "
+                "해당 축과 설명을 함께 재검토하세요.",
+            )
         )
     return errors
+
+
+def assessment_coherence_errors(
+    item: ReportFindingAssessmentDraft, *, audience: Audience | None = None
+) -> list[str]:
+    """Keep the existing rejection messages for callers of the text-only guard."""
+    return [problem.message for problem in assessment_coherence_problems(item, audience=audience)]

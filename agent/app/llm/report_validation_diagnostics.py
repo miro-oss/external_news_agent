@@ -256,6 +256,70 @@ _RULE_REASONS = {
         "출력의 표현이나 사실·해석·가정 구분이 작성 규칙을 충족하지 않습니다."
     ),
     "report_assessment_draft_invalid": "평가의 판단·업무·근거·조건 사이의 계약이 맞지 않습니다.",
+    "report_assessment_finding_id_mismatch": "평가의 findingId가 요청한 항목의 ID와 다릅니다.",
+    "report_assessment_claimless_contract": (
+        "claim이 없는 항목은 모든 범주를 미확인으로 두고 근거·업무·조건을 비워야 합니다."
+    ),
+    "report_assessment_reason_claim_absence": (
+        "원문 claim이 존재하는데 reason에서 claim이 없다고 선언했습니다. "
+        "업무 판단의 한계를 설명하세요."
+    ),
+    "report_assessment_reason_empty_claim_marker": (
+        "원문 claim이 존재하는데 reason에 빈 claim 입력 선언을 넣었습니다."
+    ),
+    "report_assessment_relation_reason_undetermined": (
+        "판정한 업무 관계와 reason의 관계 미확인 선언이 모순됩니다. "
+        "관계와 설명을 함께 재검토하세요."
+    ),
+    "report_assessment_unrelated_reason_conflict": (
+        "UNRELATED와 reason의 직접 업무 연결 긍정이 모순됩니다. 관계와 설명을 함께 재검토하세요."
+    ),
+    "report_assessment_direct_reason_conflict": (
+        "DIRECT와 reason의 직접 업무 관계 부정이 모순됩니다. 관계와 설명을 함께 재검토하세요."
+    ),
+    "report_assessment_impact_reason_conflict": (
+        "판정한 영향 범주와 reason의 전체 영향 범위 미확인이 모순됩니다. "
+        "영향과 설명을 함께 재검토하세요."
+    ),
+    "report_assessment_work_not_allowed": "선택한 업무가 해당 관점에 허용된 업무가 아닙니다.",
+    "report_assessment_unrelated_work": "무관·관계 미확인에서는 work를 null로 두어야 합니다.",
+    "report_assessment_unrelated_axes": (
+        "무관·관계 미확인과 판정된 영향·시급성이 양립하지 않습니다. 세 축의 관계를 재검토하세요."
+    ),
+    "report_assessment_condition_required": (
+        "조건부·배경 관계에는 구체적인 미확인 업무 전제가 필요합니다."
+    ),
+    "report_assessment_condition_unexpected": (
+        "직접·무관·관계 미확인에서는 condition을 null로 두어야 합니다."
+    ),
+    "report_assessment_condition_not_business_premise": (
+        "condition이 구체적인 업무 전제 대신 정보 부재·범주 정의·평가용 문구만 반복합니다."
+    ),
+    "report_assessment_basis_unexpected": "미확인으로 판정한 축의 basis는 null이어야 합니다.",
+    "report_assessment_basis_required": (
+        "판정한 축에는 같은 finding의 claim과 연결 원문 근거가 필요합니다."
+    ),
+    "report_assessment_basis_claim_invalid": (
+        "선택한 claim이 해당 finding의 허용 근거에 속하지 않습니다."
+    ),
+    "report_assessment_basis_span_invalid": (
+        "선택한 원문 구절이 해당 finding·claim의 원문 선택지와 다릅니다."
+    ),
+    "report_axis_market_forecast_only_core_constraint": (
+        "선택 근거는 시장 전망이며 현재 핵심 대상의 실제 제약을 명시하지 않습니다. "
+        "영향 근거를 재검토하세요."
+    ),
+    "report_axis_market_forecast_only_project_change": (
+        "선택 근거는 시장 전망이며 특정 프로젝트의 실제 변경을 명시하지 않습니다. "
+        "영향 근거를 재검토하세요."
+    ),
+    "report_axis_market_forecast_only_scheduled_preparation": (
+        "전망의 대상 시점은 업무 준비 순서를 바꾸는 실제 일정이 아닙니다. 시점 근거를 재검토하세요."
+    ),
+    "report_axis_physical_relocation_only_it_direct": (
+        "선택 근거는 인력·본사의 물리 이동이며 IT 시스템 이전을 명시하지 않습니다. "
+        "업무 연결을 재검토하세요."
+    ),
     "report_assessment_invalid": "평가의 필수 항목 또는 점수·근거 계약이 맞지 않습니다.",
     "report_assessment_truncated_prefix": "응답이 잘려 해당 평가를 완성하지 못했습니다.",
     "report_assumption_unconfirmed": "해석에 필요한 미확인 조건을 가정으로 표시하지 않았습니다.",

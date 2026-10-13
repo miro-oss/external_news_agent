@@ -1,4 +1,4 @@
-"""Synthetic quote repairs expose only the sources of authenticated frozen bases."""
+"""Current repairs keep display selectors null and preserve authenticated decisions."""
 
 from copy import deepcopy
 
@@ -31,7 +31,14 @@ def source_with_two_claims():
 
 
 def quote_scenario(
-    field, *, bad="same_finding", repeat=False, null_condition=False, prose_error=False, drift=False
+    field,
+    *,
+    bad="same_finding",
+    repeat=False,
+    null_condition=False,
+    selector_error=False,
+    prose_error=False,
+    drift=False,
 ):
     source = source_with_two_claims()
     slots = {slot.claim_ids[0]: slot.slot_id for slot in build_fact_text_catalog(source).slots}
@@ -54,26 +61,27 @@ def quote_scenario(
         if stage == "MAP-001":
             item = value["assessments"]["CHIP_MAKER"].get("finding101")
             if item is not None:
-                if prose_error and occurrence == 1:
-                    item["reason"] = "TSMC의 생산 제약에 따른 공정 검증 준비를 확인한다."
-                if drift and occurrence == 2:
+                if selector_error:
+                    item["sourceQuotes"][field] = invalid if occurrence == 1 or repeat else None
+                if (not selector_error or prose_error) and (occurrence == 1 or repeat):
                     target = item if field == "reason" else item["decision"]["connection"]
-                    target[field] = "해당 생산 제약이 공정 검증 준비에 연결되는 경우"
-                item["sourceQuotes"][field] = (
-                    invalid
-                    if occurrence == 1 or repeat
-                    else None
-                    if null_condition
-                    else slots["101:1"]
-                )
+                    target[field] = (
+                        "TSMC의 생산 제약에 따른 공정 검증 준비를 확인한다."
+                        if field == "reason"
+                        else "TSMC의 생산 제약이 공정 검증 일정에 연결되는 경우"
+                    )
+                if drift and occurrence == 2:
+                    preserved_field = "condition" if field == "reason" else "reason"
+                    target = item if preserved_field == "reason" else item["decision"]["connection"]
+                    target[preserved_field] = "해당 생산 제약이 공정 검증 준비에 연결되는 경우"
         return value
 
     provider = V4Provider(
         source,
-        relation="CONDITIONAL" if field == "condition" and not null_condition else "DIRECT",
+        relation="DIRECT" if null_condition else "CONDITIONAL",
         hook=hook,
         wire_hook=wire,
-        validate_wire=not (repeat or drift),
+        validate_wire=not (selector_error or drift),
     )
     return source, slots, invalid, provider
 
@@ -84,8 +92,8 @@ def repair_schema(provider):
 
 
 @pytest.mark.parametrize("field", ["reason", "condition"])
-def test_one_quote_repair_allows_supported_nonnull_slot_and_freezes_original_bases(field):
-    source, slots, invalid, provider = quote_scenario(field)
+def test_semantic_prose_repair_keeps_null_quotes_and_freezes_original_bases(field):
+    source, _, _, provider = quote_scenario(field)
     before = source.model_dump_json()
     result = generate(provider, source)
 
@@ -93,37 +101,52 @@ def test_one_quote_repair_allows_supported_nonnull_slot_and_freezes_original_bas
     initial, repaired = provider.wire_payloads[:2]
     first = initial["assessments"]["CHIP_MAKER"]["finding101"]
     second = repaired["assessments"]["CHIP_MAKER"]["finding101"]
-    assert first["sourceQuotes"][field] == invalid
-    assert second["sourceQuotes"][field] == slots["101:1"]
-    assert first["decision"] == second["decision"]
-    assert first["reason"] == second["reason"]
+    assert provider.schema_validity == [True, True, True, True]
+    assert set(repaired["assessments"]["CHIP_MAKER"]) == {"finding101"}
+    assert first["sourceQuotes"] == second["sourceQuotes"] == {"reason": None, "condition": None}
+    for axis in ("connection", "effect", "timing"):
+        assert first["decision"][axis]["basis"] == second["decision"][axis]["basis"]
     schema = repair_schema(provider)
     record = schema["properties"]["assessments"]["properties"]["CHIP_MAKER"]["properties"][
         "finding101"
     ]["properties"]
-    prose = (
-        record["reason"]
-        if field == "reason"
-        else record["decision"]["properties"]["connection"]["properties"]["condition"]
+    other = "condition" if field == "reason" else "reason"
+    properties = (
+        record
+        if other == "reason"
+        else record["decision"]["properties"]["connection"]["properties"]
     )
-    original_prose = (
-        first["reason"] if field == "reason" else first["decision"]["connection"]["condition"]
-    )
-    assert prose["const"] == original_prose
-    selection = record["sourceQuotes"]["properties"][field]
-    assert selection == {"anyOf": [{"type": "string", "enum": [slots["101:1"]]}, {"type": "null"}]}
+    original = first if other == "reason" else first["decision"]["connection"]
+    corrected = second if other == "reason" else second["decision"]["connection"]
+    assert properties[other]["const"] == original[other] == corrected[other]
+    for selector in record["sourceQuotes"]["properties"].values():
+        assert selector["type"] == "null"
     assert Draft202012Validator(schema).is_valid(repaired)
-    null_quote = deepcopy(repaired)
-    null_quote["assessments"]["CHIP_MAKER"]["finding101"]["sourceQuotes"][field] = None
-    assert Draft202012Validator(schema).is_valid(null_quote)
+    rendered = next(row for row in result.insights[0].assessments if row.finding_id == 101)
+    assert rendered.reason.startswith(f"원문: 「{source.findings[0].sentences[1].text}」")
     assert {row.finding_id for row in result.insights[0].assessments} == {101, 102}
     assert source.model_dump_json() == before
 
 
-def test_absent_condition_requires_null_selector_only_in_authenticated_repair():
-    source, _, invalid, provider = quote_scenario("condition", null_condition=True)
+@pytest.mark.parametrize("field", ["reason", "condition"])
+def test_model_selected_display_quote_is_removed_only_by_a_valid_null_retry(field):
+    source, _, invalid, provider = quote_scenario(field, selector_error=True)
+    result = generate(provider, source)
+    assert provider.schema_validity[:2] == [False, True]
+    original = provider.wire_payloads[0]["assessments"]["CHIP_MAKER"]["finding101"]
+    corrected = provider.wire_payloads[1]["assessments"]["CHIP_MAKER"]["finding101"]
+    assert original["sourceQuotes"][field] == invalid
+    assert corrected["sourceQuotes"] == {"reason": None, "condition": None}
+    assert {row.finding_id for row in result.insights[0].assessments} == {101, 102}
+
+
+def test_absent_condition_requires_null_selector_in_initial_and_retry_contracts():
+    source, _, invalid, provider = quote_scenario(
+        "condition", null_condition=True, selector_error=True
+    )
     generate(provider, source)
     assert stages(provider).count("MAP-001") == 2
+    assert provider.schema_validity[:2] == [False, True]
     original = provider.wire_payloads[0]["assessments"]["CHIP_MAKER"]["finding101"]
     corrected = provider.wire_payloads[1]["assessments"]["CHIP_MAKER"]["finding101"]
     assert original["sourceQuotes"]["condition"] == invalid
@@ -139,29 +162,29 @@ def test_absent_condition_requires_null_selector_only_in_authenticated_repair():
 
 @pytest.mark.parametrize("bad", ["same_finding", "foreign_finding", "unknown"])
 def test_repeated_invalid_quote_remains_rejected_by_schema_and_full_validator(bad):
-    source, _, _, provider = quote_scenario("reason", bad=bad, repeat=True)
+    source, _, _, provider = quote_scenario("reason", bad=bad, repeat=True, selector_error=True)
     with pytest.raises(StructuredOutputExhaustedError) as caught:
         generate(provider, source)
     assert stages(provider) == ["MAP-001", "MAP-001"]
-    assert provider.schema_validity == [True, False]
-    assert caught.value.details["validationFailure"]["errorKinds"] == [
-        "report_evidence_reference_invalid"
-    ]
+    assert provider.schema_validity == [False, False]
+    assert caught.value.details["validationFailure"]["errorKinds"] == ["none_required"]
     assert caught.value.details["usage"]["inputTokens"] == 22
     assert not Draft202012Validator(repair_schema(provider)).is_valid(provider.wire_payloads[1])
 
 
 def test_repeated_nonnull_selector_on_absent_condition_is_not_normalized_to_success():
-    source, _, _, provider = quote_scenario("condition", null_condition=True, repeat=True)
+    source, _, _, provider = quote_scenario(
+        "condition", null_condition=True, repeat=True, selector_error=True
+    )
     with pytest.raises(StructuredOutputExhaustedError) as caught:
         generate(provider, source)
     assert stages(provider) == ["MAP-001", "MAP-001"]
-    assert provider.schema_validity == [True, False]
-    assert caught.value.details["validationFailure"]["errorKinds"] == ["report_expression_policy"]
+    assert provider.schema_validity == [False, False]
+    assert caught.value.details["validationFailure"]["errorKinds"] == ["none_required"]
 
 
 @pytest.mark.parametrize("field", ["reason", "condition"])
-def test_selector_only_repair_cannot_rewrite_the_already_validated_prose(field):
+def test_semantic_repair_cannot_rewrite_the_other_already_validated_prose(field):
     source, _, _, provider = quote_scenario(field, drift=True)
     with pytest.raises(StructuredOutputExhaustedError) as caught:
         generate(provider, source)
@@ -170,18 +193,49 @@ def test_selector_only_repair_cannot_rewrite_the_already_validated_prose(field):
     assert caught.value.details["validationFailure"]["errorKinds"] == ["report_assessment_invalid"]
 
 
-def test_mixed_selector_and_factual_prose_errors_allow_both_corrections():
-    source, slots, _, provider = quote_scenario("reason", prose_error=True)
-    generate(provider, source)
+@pytest.mark.parametrize("field", ["reason", "condition"])
+def test_null_display_quotes_do_not_waive_factual_prose_validation(field):
+    source, _, _, provider = quote_scenario(field, repeat=True)
+    with pytest.raises(StructuredOutputExhaustedError) as caught:
+        generate(provider, source)
+    assert stages(provider) == ["MAP-001", "MAP-001"]
+    assert provider.schema_validity == [True, True]
+    assert caught.value.details["validationFailure"]["errorKinds"] == [
+        "report_evidence_insufficient"
+    ]
+    assert all(
+        wire["assessments"]["CHIP_MAKER"]["finding101"]["sourceQuotes"]
+        == {"reason": None, "condition": None}
+        for wire in provider.wire_payloads
+    )
+
+
+@pytest.mark.parametrize("keep_factual_error", [False, True])
+def test_mixed_selector_and_prose_errors_require_both_corrections(keep_factual_error):
+    source, _, invalid, provider = quote_scenario("reason", selector_error=True, prose_error=True)
+    original_hook = provider.wire_hook
+
+    def wire(stage, occurrence, data, value):
+        value = original_hook(stage, occurrence, data, value)
+        if stage == "MAP-001" and occurrence == 2 and keep_factual_error:
+            value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = (
+                "TSMC의 생산 제약에 따른 공정 검증 준비를 확인한다."
+            )
+        return value
+
+    provider.wire_hook = wire
+    if keep_factual_error:
+        with pytest.raises(StructuredOutputExhaustedError) as caught:
+            generate(provider, source)
+        assert caught.value.details["validationFailure"]["errorKinds"] == [
+            "report_evidence_insufficient"
+        ]
+    else:
+        generate(provider, source)
     assert stages(provider).count("MAP-001") == 2
+    assert provider.schema_validity[:2] == [False, True]
     first = provider.wire_payloads[0]["assessments"]["CHIP_MAKER"]["finding101"]
     repaired = provider.wire_payloads[1]["assessments"]["CHIP_MAKER"]["finding101"]
-    schema = repair_schema(provider)
-    record = schema["properties"]["assessments"]["properties"]["CHIP_MAKER"]["properties"][
-        "finding101"
-    ]["properties"]
-    assert "const" not in record["reason"]
-    assert first["reason"] != repaired["reason"]
-    assert repaired["sourceQuotes"]["reason"] == slots["101:1"]
-    assert first["decision"] == repaired["decision"]
-    assert Draft202012Validator(schema).is_valid(provider.wire_payloads[1])
+    assert first["sourceQuotes"]["reason"] == invalid
+    assert repaired["sourceQuotes"] == {"reason": None, "condition": None}
+    assert (first["reason"] == repaired["reason"]) is keep_factual_error

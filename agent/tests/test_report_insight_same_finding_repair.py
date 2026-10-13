@@ -5,7 +5,12 @@ import json
 import pytest
 from test_report_insight_assessment import framed, payload, request
 from test_report_insight_repair_actions import structured_diagnostics
-from test_report_insight_v4_pipeline import V4Provider, generate, stages
+from test_report_insight_v4_pipeline import (
+    V4Provider,
+    _expected_fixture_display_reason,
+    generate,
+    stages,
+)
 
 from app.core.errors import AgentError
 from app.llm import report_insight_service as service
@@ -90,7 +95,10 @@ def test_partial_repair_gets_both_causes_and_full_validation_still_gates_accepta
     provider = V4Provider(source, relation="UNRELATED", hook=hook)
     if retained_defect is None:
         result = generate(provider, source)
-        assert [item.reason for item in result.insights[0].assessments] == list(reasons.values())
+        assert [item.reason for item in result.insights[0].assessments] == [
+            _expected_fixture_display_reason(source, identifier, reason)
+            for identifier, reason in reasons.items()
+        ]
         assert result.meta.input_tokens == 22
         assert result.meta.output_tokens == 14
         assert result.meta.credits == 0.4
@@ -110,7 +118,11 @@ def test_partial_repair_gets_both_causes_and_full_validation_still_gates_accepta
     assert "report_evidence_insufficient" in actions
     assert "findingId=101" in actions and "reason" in actions
     rows = structured_diagnostics(repair["prompt"])
-    assert {row["field"] for row in rows} == {"assessments[101]", "assessments[101].reason"}
+    assert {row["field"] for row in rows} == {"assessments[101].reason"}
+    assert {row["rule"] for row in rows} == {
+        "report_assessment_reason_claim_absence",
+        "unsupported_number",
+    }
     (fact,) = [row for row in rows if row["rule"] == "unsupported_number"]
     assert fact["field"] == "assessments[101].reason"
     assert fact["claimIds"] == ["101:0"]

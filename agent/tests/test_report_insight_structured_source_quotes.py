@@ -13,6 +13,7 @@ from app.llm.report_insight_assessment import (
     draft_schema,
     draft_to_wire,
     parse_wire_draft,
+    validate_basis_draft,
     validate_draft,
     validate_source_draft,
 )
@@ -54,14 +55,16 @@ def test_new_map_requires_structured_selection_while_explicit_legacy_reader_keep
     assert not Draft202012Validator(draft_schema(source)).is_valid(wire)
 
 
-def test_map_source_choice_and_prose_survive_authenticated_flattening_without_public_metadata():
+def test_legacy_map_source_choice_survives_replay_but_current_map_rejects_model_selection():
     source = request()
     wire = draft_to_wire(payload(source), source)
     record = wire["assessments"]["CHIP_MAKER"]["finding101"]
     slot = build_fact_text_catalog(source).slots[0]
     record["sourceQuotes"]["reason"] = slot.slot_id
     original = deepcopy(wire)
-    Draft202012Validator(draft_schema(source)).validate(wire)
+    assert not Draft202012Validator(draft_schema(source)).is_valid(wire)
+    with pytest.raises(ValidationError):
+        validate_basis_draft(response(wire), source)
     validated = validate_source_draft(response(wire), source)
     assert (
         validated.draft.assessments["CHIP_MAKER"]["finding101"].source_quotes.reason == slot.slot_id
@@ -71,9 +74,19 @@ def test_map_source_choice_and_prose_survive_authenticated_flattening_without_pu
     )
     assert "sourceQuotes" not in validated.mapped.model_dump_json()
     assert wire == original
-    exported = draft_to_wire(validated)
+    exported = draft_to_wire(validated, legacy_source_quotes=True)
     assert exported == wire
     assert validate_source_draft(response(exported), source).mapped == validated.mapped
+    current = draft_to_wire(validated)
+    assert current["assessments"]["CHIP_MAKER"]["finding101"] == {
+        **record,
+        "sourceQuotes": {"reason": None, "condition": None},
+    }
+    Draft202012Validator(draft_schema(source)).validate(current)
+    assert (
+        validate_basis_draft(response(current), source).mapped.insights[0].assessments[0].reason
+        == (record["reason"])
+    )
     # An arbitrary flat dict is not authenticated just because it has a quote label.
     untrusted = validated.draft.model_dump(by_alias=True)
     assert draft_to_wire(untrusted, source)["assessments"]["CHIP_MAKER"]["finding101"][

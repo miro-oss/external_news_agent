@@ -5,7 +5,12 @@ from dataclasses import replace
 import pytest
 from test_report_insight_assessment import payload, request, response
 from test_report_insight_repair_actions import structured_diagnostics
-from test_report_insight_v4_pipeline import V4Provider, generate, stages
+from test_report_insight_v4_pipeline import (
+    V4Provider,
+    _expected_fixture_display_reason,
+    generate,
+    stages,
+)
 
 from app.core.errors import AgentError, OutputValidationError
 from app.llm import report_insight_service as service
@@ -172,7 +177,9 @@ def test_six_recorded_style_id_failures_receive_one_actionable_repair_and_keep_u
         }
     assert "원문 문장(claim" not in diagnostic
     assert len(diagnostic.strip()) <= 6000
-    assert [item.reason for item in result.insights[0].assessments] == [clean] * 6
+    assert [item.reason for item in result.insights[0].assessments] == [
+        _expected_fixture_display_reason(source, finding.id, clean) for finding in source.findings
+    ]
     assert result.meta.input_tokens == 22
     assert result.meta.output_tokens == 14
     assert result.meta.cost_usd == 0.006

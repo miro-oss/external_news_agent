@@ -5,7 +5,12 @@ from dataclasses import replace
 import pytest
 from test_report_insight_assessment import framed, payload, request, response
 from test_report_insight_repair_actions import structured_diagnostics
-from test_report_insight_v4_pipeline import V4Provider, generate, stages
+from test_report_insight_v4_pipeline import (
+    V4Provider,
+    _expected_fixture_display_reason,
+    generate,
+    stages,
+)
 
 from app.core.errors import AgentError
 from app.llm import report_insight_service as service
@@ -103,7 +108,10 @@ def test_one_full_map_repair_receives_every_late_public_cause_without_extra_call
         assert long_fact_reason(finding.id)[1] not in details
     # Template and grounding guards can both diagnose the same finding.
     assert_fact_locations(details, source)
-    assert [item.reason for item in result.insights[0].assessments] == [clean_reason] * 6
+    assert [item.reason for item in result.insights[0].assessments] == [
+        _expected_fixture_display_reason(source, finding.id, clean_reason)
+        for finding in source.findings
+    ]
     assert result.meta.input_tokens == 22
     assert result.meta.output_tokens == 14
     assert result.meta.cost_usd == 0.006
@@ -261,7 +269,9 @@ def test_one_partial_repair_must_correct_both_public_defects_and_preserve_other_
     if retained_defect is None:
         result = generate(provider, source)
         assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REDUCE-001"]
-        assert result.insights[0].assessments[1].reason == preserved_reason
+        assert result.insights[0].assessments[1].reason == _expected_fixture_display_reason(
+            source, 102, preserved_reason
+        )
         assert all(item.axes.urgency is None for item in result.insights[0].assessments)
         assert result.meta.input_tokens == 44
         assert result.meta.output_tokens == 28

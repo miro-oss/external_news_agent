@@ -3,7 +3,12 @@
 import pytest
 from test_report_insight_assessment import request
 from test_report_insight_repair_actions import structured_diagnostics
-from test_report_insight_v4_pipeline import V4Provider, generate, stages
+from test_report_insight_v4_pipeline import (
+    V4Provider,
+    _expected_fixture_display_reason,
+    generate,
+    stages,
+)
 
 from app.core.errors import AgentError
 from app.llm.report_insight_fact_repair import fact_repair_guidance, fact_repair_kinds
@@ -71,7 +76,10 @@ def test_six_list_citations_are_repaired_once_or_still_rejected(repair):
     provider = V4Provider(source, relation="UNRELATED", hook=hook)
     if repair:
         result = generate(provider, source)
-        assert [entry.reason for entry in result.insights[0].assessments] == [clean] * 6
+        assert [entry.reason for entry in result.insights[0].assessments] == [
+            _expected_fixture_display_reason(source, finding.id, clean)
+            for finding in source.findings
+        ]
     else:
         with pytest.raises(AgentError) as caught:
             generate(provider, source)

@@ -55,6 +55,16 @@ def response(wire):
     )
 
 
+def expected_market_reason(source, record, finding_id):
+    original = next(finding for finding in source.findings if finding.id == finding_id)
+    assert len(original.sentences) == 1
+    quote = f"원문: 「{original.sentences[0].text}」"
+    reason = f"{quote} 해석: {record['reason']}"
+    condition = f"{quote} 미확인 가정: {record['decision']['connection']['condition']}"
+    assert len(reason) <= 180 and len(condition) <= 120
+    return reason + " 미확인 조건: " + condition
+
+
 @pytest.mark.parametrize("term", ["순매수", "순매도"])
 @pytest.mark.parametrize("field", ["reason", "condition"])
 def test_map_and_review_allow_source_market_flow_without_treating_it_as_advice(term, field):
@@ -63,16 +73,15 @@ def test_map_and_review_allow_source_market_flow_without_treating_it_as_advice(t
     def wire(stage, occurrence, data, value):
         if stage.startswith(("MAP", "REVIEW")):
             record = value["assessments"][AUDIENCE]["finding101"]
-            record["sourceQuotes"][field] = data["findings"][0]["factTextSlots"][0]["slotId"]
+            assert "factTextSlots" not in data["findings"][0]
+            assert record["sourceQuotes"][field] is None
         return value
 
     provider = V4Provider(source, relation="CONDITIONAL", wire_hook=wire)
     result = generate(provider, source)
     assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001"]
-    assert (
-        f"원문: 「{source.findings[0].sentences[0].text}」"
-        in result.insights[0].assessments[0].reason
-    )
+    reviewed = provider.wire_payloads[1]["assessments"][AUDIENCE]["finding101"]
+    assert result.insights[0].assessments[0].reason == expected_market_reason(source, reviewed, 101)
 
 
 @pytest.mark.parametrize("term", ["순매수", "순매도"])
@@ -123,7 +132,7 @@ def test_map_advice_is_localized_and_repaired_without_replacing_other_finding(
                 if position == "before"
                 else original + " 매수해야 한다."
             )
-            record["sourceQuotes"][field] = data["findings"][0]["factTextSlots"][0]["slotId"]
+            assert record["sourceQuotes"] == {"reason": None, "condition": None}
         return value
 
     provider = V4Provider(source, relation="CONDITIONAL", wire_hook=wire)
@@ -139,6 +148,9 @@ def test_map_advice_is_localized_and_repaired_without_replacing_other_finding(
     records = repair["response_schema"]["properties"]["assessments"]["properties"][AUDIENCE]
     assert set(records["properties"]) == {"finding101"}
     assert {item.finding_id for item in result.insights[0].assessments} == {101, 102}
+    healthy = provider.wire_payloads[0]["assessments"][AUDIENCE]["finding102"]
+    assert result.insights[0].assessments[1].reason == expected_market_reason(source, healthy, 102)
+    assert result.insights[0].assessments[1].basis_claim_ids == ["102:0"]
 
 
 @pytest.mark.parametrize("group,field", REDUCE_FIELDS)

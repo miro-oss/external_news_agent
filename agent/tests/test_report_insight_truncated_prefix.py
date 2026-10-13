@@ -8,7 +8,13 @@ from datetime import date
 import pytest
 from test_report_insight_assessment import framed
 from test_report_insight_repair_actions import structured_diagnostics
-from test_report_insight_v4_pipeline import V4Provider, generate, partial_repair_fixture, stages
+from test_report_insight_v4_pipeline import (
+    V4Provider,
+    _expected_fixture_display_reason,
+    generate,
+    partial_repair_fixture,
+    stages,
+)
 
 from app.core.errors import AgentError
 from app.llm import report_insight_service as service
@@ -174,7 +180,10 @@ def test_recovers_only_missing_and_invalid_items_and_revalidates_full_batch(
     for key, value in error.preserved_wire["assessments"]["CHIP_MAKER"].items():
         assert value == original[key] == merged["assessments"]["CHIP_MAKER"][key]
     assert [a.finding_id for a in result.insights[0].assessments] == list(range(101, 109))
-    assert [a.reason for a in result.insights[0].assessments] == list(reasons.values())
+    assert [a.reason for a in result.insights[0].assessments] == [
+        _expected_fixture_display_reason(source, identifier, reason)
+        for identifier, reason in reasons.items()
+    ]
     assert result.meta.input_tokens == 33 and result.meta.output_tokens == 21
     assert result.meta.cost_usd == 0.009 and result.meta.credits == 0.6
     assert source.model_dump_json(by_alias=True) == before

@@ -8,10 +8,7 @@ from test_report_insight_source_quote_repair_scope import quote_scenario
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
 from app.llm.feedback_learning import FEEDBACK_LEARNING_INSTRUCTION
-from app.llm.report_insight_fact_rendering import (
-    FACT_TEMPLATE_INSTRUCTIONS,
-    SOURCE_QUOTE_INSTRUCTIONS,
-)
+from app.llm.report_insight_fact_rendering import FACT_TEMPLATE_INSTRUCTIONS
 
 
 def _scoped_feedback(source):
@@ -34,10 +31,11 @@ def test_native_pipeline_keeps_learning_and_source_selection_in_every_stage():
         prompt = call["prompt"]
         payload = framed(prompt)
         stage = call["response_schema"]["description"].split(":", 1)[1]
-        instructions = (
-            FACT_TEMPLATE_INSTRUCTIONS if stage.startswith("REDUCE") else SOURCE_QUOTE_INSTRUCTIONS
-        )
-        assert instructions in prompt
+        if stage.startswith("REDUCE"):
+            assert FACT_TEMPLATE_INSTRUCTIONS in prompt
+        else:
+            assert "sourceQuotes.reason과 sourceQuotes.condition은 항상 null" in prompt
+            assert all("factTextSlots" not in finding for finding in payload["findings"])
         assert FEEDBACK_LEARNING_INSTRUCTION in prompt
         assert [item["topicId"] for item in payload.pop("feedbackExamples")] == [7, 8]
         # Historical article text never becomes a selectable current source.
@@ -47,8 +45,8 @@ def test_native_pipeline_keeps_learning_and_source_selection_in_every_stage():
         assert "9001" not in json.dumps(payload, ensure_ascii=False)
 
 
-def test_native_quote_repair_keeps_only_failed_topic_feedback_and_frozen_source_scope():
-    original, slots, _, provider = quote_scenario("reason")
+def test_native_prose_repair_keeps_only_failed_topic_feedback_and_frozen_source_scope():
+    original, _, _, provider = quote_scenario("reason")
     source = _scoped_feedback(original)
     provider.source = source
     snapshot = source.model_dump_json()
@@ -61,7 +59,7 @@ def test_native_quote_repair_keeps_only_failed_topic_feedback_and_frozen_source_
     assert [item["topicId"] for item in initial["feedbackExamples"]] == [7, 8]
     assert [item["topicId"] for item in repair["feedbackExamples"]] == [7]
     assert [item["id"] for item in repair["findings"]] == [101]
-    assert SOURCE_QUOTE_INSTRUCTIONS in provider.calls[1]["prompt"]
+    assert "sourceQuotes.reason과 sourceQuotes.condition은 항상 null" in provider.calls[1]["prompt"]
     assert FEEDBACK_LEARNING_INSTRUCTION in provider.calls[1]["prompt"]
     records = provider.calls[1]["response_schema"]["properties"]["assessments"]["properties"][
         "CHIP_MAKER"
@@ -70,6 +68,17 @@ def test_native_quote_repair_keeps_only_failed_topic_feedback_and_frozen_source_
     selection = records["properties"]["finding101"]["properties"]["sourceQuotes"]["properties"][
         "reason"
     ]
-    assert selection == {"anyOf": [{"type": "string", "enum": [slots["101:1"]]}, {"type": "null"}]}
+    assert selection["type"] == "null"
+    original_record = provider.wire_payloads[0]["assessments"]["CHIP_MAKER"]["finding101"]
+    repaired_record = provider.wire_payloads[1]["assessments"]["CHIP_MAKER"]["finding101"]
+    assert original_record["decision"] == repaired_record["decision"]
+    assert (
+        original_record["sourceQuotes"]
+        == repaired_record["sourceQuotes"]
+        == {
+            "reason": None,
+            "condition": None,
+        }
+    )
     assert {item.finding_id for item in result.insights[0].assessments} == {101, 102}
     assert source.model_dump_json() == snapshot

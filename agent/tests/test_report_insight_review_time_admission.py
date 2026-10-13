@@ -4,7 +4,12 @@ from copy import deepcopy
 
 import pytest
 from test_report_insight_assessment import framed, request
-from test_report_insight_v4_pipeline import V4Provider, generate, stages
+from test_report_insight_v4_pipeline import (
+    V4Provider,
+    _expected_fixture_display_reason,
+    generate,
+    stages,
+)
 
 from app.core.errors import AgentError
 from app.llm import report_insight_service as service
@@ -78,12 +83,20 @@ def test_review_admission_preserves_all_mandatory_map_records_and_selection(
     ]
     assert reviewed_ids == (original_ids[:12] if review_count else [])
     final = result.insights[0].assessments
+    displayed_map = [
+        entry.model_copy(
+            update={
+                "reason": _expected_fixture_display_reason(source, entry.finding_id, entry.reason)
+            }
+        )
+        for entry in mapped
+    ]
     assert [entry.finding_id for entry in final] == original_ids
     if review_count:
         assert all(entry.axes.impact == 3 for entry in final[:12])
-        assert final[12:] == mapped[12:]
+        assert final[12:] == displayed_map[12:]
     else:
-        assert final == mapped
+        assert final == displayed_map
         assert all(entry.axes.directness == 3 and entry.axes.impact is None for entry in final)
     assert_usage(result.meta.model_dump(by_alias=True), 6 + review_count)
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -107,9 +120,17 @@ def test_later_review_is_skipped_after_first_review_consumes_admission_headroom(
     ]
     assert len(selection) == 1 and len(selection[0]) == 12
     final = result.insights[0].assessments
+    displayed_map = [
+        entry.model_copy(
+            update={
+                "reason": _expected_fixture_display_reason(source, entry.finding_id, entry.reason)
+            }
+        )
+        for entry in mapped
+    ]
     assert [entry.finding_id for entry in final] == [finding.id for finding in source.findings]
     assert all(entry.axes.impact == 3 for entry in final[:6])
-    assert final[6:] == mapped[6:]
+    assert final[6:] == displayed_map[6:]
     assert_usage(result.meta.model_dump(by_alias=True), 7)
 
 

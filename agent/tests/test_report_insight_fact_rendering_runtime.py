@@ -1,4 +1,4 @@
-"""Production stages assemble separate source selections into public prose."""
+"""MAP quotes come from validated bases; REDUCE retains separate source selections."""
 
 from copy import deepcopy
 
@@ -29,31 +29,32 @@ def select_source(record, field, slot):
     )
 
 
-def test_production_stage_templates_preserve_original_source_and_display_no_internal_handles():
+def test_production_basis_and_reduce_quotes_preserve_source_without_public_internal_handles():
     source = request(text="삼성전자는 생산라인 전체의 가동 중단이 현재 계속된다고 밝혔다.")
     snapshot = source.model_dump_json(by_alias=True)
     original = source.findings[0].sentences[0].text
-    seen = []
 
     def hook(stage, occurrence, data, value):
         if stage.startswith(("MAP", "REVIEW")):
             finding = data["findings"][0]
-            slot = finding["factTextSlots"][0]
-            record = value["assessments"]["CHIP_MAKER"]["finding101"]
-            select_source(record, "reason", slot)
+            assert "factTextSlots" not in finding
+            assert finding["sentences"][0]["text"] == original
         else:
             slot = data["factTextSlots"]["CHIP_MAKER"][0]
             overview = value["insights"][0]["overview"][0]
             select_source(overview, "text", slot)
             select_source(overview, "assumption", slot)
             overview["assumption"] = "같은 생산 제약이 검증 준비에 연결되는 경우"
-        seen.append((stage, slot["slotId"]))
         return value
 
     provider = V4Provider(source, hook=hook)
     output = generate(provider, source)
     assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001"]
-    assert len({slot_id for _, slot_id in seen}) == 1
+    for wire in provider.wire_payloads[:2]:
+        assert wire["assessments"]["CHIP_MAKER"]["finding101"]["sourceQuotes"] == {
+            "reason": None,
+            "condition": None,
+        }
     insight = output.insights[0]
     assert insight.assessments[0].reason.startswith(f"원문: 「{original}」 해석: ")
     assert insight.overview[0].text.startswith(f"원문: 「{original}」 해석: ")
@@ -73,10 +74,9 @@ def test_production_omits_only_long_display_quotes_and_preserves_facts_citations
 
     def hook(stage, occurrence, data, value):
         if stage.startswith(("MAP", "REVIEW")):
-            slot = data["findings"][0]["factTextSlots"][0]
+            assert "factTextSlots" not in data["findings"][0]
             record = value["assessments"]["CHIP_MAKER"]["finding101"]
             expected["reason"] = record["reason"]
-            select_source(record, "reason", slot)
         else:
             slot = data["factTextSlots"]["CHIP_MAKER"][0]
             insight = value["insights"][0]
@@ -171,7 +171,7 @@ def test_semantic_view_never_strips_an_unauthenticated_or_mutated_public_project
 
 @pytest.mark.parametrize("mutate_good_reason", [False, True])
 @pytest.mark.parametrize("finding_ids", [(101,), (101, 102)])
-def test_template_condition_repair_freezes_original_good_template_and_decisions(
+def test_condition_repair_freezes_raw_good_reason_and_decisions_before_automatic_display(
     mutate_good_reason, finding_ids
 ):
     from app.core.errors import StructuredOutputExhaustedError
@@ -183,8 +183,7 @@ def test_template_condition_repair_freezes_original_good_template_and_decisions(
         if not stage.startswith(("MAP", "REVIEW")):
             return value
         record = value["assessments"]["CHIP_MAKER"]["finding101"]
-        slot = data["findings"][0]["factTextSlots"][0]
-        select_source(record, "reason", slot)
+        assert "factTextSlots" not in data["findings"][0]
         if stage == "MAP-001" and occurrence == 1:
             original_reason.append(record["reason"])
             record["condition"] = "삼성전자의 준비가 공정 검증 일정에 필요한 경우"
@@ -208,4 +207,16 @@ def test_template_condition_repair_freezes_original_good_template_and_decisions(
         "properties"
     ]["finding101"]
     assert record["properties"]["reason"]["const"] == original_reason[0]
+    first, retry = (
+        wire["assessments"]["CHIP_MAKER"]["finding101"] for wire in provider.wire_payloads[:2]
+    )
+    assert first["sourceQuotes"] == retry["sourceQuotes"] == {"reason": None, "condition": None}
+    assert not first["reason"].startswith("원문:")
+    if not mutate_good_reason:
+        assert retry["reason"] == first["reason"]
+    assert retry["decision"]["effect"] == first["decision"]["effect"]
+    assert retry["decision"]["timing"] == first["decision"]["timing"]
+    assert {
+        key: item for key, item in retry["decision"]["connection"].items() if key != "condition"
+    } == {key: item for key, item in first["decision"]["connection"].items() if key != "condition"}
     assert "이번 수리는 진단된 reason/condition" in repair["prompt"]
