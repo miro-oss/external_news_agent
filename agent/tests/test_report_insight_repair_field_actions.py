@@ -6,13 +6,12 @@ from copy import deepcopy
 from test_report_insight_assessment import payload, request
 from test_report_insight_native_field_diagnostics import rejected_projection
 from test_report_insight_repair_actions import structured_diagnostics
-from test_report_insight_v4_pipeline import V4Provider, stages
+from test_report_insight_v4_pipeline import V4Provider, _expected_fixture_display_reason, stages
 
 from app.core.config import Settings
 from app.llm import report_insight_service as service
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.report_insight_assessment import draft_prompt, validate_template_draft
-from app.llm.report_insight_fact_rendering import FACT_TEMPLATE_INSTRUCTIONS
 
 
 def field_actions(error):
@@ -129,10 +128,19 @@ def test_mock_retry_can_keep_grounded_company_product_and_quantity_without_chang
         exclude={"reason"}
     )
     assert repaired[101].reason == corrected
-    assert corrected in result.insights[0].assessments[0].reason
-    assert healthy in result.insights[0].assessments[1].reason
+    for item, interpretation in zip(
+        result.insights[0].assessments, (corrected, healthy), strict=True
+    ):
+        finding = next(row for row in source.findings if row.id == item.finding_id)
+        condition = (
+            f"원문: 「{finding.sentences[0].text}」 미확인 가정: HBM4 공정 검증 준비가 필요한 경우"
+        )
+        assert item.reason == (
+            _expected_fixture_display_reason(source, item.finding_id, interpretation)
+            + f" 미확인 조건: {condition}"
+        )
     retry_prompt = provider.calls[1]["prompt"]
-    assert FACT_TEMPLATE_INSTRUCTIONS in retry_prompt
+    assert "sourceQuotes.reason과 sourceQuotes.condition은 항상 null" in retry_prompt
     assert "기업·기관·제품의 고유명사, 숫자와 날짜를 reason에 다시 쓰지 말고" not in retry_prompt
     assert "기업·숫자·연도·매출을 재요약하지 말고" not in retry_prompt
     assert "99개" not in retry_prompt.split("<validation-error>", 1)[1]

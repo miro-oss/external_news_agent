@@ -30,15 +30,16 @@ from app.llm.report_insight_assessment import (
     merge_drafts,
     parse_wire_draft,
     project_public_assessment,
+    render_basis_quotes,
     review_prompt,
     select_review,
     source_span_choices,
 )
 from app.llm.report_insight_assessment import (
-    validate_draft as validate_legacy_draft,
+    validate_basis_draft as validate_draft,
 )
 from app.llm.report_insight_assessment import (
-    validate_source_draft as validate_draft,
+    validate_draft as validate_legacy_draft,
 )
 from app.llm.report_insight_fact_assertions import unsupported_fact_assertions
 from app.llm.report_insight_fact_index import build_fact_index, prompt_fact_index
@@ -125,7 +126,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v36"
+PROMPT_VERSION = "report-insight.ko.v37"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -681,6 +682,11 @@ class ReportInsightService(ReportInsightLegacyService):
             # Select once from the complete MAP, then merge all independent
             # reviews. An earlier review cannot alter later selection or input.
             validated, mapped = validated_merge(validated, *reviews)
+            # Display quotes are derived only after all assessment repairs.
+            # Revalidate the rendered native/public projection before retrieval
+            # and synthesis; source, fact and time guards remain unchanged.
+            validated = render_basis_quotes(validated, request)
+            validated, mapped = validated_merge(validated)
             retrieved = {
                 insight.audience: retrieve_report_insight_evidence(
                     request,
@@ -1832,7 +1838,7 @@ def _preserve_native_decisions(repair, raw, error):
             frozen[key] = fixed
             for path, value in fixed.items():
                 _fix_native_schema_value(entries[key], path.split("."), value, schema["$defs"])
-            if values.get("sourceQuotes") is not None:
+            if values.get("sourceQuotes") is not None and "factTextSlots" in findings[identifier]:
                 # The basis snapshot has already been authenticated and frozen.
                 # Make its editable display selectors express that same scope in
                 # the retry schema; do not silently replace a rejected selection.

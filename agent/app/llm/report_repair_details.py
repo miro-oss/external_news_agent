@@ -45,6 +45,15 @@ def diagnostic_category(rule: str) -> DiagnosticCategory:
         "too_short",
         "report_fact_rendered_length",
         "report_fact_source_quotes_required",
+        "report_assessment_finding_id_mismatch",
+        "report_assessment_claimless_contract",
+        "report_assessment_work_not_allowed",
+        "report_assessment_unrelated_work",
+        "report_assessment_unrelated_axes",
+        "report_assessment_condition_required",
+        "report_assessment_condition_unexpected",
+        "report_assessment_basis_unexpected",
+        "report_assessment_basis_required",
     }:
         return "FORMAT"
     if rule in {
@@ -52,6 +61,8 @@ def diagnostic_category(rule: str) -> DiagnosticCategory:
         "report_synthesis_reference_gap",
         "report_fact_slot_unknown",
         "report_fact_slot_scope",
+        "report_assessment_basis_claim_invalid",
+        "report_assessment_basis_span_invalid",
     }:
         return "REFERENCE"
     if rule in {
@@ -67,9 +78,18 @@ def diagnostic_category(rule: str) -> DiagnosticCategory:
         "report_expression_policy",
         "report_falsification_missing_observation",
         "report_falsification_direction",
+        "report_assessment_reason_claim_absence",
+        "report_assessment_reason_empty_claim_marker",
+        "report_assessment_condition_not_business_premise",
     }:
         return "EXPRESSION_POLICY"
-    if rule == "report_fact_contradiction":
+    if rule in {
+        "report_fact_contradiction",
+        "report_assessment_relation_reason_undetermined",
+        "report_assessment_unrelated_reason_conflict",
+        "report_assessment_direct_reason_conflict",
+        "report_assessment_impact_reason_conflict",
+    }:
         return "CONTRADICTION"
     # Numeric/state/binding labels can also mean "not found". Only a matching
     # explicit FactCheck below promotes those cases to CONTRADICTION.

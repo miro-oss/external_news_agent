@@ -24,15 +24,13 @@ def mapped_reason(source, reason):
 
 def test_unknown_relation_can_explain_known_source_entities_without_repair_or_score_promotion():
     source = request(text="마이크론은 2026년 메모리 판매 전망을 발표했다.")
-    interpretation = "메모리 판매 전망과 공정 업무의 관련성은 미확인이다."
-    reason = f"원문: 「{source.findings[0].sentences[0].text}」 해석: {interpretation}"
+    interpretation = "마이크론의 2026년 메모리 판매 전망과 공정 업무의 관련성은 미확인이다."
     original = source.model_dump_json()
 
     def hook(stage, _, data, value):
+        assert "factTextSlots" not in data["findings"][0]
         for record in value["assessments"]["CHIP_MAKER"].values():
-            slot = data["findings"][0]["factTextSlots"][0]["slotId"]
             record["reason"] = interpretation
-            record["sourceQuotes"] = {"reason": slot, "condition": None}
         return value
 
     provider = V4Provider(source, relation="UNDETERMINED", hook=hook)
@@ -41,7 +39,14 @@ def test_unknown_relation_can_explain_known_source_entities_without_repair_or_sc
     assert stages(provider) == ["MAP-001", "REVIEW-001"]
     insight = result.insights[0]
     assessment = insight.assessments[0]
-    assert assessment.reason == reason
+    # A finding with no selected basis retains grounded prose without assigning
+    # a display citation or upgrading its unassessed axes.
+    assert assessment.reason == interpretation
+    for wire in provider.wire_payloads:
+        assert wire["assessments"]["CHIP_MAKER"]["finding101"]["sourceQuotes"] == {
+            "reason": None,
+            "condition": None,
+        }
     assert assessment.basis_claim_ids == []
     assert set(assessment.axes.model_dump().values()) == {None}
     assert insight.overview == insight.implications == insight.watch_items == []

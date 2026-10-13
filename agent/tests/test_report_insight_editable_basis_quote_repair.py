@@ -32,12 +32,10 @@ def native_repair(*, quote=None, bad_basis=False, malformed_quotes=None):
     def wire(stage, occurrence, _, value):
         if stage == "MAP-001":
             records = value["assessments"]["CHIP_MAKER"]
-            if "finding102" in records:
-                records["finding102"]["sourceQuotes"]["reason"] = slots["102:0"]
             if "finding101" in records:
                 record = records["finding101"]
                 record["sourceQuotes"]["reason"] = (
-                    slots["101:0"] if occurrence == 1 else slots[quote] if quote else None
+                    slots[quote] if occurrence == 2 and quote else None
                 )
                 if occurrence == 2 and bad_basis:
                     record["decision"]["connection"]["basis"] = {
@@ -62,8 +60,8 @@ def native_repair(*, quote=None, bad_basis=False, malformed_quotes=None):
     )
 
 
-def test_editable_native_basis_retry_omits_only_failed_record_optional_quotes(monkeypatch):
-    source, slots, provider = native_repair()
+def test_editable_native_basis_retry_keeps_null_quotes_and_preserves_valid_record(monkeypatch):
+    source, _, provider = native_repair()
     snapshots = []
     original = service.validate_draft
 
@@ -92,8 +90,9 @@ def test_editable_native_basis_retry_omits_only_failed_record_optional_quotes(mo
         snapshots[0]["assessments"]["CHIP_MAKER"]["finding102"]
         == snapshots[1]["assessments"]["CHIP_MAKER"]["finding102"]
     )
-    assert (
-        first["assessments"]["CHIP_MAKER"]["finding102"]["sourceQuotes"]["reason"] == slots["102:0"]
+    assert all(
+        record["sourceQuotes"] == {"reason": None, "condition": None}
+        for record in first["assessments"]["CHIP_MAKER"].values()
     )
     assert "진단·수리 과정" in provider.calls[1]["prompt"]
 

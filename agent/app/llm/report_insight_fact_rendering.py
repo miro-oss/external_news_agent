@@ -19,7 +19,8 @@ from typing import Literal
 
 from app.llm.report_insight_fact_index import build_fact_index
 from app.llm.report_repair_details import source_quote_error_kind
-from app.schemas.report_insight import ReportInsightRequest
+from app.schemas.report_insight import ReportInsightFinding, ReportInsightRequest
+from app.schemas.report_insight_assessment import ReportAssessmentSourceQuote
 
 _KIND_LABELS = {
     "interpretation": "해석",
@@ -149,6 +150,44 @@ def fact_text_slots_payload(
 
 def _quote_prefix(slot: FactTextSlot, kind: ProseKind) -> str:
     return f"원문: 「{slot.source_text}」 {_KIND_LABELS[kind]}: "
+
+
+def basis_source_quote_id(
+    bases: Collection[ReportAssessmentSourceQuote | None],
+    finding: ReportInsightFinding,
+    catalog: FactTextCatalog,
+) -> str | None:
+    """Resolve selected literals to one original sentence, never a claim summary.
+
+    Check all linked sentences before the display catalog's length filter. A
+    repeated fragment, a summary-only selection, or multiple source sentences
+    has no unique display quote. This never adds or changes a decision basis.
+    """
+    claims = {claim.id: claim for claim in finding.claims}
+    selected_sentences = set()
+    for basis in bases:
+        if basis is None:
+            continue
+        claim = claims.get(basis.claim_id)
+        if claim is None or not basis.quote.strip():
+            return None
+        matches = {
+            sentence.index
+            for sentence in finding.sentences
+            if sentence.index in claim.evidence_sentence_ids and basis.quote in sentence.text
+        }
+        if len(matches) != 1:
+            return None
+        selected_sentences.update(matches)
+    if len(selected_sentences) != 1:
+        return None
+    sentence_index = next(iter(selected_sentences))
+    choices = [
+        slot.slot_id
+        for slot in catalog.slots
+        if slot.finding_id == finding.id and slot.sentence_index == sentence_index
+    ]
+    return choices[0] if len(choices) == 1 else None
 
 
 def render_fact_template(

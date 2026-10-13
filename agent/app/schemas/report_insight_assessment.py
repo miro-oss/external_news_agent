@@ -156,3 +156,18 @@ class ReportFindingAssessmentStructuredWire(ReportFindingAssessmentWire):
 
 class ReportAssessmentStructuredWireDraft(ReportAssessmentWireDraft):
     assessments: dict[Audience, dict[str, ReportFindingAssessmentStructuredWire]]
+
+
+class ReportAssessmentDerivedQuotes(AgentModel):
+    """The server derives display quotations; the provider has no second selector."""
+
+    reason: None
+    condition: None
+
+
+class ReportFindingAssessmentBasisWire(ReportFindingAssessmentStructuredWire):
+    source_quotes: ReportAssessmentDerivedQuotes
+
+
+class ReportAssessmentBasisWireDraft(ReportAssessmentWireDraft):
+    assessments: dict[Audience, dict[str, ReportFindingAssessmentBasisWire]]

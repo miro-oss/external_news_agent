@@ -198,7 +198,7 @@ def test_native_and_public_diagnostics_survive_aggregation_and_truncated_prefix(
     error = service._native_assessment_repair_errors(response(value, source), source)
     details = report_validation_issue_details(error, {}, stage="MAP-001")
     assert {item["field"] for item in details["issues"]} >= {
-        "assessments[101]",
+        "assessments[101].decision.effect.impactScope",
         "assessments[101].reason",
         "assessments[101].axes.urgency",
     }

@@ -7,7 +7,12 @@ from datetime import date
 import pytest
 from test_report_insight_assessment import framed
 from test_report_insight_review_batches import source_request
-from test_report_insight_v4_pipeline import V4Provider, generate, stages
+from test_report_insight_v4_pipeline import (
+    V4Provider,
+    _expected_fixture_display_reason,
+    generate,
+    stages,
+)
 from test_structured_call import SequenceProvider, invoke, response
 
 from app.core.errors import AgentError, StructuredOutputExhaustedError
@@ -85,11 +90,19 @@ def test_review_exhaustion_keeps_exact_map_and_valid_reviews_with_one_budget(
     for index, entry in enumerate(final):
         review_stage = f"REVIEW-{index // 6 + 1:03d}"
         if index == 12 or review_stage in failed_stages:
-            assert entry == map_snapshots[0][index]
+            original = map_snapshots[0][index]
+            assert entry == original.model_copy(
+                update={
+                    "reason": _expected_fixture_display_reason(
+                        source, original.finding_id, original.reason
+                    )
+                }
+            )
             assert entry.axes.impact is None
         else:
             assert entry.axes.impact == 3
-    assert contexts.count((list(range(101, 114)), date(2026, 9, 30))) == 2 + len(failed_stages)
+    # The final automatic display projection receives another complete public validation.
+    assert contexts.count((list(range(101, 114)), date(2026, 9, 30))) == 3 + len(failed_stages)
     for call in provider.calls[:-1]:
         assert framed(call["prompt"])["reportReferenceDate"] == "2026-09-30"
     assert source.model_dump_json(by_alias=True) == original_source

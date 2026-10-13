@@ -221,6 +221,16 @@ def partial_repair_fixture():
     return source, reasons, hook
 
 
+def _expected_fixture_display_reason(source, finding_id, interpretation):
+    # These fixtures have one original sentence and choose it as their basis.
+    # Build the expected public text independently of the production renderer.
+    finding = next(item for item in source.findings if item.id == finding_id)
+    assert len(finding.sentences) == 1
+    quoted = f"원문: 「{finding.sentences[0].text}」 해석: {interpretation}"
+    assert len(quoted) <= 180
+    return quoted
+
+
 def test_partial_native_prose_repair_preserves_other_five_records_and_full_date(monkeypatch):
     source, reasons, hook = partial_repair_fixture()
     snapshot = source.model_dump_json(by_alias=True)
@@ -268,7 +278,10 @@ def test_partial_native_prose_repair_preserves_other_five_records_and_full_date(
     full_contexts = [context for context in public_contexts if len(context[0]) > 1]
     assert full_contexts[0] == (list(range(101, 107)), date(2026, 9, 30))
     assert [record.finding_id for record in result.insights[0].assessments] == list(range(101, 109))
-    assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
+    assert [record.reason for record in result.insights[0].assessments] == [
+        _expected_fixture_display_reason(source, identifier, reason)
+        for identifier, reason in reasons.items()
+    ]
     assert result.meta.input_tokens == 33 and result.meta.output_tokens == 21
     assert result.meta.cost_usd == 0.009 and result.meta.credits == 0.6
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -363,7 +376,10 @@ def test_partial_native_repair_keeps_existing_fenced_json_support():
     assert all(raw.startswith("```json\n") for raw in provider.response_texts[:2])
     assert [finding["id"] for finding in framed(provider.calls[1]["prompt"])["findings"]] == [104]
     assert [record.finding_id for record in result.insights[0].assessments] == list(range(101, 109))
-    assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
+    assert [record.reason for record in result.insights[0].assessments] == [
+        _expected_fixture_display_reason(source, identifier, reason)
+        for identifier, reason in reasons.items()
+    ]
     assert result.meta.input_tokens == 33 and result.meta.output_tokens == 21
     assert result.meta.cost_usd == 0.009 and result.meta.credits == 0.6
 
@@ -385,7 +401,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v36"
+    assert result.meta.prompt_version == "report-insight.ko.v37"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -555,7 +571,16 @@ def _assert_failed_review_retains_exact_map(provider, source, result, caplog):
         ProviderResponse(provider.response_texts[0], "openai", "gpt-4.1-nano", ProviderUsage()),
         source,
     )
-    assert result.insights[0].assessments == original.mapped.insights[0].assessments
+    assert result.insights[0].assessments == [
+        assessment.model_copy(
+            update={
+                "reason": _expected_fixture_display_reason(
+                    source, assessment.finding_id, assessment.reason
+                )
+            }
+        )
+        for assessment in original.mapped.insights[0].assessments
+    ]
     assert stages(provider) == ["MAP-001", "REVIEW-001", "REVIEW-001", "REDUCE-001"]
     assert provider.schema_validity == [True, False, False, True]
     assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
@@ -893,7 +918,7 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v36"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v37"
     assert output["meta"]["mock"] is True
     assert RUBRIC_VERSION == "report-importance.v6"
     assert set(output) == {"insights", "meta"}
@@ -922,5 +947,8 @@ def test_draft_error_repairs_native_and_previously_unvisited_prose_failures():
     assert stages(provider) == ["MAP-001", "MAP-001", "MAP-002"]
     assert provider.schema_validity == [True, True, True]
     assert [f["id"] for f in framed(provider.calls[1]["prompt"])["findings"]] == [101, 103]
-    assert [record.reason for record in result.insights[0].assessments] == list(reasons.values())
+    assert [record.reason for record in result.insights[0].assessments] == [
+        _expected_fixture_display_reason(source, identifier, reason)
+        for identifier, reason in reasons.items()
+    ]
     assert result.meta.input_tokens == 33 and result.meta.cost_usd == 0.009
