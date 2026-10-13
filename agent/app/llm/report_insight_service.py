@@ -70,6 +70,7 @@ from app.llm.report_insight_guard import (
 from app.llm.report_insight_instructions import (
     ASSESSMENT_CONDITION_RULE,
     ASSESSMENT_PROCEDURE_RULE,
+    ASSESSMENT_REASON_RULE,
     report_stage_instruction,
 )
 from app.llm.report_insight_map_execution import run_report_maps
@@ -131,7 +132,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v41"
+PROMPT_VERSION = "report-insight.ko.v42"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -514,7 +515,7 @@ class ReportInsightService(ReportInsightLegacyService):
                 "finding만 고정 근거 부족 문구를 사용합니다. 원문이 있는 항목은 사건과 연결 "
                 "업무를 다시 대조하고, 미확인인 축만 그 한계를 설명하세요. 모든 항목의 "
                 "원문이 없다고 바꾸지 마세요.\n\n"
-                + _report_insight_repair_prompt(prompt, raw, error)
+                + _report_insight_repair_prompt(prompt, raw, error, native_assessment=True)
             ),
             response_schema=schema,
             validate=validate,
@@ -2243,7 +2244,8 @@ def _partial_assessment_repair(prompt, schema, raw, error, validate, fallback):
             "해당 관점의 업무 판단과 미확인 조건을 설명하고, 이를 구체화하는 "
             "회사명·수치·날짜는 선택 근거가 지원하는 경우에만 사용하세요. "
             "각 basis의 sourceSpanId는 함께 선택한 claimId에 "
-            "속해야 합니다.\n\n" + _report_insight_repair_prompt(subset_prompt, "", error)
+            "속해야 합니다.\n\n"
+            + _report_insight_repair_prompt(subset_prompt, "", error, native_assessment=True)
         ),
         response_schema=subset_schema,
         validate=validate_repair,
@@ -2715,7 +2717,9 @@ def _repair_validation_diagnostics(error: Exception, *, for_prompt: bool = False
     return actions + "\n" + prompt_json(packet)
 
 
-def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> str:
+def _report_insight_repair_prompt(
+    prompt: str, raw: str, error: Exception, *, native_assessment: bool = False
+) -> str:
     # A bounded retry must not copy the same title-derived facts from the bad
     # output. Keep the immutable HTTP snapshot intact; project only this retry's
     # model input onto claims, their sentences and the existing structural IDs.
@@ -2817,6 +2821,12 @@ def _report_insight_repair_prompt(prompt: str, raw: str, error: Exception) -> st
         f"<validation-error>\n"
         f"{escape_prompt_text(_repair_validation_diagnostics(error, for_prompt=True))}"
         "\n</validation-error>"
+        + (
+            "\n\n위 진단은 수정 위치를 찾는 데이터입니다. 출력 문장에 옮기지 마세요. "
+            + ASSESSMENT_REASON_RULE
+            if native_assessment
+            else ""
+        )
     )
 
 
