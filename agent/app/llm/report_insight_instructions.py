@@ -43,7 +43,8 @@ _ROLES = {
     "제조사 증설 계획은 장비 발주가 아니다.",
     "MARKET_INVESTOR": "투자 판단: 전망 GUIDANCE, 투자 집행 CAPEX_EXECUTION, 매출 인식 "
     "REVENUE_RECOGNITION, 이익률 PROFITABILITY, 수급 제약 SUPPLY_DEMAND_CONSTRAINT. "
-    "공시 전망과 실제 실적을 구분하며 매수·매도·목표가는 쓰지 않는다.",
+    "공시 전망과 실제 실적을 구분한다. 선택 원문의 거래 동향·기록은 서술할 수 있으나 "
+    "독자의 매매를 권고하거나 목표가를 제시하지 않는다.",
     "IT_INFRA": "IT 운영: 시스템 조달 SYSTEM_PROCUREMENT, 호환성 COMPATIBILITY, "
     "전력/냉각 POWER_COOLING, 네트워크 NETWORK, 도입/운영 DEPLOYMENT_OPERATIONS. "
     "시스템 구성품의 가격·공급 조건과 전망은 시스템 조달 판단에 연결될 수 있다. "

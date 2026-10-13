@@ -73,6 +73,7 @@ from app.llm.report_insight_instructions import (
     ASSESSMENT_REASON_RULE,
     report_stage_instruction,
 )
+from app.llm.report_insight_investment_policy import has_investment_advice
 from app.llm.report_insight_map_execution import run_report_maps
 from app.llm.report_insight_optional_recovery import recover_optional_reduce
 from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
@@ -132,7 +133,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v42"
+PROMPT_VERSION = "report-insight.ko.v43"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -317,10 +318,10 @@ LEGACY_SYSTEM_INSTRUCTION = "\n\n".join(
     (_PROMPT_ROOT / f"{version}.md").read_text(encoding="utf-8").strip()
     for version in (LEGACY_PROMPT_VERSION, LEGACY_RUBRIC_VERSION)
 )
-_INVESTMENT_ADVICE = re.compile(
-    r"(?:매수|매도|목표가(?:를|는|의)?\s*(?:[0-9]|상향|하향|인상|인하|조정|변경|추천|제시|전망|높|낮))"
+_INVESTMENT_ADVICE_MESSAGE = (
+    "MARKET_INVESTOR는 투자 자문 표현을 포함할 수 없습니다. "
+    "선택 원문의 거래 동향·기록은 서술하되, 독자의 매매를 권고하거나 목표가를 제시하지 마세요."
 )
-_INVESTMENT_ADVICE_MESSAGE = "MARKET_INVESTOR는 투자 자문 표현을 포함할 수 없습니다."
 _UNSUPPORTED_COMPARISON = re.compile(
     r"(?:전주\s*(?:대비|보다)|지난주\s*(?:대비|보다)|지난\s*보고서|이전\s*보고서|"
     r"직전\s*보고서|신규\s*(?:변화|진입)|처음으로|새롭게\s*(?:확인|부각))"
@@ -972,6 +973,12 @@ def _incomplete_reduce_unit_diagnostics(units, request, allowed):
                 )
                 continue
             interpreted[field] = prose
+            if unit.audience == "MARKET_INVESTOR" and has_investment_advice(
+                prose, "\n".join(dict.fromkeys(evidence[ref] for ref in refs))
+            ):
+                issues.append(
+                    ReportValidationIssue(unit.audience, path, "report_synthesis_invalid", refs)
+                )
             for error in _prose_validation_errors(
                 [prose],
                 list(refs),
@@ -1306,22 +1313,11 @@ def _reduce_repair_diagnostics(response, request, allowed, *, native_synthesis=N
         headline_refs = [claim_id for claim_id in claims if claim_id in allowed[audience]]
         # These public-output guards also inspect otherwise grounded prose.
         # Their failures cannot be left in a supposedly unaffected unit.
-        if audience == "MARKET_INVESTOR" and _INVESTMENT_ADVICE.search(insight.model_dump_json()):
-            advice_fields = [("headline", insight.headline, headline_refs)]
-            for group, items in (
-                ("overview", insight.overview),
-                ("implications", insight.implications),
-                ("watchItems", insight.watch_items),
-            ):
-                for index, item in enumerate(items):
-                    advice_fields.extend(
-                        (f"{group}[{index}].{field}", value, item.basis_claim_ids)
-                        for field, value in item.model_dump(
-                            by_alias=True, exclude={"basis_claim_ids"}
-                        ).items()
-                    )
-            for field, value, refs in advice_fields:
-                if _INVESTMENT_ADVICE.search(value):
+        if audience == "MARKET_INVESTOR":
+            for field, value, refs in _synthesis_prose_fields(insight, headline_refs):
+                if has_investment_advice(
+                    value, "\n".join(dict.fromkeys(evidence[ref] for ref in refs))
+                ):
                     record(
                         f"{audience}.{field}",
                         refs,
@@ -3162,7 +3158,9 @@ def _assessment_field_errors(
     errors = _prose_validation_errors(
         [value], refs, evidence, claims, conditional=conditional, request=request
     )
-    if audience == "MARKET_INVESTOR" and _INVESTMENT_ADVICE.search(value):
+    if audience == "MARKET_INVESTOR" and has_investment_advice(
+        value, "\n".join(dict.fromkeys(evidence[ref] for ref in refs))
+    ):
         errors.append(
             OutputValidationError(
                 _INVESTMENT_ADVICE_MESSAGE, error_kinds=("report_expression_policy",)
@@ -3210,6 +3208,19 @@ def _assessment_prose_errors(assessment, native, refs, evidence, claims, request
     # Each native field keeps its own semantic kind and exact validated-field
     # coordinate space. Do not collapse contradictions and unsupported prose.
     return [(f"reason nativeFields={field}", error) for field, error in found]
+
+
+def _synthesis_prose_fields(insight, headline_refs):
+    """Keep each interpretation's policy check inside its own evidence scope."""
+    yield "headline", insight.headline, headline_refs
+    for group, items in (
+        ("overview", insight.overview),
+        ("implications", insight.implications),
+        ("watchItems", insight.watch_items),
+    ):
+        for index, item in enumerate(items):
+            for field, value in item.model_dump(by_alias=True, exclude={"basis_claim_ids"}).items():
+                yield f"{group}[{index}].{field}", value, item.basis_claim_ids
 
 
 def _validated_output(
@@ -3389,12 +3400,15 @@ def _validated_output(
         _validate_prose(
             [semantic_insight.headline], list(claims), evidence, claims, request=request
         )
-        if insight.audience == "MARKET_INVESTOR" and _INVESTMENT_ADVICE.search(
-            # Assessment reason/condition were checked with their authenticated
-            # native boundaries above; source quotes are not model advice.
-            semantic_insight.model_dump_json(exclude={"assessments"})
-        ):
-            raise ValueError(_INVESTMENT_ADVICE_MESSAGE)
+        if insight.audience == "MARKET_INVESTOR":
+            # Authenticated source quotes are already removed from this view.
+            # Never let another field's observation or references excuse advice.
+            headline_refs = (synthesis_allowed or {}).get(insight.audience, list(claims))
+            for _, value, refs in _synthesis_prose_fields(semantic_insight, headline_refs):
+                if has_investment_advice(
+                    value, "\n".join(dict.fromkeys(evidence[ref] for ref in refs))
+                ):
+                    raise ValueError(_INVESTMENT_ADVICE_MESSAGE)
         related = {
             assessment.finding_id
             for assessment in insight.assessments
