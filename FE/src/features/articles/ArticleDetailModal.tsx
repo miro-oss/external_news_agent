@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { ApiError } from '../../api/client'
 import { useArticle, useGenerateInsight, useInsight } from '../../api/queries'
 import {
@@ -36,7 +36,9 @@ export function ArticleDetailModal({
   onClose,
 }: Props) {
   const article = useArticle(articleId, runId)
+  const dialog = useRef<HTMLDialogElement>(null)
   const closeButton = useRef<HTMLButtonElement>(null)
+  const isOpen = articleId !== null
   const appliedInitialEvidence = useRef<string | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
     articleId: number | null
@@ -49,18 +51,20 @@ export function ArticleDetailModal({
   }>({ articleId: null, audience: defaultAudience })
 
   useEffect(() => {
-    if (articleId === null) return undefined
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', onKeyDown)
+    if (!isOpen) return undefined
+    const element = dialog.current
+    const previousFocus = document.activeElement
+    element?.showModal()
     document.body.classList.add('modal-open')
-    closeButton.current?.focus()
+    closeButton.current?.focus({ preventScroll: true })
     return () => {
-      document.removeEventListener('keydown', onKeyDown)
+      element?.close()
       document.body.classList.remove('modal-open')
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+        previousFocus.focus({ preventScroll: true })
+      }
     }
-  }, [articleId, onClose])
+  }, [isOpen])
 
   useEffect(() => {
     if (articleId === null) {
@@ -103,15 +107,40 @@ export function ArticleDetailModal({
     })
   }
 
+  const keepFocusInDialog = (event: KeyboardEvent<HTMLDialogElement>) => {
+    if (event.key !== 'Tab' || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
+    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+      'a[href], button, input, select, textarea, summary, [tabindex]',
+    )).filter(element => element.tabIndex >= 0 && !element.matches(':disabled')
+      && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden')
+    const first = controls[0]
+    const last = controls.at(-1)
+    // Native dialogs can send Tab to the browser toolbar at either boundary.
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) {
+      event.preventDefault()
+      last?.focus()
+    } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === event.currentTarget)) {
+      event.preventDefault()
+      first?.focus()
+    }
+  }
+
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div
-        className="article-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={article.data ? 'article-modal-title' : undefined}
-        aria-label={article.data ? undefined : '기사 상세'}
-      >
+    <dialog
+      ref={dialog}
+      className="modal-backdrop"
+      aria-labelledby={article.data ? 'article-modal-title' : undefined}
+      aria-label={article.data ? undefined : '기사 상세'}
+      onCancel={(event) => { event.preventDefault(); onClose() }}
+      onKeyDown={keepFocusInDialog}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          event.preventDefault()
+          onClose()
+        }
+      }}
+    >
+      <div className="article-modal">
         <button ref={closeButton} type="button" className="modal-close" aria-label="본문보기 닫기" onClick={onClose}>×</button>
         {article.isPending && <ArticleDetailSkeleton />}
         {article.isError && <div className="modal-state error" role="alert">{article.error.message}</div>}
@@ -197,7 +226,7 @@ export function ArticleDetailModal({
           </>
         )}
       </div>
-    </div>
+    </dialog>
   )
 }
 
