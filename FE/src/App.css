@@ -1889,12 +1889,28 @@ body.modal-open {
   position: fixed;
   z-index: 100;
   inset: 0;
-  display: flex;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
   justify-content: flex-end;
+  color: inherit;
   background: rgba(25, 31, 40, 0.4);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
   animation: backdrop-in var(--dur-3) var(--ease-out);
+}
+
+.modal-backdrop[open] {
+  display: flex;
+}
+
+.modal-backdrop::backdrop {
+  background: transparent;
 }
 
 @keyframes backdrop-in {
