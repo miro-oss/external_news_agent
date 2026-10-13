@@ -43,6 +43,7 @@ from app.llm.report_insight_assessment import (
 from app.llm.report_insight_assessment import (
     validate_draft as validate_legacy_draft,
 )
+from app.llm.report_insight_corporate_event_binding import corporate_event_mismatches
 from app.llm.report_insight_fact_assertions import unsupported_fact_assertions
 from app.llm.report_insight_fact_index import build_fact_index, prompt_fact_index
 from app.llm.report_insight_fact_rendering import (
@@ -138,7 +139,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v50"
+PROMPT_VERSION = "report-insight.ko.v51"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -3603,6 +3604,9 @@ def _prose_validation_errors(
                     *mismatches,
                     *source_fact_mismatches(value, binding_source),
                     *unsupported_fact_assertions(value, binding_source),
+                    *corporate_event_mismatches(
+                        value, list(dict.fromkeys(evidence[ref] for ref in refs))
+                    ),
                     *relation_mismatches,
                 ]
             )
