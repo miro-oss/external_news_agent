@@ -5,7 +5,10 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
-from report_insight_schema_assertions import assert_only_display_quotes_require_null
+from report_insight_schema_assertions import (
+    assert_only_display_quotes_require_null,
+    assert_same_native_constraints,
+)
 from test_report_insight_assessment import draft_to_wire, framed, payload, request, response
 from test_report_insight_axis_support_repair import case
 from test_report_insight_core_forecast_support import CURRENT_CAPACITY, recorded_case
@@ -186,7 +189,7 @@ def test_stale_or_untrusted_context_retains_ordinary_repair(defect):
     repair = object.__new__(service.ReportInsightService)._repair_call(
         draft_prompt(source), schema, raw.text, error, lambda result: full_validate(result, source)
     )
-    assert repair.response_schema == schema
+    assert_same_native_constraints(repair.response_schema, schema)
     assert "finding 전체의 근거 부정이 아닙니다" not in repair.prompt
 
 

@@ -7,7 +7,10 @@ from dataclasses import replace
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
-from report_insight_schema_assertions import assert_only_display_quotes_require_null
+from report_insight_schema_assertions import (
+    assert_only_display_quotes_require_null,
+    assert_same_native_constraints,
+)
 from test_report_insight_assessment import payload, request, response
 from test_report_insight_native_field_diagnostics import conditional_payload, recorded_source
 
@@ -341,4 +344,4 @@ def test_untrusted_or_stale_attribution_cannot_freeze_decisions(defect):
     schema = draft_schema(source)
     engine = object.__new__(service.ReportInsightService)
     repair = engine._repair_call(draft_prompt(source), schema, raw.text, error, lambda x: x)
-    assert repair.response_schema == schema
+    assert_same_native_constraints(repair.response_schema, schema)

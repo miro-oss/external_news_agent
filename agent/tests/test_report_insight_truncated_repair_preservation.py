@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
+from report_insight_schema_assertions import assert_same_native_constraints
 from test_report_insight_assessment import payload, request, response
 from test_report_insight_core_forecast_support import recorded_case
 from test_report_insight_mixed_record_preservation import (
@@ -245,7 +246,7 @@ def test_unauthenticated_prefix_never_enables_partial_or_axis_preservation(monke
     repair = object.__new__(service.ReportInsightService)._repair_call(
         draft_prompt(source), schema, raw.text, error, template_validator(source, calls)
     )
-    assert repair.response_schema == schema
+    assert_same_native_constraints(repair.response_schema, schema)
     assert calls == []
 
 

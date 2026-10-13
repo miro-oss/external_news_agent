@@ -23,6 +23,9 @@ ASSESSMENT_REASON_RULE = (
     "쓴다(120자 안팎, 최대 180자). ID는 구조화 필드에만 두고 근거 선택·검증 해설은 "
     "덧붙이지 않는다. " + ASSESSMENT_PROCEDURE_RULE
 )
+ASSESSMENT_REPAIR_ORDER_RULE = (
+    "Schema const를 유지하고 decision·basis를 먼저 확정한 뒤 최종 근거로 reason을 쓴다."
+)
 ASSESSMENT_FINAL_BASIS_RULE = (
     "보정은 최종 decision을 정한 뒤 마무리한다. connection/effect/timing의 최종 non-null "
     "basis가 선택한 claim과 연결 sentence만 모아 수정 가능한 reason·condition의 사실 "
@@ -68,27 +71,34 @@ _ROLES = {
 }
 
 
-def report_stage_instruction(audiences: list[Audience], stage: str) -> str:
+def report_stage_instruction(audiences: list[Audience], stage: str, *, repair: bool = False) -> str:
     """Requested roles, active stage and source rules; schema defines the shape."""
     if not audiences or stage not in {"MAP", "REVIEW", "REDUCE"}:
         raise ValueError("A report stage needs requested audiences and a known stage")
     roles = "\n".join(f"{audience}: {_ROLES[audience]}" for audience in audiences)
     common = _BASE + "\n\n" + roles
     if stage in {"MAP", "REVIEW"}:
+        conclusion = (
+            "4. "
+            + ASSESSMENT_REPAIR_ORDER_RULE
+            + " 축별 범주·필수/null 준수. 모두 미확인은 finding 원문, claims=[]만 고정 reason. "
+            + ASSESSMENT_REASON_RULE
+            if repair
+            else "4. 축별 범주와 필수/null을 지킨다. reason은 선택한 "
+            "claim·연결 sentence(모든 축 미확인이면 finding 원문)로 뒷받침한다. "
+            "실제 claims=[]만 Schema const의 고정 reason을 쓴다."
+        )
         stage_text = (
             f"현재 단계는 {stage}.\n"
             "1. 연결 sentence의 주체·대상·사건 단계를 읽는다. claim 요약이 강해도 원문의 "
             "실험·계획·전망 수준을 유지한다. "
-            + ASSESSMENT_REASON_RULE
+            + ("" if repair else ASSESSMENT_REASON_RULE)
             + "\n2. 관점의 모든 업무로 connection을 판정한다. 원문에서 확인된 "
             "사실을 미확인 condition으로 반복하지 않는다.\n"
             "3. 업무 대상의 변경·준비 범위를 찾는다. 규모·성장률·기술 사양은 "
             "실제 제약이 아니며 수요·가격 전망은 프로젝트 변경·준비가 아니다. "
             "구체 계획의 자원·일정과 시제품의 준비 범위를 판단한다. "
-            "범위를 모르면 관계는 유지하고 effect만 UNDETERMINED로 둔다.\n"
-            "4. 축별 범주와 필수/null을 지킨다. reason은 선택한 "
-            "claim·연결 sentence(모든 축 미확인이면 finding 원문)로 뒷받침한다. "
-            "실제 claims=[]만 Schema const의 고정 reason을 쓴다."
+            "범위를 모르면 관계는 유지하고 effect만 UNDETERMINED로 둔다.\n" + conclusion
         )
         if stage == "REVIEW":
             stage_text += " 검토 선정은 승격 근거가 아니며 원문으로 독립 재판정한다."

@@ -31,6 +31,8 @@ from app.llm.report_insight_assessment import (
     parse_wire_draft,
     project_public_assessment,
     render_basis_quotes,
+    repair_assessment_instructions,
+    repair_draft_schema,
     review_prompt,
     select_review,
     source_span_choices,
@@ -134,7 +136,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v45"
+PROMPT_VERSION = "report-insight.ko.v46"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -472,6 +474,16 @@ class ReportInsightLegacyService:
         )
 
     def _call(self, pipeline, *, instruction, prompt, schema, validate, stage):
+        def repair_factory(original_prompt, original_schema, raw, error):
+            repair = self._repair_call(original_prompt, original_schema, raw, error, validate)
+            if stage in {"MAP", "REVIEW"} and schema.get("title") == "ReportAssessmentDraft":
+                audiences = list(schema["properties"]["assessments"]["properties"])
+                repair = replace(
+                    repair,
+                    system_instruction=report_stage_instruction(audiences, stage, repair=True),
+                )
+            return repair
+
         return structured_call(
             pipeline,
             system_instruction=instruction,
@@ -492,9 +504,7 @@ class ReportInsightLegacyService:
                 if schema.get("description", "").startswith("reportInsightCall:")
                 else stage
             ),
-            repair_factory=lambda original_prompt, original_schema, raw, error: self._repair_call(
-                original_prompt, original_schema, raw, error, validate
-            ),
+            repair_factory=repair_factory,
         )
 
     def _repair_call(self, prompt, schema, raw, error, validate):
@@ -509,6 +519,7 @@ class ReportInsightService(ReportInsightLegacyService):
     def _repair_call(self, prompt, schema, raw, error, validate):
         if schema.get("title") != "ReportAssessmentDraft":
             return super()._repair_call(prompt, schema, raw, error, validate)
+        schema = repair_draft_schema(schema)
         fallback = StructuredCallRepair(
             prompt=(
                 "현재 단계는 내부 근거 평가 수리입니다. 각 finding의 decision 안에 "
@@ -2723,6 +2734,8 @@ def _report_insight_repair_prompt(
     # output. Keep the immutable HTTP snapshot intact; project only this retry's
     # model input onto claims, their sentences and the existing structural IDs.
     instructions, framed_input = prompt.split("<report-insight-input>", 1)
+    if native_assessment:
+        instructions = repair_assessment_instructions(instructions)
     payload = parse_json_object(framed_input.split("</report-insight-input>", 1)[0])
     metadata = {"title", "articleTitle", "canonicalUrl", "topicName", "score"}
 

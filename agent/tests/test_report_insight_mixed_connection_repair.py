@@ -5,7 +5,10 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
-from report_insight_schema_assertions import assert_only_display_quotes_require_null
+from report_insight_schema_assertions import (
+    assert_only_display_quotes_require_null,
+    assert_same_native_constraints,
+)
 from test_report_insight_assessment import framed, payload, request, response
 from test_report_insight_axis_support_repair import case
 from test_report_insight_preserved_connection_repair import repair_for
@@ -329,7 +332,7 @@ def test_mixed_context_is_reauthenticated_against_original_wire_and_source(defec
     repair = object.__new__(service.ReportInsightService)._repair_call(
         draft_prompt(source), schema, raw.text, error, lambda result: full_validate(result, source)
     )
-    assert repair.response_schema == schema
+    assert_same_native_constraints(repair.response_schema, schema)
 
 
 @pytest.mark.parametrize("retained", [None, "reason", "effect", "downgrade"])

@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
+from report_insight_schema_assertions import assert_same_native_constraints
 from test_report_insight_assessment import framed, response
 from test_report_insight_connection_evidence_dependency import full_validate
 from test_report_insight_mixed_connection_repair import corrected, mixed_case
@@ -163,7 +164,7 @@ def test_unlocalized_native_full_repair_still_reapplies_reason_completion_rule(p
         ValueError("The original JSON is incomplete."),
         lambda candidate: full_validate(candidate, source),
     )
-    assert repair.response_schema == schema
+    assert_same_native_constraints(repair.response_schema, schema)
     assert ASSESSMENT_REASON_RULE in repair.prompt.split("</validation-error>", 1)[1]
     assert [finding["id"] for finding in framed(repair.prompt)["findings"]] == [101, 202]
     assert repair.validate(fixed).evidence["IT_INFRA"][101].reason == GOOD_REASON

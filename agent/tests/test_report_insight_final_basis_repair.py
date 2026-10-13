@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
+from report_insight_schema_assertions import assert_same_native_constraints
 from test_report_insight_assessment import framed, response
 from test_report_insight_connection_evidence_dependency import full_validate
 from test_report_insight_mixed_connection_repair import mixed_case
@@ -238,7 +239,12 @@ def test_final_basis_tail_is_only_applied_to_native_map_review_repairs(kind):
     repair = engine._repair_call(prompt, schema, "{", ValueError("incomplete"), lambda raw: raw)
     tail = repair.prompt.split("</validation-error>", 1)[1]
     assert (ASSESSMENT_FINAL_BASIS_RULE in tail) == (kind == "native_fallback")
-    assert repair.response_schema == schema
+    if kind == "native_fallback":
+        # Required-field order follows the retry's decision-first serialization;
+        # all actual schema constraints must still equal the initial contract.
+        assert_same_native_constraints(repair.response_schema, schema)
+    else:
+        assert repair.response_schema == schema
 
 
 @pytest.mark.parametrize("stage", ["MAP-001", "REVIEW-001"])

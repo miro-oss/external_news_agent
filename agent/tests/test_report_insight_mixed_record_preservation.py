@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
+from report_insight_schema_assertions import assert_same_native_constraints
 from test_report_insight_assessment import payload, request, response
 from test_report_insight_core_forecast_support import recorded_case
 from test_report_insight_map_complete_diagnostics import deadline_record
@@ -317,4 +318,4 @@ def test_rebound_template_connection_does_not_authenticate_modified_input(mutati
     repair = object.__new__(service.ReportInsightService)._repair_call(
         draft_prompt(source), schema, raw.text, error, template_validator(source, [])
     )
-    assert repair.response_schema == schema
+    assert_same_native_constraints(repair.response_schema, schema)
