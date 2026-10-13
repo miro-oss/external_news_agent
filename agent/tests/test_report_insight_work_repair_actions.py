@@ -318,7 +318,13 @@ def test_fact_only_condition_repair_does_not_replace_event_state_with_invented_p
     assert "report_work_compatibility_procedure_unsupported" not in repair.prompt
     assert ASSESSMENT_CONDITION_RULE in json.dumps(draft_schema(source), ensure_ascii=False)
     assert ASSESSMENT_CONDITION_RULE in json.dumps(repair.response_schema, ensure_ascii=False)
-    assert framed(repair.prompt) == framed(draft_prompt(source))
+    repair_input = framed(repair.prompt)
+    focus = repair_input["findings"][0].pop("proseRepair")
+    assert repair_input == framed(draft_prompt(source))
+    assert focus["editableFields"] == ["decision.connection.condition"]
+    assert focus["preservedValues"]["reason"] == entry["reason"]
+    assert "decision.connection.condition" not in focus["preservedValues"]
+    assert focus["selectedEvidence"][0]["text"] == source.findings[0].claims[0].text
     with pytest.raises(service.ReportAssessmentValidationError):
         repair.validate(raw)
 

@@ -76,6 +76,11 @@ from app.llm.report_insight_map_execution import run_report_maps
 from app.llm.report_insight_optional_recovery import recover_optional_reduce
 from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
 from app.llm.report_insight_prefix import closed_assessment_prefix
+from app.llm.report_insight_prose_repair import (
+    ProseRepairSources,
+    focus_prose_repair_finding,
+    prose_repair_sources,
+)
 from app.llm.report_insight_reduce_repair import ReduceRepairContext, partial_reduce_repair
 from app.llm.report_insight_reduce_shape_scan import build_reduce_shape_scan
 from app.llm.report_insight_research_facts import supported_research_novelty
@@ -126,7 +131,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v38"
+PROMPT_VERSION = "report-insight.ko.v39"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -159,6 +164,7 @@ class ReportAssessmentValidationError(OutputValidationError):
         native_prose_repairs: dict[int, tuple[ReportFindingAssessmentDraft, tuple[str, ...]]]
         | None = None,
         native_connection_repairs: dict[int, ReportAssessmentConnectionRepairContext] | None = None,
+        native_prose_sources: dict[int, ProseRepairSources] | None = None,
     ) -> None:
         super().__init__(message, error_kinds=error_kinds)
         self.failed_finding_ids: tuple[int, ...] = tuple(failed_finding_ids)
@@ -170,6 +176,7 @@ class ReportAssessmentValidationError(OutputValidationError):
         # Created from authenticated native projections, never diagnostic prose.
         self.native_prose_repairs = deepcopy(native_prose_repairs or {})
         self.native_connection_repairs = deepcopy(native_connection_repairs or {})
+        self.native_prose_sources = deepcopy(native_prose_sources or {})
 
 
 class _TruncatedAssessmentRepairError(ReportAssessmentValidationError):
@@ -227,6 +234,12 @@ class _TruncatedAssessmentRepairError(ReportAssessmentValidationError):
                 identifier: context
                 for identifier, error in errors
                 for target, context in getattr(error, "native_connection_repairs", {}).items()
+                if target == identifier
+            },
+            native_prose_sources={
+                identifier: context
+                for identifier, error in errors
+                for target, context in getattr(error, "native_prose_sources", {}).items()
                 if target == identifier
             },
         )
@@ -586,7 +599,7 @@ class ReportInsightService(ReportInsightLegacyService):
                     native_assessments=draft.evidence,
                 )
             except ReportAssessmentValidationError as error:
-                _bind_original_prose_repair(error, response, subset, draft)
+                _bind_original_prose_repair(error, response, validation_request, draft)
                 raise
             return draft
 
@@ -1591,6 +1604,7 @@ def _native_assessment_repair_errors(response, request, *, template_wire=False):
         ),
         native_prose_repairs=prose_repairs,
         native_connection_repairs=connection_repairs,
+        native_prose_sources=prose_repair_sources(request, prose_repairs),
     )
 
 
@@ -1784,6 +1798,7 @@ def _bind_original_prose_repair(error, response, request, draft):
     except (KeyError, TypeError, ValueError):
         return
     error.native_prose_repairs = restored
+    error.native_prose_sources = prose_repair_sources(request, restored)
 
 
 def _preserve_native_decisions(repair, raw, error):
@@ -1821,6 +1836,7 @@ def _preserve_native_decisions(repair, raw, error):
         if not {f"finding{identifier}" for identifier in contexts} <= set(entries):
             return repair
         frozen = {}
+        focused_findings = {}
         for identifier, (snapshot, fields) in contexts.items():
             key = f"finding{identifier}"
             item = original.assessments[audience][key]
@@ -1903,6 +1919,17 @@ def _preserve_native_decisions(repair, raw, error):
                         if choices
                         else {"type": "null"}
                     )
+            focused_findings[identifier] = focus_prose_repair_finding(
+                findings[identifier],
+                error.native_prose_sources.get(identifier),
+                snapshot,
+                fields,
+                fixed,
+                values["decision"],
+                audience=audience,
+                reference_date=payload.get("reportReferenceDate"),
+                source_quotes=values.get("sourceQuotes"),
+            )
     except (KeyError, IndexError, TypeError, ValueError):
         # Unknown future shapes must not accidentally narrow a different field.
         return repair
@@ -1931,6 +1958,16 @@ def _preserve_native_decisions(repair, raw, error):
         # source, time, coherence and citation validators still run afterward.
         return repair.validate(response)
 
+    payload["findings"] = [focused_findings.get(item["id"], item) for item in payload["findings"]]
+    prefix, framed = repair.prompt.split("<report-insight-input>", 1)
+    _, suffix = framed.split("</report-insight-input>", 1)
+    focused_prompt = (
+        prefix
+        + "<report-insight-input>\n"
+        + prompt_json(payload)
+        + "\n</report-insight-input>"
+        + suffix
+    )
     return StructuredCallRepair(
         prompt=(
             f"findingId={sorted(contexts)}에 한해 "
@@ -1944,7 +1981,13 @@ def _preserve_native_decisions(repair, raw, error):
             "원문 선택 오류는 문구 수정만으로 해결되지 않습니다. 진단된 필드의 sourceQuotes도 "
             "Schema에 허용된 선택지 또는 null로 수정하세요. condition=null이면 "
             "sourceQuotes.condition도 null이어야 합니다. "
-            "다른 finding은 각 진단과 Schema에 지정된 수정 범위를 따르세요.\n\n" + repair.prompt
+            "proseRepair가 있는 항목은 preservedValues의 검증된 판단과 selectedEvidence의 "
+            "원문을 먼저 읽고 editableFields에 지정된 설명만 작성하세요. 이 항목의 claims와 "
+            "sentences는 고정된 모든 basis의 claim과 연결 문장 전체입니다. basis가 모두 "
+            "null이면 판단 보류 사유를 확인할 전체 유효 근거를 유지합니다. 선택 근거의 "
+            "주체·발언자·사건 단계와 미확인 전제를 보존하세요. 미선택 근거가 입력에 없는 "
+            "것은 원문 부재를 뜻하지 않습니다. 다른 finding은 각 진단과 Schema에 지정된 "
+            "수정 범위를 따르세요.\n\n" + focused_prompt
         ),
         response_schema=schema,
         validate=validate_repair,
@@ -3170,6 +3213,9 @@ def _validated_output(
             except ValueError as error:
                 assessment_errors.append((assessment, "axes.urgency", error))
         if assessment_errors:
+            prose_contexts = _native_prose_repair_context(
+                assessment_errors, native_assessments, insight.audience
+            )
             diagnostics = tuple(
                 f"findingId={assessment.finding_id} field=assessments.{field} "
                 f"refs={assessment.basis_claim_ids}: {error}"
@@ -3241,9 +3287,8 @@ def _validated_output(
                         else field,
                     )
                 ),
-                native_prose_repairs=_native_prose_repair_context(
-                    assessment_errors, native_assessments, insight.audience
-                ),
+                native_prose_repairs=prose_contexts,
+                native_prose_sources=prose_repair_sources(request, prose_contexts),
             )
         semantic_insight = semantic_by_audience[insight.audience]
         for item in [

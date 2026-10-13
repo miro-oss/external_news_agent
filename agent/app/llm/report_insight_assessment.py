@@ -804,6 +804,31 @@ def draft_to_wire(
     }
 
 
+def finding_prompt_payload(request, finding, *, claim_ids=None) -> dict:
+    """Project linked sources without changing literal IDs or fact provenance."""
+    if claim_ids is not None:
+        claims = [claim for claim in finding.claims if claim.id in claim_ids]
+        sentence_ids = {index for claim in claims for index in claim.evidence_sentence_ids}
+        finding = finding.model_copy(
+            update={
+                "claims": claims,
+                "sentences": [s for s in finding.sentences if s.index in sentence_ids],
+            }
+        )
+    return {
+        "id": finding.id,
+        **({"topicIds": finding.topic_ids} if request.feedback_examples else {}),
+        "articleId": finding.article_id,
+        "publishedAt": finding.published_at.isoformat() if finding.published_at else None,
+        "claims": [claim.model_dump(mode="json", by_alias=True) for claim in finding.claims],
+        "sentences": [sentence.model_dump(by_alias=True) for sentence in finding.sentences],
+        "sourceQuoteChoices": source_span_choices(finding),
+        # Rebuild from the original request to retain authenticated extraction
+        # proposals and accurate counts/limits for the selected claim origins.
+        "sourceFactIndex": prompt_fact_index(request, claim_ids, finding_id=finding.id),
+    }
+
+
 def _prompt_payload(request: ReportInsightRequest, reference_date: date | None) -> dict:
     reference = reference_date if reference_date is not None else report_reference_date(request)
     payload = {
@@ -819,18 +844,7 @@ def _prompt_payload(request: ReportInsightRequest, reference_date: date | None) 
             topic_ids={topic_id for finding in request.findings for topic_id in finding.topic_ids},
         ),
         "findings": [
-            {
-                "id": finding.id,
-                **({"topicIds": finding.topic_ids} if request.feedback_examples else {}),
-                "articleId": finding.article_id,
-                "publishedAt": finding.published_at.isoformat() if finding.published_at else None,
-                "claims": [
-                    claim.model_dump(mode="json", by_alias=True) for claim in finding.claims
-                ],
-                "sentences": [sentence.model_dump(by_alias=True) for sentence in finding.sentences],
-                "sourceQuoteChoices": source_span_choices(finding),
-                "sourceFactIndex": prompt_fact_index(request, finding_id=finding.id),
-            }
+            finding_prompt_payload(request, finding)
             for finding in request.findings
         ],
     }
