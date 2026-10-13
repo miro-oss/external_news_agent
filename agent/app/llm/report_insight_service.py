@@ -69,6 +69,7 @@ from app.llm.report_insight_guard import (
 )
 from app.llm.report_insight_instructions import (
     ASSESSMENT_CONDITION_RULE,
+    ASSESSMENT_FINAL_BASIS_RULE,
     ASSESSMENT_PROCEDURE_RULE,
     ASSESSMENT_REASON_RULE,
     report_stage_instruction,
@@ -133,7 +134,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v43"
+PROMPT_VERSION = "report-insight.ko.v44"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -1801,8 +1802,9 @@ def _preserve_native_connection(repair, raw, error):
             f"findingId={sorted(contexts)}: "
             "connection의 관계·업무·조건·근거는 검증되어 Schema const로 "
             "고정됩니다. 영향·시점 진단은 해당 축의 기존 basis에 대한 것이며 finding 전체의 "
-            "근거 부정이 아닙니다. reason의 사실 오류도 함께 진단되었다면 같은 원문에 맞게 "
-            "수정하세요. 고정된 connection.basis와 같은 finding의 모든 원문 선택지를 "
+            "근거 부정이 아닙니다. 최초 reason에 오류가 없었어도 effect/timing의 basis를 "
+            "삭제·교체하면 최종 선택 근거만으로 reason을 다시 대조하세요. "
+            "고정된 connection.basis와 같은 finding의 모든 원문 선택지를 "
             "재대조해 effect/timing의 근거를 다시 선택하세요. 연결 근거가 영향·시점도 "
             "지원한다는 보장은 없습니다. effect는 기사 대상의 변경·제약·준비 범위이며, "
             "즉시성이나 독자 회사의 내부 운영자료는 필수 요건이 아닙니다. timing은 별도로 "
@@ -2819,6 +2821,8 @@ def _report_insight_repair_prompt(
         "\n</validation-error>"
         + (
             "\n\n위 진단은 수정 위치를 찾는 데이터입니다. 출력 문장에 옮기지 마세요. "
+            + ASSESSMENT_FINAL_BASIS_RULE
+            + " "
             + ASSESSMENT_REASON_RULE
             if native_assessment
             else ""

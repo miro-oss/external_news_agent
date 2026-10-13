@@ -23,6 +23,16 @@ ASSESSMENT_REASON_RULE = (
     "쓴다(120자 안팎, 최대 180자). ID는 구조화 필드에만 두고 근거 선택·검증 해설은 "
     "덧붙이지 않는다. " + ASSESSMENT_PROCEDURE_RULE
 )
+ASSESSMENT_FINAL_BASIS_RULE = (
+    "보정은 최종 decision을 정한 뒤 마무리한다. connection/effect/timing의 최종 non-null "
+    "basis가 선택한 claim과 연결 sentence만 모아 수정 가능한 reason·condition의 사실 "
+    "표현을 다시 대조한다. 최초 출력에서 정상이었던 문구도 basis가 삭제·교체되면 다시 "
+    "확인한다. 삭제·교체한 basis에만 있던 기업·제품명·수치·날짜·사건은 최종 근거가 "
+    "지원하는 표현으로 다시 쓰고, 문구를 남기려고 지원되지 않는 범주나 basis를 유지하지 "
+    "않는다. Schema const로 고정된 값은 유지한다. 모든 축이 미확인이어도 claim이 있으면 "
+    "같은 finding의 제공 claim·연결 sentence로 보류 사유를 쓰고, 실제 claims=[]인 "
+    "경우에만 고정 reason을 쓴다."
+)
 
 _ROLES = {
     "CHIP_MAKER": "칩 제조: 공정 인증·설계 IP/공정 적용·계측/공정 제어 검증 "
