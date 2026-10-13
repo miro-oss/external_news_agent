@@ -226,3 +226,71 @@ def test_object_particle_forms_keep_the_same_event_and_issuer(event, source_even
     assert corporate_event_mismatches(f"새봄의 {event} 계획은 판단 근거다.", [source]) == []
     assert corporate_event_mismatches(f"가온의 {event} 계획은 판단 근거다.", [source])
     assert corporate_event_mismatches(f"새봄의 {event} 취소는 판단 근거다.", [source])
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "구조를 개선했다",
+        "구조 개편은 투자 판단에 연결된다",
+        "비용이 감소했다",
+        "조건이 개선됐다",
+        "여력이 확대됐다",
+        "전략을 실행했다",
+        "전략 확정은 투자 판단에 연결된다",
+    ],
+)
+def test_concrete_financing_changes_are_not_exempt_as_analytical_nouns(change):
+    value = f"새봄의 자금 조달 {change}."
+    assert corporate_event_mismatches(value, ["새봄의 실적이 증가했다."])
+    assert corporate_event_mismatches(value, [f"가온의 자금 조달 {change}."])
+    assert corporate_event_mismatches(value, [value]) == []
+
+
+@pytest.mark.parametrize(
+    "analysis",
+    [
+        "구조와 조건을 검토할 정보다",
+        "조건 개선 여부를 검토할 필요가 있다",
+        "여력 확대 가능성을 검토할 정보다",
+    ],
+)
+def test_financing_analysis_without_asserted_change_remains_allowed(analysis):
+    assert (
+        corporate_event_mismatches(
+            f"밸류에이션은 자금 조달 {analysis}.", ["밸류에이션은 할인받고 있다."]
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize("modifier", ["나스닥에", "미국 증시에", "높은 기업가치로", "공모로"])
+def test_shared_venue_or_modifier_cannot_replace_the_actual_issuer(modifier):
+    source = f"새봄은 {modifier} IPO를 추진한다. 가온은 실적을 발표했다."
+    assert corporate_event_mismatches(f"가온은 {modifier} IPO를 추진한다.", [source])
+    assert corporate_event_mismatches("새봄의 IPO는 판단 근거다.", [source]) == []
+    assert corporate_event_mismatches(f"새봄은 {modifier} IPO를 추진한다.", [source]) == []
+
+
+@pytest.mark.parametrize("issuer", ["파블로", "삼성전자"])
+def test_issuer_name_with_adverb_like_ending_is_preserved(issuer):
+    source = f"{issuer}의 IPO가 예정됐다."
+    assert corporate_event_mismatches(f"{issuer} IPO는 판단 근거다.", [source]) == []
+
+
+@pytest.mark.parametrize("relationship", ["자회사", "계열사", "관계사", "법인"])
+def test_nested_issuer_name_with_adverb_like_ending_does_not_transfer_its_event(relationship):
+    source = f"새봄의 {relationship} 파블로 IPO가 예정됐다."
+    assert corporate_event_mismatches("새봄의 IPO는 판단 근거다.", [source])
+    assert corporate_event_mismatches("파블로의 IPO는 판단 근거다.", [source]) == []
+
+
+def test_joint_issuer_name_with_adverb_like_ending_is_preserved():
+    source = "새봄 및 파블로 IPO가 예정됐다."
+    assert corporate_event_mismatches("새봄 및 파블로의 IPO는 판단 근거다.", [source]) == []
+
+
+def test_named_financing_intermediary_is_not_the_issuer():
+    source = "새봄은 삼성전자에서 자금 조달을 추진한다."
+    assert corporate_event_mismatches("새봄의 자금 조달은 판단 근거다.", [source]) == []
+    assert corporate_event_mismatches("삼성전자의 자금 조달은 판단 근거다.", [source])

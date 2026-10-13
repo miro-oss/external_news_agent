@@ -27,13 +27,17 @@ _FUNDING_AFTER_AMOUNT = re.compile(
     r"\s*(?:\((?P<conversion>[^()\n]{1,60})\))?\s*(?:을|를)?\s*조달"
     r"(?=$|[^가-힣A-Za-z0-9]|하|할|했|되|된|됐|될|돼|함|한)"
 )
+_FINANCE_ATTRIBUTE = r"(?:여력|구조|조건|비용|환경|위험|수요|역량|전략|방안|업무)"
 _FINANCE_ANALYSIS = re.compile(
-    r"\s*(?:여력|구조|조건|비용|환경|위험|수요|역량|전략|방안|업무)(?=$|[^가-힣]|"
+    rf"\s*{_FINANCE_ATTRIBUTE}(?=$|[^가-힣]|"
     r"(?:을|를|은|는|이|가|의|에|과|와)(?=\s))"
 )
 _FINANCE_CHANGE = re.compile(
     r"직접(?:적)?(?:인)?\s*영향|구조(?:를|가|는|의)?\s*(?:변경|변화|재편)|"
-    r"(?:바꿨|바뀌었|재편했|재편됐|변경했|변경됐)"
+    r"(?:바꿨|바뀌었|재편했|재편됐|변경했|변경됐)|"
+    rf"{_FINANCE_ATTRIBUTE}(?:을|를|은|는|이|가|의|에)?\s*"
+    r"(?:개편|개선|확대|축소|증가|감소|상승|하락|확정|실행)"
+    r"(?!\s*(?:여부|가능성)(?=$|[^가-힣]|을|를|은|는|이|가))"
 )
 _NEGATIVE_EVENT = re.compile(
     r"(?:취소|철회|무산|보류|중단|불발|포기)"
@@ -49,8 +53,11 @@ _VENUE_OR_MODIFIER = re.compile(
 )
 _BARE_OWNER = re.compile(
     r"(?<![가-힣A-Za-z0-9])(?P<name>[가-힣A-Za-z][가-힣A-Za-z0-9&.-]{1,35}?)"
-    r"(?:은|는|이|가|의)?\s*$"
+    r"(?P<particle>은|는|이|가|의)?\s*$"
 )
+_OBLIQUE_PARTICLE = re.compile(r"(?:에서|에게|으로|부터|까지|보다|처럼|에|로|을|를)(?=\s|$)")
+_BARE_OBLIQUE_END = re.compile(r"(?:으로|로|에)$")
+_OWNER_DESCRIPTION = re.compile(r"(?:자회사|모회사|계열사|관계사|기업|회사|법인)\s*$")
 _JOINT = re.compile(r"\s*(?:와|과|및|·|,|and|&)\s*", re.IGNORECASE)
 _JOINT_END = re.compile(r"(?:와|과|및|·|,|\band|&)\s*$", re.IGNORECASE)
 _NON_OWNER_END = re.compile(r"(?:에도|에서|에게|으로|보다|통해|따라|위해|때문에|하여|하며|하고)$")
@@ -142,12 +149,27 @@ def _non_owner(value: str) -> bool:
 def _owners(prefix: str) -> frozenset[str]:
     """Use the nearest owner, not every company mentioned in the sentence."""
     actors, _ = _actors(prefix)
-    candidates = [(a.span.start, a.span.end, a.value) for a in actors]
+    candidates = [
+        (a.span.start, a.span.end, a.value)
+        for a in actors
+        if not _OBLIQUE_PARTICLE.match(prefix, a.span.end)
+    ]
     trimmed = _VENUE_OR_MODIFIER.sub("", prefix.rstrip())
     bare = _BARE_OWNER.search(trimmed)
     if bare is not None:
         name = _norm(bare["name"])
-        if not _non_owner(name):
+        # A trailing venue or means ("나스닥에", "기업가치로") must not
+        # replace an explicit issuer. Keep unmarked names at the start of a
+        # clause and names with a subject/possessive particle, e.g. 파블로의.
+        oblique = (
+            candidates
+            and bare["particle"] is None
+            and name not in _ALIASES
+            and _BARE_OBLIQUE_END.search(name)
+            and not _OWNER_DESCRIPTION.search(trimmed[: bare.start("name")])
+            and not _JOINT_END.search(trimmed[: bare.start("name")])
+        )
+        if not _non_owner(name) and not oblique:
             # Prefer the existing alias span when the bare pattern captured a
             # suffix of a multiword known name or its grammatical particle.
             span = bare.span("name")
@@ -223,8 +245,8 @@ def _events(value: str) -> Iterator[_Event]:
                 and _FINANCE_ANALYSIS.match(clause, event_end)
                 and not _FINANCE_CHANGE.search(tail)
             ):
-                # Financing capacity/structure can be an analytical consequence
-                # of valuation; it does not assert a financing transaction.
+                # Merely reviewing financing capacity/structure is analytical.
+                # Concrete changes to them still require selected evidence.
                 continue
             negative = bool(_NEGATIVE_EVENT.search(tail)) or bool(
                 re.search(r"(?:취소|철회|무산|중단|보류|불발|포기)(?:된|한)\s*$", clause[:start])

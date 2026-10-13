@@ -331,3 +331,121 @@ def test_selected_corporate_event_passes_every_reduce_prose_field(group, field):
     public = result.insights[0].model_dump(by_alias=True)
     assert (public if group is None else public[group][0])[field] == reason
     assert source.model_dump() == before
+
+
+@pytest.mark.parametrize("stage", ["MAP-001", "REVIEW-001", "REDUCE-001"])
+@pytest.mark.parametrize(
+    "raw,reason",
+    [
+        (RAW, "삼성전자는 자금 조달 구조를 개선했다."),
+        (RAW, "삼성전자의 자금 조달 비용이 감소했다."),
+        (
+            RAW + " 가온은 나스닥에 IPO를 추진한다고 밝혔다.",
+            "삼성전자는 나스닥에 IPO를 추진한다.",
+        ),
+    ],
+)
+def test_concrete_financing_change_and_same_venue_wrong_issuer_require_local_repair(
+    monkeypatch, stage, raw, reason
+):
+    source = request(ids=(101, 102), text=raw, audiences=(AUDIENCE,))
+    before = source.model_dump_json()
+    failures = []
+    original_repair = service.ReportInsightService._repair_call
+
+    def capture(self, prompt, schema, raw, error, validate):
+        failures.append(error)
+        return original_repair(self, prompt, schema, raw, error, validate)
+
+    monkeypatch.setattr(service.ReportInsightService, "_repair_call", capture)
+
+    def mutate(current, occurrence, data, value):
+        value = full_synthesis(current, occurrence, data, value)
+        if current == stage and occurrence == 1:
+            if current == "REDUCE-001":
+                overview = value["insights"][0]["overview"][0]
+                overview["text"] = reason
+                overview["basisClaimIds"] = ["101:0"]
+            else:
+                value["assessments"][AUDIENCE]["finding101"]["reason"] = reason
+        return value
+
+    provider = V4Provider(source, hook=flat_hook(source, mutate))
+    result = generate(provider, source)
+    expected = ["MAP-001", "REVIEW-001", "REDUCE-001"]
+    expected.insert(expected.index(stage), stage)
+    assert stages(provider) == expected
+    assert len(failures) == 1
+    assert "report_evidence_insufficient" in failures[0].error_kinds
+    assert "source_binding" in failures[0].fact_repair_kinds
+
+    if stage == "REDUCE-001":
+        jobs = repair_jobs(provider.calls[-1]["prompt"])
+        assert len(jobs) == 1
+        assert jobs[0]["group"] == "overview" and jobs[0]["index"] == 0
+        assert any(
+            diagnostic["field"] == "overview[0].text"
+            and diagnostic["errorKind"] == "report_evidence_insufficient"
+            and any(rule["rule"] == "source_binding" for rule in diagnostic["rules"])
+            for diagnostic in jobs[0]["diagnostics"]
+        )
+        assert set(provider.wire_payloads[-1]["repairs"]) == {jobs[0]["key"]}
+        original = provider.wire_payloads[-2]["insights"][0]
+        final = result.insights[0].model_dump(by_alias=True, mode="json")
+        for field in ("headline", "implications", "watchItems"):
+            assert final[field] == public_reduce_projection(original[field])
+        assert final["overview"][1] == public_reduce_projection(original["overview"][1])
+        assert final["overview"][0]["text"] != reason
+        assert final["overview"][0]["basisClaimIds"] == ["101:0"]
+    else:
+        index = expected.index(stage)
+        original = provider.wire_payloads[index]["assessments"][AUDIENCE]
+        repaired = provider.wire_payloads[index + 1]["assessments"][AUDIENCE]
+        assert set(repaired) == {"finding101"}
+        assert repaired["finding101"]["reason"] == GOOD_REASON
+        assert repaired["finding101"]["decision"] == original["finding101"]["decision"]
+        assert any(
+            issue.field == "assessments[101].reason" and issue.claim_ids == ("101:0",)
+            for issue in failures[0].validation_issues
+        )
+    assert all(GOOD_REASON in assessment.reason for assessment in result.insights[0].assessments)
+    assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
+    assert source.model_dump_json() == before
+
+
+@pytest.mark.parametrize(
+    "raw,reason",
+    [
+        (
+            RAW + " 삼성전자는 자금 조달 구조를 개선했다고 밝혔다.",
+            "삼성전자는 자금 조달 구조를 개선했다.",
+        ),
+        (
+            RAW + " 삼성전자의 자금 조달 비용이 감소했다고 밝혔다.",
+            "삼성전자의 자금 조달 비용이 감소했다.",
+        ),
+        (
+            RAW + " 삼성전자는 나스닥에 IPO를 추진한다고 밝혔다.",
+            "삼성전자는 나스닥에 IPO를 추진한다.",
+        ),
+        (RAW, "삼성전자의 자금 조달 조건을 검토할 정보다."),
+    ],
+)
+def test_selected_financing_change_issuer_and_analytical_review_pass_all_stages(raw, reason):
+    source = request(ids=(101,), text=raw, audiences=(AUDIENCE,))
+    before = source.model_dump_json()
+
+    def mutate(stage, occurrence, data, value):
+        if stage.startswith(("MAP", "REVIEW")):
+            value["assessments"][AUDIENCE]["finding101"]["reason"] = reason
+        elif stage == "REDUCE-001":
+            value["insights"][0]["overview"][0]["text"] = reason
+        return value
+
+    provider = V4Provider(source, hook=flat_hook(source, mutate))
+    result = generate(provider, source)
+    assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001"]
+    assert reason in result.insights[0].assessments[0].reason
+    assert result.insights[0].overview[0].text == reason
+    assert result.meta.input_tokens == 33 and result.meta.output_tokens == 21
+    assert source.model_dump_json() == before
