@@ -9,6 +9,8 @@ Only callers can authenticate and remove server-rendered source quotations.
 import re
 import unicodedata
 
+from app.core.evidence import _CURRENCY_AMOUNT, _PREFIX_CURRENCY_AMOUNT, _companies
+
 _TRADE = re.compile(r"매수|매도")
 _TARGET_NAME = re.compile(r"목표\s*(?:주가|가격)|주가\s*목표|목표가")
 _BARE_TARGET_PRICE = re.compile(
@@ -69,6 +71,9 @@ _ACTION_ADVICE_SUFFIX = (
     r"(?:검토|추가|확대|축소)(?:가|는|를|를\s*할)?\s*(?:필요|좋|유리))"
 )
 _ACTION_ADVICE = re.compile(_ACTION + _ACTION_ADVICE_SUFFIX)
+_NET_AMOUNT_EXECUTION_ADVICE = re.compile(
+    r"(?:는|은|가|이|를|을|도|만)?\s*(?:실행|진행)" + _ACTION_ADVICE_SUFFIX
+)
 _TARGET_ACTION_ADVICE = re.compile(r"(?:상향|하향|조정|산정|설정|제시)" + _ACTION_ADVICE_SUFFIX)
 _DIRECTIVE = re.compile(
     r"담(?:아야|으세요|으십시오|자|아라)|"
@@ -96,6 +101,163 @@ _OBSERVED_ACTOR = re.compile(
     r"(?:(?:대규모|집중|누적)\s*)?$"
 )
 _NOMINAL_END = re.compile(r"(?:$|[\s,.;:!?。]|(?:와|과|의|가|는|은|로|를|도|만|에)(?=\s|$))")
+_OBSERVATION_CLAUSE_BREAK = re.compile(r"(?<![0-9])\.|\.(?![0-9])|[,;!?。\n]")
+_CONCENTRATION_PREDICATE = re.compile(
+    r"(?:됐(?:다|고|으며|지만|는데)|되었(?:다|고|으며|지만|는데)|"
+    r"되어|되며|되면서|되고|된다|된)(?=$|[\s,.;!?。])"
+)
+_CONCENTRATION_UNASSERTED = re.compile(
+    r"만약|다면|라면|경우|가정|전제|전망|예상|예정|가능성|계획|"
+    r"(?:하지|되지|있지|하지는|되지는|있지는)\s*않|아니|부인|철회|취소"
+)
+_CONCENTRATION_ADVICE = re.compile(
+    r"좋|유리|필요|바람직|합리적|정답|전략|방법|방안|낫|"
+    r"(?:^|\s)야(?:만)?(?=\s|하|한|합|$)"
+)
+_TRADING_ACTOR = re.compile(r"외국인|기관|개인")
+_TRADING_MARKET = re.compile(r"유가증권시장|코스피|코스닥|krx|nxt", re.IGNORECASE)
+_TARGET_TOKEN = re.compile(r"[가-힣A-Za-z0-9]+")
+_TOKEN_PARTICLE = r"(?:에서|에도|에는|으로|의|와|과|은|는|이|가|을|를|에|로|도)?"
+_ConcentrationContext = tuple[str, str, frozenset[str]]
+
+
+def _net_amount_end(value: str, end: int) -> int | None:
+    """Only a complete currency amount may intervene after a net-trade noun."""
+    if value[end : end + 1] != "(":
+        return None
+    close = value.find(")", end + 1, end + 81)
+    if close < 0:
+        return None
+    amount = value[end + 1 : close].strip()
+    if (
+        "\n" in amount
+        or "\r" in amount
+        or not any(
+            pattern.fullmatch(amount) for pattern in (_CURRENCY_AMOUNT, _PREFIX_CURRENCY_AMOUNT)
+        )
+    ):
+        return None
+    return close + 1
+
+
+def _trade_clause(value: str, match: re.Match) -> tuple[str, str]:
+    before = _OBSERVATION_CLAUSE_BREAK.split(value[: match.start()])[-1]
+    after = _OBSERVATION_CLAUSE_BREAK.split(value[match.end() :], maxsplit=1)[0]
+    return before, after
+
+
+def _target_tokens(value: str) -> frozenset[str]:
+    return frozenset(
+        re.sub(r"(?:와|과|의)$", "", token.casefold())
+        for token in _TARGET_TOKEN.findall(value)
+        if token not in {"등", "및"}
+    )
+
+
+def _contains_target(source: str, token: str) -> bool:
+    return bool(
+        re.search(
+            r"(?<![가-힣A-Za-z0-9_])"
+            + re.escape(token)
+            + _TOKEN_PARTICLE
+            + r"(?=$|[^가-힣A-Za-z0-9_])",
+            source.casefold(),
+        )
+    )
+
+
+def _concentration_context(value: str, match: re.Match) -> _ConcentrationContext | None:
+    """Locate concentration within this trade's clause, before another trade."""
+    before, after = _trade_clause(value, match)
+    targets = frozenset()
+    concentrated = re.match(r"[^\S\r\n]*집중", after)
+    if concentrated is None:
+        # A subject particle may precede an explicit target ending in 에/로.
+        concentrated = re.match(
+            r"(?:가|는|은|이)[^\S\r\n]*"
+            r"(?:(?P<target>[^.;!?。\n]{1,80}?)(?:에|으로|로)[^\S\r\n]*)?집중",
+            after,
+        )
+        if concentrated is not None and concentrated.group("target"):
+            targets = _target_tokens(concentrated.group("target"))
+    if concentrated is None or _TRADE.search(after[: concentrated.end()]):
+        return None
+    tail = after[concentrated.end() :]
+    # A prior trade may introduce a separate observation ("순매도와 대형주
+    # 중심의 매도 집중"); its earlier modifiers are not this trade's target.
+    previous = tuple(_TRADE.finditer(before))
+    target_prefix = before[previous[-1].end() :] if previous else before
+    target_prefix = re.sub(r"^(?:와|과|및)\s*", "", target_prefix)
+    target_prefix = target_prefix.removesuffix("순")
+    target_prefix = _OBSERVED_ACTOR.sub("", target_prefix).strip()
+    target = re.fullmatch(r"(.+?)(?:\s*중심(?:의|으로)?|으로|에|로)", target_prefix)
+    if target is not None:
+        targets |= _target_tokens(target.group(1))
+    elif target_prefix:
+        # An unmarked name ("현대차 매도 집중") is still a target, even if
+        # the shared company detector does not recognize that proper noun.
+        targets |= _target_tokens(target_prefix)
+    return before + match.group() + after, tail, targets
+
+
+def _concentration_observation(context: _ConcentrationContext, *, nominal: bool) -> bool:
+    clause, tail, _ = context
+    if _CONCENTRATION_UNASSERTED.search(clause):
+        return False
+    if _CONCENTRATION_ADVICE.search(tail):
+        return False
+    predicate = _CONCENTRATION_PREDICATE.match(tail)
+    if predicate is not None:
+        # A spaced imperative ("되어 야 한다") is not an observed event.
+        return not re.match(r"\s*야(?:만)?", tail[predicate.end() :])
+    return nominal and _NOMINAL_END.match(tail) is not None
+
+
+def _has_source_concentration(
+    source: str, trade: str, context: _ConcentrationContext, *, net: bool
+) -> bool:
+    companies = _companies(context[0].casefold())
+    actors = set(_TRADING_ACTOR.findall(context[0]))
+    for match in _TRADE.finditer(source):
+        source_net = match.start() > 0 and source[match.start() - 1] == "순"
+        observed = _concentration_context(source, match)
+        if (
+            match.group() == trade
+            and source_net == net
+            and observed is not None
+            and len(_TRADE.findall(observed[0])) == 1
+            and _concentration_observation(observed, nominal=False)
+            and companies <= _companies(observed[0].casefold())
+            and actors <= set(_TRADING_ACTOR.findall(observed[0]))
+            and all(_contains_target(observed[0], token) for token in context[2])
+        ):
+            return True
+    return False
+
+
+def _has_source_net_subject(source: str, value: str, match: re.Match) -> bool:
+    """The new parenthesized form cannot borrow another actor's net trade."""
+    prefix, _ = _trade_clause(value, match)
+    companies = _companies(prefix.casefold())
+    actors = set(_TRADING_ACTOR.findall(prefix))
+    markets = {item.casefold() for item in _TRADING_MARKET.findall(prefix)}
+    for candidate in _TRADE.finditer(source):
+        if (
+            candidate.group() != match.group()
+            or candidate.start() == 0
+            or source[candidate.start() - 1] != "순"
+        ):
+            continue
+        before, after = _trade_clause(source, candidate)
+        clause = before + candidate.group() + after
+        if (
+            len(_TRADE.findall(clause)) == 1
+            and companies <= _companies(clause.casefold())
+            and actors <= set(_TRADING_ACTOR.findall(clause))
+            and markets <= {item.casefold() for item in _TRADING_MARKET.findall(clause)}
+        ):
+            return True
+    return False
 
 
 def _normalized(value: str) -> str:
@@ -143,8 +305,12 @@ def _is_target_change_observation(value: str, match: re.Match[str]) -> bool:
     return bool(_TARGET_CHANGE_REPORT.match(clause) or _TARGET_COMPLETED_CHANGE.match(clause))
 
 
-def has_investment_advice(value: str, source: str = "") -> bool:
-    """Return whether generated prose contains disallowed investment wording.
+def investment_policy_violation(value: str, source: str = "") -> str | None:
+    """Return a closed diagnostic reason without changing policy acceptance.
+
+    ``trading_observation_source`` means an observational trading form lacks
+    its selected-source support. Every other rejection is ``investment_wording``;
+    that reason takes priority if a field contains both types of violation.
 
     ``source`` must contain only original sentences permitted for this field's
     selected claims, not claim summaries or the rest of the report. Without
@@ -158,37 +324,80 @@ def has_investment_advice(value: str, source: str = "") -> bool:
     targets = _price_targets(value)
     trades = tuple(_TRADE.finditer(value))
     if not trades and not targets:
-        return False
+        return None
     if any(pattern.search(value) for pattern in (_RECOMMENDATION, _ACTION_ADVICE, _DIRECTIVE)):
-        return True
+        return "investment_wording"
+    # The check-only view closes the gap introduced by a currency parenthesis:
+    # "순매도(금액)가 필요하다" must retain the ordinary action-advice veto.
+    amount_spans = [
+        (match.end(), end)
+        for match in trades
+        if match.start() > 0
+        and value[match.start() - 1] == "순"
+        and (end := _net_amount_end(value, match.end())) is not None
+    ]
+    advice_view = value
+    for start, end in reversed(amount_spans):
+        advice_view = advice_view[:start] + advice_view[end:]
+    if _ACTION_ADVICE.search(advice_view):
+        return "investment_wording"
     if targets and (
         _TARGET_ACTION_ADVICE.search(value)
         or _AMOUNT_PROPOSAL.search(value)
         or not _has_reported_target_change(source)
         or any(not _is_target_change_observation(value, match) for match in targets)
     ):
-        return True
+        return "investment_wording"
+    source_missing = False
     for match in trades:
         trade = match.group()
-        if match.start() > 0 and value[match.start() - 1] == "순":
+        net = match.start() > 0 and value[match.start() - 1] == "순"
+        concentration = _concentration_context(value, match)
+        if concentration is not None:
+            # A rejected concentration must not fall through to a generic
+            # net-trade particle or actor allowance ("순매도가 집중해야 ...").
+            if not _concentration_observation(concentration, nominal=True):
+                return "investment_wording"
+            if not _has_source_concentration(source, trade, concentration, net=net):
+                source_missing = True
+            continue
+        if net:
             # Net purchases/sales are distinct from gross trading activity.
             # Source presence alone cannot authorize an arbitrary verb ending.
-            if f"순{trade}" not in source or not (
+            if not (
                 _OBSERVATION_NOUN.match(value, match.end())
                 or _NET_OBSERVATION_END.match(value, match.end())
             ):
-                return True
+                amount_end = _net_amount_end(value, match.end())
+                if (
+                    amount_end is None
+                    or _NET_AMOUNT_EXECUTION_ADVICE.match(value, amount_end)
+                    or not (
+                        _OBSERVATION_NOUN.match(value, amount_end)
+                        or _NET_OBSERVATION_END.match(value, amount_end)
+                    )
+                ):
+                    return "investment_wording"
+                if not _has_source_net_subject(source, value, match):
+                    source_missing = True
+            if f"순{trade}" not in source:
+                source_missing = True
             continue
         noun = _OBSERVATION_NOUN.match(value, match.end())
         if noun is not None:
             if not re.search(re.escape(trade) + r"\s*" + re.escape(noun.group(1)), source):
-                return True
+                source_missing = True
             continue
-        if (
-            _OBSERVED_ACTOR.search(value[: match.start()])
-            and _NOMINAL_END.match(value, match.end())
-            and trade in source
+        if _OBSERVED_ACTOR.search(value[: match.start()]) and _NOMINAL_END.match(
+            value, match.end()
         ):
+            if trade not in source:
+                source_missing = True
             continue
-        return True
-    return False
+        return "investment_wording"
+    return "trading_observation_source" if source_missing else None
+
+
+def has_investment_advice(value: str, source: str = "") -> bool:
+    """Return the policy verdict; diagnostic classification grants no exemption."""
+    return investment_policy_violation(value, source) is not None

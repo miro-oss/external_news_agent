@@ -13,6 +13,11 @@ REPORT_YEAR_UNIT_RULE = (
     "범위 양끝의 연도·단위를 생략하거나 두 자리로 줄이지 않는다. "
     "선택 원문의 연도와 순서를 유지하며, 다른 수치·ID·원문 인용은 바꾸지 않는다."
 )
+REPORT_ANALYSIS_ONLY_RULE = (
+    "자연어 설명에는 최종 선택 근거에 따른 사건과 판단 근거·한계를 쓴다. "
+    "작성 규칙을 준수했다거나 금지 표현을 넣지 않았다는 설명·면책 문구·수정 보고는 "
+    "출력하지 않는다. 검증 오류 문구를 부정형으로 바꿔 반복하지 않는다."
+)
 ASSESSMENT_PROCEDURE_RULE = (
     "원문에 없는 절차는 완료 여부가 미확인이라는 설명으로도 추가하지 않는다. "
     "원문에 명시된 절차와 그 판단 한계는 유지한다."
@@ -82,6 +87,8 @@ def report_stage_instruction(audiences: list[Audience], stage: str, *, repair: b
         raise ValueError("A report stage needs requested audiences and a known stage")
     roles = "\n".join(f"{audience}: {_ROLES[audience]}" for audience in audiences)
     common = _BASE + "\n\n" + roles
+    if "MARKET_INVESTOR" in audiences:
+        common += "\n\n" + REPORT_ANALYSIS_ONLY_RULE
     if stage in {"MAP", "REVIEW"}:
         conclusion = (
             "4. "

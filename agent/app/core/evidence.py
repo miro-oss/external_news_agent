@@ -104,6 +104,11 @@ _KOREAN_ORGANIZATION = re.compile(
 _SEMICONDUCTOR_CATEGORY_TERMS = frozenset(
     {"전력반도체", "시스템반도체", "화합물반도체", "메모리반도체", "비메모리반도체", "차세대반도체"}
 )
+_SECURITIES_MARKET_NAME = re.compile(r"유가증권[^\S\r\n]*시장")
+_STOCK_INDEX_LEVEL = re.compile(
+    r"(?P<index>코스피|코스닥)(?:\s*지수)?(?:가|는|이|은)?\s*"
+    r"(?P<level>\d+(?:,\d{3})*(?:\.\d+)?)\s*선"
+)
 _EXPLICIT_ORGANIZATION_PREFIX = re.compile(
     r"(?:(?<![A-Za-z0-9가-힣_])(?:기업|회사|주식회사|업체|법인|기관|제조사|공급사)\s+|"
     r"(?:㈜|\(주\))\s*)[\"'“‘]?$"
@@ -407,6 +412,12 @@ def factual_mismatches(claim: str, evidence_text: str) -> list[str]:
     missing_companies = claim_companies - evidence_companies
     if missing_companies:
         mismatches.append("근거에서 확인되지 않는 기업명: " + ", ".join(sorted(missing_companies)))
+    # A market is not an organization, but its identity still needs selected
+    # source support; another venue's quantity cannot establish this venue.
+    if _has_securities_market_name(normalized_claim) and not _has_securities_market_name(
+        normalized_evidence
+    ):
+        mismatches.append("근거에서 확인되지 않는 식별자: 유가증권시장")
 
     if _polarity_mismatch(normalized_claim, normalized_evidence):
         mismatches.append("근거와 반대되는 부정 표현이 포함되어 있습니다.")
@@ -756,6 +767,7 @@ def _companies(value: str) -> set[str]:
         match.group()
         for match in _KOREAN_ORGANIZATION.finditer(value)
         if _normalize(match.group()) not in _KNOWN_COMPANY_ALIASES
+        and not _securities_market_context(value, match)
         and (
             _normalize(match.group()) not in _SEMICONDUCTOR_CATEGORY_TERMS
             or _explicit_organization(value, match)
@@ -769,6 +781,23 @@ def _companies(value: str) -> set[str]:
         if _explicit_organization(value, match)
     )
     return companies
+
+
+def _securities_market_context(value: str, match: re.Match) -> bool:
+    """Exclude one general market noun, not names ending in 증권."""
+    if match[0] != "유가증권":
+        return False
+    return any(
+        market.start() == match.start() and not _explicit_organization(value, market)
+        for market in _bounded_alias_matches(value, _SECURITIES_MARKET_NAME)
+    )
+
+
+def _has_securities_market_name(value: str) -> bool:
+    return any(
+        not _explicit_organization(value, market)
+        for market in _bounded_alias_matches(value, _SECURITIES_MARKET_NAME)
+    )
 
 
 def _explicit_organization(value: str, match: re.Match) -> bool:
@@ -834,14 +863,63 @@ def _contextual_number_mismatches(claim: str, evidence: str) -> list[str]:
     # those anchors could erase all matching source contexts and hide an error.
     return list(
         dict.fromkeys(
-            error
-            for categories in (False, True)
-            for error in _numeric_binding_mismatches(
-                _numeric_facts(claim, categories=categories),
-                _numeric_facts(evidence, categories=categories),
-            )
+            [
+                *(
+                    error
+                    for categories in (False, True)
+                    for error in _numeric_binding_mismatches(
+                        _numeric_facts(claim, categories=categories),
+                        _numeric_facts(evidence, categories=categories),
+                    )
+                ),
+                *_numeric_binding_mismatches(
+                    _securities_market_numeric_facts(claim, evidence),
+                    _securities_market_numeric_facts(evidence, evidence),
+                ),
+            ]
         )
     )
+
+
+def _securities_market_numeric_facts(
+    value: str, evidence: str
+) -> list[tuple[frozenset[str], frozenset[str]]]:
+    """Keep all market quantities; separate only independently sourced index levels."""
+    index_sources = [
+        (
+            match["index"],
+            _normalized_number(match["level"]),
+            _date_number_anchors(clause) | _date_terms(clause),
+        )
+        for clause in _clauses(_canonical_numeric_text(evidence))
+        for match in _bounded_alias_matches(clause, _STOCK_INDEX_LEVEL)
+    ]
+    facts: list[tuple[frozenset[str], frozenset[str]]] = []
+    for clause in _clauses(_canonical_numeric_text(value)):
+        markets = [
+            market
+            for market in _bounded_alias_matches(clause, _SECURITIES_MARKET_NAME)
+            if not _explicit_organization(clause, market)
+        ]
+        if not markets:
+            continue
+        dates = _date_number_anchors(clause) | _date_terms(clause)
+        numeric_clause = clause
+        for match in reversed(list(_bounded_alias_matches(clause, _STOCK_INDEX_LEVEL))):
+            if any(
+                match["index"] == index
+                and _normalized_number(match["level"]) == level
+                and dates <= source_dates
+                for index, level, source_dates in index_sources
+            ):
+                # Remove this occurrence, not its numeric value elsewhere in
+                # the clause: a market quantity may happen to equal an index.
+                numeric_clause = numeric_clause[: match.start()] + numeric_clause[match.end() :]
+        quantities = frozenset(_quantity_values(numeric_clause))
+        if quantities:
+            anchors = frozenset({"유가증권시장"} | _companies(clause) | dates)
+            facts.append((anchors, quantities))
+    return facts
 
 
 def _numeric_binding_mismatches(claim_facts, evidence_facts) -> list[str]:
