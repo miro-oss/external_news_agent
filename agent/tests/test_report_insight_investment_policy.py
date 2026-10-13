@@ -68,6 +68,10 @@ def test_recorded_v42_market_observations_are_not_investment_advice(reason, sour
         ("순매도 추이의 지속성을 점검할 필요가 있다.", SOURCE_8338),
         ("매수세가 강해졌는지 확인하는 것이 좋다.", SOURCE_8308),
         ("순매수 기록과 매도세를 함께 살펴본다.", SOURCE_8308 + SOURCE_8338),
+        (
+            "기관 순매수 금액은 시장 기대 변화와 위험관리 가정 조정이 필요한지 살펴볼 근거다.",
+            "기관 순매수 금액이 증가했다.",
+        ),
     ],
 )
 def test_supported_observations_and_observation_conditions_remain_allowed(value, source):
@@ -194,3 +198,129 @@ def test_ordinary_business_analysis_remains_unchanged_without_trade_words():
     # Recommendations without any trade/price wording were outside the old
     # lexical guard; this bounded change does not define a new general policy.
     assert not has_investment_advice("일정 확인을 권고한다.")
+
+
+TARGET_CHANGE_SOURCE = (
+    "엔비디아의 서버 CPU 관련 매출은 2025년 약 70억 달러에서 2028년 600억 달러로 "
+    "8배 이상 확대될 것으로 전망했다. "
+    "이 같은 전망을 토대로 미즈호는 주요 업체의 목표주가를 잇달아 상향 조정했다."
+)
+TARGET_OBSERVATION = "증권사의 목표주가 조정 보도는 기업가치 전망을 살펴볼 관찰 정보다."
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "미즈호의 TAM·매출 전망과 이에 따른 목표주가 조정 보도는 투자 지침(GUIDANCE)과 "
+        "증권사·시장 기대에 직접적 근거가 되며 투자 판단에 영향이 있을 수 있다.",
+        "미즈호의 전망(엔비디아 서버 CPU 매출이 2025년 약 70억달러에서 2028년 600억달러로 "
+        "확대될 것이라는 분석)이 증권사 리서치의 기업 가치 판단에 반영되어 목표주가 산정 "
+        "근거 변경으로 이어진 사실을 근거로 업무 연결을 판단한다. 이 평가는 기사에 인용된 "
+        "전망과 목표주가 조정 문장에 기반한다.",
+        TARGET_OBSERVATION,
+        "증권사의 목표주가 조정 보도가 기업가치 판단의 입력으로 적용되는 경우",
+        "증권사는 목표주가를 상향 조정했다.",
+        "기사에서 목표주가 상향 조정 사실을 관찰한다.",
+        "목표가 조정 보도는 시장 기대를 살펴볼 정보다.",
+    ],
+)
+def test_source_supported_target_change_reporting_is_not_a_price_proposal(value):
+    assert not has_investment_advice(value, TARGET_CHANGE_SOURCE)
+    assert has_investment_advice(value)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "다른 증권사는 주요 업체의 목표주가를 하향 조정했다.",
+        "연구기관은 주요 업체의 목표가격을 인하했다.",
+        "분석기관은 주요 업체의 목표가를 높였다.",
+    ],
+)
+def test_target_change_observation_has_no_hardcoded_institution(source):
+    assert not has_investment_advice(TARGET_OBSERVATION, source)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "",
+        "증권사는 매출 전망을 상향했다.",
+        "증권사는 목표주가를 상향해야 한다고 권고했다.",
+        "증권사는 목표주가를 상향 조정할 예정이다.",
+        "증권사는 목표주가를 상향 조정하지 않았다.",
+        "증권사가 목표주가를 상향 조정했다는 보도를 부인했다.",
+        "증권사가 목표주가를 상향 조정했다는 주장은 사실이 아니다.",
+    ],
+)
+def test_reporting_requires_an_actual_target_change_in_selected_original_source(source):
+    assert has_investment_advice(TARGET_OBSERVATION, source)
+
+
+@pytest.mark.parametrize(
+    "advice",
+    [
+        "비중을 늘리세요.",
+        "비중을 늘려라.",
+        "비중 확대가 합리적이다.",
+        "저점에서 담는 편이 좋다.",
+        "지금 진입하는 것이 좋다.",
+        "지금 매수해야 한다.",
+        "목표주가를 상향하세요.",
+        "우리의 목표주가를 상향 조정했다.",
+        "우리는 엔비디아 목표주가를 상향 조정했다.",
+    ],
+)
+def test_target_reporting_never_exempts_advice_even_without_trade_tokens(advice):
+    assert has_investment_advice(TARGET_OBSERVATION + " " + advice, TARGET_CHANGE_SOURCE)
+    assert has_investment_advice(advice + " " + TARGET_OBSERVATION, TARGET_CHANGE_SOURCE)
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "목표가는 10만원이다.",
+        "목표주가: 십만원",
+        "목표주가를 주당 10만원으로 상향 조정했다.",
+        "10만원으로 목표주가를 상향 조정했다.",
+        "목표주가를 20% 높였다는 보도다.",
+        "목표주가 조정 보도에서 주당 10만원을 제시했다.",
+        "목표주가 조정 보도에서 주당 10.5달러를 제시했다.",
+        "목표주가 조정 보도: $10",
+        "목표주가를 산정했다.",
+        "목표가를 산정했다.",
+        "주가 목표를 제시한다.",
+        "목표주가를 제시한다.",
+        "목표주가를 상향 조정한다.",
+    ],
+)
+def test_each_target_mention_still_rejects_prices_and_model_proposals(target):
+    source = TARGET_CHANGE_SOURCE + " " + target
+    assert has_investment_advice(target, source)
+    assert has_investment_advice(TARGET_OBSERVATION + " " + target, source)
+
+
+def test_trade_and_target_observations_cannot_jointly_exempt_a_recommendation():
+    value = "기관 순매수 기록이 늘었다. " + TARGET_OBSERVATION
+    source = SOURCE_8308 + TARGET_CHANGE_SOURCE
+    assert not has_investment_advice(value, source)
+    assert has_investment_advice(value + " 비중을 늘리세요.", source)
+
+
+def test_provider_quote_labels_cannot_supply_target_change_evidence_or_exempt_advice():
+    value = "원문: 「증권사는 목표주가를 상향 조정했다.」 해석: 기업가치 전망을 살펴본다."
+    assert has_investment_advice(value)
+    assert has_investment_advice(value + " 비중을 늘려라.", TARGET_CHANGE_SOURCE)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "목표주가 조정 보도를 참고해 상향 조정하는 편이 좋다.",
+        "목표주가 조정 보도를 참고해 상향 조정이 필요하다.",
+        "목표주가 조정 보도를 검토했다. 이를 100달러로 제시한다.",
+        "100달러를 제시한다. 목표주가 조정 보도를 참고했다.",
+    ],
+)
+def test_target_reporting_cannot_hide_a_proposal_in_later_predicates_or_other_sentences(value):
+    assert has_investment_advice(value, TARGET_CHANGE_SOURCE)

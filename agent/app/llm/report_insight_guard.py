@@ -11,11 +11,13 @@ from datetime import date, timedelta
 
 from app.core.evidence import _COMPANY_ALIASES, _companies, factual_mismatches
 from app.llm.report_insight_amount_context import supported_labeled_amount_context
+from app.llm.report_insight_index_identifiers import S_AND_P_INDEX
 from app.llm.report_insight_year_ranges import supported_year_range_context
 from app.schemas.report_insight import ReportInsightRequest
 
 _POLARITY_MESSAGE = "근거와 반대되는 부정 표현이 포함되어 있습니다."
 _NUMERIC_CONTEXT_MESSAGE = "근거와 연결이 다른 숫자: "
+_UNSUPPORTED_NUMBER_MESSAGE = "근거에서 확인되지 않는 숫자: "
 _UNSUPPORTED_COMPANY_MESSAGE = "근거에서 확인되지 않는 기업명: "
 _UNSUPPORTED_IDENTIFIER_MESSAGE = "근거에서 확인되지 않는 식별자: "
 _MICRON_UNIT = re.compile(
@@ -493,6 +495,13 @@ def _known_company_spans(value: str) -> list[tuple[int, int]]:
 def _source_identifier_mismatches(value: str, source: str) -> list[str]:
     known_spans = _known_company_spans(value)
     errors = []
+    source_indexes = {match["number"] for match in S_AND_P_INDEX.finditer(source)}
+    for match in S_AND_P_INDEX.finditer(value):
+        known_spans.append(match.span())
+        if match["number"] not in source_indexes:
+            errors.append(_UNSUPPORTED_IDENTIFIER_MESSAGE + match[0])
+    # A standalone product P500 cannot borrow the P500 inside an index name.
+    identifier_source = S_AND_P_INDEX.sub(lambda match: " " * len(match[0]), source)
     for match in _LATIN_IDENTIFIER.finditer(value):
         if any(start <= match.start() and match.end() <= end for start, end in known_spans):
             continue
@@ -504,11 +513,27 @@ def _source_identifier_mismatches(value: str, source: str) -> list[str]:
         if not numbered and not named_entity:
             continue
         if not re.search(
-            rf"(?<![A-Za-z0-9_]){re.escape(identifier)}(?![A-Za-z0-9_])", source, re.I
+            rf"(?<![A-Za-z0-9_]){re.escape(identifier)}(?![A-Za-z0-9_])",
+            identifier_source,
+            re.I,
         ):
             prefix = _UNSUPPORTED_IDENTIFIER_MESSAGE if numbered else _UNSUPPORTED_COMPANY_MESSAGE
             errors.append(prefix + identifier)
     return errors
+
+
+def _without_supported_index_names(value: str, source: str) -> str:
+    """Keep index numbers out of quantity checks only after proving the name.
+
+    The shared number guard reads 500 in S&P 500 but not S&P500. Mask only the
+    exact supported index spans in this comparison view; another 500 quantity
+    or date remains intact and cannot borrow that index's numerical suffix.
+    """
+    supported = {match["number"] for match in S_AND_P_INDEX.finditer(source)}
+    return S_AND_P_INDEX.sub(
+        lambda match: " " * len(match[0]) if match["number"] in supported else match[0],
+        value,
+    )
 
 
 def _production_reversal(value: str, source: str) -> bool:
@@ -655,6 +680,24 @@ def report_prose_mismatches(
             item for item in remaining if not item.startswith(_UNSUPPORTED_COMPANY_MESSAGE)
         ] + [item for item in entity_checked if item.startswith(_UNSUPPORTED_COMPANY_MESSAGE)]
     remaining.extend(_source_identifier_mismatches(value, actor_source))
+    numeric_messages = (_UNSUPPORTED_NUMBER_MESSAGE, _NUMERIC_CONTEXT_MESSAGE)
+    if any(item.startswith(numeric_messages) for item in remaining):
+        numeric_value = _without_supported_index_names(value, actor_source)
+        if numeric_value != value:
+            # Re-run the existing number checks, not a number-set exemption:
+            # supported S&P 500 plus an unsupported 500억원 must still fail.
+            # Preserve independently issued relation/graph errors, including
+            # quantity conflicts whose message shares the numeric prefix.
+            original_numeric = {
+                item
+                for item in factual_mismatches(value, source)
+                if item.startswith(numeric_messages)
+            }
+            remaining = [item for item in remaining if item not in original_numeric] + [
+                item
+                for item in factual_mismatches(numeric_value, source)
+                if item.startswith(numeric_messages)
+            ]
     if any(item.startswith(_NUMERIC_CONTEXT_MESSAGE) for item in remaining) and (
         _independent_parallel_numbers(value, source)
         or _ordered_year_percentages(value, source)

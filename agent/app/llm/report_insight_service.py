@@ -134,7 +134,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v44"
+PROMPT_VERSION = "report-insight.ko.v45"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -321,7 +321,8 @@ LEGACY_SYSTEM_INSTRUCTION = "\n\n".join(
 )
 _INVESTMENT_ADVICE_MESSAGE = (
     "MARKET_INVESTOR는 투자 자문 표현을 포함할 수 없습니다. "
-    "선택 원문의 거래 동향·기록은 서술하되, 독자의 매매를 권고하거나 목표가를 제시하지 마세요."
+    "선택 원문의 거래 동향·기록과 목표주가 조정 보도는 서술하되, "
+    "독자의 매매를 권고하거나 목표가격을 제시하지 마세요."
 )
 _UNSUPPORTED_COMPARISON = re.compile(
     r"(?:전주\s*(?:대비|보다)|지난주\s*(?:대비|보다)|지난\s*보고서|이전\s*보고서|"
