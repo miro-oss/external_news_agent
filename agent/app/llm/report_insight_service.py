@@ -126,7 +126,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v37"
+PROMPT_VERSION = "report-insight.ko.v38"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -1539,9 +1539,9 @@ def _native_assessment_repair_errors(response, request, *, template_wire=False):
     if not failures:
         return None
     # A different finding's native failure does not invalidate a proven
-    # prose-only snapshot here. Conversely, every failure of this finding must
-    # authorize the same preservation: mixed causes within one finding may
-    # require changing its decisions or connection.
+    # prose-only snapshot here. Within a finding, every guard must authorize
+    # the preserved component; a reason-only fact error can coexist with the
+    # native proof of connection while effect/timing remain open for repair.
     prose_repairs, connection_repairs = {}, {}
     for finding_id in dict.fromkeys(identifier for identifier, _ in failures):
         local_errors = [error for identifier, error in failures if identifier == finding_id]
@@ -1555,14 +1555,9 @@ def _native_assessment_repair_errors(response, request, *, template_wire=False):
                 prose_contexts[0][0],
                 tuple(dict.fromkeys(field for context in prose_contexts for field in context[1])),
             )
-        connection_contexts = [
-            getattr(error, "native_connection_repairs", {}).get(finding_id)
-            for error in local_errors
-        ]
-        if all(connection_contexts) and all(
-            context == connection_contexts[0] for context in connection_contexts
-        ):
-            connection_repairs[finding_id] = connection_contexts[0]
+        connection_context = _composed_connection_repair_context(local_errors, finding_id)
+        if connection_context is not None:
+            connection_repairs[finding_id] = connection_context
     return ReportAssessmentValidationError(
         "아래 항목의 내부 근거 계약과 공개 평가 검증 오류를 모두 수정하세요.\n"
         + "\n".join(f"findingId={finding_id}: {error}" for finding_id, error in failures),
@@ -1599,8 +1594,51 @@ def _native_assessment_repair_errors(response, request, *, template_wire=False):
     )
 
 
+def _composed_connection_repair_context(local_errors, finding_id):
+    """Intersect validator-owned proofs without treating diagnostics as authority.
+
+    The native context certifies connection after all native checks and only
+    owned effect/timing support failures. Public fact errors may additionally
+    reopen reason, but a faulty condition can change the connection premise.
+    Coherence, time, unknown and unlocated failures therefore retain full repair.
+    The consumer still binds this snapshot and its source to the original wire.
+    """
+    native_contexts = [
+        error.native_connection_repairs.get(finding_id)
+        for error in local_errors
+        if isinstance(error, ReportAssessmentDraftValidationError)
+    ]
+    if (
+        not native_contexts
+        or not all(
+            isinstance(context, ReportAssessmentConnectionRepairContext)
+            for context in native_contexts
+        )
+        or not all(context == native_contexts[0] for context in native_contexts)
+    ):
+        return None
+    context = native_contexts[0]
+    for error in local_errors:
+        if getattr(error, "failed_finding_ids", ()) != (finding_id,):
+            return None
+        if isinstance(error, ReportAssessmentDraftValidationError):
+            if set(error.error_kinds) != {"report_assessment_draft_invalid"}:
+                return None
+            continue
+        if (
+            not isinstance(error, ReportAssessmentValidationError)
+            or not error.error_kinds
+            or not set(error.error_kinds) <= _PROSE_FACT_KINDS
+        ):
+            return None
+        prose = error.native_prose_repairs.get(finding_id)
+        if prose is None or prose[0] != context.snapshot or set(prose[1]) != {"reason"}:
+            return None
+    return context
+
+
 def _preserve_native_connection(repair, raw, error):
-    """Keep a verified connection when only owned effect/timing support failed."""
+    """Keep a proven connection while failed axes and reason remain editable."""
     contexts = getattr(error, "native_connection_repairs", {})
     if (
         not isinstance(error, ReportAssessmentValidationError)
@@ -1684,7 +1722,7 @@ def _preserve_native_connection(repair, raw, error):
             for key, expected in frozen_quotes.items()
         ):
             raise OutputValidationError(
-                "영향·시점 근거만 실패한 수리에서 검증된 connection을 변경할 수 없습니다.",
+                "영향·시점 및 reason 보정에서 검증된 connection을 변경할 수 없습니다.",
                 error_kinds=("report_assessment_invalid",),
             )
         return repair.validate(response)
@@ -1693,8 +1731,9 @@ def _preserve_native_connection(repair, raw, error):
         prompt=(
             f"findingId={sorted(contexts)}: "
             "connection의 관계·업무·조건·근거는 검증되어 Schema const로 "
-            "고정됩니다. 진단은 실패한 축의 기존 basis에 대한 것이며 finding 전체의 근거 "
-            "부정이 아닙니다. 고정된 connection.basis와 같은 finding의 모든 원문 선택지를 "
+            "고정됩니다. 영향·시점 진단은 해당 축의 기존 basis에 대한 것이며 finding 전체의 "
+            "근거 부정이 아닙니다. reason의 사실 오류도 함께 진단되었다면 같은 원문에 맞게 "
+            "수정하세요. 고정된 connection.basis와 같은 finding의 모든 원문 선택지를 "
             "재대조해 effect/timing의 근거를 다시 선택하세요. 연결 근거가 영향·시점도 "
             "지원한다는 보장은 없습니다. effect는 기사 대상의 변경·제약·준비 범위이며, "
             "즉시성이나 독자 회사의 내부 운영자료는 필수 요건이 아닙니다. timing은 별도로 "

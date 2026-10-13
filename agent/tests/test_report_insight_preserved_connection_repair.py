@@ -145,13 +145,11 @@ def test_connection_preservation_still_runs_full_validation(defect):
         repair.validate(replace(raw, text=json.dumps(fixed, ensure_ascii=False)))
 
 
-@pytest.mark.parametrize("defect", ["public_fact", "native_coherence", "relation"])
-def test_mixed_or_genuine_relation_failure_does_not_preserve_connection(defect):
+@pytest.mark.parametrize("defect", ["native_coherence", "relation"])
+def test_coherence_or_genuine_relation_failure_does_not_preserve_connection(defect):
     source, value = case("relocation" if defect == "relation" else "forecast")
     item = value["assessments"]["IT_INFRA"]["finding101"]
-    if defect == "public_fact":
-        item["reason"] = "9999년의 가격 전망은 시스템 조달과 연결된다."
-    elif defect == "native_coherence":
+    if defect == "native_coherence":
         item["reason"] = "영향 범위는 미확인이다."
     repair, error, raw = repair_for(source, value)
     assert not error.native_connection_repairs

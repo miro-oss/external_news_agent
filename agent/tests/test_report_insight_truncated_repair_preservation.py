@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import pytest
 from test_report_insight_assessment import payload, request, response
+from test_report_insight_core_forecast_support import recorded_case
 from test_report_insight_mixed_record_preservation import (
     BAD_COMPANY_REASON,
     GOOD_REASON,
@@ -109,6 +110,54 @@ def test_closed_native_failure_reports_public_failure_before_the_only_retry(prom
     )
     assert original == (source.model_dump_json(), raw.text)
     assert raw.truncated
+
+
+@pytest.mark.parametrize("prompt", [draft_prompt, review_prompt], ids=["MAP", "REVIEW"])
+def test_closed_mixed_axis_and_reason_failure_keeps_connection_after_prefix_recovery(prompt):
+    source, value = recorded_case()
+    other = request(ids=(102, 103))
+    source.findings.extend(other.findings)
+    value["assessments"]["CHIP_MAKER"].update(payload(other)["assessments"]["CHIP_MAKER"])
+    value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = (
+        "TSMC의 메모리 생산능력 제약은 생산능력 업무와 연결된다."
+    )
+    raw = truncated(source, value, 2)
+    original = source.model_dump_json(), raw.text
+    repair, error, calls = repair_for(source, raw, prompt)
+    assert error.failed_finding_ids == (101, 103)
+    assert set(error.native_connection_repairs) == {101}
+    assert not error.native_prose_repairs
+    assert set(error.preserved_wire["assessments"]["CHIP_MAKER"]) == {"finding102"}
+    assert ("assessments[101].reason", "company") in {
+        (issue.field, issue.rule) for issue in error.validation_issues
+    }
+
+    fixed = corrected_capacity(value)
+    wire, fixed_raw = candidate(repair, source, raw, fixed)
+    assert set(wire["assessments"]["CHIP_MAKER"]) == {"finding101", "finding103"}
+    wire_validator(repair).validate(wire)
+    changed = deepcopy(wire)
+    # Changing a valid connection's basis is forbidden even though the response was
+    # truncated after this complete, source-authenticated record.
+    changed["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["connection"]["basis"] = {
+        "claimId": "101:0",
+        "sourceSpanId": "s101_0_0",
+    }
+    assert not wire_validator(repair).is_valid(changed)
+    with pytest.raises(OutputValidationError, match="connection을 변경할 수 없습니다"):
+        repair.validate(replace(fixed_raw, text=json.dumps(changed, ensure_ascii=False)))
+    assert calls == []
+
+    accepted = repair.validate(fixed_raw)
+    item = accepted.evidence["CHIP_MAKER"][101]
+    assert item.relation == "DIRECT" and item.relation_basis.claim_id == "101:1"
+    assert item.impact_scope == "CORE_CONSTRAINT" and item.impact_basis.claim_id == "101:1"
+    assert item.urgency_state == "MONITOR"
+    assert len(calls) == 1
+    merged = calls[0]["assessments"]["CHIP_MAKER"]
+    assert set(merged) == {"finding101", "finding102", "finding103"}
+    assert merged["finding102"] == error.preserved_wire["assessments"]["CHIP_MAKER"]["finding102"]
+    assert original == (source.model_dump_json(), raw.text)
 
 
 @pytest.mark.parametrize("impact_scope", ["UNDETERMINED", "NO_CHANGE"])

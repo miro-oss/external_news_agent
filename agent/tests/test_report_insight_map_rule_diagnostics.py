@@ -109,7 +109,13 @@ def test_forecast_rule_identity_survives_aggregation_and_preservation_stays_narr
         "9999년의 가격 전망은 시스템 조달과 연결된다."
     )
     mixed = service._native_assessment_repair_errors(response(value, source), source)
-    assert not mixed.native_connection_repairs and not mixed.native_prose_repairs
+    assert set(mixed.native_connection_repairs) == {101}
+    assert not mixed.native_prose_repairs
+    assert [issue.rule for issue in mixed.validation_issues] == [
+        "report_axis_market_forecast_only_" + impact.lower(),
+        "report_axis_market_forecast_only_scheduled_preparation",
+        "unsupported_number",
+    ]
 
 
 @pytest.mark.parametrize(
