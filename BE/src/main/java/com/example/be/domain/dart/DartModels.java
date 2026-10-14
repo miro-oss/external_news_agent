@@ -14,7 +14,7 @@ public final class DartModels {
     public record Company(
             @Schema(description = "8자리 DART 고유번호", example = "00126380", pattern = "[0-9]{8}") String corpCode,
             @Schema(description = "법인명", example = "삼성전자") String corpName,
-            @Schema(description = "6자리 종목코드. 비상장은 빈 문자열", example = "005930") String stockCode) { }
+            @Schema(description = "숫자와 영문 대문자로 구성된 6자리 종목코드. 비상장은 빈 문자열", example = "005930", pattern = "[0-9A-Z]{6}|") String stockCode) { }
 
     @Schema(description = "실제 확인한 DART 공시 출처")
     public record Filing(

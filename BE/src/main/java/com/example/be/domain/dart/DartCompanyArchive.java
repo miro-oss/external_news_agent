@@ -101,7 +101,7 @@ final class DartCompanyArchive {
                     } else if (event == XMLStreamConstants.END_ELEMENT) {
                         if ("list".equals(reader.getLocalName())) {
                             if (code == null || !code.matches("[0-9]{8}") || name == null || name.isBlank()
-                                    || !stock.matches("[0-9]{6}|")) throw new DartUpstreamException("BAD_RESPONSE");
+                                    || !stock.matches("[0-9A-Z]{6}|")) throw new DartUpstreamException("BAD_RESPONSE");
                             LocalDate date = LocalDate.parse(modified, DateTimeFormatter.BASIC_ISO_DATE);
                             if (!codes.add(code) || entries.size() >= MAX_COMPANIES)
                                 throw new DartUpstreamException("BAD_RESPONSE");

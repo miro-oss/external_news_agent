@@ -70,6 +70,26 @@ class DartCompanyOracleIntegrationTests {
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM news_dart_companies", Integer.class));
     }
 
+    @Test void storesAndSearchesPublishedAlphanumericStockCodesAfterMigration() {
+        repository.replace(List.of(entry("01933981", "비엔케이제3호스팩", "0068Y0"),
+                entry("01817920", "페스카로", "0015S0")));
+        assertEquals("0068Y0", repository.find("01933981").orElseThrow().stockCode());
+        assertEquals("0015S0", repository.find("01817920").orElseThrow().stockCode());
+        assertEquals(1L, repository.count("0068y0"));
+        assertEquals("01933981", repository.search("0068y0", 0, 20).getFirst().corpCode());
+    }
+
+    @Test void upgradedStockCodeConstraintRejectsMalformedValuesWithoutReplacingCatalog() {
+        var original = entry("01933981", "비엔케이제3호스팩", "0068Y0");
+        repository.replace(List.of(original));
+        for (String stock : List.of("0068y0", "0068-0", "12345", "1234567", "00가000")) {
+            assertThrows(DataIntegrityViolationException.class,
+                    () -> repository.replace(List.of(entry("01817920", "Invalid", stock))));
+            assertEquals(original.company(), repository.find("01933981").orElseThrow());
+            assertTrue(repository.find("01817920").isEmpty());
+        }
+    }
+
     private DartCompanyArchive.Entry entry(String code, String name, String stock) {
         return new DartCompanyArchive.Entry(new DartModels.Company(code, name, stock), LocalDate.of(2026, 10, 14));
     }

@@ -56,6 +56,36 @@ class DartFinancialNormalizerTest {
         assertNull(quarters.getLast().operatingProfit());
     }
 
+    @Test void derivesSamsung2023Q4RevenueWhenStandardAccountDisplayNameChanges() {
+        var annualPeriod = new DartFinancialNormalizer.Period(2023, 4);
+        var thirdPeriod = new DartFinancialNormalizer.Period(2023, 3);
+        // Public DART receipts 20240312000736 / 20231114002109, same ifrs-full_Revenue.
+        var annual = parse(annualPeriod, JSON.readTree(financial(annualPeriod, "20240312000736",
+                "258935494000000", "", "6566976000000", "").toString().replace("매출액", "영업수익")), false);
+        var third = parse(thirdPeriod, JSON.readTree(financial(thirdPeriod, "20231114002109",
+                "67404652000000", "191155556000000", "2433534000000", "3742259000000")
+                .toString().replace("매출액", "수익(매출액)")), false);
+        var quarter = normalizer.normalize(annualPeriod, Map.of(annualPeriod, annual, thirdPeriod, third), notes).quarters().getLast();
+        assertEquals("67779938000000", quarter.revenue());
+        assertEquals("2824717000000", quarter.operatingProfit());
+        assertEquals(new BigDecimal("4.17"), quarter.operatingMargin());
+        assertTrue(quarter.derived());
+    }
+
+    @Test void derivesHynix2025Q4OperatingProfitWhenStandardAccountDisplayNameChanges() {
+        // Public DART receipts 20260317000635 / 20251114001805, same dart_OperatingIncomeLoss.
+        var annual = parse(q4, JSON.readTree(financial(q4, "20260317000635", "97146675000000", "",
+                "47206319000000", "").toString().replace("\"IS\"", "\"CIS\"")), false);
+        var third = parse(q3, JSON.readTree(financial(q3, "20251114001805", "24448929000000", "64320022000000",
+                "11383390000000", "28036745000000").toString().replace("영업이익(손실)", "영업이익")
+                .replace("\"IS\"", "\"CIS\"")), false);
+        var quarter = normalizer.normalize(q4, Map.of(q4, annual, q3, third), notes).quarters().getLast();
+        assertEquals("32826653000000", quarter.revenue());
+        assertEquals("19169574000000", quarter.operatingProfit());
+        assertEquals(new BigDecimal("58.40"), quarter.operatingMargin());
+        assertTrue(quarter.derived());
+    }
+
     @Test void zeroRevenueIsRetainedButMarginIsUnavailable() {
         var value = parse(q2, financial(q2, RECEIPT, "0", "200", "-1", "10"), false);
         var quarter = normalizer.normalize(q2, Map.of(q2, value), notes).quarters().getLast();
@@ -100,6 +130,7 @@ class DartFinancialNormalizerTest {
         var annual = parse(q4, root, false);
         var third = parse(q3, financial(q3, RECEIPT, "300", "600", "30", "40"), false);
         assertNull(normalizer.normalize(q4, Map.of(q3, third, q4, annual), notes).quarters().getLast().revenue());
+        assertTrue(notes.stream().anyMatch(note -> note.contains("분기별 사업 범위가 다를 수")));
     }
 
     @Test void currenciesCannotBeMixedAcrossQuarters() {

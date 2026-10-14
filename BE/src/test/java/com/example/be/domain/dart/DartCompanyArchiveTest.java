@@ -1,6 +1,8 @@
 package com.example.be.domain.dart;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
 
@@ -31,6 +33,24 @@ class DartCompanyArchiveTest {
         assertEquals("020", error.getStatus());
         assertFalse(error.getMessage().contains("synthetic"));
         assertNull(error.getCause());
+    }
+
+    @Test void acceptsAlphanumericStockCodesFromPublishedDartCorpus() throws Exception {
+        var companies = parser.parse(zip("CORPCODE.xml", "<result>" + COMPANY
+                + COMPANY.replace("00126380", "01933981").replace("삼성전자", "비엔케이제3호스팩")
+                        .replace("005930", "0068Y0")
+                + COMPANY.replace("00126380", "01817920").replace("삼성전자", "페스카로")
+                        .replace("005930", "0015S0") + "</result>"));
+        assertEquals(3, companies.size());
+        assertEquals("0068Y0", companies.get(1).company().stockCode());
+        assertEquals("0015S0", companies.get(2).company().stockCode());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0068y0", "0068-0", "12345", "1234567", "00가000"})
+    void rejectsMalformedStockCodeBeforeReplacingCatalog(String stockCode) throws Exception {
+        byte[] archive = zip("CORPCODE.xml", "<result>" + COMPANY.replace("005930", stockCode) + "</result>");
+        assertEquals("BAD_RESPONSE", assertThrows(DartUpstreamException.class, () -> parser.parse(archive)).getStatus());
     }
 
     @Test void blocksDoctypeAndExternalEntityResolution() throws Exception {

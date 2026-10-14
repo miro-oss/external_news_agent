@@ -30,7 +30,9 @@ final class DartFinancialNormalizer {
     record Metric(String accountId, String accountName, String statement, String currency,
                   BigDecimal amount, BigDecimal cumulative) {
         boolean sameBasis(Metric other) {
-            return other != null && accountId.equals(other.accountId) && accountName.equals(other.accountName)
+            // Only allowlisted standard accounts reach this point. Their display label can change
+            // (e.g. 영업이익 -> 영업이익(손실)) without changing the taxonomy identity.
+            return other != null && accountId.equals(other.accountId)
                     && statement.equals(other.statement) && currency.equals(other.currency);
         }
     }
@@ -85,6 +87,7 @@ final class DartFinancialNormalizer {
         }
         Metric revenue = metric(income, REVENUE_IDS, "매출", period, notes);
         Metric profit = metric(income, PROFIT_IDS, "영업이익", period, notes);
+        if (discontinued) notes.add("중단영업이 포함된 공시가 있어 분기별 사업 범위가 다를 수 있습니다. 각 분기 공시 기준 값이며 과거 분기를 동일 사업 범위로 재작성하지 않았습니다.");
         return new Statement(period, currencies.iterator().next(), revenue, profit, source,
                 !source.corrected() && !discontinued);
     }
