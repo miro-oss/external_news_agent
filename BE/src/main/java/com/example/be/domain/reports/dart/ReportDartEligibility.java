@@ -1,6 +1,6 @@
 package com.example.be.domain.reports.dart;
 
-import com.example.be.domain.dart.DartModels.Company;
+import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;

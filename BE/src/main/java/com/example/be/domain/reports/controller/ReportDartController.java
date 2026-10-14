@@ -1,6 +1,6 @@
 package com.example.be.domain.reports.controller;
 
-import com.example.be.domain.reports.dart.ReportDartDTO;
+import com.example.be.domain.reports.dto.res.ReportDartDTO;
 import com.example.be.domain.reports.dart.ReportDartService;
 import com.example.be.global.apiPayload.ApiResponse;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;

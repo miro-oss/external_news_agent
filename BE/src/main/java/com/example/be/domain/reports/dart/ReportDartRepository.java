@@ -1,7 +1,7 @@
 package com.example.be.domain.reports.dart;
 
-import com.example.be.domain.dart.DartModels.Company;
-import com.example.be.domain.dart.DartModels.FinancialData;
+import com.example.be.domain.dart.model.DartModels.Company;
+import com.example.be.domain.dart.model.DartModels.FinancialData;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;

@@ -1,7 +1,7 @@
 package com.example.be.domain.topics.dto.res;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import com.example.be.domain.dart.DartModels;
+import com.example.be.domain.dart.model.DartModels;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;

@@ -1,5 +1,8 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.company;
 
+import com.example.be.domain.dart.client.DartClient;
+import com.example.be.domain.dart.config.DartProperties;
+import com.example.be.domain.dart.exception.DartUpstreamException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;

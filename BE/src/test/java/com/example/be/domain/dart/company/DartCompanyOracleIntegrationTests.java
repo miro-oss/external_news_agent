@@ -1,5 +1,6 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.company;
 
+import com.example.be.domain.dart.model.DartModels;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

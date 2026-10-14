@@ -1,8 +1,8 @@
 package com.example.be.domain.topics.service.command;
 
 import com.example.be.domain.sources.entity.Source;
-import com.example.be.domain.dart.DartCompanyService;
-import com.example.be.domain.dart.DartModels;
+import com.example.be.domain.dart.company.DartCompanyService;
+import com.example.be.domain.dart.model.DartModels;
 import com.example.be.domain.collection.entity.CollectionTopicSnapshot;
 import com.example.be.domain.collection.converter.CollectionTopicSnapshotConverter;
 import tools.jackson.databind.ObjectMapper;

@@ -1,5 +1,7 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.financial;
 
+import com.example.be.domain.dart.exception.DartUpstreamException;
+import com.example.be.domain.dart.model.DartModels;
 import tools.jackson.databind.JsonNode;
 
 import java.math.BigDecimal;

@@ -1,7 +1,7 @@
 package com.example.be.domain.topics.repository;
 
 import com.example.be.domain.sources.entity.Source;
-import com.example.be.domain.dart.DartModels;
+import com.example.be.domain.dart.model.DartModels;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.converter.TopicConverter;
 import com.example.be.domain.topics.dto.res.TopicSourceResDTO;

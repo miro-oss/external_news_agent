@@ -1,7 +1,8 @@
 package com.example.be.domain.reports.dart;
 
-import com.example.be.domain.dart.DartModels.Company;
-import com.example.be.domain.dart.DartProperties;
+import com.example.be.domain.reports.dto.res.ReportDartDTO;
+import com.example.be.domain.dart.model.DartModels.Company;
+import com.example.be.domain.dart.config.DartProperties;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.exception.ReportException;

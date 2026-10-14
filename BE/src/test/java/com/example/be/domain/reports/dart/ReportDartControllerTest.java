@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.dart;
 
+import com.example.be.domain.reports.dto.res.ReportDartDTO;
 import com.example.be.domain.reports.controller.ReportDartController;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;

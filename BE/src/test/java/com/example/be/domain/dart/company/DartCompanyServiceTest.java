@@ -1,5 +1,6 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.company;
 
+import com.example.be.domain.dart.config.DartProperties;
 import com.example.be.domain.topics.exception.TopicException;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.Test;
@@ -18,8 +19,8 @@ class DartCompanyServiceTest {
     @Test void keylessSearchDoesNotTouchDatabaseButRetainsExistingSelectionValidation() {
         assertEquals(DartCompanyService.Status.DISABLED, service.search("삼성", 0, 20).status());
         verifyNoInteractions(repository);
-        when(repository.find("00126380")).thenReturn(Optional.of(DartTestFixtures.COMPANY));
-        assertEquals(DartTestFixtures.COMPANY, service.requireCompany("00126380"));
+        when(repository.find("00126380")).thenReturn(Optional.of(DartCompanyTestFixtures.COMPANY));
+        assertEquals(DartCompanyTestFixtures.COMPANY, service.requireCompany("00126380"));
     }
 
     @Test void preparationAndFailureAreExplicitWhileLastSuccessfulCorpusRemainsSearchable() {
@@ -29,7 +30,7 @@ class DartCompanyServiceTest {
         assertEquals(DartCompanyService.Status.FAILED, service.search("삼성", 0, 20).status());
         when(repository.hasCompanies()).thenReturn(true);
         when(repository.count("삼성")).thenReturn(1L);
-        when(repository.search("삼성", 0, 20)).thenReturn(List.of(DartTestFixtures.COMPANY));
+        when(repository.search("삼성", 0, 20)).thenReturn(List.of(DartCompanyTestFixtures.COMPANY));
         var result = service.search("  삼성  ", 0, 20);
         assertEquals(DartCompanyService.Status.READY, result.status());
         assertEquals(1L, result.totalElements());

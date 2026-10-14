@@ -1,7 +1,7 @@
 package com.example.be.domain.topics.entity;
 
 import com.example.be.domain.sources.entity.Source;
-import com.example.be.domain.dart.DartModels;
+import com.example.be.domain.dart.model.DartModels;
 import com.example.be.domain.topics.converter.TopicKeywordRevisionMapConverter;
 import com.example.be.global.converter.StringListJsonConverter;
 import com.example.be.global.converter.YnBooleanConverter;

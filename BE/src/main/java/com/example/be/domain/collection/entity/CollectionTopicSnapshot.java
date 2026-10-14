@@ -1,7 +1,7 @@
 package com.example.be.domain.collection.entity;
 
 import com.example.be.domain.topics.entity.Topic;
-import com.example.be.domain.dart.DartModels;
+import com.example.be.domain.dart.model.DartModels;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 

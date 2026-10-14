@@ -1,9 +1,9 @@
 package com.example.be.domain.reports.dart;
 
 import com.example.be.domain.collection.entity.CollectionTopicSnapshot;
-import com.example.be.domain.dart.DartModels.Company;
-import com.example.be.domain.dart.DartModels.FinancialData;
-import com.example.be.domain.dart.DartModels.Quarter;
+import com.example.be.domain.dart.model.DartModels.Company;
+import com.example.be.domain.dart.model.DartModels.FinancialData;
+import com.example.be.domain.dart.model.DartModels.Quarter;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportCollectionContext;
 import com.example.be.domain.reports.entity.ReportScope;

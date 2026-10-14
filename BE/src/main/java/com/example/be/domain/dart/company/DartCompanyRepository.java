@@ -1,5 +1,6 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.company;
 
+import com.example.be.domain.dart.model.DartModels;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;

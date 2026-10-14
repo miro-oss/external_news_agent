@@ -1,5 +1,7 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.client;
 
+import com.example.be.domain.dart.config.DartProperties;
+import com.example.be.domain.dart.exception.DartUpstreamException;
 import com.example.be.global.config.RestClientFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -17,7 +19,7 @@ import java.util.Set;
 @Component
 public class DartClient {
     static final int MAX_JSON_BYTES = 8 * 1024 * 1024;
-    static final int MAX_ZIP_BYTES = 32 * 1024 * 1024;
+    public static final int MAX_ZIP_BYTES = 32 * 1024 * 1024;
     private static final Set<String> STATUSES = Set.of("000", "010", "011", "012", "013", "014",
             "020", "021", "100", "101", "800", "900", "901");
     private final RestClient http;
@@ -35,16 +37,16 @@ public class DartClient {
         this.http = http;
     }
 
-    byte[] companyArchive() { return request("corpCode.xml", Map.of(), MAX_ZIP_BYTES); }
+    public byte[] companyArchive() { return request("corpCode.xml", Map.of(), MAX_ZIP_BYTES); }
 
-    JsonNode company(String corpCode) { return json("company.json", Map.of("corp_code", corpCode)); }
+    public JsonNode company(String corpCode) { return json("company.json", Map.of("corp_code", corpCode)); }
 
-    JsonNode financial(String corpCode, int year, String reportCode, String fsDiv) {
+    public JsonNode financial(String corpCode, int year, String reportCode, String fsDiv) {
         return json("fnlttSinglAcntAll.json", Map.of("corp_code", corpCode,
                 "bsns_year", Integer.toString(year), "reprt_code", reportCode, "fs_div", fsDiv));
     }
 
-    JsonNode filings(String corpCode, LocalDate from, LocalDate to, boolean regularOnly, int page, int size) {
+    public JsonNode filings(String corpCode, LocalDate from, LocalDate to, boolean regularOnly, int page, int size) {
         Map<String, String> params = new LinkedHashMap<>();
         params.put("corp_code", corpCode);
         params.put("bgn_de", from.format(DateTimeFormatter.BASIC_ISO_DATE));

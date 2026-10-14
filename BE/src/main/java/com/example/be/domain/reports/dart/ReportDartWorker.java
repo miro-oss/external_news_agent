@@ -1,8 +1,8 @@
 package com.example.be.domain.reports.dart;
 
-import com.example.be.domain.dart.DartFinancialService;
-import com.example.be.domain.dart.DartProperties;
-import com.example.be.domain.dart.DartUpstreamException;
+import com.example.be.domain.dart.financial.DartFinancialService;
+import com.example.be.domain.dart.config.DartProperties;
+import com.example.be.domain.dart.exception.DartUpstreamException;
 import com.example.be.domain.reports.comparison.ReportCompleted;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;

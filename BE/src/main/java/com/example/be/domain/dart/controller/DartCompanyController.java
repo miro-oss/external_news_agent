@@ -1,5 +1,6 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.controller;
 
+import com.example.be.domain.dart.company.DartCompanyService;
 import com.example.be.global.apiPayload.ApiResponse;
 import com.example.be.global.apiPayload.code.GeneralSuccessCode;
 import io.swagger.v3.oas.annotations.Operation;

@@ -1,5 +1,8 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.company;
 
+import com.example.be.domain.dart.client.DartClient;
+import com.example.be.domain.dart.exception.DartUpstreamException;
+import com.example.be.domain.dart.model.DartModels;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;

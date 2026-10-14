@@ -1,7 +1,7 @@
 package com.example.be.domain.topics.service.command;
 
 import com.example.be.domain.collection.entity.RunStatus;
-import com.example.be.domain.dart.DartCompanyService;
+import com.example.be.domain.dart.company.DartCompanyService;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;

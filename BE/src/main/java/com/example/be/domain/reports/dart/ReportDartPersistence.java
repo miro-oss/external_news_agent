@@ -1,7 +1,7 @@
 package com.example.be.domain.reports.dart;
 
-import com.example.be.domain.dart.DartModels.FinancialData;
-import com.example.be.domain.dart.DartProperties;
+import com.example.be.domain.dart.model.DartModels.FinancialData;
+import com.example.be.domain.dart.config.DartProperties;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;

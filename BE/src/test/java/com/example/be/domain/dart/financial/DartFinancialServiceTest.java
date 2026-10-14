@@ -1,5 +1,9 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.financial;
 
+import com.example.be.domain.dart.client.DartClient;
+import com.example.be.domain.dart.config.DartProperties;
+import com.example.be.domain.dart.exception.DartUpstreamException;
+import com.example.be.domain.dart.model.DartModels;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -8,7 +12,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 
-import static com.example.be.domain.dart.DartTestFixtures.*;
+import static com.example.be.domain.dart.financial.DartFinancialTestFixtures.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;

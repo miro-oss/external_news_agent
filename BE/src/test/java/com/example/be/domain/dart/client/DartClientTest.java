@@ -1,5 +1,7 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.client;
 
+import com.example.be.domain.dart.config.DartProperties;
+import com.example.be.domain.dart.exception.DartUpstreamException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;

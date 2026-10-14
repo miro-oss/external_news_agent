@@ -1,5 +1,7 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.company;
 
+import com.example.be.domain.dart.config.DartProperties;
+import com.example.be.domain.dart.controller.DartCompanyController;
 import com.example.be.global.apiPayload.exception.handler.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,7 +49,7 @@ class DartCompanyControllerTest {
         properties.setApiKey("synthetic-key");
         when(repository.hasCompanies()).thenReturn(true);
         when(repository.count("005930")).thenReturn(1L);
-        when(repository.search("005930", 0, 20)).thenReturn(List.of(DartTestFixtures.COMPANY));
+        when(repository.search("005930", 0, 20)).thenReturn(List.of(DartCompanyTestFixtures.COMPANY));
         mvc.perform(get("/api/news/dart/companies").param("query", "005930"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.result.content[0].corpCode").value("00126380"))
                 .andExpect(jsonPath("$.result.content[0].stockCode").value("005930"))

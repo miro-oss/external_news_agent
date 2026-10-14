@@ -1,4 +1,4 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.exception;
 
 /** Never retain the HTTP exception, query string, provider message or response body (the key is a query). */
 public final class DartUpstreamException extends RuntimeException {

@@ -1,12 +1,13 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.company;
 
+import com.example.be.domain.dart.exception.DartUpstreamException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
 
-import static com.example.be.domain.dart.DartTestFixtures.zip;
+import static com.example.be.domain.dart.company.DartCompanyTestFixtures.zip;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DartCompanyArchiveTest {

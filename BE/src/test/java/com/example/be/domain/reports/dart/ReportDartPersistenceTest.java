@@ -1,6 +1,6 @@
 package com.example.be.domain.reports.dart;
 
-import com.example.be.domain.dart.DartProperties;
+import com.example.be.domain.dart.config.DartProperties;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.global.config.ApiTimeZone;

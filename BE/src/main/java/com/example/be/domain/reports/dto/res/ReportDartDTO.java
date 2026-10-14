@@ -1,7 +1,7 @@
-package com.example.be.domain.reports.dart;
+package com.example.be.domain.reports.dto.res;
 
-import com.example.be.domain.dart.DartModels.Company;
-import com.example.be.domain.dart.DartModels.FinancialData;
+import com.example.be.domain.dart.model.DartModels.Company;
+import com.example.be.domain.dart.model.DartModels.FinancialData;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.util.List;

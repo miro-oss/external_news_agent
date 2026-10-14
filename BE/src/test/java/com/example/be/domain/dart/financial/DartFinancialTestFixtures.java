@@ -1,15 +1,12 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.financial;
 
+import com.example.be.domain.dart.model.DartModels;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
 
-final class DartTestFixtures {
+final class DartFinancialTestFixtures {
     static final String CORP = "00126380";
     static final DartModels.Company COMPANY = new DartModels.Company(CORP, "삼성전자", "005930");
     static final ObjectMapper JSON = new ObjectMapper();
@@ -43,14 +40,4 @@ final class DartTestFixtures {
     }
 
     static JsonNode noData() { return JSON.readTree("{\"status\":\"013\",\"message\":\"조회된 데이타가 없습니다.\"}"); }
-
-    static byte[] zip(String name, String text) throws Exception {
-        var bytes = new ByteArrayOutputStream();
-        try (var zip = new ZipOutputStream(bytes)) {
-            zip.putNextEntry(new ZipEntry(name));
-            zip.write(text.getBytes(StandardCharsets.UTF_8));
-            zip.closeEntry();
-        }
-        return bytes.toByteArray();
-    }
 }

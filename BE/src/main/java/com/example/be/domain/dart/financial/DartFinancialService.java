@@ -1,5 +1,9 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.financial;
 
+import com.example.be.domain.dart.client.DartClient;
+import com.example.be.domain.dart.config.DartProperties;
+import com.example.be.domain.dart.exception.DartUpstreamException;
+import com.example.be.domain.dart.model.DartModels;
 import com.example.be.global.config.ApiTimeZone;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -22,8 +26,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.function.Supplier;
 
-import static com.example.be.domain.dart.DartFinancialNormalizer.Period;
-import static com.example.be.domain.dart.DartFinancialNormalizer.Statement;
+import static com.example.be.domain.dart.financial.DartFinancialNormalizer.Period;
+import static com.example.be.domain.dart.financial.DartFinancialNormalizer.Statement;
 
 /** Called by the independent report worker, never by an HTTP request or report transaction. */
 @Service

@@ -1,5 +1,7 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.company;
 
+import com.example.be.domain.dart.config.DartProperties;
+import com.example.be.domain.dart.model.DartModels;
 import com.example.be.domain.topics.exception.TopicException;
 import com.example.be.domain.topics.exception.code.TopicErrorCode;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;

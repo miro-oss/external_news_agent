@@ -1,5 +1,7 @@
-package com.example.be.domain.dart;
+package com.example.be.domain.dart.financial;
 
+import com.example.be.domain.dart.exception.DartUpstreamException;
+import com.example.be.domain.dart.model.DartModels;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 
@@ -8,7 +10,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
-import static com.example.be.domain.dart.DartTestFixtures.*;
+import static com.example.be.domain.dart.financial.DartFinancialTestFixtures.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DartFinancialNormalizerTest {
