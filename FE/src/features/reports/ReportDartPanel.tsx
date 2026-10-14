@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DART_POLL_WINDOW, reportDartCompanies, reportDartOptions, retryReportDartOptions, type DartCompany, type DartFiling,
   type DartFinancialData, type DartQuarter, type ReportDartCompany } from '../../api/dart'
@@ -119,12 +119,12 @@ function DartFinancialContent({ data, companyName }: { data: DartFinancialData; 
       {data.quarters.some(quarter => quarter.derived) && <p className="report-dart-note">4분기 산출값은 같은 회계 기준의 연간 금액에서 3분기 누적 금액을 뺀 값입니다.</p>}
     </> : <p className="report-dart-note">표시할 분기 실적 자료가 없습니다.</p>}
     {data.notes.length > 0 && <ul className="report-dart-notes">{data.notes.map((note, index) => <li key={index}>{note}</li>)}</ul>}
-    <section className="report-dart-disclosures" aria-label="최근 공시">
-      <h5>최근 공시</h5>
+    <details className="report-dart-disclosures">
+      <summary>최근 공시 보기</summary>
       {data.disclosures.length > 0 ? <ul>{data.disclosures.map(filing => <li key={filing.rceptNo}>
         <DartFilingLink filing={filing} /><time dateTime={filing.filedAt}>{filing.filedAt}</time>
       </li>)}</ul> : <p className="report-dart-note">확인된 공시가 없습니다.</p>}
-    </section>
+    </details>
     <p className="report-dart-note">공시와 실적은 회사 전체 기준이며 뉴스 키워드로 필터하지 않습니다. 자료 확인 시 확보한 내용을 보존하며, 이후 정정공시가 반영된 최신 수치와 다를 수 있습니다.</p>
   </>
 }
@@ -140,10 +140,33 @@ function DartFilingLink({ filing }: { filing: DartFiling }) {
 function DartTrendChart({ quarters, currency, companyName }: { quarters: DartQuarter[]; currency: string | null; companyName: string }) {
   const titleId = useId()
   const descriptionId = useId()
+  const tooltipId = useId()
+  type Point = { index: number; field: 'revenue' | 'operatingProfit' }
+  const [hovered, setHovered] = useState<Point | null>(null)
+  const [focused, setFocused] = useState<Point | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [viewport, setViewport] = useState({ left: 0, right: 720 })
   const revenue = quarters.map(quarter => dartChartAmount(quarter.revenue, currency))
   const profit = quarters.map(quarter => dartChartAmount(quarter.operatingProfit, currency))
   const values = [...revenue, ...profit].filter((value): value is number => value !== null)
-  if (!values.length) return <p className="report-dart-note">확인된 금액이 없어 실적 차트를 표시할 수 없습니다.</p>
+  const hasValues = values.length > 0
+  useEffect(() => {
+    const scroll = scrollRef.current
+    const svg = scroll?.querySelector('svg')
+    if (!scroll || !svg) return
+    const updateViewport = () => {
+      const width = svg.getBoundingClientRect().width
+      if (width <= 0) return
+      const scale = 720 / width
+      setViewport({ left: scroll.scrollLeft * scale, right: (scroll.scrollLeft + scroll.clientWidth) * scale })
+    }
+    const observer = new ResizeObserver(updateViewport)
+    observer.observe(scroll)
+    observer.observe(svg)
+    scroll.addEventListener('scroll', updateViewport, { passive: true })
+    return () => { observer.disconnect(); scroll.removeEventListener('scroll', updateViewport) }
+  }, [hasValues])
+  if (!hasValues) return <p className="report-dart-note">확인된 금액이 없어 실적 차트를 표시할 수 없습니다.</p>
   const lower = Math.min(0, ...values)
   const upper = Math.max(0, ...values)
   const padding = Math.max((upper - lower) * 0.1, 1)
@@ -151,13 +174,21 @@ function DartTrendChart({ quarters, currency, companyName }: { quarters: DartQua
   const max = upper + padding
   const x = (index: number) => 88 + index / Math.max(1, quarters.length - 1) * 592
   const y = (value: number) => 212 - (value - min) / (max - min) * 184
+  const active = hovered ?? focused
+  const activeValue = active ? (active.field === 'revenue' ? revenue : profit)[active.index] : null
+  const activeQuarter = active && activeValue != null ? quarters[active.index] : null
+  const tooltipX = active ? Math.max(viewport.left + 8, Math.min(viewport.right - 260 - 8, x(active.index) - 130)) : 0
+  const tooltipY = activeValue != null ? (y(activeValue) >= 94 ? y(activeValue) - 86 : y(activeValue) + 12) : 0
   return <figure className="report-dart-chart">
     <figcaption>최근 {quarters.length}분기 추이 <span>단위: {dartAmountUnit(currency)}</span></figcaption>
     <div className="report-dart-chart-legend"><span className="dart-revenue">● 매출액</span><span className="dart-profit">◆ 영업이익</span></div>
-    <div className="report-dart-chart-scroll" tabIndex={0} role="region" aria-label="분기 실적 차트 가로 스크롤">
-      <svg viewBox="0 0 720 252" role="img" aria-labelledby={`${titleId} ${descriptionId}`}>
+    <div ref={scrollRef} className="report-dart-chart-scroll" tabIndex={0} role="region" aria-label="분기 실적 차트 가로 스크롤">
+      <svg viewBox="0 0 720 252" role="group" aria-labelledby={`${titleId} ${descriptionId}`}
+        onKeyDown={event => {
+          if (event.key === 'Escape') { setHovered(null); setFocused(null) }
+        }}>
         <title id={titleId}>{`${companyName} 매출액과 영업이익 분기 추이`}</title>
-        <desc id={descriptionId}>자료가 없는 분기는 선을 연결하지 않습니다. 정확한 금액과 근거는 아래 분기별 상세 실적 표에서 확인할 수 있습니다.</desc>
+        <desc id={descriptionId}>자료가 없는 분기는 선을 연결하지 않습니다. 점에 마우스를 올리거나 키보드로 이동하면 해당 분기의 금액을 표시합니다. 정확한 금액과 근거는 아래 분기별 상세 실적 표에서 확인할 수 있습니다.</desc>
         {[0, 0.5, 1].map(fraction => {
           const value = min + (max - min) * fraction
           return <g key={fraction}><line className="dart-chart-grid" x1={88} x2={680} y1={y(value)} y2={y(value)} />
@@ -167,15 +198,28 @@ function DartTrendChart({ quarters, currency, companyName }: { quarters: DartQua
         <line className="dart-chart-zero" x1={88} x2={680} y1={y(0)} y2={y(0)} />
         {([{ values: revenue, field: 'revenue', label: '매출액' }, { values: profit, field: 'operatingProfit', label: '영업이익' }] as const).map(series => <g key={series.field} className={series.field === 'revenue' ? 'dart-chart-revenue' : 'dart-chart-profit'}>
           {dartChartSegments(series.values).map((segment, index) => <polyline key={index} points={segment.map(point => `${x(point.index)},${y(point.value)}`).join(' ')} />)}
-          {series.values.map((value, index) => value === null ? null : <g key={index}>
-            <title>{`${dartQuarterLabel(quarters[index])} ${series.label} ${formatDartAmount(quarters[index][series.field], currency)} ${dartAmountUnit(currency)}`}</title>
-            {series.field === 'revenue' ? <circle cx={x(index)} cy={y(value)} r={3.5} />
-              : <path d={`M ${x(index)} ${y(value) - 4.5} l 4.5 4.5 l -4.5 4.5 l -4.5 -4.5 Z`} />}
+          {series.values.map((value, index) => value === null ? null : <g key={index} className="dart-chart-point"
+            tabIndex={0} role="img"
+            aria-label={`${dartQuarterLabel(quarters[index])} ${series.label} ${formatDartAmount(quarters[index][series.field], currency)} ${dartAmountUnit(currency)}`}
+            aria-describedby={active?.index === index && active.field === series.field ? tooltipId : undefined}
+            onPointerEnter={() => setHovered({ index, field: series.field })} onPointerLeave={() => setHovered(null)}
+            onFocus={() => { setHovered(null); setFocused({ index, field: series.field }) }} onBlur={() => setFocused(null)}>
+            <circle className="dart-chart-hit-area" cx={x(index)} cy={y(value)} r={10} />
+            {series.field === 'revenue' ? <circle className="dart-chart-marker" cx={x(index)} cy={y(value)} r={3.5} />
+              : <path className="dart-chart-marker" d={`M ${x(index)} ${y(value) - 4.5} l 4.5 4.5 l -4.5 4.5 l -4.5 -4.5 Z`} />}
           </g>)}
         </g>)}
         {quarters.map((quarter, index) => <text key={`${quarter.year}-${quarter.quarter}`} x={x(index)} y={236} className="dart-chart-label" textAnchor="middle">
           {String(quarter.year).slice(-2)}.{quarter.quarter}Q
         </text>)}
+        {activeQuarter && <g id={tooltipId} className="dart-chart-tooltip" role="tooltip" transform={`translate(${tooltipX} ${tooltipY})`}>
+          <rect width={260} height={74} rx={7} />
+          <text className="dart-chart-tooltip-heading" x={12} y={20}>{dartQuarterLabel(activeQuarter)} · {dartAmountUnit(currency)}</text>
+          <text className="dart-chart-tooltip-label" x={12} y={42}>매출액</text>
+          <text className="dart-chart-tooltip-value" x={248} y={42} textAnchor="end">{formatDartAmount(activeQuarter.revenue, currency)}</text>
+          <text className="dart-chart-tooltip-label" x={12} y={61}>영업이익</text>
+          <text className="dart-chart-tooltip-value" x={248} y={61} textAnchor="end">{formatDartAmount(activeQuarter.operatingProfit, currency)}</text>
+        </g>}
       </svg>
     </div>
   </figure>

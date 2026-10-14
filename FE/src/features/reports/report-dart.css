@@ -32,7 +32,16 @@
 .dart-chart-profit { fill: var(--success-strong); stroke: var(--success-strong); }
 .dart-chart-revenue polyline, .dart-chart-profit polyline { fill: none; stroke-width: 2; }
 .dart-chart-profit polyline { stroke-dasharray: 5 3; }
-.report-dart-table-details summary { color: var(--primary-strong); font-size: .79rem; cursor: pointer; padding: .3rem 0; }
+.dart-chart-point { cursor: crosshair; outline: none; }
+.dart-chart-hit-area { fill: transparent; stroke: none; pointer-events: all; }
+.dart-chart-point:hover .dart-chart-marker, .dart-chart-point:focus .dart-chart-marker { stroke: var(--fg); stroke-width: 2; }
+.dart-chart-tooltip { pointer-events: none; }
+.dart-chart-tooltip rect { fill: var(--surface); stroke: var(--line); stroke-width: 1; filter: drop-shadow(0 2px 4px rgb(0 0 0 / .12)); }
+.dart-chart-tooltip text { fill: var(--fg); font-size: 12px; stroke: none; }
+.dart-chart-tooltip .dart-chart-tooltip-heading { fill: var(--fg-3); font-size: 11px; }
+.dart-chart-tooltip .dart-chart-tooltip-label { fill: var(--fg-2); }
+.dart-chart-tooltip .dart-chart-tooltip-value { font-weight: 650; font-variant-numeric: tabular-nums; }
+.report-dart-table-details summary, .report-dart-disclosures summary { color: var(--primary-strong); font-size: .79rem; cursor: pointer; padding: .3rem 0; }
 .report-dart-table { width: 100%; min-width: 620px; border-collapse: collapse; margin-top: .65rem; font-size: .73rem; }
 .report-dart-table caption { text-align: left; color: var(--fg-3); font-size: .72rem; margin-bottom: .6rem; line-height: 1.7; }
 .report-dart-table th, .report-dart-table td { padding: .7rem .5rem; border-bottom: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; vertical-align: top; white-space: nowrap; }
@@ -46,8 +55,7 @@
 .report-dart-filing a { color: var(--primary-strong); }
 .report-dart-correction { margin-right: .35rem; padding: .08rem .35rem; border-radius: 4px; background: var(--warning-weak); color: var(--warning-strong); font-size: .66rem; white-space: nowrap; }
 .report-dart-disclosures { margin-top: 1.15rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-.report-dart-disclosures h5 { margin: 0 0 .7rem; font-size: .83rem; }
-.report-dart-disclosures ul { display: grid; gap: .65rem; margin: 0; padding: 0; list-style: none; }
+.report-dart-disclosures ul { display: grid; gap: .65rem; margin: .7rem 0 0; padding: 0; list-style: none; }
 .report-dart-disclosures li { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; font-size: .76rem; }
 .report-dart-disclosures time { flex: none; color: var(--fg-3); }
 .report-dart-note, .report-dart-notes { color: var(--fg-3); font-size: .72rem; line-height: 1.8; }

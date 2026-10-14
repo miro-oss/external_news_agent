@@ -49,7 +49,7 @@ test('financial summary and 12-quarter table preserve losses, zero, nulls, prove
   assert.match(html, /자료 확인/)
   assert.match(html, /한국시간/)
   assert.match(html, /최근 12분기 추이/)
-  assert.match(html, /<svg[^>]+role="img"/)
+  assert.match(html, /<svg[^>]+role="group"/)
   assert.match(html, /자료가 없는 분기는 선을 연결하지 않습니다/)
   assert.equal((html.match(/<th scope="row">/g) ?? []).length, 12)
   assert.match(html, /<td title="0">0<\/td>/)
