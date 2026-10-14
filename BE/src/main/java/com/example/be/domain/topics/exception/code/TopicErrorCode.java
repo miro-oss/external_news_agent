@@ -9,6 +9,9 @@ import org.springframework.http.HttpStatus;
 @AllArgsConstructor
 public enum TopicErrorCode implements BaseErrorCode {
 
+    DART_COMPANY_NOT_FOUND(HttpStatus.BAD_REQUEST, "TOPIC400",
+            "선택한 공시 회사를 찾을 수 없습니다."),
+
     INVALID_SCHEDULE(HttpStatus.BAD_REQUEST, "TOPIC400",
             "batchSize는 1 이상 300 이하, intervalMinutes는 60, 720, 1440 중 하나여야 합니다."),
     QUERY_TEXT_REQUIRED(HttpStatus.BAD_REQUEST, "TOPIC400",

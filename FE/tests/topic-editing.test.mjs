@@ -104,3 +104,34 @@ test('failed edits preserve cached conditions and expose the server message with
   assert.deepEqual(client.getQueryData(['topics', false]), page([summary]))
   assert.deepEqual(client.getQueryData(topicEditOptions(topic.id).queryKey), detail)
 })
+
+test('company-only PATCH preserves nullable intent and updates response company in every topic cache', async context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const company = { corpCode: '00126380', corpName: '삼성전자', stockCode: '005930' }
+  const linked = { ...detail, dartCompany: company }
+  client.setQueryData(topicEditOptions(topic.id).queryKey, linked)
+  client.setQueryData(['topic-schedule', topic.id], linked)
+  client.setQueryData(['topics', 'all'], page([{ ...summary, dartCompany: company }]))
+  const requests = []
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    requests.push(JSON.parse(init.body))
+    return response({ ...topic, dartCompany: null })
+  })
+  await client.getMutationCache().build(client, saveTopicEditOptions(client, topic.id)).execute({ dartCorpCode: null })
+  assert.deepEqual(requests, [{ dartCorpCode: null }])
+  assert.deepEqual(client.getQueryData(topicEditOptions(topic.id).queryKey), { ...linked, dartCompany: null })
+  assert.deepEqual(client.getQueryData(['topic-schedule', topic.id]), { ...linked, dartCompany: null })
+  assert.deepEqual(client.getQueryData(['topics', 'all']).content[0], { ...summary, dartCompany: null })
+  assert.equal('dartCorpCode' in client.getQueryData(topicEditOptions(topic.id).queryKey), false)
+})
+
+test('keyword-only edits cannot overwrite a newer saved company selection', async context => {
+  const client = new QueryClient()
+  context.after(() => client.clear())
+  const company = { corpCode: '00126380', corpName: '삼성전자', stockCode: '005930' }
+  client.setQueryData(topicEditOptions(topic.id).queryKey, { ...detail, dartCompany: company })
+  context.mock.method(globalThis, 'fetch', async () => response({ ...topic, name: '변경', dartCompany: null }))
+  await client.getMutationCache().build(client, saveTopicEditOptions(client, topic.id)).execute({ name: '변경' })
+  assert.deepEqual(client.getQueryData(topicEditOptions(topic.id).queryKey).dartCompany, company)
+})

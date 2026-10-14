@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.entity;
 
 import com.example.be.domain.topics.entity.Topic;
+import com.example.be.domain.dart.model.DartModels;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
@@ -14,16 +15,24 @@ public record CollectionTopicSnapshot(
         @Schema(description = "접수 당시 선택 키워드. 없으면 []") List<String> optionalKeywords,
         @Schema(description = "접수 당시 제외 키워드. 원문에서 수집 키워드로 강조하지 않음. 없으면 []") List<String> excludedKeywords,
         @Schema(description = "접수 당시 주제의 회당 수집 기사 상한", example = "100") int batchSize,
-        @Schema(description = "접수 당시 수집 주기(분)", example = "1440") int intervalMinutes) {
+        @Schema(description = "접수 당시 수집 주기(분)", example = "1440") int intervalMinutes,
+        @Schema(description = "접수 당시 선택한 공시 회사. 미선택/과거 기록은 null", nullable = true) DartModels.Company dartCompany) {
     public CollectionTopicSnapshot {
         requiredKeywords = requiredKeywords == null ? List.of() : List.copyOf(requiredKeywords);
         optionalKeywords = optionalKeywords == null ? List.of() : List.copyOf(optionalKeywords);
         excludedKeywords = excludedKeywords == null ? List.of() : List.copyOf(excludedKeywords);
     }
 
+    public CollectionTopicSnapshot(Long topicId, String topicName, String queryText,
+                                   List<String> requiredKeywords, List<String> optionalKeywords,
+                                   List<String> excludedKeywords, int batchSize, int intervalMinutes) {
+        this(topicId, topicName, queryText, requiredKeywords, optionalKeywords, excludedKeywords,
+                batchSize, intervalMinutes, null);
+    }
+
     public static CollectionTopicSnapshot capture(Topic topic) {
         return new CollectionTopicSnapshot(topic.getId(), topic.getName(), topic.getQueryText(),
                 topic.getRequiredKeywords(), topic.getOptionalKeywords(), topic.getExcludedKeywords(),
-                topic.getBatchSize(), topic.getIntervalMinutes());
+                topic.getBatchSize(), topic.getIntervalMinutes(), topic.getDartCompany());
     }
 }

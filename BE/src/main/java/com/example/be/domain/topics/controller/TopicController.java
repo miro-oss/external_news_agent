@@ -46,6 +46,7 @@ public class TopicController {
                     sourceIds를 함께 보내면 등록과 동시에 소스 연결까지 끝납니다.
                     주제명은 중복할 수 없고, SEARCH 소스를 연결하려면 queryText가 필요합니다.
                     수집 주기를 생략하면 24시간(1440분)마다 수집합니다.
+                    dartCorpCode로 공시 회사 한 곳을 선택할 수 있으며 생략/null은 미연결입니다.
                     """
     )
     @ApiResponses({
@@ -61,6 +62,7 @@ public class TopicController {
                                 "id": 1,
                                 "name": "HBM",
                                 "queryText": "HBM 반도체",
+                                "dartCompany": {"corpCode":"00126380","corpName":"삼성전자","stockCode":"005930"},
                                 "requiredKeywords": ["HBM"],
                                 "optionalKeywords": ["SK하이닉스", "삼성전자", "마이크론"],
                                 "excludedKeywords": ["광고", "채용"],
@@ -76,7 +78,7 @@ public class TopicController {
                             """))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "400",
-                    description = "SEARCH 소스를 연결했지만 검색어가 없는 경우",
+                    description = "검색어 누락 또는 유효하지 않은 공시 회사(TOPIC400: 선택한 공시 회사를 찾을 수 없습니다.)",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
                             {
                               "isSuccess": false,
@@ -138,6 +140,7 @@ public class TopicController {
                                     "id": 1,
                                     "name": "HBM",
                                     "queryText": "HBM 반도체",
+                                    "dartCompany": {"corpCode":"00126380","corpName":"삼성전자","stockCode":"005930"},
                                     "requiredKeywords": ["HBM"],
                                     "optionalKeywords": ["SK하이닉스", "삼성전자", "마이크론"],
                                     "excludedKeywords": ["광고", "채용"],
@@ -221,6 +224,7 @@ public class TopicController {
                                 "id": 1,
                                 "name": "HBM",
                                 "queryText": "HBM 반도체",
+                                "dartCompany": {"corpCode":"00126380","corpName":"삼성전자","stockCode":"005930"},
                                 "requiredKeywords": ["HBM"],
                                 "optionalKeywords": ["SK하이닉스", "삼성전자", "마이크론"],
                                 "excludedKeywords": ["광고", "채용"],
@@ -264,7 +268,7 @@ public class TopicController {
     @Operation(
             summary = "수집 주제 수정",
             description = """
-                    수집 주제를 부분 수정합니다. 전달한 필드만 반영됩니다.
+                    수집 주제를 부분 수정합니다. dartCorpCode 생략은 회사 유지, null은 해제, 8자리 문자열은 회사 교체입니다. 전달한 필드만 반영됩니다.
                     키워드 배열은 부분 병합이 아니라 전체 교체입니다. 빈 배열을 보내면 해당 필터가 사라집니다.
                     intervalMinutes는 60분, 12시간(720분), 24시간(1440분) 중 하나이며,
                     바꾸면 스케줄러가 다음 실행부터 바뀐 주기를 적용합니다.
@@ -283,6 +287,7 @@ public class TopicController {
                                 "id": 1,
                                 "name": "HBM",
                                 "queryText": "HBM4 반도체",
+                                "dartCompany": {"corpCode":"00126380","corpName":"삼성전자","stockCode":"005930"},
                                 "requiredKeywords": ["HBM"],
                                 "optionalKeywords": ["SK하이닉스", "삼성전자", "마이크론"],
                                 "excludedKeywords": ["광고", "채용", "주가"],
@@ -294,7 +299,7 @@ public class TopicController {
                             """))),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "400",
-                    description = "배치 건수나 주기가 허용 범위를 벗어난 경우",
+                    description = "배치·주기 오류 또는 유효하지 않은 공시 회사(TOPIC400: 선택한 공시 회사를 찾을 수 없습니다.)",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
                             {
                               "isSuccess": false,

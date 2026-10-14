@@ -7,6 +7,7 @@ import type { TopicDetail, TopicSummary } from '../../api/types'
 import { saveTopicEditOptions, topicEditOptions, type TopicEditRequest } from '../../api/topicEditing'
 import { baseTopicKeywords } from './topicKeywordInput'
 import { buildTopicEditRequest, topicEditDraft, type TopicEditDraft } from './topicEditDraft'
+import { DartCompanyPicker } from './DartCompanyPicker'
 import '../notifications/notifications-refinement.css'
 import './topic-edit.css'
 
@@ -89,7 +90,7 @@ export function TopicEditDialog({ id, initial, pending = false, error, onDismiss
     }
   }, [returnFocusRef])
 
-  function update(field: keyof TopicEditDraft, value: string) {
+  function update<K extends keyof TopicEditDraft>(field: K, value: TopicEditDraft[K]) {
     setDraft(current => ({ ...current, [field]: value }))
     onDraftChange?.()
   }
@@ -150,6 +151,7 @@ export function TopicEditDialog({ id, initial, pending = false, error, onDismiss
               aria-describedby={`${id}-excluded-hint`} />
             <p id={`${id}-excluded-hint`} className="hint">제외 키워드가 들어간 기사는 모으지 않습니다.</p>
           </div>
+          <DartCompanyPicker value={draft.dartCompany} disabled={pending} onChange={company => update('dartCompany', company)} />
         </fieldset>
         <p className="hint topic-edit-application-hint">변경한 설정은 다음 수집부터 적용됩니다.</p>
         {!initial.active && <p className="hint">현재 수집이 중지된 주제입니다. 수집을 재개하면 변경한 설정으로 수집합니다.</p>}

@@ -3,10 +3,13 @@ import { get, patch } from './client.ts'
 import type { Combination, PageResult, Topic, TopicDetail, TopicSummary } from './types'
 
 const EDIT_FIELDS = ['name', 'queryText', 'requiredKeywords', 'optionalKeywords', 'excludedKeywords'] as const
-export type TopicEditRequest = Partial<Pick<Topic, (typeof EDIT_FIELDS)[number]>>
+export type TopicEditRequest = Partial<Pick<Topic, (typeof EDIT_FIELDS)[number]>> & { dartCorpCode?: string | null }
 
 function editFields(input: TopicEditRequest): TopicEditRequest {
-  return Object.fromEntries(EDIT_FIELDS.filter(field => input[field] !== undefined).map(field => [field, input[field]]))
+  return {
+    ...Object.fromEntries(EDIT_FIELDS.filter(field => input[field] !== undefined).map(field => [field, input[field]])),
+    ...(input.dartCorpCode !== undefined ? { dartCorpCode: input.dartCorpCode } : {}),
+  }
 }
 
 export function topicEditOptions(topicId: number) {
@@ -28,9 +31,10 @@ export function saveTopicEditOptions(client: QueryClient, topicId: number) {
       // 편집 전에 시작한 조회가 뒤늦게 완료돼 저장한 조건을 덮어쓰지 않도록 한다.
       await Promise.all(affectedKeys.map(queryKey => client.cancelQueries({ queryKey })))
       // 변경하지 않은 일정·활성 상태와 상세 조회의 소스 정보는 캐시에 유지한다.
-      const changes: TopicEditRequest = Object.fromEntries(
-        EDIT_FIELDS.filter(field => input[field] !== undefined).map(field => [field, saved[field]]),
-      )
+      const changes: Partial<Topic> = {
+        ...Object.fromEntries(EDIT_FIELDS.filter(field => input[field] !== undefined).map(field => [field, saved[field]])),
+        ...(input.dartCorpCode !== undefined ? { dartCompany: saved.dartCompany ?? null } : {}),
+      }
       client.setQueryData<TopicDetail>(detailKey, current => current ? { ...current, ...changes } : current)
       client.setQueryData<Topic>(scheduleKey, current => current ? { ...current, ...changes } : current)
       client.setQueriesData<PageResult<TopicSummary>>({ queryKey: ['topics'] }, current => current ? {

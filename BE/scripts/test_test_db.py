@@ -214,7 +214,7 @@ class ProcessBoundaryTests(unittest.TestCase):
             "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "JAVA_OPTS", "GRADLE_OPTS",
             "SPRING_APPLICATION_JSON", "spring.datasource.url", "NEWS_CONFIG_IMPORT",
             "news.agent.enabled", "AGENT_ENABLED", "OPENAI_API_KEY", "NAVER_CLIENT_SECRET",
-            "TAVILY_API_KEY", "SERPAPI_API_KEY", "SMTP_PASSWORD", "TELEGRAM_BOT_TOKEN",
+            "TAVILY_API_KEY", "SERPAPI_API_KEY", "SMTP_PASSWORD", "TELEGRAM_BOT_TOKEN", "DART_API_KEY",
             "MINDLOGIC_API_KEY", "ORG_GRADLE_PROJECT_systemProp.spring.datasource.url",
         ]}
         allowed = {"PATH": "/bin", "JAVA_HOME": "/java", "DOCKER_CONTEXT": "desktop-linux",

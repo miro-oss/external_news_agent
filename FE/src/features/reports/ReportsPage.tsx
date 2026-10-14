@@ -34,6 +34,7 @@ import { ReportReadingWithFeedback } from './ReportReadingWithFeedback'
 import { ReportChangesPanel } from './ReportChangesPanel'
 import { refreshReportReading } from './reportRefresh'
 import { ReportInsightsPanel } from './ReportInsightsPanel'
+import { ReportDartPanel } from './ReportDartPanel'
 import { reportInsightSnapshotKey } from '../../api/reportInsights'
 import { IssueTonePanel } from './IssueTonePanel'
 import { collectionHighlightTerms, collectionKeywords } from './reportReading'
@@ -437,6 +438,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
             {keywords.length > 0 && <p><span>키워드</span><span className="report-context-keywords">{keywords.join(' · ')}</span></p>}
           </> : <p className="report-context-unavailable">수집 당시 주제·키워드 기록이 없는 보고서입니다.</p>}
         </div>}
+        <ReportDartPanel report={report} />
         {report.reportScope !== 'RUN' ? <div className="report-daily-summary">
           <span className="report-daily-date">{report.reportDate ?? '집계일 미상'}{report.reportScope === 'WEEKLY' && report.reportEndDate ? ` ~ ${report.reportEndDate}` : ''}</span>
           {report.topicId != null

@@ -34,7 +34,7 @@ function render(initial = topic, props = {}) {
 test('opening an existing topic preserves every condition and produces no unchanged PATCH fields', () => {
   const initial = { ...topic, queryText: '반도체  수출', requiredKeywords: [], optionalKeywords: ['고대역폭 메모리', '첨단 패키징'] }
   assert.deepEqual(topicEditDraft(initial), { name: '반도체 공급망', queryText: '반도체  수출',
-    requiredKeywords: '', optionalKeywords: '고대역폭 메모리, 첨단 패키징', excludedKeywords: '채용' })
+    requiredKeywords: '', optionalKeywords: '고대역폭 메모리, 첨단 패키징', excludedKeywords: '채용', dartCompany: null })
   assert.deepEqual(request({}, initial), {})
   assert.deepEqual(request({}, { ...initial, queryText: null }), {})
 })
@@ -97,4 +97,22 @@ test('save failures remain visible in the editor with the loaded conditions avai
   assert.match(html, /value="반도체 공급망"/)
   assert.match(html, />수출 규제, 공급망<\/textarea>/)
   assert.match(html, /<button[^>]*>취소<\/button>/)
+})
+
+test('company selection preserves omission, changes by code, and explicitly clears with null', () => {
+  const company = { corpCode: '00126380', corpName: '삼성전자', stockCode: '005930' }
+  const another = { corpCode: '00164779', corpName: 'SK하이닉스', stockCode: '000660' }
+  const linked = { ...topic, dartCompany: company }
+  assert.deepEqual(request({}, linked), {})
+  assert.deepEqual(request({ dartCompany: { ...company, corpName: '변경된 이름' } }, linked), {})
+  assert.deepEqual(request({ dartCompany: company }), { dartCorpCode: '00126380' })
+  assert.deepEqual(request({ dartCompany: another }, linked), { dartCorpCode: '00164779' })
+  assert.deepEqual(request({ dartCompany: null }, linked), { dartCorpCode: null })
+  const html = render(linked)
+  assert.match(html, /공시 회사 연결/)
+  assert.match(html, /삼성전자/)
+  assert.match(html, /<small>005930<\/small>/)
+  assert.doesNotMatch(html, /DART|00126380/)
+  assert.match(html, /공시 회사 연결 해제/)
+  assert.match(html, /이후 실행별 리포트/)
 })
