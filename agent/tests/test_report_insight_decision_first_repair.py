@@ -1,4 +1,4 @@
-"""Retry serialization follows final decisions without weakening source guards."""
+"""Initial and retry serialization follow decisions without weakening source guards."""
 
 import json
 from copy import deepcopy
@@ -128,7 +128,7 @@ def _pipeline_hook(stage, value, failure):
 
 @pytest.mark.parametrize("stage", ["MAP-001", "REVIEW-001"])
 @pytest.mark.parametrize("failure", ["axis", "prose", "unlocalized_json"])
-def test_actual_native_retry_uses_decision_first_contract_and_full_validation(stage, failure):
+def test_initial_and_retry_native_generation_use_decision_first_and_full_validation(stage, failure):
     source, value = final_basis_case()
     before = source.model_dump_json(), deepcopy(value)
 
@@ -152,19 +152,18 @@ def test_actual_native_retry_uses_decision_first_contract_and_full_validation(st
     )
     engine = service.ReportInsightService(Settings(_env_file=None, AGENT_MOCK=False), provider)
     result = engine.generate(source)
-    expected_stages = ["MAP-001", "REVIEW-001", "REDUCE-001"]
+    expected_stages = ["MAP-001", "REVIEW-001", "EXPLAIN-001", "REDUCE-001"]
     expected_stages.insert(expected_stages.index(stage), stage)
     assert stages(provider) == expected_stages
     initial_index = stages(provider).index(stage)
     retry = provider.calls[initial_index + 1]
     _assert_retry_guidance(retry, stage)
-    # Initial MAP/REVIEW generation and REDUCE retain their original contract.
-    for record in _records(provider.calls[initial_index]["response_schema"]):
-        assert list(record["properties"]) == ["findingId", "reason", "decision", "sourceQuotes"]
+    # Initial MAP/REVIEW generation and its retry share the decision-first order.
+    _assert_decision_first(provider.calls[initial_index]["response_schema"])
     initial_system = provider.calls[initial_index]["system_instruction"].split(
         f"현재 단계는 {stage.split('-')[0]}.", 1
     )[1]
-    assert initial_system.index(ASSESSMENT_REASON_RULE) < initial_system.index("connection")
+    assert initial_system.index("connection") < initial_system.index(ASSESSMENT_REASON_RULE)
     retry_output = json.loads(provider.response_texts[initial_index + 1])["assessments"][AUDIENCE]
     assert all(
         list(record) == ["findingId", "decision", "reason", "sourceQuotes"]
@@ -172,7 +171,7 @@ def test_actual_native_retry_uses_decision_first_contract_and_full_validation(st
     )
     assert "<validation-error>" not in provider.calls[-1]["prompt"]
     assert "현재 단계는 REDUCE." in provider.calls[-1]["system_instruction"]
-    assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
+    assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assessment = next(item for item in result.insights[0].assessments if item.finding_id == 101)
     assert assessment.reason == f"원문: 「{CONNECTION_SOURCE}」 해석: {FINAL_REASON}"
     assert assessment.basis_claim_ids == ["101:0"]

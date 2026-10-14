@@ -420,9 +420,13 @@ def _observe(recorder):
         )
         return original_log(target_logger, response, error, **kwargs)
 
-    def review(pipeline):
+    def review(pipeline, reserve_seconds: float = 0.0):
         policy = recorder.local.job.get("reviewPolicy", "production")
-        admitted = original_review(pipeline) if policy == "production" else False
+        admitted = (
+            original_review(pipeline, reserve_seconds=reserve_seconds)
+            if policy == "production"
+            else False
+        )
         recorder.event(
             "reviewAdmissions",
             {

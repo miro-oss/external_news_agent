@@ -988,7 +988,7 @@ def test_claimful_reason_schema_and_map_review_prompts_explain_business_unknown_
     for stage, prompt in (("MAP", draft_prompt(source)), ("REVIEW", review_prompt(source))):
         assert "sourceSpanId" in prompt and "sourceQuoteChoices" in prompt
         assert "claims=[]" in prompt
-        assert "findingId, reason, decision, sourceQuotes 순서" in prompt
+        assert "findingId, decision, reason, sourceQuotes 순서" in prompt
         assert "basis의 claimId/sourceSpanId 필드에만" in prompt
         assert "내부 ID·ID 범위·미완성 ID·업무 범주 코드" in prompt
         instruction = report_stage_instruction(source.audiences, stage)

@@ -349,6 +349,12 @@ def test_partial_mixed_repair_preserves_healthy_neighbor_and_has_one_retry(retai
     monkeypatch.setattr(service, "validate_draft", capture)
 
     def hook(stage, occurrence, data, result):
+        if stage.startswith("EXPLAIN"):
+            for record in result["assessments"]["IT_INFRA"].values():
+                record["reason"] = corrected(value)["assessments"]["IT_INFRA"]["finding101"][
+                    "reason"
+                ]
+            return result
         if stage.startswith("REDUCE"):
             for insight in result["insights"]:
                 insight.update(
@@ -389,8 +395,14 @@ def test_partial_mixed_repair_preserves_healthy_neighbor_and_has_one_retry(retai
     provider = V4Provider(source, hook=hook, validate_wire=retained != "downgrade")
     if retained is None:
         result = generate(provider, source)
-        assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REDUCE-001"]
-        assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
+        assert stages(provider) == [
+            "MAP-001",
+            "MAP-001",
+            "REVIEW-001",
+            "EXPLAIN-001",
+            "REDUCE-001",
+        ]
+        assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
         assert result.insights[0].assessments[0].axes.directness == 3
         assert result.insights[0].assessments[0].axes.impact is None
         merged = validated_inputs[1]["assessments"]["IT_INFRA"]

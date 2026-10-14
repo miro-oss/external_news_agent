@@ -36,6 +36,7 @@ from app.llm.report_insight_instructions import (
     ASSESSMENT_CONDITION_RULE,
     ASSESSMENT_REASON_RULE,
     ASSESSMENT_REPAIR_ORDER_RULE,
+    ASSESSMENT_SELECTED_BASIS_RULE,
     REPORT_YEAR_UNIT_RULE,
 )
 from app.llm.report_insight_relocation_support import relocation_support_problems
@@ -522,8 +523,8 @@ def draft_schema(request: ReportInsightRequest) -> dict[str, Any]:
                 return _object(
                     {
                         "findingId": {"type": "integer", "const": finding_id},
-                        "reason": reason,
                         "decision": decision,
+                        "reason": reason,
                         "sourceQuotes": source_quotes_schema(
                             ("reason", "condition"), enabled=False
                         ),
@@ -868,11 +869,11 @@ def _prompt_payload(request: ReportInsightRequest, reference_date: date | None) 
 
 _ASSESSMENT_OUTPUT_ORDER = (
     "각 audience와 finding<ID> 키를 정확히 한 번 반환하세요. 각 항목은 findingId, "
-    "reason, decision, sourceQuotes 순서입니다. 먼저 원문 대상과 사건 단계에 맞는 업무 연결 근거를 "
-    "간결하게 설명한 뒤 decision의 connection/effect/timing을 판정하세요. "
+    "decision, reason, sourceQuotes 순서입니다. 먼저 원문 대상과 사건 단계에 맞춰 "
+    "decision의 connection/effect/timing과 각 basis를 확정한 뒤 reason을 작성하세요. "
 )
 _ASSESSMENT_OUTPUT_INSTRUCTIONS = _ASSESSMENT_OUTPUT_ORDER + (
-    "각 축은 "
+    ASSESSMENT_SELECTED_BASIS_RULE + " 각 축은 "
     "범주를 먼저 고르고 해당 범주의 필수/null 필드를 Schema에 맞게 작성합니다. "
     "sourceQuotes.reason과 sourceQuotes.condition은 항상 null입니다. 표시용 인용은 "
     "평가 검증 후 서버가 basis에 정확히 연결된 원문에서 조립합니다. "

@@ -236,6 +236,48 @@ def test_insight_deadline_is_independent_and_bounds_review_and_synthesis(
     assert not pipeline.can_start_optional_review()
 
 
+@pytest.mark.parametrize("request_seconds", [90, 180, 300])
+def test_review_admission_can_reserve_explanation_time_without_changing_default(
+    monkeypatch, request_seconds
+):
+    clock = [0.0]
+    monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])
+    pipeline = ReportInsightPipelineProvider(
+        Settings(AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=request_seconds), "FREE"
+    )
+    budget = min(request_seconds, 180)
+    reserve = pipeline.explanation_reserve_seconds
+    assert reserve == min(30, budget / 6)
+    clock[0] = budget - budget / 3 - reserve - min(30, budget / 3)
+
+    assert pipeline.can_start_optional_review(reserve_seconds=reserve)
+    clock[0] += 0.001
+    assert not pipeline.can_start_optional_review(reserve_seconds=reserve)
+    assert pipeline.can_start_optional_review()
+    assert pipeline.deadline == budget
+
+
+@pytest.mark.parametrize("request_seconds", [90, 180])
+def test_review_window_preserves_explanation_and_reduce_reserves_on_timeout(
+    monkeypatch, request_seconds
+):
+    clock = [0.0]
+    monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])
+    pipeline = ReportInsightPipelineProvider(
+        Settings(AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=request_seconds), "FREE"
+    )
+    reserve = pipeline.explanation_reserve_seconds
+    clock[0] = request_seconds - request_seconds / 3 - reserve - 30
+
+    with pytest.raises(AgentError) as caught:
+        with pipeline.optional_review_deadline(reserve_seconds=reserve):
+            assert pipeline.deadline == request_seconds - request_seconds / 3 - reserve
+            clock[0] = pipeline.deadline + 0.001
+    assert caught.value.details["requestDeadlineExceeded"] is True
+    assert pipeline.deadline == request_seconds
+    assert pipeline.calls == 0
+
+
 def test_overall_deadline_stops_reduce_and_keeps_observed_charge(monkeypatch):
     clock = [0.0]
     monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])

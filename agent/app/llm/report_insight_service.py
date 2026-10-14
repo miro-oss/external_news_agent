@@ -28,6 +28,7 @@ from app.llm.report_insight_assessment import (
     ReportAssessmentDraftValidationError,
     draft_prompt,
     draft_schema,
+    draft_to_wire,
     merge_drafts,
     parse_wire_draft,
     project_public_assessment,
@@ -45,6 +46,10 @@ from app.llm.report_insight_assessment import (
     validate_draft as validate_legacy_draft,
 )
 from app.llm.report_insight_corporate_event_binding import corporate_event_mismatches
+from app.llm.report_insight_explanation import (
+    prepare_explanation_batches,
+    validate_explanation_fields,
+)
 from app.llm.report_insight_fact_assertions import unsupported_fact_assertions
 from app.llm.report_insight_fact_index import build_fact_index, prompt_fact_index
 from app.llm.report_insight_fact_rendering import (
@@ -140,7 +145,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v53"
+PROMPT_VERSION = "report-insight.ko.v55"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -617,6 +622,11 @@ class ReportInsightService(ReportInsightLegacyService):
             request.report.id, request.audiences
         )
         reference_date = report_reference_date(request)
+        explanation_reserve = (
+            pipeline.explanation_reserve_seconds
+            if any(len(finding.claims) > 1 for finding in request.findings)
+            else 0.0
+        )
         full_validation_request = request
         if reference_date is not None:
             full_validation_request = request.model_copy(
@@ -750,7 +760,7 @@ class ReportInsightService(ReportInsightLegacyService):
             def evaluate_review(subset, review_index):
                 schema = draft_schema(subset)
                 schema["description"] = f"reportInsightCall:REVIEW-{review_index:03d}"
-                with pipeline.optional_review_deadline():
+                with pipeline.optional_review_deadline(reserve_seconds=explanation_reserve):
                     return self._call(
                         pipeline,
                         instruction=report_stage_instruction(request.audiences, "REVIEW"),
@@ -767,7 +777,7 @@ class ReportInsightService(ReportInsightLegacyService):
             ]
             reviews = []
             for offset in range(0, len(required_findings), MAX_ASSESSMENT_BATCH):
-                if not pipeline.can_start_optional_review():
+                if not pipeline.can_start_optional_review(reserve_seconds=explanation_reserve):
                     logger.info(
                         "Report insight stage=REVIEW-%03d outcome=SKIPPED_TIME_BUDGET "
                         "required=True fallback=NONE findingCount=%d",
@@ -793,7 +803,7 @@ class ReportInsightService(ReportInsightLegacyService):
             for review_index, offset in enumerate(
                 range(0, len(review_findings), MAX_ASSESSMENT_BATCH), start=next_review_index
             ):
-                if not pipeline.can_start_optional_review():
+                if not pipeline.can_start_optional_review(reserve_seconds=explanation_reserve):
                     logger.info(
                         "Report insight stage=REVIEW-%03d outcome=SKIPPED_TIME_BUDGET "
                         "fallback=VALIDATED_ASSESSMENTS_RETAINED findingCount=%d",
@@ -823,6 +833,46 @@ class ReportInsightService(ReportInsightLegacyService):
             # Select once from the complete MAP, then merge all independent
             # reviews. An earlier review cannot alter later selection or input.
             validated, mapped = validated_merge(validated, *reviews)
+            explanations = prepare_explanation_batches(
+                request, validated, batch_size=MAX_ASSESSMENT_BATCH, reference_date=reference_date
+            )
+
+            def explain(index, batch):
+                schema = deepcopy(batch.response_schema)
+                schema["description"] = f"reportInsightCall:EXPLAIN-{index + 1:03d}"
+
+                def validate_explanation(response):
+                    validate_explanation_fields(response, batch)
+                    return assess(response, batch.request)
+
+                return self._call(
+                    pipeline,
+                    instruction=report_stage_instruction(batch.request.audiences, "EXPLAIN"),
+                    prompt=batch.prompt,
+                    schema=schema,
+                    validate=validate_explanation,
+                    stage="EXPLAIN",
+                ).output
+
+            if explanations:
+                explained = run_report_maps(
+                    explanations,
+                    explain,
+                    concurrency=pipeline.map_concurrency,
+                    cancel_pending=pipeline.cancel_pending_calls,
+                )
+                combined = draft_to_wire(validated, request)
+                for batch, part in zip(explanations, explained, strict=True):
+                    for audience, records in draft_to_wire(part, batch.request)[
+                        "assessments"
+                    ].items():
+                        combined["assessments"][audience].update(records)
+                # Reauthenticate the complete request, including every audience,
+                # after joining prose-only batches. No old-prose fallback is safe.
+                validated = assess(
+                    replace(pipeline.last_response, text=prompt_json(combined)), request
+                )
+                validated, mapped = validated_merge(validated)
             # Display quotes are derived only after all assessment repairs.
             # Revalidate the rendered native/public projection before retrieval
             # and synthesis; source, fact and time guards remain unchanged.

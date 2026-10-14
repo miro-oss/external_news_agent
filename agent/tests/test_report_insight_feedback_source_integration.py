@@ -53,7 +53,7 @@ def test_native_prose_repair_keeps_only_failed_topic_feedback_and_frozen_source_
 
     result = generate(provider, source)
 
-    assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REDUCE-001"]
+    assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "EXPLAIN-001", "REDUCE-001"]
     initial = framed(provider.calls[0]["prompt"])
     repair = framed(provider.calls[1]["prompt"])
     assert [item["topicId"] for item in initial["feedbackExamples"]] == [7, 8]
@@ -61,6 +61,9 @@ def test_native_prose_repair_keeps_only_failed_topic_feedback_and_frozen_source_
     assert [item["id"] for item in repair["findings"]] == [101]
     assert "sourceQuotes.reason과 sourceQuotes.condition은 항상 null" in provider.calls[1]["prompt"]
     assert FEEDBACK_LEARNING_INSTRUCTION in provider.calls[1]["prompt"]
+    explanation = framed(provider.calls[3]["prompt"])
+    assert "feedbackExamples" not in explanation
+    assert [claim["id"] for claim in explanation["findings"][0]["claims"]] == ["101:1"]
     records = provider.calls[1]["response_schema"]["properties"]["assessments"]["properties"][
         "CHIP_MAKER"
     ]

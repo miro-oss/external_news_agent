@@ -49,15 +49,15 @@ def _encoded(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
-def test_sdk_preserves_shared_unknowns_and_the_previous_contract_order():
+def test_sdk_preserves_shared_unknowns_and_decision_first_contract_order():
     source = request(ids=tuple(range(101, 113)), audiences=tuple(ROLE_WORK))
     source.findings[-1] = source.findings[-1].model_copy(update={"claims": [], "sentences": []})
     logical = draft_schema(source)
     snapshot = deepcopy(logical)
     wire = _wire(logical)
     assert logical == snapshot
-    # Expanding only the three references restores the complete prior native
-    # contract byte-for-byte, including field order and known-first branches.
+    # Expanding only the three references preserves the complete native
+    # contract byte-for-byte, including decision-first order and known-first branches.
     assert _encoded(_inline_unknowns(wire)) == _encoded(_wire(_inline_unknowns(logical)))
     for field, (name, category, nulls) in UNKNOWN.items():
         expected_properties = {
@@ -78,7 +78,7 @@ def test_sdk_preserves_shared_unknowns_and_the_previous_contract_order():
             records = wire["properties"]["assessments"]["properties"][audience]["properties"]
             for finding in source.findings:
                 record = records[f"finding{finding.id}"]["properties"]
-                assert list(record) == ["findingId", "reason", "decision", "sourceQuotes"]
+                assert list(record) == ["findingId", "decision", "reason", "sourceQuotes"]
                 assert record["findingId"] == {"type": "integer", "const": finding.id}
                 if finding.claims:
                     unknown_decision = record["decision"]["anyOf"][1]["properties"]

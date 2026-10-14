@@ -36,6 +36,13 @@ ASSESSMENT_REASON_RULE = (
 ASSESSMENT_REPAIR_ORDER_RULE = (
     "Schema const를 유지하고 decision·basis를 먼저 확정한 뒤 최종 근거로 reason을 쓴다."
 )
+ASSESSMENT_SELECTED_BASIS_RULE = (
+    "최종 선택한 non-null basis의 claim·연결 원문만 다시 읽고 reason을 쓴다. "
+    "같은 finding이라도 미선택 claim의 내용을 섞지 않는다. 자금 조달과 사용처·투자 지역·"
+    "시설은 별개 정보다. 후자를 설명하려면 그 내용을 지원하는 원문을 해당 축의 근거로 "
+    "선택하고 원문의 조건·가능성을 유지한다. 그런 근거를 선택하지 않았다면 판단과 설명을 "
+    "선택한 사건 범위로 좁힌다. 추론한 연결을 원문이 직접 제시한 사실처럼 쓰지 않는다."
+)
 ASSESSMENT_FINAL_BASIS_RULE = (
     "보정은 최종 decision을 정한 뒤 마무리한다. connection/effect/timing의 최종 non-null "
     "basis가 선택한 claim과 연결 sentence만 모아 수정 가능한 reason·condition의 사실 "
@@ -50,7 +57,7 @@ ASSESSMENT_FINAL_BASIS_RULE = (
     "claimId/sourceSpanId와 업무 범주 코드는 JSON 구조화 필드에만 두고, "
     "괄호 인용·근거 목록 형태로도 자연어에 복사하지 않는다. "
     "매매 권고·목표가격을 제시하지 않았다는 면책이나 오류 수정 보고를 덧붙이지 않는다. "
-    "원문에 실제로 명시된 조건·불확실성은 보존한다."
+    "원문에 실제로 명시된 조건·불확실성은 보존한다. " + ASSESSMENT_SELECTED_BASIS_RULE
 )
 
 _ROLES = {
@@ -89,29 +96,42 @@ _ROLES = {
 
 def report_stage_instruction(audiences: list[Audience], stage: str, *, repair: bool = False) -> str:
     """Requested roles, active stage and source rules; schema defines the shape."""
-    if not audiences or stage not in {"MAP", "REVIEW", "REDUCE"}:
+    if not audiences or stage not in {"MAP", "REVIEW", "EXPLAIN", "REDUCE"}:
         raise ValueError("A report stage needs requested audiences and a known stage")
     roles = "\n".join(f"{audience}: {_ROLES[audience]}" for audience in audiences)
     common = _BASE + "\n\n" + roles
     if "MARKET_INVESTOR" in audiences:
         common += "\n\n" + REPORT_ANALYSIS_ONLY_RULE
+    if stage == "EXPLAIN":
+        stage_text = (
+            "현재 단계는 EXPLAIN. Schema const로 고정된 decision의 판단·work·basis와 "
+            "null condition은 유지한다. 선택된 claim·연결 원문만 읽고 수정 가능한 "
+            "reason과 non-null condition을 작성한다. "
+            + ASSESSMENT_REASON_RULE
+            + " "
+            + ASSESSMENT_CONDITION_RULE
+            + " "
+            + ASSESSMENT_SELECTED_BASIS_RULE
+            + " 이 단계에서는 판단을 재판정하거나 basis를 새로 선택·교체·삭제하지 않는다. "
+            "선택 근거가 지원하지 않는 사용처·시설 설명은 추가하지 않고 설명 범위를 좁힌다."
+        )
+        return common + "\n\n" + stage_text
     if stage in {"MAP", "REVIEW"}:
         conclusion = (
             "4. "
-            + ASSESSMENT_REPAIR_ORDER_RULE
-            + " 축별 범주·필수/null 준수. 모두 미확인은 finding 원문, claims=[]만 고정 reason. "
+            + (
+                ASSESSMENT_REPAIR_ORDER_RULE
+                if repair
+                else "Schema const를 지키고 decision·basis를 먼저 확정한다."
+            )
+            + " 모두 미확인은 finding 원문, claims=[]만 고정 reason. "
             + ASSESSMENT_REASON_RULE
-            if repair
-            else "4. 축별 범주와 필수/null을 지킨다. reason은 선택한 "
-            "claim·연결 sentence(모든 축 미확인이면 finding 원문)로 뒷받침한다. "
-            "실제 claims=[]만 Schema const의 고정 reason을 쓴다."
         )
         stage_text = (
             f"현재 단계는 {stage}.\n"
             "1. 연결 sentence의 주체·대상·사건 단계를 읽는다. claim 요약이 강해도 원문의 "
             "실험·계획·전망 수준을 유지한다. "
-            + ("" if repair else ASSESSMENT_REASON_RULE)
-            + "\n2. 관점의 모든 업무로 connection을 판정한다. 원문에서 확인된 "
+            "\n2. 관점의 모든 업무로 connection을 판정한다. 원문에서 확인된 "
             "사실을 미확인 condition으로 반복하지 않는다.\n"
             "3. 업무 대상의 변경·준비 범위를 찾는다. 규모·성장률·기술 사양은 "
             "실제 제약이 아니며 수요·가격 전망은 프로젝트 변경·준비가 아니다. "
@@ -131,6 +151,9 @@ def report_stage_instruction(audiences: list[Audience], stage: str, *, repair: b
         "하나의 사건으로 만들지 않는다. 실제 공통 대상의 관계가 원문에 있을 때만 복수 "
         "finding을 연결하고, 공통 업무만 있으면 독립 사건으로 나란히 설명한다. "
         "basisClaimIds는 필요한 최소 원문만 중복 없이 쓴다. "
+        "각 해석의 근거를 먼저 정하고 그 claim·연결 원문에서만 영향 경로를 설명한다. "
+        "자금 조달 전망을 특정 지역·시설에 대한 사용 계획으로 바꾸지 않는다. "
+        "그 사용처를 설명하려면 이를 지원하는 근거도 선택하고 원문의 조건을 유지한다. "
         "implications는 원문 사건→원문에 지원되는 중간 조건→업무 판단의 경로가 있을 때만 "
         "작성한다. assumption은 같은 대상의 성립 조건, falsifiedBy는 같은 해석을 바꾸는 "
         "관측 사건이다. falsifiedBy가 실제로 발생했을 때 text의 예상 결과가 약해지는지 "

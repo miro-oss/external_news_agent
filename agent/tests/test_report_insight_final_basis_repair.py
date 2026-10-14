@@ -256,6 +256,13 @@ def test_pipeline_revalidates_final_bases_with_one_repair_and_original_usage_bud
     snapshot = source.model_dump_json()
 
     def hook(current, occurrence, data, result):
+        if current.startswith("EXPLAIN"):
+            for finding in data["findings"]:
+                selected = {claim["id"] for claim in finding["claims"]}
+                result["assessments"][AUDIENCE][f"finding{finding['id']}"]["reason"] = (
+                    ORIGINAL_REASON if "101:1" in selected else FINAL_REASON
+                )
+            return result
         if current.startswith("REDUCE"):
             for insight in result["insights"]:
                 insight.update(
@@ -296,10 +303,10 @@ def test_pipeline_revalidates_final_bases_with_one_repair_and_original_usage_bud
         assert caught.value.details["usage"]["outputTokens"] == 28
     else:
         result = engine.generate(source)
-        expected = ["MAP-001", "REVIEW-001", "REDUCE-001"]
+        expected = ["MAP-001", "REVIEW-001", "EXPLAIN-001", "REDUCE-001"]
         expected.insert(expected.index(stage), stage)
         assert stages(provider) == expected
-        assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
+        assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
         assessment = next(item for item in result.insights[0].assessments if item.finding_id == 101)
         if stale_reason:
             # Optional REVIEW failure keeps a valid MAP whose selected timing

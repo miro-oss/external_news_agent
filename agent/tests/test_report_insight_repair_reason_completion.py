@@ -385,8 +385,8 @@ def test_pipeline_keeps_one_retry_and_observed_usage_when_reason_remains_invalid
     engine = service.ReportInsightService(Settings(_env_file=None, AGENT_MOCK=False), provider)
     if defect is None:
         result = engine.generate(source)
-        assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REDUCE-001"]
-        assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
+        assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "EXPLAIN-001", "REDUCE-001"]
+        assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
         assert {item.finding_id for item in result.insights[0].assessments} == {101, 202}
     else:
         with pytest.raises(AgentError) as caught:

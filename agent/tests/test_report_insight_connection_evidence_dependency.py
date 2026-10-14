@@ -288,6 +288,10 @@ def test_map_and_review_dependency_repairs_keep_neighbor_and_one_retry_budget(
     monkeypatch.setattr(service, "validate_draft", capture)
 
     def hook(stage, occurrence, data, generated):
+        if stage.startswith("EXPLAIN"):
+            for record in generated["assessments"]["IT_INFRA"].values():
+                record.update(reason=GOOD_REASON, condition=GOOD_CONDITION)
+            return generated
         if stage.startswith("REDUCE"):
             for insight in generated["insights"]:
                 insight.update(
@@ -324,9 +328,16 @@ def test_map_and_review_dependency_repairs_keep_neighbor_and_one_retry_budget(
         assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
     else:
         result = generate(provider, source)
-        assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REVIEW-001", "REDUCE-001"]
-        assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
-        assert result.meta.cost_usd == 0.015 and result.meta.credits == 1.0
+        assert stages(provider) == [
+            "MAP-001",
+            "MAP-001",
+            "REVIEW-001",
+            "REVIEW-001",
+            "EXPLAIN-001",
+            "REDUCE-001",
+        ]
+        assert result.meta.input_tokens == 66 and result.meta.output_tokens == 42
+        assert result.meta.cost_usd == 0.018 and result.meta.credits == 1.2
         assert [item.finding_id for item in result.insights[0].assessments] == [101, 202]
         first = result.insights[0].assessments[0]
         assert first.axes.directness == 2 and first.axes.impact is first.axes.urgency is None

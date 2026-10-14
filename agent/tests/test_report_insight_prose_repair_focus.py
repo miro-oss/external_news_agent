@@ -387,6 +387,8 @@ def test_map_and_review_focus_keep_full_report_date_across_multiple_batches(monk
         "MAP-002",
         "REVIEW-001",
         "REVIEW-001",
+        "EXPLAIN-001",
+        "EXPLAIN-001",
         "REDUCE-001",
     ]
     assert all(provider.schema_validity)
@@ -423,6 +425,6 @@ def test_map_and_review_focus_keep_full_report_date_across_multiple_batches(monk
         range(101, 108)
     )
     assert result.insights[0].assessments[0].reason == GOOD_SOURCE_REASON
-    assert result.meta.input_tokens == 66 and result.meta.output_tokens == 42
-    assert result.meta.cost_usd == 0.018 and result.meta.credits == 1.2
+    assert result.meta.input_tokens == 88 and result.meta.output_tokens == 56
+    assert result.meta.cost_usd == 0.024 and result.meta.credits == 1.6
     assert source.model_dump_json() == before

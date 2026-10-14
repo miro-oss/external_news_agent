@@ -73,7 +73,7 @@ def run_pipeline(failed_stage):
     original = source.model_dump_json(), deepcopy(value)
 
     def hook(stage, occurrence, data, proposed):
-        if stage.startswith(("MAP", "REVIEW")):
+        if stage.startswith(("MAP", "REVIEW", "EXPLAIN")):
             proposed = deepcopy(value)
             wanted = {f"finding{finding['id']}" for finding in data["findings"]}
             proposed["assessments"][AUDIENCE] = {
@@ -116,7 +116,7 @@ def run_pipeline(failed_stage):
 @pytest.mark.parametrize("stage", ["MAP-001", "REVIEW-001", "REDUCE-001"])
 def test_source_specific_repair_guidance_reaches_actual_provider_and_preserves_scope(stage):
     source, provider, result, failures = run_pipeline(stage)
-    expected = ["MAP-001", "REVIEW-001", "REDUCE-001"]
+    expected = ["MAP-001", "REVIEW-001", "EXPLAIN-001", "REDUCE-001"]
     expected.insert(expected.index(stage), stage)
     assert stages(provider) == expected
     assert len(failures) == 1
@@ -164,7 +164,7 @@ def test_source_specific_repair_guidance_reaches_actual_provider_and_preserves_s
     for finding_id, assessment in zip((101, 102), result.insights[0].assessments, strict=True):
         assert assessment.reason == f"원문: 「{PLAIN_SOURCE}」 해석: {GOOD_REASON}"
         assert assessment.basis_claim_ids == [f"{finding_id}:0"]
-    assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
+    assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert all(provider.schema_validity)
 
 

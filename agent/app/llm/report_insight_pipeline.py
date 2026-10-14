@@ -21,6 +21,7 @@ MAX_REPORT_INSIGHT_DEADLINE_SECONDS = 180.0
 REPORT_INSIGHT_REDUCE_RESERVE_SECONDS = 60.0
 REPORT_INSIGHT_REVIEW_BUDGET_SECONDS = 60.0
 REPORT_INSIGHT_REVIEW_MIN_ADMISSION_SECONDS = 30.0
+REPORT_INSIGHT_EXPLANATION_RESERVE_SECONDS = 30.0
 
 
 class ReportInsightPipelineProvider:
@@ -37,6 +38,9 @@ class ReportInsightPipelineProvider:
         self._review_budget_seconds = min(REPORT_INSIGHT_REVIEW_BUDGET_SECONDS, request_budget / 3)
         self._reduce_reserve_seconds = min(
             REPORT_INSIGHT_REDUCE_RESERVE_SECONDS, request_budget / 3
+        )
+        self.explanation_reserve_seconds = min(
+            REPORT_INSIGHT_EXPLANATION_RESERVE_SECONDS, request_budget / 6
         )
         self.cap = Decimal(str(settings.hard_cap_credits_per_request))
         self.usage = ProviderUsage()
@@ -200,7 +204,7 @@ class ReportInsightPipelineProvider:
             raise error
         return remaining
 
-    def can_start_optional_review(self) -> bool:
+    def can_start_optional_review(self, reserve_seconds: float = 0.0) -> bool:
         """Leave synthesis headroom before starting another optional review.
 
         This is admission only. Once started, every provider/deadline failure
@@ -208,11 +212,12 @@ class ReportInsightPipelineProvider:
         """
         return self.deadline - monotonic() >= (
             self._reduce_reserve_seconds
+            + max(0.0, reserve_seconds)
             + min(REPORT_INSIGHT_REVIEW_MIN_ADMISSION_SECONDS, self._review_budget_seconds)
         )
 
     @contextmanager
-    def optional_review_deadline(self):
+    def optional_review_deadline(self, reserve_seconds: float = 0.0):
         """Share one bounded window across a REVIEW draft and its repair.
 
         Scoped production providers inherit this deadline for their HTTP call.
@@ -222,7 +227,7 @@ class ReportInsightPipelineProvider:
         request_deadline = self.deadline
         self.deadline = min(
             monotonic() + self._review_budget_seconds,
-            request_deadline - self._reduce_reserve_seconds,
+            request_deadline - self._reduce_reserve_seconds - max(0.0, reserve_seconds),
         )
         try:
             yield

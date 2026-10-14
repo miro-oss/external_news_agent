@@ -62,7 +62,7 @@ def flat_hook(source, mutate=None):
     sources = {finding.id: finding for finding in source.findings}
 
     def hook(stage, occurrence, data, value):
-        if stage.startswith(("MAP", "REVIEW")):
+        if stage.startswith(("MAP", "REVIEW", "EXPLAIN")):
             for record in value["assessments"][AUDIENCE].values():
                 raw = sources[record["findingId"]].sentences[0].text
                 for field in ("relationBasis", "impactBasis", "urgencyBasis"):
@@ -99,6 +99,8 @@ def test_native_repair_rejects_event_outside_selected_raw_and_preserves_valid_de
     provider = V4Provider(source, hook=flat_hook(source, mutate))
     result = generate(provider, source)
     expected = ["MAP-001", "REVIEW-001", "REDUCE-001"]
+    if scope == "unselected_claim":
+        expected.insert(-1, "EXPLAIN-001")
     expected.insert(expected.index(stage), stage)
     assert stages(provider) == expected
     assert len(failures) == 1
@@ -129,7 +131,8 @@ def test_native_repair_rejects_event_outside_selected_raw_and_preserves_valid_de
     assert focused[0]["sentences"] == [{"index": 0, "text": RAW}]
     assert focused[0]["proseRepair"]["editableFields"] == ["reason"]
     assert GOOD_REASON in result.insights[0].assessments[1].reason
-    assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
+    assert result.meta.input_tokens == 11 * len(expected)
+    assert result.meta.output_tokens == 7 * len(expected)
     assert source.model_dump_json() == before
 
 
@@ -148,12 +151,16 @@ def test_reduce_item_cannot_borrow_corporate_event_from_other_claims_or_metadata
 
     provider = V4Provider(source, hook=flat_hook(source, mutate))
     result = generate(provider, source)
-    assert stages(provider) == ["MAP-001", "REVIEW-001", "REDUCE-001", "REDUCE-001"]
+    expected = ["MAP-001", "REVIEW-001", "REDUCE-001", "REDUCE-001"]
+    if scope == "unselected_claim":
+        expected.insert(2, "EXPLAIN-001")
+    assert stages(provider) == expected
     assert result.insights[0].overview[0].text == GOOD_REASON
     assert result.insights[0].overview[0].basis_claim_ids == ["101:0"]
     initial = provider.wire_payloads[-2]["insights"][0]
     assert result.insights[0].headline == initial["headline"]
-    assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
+    assert result.meta.input_tokens == 11 * len(expected)
+    assert result.meta.output_tokens == 7 * len(expected)
 
 
 @pytest.mark.parametrize("group,field", REDUCE_FIELDS)

@@ -98,11 +98,11 @@ def test_semantic_prose_repair_keeps_null_quotes_and_freezes_original_bases(fiel
     before = source.model_dump_json()
     result = generate(provider, source)
 
-    assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REDUCE-001"]
+    assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "EXPLAIN-001", "REDUCE-001"]
     initial, repaired = provider.wire_payloads[:2]
     first = initial["assessments"]["CHIP_MAKER"]["finding101"]
     second = repaired["assessments"]["CHIP_MAKER"]["finding101"]
-    assert provider.schema_validity == [True, True, True, True]
+    assert provider.schema_validity == [True, True, True, True, True]
     assert set(repaired["assessments"]["CHIP_MAKER"]) == {"finding101"}
     assert first["sourceQuotes"] == second["sourceQuotes"] == {"reason": None, "condition": None}
     for axis in ("connection", "effect", "timing"):
