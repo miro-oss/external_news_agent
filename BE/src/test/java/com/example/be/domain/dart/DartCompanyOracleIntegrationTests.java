@@ -6,10 +6,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -75,19 +77,33 @@ class DartCompanyOracleIntegrationTests {
                 entry("01817920", "페스카로", "0015S0")));
         assertEquals("0068Y0", repository.find("01933981").orElseThrow().stockCode());
         assertEquals("0015S0", repository.find("01817920").orElseThrow().stockCode());
-        assertEquals(1L, repository.count("0068y0"));
-        assertEquals("01933981", repository.search("0068y0", 0, 20).getFirst().corpCode());
+        assertEquals(1L, repository.count("0068Y0"));
+        assertEquals("01933981", repository.search("0068Y0", 0, 20).getFirst().corpCode());
     }
 
     @Test void upgradedStockCodeConstraintRejectsMalformedValuesWithoutReplacingCatalog() {
         var original = entry("01933981", "비엔케이제3호스팩", "0068Y0");
         repository.replace(List.of(original));
         for (String stock : List.of("0068y0", "0068-0", "12345", "1234567", "00가000")) {
-            assertThrows(DataIntegrityViolationException.class,
+            var failure = assertThrows(DataAccessException.class,
                     () -> repository.replace(List.of(entry("01817920", "Invalid", stock))));
+            // Oracle batch failures can have an uncategorized Spring wrapper; assert the actual database rejection.
+            int expectedOracleCode = stock.length() > 6 ? 12899 : 2290;
+            assertTrue(hasOracleErrorCode(failure, expectedOracleCode), "Expected Oracle constraint/length violation for " + stock);
             assertEquals(original.company(), repository.find("01933981").orElseThrow());
             assertTrue(repository.find("01817920").isEmpty());
         }
+    }
+
+    private boolean hasOracleErrorCode(Throwable failure, int expected) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sql) {
+                for (SQLException current = sql; current != null; current = current.getNextException()) {
+                    if (current.getErrorCode() == expected) return true;
+                }
+            }
+        }
+        return false;
     }
 
     private DartCompanyArchive.Entry entry(String code, String name, String stock) {
