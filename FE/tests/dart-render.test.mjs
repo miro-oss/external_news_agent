@@ -122,11 +122,12 @@ test('multi-company panel uses the report snapshot and offers individual company
   } finally { client.clear() }
 })
 
-test('company picker shows optional selection, code, replacement search and disabled clear action', () => {
+test('company picker shows optional selection, stock code, replacement search and disabled clear action', () => {
   const html = renderToStaticMarkup(createElement(Picker, { value: company, disabled: true, onChange() {} }))
   assert.match(html, /선택사항/)
   assert.match(html, /연결할 다른 회사 검색/)
-  assert.match(html, /005930 · DART 00126380/)
+  assert.match(html, /<small>005930<\/small>/)
+  assert.doesNotMatch(html, /DART|00126380/)
   assert.match(html, /type="button"[^>]*disabled=""[^>]*aria-label="삼성전자 공시 회사 연결 해제"/)
   assert.match(html, /<input[^>]+disabled=""/)
 })

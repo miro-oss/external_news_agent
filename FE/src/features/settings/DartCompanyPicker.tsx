@@ -26,7 +26,7 @@ export function DartCompanyPicker({ value, onChange, disabled = false }: {
     <label htmlFor={`${id}-search`}>공시 회사 연결 <span className="dart-optional">선택사항</span></label>
     <p id={`${id}-hint`} className="hint">회사 한 곳을 연결하면 이후 실행별 리포트에 최근 12분기 실적과 공시를 표시합니다.</p>
     {value && <div className="dart-company-selection" role="status">
-      <span><strong>{value.corpName}</strong><small>{value.stockCode || '비상장'} · DART {value.corpCode}</small></span>
+      <span><strong>{value.corpName}</strong><small>{value.stockCode || '비상장'}</small></span>
       <button type="button" className="text-button" disabled={disabled} onClick={() => { onChange(null); input.current?.focus() }}
         aria-label={`${value.corpName} 공시 회사 연결 해제`}>연결 해제</button>
     </div>}
@@ -65,7 +65,7 @@ function DartCompanySearchResults({ query, page, selectedCode, disabled, onSelec
     <ul aria-label="공시 회사 검색 결과">{result.data.content.map(company => <li key={company.corpCode}>
       <button type="button" className="dart-company-result" disabled={disabled || result.isFetching}
         aria-pressed={selectedCode === company.corpCode} onClick={() => onSelect(company)}>
-        <span><strong>{company.corpName}</strong><small>{company.stockCode || '비상장'} · DART {company.corpCode}</small></span>
+        <span><strong>{company.corpName}</strong><small>{company.stockCode || '비상장'}</small></span>
         <span>{selectedCode === company.corpCode ? '선택됨' : '선택'}</span>
       </button>
     </li>)}</ul>
