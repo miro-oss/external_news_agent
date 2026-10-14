@@ -22,6 +22,7 @@ from app.llm.feedback_learning import (
 )
 from app.llm.prompt_data import escape_prompt_text, prompt_json
 from app.llm.report_insight_assessment import (
+    MAX_REVIEW_FINDINGS,
     RenderedAssessmentDiagnosticContext,
     ReportAssessmentConnectionRepairContext,
     ReportAssessmentDraftValidationError,
@@ -139,7 +140,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v52"
+PROMPT_VERSION = "report-insight.ko.v53"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -383,7 +384,7 @@ _ASSERTED_EVENTS = (
     (
         5,
         re.compile(
-            r"(?:착수|시작|개시|돌입|확대|공급|설치|건설)(?:했|됐|되었|하였|한|된)|"
+            r"(?:착수|시작|개시|돌입|확대|공급|설치|건설)(?:했|됐|되었|하였|한|된)|짓고\s*있|"
             r"\b(?:started|began|launched|expanded|supplied|installed|shipped|delivered)\b",
             re.IGNORECASE,
         ),
@@ -692,27 +693,105 @@ class ReportInsightService(ReportInsightLegacyService):
             def evaluate_map(index, subset):
                 schema = draft_schema(subset)
                 schema["description"] = f"reportInsightCall:MAP-{index + 1:03d}"
-                return self._call(
-                    pipeline,
-                    instruction=report_stage_instruction(request.audiences, "MAP"),
-                    prompt=draft_prompt(subset, reference_date=reference_date),
-                    schema=schema,
-                    validate=lambda response: assess(response, subset),
-                    stage="MAP",
-                ).output
+                failed_attempt = None
 
-            drafts = run_report_maps(
+                def validate_map(response):
+                    nonlocal failed_attempt
+                    try:
+                        return assess(response, subset)
+                    except ReportAssessmentValidationError as error:
+                        failed_attempt = response, error
+                        raise
+
+                try:
+                    draft = self._call(
+                        pipeline,
+                        instruction=report_stage_instruction(request.audiences, "MAP"),
+                        prompt=draft_prompt(subset, reference_date=reference_date),
+                        schema=schema,
+                        validate=validate_map,
+                        stage="MAP",
+                    ).output
+                except StructuredOutputExhaustedError as error:
+                    # A repair can fail before reaching assess. Never combine
+                    # that failure with a stale earlier native snapshot.
+                    if failed_attempt is None or error.__cause__ is not failed_attempt[1]:
+                        raise
+                    response, public_error = failed_attempt
+                    failed_ids = public_error.failed_finding_ids
+                    known_ids = {finding.id for finding in subset.findings}
+                    if (
+                        type(failed_ids) is not tuple
+                        or not failed_ids
+                        or any(type(identifier) is not int for identifier in failed_ids)
+                        or len(set(failed_ids)) != len(failed_ids)
+                        or not set(failed_ids) <= known_ids
+                    ):
+                        raise
+                    try:
+                        draft = validate_draft(response, subset)
+                    except ValueError:
+                        raise error from public_error
+                    logger.info(
+                        "Report insight stage=MAP-%03d outcome=AWAITING_REVIEW findingCount=%d",
+                        index + 1,
+                        len(failed_ids),
+                    )
+                    return draft, failed_ids, error
+                return draft, (), None
+
+            map_results = run_report_maps(
                 subsets,
                 evaluate_map,
                 concurrency=pipeline.map_concurrency,
                 cancel_pending=pipeline.cancel_pending_calls,
             )
-            validated, _ = validated_merge(*drafts)
-            review_ids = set(select_review(request, validated))
+
+            def evaluate_review(subset, review_index):
+                schema = draft_schema(subset)
+                schema["description"] = f"reportInsightCall:REVIEW-{review_index:03d}"
+                with pipeline.optional_review_deadline():
+                    return self._call(
+                        pipeline,
+                        instruction=report_stage_instruction(request.audiences, "REVIEW"),
+                        prompt=review_prompt(subset, reference_date=reference_date),
+                        schema=schema,
+                        validate=lambda response: assess(response, subset),
+                        stage="REVIEW",
+                    ).output
+
+            drafts = [draft for draft, _, _ in map_results]
+            required_ids = {identifier for _, failed, _ in map_results for identifier in failed}
+            required_findings = [
+                finding for finding in request.findings if finding.id in required_ids
+            ]
+            reviews = []
+            for offset in range(0, len(required_findings), MAX_ASSESSMENT_BATCH):
+                if not pipeline.can_start_optional_review():
+                    logger.info(
+                        "Report insight stage=REVIEW-%03d outcome=SKIPPED_TIME_BUDGET "
+                        "required=True fallback=NONE findingCount=%d",
+                        len(reviews) + 1,
+                        len(required_findings) - offset,
+                    )
+                    raise next(error for _, failed, error in map_results if failed)
+                subset = request.model_copy(
+                    update={"findings": required_findings[offset : offset + MAX_ASSESSMENT_BATCH]}
+                )
+                # Mandatory review uses fresh source/schema and must succeed:
+                # these MAP rows have never passed the public grounding guards.
+                reviews.append(evaluate_review(subset, len(reviews) + 1))
+            validated, _ = validated_merge(*drafts, *reviews)
+            review_ids = [
+                identifier
+                for identifier in select_review(request, validated)
+                if identifier not in required_ids
+            ][: max(0, MAX_REVIEW_FINDINGS - len(required_ids))]
             review_findings = [finding for finding in request.findings if finding.id in review_ids]
+            next_review_index = len(reviews) + 1
             reviews = []
             for review_index, offset in enumerate(
-                range(0, len(review_findings), MAX_ASSESSMENT_BATCH), start=1
+                range(0, len(review_findings), MAX_ASSESSMENT_BATCH), start=next_review_index
             ):
                 if not pipeline.can_start_optional_review():
                     logger.info(
@@ -725,18 +804,8 @@ class ReportInsightService(ReportInsightLegacyService):
                 subset = request.model_copy(
                     update={"findings": review_findings[offset : offset + MAX_ASSESSMENT_BATCH]}
                 )
-                schema = draft_schema(subset)
-                schema["description"] = f"reportInsightCall:REVIEW-{review_index:03d}"
                 try:
-                    with pipeline.optional_review_deadline():
-                        review = self._call(
-                            pipeline,
-                            instruction=report_stage_instruction(request.audiences, "REVIEW"),
-                            prompt=review_prompt(subset, reference_date=reference_date),
-                            schema=schema,
-                            validate=lambda response, subset=subset: assess(response, subset),
-                            stage="REVIEW",
-                        ).output
+                    review = evaluate_review(subset, review_index)
                 except StructuredOutputExhaustedError:
                     # This independent refinement failed. Keep the original
                     # validated MAP for its IDs; never accept its invalid draft.

@@ -82,7 +82,7 @@ def test_partial_repair_gets_both_causes_and_full_validation_still_gates_accepta
     def hook(stage, occurrence, _, value):
         for record in value["assessments"]["CHIP_MAKER"].values():
             record["reason"] = reasons[record["findingId"]]
-        if stage == "MAP-001":
+        if stage == "MAP-001" or (retained_defect == "public" and stage.startswith("REVIEW")):
             item = value["assessments"]["CHIP_MAKER"]["finding101"]
             if occurrence == 1:
                 item["reason"] = "제공된 claim이 없다. 9999년의 업무 연결 조건을 검토해야 한다."
@@ -106,11 +106,16 @@ def test_partial_repair_gets_both_causes_and_full_validation_still_gates_accepta
         with pytest.raises(AgentError) as caught:
             generate(provider, source)
         assert caught.value.code == "SCHEMA_VIOLATION"
-        assert caught.value.details["usage"]["inputTokens"] == 22
-        assert caught.value.details["usage"]["outputTokens"] == 14
+        calls = 4 if retained_defect == "public" else 2
+        assert caught.value.details["usage"]["inputTokens"] == 11 * calls
+        assert caught.value.details["usage"]["outputTokens"] == 7 * calls
 
-    assert stages(provider) == ["MAP-001", "MAP-001"]
-    assert provider.schema_validity == [True, True]
+    expected = ["MAP-001", "MAP-001"]
+    if retained_defect == "public":
+        expected += ["REVIEW-001", "REVIEW-001"]
+        assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
+    assert stages(provider) == expected
+    assert provider.schema_validity == [True] * len(expected)
     repair = provider.calls[1]
     assert [finding["id"] for finding in framed(repair["prompt"])["findings"]] == [101]
     actions = repair["prompt"].split("<validation-error>", 1)[1].split("</validation-error>", 1)[0]

@@ -6,17 +6,20 @@ from dataclasses import replace
 
 import pytest
 from report_insight_schema_assertions import assert_same_native_constraints
-from test_report_insight_assessment import framed, response
+from test_report_insight_assessment import framed, payload, request, response
 from test_report_insight_connection_evidence_dependency import full_validate
 from test_report_insight_mixed_connection_repair import corrected, mixed_case
 from test_report_insight_preserved_decision_repair import repair_payload, wire_validator
 from test_report_insight_v4_pipeline import V4Provider, stages
 
 from app.core.config import Settings
-from app.core.errors import AgentError
+from app.core.errors import AgentError, OutputValidationError
 from app.llm import report_insight_service as service
 from app.llm.report_insight_assessment import draft_prompt, draft_schema, review_prompt
-from app.llm.report_insight_instructions import ASSESSMENT_REASON_RULE
+from app.llm.report_insight_instructions import (
+    ASSESSMENT_FINAL_BASIS_RULE,
+    ASSESSMENT_REASON_RULE,
+)
 
 SOURCE = "HBM4 메모리 가격은 내년에 상승할 것으로 전망된다."
 GOOD_REASON = (
@@ -152,6 +155,128 @@ def test_reason_completion_rule_follows_repair_data_without_changing_its_sources
     ]
 
 
+def recorded_retry_case(finding_id):
+    # Only the three selected source sentences and failed prose are retained.
+    # Captured files and full articles are not required at test runtime.
+    if finding_id == 8290:
+        texts = {
+            2: "일본 요코하마에는 350억엔을 들여 첨단 패키징 연구 거점(APL)을 짓고 있다.",
+            3: "베트남 타이응우옌에는 15억달러를 들여 칩 출하 전 검사와 패키징을 맡는 "
+            "후공정 거점을 추진하고 있다.",
+            4: "미국 텍사스주 테일러에는 미국 반도체법 보조금과 연계한 첨단 파운드리 "
+            "생산 라인을 짓고 있다.",
+        }
+        selected = (4, 2, 3)
+        bad = (
+            "원문은 텍사스 테일러의 미국 반도체법 보조금 연계 파운드리 라인(8290:4), "
+            "요코하마의 350억엔 규모 APL(8290:2), 타이응우옌의 15억달러 후공정 "
+            "추진(8290:3)을 보도해 프로젝트의 자원·일정 변경 가능성을 시사한다. "
+            "다만 기사에 투자주체와 구체 일정·완료 상태가 명시되지 않아 영향 범위와 "
+            "책임 주체는불"
+        )
+        initial = (
+            "삼성전자의 일본·베트남·미국 등 다지역 연구·생산 거점 구축은 메모리 공급 "
+            "부족 대응을 위한 공급망·생산 역량 확충으로 투자·생산(공정) 측면의 수급 "
+            "제약 완화와 설비투자 변경과 직접 연관된다."
+        )
+        clean = (
+            "파운드리 생산 라인과 패키징 연구·후공정 거점 구축은 수급 제약 판단과 "
+            "연결되며, 거점별 투자 규모와 추진 단계를 구분해 평가할 근거다."
+        )
+        work, urgency = "SUPPLY_DEMAND_CONSTRAINT", "SCHEDULED_PREPARATION"
+    else:
+        assert finding_id == 8286
+        texts = {8: "이 같은 전망을 토대로 미즈호는 주요 업체의 목표주가를 잇달아 상향 조정했다."}
+        selected = (8, 8, 8)
+        bad = (
+            "미즈호의 분석을 근거로 주요 업체들의 목표주가가 상향 조정된 사실이 원문에 "
+            "확인되어, GUIDANCE 관점에서 관련 기업의 투자전망·분석을 즉시 재검토해야 "
+            "할 근거로 판단된다. 원문은 구체적 매매 권고나 목표가격 수치를 제시하지 않는다."
+        )
+        initial = bad
+        clean = (
+            "미즈호가 주요 업체의 목표주가를 상향 조정한 보도는 증권사의 기업 전망이 "
+            "달라졌음을 보여주므로 투자 전망 판단에 반영할 근거다."
+        )
+        work, urgency = "GUIDANCE", "IMMEDIATE"
+    source = request(ids=(finding_id,), audiences=("MARKET_INVESTOR",))
+    finding = source.findings[0]
+    claim, sentence = finding.claims[0], finding.sentences[0]
+    finding.claims = [
+        claim.model_copy(
+            update={"id": f"{finding_id}:{index}", "text": text, "evidence_sentence_ids": [index]}
+        )
+        for index, text in texts.items()
+    ]
+    finding.sentences = [
+        sentence.model_copy(update={"index": index, "text": text}) for index, text in texts.items()
+    ]
+    value = payload(source)
+    entry = value["assessments"]["MARKET_INVESTOR"][f"finding{finding_id}"]
+    entry.update(work=work, impactScope="PROJECT_CHANGE", urgencyState=urgency, reason=initial)
+    for field, index in zip(
+        ("relationBasis", "impactBasis", "urgencyBasis"), selected, strict=True
+    ):
+        entry[field] = {"claimId": f"{finding_id}:{index}", "quote": texts[index]}
+    return source, value, bad, clean
+
+
+@pytest.mark.parametrize("prompt", [draft_prompt, review_prompt], ids=["MAP", "REVIEW"])
+@pytest.mark.parametrize("finding_id", [8290, 8286], ids=["internal-id", "policy-disclaimer"])
+def test_recorded_retry_requires_source_reason_and_preserves_decisions(prompt, finding_id):
+    source, value, bad, clean = recorded_retry_case(finding_id)
+    before = source.model_dump_json(), deepcopy(value)
+    raw = response(value, source)
+    with pytest.raises(service.ReportAssessmentValidationError) as caught:
+        full_validate(raw, source)
+    assert set(caught.value.native_prose_repairs) == {finding_id}
+    assert not caught.value.native_connection_repairs
+    repair = object.__new__(service.ReportInsightService)._repair_call(
+        prompt(source),
+        draft_schema(source),
+        raw.text,
+        caught.value,
+        lambda candidate: full_validate(candidate, source),
+    )
+    tail = repair.prompt.split("</validation-error>", 1)[1]
+    assert ASSESSMENT_FINAL_BASIS_RULE in tail
+    assert "출력 직전 수정 가능한 reason·condition을 확인한다" in tail
+    assert "괄호 인용·근거 목록 형태로도 자연어에 복사하지 않는다" in tail
+    assert "진단에 지목된 이름이나 표현이 없다는 안내로 대체하지 않는다" in tail
+    assert "매매 권고·목표가격을 제시하지 않았다는 면책" in tail
+    (finding,) = framed(repair.prompt)["findings"]
+    assert finding["proseRepair"]["editableFields"] == ["reason"]
+    assert finding["sentences"] == [
+        {"index": sentence.index, "text": sentence.text}
+        for sentence in source.findings[0].sentences
+    ]
+
+    replacement = deepcopy(value)
+    entry = replacement["assessments"]["MARKET_INVESTOR"][f"finding{finding_id}"]
+    original_decision = json.loads(raw.text)["assessments"]["MARKET_INVESTOR"][
+        f"finding{finding_id}"
+    ]["decision"]
+    for reason in (bad, clean):
+        entry["reason"] = reason
+        fixed = repair_payload(repair, source, replacement)
+        wire_validator(repair).validate(fixed)
+        assert (
+            fixed["assessments"]["MARKET_INVESTOR"][f"finding{finding_id}"]["decision"]
+            == original_decision
+        )
+        candidate = replace(raw, text=json.dumps(fixed, ensure_ascii=False))
+        if reason == bad:
+            with pytest.raises(OutputValidationError) as failed:
+                repair.validate(candidate)
+            expected = "unsupported_number" if finding_id == 8290 else "report_expression_policy"
+            assert expected in {issue.rule for issue in failed.value.validation_issues}
+            assert json.loads(candidate.text) == fixed
+        else:
+            accepted = repair.validate(candidate)
+            assert accepted.evidence["MARKET_INVESTOR"][finding_id].reason == clean
+    assert before == (source.model_dump_json(), value)
+
+
 @pytest.mark.parametrize("prompt", [draft_prompt, review_prompt], ids=["MAP", "REVIEW"])
 def test_unlocalized_native_full_repair_still_reapplies_reason_completion_rule(prompt):
     source, value = reason_case()
@@ -246,9 +371,7 @@ def test_pipeline_keeps_one_retry_and_observed_usage_when_reason_remains_invalid
                 )
             return result
         proposed = deepcopy(
-            value
-            if stage == "MAP-001" and occurrence == 1
-            else corrected_reason(value, defect if stage == "MAP-001" else None)
+            value if stage == "MAP-001" and occurrence == 1 else corrected_reason(value, defect)
         )
         wanted = {f"finding{finding['id']}" for finding in data["findings"]}
         proposed["assessments"]["IT_INFRA"] = {
@@ -269,9 +392,13 @@ def test_pipeline_keeps_one_retry_and_observed_usage_when_reason_remains_invalid
         with pytest.raises(AgentError) as caught:
             engine.generate(source)
         assert caught.value.code == "SCHEMA_VIOLATION"
-        assert stages(provider) == ["MAP-001", "MAP-001"]
-        assert caught.value.details["usage"]["inputTokens"] == 22
-        assert caught.value.details["usage"]["outputTokens"] == 14
+        expected = ["MAP-001", "MAP-001"]
+        if defect in {"internal_id", "unselected_company"}:
+            expected += ["REVIEW-001", "REVIEW-001"]
+            assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
+        assert stages(provider) == expected
+        assert caught.value.details["usage"]["inputTokens"] == 11 * len(expected)
+        assert caught.value.details["usage"]["outputTokens"] == 7 * len(expected)
     initial, repaired = provider.wire_payloads[:2]
     assert set(repaired["assessments"]["IT_INFRA"]) == {"finding101"}
     assert (

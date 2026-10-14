@@ -209,7 +209,7 @@ def test_existing_grounding_and_decision_guards_still_reject_invalid_map(defect)
     source = request(ids=(101, 102))
 
     def hook(stage, occurrence, data, wire):
-        if not stage.startswith("MAP"):
+        if not stage.startswith(("MAP", "REVIEW")):
             return wire
         record = wire["assessments"]["CHIP_MAKER"]["finding101"]
         if defect == "company":
@@ -228,5 +228,8 @@ def test_existing_grounding_and_decision_guards_still_reject_invalid_map(defect)
     provider = V4Provider(source, wire_hook=hook, validate_wire=False)
     with pytest.raises(StructuredOutputExhaustedError):
         generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
+    expected = ["MAP-001", "MAP-001"]
+    if defect == "company":
+        expected += ["REVIEW-001", "REVIEW-001"]
+    assert stages(provider) == expected
     assert all("sourceQuotes" in json.dumps(wire) for wire in provider.wire_payloads)

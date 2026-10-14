@@ -52,13 +52,13 @@ class SafeProvider:
 
 
 def test_only_scoped_openai_or_explicit_bound_and_safe_injection_can_parallelize():
-    assert ReportInsightPipelineProvider(config(), "FREE").map_concurrency == 2
+    assert ReportInsightPipelineProvider(config(), "FREE").map_concurrency == 3
     assert ReportInsightPipelineProvider(config(), "PAID").map_concurrency == 1
     assert ReportInsightPipelineProvider(config(), "FREE", object()).map_concurrency == 1
     safe = SafeProvider(lambda _: answer())
     # Evaluation injects OpenAI into a stored PAID case; explicit capability is
     # about the real delegate, not the original request's routing label.
-    assert ReportInsightPipelineProvider(config(), "PAID", safe).map_concurrency == 2
+    assert ReportInsightPipelineProvider(config(), "PAID", safe).map_concurrency == 3
     limited = config(AGENT_PROVIDER_CONCURRENCY=2)
     assert ReportInsightPipelineProvider(limited, "FREE", safe).map_concurrency == 1
     safe.report_insight_max_concurrency = 1
@@ -66,9 +66,9 @@ def test_only_scoped_openai_or_explicit_bound_and_safe_injection_can_parallelize
 
 
 @pytest.mark.parametrize(
-    "slots,expected", [(1, 1), (2, 1), (3, 1), (4, 2), (5, 2), (6, 3), (10, 3)]
+    "slots,expected", [(1, 1), (2, 1), (3, 2), (4, 3), (5, 3), (6, 3), (10, 3)]
 )
-def test_report_uses_at_most_half_the_shared_slots_with_a_three_worker_ceiling(slots, expected):
+def test_report_reserves_one_shared_slot_with_a_three_worker_ceiling(slots, expected):
     settings = config(AGENT_PROVIDER_CONCURRENCY=slots)
     assert ReportInsightPipelineProvider(settings, "FREE").map_concurrency == expected
     safe = SafeProvider(lambda _: answer())
@@ -108,7 +108,7 @@ def test_parallel_success_sums_all_usage_once_and_keeps_request_deadline():
 
 
 def test_first_failure_stops_repair_but_drains_issued_success_and_known_failure_usage():
-    gate = Barrier(3, timeout=3)
+    gate = Barrier(4, timeout=3)
     release = Event()
     usage = {"inputTokens": 20, "outputTokens": 7, "costUsd": 0.02, "credits": 0}
     original = AgentError(503, "PROVIDER_UNAVAILABLE", "offline", {"usage": usage})
@@ -122,8 +122,8 @@ def test_first_failure_stops_repair_but_drains_issued_success_and_known_failure_
 
     provider = SafeProvider(run)
     pipeline = ReportInsightPipelineProvider(config(), "FREE", provider)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        slow = pool.submit(call, pipeline, "slow")
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        slow = [pool.submit(call, pipeline, name) for name in ("slow-a", "slow-b")]
         failure = pool.submit(call, pipeline, "fail")
         gate.wait()
         with pytest.raises(AgentError) as caught:
@@ -135,14 +135,15 @@ def test_first_failure_stops_repair_but_drains_issued_success_and_known_failure_
             assert cancelled.value.details["requestNotStarted"]
         finally:
             release.set()
-        slow.result(timeout=3)
-    assert sorted(provider.calls) == ["fail", "slow"]
+        for future in slow:
+            future.result(timeout=3)
+    assert sorted(provider.calls) == ["fail", "slow-a", "slow-b"]
     assert provider.cancel_count == 1
-    assert pipeline.usage == ProviderUsage(30, 12, Decimal(".03"), Decimal(0))
+    assert pipeline.usage == ProviderUsage(40, 17, Decimal(".04"), Decimal(0))
     pipeline.annotate_failure(original, "offline-version")
-    assert original.details["usage"]["inputTokens"] == 30
+    assert original.details["usage"]["inputTokens"] == 40
     assert original.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
-    assert pipeline.calls == 1
+    assert pipeline.calls == 2
     assert pipeline._reserved_credits == 0
 
 
@@ -230,10 +231,12 @@ def test_unknown_exception_closes_admission_without_inventing_usage():
 
 def test_two_reports_share_four_guard_slots_without_rejecting_their_map_batches(monkeypatch):
     gate = Barrier(4, timeout=3)
+    first_ready = Event()
     lock = Lock()
     active = {"first": 0, "second": 0}
     peaks = {"first": 0, "second": 0, "total": 0}
     issued, closed = [], []
+    opening_wave = []
 
     class Transport:
         def __init__(self, *args, **kwargs):
@@ -247,6 +250,10 @@ def test_two_reports_share_four_guard_slots_without_rejecting_their_map_batches(
                 active[report] += 1
                 peaks[report] = max(peaks[report], active[report])
                 peaks["total"] = max(peaks["total"], sum(active.values()))
+                if report == "first" and active[report] == 3:
+                    first_ready.set()
+                if len(issued) == 4:
+                    opening_wave.append(dict(active))
             try:
                 gate.wait()
                 return answer()
@@ -275,7 +282,7 @@ def test_two_reports_share_four_guard_slots_without_rejecting_their_map_batches(
         ReportInsightPipelineProvider(config(OPENAI_API_KEY="offline-test-only"), "FREE")
         for _ in range(2)
     ]
-    assert all(pipeline.map_concurrency == 2 for pipeline in pipelines)
+    assert all(pipeline.map_concurrency == 3 for pipeline in pipelines)
 
     def report_maps(pipeline, report):
         def evaluate(index, item):
@@ -290,13 +297,18 @@ def test_two_reports_share_four_guard_slots_without_rejecting_their_map_batches(
         )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [
-            pool.submit(report_maps, pipeline, name)
-            for pipeline, name in zip(pipelines, ("first", "second"), strict=True)
-        ]
+        first = pool.submit(report_maps, pipelines[0], "first")
+        # The first report fills only three slots. The second can issue into
+        # the remaining slot before the first report releases any calls.
+        assert first_ready.wait(3)
+        second = pool.submit(report_maps, pipelines[1], "second")
+        futures = [first, second]
         assert [future.result(timeout=5) for future in futures] == [list(range(4))] * 2
 
-    assert peaks == {"first": 2, "second": 2, "total": 4}
+    assert opening_wave == [{"first": 3, "second": 1}]
+    assert peaks["first"] == 3
+    assert 1 <= peaks["second"] <= 3
+    assert peaks["total"] == 4
     assert len(issued) == len(set(issued)) == len(closed) == 8
     assert guard.breaker.state is CircuitState.CLOSED
     for pipeline in pipelines:

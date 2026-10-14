@@ -10,6 +10,15 @@ S_AND_P_INDEX = re.compile(
     r"(?P<number>[0-9]+)(?![A-Za-z0-9_]|[.,][0-9])",
     re.IGNORECASE,
 )
+# Unlike the existing S&P spacing alias, only the complete attached spelling
+# is recognized here. A source number/quantity alone cannot prove an index.
+NASDAQ_INDEX = re.compile(
+    r"(?<![가-힣A-Za-z0-9_])(?:나스닥|NASDAQ)(?P<number>[0-9]+)"
+    r"(?![A-Za-z0-9_]|[.,][0-9])"
+    r"(?=$|[^가-힣]|(?:지수)?(?:은|는|이|가|의|와|과|에|도|을|를)(?=$|[\s,.!?;])|"
+    r"지수(?=$|[\s,.!?;]))",
+    re.IGNORECASE,
+)
 
 
 def canonical_index_name(value: str) -> str:

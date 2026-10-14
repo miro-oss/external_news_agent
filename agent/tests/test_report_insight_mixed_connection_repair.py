@@ -366,7 +366,7 @@ def test_partial_mixed_repair_preserves_healthy_neighbor_and_has_one_retry(retai
             return result
         proposed = deepcopy(value if stage == "MAP-001" and occurrence == 1 else corrected(value))
         entry = proposed["assessments"]["IT_INFRA"]["finding101"]
-        if occurrence > 1 and retained == "reason":
+        if retained == "reason" and (occurrence > 1 or stage.startswith("REVIEW")):
             entry["reason"] = value["assessments"]["IT_INFRA"]["finding101"]["reason"]
         elif occurrence > 1 and retained == "effect":
             entry.update(impactScope="PROJECT_CHANGE", impactBasis=deepcopy(entry["relationBasis"]))
@@ -408,7 +408,11 @@ def test_partial_mixed_repair_preserves_healthy_neighbor_and_has_one_retry(retai
         with pytest.raises(AgentError) as caught:
             generate(provider, source)
         assert caught.value.code == "SCHEMA_VIOLATION"
-        assert caught.value.details["usage"]["inputTokens"] == 22
-        assert stages(provider) == ["MAP-001", "MAP-001"]
+        expected = ["MAP-001", "MAP-001"]
+        if retained == "reason":
+            expected += ["REVIEW-001", "REVIEW-001"]
+            assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
+        assert caught.value.details["usage"]["inputTokens"] == 11 * len(expected)
+        assert stages(provider) == expected
     assert [finding["id"] for finding in framed(provider.calls[1]["prompt"])["findings"]] == [101]
     assert set(provider.wire_payloads[1]["assessments"]["IT_INFRA"]) == {"finding101"}

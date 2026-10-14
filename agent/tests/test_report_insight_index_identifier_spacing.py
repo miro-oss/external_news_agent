@@ -14,7 +14,7 @@ from app.llm.report_insight_guard import (
     _source_identifier_mismatches,
     report_prose_mismatches,
 )
-from app.llm.report_insight_index_identifiers import S_AND_P_INDEX
+from app.llm.report_insight_index_identifiers import NASDAQ_INDEX, S_AND_P_INDEX
 
 
 def validate(value, source):
@@ -244,3 +244,142 @@ def test_index_number_recheck_never_removes_an_independent_graph_quantity_confli
         value, source, [*factual_mismatches(value, source), conflict], modality_reason=None
     )
     assert conflict in remaining
+
+
+NASDAQ_CONDITION = (
+    "나스닥100의 약세와 국제 유가·미국 10년물 금리 상승이 동시에 관찰되어 시장 전반의 "
+    "위축 신호로 작용한다는 전제가 성립할 때"
+)
+
+
+def nasdaq_duration_case():
+    # Minimal selected claims/raw sentences from report 2005, finding 8303.
+    # Keep the observed numbers; no captured files are read at test runtime.
+    sentences = {
+        0: "[초이스경제 조미정 기자] 12일(미국시간) 뉴욕증권거래소에 따르면 이날 "
+        "뉴욕증시에서 나스닥100 지수는 3만664.70으로 218.45포인트(0.71%) 하락했다.",
+        1: "이날 나스닥100 지수는 정규장 내내 약세 흐름을 보였다.",
+        2: "이날엔 중동 불안에 따른 국제 유가 및 미국 10년물 국채금리 상승 속에 "
+        "뉴욕증시 전반이 위축됐다.",
+        11: '미국 경제방송 씨엔비씨는 "이날 미국증시 마감 5분전 11월 인도분 '
+        "미국서부텍사스산원유(WTI) 가격이 배럴당 93.30 달러로 1.58%나 오르고 이 시각 "
+        "벤치마크 금리인 10년물 미국 국채금리도 5.242%로 직전 거래일의 5.233% 대비 "
+        '높아지면서 뉴욕증시 전반을 불안케 했다"고 전했다.',
+    }
+    source = request(ids=(8303,), audiences=("MARKET_INVESTOR",))
+    finding = source.findings[0]
+    claim, sentence = finding.claims[0], finding.sentences[0]
+    finding.claims = [
+        claim.model_copy(
+            update={
+                "id": "8303:0",
+                "text": "12일 나스닥100이 0.71% 하락하며 약세 마감했다.",
+                "evidence_sentence_ids": [0, 1],
+            }
+        ),
+        claim.model_copy(
+            update={
+                "id": "8303:4",
+                "text": "국제 유가와 미국 10년물 금리 상승이 시장을 압박했다.",
+                "evidence_sentence_ids": [2, 11],
+            }
+        ),
+    ]
+    finding.sentences = [
+        sentence.model_copy(update={"index": index, "text": text})
+        for index, text in sentences.items()
+    ]
+    return source
+
+
+def nasdaq_errors(source, prose=NASDAQ_CONDITION, refs=("8303:0", "8303:4")):
+    claims, evidence = service._source_context(source)
+    return service._assessment_field_errors(
+        prose,
+        list(refs),
+        evidence,
+        claims,
+        source,
+        audience="MARKET_INVESTOR",
+        conditional=True,
+    )
+
+
+def test_captured_nasdaq_index_and_treasury_maturity_keep_distinct_numeric_roles():
+    source = nasdaq_duration_case()
+    before = source.model_dump_json()
+    assert nasdaq_errors(source) == []
+    assert nasdaq_errors(source, NASDAQ_CONDITION + " 미국 국채금리는 5.242%다.") == []
+    assert source.model_dump_json() == before
+
+
+@pytest.mark.parametrize("maturity", ["20", "100", "1000"])
+def test_index_suffix_cannot_supply_another_treasury_maturity(maturity):
+    assert nasdaq_errors(
+        nasdaq_duration_case(), NASDAQ_CONDITION.replace("10년물", maturity + "년물")
+    )
+
+
+@pytest.mark.parametrize("index", ["나스닥10", "나스닥101", "나스닥1000", "S&P100", "S&P500"])
+def test_selected_maturity_or_other_index_cannot_supply_a_numbered_index(index):
+    errors = nasdaq_errors(nasdaq_duration_case(), NASDAQ_CONDITION.replace("나스닥100", index))
+    assert any("source_binding" in error.fact_repair_kinds for error in errors)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        " 미국 국채금리는 100%다.",
+        " 미국 국채금리는 5.243%다.",
+        " 나스닥100은 10% 상승했다.",
+        " WTI 가격은 100달러다.",
+        " WTI 가격은 93.31달러다.",
+        " 삼성전자는 서버 100개를 공급한다.",
+    ],
+)
+def test_index_number_comparison_keeps_other_rates_amounts_and_owners(extra):
+    assert nasdaq_errors(nasdaq_duration_case(), NASDAQ_CONDITION + extra)
+
+
+@pytest.mark.parametrize("refs", [("8303:0",), ("8303:4",)])
+def test_nasdaq_and_duration_each_require_their_selected_raw_source(refs):
+    assert nasdaq_errors(nasdaq_duration_case(), refs=refs)
+
+
+@pytest.mark.parametrize("index", ["나스닥100", "NASDAQ100"])
+def test_numbered_nasdaq_identifier_requires_the_whole_name_not_a_quantity(index):
+    validate(index + " 지수 흐름을 확인한다.", index + " 지수 흐름이 관찰됐다.")
+    for source in ("100억원 규모다.", "S&P100 지수가 관찰됐다.", "서버 100개를 구매했다."):
+        assert _source_identifier_mismatches(index, source)
+        with pytest.raises(ValueError):
+            validate(index + " 지수 흐름을 확인한다.", source)
+
+
+@pytest.mark.parametrize(
+    "index", ["X나스닥100", "나스닥100X", "나스닥100_수정", "나스닥100.0", "나스닥100억원"]
+)
+def test_nasdaq_identifier_does_not_mask_an_embedded_prefix_or_currency(index):
+    assert NASDAQ_INDEX.search(index) is None
+    assert _source_identifier_mismatches("나스닥100", index)
+
+
+@pytest.mark.parametrize("scope", ["claim_summary", "unselected_claim", "title"])
+def test_nasdaq_identifier_cannot_be_borrowed_outside_selected_raw(scope):
+    source = request(ids=(101,), audiences=("MARKET_INVESTOR",), text="금리는 10%로 관찰됐다.")
+    finding = source.findings[0]
+    index_source = "나스닥100의 약세가 관찰됐다."
+    if scope == "claim_summary":
+        finding.claims[0].text += " " + index_source
+    elif scope == "title":
+        finding.article_title = index_source
+    else:
+        finding.claims.append(
+            finding.claims[0].model_copy(
+                update={"id": "101:1", "text": index_source, "evidence_sentence_ids": [1]}
+            )
+        )
+        finding.sentences.append(
+            finding.sentences[0].model_copy(update={"index": 1, "text": index_source})
+        )
+    errors = nasdaq_errors(source, "나스닥100의 약세는 투자 전망의 배경이다.", ("101:0",))
+    assert any("source_binding" in error.fact_repair_kinds for error in errors)

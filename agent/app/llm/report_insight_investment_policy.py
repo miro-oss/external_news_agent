@@ -10,6 +10,7 @@ import re
 import unicodedata
 
 from app.core.evidence import _CURRENCY_AMOUNT, _PREFIX_CURRENCY_AMOUNT, _companies
+from app.llm.report_insight_guard import _STATE_QUOTATION, _asserted_state_alias
 
 _TRADE = re.compile(r"매수|매도")
 _TARGET_NAME = re.compile(r"목표\s*(?:주가|가격)|주가\s*목표|목표가")
@@ -20,10 +21,25 @@ _BARE_TARGET_PRICE = re.compile(
     r"상향|하향|인상|인하|조정|변경|산정|설정|추천|제시|전망|높|낮)"
 )
 _TARGET_PARTICLE = r"(?:를|는|의|을|은|가|이)?\s*"
+_PRICE_UNIT_END = (
+    r"(?=$|[^가-힣]|(?:으로|로|을|를|의|은|는|이|가|에서|까지)(?=$|[^가-힣])|"
+    r"(?:이다|입니다|이고|이며|이라는|이라고|이었다|이면|이지만)(?=$|[^가-힣])|"
+    r"인(?=\s*(?:가격|금액|목표가))|"
+    r"(?:대|선|쯤|짜리)(?:이다|입니다|이고|으로|로|의|은|는|이|가)?(?=$|[^가-힣]))"
+)
 _PRICE_AMOUNT = re.compile(
     r"(?:[₩$¥€]\s*[0-9][0-9,.]*|"
-    r"(?:[0-9][0-9,.]*\s*(?:조|억|천|백|만)?|[영일이삼사오육칠팔구십백천만억조]+)"
-    r"\s*(?:원|달러|엔|유로|%|퍼센트))"
+    r"(?:[0-9][0-9,.]*\s*(?:조|억|천|백|만)?|(?<![가-힣])[영일이삼사오육칠팔구십백천만억조]+)"
+    r"\s*(?:(?:원|달러|엔|유로|퍼센트)" + _PRICE_UNIT_END + r"|%))"
+)
+_TARGET_MONEY_VALUE = re.compile(
+    _TARGET_PARTICLE
+    + r"(?::\s*)?(?:주당\s*)?(?:약\s*)?(?:"
+    + _PRICE_AMOUNT.pattern
+    + "|"
+    + _PREFIX_CURRENCY_AMOUNT.pattern
+    + ")",
+    re.IGNORECASE,
 )
 _PRICE_BEFORE_TARGET = re.compile(_PRICE_AMOUNT.pattern + r"(?:으로|로|인)?\s*$")
 _AMOUNT_PROPOSAL = re.compile(
@@ -46,9 +62,31 @@ _TARGET_COMPLETED_CHANGE = re.compile(
 _TARGET_CHANGE_REPORT = re.compile(
     _TARGET_PARTICLE + r"(?:(?:(?:상향|하향|인상|인하)\s*)?(?:조정|변경)|"
     r"상향|하향|인상|인하|산정\s*근거\s*변경)"
-    r"(?:으로\s*이어진)?\s*(?:보도|기사|사실|문장|관찰|기록)"
+    r"(?:(?:된|한)|으로\s*이어진)?\s*(?:보도|기사|사실|문장|관찰|기록)"
+)
+# The selected source authenticates the completed change. Output prose only
+# needs to name that change; its analytical noun/verb is not an advice signal.
+_TARGET_CHANGE_MENTION = re.compile(
+    _TARGET_PARTICLE + r"(?:(?:상향|하향|인상|인하)(?:\s*조정)?|조정|변경|산정\s*근거\s*변경)"
+    r"(?:된|한)?"
+)
+_TARGET_DIRECT_PROPOSAL = re.compile(
+    r"(?:제시|설정|산정)\s*(?:한다|합니다|했다|했으며|하겠다)|"
+    r"(?:상향|하향|인상|인하|조정|변경)(?:\s*조정)?\s*(?:한다|합니다|하겠다)"
 )
 _TARGET_CHANGE_DENIAL = re.compile(r"부인|사실(?:이|은)\s*아니|확인되지|하지\s*않")
+_TARGET_UNASSERTED_SUFFIX = re.compile(
+    r"[\"'”’」』\s]*(?:(?:다고|고|다는|는)?\s*(?:가정|전제)|"
+    r"(?:다고|고|다는|는)?\s*"
+    r"(?:(?:보도|기사|주장|사실|것|뜻|의미)(?:은|는|이|가|을|를)?\s*)?"
+    r"(?:은|는|이|가|을|를)?\s*(?:허위|거짓|사실무근|아니|부인|부정|"
+    r"볼\s*수\s*없|(?:확인|단정|확정|판단|인정)(?:할\s*수\s*없|하기\s*어렵)|"
+    r"(?:확인|보도|발표|공개)(?:되|하)지\s*않))"
+)
+_TARGET_DIRECTION = re.compile(r"(?P<up>상향|인상|높였|올렸)|(?P<down>하향|인하|낮췄|내렸)")
+_TARGET_CLAUSE_BREAK = re.compile(
+    r"(?<![0-9])\.|\.(?![0-9])|[;!?。\n]|목표\s*(?:주가|가격)|주가\s*목표|목표가"
+)
 _OWN_TARGET = re.compile(
     r"(?<![가-힣A-Za-z])(?:우리|당사|내|제|나|저|모델|AI)(?:의|가|는|은)?"
     r"(?=\s|$)\s*[^.;!?。\n]*$",
@@ -60,6 +98,8 @@ _RECOMMENDATION = re.compile(
     r"(?:매수|매도|투자|진입|청산)(?:의|할)?\s*시점|"
     r"(?:정답|최선의\s*전략|좋은\s*전략)"
 )
+_NON_TRADING_RECOMMENDATION_OBJECT = re.compile(r"(?<![가-힣A-Za-z])(?:모니터링|관찰)(?:을|를)\s*$")
+_COORDINATED_ACTION_END = re.compile(r"(?:와|과|및|·|,|and|&)\s*$", re.I)
 _ACTION = r"(?:순매수|순매도|매수|매도|매입|매각|투자|진입|청산|보유|매집|처분|확대|축소)"
 _ACTION_ADVICE_SUFFIX = (
     r"(?:를|을|에)?\s*(?:"
@@ -74,7 +114,9 @@ _ACTION_ADVICE = re.compile(_ACTION + _ACTION_ADVICE_SUFFIX)
 _NET_AMOUNT_EXECUTION_ADVICE = re.compile(
     r"(?:는|은|가|이|를|을|도|만)?\s*(?:실행|진행)" + _ACTION_ADVICE_SUFFIX
 )
-_TARGET_ACTION_ADVICE = re.compile(r"(?:상향|하향|조정|산정|설정|제시)" + _ACTION_ADVICE_SUFFIX)
+_TARGET_ACTION_ADVICE = re.compile(
+    r"(?:상향|하향|인상|인하|조정|변경|산정|설정|제시)(?:은)?" + _ACTION_ADVICE_SUFFIX
+)
 _DIRECTIVE = re.compile(
     r"담(?:아야|으세요|으십시오|자|아라)|"
     r"늘(?:려야|리세요|리십시오|리자|려라)|"
@@ -89,7 +131,7 @@ _DIRECTIVE = re.compile(
 # These nouns describe flows or their participants, rather than an instruction
 # to trade. Match every occurrence separately; one noun never exempts a field.
 _OBSERVATION_NOUN = re.compile(
-    r"\s*(세|물량|여력|주체|기록|관찰|규모|금액|대금|동향|흐름|현황|내역|추이)"
+    r"\s*(세|물량|여력|주체|기록|관찰|규모|금액|대금|동향|흐름|유입|현황|내역|추이)"
 )
 _NET_OBSERVATION_END = re.compile(
     r"\s*(?:$|[,.;:!?。]|[0-9]|전환|지속|증가|감소|누적|상위|"
@@ -272,23 +314,51 @@ def _price_targets(value: str) -> tuple[re.Match[str], ...]:
         for match in _TARGET_NAME.finditer(value)
         if match.group() != "목표가"
         or _BARE_TARGET_PRICE.match(value, match.start())
+        or _TARGET_MONEY_VALUE.match(value, match.end())
         or _PRICE_BEFORE_TARGET.search(value[: match.start()])
     )
 
 
 def _target_clause(value: str, end: int) -> str:
     # Do not borrow a later target occurrence or a later sentence's change.
-    return re.split(
-        r"(?<![0-9])\.|\.(?![0-9])|[;!?。\n]|목표\s*(?:주가|가격)|주가\s*목표|목표가",
-        value[end:],
-        maxsplit=1,
-    )[0]
+    # A quotation's punctuation cannot detach its own denial/reporting suffix.
+    quotations = [match.span() for match in _STATE_QUOTATION.finditer(value)]
+    for boundary in _TARGET_CLAUSE_BREAK.finditer(value, end):
+        if any(left < boundary.start() < right for left, right in quotations):
+            continue
+        return value[end : boundary.start()]
+    return value[end:]
 
 
-def _has_reported_target_change(source: str) -> bool:
+def _target_change_is_asserted(change: re.Match[str], context: str) -> bool:
+    suffix = context[change.end() :]
+    suffix = re.sub(r"^[.。](?=[\"'”’」』])", "", suffix)
+    return _asserted_state_alias(change, context) and not _TARGET_UNASSERTED_SUFFIX.match(suffix)
+
+
+def _target_direction(value: str) -> str | None:
+    # Later revenue/sales forecasts do not state this target's direction.
+    change = (
+        _TARGET_CHANGE_REPORT.match(value)
+        or _TARGET_COMPLETED_CHANGE.match(value)
+        or _TARGET_CHANGE_MENTION.match(value)
+    )
+    match = _TARGET_DIRECTION.search(change.group()) if change is not None else None
+    return match.lastgroup if match is not None else None
+
+
+def _has_reported_target_change(source: str, direction: str | None = None) -> bool:
     for match in _price_targets(source):
         clause = _target_clause(source, match.end())
-        if _TARGET_COMPLETED_CHANGE.match(clause) and not _TARGET_CHANGE_DENIAL.search(clause):
+        prefix = _OBSERVATION_CLAUSE_BREAK.split(source[: match.start()])[-1] + match.group()
+        context = prefix + clause
+        change = _TARGET_COMPLETED_CHANGE.match(context, len(prefix))
+        if (
+            change
+            and not _TARGET_CHANGE_DENIAL.search(clause)
+            and _target_change_is_asserted(change, context)
+            and (direction is None or direction == _target_direction(change.group()))
+        ):
             return True
     return False
 
@@ -300,9 +370,25 @@ def _is_target_change_observation(value: str, match: re.Match[str]) -> bool:
         or _PRICE_BEFORE_TARGET.search(value[: match.start()])
         or _TARGET_NUMERIC_VALUE.match(clause)
         or _PRICE_AMOUNT.search(clause)
+        or _TARGET_DIRECT_PROPOSAL.search(clause)
     ):
         return False
-    return bool(_TARGET_CHANGE_REPORT.match(clause) or _TARGET_COMPLETED_CHANGE.match(clause))
+    change = (
+        _TARGET_CHANGE_REPORT.match(clause)
+        or _TARGET_COMPLETED_CHANGE.match(clause)
+        or _TARGET_CHANGE_MENTION.match(clause)
+    )
+    return bool(change and _target_change_is_asserted(change, clause))
+
+
+def _has_trading_recommendation(value: str) -> bool:
+    for recommendation in _RECOMMENDATION.finditer(value):
+        observation = _NON_TRADING_RECOMMENDATION_OBJECT.search(value[: recommendation.start()])
+        # Exempt only this recommendation's non-trading object, never another
+        # recommendation elsewhere or a coordinated trading action.
+        if observation is None or _COORDINATED_ACTION_END.search(value[: observation.start()]):
+            return True
+    return False
 
 
 def investment_policy_violation(value: str, source: str = "") -> str | None:
@@ -325,7 +411,9 @@ def investment_policy_violation(value: str, source: str = "") -> str | None:
     trades = tuple(_TRADE.finditer(value))
     if not trades and not targets:
         return None
-    if any(pattern.search(value) for pattern in (_RECOMMENDATION, _ACTION_ADVICE, _DIRECTIVE)):
+    if _has_trading_recommendation(value) or any(
+        pattern.search(value) for pattern in (_ACTION_ADVICE, _DIRECTIVE)
+    ):
         return "investment_wording"
     # The check-only view closes the gap introduced by a currency parenthesis:
     # "순매도(금액)가 필요하다" must retain the ordinary action-advice veto.
@@ -344,8 +432,13 @@ def investment_policy_violation(value: str, source: str = "") -> str | None:
     if targets and (
         _TARGET_ACTION_ADVICE.search(value)
         or _AMOUNT_PROPOSAL.search(value)
-        or not _has_reported_target_change(source)
-        or any(not _is_target_change_observation(value, match) for match in targets)
+        or any(
+            not _is_target_change_observation(value, match)
+            or not _has_reported_target_change(
+                source, _target_direction(_target_clause(value, match.end()))
+            )
+            for match in targets
+        )
     ):
         return "investment_wording"
     source_missing = False
@@ -385,7 +478,11 @@ def investment_policy_violation(value: str, source: str = "") -> str | None:
             continue
         noun = _OBSERVATION_NOUN.match(value, match.end())
         if noun is not None:
-            if not re.search(re.escape(trade) + r"\s*" + re.escape(noun.group(1)), source):
+            # "매수세" and "매수 흐름" describe the same observed flow.
+            source_noun = (
+                r"(?:세|흐름)" if noun.group(1) in {"세", "흐름"} else re.escape(noun.group(1))
+            )
+            if not re.search(re.escape(trade) + r"\s*" + source_noun, source):
                 source_missing = True
             continue
         if _OBSERVED_ACTOR.search(value[: match.start()]) and _NOMINAL_END.match(

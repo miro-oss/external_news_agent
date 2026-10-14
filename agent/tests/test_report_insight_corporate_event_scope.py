@@ -18,11 +18,12 @@ from app.llm import report_insight_service as service
 from app.llm.report_insight_assessment import validate_draft
 
 RAW = "삼성전자는 생산라인의 가동 중단이 현재 계속된다고 밝혔다."
-EVENT = "삼성전자는 IPO를 통해 자금 조달을 추진한다고 밝혔다."
+EVENT = "삼성전자는 IPO와 신주 발행을 통해 자금 조달을 추진한다고 밝혔다."
 GOOD_REASON = "삼성전자의 생산 제약은 수급과 투자 판단에 연결된다."
 EVENT_REASONS = (
     "삼성전자의 IPO는 생산 제약의 대응과 투자 판단에 연결된다.",
     "삼성전자의 자금 조달은 생산 제약의 대응과 투자 판단에 연결된다.",
+    "삼성전자의 신주 발행은 생산 제약의 대응과 투자 판단에 연결된다.",
 )
 SCOPES = ("unselected_claim", "other_finding", "title", "claim_summary")
 
@@ -47,7 +48,7 @@ def scoped_source(scope):
     elif scope == "claim_summary":
         # A claim summary can carry event vocabulary without the raw sentence
         # establishing that transaction. Keep its original factual clause valid.
-        finding.claims[0].text += " IPO 자금 조달"
+        finding.claims[0].text += " IPO 자금 조달 신주 발행"
     elif scope == "selected":
         finding.claims[0].text += " " + EVENT
         finding.sentences[0].text += " " + EVENT

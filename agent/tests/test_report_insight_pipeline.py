@@ -226,8 +226,8 @@ def test_insight_deadline_is_independent_and_bounds_review_and_synthesis(
     pipeline = ReportInsightPipelineProvider(Settings(**values), "FREE")
 
     assert pipeline.deadline == expected_budget
-    # Starting REVIEW needs room for its whole window and the same REDUCE reserve.
-    clock[0] = expected_budget - 2 * review_seconds
+    # Admission may use a shorter review window while keeping the REDUCE reserve.
+    clock[0] = expected_budget - review_seconds - min(30, review_seconds)
     assert pipeline.can_start_optional_review()
     with pipeline.optional_review_deadline():
         assert pipeline.deadline == expected_budget - review_seconds

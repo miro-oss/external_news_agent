@@ -20,6 +20,7 @@ MAX_REPORT_INSIGHT_DEADLINE_SECONDS = 180.0
 # a fixed third to each stage. Synthesis includes its draft and one repair.
 REPORT_INSIGHT_REDUCE_RESERVE_SECONDS = 60.0
 REPORT_INSIGHT_REVIEW_BUDGET_SECONDS = 60.0
+REPORT_INSIGHT_REVIEW_MIN_ADMISSION_SECONDS = 30.0
 
 
 class ReportInsightPipelineProvider:
@@ -69,8 +70,10 @@ class ReportInsightPipelineProvider:
         if self._credit_reservation is None:
             return 1
         explicit = 3 if self.provider is None else self.provider.report_insight_max_concurrency
-        # Leave capacity for another report using the same provider guard.
-        report_slots = max(1, self.settings.provider_concurrency // 2)
+        # Keep one shared slot available for another request when possible.
+        # Four shared slots therefore allow three MAP workers, while the
+        # provider guard still bounds all reports together to four calls.
+        report_slots = max(1, self.settings.provider_concurrency - 1)
         return min(3, report_slots, explicit)
 
     def cancel_pending_calls(self) -> None:
@@ -204,7 +207,8 @@ class ReportInsightPipelineProvider:
         still propagates normally and all calls share the original deadline.
         """
         return self.deadline - monotonic() >= (
-            self._reduce_reserve_seconds + self._review_budget_seconds
+            self._reduce_reserve_seconds
+            + min(REPORT_INSIGHT_REVIEW_MIN_ADMISSION_SECONDS, self._review_budget_seconds)
         )
 
     @contextmanager

@@ -273,7 +273,7 @@ def test_pipeline_revalidates_final_bases_with_one_repair_and_original_usage_bud
             value
             if current == stage and occurrence == 1
             else cleared_bases(value, stale_reason=stale_reason)
-            if current == stage
+            if current == stage or (stage == "MAP-001" and stale_reason)
             else selected_basis(value, "retain_monitor")
             if stage == "REVIEW-001"
             else cleared_bases(value)
@@ -290,9 +290,10 @@ def test_pipeline_revalidates_final_bases_with_one_repair_and_original_usage_bud
         with pytest.raises(AgentError) as caught:
             engine.generate(source)
         assert caught.value.code == "SCHEMA_VIOLATION"
-        assert stages(provider) == [stage, stage]
-        assert caught.value.details["usage"]["inputTokens"] == 22
-        assert caught.value.details["usage"]["outputTokens"] == 14
+        assert stages(provider) == [stage, stage, "REVIEW-001", "REVIEW-001"]
+        assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
+        assert caught.value.details["usage"]["inputTokens"] == 44
+        assert caught.value.details["usage"]["outputTokens"] == 28
     else:
         result = engine.generate(source)
         expected = ["MAP-001", "REVIEW-001", "REDUCE-001"]

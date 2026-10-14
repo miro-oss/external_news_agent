@@ -319,8 +319,9 @@ def test_map_and_review_dependency_repairs_keep_neighbor_and_one_retry_budget(
         with pytest.raises(AgentError) as caught:
             generate(provider, source)
         assert caught.value.code == "SCHEMA_VIOLATION"
-        assert caught.value.details["usage"]["inputTokens"] == 22
-        assert stages(provider) == ["MAP-001", "MAP-001"]
+        assert caught.value.details["usage"]["inputTokens"] == 44
+        assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REVIEW-001"]
+        assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
     else:
         result = generate(provider, source)
         assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REVIEW-001", "REDUCE-001"]

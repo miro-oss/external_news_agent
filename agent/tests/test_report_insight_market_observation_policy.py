@@ -301,7 +301,7 @@ def test_repeated_advice_stops_after_one_repair_with_accounted_usage(stage):
 
     def wire(current, occurrence, data, value):
         value = observed_wire(current, occurrence, data, value)
-        if current == stage:
+        if current == stage or (stage == "MAP-001" and current.startswith("REVIEW")):
             value["assessments"][AUDIENCE]["finding101"]["reason"] = (
                 "기관 순매수 기록이 있으므로 지금 매수해야 한다."
             )
@@ -312,9 +312,10 @@ def test_repeated_advice_stops_after_one_repair_with_accounted_usage(stage):
         with pytest.raises(AgentError) as caught:
             generate(provider, source)
         assert caught.value.code == "SCHEMA_VIOLATION"
-        assert stages(provider) == [stage, stage]
-        assert caught.value.details["usage"]["inputTokens"] == 22
-        assert caught.value.details["usage"]["outputTokens"] == 14
+        assert stages(provider) == [stage, stage, "REVIEW-001", "REVIEW-001"]
+        assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
+        assert caught.value.details["usage"]["inputTokens"] == 44
+        assert caught.value.details["usage"]["outputTokens"] == 28
         repaired = provider.wire_payloads[-1]
     else:
         # An exhausted optional review retains the independently validated MAP;

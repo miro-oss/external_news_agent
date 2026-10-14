@@ -401,7 +401,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v52"
+    assert result.meta.prompt_version == "report-insight.ko.v53"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -806,12 +806,20 @@ def test_full_report_latest_date_is_used_before_first_batch_and_repair():
     provider = V4Provider(source)
     with pytest.raises(AgentError) as caught:
         generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
+    assert stages(provider) == [
+        "MAP-001",
+        "MAP-001",
+        "MAP-002",
+        "MAP-002",
+        "REVIEW-001",
+        "REVIEW-001",
+    ]
     assert all(
         framed(call["prompt"])["reportReferenceDate"] == "2026-09-30" for call in provider.calls
     )
     assert caught.value.code == "SCHEMA_VIOLATION"
-    assert caught.value.details["usage"]["credits"] == 0.4
+    assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
+    assert caught.value.details["usage"]["credits"] == 1.2
 
 
 def test_unknown_time_anchor_remains_null_in_all_stages():
@@ -918,7 +926,7 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v52"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v53"
     assert output["meta"]["mock"] is True
     assert RUBRIC_VERSION == "report-importance.v6"
     assert set(output) == {"insights", "meta"}

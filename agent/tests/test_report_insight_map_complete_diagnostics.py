@@ -255,7 +255,9 @@ def test_one_partial_repair_must_correct_both_public_defects_and_preserve_other_
             ]
             return value
         for record in value["assessments"]["CHIP_MAKER"].values():
-            target = record["findingId"] == 101 and stage == "MAP-001"
+            target = record["findingId"] == 101 and (
+                stage == "MAP-001" or retained_defect is not None
+            )
             deadline_record(
                 record,
                 bad_company=target and (occurrence == 1 or retained_defect == "company"),
@@ -281,12 +283,13 @@ def test_one_partial_repair_must_correct_both_public_defects_and_preserve_other_
         with pytest.raises(AgentError) as caught:
             generate(provider, source)
         assert caught.value.code == "SCHEMA_VIOLATION"
-        assert stages(provider) == ["MAP-001", "MAP-001"]
+        assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REVIEW-001"]
+        assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
         assert caught.value.details["usage"] == {
-            "inputTokens": 22,
-            "outputTokens": 14,
-            "costUsd": 0.006,
-            "credits": 0.4,
+            "inputTokens": 44,
+            "outputTokens": 28,
+            "costUsd": 0.012,
+            "credits": 0.8,
         }
 
     repair = provider.calls[1]

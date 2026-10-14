@@ -84,7 +84,12 @@ def test_six_list_citations_are_repaired_once_or_still_rejected(repair):
         with pytest.raises(AgentError) as caught:
             generate(provider, source)
         assert caught.value.code == "SCHEMA_VIOLATION"
-    assert stages(provider) == ["MAP-001", "MAP-001"]
+    expected = ["MAP-001", "MAP-001"]
+    if not repair:
+        expected += ["REVIEW-001", "REVIEW-001"]
+        assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
+        assert caught.value.details["usage"]["inputTokens"] == 44
+    assert stages(provider) == expected
     diagnostic = (
         provider.calls[1]["prompt"].split("<validation-error>")[1].split("</validation-error>")[0]
     )

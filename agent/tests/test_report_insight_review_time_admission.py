@@ -56,7 +56,17 @@ def assert_usage(actual, calls):
 
 @pytest.mark.parametrize(
     "request_seconds,map_elapsed,review_count",
-    [(180, 60.0, 2), (180, 60.001, 0), (180, 119.0, 0), (120, 40.0, 2), (120, 40.001, 0)],
+    [
+        (180, 60.0, 2),
+        (180, 70.0, 2),
+        (180, 90.0, 2),
+        (180, 90.001, 0),
+        (180, 119.0, 0),
+        (120, 50.0, 2),
+        (120, 50.001, 0),
+        (60, 20.0, 2),
+        (60, 20.001, 0),
+    ],
 )
 def test_review_admission_preserves_all_mandatory_map_records_and_selection(
     monkeypatch, request_seconds, map_elapsed, review_count
@@ -102,9 +112,12 @@ def test_review_admission_preserves_all_mandatory_map_records_and_selection(
     assert source.model_dump_json(by_alias=True) == snapshot
 
 
-def test_later_review_is_skipped_after_first_review_consumes_admission_headroom(monkeypatch):
+@pytest.mark.parametrize("map_elapsed,review_end", [(40.0, 90.001), (80.0, 105.0)])
+def test_later_review_is_skipped_after_first_review_consumes_admission_headroom(
+    monkeypatch, map_elapsed, review_end
+):
     source, provider, _clock, mapped, selection = timed_report(
-        monkeypatch, map_elapsed=40.0, first_review_elapsed=90.0
+        monkeypatch, map_elapsed=map_elapsed, first_review_elapsed=review_end
     )
 
     result = generate(provider, source, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=180)
@@ -134,8 +147,16 @@ def test_later_review_is_skipped_after_first_review_consumes_admission_headroom(
     assert_usage(result.meta.model_dump(by_alias=True), 7)
 
 
-def test_review_draft_and_repair_share_one_deadline_and_restore_request_deadline(monkeypatch):
-    source, provider, clock, _mapped, _selection = timed_report(monkeypatch, map_elapsed=40.0)
+@pytest.mark.parametrize(
+    "map_elapsed,draft_end,repair_end,review_deadline",
+    [(40.0, 80.0, 101.0, 100.0), (80.0, 105.0, 121.0, 120.0)],
+)
+def test_review_draft_and_repair_share_one_deadline_and_restore_request_deadline(
+    monkeypatch, map_elapsed, draft_end, repair_end, review_deadline
+):
+    source, provider, clock, _mapped, _selection = timed_report(
+        monkeypatch, map_elapsed=map_elapsed
+    )
     instances, review_deadlines = [], []
     pipeline_class = service.ReportInsightPipelineProvider
     original_hook = provider.hook
@@ -149,9 +170,9 @@ def test_review_draft_and_repair_share_one_deadline_and_restore_request_deadline
         value = original_hook(stage, occurrence, data, value)
         if stage == "REVIEW-001":
             review_deadlines.append(instances[0].deadline)
-            # The initial draft consumes 40 seconds. Its repair consumes 21
-            # more, exceeding their shared 60-second window before REDUCE.
-            clock[0] = 80.0 if occurrence == 1 else 101.0
+            # Draft and repair share either the full 60-second window or the
+            # remaining 40 seconds before the untouched REDUCE reserve.
+            clock[0] = draft_end if occurrence == 1 else repair_end
         return value
 
     def malformed_first_review(stage, occurrence, _data, raw):
@@ -170,7 +191,7 @@ def test_review_draft_and_repair_share_one_deadline_and_restore_request_deadline
         "REVIEW-001",
         "REVIEW-001",
     ]
-    assert review_deadlines == [100.0, 100.0]
+    assert review_deadlines == [review_deadline, review_deadline]
     assert len(instances) == 1 and instances[0].deadline == 180.0
     assert_usage(caught.value.details["usage"], 7)
 

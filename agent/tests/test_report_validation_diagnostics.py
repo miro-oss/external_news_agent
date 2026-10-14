@@ -152,7 +152,7 @@ def test_map_field_injection_is_omitted(field):
     assert "issues" not in _validation_failure(error, "MAP-001", 2, {})
 
 
-def test_final_map_retry_keeps_all_finding_locations_without_provider_prose():
+def test_mandatory_review_retry_keeps_all_finding_locations_without_provider_prose():
     from test_report_insight_map_complete_diagnostics import long_fact_reason, long_fact_source
     from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
@@ -166,9 +166,9 @@ def test_final_map_retry_keeps_all_finding_locations_without_provider_prose():
     provider = V4Provider(source, relation="UNRELATED", hook=hook)
     with pytest.raises(AgentError) as caught:
         generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
+    assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REVIEW-001"]
     failure = caught.value.details["validationFailure"]
-    assert failure["stage"] == "MAP-001" and failure["attempt"] == 2
+    assert failure["stage"] == "REVIEW-001" and failure["attempt"] == 2
     # Each location violates both the new fact-template contract and the
     # existing grounding rule; the public location list remains deduplicated.
     assert failure["errorCount"] == 12
@@ -181,7 +181,12 @@ def test_final_map_retry_keeps_all_finding_locations_without_provider_prose():
         for finding, item in zip(source.findings, failure["issues"], strict=True)
     )
     assert not failure["issuesTruncated"]
-    assert caught.value.details["usage"]["inputTokens"] == 22
+    assert caught.value.details["usage"] == {
+        "inputTokens": 44,
+        "outputTokens": 28,
+        "costUsd": 0.012,
+        "credits": 0.8,
+    }
     assert "NVIDIA" not in json.dumps(caught.value.details)
     assert "9101" not in json.dumps(caught.value.details)
 

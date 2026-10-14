@@ -207,7 +207,9 @@ def test_native_partial_repair_revalidates_merged_batch_without_third_attempt(de
     source, reasons, _ = partial_repair_fixture()
 
     def wire_hook(stage, occurrence, _, value):
-        if stage == "MAP-001" and occurrence == 2:
+        if (stage == "MAP-001" and occurrence == 2) or (
+            stage.startswith("REVIEW") and defect == "public"
+        ):
             entries = value["assessments"]["CHIP_MAKER"]
             if defect == "native":
                 entries["finding101"]["reason"] = "원문 claim이 없다."
@@ -240,13 +242,17 @@ def test_native_partial_repair_revalidates_merged_batch_without_third_attempt(de
     with pytest.raises(AgentError) as caught:
         generate(provider, source)
     assert caught.value.code == "SCHEMA_VIOLATION"
-    assert stages(provider) == ["MAP-001", "MAP-001"]
+    expected = ["MAP-001", "MAP-001"]
+    if defect == "public":
+        expected += ["MAP-002", "REVIEW-001", "REVIEW-001"]
+        assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
+    assert stages(provider) == expected
     assert [f["id"] for f in framed(provider.calls[1]["prompt"])["findings"]] == [101, 103]
     assert caught.value.details["usage"] == {
-        "inputTokens": 22,
-        "outputTokens": 14,
-        "costUsd": 0.006,
-        "credits": 0.4,
+        "inputTokens": 11 * len(expected),
+        "outputTokens": 7 * len(expected),
+        "costUsd": 0.003 * len(expected),
+        "credits": 0.2 * len(expected),
     }
 
 
