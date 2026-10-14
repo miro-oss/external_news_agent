@@ -10,6 +10,7 @@ import com.example.be.global.apiPayload.PageResponse;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -26,6 +27,12 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -45,6 +52,23 @@ class TopicControllerTest {
 
     @MockitoBean
     private TopicQueryService topicQueryService;
+
+    @Test
+    void patchDistinguishesOmittedNullAndSelectedDartCompany() throws Exception {
+        when(topicCommandService.updateTopic(eq(1L), any())).thenReturn(
+                TopicResDTO.Updated.builder().id(1L).name("HBM").build());
+        for (String body : List.of("{}", "{\"dartCorpCode\":null}", "{\"dartCorpCode\":\"00126380\"}")) {
+            mockMvc.perform(patch("/api/news/topics/1").contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isOk());
+        }
+        var requests = ArgumentCaptor.forClass(TopicReqDTO.Update.class);
+        verify(topicCommandService, times(3)).updateTopic(eq(1L), requests.capture());
+        assertFalse(requests.getAllValues().get(0).hasDartCorpCode());
+        assertTrue(requests.getAllValues().get(1).hasDartCorpCode());
+        assertNull(requests.getAllValues().get(1).getDartCorpCode());
+        assertTrue(requests.getAllValues().get(2).hasDartCorpCode());
+        assertEquals("00126380", requests.getAllValues().get(2).getDartCorpCode());
+    }
 
     @Test
     void createTopicRespondsWithCreatedEnvelope() throws Exception {

@@ -1,6 +1,7 @@
 package com.example.be.domain.topics.dto.res;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import com.example.be.domain.dart.DartModels;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -20,6 +21,9 @@ public class TopicResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @Schema(name = "TopicCreateResponse", description = "수집 주제 등록 결과")
     public static class Created {
+
+        @Schema(description = "선택한 공시 회사. 미연결이면 null", nullable = true)
+        private final DartModels.Company dartCompany;
 
         @Schema(description = "수집 주제 ID", example = "1")
         private final Long id;
@@ -57,6 +61,9 @@ public class TopicResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @Schema(name = "TopicSummaryResponse", description = "수집 주제 목록 항목")
     public static class Summary {
+
+        @Schema(description = "선택한 공시 회사. 미연결이면 null", nullable = true)
+        private final DartModels.Company dartCompany;
 
         @Schema(description = "수집 주제 ID", example = "1")
         private final Long id;
@@ -104,6 +111,9 @@ public class TopicResDTO {
     @Schema(name = "TopicDetailResponse", description = "수집 주제 상세")
     public static class Detail {
 
+        @Schema(description = "선택한 공시 회사. 미연결이면 null", nullable = true)
+        private final DartModels.Company dartCompany;
+
         @Schema(description = "수집 주제 ID", example = "1")
         private final Long id;
 
@@ -143,6 +153,9 @@ public class TopicResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @Schema(name = "TopicUpdateResponse", description = "수집 주제 수정 결과")
     public static class Updated {
+
+        @Schema(description = "선택한 공시 회사. 미연결이면 null", nullable = true)
+        private final DartModels.Company dartCompany;
 
         @Schema(description = "수집 주제 ID", example = "1")
         private final Long id;

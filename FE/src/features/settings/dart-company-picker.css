@@ -1,0 +1,15 @@
+.dart-company-picker { padding-top: .9rem; border-top: 1px solid var(--line); }
+.dart-company-picker .dart-optional { margin-left: .25rem; color: var(--fg-3); font-size: .76rem; font-weight: 400; }
+.dart-company-picker > .hint { margin: .4rem 0 .65rem; line-height: 1.7; }
+.dart-company-selection { display: flex; align-items: center; justify-content: space-between; gap: .7rem; padding: .8rem .9rem; margin-bottom: .6rem; border-radius: var(--radius-xs); background: var(--primary-weak); }
+.dart-company-selection > span, .dart-company-result > span:first-child { display: grid; min-width: 0; gap: .25rem; text-align: left; }
+.dart-company-selection strong, .dart-company-result strong { font-size: .87rem; overflow-wrap: anywhere; }
+.dart-company-selection small, .dart-company-result small { color: var(--fg-3); font-size: .72rem; }
+.dart-company-selection .text-button { flex: none; font-size: .76rem; }
+.dart-search-state { padding: .3rem 0; font-size: .8rem; color: var(--fg-3); }
+.dart-search-state p { line-height: 1.7; }
+.dart-search-results ul { list-style: none; margin: .5rem 0; padding: 0; max-height: 18rem; overflow-y: auto; overscroll-behavior: contain; }
+.dart-search-results .dart-company-result { display: flex; align-items: center; justify-content: space-between; gap: .7rem; width: 100%; padding: .75rem; border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--surface); color: var(--fg); text-align: left; margin-bottom: .35rem; }
+.dart-search-results .dart-company-result:hover:not(:disabled), .dart-search-results .dart-company-result[aria-pressed="true"] { background: var(--primary-weak); border-color: var(--primary); }
+.dart-company-result > span:last-child { flex: none; color: var(--primary-strong); font-size: .75rem; }
+.dart-search-pagination { display: flex; justify-content: space-between; align-items: center; gap: .7rem; font-size: .76rem; color: var(--fg-3); }

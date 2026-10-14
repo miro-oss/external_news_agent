@@ -48,8 +48,9 @@ class ReportRecoveryModeTest {
         runner.run(context -> {
             assertTrue(context.getBeansOfType(ReportRecoveryRunner.class).isEmpty());
             assertEquals(1, context.getBeansOfType(ScheduledAnnotationBeanPostProcessor.class).size());
-            assertEquals(5, context.getBeansOfType(TaskScheduler.class).size());
+            assertEquals(6, context.getBeansOfType(TaskScheduler.class).size());
             assertTrue(context.containsBean("reportInsightScheduler"));
+            assertTrue(context.containsBean("dartScheduler"));
             assertEquals(1, context.getBeansOfType(CollectionRunReaper.class).size());
         });
     }

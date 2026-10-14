@@ -1,0 +1,62 @@
+.report-dart-panel { margin-top: 1.25rem; padding: 1.15rem 1.25rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-sunken); }
+.report-dart-heading h3 { margin: 0; font-size: 1rem; letter-spacing: -.03em; }
+.report-dart-heading p { margin: .4rem 0 0; color: var(--fg-3); font-size: .78rem; line-height: 1.7; }
+.report-dart-tabs { margin-top: .9rem; flex-wrap: wrap; }
+.report-dart-company-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .6rem; margin-top: 1.1rem; }
+.report-dart-company-name h4 { margin: 0; font-size: 1.03rem; }
+.report-dart-company-name > span { color: var(--fg-3); font-size: .72rem; }
+.report-dart-meta { display: flex; flex-wrap: wrap; gap: .3rem .85rem; margin-top: .55rem; color: var(--fg-3); font-size: .71rem; line-height: 1.7; }
+.report-document-header .report-dart-meta time, .report-document-header .report-dart-disclosures time { font-size: inherit; margin: 0; color: inherit; }
+.report-dart-latest { padding: 1rem 0 .2rem; }
+.report-dart-latest > p { margin: 0 0 .5rem; color: var(--fg-3); font-size: .77rem; }
+.report-dart-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6rem; margin: 0; }
+.report-dart-metrics > div { min-width: 0; padding: .85rem; background: var(--surface); border-radius: var(--radius-xs); }
+.report-dart-metrics dt { color: var(--fg-3); font-size: .76rem; }
+.report-dart-metrics dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem; margin: .45rem 0 0; color: var(--fg); font-size: 1.2rem; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.report-dart-metrics small { color: var(--fg-3); font-size: .69rem; font-weight: 400; }
+.report-dart-state { margin: .8rem 0; padding: .8rem .95rem; background: var(--surface); border-radius: var(--radius-xs); color: var(--fg-2); font-size: .8rem; }
+.report-dart-state p { margin: 0 0 .4rem; line-height: 1.75; }
+.report-dart-state .text-button { margin-top: .3rem; font-size: .77rem; }
+.report-dart-chart { margin: 1.15rem 0 .6rem; }
+.report-dart-chart figcaption { font-size: .83rem; font-weight: 600; }
+.report-dart-chart figcaption > span { margin-left: .5rem; font-size: .71rem; font-weight: 400; color: var(--fg-3); }
+.report-dart-chart-legend { display: flex; justify-content: flex-end; gap: 1rem; margin-top: .5rem; font-size: .72rem; }
+.dart-revenue { color: var(--primary-strong); }
+.dart-profit { color: var(--success-strong); }
+.report-dart-chart-scroll, .report-dart-table-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+.report-dart-chart svg { display: block; width: 100%; min-width: 540px; }
+.dart-chart-label { fill: var(--fg-3); font-size: 11px; }
+.dart-chart-grid { stroke: var(--line); stroke-width: 1; }
+.dart-chart-zero { stroke: var(--fg-3); stroke-width: 1; stroke-dasharray: 3 3; }
+.dart-chart-revenue { fill: var(--primary-strong); stroke: var(--primary-strong); }
+.dart-chart-profit { fill: var(--success-strong); stroke: var(--success-strong); }
+.dart-chart-revenue polyline, .dart-chart-profit polyline { fill: none; stroke-width: 2; }
+.dart-chart-profit polyline { stroke-dasharray: 5 3; }
+.report-dart-table-details summary { color: var(--primary-strong); font-size: .79rem; cursor: pointer; padding: .3rem 0; }
+.report-dart-table { width: 100%; min-width: 620px; border-collapse: collapse; margin-top: .65rem; font-size: .73rem; }
+.report-dart-table caption { text-align: left; color: var(--fg-3); font-size: .72rem; margin-bottom: .6rem; line-height: 1.7; }
+.report-dart-table th, .report-dart-table td { padding: .7rem .5rem; border-bottom: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; vertical-align: top; white-space: nowrap; }
+.report-dart-table th:first-child, .report-dart-table th:last-child, .report-dart-table td:last-child { text-align: left; }
+.report-dart-table thead th { color: var(--fg-3); font-weight: 500; }
+.report-dart-table tbody th { font-weight: 500; }
+.report-dart-table th > small { display: block; margin-top: .25rem; color: var(--fg-3); font-size: .68rem; font-weight: 400; }
+.report-dart-table td:last-child { white-space: normal; min-width: 11rem; }
+.report-dart-table ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; }
+.report-dart-filing { line-height: 1.6; overflow-wrap: anywhere; }
+.report-dart-filing a { color: var(--primary-strong); }
+.report-dart-correction { margin-right: .35rem; padding: .08rem .35rem; border-radius: 4px; background: var(--warning-weak); color: var(--warning-strong); font-size: .66rem; white-space: nowrap; }
+.report-dart-disclosures { margin-top: 1.15rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.report-dart-disclosures h5 { margin: 0 0 .7rem; font-size: .83rem; }
+.report-dart-disclosures ul { display: grid; gap: .65rem; margin: 0; padding: 0; list-style: none; }
+.report-dart-disclosures li { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; font-size: .76rem; }
+.report-dart-disclosures time { flex: none; color: var(--fg-3); }
+.report-dart-note, .report-dart-notes { color: var(--fg-3); font-size: .72rem; line-height: 1.8; }
+.report-dart-note { margin: .8rem 0 0; }
+.report-dart-notes { padding-left: 1.2rem; }
+@media (max-width: 700px) {
+  .report-dart-panel { padding: 1rem .85rem; }
+  .report-dart-metrics { grid-template-columns: 1fr; }
+  .report-dart-metrics > div { display: flex; align-items: baseline; justify-content: space-between; gap: .7rem; }
+  .report-dart-metrics dd { margin: 0; font-size: 1.06rem; }
+  .report-dart-disclosures li { flex-direction: column; gap: .2rem; }
+}

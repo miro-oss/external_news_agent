@@ -1,6 +1,11 @@
 package com.example.be.domain.topics.service.command;
 
 import com.example.be.domain.sources.entity.Source;
+import com.example.be.domain.dart.DartCompanyService;
+import com.example.be.domain.dart.DartModels;
+import com.example.be.domain.collection.entity.CollectionTopicSnapshot;
+import com.example.be.domain.collection.converter.CollectionTopicSnapshotConverter;
+import tools.jackson.databind.ObjectMapper;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.sources.repository.SourceRepository;
@@ -47,8 +52,72 @@ class TopicCommandServiceImplTest {
     @Mock
     private CollectionRunRepository collectionRunRepository;
 
+    @Mock
+    private DartCompanyService dartCompanyService;
+
     @InjectMocks
     private TopicCommandServiceImpl topicCommandService;
+
+    @Test
+    void createValidatesAndReturnsSelectedDartCompany() {
+        var company = new DartModels.Company("00126380", "삼성전자", "005930");
+        var request = new TopicReqDTO.Create();
+        request.setName("삼성 HBM");
+        request.setDartCorpCode(company.corpCode());
+        when(dartCompanyService.requireCompany(company.corpCode())).thenReturn(company);
+        when(topicRepository.saveAndFlush(any(Topic.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertEquals(company, topicCommandService.createTopic(request).getDartCompany());
+        verify(dartCompanyService).requireCompany("00126380");
+    }
+
+    @Test
+    void patchOmittedCompanyKeepsSelectionButExplicitNullClearsItWithoutChangingSnapshot() {
+        var company = new DartModels.Company("00126380", "삼성전자", "005930");
+        Topic topic = existingTopic();
+        topic.changeDartCompany(company);
+        var converter = new CollectionTopicSnapshotConverter();
+        var snapshotJson = converter.convertToDatabaseColumn(CollectionTopicSnapshot.capture(topic));
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
+        var mapper = new ObjectMapper();
+
+        var omitted = mapper.readValue("{}", TopicReqDTO.Update.class);
+        assertFalse(omitted.hasDartCorpCode());
+        assertEquals(company, topicCommandService.updateTopic(1L, omitted).getDartCompany());
+
+        var clear = mapper.readValue("{\"dartCorpCode\":null}", TopicReqDTO.Update.class);
+        assertTrue(clear.hasDartCorpCode());
+        assertNull(topicCommandService.updateTopic(1L, clear).getDartCompany());
+        assertEquals(company, converter.convertToEntityAttribute(snapshotJson).dartCompany());
+        verify(dartCompanyService, never()).requireCompany(anyString());
+    }
+
+    @Test
+    void patchReplacesSelectedCompanyAndRejectsUnknownCompanyBeforeFlushing() {
+        Topic topic = existingTopic();
+        var company = new DartModels.Company("00164779", "SK하이닉스", "000660");
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
+        when(dartCompanyService.requireCompany(company.corpCode())).thenReturn(company);
+        var request = new TopicReqDTO.Update();
+        request.setDartCorpCode(company.corpCode());
+        assertEquals(company, topicCommandService.updateTopic(1L, request).getDartCompany());
+
+        request.setDartCorpCode("");
+        when(dartCompanyService.requireCompany("")).thenThrow(new TopicException(TopicErrorCode.DART_COMPANY_NOT_FOUND));
+        var error = assertThrows(TopicException.class, () -> topicCommandService.updateTopic(1L, request));
+        assertEquals("TOPIC400", error.getCode().getCode());
+        assertEquals(company, topic.getDartCompany());
+    }
+
+    @Test
+    void legacySnapshotWithoutDartFieldRemainsUnlinked() {
+        var converter = new CollectionTopicSnapshotConverter();
+        var snapshot = converter.convertToEntityAttribute("""
+                {"topicId":1,"topicName":"기존","queryText":"HBM","requiredKeywords":[],
+                 "optionalKeywords":[],"excludedKeywords":[],"batchSize":100,"intervalMinutes":1440}
+                """);
+        assertNull(snapshot.dartCompany());
+    }
 
     @Test
     void createTopicSavesTopicWithLinkedSources() {

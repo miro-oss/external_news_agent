@@ -1,6 +1,7 @@
 package com.example.be.domain.topics.service.command;
 
 import com.example.be.domain.collection.entity.RunStatus;
+import com.example.be.domain.dart.DartCompanyService;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.sources.repository.SourceRepository;
@@ -36,6 +37,7 @@ public class TopicCommandServiceImpl implements TopicCommandService {
     private final TopicRepository topicRepository;
     private final SourceRepository sourceRepository;
     private final CollectionRunRepository collectionRunRepository;
+    private final DartCompanyService dartCompanyService;
 
     @Override
     public TopicResDTO.Created createTopic(TopicReqDTO.Create request) {
@@ -51,6 +53,10 @@ public class TopicCommandServiceImpl implements TopicCommandService {
         List<Source> sources = findSources(request.getSourceIds());
         validateQueryTextForSearchSources(topic.getQueryText(), sources);
         topic.replaceSources(sources);
+
+        if (request.getDartCorpCode() != null) {
+            topic.changeDartCompany(dartCompanyService.requireCompany(request.getDartCorpCode()));
+        }
 
         return TopicConverter.toCreated(saveTopic(topic));
     }
@@ -78,6 +84,11 @@ public class TopicCommandServiceImpl implements TopicCommandService {
             throw new TopicException(TopicErrorCode.DUPLICATED_TOPIC_NAME);
         }
         validateQueryTextForSearchSources(queryText, topic.getSources());
+
+        if (request.hasDartCorpCode()) {
+            topic.changeDartCompany(request.getDartCorpCode() == null ? null
+                    : dartCompanyService.requireCompany(request.getDartCorpCode()));
+        }
 
         topic.update(name, queryText, requiredKeywords, optionalKeywords, excludedKeywords,
                 batchSize, intervalMinutes, active);

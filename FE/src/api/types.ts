@@ -83,6 +83,7 @@ export interface TopicCreateRequest {
   batchSize?: number
   intervalMinutes?: number
   sourceIds?: number[]
+  dartCorpCode?: string | null
 }
 
 export interface TopicSourceBrief {
@@ -101,6 +102,7 @@ export interface Topic {
   batchSize: number
   intervalMinutes: number
   active: boolean
+  dartCompany?: import('./dart').DartCompany | null
 }
 
 /** GET /topics/{topicId} 응답. 편집 시 연결된 소스의 검색어 필수 여부를 확인한다. */
@@ -514,6 +516,7 @@ export interface ReportCollectionContext {
     excludedKeywords: string[]
     batchSize: number
     intervalMinutes: number
+    dartCompany?: import('./dart').DartCompany | null
   }>
 }
 

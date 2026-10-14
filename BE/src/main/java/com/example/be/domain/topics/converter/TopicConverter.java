@@ -37,6 +37,7 @@ public class TopicConverter {
 
     public static TopicResDTO.Created toCreated(Topic topic) {
         return TopicResDTO.Created.builder()
+                .dartCompany(topic.getDartCompany())
                 .id(topic.getId())
                 .name(topic.getName())
                 .queryText(topic.getQueryText())
@@ -65,6 +66,7 @@ public class TopicConverter {
                                                 int linkedSourceCount,
                                                 TopicTrendJdbcRepository.TopicTrendSnapshot trendSnapshot) {
         return TopicResDTO.Summary.builder()
+                .dartCompany(topic.getDartCompany())
                 .id(topic.getId())
                 .name(topic.getName())
                 .queryText(topic.getQueryText())
@@ -83,6 +85,7 @@ public class TopicConverter {
 
     public static TopicResDTO.Detail toDetail(Topic topic) {
         return TopicResDTO.Detail.builder()
+                .dartCompany(topic.getDartCompany())
                 .id(topic.getId())
                 .name(topic.getName())
                 .queryText(topic.getQueryText())
@@ -99,6 +102,7 @@ public class TopicConverter {
 
     public static TopicResDTO.Updated toUpdated(Topic topic) {
         return TopicResDTO.Updated.builder()
+                .dartCompany(topic.getDartCompany())
                 .id(topic.getId())
                 .name(topic.getName())
                 .queryText(topic.getQueryText())

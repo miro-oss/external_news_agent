@@ -1,6 +1,7 @@
 package com.example.be.domain.topics.repository;
 
 import com.example.be.domain.sources.entity.Source;
+import com.example.be.domain.dart.DartModels;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.converter.TopicConverter;
 import com.example.be.domain.topics.dto.res.TopicSourceResDTO;
@@ -39,6 +40,26 @@ class TopicRepositoryIntegrationTests {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Test
+    void persistsAndClearsDartCompanyIncludingUnlistedStockCode() {
+        Topic selected = topic("공시 회사 통합테스트");
+        var company = new DartModels.Company("00126380", "삼성전자", "005930");
+        selected.changeDartCompany(company);
+        Long id = topicRepository.saveAndFlush(selected).getId();
+        entityManager.clear();
+        Topic loaded = topicRepository.findById(id).orElseThrow();
+        assertEquals(company, loaded.getDartCompany());
+
+        loaded.changeDartCompany(new DartModels.Company("00999999", "비상장 예시", ""));
+        flushAndClear();
+        loaded = topicRepository.findById(id).orElseThrow();
+        assertEquals("", loaded.getDartCompany().stockCode());
+
+        loaded.changeDartCompany(null);
+        flushAndClear();
+        assertNull(topicRepository.findById(id).orElseThrow().getDartCompany());
+    }
 
     @Test
     void savesAndReadsTopicWithKeywordJson() {

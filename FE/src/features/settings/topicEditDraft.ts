@@ -1,6 +1,7 @@
 import type { Topic } from '../../api/types'
 import type { TopicEditRequest } from '../../api/topicEditing'
 import { detailedTopicKeywords } from './topicKeywordInput.ts'
+import type { DartCompany } from '../../api/dart'
 
 export interface TopicEditDraft {
   name: string
@@ -8,6 +9,7 @@ export interface TopicEditDraft {
   requiredKeywords: string
   optionalKeywords: string
   excludedKeywords: string
+  dartCompany: DartCompany | null
 }
 
 export function topicEditDraft(initial: Topic): TopicEditDraft {
@@ -17,12 +19,16 @@ export function topicEditDraft(initial: Topic): TopicEditDraft {
     requiredKeywords: initial.requiredKeywords.join(', '),
     optionalKeywords: initial.optionalKeywords.join(', '),
     excludedKeywords: initial.excludedKeywords.join(', '),
+    dartCompany: initial.dartCompany ?? null,
   }
 }
 
 export function buildTopicEditRequest(initial: Topic, draft: TopicEditDraft): TopicEditRequest {
   const original = topicEditDraft(initial)
   const changes: TopicEditRequest = {}
+  if (draft.dartCompany?.corpCode !== original.dartCompany?.corpCode) {
+    changes.dartCorpCode = draft.dartCompany?.corpCode ?? null
+  }
   if (draft.name !== original.name && draft.name.trim() !== initial.name) changes.name = draft.name.trim()
   if (draft.queryText !== original.queryText) {
     const queryText = draft.queryText.replaceAll(',', ' ').trim().replace(/\s+/g, ' ')
