@@ -6,7 +6,7 @@
 .report-document-header > .report-kind-label { margin-bottom: .6rem; }
 .topic-weekly-dialog { box-sizing: border-box; width: min(560px, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); margin: auto; padding: 1.4rem; border: 1px solid var(--line); border-radius: var(--radius); color: var(--fg); background: var(--surface); box-shadow: var(--shadow-lg); }
 .topic-weekly-dialog[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 1.2rem; }
-.topic-weekly-dialog::backdrop { background: rgb(16 24 40 / 42%); backdrop-filter: blur(3px); }
+.topic-weekly-dialog::backdrop { background: var(--dialog-backdrop); backdrop-filter: blur(3px); }
 .topic-weekly-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; }
 .topic-weekly-heading h2 { margin: 0; font-size: 1.1rem; line-height: 1.5; }
 .topic-weekly-heading p { margin: .45rem 0 0; font-size: .8rem; line-height: 1.6; color: var(--fg-3); }
