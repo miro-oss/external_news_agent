@@ -38,6 +38,10 @@ def test_missing_event_or_wrong_nearby_owner_is_rejected(value, sources):
         ("새봄의 기업공개는 기업가치 판단의 근거다.", ["새봄은 이번 IPO를 추진한다."]),
         ("새봄 상장은 기업가치 판단의 근거다.", ["새봄은 미국 증시 상장을 계획했다."]),
         ("가온 IPO는 기업가치 판단의 근거다.", ["새봄의 자회사 가온의 IPO가 할인 요인이다."]),
+        (
+            "새봄은 실적이 증가했고, 가온의 IPO는 판단 근거다.",
+            ["가온의 IPO가 예정됐다."],
+        ),
         ("Samsung Electronics의 IPO는 기업가치 판단의 근거다.", ["삼성전자는 IPO를 추진한다."]),
         (
             "새봄의 자금 조달은 투자 판단에 영향을 준다.",
@@ -50,6 +54,13 @@ def test_missing_event_or_wrong_nearby_owner_is_rejected(value, sources):
 )
 def test_selected_same_event_and_owner_support_an_observation(value, sources):
     assert corporate_event_mismatches(value, sources) == []
+
+
+@pytest.mark.parametrize("delisting", ["상장폐지", "상장 폐지"])
+def test_delisting_cannot_support_an_ipo_or_hide_another_issuers_ipo(delisting):
+    source = f"새봄은 {delisting}를 추진하고 가온은 IPO를 계획한다."
+    assert corporate_event_mismatches("새봄의 IPO는 판단 근거다.", [source])
+    assert corporate_event_mismatches("가온의 IPO는 판단 근거다.", [source]) == []
 
 
 @pytest.mark.parametrize(
