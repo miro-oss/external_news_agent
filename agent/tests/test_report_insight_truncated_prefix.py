@@ -8,6 +8,7 @@ from datetime import date
 import pytest
 from test_report_insight_assessment import framed
 from test_report_insight_repair_actions import structured_diagnostics
+from test_report_insight_review_time_admission import assert_usage
 from test_report_insight_v4_pipeline import (
     V4Provider,
     _expected_fixture_display_reason,
@@ -120,6 +121,14 @@ class PrefixProvider(V4Provider):
                 text=json.dumps(wire, ensure_ascii=False),
                 truncated=self.repair_defect == "truncated",
             )
+        if self.repair_defect == "public" and self.calls[-1]["response_schema"][
+            "description"
+        ].startswith(("reportInsightCall:REVIEW", "reportInsightCall:EXPLAIN")):
+            wire = json.loads(response.text)
+            next(iter(wire["assessments"]["CHIP_MAKER"].values()))["reason"] = (
+                "2031년 조건이 실제로 적용됐다."
+            )
+            return replace(response, text=json.dumps(wire, ensure_ascii=False))
         return response
 
 
@@ -208,14 +217,32 @@ def test_ambiguous_or_unusable_prefix_keeps_the_existing_full_repair(mode):
 
 
 @pytest.mark.parametrize("defect", ["missing", "extra", "native", "public", "truncated"])
-def test_failed_repair_has_no_third_call_and_keeps_original_truncation_usage(defect):
+def test_failed_repair_has_one_retry_per_stage_and_keeps_original_truncation_usage(
+    defect, monkeypatch
+):
+    failures = []
+    original_call = service.structured_call
+
+    def capture(*args, **kwargs):
+        try:
+            return original_call(*args, **kwargs)
+        except AgentError as error:
+            failures.append(error)
+            raise
+
+    monkeypatch.setattr(service, "structured_call", capture)
     source, reasons, _ = partial_repair_fixture()
     provider = PrefixProvider(source, reasons, repair_defect=defect)
     with pytest.raises(AgentError) as caught:
         generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
+    expected = ["MAP-001", "MAP-001"]
+    if defect == "public":
+        expected += ["MAP-002", "REVIEW-001", "REVIEW-001", "EXPLAIN-001", "EXPLAIN-001"]
+    assert stages(provider) == expected
     assert caught.value.code == "SCHEMA_VIOLATION"
-    assert caught.value.details["truncated"] is True
-    assert caught.value.details["usage"]["inputTokens"] == 22
-    assert caught.value.details["usage"]["outputTokens"] == 14
-    assert caught.value.details["usage"]["costUsd"] == 0.006
+    assert failures[0].details["truncated"] is True
+    assert failures[0].details["validationFailure"]["stage"] == "MAP-001"
+    failure = caught.value.details["validationFailure"]
+    assert failure["stage"] == ("EXPLAIN-001" if defect == "public" else "MAP-001")
+    assert failure["attempt"] == 2
+    assert_usage(caught.value.details["usage"], len(expected))

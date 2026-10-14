@@ -1,4 +1,5 @@
 import json
+import logging
 from copy import deepcopy
 from dataclasses import replace
 
@@ -8,11 +9,12 @@ from test_structured_call import SequenceProvider, invoke, response
 
 from app.core.errors import AgentError, OutputValidationError
 from app.llm.report_validation_diagnostics import (
+    ReportValidationContext,
     ReportValidationIssue,
     pydantic_reduce_issues,
     report_validation_issue_details,
 )
-from app.llm.structured_call import _validation_failure
+from app.llm.structured_call import _validation_failure, structured_call
 
 
 def schema(*audiences):
@@ -73,6 +75,60 @@ def test_typed_final_attempt_metadata_survives_without_error_or_response_prose()
     assert caught.value.details["usage"]["inputTokens"] == 20
 
 
+def test_explanation_failure_keeps_assessment_locations_in_logs_and_final_metadata(caplog):
+    errors = []
+    for identifier in (8290, 8298):
+        error = OutputValidationError(
+            "PRIVATE_PROSE", error_kinds=("report_evidence_insufficient",)
+        )
+        error.validation_issues = (
+            ReportValidationIssue(
+                "MARKET_INVESTOR",
+                f"assessments[{identifier}].reason",
+                "report_evidence_insufficient",
+                (f"{identifier}:0",),
+                rule_id="source_binding",
+            ),
+        )
+        errors.append(error)
+    attempts = iter(errors)
+
+    def validate(_):
+        raise next(attempts)
+
+    with pytest.raises(AgentError) as caught:
+        structured_call(
+            SequenceProvider(response(), response()),
+            system_instruction="fixture",
+            prompt="fixture",
+            response_schema={},
+            validate=validate,
+            repair_attempts=1,
+            task_name="EXPLAIN fixture",
+            input_tag="fixture",
+            schema_violation_message="invalid output",
+            logger=logging.getLogger(__name__),
+            validation_context=ReportValidationContext.create(77, ["MARKET_INVESTOR"]),
+            failure_stage="EXPLAIN-001",
+        )
+
+    failure = caught.value.details["validationFailure"]
+    assert failure["stage"] == "EXPLAIN-001" and failure["attempt"] == 2
+    assert failure["issues"] == [
+        {
+            "audience": "MARKET_INVESTOR",
+            "field": "assessments[8298].reason",
+            "errorKind": "report_evidence_insufficient",
+            "claimIds": ["8298:0"],
+        }
+    ]
+    assert not failure["issuesTruncated"]
+    assert "assessments[8290].reason" in caplog.text
+    assert "assessments[8298].reason" in caplog.text
+    assert "source_binding" in caplog.text
+    assert "PRIVATE_PROSE" not in caplog.text + json.dumps(caught.value.details)
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -105,6 +161,7 @@ def test_only_typed_tuples_and_stage_matching_fields_are_accepted():
     error.validation_issues = (issue(),)
     assert "issues" not in _validation_failure(error, "MAP-001", 2, schema("CHIP_MAKER"))
     assert "issues" not in _validation_failure(error, "REVIEW-001", 2, schema("CHIP_MAKER"))
+    assert "issues" not in _validation_failure(error, "EXPLAIN-001", 2, schema("CHIP_MAKER"))
     assert _validation_failure(error, None, 2, schema("CHIP_MAKER")) is None
 
 
@@ -119,10 +176,10 @@ def test_only_typed_tuples_and_stage_matching_fields_are_accepted():
         "assessments[7869].decision.timing.urgencyState",
     ],
 )
-def test_closed_assessment_fields_survive_map_and_review_diagnostics(field):
+def test_closed_assessment_fields_survive_map_review_and_explain_diagnostics(field):
     error = OutputValidationError("PRIVATE_PROSE", error_kinds=("report_evidence_insufficient",))
     error.validation_issues = (replace(issue(), field=field),)
-    for stage in ("MAP", "MAP-001", "REVIEW", "REVIEW-001"):
+    for stage in ("MAP", "MAP-001", "REVIEW", "REVIEW-001", "EXPLAIN", "EXPLAIN-001"):
         failure = _validation_failure(error, stage, 2, {})
         assert failure["issues"][0]["field"] == field
         assert failure["issues"][0]["claimIds"] == ["7869:1"]
@@ -152,7 +209,7 @@ def test_map_field_injection_is_omitted(field):
     assert "issues" not in _validation_failure(error, "MAP-001", 2, {})
 
 
-def test_final_map_retry_keeps_all_finding_locations_without_provider_prose():
+def test_mandatory_review_retry_keeps_all_finding_locations_without_provider_prose():
     from test_report_insight_map_complete_diagnostics import long_fact_reason, long_fact_source
     from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
@@ -166,9 +223,16 @@ def test_final_map_retry_keeps_all_finding_locations_without_provider_prose():
     provider = V4Provider(source, relation="UNRELATED", hook=hook)
     with pytest.raises(AgentError) as caught:
         generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
+    assert stages(provider) == [
+        "MAP-001",
+        "MAP-001",
+        "REVIEW-001",
+        "REVIEW-001",
+        "EXPLAIN-001",
+        "EXPLAIN-001",
+    ]
     failure = caught.value.details["validationFailure"]
-    assert failure["stage"] == "MAP-001" and failure["attempt"] == 2
+    assert failure["stage"] == "EXPLAIN-001" and failure["attempt"] == 2
     # Each location violates both the new fact-template contract and the
     # existing grounding rule; the public location list remains deduplicated.
     assert failure["errorCount"] == 12
@@ -181,7 +245,12 @@ def test_final_map_retry_keeps_all_finding_locations_without_provider_prose():
         for finding, item in zip(source.findings, failure["issues"], strict=True)
     )
     assert not failure["issuesTruncated"]
-    assert caught.value.details["usage"]["inputTokens"] == 22
+    assert caught.value.details["usage"] == {
+        "inputTokens": 66,
+        "outputTokens": 42,
+        "costUsd": 0.018,
+        "credits": 1.2,
+    }
     assert "NVIDIA" not in json.dumps(caught.value.details)
     assert "9101" not in json.dumps(caught.value.details)
 
@@ -222,7 +291,9 @@ def test_native_and_public_diagnostics_survive_aggregation_and_truncated_prefix(
     )
 
 
-def test_final_review_retry_keeps_diagnostics_before_validated_map_fallback(monkeypatch):
+def test_final_explanation_retry_keeps_review_diagnostics_without_publishing_invalid_prose(
+    monkeypatch,
+):
     from test_report_insight_assessment import request
     from test_report_insight_map_complete_diagnostics import long_fact_reason
     from test_report_insight_v4_pipeline import V4Provider, generate, stages
@@ -244,14 +315,21 @@ def test_final_review_retry_keeps_diagnostics_before_validated_map_fallback(monk
     monkeypatch.setattr(service, "structured_call", capture)
 
     def hook(stage, occurrence, _, value):
-        if stage.startswith("REVIEW"):
+        if stage.startswith(("REVIEW", "EXPLAIN")):
             value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = long_fact_reason(101)[0]
         return value
 
     provider = V4Provider(source, hook=hook)
-    output = generate(provider, source)
-    assert stages(provider) == ["MAP-001", "REVIEW-001", "REVIEW-001", "REDUCE-001"]
-    assert len(failures) == 1
+    with pytest.raises(StructuredOutputExhaustedError) as caught:
+        generate(provider, source)
+    assert stages(provider) == [
+        "MAP-001",
+        "REVIEW-001",
+        "REVIEW-001",
+        "EXPLAIN-001",
+        "EXPLAIN-001",
+    ]
+    assert len(failures) == 2
     failure = failures[0].details["validationFailure"]
     assert failure["stage"] == "REVIEW-001" and failure["attempt"] == 2
     assert failure["issues"] == [
@@ -263,8 +341,11 @@ def test_final_review_retry_keeps_diagnostics_before_validated_map_fallback(monk
         }
     ]
     assert "NVIDIA" not in json.dumps(failures[0].details)
-    assert "9101" not in output.model_dump_json()
-    assert output.meta.input_tokens == 44
+    assert failures[1] is caught.value
+    assert caught.value.details["validationFailure"]["stage"] == "EXPLAIN-001"
+    assert caught.value.details["validationFailure"]["issues"] == failure["issues"]
+    assert "9101" not in json.dumps(caught.value.details)
+    assert caught.value.details["usage"]["inputTokens"] == 55
 
 
 def test_native_shape_diagnostic_uses_requested_finding_id_not_rejected_provider_id():

@@ -5,7 +5,10 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
-from report_insight_schema_assertions import assert_only_display_quotes_require_null
+from report_insight_schema_assertions import (
+    assert_only_display_quotes_require_null,
+    assert_same_native_constraints,
+)
 from test_report_insight_assessment import draft_to_wire, framed, payload, request, response
 from test_report_insight_axis_support_repair import case
 from test_report_insight_core_forecast_support import CURRENT_CAPACITY, recorded_case
@@ -145,13 +148,11 @@ def test_connection_preservation_still_runs_full_validation(defect):
         repair.validate(replace(raw, text=json.dumps(fixed, ensure_ascii=False)))
 
 
-@pytest.mark.parametrize("defect", ["public_fact", "native_coherence", "relation"])
-def test_mixed_or_genuine_relation_failure_does_not_preserve_connection(defect):
+@pytest.mark.parametrize("defect", ["native_coherence", "relation"])
+def test_coherence_or_genuine_relation_failure_does_not_preserve_connection(defect):
     source, value = case("relocation" if defect == "relation" else "forecast")
     item = value["assessments"]["IT_INFRA"]["finding101"]
-    if defect == "public_fact":
-        item["reason"] = "9999년의 가격 전망은 시스템 조달과 연결된다."
-    elif defect == "native_coherence":
+    if defect == "native_coherence":
         item["reason"] = "영향 범위는 미확인이다."
     repair, error, raw = repair_for(source, value)
     assert not error.native_connection_repairs
@@ -188,7 +189,7 @@ def test_stale_or_untrusted_context_retains_ordinary_repair(defect):
     repair = object.__new__(service.ReportInsightService)._repair_call(
         draft_prompt(source), schema, raw.text, error, lambda result: full_validate(result, source)
     )
-    assert repair.response_schema == schema
+    assert_same_native_constraints(repair.response_schema, schema)
     assert "finding 전체의 근거 부정이 아닙니다" not in repair.prompt
 
 

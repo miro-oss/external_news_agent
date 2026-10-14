@@ -94,8 +94,8 @@ def test_sdk_keeps_axis_and_proof_guidance_without_changing_validation_keywords(
         wire_record = _record(wire, audience)
         assert list(wire_record["properties"]) == [
             "findingId",
-            "reason",
             "decision",
+            "reason",
             "sourceQuotes",
         ]
         original_record = decision_axis_schemas(schema, original_record)

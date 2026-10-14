@@ -6,6 +6,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
 from test_report_insight_assessment import request
+from test_report_insight_review_time_admission import assert_usage
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
 from app.core.errors import StructuredOutputExhaustedError
@@ -58,7 +59,7 @@ def quote_scenario(
         return value
 
     def wire(stage, occurrence, _, value):
-        if stage == "MAP-001":
+        if stage == "MAP-001" or (repeat and stage.startswith(("REVIEW", "EXPLAIN"))):
             item = value["assessments"]["CHIP_MAKER"].get("finding101")
             if item is not None:
                 if selector_error:
@@ -97,11 +98,11 @@ def test_semantic_prose_repair_keeps_null_quotes_and_freezes_original_bases(fiel
     before = source.model_dump_json()
     result = generate(provider, source)
 
-    assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REDUCE-001"]
+    assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "EXPLAIN-001", "REDUCE-001"]
     initial, repaired = provider.wire_payloads[:2]
     first = initial["assessments"]["CHIP_MAKER"]["finding101"]
     second = repaired["assessments"]["CHIP_MAKER"]["finding101"]
-    assert provider.schema_validity == [True, True, True, True]
+    assert provider.schema_validity == [True, True, True, True, True]
     assert set(repaired["assessments"]["CHIP_MAKER"]) == {"finding101"}
     assert first["sourceQuotes"] == second["sourceQuotes"] == {"reason": None, "condition": None}
     for axis in ("connection", "effect", "timing"):
@@ -198,8 +199,18 @@ def test_null_display_quotes_do_not_waive_factual_prose_validation(field):
     source, _, _, provider = quote_scenario(field, repeat=True)
     with pytest.raises(StructuredOutputExhaustedError) as caught:
         generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
-    assert provider.schema_validity == [True, True]
+    assert stages(provider) == [
+        "MAP-001",
+        "MAP-001",
+        "REVIEW-001",
+        "REVIEW-001",
+        "EXPLAIN-001",
+        "EXPLAIN-001",
+    ]
+    assert caught.value.details["validationFailure"]["stage"] == "EXPLAIN-001"
+    assert caught.value.details["validationFailure"]["attempt"] == 2
+    assert_usage(caught.value.details["usage"], 6)
+    assert provider.schema_validity == [True] * 6
     assert caught.value.details["validationFailure"]["errorKinds"] == [
         "report_evidence_insufficient"
     ]
@@ -217,7 +228,9 @@ def test_mixed_selector_and_prose_errors_require_both_corrections(keep_factual_e
 
     def wire(stage, occurrence, data, value):
         value = original_hook(stage, occurrence, data, value)
-        if stage == "MAP-001" and occurrence == 2 and keep_factual_error:
+        if keep_factual_error and (
+            (stage == "MAP-001" and occurrence == 2) or stage.startswith(("REVIEW", "EXPLAIN"))
+        ):
             value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = (
                 "TSMC의 생산 제약에 따른 공정 검증 준비를 확인한다."
             )
@@ -230,6 +243,17 @@ def test_mixed_selector_and_prose_errors_require_both_corrections(keep_factual_e
         assert caught.value.details["validationFailure"]["errorKinds"] == [
             "report_evidence_insufficient"
         ]
+        assert stages(provider) == [
+            "MAP-001",
+            "MAP-001",
+            "REVIEW-001",
+            "REVIEW-001",
+            "EXPLAIN-001",
+            "EXPLAIN-001",
+        ]
+        assert caught.value.details["validationFailure"]["stage"] == "EXPLAIN-001"
+        assert caught.value.details["validationFailure"]["attempt"] == 2
+        assert_usage(caught.value.details["usage"], 6)
     else:
         generate(provider, source)
     assert stages(provider).count("MAP-001") == 2

@@ -102,7 +102,21 @@ _KOREAN_ORGANIZATION = re.compile(
 # set narrow: real names ending in 반도체 (including unknown companies) still
 # need source support, as do names containing one of these category terms.
 _SEMICONDUCTOR_CATEGORY_TERMS = frozenset(
-    {"전력반도체", "시스템반도체", "화합물반도체", "메모리반도체", "비메모리반도체"}
+    {"전력반도체", "시스템반도체", "화합물반도체", "메모리반도체", "비메모리반도체", "차세대반도체"}
+)
+_SECURITIES_MARKET_NAME = re.compile(r"유가증권[^\S\r\n]*시장")
+_STOCK_INDEX_LEVEL = re.compile(
+    r"(?P<index>코스피|코스닥)(?:\s*지수)?(?:가|는|이|은)?\s*"
+    r"(?P<level>\d+(?:,\d{3})*(?:\.\d+)?)\s*선"
+)
+_EXPLICIT_ORGANIZATION_PREFIX = re.compile(
+    r"(?:(?<![A-Za-z0-9가-힣_])(?:기업|회사|주식회사|업체|법인|기관|제조사|공급사)\s+|"
+    r"(?:㈜|\(주\))\s*)[\"'“‘]?$"
+)
+_EXPLICIT_ORGANIZATION_SUFFIX = re.compile(
+    r"[\"'”’]?\s*(?:㈜|\(주\)|주식회사(?=$|[^A-Za-z0-9가-힣_]|[은는이가의])|"
+    r"(?:이라는|라는)\s+(?:회사|기업|업체|법인|기관)"
+    r"(?=$|[^A-Za-z0-9가-힣_]|[은는이가의]))"
 )
 _WORD = re.compile(r"[A-Za-z0-9가-힣]+")
 _TECHNICAL_ANCHOR = re.compile(r"\b(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+)\b")
@@ -398,6 +412,12 @@ def factual_mismatches(claim: str, evidence_text: str) -> list[str]:
     missing_companies = claim_companies - evidence_companies
     if missing_companies:
         mismatches.append("근거에서 확인되지 않는 기업명: " + ", ".join(sorted(missing_companies)))
+    # A market is not an organization, but its identity still needs selected
+    # source support; another venue's quantity cannot establish this venue.
+    if _has_securities_market_name(normalized_claim) and not _has_securities_market_name(
+        normalized_evidence
+    ):
+        mismatches.append("근거에서 확인되지 않는 식별자: 유가증권시장")
 
     if _polarity_mismatch(normalized_claim, normalized_evidence):
         mismatches.append("근거와 반대되는 부정 표현이 포함되어 있습니다.")
@@ -747,13 +767,74 @@ def _companies(value: str) -> set[str]:
         match.group()
         for match in _KOREAN_ORGANIZATION.finditer(value)
         if _normalize(match.group()) not in _KNOWN_COMPANY_ALIASES
-        and _normalize(match.group()) not in _SEMICONDUCTOR_CATEGORY_TERMS
+        and not _securities_market_context(value, match)
+        and (
+            _normalize(match.group()) not in _SEMICONDUCTOR_CATEGORY_TERMS
+            or _explicit_organization(value, match)
+        )
+    )
+    # A category used as an explicitly named organization still needs proof,
+    # including its spaced spelling. Never normalize arbitrary company names.
+    companies.update(
+        term
+        for term, match in _semiconductor_category_mentions(value)
+        if _explicit_organization(value, match)
     )
     return companies
 
 
+def _securities_market_context(value: str, match: re.Match) -> bool:
+    """Exclude one general market noun, not names ending in 증권."""
+    if match[0] != "유가증권":
+        return False
+    return any(
+        market.start() == match.start() and not _explicit_organization(value, market)
+        for market in _bounded_alias_matches(value, _SECURITIES_MARKET_NAME)
+    )
+
+
+def _has_securities_market_name(value: str) -> bool:
+    return any(
+        not _explicit_organization(value, market)
+        for market in _bounded_alias_matches(value, _SECURITIES_MARKET_NAME)
+    )
+
+
+def _explicit_organization(value: str, match: re.Match) -> bool:
+    return bool(
+        _EXPLICIT_ORGANIZATION_PREFIX.search(value[: match.start()])
+        or _EXPLICIT_ORGANIZATION_SUFFIX.match(value[match.end() :])
+    )
+
+
+def _semiconductor_category_mentions(value: str):
+    organizations = [
+        match
+        for match in _KOREAN_ORGANIZATION.finditer(value)
+        if _normalize(match.group()) not in _SEMICONDUCTOR_CATEGORY_TERMS
+    ]
+    for term in sorted(_SEMICONDUCTOR_CATEGORY_TERMS):
+        pattern = re.compile(re.escape(term.removesuffix("반도체")) + r"[^\S\r\n]*반도체")
+        for match in _bounded_alias_matches(value, pattern):
+            # Punctuation can join a longer organization name. A category
+            # inside 차세대반도체-테크 must not create a second identity.
+            if any(
+                org.start() < match.end() and match.start() < org.end() for org in organizations
+            ):
+                continue
+            yield term, match
+
+
 def _contains_alias(value: str, alias: str) -> bool:
-    for match in re.finditer(re.escape(alias), value):
+    return any(_alias_matches(value, alias))
+
+
+def _alias_matches(value: str, alias: str):
+    yield from _bounded_alias_matches(value, re.compile(re.escape(alias)))
+
+
+def _bounded_alias_matches(value: str, pattern: re.Pattern):
+    for match in pattern.finditer(value):
         if match.start() > 0 and value[match.start() - 1].isalnum():
             continue
         token_end = match.end()
@@ -761,8 +842,7 @@ def _contains_alias(value: str, alias: str) -> bool:
             token_end += 1
         suffix = value[match.end() : token_end]
         if not suffix or _is_korean_suffix_chain(suffix):
-            return True
-    return False
+            yield match
 
 
 def _is_korean_suffix_chain(value: str) -> bool:
@@ -779,8 +859,70 @@ def _is_korean_suffix_chain(value: str) -> bool:
 
 
 def _contextual_number_mismatches(claim: str, evidence: str) -> list[str]:
-    claim_facts = _numeric_facts(claim)
-    evidence_facts = _numeric_facts(evidence)
+    # Keep the original actor/date comparison separate. Adding a category to
+    # those anchors could erase all matching source contexts and hide an error.
+    return list(
+        dict.fromkeys(
+            [
+                *(
+                    error
+                    for categories in (False, True)
+                    for error in _numeric_binding_mismatches(
+                        _numeric_facts(claim, categories=categories),
+                        _numeric_facts(evidence, categories=categories),
+                    )
+                ),
+                *_numeric_binding_mismatches(
+                    _securities_market_numeric_facts(claim, evidence),
+                    _securities_market_numeric_facts(evidence, evidence),
+                ),
+            ]
+        )
+    )
+
+
+def _securities_market_numeric_facts(
+    value: str, evidence: str
+) -> list[tuple[frozenset[str], frozenset[str]]]:
+    """Keep all market quantities; separate only independently sourced index levels."""
+    index_sources = [
+        (
+            match["index"],
+            _normalized_number(match["level"]),
+            _date_number_anchors(clause) | _date_terms(clause),
+        )
+        for clause in _clauses(_canonical_numeric_text(evidence))
+        for match in _bounded_alias_matches(clause, _STOCK_INDEX_LEVEL)
+    ]
+    facts: list[tuple[frozenset[str], frozenset[str]]] = []
+    for clause in _clauses(_canonical_numeric_text(value)):
+        markets = [
+            market
+            for market in _bounded_alias_matches(clause, _SECURITIES_MARKET_NAME)
+            if not _explicit_organization(clause, market)
+        ]
+        if not markets:
+            continue
+        dates = _date_number_anchors(clause) | _date_terms(clause)
+        numeric_clause = clause
+        for match in reversed(list(_bounded_alias_matches(clause, _STOCK_INDEX_LEVEL))):
+            if any(
+                match["index"] == index
+                and _normalized_number(match["level"]) == level
+                and dates <= source_dates
+                for index, level, source_dates in index_sources
+            ):
+                # Remove this occurrence, not its numeric value elsewhere in
+                # the clause: a market quantity may happen to equal an index.
+                numeric_clause = numeric_clause[: match.start()] + numeric_clause[match.end() :]
+        quantities = frozenset(_quantity_values(numeric_clause))
+        if quantities:
+            anchors = frozenset({"유가증권시장"} | _companies(clause) | dates)
+            facts.append((anchors, quantities))
+    return facts
+
+
+def _numeric_binding_mismatches(claim_facts, evidence_facts) -> list[str]:
     mismatches: list[str] = []
     for anchors, values in claim_facts:
         matching_contexts = [
@@ -802,10 +944,27 @@ def _contextual_number_mismatches(claim: str, evidence: str) -> list[str]:
     return list(dict.fromkeys(mismatches))
 
 
-def _numeric_facts(value: str) -> list[tuple[frozenset[str], frozenset[str]]]:
+def _numeric_facts(
+    value: str, *, categories: bool = False
+) -> list[tuple[frozenset[str], frozenset[str]]]:
     facts: list[tuple[frozenset[str], frozenset[str]]] = []
     for clause in _clauses(_canonical_numeric_text(value)):
-        anchors = frozenset(_date_number_anchors(clause) | _date_terms(clause) | _companies(clause))
+        companies = _companies(clause) - _SEMICONDUCTOR_CATEGORY_TERMS
+        if categories:
+            terms = {term for term, _ in _semiconductor_category_mentions(clause)}
+            if not terms:
+                continue
+        else:
+            # Preserve the former numeric anchors byte-for-byte: the original
+            # suffix detector included compact 차세대반도체, but not the five
+            # older category exceptions. Its removal as a company is not
+            # permission to attach another category's quantity to this one.
+            terms = {
+                match.group()
+                for match in _KOREAN_ORGANIZATION.finditer(clause)
+                if match.group() == "차세대반도체"
+            }
+        anchors = frozenset(_date_number_anchors(clause) | _date_terms(clause) | companies | terms)
         values = frozenset(_quantity_values(clause))
         if anchors and values:
             facts.append((anchors, values))

@@ -243,6 +243,12 @@ def test_one_partial_repair_must_correct_both_public_defects_and_preserve_other_
     preserved_reason = "검증 장비 도입 마감에 따른 준비 범위를 확인한다."
 
     def hook(stage, occurrence, _, value):
+        if stage.startswith("EXPLAIN"):
+            for record in value["assessments"]["CHIP_MAKER"].values():
+                record["reason"] = (
+                    "NVIDIA의 검증 장비 도입 마감에 따라 준비 일정을 확인할 필요가 있다."
+                )
+            return value
         if stage == "REDUCE-001":
             insight = value["insights"][0]
             insight["headline"] = "검증 장비 도입의 마감과 준비 범위를 확인한다."
@@ -255,7 +261,9 @@ def test_one_partial_repair_must_correct_both_public_defects_and_preserve_other_
             ]
             return value
         for record in value["assessments"]["CHIP_MAKER"].values():
-            target = record["findingId"] == 101 and stage == "MAP-001"
+            target = record["findingId"] == 101 and (
+                stage == "MAP-001" or retained_defect is not None
+            )
             deadline_record(
                 record,
                 bad_company=target and (occurrence == 1 or retained_defect == "company"),
@@ -281,12 +289,16 @@ def test_one_partial_repair_must_correct_both_public_defects_and_preserve_other_
         with pytest.raises(AgentError) as caught:
             generate(provider, source)
         assert caught.value.code == "SCHEMA_VIOLATION"
-        assert stages(provider) == ["MAP-001", "MAP-001"]
+        expected = ["MAP-001", "MAP-001", "REVIEW-001", "REVIEW-001"]
+        if retained_defect == "company":
+            expected += ["EXPLAIN-001", "EXPLAIN-001"]
+        assert stages(provider) == expected
+        assert caught.value.details["validationFailure"]["stage"] == expected[-1]
         assert caught.value.details["usage"] == {
-            "inputTokens": 22,
-            "outputTokens": 14,
-            "costUsd": 0.006,
-            "credits": 0.4,
+            "inputTokens": 11 * len(expected),
+            "outputTokens": 7 * len(expected),
+            "costUsd": pytest.approx(0.003 * len(expected)),
+            "credits": pytest.approx(0.2 * len(expected)),
         }
 
     repair = provider.calls[1]

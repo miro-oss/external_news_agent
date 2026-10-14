@@ -209,9 +209,11 @@ def test_existing_grounding_and_decision_guards_still_reject_invalid_map(defect)
     source = request(ids=(101, 102))
 
     def hook(stage, occurrence, data, wire):
-        if not stage.startswith("MAP"):
+        if not stage.startswith(("MAP", "REVIEW", "EXPLAIN")):
             return wire
-        record = wire["assessments"]["CHIP_MAKER"]["finding101"]
+        record = wire["assessments"]["CHIP_MAKER"].get("finding101")
+        if record is None:
+            return wire
         if defect == "company":
             record["reason"] = "NVIDIA의 생산 제약에 맞춰 공정 검증 준비의 영향을 확인한다."
         elif defect == "foreign_basis":
@@ -228,5 +230,8 @@ def test_existing_grounding_and_decision_guards_still_reject_invalid_map(defect)
     provider = V4Provider(source, wire_hook=hook, validate_wire=False)
     with pytest.raises(StructuredOutputExhaustedError):
         generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
+    expected = ["MAP-001", "MAP-001"]
+    if defect == "company":
+        expected += ["REVIEW-001", "REVIEW-001", "EXPLAIN-001", "EXPLAIN-001"]
+    assert stages(provider) == expected
     assert all("sourceQuotes" in json.dumps(wire) for wire in provider.wire_payloads)

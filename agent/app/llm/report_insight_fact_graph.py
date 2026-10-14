@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 
 from app.core.evidence import _COMPANY_ALIASES
+from app.llm.report_insight_index_identifiers import S_AND_P_INDEX, canonical_index_name
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +281,10 @@ _SUBJECT = re.compile(
     r"(?<![가-힣A-Za-z0-9])(?P<name>[가-힣A-Za-z][가-힣A-Za-z0-9&·.-]{1,35}?)"
     r"(?:\([^()]{1,80}\))?(?P<particle>은|는|이|가|의)(?=\s)",
 )
+_INDEX_OWNER = re.compile(
+    rf"(?P<name>{S_AND_P_INDEX.pattern})(?P<particle>은|는|이|가|의)(?=\s)",
+    re.IGNORECASE,
+)
 _JOINT_SUBJECT = re.compile(
     r"(?<![가-힣A-Za-z0-9])(?P<name>[가-힣A-Za-z][가-힣A-Za-z0-9&·.-]{1,35}?)"
     r"(?:와|과)(?=\s+[가-힣A-Za-z])"
@@ -536,6 +541,13 @@ def _actors(source: str) -> tuple[list[Mention], dict[tuple[int, int], str]]:
                 continue
             span = _span(source, match.start(), match.end())
             actors[(span.start, span.end)] = Mention("actor", canonical, span)
+    # Preserve the whole original span and grammatical role while comparing
+    # spacing variants as the same owner. A P500 fragment remains independent.
+    for match in _INDEX_OWNER.finditer(source):
+        span = _span(source, match.start("name"), match.end("name"))
+        key = span.start, span.end
+        actors[key] = Mention("actor", canonical_index_name(span.text), span)
+        roles[key] = match["particle"]
     for pattern in (_SUBJECT, _JOINT_SUBJECT, _ENGLISH_OWNER, _ENGLISH_SUBJECT):
         for match in pattern.finditer(source):
             name = match["name"]

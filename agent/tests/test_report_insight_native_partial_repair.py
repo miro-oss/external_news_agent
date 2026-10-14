@@ -207,7 +207,9 @@ def test_native_partial_repair_revalidates_merged_batch_without_third_attempt(de
     source, reasons, _ = partial_repair_fixture()
 
     def wire_hook(stage, occurrence, _, value):
-        if stage == "MAP-001" and occurrence == 2:
+        if (stage == "MAP-001" and occurrence == 2) or (
+            stage.startswith("REVIEW") and defect == "public"
+        ):
             entries = value["assessments"]["CHIP_MAKER"]
             if defect == "native":
                 entries["finding101"]["reason"] = "원문 claim이 없다."
@@ -237,17 +239,26 @@ def test_native_partial_repair_revalidates_merged_batch_without_third_attempt(de
         wire_hook=wire_hook,
         validate_wire=False,
     )
-    with pytest.raises(AgentError) as caught:
-        generate(provider, source)
-    assert caught.value.code == "SCHEMA_VIOLATION"
-    assert stages(provider) == ["MAP-001", "MAP-001"]
+    expected = ["MAP-001", "MAP-001"]
+    if defect == "public":
+        result = generate(provider, source)
+        expected += ["MAP-002", "REVIEW-001", "REVIEW-001", "EXPLAIN-001"]
+        assert [record.reason for record in result.insights[0].assessments] == [
+            _expected_fixture_display_reason(source, identifier, reason)
+            for identifier, reason in reasons.items()
+        ]
+        usage = result.meta.model_dump(by_alias=True)
+    else:
+        with pytest.raises(AgentError) as caught:
+            generate(provider, source)
+        assert caught.value.code == "SCHEMA_VIOLATION"
+        usage = caught.value.details["usage"]
+    assert stages(provider) == expected
     assert [f["id"] for f in framed(provider.calls[1]["prompt"])["findings"]] == [101, 103]
-    assert caught.value.details["usage"] == {
-        "inputTokens": 22,
-        "outputTokens": 14,
-        "costUsd": 0.006,
-        "credits": 0.4,
-    }
+    assert usage["inputTokens"] == 11 * len(expected)
+    assert usage["outputTokens"] == 7 * len(expected)
+    assert usage["costUsd"] == pytest.approx(0.003 * len(expected))
+    assert usage["credits"] == pytest.approx(0.2 * len(expected))
 
 
 def test_native_partial_repair_uses_existing_stage_and_credit_limit():

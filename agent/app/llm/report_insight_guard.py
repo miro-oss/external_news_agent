@@ -11,11 +11,14 @@ from datetime import date, timedelta
 
 from app.core.evidence import _COMPANY_ALIASES, _companies, factual_mismatches
 from app.llm.report_insight_amount_context import supported_labeled_amount_context
+from app.llm.report_insight_index_identifiers import NASDAQ_INDEX, S_AND_P_INDEX
+from app.llm.report_insight_ipo_amount_context import supported_ipo_amount_context
 from app.llm.report_insight_year_ranges import supported_year_range_context
 from app.schemas.report_insight import ReportInsightRequest
 
 _POLARITY_MESSAGE = "근거와 반대되는 부정 표현이 포함되어 있습니다."
 _NUMERIC_CONTEXT_MESSAGE = "근거와 연결이 다른 숫자: "
+_UNSUPPORTED_NUMBER_MESSAGE = "근거에서 확인되지 않는 숫자: "
 _UNSUPPORTED_COMPANY_MESSAGE = "근거에서 확인되지 않는 기업명: "
 _UNSUPPORTED_IDENTIFIER_MESSAGE = "근거에서 확인되지 않는 식별자: "
 _MICRON_UNIT = re.compile(
@@ -124,7 +127,9 @@ _FACT_STATES = {
             r"(?=(?:다|습니다|었다|었습니다|음|고|으며|다고\s*밝혔다)(?=$|[\s,.!?;。]))"
         ),
         re.compile(
-            r"체결(?:했|됐|되었|하였|한|된|됨)|계약(?:이|은)?\s*(?:성립|확정)|계약(?:이|은)?\s*(?:별도\s*)?사실"
+            # 확정성 describes certainty, not the fact that a contract was confirmed.
+            r"체결(?:했|됐|되었|하였|한|된|됨)|계약(?:이|은)?\s*(?:성립|확정(?!성))|"
+            r"계약(?:이|은)?\s*(?:별도\s*)?사실"
         ),
     ),
     "halt": (
@@ -186,6 +191,19 @@ _UNREPORTED_PRODUCTION_EXPANSION_SUFFIX = re.compile(
     r"\s+생산\s*증설(?:은|이)\s+"
     r"(?:(?:원문|기사|자료)(?:에|에는|에서)\s+)?"
     r"명시(?:되지|되어\s*있지)\s*않(?:는다|았다|다)"
+    r"(?=\s*(?:[.!?;。]|$))"
+)
+# The question is whether financing was executed, not merely what an already
+# confirmed transaction's amount was. Keep its absence predicate in this same
+# closed clause so another assertion or double negation cannot borrow it.
+# A preceding subject ("조건이 확정된 ...") still asserts that subject's
+# confirmation, so admit only the question's start or a reporting coordination.
+_UNCONFIRMED_FUNDING_EXECUTION_PREFIX = re.compile(r"(?:^\s*|(?<![가-힣])전하(?:며|고)\s+)$")
+_UNCONFIRMED_FUNDING_EXECUTION_SUFFIX = re.compile(
+    r"\s+(?:자금\s*)?조달\s*(?:실행|집행)\s*여부"
+    r"(?:와\s*(?:최종\s*)?규모)?(?:는|가)\s*"
+    r"(?:(?:기사|원문|보도|자료)(?:에서|에)\s*)?"
+    r"(?:확인되지\s*않(?:는다|습니다)|미확인(?:이다|입니다))"
     r"(?=\s*(?:[.!?;。]|$))"
 )
 # "계약 사실" alone is an asserted-state cue, but its immediately attached
@@ -419,8 +437,13 @@ def event_is_unasserted(value: str, match: re.Match) -> bool:
     if re.search(r"(?:이미|실제로)\s*$", prefix):
         return False
     suffix = value[match.end() :]
-    if _UNASSERTED_DOCUMENT_SUFFIX.match(suffix) or (
-        _UNREPORTED_PRODUCTION_EXPANSION_SUFFIX.match(suffix)
+    if (
+        _UNASSERTED_DOCUMENT_SUFFIX.match(suffix)
+        or _UNREPORTED_PRODUCTION_EXPANSION_SUFFIX.match(suffix)
+        or (
+            _UNCONFIRMED_FUNDING_EXECUTION_PREFIX.search(prefix)
+            and _UNCONFIRMED_FUNDING_EXECUTION_SUFFIX.match(suffix)
+        )
     ):
         return True
     # "...확인되어야 업무로 확정된다" classifies a work connection after
@@ -493,6 +516,18 @@ def _known_company_spans(value: str) -> list[tuple[int, int]]:
 def _source_identifier_mismatches(value: str, source: str) -> list[str]:
     known_spans = _known_company_spans(value)
     errors = []
+    for pattern in (S_AND_P_INDEX, NASDAQ_INDEX):
+        source_indexes = {
+            re.sub(r"\s+", "", match[0]).casefold() for match in pattern.finditer(source)
+        }
+        for match in pattern.finditer(value):
+            known_spans.append(match.span())
+            if re.sub(r"\s+", "", match[0]).casefold() not in source_indexes:
+                errors.append(_UNSUPPORTED_IDENTIFIER_MESSAGE + match[0])
+    # A standalone product P500 cannot borrow the P500 inside an index name.
+    identifier_source = source
+    for pattern in (S_AND_P_INDEX, NASDAQ_INDEX):
+        identifier_source = pattern.sub(lambda match: " " * len(match[0]), identifier_source)
     for match in _LATIN_IDENTIFIER.finditer(value):
         if any(start <= match.start() and match.end() <= end for start, end in known_spans):
             continue
@@ -504,11 +539,33 @@ def _source_identifier_mismatches(value: str, source: str) -> list[str]:
         if not numbered and not named_entity:
             continue
         if not re.search(
-            rf"(?<![A-Za-z0-9_]){re.escape(identifier)}(?![A-Za-z0-9_])", source, re.I
+            rf"(?<![A-Za-z0-9_]){re.escape(identifier)}(?![A-Za-z0-9_])",
+            identifier_source,
+            re.I,
         ):
             prefix = _UNSUPPORTED_IDENTIFIER_MESSAGE if numbered else _UNSUPPORTED_COMPANY_MESSAGE
             errors.append(prefix + identifier)
     return errors
+
+
+def _without_supported_index_names(value: str, source: str) -> str:
+    """Keep index numbers out of quantity checks only after proving the name.
+
+    The shared guard reads 500 in S&P 500 and 100 in 나스닥100 as quantities.
+    Mask only the exact supported index spans in this comparison view; other
+    quantities/dates remain intact and cannot borrow the index's suffix.
+    """
+    for pattern in (S_AND_P_INDEX, NASDAQ_INDEX):
+        supported = {re.sub(r"\s+", "", match[0]).casefold() for match in pattern.finditer(source)}
+        value = pattern.sub(
+            lambda match, supported=supported: (
+                " " * len(match[0])
+                if re.sub(r"\s+", "", match[0]).casefold() in supported
+                else match[0]
+            ),
+            value,
+        )
+    return value
 
 
 def _production_reversal(value: str, source: str) -> bool:
@@ -655,6 +712,23 @@ def report_prose_mismatches(
             item for item in remaining if not item.startswith(_UNSUPPORTED_COMPANY_MESSAGE)
         ] + [item for item in entity_checked if item.startswith(_UNSUPPORTED_COMPANY_MESSAGE)]
     remaining.extend(_source_identifier_mismatches(value, actor_source))
+    numeric_messages = (_UNSUPPORTED_NUMBER_MESSAGE, _NUMERIC_CONTEXT_MESSAGE)
+    numeric_value = _without_supported_index_names(value, actor_source)
+    numeric_source = _without_supported_index_names(source, source)
+    if numeric_value != value or numeric_source != source:
+        # Re-run the existing checks in both numeric views. A source index's
+        # 100 must not support an invented 100-year maturity or 100-unit amount,
+        # including when that collision hid the original numeric error.
+        # Preserve independently issued relation/graph errors, including
+        # quantity conflicts whose message shares the numeric prefix.
+        original_numeric = {
+            item for item in factual_mismatches(value, source) if item.startswith(numeric_messages)
+        }
+        remaining = [item for item in remaining if item not in original_numeric] + [
+            item
+            for item in factual_mismatches(numeric_value, numeric_source)
+            if item.startswith(numeric_messages)
+        ]
     if any(item.startswith(_NUMERIC_CONTEXT_MESSAGE) for item in remaining) and (
         _independent_parallel_numbers(value, source)
         or _ordered_year_percentages(value, source)
@@ -663,6 +737,8 @@ def report_prose_mismatches(
         remaining = [item for item in remaining if not item.startswith(_NUMERIC_CONTEXT_MESSAGE)]
     elif any(item.startswith(_NUMERIC_CONTEXT_MESSAGE) for item in remaining):
         proven = supported_labeled_amount_context(value, actor_source)
+        if proven is None:
+            proven = supported_ipo_amount_context(value, actor_source)
         if proven is not None:
             remaining = [item for item in remaining if item != _NUMERIC_CONTEXT_MESSAGE + proven]
     if _POLARITY_MESSAGE in remaining:

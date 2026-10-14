@@ -17,7 +17,7 @@ from app.core.errors import AgentError
 from app.core.parser import JsonObjectParseError
 from app.llm import report_insight_service as insight_service
 from app.llm.base import ProviderResponse, ProviderUsage
-from app.llm.report_insight_assessment import draft_to_wire, validate_draft
+from app.llm.report_insight_assessment import draft_to_wire, source_span_choices, validate_draft
 from app.llm.report_insight_service import (
     PROMPT_VERSION,
     RUBRIC_VERSION,
@@ -74,6 +74,38 @@ class V4Provider:
                     for audience in data["audiences"]
                 }
             }
+            if stage.startswith("EXPLAIN-"):
+                for audience in data["audiences"]:
+                    for finding in data["findings"]:
+                        record = value["assessments"][audience][f"finding{finding['id']}"]
+                        decision = finding["decision"]
+                        record.update(
+                            work=decision["connection"]["work"],
+                            relation=decision["connection"]["relation"],
+                            condition=(
+                                "해당 준비가 공정 검증 일정에 필요한 경우"
+                                if finding["conditionRequired"]
+                                else None
+                            ),
+                            impactScope=decision["effect"]["impactScope"],
+                            urgencyState=decision["timing"]["urgencyState"],
+                        )
+                        for axis, field in (
+                            ("connection", "relationBasis"),
+                            ("effect", "impactBasis"),
+                            ("timing", "urgencyBasis"),
+                        ):
+                            basis = decision[axis]["basis"]
+                            record[field] = (
+                                {
+                                    "claimId": basis["claimId"],
+                                    "quote": source_span_choices(source[finding["id"]])[
+                                        basis["claimId"]
+                                    ][basis["sourceSpanId"]],
+                                }
+                                if basis is not None
+                                else None
+                            )
         else:
             value = {"insights": []}
             for group in data["retrievedEvidence"]:
@@ -170,6 +202,71 @@ def generate(provider, source, **settings):
 
 def stages(provider):
     return [call["response_schema"]["description"].split(":", 1)[1] for call in provider.calls]
+
+
+def explanation_fixture(*, audiences=("CHIP_MAKER",)):
+    source = request(audiences=audiences)
+    finding = source.findings[0]
+    finding.claims.append(
+        finding.claims[0].model_copy(
+            update={
+                "id": "101:1",
+                "text": "미선택 별도 사업은 미국 시설투자 계획을 발표했다.",
+                "evidence_sentence_ids": [1],
+            }
+        )
+    )
+    finding.sentences.append(
+        finding.sentences[0].model_copy(update={"index": 1, "text": finding.claims[1].text})
+    )
+    return source
+
+
+def test_selected_source_explanation_replaces_prose_for_each_audience_before_reduce():
+    source = explanation_fixture(audiences=("CHIP_MAKER", "EQUIPMENT_MAKER"))
+    reason = "생산라인 가동 중단이 계속돼 준비 일정의 영향을 확인한다."
+
+    def hook(stage, occurrence, data, value):
+        if stage.startswith("EXPLAIN-"):
+            for records in value["assessments"].values():
+                for record in records.values():
+                    record["reason"] = reason
+        return value
+
+    provider = V4Provider(source, hook=hook)
+    result = generate(provider, source)
+    explanation_calls = [
+        call for call in provider.calls if "EXPLAIN-" in call["response_schema"]["description"]
+    ]
+    assert len(explanation_calls) == 2
+    for call in explanation_calls:
+        assert "미선택 별도 사업" not in call["prompt"]
+        assert "미국 시설투자" not in call["prompt"]
+        assert "알려진 생산 제약에 맞춰" not in call["prompt"]
+        assert [claim["id"] for claim in framed(call["prompt"])["findings"][0]["claims"]] == [
+            "101:0"
+        ]
+    assert stages(provider)[-1] == "REDUCE-001"
+    for insight in result.insights:
+        assert reason in insight.assessments[0].reason
+        assert insight.assessments[0].basis_claim_ids == ["101:0"]
+
+
+def test_explanation_failure_cannot_fall_back_to_original_prose():
+    source = explanation_fixture()
+
+    def wire_hook(stage, occurrence, data, value):
+        if stage.startswith("EXPLAIN-"):
+            value["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["connection"]["work"] = (
+                "YIELD_CAPACITY"
+            )
+        return value
+
+    provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
+    with pytest.raises(AgentError):
+        generate(provider, source)
+    assert provider.stages["EXPLAIN-001"] == 2
+    assert provider.stages["REDUCE-001"] == 0
 
 
 def partial_repair_fixture():
@@ -401,7 +498,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v37"
+    assert result.meta.prompt_version == "report-insight.ko.v56"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -806,12 +903,20 @@ def test_full_report_latest_date_is_used_before_first_batch_and_repair():
     provider = V4Provider(source)
     with pytest.raises(AgentError) as caught:
         generate(provider, source)
-    assert stages(provider) == ["MAP-001", "MAP-001"]
+    assert stages(provider) == [
+        "MAP-001",
+        "MAP-001",
+        "MAP-002",
+        "MAP-002",
+        "REVIEW-001",
+        "REVIEW-001",
+    ]
     assert all(
         framed(call["prompt"])["reportReferenceDate"] == "2026-09-30" for call in provider.calls
     )
     assert caught.value.code == "SCHEMA_VIOLATION"
-    assert caught.value.details["usage"]["credits"] == 0.4
+    assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
+    assert caught.value.details["usage"]["credits"] == 1.2
 
 
 def test_unknown_time_anchor_remains_null_in_all_stages():
@@ -918,7 +1023,7 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v37"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v56"
     assert output["meta"]["mock"] is True
     assert RUBRIC_VERSION == "report-importance.v6"
     assert set(output) == {"insights", "meta"}

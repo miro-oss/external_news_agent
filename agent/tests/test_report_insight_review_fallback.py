@@ -1,4 +1,4 @@
-"""Failed independent reviews retain only revalidated MAP records, never failed output."""
+"""Native failures retain MAP; valid REVIEW decisions require grounded explanations."""
 
 from copy import deepcopy
 from dataclasses import replace
@@ -77,11 +77,14 @@ def test_review_exhaustion_keeps_exact_map_and_valid_reviews_with_one_budget(
 
     monkeypatch.setattr(service, "select_review", select)
     monkeypatch.setattr(service, "_validated_map_output", validate)
+    caplog.set_level("INFO", logger="app.llm.report_insight_service")
     provider = ReviewProvider(source, failed_stages=failed_stages, failure=failure)
     output = generate(provider, source)
     expected_stages = ["MAP-001", "MAP-002", "MAP-003"]
     for stage in ("REVIEW-001", "REVIEW-002"):
         expected_stages.extend([stage] * (2 if stage in failed_stages else 1))
+    if failure == "public":
+        expected_stages.extend(f"EXPLAIN-{index + 1:03d}" for index in range(len(failed_stages)))
     expected_stages.append("REDUCE-001")
     assert stages(provider) == expected_stages
     assert len(selected) == 1
@@ -89,7 +92,7 @@ def test_review_exhaustion_keeps_exact_map_and_valid_reviews_with_one_budget(
     assert [entry.finding_id for entry in final] == list(range(101, 114))
     for index, entry in enumerate(final):
         review_stage = f"REVIEW-{index // 6 + 1:03d}"
-        if index == 12 or review_stage in failed_stages:
+        if index == 12 or (review_stage in failed_stages and failure != "public"):
             original = map_snapshots[0][index]
             assert entry == original.model_copy(
                 update={
@@ -101,8 +104,10 @@ def test_review_exhaustion_keeps_exact_map_and_valid_reviews_with_one_budget(
             assert entry.axes.impact is None
         else:
             assert entry.axes.impact == 3
+            assert "2031" not in entry.reason
     # The final automatic display projection receives another complete public validation.
-    assert contexts.count((list(range(101, 114)), date(2026, 9, 30))) == 3 + len(failed_stages)
+    full_validations = 4 if failure == "public" else 3 + len(failed_stages)
+    assert contexts.count((list(range(101, 114)), date(2026, 9, 30))) == full_validations
     for call in provider.calls[:-1]:
         assert framed(call["prompt"])["reportReferenceDate"] == "2026-09-30"
     assert source.model_dump_json(by_alias=True) == original_source
@@ -113,10 +118,14 @@ def test_review_exhaustion_keeps_exact_map_and_valid_reviews_with_one_budget(
     assert output.meta.credits == pytest.approx(0.2 * count)
     assert output.meta.truncated is False  # Complete final output, not a successful review.
     for stage in failed_stages:
-        assert (
-            f"stage={stage} outcome=VALIDATION_FAILED fallback=VALIDATED_MAP_RETAINED"
-            in caplog.text
-        )
+        if failure == "public":
+            assert f"stage={stage} outcome=AWAITING_EXPLANATION" in caplog.text
+            assert f"stage={stage} outcome=ADOPTED" in caplog.text
+        else:
+            assert (
+                f"stage={stage} outcome=VALIDATION_FAILED fallback=VALIDATED_MAP_RETAINED"
+                in caplog.text
+            )
     assert "SENSITIVE_RAW" not in caplog.text
 
 

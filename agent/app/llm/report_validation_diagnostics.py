@@ -255,6 +255,10 @@ _RULE_REASONS = {
     "report_expression_policy": (
         "출력의 표현이나 사실·해석·가정 구분이 작성 규칙을 충족하지 않습니다."
     ),
+    "report_trading_observation_source": (
+        "현재 필드에 선택한 claim의 연결 원문이 해당 거래 관찰의 방향·주체·맥락을 "
+        "지원하지 않습니다. 최종 선택 근거로 설명을 다시 작성하세요."
+    ),
     "report_assessment_draft_invalid": "평가의 판단·업무·근거·조건 사이의 계약이 맞지 않습니다.",
     "report_assessment_finding_id_mismatch": "평가의 findingId가 요청한 항목의 ID와 다릅니다.",
     "report_assessment_claimless_contract": (
@@ -403,7 +407,7 @@ class ReportValidationContext:
 def _safe_issue(issue: object, stage: str | None = None) -> bool:
     if stage is None:
         fields = (_REDUCE_FIELD, _MAP_FIELD)
-    elif stage in {"MAP", "REVIEW"} or stage.startswith(("MAP-", "REVIEW-")):
+    elif stage in {"MAP", "REVIEW", "EXPLAIN"} or stage.startswith(("MAP-", "REVIEW-", "EXPLAIN-")):
         fields = (_MAP_FIELD,)
     else:
         fields = (_REDUCE_FIELD,)

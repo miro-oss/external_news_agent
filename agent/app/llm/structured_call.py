@@ -21,7 +21,7 @@ from app.llm.report_validation_diagnostics import (
     report_validation_issue_details,
 )
 
-_REPORT_FAILURE_STAGE = re.compile(r"(?:MAP|REVIEW|REDUCE)(?:-[0-9]{3})?")
+_REPORT_FAILURE_STAGE = re.compile(r"(?:MAP|REVIEW|EXPLAIN|REDUCE)(?:-[0-9]{3})?")
 _PYDANTIC_ERROR_KINDS = frozenset(get_args(ErrorType))
 
 
@@ -37,6 +37,7 @@ class StructuredCallRepair[OutputT]:
     prompt: str
     response_schema: dict[str, object]
     validate: Callable[[ProviderResponse], OutputT]
+    system_instruction: str | None = None
 
 
 def structured_call[OutputT](
@@ -67,13 +68,14 @@ def structured_call[OutputT](
     current_prompt = prompt
     current_schema = response_schema
     current_validate = validate
+    current_system_instruction = system_instruction
     last_error: Exception | None = None
     last_response: ProviderResponse | None = None
 
     for attempt in range(1, repair_attempts + 2):
         try:
             response = provider.generate(
-                system_instruction=system_instruction,
+                system_instruction=current_system_instruction,
                 prompt=current_prompt,
                 response_schema=current_schema,
             )
@@ -128,6 +130,11 @@ def structured_call[OutputT](
                 current_prompt = repair.prompt
                 current_schema = repair.response_schema
                 current_validate = repair.validate
+                current_system_instruction = (
+                    repair.system_instruction
+                    if repair.system_instruction is not None
+                    else system_instruction
+                )
             else:
                 current_prompt = (
                     repair_prompt_factory(prompt, response.text, error)

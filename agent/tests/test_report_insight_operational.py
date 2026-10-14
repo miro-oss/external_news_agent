@@ -86,6 +86,34 @@ class FakeSDK:
                 self.active -= 1
 
 
+def test_review_observer_preserves_explanation_reserve_and_disabled_control(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])
+    pipeline = operational.ReportInsightPipelineProvider(
+        operational.Settings(_env_file=None, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=180), "FREE"
+    )
+    events = []
+    recorder = SimpleNamespace(
+        local=SimpleNamespace(job={"jobId": "reserve", "reviewPolicy": "production"}),
+        event=lambda name, value: events.append((name, value)),
+    )
+    clock[0] = 61.0
+    assert pipeline.can_start_optional_review()
+
+    with operational._observe(recorder):
+        reserve = pipeline.explanation_reserve_seconds
+        assert not pipeline.can_start_optional_review(reserve_seconds=reserve)
+        clock[0] = 59.0
+        assert pipeline.can_start_optional_review(reserve_seconds=reserve)
+        recorder.local.job["reviewPolicy"] = "disabled"
+        assert not pipeline.can_start_optional_review(reserve_seconds=reserve)
+
+    assert [event["admitted"] for _, event in events] == [False, True, False]
+    assert [event["policy"] for _, event in events] == ["production", "production", "disabled"]
+    assert all(name == "reviewAdmissions" for name, _ in events)
+    assert pipeline.calls == 0
+
+
 def test_current_native_service_runs_all_stages_with_real_review_admission(prepared, monkeypatch):
     output, source, policy, cases = prepared
     # Policy construction must not discover ambient credentials/settings.

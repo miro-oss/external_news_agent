@@ -8,7 +8,7 @@ from app.core.evidence import factual_mismatches
 from app.llm.report_insight_service import _validate_prose
 
 
-@pytest.mark.parametrize("prefix", ["전력", "시스템", "화합물", "메모리", "비메모리"])
+@pytest.mark.parametrize("prefix", ["전력", "시스템", "화합물", "메모리", "비메모리", "차세대"])
 def test_semiconductor_category_spacing_does_not_create_a_company(prefix):
     source = f"{prefix} 반도체 소자의 설계를 다룬다."
     assert factual_mismatches(f"{prefix}반도체 소자의 설계를 다룬다.", source) == []

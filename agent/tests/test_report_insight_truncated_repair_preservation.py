@@ -5,7 +5,9 @@ from copy import deepcopy
 from dataclasses import replace
 
 import pytest
+from report_insight_schema_assertions import assert_same_native_constraints
 from test_report_insight_assessment import payload, request, response
+from test_report_insight_core_forecast_support import recorded_case
 from test_report_insight_mixed_record_preservation import (
     BAD_COMPANY_REASON,
     GOOD_REASON,
@@ -14,6 +16,7 @@ from test_report_insight_mixed_record_preservation import (
 )
 from test_report_insight_preserved_connection_repair import corrected_capacity
 from test_report_insight_preserved_decision_repair import repair_payload, wire_validator
+from test_report_insight_review_time_admission import assert_usage
 from test_report_insight_truncated_prefix import prefix
 from test_report_insight_v4_pipeline import V4Provider, generate, stages
 
@@ -111,6 +114,54 @@ def test_closed_native_failure_reports_public_failure_before_the_only_retry(prom
     assert raw.truncated
 
 
+@pytest.mark.parametrize("prompt", [draft_prompt, review_prompt], ids=["MAP", "REVIEW"])
+def test_closed_mixed_axis_and_reason_failure_keeps_connection_after_prefix_recovery(prompt):
+    source, value = recorded_case()
+    other = request(ids=(102, 103))
+    source.findings.extend(other.findings)
+    value["assessments"]["CHIP_MAKER"].update(payload(other)["assessments"]["CHIP_MAKER"])
+    value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = (
+        "TSMC의 메모리 생산능력 제약은 생산능력 업무와 연결된다."
+    )
+    raw = truncated(source, value, 2)
+    original = source.model_dump_json(), raw.text
+    repair, error, calls = repair_for(source, raw, prompt)
+    assert error.failed_finding_ids == (101, 103)
+    assert set(error.native_connection_repairs) == {101}
+    assert not error.native_prose_repairs
+    assert set(error.preserved_wire["assessments"]["CHIP_MAKER"]) == {"finding102"}
+    assert ("assessments[101].reason", "company") in {
+        (issue.field, issue.rule) for issue in error.validation_issues
+    }
+
+    fixed = corrected_capacity(value)
+    wire, fixed_raw = candidate(repair, source, raw, fixed)
+    assert set(wire["assessments"]["CHIP_MAKER"]) == {"finding101", "finding103"}
+    wire_validator(repair).validate(wire)
+    changed = deepcopy(wire)
+    # Changing a valid connection's basis is forbidden even though the response was
+    # truncated after this complete, source-authenticated record.
+    changed["assessments"]["CHIP_MAKER"]["finding101"]["decision"]["connection"]["basis"] = {
+        "claimId": "101:0",
+        "sourceSpanId": "s101_0_0",
+    }
+    assert not wire_validator(repair).is_valid(changed)
+    with pytest.raises(OutputValidationError, match="connection을 변경할 수 없습니다"):
+        repair.validate(replace(fixed_raw, text=json.dumps(changed, ensure_ascii=False)))
+    assert calls == []
+
+    accepted = repair.validate(fixed_raw)
+    item = accepted.evidence["CHIP_MAKER"][101]
+    assert item.relation == "DIRECT" and item.relation_basis.claim_id == "101:1"
+    assert item.impact_scope == "CORE_CONSTRAINT" and item.impact_basis.claim_id == "101:1"
+    assert item.urgency_state == "MONITOR"
+    assert len(calls) == 1
+    merged = calls[0]["assessments"]["CHIP_MAKER"]
+    assert set(merged) == {"finding101", "finding102", "finding103"}
+    assert merged["finding102"] == error.preserved_wire["assessments"]["CHIP_MAKER"]["finding102"]
+    assert original == (source.model_dump_json(), raw.text)
+
+
 @pytest.mark.parametrize("impact_scope", ["UNDETERMINED", "NO_CHANGE"])
 def test_truncated_prose_repair_rejects_changes_to_verified_decisions(impact_scope):
     source, value = mixed_case()
@@ -196,7 +247,7 @@ def test_unauthenticated_prefix_never_enables_partial_or_axis_preservation(monke
     repair = object.__new__(service.ReportInsightService)._repair_call(
         draft_prompt(source), schema, raw.text, error, template_validator(source, calls)
     )
-    assert repair.response_schema == schema
+    assert_same_native_constraints(repair.response_schema, schema)
     assert calls == []
 
 
@@ -241,16 +292,35 @@ def test_closed_prefix_retry_rechecks_full_output_and_never_accepts_truncated_re
 
 
 @pytest.mark.parametrize("permanent", [False, True])
-def test_pipeline_uses_one_truncated_retry_and_preserves_usage(permanent):
+def test_pipeline_uses_one_retry_per_stage_and_preserves_truncated_map_usage(
+    permanent, monkeypatch
+):
+    failures = []
+    original_call = service.structured_call
+
+    def capture(*args, **kwargs):
+        try:
+            return original_call(*args, **kwargs)
+        except AgentError as error:
+            failures.append(error)
+            raise
+
+    monkeypatch.setattr(service, "structured_call", capture)
     source = request(ids=(101, 102, 103))
 
     class Provider(V4Provider):
         def generate(self, **kwargs):
             answer = super().generate(**kwargs)
-            if self.calls[-1]["response_schema"]["description"] != "reportInsightCall:MAP-001":
+            stage = self.calls[-1]["response_schema"]["description"]
+            if stage != "reportInsightCall:MAP-001" and not (
+                permanent
+                and stage.startswith(("reportInsightCall:REVIEW", "reportInsightCall:EXPLAIN"))
+            ):
                 return answer
             wire = json.loads(answer.text)
-            record = wire["assessments"]["CHIP_MAKER"]["finding101"]
+            record = wire["assessments"]["CHIP_MAKER"].get("finding101")
+            if record is None:
+                return answer
             if len(self.calls) == 1:
                 record["reason"] = "영향 범위는 미확인이다. " + BAD_COMPANY_REASON
                 return replace(
@@ -265,14 +335,19 @@ def test_pipeline_uses_one_truncated_retry_and_preserves_usage(permanent):
     if permanent:
         with pytest.raises(AgentError) as caught:
             generate(provider, source)
-        assert stages(provider) == ["MAP-001", "MAP-001"]
-        assert caught.value.details["truncated"] is True
-        assert caught.value.details["usage"] == {
-            "inputTokens": 22,
-            "outputTokens": 14,
-            "costUsd": 0.006,
-            "credits": 0.4,
-        }
+        assert stages(provider) == [
+            "MAP-001",
+            "MAP-001",
+            "REVIEW-001",
+            "REVIEW-001",
+            "EXPLAIN-001",
+            "EXPLAIN-001",
+        ]
+        assert failures[0].details["truncated"] is True
+        assert failures[0].details["validationFailure"]["stage"] == "MAP-001"
+        assert caught.value.details["validationFailure"]["stage"] == "EXPLAIN-001"
+        assert caught.value.details["validationFailure"]["attempt"] == 2
+        assert_usage(caught.value.details["usage"], 6)
     else:
         output = generate(provider, source)
         assert stages(provider)[:2] == ["MAP-001", "MAP-001"]

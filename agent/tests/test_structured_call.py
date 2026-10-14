@@ -9,16 +9,18 @@ from pydantic_core import PydanticCustomError
 from app.core.errors import AgentError, OutputValidationError
 from app.core.parser import JsonObjectParseError
 from app.llm.base import ProviderResponse, ProviderUsage
-from app.llm.structured_call import _log_validation_failure, structured_call
+from app.llm.structured_call import StructuredCallRepair, _log_validation_failure, structured_call
 
 
 class SequenceProvider:
     def __init__(self, *results: ProviderResponse | AgentError) -> None:
         self.results = list(results)
         self.calls = 0
+        self.requests = []
 
     def generate(self, **kwargs) -> ProviderResponse:
         self.calls += 1
+        self.requests.append(kwargs)
         result = self.results.pop(0)
         if isinstance(result, AgentError):
             raise result
@@ -104,6 +106,8 @@ def invoke(
     failure_stage: str | None = None,
     validator=reject,
     include_failure_details: bool = True,
+    repair_factory=None,
+    repair_attempts: int = 1,
 ):
     return structured_call(
         provider,
@@ -111,7 +115,7 @@ def invoke(
         prompt="unchanged prompt",
         response_schema={},
         validate=validator,
-        repair_attempts=1,
+        repair_attempts=repair_attempts,
         task_name="fixture",
         input_tag="fixture",
         schema_violation_message="invalid output",
@@ -119,7 +123,89 @@ def invoke(
         failure_prompt_version=prompt_version,
         failure_stage=failure_stage,
         include_failure_details=include_failure_details,
+        repair_factory=repair_factory,
     )
+
+
+@pytest.mark.parametrize("instruction", [None, "decision first repair"])
+def test_repair_instruction_is_opt_in_and_keeps_validation_and_usage(instruction):
+    provider = SequenceProvider(response(), response())
+    repaired = []
+
+    def validate(candidate):
+        repaired.append(candidate)
+        return "validated repair"
+
+    def repair(prompt, schema, raw, failure):
+        assert (prompt, schema, raw) == ("unchanged prompt", {}, "invalid")
+        assert isinstance(failure, ValueError)
+        return StructuredCallRepair("retry prompt", {"title": "retry"}, validate, instruction)
+
+    result = invoke(provider, repair_factory=repair)
+    assert provider.requests == [
+        {
+            "system_instruction": "unchanged system",
+            "prompt": "unchanged prompt",
+            "response_schema": {},
+        },
+        {
+            "system_instruction": instruction or "unchanged system",
+            "prompt": "retry prompt",
+            "response_schema": {"title": "retry"},
+        },
+    ]
+    assert repaired == [result.response]
+    assert result.output == "validated repair"
+    assert result.usage == ProviderUsage(20, 8, Decimal("0.04"), Decimal("2"))
+
+
+@pytest.mark.parametrize("repair_attempts", [0, 1])
+def test_repair_instruction_does_not_add_attempts_or_hide_exhausted_usage(repair_attempts):
+    provider = SequenceProvider(response(), response(), response())
+    repairs = []
+
+    def repair(prompt, schema, raw, failure):
+        repairs.append(failure)
+        return StructuredCallRepair(prompt, schema, reject, "decision first repair")
+
+    with pytest.raises(AgentError) as caught:
+        invoke(provider, repair_factory=repair, repair_attempts=repair_attempts)
+    attempts = repair_attempts + 1
+    assert provider.calls == attempts
+    assert len(repairs) == repair_attempts
+    assert caught.value.details["usage"] == {
+        "inputTokens": 10 * attempts,
+        "outputTokens": 4 * attempts,
+        "costUsd": float(Decimal("0.02") * attempts),
+        "credits": float(attempts),
+    }
+    assert caught.value.details["executionMetadata"]["usageCompleteness"] == "COMPLETE"
+
+
+def test_retry_without_instruction_override_uses_original_not_previous_override():
+    provider = SequenceProvider(response(), response(), response())
+    instructions = iter(("decision first repair", None))
+
+    def repair(prompt, schema, raw, failure):
+        return StructuredCallRepair(prompt, schema, reject, next(instructions))
+
+    with pytest.raises(AgentError):
+        invoke(provider, repair_factory=repair, repair_attempts=2)
+    assert [call["system_instruction"] for call in provider.requests] == [
+        "unchanged system",
+        "decision first repair",
+        "unchanged system",
+    ]
+
+
+def test_generic_retry_without_factory_keeps_original_instruction():
+    provider = SequenceProvider(response(), response())
+    with pytest.raises(AgentError):
+        invoke(provider)
+    assert [call["system_instruction"] for call in provider.requests] == [
+        "unchanged system",
+        "unchanged system",
+    ]
 
 
 def test_schema_failure_keeps_last_observed_identity_and_accumulated_usage() -> None:
