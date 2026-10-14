@@ -145,7 +145,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v55"
+PROMPT_VERSION = "report-insight.ko.v56"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -756,25 +756,89 @@ class ReportInsightService(ReportInsightLegacyService):
                 concurrency=pipeline.map_concurrency,
                 cancel_pending=pipeline.cancel_pending_calls,
             )
+            pending_review_prose = set()
+            completed_reviews = []
 
             def evaluate_review(subset, review_index):
                 schema = draft_schema(subset)
                 schema["description"] = f"reportInsightCall:REVIEW-{review_index:03d}"
-                with pipeline.optional_review_deadline(reserve_seconds=explanation_reserve):
-                    return self._call(
-                        pipeline,
-                        instruction=report_stage_instruction(request.audiences, "REVIEW"),
-                        prompt=review_prompt(subset, reference_date=reference_date),
-                        schema=schema,
-                        validate=lambda response: assess(response, subset),
-                        stage="REVIEW",
-                    ).output
+                failed_attempt = None
+
+                def validate_review(response):
+                    nonlocal failed_attempt
+                    try:
+                        return assess(response, subset)
+                    except ReportAssessmentValidationError as error:
+                        failed_attempt = response, error
+                        raise
+
+                try:
+                    with pipeline.optional_review_deadline(reserve_seconds=explanation_reserve):
+                        draft = self._call(
+                            pipeline,
+                            instruction=report_stage_instruction(request.audiences, "REVIEW"),
+                            prompt=review_prompt(subset, reference_date=reference_date),
+                            schema=schema,
+                            validate=validate_review,
+                            stage="REVIEW",
+                        ).output
+                except StructuredOutputExhaustedError as error:
+                    # A repaired decision can be valid while its prose still
+                    # copies an old answer/claim summary. Finish that prose in
+                    # the existing source-only stage, never accept it as-is.
+                    if failed_attempt is None or error.__cause__ is not failed_attempt[1]:
+                        raise
+                    response, public_error = failed_attempt
+                    failed_ids = public_error.failed_finding_ids
+                    if (
+                        not failed_ids
+                        or len(subset.audiences) != 1
+                        or set(failed_ids) != set(public_error.native_prose_repairs)
+                        or set(failed_ids) != set(public_error.native_prose_sources)
+                    ):
+                        raise
+                    try:
+                        draft = validate_draft(response, subset)
+                    except ValueError:
+                        raise error from public_error
+                    pending_review_prose.update(failed_ids)
+                    logger.info(
+                        "Report insight stage=REVIEW-%03d outcome=AWAITING_EXPLANATION "
+                        "findingCount=%d",
+                        review_index,
+                        len(failed_ids),
+                    )
+                completed_reviews.append((review_index, tuple(f.id for f in subset.findings)))
+                return draft
+
+            def merge_review_candidates(*parts):
+                if pending_review_prose:
+                    # Only native validity is claimed here. Public validation
+                    # is mandatory after every pending explanation is replaced.
+                    return merge_drafts(request, *parts)
+                return validated_merge(*parts)[0]
 
             drafts = [draft for draft, _, _ in map_results]
             required_ids = {identifier for _, failed, _ in map_results for identifier in failed}
             required_findings = [
                 finding for finding in request.findings if finding.id in required_ids
             ]
+            review_ids = None
+            mandatory_ids = set(required_ids)
+            if required_ids:
+                # Rank the native-valid MAP once. A partly filled mandatory
+                # batch also reviews leading/omitted candidates, without an
+                # extra provider round or exposing any failed MAP prose.
+                review_ids = [
+                    identifier
+                    for identifier in select_review(request, merge_drafts(request, *drafts))
+                    if identifier not in required_ids
+                ][: max(0, MAX_REVIEW_FINDINGS - len(required_ids))]
+                spare_slots = (-len(required_findings)) % MAX_ASSESSMENT_BATCH
+                mandatory_ids.update(review_ids[:spare_slots])
+                required_findings = [
+                    finding for finding in request.findings if finding.id in mandatory_ids
+                ]
             reviews = []
             for offset in range(0, len(required_findings), MAX_ASSESSMENT_BATCH):
                 if not pipeline.can_start_optional_review(reserve_seconds=explanation_reserve):
@@ -791,12 +855,12 @@ class ReportInsightService(ReportInsightLegacyService):
                 # Mandatory review uses fresh source/schema and must succeed:
                 # these MAP rows have never passed the public grounding guards.
                 reviews.append(evaluate_review(subset, len(reviews) + 1))
-            validated, _ = validated_merge(*drafts, *reviews)
+            validated = merge_review_candidates(*drafts, *reviews)
+            if review_ids is None:
+                review_ids = list(select_review(request, validated))[:MAX_REVIEW_FINDINGS]
             review_ids = [
-                identifier
-                for identifier in select_review(request, validated)
-                if identifier not in required_ids
-            ][: max(0, MAX_REVIEW_FINDINGS - len(required_ids))]
+                identifier for identifier in review_ids if identifier not in mandatory_ids
+            ]
             review_findings = [finding for finding in request.findings if finding.id in review_ids]
             next_review_index = len(reviews) + 1
             reviews = []
@@ -821,7 +885,7 @@ class ReportInsightService(ReportInsightLegacyService):
                     # validated MAP for its IDs; never accept its invalid draft.
                     # Provider/routing, deadline, budget and unknown-usage errors
                     # remain ordinary AgentErrors and must leave the pipeline.
-                    validated, _ = validated_merge(validated)
+                    validated = merge_review_candidates(validated)
                     logger.warning(
                         "Report insight stage=REVIEW-%03d outcome=VALIDATION_FAILED "
                         "fallback=VALIDATED_MAP_RETAINED findingCount=%d",
@@ -832,9 +896,13 @@ class ReportInsightService(ReportInsightLegacyService):
                     reviews.append(review)
             # Select once from the complete MAP, then merge all independent
             # reviews. An earlier review cannot alter later selection or input.
-            validated, mapped = validated_merge(validated, *reviews)
+            validated = merge_drafts(request, validated, *reviews)
             explanations = prepare_explanation_batches(
-                request, validated, batch_size=MAX_ASSESSMENT_BATCH, reference_date=reference_date
+                request,
+                validated,
+                batch_size=MAX_ASSESSMENT_BATCH,
+                reference_date=reference_date,
+                required_finding_ids=pending_review_prose,
             )
 
             def explain(index, batch):
@@ -872,12 +940,22 @@ class ReportInsightService(ReportInsightLegacyService):
                 validated = assess(
                     replace(pipeline.last_response, text=prompt_json(combined)), request
                 )
-                validated, mapped = validated_merge(validated)
+            validated, mapped = validated_merge(validated)
             # Display quotes are derived only after all assessment repairs.
             # Revalidate the rendered native/public projection before retrieval
             # and synthesis; source, fact and time guards remain unchanged.
             validated = render_basis_quotes(validated, request)
             validated, mapped = validated_merge(validated)
+            for review_index, finding_ids in completed_reviews:
+                logger.info(
+                    "Report insight stage=REVIEW-%03d outcome=ADOPTED findingIds=%s "
+                    "traceId=%s reportId=%s audiences=%s",
+                    review_index,
+                    finding_ids,
+                    pipeline.validation_context.trace_id,
+                    request.report.id,
+                    request.audiences,
+                )
             retrieved = {
                 insight.audience: retrieve_report_insight_evidence(
                     request,

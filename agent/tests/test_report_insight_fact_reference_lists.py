@@ -86,9 +86,9 @@ def test_six_list_citations_are_repaired_once_or_still_rejected(repair):
         assert caught.value.code == "SCHEMA_VIOLATION"
     expected = ["MAP-001", "MAP-001"]
     if not repair:
-        expected += ["REVIEW-001", "REVIEW-001"]
-        assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
-        assert caught.value.details["usage"]["inputTokens"] == 44
+        expected += ["REVIEW-001", "REVIEW-001", "EXPLAIN-001", "EXPLAIN-001"]
+        assert caught.value.details["validationFailure"]["stage"] == "EXPLAIN-001"
+        assert caught.value.details["usage"]["inputTokens"] == 66
     assert stages(provider) == expected
     diagnostic = (
         provider.calls[1]["prompt"].split("<validation-error>")[1].split("</validation-error>")[0]

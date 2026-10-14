@@ -1,5 +1,6 @@
 """Prepare prose-only calls from final decisions and their selected sources."""
 
+from collections.abc import Collection
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date
@@ -51,8 +52,9 @@ def prepare_explanation_batches(
     *,
     batch_size: int = 6,
     reference_date: date | None = None,
+    required_finding_ids: Collection[int] = (),
 ) -> tuple[ExplanationBatch, ...]:
-    """Select only rows that had access to evidence outside their final bases."""
+    """Focus final prose and retry required rows without reopening their decisions."""
     if type(batch_size) is not int or batch_size < 1:
         raise ValueError("Explanation batch size must be a positive integer.")
     authenticated = merge_drafts(request, validated)
@@ -66,6 +68,7 @@ def prepare_explanation_batches(
         if branch.get("type") == "string"
     )
     result = []
+    required = frozenset(required_finding_ids)
     for audience in request.audiences:
         targets = []
         for finding in request.findings:
@@ -74,13 +77,19 @@ def prepare_explanation_batches(
             selected = {
                 axis["basis"]["claimId"] for axis in decision.values() if axis["basis"] is not None
             }
-            if (
-                decision["connection"]["relation"] == "UNDETERMINED"
-                or not selected
-                or not selected < {claim.id for claim in finding.claims}
+            eligible = {claim.id for claim in finding.claims}
+            if not eligible or (
+                finding.id not in required
+                and (
+                    decision["connection"]["relation"] == "UNDETERMINED"
+                    or not selected
+                    or not selected < eligible
+                )
             ):
                 continue
-            targets.append((finding, record, selected))
+            # An authenticated all-unknown row has no basis. Its local sources
+            # still support a grounded explanation of the withheld decision.
+            targets.append((finding, record, selected or eligible))
         for offset in range(0, len(targets), batch_size):
             group = targets[offset : offset + batch_size]
             subset = request.model_copy(
@@ -103,6 +112,12 @@ def prepare_explanation_batches(
                     )
                 )
                 payload = finding_prompt_payload(request, finding, claim_ids=selected)
+                # Claim summaries can contain identifiers absent from their raw
+                # sources. Keep their provenance, never their wording, in prose input.
+                for claim in payload["claims"]:
+                    claim.pop("text")
+                payload.pop("sourceQuoteChoices")
+                claim_sentences = {claim.id: claim.evidence_sentence_ids for claim in claims}
                 decision = deepcopy(record["decision"])
                 # Do not anchor new prose to either previously generated field.
                 condition_required = decision["connection"].pop("condition") is not None
@@ -113,9 +128,7 @@ def prepare_explanation_batches(
                         {
                             "axis": axis,
                             **value["basis"],
-                            "text": payload["sourceQuoteChoices"][value["basis"]["claimId"]][
-                                value["basis"]["sourceSpanId"]
-                            ],
+                            "evidenceSentenceIds": claim_sentences[value["basis"]["claimId"]],
                         }
                         for axis, value in decision.items()
                         if value["basis"] is not None
@@ -145,15 +158,19 @@ def prepare_explanation_batches(
                 ExplanationBatch(
                     request=subset,
                     prompt=(
-                        "최종 검증된 판단과 선택 원문으로 설명을 새로 작성하세요. 각 항목은 "
+                        "근거 계약이 검증된 판단과 선택 원문으로 설명을 새로 작성하세요. 각 항목은 "
                         "findingId, decision, reason, sourceQuotes 순서입니다. Schema const의 "
                         "관계·업무·영향·시점·basis를 유지하고 reason과 conditionRequired=true인 "
                         "condition만 작성하세요. conditionRequired=false이면 condition=null을 "
                         "유지합니다. sourceQuotes는 모두 null입니다. "
                         + ASSESSMENT_SELECTED_BASIS_RULE
-                        + " 각 finding의 claims와 sentences는 최종 선택 claim과 연결 문장 "
-                        "전체입니다. selectedEvidence는 고정된 축별 인용입니다. 선택되지 않은 "
-                        "원문을 추측하거나 원문이 없다는 면책 문구를 쓰지 마세요.\n\n"
+                        + " claims는 요약 문구를 제외한 출처 메타데이터입니다. 설명의 사실은 "
+                        "sentences의 원문에서만 가져오세요. selectedEvidence는 고정된 축별 "
+                        "근거와 연결 문장 번호입니다. sentences는 최종 선택 claim의 연결 원문 "
+                        "전체이며, selectedEvidence가 비어 있으면 같은 finding의 전체 연결 "
+                        "원문으로 판단 보류 이유를 씁니다. 선택되지 않은 원문을 추측하거나 "
+                        "원문이 없다는 면책 문구를 쓰지 마세요. ID는 구조화 필드에만 두고 "
+                        "근거 선택·검증 해설을 덧붙이지 마세요.\n\n"
                         + "<report-insight-input>\n"
                         + prompt_json(payload)
                         + "\n</report-insight-input>"

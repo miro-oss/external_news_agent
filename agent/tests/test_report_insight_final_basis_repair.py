@@ -13,7 +13,7 @@ from test_report_insight_preserved_decision_repair import repair_payload, wire_v
 from test_report_insight_v4_pipeline import V4Provider, stages
 
 from app.core.config import Settings
-from app.core.errors import AgentError, OutputValidationError
+from app.core.errors import OutputValidationError
 from app.llm import report_insight_service as service
 from app.llm.report_insight_assessment import draft_prompt, draft_schema, review_prompt
 from app.llm.report_insight_instructions import (
@@ -293,29 +293,20 @@ def test_pipeline_revalidates_final_bases_with_one_repair_and_original_usage_bud
 
     provider = V4Provider(source, hook=hook)
     engine = service.ReportInsightService(Settings(_env_file=None, AGENT_MOCK=False), provider)
+    result = engine.generate(source)
+    expected = ["MAP-001", "REVIEW-001", "EXPLAIN-001", "REDUCE-001"]
+    expected.insert(expected.index(stage), stage)
     if stage == "MAP-001" and stale_reason:
-        with pytest.raises(AgentError) as caught:
-            engine.generate(source)
-        assert caught.value.code == "SCHEMA_VIOLATION"
-        assert stages(provider) == [stage, stage, "REVIEW-001", "REVIEW-001"]
-        assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
-        assert caught.value.details["usage"]["inputTokens"] == 44
-        assert caught.value.details["usage"]["outputTokens"] == 28
-    else:
-        result = engine.generate(source)
-        expected = ["MAP-001", "REVIEW-001", "EXPLAIN-001", "REDUCE-001"]
-        expected.insert(expected.index(stage), stage)
-        assert stages(provider) == expected
-        assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
-        assessment = next(item for item in result.insights[0].assessments if item.finding_id == 101)
-        if stale_reason:
-            # Optional REVIEW failure keeps a valid MAP whose selected timing
-            # still supports HBM4; it never publishes the rejected revision.
-            assert "HBM4" in assessment.reason
-            assert "101:1" in assessment.basis_claim_ids
-        else:
-            assert "HBM4" not in assessment.reason
-            assert assessment.basis_claim_ids == ["101:0"]
+        expected.insert(expected.index("REVIEW-001"), "REVIEW-001")
+    assert stages(provider) == expected
+    assert result.meta.input_tokens == 11 * len(expected)
+    assert result.meta.output_tokens == 7 * len(expected)
+    assessment = next(item for item in result.insights[0].assessments if item.finding_id == 101)
+    # REVIEW's corrected decision survives; EXPLAIN replaces its stale HBM4
+    # prose using only the final HBM basis, including after a MAP prose failure.
+    assert "HBM4" not in assessment.reason
+    assert assessment.basis_claim_ids == ["101:0"]
+    assert assessment.axes.impact is assessment.axes.urgency is None
     repair_index = stages(provider).index(stage) + 1
     repaired = provider.wire_payloads[repair_index]["assessments"][AUDIENCE]
     assert set(repaired) == {"finding101"}

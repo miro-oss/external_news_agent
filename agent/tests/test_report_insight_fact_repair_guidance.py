@@ -192,9 +192,16 @@ def test_unchanged_internal_ids_still_fail_after_the_one_repair():
     with pytest.raises(AgentError) as caught:
         generate(provider, source)
     assert caught.value.code == "SCHEMA_VIOLATION"
-    assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REVIEW-001"]
-    assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
-    assert caught.value.details["usage"]["inputTokens"] == 44
+    assert stages(provider) == [
+        "MAP-001",
+        "MAP-001",
+        "REVIEW-001",
+        "REVIEW-001",
+        "EXPLAIN-001",
+        "EXPLAIN-001",
+    ]
+    assert caught.value.details["validationFailure"]["stage"] == "EXPLAIN-001"
+    assert caught.value.details["usage"]["inputTokens"] == 66
 
 
 @pytest.mark.parametrize("citation", ["claim 101:0", "claim 101:0~2", "claim 101:"])

@@ -407,7 +407,7 @@ class ReportValidationContext:
 def _safe_issue(issue: object, stage: str | None = None) -> bool:
     if stage is None:
         fields = (_REDUCE_FIELD, _MAP_FIELD)
-    elif stage in {"MAP", "REVIEW"} or stage.startswith(("MAP-", "REVIEW-")):
+    elif stage in {"MAP", "REVIEW", "EXPLAIN"} or stage.startswith(("MAP-", "REVIEW-", "EXPLAIN-")):
         fields = (_MAP_FIELD,)
     else:
         fields = (_REDUCE_FIELD,)

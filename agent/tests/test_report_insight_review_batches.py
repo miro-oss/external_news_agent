@@ -124,13 +124,15 @@ def test_later_review_failure_keeps_usage_and_only_validation_can_retain_map(mon
         settings["AGENT_HARD_CAP_CREDITS_PER_REQUEST"] = 0.95
     if failure == "repair_exhausted":
         output = generate(provider, source, **settings)
-        assert stages(provider)[-3:] == ["REVIEW-002", "REVIEW-002", "REDUCE-001"]
-        assert len(provider.calls) == 7
+        assert stages(provider)[-4:] == ["REVIEW-002", "REVIEW-002", "EXPLAIN-001", "REDUCE-001"]
+        assert len(provider.calls) == 8
         final = output.insights[0].assessments
         assert all(item.axes.directness is None for item in final[:6])
-        assert all(item.axes.impact is None for item in final[6:])
-        assert output.meta.input_tokens == 77 and output.meta.output_tokens == 49
-        assert output.meta.cost_usd == 0.021 and output.meta.credits == 1.4
+        assert all(item.axes.impact == 3 for item in final[6:12])
+        assert final[12].axes.impact is None
+        assert "2031" not in final[9].reason
+        assert output.meta.input_tokens == 88 and output.meta.output_tokens == 56
+        assert output.meta.cost_usd == 0.024 and output.meta.credits == 1.6
         return
     with pytest.raises(AgentError) as caught:
         generate(provider, source, **settings)

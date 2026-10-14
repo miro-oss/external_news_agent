@@ -313,11 +313,14 @@ def test_pipeline_uses_one_retry_per_stage_and_preserves_truncated_map_usage(
             answer = super().generate(**kwargs)
             stage = self.calls[-1]["response_schema"]["description"]
             if stage != "reportInsightCall:MAP-001" and not (
-                permanent and stage.startswith("reportInsightCall:REVIEW")
+                permanent
+                and stage.startswith(("reportInsightCall:REVIEW", "reportInsightCall:EXPLAIN"))
             ):
                 return answer
             wire = json.loads(answer.text)
-            record = wire["assessments"]["CHIP_MAKER"]["finding101"]
+            record = wire["assessments"]["CHIP_MAKER"].get("finding101")
+            if record is None:
+                return answer
             if len(self.calls) == 1:
                 record["reason"] = "영향 범위는 미확인이다. " + BAD_COMPANY_REASON
                 return replace(
@@ -332,12 +335,19 @@ def test_pipeline_uses_one_retry_per_stage_and_preserves_truncated_map_usage(
     if permanent:
         with pytest.raises(AgentError) as caught:
             generate(provider, source)
-        assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REVIEW-001"]
+        assert stages(provider) == [
+            "MAP-001",
+            "MAP-001",
+            "REVIEW-001",
+            "REVIEW-001",
+            "EXPLAIN-001",
+            "EXPLAIN-001",
+        ]
         assert failures[0].details["truncated"] is True
         assert failures[0].details["validationFailure"]["stage"] == "MAP-001"
-        assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
+        assert caught.value.details["validationFailure"]["stage"] == "EXPLAIN-001"
         assert caught.value.details["validationFailure"]["attempt"] == 2
-        assert_usage(caught.value.details["usage"], 4)
+        assert_usage(caught.value.details["usage"], 6)
     else:
         output = generate(provider, source)
         assert stages(provider)[:2] == ["MAP-001", "MAP-001"]

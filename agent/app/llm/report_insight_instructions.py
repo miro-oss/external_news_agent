@@ -106,7 +106,9 @@ def report_stage_instruction(audiences: list[Audience], stage: str, *, repair: b
         stage_text = (
             "현재 단계는 EXPLAIN. Schema const로 고정된 decision의 판단·work·basis와 "
             "null condition은 유지한다. 선택된 claim·연결 원문만 읽고 수정 가능한 "
-            "reason과 non-null condition을 작성한다. "
+            "reason과 non-null condition을 작성한다. claims는 출처 메타데이터이며 "
+            "설명의 사실은 sentences의 연결 원문에서만 가져온다. selectedEvidence가 "
+            "비어 있으면 같은 finding의 전체 연결 원문으로 판단 보류 이유를 쓴다. "
             + ASSESSMENT_REASON_RULE
             + " "
             + ASSESSMENT_CONDITION_RULE

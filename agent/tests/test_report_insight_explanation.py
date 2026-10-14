@@ -38,10 +38,10 @@ def captured_case(*, conditional=False):
     return source, value
 
 
-def prepare(source, value):
+def prepare(source, value, **kwargs):
     raw = response(value, source)
     validated = validate_draft(raw, source)
-    return raw, validated, prepare_explanation_batches(source, validated)
+    return raw, validated, prepare_explanation_batches(source, validated, **kwargs)
 
 
 def batch_response(raw, batch):
@@ -66,8 +66,11 @@ def test_8288_explanation_excludes_unselected_use_of_funds_and_retains_all_linke
     assert extra in batch.prompt
     assert "8288:7" not in batch.prompt and "8288:3" not in batch.prompt
     assert "미국 내 생산시설" not in batch.prompt
-    assert set(focused["sourceQuoteChoices"]) == {"8288:1"}
+    assert "sourceQuoteChoices" not in focused
+    assert all("text" not in claim for claim in focused["claims"])
     assert focused["selectedEvidence"][0]["claimId"] == "8288:1"
+    assert focused["selectedEvidence"][0]["evidenceSentenceIds"] == [37, 38]
+    assert "text" not in focused["selectedEvidence"][0]
     assert focused["conditionRequired"] is True
     assert "condition" not in focused["decision"]["connection"]
     original = value["assessments"]["MARKET_INVESTOR"]["finding8288"]
@@ -197,3 +200,84 @@ def test_explanation_batches_preserve_source_order_and_separate_audiences():
         (("EQUIPMENT_MAKER",), (107,)),
     ]
     assert draft_to_wire(validated, source)["assessments"].keys() == value["assessments"].keys()
+
+
+@pytest.mark.parametrize("quote_summary", [False, True])
+def test_explanation_8298_summary_identifier_never_reappears_in_raw_only_input(quote_summary):
+    raw_sentence = (
+        "삼성전자가 메모리 반도체 가격 상승과 고대역폭메모리(HBM) 공급 확대에 힘입어 "
+        "남은 4·4분기와 내년에 실적 성장세를 이어갈 것으로 예상된다."
+    )
+    source = request(ids=(8298,), audiences=("MARKET_INVESTOR",), text=raw_sentence)
+    finding = source.findings[0]
+    finding.claims[
+        0
+    ].text = (
+        "증권가는 메모리 가격 상승과 HBM4 공급 확대가 삼성전자 이익 성장을 이끌 것으로 전망한다."
+    )
+    finding.claims[0].claim_type = "FORECAST"
+    value = payload(source)
+    record = value["assessments"]["MARKET_INVESTOR"]["finding8298"]
+    record.update(
+        work="PROFITABILITY",
+        impactScope="UNDETERMINED",
+        impactBasis=None,
+        urgencyState="UNDETERMINED",
+        urgencyBasis=None,
+        reason="HBM4 공급 확대는 삼성전자 수익성과 연결된다.",
+    )
+    if not quote_summary:
+        record["relationBasis"]["quote"] = raw_sentence
+    before = source.model_dump_json()
+    _, validated, (batch,) = prepare(source, value, required_finding_ids=(8298,))
+    focused = framed(batch.prompt)["findings"][0]
+    assert "HBM4" not in batch.prompt
+    assert raw_sentence in batch.prompt
+    assert focused["claims"] == [
+        {
+            "id": "8298:0",
+            "claimType": "FORECAST",
+            "attributedTo": None,
+            "evidenceSentenceIds": [0],
+        }
+    ]
+    assert focused["selectedEvidence"][0]["sourceSpanId"] == (
+        "s8298_0_0" if quote_summary else "s8298_0_1"
+    )
+    assert "sourceQuoteChoices" not in focused
+    assert "HBM4" not in json.dumps(focused["sourceFactIndex"], ensure_ascii=False)
+    assert batch.request.findings[0].claims[0].text == finding.claims[0].text
+    assert before == source.model_dump_json()
+    assert prepare_explanation_batches(source, validated) == ()
+
+
+def test_required_unknown_row_uses_all_local_linked_sources_and_freezes_null_bases():
+    source, _ = captured_case()
+    value = payload(source, relation="UNDETERMINED")
+    raw, _, (batch,) = prepare(source, value, required_finding_ids=(8288,))
+    focused = framed(batch.prompt)["findings"][0]
+    assert {claim["id"] for claim in focused["claims"]} == {"8288:1", "8288:3", "8288:7"}
+    assert {sentence["index"] for sentence in focused["sentences"]} == {
+        index for claim in source.findings[0].claims for index in claim.evidence_sentence_ids
+    }
+    assert focused["selectedEvidence"] == []
+    assert all(axis["basis"] is None for axis in focused["decision"].values())
+    assert all("text" not in claim for claim in focused["claims"])
+    actual = {"assessments": deepcopy(batch.fixed_records)}
+    actual["assessments"]["MARKET_INVESTOR"]["finding8288"]["reason"] = (
+        "상장 추진과 자금 조달 전망이 제시됐으나 구체적인 업무 관계 판단은 보류한다."
+    )
+    Draft202012Validator(batch.response_schema).validate(actual)
+    assert validate_explanation_fields(replace(raw, text=json.dumps(actual)), batch) == actual
+
+
+def test_required_ids_do_not_include_claimless_or_other_all_selected_rows():
+    from app.schemas.report_insight import CLAIMLESS_ASSESSMENT_REASON
+
+    source = request(ids=(101, 102, 103))
+    value = payload(source, relation="UNDETERMINED")
+    source.findings[0].claims = []
+    source.findings[0].sentences = []
+    value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = CLAIMLESS_ASSESSMENT_REASON
+    _, _, (batch,) = prepare(source, value, required_finding_ids=(101, 102))
+    assert batch.finding_ids == (102,)

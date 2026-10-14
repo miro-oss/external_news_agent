@@ -27,6 +27,7 @@ def test_failed_map_finding_is_freshly_reviewed_for_all_audiences_then_fully_val
     source = request(ids=(102, 101, 103), audiences=("CHIP_MAKER", "EQUIPMENT_MAKER"))
     snapshot = source.model_dump_json(by_alias=True)
     full_validations = []
+    selections = []
     original_validate = service._validated_map_output
 
     def capture_full(response, validation_source, **kwargs):
@@ -36,18 +37,23 @@ def test_failed_map_finding_is_freshly_reviewed_for_all_audiences_then_fully_val
         return result
 
     monkeypatch.setattr(service, "_validated_map_output", capture_full)
-    monkeypatch.setattr(service, "select_review", lambda *_: (101, 102, 103))
+
+    def select(review_source, _draft):
+        selections.append([finding.id for finding in review_source.findings])
+        return (101, 102, 103)
+
+    monkeypatch.setattr(service, "select_review", select)
     monkeypatch.setattr(service, "MAX_REVIEW_FINDINGS", 2)
     provider = V4Provider(source, hook=fail_first_finding)
 
     result = generate(provider, source)
 
-    assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REVIEW-002", "REDUCE-001"]
+    assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REDUCE-001"]
     mandatory = framed(provider.calls[2]["prompt"])
-    optional = framed(provider.calls[3]["prompt"])
-    assert [finding["id"] for finding in mandatory["findings"]] == [101]
+    assert selections == [[102, 101, 103]]
+    assert [finding["id"] for finding in mandatory["findings"]] == [102, 101]
     assert mandatory["audiences"] == source.audiences
-    assert [finding["id"] for finding in optional["findings"]] == [102]
+    assert len({finding["id"] for finding in mandatory["findings"]}) == 2
     assert BAD_REASON not in provider.calls[2]["prompt"]
     assert "validation-errors" not in provider.calls[2]["prompt"]
     assert source.findings[1].sentences[0].text in provider.calls[2]["prompt"]
@@ -56,10 +62,10 @@ def test_failed_map_finding_is_freshly_reviewed_for_all_audiences_then_fully_val
         assert [entry.finding_id for entry in insight.assessments] == [102, 101, 103]
         assert all(NORMAL_REASON in entry.reason for entry in insight.assessments)
     assert source.model_dump_json(by_alias=True) == snapshot
-    assert_usage(result.meta.model_dump(by_alias=True), 5)
+    assert_usage(result.meta.model_dump(by_alias=True), 4)
 
 
-def test_mandatory_review_failure_cannot_retain_invalid_map_or_reach_reduce():
+def test_mandatory_review_and_explanation_failure_cannot_retain_invalid_map_or_reach_reduce():
     source = request(ids=(101, 102))
 
     def keep_invalid(stage, occurrence, data, value):
@@ -70,9 +76,16 @@ def test_mandatory_review_failure_cannot_retain_invalid_map_or_reach_reduce():
         generate(provider, source)
 
     assert caught.value.code == "SCHEMA_VIOLATION"
-    assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
-    assert stages(provider) == ["MAP-001", "MAP-001", "REVIEW-001", "REVIEW-001"]
-    assert_usage(caught.value.details["usage"], 4)
+    assert caught.value.details["validationFailure"]["stage"] == "EXPLAIN-001"
+    assert stages(provider) == [
+        "MAP-001",
+        "MAP-001",
+        "REVIEW-001",
+        "REVIEW-001",
+        "EXPLAIN-001",
+        "EXPLAIN-001",
+    ]
+    assert_usage(caught.value.details["usage"], 6)
 
 
 def test_repair_parse_failure_cannot_defer_stale_public_failure_snapshot():

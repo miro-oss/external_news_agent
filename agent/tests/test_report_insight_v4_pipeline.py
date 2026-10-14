@@ -17,7 +17,7 @@ from app.core.errors import AgentError
 from app.core.parser import JsonObjectParseError
 from app.llm import report_insight_service as insight_service
 from app.llm.base import ProviderResponse, ProviderUsage
-from app.llm.report_insight_assessment import draft_to_wire, validate_draft
+from app.llm.report_insight_assessment import draft_to_wire, source_span_choices, validate_draft
 from app.llm.report_insight_service import (
     PROMPT_VERSION,
     RUBRIC_VERSION,
@@ -99,9 +99,9 @@ class V4Provider:
                             record[field] = (
                                 {
                                     "claimId": basis["claimId"],
-                                    "quote": finding["sourceQuoteChoices"][basis["claimId"]][
-                                        basis["sourceSpanId"]
-                                    ],
+                                    "quote": source_span_choices(source[finding["id"]])[
+                                        basis["claimId"]
+                                    ][basis["sourceSpanId"]],
                                 }
                                 if basis is not None
                                 else None
@@ -498,7 +498,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v55"
+    assert result.meta.prompt_version == "report-insight.ko.v56"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -1023,7 +1023,7 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v55"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v56"
     assert output["meta"]["mock"] is True
     assert RUBRIC_VERSION == "report-importance.v6"
     assert set(output) == {"insights", "meta"}

@@ -394,8 +394,8 @@ def test_pipeline_keeps_one_retry_and_observed_usage_when_reason_remains_invalid
         assert caught.value.code == "SCHEMA_VIOLATION"
         expected = ["MAP-001", "MAP-001"]
         if defect in {"internal_id", "unselected_company"}:
-            expected += ["REVIEW-001", "REVIEW-001"]
-            assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
+            expected += ["REVIEW-001", "REVIEW-001", "EXPLAIN-001", "EXPLAIN-001"]
+            assert caught.value.details["validationFailure"]["stage"] == "EXPLAIN-001"
         assert stages(provider) == expected
         assert caught.value.details["usage"]["inputTokens"] == 11 * len(expected)
         assert caught.value.details["usage"]["outputTokens"] == 7 * len(expected)

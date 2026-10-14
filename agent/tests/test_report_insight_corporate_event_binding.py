@@ -797,3 +797,41 @@ def test_run16_financial_event_names_do_not_become_the_next_event_owner(value):
     ]
     assert corporate_event_mismatches(value, sources) == []
     assert corporate_event_mismatches(value, ["솔리다임의 실적이 늘었다."])
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "원문은 솔리다임이 미국 IPO를 통해 약 100억달러 조달을 예상한다고 전하고, 나스닥 "
+        "상장이 생산시설 투자 재원으로 작용할 수 있다고 연결해 IPO가 현지 CAPEX 집행과 "
+        "조건부로 연계될 수 있음을 제시한다.",
+        "블룸버그 보도에서 솔리다임의 미국 IPO 준비와 향후 자금조달 전망이 제시되어 있어, "
+        "IPO 성사 및 해당 자금의 미국 생산시설 투자 전환이 확인될 경우에만 설비투자 집행 "
+        "가능성이 업무상 검토 대상이 된다(조달·사용처는 기사에서 직접 연결되지 않음).",
+    ],
+)
+def test_v56_explanation_predicate_and_event_coordination_keep_the_actual_issuer(value):
+    sources = [
+        "블룸버그통신에 따르면 솔리다임은 미국 IPO를 위한 대표 주관사를 선정했고, "
+        "이르면 내년 상장을 통해 약 100억달러(13조4000억원)를 조달할 것으로 예상된다.",
+        "도널드 트럼프 행정부가 반도체 기업들의 현지 투자를 압박하는 가운데 나스닥 상장이 "
+        "생산시설 투자 재원을 마련하는 통로가 될 수 있어서다.",
+        "솔리다임이 IPO 자금을 미국 내 생산시설에 투입한다면 현지 생산 확대를 요구하는 "
+        "미국 정부의 정책 기조에 대응하고 고객사와의 협력도 강화할 수 있을 것으로 보인다.",
+    ]
+    assert corporate_event_mismatches(value, sources) == []
+    assert corporate_event_mismatches(value.replace("솔리다임", "가온"), sources)
+    assert corporate_event_mismatches(value, ["솔리다임의 실적이 늘었다."])
+
+
+def test_reported_predicate_and_joint_filter_preserve_explicit_unknown_company_names():
+    assert (
+        corporate_event_mismatches(
+            "솔리다임이 자금을 조달한다고 연결해의 IPO를 설명한다.",
+            ["솔리다임은 자금을 조달한다. 연결해는 IPO를 추진한다."],
+        )
+        == []
+    )
+    assert corporate_event_mismatches(
+        "새봄과 가온의 IPO는 투자 판단에 연결된다.", ["가온은 IPO를 추진한다."]
+    )

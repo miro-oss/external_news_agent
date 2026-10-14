@@ -123,7 +123,7 @@ class PrefixProvider(V4Provider):
             )
         if self.repair_defect == "public" and self.calls[-1]["response_schema"][
             "description"
-        ].startswith("reportInsightCall:REVIEW"):
+        ].startswith(("reportInsightCall:REVIEW", "reportInsightCall:EXPLAIN")):
             wire = json.loads(response.text)
             next(iter(wire["assessments"]["CHIP_MAKER"].values()))["reason"] = (
                 "2031년 조건이 실제로 적용됐다."
@@ -237,12 +237,12 @@ def test_failed_repair_has_one_retry_per_stage_and_keeps_original_truncation_usa
         generate(provider, source)
     expected = ["MAP-001", "MAP-001"]
     if defect == "public":
-        expected += ["MAP-002", "REVIEW-001", "REVIEW-001"]
+        expected += ["MAP-002", "REVIEW-001", "REVIEW-001", "EXPLAIN-001", "EXPLAIN-001"]
     assert stages(provider) == expected
     assert caught.value.code == "SCHEMA_VIOLATION"
     assert failures[0].details["truncated"] is True
     assert failures[0].details["validationFailure"]["stage"] == "MAP-001"
     failure = caught.value.details["validationFailure"]
-    assert failure["stage"] == ("REVIEW-001" if defect == "public" else "MAP-001")
+    assert failure["stage"] == ("EXPLAIN-001" if defect == "public" else "MAP-001")
     assert failure["attempt"] == 2
     assert_usage(caught.value.details["usage"], len(expected))

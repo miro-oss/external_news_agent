@@ -301,10 +301,15 @@ def test_repeated_advice_stops_after_one_repair_with_accounted_usage(stage):
 
     def wire(current, occurrence, data, value):
         value = observed_wire(current, occurrence, data, value)
-        if current == stage or (stage == "MAP-001" and current.startswith("REVIEW")):
-            value["assessments"][AUDIENCE]["finding101"]["reason"] = (
-                "기관 순매수 기록이 있으므로 지금 매수해야 한다."
-            )
+        if current.startswith("EXPLAIN"):
+            for record in value["assessments"][AUDIENCE].values():
+                record["reason"] = observed_reason()
+                record["decision"]["connection"]["condition"] = observed_condition()
+        if current == stage or (stage == "MAP-001" and current.startswith(("REVIEW", "EXPLAIN"))):
+            record = value["assessments"][AUDIENCE].get("finding101")
+            if record is None:
+                return value
+            record["reason"] = "기관 순매수 기록이 있으므로 지금 매수해야 한다."
         return value
 
     provider = V4Provider(source, relation="CONDITIONAL", wire_hook=wire)
@@ -312,21 +317,28 @@ def test_repeated_advice_stops_after_one_repair_with_accounted_usage(stage):
         with pytest.raises(AgentError) as caught:
             generate(provider, source)
         assert caught.value.code == "SCHEMA_VIOLATION"
-        assert stages(provider) == [stage, stage, "REVIEW-001", "REVIEW-001"]
-        assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
-        assert caught.value.details["usage"]["inputTokens"] == 44
-        assert caught.value.details["usage"]["outputTokens"] == 28
+        assert stages(provider) == [
+            stage,
+            stage,
+            "REVIEW-001",
+            "REVIEW-001",
+            "EXPLAIN-001",
+            "EXPLAIN-001",
+        ]
+        assert caught.value.details["validationFailure"]["stage"] == "EXPLAIN-001"
+        assert caught.value.details["usage"]["inputTokens"] == 66
+        assert caught.value.details["usage"]["outputTokens"] == 42
         repaired = provider.wire_payloads[-1]
     else:
-        # An exhausted optional review retains the independently validated MAP;
-        # it must neither publish the bad revision nor request a third attempt.
+        # EXPLAIN replaces rejected advice with grounded prose before REVIEW's
+        # valid decisions can become part of the final report.
         result = generate(provider, source)
-        assert stages(provider) == ["MAP-001", stage, stage, "REDUCE-001"]
+        assert stages(provider) == ["MAP-001", stage, stage, "EXPLAIN-001", "REDUCE-001"]
         initial = provider.wire_payloads[0]["assessments"][AUDIENCE]["finding101"]
         assert result.insights[0].assessments[0].reason == expected_market_reason(
             source, initial, 101
         )
-        assert result.meta.input_tokens == 44 and result.meta.output_tokens == 28
+        assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
         repaired = provider.wire_payloads[-2]
     assert set(repaired["assessments"][AUDIENCE]) == {"finding101"}
     assert all(provider.schema_validity)

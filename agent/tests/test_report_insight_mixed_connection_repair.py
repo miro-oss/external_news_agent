@@ -354,6 +354,8 @@ def test_partial_mixed_repair_preserves_healthy_neighbor_and_has_one_retry(retai
                 record["reason"] = corrected(value)["assessments"]["IT_INFRA"]["finding101"][
                     "reason"
                 ]
+                if retained == "reason":
+                    record["reason"] = value["assessments"]["IT_INFRA"]["finding101"]["reason"]
             return result
         if stage.startswith("REDUCE"):
             for insight in result["insights"]:
@@ -422,8 +424,8 @@ def test_partial_mixed_repair_preserves_healthy_neighbor_and_has_one_retry(retai
         assert caught.value.code == "SCHEMA_VIOLATION"
         expected = ["MAP-001", "MAP-001"]
         if retained == "reason":
-            expected += ["REVIEW-001", "REVIEW-001"]
-            assert caught.value.details["validationFailure"]["stage"] == "REVIEW-001"
+            expected += ["REVIEW-001", "REVIEW-001", "EXPLAIN-001", "EXPLAIN-001"]
+            assert caught.value.details["validationFailure"]["stage"] == "EXPLAIN-001"
         assert caught.value.details["usage"]["inputTokens"] == 11 * len(expected)
         assert stages(provider) == expected
     assert [finding["id"] for finding in framed(provider.calls[1]["prompt"])["findings"]] == [101]

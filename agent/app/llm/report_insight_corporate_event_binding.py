@@ -66,6 +66,7 @@ _BARE_OWNER = re.compile(
 _OBLIQUE_PARTICLE = re.compile(r"(?:에서|에게|으로|부터|까지|보다|처럼|에|로|을|를)(?=\s|$)")
 _BARE_OBLIQUE_END = re.compile(r"(?:으로|로|에)$")
 _BARE_CONNECTIVE_END = re.compile(r"(?:라면|다면|으?므로)$")
+_REPORTED_PREDICATE_END = re.compile(r"(?:다고|라고)\s+[가-힣]{2,}해\s*$")
 _OWNER_DESCRIPTION = re.compile(r"(?:자회사|모회사|계열사|관계사|기업|회사|법인)\s*$")
 _JOINT = re.compile(r"\s*(?:와|과|및|·|,|and|&)\s*", re.IGNORECASE)
 _JOINT_END = re.compile(r"(?:와|과|및|·|,|\band|&)\s*$", re.IGNORECASE)
@@ -224,7 +225,7 @@ def _owners(prefix: str) -> frozenset[str]:
             # space lets the actor lexer read an unknown name before a comma.
             else preceding + " " + prefix[reference.start() :]
         )
-    actors, _ = _actors(prefix)
+    actors, roles = _actors(prefix)
     candidates = [
         (a.span.start, a.span.end, a.value)
         for a in actors
@@ -251,7 +252,17 @@ def _owners(prefix: str) -> frozenset[str]:
             and _BARE_CONNECTIVE_END.search(name)
             and not _OWNER_DESCRIPTION.search(trimmed[: bare.start("name")])
         )
-        if not _non_owner(name, bare["particle"]) and not oblique and not connective:
+        reporting_predicate = (
+            bare["particle"] is None
+            and name not in _ALIASES
+            and _REPORTED_PREDICATE_END.search(trimmed)
+        )
+        if (
+            not _non_owner(name, bare["particle"])
+            and not oblique
+            and not connective
+            and not reporting_predicate
+        ):
             # Prefer the existing alias span when the bare pattern captured a
             # suffix of a multiword known name or its grammatical particle.
             span = bare.span("name")
@@ -268,6 +279,20 @@ def _owners(prefix: str) -> frozenset[str]:
             and not any(start <= item[0] and item[1] <= end for start, end in event_spans)
         }
     )
+    # The shared lexer offers the left noun of any A와 B phrase as a joint
+    # actor. Require an actual right-hand owner before promoting an unknown
+    # left noun: in "IPO 준비와 향후 자금조달", 준비 coordinates events.
+    candidates = [
+        item
+        for item in candidates
+        if item[2] in _ALIASES
+        or roles.get(item[:2]) is not None
+        or not _JOINT.match(prefix[item[1] :])
+        or any(
+            item[1] < other[0] and _JOINT.fullmatch(prefix[item[1] : other[0]])
+            for other in candidates
+        )
+    ]
     if not candidates:
         return frozenset()
     last = candidates[-1]

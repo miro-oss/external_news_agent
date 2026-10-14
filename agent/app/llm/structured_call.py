@@ -21,7 +21,7 @@ from app.llm.report_validation_diagnostics import (
     report_validation_issue_details,
 )
 
-_REPORT_FAILURE_STAGE = re.compile(r"(?:MAP|REVIEW|REDUCE)(?:-[0-9]{3})?")
+_REPORT_FAILURE_STAGE = re.compile(r"(?:MAP|REVIEW|EXPLAIN|REDUCE)(?:-[0-9]{3})?")
 _PYDANTIC_ERROR_KINDS = frozenset(get_args(ErrorType))
 
 
