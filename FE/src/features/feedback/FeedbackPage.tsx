@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { ThemeSwitcher } from '../../components/ThemeSwitcher'
 import bistelligenceLogo from '../../assets/bistelligence-logo.png'
 import { ApiError } from '../../api/client'
 import {
@@ -25,6 +26,7 @@ export function FeedbackPage({ token }: { token: string | null }) {
       <img src={bistelligenceLogo} alt="BISTelligence" width={136} height={23} />
       <span>News Signal Desk</span>
       <span className="feedback-private-label">보고서 의견</span>
+      <ThemeSwitcher />
     </header>
     <main className="feedback-page">
       {context.unavailable ? <section className="feedback-link-state">

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import './App.css'
 import bistelligenceLogo from './assets/bistelligence-logo.png'
+import { ThemeSwitcher } from './components/ThemeSwitcher'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { Segmented, type SegmentedOption } from './components/Segmented'
 import { ReportsPage } from './features/reports/ReportsPage'
@@ -149,6 +150,7 @@ function App() {
           onSelect={go}
           activeAria="current"
         />
+        <ThemeSwitcher />
       </nav>
       <TopicWeeklyReportTaskBanner />
       {/*

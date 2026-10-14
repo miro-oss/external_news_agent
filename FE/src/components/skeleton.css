@@ -11,7 +11,7 @@
   max-width: 100%;
   height: .875rem;
   border-radius: 6px;
-  background: linear-gradient(100deg, #e9eef4 20%, #f6f8fb 42%, #e9eef4 64%);
+  background: linear-gradient(100deg, var(--skeleton-base) 20%, var(--skeleton-highlight) 42%, var(--skeleton-base) 64%);
   background-size: 240% 100%;
   animation: skeleton-shimmer 1.8s ease-in-out infinite;
 }
@@ -54,5 +54,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .skeleton-shape { animation: none; background: #e9eef4; }
+  .skeleton-shape { animation: none; background: var(--skeleton-base); }
 }
