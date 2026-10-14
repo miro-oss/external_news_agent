@@ -62,6 +62,25 @@ class DartCompanyOracleIntegrationTests {
         assertEquals(wideName, unlisted.corpName());
     }
 
+    @Test void ignoresSpacesInQueriesAndStoredNamesWithExactMatchFirstAndConsistentPages() {
+        repository.replace(List.of(entry("00164779", "SK하이닉스", "000660"),
+                entry("99999001", "SK 하이닉스서비스", "000001"),
+                entry("99999002", "SK하이닉스테스트", ""),
+                entry("00126362", "삼성 SDI", "006400")));
+        var expected = repository.search("SK하이닉스", 0, 20);
+        for (String query : List.of("SK 하이닉스", "sk  하이닉스", "S K 하 이 닉 스")) {
+            assertEquals(3L, repository.count(query));
+            assertEquals(expected, repository.search(query, 0, 20));
+            assertEquals("00164779", repository.search(query, 0, 1).getFirst().corpCode());
+            assertEquals(expected.subList(0, 2), repository.search(query, 0, 2));
+            assertEquals(expected.subList(2, 3), repository.search(query, 1, 2));
+            assertTrue(repository.search(query, 2, 2).isEmpty());
+        }
+        assertEquals(1L, repository.count("삼성SDI"));
+        assertEquals("삼성 SDI", repository.search("삼성SDI", 0, 20).getFirst().corpName());
+        assertEquals("000660", repository.search("SK 하이닉스", 0, 1).getFirst().stockCode());
+    }
+
     @Test void failedReplacementRollsBackDeleteAndAllPartialBatchInserts() {
         var original = entry("99999001", "Original", "000001");
         repository.replace(List.of(original));

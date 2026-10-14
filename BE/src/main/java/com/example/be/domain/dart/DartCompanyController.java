@@ -48,7 +48,7 @@ public class DartCompanyController {
                     }))
     })
     public ApiResponse<DartCompanyService.SearchResult> search(
-            @Parameter(description = "법인명 또는 종목코드, trim 후 2~100자", required = true)
+            @Parameter(description = "법인명 또는 종목코드, trim 후 2~100자. 검색어·법인명의 일반 공백을 무시하며 법인명은 대소문자를 구분하지 않습니다. 예: SK 하이닉스 → SK하이닉스", required = true)
             @RequestParam(required = false) String query,
             @Parameter(description = "0부터 시작하는 페이지") @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "1~100, 기본 20") @RequestParam(defaultValue = "20") int size) {

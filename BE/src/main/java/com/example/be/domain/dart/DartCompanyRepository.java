@@ -26,18 +26,20 @@ public class DartCompanyRepository {
     }
 
     long count(String query) {
+        query = query.replace(" ", "");
         Long total = jdbc.queryForObject("""
                 SELECT COUNT(*) FROM news_dart_companies
-                WHERE INSTR(UPPER(corp_name), UPPER(?)) > 0 OR INSTR(stock_code, ?) > 0
+                WHERE INSTR(REPLACE(UPPER(corp_name), ' ', ''), UPPER(?)) > 0 OR INSTR(stock_code, ?) > 0
                 """, Long.class, query, query);
         return total == null ? 0 : total;
     }
 
     List<DartModels.Company> search(String query, int page, int size) {
+        query = query.replace(" ", "");
         return jdbc.query("""
                 SELECT corp_code, corp_name, stock_code FROM news_dart_companies
-                WHERE INSTR(UPPER(corp_name), UPPER(?)) > 0 OR INSTR(stock_code, ?) > 0
-                ORDER BY CASE WHEN UPPER(corp_name) = UPPER(?) OR stock_code = ? THEN 0 ELSE 1 END,
+                WHERE INSTR(REPLACE(UPPER(corp_name), ' ', ''), UPPER(?)) > 0 OR INSTR(stock_code, ?) > 0
+                ORDER BY CASE WHEN REPLACE(UPPER(corp_name), ' ', '') = UPPER(?) OR stock_code = ? THEN 0 ELSE 1 END,
                   CASE WHEN stock_code IS NOT NULL THEN 0 ELSE 1 END, corp_name, corp_code
                 OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
                 """, (rs, row) -> new DartModels.Company(rs.getString(1), rs.getString(2),
