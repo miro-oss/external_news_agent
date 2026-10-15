@@ -29,7 +29,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-/** Offline reading attachment built from the same final recipient-visible view as the email. */
+/**
+ * Offline attachment containing company performance, summaries, important events, watch items and
+ * the selected audience's reading sections. Standalone article analysis, collection notes and
+ * disclosure listings are intentionally omitted; the PDF is not an export of every web section.
+ */
 @Component
 @RequiredArgsConstructor
 public class ReportPdfRenderer {
@@ -38,6 +42,17 @@ public class ReportPdfRenderer {
     private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[([^]\\r\\n]+)]\\(([^)\\r\\n]+)\\)");
     private static final Pattern AUTOLINK = Pattern.compile("<(https?://[^>\\r\\n]+)>");
 
+    /**
+     * Builds an in-memory PDF using embedded fonts and saved report data only.
+     *
+     * @param report report metadata and the identity of its stored financial snapshot
+     * @param view final recipient-visible content after local reviews and personal exclusions;
+     *             raw report content must not replace this projection
+     * @param insight the selected, already stored audience analysis, or null to omit it;
+     *                its claims are filtered again against the supplied view
+     * @return complete PDF bytes ready for attachment to this recipient's message
+     * @throws UncheckedIOException if the attachment cannot be prepared completely
+     */
     public byte[] render(NewsReport report, ReportEventFeedbackProjection.View view,
                          ReportInsightDTO.AudienceInsight insight) {
         try (PDDocument document = new PDDocument(); ReportPdfLayout pdf = new ReportPdfLayout(document)) {
@@ -85,7 +100,7 @@ public class ReportPdfRenderer {
                 sources(pdf, item.sourceFindingIds(), findings);
             }
         }
-        // Other analysis and collection notes are omitted to keep the PDF focused.
+        // Standalone findings and collection notes are intentionally outside the attachment's scope.
     }
 
     private void sources(ReportPdfLayout pdf, List<Long> ids, Map<Long, Finding> findings) throws IOException {
@@ -99,6 +114,7 @@ public class ReportPdfRenderer {
         pdf.gap(3);
     }
 
+    /** Reads the report's stored financial snapshot without refreshing it or including filing lists. */
     private void financials(ReportPdfLayout pdf, NewsReport report) throws IOException {
         if (report.getReportScope() != ReportScope.RUN) return;
         var result = dart.getStored(report);
@@ -140,6 +156,11 @@ public class ReportPdfRenderer {
         }
     }
 
+    /**
+     * Displays KRW in hundred-million-won units with two-decimal HALF_UP rounding. Nonzero amounts
+     * below 0.01 of that unit retain their sign as an interval; other currencies keep their original
+     * decimal precision. Missing or invalid values remain distinct from an actual zero.
+     */
     static String amount(String value, String currency) {
         if (value == null || !value.matches("-?\\d+(?:\\.\\d+)?")) return "자료 없음";
         BigDecimal amount = new BigDecimal(value);
@@ -155,7 +176,11 @@ public class ReportPdfRenderer {
         return format.format(amount);
     }
 
-    /** Apply the same section omissions to reports that only have a Markdown body. */
+    /**
+     * Applies the same omissions to Markdown-only reports, including the older article-analysis and
+     * excluded-issue appendix names grouped as 기타 분석 in the web reader. Nested headings remain
+     * omitted until the next sibling or parent section; headings inside fenced text are not sections.
+     */
     private void legacy(ReportPdfLayout pdf, String markdown) throws IOException {
         if (markdown == null || markdown.isBlank()) { pdf.paragraph("표시할 보고서 내용이 없습니다."); return; }
         int skippedLevel = 0;
@@ -176,7 +201,8 @@ public class ReportPdfRenderer {
                 int level = heading.group(1).length();
                 String title = heading.group(2);
                 if (skippedLevel > 0 && level <= skippedLevel) skippedLevel = 0;
-                if (title.matches(".*(?:기타\\s*분석|수집\\s*상태|수집\\s*및\\s*출처\\s*참고).*") && skippedLevel == 0) skippedLevel = level;
+                if (title.matches(".*(?:기타\\s*분석|기사별\\s*분석|보고서\\s*제외|수집\\s*상태|수집\\s*및\\s*출처\\s*참고).*")
+                        && skippedLevel == 0) skippedLevel = level;
                 if (skippedLevel > 0) continue;
                 if (firstContent && level == 1) { firstContent = false; continue; }
                 firstContent = false;

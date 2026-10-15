@@ -20,6 +20,12 @@ import java.util.stream.Collectors;
 final class ReportPdfInsightSection {
     private ReportPdfInsightSection() { }
 
+    /**
+     * Appends the selected audience's overview, issue explanations and follow-up checks.
+     * Every included interpretation must be bound to grounded facts that remain visible to the recipient.
+     * A null selection omits this section; an empty eligible selection prints the unavailable notice.
+     * Scoring, conditional implications and the evidence appendix are outside the PDF reading scope.
+     */
     static void write(ReportPdfLayout pdf, ReportInsightDTO.AudienceInsight insight,
                       ReportEventFeedbackProjection.View view) throws IOException {
         if (insight == null) return;

@@ -21,6 +21,8 @@ import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -165,12 +167,14 @@ class ReportPdfRendererTests {
         }
     }
 
-    @Test
-    void legacyOmitsOtherAnalysisAndCollectionSubsectionsWhileKeepingFollowingSectionsAndLinks() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"기타 분석", "기타 분석 이슈", "기사별 분석", "보고서 제외 이슈"})
+    void legacyOmitsOtherAnalysisAndCollectionSubsectionsWhileKeepingFollowingSectionsAndLinks(String otherHeading) throws Exception {
         var report = report(ReportScope.DAILY);
         var reading = new ReportReadingContent("# 중복 제목\n\n## 핵심 요약\n- 저장된 요약\n\n## 중요 이벤트\n### 계약 체결\n"
                 + "전체 계약 내용\n\n## 수집 및 출처 참고\n숨겨야 할 참고\n### 내부 상태\n숨겨야 할 하위 내용\n"
-                + "## 기타 분석\n### 다른 분석\n숨겨야 할 기사 분석\n[기타 기사](https://example.com/omitted)\n"
+                + "## " + otherHeading + "\n### 다른 분석\n숨겨야 할 기사 분석\n[기타 기사](https://example.com/omitted)\n"
+                + "#### 추가 근거\n숨겨야 할 하위 근거\n[추가 기사](https://example.com/omitted-nested)\n"
                 + "## 관찰 항목\n마지막 관찰 내용\n[기사](https://example.com/legacy)\n- 원문: <https://example.com/filtered-legacy>\n", null);
         try (PDDocument document = Loader.loadPDF(renderer.render(report,
                 new ReportEventFeedbackProjection.View(List.of(), reading, false), null))) {
@@ -178,8 +182,11 @@ class ReportPdfRendererTests {
             for (String expected : List.of("저장된 요약", "전체 계약 내용", "관찰 항목", "마지막 관찰 내용")) assertTrue(text.contains(expected));
             assertFalse(text.contains("숨겨야"));
             assertFalse(text.contains("기타 분석"));
+            assertFalse(text.contains(otherHeading));
             assertFalse(text.contains("다른 분석"));
+            assertFalse(text.contains("추가 근거"));
             assertFalse(urls(document).contains("https://example.com/omitted"));
+            assertFalse(urls(document).contains("https://example.com/omitted-nested"));
             assertFalse(text.contains("수집 및 출처 참고"));
             assertFalse(text.contains("중복 제목"));
             assertTrue(urls(document).contains("https://example.com/legacy"));

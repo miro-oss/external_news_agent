@@ -24,6 +24,11 @@ public interface NotificationSender {
     interface DeliverySession extends AutoCloseable {
         String send(String address, String subject, String body);
 
+        /**
+         * Sends one rendered message with its recipient-specific attachments.
+         * Channels must explicitly support attachments; the default rejects them before sending,
+         * preventing a successful text-only delivery from silently dropping a required PDF.
+         */
         default String send(String address, String subject, String body, List<NotificationAttachment> attachments) {
             if (!attachments.isEmpty()) {
                 throw new IllegalArgumentException("This delivery channel does not support attachments");

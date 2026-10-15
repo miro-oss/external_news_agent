@@ -87,6 +87,10 @@ final class ReportPdfLayout implements AutoCloseable {
     record ReadingItem(String label, String title, List<ReadingField> fields) { }
     record ReadingGroup(String heading, List<ReadingItem> items) { }
 
+    /**
+     * Keeps the section heading, notice and first ordinary item on one page when they fit.
+     * Groups must contain at least one item; oversized items continue through the line paginator.
+     */
     void readingSection(String heading, String notice, List<ReadingGroup> groups) throws IOException {
         if (groups.isEmpty()) return;
         ReadingGroup first = groups.getFirst();
