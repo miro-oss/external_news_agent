@@ -1,7 +1,6 @@
 package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.analysis.entity.Finding;
-import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.dart.model.DartModels.FinancialData;
 import com.example.be.domain.reports.dart.ReportDartService;
 import com.example.be.domain.reports.dto.res.ReportDartDTO.CompanyAttachment;
@@ -29,7 +28,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-/** Complete offline reading attachment built from the same final recipient-visible view as the email. */
+/** Offline reading attachment built from the same final recipient-visible view as the email. */
 @Component
 @RequiredArgsConstructor
 public class ReportPdfRenderer {
@@ -53,7 +52,7 @@ public class ReportPdfRenderer {
             view.findings().forEach(finding -> findings.putIfAbsent(finding.getId(), finding));
             ReportContent content = view.readingContent().structuredContent();
             if (content == null) legacy(pdf, view.readingContent().markdownBody());
-            else body(pdf, content, findings, view.excludedEvidenceFindingIds());
+            else body(pdf, content, findings);
             ReportPdfInsightSection.write(pdf, insight, view);
             return pdf.save();
         } catch (IOException exception) {
@@ -61,8 +60,7 @@ public class ReportPdfRenderer {
         }
     }
 
-    private void body(ReportPdfLayout pdf, ReportContent content, Map<Long, Finding> findings,
-                      Set<Long> excludedEvidence) throws IOException {
+    private void body(ReportPdfLayout pdf, ReportContent content, Map<Long, Finding> findings) throws IOException {
         pdf.section("핵심 요약");
         if (content.executiveSummary().isEmpty()) pdf.paragraph("근거가 확인된 요약이 없습니다.");
         for (String summary : content.executiveSummary()) pdf.bullet(summary);
@@ -70,9 +68,7 @@ public class ReportPdfRenderer {
         var events = content.importantEvents().stream().filter(event -> !event.sourceFindingIds().isEmpty()
                 && findings.keySet().containsAll(event.sourceFindingIds())).toList();
         if (events.isEmpty()) pdf.paragraph("중요 이벤트가 없습니다.");
-        Set<Long> referenced = new HashSet<>();
         for (var event : events) {
-            referenced.addAll(event.sourceFindingIds());
             pdf.subheading(event.title());
             pdf.paragraph(event.summaryKo());
             if (event.significance() != null && !event.significance().equals(event.summaryKo())) pdf.paragraph(event.significance());
@@ -83,24 +79,12 @@ public class ReportPdfRenderer {
         if (!watches.isEmpty()) {
             pdf.section("관찰 항목");
             for (var item : watches) {
-                referenced.addAll(item.sourceFindingIds());
                 pdf.subheading(item.topic());
                 pdf.paragraph(item.reason());
                 sources(pdf, item.sourceFindingIds(), findings);
             }
         }
-        var other = findings.values().stream().filter(finding -> !referenced.contains(finding.getId()))
-                .filter(finding -> !excludedEvidence.contains(finding.getId()))
-                .filter(FindingEvidencePolicy::hasSupportedEvidence).toList();
-        if (!other.isEmpty()) {
-            pdf.section("기타 분석");
-            for (Finding finding : other) {
-                if (finding.getArticle() != null) pdf.subheading(finding.getArticle().getTitle());
-                pdf.paragraph(FindingEvidencePolicy.reportSummary(finding));
-                sources(pdf, List.of(finding.getId()), findings);
-            }
-        }
-        // Collection notes and sourceNotes are intentionally absent from the reading attachment.
+        // Other analysis and collection notes are omitted to keep the PDF focused.
     }
 
     private void sources(ReportPdfLayout pdf, List<Long> ids, Map<Long, Finding> findings) throws IOException {
@@ -160,7 +144,7 @@ public class ReportPdfRenderer {
         return format.format(amount);
     }
 
-    /** Legacy reports have no structured content: preserve every reading section except collection notes. */
+    /** Apply the same section omissions to reports that only have a Markdown body. */
     private void legacy(ReportPdfLayout pdf, String markdown) throws IOException {
         if (markdown == null || markdown.isBlank()) { pdf.paragraph("표시할 보고서 내용이 없습니다."); return; }
         int skippedLevel = 0;
@@ -181,7 +165,7 @@ public class ReportPdfRenderer {
                 int level = heading.group(1).length();
                 String title = heading.group(2);
                 if (skippedLevel > 0 && level <= skippedLevel) skippedLevel = 0;
-                if (title.matches(".*(?:수집\\s*상태|수집\\s*및\\s*출처\\s*참고).*") && skippedLevel == 0) skippedLevel = level;
+                if (title.matches(".*(?:기타\\s*분석|수집\\s*상태|수집\\s*및\\s*출처\\s*참고).*") && skippedLevel == 0) skippedLevel = level;
                 if (skippedLevel > 0) continue;
                 if (firstContent && level == 1) { firstContent = false; continue; }
                 firstContent = false;

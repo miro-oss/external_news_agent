@@ -26,13 +26,15 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 class ReportPdfInsightSectionTest {
     @Test
-    void includesAllSupportedAudienceDetailsWithoutEvidenceAppendixOrNumberedReferences() throws Exception {
+    void keepsOverviewIssuesAndWatchesWithoutScoringImplicationsOrEvidenceAppendix() throws Exception {
         var insight = insight(List.of(fact(11, "grounded", List.of(0, 2))), List.of(
                         new Overview("첫 번째 종합 판단", List.of("11:0"), "첫 번째 조건"),
                         new Overview("두 번째 종합 판단", List.of("11:0"), "두 번째 조건"),
                         new Overview("세 번째 종합 판단", List.of("11:0"), "세 번째 조건")),
                 List.of(new ReportInsightDTO.Issue(11L, "high", "우선 확인할 이유", List.of("11:0"),
-                        new Axes(3, 2, null, null), 1)),
+                                new Axes(3, 2, null, null), 1),
+                        new ReportInsightDTO.Issue(11L, "low", "추가 확인할 이유", List.of("11:0"),
+                                new Axes(0, null, null, null), 2)),
                 List.of(new Implication("조건부 영향 해석", "설비 투자에서 수요로 이어지는 경로", List.of("11:0"),
                         "예산이 확정되는 경우", "예산이 철회되는 경우")),
                 List.of(new WatchItem("후속 투자 일정", "분기별 발주 규모", "발주 증가 여부", List.of("11:0"))));
@@ -40,10 +42,8 @@ class ReportPdfInsightSectionTest {
         String text = render(insight, view(List.of(finding(11)), Set.of()));
 
         for (String expected : List.of("리포트 관점 분석 · 장비·소재사", "AI 해석", "첫 번째 종합 판단", "두 번째 종합 판단",
-                "세 번째 종합 판단", "세 번째 조건", "우선순위 1 · 중요도 높음", "우선 확인할 이유",
-                "직접 관련성", "영향 크기", "시급성", "비교 근거 없음", "3 / 3", "2 / 3", "미확인",
-                "조건부 영향 해석", "설비 투자에서 수요로 이어지는 경로", "예산이 확정되는 경우", "예산이 철회되는 경우",
-                "후속 투자 일정", "분기별 발주 규모", "발주 증가 여부", "기사 제목 11")) {
+                "세 번째 종합 판단", "해석의 조건", "세 번째 조건", "먼저 살펴볼 이슈", "우선 확인할 이유", "추가 확인할 이유",
+                "다음 확인 항목", "후속 투자 일정", "분기별 발주 규모", "발주 증가 여부", "기사 제목 11")) {
             assertTrue(text.contains(expected), expected + "\n" + text);
         }
         assertFalse(text.contains("근거 없는 헤드라인"));
@@ -52,7 +52,10 @@ class ReportPdfInsightSectionTest {
         assertFalse(text.contains("반도체 제조사"));
         assertFalse(text.contains("11:0"));
         for (String omitted : List.of("분석에 사용한 원문 근거", "참조:", "근거 1", "확인된 원문 11",
-                "출처 · 전문 뉴스", "발행일", "원문 근거 문장", "https://example.com/article-11")) {
+                "출처 · 전문 뉴스", "발행일", "원문 근거 문장", "https://example.com/article-11",
+                "우선순위", "중요도", "직접 관련성", "영향 크기", "시급성", "새 변화", "비교 근거 없음", "3 / 3", "2 / 3",
+                "관련성 낮음", "관련성 미확인", "영향 규모 미확인", "조건부 해석", "조건부 영향 해석",
+                "영향 경로", "설비 투자에서 수요로 이어지는 경로", "성립 조건", "예산이 확정되는 경우", "판단 변경 조건", "예산이 철회되는 경우")) {
             assertFalse(text.contains(omitted), omitted + "\n" + text);
         }
     }
@@ -77,14 +80,31 @@ class ReportPdfInsightSectionTest {
         assertFalse(text.contains("제외된"), text);
         assertFalse(text.contains("확인된 원문 11"), text);
         assertFalse(text.contains("기사 제목 11"), text);
-        for (String expected : List.of("독립적인 판단", "독립적인 조건", "독립적인 이슈 이유", "독립적인 영향 해석",
-                "독립적인 영향 경로", "독립적인 성립 조건", "독립적인 변경 조건", "독립적인 관찰 주제",
+        for (String expected : List.of("독립적인 판단", "독립적인 조건", "독립적인 이슈 이유", "독립적인 관찰 주제",
                 "독립적인 지표", "독립적인 기준", "기사 제목 12")) {
             assertTrue(text.contains(expected), expected + "\n" + text);
         }
         assertFalse(text.contains("확인된 원문 12"));
         assertFalse(text.contains("분석에 사용한 원문 근거"));
         assertFalse(text.contains("참조:"));
+        assertFalse(text.contains("독립적인 영향 해석"));
+        assertFalse(text.contains("독립적인 영향 경로"));
+        assertFalse(text.contains("독립적인 성립 조건"));
+        assertFalse(text.contains("독립적인 변경 조건"));
+    }
+
+    @Test
+    void implicationsAloneShowUnavailableEvenWithVisibleGroundedEvidence() throws Exception {
+        var insight = insight(List.of(fact(11, "grounded", List.of(0))), List.of(), List.of(),
+                List.of(new Implication("제거할 영향 해석", "제거할 영향 경로", List.of("11:0"),
+                        "제거할 성립 조건", "제거할 변경 조건")), List.of());
+
+        String text = render(insight, view(List.of(finding(11)), Set.of()));
+
+        assertTrue(text.contains(NotificationInsightBrief.UNAVAILABLE));
+        assertFalse(text.contains("조건부 해석"));
+        assertFalse(text.contains("제거할"));
+        assertFalse(text.contains("분석에 사용한 원문 근거"));
     }
 
     @Test

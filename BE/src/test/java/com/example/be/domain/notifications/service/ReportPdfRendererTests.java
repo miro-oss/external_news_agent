@@ -42,7 +42,7 @@ class ReportPdfRendererTests {
     private final ReportPdfRenderer renderer = new ReportPdfRenderer(dart);
 
     @Test
-    void includesEveryBodyItemAndOnlyFinalRecipientVisibleContent() throws Exception {
+    void includesAllSummariesEventsAndWatchesWithoutOtherAnalysis() throws Exception {
         var report = report(ReportScope.RUN);
         var findings = IntStream.rangeClosed(1, 10).mapToObj(i -> finding(i, "기사 " + i, "기사 분석 " + i)).toList();
         var events = IntStream.rangeClosed(1, 7).mapToObj(i -> new ReportContent.ImportantEvent(
@@ -56,11 +56,12 @@ class ReportPdfRendererTests {
         try (PDDocument document = Loader.loadPDF(bytes)) {
             String text = new PDFTextStripper().getText(document);
             for (String expected : List.of("핵심 요약", "네 번째 전체 요약", "중요 이벤트", "중요 사건 7", "사건 전체 내용 7",
-                    "주목할 이유 7", "관찰 항목", "후속 확인할 조건", "기타 분석", "기사 분석 9")) assertTrue(text.contains(expected), expected);
-            for (String absent : List.of("수집 상태", "절대 표시하지", "기사 분석 10", "원본 보고서에만 남은 비공개 내용", "리포트 관점 분석"))
+                    "주목할 이유 7", "관찰 항목", "후속 확인할 조건")) assertTrue(text.contains(expected), expected);
+            for (String absent : List.of("기타 분석", "기사 분석 9", "수집 상태", "절대 표시하지", "기사 분석 10", "원본 보고서에만 남은 비공개 내용", "리포트 관점 분석"))
                 assertFalse(text.contains(absent), absent);
-            assertTrue(urls(document).contains("https://example.com/article-9"));
-            for (long id : List.of(1L, 8L, 9L)) assertTrue(text.contains("https://example.com/article-" + id));
+            assertFalse(urls(document).contains("https://example.com/article-9"));
+            assertFalse(text.contains("https://example.com/article-9"));
+            for (long id : List.of(1L, 8L)) assertTrue(text.contains("https://example.com/article-" + id));
             assertFalse(text.contains("출처 ·"));
             assertFalse(urls(document).contains("https://example.com/article-10"));
             for (var page : document.getPages()) for (var name : page.getResources().getFontNames())
@@ -69,13 +70,14 @@ class ReportPdfRendererTests {
     }
 
     @Test
-    void rejectedSharedEvidenceNeverReturnsAsOtherAnalysis() throws Exception {
+    void standaloneFindingsDoNotCreateAnOtherAnalysisSection() throws Exception {
         var report = report(ReportScope.DAILY);
         var content = new ReportContent(List.of(), List.of(), List.of(), List.of());
         String text = text(renderer.render(report, view(content,
                 List.of(finding(1, "제외할 기사", "제외할 분석"), finding(2, "유효한 기사", "유효한 분석")), Set.of(1L)), null));
         assertFalse(text.contains("제외할"));
-        assertTrue(text.contains("유효한 분석"));
+        assertFalse(text.contains("유효한 분석"));
+        assertFalse(text.contains("기타 분석"));
         verifyNoInteractions(dart);
     }
 
@@ -149,7 +151,9 @@ class ReportPdfRendererTests {
                         List.of(), List.of(filing("대기 자료 유출", FILING_URL, false)), List.of())), company("공시 회사", "READY", payload))));
         var finding = Finding.builder().id(1L).article(Article.builder().id(101L).title("외부 출처 제목")
                 .canonicalUrl("javascript:alert(1)").build()).summary("근거 분석").keyPoints(List.of(new FindingKeyPoint("근거", List.of(0), "grounded"))).build();
-        try (PDDocument document = Loader.loadPDF(renderer.render(report, view(emptyContent(), List.of(finding), Set.of()), null))) {
+        var content = new ReportContent(List.of(), List.of(new ReportContent.ImportantEvent("외부 출처 제목",
+                "사건 내용", "주목할 이유", List.of(1L))), List.of(), List.of());
+        try (PDDocument document = Loader.loadPDF(renderer.render(report, view(content, List.of(finding), Set.of()), null))) {
             String text = new PDFTextStripper().getText(document);
             assertFalse(text.contains("안전하지 않은 공시 제목"));
             assertTrue(text.contains("외부 출처 제목"));
@@ -160,16 +164,20 @@ class ReportPdfRendererTests {
     }
 
     @Test
-    void legacySectionsRemainCompleteWhileCollectionNotesAndTheirSubsectionsAreOmitted() throws Exception {
+    void legacyOmitsOtherAnalysisAndCollectionSubsectionsWhileKeepingFollowingSectionsAndLinks() throws Exception {
         var report = report(ReportScope.DAILY);
         var reading = new ReportReadingContent("# 중복 제목\n\n## 핵심 요약\n- 저장된 요약\n\n## 중요 이벤트\n### 계약 체결\n"
                 + "전체 계약 내용\n\n## 수집 및 출처 참고\n숨겨야 할 참고\n### 내부 상태\n숨겨야 할 하위 내용\n"
-                + "## 기타 분석\n### 다른 분석\n마지막 분석 내용\n[기사](https://example.com/legacy)\n- 원문: <https://example.com/filtered-legacy>\n", null);
+                + "## 기타 분석\n### 다른 분석\n숨겨야 할 기사 분석\n[기타 기사](https://example.com/omitted)\n"
+                + "## 관찰 항목\n마지막 관찰 내용\n[기사](https://example.com/legacy)\n- 원문: <https://example.com/filtered-legacy>\n", null);
         try (PDDocument document = Loader.loadPDF(renderer.render(report,
                 new ReportEventFeedbackProjection.View(List.of(), reading, false), null))) {
             String text = new PDFTextStripper().getText(document);
-            for (String expected : List.of("저장된 요약", "전체 계약 내용", "기타 분석", "마지막 분석 내용")) assertTrue(text.contains(expected));
+            for (String expected : List.of("저장된 요약", "전체 계약 내용", "관찰 항목", "마지막 관찰 내용")) assertTrue(text.contains(expected));
             assertFalse(text.contains("숨겨야"));
+            assertFalse(text.contains("기타 분석"));
+            assertFalse(text.contains("다른 분석"));
+            assertFalse(urls(document).contains("https://example.com/omitted"));
             assertFalse(text.contains("수집 및 출처 참고"));
             assertFalse(text.contains("중복 제목"));
             assertTrue(urls(document).contains("https://example.com/legacy"));
@@ -193,7 +201,7 @@ class ReportPdfRendererTests {
         var report = NewsReport.builder().id(17L).reportScope(ReportScope.RUN).title("PDF 형식 예시 · 가상 데이터")
                 .generatedAt(LocalDateTime.of(2026, 10, 15, 9, 0)).markdownBody("").build();
         var content = new ReportContent(List.of("반도체 투자 계획과 신규 생산라인의 장비 발주 일정을 함께 점검했습니다.",
-                "이번 보고서에서는 확인된 사실과 관점별 조건부 해석을 구분하여 제공합니다."),
+                "이번 보고서에서는 확인된 사실과 관점별 종합 판단을 구분하여 제공합니다."),
                 List.of(new ReportContent.ImportantEvent("차세대 공정 투자 계획 구체화", "제조사는 신규 공정 전환과 생산 능력 확대를 위한 투자 계획을 공개했습니다. 장비 반입과 양산 준비 일정이 후속 확인 대상입니다.",
                         "발주 규모와 인도 시점을 함께 확인해야 장비 업체 실적 반영 시기를 판단할 수 있습니다.", List.of(1L))),
                 List.of(new ReportContent.WatchItem("설비 발주 일정", "공식 공시와 공급계약에서 투자 집행 여부를 확인합니다.", List.of(2L))), List.of("수집 상태는 출력하지 않습니다."));
@@ -218,7 +226,14 @@ class ReportPdfRendererTests {
         Path path = Path.of("build/reports/pdf/report-attachment-sample.pdf");
         Files.createDirectories(path.getParent());
         Files.write(path, bytes);
-        try (PDDocument document = Loader.loadPDF(bytes)) { assertWithinPageBounds(document); }
+        try (PDDocument document = Loader.loadPDF(bytes)) {
+            assertWithinPageBounds(document);
+            String text = new PDFTextStripper().getText(document);
+            for (String expected : List.of("리포트 관점 분석 · 장비·소재사", "리포트 종합 판단", "먼저 살펴볼 이슈", "다음 확인 항목"))
+                assertTrue(text.contains(expected), expected);
+            for (String omitted : List.of("기타 분석", "우선순위", "중요도", "직접 관련성", "영향 크기", "조건부 해석"))
+                assertFalse(text.contains(omitted), omitted);
+        }
     }
 
     private static void assertWithinPageBounds(PDDocument document) throws Exception {

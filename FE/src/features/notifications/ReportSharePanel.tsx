@@ -38,7 +38,7 @@ export function ReportSharePanel({ reportId, reportScope, topicId }: { reportId:
   return <section className="report-delivery-panel report-share-card" aria-label="보고서 공유">
     <div className="report-share-heading">
       <h3>다른 사람에게 공유</h3>
-        <p className="muted">이메일은 요약과 상세 PDF를 함께 전달합니다. PDF에는 보고서 본문 전체와 준비된 회사 실적이 포함됩니다. 텔레그램은 뉴스 카드로 전달합니다.</p>
+        <p className="muted">이메일은 요약과 상세 PDF를 함께 전달합니다. PDF에는 핵심 요약·중요 이벤트·관찰 항목과 준비된 회사 실적이 포함됩니다. 텔레그램은 뉴스 카드로 전달합니다.</p>
     </div>
     {!!deliveries.data?.length && <details className="auto-delivery-status"><summary>자동 전달 상태</summary>
       <ul>{deliveries.data.map((delivery) => <li key={delivery.id}>{delivery.recipientName} · {delivery.channelType === 'EMAIL' ? '이메일' : '텔레그램'} · {LABELS[delivery.status] ?? delivery.status}{delivery.message && <p className="muted">{delivery.message}</p>}</li>)}</ul>
