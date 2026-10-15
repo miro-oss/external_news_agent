@@ -2,6 +2,7 @@ package com.example.be.domain.reports.dart;
 
 import com.example.be.domain.reports.dto.res.ReportDartDTO;
 import com.example.be.domain.dart.config.DartProperties;
+import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;
@@ -27,6 +28,12 @@ public class ReportDartService {
     public ReportDartDTO.Result get(long reportId) {
         var report = reports.findByIdAndReportStatusNot(reportId, ReportStatus.PENDING)
                 .orElseThrow(() -> new ReportException(ReportErrorCode.REPORT_NOT_FOUND));
+        return getStored(report);
+    }
+
+    @Transactional(readOnly = true)
+    public ReportDartDTO.Result getStored(NewsReport report) {
+        Long reportId = report.getId();
         var companies = ReportDartEligibility.companies(report);
         if (companies.isEmpty()) return new ReportDartDTO.Result(reportId, List.of());
         var attachments = repository.find(reportId).stream()

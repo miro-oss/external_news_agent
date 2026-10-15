@@ -39,12 +39,14 @@ public class NotificationRenderer {
     private final FindingRepository findingRepository;
     private final TopicRelevancePolicy relevancePolicy;
     private final ReportEventFeedbackProjection feedbackProjection;
+    private final NotificationDartSummary dartSummary;
 
     public NotificationRenderer(FindingRepository findingRepository, TopicRelevancePolicy relevancePolicy,
-                                ReportEventFeedbackProjection feedbackProjection) {
+                                ReportEventFeedbackProjection feedbackProjection, NotificationDartSummary dartSummary) {
         this.findingRepository = findingRepository;
         this.relevancePolicy = relevancePolicy;
         this.feedbackProjection = feedbackProjection;
+        this.dartSummary = dartSummary;
     }
 
     public RenderedNotification render(NewsReport report, NotificationChannel channel) {
@@ -110,6 +112,8 @@ public class NotificationRenderer {
                                              NotificationInsightBrief brief) {
         String subject = "[뉴스 보고서] " + singleLine(normalize(report.getTitle()));
         StringBuilder html = emailStart(report.getTitle());
+        String dartBlock = dartSummary.render(report, reportUrl(report));
+        if (StringUtils.hasText(dartBlock)) html.append(dartBlock);
         html.append(EMAIL_TABLE).append("<tr><td class=\"email-card\" bgcolor=\"#e8f3ff\" "
                 + "style=\"padding:24px;background:#e8f3ff;border-radius:16px\">"
                 + "<h2 style=\"margin:0 0 12px;color:#1b64da;font-size:14px;font-weight:700\">핵심 요약</h2>");
@@ -354,9 +358,14 @@ public class NotificationRenderer {
     @org.springframework.beans.factory.annotation.Value("${news.notifications.public-base-url:}")
     private String publicBaseUrl = "";
 
+    private String reportUrl(NewsReport report) {
+        return safeUrl(publicBaseUrl)
+                ? publicBaseUrl.replaceAll("/+$", "") + "/#/reports?reportId=" + report.getId() : "";
+    }
+
     private void appendReportLink(StringBuilder body, NewsReport report, boolean email) {
-        if (!safeUrl(publicBaseUrl)) return;
-        String url = publicBaseUrl.replaceAll("/+$", "") + "/#/reports?reportId=" + report.getId();
+        String url = reportUrl(report);
+        if (url.isEmpty()) return;
         if (email) {
             body.append(EMAIL_TABLE).append("<tr><td align=\"center\" style=\"padding:28px 0 0\">"
                             + "<table role=\"presentation\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\"><tbody><tr>"

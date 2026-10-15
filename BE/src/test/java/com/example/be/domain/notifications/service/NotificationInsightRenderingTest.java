@@ -24,7 +24,7 @@ import static org.mockito.Mockito.mock;
 
 class NotificationInsightRenderingTest {
     private final NotificationRenderer renderer = new NotificationRenderer(mock(FindingRepository.class),
-            TopicRelevanceTestSupport.legacyPolicy(), mock(ReportEventFeedbackProjection.class));
+            TopicRelevanceTestSupport.legacyPolicy(), mock(ReportEventFeedbackProjection.class), mock(NotificationDartSummary.class));
     private final NewsReport report = NewsReport.builder().id(17L).title("뉴스 보고서").build();
 
     @ParameterizedTest @EnumSource(ChannelType.class)
