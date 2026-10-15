@@ -173,32 +173,48 @@ class NotificationDeliveryServiceTest {
     }
 
     @Test
-    void recipientsOnTheSameChannelReuseOneDeliverySession() {
+    void recipientsOnTheSameChannelReuseOneDeliverySessionWithTheirOwnPdf() {
         NotificationChannel channel = channel(1L, ChannelType.EMAIL);
         var first = target(channel, true);
         var second = new NotificationDeliveryPlanService.PreparedTarget(
                 5L, "이영희", channel, 6L, "second@example.com", true);
+        var firstAttachments = List.of(new NotificationAttachment("news-report-17.pdf", "application/pdf", new byte[]{1}));
+        var secondAttachments = List.of(new NotificationAttachment("news-report-17.pdf", "application/pdf", new byte[]{2}));
         NotificationSender sender = mock(NotificationSender.class);
         NotificationSender.DeliverySession session = mock(NotificationSender.DeliverySession.class);
         when(planService.prepare(any(), any())).thenReturn(new NotificationDeliveryPlanService.PreparedDelivery(
                 17L, List.of(first, second),
                 Map.of(channel.getId(), new RenderedNotification("제목", "HTML", List.of("공용 메시지"))),
-                Map.of(first.recipientId() + ":" + channel.getId(), new RenderedNotification("제목", "HTML", List.of("첫 수신자 전용")),
-                        second.recipientId() + ":" + channel.getId(), new RenderedNotification("제목", "HTML", List.of("둘째 수신자 전용")))));
+                Map.of(first.recipientId() + ":" + channel.getId(),
+                                new RenderedNotification("제목", "HTML", List.of("첫 수신자 전용"), firstAttachments),
+                        second.recipientId() + ":" + channel.getId(),
+                                new RenderedNotification("제목", "HTML", List.of("둘째 수신자 전용"), secondAttachments))));
         when(persistenceService.reserve(17L, null)).thenReturn(
                 new NotificationDeliveryPersistenceService.BatchInfo("batch-id", 17L, REQUESTED_AT));
         when(senderRegistry.get(ChannelType.EMAIL)).thenReturn(sender);
         when(sender.isConfigured(channel)).thenReturn(true);
         when(sender.openSession(channel)).thenReturn(session);
-        when(session.send(any(), any(), any())).thenReturn("first-id", "second-id");
+        when(session.send(any(), any(), any(), any())).thenReturn("first-id", "second-id");
 
         var response = service.send(17L, request(null));
 
         assertEquals(2, response.getSentCount());
         verify(sender).openSession(channel);
-        verify(session).send(first.address(), "제목", "첫 수신자 전용");
-        verify(session).send(second.address(), "제목", "둘째 수신자 전용");
+        verify(session).send(first.address(), "제목", "첫 수신자 전용", firstAttachments);
+        verify(session).send(second.address(), "제목", "둘째 수신자 전용", secondAttachments);
+        verify(session, never()).send(any(), any(), any());
         verify(session).close();
+    }
+
+    @Test
+    void pdfPreparationFailureStopsBeforeReservationAndTransport() {
+        var request = request(null);
+        var failure = new IllegalStateException("synthetic PDF preparation failure");
+        when(planService.prepare(17L, request)).thenThrow(failure);
+
+        assertEquals(failure, assertThrows(IllegalStateException.class, () -> service.send(17L, request)));
+
+        org.mockito.Mockito.verifyNoInteractions(persistenceService, senderRegistry);
     }
 
     private void stubNewDelivery(NotificationChannel channel,

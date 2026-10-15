@@ -48,6 +48,56 @@ class ReportDeliveryWorkerTest {
         worker.deliver(work);
         verify(session).send(work.address(),"개인 제목","개인 내용");
     }
+    @Test void consecutiveRecipientsReceiveOnlyTheirOwnPreparedPdf() {
+        ready();
+        var second = new ReportDeliveryOutboxStore.Work(2L, 2L, 5L, 4L, "batch", "다음 수신자",
+                "second@invalid.test", "제목", "요약", 1);
+        var firstAttachments = List.of(new NotificationAttachment("news-report-2.pdf", "application/pdf", new byte[]{1}));
+        var secondAttachments = List.of(new NotificationAttachment("news-report-2.pdf", "application/pdf", new byte[]{2}));
+        when(store.destinationStillActive(second)).thenReturn(true);
+        when(personalized.render(eq(2L), any(), eq(3L)))
+                .thenReturn(new RenderedNotification("첫 제목", "HTML", List.of("첫 내용"), firstAttachments));
+        when(personalized.render(eq(2L), any(), eq(5L)))
+                .thenReturn(new RenderedNotification("둘째 제목", "HTML", List.of("둘째 내용"), secondAttachments));
+        when(session.send(any(), any(), any(), any())).thenReturn("first-id", "second-id");
+
+        worker.deliver(work);
+        worker.deliver(second);
+
+        verify(session).send(work.address(), "첫 제목", "첫 내용", firstAttachments);
+        verify(session).send(second.address(), "둘째 제목", "둘째 내용", secondAttachments);
+        verify(session, never()).send(any(), any(), any());
+        verify(store).finish(work, "EMAIL", "SENT", "first-id", null, false);
+        verify(store).finish(second, "EMAIL", "SENT", "second-id", null, false);
+    }
+    @Test void pdfPreparationFailureIsRetryableBeforeOpeningSmtp() {
+        ready();
+        when(personalized.render(eq(2L), any(), eq(3L)))
+                .thenThrow(new IllegalStateException("synthetic PDF preparation failure"));
+
+        worker.deliver(work);
+
+        verify(store).finish(work, "EMAIL", "FAILED", null, "개인 전달 내용을 준비하지 못했습니다.", true);
+        verify(sender, never()).openSession(any());
+        verifyNoInteractions(session);
+    }
+    @Test void telegramStillUsesItsTextOnlyDeliveryPath() {
+        var channel = NotificationChannel.builder().id(4L).channelType(ChannelType.TELEGRAM).active(true).build();
+        when(channels.findById(4L)).thenReturn(Optional.of(channel));
+        when(store.destinationStillActive(work)).thenReturn(true);
+        when(senders.get(ChannelType.TELEGRAM)).thenReturn(sender);
+        when(sender.isConfigured(channel)).thenReturn(true);
+        when(sender.openSession(channel)).thenReturn(session);
+        when(personalized.render(2L, channel, 3L))
+                .thenReturn(new RenderedNotification(null, "HTML", List.of("텔레그램 내용")));
+        when(session.send(any(), any(), any())).thenReturn("telegram-id");
+
+        worker.deliver(work);
+
+        verify(session).send(work.address(), null, "텔레그램 내용");
+        verify(session, never()).send(any(), any(), any(), any());
+        verify(store).finish(work, "TELEGRAM", "SENT", "telegram-id", null, false);
+    }
     @Test void successfulDeliveryPersistsExternalIdOnce() {
         ready(); when(session.send(any(),any(),any())).thenReturn("message-id");
         worker.deliver(work);

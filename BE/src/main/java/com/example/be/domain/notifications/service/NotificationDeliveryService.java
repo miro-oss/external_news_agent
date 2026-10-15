@@ -200,7 +200,9 @@ public class NotificationDeliveryService {
         for (int index = 0; index < rendered.chunks().size(); index++) {
             String externalId;
             try {
-                externalId = session.send(target.address(), rendered.subject(), rendered.chunks().get(index));
+                externalId = rendered.attachments().isEmpty()
+                        ? session.send(target.address(), rendered.subject(), rendered.chunks().get(index))
+                        : session.send(target.address(), rendered.subject(), rendered.chunks().get(index), rendered.attachments());
             } catch (RuntimeException exception) {
                 now = LocalDateTime.now(ApiTimeZone.ZONE);
                 String message = transportFailureMessage(exception);

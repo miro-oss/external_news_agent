@@ -3,6 +3,7 @@ package com.example.be.domain.notifications.service;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.feedback.service.FeedbackDeliveryService;
+import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.insight.ReportInsightDTO;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
+import java.util.List;
 
 /** Reads precomputed personal decisions and creates a recipient-bound feedback capability. */
 @Service
@@ -28,6 +30,7 @@ public class PersonalizedNotificationRenderer {
     private final FeedbackDeliveryService feedback;
     private final NotificationRenderer renderer;
     private final ReportEventFeedbackProjection feedbackProjection;
+    private final ReportPdfRenderer pdfRenderer;
 
     @Value("${news.notifications.public-base-url:}")
     private String publicBaseUrl = "";
@@ -52,7 +55,13 @@ public class PersonalizedNotificationRenderer {
         var reviewed = feedbackProjection.projectForDelivery(report, original, feedbackProjection.reviews(report.getId()));
         var prepared = feedback.prepare(report, recipientId, reviewed);
         var delivered = reviewed.suppress(report, prepared.suppressedFindingIds());
-        return renderer.render(report, channel, delivered, feedbackUrl(prepared.token()), insight);
+        RenderedNotification rendered = renderer.render(report, channel, delivered, feedbackUrl(prepared.token()), insight);
+        if (channel.getChannelType() != ChannelType.EMAIL) return rendered;
+        // Render from the same final view as the email: discarded evidence must never return in the PDF.
+        // Preparation failure aborts before opening SMTP; never silently send a report without its PDF.
+        byte[] pdf = pdfRenderer.render(report, delivered, insight);
+        return new RenderedNotification(rendered.subject(), rendered.parseMode(), rendered.chunks(),
+                List.of(new NotificationAttachment("news-report-" + report.getId() + ".pdf", "application/pdf", pdf)));
     }
 
     String feedbackUrl(String token) {

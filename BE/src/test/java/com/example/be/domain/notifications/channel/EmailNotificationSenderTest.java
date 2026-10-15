@@ -7,9 +7,12 @@ import com.example.be.domain.notifications.config.NotificationProperties;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.notifications.exception.NotificationTransportException;
+import com.example.be.domain.notifications.service.NotificationAttachment;
 import jakarta.mail.Authenticator;
 import jakarta.mail.AuthenticationFailedException;
 import jakarta.mail.Message;
+import jakarta.mail.Multipart;
+import jakarta.mail.Part;
 import jakarta.mail.MessagingException;
 import jakarta.mail.Session;
 import jakarta.mail.Transport;
@@ -27,6 +30,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
@@ -176,6 +180,69 @@ class EmailNotificationSenderTest {
         }
         assertEquals(3, new HashSet<>(returnedIds).size());
         assertTrue(logs.list.isEmpty());
+    }
+
+    @Test
+    void serializedEmailPreservesHtmlAndEachRecipientsPdfAttachment() throws Exception {
+        String subject = "[뉴스 보고서] 본문과 PDF";
+        String body = "<html><body><p>간결한 메일 요약과 한글</p></body></html>";
+        byte[] firstPdf = new byte[]{'%', 'P', 'D', 'F', '-', 0, 13, 10, (byte) 0xff};
+        byte[] secondPdf = new byte[]{'%', 'P', 'D', 'F', '-', 1, 13, 10, (byte) 0xfe};
+        var attachments = List.of(
+                new NotificationAttachment("news-report-17.pdf", "application/pdf", firstPdf),
+                new NotificationAttachment("news-report-17.pdf", "application/pdf", secondPdf));
+        var returnedIds = new ArrayList<String>();
+        try (var delivery = sender.openSession(channel(465, true, false))) {
+            returnedIds.add(delivery.send("first@example.test", subject, body, List.of(attachments.get(0))));
+            returnedIds.add(delivery.send("second@example.test", subject, body, List.of(attachments.get(1))));
+        }
+
+        var messages = org.mockito.ArgumentCaptor.forClass(Message.class);
+        verify(transport, times(2)).sendMessage(messages.capture(), any());
+        for (int index = 0; index < messages.getAllValues().size(); index++) {
+            var bytes = new ByteArrayOutputStream();
+            messages.getAllValues().get(index).writeTo(bytes);
+            var wire = new MimeMessage(Session.getInstance(new Properties(), null),
+                    new ByteArrayInputStream(bytes.toByteArray()));
+            assertEquals(subject, wire.getSubject());
+            assertEquals(returnedIds.get(index), wire.getMessageID());
+            assertTrue(wire.isMimeType("multipart/mixed"));
+            var multipart = (Multipart) wire.getContent();
+            assertEquals(2, multipart.getCount());
+            var html = multipart.getBodyPart(0);
+            assertTrue(html.isMimeType("text/html"));
+            assertEquals(body, html.getContent());
+            var pdf = multipart.getBodyPart(1);
+            assertTrue(pdf.isMimeType("application/pdf"));
+            assertEquals(Part.ATTACHMENT, pdf.getDisposition());
+            assertEquals("news-report-17.pdf", pdf.getFileName());
+            assertArrayEquals(index == 0 ? firstPdf : secondPdf, pdf.getInputStream().readAllBytes());
+            assertEquals(index == 0 ? "first@example.test" : "second@example.test",
+                    ((jakarta.mail.internet.InternetAddress) wire.getAllRecipients()[0]).getAddress());
+        }
+        assertNotEquals(returnedIds.get(0), returnedIds.get(1));
+        verify(transport).close();
+    }
+
+    @Test
+    void emptyAttachmentsKeepTheExistingHtmlMessageFormat() throws Exception {
+        try (var delivery = sender.openSession(channel(465, true, false))) {
+            delivery.send("reader@example.test", "제목", "<p>요약</p>", List.of());
+        }
+        var message = org.mockito.ArgumentCaptor.forClass(Message.class);
+        verify(transport).sendMessage(message.capture(), any());
+        assertTrue(message.getValue().isMimeType("text/html"));
+        assertEquals("<p>요약</p>", message.getValue().getContent());
+    }
+
+    @Test
+    void attachmentBytesCannotBeChangedAfterPreparationOrThroughAnAccessor() {
+        byte[] bytes = new byte[]{'%', 'P', 'D', 'F'};
+        var attachment = new NotificationAttachment("report.pdf", "application/pdf", bytes);
+        bytes[0] = 0;
+        byte[] read = attachment.content();
+        read[1] = 0;
+        assertArrayEquals(new byte[]{'%', 'P', 'D', 'F'}, attachment.content());
     }
 
     private NotificationChannel channel(int port, boolean ssl, boolean startTls) {
