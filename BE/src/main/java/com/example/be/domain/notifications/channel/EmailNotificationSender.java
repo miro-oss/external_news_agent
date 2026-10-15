@@ -4,6 +4,8 @@ import com.example.be.domain.notifications.config.NotificationProperties;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.notifications.exception.NotificationTransportException;
+import com.example.be.domain.notifications.service.NotificationAttachment;
+import jakarta.activation.DataHandler;
 import jakarta.mail.Authenticator;
 import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
@@ -11,12 +13,16 @@ import jakarta.mail.PasswordAuthentication;
 import jakarta.mail.Session;
 import jakarta.mail.Transport;
 import jakarta.mail.internet.InternetAddress;
+import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeMessage;
+import jakarta.mail.internet.MimeMultipart;
+import jakarta.mail.util.ByteArrayDataSource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
@@ -107,13 +113,34 @@ public class EmailNotificationSender implements NotificationSender {
             return new DeliverySession() {
                 @Override
                 public String send(String address, String subject, String body) {
+                    return send(address, subject, body, List.of());
+                }
+
+                @Override
+                public String send(String address, String subject, String body, List<NotificationAttachment> attachments) {
                     InternetAddress recipient = validateMessageHeaders(address, subject);
                     try {
                         MimeMessage message = new MimeMessage(session);
                         message.setFrom(from);
                         message.setRecipient(Message.RecipientType.TO, recipient);
                         message.setSubject(subject, "UTF-8");
-                        message.setContent(body, "text/html; charset=UTF-8");
+                        if (attachments.isEmpty()) {
+                            message.setContent(body, "text/html; charset=UTF-8");
+                        } else {
+                            MimeMultipart mixed = new MimeMultipart("mixed");
+                            MimeBodyPart html = new MimeBodyPart();
+                            html.setContent(body, "text/html; charset=UTF-8");
+                            mixed.addBodyPart(html);
+                            for (NotificationAttachment attachment : attachments) {
+                                MimeBodyPart file = new MimeBodyPart();
+                                file.setDataHandler(new DataHandler(new ByteArrayDataSource(
+                                        attachment.content(), attachment.contentType())));
+                                file.setFileName(attachment.filename());
+                                file.setDisposition(jakarta.mail.Part.ATTACHMENT);
+                                mixed.addBodyPart(file);
+                            }
+                            message.setContent(mixed);
+                        }
                         // Gmail uses References to group repeated notifications and trim their shared text.
                         // Give every standalone delivery a separate thread without changing its subject/body.
                         message.setHeader("References", "<news-delivery-" + UUID.randomUUID() + "@notifications.invalid>");

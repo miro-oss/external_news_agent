@@ -24,6 +24,7 @@ import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import com.example.be.domain.reports.service.DailyReportFeedbackExclusions;
 import com.example.be.domain.reports.service.ReportFindings;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
@@ -52,11 +53,13 @@ class PersonalizedNotificationRendererTest {
     private final ReportEventFeedbackProjection projection = new ReportEventFeedbackProjection(
             store, snapshots, mock(DailyReportFeedbackExclusions.class));
     private final NotificationRenderer renderer = new NotificationRenderer(findings, relevance, projection, mock(NotificationDartSummary.class));
+    private final ReportPdfRenderer pdfRenderer = mock(ReportPdfRenderer.class);
     private final PersonalizedNotificationRenderer personalized = new PersonalizedNotificationRenderer(
-            reports, findings, relevance, feedback, renderer, projection);
+            reports, findings, relevance, feedback, renderer, projection, pdfRenderer);
 
     @BeforeEach
     void configurePublicLinks() {
+        when(pdfRenderer.render(any(), any(), any())).thenReturn(new byte[]{'%', 'P', 'D', 'F'});
         ReflectionTestUtils.setField(renderer, "publicBaseUrl", "https://news.example.com");
         ReflectionTestUtils.setField(personalized, "publicBaseUrl", "https://news.example.com");
     }
@@ -217,6 +220,49 @@ class PersonalizedNotificationRendererTest {
         }
         for (var view : preparedViews(fixture.report(), 2)) assertFalse(view.excludedEvents());
         verify(snapshots, never()).capture(any(), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(ChannelType.class)
+    void onlyEmailAttachesPdfBuiltFromTheFinalRecipientFilteredView(ChannelType type) {
+        Fixture fixture = fixture(true);
+        prepare(fixture, List.of(confirmed('a')), Set.of(14L));
+        var insight = NotificationInsightTestSupport.insight();
+        var channel = NotificationChannel.builder().id(1L).channelType(type).maxLength(3500).active(true).build();
+
+        var result = personalized.render(fixture.report(), channel, RECIPIENT_ID, insight);
+
+        if (type == ChannelType.TELEGRAM) {
+            assertTrue(result.attachments().isEmpty());
+            verifyNoInteractions(pdfRenderer);
+            return;
+        }
+        assertEquals(1, result.attachments().size());
+        var attachment = result.attachments().getFirst();
+        assertEquals("news-report-17.pdf", attachment.filename());
+        assertEquals("application/pdf", attachment.contentType());
+        assertArrayEquals(new byte[]{'%', 'P', 'D', 'F'}, attachment.content());
+        var view = ArgumentCaptor.forClass(ReportEventFeedbackProjection.View.class);
+        verify(pdfRenderer).render(eq(fixture.report()), view.capture(), same(insight));
+        assertEquals(List.of("정상 사건 제목"), eventTitles(view.getValue()));
+        assertEquals(List.of(12L, 13L), view.getValue().findings().stream().map(Finding::getId).toList());
+        assertTrue(view.getValue().excludedEvidenceFindingIds().containsAll(Set.of(11L, 12L, 14L)));
+        assertRejectedContentAbsent(view.getValue().readingContent().markdownBody());
+        assertFalse(view.getValue().readingContent().markdownBody().contains("개인 제외"));
+        assertEquals(List.of("정상 후속 확인"), view.getValue().readingContent().structuredContent().watchItems()
+                .stream().map(ReportContent.WatchItem::topic).toList());
+    }
+
+    @Test
+    void pdfPreparationFailureDoesNotReturnAnEmailWithoutItsAttachment() {
+        Fixture fixture = fixture(false);
+        prepare(fixture, List.of(), Set.of());
+        var channel = NotificationChannel.builder().id(1L).channelType(ChannelType.EMAIL).maxLength(3500).active(true).build();
+        var failure = new IllegalStateException("synthetic PDF preparation failure");
+        when(pdfRenderer.render(any(), any(), any())).thenThrow(failure);
+
+        assertSame(failure, assertThrows(IllegalStateException.class,
+                () -> personalized.render(fixture.report(), channel, RECIPIENT_ID)));
     }
 
     private void prepare(Fixture fixture, List<Feedback> reviews, Set<Long> suppressed) {

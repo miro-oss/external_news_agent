@@ -38,7 +38,7 @@ export function ReportSharePanel({ reportId, reportScope, topicId }: { reportId:
   return <section className="report-delivery-panel report-share-card" aria-label="보고서 공유">
     <div className="report-share-heading">
       <h3>다른 사람에게 공유</h3>
-        <p className="muted">이 보고서를 텔레그램 뉴스 카드 또는 이메일 브리핑으로 전달할 수 있습니다.</p>
+        <p className="muted">이메일은 요약과 상세 PDF를 함께 전달합니다. PDF에는 보고서 본문 전체와 회사 실적·공시가 포함됩니다. 텔레그램은 뉴스 카드로 전달합니다.</p>
     </div>
     {!!deliveries.data?.length && <details className="auto-delivery-status"><summary>자동 전달 상태</summary>
       <ul>{deliveries.data.map((delivery) => <li key={delivery.id}>{delivery.recipientName} · {delivery.channelType === 'EMAIL' ? '이메일' : '텔레그램'} · {LABELS[delivery.status] ?? delivery.status}{delivery.message && <p className="muted">{delivery.message}</p>}</li>)}</ul>
@@ -62,7 +62,7 @@ export function ReportSharePanel({ reportId, reportScope, topicId }: { reportId:
     {insightGuidance && <p className="report-share-insight-guidance" role="status">{insightGuidance}</p>}
     {resultBatchId && <ReportShareDeliveryLogs key={resultBatchId} reportId={reportId} deliveryBatchId={resultBatchId} />}
     {preview.isPending && !preview.data && <MessagePreviewSkeleton />}
-    {preview.data && <div className="report-message-preview"><strong>{preview.data.subject ?? '텔레그램 요약'}</strong>{preview.data.chunks.map((chunk) => <p key={chunk.seq}>{plainPreview(chunk.body)}</p>)}</div>}
+    {preview.data && <div className="report-message-preview"><strong>{preview.data.subject ?? '텔레그램 요약'}</strong>{preview.data.channelType === 'EMAIL' && <p className="muted">이메일 본문 미리보기입니다. 실제 이메일에는 수신자별 표시 기준을 적용한 상세 PDF도 첨부됩니다.</p>}{preview.data.chunks.map((chunk) => <p key={chunk.seq}>{plainPreview(chunk.body)}</p>)}</div>}
   </section>
 }
 export function ReportShareInsightSelector({ value, disabled, onChange }: {
@@ -71,8 +71,8 @@ export function ReportShareInsightSelector({ value, disabled, onChange }: {
   const id = useId()
   return <div className="report-share-insight">
     <div className="report-share-insight-description">
-      <label htmlFor={id}>함께 보낼 간단 인사이트</label>
-      <p id={`${id}-help`}>선택한 관점의 저장된 분석을 이메일·텔레그램 요약에 덧붙입니다. 이번 전달에만 적용됩니다.</p>
+      <label htmlFor={id}>함께 보낼 관점 분석</label>
+      <p id={`${id}-help`}>선택한 관점 하나의 저장된 분석을 함께 보냅니다. 이메일·텔레그램에는 요약을, 이메일 PDF에는 상세 분석을 담습니다. 이번 전달에만 적용됩니다.</p>
     </div>
     <select id={id} value={value} disabled={disabled} aria-describedby={`${id}-help`}
       onChange={(event) => onChange(event.target.value as Audience | '')}>

@@ -65,7 +65,12 @@ public class ReportDeliveryWorker {
             return;
         }
         String externalId;
-        try { externalId = session.send(work.address(),personalized.subject(),String.join("\n", personalized.chunks())); }
+        try {
+            String body = String.join("\n", personalized.chunks());
+            externalId = personalized.attachments().isEmpty()
+                    ? session.send(work.address(), personalized.subject(), body)
+                    : session.send(work.address(), personalized.subject(), body, personalized.attachments());
+        }
         catch (RuntimeException failure) {
             // A transport timeout may occur after the provider accepted a message.
             boolean knownFailure = failure instanceof NotificationTransportException transport && transport.isDefinitelyRejected();

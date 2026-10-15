@@ -73,11 +73,13 @@ class DailyFeedbackNotificationPropagationTest {
     private final ReportEventFeedbackProjection projection = new ReportEventFeedbackProjection(store, snapshots, exclusions);
     private final FeedbackDeliveryService feedback = mock(FeedbackDeliveryService.class);
     private final NotificationRenderer renderer = new NotificationRenderer(findings, relevance, projection, mock(NotificationDartSummary.class));
+    private final ReportPdfRenderer pdfRenderer = mock(ReportPdfRenderer.class);
     private final PersonalizedNotificationRenderer personalized = new PersonalizedNotificationRenderer(
-            reports, findings, relevance, feedback, renderer, projection);
+            reports, findings, relevance, feedback, renderer, projection, pdfRenderer);
 
     @BeforeEach
     void configure() {
+        when(pdfRenderer.render(any(), any(), any())).thenReturn(new byte[]{'%', 'P', 'D', 'F'});
         when(relevance.filterTopicFindings(eq(TOPIC_ID), anyList())).thenAnswer(invocation -> invocation.getArgument(1));
         when(jdbc.queryForList(anyString(), eq(Long.class), anyLong(), anyLong())).thenReturn(List.of(TOPIC_ID));
         ReflectionTestUtils.setField(renderer, "publicBaseUrl", "https://news.example.com");
@@ -94,7 +96,7 @@ class DailyFeedbackNotificationPropagationTest {
             Feedback submitted = review(fixture, Category.PREFERENCE, status,
                     status == Status.COMPLETED ? "NO_ERROR" : null);
             when(store.eventFeedback(DAILY_ID)).thenReturn(List.of(submitted));
-            clearInvocations(feedback);
+            clearInvocations(feedback, pdfRenderer);
             for (String body : allEntryPoints(fixture.weekly(), channelType)) {
                 assertRejectedContentAbsent(body);
                 assertTrue(body.contains("정상 주간 사건"));
@@ -103,6 +105,10 @@ class DailyFeedbackNotificationPropagationTest {
                 assertTrue(body.contains("https://example.com/source-22"));
             }
 
+            for (var view : pdfViews(fixture.weekly(), channelType)) {
+                assertEquals(List.of(22L), view.findings().stream().map(Finding::getId).toList());
+                assertRejectedContentAbsent(view.readingContent().markdownBody());
+            }
             for (var view : preparedViews(fixture.weekly())) {
                 assertTrue(view.excludedEvents());
                 assertEquals(List.of(22L), view.findings().stream().map(Finding::getId).toList());
@@ -134,6 +140,10 @@ class DailyFeedbackNotificationPropagationTest {
             assertTrue(body.contains("새롭게 정리할 주요 내용이 없습니다"));
             assertTrue(body.contains("보고서 전체 보기"));
         }
+        for (var view : pdfViews(fixture.weekly(), channelType)) {
+            assertTrue(view.findings().isEmpty());
+            assertTrue(view.readingContent().structuredContent().importantEvents().isEmpty());
+        }
         for (var view : preparedViews(fixture.weekly())) {
             assertTrue(view.findings().isEmpty());
             assertTrue(view.readingContent().structuredContent().importantEvents().isEmpty());
@@ -156,6 +166,20 @@ class DailyFeedbackNotificationPropagationTest {
             assertTrue(body.contains("새롭게 정리할 주요 내용이 없습니다"));
             assertTrue(body.contains("이슈 피드백"));
         }
+        for (var view : pdfViews(fixture.weekly(), channelType)) {
+            assertTrue(view.findings().isEmpty());
+            assertTrue(view.readingContent().structuredContent().importantEvents().isEmpty());
+        }
+    }
+
+    private List<ReportEventFeedbackProjection.View> pdfViews(NewsReport report, ChannelType type) {
+        if (type == ChannelType.TELEGRAM) {
+            verifyNoInteractions(pdfRenderer);
+            return List.of();
+        }
+        var views = ArgumentCaptor.forClass(ReportEventFeedbackProjection.View.class);
+        verify(pdfRenderer, times(2)).render(eq(report), views.capture(), isNull());
+        return views.getAllValues();
     }
 
     private void prepare(Fixture fixture, Set<Long> suppressed) {
@@ -200,6 +224,7 @@ class DailyFeedbackNotificationPropagationTest {
     private String delivery(NewsReport report, ChannelType type, boolean queued) {
         var rendered = queued ? personalized.render(report.getId(), channel(type), RECIPIENT_ID)
                 : personalized.render(report, channel(type), RECIPIENT_ID);
+        assertEquals(type == ChannelType.EMAIL ? 1 : 0, rendered.attachments().size());
         String body = String.join("\n", rendered.chunks());
         assertTrue(body.contains("https://news.example.com/#/feedback?token=synthetic-test-token"));
         return body;
