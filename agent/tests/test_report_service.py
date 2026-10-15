@@ -137,7 +137,7 @@ def test_generates_structured_report_and_deterministic_markdown() -> None:
     assert "STUB 분석 3건" in response.markdown_body
     assert "페이월" in response.markdown_body
     assert "수집 실패 1건" in response.markdown_body
-    assert response.meta.prompt_version == "report.ko.v1.5"
+    assert response.meta.prompt_version == "report.ko.v1.6"
     assert response.meta.mock is False
 
 
@@ -497,14 +497,14 @@ def test_rejects_report_output_outside_readable_length(mutate) -> None:
         ReportOutput.model_validate(output)
 
 
-def test_mock_report_truncates_executive_summary_to_one_hundred_characters() -> None:
+def test_mock_report_keeps_complete_claims_within_summary_limits() -> None:
     payload = request().model_dump(by_alias=True, mode="json")
-    payload["findings"][0]["summaryKo"] = "가" * 200
+    payload["findings"][0]["summaryKo"] = "HBM4 양산 일정이 " + "매우 " * 60 + "앞당겨졌다."
 
     response = ReportWriterService(Settings()).write(ReportRequest.model_validate(payload))
 
-    assert len(response.executive_summary[0]) == 100
-    assert len(response.important_events[0].summary_ko) == 150
+    assert response.executive_summary == ["양산 일정이 앞당겨졌다."]
+    assert response.important_events[0].summary_ko == "양산 일정이 앞당겨졌다."
 
 
 def test_mock_report_does_not_repeat_important_finding_in_watch_items() -> None:
