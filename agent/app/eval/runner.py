@@ -47,7 +47,7 @@ from app.schemas.report import ReportRequest, ReportResponse
 
 EvalProfile = Literal["replay", "live"]
 _DEFAULT_CLAIM_DATASET = Path(__file__).resolve().parent / "golden" / "claims.ko.v1.json"
-_DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.4.json"
+_DEFAULT_REPORT_FIXTURE = Path(__file__).resolve().parent / "golden" / "report.ko.v1.6.json"
 _DEFAULT_SENSITIVITY_CONFIG = (
     Path(__file__).resolve().parents[3] / "BE" / "src" / "main" / "resources" / "application.yml"
 )

@@ -307,7 +307,7 @@ def test_services_send_request_bounds_to_responses_and_preserve_usage(task):
     assert (
         response.meta.prompt_version
         == {
-            "report": "report.ko.v1.5",
+            "report": "report.ko.v1.6",
             "evidence": "evidence.ko.v3",
             "critique": "self-critique.ko.v3",
             "insight": "insight.ko.v2+perspective.ko.v1",
