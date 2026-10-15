@@ -8,7 +8,7 @@ import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -26,7 +26,8 @@ final class ReportPdfInsightSection {
         Map<Long, Finding> visible = view.findings().stream()
                 .filter(finding -> !view.excludedEvidenceFindingIds().contains(finding.getId()))
                 .collect(Collectors.toMap(Finding::getId, Function.identity(), (first, duplicate) -> first));
-        Map<String, ReportInsightDTO.Fact> facts = new LinkedHashMap<>();
+        // Facts remain the authorization basis for interpretations, without a PDF evidence appendix.
+        Set<String> allowed = new HashSet<>();
         for (var fact : list(insight.facts())) {
             Finding finding = visible.get(fact.findingId());
             if (finding != null && finding.getArticle() != null
@@ -35,10 +36,9 @@ final class ReportPdfInsightSection {
                     && StringUtils.hasText(fact.text()) && "grounded".equals(fact.groundedness())
                     && fact.evidenceSentenceIds() != null && !fact.evidenceSentenceIds().isEmpty()
                     && fact.evidenceSentenceIds().stream().allMatch(id -> id != null && id >= 0)) {
-                facts.putIfAbsent(fact.id(), fact);
+                allowed.add(fact.id());
             }
         }
-        Set<String> allowed = facts.keySet();
         var overview = list(insight.overview()).stream()
                 .filter(item -> supported(item.basisClaimIds(), allowed) && StringUtils.hasText(item.text())).toList();
         var issues = list(insight.issues()).stream()
@@ -48,13 +48,10 @@ final class ReportPdfInsightSection {
                 .filter(item -> supported(item.basisClaimIds(), allowed) && StringUtils.hasText(item.text())).toList();
         var watches = list(insight.watchItems()).stream()
                 .filter(item -> supported(item.basisClaimIds(), allowed) && StringUtils.hasText(item.topic())).toList();
-        Map<String, Integer> references = new LinkedHashMap<>();
-        facts.keySet().forEach(id -> references.put(id, references.size() + 1));
-
         pdf.section("리포트 관점 분석 · " + audience(insight.audience()));
         pdf.muted(NotificationInsightBrief.AI_NOTICE);
         // The aggregate headline and importance have no claim bindings and can repeat excluded evidence.
-        if (overview.isEmpty() && issues.isEmpty() && implications.isEmpty() && watches.isEmpty() && facts.isEmpty()) {
+        if (overview.isEmpty() && issues.isEmpty() && implications.isEmpty() && watches.isEmpty()) {
             pdf.paragraph(NotificationInsightBrief.UNAVAILABLE);
             return;
         }
@@ -63,7 +60,6 @@ final class ReportPdfInsightSection {
             for (var item : overview) {
                 pdf.bullet(item.text());
                 value(pdf, "해석의 조건", item.assumption());
-                references(pdf, item.basisClaimIds(), references);
             }
         }
         if (!issues.isEmpty()) {
@@ -75,7 +71,6 @@ final class ReportPdfInsightSection {
                 pdf.paragraph(item.reason());
                 assessment(pdf, item);
                 axes(pdf, item.axes());
-                references(pdf, item.basisClaimIds(), references);
             }
         }
         if (!implications.isEmpty()) {
@@ -85,7 +80,6 @@ final class ReportPdfInsightSection {
                 value(pdf, "영향 경로", item.mechanism());
                 value(pdf, "성립 조건", item.assumption());
                 value(pdf, "판단 변경 조건", item.falsifiedBy());
-                references(pdf, item.basisClaimIds(), references);
             }
         }
         if (!watches.isEmpty()) {
@@ -94,23 +88,6 @@ final class ReportPdfInsightSection {
                 pdf.bullet(item.topic());
                 value(pdf, "확인할 지표", item.indicator());
                 value(pdf, "판단 기준", item.trigger());
-                references(pdf, item.basisClaimIds(), references);
-            }
-        }
-        if (!facts.isEmpty()) {
-            pdf.subheading("분석에 사용한 원문 근거");
-            pdf.muted("계획·전망과 의견은 확인된 사실과 구분해 읽어 주세요.");
-            for (var fact : facts.values()) {
-                var article = visible.get(fact.findingId()).getArticle();
-                pdf.paragraph("근거 " + references.get(fact.id()) + " · " + claimType(fact.claimType()));
-                pdf.paragraph(fact.text());
-                value(pdf, "발언 주체", fact.attributedTo());
-                value(pdf, "출처", article.getSourceName());
-                if (article.getPublishedAt() != null) value(pdf, "발행일", article.getPublishedAt().toLocalDate().toString());
-                String title = StringUtils.hasText(article.getTitle()) ? article.getTitle() : "기사 원문";
-                pdf.link(title, article.getCanonicalUrl());
-                pdf.muted("원문 근거 문장 " + fact.evidenceSentenceIds().stream().distinct()
-                        .map(id -> Long.toString((long) id + 1)).collect(Collectors.joining(", ")));
             }
         }
     }
@@ -143,10 +120,6 @@ final class ReportPdfInsightSection {
         if (StringUtils.hasText(text)) pdf.keyValue(label, text);
     }
 
-    private static void references(ReportPdfLayout pdf, List<String> ids, Map<String, Integer> references) throws IOException {
-        pdf.muted("참조: " + ids.stream().distinct().map(id -> "근거 " + references.get(id)).collect(Collectors.joining(", ")));
-    }
-
     private static boolean supported(List<String> ids, Set<String> allowed) {
         return ids != null && !ids.isEmpty() && allowed.containsAll(ids);
     }
@@ -174,13 +147,4 @@ final class ReportPdfInsightSection {
         };
     }
 
-    private static String claimType(String value) {
-        if (value == null) return "원문 주장";
-        return switch (value) {
-            case "FACT" -> "사실";
-            case "FORECAST" -> "계획·전망";
-            case "OPINION" -> "의견";
-            default -> "원문 주장";
-        };
-    }
 }

@@ -60,6 +60,8 @@ class ReportPdfRendererTests {
             for (String absent : List.of("수집 상태", "절대 표시하지", "기사 분석 10", "원본 보고서에만 남은 비공개 내용", "리포트 관점 분석"))
                 assertFalse(text.contains(absent), absent);
             assertTrue(urls(document).contains("https://example.com/article-9"));
+            for (long id : List.of(1L, 8L, 9L)) assertTrue(text.contains("https://example.com/article-" + id));
+            assertFalse(text.contains("출처 ·"));
             assertFalse(urls(document).contains("https://example.com/article-10"));
             for (var page : document.getPages()) for (var name : page.getResources().getFontNames())
                 assertTrue(page.getResources().getFont(name).isEmbedded(), "Korean fonts must travel with the attachment");
@@ -84,11 +86,16 @@ class ReportPdfRendererTests {
                 .collect(java.util.stream.Collectors.joining("\n"));
         var content = new ReportContent(List.of("장문 검증"), List.of(new ReportContent.ImportantEvent("긴 이벤트", body,
                 "마지막 중요성도 보존합니다", List.of(1L))), List.of(), List.of());
-        try (PDDocument document = Loader.loadPDF(renderer.render(report, view(content, List.of(finding(1, "기사", "분석")), Set.of()), null))) {
+        String longUrl = "https://example.com/news/" + "long-article-address-".repeat(15) + "?edition=2026";
+        var linkedFinding = Finding.builder().id(1L).article(Article.builder().id(101L).title("기사")
+                .canonicalUrl(longUrl).build()).build();
+        try (PDDocument document = Loader.loadPDF(renderer.render(report, view(content, List.of(linkedFinding), Set.of()), null))) {
             String text = new PDFTextStripper().getText(document);
             assertTrue(document.getNumberOfPages() >= 3);
             for (int i = 1; i <= 90; i++) assertTrue(text.contains("완전한 문장 " + i + ":"), "missing prose " + i);
             assertTrue(text.contains("마지막 중요성도 보존합니다"));
+            assertTrue(text.replaceAll("\\s", "").contains(longUrl));
+            assertTrue(urls(document).contains(longUrl));
             assertWithinPageBounds(document);
         }
         byte[] bytes;
@@ -108,7 +115,7 @@ class ReportPdfRendererTests {
     }
 
     @Test
-    void allCompaniesHavePrintedExactFinancialTablesSourcesAndDisclosures() throws Exception {
+    void allCompaniesHavePrintedExactFinancialTablesWithoutFilingColumnsOrLists() throws Exception {
         var report = report(ReportScope.RUN);
         var filing = filing("반기보고서", FILING_URL, true);
         var financials = new DartModels.FinancialData("CFS", "KRW", OffsetDateTime.parse("2026-10-14T16:30:00Z"),
@@ -121,11 +128,13 @@ class ReportPdfRendererTests {
 
         try (PDDocument document = Loader.loadPDF(renderer.render(report, view(emptyContent(), List.of(), Set.of()), null))) {
             String text = new PDFTextStripper().getText(document);
-            for (String expected : List.of("연결 회사 5", "2026년 1분기", "매출액", "영업이익", "영업이익률", "근거 공시",
-                    "자료 없음", "-1", "0%", "산출값", "최근 주요사항보고서", "[정정] 반기보고서", "2026-10-15 01:30",
+            for (String expected : List.of("연결 회사 5", "2026년 1분기", "매출액", "영업이익", "영업이익률",
+                    "자료 없음", "-1", "0%", "산출값", "2026-10-15 01:30",
                     "동일한 재무 기준으로 비교합니다", "차트 단위: 억원", "표 금액 단위: 원 (KRW)")) assertTrue(text.contains(expected), expected);
             assertTrue(text.replaceAll("\\s", "").contains("10,000,000,005,000,001.20"));
-            assertTrue(urls(document).contains(FILING_URL));
+            for (String hidden : List.of("근거 공시", "실적 근거 공시", "최근 공시", "최근 주요사항보고서", "반기보고서", "[1]"))
+                assertFalse(text.contains(hidden), hidden);
+            assertTrue(urls(document).isEmpty());
             assertWithinPageBounds(document);
         }
     }
@@ -142,7 +151,7 @@ class ReportPdfRendererTests {
                 .canonicalUrl("javascript:alert(1)").build()).summary("근거 분석").keyPoints(List.of(new FindingKeyPoint("근거", List.of(0), "grounded"))).build();
         try (PDDocument document = Loader.loadPDF(renderer.render(report, view(emptyContent(), List.of(finding), Set.of()), null))) {
             String text = new PDFTextStripper().getText(document);
-            assertTrue(text.contains("안전하지 않은 공시 제목"));
+            assertFalse(text.contains("안전하지 않은 공시 제목"));
             assertTrue(text.contains("외부 출처 제목"));
             assertFalse(text.contains("대기 자료 유출"));
             assertFalse(text.contains("javascript:"));
@@ -165,7 +174,8 @@ class ReportPdfRendererTests {
             assertFalse(text.contains("중복 제목"));
             assertTrue(urls(document).contains("https://example.com/legacy"));
             assertTrue(urls(document).contains("https://example.com/filtered-legacy"));
-            assertTrue(text.contains("기사 원문 · https://example.com/filtered-legacy"));
+            assertTrue(text.contains("https://example.com/filtered-legacy"));
+            assertTrue(text.contains("https://example.com/legacy"));
         }
     }
 

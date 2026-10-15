@@ -26,7 +26,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 class ReportPdfInsightSectionTest {
     @Test
-    void includesAllSelectedAudienceDetailsWithPrintableEvidenceInsteadOfTwoItemBrief() throws Exception {
+    void includesAllSupportedAudienceDetailsWithoutEvidenceAppendixOrNumberedReferences() throws Exception {
         var insight = insight(List.of(fact(11, "grounded", List.of(0, 2))), List.of(
                         new Overview("첫 번째 종합 판단", List.of("11:0"), "첫 번째 조건"),
                         new Overview("두 번째 종합 판단", List.of("11:0"), "두 번째 조건"),
@@ -43,8 +43,7 @@ class ReportPdfInsightSectionTest {
                 "세 번째 종합 판단", "세 번째 조건", "우선순위 1 · 중요도 높음", "우선 확인할 이유",
                 "직접 관련성", "영향 크기", "시급성", "비교 근거 없음", "3 / 3", "2 / 3", "미확인",
                 "조건부 영향 해석", "설비 투자에서 수요로 이어지는 경로", "예산이 확정되는 경우", "예산이 철회되는 경우",
-                "후속 투자 일정", "분기별 발주 규모", "발주 증가 여부", "참조: 근거 1", "근거 1 · 사실",
-                "확인된 원문 11", "출처 · 전문 뉴스", "발행일 · 2026-10-15", "기사 제목 11", "원문 근거 문장 1, 3")) {
+                "후속 투자 일정", "분기별 발주 규모", "발주 증가 여부", "기사 제목 11")) {
             assertTrue(text.contains(expected), expected + "\n" + text);
         }
         assertFalse(text.contains("근거 없는 헤드라인"));
@@ -52,6 +51,10 @@ class ReportPdfInsightSectionTest {
         assertFalse(text.contains("내부 모델"));
         assertFalse(text.contains("반도체 제조사"));
         assertFalse(text.contains("11:0"));
+        for (String omitted : List.of("분석에 사용한 원문 근거", "참조:", "근거 1", "확인된 원문 11",
+                "출처 · 전문 뉴스", "발행일", "원문 근거 문장", "https://example.com/article-11")) {
+            assertFalse(text.contains(omitted), omitted + "\n" + text);
+        }
     }
 
     @Test
@@ -76,9 +79,12 @@ class ReportPdfInsightSectionTest {
         assertFalse(text.contains("기사 제목 11"), text);
         for (String expected : List.of("독립적인 판단", "독립적인 조건", "독립적인 이슈 이유", "독립적인 영향 해석",
                 "독립적인 영향 경로", "독립적인 성립 조건", "독립적인 변경 조건", "독립적인 관찰 주제",
-                "독립적인 지표", "독립적인 기준", "확인된 원문 12", "기사 제목 12", "참조: 근거 1")) {
+                "독립적인 지표", "독립적인 기준", "기사 제목 12")) {
             assertTrue(text.contains(expected), expected + "\n" + text);
         }
+        assertFalse(text.contains("확인된 원문 12"));
+        assertFalse(text.contains("분석에 사용한 원문 근거"));
+        assertFalse(text.contains("참조:"));
     }
 
     @Test
@@ -105,7 +111,7 @@ class ReportPdfInsightSectionTest {
     }
 
     @Test
-    void factsRetainForecastOpinionAndAttributionWhenTheyHaveVisibleEvidence() throws Exception {
+    void factsAloneShowUnavailableWithoutRenderingEvidenceOrAttribution() throws Exception {
         var insight = insight(List.of(
                         new ReportInsightDTO.Fact("11:1", "증설을 계획하고 있다", "FORECAST", null, 11L, 111L, List.of(1), "grounded"),
                         new ReportInsightDTO.Fact("11:2", "수요가 확대될 수 있다", "OPINION", "회사 관계자", 11L, 111L, List.of(2), "grounded")),
@@ -113,11 +119,11 @@ class ReportPdfInsightSectionTest {
 
         String text = render(insight, view(List.of(finding(11)), Set.of()));
 
-        assertTrue(text.contains("근거 1 · 계획·전망"));
-        assertTrue(text.contains("증설을 계획하고 있다"));
-        assertTrue(text.contains("근거 2 · 의견"));
-        assertTrue(text.contains("수요가 확대될 수 있다"));
-        assertTrue(text.contains("발언 주체 · 회사 관계자"));
+        assertTrue(text.contains(NotificationInsightBrief.UNAVAILABLE));
+        for (String omitted : List.of("분석에 사용한 원문 근거", "참조:", "증설을 계획하고 있다",
+                "수요가 확대될 수 있다", "회사 관계자", "근거 1", "근거 2")) {
+            assertFalse(text.contains(omitted), omitted + "\n" + text);
+        }
     }
 
     @Test

@@ -2,7 +2,6 @@ package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.service.FindingEvidencePolicy;
-import com.example.be.domain.dart.model.DartModels.Filing;
 import com.example.be.domain.dart.model.DartModels.FinancialData;
 import com.example.be.domain.reports.dart.ReportDartService;
 import com.example.be.domain.reports.dto.res.ReportDartDTO.CompanyAttachment;
@@ -19,7 +18,6 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
-import java.net.URI;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.time.format.DateTimeFormatter;
@@ -110,7 +108,8 @@ public class ReportPdfRenderer {
         for (Long id : ids) {
             Finding finding = findings.get(id);
             if (finding == null || finding.getArticle() == null || !articles.add(finding.getArticle().getId())) continue;
-            pdf.link("출처 · " + finding.getArticle().getTitle(), finding.getArticle().getCanonicalUrl());
+            String url = finding.getArticle().getCanonicalUrl();
+            if (ReportPdfLayout.safeUrl(url)) pdf.link(url, url);
         }
         pdf.gap(3);
     }
@@ -120,23 +119,20 @@ public class ReportPdfRenderer {
         var result = dart.getStored(report);
         if (result == null || result.companies().isEmpty()) return;
         pdf.reserve(345);
-        pdf.section("회사 실적 · 공시");
+        pdf.section("회사 실적");
         for (CompanyAttachment entry : result.companies()) {
             if (entry.data() != null && !entry.data().quarters().isEmpty()
                     && ("READY".equals(entry.status()) || "PARTIAL".equals(entry.status()))) pdf.reserve(300);
             pdf.subheading(entry.company().corpName());
             pdf.muted(entry.company().stockCode() == null || entry.company().stockCode().isBlank() ? "비상장" : entry.company().stockCode());
             if (!("READY".equals(entry.status()) || "PARTIAL".equals(entry.status())) || entry.data() == null) {
-                pdf.paragraph("표시할 저장된 실적·공시 자료가 없습니다.");
+                pdf.paragraph("표시할 저장된 실적 자료가 없습니다.");
                 continue;
             }
             FinancialData data = entry.data();
             pdf.muted(("CFS".equals(data.fsDiv()) ? "연결재무제표" : "OFS".equals(data.fsDiv()) ? "별도재무제표" : "재무 기준 미확인")
                     + (data.fetchedAt() == null ? " · 자료 확인 시각 미상" : " · 자료 확인 "
                     + data.fetchedAt().atZoneSameInstant(ApiTimeZone.ZONE).format(DATE_TIME) + " (한국시간)"));
-            Map<Filing, Integer> filings = new LinkedHashMap<>();
-            for (var quarter : data.quarters()) for (Filing filing : quarter.sources())
-                filings.computeIfAbsent(filing, key -> filings.size() + 1);
             if (data.quarters().isEmpty()) pdf.paragraph("표시할 분기 실적 자료가 없습니다.");
             else {
                 pdf.chart(data.quarters(), data.currency());
@@ -145,21 +141,13 @@ public class ReportPdfRenderer {
                 List<List<String>> rows = new ArrayList<>();
                 for (var quarter : data.quarters()) rows.add(List.of(quarter.year() + "년 " + quarter.quarter() + "분기"
                                 + (quarter.derived() ? "\n산출값" : ""), amount(quarter.revenue()), amount(quarter.operatingProfit()),
-                        quarter.operatingMargin() == null ? "자료 없음" : quarter.operatingMargin().stripTrailingZeros().toPlainString() + "%",
-                        quarter.sources().isEmpty() ? "자료 없음" : quarter.sources().stream().map(f -> "[" + filings.get(f) + "]").collect(java.util.stream.Collectors.joining(" "))));
-                pdf.table(List.of("분기", "매출액", "영업이익", "영업이익률", "근거 공시"), rows, new float[] { 1.1f, 1.65f, 1.65f, 1, .85f });
+                        quarter.operatingMargin() == null ? "자료 없음" : quarter.operatingMargin().stripTrailingZeros().toPlainString() + "%"));
+                pdf.table(List.of("분기", "매출액", "영업이익", "영업이익률"), rows, new float[] { 1.1f, 1.8f, 1.8f, 1 });
                 if (data.quarters().stream().anyMatch(com.example.be.domain.dart.model.DartModels.Quarter::derived))
                     pdf.muted("4분기 산출값은 같은 회계 기준의 연간 금액에서 3분기 누적 금액을 뺀 값입니다.");
             }
-            if (!filings.isEmpty()) {
-                pdf.subheading("실적 근거 공시");
-                for (var entrySet : filings.entrySet()) filing(pdf, "[" + entrySet.getValue() + "] ", entrySet.getKey());
-            }
             for (String note : data.notes()) pdf.muted(note);
-            pdf.subheading("최근 공시");
-            if (data.disclosures().isEmpty()) pdf.muted("확인된 공시가 없습니다.");
-            for (Filing filing : data.disclosures()) filing(pdf, "", filing);
-            pdf.muted("공시와 실적은 회사 전체 기준이며 뉴스 키워드로 필터하지 않습니다. 자료 확인 시 확보한 내용을 보존하며, 이후 정정공시가 반영된 최신 수치와 다를 수 있습니다.");
+            pdf.muted("실적은 회사 전체 기준입니다. 자료 확인 시 확보한 내용을 보존하며, 이후 정정공시가 반영된 최신 수치와 다를 수 있습니다.");
         }
     }
 
@@ -170,19 +158,6 @@ public class ReportPdfRenderer {
         format.setMinimumFractionDigits(Math.max(0, amount.scale()));
         format.setMaximumFractionDigits(Math.max(0, amount.scale()));
         return format.format(amount);
-    }
-
-    private void filing(ReportPdfLayout pdf, String prefix, Filing filing) throws IOException {
-        pdf.link(prefix + (filing.corrected() ? "[정정] " : "") + filing.reportName() + " · " + filing.filedAt(),
-                safeFilingUrl(filing) ? filing.url() : null);
-    }
-
-    private static boolean safeFilingUrl(Filing filing) {
-        if (!ReportPdfLayout.safeUrl(filing.url()) || filing.rceptNo() == null || !filing.rceptNo().matches("[0-9]{14}")) return false;
-        URI uri = URI.create(filing.url());
-        return "https".equalsIgnoreCase(uri.getScheme()) && "dart.fss.or.kr".equalsIgnoreCase(uri.getHost())
-                && uri.getPort() == -1 && uri.getFragment() == null && "/dsaf001/main.do".equals(uri.getRawPath())
-                && ("rcpNo=" + filing.rceptNo()).equals(uri.getRawQuery());
     }
 
     /** Legacy reports have no structured content: preserve every reading section except collection notes. */
@@ -230,9 +205,9 @@ public class ReportPdfRenderer {
     private void legacyText(ReportPdfLayout pdf, String text, boolean bullet) throws IOException {
         if (bullet) pdf.bullet(plain(text)); else pdf.paragraph(plain(text));
         var links = MARKDOWN_LINK.matcher(text);
-        while (links.find()) if (ReportPdfLayout.safeUrl(links.group(2))) pdf.link("출처 · " + links.group(1), links.group(2));
+        while (links.find()) if (ReportPdfLayout.safeUrl(links.group(2))) pdf.link(links.group(2), links.group(2));
         var autolinks = AUTOLINK.matcher(text);
-        while (autolinks.find()) if (ReportPdfLayout.safeUrl(autolinks.group(1))) pdf.link("기사 원문 · " + autolinks.group(1), autolinks.group(1));
+        while (autolinks.find()) if (ReportPdfLayout.safeUrl(autolinks.group(1))) pdf.link(autolinks.group(1), autolinks.group(1));
     }
 
     private String plain(String value) {

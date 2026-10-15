@@ -225,7 +225,7 @@ final class ReportPdfLayout implements AutoCloseable {
             draw(label, x - width(label, regular, 7) / 2, chartBottom - 16, regular, 7, MUTED);
         }
         y = chartBottom - 34;
-        muted("자료가 없는 분기는 선을 연결하지 않습니다. 정확한 금액과 근거 공시는 아래 표에서 확인할 수 있습니다.");
+        muted("자료가 없는 분기는 선을 연결하지 않습니다. 정확한 금액은 아래 표에서 확인할 수 있습니다.");
     }
 
     private void chartSeries(List<Double> values, float left, float right, float bottom,
