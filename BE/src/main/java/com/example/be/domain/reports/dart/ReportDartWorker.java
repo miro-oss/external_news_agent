@@ -3,6 +3,7 @@ package com.example.be.domain.reports.dart;
 import com.example.be.domain.dart.financial.DartFinancialService;
 import com.example.be.domain.dart.config.DartProperties;
 import com.example.be.domain.dart.exception.DartUpstreamException;
+import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.reports.comparison.ReportCompleted;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
@@ -31,10 +32,17 @@ public class ReportDartWorker {
     public void poll() {
         persistence.recover();
         repository.missing().forEach(this::enqueueSafely);
+        repository.reusableReports().forEach(this::enqueueSafely);
         if (!properties.isEnabled() || repository.paused(now())) return;
         for (var job : repository.pending(now())) {
-            if (repository.paused(now())) break;
+            if (repository.paused(now())) return;
             process(job);
+        }
+        if (repository.paused(now())) return;
+        var now = now();
+        for (var company : repository.staleCompanies(now.minus(ReportDartPersistence.CACHE_TTL), now)) {
+            if (repository.paused(now())) return;
+            refresh(company);
         }
     }
 
@@ -68,6 +76,23 @@ public class ReportDartWorker {
                 log.warn("공시 작업 상태 저장 실패. reportId={}, corpCode={}", job.reportId(), job.company().corpCode());
             }
             log.warn("공시 자료 준비 실패. reportId={}, corpCode={}", job.reportId(), job.company().corpCode());
+        }
+    }
+
+    void refresh(Company company) {
+        String token = UUID.randomUUID().toString();
+        try {
+            var cache = persistence.refreshAccess(company.corpCode(), token);
+            if (!cache.owner()) return;
+            var data = financials.fetch(company);
+            persistence.refreshCache(company.corpCode(), token, data);
+        } catch (RuntimeException exception) {
+            String upstreamStatus = exception instanceof DartUpstreamException upstream ? upstream.getStatus() : "INTERNAL";
+            try { persistence.failCache(company.corpCode(), token, upstreamStatus); }
+            catch (RuntimeException persistenceFailure) {
+                log.warn("공시 캐시 갱신 상태 저장 실패. corpCode={}", company.corpCode());
+            }
+            log.warn("공시 캐시 갱신 실패. corpCode={}", company.corpCode());
         }
     }
 

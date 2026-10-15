@@ -31,14 +31,61 @@ class ReportDartPersistenceTest {
         verify(repository, never()).enqueue(eq(18L), any(), anyBoolean(), any());
     }
 
-    @Test void freshCacheSkipsProviderLeaseAndExpiredCacheRequiresExclusiveLease() {
+    @Test void enqueueCopiesExpiredCompanySnapshotEvenWhenProviderIsDisabled() {
+        when(reports.findByIdForUpdate(17L)).thenReturn(Optional.of(report(ReportScope.RUN, SAMSUNG)));
+        when(repository.cached(SAMSUNG.corpCode())).thenReturn(Optional.of(
+                new ReportDartRepository.Cached(data(), LocalDateTime.now(ApiTimeZone.ZONE).minusDays(30))));
+
+        persistence.enqueue(17L);
+
+        var order = inOrder(repository);
+        order.verify(repository).enqueue(eq(17L), eq(SAMSUNG), eq(false), any());
+        order.verify(repository).attachCached(eq(17L), eq(SAMSUNG.corpCode()), eq(data()), any());
+        verify(repository, never()).claimCache(anyString(), anyString(), any(), any());
+    }
+
+    @Test void retryCopiesExpiredCompanySnapshotBeforeResettingRemainingFailedWork() {
+        when(reports.findByIdForUpdate(17L)).thenReturn(Optional.of(report(ReportScope.RUN, SAMSUNG)));
+        when(repository.cached(SAMSUNG.corpCode())).thenReturn(Optional.of(
+                new ReportDartRepository.Cached(data(), LocalDateTime.now(ApiTimeZone.ZONE).minusDays(30))));
+        properties.setApiKey("unit-test-key");
+
+        persistence.retry(17L);
+
+        var order = inOrder(repository);
+        order.verify(repository).enqueue(eq(17L), eq(SAMSUNG), eq(true), any());
+        order.verify(repository).attachCached(eq(17L), eq(SAMSUNG.corpCode()), eq(data()), any());
+        order.verify(repository).retry(eq(17L), eq(true), any());
+        verify(repository, never()).claimCache(anyString(), anyString(), any(), any());
+    }
+
+    @Test void reportReusesAnyAgeCacheWhileOnlyStaleRefreshRequiresExclusiveLease() {
         var now = LocalDateTime.now(ApiTimeZone.ZONE);
         when(repository.cached(SAMSUNG.corpCode())).thenReturn(Optional.of(new ReportDartRepository.Cached(data(), now.minusHours(23))));
         assertEquals(data(), persistence.cache(SAMSUNG.corpCode(), "token").data());
         verify(repository, never()).claimCache(anyString(), anyString(), any(), any());
         when(repository.cached(SAMSUNG.corpCode())).thenReturn(Optional.of(new ReportDartRepository.Cached(data(), now.minusHours(25))));
+        assertEquals(data(), persistence.cache(SAMSUNG.corpCode(), "token").data());
+        verify(repository, never()).claimCache(anyString(), anyString(), any(), any());
         when(repository.claimCache(eq(SAMSUNG.corpCode()), eq("token"), any(), any())).thenReturn(true);
-        assertTrue(persistence.cache(SAMSUNG.corpCode(), "token").owner());
+        assertTrue(persistence.refreshAccess(SAMSUNG.corpCode(), "token").owner());
+    }
+
+    @Test void refreshSkipsFreshCacheAndRechecksItAfterAcquiringLease() {
+        var now = LocalDateTime.now(ApiTimeZone.ZONE);
+        var fresh = new ReportDartRepository.Cached(data(), now);
+        when(repository.cached(SAMSUNG.corpCode())).thenReturn(Optional.of(fresh));
+        assertEquals(data(), persistence.refreshAccess(SAMSUNG.corpCode(), "token").data());
+        verify(repository, never()).claimCache(anyString(), anyString(), any(), any());
+        when(repository.cached(SAMSUNG.corpCode())).thenReturn(
+                Optional.of(new ReportDartRepository.Cached(data(), now.minusDays(2))), Optional.of(fresh));
+        when(repository.claimCache(eq(SAMSUNG.corpCode()), eq("token"), any(), any())).thenReturn(true);
+
+        var access = persistence.refreshAccess(SAMSUNG.corpCode(), "token");
+
+        assertFalse(access.owner());
+        assertEquals(data(), access.data());
+        verify(repository).releaseCache(SAMSUNG.corpCode(), "token");
     }
 
     @Test void cacheRefreshedDuringLeaseRaceIsReusedAndLeaseReleased() {
@@ -56,6 +103,55 @@ class ReportDartPersistenceTest {
         persistence.complete(job, "old-token", data(), true);
         verify(repository, never()).complete(any(), anyString(), any(), any());
         verify(repository).defer(eq(job), eq("old-token"), any(), any());
+    }
+
+    @Test void refreshingCompanyCacheNeverUpdatesCompletedReportAttachments() {
+        when(repository.saveCache(eq(SAMSUNG.corpCode()), eq("token"), eq(data()), any())).thenReturn(true);
+
+        persistence.refreshCache(SAMSUNG.corpCode(), "token", data());
+        persistence.refreshCache(SAMSUNG.corpCode(), "lost-token", data());
+
+        verify(repository).saveCache(eq(SAMSUNG.corpCode()), eq("token"), eq(data()), any());
+        verify(repository).saveCache(eq(SAMSUNG.corpCode()), eq("lost-token"), eq(data()), any());
+        verifyNoMoreInteractions(repository);
+        verifyNoInteractions(reports);
+    }
+
+    @Test void transientAndDisabledCacheFailuresRetainSnapshotsAndRetryAfterFiveMinutes() {
+        for (var status : new String[] { "NETWORK", "INTERNAL", "DISABLED" }) {
+            clearInvocations(repository);
+            var before = LocalDateTime.now(ApiTimeZone.ZONE);
+
+            persistence.failCache(SAMSUNG.corpCode(), "token", status);
+
+            var retryAt = ArgumentCaptor.forClass(LocalDateTime.class);
+            verify(repository).deferCache(eq(SAMSUNG.corpCode()), eq("token"), retryAt.capture());
+            assertFalse(retryAt.getValue().isBefore(before.plusMinutes(5)));
+            assertFalse(retryAt.getValue().isAfter(LocalDateTime.now(ApiTimeZone.ZONE).plusMinutes(5)));
+            verifyNoMoreInteractions(repository);
+        }
+        verifyNoInteractions(reports);
+    }
+
+    @Test void cacheQuotaAndAuthenticationFailuresDelayRefreshAndPauseProviderWithoutChangingReports() {
+        for (var status : new String[] { "020", "010", "011", "012", "901" }) {
+            clearInvocations(repository);
+            var before = LocalDateTime.now(ApiTimeZone.ZONE);
+
+            persistence.failCache(SAMSUNG.corpCode(), "token", status);
+
+            var retryAt = ArgumentCaptor.forClass(LocalDateTime.class);
+            verify(repository).deferCache(eq(SAMSUNG.corpCode()), eq("token"), retryAt.capture());
+            verify(repository).pauseUntil(retryAt.getValue());
+            if ("020".equals(status)) {
+                assertEquals(before.toLocalDate().plusDays(1).atTime(0, 5), retryAt.getValue());
+            } else {
+                assertFalse(retryAt.getValue().isBefore(before.plusHours(1)));
+                assertFalse(retryAt.getValue().isAfter(LocalDateTime.now(ApiTimeZone.ZONE).plusHours(1)));
+            }
+            verifyNoMoreInteractions(repository);
+        }
+        verifyNoInteractions(reports);
     }
 
     @Test void quotaDelaysAllCompaniesAndTransientFailuresHaveBoundedAttempts() {

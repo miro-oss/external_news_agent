@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.dart;
 
 import com.example.be.domain.dart.model.DartModels.FinancialData;
+import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.dart.config.DartProperties;
 import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.exception.ReportException;
@@ -29,7 +30,7 @@ public class ReportDartPersistence {
         var report = reports.findByIdForUpdate(reportId).orElse(null);
         if (report == null) return;
         var now = now();
-        ReportDartEligibility.companies(report).forEach(company -> repository.enqueue(reportId, company, properties.isEnabled(), now));
+        ReportDartEligibility.companies(report).forEach(company -> enqueueWithCachedData(reportId, company, now));
     }
 
     @Transactional
@@ -40,8 +41,15 @@ public class ReportDartPersistence {
         var companies = ReportDartEligibility.companies(report);
         if (companies.isEmpty()) return;
         var now = now();
-        companies.forEach(company -> repository.enqueue(reportId, company, properties.isEnabled(), now));
+        companies.forEach(company -> enqueueWithCachedData(reportId, company, now));
         repository.retry(reportId, properties.isEnabled(), now);
+    }
+
+    private void enqueueWithCachedData(long reportId, Company company, LocalDateTime now) {
+        repository.enqueue(reportId, company, properties.isEnabled(), now);
+        // A cache's age controls background refresh, not whether an existing snapshot can be displayed.
+        repository.cached(company.corpCode())
+                .ifPresent(cached -> repository.attachCached(reportId, company.corpCode(), cached.data(), now));
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -60,12 +68,21 @@ public class ReportDartPersistence {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public CacheAccess cache(String corpCode, String token) {
+        return accessCache(corpCode, token, false);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public CacheAccess refreshAccess(String corpCode, String token) {
+        return accessCache(corpCode, token, true);
+    }
+
+    private CacheAccess accessCache(String corpCode, String token, boolean requireFresh) {
         var now = now();
-        var cached = repository.cached(corpCode).filter(value -> value.cachedAt().plus(CACHE_TTL).isAfter(now));
+        var cached = repository.cached(corpCode).filter(value -> !requireFresh || value.cachedAt().plus(CACHE_TTL).isAfter(now));
         if (cached.isPresent()) return new CacheAccess(cached.get().data(), false);
         if (!repository.claimCache(corpCode, token, now, now.plus(LEASE))) return new CacheAccess(null, false);
         // A different instance may have populated the cache between our first read and lease acquisition.
-        cached = repository.cached(corpCode).filter(value -> value.cachedAt().plus(CACHE_TTL).isAfter(now));
+        cached = repository.cached(corpCode).filter(value -> !requireFresh || value.cachedAt().plus(CACHE_TTL).isAfter(now));
         if (cached.isPresent()) {
             repository.releaseCache(corpCode, token);
             return new CacheAccess(cached.get().data(), false);
@@ -81,6 +98,26 @@ public class ReportDartPersistence {
             return;
         }
         repository.complete(job, token, data, now);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void refreshCache(String corpCode, String token, FinancialData data) {
+        repository.saveCache(corpCode, token, data, now());
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void failCache(String corpCode, String token, String upstreamStatus) {
+        var now = now();
+        var retryAt = now.plusMinutes(5);
+        if ("020".equals(upstreamStatus)) {
+            retryAt = now.toLocalDate().plusDays(1).atStartOfDay().plusMinutes(5);
+            repository.pauseUntil(retryAt);
+        } else if (java.util.Set.of("010", "011", "012", "901").contains(upstreamStatus)) {
+            retryAt = now.plusHours(1);
+            repository.pauseUntil(retryAt);
+        }
+        // Retain the last successful payload and its timestamp while delaying the next refresh.
+        repository.deferCache(corpCode, token, retryAt);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

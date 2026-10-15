@@ -56,6 +56,56 @@ public class ReportDartRepository {
                 """, (rs, row) -> rs.getLong(1));
     }
 
+    List<Long> reusableReports() {
+        return jdbc.query("""
+                SELECT DISTINCT attachment.report_id
+                FROM news_report_dart_attachments attachment
+                JOIN news_reports report ON report.id = attachment.report_id
+                JOIN news_dart_financial_cache cache ON cache.corp_code = attachment.corp_code
+                WHERE attachment.payload_json IS NULL
+                  AND attachment.status IN ('PENDING', 'RUNNING', 'FAILED', 'DISABLED')
+                  AND cache.payload_json IS NOT NULL
+                  AND report.report_scope = 'RUN' AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
+                ORDER BY attachment.report_id FETCH FIRST 20 ROWS ONLY
+                """, (rs, row) -> rs.getLong(1));
+    }
+
+    /** A cache's age controls refresh, not whether already verified data can be displayed. */
+    void attachCached(long reportId, String corpCode, FinancialData data, LocalDateTime now) {
+        String json = mapper.writeValueAsString(data);
+        boolean partial = partial(data);
+        jdbc.update(connection -> {
+            var statement = connection.prepareStatement("""
+                UPDATE news_report_dart_attachments SET status = ?, message = ?, payload_json = ?,
+                    lease_token = NULL, lease_expires_at = NULL, updated_at = ?
+                WHERE report_id = ? AND corp_code = ? AND payload_json IS NULL
+                  AND status IN ('PENDING', 'RUNNING', 'FAILED', 'DISABLED')
+                """);
+            statement.setString(1, partial ? "PARTIAL" : "READY");
+            statement.setString(2, partial ? ReportDartMessages.PARTIAL : ReportDartMessages.READY);
+            statement.setCharacterStream(3, new StringReader(json), json.length());
+            statement.setTimestamp(4, ts(now));
+            statement.setLong(5, reportId);
+            statement.setString(6, corpCode);
+            return statement;
+        });
+    }
+
+    List<Company> staleCompanies(LocalDateTime before, LocalDateTime now) {
+        return jdbc.query("""
+                SELECT attachment.corp_code, MAX(attachment.corp_name), MAX(attachment.stock_code)
+                FROM news_report_dart_attachments attachment
+                JOIN news_reports report ON report.id = attachment.report_id
+                JOIN news_dart_financial_cache cache ON cache.corp_code = attachment.corp_code
+                WHERE cache.payload_json IS NOT NULL AND cache.cached_at <= ?
+                  AND (cache.lease_token IS NULL OR cache.lease_expires_at <= ?)
+                  AND attachment.created_at > cache.cached_at
+                  AND report.report_scope = 'RUN' AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
+                GROUP BY attachment.corp_code, cache.cached_at
+                ORDER BY cache.cached_at, attachment.corp_code FETCH FIRST 5 ROWS ONLY
+                """, (rs, row) -> new Company(rs.getString(1), rs.getString(2), rs.getString(3)), ts(before), ts(now));
+    }
+
     List<Job> pending(LocalDateTime now) {
         return jdbc.query("""
                 SELECT attachment.report_id, attachment.corp_code, attachment.corp_name, attachment.stock_code, attachment.attempts
@@ -106,8 +156,7 @@ public class ReportDartRepository {
     }
 
     void complete(Job job, String token, FinancialData data, LocalDateTime now) {
-        boolean partial = data.quarters() == null || data.quarters().size() < 12
-                || data.quarters().stream().anyMatch(q -> q.revenue() == null || q.operatingProfit() == null);
+        boolean partial = partial(data);
         String json = mapper.writeValueAsString(data);
         jdbc.update(connection -> {
             var statement = connection.prepareStatement("""
@@ -180,12 +229,23 @@ public class ReportDartRepository {
         jdbc.update("UPDATE news_dart_financial_cache SET lease_token = NULL, lease_expires_at = NULL WHERE corp_code = ? AND lease_token = ?", corpCode, token);
     }
 
+    void deferCache(String corpCode, String token, LocalDateTime retryAt) {
+        // Retain the token so the existing lease condition also enforces the retry delay.
+        jdbc.update("UPDATE news_dart_financial_cache SET lease_expires_at = ? WHERE corp_code = ? AND lease_token = ?",
+                ts(retryAt), corpCode, token);
+    }
+
     boolean paused(LocalDateTime now) {
         return Integer.valueOf(1).equals(jdbc.queryForObject("SELECT CASE WHEN paused_until > ? THEN 1 ELSE 0 END FROM news_dart_fetch_state WHERE id = 1", Integer.class, ts(now)));
     }
 
     void pauseUntil(LocalDateTime until) {
         jdbc.update("UPDATE news_dart_fetch_state SET paused_until = CASE WHEN paused_until IS NULL OR paused_until < ? THEN ? ELSE paused_until END WHERE id = 1", ts(until), ts(until));
+    }
+
+    private static boolean partial(FinancialData data) {
+        return data.quarters() == null || data.quarters().size() < 12
+                || data.quarters().stream().anyMatch(q -> q.revenue() == null || q.operatingProfit() == null);
     }
 
     private FinancialData read(String json) {

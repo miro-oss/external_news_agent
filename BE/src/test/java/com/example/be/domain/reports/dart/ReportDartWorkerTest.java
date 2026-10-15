@@ -29,16 +29,39 @@ class ReportDartWorkerTest {
         verifyNoInteractions(financials);
     }
 
-    @Test void pollRecoversMissingAndExpiredWorkButDisabledOrPausedProviderIsNotCalled() {
+    @Test void pollHydratesCachedReportsBeforeDisabledOrPausedProviderStopsExternalWork() {
         when(repository.missing()).thenReturn(List.of(17L));
+        when(repository.reusableReports()).thenReturn(List.of(18L));
         worker.poll();
-        verify(persistence).recover();
-        verify(persistence).enqueue(17L);
+        var order = inOrder(persistence);
+        order.verify(persistence).recover();
+        order.verify(persistence).enqueue(17L);
+        order.verify(persistence).enqueue(18L);
         verify(repository, never()).pending(any());
         properties.setApiKey("unit-test-key");
         when(repository.paused(any())).thenReturn(true);
         worker.poll();
+        verify(persistence, times(2)).enqueue(18L);
+        verify(repository, never()).pending(any());
+        verify(repository, never()).staleCompanies(any(), any());
         verifyNoInteractions(financials);
+    }
+
+    @Test void pollingProcessesMissingDataBeforeRefreshingStaleCompanyCaches() {
+        properties.setApiKey("unit-test-key");
+        when(repository.pending(any())).thenReturn(List.of(job));
+        when(repository.staleCompanies(any(), any())).thenReturn(List.of(HYNIX));
+        when(persistence.claim(eq(job), anyString())).thenReturn(true);
+        when(persistence.cache(eq(SAMSUNG.corpCode()), anyString())).thenReturn(new ReportDartPersistence.CacheAccess(data(), false));
+        when(persistence.refreshAccess(eq(HYNIX.corpCode()), anyString())).thenReturn(new ReportDartPersistence.CacheAccess(null, true));
+        when(financials.fetch(HYNIX)).thenReturn(data());
+
+        worker.poll();
+
+        var order = inOrder(persistence, financials);
+        order.verify(persistence).complete(eq(job), anyString(), eq(data()), eq(false));
+        order.verify(financials).fetch(HYNIX);
+        order.verify(persistence).refreshCache(eq(HYNIX.corpCode()), anyString(), eq(data()));
     }
 
     @Test void duplicateClaimAndBusyCompanyCacheDoNotCallProvider() {
@@ -68,5 +91,41 @@ class ReportDartWorkerTest {
         when(financials.fetch(SAMSUNG)).thenThrow(new DartUpstreamException("020"));
         worker.process(job);
         verify(persistence).fail(eq(job), anyString(), eq("020"));
+    }
+
+    @Test void cacheRefreshSkipsFreshDataAndAnotherOwnersLease() {
+        when(persistence.refreshAccess(eq(SAMSUNG.corpCode()), anyString()))
+                .thenReturn(new ReportDartPersistence.CacheAccess(data(), false), new ReportDartPersistence.CacheAccess(null, false));
+
+        worker.refresh(SAMSUNG);
+        worker.refresh(SAMSUNG);
+
+        verify(persistence, times(2)).refreshAccess(eq(SAMSUNG.corpCode()), anyString());
+        verifyNoMoreInteractions(persistence);
+        verifyNoInteractions(financials);
+    }
+
+    @Test void cacheRefreshSuccessWritesOnlyTheCompanyCache() {
+        when(persistence.refreshAccess(eq(SAMSUNG.corpCode()), anyString())).thenReturn(new ReportDartPersistence.CacheAccess(null, true));
+        when(financials.fetch(SAMSUNG)).thenReturn(data());
+
+        worker.refresh(SAMSUNG);
+
+        verify(persistence).refreshAccess(eq(SAMSUNG.corpCode()), anyString());
+        verify(persistence).refreshCache(eq(SAMSUNG.corpCode()), anyString(), eq(data()));
+        verifyNoMoreInteractions(persistence);
+    }
+
+    @Test void cacheRefreshFailuresDoNotFailOrRequeueReportAttachments() {
+        when(persistence.refreshAccess(eq(SAMSUNG.corpCode()), anyString())).thenReturn(new ReportDartPersistence.CacheAccess(null, true));
+        when(financials.fetch(SAMSUNG)).thenThrow(new DartUpstreamException("020"), new IllegalStateException("unavailable"));
+
+        worker.refresh(SAMSUNG);
+        worker.refresh(SAMSUNG);
+
+        verify(persistence, times(2)).refreshAccess(eq(SAMSUNG.corpCode()), anyString());
+        verify(persistence).failCache(eq(SAMSUNG.corpCode()), anyString(), eq("020"));
+        verify(persistence).failCache(eq(SAMSUNG.corpCode()), anyString(), eq("INTERNAL"));
+        verifyNoMoreInteractions(persistence);
     }
 }

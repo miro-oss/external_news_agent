@@ -122,6 +122,32 @@ test('multi-company panel uses the report snapshot and offers individual company
   } finally { client.clear() }
 })
 
+test('new reports show reused company financials with their original fetch time for ready and partial snapshots', () => {
+  for (const status of ['READY', 'PARTIAL']) {
+    const client = new QueryClient()
+    try {
+      const snapshot = data()
+      const originalFetchedAt = snapshot.fetchedAt
+      const entry = { company, status, message: `${status} 상태 안내`, data: snapshot }
+      client.setQueryData(['report-dart', 17], { reportId: 17, companies: [entry] })
+      client.setQueryData(['report-dart', 18], { reportId: 18, companies: [entry] })
+      const report = { id: 18, reportScope: 'RUN', createdAt: '2026-10-15T14:41:00+09:00',
+        collectionContexts: [{ topics: [{ dartCompany: company }] }] }
+      const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(Panel, { report })))
+
+      assert.match(html, /삼성전자/)
+      assert.match(html, /최근 12분기 추이/)
+      assert.match(html, /<svg[^>]+role="group"/)
+      assert.equal((html.match(/<th scope="row">/g) ?? []).length, 12)
+      assert.match(html, /최근 공시 보기/)
+      assert.match(html, /반기보고서 \(2026\.06\)/)
+      assert.ok(html.includes(`<time dateTime="${originalFetchedAt}">`))
+      assert.doesNotMatch(html, /공시 자료를 준비|자료가 준비되면|공시 자료 새로고침/)
+      assert.equal(client.getQueryData(['report-dart', 17]).companies[0].data.fetchedAt, originalFetchedAt)
+    } finally { client.clear() }
+  }
+})
+
 test('company picker shows optional selection, stock code, replacement search and disabled clear action', () => {
   const html = renderToStaticMarkup(createElement(Picker, { value: company, disabled: true, onChange() {} }))
   assert.match(html, /선택사항/)
