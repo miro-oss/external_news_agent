@@ -1,47 +1,56 @@
 .source-registration-entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem 1rem;
   margin-top: .25rem;
   scroll-margin-top: 5rem;
-}
-
-.source-registration-heading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
-.source-registration-heading h2 {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-  margin: 0;
-  font-size: 1.02rem;
-}
-
-.source-registration-heading p {
-  margin: .35rem 0 0;
-  font-size: .84rem;
-  line-height: 1.6;
-}
-
-.source-registration-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .65rem;
-}
-
-.source-registration-actions button {
-  white-space: nowrap;
-  font-size: .84rem;
 }
 
 .source-registration-trigger {
   display: inline-flex;
   align-items: center;
   gap: .35rem;
+  padding: .5rem .25rem;
+  border-radius: var(--radius-xs);
+  color: var(--fg-3);
+  font-size: .84rem;
+  font-weight: 500;
+}
+
+.source-registration-trigger:hover:not(:disabled) {
+  background: transparent;
+  color: var(--fg);
+}
+
+.source-registration-trigger > svg {
+  flex: none;
+  transition: transform var(--dur-2) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+
+.source-registration-trigger:hover:not(:disabled) > svg {
+  color: var(--primary-strong);
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .source-registration-trigger:hover:not(:disabled) > svg {
+    transform: translateX(2px);
+  }
+}
+
+.recipient-selection-dialog.source-feed-dialog {
+  width: min(36rem, calc(100vw - 2rem));
+  height: fit-content;
+  max-height: min(34rem, calc(100dvh - 2rem));
+}
+
+.source-feed-dialog[open] {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.source-feed-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
 }
 
 .source-feed-status {
@@ -50,9 +59,11 @@
   line-height: 1.6;
 }
 
-.source-feed-scroll {
-  max-height: 26rem;
+.source-feed-body {
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: .2rem;
   border-top: 1px solid var(--line);
 }
 

@@ -14,29 +14,68 @@ const EMPTY = {
 }
 
 export function SourceRegistration() {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState<'register' | 'feeds' | null>(null)
   const id = useId()
+
+  return <div className="source-registration-entry" id="source">
+    <button type="button" className="text-button source-registration-trigger"
+      aria-haspopup="dialog" aria-expanded={open === 'register'} aria-controls={open === 'register' ? `${id}-register` : undefined}
+      onClick={() => setOpen('register')}>
+      <SourceEntryChevron /> RSS 피드 등록
+    </button>
+    <button type="button" className="text-button source-registration-trigger"
+      aria-haspopup="dialog" aria-expanded={open === 'feeds'} aria-controls={open === 'feeds' ? `${id}-feeds` : undefined}
+      onClick={() => setOpen('feeds')}>
+      <SourceEntryChevron /> 활성 RSS 피드 보기
+    </button>
+    {open === 'register' && createPortal(<SourceDialog id={`${id}-register`} onDismiss={() => setOpen(null)} />, document.body)}
+    {open === 'feeds' && createPortal(<SourceFeedDialog id={`${id}-feeds`} onDismiss={() => setOpen(null)} />, document.body)}
+  </div>
+}
+
+function SourceEntryChevron() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
+}
+
+function SourceFeedDialog({ id, onDismiss }: { id: string; onDismiss: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  const closeButton = useRef<HTMLButtonElement>(null)
   const sources = useSources()
   const feeds = sources.data?.content.filter(source => source.active && source.sourceKind === 'FEED') ?? []
 
-  return <section className="card source-registration-entry" id="source" aria-labelledby={`${id}-feeds-title`}>
-    <header className="source-registration-heading">
+  useEffect(() => {
+    const element = dialog.current
+    const previousFocus = document.activeElement
+    element?.showModal()
+    closeButton.current?.focus()
+    document.body.classList.add('modal-open')
+    return () => {
+      element?.close()
+      document.body.classList.remove('modal-open')
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()
+    }
+  }, [])
+
+  return <dialog ref={dialog} id={id} className="recipient-selection-dialog source-feed-dialog"
+    aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`}
+    onCancel={event => { event.preventDefault(); onDismiss() }}
+    onClick={event => {
+      if (event.target !== event.currentTarget) return
+      const bounds = event.currentTarget.getBoundingClientRect()
+      if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onDismiss()
+    }}>
+    <header className="recipient-selection-heading source-feed-heading">
       <div>
-        <h2 id={`${id}-feeds-title`}>활성 RSS 피드
+        <h2 id={`${id}-title`}>활성 RSS 피드
           {sources.data && !sources.error && <span className="collapsible-count">{feeds.length}개</span>}
         </h2>
-        <p className="muted">현재 활성화된 RSS 피드입니다. 수집할 주제에 연결해 사용할 수 있습니다.</p>
+        <p id={`${id}-description`}>현재 활성화된 RSS 피드 목록입니다.</p>
       </div>
-      <div className="source-registration-actions">
-        <button type="button" className="text-button" disabled={sources.isFetching}
-          onClick={() => { void sources.refetch() }}>새로고침</button>
-        <button type="button" className="secondary-button source-registration-trigger"
-          aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
-          onClick={() => setOpen(true)}>
-          <span aria-hidden="true">+</span> RSS 피드 등록
-        </button>
-      </div>
+      <button ref={closeButton} type="button" className="text-button recipient-selection-close"
+        aria-label="활성 RSS 피드 닫기" onClick={onDismiss}>×</button>
     </header>
+    <div className="source-feed-body" role="region" aria-label="활성 RSS 피드 목록" tabIndex={0}>
     {sources.isPending ? <p className="source-feed-status muted" role="status">활성 RSS 피드를 불러오고 있습니다.</p>
       : sources.error ? <div className="source-feed-status">
         <p className="error" role="alert">{sources.error instanceof ApiError ? sources.error.message : '활성 RSS 피드를 불러오지 못했습니다.'}</p>
@@ -46,8 +85,7 @@ export function SourceRegistration() {
       : <>
         {sources.isFetching && <p className="muted source-feed-status" role="status">목록을 새로고침하고 있습니다.</p>}
         {feeds.length === 0 ? <p className="source-feed-status muted">활성화된 RSS 피드가 없습니다. RSS 피드를 등록해 주세요.</p>
-          : <div className="source-feed-scroll" role="region" aria-label="활성 RSS 피드 목록" tabIndex={0}>
-            <ul className="source-feed-list">
+          : <ul className="source-feed-list">
               {feeds.map(source => <li key={source.id} className="source-feed-item">
                 <div className="source-feed-info">
                   <strong>{source.name}</strong>
@@ -61,11 +99,15 @@ export function SourceRegistration() {
                   <div><dt>언어</dt><dd>{source.language || '미지정'}</dd></div>
                 </dl>
               </li>)}
-            </ul>
-          </div>}
+            </ul>}
       </>}
-    {open && createPortal(<SourceDialog id={id} onDismiss={() => setOpen(false)} />, document.body)}
-  </section>
+    </div>
+    <footer className="recipient-selection-actions">
+      <button type="button" className="secondary-button" disabled={sources.isFetching}
+        onClick={() => { void sources.refetch() }}>새로고침</button>
+      <button type="button" onClick={onDismiss}>닫기</button>
+    </footer>
+  </dialog>
 }
 
 function SourceDialog({ id, onDismiss }: { id: string; onDismiss: () => void }) {
