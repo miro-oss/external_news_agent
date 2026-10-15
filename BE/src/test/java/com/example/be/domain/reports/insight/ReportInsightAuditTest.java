@@ -12,6 +12,7 @@ import com.example.be.domain.analysis.agent.quota.QuotaReservation;
 import com.example.be.domain.analysis.agent.repository.AgentRunJdbcRepository;
 import com.example.be.domain.analysis.agent.service.AgentRunRecorder;
 import com.example.be.domain.analysis.agent.service.ReportInsightAuditContext;
+import com.example.be.domain.analysis.entity.Audience;
 import com.example.be.domain.settings.service.LlmPlanService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -21,6 +22,7 @@ import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import static com.example.be.domain.reports.insight.ReportInsightTestFixtures.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -42,6 +44,7 @@ class ReportInsightAuditTest {
         assertEquals(AgentTargetType.REPORT, run.getTargetType());
         assertEquals("AGENT_ERROR", audit.get("metadataSource").asText());
         assertEquals(completeness, audit.get("usageCompleteness").asText());
+        assertEquals("CHIP_MAKER", audit.get("audiences").get(0).asText());
         assertEquals(BigDecimal.ONE, run.getCredits());
         assertFalse(run.getActionPayload().contains("회사는 생산 계획"));
     }
@@ -51,21 +54,67 @@ class ReportInsightAuditTest {
         var audit = mapper.readTree(captured().getActionPayload());
         assertEquals("UNAVAILABLE", audit.get("metadataSource").asText());
         assertEquals("UNKNOWN", audit.get("usageCompleteness").asText());
+        assertTrue(audit.get("validationFailure").isNull());
     }
     @Test void fullSuccessfulResponseIsCompleteAndIdentifiedAsResponse() {
         recorder.recordReportInsightSuccess(20L, request(), response(), context(), LocalDateTime.now());
         var audit = mapper.readTree(captured().getActionPayload());
         assertEquals("RESPONSE", audit.get("metadataSource").asText());
         assertEquals("COMPLETE", audit.get("usageCompleteness").asText());
+        assertEquals("CHIP_MAKER", audit.get("audiences").get(0).asText());
+        assertTrue(audit.get("validationFailure").isNull());
     }
     @Test void cacheAuditRecordsCompleteZeroUsageWithNoPlan() {
-        recorder.recordReportInsightCacheHit(20L, 10L, context(), LocalDateTime.now());
+        recorder.recordReportInsightCacheHit(20L, 10L,
+                context().withAudiences(List.of("CHIP_MAKER", "IT_INFRA")), LocalDateTime.now());
         var run = captured();
         var audit = mapper.readTree(run.getActionPayload());
         assertEquals("CACHE", audit.get("metadataSource").asText());
         assertEquals("COMPLETE", audit.get("usageCompleteness").asText());
         assertEquals(BigDecimal.ZERO, run.getCredits());
         assertNull(run.getLlmPlan());
+        assertEquals(List.of("CHIP_MAKER", "IT_INFRA"), mapper.convertValue(audit.get("audiences"), List.class));
+        assertTrue(audit.get("validationFailure").isNull());
+    }
+    @Test void persistsBoundedExplanationDiagnosticsWithoutFailureProse() {
+        var diagnostics = new AgentClientException.ValidationFailure("EXPLAIN-002", 2,
+                "OutputValidationError", 1, List.of("report_evidence_insufficient"),
+                List.of(new AgentClientException.ValidationIssue("CHIP_MAKER", "assessments[501].reason",
+                        "report_evidence_insufficient", List.of("501:0"))), false);
+        var failure = new AgentClientException("SCHEMA_VIOLATION", "private provider prose", null,
+                new AgentClientException.Usage(20L, 10L, BigDecimal.ONE, BigDecimal.ZERO),
+                AgentClientException.TimeoutPhase.NONE,
+                new AgentClientException.ExecutionMetadata("openai", "model", ReportInsightService.PROMPT_VERSION,
+                        "AGENT_ERROR", "COMPLETE"), diagnostics);
+
+        recorder.recordReportInsightFailure(20L, request(), failure, context(), LocalDateTime.now());
+
+        var run = captured();
+        var audit = mapper.readValue(run.getActionPayload(), ReportInsightAuditContext.class);
+        assertEquals(diagnostics, audit.validationFailure());
+        assertEquals(List.of(Audience.CHIP_MAKER), audit.audiences());
+        assertEquals("COMPLETE", audit.usageCompleteness());
+        assertFalse(run.getActionPayload().contains("private provider prose"));
+        assertFalse(run.getActionPayload().contains(request().findings().getFirst().claims().getFirst().text()));
+    }
+    @Test void legacyAuditJsonKeepsUnknownAudienceAndMissingDiagnostics() {
+        var old = mapper.readTree(mapper.writeValueAsString(context()));
+        ((tools.jackson.databind.node.ObjectNode) old).remove("audiences");
+        ((tools.jackson.databind.node.ObjectNode) old).remove("validationFailure");
+
+        var restored = mapper.treeToValue(old, ReportInsightAuditContext.class);
+
+        assertEquals(1, restored.schemaVersion());
+        assertEquals(1, restored.requestedAudienceCount());
+        assertEquals(List.of(), restored.audiences());
+        assertNull(restored.validationFailure());
+        assertEquals("a".repeat(64), restored.inputHash());
+    }
+    @Test void auditAudienceNamesRemainClosedAndCannotContainProse() {
+        assertThrows(IllegalArgumentException.class,
+                () -> context().withAudiences(List.of("CHIP_MAKER\nprivate prose")));
+        assertThrows(IllegalArgumentException.class,
+                () -> context().withAudiences(List.of("CHIP_MAKER", "CHIP_MAKER")));
     }
     @ParameterizedTest @CsvSource({"PARTIAL,1", "UNKNOWN,1", "PARTIAL,6", "UNKNOWN,6"})
     void incompleteFailureKeepsObservedAuditAndConservativeQuotaTogether(String completeness, String observed) {

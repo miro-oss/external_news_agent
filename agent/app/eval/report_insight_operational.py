@@ -2,7 +2,7 @@
 
 Run in a standalone process: observers patch SDK methods and clear provider caches.
 This is an Agent service evaluation, not a BE persistence/HTTP acceptance test.
-No dotenv is loaded. ``prepare``/``check`` are offline. ``run --execute-live`` asks
+No dotenv is loaded. ``prepare``/``check``/``summarize`` are offline. ``run --execute-live`` asks
 for a key with getpass; only ``--use-injected-key`` reads OPENAI_API_KEY from the
 already injected process environment. Keep all exports untracked.
 The legacy nano comparison remains available in report_insight_measure.
@@ -31,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 from app.core.config import Settings
 from app.core.errors import AgentError
 from app.eval.report_insight_measure import generation_metrics
+from app.eval.report_insight_outcomes import summarize_outcomes
 from app.eval.report_insight_review import QUALITY_RUBRIC
 from app.eval.report_insight_run import (
     AGENT_ROOT,
@@ -44,6 +45,7 @@ from app.eval.report_insight_run import (
     require,
     stamp,
 )
+from app.eval.report_insight_split import validate_report_splits
 from app.llm import openai_provider, structured_call
 from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
 from app.llm.report_insight_service import PROMPT_VERSION, RUBRIC_VERSION, ReportInsightService
@@ -135,6 +137,8 @@ class ReportCase(BaseModel):
     split: Literal["development", "holdout"]
     review_policy: Literal["production", "disabled"] = "production"
     request: ReportInsightRequest
+    # Evaluation metadata only; never infer families from a report ID or title.
+    event_families: dict[int, list[str]] = Field(default_factory=dict)
 
 
 def runtime_hashes() -> dict[str, str]:
@@ -153,6 +157,9 @@ def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
     require(len({case.case_id for case in parsed}) == len(parsed), "DUPLICATE_CASE")
     for case in parsed:
         require(case.request.plan == "FREE", "ONLY_OPENAI_FREE_PLAN_SUPPORTED")
+    split_validation = validate_report_splits(
+        [case.model_dump(mode="python", by_alias=True) for case in parsed]
+    )
     manifest = {
         "schemaVersion": 1,
         "kind": "current-report-insight-service",
@@ -166,6 +173,7 @@ def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
             settings.settings.report_insight_timeout_seconds, 180
         ),
         "cases": [case.model_dump(mode="json", by_alias=True) for case in parsed],
+        "splitValidation": split_validation,
         "qualityRubric": QUALITY_RUBRIC,
         "scope": "Agent service with production admission/retry/validation; no BE or HTTP",
         "credentials": "explicit run argument; CLI process key only by opt-in; no dotenv loading",
@@ -177,6 +185,7 @@ def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
             "jobId": f"{index}:{repeat}:{audience}",
             "caseId": case.case_id,
             "caseIndex": index,
+            "split": case.split,
             "repeat": repeat,
             "audience": audience,
             "variant": "staged",
@@ -600,6 +609,7 @@ def summarize(state: dict) -> dict:
     groups = {(job["caseIndex"], job["repeat"]) for job in results}
     return {
         **generation_metrics(state)["staged"],
+        "generationOutcomes": summarize_outcomes(results),
         "allFinishedLatencyP95Ms": latencies[math.ceil(len(latencies) * 0.95) - 1]
         if latencies
         else None,
@@ -634,7 +644,7 @@ def summarize(state: dict) -> dict:
             )
         ),
         "assessmentCount": len(assessments),
-        "assessmentsWithoutEvidence": sum(not a["basisClaimIds"] for a in assessments),
+        "assessmentsWithoutSelectedBasis": sum(not a["basisClaimIds"] for a in assessments),
         "abstainedAxes": sum(
             a["axes"][axis] is None
             for a in assessments
@@ -655,7 +665,7 @@ def summarize(state: dict) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "check", "run"))
+    parser.add_argument("command", choices=("prepare", "check", "summarize", "run"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cases", type=Path)
     parser.add_argument("--policy", type=Path)
@@ -688,6 +698,11 @@ def main():
                     }
                 )
             )
+        elif args.command == "summarize":
+            # Historical ledgers remain diagnosable after runtime changes.
+            # This command only reads results; it cannot resume or call a provider.
+            state = json.loads((args.output / "result.json").read_text())
+            print(json.dumps(summarize(state)))
         else:
             require(args.execute_live, "EXPLICIT_EXECUTE_LIVE_REQUIRED")
             check(args.output)

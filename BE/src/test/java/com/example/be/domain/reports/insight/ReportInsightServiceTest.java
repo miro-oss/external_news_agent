@@ -336,7 +336,8 @@ class ReportInsightServiceTest {
         when(persistence.findCached(10L, "a".repeat(64), List.of(Audience.CHIP_MAKER))).thenReturn(List.of(row(Audience.CHIP_MAKER)));
         assertTrue(service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER"))).cached());
         verifyNoInteractions(client, quota, plans);
-        verify(recorder).recordReportInsightCacheHit(eq(20L), eq(10L), any(), any());
+        verify(recorder).recordReportInsightCacheHit(eq(20L), eq(10L),
+                argThat(audit -> audit.audiences().equals(List.of(Audience.CHIP_MAKER))), any());
     }
     @Test void invalidAudiencePositiveIdAndMissingEvidenceFailBeforeQuota() {
         assertThrows(AudienceException.class, () -> service.create(10L, new ReportInsightDTO.CreateRequest(List.of("OTHER"))));

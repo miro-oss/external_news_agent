@@ -62,7 +62,8 @@ public class ReportInsightService {
         Map<Audience, NewsReportInsight> cached = cached(snapshot, audiences);
         if (cached.size() == audiences.size()) {
             safeAudit(() -> recorder.recordReportInsightCacheHit(snapshot.runId(), reportId,
-                    context(snapshot, audiences.size(), audiences.size(), false), now()));
+                    context(snapshot, audiences.size(), audiences.size(), false)
+                            .withAudiences(audiences.stream().map(Audience::name).toList()), now()));
             return result(true, snapshot, audiences, cached);
         }
         if (!automatic && schedulingEnabled) {

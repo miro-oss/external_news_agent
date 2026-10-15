@@ -137,7 +137,7 @@ public class AgentClientException extends RuntimeException {
                 + "decimal_whole_digits complex_type complex_str_parsing").split(" "));
 
         public ValidationFailure {
-            if (stage == null || !stage.matches("(?:MAP|REVIEW|REDUCE)(?:-[0-9]{3})?")
+            if (stage == null || !stage.matches("(?:MAP|REVIEW|EXPLAIN|REDUCE)(?:-[0-9]{3})?")
                     || attempt < 1 || attempt > 2 || errorType == null || !TYPES.contains(errorType)
                     || errorCount < 0 || errorCount > 1_000_000 || errorKinds == null
                     || errorKinds.size() > 5 || errorKinds.stream().anyMatch(value -> value == null)) {
@@ -170,7 +170,7 @@ public class AgentClientException extends RuntimeException {
                 + "decision\\.(?:connection|effect|timing)\\.basis(?:\\.(?:claimId|sourceSpanId))?))?";
 
         private boolean matchesStage(String stage) {
-            return field.matches(stage.matches("(?:MAP|REVIEW)(?:-[0-9]{3})?") ? MAP_FIELD : REDUCE_FIELD);
+            return field.matches(stage.matches("(?:MAP|REVIEW|EXPLAIN)(?:-[0-9]{3})?") ? MAP_FIELD : REDUCE_FIELD);
         }
 
         public ValidationIssue {
