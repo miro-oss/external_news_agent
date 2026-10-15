@@ -72,7 +72,7 @@ class DailyFeedbackNotificationPropagationTest {
             reports, store, snapshots, findings, relevance, comparisons);
     private final ReportEventFeedbackProjection projection = new ReportEventFeedbackProjection(store, snapshots, exclusions);
     private final FeedbackDeliveryService feedback = mock(FeedbackDeliveryService.class);
-    private final NotificationRenderer renderer = new NotificationRenderer(findings, relevance, projection);
+    private final NotificationRenderer renderer = new NotificationRenderer(findings, relevance, projection, mock(NotificationDartSummary.class));
     private final PersonalizedNotificationRenderer personalized = new PersonalizedNotificationRenderer(
             reports, findings, relevance, feedback, renderer, projection);
 

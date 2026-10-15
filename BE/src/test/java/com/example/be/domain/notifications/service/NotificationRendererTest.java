@@ -49,7 +49,32 @@ class NotificationRendererTest {
     private final ReportEventSnapshotFactory eventSnapshots = mock(ReportEventSnapshotFactory.class);
     private final ReportEventFeedbackProjection projection = new ReportEventFeedbackProjection(
             feedbackStore, eventSnapshots, mock(DailyReportFeedbackExclusions.class));
-    private final NotificationRenderer renderer = new NotificationRenderer(findingRepository, relevancePolicy, projection);
+    private final NotificationDartSummary dartSummary = mock(NotificationDartSummary.class);
+    private final NotificationRenderer renderer = new NotificationRenderer(findingRepository, relevancePolicy, projection, dartSummary);
+
+    @Test
+    void emailPlacesCompanySummaryBetweenTitleAndNewsDigestForPreviewAndPersonalizedDelivery() {
+        NewsReport report = report("");
+        org.springframework.test.util.ReflectionTestUtils.setField(renderer, "publicBaseUrl", "https://news.example/");
+        String reportUrl = "https://news.example/#/reports?reportId=17";
+        when(dartSummary.render(report, reportUrl)).thenReturn("<p>회사 실적 · 공시 · 매출 100억원</p>");
+        for (String body : List.of(
+                renderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE)).chunks().getFirst(),
+                renderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE),
+                        view(report, List.of(), false), "https://news.example/#/feedback?token=test").chunks().getFirst())) {
+            assertTrue(body.indexOf("</h1>") < body.indexOf("회사 실적 · 공시"));
+            assertTrue(body.indexOf("회사 실적 · 공시") < body.indexOf("핵심 요약"));
+            assertTrue(body.contains(reportUrl));
+            assertEquals(1, org.jsoup.Jsoup.parse(body).select("p:contains(회사 실적 · 공시)").size());
+        }
+    }
+
+    @Test
+    void telegramAndBreakingAlertsNeverLoadCompanySummary() {
+        renderer.render(report(""), channel(ChannelType.TELEGRAM, 3500));
+        renderer.renderBreakingAlert("속보", "후속 내용", channel(ChannelType.EMAIL, Integer.MAX_VALUE));
+        org.mockito.Mockito.verifyNoInteractions(dartSummary);
+    }
 
     @Test
     void personalExclusionRemovesSavedSummaryAndSourceFromBothChannels() {

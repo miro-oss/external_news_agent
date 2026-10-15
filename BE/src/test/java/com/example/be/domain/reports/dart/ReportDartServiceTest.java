@@ -70,4 +70,20 @@ class ReportDartServiceTest {
     @Test void absentPendingAndHiddenReportsUseExistingNotFoundContract() {
         assertThrows(ReportException.class, () -> service.get(404L));
     }
+
+    @Test void notificationReadsExistingReportSnapshotWithoutReloadingOrEnqueueing() {
+        var report = report(ReportScope.RUN, SAMSUNG, SAMSUNG);
+        when(repository.find(17L)).thenReturn(List.of(
+                new ReportDartRepository.Attachment(17L, SAMSUNG, "READY", ReportDartMessages.READY, data()),
+                new ReportDartRepository.Attachment(17L, HYNIX, "READY", ReportDartMessages.READY, data())));
+
+        var result = service.getStored(report);
+
+        assertEquals(1, result.companies().size());
+        assertEquals(SAMSUNG, result.companies().getFirst().company());
+        assertEquals(data(), result.companies().getFirst().data());
+        verifyNoInteractions(reports, persistence);
+        verify(repository).find(17L);
+        verifyNoMoreInteractions(repository);
+    }
 }
