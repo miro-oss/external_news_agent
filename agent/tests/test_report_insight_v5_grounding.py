@@ -182,9 +182,11 @@ def test_stage_instruction_only_teaches_requested_role_without_fictional_respons
 
 def test_customer_supply_contract_guidance_preserves_direct_relationship_without_invented_specs():
     instruction = report_stage_instruction(["CHIP_MAKER"], "MAP")
-    assert "실제 고객 공급 계약" in instruction
-    assert "공정·수율이 없다는 이유로 그 계약을 무관 처리하지 않는다" in instruction
-    assert "계약은 생산 증가·규격 승인·납품 완료를 뜻하지 않는다" in instruction
+    assert "고객 요구·공급 약정 CUSTOMER_REQUIREMENTS" in instruction
+    assert "하나와 직접 연결되면 다른 업무의 조건을 요구하지 않는다" in instruction
+    assert "이행 결과가 미정이어도 해당 업무에 직접 연결될 수 있다" in instruction
+    assert "같은 finding/claim의 주체·대상·사건·단계를 유지한다" in instruction
+    assert "타당한 업무 해석과 관측 효과를 구분한다" in instruction
 
 
 def test_reassessment_context_is_independent_and_preserves_source_identity_and_time():
@@ -200,7 +202,7 @@ def test_reassessment_context_is_independent_and_preserves_source_identity_and_t
     assert context["reportReferenceDate"] == "2026-09-25"
     assert [item["claims"][0]["id"] for item in context["findings"]] == ["101:0", "102:0"]
     assert source.model_dump_json(by_alias=True) == original
-    assert result.meta.prompt_version == "report-insight.ko.v57"
+    assert result.meta.prompt_version == "report-insight.ko.v58"
 
 
 def test_native_decision_contract_keeps_axis_category_before_source_fields():

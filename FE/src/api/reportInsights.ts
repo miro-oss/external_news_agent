@@ -196,10 +196,12 @@ export function generateReportInsightOptions(client: QueryClient) {
       await client.cancelQueries({ queryKey, exact: true })
       client.setQueryData(queryKey, result)
     },
-    onError: (error: Error, { reportId, audience, snapshot }: GenerateReportInsightRequest) => {
-      if (isReportInsightPreparing(error)) {
-        void client.invalidateQueries({ queryKey: reportInsightKey(reportId, audience, snapshot), exact: true })
-      }
+    onError: async (_error: Error, { reportId, audience, snapshot }: GenerateReportInsightRequest) => {
+      const queryKey = reportInsightKey(reportId, audience, snapshot)
+      // The POST response can fail after the server saves or queues the result.
+      // Replace any older lookup with a fresh GET; never repeat the paid POST.
+      await client.cancelQueries({ queryKey, exact: true })
+      await client.invalidateQueries({ queryKey, exact: true })
     },
     onSettled: () => { void client.invalidateQueries({ queryKey: ['usage', 'llm'] }) },
   }

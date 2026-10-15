@@ -607,6 +607,7 @@ public class AgentRunRecorder {
                 .costUsd(usage == null ? null : usage.costUsd()).credits(usage == null ? null : usage.credits())
                 .requestHash(hash(request)).actionPayload(objectMapper.writeValueAsString(context
                         .withAudiences(request.audiences()).withValidationFailure(exception.getValidationFailure())
+                        .withClientFailure(exception.getClientFailureKind())
                         .withExecution(metadata == null ? "UNAVAILABLE" : metadata.source(),
                                 failureUsageCompleteness(usage, metadata))))
                 .startedAt(startedAt).finishedAt(now()).build());

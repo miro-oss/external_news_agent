@@ -18,7 +18,52 @@ def _normalized(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).split())
 
 
-def validate_report_splits(cases: list[dict]) -> dict:
+def case_identities(case: dict) -> dict:
+    request = case["request"]
+    return {
+        "report": [str(request["report"]["id"])],
+        "article": sorted({str(finding["articleId"]) for finding in request["findings"]}),
+        "source": sorted(
+            {
+                digest(text)
+                for finding in request["findings"]
+                for sentence in finding["sentences"]
+                if (text := _normalized(sentence["text"]))
+            }
+        ),
+        "event_family": sorted(
+            {
+                _normalized(label).casefold()
+                for labels in case.get("event_families", {}).values()
+                for label in labels
+            }
+        ),
+    }
+
+
+def validate_exposure_registry(registry: dict) -> None:
+    require(
+        registry.get("registryHash")
+        == digest({key: value for key, value in registry.items() if key != "registryHash"}),
+        "EXPOSURE_REGISTRY_CHANGED",
+    )
+    require(registry.get("schemaVersion") == 1, "UNKNOWN_EXPOSURE_REGISTRY")
+    require(isinstance(registry.get("entries"), list), "INVALID_EXPOSURE_ENTRIES")
+    for entry in registry.get("entries", []):
+        require(
+            bool(entry.get("reference"))
+            and bool(entry.get("caseId"))
+            and all(
+                isinstance(entry.get(key), list)
+                and bool(entry[key])
+                and all(isinstance(value, str) and bool(value) for value in entry[key])
+                for key in DIMENSIONS
+            ),
+            "INVALID_EXPOSURE_ENTRY",
+        )
+
+
+def validate_report_splits(cases: list[dict], *, exposure_registry=None) -> dict:
     """Validate Python-mode ReportCase dumps, preserving development-only workflows.
 
     A holdout requires declared families for every finding in *both* splits.
@@ -28,6 +73,12 @@ def validate_report_splits(cases: list[dict]) -> dict:
     require(bool(cases), "EMPTY_CASES")
     has_holdout = any(case["split"] == "holdout" for case in cases)
     owners = {dimension: {} for dimension in DIMENSIONS}
+    if exposure_registry is not None:
+        validate_exposure_registry(exposure_registry)
+        for entry in exposure_registry["entries"]:
+            for dimension in DIMENSIONS:
+                for value in entry[dimension]:
+                    owners[dimension][value] = ("development", entry["caseId"])
     identities = []
     for case in cases:
         case_id, split, request = case["case_id"], case["split"], case["request"]
@@ -40,7 +91,6 @@ def validate_report_splits(cases: list[dict]) -> dict:
             set(families) == finding_ids if has_holdout or families else True,
             "HOLDOUT_EVENT_FAMILIES_REQUIRED" if has_holdout else "INVALID_EVENT_FAMILY_FINDINGS",
         )
-        events = set()
         for labels in families.values():
             require(
                 bool(labels)
@@ -49,18 +99,7 @@ def validate_report_splits(cases: list[dict]) -> dict:
             )
             normalized = [_normalized(label).casefold() for label in labels]
             require(len(normalized) == len(set(normalized)), "DUPLICATE_EVENT_FAMILY_LABEL")
-            events.update(normalized)
-        keys = {
-            "report": {str(request["report"]["id"])},
-            "article": {str(finding["articleId"]) for finding in findings},
-            "source": {
-                digest(text)
-                for finding in findings
-                for sentence in finding["sentences"]
-                if (text := _normalized(sentence["text"]))
-            },
-            "event_family": events,
-        }
+        keys = case_identities(case)
         for dimension, values in keys.items():
             for value in values:
                 previous = owners[dimension].get(value)
@@ -80,7 +119,10 @@ def validate_report_splits(cases: list[dict]) -> dict:
     result = {
         "schemaVersion": 1,
         "holdoutRequested": has_holdout,
-        "independenceScope": "supplied-cases-only",
+        "independenceScope": "supplied-cases-and-declared-development-history"
+        if exposure_registry is not None
+        else "supplied-cases-only",
+        "exposureRegistryHash": exposure_registry["registryHash"] if exposure_registry else None,
         "eventFamiliesComplete": all(
             set(case.get("event_families", {}))
             == {finding["id"] for finding in case["request"]["findings"]}

@@ -157,8 +157,12 @@ def test_smoke_and_resume_share_ledger_and_keep_paired_review_control(prepared, 
     result = operational.run(output, api_key="test-key", resume=True)
     assert len(sdk.calls) == 20
     assert result["summary"]["successResults"] == 8
-    controls = [event for event in result["reviewAdmissions"] if event["policy"] == "disabled"]
-    assert len(controls) == 4 and all(not event["admitted"] for event in controls)
+    controls = [
+        event
+        for event in result["stagePolicies"]
+        if event["stage"] == "REVIEW" and event["optionalDisabled"]
+    ]
+    assert len(controls) == 4 and all(event["omittedFindingIds"] for event in controls)
     assert len(measure_run(result)["pairedReviewComparison"]) == 4
     assert measure_run(result)["reviewedAssessments"] == 4
     with pytest.raises(EvaluationStopped, match="NO_PENDING_JOBS"):

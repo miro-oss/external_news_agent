@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import logging
 import math
 import os
 import threading
@@ -29,7 +30,7 @@ from unittest.mock import patch
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 from app.core.config import Settings
-from app.core.errors import AgentError
+from app.core.errors import AgentError, StructuredOutputExhaustedError
 from app.eval.report_insight_measure import generation_metrics
 from app.eval.report_insight_outcomes import summarize_outcomes
 from app.eval.report_insight_review import QUALITY_RUBRIC
@@ -46,7 +47,7 @@ from app.eval.report_insight_run import (
     stamp,
 )
 from app.eval.report_insight_split import validate_report_splits
-from app.llm import openai_provider, structured_call
+from app.llm import openai_provider, report_insight_service, structured_call
 from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
 from app.llm.report_insight_service import PROMPT_VERSION, RUBRIC_VERSION, ReportInsightService
 from app.llm.router import close_analyze_providers
@@ -134,8 +135,10 @@ class OperationalPolicy(BaseModel):
 class ReportCase(BaseModel):
     model_config = ConfigDict(extra="forbid")
     case_id: str = Field(min_length=1, max_length=100)
+    pair_id: str | None = Field(default=None, min_length=1, max_length=100)
     split: Literal["development", "holdout"]
     review_policy: Literal["production", "disabled"] = "production"
+    explanation_policy: Literal["production", "disabled"] = "production"
     request: ReportInsightRequest
     # Evaluation metadata only; never infer families from a report ID or title.
     event_families: dict[int, list[str]] = Field(default_factory=dict)
@@ -149,7 +152,7 @@ def runtime_hashes() -> dict[str, str]:
     return {str(path.relative_to(AGENT_ROOT)): file_digest(path) for path in sorted(paths)}
 
 
-def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
+def prepare(cases: list[dict], policy: dict, output_dir: Path, *, exposure_registry=None) -> dict:
     parsed = [ReportCase.model_validate(case) for case in cases]
     settings = OperationalPolicy.model_validate(policy)
     settings.runtime_settings()
@@ -158,7 +161,8 @@ def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
     for case in parsed:
         require(case.request.plan == "FREE", "ONLY_OPENAI_FREE_PLAN_SUPPORTED")
     split_validation = validate_report_splits(
-        [case.model_dump(mode="python", by_alias=True) for case in parsed]
+        [case.model_dump(mode="python", by_alias=True) for case in parsed],
+        exposure_registry=exposure_registry,
     )
     manifest = {
         "schemaVersion": 1,
@@ -174,6 +178,7 @@ def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
         ),
         "cases": [case.model_dump(mode="json", by_alias=True) for case in parsed],
         "splitValidation": split_validation,
+        "exposureRegistry": exposure_registry,
         "qualityRubric": QUALITY_RUBRIC,
         "scope": "Agent service with production admission/retry/validation; no BE or HTTP",
         "credentials": "explicit run argument; CLI process key only by opt-in; no dotenv loading",
@@ -184,12 +189,14 @@ def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
         {
             "jobId": f"{index}:{repeat}:{audience}",
             "caseId": case.case_id,
+            "pairId": case.pair_id or case.case_id,
             "caseIndex": index,
             "split": case.split,
             "repeat": repeat,
             "audience": audience,
             "variant": "staged",
             "reviewPolicy": case.review_policy,
+            "explanationPolicy": case.explanation_policy,
             "status": "pending",
             "attemptIds": [],
         }
@@ -211,6 +218,8 @@ def prepare(cases: list[dict], policy: dict, output_dir: Path) -> dict:
         "reviewAdmissions": [],
         "repairs": [],
         "admissionDenials": [],
+        "stagePolicies": [],
+        "recoveries": [],
     }
     with evaluation_lock(output_dir):
         require(not (output_dir / "manifest.json").exists(), "OUTPUT_ALREADY_PREPARED")
@@ -245,6 +254,8 @@ def check(output_dir: Path) -> tuple[dict, dict, OperationalPolicy]:
 def _safe_failure(error: Exception) -> dict:
     if isinstance(error, AgentError):
         result = {"code": error.code, "statusCode": error.status_code}
+        if isinstance(error, StructuredOutputExhaustedError):
+            result["outputValidationExhausted"] = True
         details = error.details if isinstance(error.details, dict) else {}
         for key in (
             "providerStatus",
@@ -405,6 +416,8 @@ def _observe(recorder):
     original_sdk = openai_provider.OpenAI
     original_log = structured_call._log_validation_failure
     original_review = ReportInsightPipelineProvider.can_start_optional_review
+    original_select = report_insight_service.select_review
+    original_explanations = report_insight_service.prepare_explanation_batches
 
     def sdk(**kwargs):
         client = original_sdk(**kwargs)
@@ -431,11 +444,9 @@ def _observe(recorder):
 
     def review(pipeline, reserve_seconds: float = 0.0):
         policy = recorder.local.job.get("reviewPolicy", "production")
-        admitted = (
-            original_review(pipeline, reserve_seconds=reserve_seconds)
-            if policy == "production"
-            else False
-        )
+        # This admission method also protects mandatory recovery. Disable only
+        # the optional selection below, never the shared time/budget admission.
+        admitted = original_review(pipeline, reserve_seconds=reserve_seconds)
         recorder.event(
             "reviewAdmissions",
             {
@@ -447,15 +458,95 @@ def _observe(recorder):
         )
         return admitted
 
+    def select_review(request, validated):
+        selected = original_select(request, validated)
+        disabled = recorder.local.job.get("reviewPolicy", "production") == "disabled"
+        recorder.event(
+            "stagePolicies",
+            {
+                "jobId": recorder.local.job["jobId"],
+                "stage": "REVIEW",
+                "optionalDisabled": disabled,
+                "omittedFindingIds": list(selected) if disabled else [],
+            },
+        )
+        return () if disabled else selected
+
+    def explanations(request, validated, **kwargs):
+        batches = original_explanations(request, validated, **kwargs)
+        disabled = recorder.local.job.get("explanationPolicy", "production") == "disabled"
+        required = set(kwargs.get("required_finding_ids", ()))
+        kept = tuple(
+            batch for batch in batches if not disabled or required.intersection(batch.finding_ids)
+        )
+        recorder.event(
+            "stagePolicies",
+            {
+                "jobId": recorder.local.job["jobId"],
+                "stage": "EXPLAIN",
+                "optionalDisabled": disabled,
+                "ablationUnit": "batch",
+                "requiredFindingIds": sorted(required),
+                "omittedBatches": len(batches) - len(kept),
+                "retainedOptionalFindingIds": sorted(
+                    {
+                        identifier
+                        for batch in kept
+                        for identifier in batch.finding_ids
+                        if identifier not in required
+                    }
+                ),
+                "omittedFindingIds": sorted(
+                    {
+                        identifier
+                        for batch in batches
+                        if batch not in kept
+                        for identifier in batch.finding_ids
+                    }
+                ),
+            },
+        )
+        return kept
+
+    class RecoveryObserver(logging.Handler):
+        def emit(self, record):
+            # Observe only closed, server-owned templates. Never persist prose,
+            # arbitrary exception text or infer recovery from job success.
+            templates = {
+                "Report insight stage=EXPLAIN-%03d outcome=VALIDATION_FAILED "
+                "fallback=VALIDATED_ASSESSMENTS_RETAINED findingCount=%d": "EXPLAIN",
+                "Report insight stage=REVIEW-%03d outcome=VALIDATION_FAILED "
+                "fallback=VALIDATED_MAP_RETAINED findingCount=%d": "REVIEW",
+            }
+            stage = templates.get(record.msg) if isinstance(record.msg, str) else None
+            if stage and isinstance(record.args, tuple) and len(record.args) == 2:
+                index, count = record.args
+                if type(index) is int and type(count) is int and hasattr(recorder.local, "job"):
+                    recorder.event(
+                        "recoveries",
+                        {
+                            "jobId": recorder.local.job["jobId"],
+                            "stage": f"{stage}-{index:03d}",
+                            "outcome": "validated_prior_retained",
+                            "findingCount": count,
+                        },
+                    )
+
+    recovery_observer = RecoveryObserver()
+    report_insight_service.logger.addHandler(recovery_observer)
+
     try:
         close_analyze_providers()
         with (
             patch.object(openai_provider, "OpenAI", sdk),
             patch.object(structured_call, "_log_validation_failure", validation),
             patch.object(ReportInsightPipelineProvider, "can_start_optional_review", review),
+            patch.object(report_insight_service, "select_review", select_review),
+            patch.object(report_insight_service, "prepare_explanation_batches", explanations),
         ):
             yield
     finally:
+        report_insight_service.logger.removeHandler(recovery_observer)
         close_analyze_providers()
         _PROCESS_LOCK.release()
 
@@ -484,9 +575,10 @@ def run(
         settings = policy.runtime_settings(api_key)
 
         class ObservedService(ReportInsightService):
-            def __init__(self, job):
+            def __init__(self, job, request):
                 super().__init__(settings)
                 self.job = job
+                self.request_hash = digest(request.model_dump(mode="json", by_alias=True))
 
             def _repair_call(self, prompt, schema, raw, error, validate):
                 repair = super()._repair_call(prompt, schema, raw, error, validate)
@@ -524,11 +616,13 @@ def run(
                     "stage": stage,
                     "event": "stage",
                     "status": "success",
+                    "requestHash": self.request_hash,
                 }
                 try:
                     result = super()._call(pipeline, **kwargs)
                     mapped = getattr(result.output, "mapped", None)
                     if mapped is not None:
+                        event["validatedSnapshot"] = mapped.model_dump(mode="json", by_alias=True)
                         # Local measurements compare validated decisions, never
                         # infer quality merely because REVIEW changed an axis.
                         event["assessments"] = [
@@ -560,7 +654,7 @@ def run(
                 manifest["cases"][job["caseIndex"]]["request"]
             ).model_copy(update={"audiences": [job["audience"]]})
             try:
-                response = ObservedService(job).generate(request)
+                response = ObservedService(job, request).generate(request)
                 with recorder.lock:
                     job.update(
                         status="success", response=response.model_dump(mode="json", by_alias=True)
@@ -658,6 +752,13 @@ def summarize(state: dict) -> dict:
         "forcedReviewSkip": any(
             job.get("reviewPolicy", "production") == "disabled" for job in results
         ),
+        "forcedOptionalExplanationSkip": any(
+            job.get("explanationPolicy", "production") == "disabled" for job in results
+        ),
+        "retainedValidatedStages": len(state.get("recoveries", [])),
+        "optionalExplanationAblationScope": (
+            "optional-only batches omitted; mandatory-mixed batches retained"
+        ),
         "bePersistenceVerified": False,
         "httpVerified": False,
     }
@@ -669,6 +770,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cases", type=Path)
     parser.add_argument("--policy", type=Path)
+    parser.add_argument("--exposure-registry", type=Path)
     parser.add_argument("--execute-live", action="store_true")
     parser.add_argument("--job-limit", type=int)
     parser.add_argument("--resume", action="store_true")
@@ -682,7 +784,12 @@ def main():
         if args.command == "prepare":
             require(args.cases is not None and args.policy is not None, "CASES_AND_POLICY_REQUIRED")
             manifest = prepare(
-                json.loads(args.cases.read_text()), json.loads(args.policy.read_text()), args.output
+                json.loads(args.cases.read_text()),
+                json.loads(args.policy.read_text()),
+                args.output,
+                exposure_registry=json.loads(args.exposure_registry.read_text())
+                if args.exposure_registry
+                else None,
             )
             print(json.dumps({"manifestHash": digest(manifest), "promptVersion": PROMPT_VERSION}))
         elif args.command == "check":

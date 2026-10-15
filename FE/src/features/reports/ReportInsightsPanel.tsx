@@ -56,7 +56,7 @@ export function ReportInsightsPanel({ report, audience, selector, onEvidenceSele
       <p>{queued ? '분석은 두 관점씩 진행합니다. 차례가 되면 자동으로 시작하며, 다른 관점을 확인해도 요청은 유지됩니다.'
         : '주요 이슈의 우선순위와 근거를 종합하는 동안 잠시 기다려 주세요.'}</p>
     </div>}
-    {generationError && !isReportInsightPreparing(generationError) && <div className="report-insights-state" role="alert"><strong>관점 분석을 생성하지 못했습니다.</strong><p>{generationError.message}</p>
+    {generationError && !insight && !preparing && !isReportInsightPreparing(generationError) && <div className="report-insights-state" role="alert"><strong>관점 분석을 생성하지 못했습니다.</strong><p>{generationError.message}</p>
       <button type="button" className="text-button" disabled={stored.isFetching || generating} onClick={() => { void refresh() }}>저장된 분석 다시 확인</button>
     </div>}
     {stored.isError && !stored.isFetching && !missing && !preparing && !generating && <div className="report-insights-state" role="alert">

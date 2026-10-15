@@ -61,7 +61,9 @@ def generation_outcome(job: dict) -> str:
         )
     ):
         return "technical_failure"
-    if failure.get("code") == "SCHEMA_VIOLATION":
+    if failure.get("code") == "SCHEMA_VIOLATION" and (
+        failure.get("outputValidationExhausted") or failure.get("validationFailure")
+    ):
         return "validation_rejected"
     return "unknown_failure"
 

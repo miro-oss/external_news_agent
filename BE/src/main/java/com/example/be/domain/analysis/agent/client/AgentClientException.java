@@ -11,6 +11,7 @@ public class AgentClientException extends RuntimeException {
     private final TimeoutPhase timeoutPhase;
     private final ExecutionMetadata executionMetadata;
     private final ValidationFailure validationFailure;
+    private final ClientFailureKind clientFailureKind;
 
     public AgentClientException(String code, String message) {
         this(code, message, null, null, TimeoutPhase.NONE);
@@ -44,12 +45,19 @@ public class AgentClientException extends RuntimeException {
     public AgentClientException(String code, String message, Throwable cause, Usage usage,
                                 TimeoutPhase timeoutPhase, ExecutionMetadata executionMetadata,
                                 ValidationFailure validationFailure) {
+        this(code, message, cause, usage, timeoutPhase, executionMetadata, validationFailure, null);
+    }
+
+    public AgentClientException(String code, String message, Throwable cause, Usage usage,
+                                TimeoutPhase timeoutPhase, ExecutionMetadata executionMetadata,
+                                ValidationFailure validationFailure, ClientFailureKind clientFailureKind) {
         super(message, cause);
         this.code = code;
         this.usage = usage;
         this.timeoutPhase = timeoutPhase;
         this.executionMetadata = executionMetadata;
         this.validationFailure = validationFailure;
+        this.clientFailureKind = clientFailureKind;
     }
 
     public String getCode() {
@@ -66,6 +74,14 @@ public class AgentClientException extends RuntimeException {
 
     public ValidationFailure getValidationFailure() {
         return validationFailure;
+    }
+
+    public ClientFailureKind getClientFailureKind() { return clientFailureKind; }
+
+    /** Local HTTP client observations, not a claim about provider usage or retry safety. */
+    public enum ClientFailureKind {
+        CONNECT_TIMEOUT, READ_TIMEOUT, DNS_FAILURE, CONNECTION_FAILURE, TLS_FAILURE,
+        IO_FAILURE, RESPONSE_DECODE, EMPTY_RESPONSE, UNKNOWN
     }
 
     public boolean isConnectTimeout() {

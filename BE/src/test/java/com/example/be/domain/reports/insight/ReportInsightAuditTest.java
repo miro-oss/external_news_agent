@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
@@ -101,6 +102,7 @@ class ReportInsightAuditTest {
         var old = mapper.readTree(mapper.writeValueAsString(context()));
         ((tools.jackson.databind.node.ObjectNode) old).remove("audiences");
         ((tools.jackson.databind.node.ObjectNode) old).remove("validationFailure");
+        ((tools.jackson.databind.node.ObjectNode) old).remove("clientFailureKind");
 
         var restored = mapper.treeToValue(old, ReportInsightAuditContext.class);
 
@@ -108,7 +110,39 @@ class ReportInsightAuditTest {
         assertEquals(1, restored.requestedAudienceCount());
         assertEquals(List.of(), restored.audiences());
         assertNull(restored.validationFailure());
+        assertNull(restored.clientFailureKind());
         assertEquals("a".repeat(64), restored.inputHash());
+    }
+    @ParameterizedTest @EnumSource(AgentClientException.ClientFailureKind.class)
+    void clientFailureDiagnosticsPreserveUnknownUsageAndConservativeQuota(AgentClientException.ClientFailureKind kind) {
+        var quotaRepository = mock(AgentQuotaJdbcRepository.class);
+        var quota = new AgentQuotaService(quotaRepository, new AgentProperties(), mock(LlmPlanService.class));
+        var executions = new ReportInsightExecutionRecorder(recorder, quota, mock(ReportInsightPersistenceService.class));
+        var reservation = new QuotaReservation(1L, null, "report-insight:10:hash", AgentTask.INSIGHT,
+                AgentPlan.PAID, new BigDecimal("5"));
+        var phase = kind == AgentClientException.ClientFailureKind.CONNECT_TIMEOUT
+                ? AgentClientException.TimeoutPhase.CONNECT : kind == AgentClientException.ClientFailureKind.READ_TIMEOUT
+                ? AgentClientException.TimeoutPhase.READ : AgentClientException.TimeoutPhase.NONE;
+        var failure = new AgentClientException("PROVIDER_UNAVAILABLE", "PRIVATE_FAILURE", null, null,
+                phase, null, null, kind);
+        when(repository.insertIfAbsent(any())).thenReturn(true);
+
+        executions.failure(20L, request(), failure, context(), LocalDateTime.now(), reservation);
+
+        var run = captured();
+        var audit = mapper.readValue(run.getActionPayload(), ReportInsightAuditContext.class);
+        assertEquals(kind, audit.clientFailureKind());
+        assertEquals("UNKNOWN", audit.usageCompleteness());
+        assertEquals(List.of(Audience.CHIP_MAKER), audit.audiences());
+        assertNull(run.getCredits());
+        assertFalse(run.getActionPayload().contains("PRIVATE_FAILURE"));
+        if (phase == AgentClientException.TimeoutPhase.CONNECT) {
+            verify(quotaRepository).release(eq(reservation), any(LocalDateTime.class));
+            verify(quotaRepository, never()).consume(any(), any(), any());
+        } else {
+            verify(quotaRepository).consume(eq(reservation), eq(reservation.reservedUnits()), any(LocalDateTime.class));
+            verify(quotaRepository, never()).release(any(), any());
+        }
     }
     @Test void auditAudienceNamesRemainClosedAndCannotContainProse() {
         assertThrows(IllegalArgumentException.class,

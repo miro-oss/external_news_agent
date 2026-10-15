@@ -45,6 +45,7 @@ from app.llm.report_insight_assessment import (
 from app.llm.report_insight_assessment import (
     validate_draft as validate_legacy_draft,
 )
+from app.llm.report_insight_comparison import comparison_direction_conflict, unsupported_comparison
 from app.llm.report_insight_corporate_event_binding import corporate_event_mismatches
 from app.llm.report_insight_explanation import (
     prepare_explanation_batches,
@@ -145,7 +146,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v57"
+PROMPT_VERSION = "report-insight.ko.v58"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -362,10 +363,6 @@ def _investment_source_rule(message: str) -> str | None:
     )
 
 
-_UNSUPPORTED_COMPARISON = re.compile(
-    r"(?:전주\s*(?:대비|보다)|지난주\s*(?:대비|보다)|지난\s*보고서|이전\s*보고서|"
-    r"직전\s*보고서|신규\s*(?:변화|진입)|처음으로|새롭게\s*(?:확인|부각))"
-)
 _PREPARATION_RECOMMENDATION = re.compile(r"(?:필요|조건|확인|검토|부족|준비.*(?:일정|시점))")
 _METADATA_ONLY_OVERVIEW = re.compile(
     r"^(?:원문(?:에|에서)|원문(?:은|는)?있(?:지만|으나))?"
@@ -3820,18 +3817,18 @@ def _prose_validation_errors(
     # original-sentence index as MAP/REVIEW/REDUCE, with only cited claims.
     fact_index = build_fact_index(request, refs) if request is not None else None
     for value in values:
-        comparisons = list(_UNSUPPORTED_COMPARISON.finditer(value))
-        if (
-            comparisons
-            and not _UNSUPPORTED_COMPARISON.search(source)
-            and not (
-                all(match[0] == "처음으로" for match in comparisons)
-                and supported_research_novelty(value, binding_source)
-            )
+        if unsupported_comparison(
+            value, binding_source,
+            research_first=supported_research_novelty(value, binding_source),
         ):
             errors.append(
                 ValueError("이전 보고서 기준선이 없어 신규성·기간 비교를 판정할 수 없습니다.")
             )
+        if not conditional and comparison_direction_conflict(value, binding_source):
+            errors.append(OutputValidationError(
+                "원문의 같은 기간·대상 비교와 변화 방향이 반대입니다.",
+                error_kinds=("report_fact_contradiction",),
+            ))
         relation_mismatches = (
             fact_index_mismatches(value, fact_index, reference_date=report_reference_date(request))
             if fact_index is not None

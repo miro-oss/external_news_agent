@@ -79,7 +79,8 @@ def test_known_work_does_not_require_other_work_contracts_or_known_deadlines(
 @pytest.mark.parametrize("stage", ["MAP", "REVIEW"])
 def test_assessment_instructions_distinguish_work_scope_from_evidence_absence(stage):
     instruction = report_stage_instruction(["CHIP_MAKER"], stage)
-    assert "공정 인증·설계 적용은 고객 계약이 없어도" in instruction
+    assert "공정 인증·설계 IP/공정 적용" in instruction
+    assert "하나와 직접 연결되면 다른 업무의 조건을 요구하지 않는다" in instruction
     assert "정량 금액·비율 없이도 정성적으로 판정" in instruction
     assert "미확인을 NO_CHANGE로 바꾸지 않는다" in instruction
     assert "전망·목표를 현재 집행·수주·납품·효과로 바꾸지 않는다" in instruction

@@ -26,18 +26,29 @@ import com.example.be.global.config.RestClientFactory;
 import tools.jackson.databind.JsonNode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.UnknownContentTypeException;
 
+import java.io.IOException;
+import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpTimeoutException;
+import java.nio.channels.UnresolvedAddressException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Locale;
+import javax.net.ssl.SSLException;
 
 @Component
 public class AgentClient {
@@ -198,7 +209,9 @@ public class AgentClient {
                     .retrieve()
                     .body(responseType);
             if (response == null) {
-                throw new AgentClientException("SCHEMA_VIOLATION", "Agent 응답 본문이 비어 있습니다.");
+                throw new AgentClientException("SCHEMA_VIOLATION", "Agent 응답 본문이 비어 있습니다.",
+                        null, null, AgentClientException.TimeoutPhase.NONE, null, null,
+                        AgentClientException.ClientFailureKind.EMPTY_RESPONSE);
             }
             return response;
         } catch (RestClientResponseException exception) {
@@ -213,23 +226,25 @@ public class AgentClient {
                     error == null ? null : error.validationFailure());
         } catch (RestClientException exception) {
             AgentClientException.TimeoutPhase timeoutPhase = timeoutPhase(exception);
+            var kind = clientFailureKind(exception, timeoutPhase);
+            boolean invalidResponse = kind == AgentClientException.ClientFailureKind.RESPONSE_DECODE;
             throw new AgentClientException(
-                    "PROVIDER_UNAVAILABLE",
-                    timeoutPhase == AgentClientException.TimeoutPhase.READ
+                    invalidResponse ? "SCHEMA_VIOLATION" : "PROVIDER_UNAVAILABLE",
+                    invalidResponse ? "Agent 응답 형식을 해석할 수 없습니다."
+                            : timeoutPhase == AgentClientException.TimeoutPhase.READ
                             ? "Agent 응답 대기 시간이 초과되었습니다."
                             : "Agent에 연결할 수 없습니다.",
                     exception,
                     null,
-                    timeoutPhase);
+                    timeoutPhase, null, null, kind);
         }
     }
 
     AgentClientException.TimeoutPhase timeoutPhase(RestClientException exception) {
-        if (!(exception instanceof ResourceAccessException)) {
-            return AgentClientException.TimeoutPhase.NONE;
-        }
-        Throwable cause = exception;
-        while (cause != null) {
+        // This phase also controls quota release; preserve the pre-response
+        // ResourceAccessException requirement independently of diagnostics.
+        if (!(exception instanceof ResourceAccessException)) return AgentClientException.TimeoutPhase.NONE;
+        for (Throwable cause : causes(exception)) {
             if (cause instanceof HttpConnectTimeoutException) {
                 return AgentClientException.TimeoutPhase.CONNECT;
             }
@@ -242,9 +257,40 @@ public class AgentClient {
                         ? AgentClientException.TimeoutPhase.CONNECT
                         : AgentClientException.TimeoutPhase.READ;
             }
-            cause = cause.getCause();
         }
         return AgentClientException.TimeoutPhase.NONE;
+    }
+
+    private AgentClientException.ClientFailureKind clientFailureKind(RestClientException exception,
+            AgentClientException.TimeoutPhase timeoutPhase) {
+        if (timeoutPhase == AgentClientException.TimeoutPhase.CONNECT)
+            return AgentClientException.ClientFailureKind.CONNECT_TIMEOUT;
+        if (timeoutPhase == AgentClientException.TimeoutPhase.READ)
+            return AgentClientException.ClientFailureKind.READ_TIMEOUT;
+        var chain = causes(exception);
+        if (chain.stream().anyMatch(cause -> cause instanceof UnknownHostException
+                || cause instanceof UnresolvedAddressException))
+            return AgentClientException.ClientFailureKind.DNS_FAILURE;
+        if (chain.stream().anyMatch(SSLException.class::isInstance))
+            return AgentClientException.ClientFailureKind.TLS_FAILURE;
+        if (chain.stream().anyMatch(ConnectException.class::isInstance))
+            return AgentClientException.ClientFailureKind.CONNECTION_FAILURE;
+        if (exception instanceof ResourceAccessException)
+            return AgentClientException.ClientFailureKind.IO_FAILURE;
+        if (chain.stream().anyMatch(cause -> cause instanceof HttpMessageNotReadableException
+                || cause instanceof UnknownContentTypeException))
+            return AgentClientException.ClientFailureKind.RESPONSE_DECODE;
+        if (chain.stream().anyMatch(IOException.class::isInstance))
+            return AgentClientException.ClientFailureKind.IO_FAILURE;
+        return AgentClientException.ClientFailureKind.UNKNOWN;
+    }
+
+    private List<Throwable> causes(Throwable exception) {
+        var result = new ArrayList<Throwable>();
+        var seen = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>());
+        for (Throwable cause = exception; cause != null && seen.add(cause) && result.size() < 32;
+                cause = cause.getCause()) result.add(cause);
+        return result;
     }
 
     private AgentErrorResponse errorResponse(RestClientResponseException exception) {

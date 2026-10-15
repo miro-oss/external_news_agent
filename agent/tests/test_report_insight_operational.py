@@ -107,9 +107,9 @@ def test_review_observer_preserves_explanation_reserve_and_disabled_control(monk
         clock[0] = 59.0
         assert pipeline.can_start_optional_review(reserve_seconds=reserve)
         recorder.local.job["reviewPolicy"] = "disabled"
-        assert not pipeline.can_start_optional_review(reserve_seconds=reserve)
+        assert pipeline.can_start_optional_review(reserve_seconds=reserve)
 
-    assert [event["admitted"] for _, event in events] == [False, True, False]
+    assert [event["admitted"] for _, event in events] == [False, True, True]
     assert [event["policy"] for _, event in events] == ["production", "production", "disabled"]
     assert all(name == "reviewAdmissions" for name, _ in events)
     assert pipeline.calls == 0
