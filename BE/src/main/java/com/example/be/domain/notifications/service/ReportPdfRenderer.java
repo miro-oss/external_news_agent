@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.time.format.DateTimeFormatter;
@@ -120,13 +121,17 @@ public class ReportPdfRenderer {
             if (data.quarters().isEmpty()) pdf.paragraph("표시할 분기 실적 자료가 없습니다.");
             else {
                 pdf.chart(data.quarters(), data.currency());
-                pdf.muted("분기별 상세 실적 · 표 금액 단위: " + ("KRW".equals(data.currency()) ? "원 (KRW)" : data.currency() == null ? "통화 미확인" : data.currency())
-                        + " · 원 금액을 그대로 표시합니다. 자료 없음은 0이 아닙니다.");
+                boolean won = "KRW".equals(data.currency());
+                String unit = won ? "억원" : data.currency() == null ? "통화 미확인" : data.currency();
+                pdf.muted("분기별 상세 실적 · 표 금액 단위: " + unit
+                        + (won ? " · 소수 둘째 자리까지 반올림합니다." : " · 원 금액을 그대로 표시합니다."));
+                pdf.muted((won ? "절댓값이 0보다 크고 0.01억원 미만인 금액은 범위로 표시합니다. " : "")
+                        + "자료 없음은 0이 아닙니다.");
                 List<List<String>> rows = new ArrayList<>();
                 for (var quarter : data.quarters()) rows.add(List.of(quarter.year() + "년 " + quarter.quarter() + "분기"
-                                + (quarter.derived() ? "\n산출값" : ""), amount(quarter.revenue()), amount(quarter.operatingProfit()),
+                                + (quarter.derived() ? "\n산출값" : ""), amount(quarter.revenue(), data.currency()), amount(quarter.operatingProfit(), data.currency()),
                         quarter.operatingMargin() == null ? "자료 없음" : quarter.operatingMargin().stripTrailingZeros().toPlainString() + "%"));
-                pdf.table(List.of("분기", "매출액", "영업이익", "영업이익률"), rows, new float[] { 1.1f, 1.8f, 1.8f, 1 });
+                pdf.table(List.of("분기", "매출액 (" + unit + ")", "영업이익 (" + unit + ")", "영업이익률"), rows, new float[] { 1.1f, 1.8f, 1.8f, 1 });
                 if (data.quarters().stream().anyMatch(com.example.be.domain.dart.model.DartModels.Quarter::derived))
                     pdf.muted("4분기 산출값은 같은 회계 기준의 연간 금액에서 3분기 누적 금액을 뺀 값입니다.");
             }
@@ -135,9 +140,15 @@ public class ReportPdfRenderer {
         }
     }
 
-    static String amount(String value) {
+    static String amount(String value, String currency) {
         if (value == null || !value.matches("-?\\d+(?:\\.\\d+)?")) return "자료 없음";
         BigDecimal amount = new BigDecimal(value);
+        if ("KRW".equals(currency)) {
+            amount = amount.movePointLeft(8);
+            if (amount.signum() != 0 && amount.abs().compareTo(new BigDecimal("0.01")) < 0)
+                return amount.signum() < 0 ? "-0.01 < 값 < 0" : "0 < 값 < 0.01";
+            amount = amount.setScale(2, RoundingMode.HALF_UP).stripTrailingZeros();
+        }
         DecimalFormat format = new DecimalFormat("#,##0", DecimalFormatSymbols.getInstance(java.util.Locale.KOREA));
         format.setMinimumFractionDigits(Math.max(0, amount.scale()));
         format.setMaximumFractionDigits(Math.max(0, amount.scale()));

@@ -12,12 +12,16 @@ import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import com.example.be.domain.reports.service.ReportReadingContent;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.text.TextPosition;
 import org.junit.jupiter.api.Test;
 
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -105,6 +109,50 @@ class ReportPdfInsightSectionTest {
         assertFalse(text.contains("조건부 해석"));
         assertFalse(text.contains("제거할"));
         assertFalse(text.contains("분석에 사용한 원문 근거"));
+    }
+
+    @Test
+    void readingBlocksKeepTheirOpeningTogetherAndSplitOversizedItemsWithoutLosingText() throws Exception {
+        String longText = IntStream.range(0, 120).mapToObj(index -> "긴 문단 기록 " + index)
+                .collect(Collectors.joining("\n"));
+        var insight = insight(List.of(fact(11, "grounded", List.of(0))),
+                List.of(new Overview("첫 묶음 해석", List.of("11:0"), "첫 묶음 조건"),
+                        new Overview(longText, List.of("11:0"), "긴 문단 마지막 조건")),
+                List.of(new ReportInsightDTO.Issue(11L, "high", "기사 해석 본문", List.of("11:0"), null, 1)),
+                List.of(), List.of(new WatchItem("마지막 관찰 주제", "마지막 지표", "마지막 기준", List.of("11:0"))));
+        byte[] bytes;
+        try (PDDocument document = new PDDocument(); ReportPdfLayout pdf = new ReportPdfLayout(document)) {
+            pdf.paragraph("앞 페이지 내용");
+            pdf.gap(620);
+            ReportPdfInsightSection.write(pdf, insight, view(List.of(finding(11)), Set.of()));
+            bytes = pdf.save();
+        }
+        try (PDDocument document = Loader.loadPDF(bytes)) {
+            assertTrue(document.getNumberOfPages() > 3);
+            PDFTextStripper page = new PDFTextStripper();
+            page.setStartPage(1);
+            page.setEndPage(1);
+            assertFalse(page.getText(document).contains("리포트 관점 분석"));
+            page.setStartPage(2);
+            page.setEndPage(2);
+            String opening = page.getText(document);
+            assertTrue(opening.contains("리포트 관점 분석"));
+            assertTrue(opening.contains("첫 묶음 해석"));
+            assertTrue(opening.contains("해석의 조건\n첫 묶음 조건"));
+            String text = new PDFTextStripper() {
+                @Override protected void processTextPosition(TextPosition position) {
+                    assertTrue(position.getXDirAdj() >= 40);
+                    assertTrue(position.getXDirAdj() + position.getWidthDirAdj() <= PDRectangle.A4.getWidth() - 40);
+                    assertTrue(position.getYDirAdj() > 20 && position.getYDirAdj() < 820);
+                    super.processTextPosition(position);
+                }
+            }.getText(document);
+            for (int index = 0; index < 120; index++) assertTrue(text.contains("긴 문단 기록 " + index));
+            assertTrue(text.contains("긴 문단 마지막 조건"));
+            assertTrue(text.contains("기사\n기사 제목 11\n해석\n기사 해석 본문"));
+            assertTrue(text.contains("확인할 지표\n마지막 지표"));
+            assertTrue(text.contains("판단 기준\n마지막 기준"));
+        }
     }
 
     @Test

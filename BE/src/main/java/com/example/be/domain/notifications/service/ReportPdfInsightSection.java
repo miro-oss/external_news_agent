@@ -7,6 +7,7 @@ import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -45,40 +46,36 @@ final class ReportPdfInsightSection {
                         && supported(item.basisClaimIds(), allowed) && StringUtils.hasText(item.reason())).toList();
         var watches = list(insight.watchItems()).stream()
                 .filter(item -> supported(item.basisClaimIds(), allowed) && StringUtils.hasText(item.topic())).toList();
-        pdf.section("리포트 관점 분석 · " + audience(insight.audience()));
-        pdf.muted(NotificationInsightBrief.AI_NOTICE);
+        String heading = "리포트 관점 분석 · " + audience(insight.audience());
         // The aggregate headline and importance have no claim bindings and can repeat excluded evidence.
         if (overview.isEmpty() && issues.isEmpty() && watches.isEmpty()) {
+            pdf.reserve(110);
+            pdf.section(heading);
+            pdf.muted(NotificationInsightBrief.AI_NOTICE);
             pdf.paragraph(NotificationInsightBrief.UNAVAILABLE);
             return;
         }
+        List<ReportPdfLayout.ReadingGroup> groups = new ArrayList<>();
         if (!overview.isEmpty()) {
-            pdf.subheading("리포트 종합 판단");
-            for (var item : overview) {
-                pdf.bullet(item.text());
-                value(pdf, "해석의 조건", item.assumption());
-            }
+            groups.add(new ReportPdfLayout.ReadingGroup("리포트 종합 판단", overview.stream().map(item ->
+                    new ReportPdfLayout.ReadingItem("해석", item.text(),
+                            List.of(new ReportPdfLayout.ReadingField("해석의 조건", item.assumption())))).toList()));
         }
         if (!issues.isEmpty()) {
-            pdf.subheading("먼저 살펴볼 이슈");
-            for (var item : issues) {
+            groups.add(new ReportPdfLayout.ReadingGroup("먼저 살펴볼 이슈", issues.stream().map(item -> {
                 Finding finding = visible.get(item.findingId());
-                if (finding.getArticle() != null) value(pdf, "기사", finding.getArticle().getTitle());
-                pdf.paragraph(item.reason());
-            }
+                String title = finding.getArticle() == null ? null : finding.getArticle().getTitle();
+                return new ReportPdfLayout.ReadingItem(StringUtils.hasText(title) ? "기사" : null, title,
+                        List.of(new ReportPdfLayout.ReadingField("해석", item.reason())));
+            }).toList()));
         }
         if (!watches.isEmpty()) {
-            pdf.subheading("다음 확인 항목");
-            for (var item : watches) {
-                pdf.bullet(item.topic());
-                value(pdf, "확인할 지표", item.indicator());
-                value(pdf, "판단 기준", item.trigger());
-            }
+            groups.add(new ReportPdfLayout.ReadingGroup("다음 확인 항목", watches.stream().map(item ->
+                    new ReportPdfLayout.ReadingItem(null, item.topic(), List.of(
+                            new ReportPdfLayout.ReadingField("확인할 지표", item.indicator()),
+                            new ReportPdfLayout.ReadingField("판단 기준", item.trigger())))).toList()));
         }
-    }
-
-    private static void value(ReportPdfLayout pdf, String label, String text) throws IOException {
-        if (StringUtils.hasText(text)) pdf.keyValue(label, text);
+        pdf.readingSection(heading, NotificationInsightBrief.AI_NOTICE, groups);
     }
 
     private static boolean supported(List<String> ids, Set<String> allowed) {

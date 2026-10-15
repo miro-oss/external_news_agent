@@ -83,6 +83,85 @@ final class ReportPdfLayout implements AutoCloseable {
     void gap(float amount) { y -= amount; }
     void reserve(float amount) throws IOException { ensure(amount); }
 
+    record ReadingField(String label, String text) { }
+    record ReadingItem(String label, String title, List<ReadingField> fields) { }
+    record ReadingGroup(String heading, List<ReadingItem> items) { }
+
+    void readingSection(String heading, String notice, List<ReadingGroup> groups) throws IOException {
+        if (groups.isEmpty()) return;
+        ReadingGroup first = groups.getFirst();
+        float prefix = 38 + readingTextHeight(heading, bold, 15, 22)
+                + readingTextHeight(notice, regular, 8.5f, 13) + 4
+                + 22 + readingTextHeight(first.heading(), bold, 11.5f, 17);
+        float complete = prefix + readingHeight(first.items().getFirst());
+        boolean keepFirstTogether = complete <= TOP - BOTTOM;
+        ensure(keepFirstTogether ? complete : Math.min(prefix + 90, TOP - BOTTOM));
+        section(heading);
+        muted(notice);
+        for (int index = 0; index < groups.size(); index++) {
+            ReadingGroup group = groups.get(index);
+            readingGroup(group.heading(), group.items(), index > 0 || keepFirstTogether);
+        }
+    }
+
+    /** Keep ordinary reading items together; oversized prose still flows through the normal line paginator. */
+    private void readingGroup(String heading, List<ReadingItem> items, boolean keepFirstTogether) throws IOException {
+        if (items.isEmpty()) return;
+        gap(6);
+        float headingHeight = 16 + readingTextHeight(heading, bold, 11.5f, 17);
+        float opening = readingHeight(items.getFirst()) + headingHeight;
+        ensure(keepFirstTogether && opening <= TOP - BOTTOM ? opening : headingHeight + 90);
+        subheading(heading);
+        gap(7);
+        for (int index = 0; index < items.size(); index++) {
+            readingItem(items.get(index), index > 0, index > 0 || (keepFirstTogether && opening <= TOP - BOTTOM));
+        }
+    }
+
+    private void readingItem(ReadingItem item, boolean separated, boolean keepTogether) throws IOException {
+        float height = readingHeight(item);
+        PDPage previousPage = page;
+        float requested = height + (separated ? 20 : 0);
+        ensure(keepTogether && requested <= TOP - BOTTOM ? requested : 90);
+        if (separated && previousPage == page) {
+            gap(8);
+            line(MARGIN, y, MARGIN + WIDTH, y, RULE, .5f);
+            gap(12);
+        }
+        readingLabel(item.label(), 18);
+        textBlock(item.title(), 10.5f, 18, bold, INK, 0);
+        gap(8);
+        for (ReadingField field : item.fields()) {
+            if (field.text() == null || field.text().isBlank()) continue;
+            readingLabel(field.label(), 17);
+            textBlock(field.text(), 10, 17, regular, INK, 0);
+            gap(9);
+        }
+        gap(3);
+    }
+
+    private void readingLabel(String label, float followingLineHeight) throws IOException {
+        if (label == null || label.isBlank()) return;
+        ensure(readingTextHeight(label, regular, 8, 11) + 3 + followingLineHeight);
+        textBlock(label, 8, 11, regular, MUTED, 0);
+        gap(3);
+    }
+
+    private float readingHeight(ReadingItem item) throws IOException {
+        float height = readingTextHeight(item.title(), bold, 10.5f, 18) + 11;
+        if (item.label() != null && !item.label().isBlank()) height += readingTextHeight(item.label(), regular, 8, 11) + 3;
+        for (ReadingField field : item.fields()) {
+            if (field.text() == null || field.text().isBlank()) continue;
+            if (field.label() != null && !field.label().isBlank()) height += readingTextHeight(field.label(), regular, 8, 11) + 3;
+            height += readingTextHeight(field.text(), regular, 10, 17) + 9;
+        }
+        return height;
+    }
+
+    private float readingTextHeight(String value, PDType0Font font, float size, float leading) throws IOException {
+        return value == null || value.isBlank() ? 0 : wrap(value, font, size, WIDTH).size() * leading;
+    }
+
     void link(String label, String url) throws IOException {
         if (!safeUrl(url)) { muted(label); return; }
         for (String line : wrap(label, regular, 8.5f, WIDTH)) {
@@ -225,7 +304,7 @@ final class ReportPdfLayout implements AutoCloseable {
             draw(label, x - width(label, regular, 7) / 2, chartBottom - 16, regular, 7, MUTED);
         }
         y = chartBottom - 34;
-        muted("자료가 없는 분기는 선을 연결하지 않습니다. 정확한 금액은 아래 표에서 확인할 수 있습니다.");
+        muted("자료가 없는 분기는 선을 연결하지 않습니다. 분기별 수치는 아래 표에서 확인할 수 있습니다.");
     }
 
     private void chartSeries(List<Double> values, float left, float right, float bottom,

@@ -23,6 +23,7 @@ import org.apache.pdfbox.text.TextPosition;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -117,7 +118,7 @@ class ReportPdfRendererTests {
     }
 
     @Test
-    void allCompaniesHavePrintedExactFinancialTablesWithoutFilingColumnsOrLists() throws Exception {
+    void allCompaniesHaveReadableFinancialTablesWithRepeatedUnitLabelsAndNoFilings() throws Exception {
         var report = report(ReportScope.RUN);
         var filing = filing("반기보고서", FILING_URL, true);
         var financials = new DartModels.FinancialData("CFS", "KRW", OffsetDateTime.parse("2026-10-14T16:30:00Z"),
@@ -132,8 +133,9 @@ class ReportPdfRendererTests {
             String text = new PDFTextStripper().getText(document);
             for (String expected : List.of("연결 회사 5", "2026년 1분기", "매출액", "영업이익", "영업이익률",
                     "자료 없음", "-1", "0%", "산출값", "2026-10-15 01:30",
-                    "동일한 재무 기준으로 비교합니다", "차트 단위: 억원", "표 금액 단위: 원 (KRW)")) assertTrue(text.contains(expected), expected);
-            assertTrue(text.replaceAll("\\s", "").contains("10,000,000,005,000,001.20"));
+                    "동일한 재무 기준으로 비교합니다", "차트 단위: 억원", "표 금액 단위: 억원", "매출액 (억원)", "영업이익 (억원)",
+                    "소수 둘째 자리까지 반올림", "100,000,000.05", "1,234.57", "-12.35", "-0.01 < 값 < 0")) assertTrue(text.contains(expected), expected);
+            assertFalse(text.replaceAll("\\s", "").contains("10,000,000,005,000,001.20"));
             for (String hidden : List.of("근거 공시", "실적 근거 공시", "최근 공시", "최근 주요사항보고서", "반기보고서", "[1]"))
                 assertFalse(text.contains(hidden), hidden);
             assertTrue(urls(document).isEmpty());
@@ -188,12 +190,20 @@ class ReportPdfRendererTests {
     }
 
     @Test
-    void monetaryTableKeepsOriginalDecimalPrecisionAndMissingDistinctFromZero() {
-        assertEquals("10,000,000,000,000,001.20", ReportPdfRenderer.amount("10000000000000001.20"));
-        assertEquals("-0.01", ReportPdfRenderer.amount("-0.01"));
-        assertEquals("0", ReportPdfRenderer.amount("0"));
-        assertEquals("자료 없음", ReportPdfRenderer.amount(null));
-        assertEquals("자료 없음", ReportPdfRenderer.amount("NaN"));
+    void monetaryTableScalesWonAndRoundsWithoutConfusingMissingTinyOrNegativeValuesWithZero() {
+        assertEquals("50", ReportPdfRenderer.amount("5000000000", "KRW"));
+        assertEquals("1,234.57", ReportPdfRenderer.amount("123456789012", "KRW"));
+        assertEquals("-12.35", ReportPdfRenderer.amount("-1234567890", "KRW"));
+        assertEquals("1.01", ReportPdfRenderer.amount("100500000", "KRW"));
+        assertEquals("-1.01", ReportPdfRenderer.amount("-100500000", "KRW"));
+        assertEquals("0.01", ReportPdfRenderer.amount("1000000", "KRW"));
+        assertEquals("0 < 값 < 0.01", ReportPdfRenderer.amount("1", "KRW"));
+        assertEquals("-0.01 < 값 < 0", ReportPdfRenderer.amount("-1", "KRW"));
+        assertEquals("0", ReportPdfRenderer.amount("0.00", "KRW"));
+        assertEquals("자료 없음", ReportPdfRenderer.amount(null, "KRW"));
+        assertEquals("자료 없음", ReportPdfRenderer.amount("NaN", "KRW"));
+        assertEquals("10,000,000,000,000,001.20", ReportPdfRenderer.amount("10000000000000001.20", "USD"));
+        assertEquals("-0.01", ReportPdfRenderer.amount("-0.01", null));
     }
 
     @Test
@@ -209,9 +219,15 @@ class ReportPdfRendererTests {
                 finding(2, "주요 공급사 계약 현황", "공급사의 계약 일정과 장비 반입 일정을 확인했습니다."),
                 finding(3, "시장 수요와 재고 동향", "주요 제품의 수요와 재고 수준은 다음 분기 생산 계획을 판단하는 참고 지표입니다."));
         var filing = filing("반기보고서 (2026.06)", FILING_URL, false);
-        var quarters = IntStream.range(0, 12).mapToObj(i -> quarter(2023 + (i + 2) / 4, (i + 2) % 4 + 1,
-                i == 5 ? null : String.valueOf(5_000_000_000L + i * 300_000_000L),
-                i == 5 ? null : String.valueOf((i - 2) * 140_000_000L), i == 5 ? null : new BigDecimal("8.35"), List.of(filing))).toList();
+        var quarters = IntStream.range(0, 12).mapToObj(i -> {
+            long revenue = 5_000_000_000L + i * 300_000_000L;
+            long profit = (i - 2) * 140_000_000L;
+            BigDecimal margin = BigDecimal.valueOf(profit).multiply(BigDecimal.valueOf(100))
+                    .divide(BigDecimal.valueOf(revenue), 2, RoundingMode.HALF_UP);
+            return quarter(2023 + (i + 2) / 4, (i + 2) % 4 + 1,
+                    i == 5 ? null : String.valueOf(revenue), i == 5 ? null : String.valueOf(profit),
+                    i == 5 ? null : margin, List.of(filing));
+        }).toList();
         when(dart.getStored(report)).thenReturn(new ReportDartDTO.Result(17L, List.of(company("예시 반도체", "PARTIAL",
                 new DartModels.FinancialData("CFS", "KRW", OffsetDateTime.parse("2026-10-15T09:00:00+09:00"),
                         quarters, List.of(filing, filing("주요사항보고서 (시설투자)", FILING_URL, true)),
