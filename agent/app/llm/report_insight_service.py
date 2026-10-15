@@ -145,7 +145,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v56"
+PROMPT_VERSION = "report-insight.ko.v57"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -913,14 +913,69 @@ class ReportInsightService(ReportInsightLegacyService):
                     validate_explanation_fields(response, batch)
                     return assess(response, batch.request)
 
-                return self._call(
-                    pipeline,
-                    instruction=report_stage_instruction(batch.request.audiences, "EXPLAIN"),
-                    prompt=batch.prompt,
-                    schema=schema,
-                    validate=validate_explanation,
-                    stage="EXPLAIN",
-                ).output
+                def explanation_response(wire):
+                    # This complete JSON is assembled locally. A discarded
+                    # provider response's truncation flag does not describe it.
+                    return replace(
+                        pipeline.last_response, text=prompt_json(wire), truncated=False
+                    )
+
+                fallback = None
+                if not pending_review_prose.intersection(batch.finding_ids):
+                    try:
+                        # Use only the final post-REVIEW decisions and sources.
+                        # Native validity alone is not proof that prose passed
+                        # the public grounding/time guards, so run both again.
+                        original = draft_to_wire(merge_drafts(request, validated), request)
+                        wire = {
+                            "assessments": {
+                                audience: {
+                                    f"finding{identifier}": original["assessments"][audience][
+                                        f"finding{identifier}"
+                                    ]
+                                    for identifier in batch.finding_ids
+                                }
+                                for audience in batch.request.audiences
+                            }
+                        }
+                        fallback = validate_explanation(explanation_response(wire))
+                    except ValueError:
+                        # EXPLAIN may still fix this prose, but it cannot be
+                        # retained if that independent refinement also fails.
+                        pass
+
+                try:
+                    return self._call(
+                        pipeline,
+                        instruction=report_stage_instruction(batch.request.audiences, "EXPLAIN"),
+                        prompt=batch.prompt,
+                        schema=schema,
+                        validate=validate_explanation,
+                        stage="EXPLAIN",
+                    ).output
+                except StructuredOutputExhaustedError:
+                    # Recover inside the worker, before parallel execution
+                    # cancels sibling batches. Provider/budget/deadline errors
+                    # are not output-validation failures and still propagate.
+                    if fallback is None:
+                        raise
+                    pipeline.ensure_time_remaining()
+                    try:
+                        authenticated = merge_drafts(batch.request, fallback)
+                        retained = validate_explanation(
+                            explanation_response(draft_to_wire(authenticated, batch.request))
+                        )
+                    except ValueError:
+                        retained = None
+                    if retained is None:
+                        raise
+                    logger.warning(
+                        "Report insight stage=EXPLAIN-%03d outcome=VALIDATION_FAILED "
+                        "fallback=VALIDATED_ASSESSMENTS_RETAINED findingCount=%d",
+                        index + 1,
+                        len(batch.finding_ids),
+                    )
+                    return retained
 
             if explanations:
                 explained = run_report_maps(
@@ -936,9 +991,10 @@ class ReportInsightService(ReportInsightLegacyService):
                     ].items():
                         combined["assessments"][audience].update(records)
                 # Reauthenticate the complete request, including every audience,
-                # after joining prose-only batches. No old-prose fallback is safe.
+                # after joining newly explained or revalidated retained prose.
                 validated = assess(
-                    replace(pipeline.last_response, text=prompt_json(combined)), request
+                    replace(pipeline.last_response, text=prompt_json(combined), truncated=False),
+                    request,
                 )
             validated, mapped = validated_merge(validated)
             # Display quotes are derived only after all assessment repairs.

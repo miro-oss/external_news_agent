@@ -252,8 +252,9 @@ def test_selected_source_explanation_replaces_prose_for_each_audience_before_red
         assert insight.assessments[0].basis_claim_ids == ["101:0"]
 
 
-def test_explanation_failure_cannot_fall_back_to_original_prose():
+def test_explanation_failure_retains_revalidated_final_assessment():
     source = explanation_fixture()
+    expected = generate(V4Provider(source), source).insights[0].assessments[0]
 
     def wire_hook(stage, occurrence, data, value):
         if stage.startswith("EXPLAIN-"):
@@ -263,10 +264,10 @@ def test_explanation_failure_cannot_fall_back_to_original_prose():
         return value
 
     provider = V4Provider(source, wire_hook=wire_hook, validate_wire=False)
-    with pytest.raises(AgentError):
-        generate(provider, source)
+    result = generate(provider, source)
+    assert result.insights[0].assessments[0] == expected
     assert provider.stages["EXPLAIN-001"] == 2
-    assert provider.stages["REDUCE-001"] == 0
+    assert provider.stages["REDUCE-001"] == 1
 
 
 def partial_repair_fixture():
@@ -498,7 +499,7 @@ def test_default_v4_covers_every_finding_in_batches_then_reviews_and_synthesizes
     assert all(
         entry.axes.directness == entry.axes.impact == entry.axes.urgency == 3 for entry in final
     )
-    assert result.meta.prompt_version == "report-insight.ko.v56"
+    assert result.meta.prompt_version == "report-insight.ko.v57"
     assert result.meta.input_tokens == 55 and result.meta.output_tokens == 35
     assert result.meta.cost_usd == 0.015 and result.meta.credits == 1
     assert source.model_dump_json(by_alias=True) == snapshot
@@ -1023,7 +1024,7 @@ def test_default_api_mock_has_v4_metadata_and_unchanged_public_response():
         )
     assert result.status_code == 200
     output = result.json()
-    assert output["meta"]["promptVersion"] == "report-insight.ko.v56"
+    assert output["meta"]["promptVersion"] == "report-insight.ko.v57"
     assert output["meta"]["mock"] is True
     assert RUBRIC_VERSION == "report-importance.v6"
     assert set(output) == {"insights", "meta"}
