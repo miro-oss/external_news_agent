@@ -153,4 +153,91 @@ class ReportDartOracleIntegrationTests {
         persistence.recover();
         assertEquals("PENDING", repository.find(report.getId()).getFirst().status());
     }
+
+    @Test void expiredCacheIsImmediatelyCopiedToNewReportWithoutChangingItsFetchTime() {
+        var now = LocalDateTime.now(ApiTimeZone.ZONE);
+        seedCache(data(), now.minusDays(2));
+        var report = create(true, ReportStatus.GENERATED);
+
+        persistence.enqueue(report.getId());
+
+        var attachment = service.get(report.getId()).companies().getFirst();
+        assertEquals("READY", attachment.status());
+        assertEquals(data(), attachment.data());
+        assertEquals(data().fetchedAt(), attachment.data().fetchedAt());
+        assertEquals(List.of(COMPANY.corpCode()), repository.staleCompanies(now.minusHours(24), now)
+                .stream().map(Company::corpCode).toList());
+        verifyNoInteractions(financials);
+    }
+
+    @Test void waitingReportsReuseCacheDespiteRetryDelayDisabledKeyOrActiveAttachmentLease() {
+        var now = LocalDateTime.now(ApiTimeZone.ZONE);
+        var waiting = new ArrayList<NewsReport>();
+        for (var status : List.of("PENDING", "RUNNING", "FAILED", "DISABLED")) {
+            var report = create(true, ReportStatus.GENERATED);
+            persistence.enqueue(report.getId());
+            jdbc.update("""
+                    UPDATE news_report_dart_attachments SET status = ?, next_attempt_at = ?,
+                        lease_token = 'old-owner', lease_expires_at = ? WHERE report_id = ?
+                    """, status, java.sql.Timestamp.valueOf(now.plusDays(1)),
+                    java.sql.Timestamp.valueOf(now.plusMinutes(30)), report.getId());
+            waiting.add(report);
+        }
+        seedCache(data(), now.minusDays(2));
+
+        assertTrue(repository.reusableReports().containsAll(waiting.stream().map(NewsReport::getId).toList()));
+        for (var report : waiting) {
+            persistence.enqueue(report.getId());
+            var attachment = service.get(report.getId()).companies().getFirst();
+            assertEquals("READY", attachment.status());
+            assertEquals(data(), attachment.data());
+            // An in-flight request may refresh the company cache, but cannot overwrite this report.
+            repository.complete(new ReportDartRepository.Job(report.getId(), COMPANY, 0), "old-owner",
+                    new FinancialData(null, null, data().fetchedAt(), List.of(), List.of(), List.of()), now);
+            assertEquals(data(), service.get(report.getId()).companies().getFirst().data());
+        }
+        assertTrue(repository.reusableReports().isEmpty());
+        verifyNoInteractions(financials);
+    }
+
+    @Test void partialCacheRetainsMissingValuesAndCompletedSnapshotsSurviveCacheRefresh() {
+        var now = LocalDateTime.now(ApiTimeZone.ZONE);
+        var partial = new FinancialData(data().fsDiv(), data().currency(), data().fetchedAt(),
+                data().quarters().subList(0, 10), data().disclosures(), List.of("일부 분기 자료 없음"));
+        seedCache(partial, now.minusDays(2));
+        var report = create(true, ReportStatus.GENERATED);
+        persistence.enqueue(report.getId());
+        assertEquals("PARTIAL", service.get(report.getId()).companies().getFirst().status());
+        assertEquals(partial, service.get(report.getId()).companies().getFirst().data());
+
+        seedCache(data(), LocalDateTime.now(ApiTimeZone.ZONE).plusSeconds(1));
+        persistence.enqueue(report.getId());
+        persistence.retry(report.getId());
+
+        assertEquals(partial, service.get(report.getId()).companies().getFirst().data());
+        assertTrue(repository.staleCompanies(now.plusDays(3), now.plusDays(4)).isEmpty());
+        verifyNoInteractions(financials);
+    }
+
+    @Test void refreshBackoffKeepsOldPayloadReadableAndExcludesTheCompanyUntilRetryTime() {
+        var now = LocalDateTime.now(ApiTimeZone.ZONE);
+        seedCache(data(), now.minusDays(2));
+        var report = create(true, ReportStatus.GENERATED);
+        persistence.enqueue(report.getId());
+        assertTrue(repository.claimCache(COMPANY.corpCode(), "refresh", now, now.plusMinutes(30)));
+        repository.deferCache(COMPANY.corpCode(), "refresh", now.plusMinutes(5));
+
+        assertEquals(data(), repository.cached(COMPANY.corpCode()).orElseThrow().data());
+        assertTrue(repository.staleCompanies(now.minusHours(24), now.plusMinutes(4)).isEmpty());
+        assertFalse(repository.claimCache(COMPANY.corpCode(), "other", now.plusMinutes(4), now.plusMinutes(34)));
+        assertEquals(List.of(COMPANY.corpCode()), repository.staleCompanies(now.minusHours(24), now.plusMinutes(6))
+                .stream().map(Company::corpCode).toList());
+        assertEquals(data(), service.get(report.getId()).companies().getFirst().data());
+    }
+
+    private void seedCache(FinancialData snapshot, LocalDateTime cachedAt) {
+        var now = LocalDateTime.now(ApiTimeZone.ZONE);
+        assertTrue(repository.claimCache(COMPANY.corpCode(), "seed", now, now.plusMinutes(30)));
+        assertTrue(repository.saveCache(COMPANY.corpCode(), "seed", snapshot, cachedAt));
+    }
 }
