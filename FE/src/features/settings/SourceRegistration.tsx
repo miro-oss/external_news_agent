@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useCreateSource } from '../../api/queries'
+import { ApiError } from '../../api/client'
+import { useCreateSource, useSources } from '../../api/queries'
 import { FormStatus } from './FormStatus'
 import '../notifications/notifications-refinement.css'
 import './source-registration.css'
@@ -15,17 +16,56 @@ const EMPTY = {
 export function SourceRegistration() {
   const [open, setOpen] = useState(false)
   const id = useId()
+  const sources = useSources()
+  const feeds = sources.data?.content.filter(source => source.active && source.sourceKind === 'FEED') ?? []
 
-  return <div className="source-registration-entry" id="source">
-    <button type="button" className="text-button source-registration-trigger"
-      aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
-      onClick={() => setOpen(true)}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
-      RSS 피드 등록
-    </button>
+  return <section className="card source-registration-entry" id="source" aria-labelledby={`${id}-feeds-title`}>
+    <header className="source-registration-heading">
+      <div>
+        <h2 id={`${id}-feeds-title`}>활성 RSS 피드
+          {sources.data && !sources.error && <span className="collapsible-count">{feeds.length}개</span>}
+        </h2>
+        <p className="muted">현재 활성화된 RSS 피드입니다. 수집할 주제에 연결해 사용할 수 있습니다.</p>
+      </div>
+      <div className="source-registration-actions">
+        <button type="button" className="text-button" disabled={sources.isFetching}
+          onClick={() => { void sources.refetch() }}>새로고침</button>
+        <button type="button" className="secondary-button source-registration-trigger"
+          aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
+          onClick={() => setOpen(true)}>
+          <span aria-hidden="true">+</span> RSS 피드 등록
+        </button>
+      </div>
+    </header>
+    {sources.isPending ? <p className="source-feed-status muted" role="status">활성 RSS 피드를 불러오고 있습니다.</p>
+      : sources.error ? <div className="source-feed-status">
+        <p className="error" role="alert">{sources.error instanceof ApiError ? sources.error.message : '활성 RSS 피드를 불러오지 못했습니다.'}</p>
+        <button type="button" className="secondary-button" disabled={sources.isFetching}
+          onClick={() => { void sources.refetch() }}>{sources.isFetching ? '다시 불러오는 중…' : '다시 시도'}</button>
+      </div>
+      : <>
+        {sources.isFetching && <p className="muted source-feed-status" role="status">목록을 새로고침하고 있습니다.</p>}
+        {feeds.length === 0 ? <p className="source-feed-status muted">활성화된 RSS 피드가 없습니다. RSS 피드를 등록해 주세요.</p>
+          : <div className="source-feed-scroll" role="region" aria-label="활성 RSS 피드 목록" tabIndex={0}>
+            <ul className="source-feed-list">
+              {feeds.map(source => <li key={source.id} className="source-feed-item">
+                <div className="source-feed-info">
+                  <strong>{source.name}</strong>
+                  {/^https?:\/\//i.test(source.urlTemplate)
+                    ? <a href={source.urlTemplate} target="_blank" rel="noopener noreferrer"
+                      aria-label={`${source.name} 피드 열기 (새 탭)`}>{source.urlTemplate}</a>
+                    : <span className="source-feed-url">{source.urlTemplate}</span>}
+                </div>
+                <dl className="source-feed-meta">
+                  <div><dt>국가</dt><dd>{source.country || '미지정'}</dd></div>
+                  <div><dt>언어</dt><dd>{source.language || '미지정'}</dd></div>
+                </dl>
+              </li>)}
+            </ul>
+          </div>}
+      </>}
     {open && createPortal(<SourceDialog id={id} onDismiss={() => setOpen(false)} />, document.body)}
-  </div>
+  </section>
 }
 
 function SourceDialog({ id, onDismiss }: { id: string; onDismiss: () => void }) {
