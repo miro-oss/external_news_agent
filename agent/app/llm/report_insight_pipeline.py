@@ -205,7 +205,7 @@ class ReportInsightPipelineProvider:
         return remaining
 
     def can_start_optional_review(self, reserve_seconds: float = 0.0) -> bool:
-        """Leave synthesis headroom before starting another optional review.
+        """Leave synthesis headroom when admitting REVIEW.
 
         This is admission only. Once started, every provider/deadline failure
         still propagates normally and all calls share the original deadline.
@@ -223,6 +223,8 @@ class ReportInsightPipelineProvider:
         Scoped production providers inherit this deadline for their HTTP call.
         The response check also applies it to injected providers. Exceptions
         leave the pipeline normally; this context never converts them to success.
+        REDUCE headroom is preserved through REVIEW, not guaranteed after later
+        required EXPLAIN, which runs under the restored whole-request deadline.
         """
         request_deadline = self.deadline
         self.deadline = min(

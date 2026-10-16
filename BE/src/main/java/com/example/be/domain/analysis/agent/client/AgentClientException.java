@@ -11,6 +11,7 @@ public class AgentClientException extends RuntimeException {
     private final TimeoutPhase timeoutPhase;
     private final ExecutionMetadata executionMetadata;
     private final ValidationFailure validationFailure;
+    private final ClientFailureKind clientFailureKind;
 
     public AgentClientException(String code, String message) {
         this(code, message, null, null, TimeoutPhase.NONE);
@@ -44,12 +45,19 @@ public class AgentClientException extends RuntimeException {
     public AgentClientException(String code, String message, Throwable cause, Usage usage,
                                 TimeoutPhase timeoutPhase, ExecutionMetadata executionMetadata,
                                 ValidationFailure validationFailure) {
+        this(code, message, cause, usage, timeoutPhase, executionMetadata, validationFailure, null);
+    }
+
+    public AgentClientException(String code, String message, Throwable cause, Usage usage,
+                                TimeoutPhase timeoutPhase, ExecutionMetadata executionMetadata,
+                                ValidationFailure validationFailure, ClientFailureKind clientFailureKind) {
         super(message, cause);
         this.code = code;
         this.usage = usage;
         this.timeoutPhase = timeoutPhase;
         this.executionMetadata = executionMetadata;
         this.validationFailure = validationFailure;
+        this.clientFailureKind = clientFailureKind;
     }
 
     public String getCode() {
@@ -66,6 +74,14 @@ public class AgentClientException extends RuntimeException {
 
     public ValidationFailure getValidationFailure() {
         return validationFailure;
+    }
+
+    public ClientFailureKind getClientFailureKind() { return clientFailureKind; }
+
+    /** Local HTTP client observations, not a claim about provider usage or retry safety. */
+    public enum ClientFailureKind {
+        CONNECT_TIMEOUT, READ_TIMEOUT, DNS_FAILURE, CONNECTION_FAILURE, TLS_FAILURE,
+        IO_FAILURE, RESPONSE_DECODE, EMPTY_RESPONSE, UNKNOWN
     }
 
     public boolean isConnectTimeout() {
@@ -137,7 +153,7 @@ public class AgentClientException extends RuntimeException {
                 + "decimal_whole_digits complex_type complex_str_parsing").split(" "));
 
         public ValidationFailure {
-            if (stage == null || !stage.matches("(?:MAP|REVIEW|REDUCE)(?:-[0-9]{3})?")
+            if (stage == null || !stage.matches("(?:MAP|REVIEW|EXPLAIN|REDUCE)(?:-[0-9]{3})?")
                     || attempt < 1 || attempt > 2 || errorType == null || !TYPES.contains(errorType)
                     || errorCount < 0 || errorCount > 1_000_000 || errorKinds == null
                     || errorKinds.size() > 5 || errorKinds.stream().anyMatch(value -> value == null)) {
@@ -170,7 +186,7 @@ public class AgentClientException extends RuntimeException {
                 + "decision\\.(?:connection|effect|timing)\\.basis(?:\\.(?:claimId|sourceSpanId))?))?";
 
         private boolean matchesStage(String stage) {
-            return field.matches(stage.matches("(?:MAP|REVIEW)(?:-[0-9]{3})?") ? MAP_FIELD : REDUCE_FIELD);
+            return field.matches(stage.matches("(?:MAP|REVIEW|EXPLAIN)(?:-[0-9]{3})?") ? MAP_FIELD : REDUCE_FIELD);
         }
 
         public ValidationIssue {

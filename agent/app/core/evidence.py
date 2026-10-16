@@ -3,6 +3,7 @@ import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
+from app.core.numeric_quantities import QUANTITY_UNITS
 from app.schemas.evidence import EvidenceSentence
 
 # Read the entire decimal before checking its boundary: ``3.59GW`` must not
@@ -79,6 +80,30 @@ _SCALED_COUNT_UNIT = re.compile(
     r"\s*(?:개|명|건|톤|배)(?=$|[^A-Za-z0-9가-힣]|"
     r"(?:으로|에서|까지|부터|보다|이다|이고|이며|을|를|은|는|이|가|의|에|로|와|과|만|도|당|씩)+"
     r"(?![가-힣]))"
+)
+_COMPARABLE_QUANTITY_UNITS = {
+    unit: definition
+    for unit, definition in QUANTITY_UNITS.items()
+    if definition[0] in {"count", "machines", "cases", "people", "tonne"}
+}
+_COMPARABLE_UNIT_PATTERN = "|".join(
+    re.escape(unit) for unit in sorted(_COMPARABLE_QUANTITY_UNITS, key=len, reverse=True)
+)
+_QUANTITY_END = (
+    r"(?=$|[^A-Za-z0-9가-힣]|(?:으로|에서|까지|부터|보다|이다|이고|이며|다|"
+    r"을|를|은|는|이|가|의|에|로|와|과|만|도|당|씩)+(?![A-Za-z0-9가-힣]))"
+)
+_COMPARABLE_QUANTITY = re.compile(
+    rf"(?<![\w.+−-])(?P<sign>[-+]?)(?P<amount>{_CURRENCY_EXPRESSION})\s*"
+    rf"(?P<unit>{_COMPARABLE_UNIT_PATTERN}){_QUANTITY_END}",
+    re.IGNORECASE,
+)
+# Opaque Korean suffixes can prove whitespace equivalence without inventing a
+# counter dictionary. Their complete literal is the identity, never a dimension.
+_KOREAN_QUANTITY_TOKEN = re.compile(
+    rf"(?<![A-Za-z0-9.])(?P<sign>[-+]?)(?P<amount>{_CURRENCY_EXPRESSION})\s*"
+    r"(?P<suffix>[가-힣]+)",
+    re.IGNORECASE,
 )
 _SIGNED_CURRENCY_PREFIX = re.compile(r"(?P<sign>[-+])(?P<currency>us\$|\$|€|₩|usd|eur|krw)\s*$")
 _DATE_NUMBER_UNIT = re.compile(r"\s*(년|월|일|분기)")
@@ -377,7 +402,9 @@ def cross_source_signal(reference_text: str, candidate_text: str) -> CrossSource
     )
 
 
-def factual_mismatches(claim: str, evidence_text: str) -> list[str]:
+def factual_mismatches(
+    claim: str, evidence_text: str, *, quantity_source: str | None = None
+) -> list[str]:
     """근거에 문자 그대로 존재해야 하는 사실만 보수적으로 검사한다."""
     normalized_claim = _normalize(claim)
     normalized_evidence = _normalize(evidence_text)
@@ -386,6 +413,21 @@ def factual_mismatches(claim: str, evidence_text: str) -> list[str]:
     evidence_numbers = _numbers(normalized_evidence)
     numeric_claim = _approximate_currency_comparison(normalized_claim, normalized_evidence)
     missing_numbers = _numbers(numeric_claim) - evidence_numbers
+    contextual_numbers = _contextual_number_mismatches(numeric_claim, normalized_evidence)
+    if missing_numbers or contextual_numbers:
+        # Already-supported prose keeps its existing acceptance behavior. This
+        # comparison view only resolves an actual numeric spelling mismatch.
+        compared = _source_quantity_comparison(
+            claim, evidence_text if quantity_source is None else quantity_source
+        )
+        if compared != claim:
+            # The proof retains raw case and punctuation. Only its proven
+            # comparison copy enters the pre-existing normalized checks.
+            numeric_claim = _approximate_currency_comparison(
+                _normalize(compared), normalized_evidence
+            )
+        missing_numbers = _numbers(numeric_claim) - evidence_numbers
+        contextual_numbers = _contextual_number_mismatches(numeric_claim, normalized_evidence)
     if missing_numbers:
         mismatches.append("근거에서 확인되지 않는 숫자: " + ", ".join(sorted(missing_numbers)))
     source_currency = {amount for _, _, amount in _currency_amounts(normalized_evidence)}
@@ -399,7 +441,6 @@ def factual_mismatches(claim: str, evidence_text: str) -> list[str]:
             "근거와 일치하지 않는 통화·금액 숫자: " + ", ".join(sorted(unsupported_currency))
         )
 
-    contextual_numbers = _contextual_number_mismatches(numeric_claim, normalized_evidence)
     if contextual_numbers:
         mismatches.append("근거와 연결이 다른 숫자: " + ", ".join(contextual_numbers))
 
@@ -711,6 +752,55 @@ def _unitless_scaled_amounts(value, currency_amounts):
         if amount is not None:
             amounts.append((match.start(), match.end(), amount))
     return amounts
+
+
+def _comparison_quantities(value: str):
+    currency = _currency_amounts(value)
+    for match in _COMPARABLE_QUANTITY.finditer(value):
+        if any(start <= match.start() < end for start, end, _ in currency):
+            continue
+        amount = _scaled_amount_value(match["amount"], match["sign"])
+        if amount is None:
+            continue
+        dimension, multiplier = _COMPARABLE_QUANTITY_UNITS[match["unit"].casefold()]
+        yield match, (dimension, Decimal(amount) * multiplier)
+
+
+def _source_quantity_comparison(claim: str, source: str) -> str:
+    """Compare a complete original text with only quantity notation changed.
+
+    Individual spans need the same value, dimension and sign, or the same
+    complete literal except whitespace. The entire result, including nonnumeric
+    context and punctuation, must equal the raw source. A partial excerpt or an
+    unparsed owner/event therefore cannot gain an exemption. Stored/generated
+    prose and the source itself are never rewritten.
+    """
+    source_quantities = list(_comparison_quantities(source))
+    replacements = []
+    for match, identity in _comparison_quantities(claim):
+        equivalent = next(
+            (row[0] for row, source_identity in source_quantities if source_identity == identity),
+            None,
+        )
+        if equivalent is not None and match[0] != equivalent:
+            replacements.append((match.start(), match.end(), equivalent))
+
+    source_tokens = {
+        re.sub(r"\s+", "", match[0]): match[0] for match in _KOREAN_QUANTITY_TOKEN.finditer(source)
+    }
+    for match in _KOREAN_QUANTITY_TOKEN.finditer(claim):
+        equivalent = source_tokens.get(re.sub(r"\s+", "", match[0]))
+        if equivalent is None or match[0] == equivalent:
+            continue
+        if any(start < match.end() and match.start() < end for start, end, _ in replacements):
+            continue
+        replacements.append((match.start(), match.end(), equivalent))
+    if not replacements:
+        return claim
+    compared = claim
+    for start, end, spelling in sorted(replacements, reverse=True):
+        compared = compared[:start] + spelling + compared[end:]
+    return compared if compared == source else claim
 
 
 def _approximate_currency_comparison(claim: str, evidence: str) -> str:

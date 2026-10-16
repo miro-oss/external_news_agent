@@ -12,6 +12,7 @@ from collections import Counter
 from decimal import Decimal
 
 from app.eval.report_insight_operational import AUDIENCES, ReportCase
+from app.eval.report_insight_outcomes import summarize_outcomes
 from app.eval.report_insight_run import digest, require
 from app.eval.report_insight_semantic_judge import validate_packet
 from app.eval.report_insight_semantic_review import _annotations
@@ -139,6 +140,7 @@ def measure_run(state: dict) -> dict:
         )
         latency = sorted(job["latencyMs"] for job in finished if "latencyMs" in job)
         groups[policy] = {
+            "generationOutcomes": summarize_outcomes(jobs),
             "plannedResults": len(jobs),
             "finishedResults": len(finished),
             "measuredGenerationResults": len(measured),

@@ -236,6 +236,108 @@ test('an explicit retry racing an automatic job refreshes stored lookup without 
   assert.deepEqual(invalidations, [{ queryKey: reportInsightKey(report.id, 'CHIP_MAKER', snapshot), exact: true }, { queryKey: ['usage', 'llm'] }])
 })
 
+test('a lost generation response rechecks the active stored result without repeating the POST', async context => {
+  const client = clientFor(context), calls = []
+  const unrelatedKey = reportInsightKey(report.id, 'IT_INFRA', snapshot)
+  const unrelated = reportInsightFixture(report, 'IT_INFRA')
+  client.setQueryData(unrelatedKey, unrelated)
+  context.mock.method(globalThis, 'fetch', async (url, init) => {
+    const method = init.method ?? 'GET'
+    calls.push({ url, method })
+    if (method === 'POST') throw new TypeError('lost generation response')
+    return calls.length === 1 ? fail('COMMON404', '저장된 리포트 관점 인사이트가 없습니다.', 404)
+      : envelope(reportInsightFixture(report))
+  })
+  const observer = new QueryObserver(client, reportInsightOptions(report.id, 'CHIP_MAKER', snapshot))
+  context.after(observer.subscribe(() => {}))
+  await settle()
+  assert.ok(isReportInsightAbsent(observer.getCurrentResult().error))
+  await assert.rejects(client.getMutationCache().build(client, generateReportInsightOptions(client))
+    .execute({ reportId: report.id, audience: 'CHIP_MAKER', snapshot }), /lost generation response/)
+  assert.deepEqual(calls.map(call => call.method), ['GET', 'POST', 'GET'])
+  assert.ok(calls.filter(call => call.method === 'GET').every(call => call.url.endsWith('?audience=CHIP_MAKER')))
+  assert.equal(observer.getCurrentResult().isSuccess, true)
+  assert.equal(observer.getCurrentResult().data.insights[0].audience, 'CHIP_MAKER')
+  assert.deepEqual(client.getQueryData(unrelatedKey), unrelated)
+})
+
+test('a failed reconciliation read replaces the earlier absence without authorizing an automatic generation retry', async context => {
+  const client = clientFor(context), calls = []
+  context.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const method = init.method ?? 'GET'
+    calls.push(method)
+    if (method === 'POST') return fail('COMMON500', '리포트 관점 인사이트 생성에 실패했습니다.', 500)
+    return calls.length === 1 ? fail('COMMON404', '저장된 리포트 관점 인사이트가 없습니다.', 404)
+      : fail('COMMON503', '저장된 결과를 확인하지 못했습니다.', 503)
+  })
+  const observer = new QueryObserver(client, reportInsightOptions(report.id, 'CHIP_MAKER', snapshot))
+  context.after(observer.subscribe(() => {}))
+  await settle()
+  await assert.rejects(client.getMutationCache().build(client, generateReportInsightOptions(client))
+    .execute({ reportId: report.id, audience: 'CHIP_MAKER', snapshot }), error => error.code === 'COMMON500')
+  assert.deepEqual(calls, ['GET', 'POST', 'GET'])
+  assert.equal(observer.getCurrentResult().error.code, 'COMMON503')
+  assert.equal(isReportInsightAbsent(observer.getCurrentResult().error), false)
+  assert.equal(observer.getCurrentResult().data, undefined)
+  await settle()
+  assert.deepEqual(calls, ['GET', 'POST', 'GET'])
+})
+
+test('a lost POST response followed by pending GET resumes existing read polling until saved', async context => {
+  const advance = pollingClock(context)
+  const client = clientFor(context), calls = []
+  context.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const method = init.method ?? 'GET'
+    calls.push(method)
+    if (method === 'POST') throw new TypeError('lost generation response')
+    if (calls.length === 1) return fail('COMMON404', '저장된 리포트 관점 인사이트가 없습니다.', 404)
+    return calls.length === 3 ? fail('COMMON409', preparingMessage, 409) : envelope(reportInsightFixture(report))
+  })
+  const observer = new QueryObserver(client, reportInsightOptions(report.id, 'CHIP_MAKER', snapshot))
+  context.after(observer.subscribe(() => {}))
+  await settle()
+  await assert.rejects(client.getMutationCache().build(client, generateReportInsightOptions(client))
+    .execute({ reportId: report.id, audience: 'CHIP_MAKER', snapshot }), /lost generation response/)
+  assert.ok(isReportInsightPreparing(observer.getCurrentResult().error))
+  await advance(10_000)
+  assert.equal(observer.getCurrentResult().isSuccess, true)
+  await advance(60_000)
+  assert.deepEqual(calls, ['GET', 'POST', 'GET', 'GET'])
+})
+
+test('POST failure cancels an older in-flight lookup before rechecking saved results', async context => {
+  const client = clientFor(context), calls = []
+  let rejectPost, releaseOlderRead, olderSignal
+  context.mock.method(globalThis, 'fetch', (_url, init) => {
+    const method = init.method ?? 'GET'
+    calls.push(method)
+    if (method === 'POST') return new Promise((_resolve, reject) => { rejectPost = reject })
+    if (calls.length === 1) return Promise.resolve(fail('COMMON404', '저장된 리포트 관점 인사이트가 없습니다.', 404))
+    if (calls.length === 3) {
+      olderSignal = init.signal
+      return new Promise(resolve => { releaseOlderRead = () => resolve(fail('COMMON404', '이전 조회 결과', 404)) })
+    }
+    return Promise.resolve(envelope(reportInsightFixture(report)))
+  })
+  const observer = new QueryObserver(client, reportInsightOptions(report.id, 'CHIP_MAKER', snapshot))
+  context.after(observer.subscribe(() => {}))
+  await settle()
+  const generation = client.getMutationCache().build(client, generateReportInsightOptions(client))
+    .execute({ reportId: report.id, audience: 'CHIP_MAKER', snapshot }).catch(error => error)
+  await settle()
+  const olderRead = observer.refetch()
+  await settle()
+  rejectPost(new TypeError('lost generation response'))
+  assert.match((await generation).message, /lost generation response/)
+  assert.equal(olderSignal.aborted, true)
+  releaseOlderRead()
+  await olderRead
+  await settle()
+  assert.deepEqual(calls, ['GET', 'POST', 'GET', 'GET'])
+  assert.equal(observer.getCurrentResult().isSuccess, true)
+  assert.ok(observer.getCurrentResult().data)
+})
+
 test('responses for another report or missing requested perspective are rejected without populating the requested cache', async context => {
   const client = clientFor(context)
   for (const wrong of [reportInsightFixture({ ...report, id: report.id + 1 }), reportInsightFixture(report, 'IT_INFRA')]) {

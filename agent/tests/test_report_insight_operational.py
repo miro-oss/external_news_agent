@@ -35,6 +35,7 @@ def prepared(tmp_path, monkeypatch):
             "case_id": "four-role-source",
             "split": "holdout",
             "request": source.model_dump(mode="json", by_alias=True),
+            "event_families": {101: ["synthetic-production-halt"]},
         }
     ]
     return tmp_path, source, policy, cases
@@ -106,9 +107,9 @@ def test_review_observer_preserves_explanation_reserve_and_disabled_control(monk
         clock[0] = 59.0
         assert pipeline.can_start_optional_review(reserve_seconds=reserve)
         recorder.local.job["reviewPolicy"] = "disabled"
-        assert not pipeline.can_start_optional_review(reserve_seconds=reserve)
+        assert pipeline.can_start_optional_review(reserve_seconds=reserve)
 
-    assert [event["admitted"] for _, event in events] == [False, True, False]
+    assert [event["admitted"] for _, event in events] == [False, True, True]
     assert [event["policy"] for _, event in events] == ["production", "production", "disabled"]
     assert all(name == "reviewAdmissions" for name, _ in events)
     assert pipeline.calls == 0
@@ -125,6 +126,8 @@ def test_current_native_service_runs_all_stages_with_real_review_admission(prepa
     state = operational.run(output, api_key="explicit-test-key")
 
     assert manifest["promptVersion"] == PROMPT_VERSION
+    assert all(job["split"] == "holdout" for job in manifest["jobs"])
+    assert state["summary"]["generationOutcomes"]["bySplit"]["holdout"]["counts"]["generated"] == 4
     assert manifest["policy"]["settings"]["report_insight_timeout_seconds"] == 180
     assert state["summary"]["successResults"] == 4, state["results"]
     assert state["summary"]["providerAttemptsByStage"] == {"MAP": 4, "REVIEW": 4, "REDUCE": 4}
@@ -217,6 +220,9 @@ def test_full_36_findings_use_six_maps_and_normal_reviews_per_audience(prepared,
     output, _, policy, cases = prepared
     source = request(ids=tuple(range(101, 137)), audiences=operational.AUDIENCES)
     cases[0]["request"] = source.model_dump(mode="json", by_alias=True)
+    cases[0]["event_families"] = {
+        finding.id: ["synthetic-production-halt"] for finding in source.findings
+    }
     sdk = FakeSDK(source, monkeypatch)
     operational.prepare(cases, policy, output)
     state = operational.run(output, api_key="test-key")

@@ -581,7 +581,7 @@ public class AgentRunRecorder {
                 .promptVersion(meta.promptVersion()).llmProvider(meta.provider()).llmModel(meta.model())
                 .llmPlan(request.plan()).inputTokens(meta.inputTokens()).outputTokens(meta.outputTokens())
                 .costUsd(meta.costUsd()).credits(meta.credits()).requestHash(hash(request))
-                .actionPayload(objectMapper.writeValueAsString(context.withExecution("RESPONSE",
+                .actionPayload(objectMapper.writeValueAsString(context.withAudiences(request.audiences()).withExecution("RESPONSE",
                         usageCompleteness(meta.inputTokens(), meta.outputTokens(), meta.costUsd(), meta.credits()))))
                 .startedAt(startedAt).finishedAt(now()).build());
     }
@@ -605,8 +605,11 @@ public class AgentRunRecorder {
                 .llmModel(metadata == null ? null : validFailureMetadata(metadata.model(), 100)).llmPlan(request.plan())
                 .inputTokens(usage == null ? null : usage.inputTokens()).outputTokens(usage == null ? null : usage.outputTokens())
                 .costUsd(usage == null ? null : usage.costUsd()).credits(usage == null ? null : usage.credits())
-                .requestHash(hash(request)).actionPayload(objectMapper.writeValueAsString(context.withExecution(
-                        metadata == null ? "UNAVAILABLE" : metadata.source(), failureUsageCompleteness(usage, metadata))))
+                .requestHash(hash(request)).actionPayload(objectMapper.writeValueAsString(context
+                        .withAudiences(request.audiences()).withValidationFailure(exception.getValidationFailure())
+                        .withClientFailure(exception.getClientFailureKind())
+                        .withExecution(metadata == null ? "UNAVAILABLE" : metadata.source(),
+                                failureUsageCompleteness(usage, metadata))))
                 .startedAt(startedAt).finishedAt(now()).build());
     }
 

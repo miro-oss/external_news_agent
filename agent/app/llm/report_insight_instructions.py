@@ -37,11 +37,10 @@ ASSESSMENT_REPAIR_ORDER_RULE = (
     "Schema const를 유지하고 decision·basis를 먼저 확정한 뒤 최종 근거로 reason을 쓴다."
 )
 ASSESSMENT_SELECTED_BASIS_RULE = (
-    "최종 선택한 non-null basis의 claim·연결 원문만 다시 읽고 reason을 쓴다. "
-    "같은 finding이라도 미선택 claim의 내용을 섞지 않는다. 자금 조달과 사용처·투자 지역·"
-    "시설은 별개 정보다. 후자를 설명하려면 그 내용을 지원하는 원문을 해당 축의 근거로 "
-    "선택하고 원문의 조건·가능성을 유지한다. 그런 근거를 선택하지 않았다면 판단과 설명을 "
-    "선택한 사건 범위로 좁힌다. 추론한 연결을 원문이 직접 제시한 사실처럼 쓰지 않는다."
+    "각 축은 그 축의 최종 non-null basis가 선택한 claim·연결 원문으로 판단한다. "
+    "reason은 최종 선택 근거만 다시 읽고 쓰며, 같은 finding의 미선택 claim을 섞지 않는다. "
+    "원문의 주체·대상·사건·단계와 조건·가능성을 유지한다. 지원되지 않는 연결을 사실로 "
+    "단정하지 말고, 선택한 사건 범위로 판단과 설명을 좁힌다."
 )
 ASSESSMENT_FINAL_BASIS_RULE = (
     "보정은 최종 decision을 정한 뒤 마무리한다. connection/effect/timing의 최종 non-null "
@@ -60,37 +59,27 @@ ASSESSMENT_FINAL_BASIS_RULE = (
     "원문에 실제로 명시된 조건·불확실성은 보존한다. " + ASSESSMENT_SELECTED_BASIS_RULE
 )
 
+REPORT_WORK_SCOPE_RULE = (
+    "같은 동작·기업이라도 원문 대상이 다르면 해당 업무의 사실로 대체하지 않는다. "
+    "수반될 수 있는 업무와 실제 확인된 업무를 구분하고, 미확인 연결 전제는 condition에 쓴다."
+)
+
 _ROLES = {
     "CHIP_MAKER": "칩 제조: 공정 인증·설계 IP/공정 적용·계측/공정 제어 검증 "
     "PROCESS_QUALIFICATION, "
-    "생산 일정 PRODUCTION_SCHEDULE, "
+    "생산 일정·배분 PRODUCTION_SCHEDULE, "
     "수율/능력·품질/처리량 분석 YIELD_CAPACITY, 고객 요구·공급 약정 CUSTOMER_REQUIREMENTS, "
-    "소재 확보 "
-    "MATERIAL_SUPPLY. 메모리/HBM 제조사의 실제 고객 공급 계약도 직접 관계일 수 있다. "
-    "공정·수율이 없다는 이유로 그 계약을 무관 처리하지 않는다. "
-    "계약은 생산 증가·규격 승인·납품 완료를 뜻하지 않는다. 공정 인증·설계 적용은 "
-    "고객 계약이 없어도 판단한다. 생산능력·생산 배분은 각각 능력·생산 일정 업무로 판단한다. "
-    "기술 검토는 실제 채택·효과 달성이 아니다. 기판·패키징 공정 적용도 업무와 대조한다. "
-    "주가·수출액·시장점유율과 생산 일정·능력의 변화를 구분한다. "
-    "소자·칩 실험·특성 분석은 고객 요구 변경과 구분한다.",
+    "소재 확보 MATERIAL_SUPPLY.",
     "EQUIPMENT_MAKER": "장비 공급: 공정 검증 PROCESS_VALIDATION, 설계 채택 DESIGN_IN, "
     "실제 발주/수주 ORDER_BOOKING, 납품/설치 DELIVERY_INSTALLATION, 서비스 "
-    "MAINTENANCE_SERVICE. 공정 검증·설계 채택은 발주 확인을 전제로 하지 않는다. "
-    "제조사 증설 계획은 장비 발주가 아니다.",
+    "MAINTENANCE_SERVICE.",
     "MARKET_INVESTOR": "투자 판단: 전망 GUIDANCE, 투자 집행 CAPEX_EXECUTION, 매출 인식 "
     "REVENUE_RECOGNITION, 이익률 PROFITABILITY, 수급 제약 SUPPLY_DEMAND_CONSTRAINT. "
     "공시 전망과 실제 실적을 구분한다. 선택 원문의 거래 동향·기록과 목표주가 조정 "
     "보도는 서술할 수 있으나 독자의 매매를 권고하거나 목표가격을 제시하지 않는다.",
-    "IT_INFRA": "IT 운영: 시스템 조달 SYSTEM_PROCUREMENT, 호환성 COMPATIBILITY, "
-    "전력/냉각 POWER_COOLING, 네트워크 NETWORK, 도입/운영 DEPLOYMENT_OPERATIONS. "
-    "시스템 구성품의 가격·공급 조건과 전망은 시스템 조달 판단에 연결될 수 있다. "
-    "확정 공급 조건과 전망을 구분한다. 그것만으로 이미 "
-    "조달 비용이 변했거나 냉각 승인 절차가 존재한다고 만들지 않는다. 소재 공장은 서버 "
-    "운영이 아니다. 시장 수급·가격 전망만으로 특정 프로젝트 변경이나 준비 활동을 "
-    "만들지 않는다. 전망의 연도·사업 발표일은 대응 기한이 아니다. "
-    "직원·본사·사무공간의 물리 이전은 IT 시스템·네트워크 이전의 사실 근거가 아니다. "
-    "시스템 변경이 원문에 있으면 직접 업무로 판단하고, 수반될 것이라는 가정만 있으면 "
-    "그 구체적 연결 전제를 구분한다.",
+    "IT_INFRA": "IT 운영: 시스템·구성품의 가격/공급 조건·전망을 포함한 조달 "
+    "SYSTEM_PROCUREMENT, 호환성 COMPATIBILITY, 전력/냉각 POWER_COOLING, "
+    "네트워크 NETWORK, 도입/운영 DEPLOYMENT_OPERATIONS.",
 }
 
 
@@ -99,7 +88,7 @@ def report_stage_instruction(audiences: list[Audience], stage: str, *, repair: b
     if not audiences or stage not in {"MAP", "REVIEW", "EXPLAIN", "REDUCE"}:
         raise ValueError("A report stage needs requested audiences and a known stage")
     roles = "\n".join(f"{audience}: {_ROLES[audience]}" for audience in audiences)
-    common = _BASE + "\n\n" + roles
+    common = _BASE + "\n\n" + REPORT_WORK_SCOPE_RULE + "\n\n" + roles
     if "MARKET_INVESTOR" in audiences:
         common += "\n\n" + REPORT_ANALYSIS_ONLY_RULE
     if stage == "EXPLAIN":
@@ -115,7 +104,6 @@ def report_stage_instruction(audiences: list[Audience], stage: str, *, repair: b
             + " "
             + ASSESSMENT_SELECTED_BASIS_RULE
             + " 이 단계에서는 판단을 재판정하거나 basis를 새로 선택·교체·삭제하지 않는다. "
-            "선택 근거가 지원하지 않는 사용처·시설 설명은 추가하지 않고 설명 범위를 좁힌다."
         )
         return common + "\n\n" + stage_text
     if stage in {"MAP", "REVIEW"}:
@@ -154,8 +142,7 @@ def report_stage_instruction(audiences: list[Audience], stage: str, *, repair: b
         "finding을 연결하고, 공통 업무만 있으면 독립 사건으로 나란히 설명한다. "
         "basisClaimIds는 필요한 최소 원문만 중복 없이 쓴다. "
         "각 해석의 근거를 먼저 정하고 그 claim·연결 원문에서만 영향 경로를 설명한다. "
-        "자금 조달 전망을 특정 지역·시설에 대한 사용 계획으로 바꾸지 않는다. "
-        "그 사용처를 설명하려면 이를 지원하는 근거도 선택하고 원문의 조건을 유지한다. "
+        "같은 finding의 미선택 사실을 섞지 말고 선택 근거의 대상·단계·조건을 유지한다. "
         "implications는 원문 사건→원문에 지원되는 중간 조건→업무 판단의 경로가 있을 때만 "
         "작성한다. assumption은 같은 대상의 성립 조건, falsifiedBy는 같은 해석을 바꾸는 "
         "관측 사건이다. falsifiedBy가 실제로 발생했을 때 text의 예상 결과가 약해지는지 "

@@ -336,7 +336,8 @@ class ReportInsightServiceTest {
         when(persistence.findCached(10L, "a".repeat(64), List.of(Audience.CHIP_MAKER))).thenReturn(List.of(row(Audience.CHIP_MAKER)));
         assertTrue(service.create(10L, new ReportInsightDTO.CreateRequest(List.of("CHIP_MAKER"))).cached());
         verifyNoInteractions(client, quota, plans);
-        verify(recorder).recordReportInsightCacheHit(eq(20L), eq(10L), any(), any());
+        verify(recorder).recordReportInsightCacheHit(eq(20L), eq(10L),
+                argThat(audit -> audit.audiences().equals(List.of(Audience.CHIP_MAKER))), any());
     }
     @Test void invalidAudiencePositiveIdAndMissingEvidenceFailBeforeQuota() {
         assertThrows(AudienceException.class, () -> service.create(10L, new ReportInsightDTO.CreateRequest(List.of("OTHER"))));
@@ -395,14 +396,14 @@ class ReportInsightServiceTest {
         assertDiagnostic("AGENT_CALL", "SCHEMA_VIOLATION", AgentClientException.TimeoutPhase.NONE, true);
         var arguments = logs.list.stream().filter(event -> event.getMessage().contains("failureCode={}"))
                 .findFirst().orElseThrow().getArgumentArray();
-        assertEquals(stage, arguments[6]);
-        assertEquals(2, arguments[7]);
-        assertEquals("OutputValidationError", arguments[8]);
-        assertEquals(2, arguments[9]);
-        assertEquals(List.of("report_fact_mismatch"), arguments[10]);
+        assertEquals(stage, arguments[7]);
+        assertEquals(2, arguments[8]);
+        assertEquals("OutputValidationError", arguments[9]);
+        assertEquals(2, arguments[10]);
+        assertEquals(List.of("report_fact_mismatch"), arguments[11]);
         assertEquals(List.of(new AgentClientException.ValidationIssue("CHIP_MAKER", field,
-                "report_fact_mismatch", List.of("101:0"))), arguments[11]);
-        assertEquals(true, arguments[12]);
+                "report_fact_mismatch", List.of("101:0"))), arguments[12]);
+        assertEquals(true, arguments[13]);
         verify(recorder).recordReportInsightFailure(eq(20L), any(), same(failure), any(), any());
         verify(quota).completeObservedFailure(any(), same(failure));
     }
@@ -470,7 +471,8 @@ class ReportInsightServiceTest {
         assertEquals(phase, arguments[2].toString());
         assertEquals(code, arguments[3]);
         assertEquals(timeout, arguments[4]);
-        assertEquals(auditPersisted, arguments[5]);
+        assertNull(arguments[5]);
+        assertEquals(auditPersisted, arguments[6]);
         for (var event : logs.list) {
             assertNull(event.getThrowableProxy());
             assertFalse(event.getFormattedMessage().toLowerCase(Locale.ROOT).contains("private"));

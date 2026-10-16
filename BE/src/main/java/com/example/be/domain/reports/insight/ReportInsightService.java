@@ -29,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service @RequiredArgsConstructor @Slf4j
 public class ReportInsightService {
-    public static final String PROMPT_VERSION = "report-insight.ko.v56";
+    public static final String PROMPT_VERSION = "report-insight.ko.v59";
     public static final String RUBRIC_VERSION = "report-importance.v6";
     private final AgentProperties properties;
     private final ReportInsightSnapshotAssembler assembler;
@@ -62,7 +62,8 @@ public class ReportInsightService {
         Map<Audience, NewsReportInsight> cached = cached(snapshot, audiences);
         if (cached.size() == audiences.size()) {
             safeAudit(() -> recorder.recordReportInsightCacheHit(snapshot.runId(), reportId,
-                    context(snapshot, audiences.size(), audiences.size(), false), now()));
+                    context(snapshot, audiences.size(), audiences.size(), false)
+                            .withAudiences(audiences.stream().map(Audience::name).toList()), now()));
             return result(true, snapshot, audiences, cached);
         }
         if (!automatic && schedulingEnabled) {
@@ -141,8 +142,9 @@ public class ReportInsightService {
             }
             // Agent error messages, codes and causes can contain response data. Log only bounded metadata.
             var validation = failure.getValidationFailure();
-            log.warn("리포트 관점 인사이트 생성 실패. reportId={}, audience={}, phase={}, failureCode={}, timeoutPhase={}, auditPersisted={}, validationStage={}, validationAttempt={}, validationErrorType={}, validationErrorCount={}, validationErrorKinds={}, validationIssues={}, validationIssuesTruncated={}",
-                    snapshot.reportId(), audience, phase, diagnosticFailureCode(failure), failure.getTimeoutPhase(), auditPersisted,
+            log.warn("리포트 관점 인사이트 생성 실패. reportId={}, audience={}, phase={}, failureCode={}, timeoutPhase={}, clientFailureKind={}, auditPersisted={}, validationStage={}, validationAttempt={}, validationErrorType={}, validationErrorCount={}, validationErrorKinds={}, validationIssues={}, validationIssuesTruncated={}",
+                    snapshot.reportId(), audience, phase, diagnosticFailureCode(failure), failure.getTimeoutPhase(),
+                    failure.getClientFailureKind(), auditPersisted,
                     validation == null ? null : validation.stage(), validation == null ? null : validation.attempt(),
                     validation == null ? null : validation.errorType(), validation == null ? null : validation.errorCount(),
                     validation == null ? null : validation.errorKinds(),

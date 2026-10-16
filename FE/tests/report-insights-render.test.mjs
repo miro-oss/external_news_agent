@@ -3,19 +3,35 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { after, before, test } from 'node:test'
+import { after, afterEach, before, test } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import { reportInsightFixture } from '../scripts/report-insight-fixtures.mjs'
-let server, emptyEnvDir, Content, Panel, ApiError, insightKey, snapshot, generateOptions
+const generationFixtureId = '\0test:report-insight-generation'
+const generationFixturePlugin = {
+  name: 'report-insight-generation-fixture', enforce: 'pre',
+  resolveId(source, importer) {
+    if (source === 'test:report-insight-generation'
+      || (source === '../../api/reportInsights' && importer?.endsWith('/ReportInsightsPanel.tsx'))) return generationFixtureId
+  },
+  load(id) {
+    if (id !== generationFixtureId) return
+    return `export * from '/src/api/reportInsights.ts';
+      import { useGenerateReportInsight as useActualGeneration } from '/src/api/reportInsights.ts';
+      let fixture;
+      export function setGenerationFixture(value) { fixture = value; }
+      export function useGenerateReportInsight() { const actual = useActualGeneration(); return fixture ?? actual; }`
+  },
+}
+let server, emptyEnvDir, Content, Panel, ApiError, insightKey, snapshot, generateOptions, setGenerationFixture
 const report = JSON.parse(await readFile(new URL('./fixtures/refactor-report.json', import.meta.url), 'utf8')).report
 before(async () => {
   emptyEnvDir = await mkdtemp(join(tmpdir(), 'report-insights-render-'))
   server = await createServer({ root: fileURLToPath(new URL('../', import.meta.url)), configFile: false,
-    envDir: emptyEnvDir, cacheDir: join(emptyEnvDir, 'vite-cache'), plugins: [react()],
+    envDir: emptyEnvDir, cacheDir: join(emptyEnvDir, 'vite-cache'), plugins: [generationFixturePlugin, react()],
     optimizeDeps: { noDiscovery: true, include: [] },
     server: { middlewareMode: true, watch: null, ws: false }, logLevel: 'error' })
   const panel = await server.ssrLoadModule('/src/features/reports/ReportInsightsPanel.tsx')
@@ -26,7 +42,9 @@ before(async () => {
   insightKey = api.reportInsightKey
   snapshot = api.reportInsightSnapshotKey(report)
   generateOptions = api.generateReportInsightOptions
+  setGenerationFixture = (await server.ssrLoadModule('test:report-insight-generation')).setGenerationFixture
 })
+afterEach(() => setGenerationFixture?.())
 after(async () => { await server?.close(); if (emptyEnvDir) await rm(emptyEnvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
 function render(result, findings = report.findings) {
   return renderToStaticMarkup(createElement(Content, { result, insight: result.insights[0], findings, onEvidenceSelect() {} }))
@@ -196,6 +214,37 @@ test('a completed automatic result is displayed with evidence and no paid genera
   assert.match(html, /원문 근거 문장 1 보기/)
   assert.match(html, /저장된 분석 새로고침/)
   assert.doesNotMatch(html, /분석 다시 준비 · 크레딧 사용|관점 분석을 자동으로 준비하고 있습니다|분석 결과가 없습니다/)
+})
+
+test('a fresh stored result or pending read supersedes the lost POST response in the panel', () => {
+  setGenerationFixture({ variables: { reportId: report.id, audience: 'CHIP_MAKER', snapshot },
+    isError: true, error: new TypeError('응답 연결을 잃었습니다.'), reset() {}, mutate() {} })
+  const result = reportInsightFixture(report)
+  const saved = renderPanel({ status: 'success', fetchStatus: 'idle', data: result, dataUpdatedAt: Date.now() })
+  assert.match(saved, /리포트 중요도 높음/)
+  assert.match(saved, /저장된 분석 새로고침/)
+  assert.doesNotMatch(saved, /생성하지 못했습니다|응답 연결을 잃었습니다|분석 다시 준비 · 크레딧 사용/)
+
+  const pending = new ApiError('COMMON409', '동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.', 409)
+  const preparing = renderPanel({ status: 'error', fetchStatus: 'idle', error: pending, fetchFailureReason: pending })
+  assert.match(preparing, /관점 분석을 자동으로 준비하고 있습니다/)
+  assert.doesNotMatch(preparing, /생성하지 못했습니다|응답 연결을 잃었습니다|분석 결과가 없습니다|분석 다시 준비 · 크레딧 사용/)
+})
+
+test('a failed post-response lookup is not absence, while a confirmed 404 keeps the explicit paid retry', () => {
+  setGenerationFixture({ variables: { reportId: report.id, audience: 'CHIP_MAKER', snapshot },
+    isError: true, error: new TypeError('응답 연결을 잃었습니다.'), reset() {}, mutate() {} })
+  const lookupError = new ApiError('COMMON503', '저장된 결과를 확인하지 못했습니다.', 503)
+  const unknown = renderPanel({ status: 'error', fetchStatus: 'idle', error: lookupError, fetchFailureReason: lookupError })
+  assert.match(unknown, /저장된 관점 분석을 불러오지 못했습니다/)
+  assert.match(unknown, /다시 불러오기/)
+  assert.doesNotMatch(unknown, /이 관점의 분석 결과가 없습니다|분석 다시 준비 · 크레딧 사용/)
+
+  const absent = new ApiError('COMMON404', '저장된 리포트 관점 인사이트가 없습니다.', 404)
+  const missing = renderPanel({ status: 'error', fetchStatus: 'idle', error: absent, fetchFailureReason: absent })
+  assert.match(missing, /이 관점의 분석 결과가 없습니다/)
+  assert.match(missing, /이 관점 분석 다시 준비 · 크레딧 사용/)
+  assert.match(missing, /새 분석 생성 시 인사이트 크레딧을 사용/)
 })
 
 test('a manually queued perspective shows waiting until admitted, including when its panel is opened later', async context => {

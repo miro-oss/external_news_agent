@@ -45,6 +45,7 @@ from app.llm.report_insight_assessment import (
 from app.llm.report_insight_assessment import (
     validate_draft as validate_legacy_draft,
 )
+from app.llm.report_insight_comparison import comparison_direction_conflict, unsupported_comparison
 from app.llm.report_insight_corporate_event_binding import corporate_event_mismatches
 from app.llm.report_insight_explanation import (
     prepare_explanation_batches,
@@ -145,7 +146,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v56"
+PROMPT_VERSION = "report-insight.ko.v59"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -362,10 +363,6 @@ def _investment_source_rule(message: str) -> str | None:
     )
 
 
-_UNSUPPORTED_COMPARISON = re.compile(
-    r"(?:전주\s*(?:대비|보다)|지난주\s*(?:대비|보다)|지난\s*보고서|이전\s*보고서|"
-    r"직전\s*보고서|신규\s*(?:변화|진입)|처음으로|새롭게\s*(?:확인|부각))"
-)
 _PREPARATION_RECOMMENDATION = re.compile(r"(?:필요|조건|확인|검토|부족|준비.*(?:일정|시점))")
 _METADATA_ONLY_OVERVIEW = re.compile(
     r"^(?:원문(?:에|에서)|원문(?:은|는)?있(?:지만|으나))?"
@@ -759,7 +756,17 @@ class ReportInsightService(ReportInsightLegacyService):
             pending_review_prose = set()
             completed_reviews = []
 
-            def evaluate_review(subset, review_index):
+            def review_explanation_reserve(*, mandatory):
+                if pending_review_prose:
+                    # A prior REVIEW now requires EXPLAIN, even for a source
+                    # with one claim. Later reviews must preserve that time.
+                    return pipeline.explanation_reserve_seconds
+                # Mandatory MAP recovery precedes optional explanation polish.
+                # REVIEW still leaves REDUCE headroom. Later required EXPLAIN
+                # shares the whole-request deadline and can consume that time.
+                return 0.0 if mandatory else explanation_reserve
+
+            def evaluate_review(subset, review_index, *, reserve_seconds):
                 schema = draft_schema(subset)
                 schema["description"] = f"reportInsightCall:REVIEW-{review_index:03d}"
                 failed_attempt = None
@@ -773,7 +780,7 @@ class ReportInsightService(ReportInsightLegacyService):
                         raise
 
                 try:
-                    with pipeline.optional_review_deadline(reserve_seconds=explanation_reserve):
+                    with pipeline.optional_review_deadline(reserve_seconds=reserve_seconds):
                         draft = self._call(
                             pipeline,
                             instruction=report_stage_instruction(request.audiences, "REVIEW"),
@@ -841,7 +848,8 @@ class ReportInsightService(ReportInsightLegacyService):
                 ]
             reviews = []
             for offset in range(0, len(required_findings), MAX_ASSESSMENT_BATCH):
-                if not pipeline.can_start_optional_review(reserve_seconds=explanation_reserve):
+                reserve_seconds = review_explanation_reserve(mandatory=True)
+                if not pipeline.can_start_optional_review(reserve_seconds=reserve_seconds):
                     logger.info(
                         "Report insight stage=REVIEW-%03d outcome=SKIPPED_TIME_BUDGET "
                         "required=True fallback=NONE findingCount=%d",
@@ -854,7 +862,9 @@ class ReportInsightService(ReportInsightLegacyService):
                 )
                 # Mandatory review uses fresh source/schema and must succeed:
                 # these MAP rows have never passed the public grounding guards.
-                reviews.append(evaluate_review(subset, len(reviews) + 1))
+                reviews.append(
+                    evaluate_review(subset, len(reviews) + 1, reserve_seconds=reserve_seconds)
+                )
             validated = merge_review_candidates(*drafts, *reviews)
             if review_ids is None:
                 review_ids = list(select_review(request, validated))[:MAX_REVIEW_FINDINGS]
@@ -867,7 +877,8 @@ class ReportInsightService(ReportInsightLegacyService):
             for review_index, offset in enumerate(
                 range(0, len(review_findings), MAX_ASSESSMENT_BATCH), start=next_review_index
             ):
-                if not pipeline.can_start_optional_review(reserve_seconds=explanation_reserve):
+                reserve_seconds = review_explanation_reserve(mandatory=False)
+                if not pipeline.can_start_optional_review(reserve_seconds=reserve_seconds):
                     logger.info(
                         "Report insight stage=REVIEW-%03d outcome=SKIPPED_TIME_BUDGET "
                         "fallback=VALIDATED_ASSESSMENTS_RETAINED findingCount=%d",
@@ -879,7 +890,7 @@ class ReportInsightService(ReportInsightLegacyService):
                     update={"findings": review_findings[offset : offset + MAX_ASSESSMENT_BATCH]}
                 )
                 try:
-                    review = evaluate_review(subset, review_index)
+                    review = evaluate_review(subset, review_index, reserve_seconds=reserve_seconds)
                 except StructuredOutputExhaustedError:
                     # This independent refinement failed. Keep the original
                     # validated MAP for its IDs; never accept its invalid draft.
@@ -913,14 +924,69 @@ class ReportInsightService(ReportInsightLegacyService):
                     validate_explanation_fields(response, batch)
                     return assess(response, batch.request)
 
-                return self._call(
-                    pipeline,
-                    instruction=report_stage_instruction(batch.request.audiences, "EXPLAIN"),
-                    prompt=batch.prompt,
-                    schema=schema,
-                    validate=validate_explanation,
-                    stage="EXPLAIN",
-                ).output
+                def explanation_response(wire):
+                    # This complete JSON is assembled locally. A discarded
+                    # provider response's truncation flag does not describe it.
+                    return replace(
+                        pipeline.last_response, text=prompt_json(wire), truncated=False
+                    )
+
+                fallback = None
+                if not pending_review_prose.intersection(batch.finding_ids):
+                    try:
+                        # Use only the final post-REVIEW decisions and sources.
+                        # Native validity alone is not proof that prose passed
+                        # the public grounding/time guards, so run both again.
+                        original = draft_to_wire(merge_drafts(request, validated), request)
+                        wire = {
+                            "assessments": {
+                                audience: {
+                                    f"finding{identifier}": original["assessments"][audience][
+                                        f"finding{identifier}"
+                                    ]
+                                    for identifier in batch.finding_ids
+                                }
+                                for audience in batch.request.audiences
+                            }
+                        }
+                        fallback = validate_explanation(explanation_response(wire))
+                    except ValueError:
+                        # EXPLAIN may still fix this prose, but it cannot be
+                        # retained if that independent refinement also fails.
+                        pass
+
+                try:
+                    return self._call(
+                        pipeline,
+                        instruction=report_stage_instruction(batch.request.audiences, "EXPLAIN"),
+                        prompt=batch.prompt,
+                        schema=schema,
+                        validate=validate_explanation,
+                        stage="EXPLAIN",
+                    ).output
+                except StructuredOutputExhaustedError:
+                    # Recover inside the worker, before parallel execution
+                    # cancels sibling batches. Provider/budget/deadline errors
+                    # are not output-validation failures and still propagate.
+                    if fallback is None:
+                        raise
+                    pipeline.ensure_time_remaining()
+                    try:
+                        authenticated = merge_drafts(batch.request, fallback)
+                        retained = validate_explanation(
+                            explanation_response(draft_to_wire(authenticated, batch.request))
+                        )
+                    except ValueError:
+                        retained = None
+                    if retained is None:
+                        raise
+                    logger.warning(
+                        "Report insight stage=EXPLAIN-%03d outcome=VALIDATION_FAILED "
+                        "fallback=VALIDATED_ASSESSMENTS_RETAINED findingCount=%d",
+                        index + 1,
+                        len(batch.finding_ids),
+                    )
+                    return retained
 
             if explanations:
                 explained = run_report_maps(
@@ -936,9 +1002,10 @@ class ReportInsightService(ReportInsightLegacyService):
                     ].items():
                         combined["assessments"][audience].update(records)
                 # Reauthenticate the complete request, including every audience,
-                # after joining prose-only batches. No old-prose fallback is safe.
+                # after joining newly explained or revalidated retained prose.
                 validated = assess(
-                    replace(pipeline.last_response, text=prompt_json(combined)), request
+                    replace(pipeline.last_response, text=prompt_json(combined), truncated=False),
+                    request,
                 )
             validated, mapped = validated_merge(validated)
             # Display quotes are derived only after all assessment repairs.
@@ -3764,18 +3831,18 @@ def _prose_validation_errors(
     # original-sentence index as MAP/REVIEW/REDUCE, with only cited claims.
     fact_index = build_fact_index(request, refs) if request is not None else None
     for value in values:
-        comparisons = list(_UNSUPPORTED_COMPARISON.finditer(value))
-        if (
-            comparisons
-            and not _UNSUPPORTED_COMPARISON.search(source)
-            and not (
-                all(match[0] == "처음으로" for match in comparisons)
-                and supported_research_novelty(value, binding_source)
-            )
+        if unsupported_comparison(
+            value, binding_source,
+            research_first=supported_research_novelty(value, binding_source),
         ):
             errors.append(
                 ValueError("이전 보고서 기준선이 없어 신규성·기간 비교를 판정할 수 없습니다.")
             )
+        if not conditional and comparison_direction_conflict(value, binding_source):
+            errors.append(OutputValidationError(
+                "원문의 같은 기간·대상 비교와 변화 방향이 반대입니다.",
+                error_kinds=("report_fact_contradiction",),
+            ))
         relation_mismatches = (
             fact_index_mismatches(value, fact_index, reference_date=report_reference_date(request))
             if fact_index is not None
@@ -3905,7 +3972,7 @@ def _report_factual_mismatches(
     binding_source: str | None = None,
     relation_mismatches: list[str] | None = None,
 ) -> list[str]:
-    mismatches = factual_mismatches(value, source)
+    mismatches = factual_mismatches(value, source, quantity_source=binding_source)
     modality = modality_overreach(value, source)
     only_hypothetical = not _asserted_event_stage(value) and _asserted_event_stage(
         value, include_hypothetical=True

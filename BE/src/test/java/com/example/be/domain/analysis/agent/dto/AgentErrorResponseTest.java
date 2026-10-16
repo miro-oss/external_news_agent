@@ -182,7 +182,7 @@ class AgentErrorResponseTest {
     }
 
     @Test
-    void readsClosedMapAndReviewFindingLocationsAndRejectsStageMixing() {
+    void readsClosedAssessmentStageLocationsAndRejectsStageMixing() {
         var fields = List.of("assessments[7869]", "assessments[7869].reason",
                 "assessments[7869].basisClaimIds", "assessments[7869].decision.connection.relation",
                 "assessments[7869].decision.connection.work", "assessments[7869].decision.connection.basis",
@@ -190,7 +190,7 @@ class AgentErrorResponseTest {
                 "assessments[7869].decision.timing.basis.sourceSpanId",
                 "assessments[7869].axes.urgency", "assessments[7869].decision.connection.condition",
                 "assessments[7869].decision.effect.impactScope", "assessments[7869].decision.timing.urgencyState");
-        for (var stage : List.of("MAP", "MAP-001", "REVIEW", "REVIEW-001")) {
+        for (var stage : List.of("MAP", "MAP-001", "REVIEW", "REVIEW-001", "EXPLAIN", "EXPLAIN-002")) {
             for (var field : fields) {
                 var failure = reduceIssues(List.of(changedIssue("field", field)), false);
                 failure.put("stage", stage);
@@ -252,8 +252,10 @@ class AgentErrorResponseTest {
         assertNull(error(Map.of("validationFailure", reduceIssues(java.util.Collections.nCopies(9, issue()), true)))
                 .validationFailure());
         var mapFailure = reduceIssues(List.of(issue()), false);
-        mapFailure.put("stage", "MAP-001");
-        assertNull(error(Map.of("validationFailure", mapFailure)).validationFailure());
+        for (var stage : List.of("MAP-001", "REVIEW-001", "EXPLAIN-002")) {
+            mapFailure.put("stage", stage);
+            assertNull(error(Map.of("validationFailure", mapFailure)).validationFailure());
+        }
         var missingFlag = reduceIssues(List.of(issue()), false);
         missingFlag.remove("issuesTruncated");
         assertNull(error(Map.of("validationFailure", missingFlag)).validationFailure());

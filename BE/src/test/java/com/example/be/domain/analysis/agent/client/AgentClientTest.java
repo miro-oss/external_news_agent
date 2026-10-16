@@ -459,6 +459,33 @@ class AgentClientTest {
     }
 
     @Test
+    void preservesReportExplanationFailureAndUsageAcrossHttpBoundary() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/report-insight"))
+                .andRespond(withStatus(HttpStatus.BAD_GATEWAY).contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"error":{"code":"SCHEMA_VIOLATION","message":"출력 오류","details":{
+                                "validationFailure":{"stage":"EXPLAIN-002","attempt":2,"errorType":"OutputValidationError","errorCount":1,"errorKinds":["report_evidence_insufficient"],"issues":[{"audience":"CHIP_MAKER","field":"assessments[101].reason","errorKind":"report_evidence_insufficient","claimIds":["101:0"]}],"issuesTruncated":false},
+                                "usage":{"inputTokens":30,"outputTokens":15,"costUsd":0.25,"credits":2},
+                                "executionMetadata":{"provider":"openai","model":"model","promptVersion":"report-insight.ko.v56","source":"AGENT_ERROR","usageCompleteness":"COMPLETE"}}}}
+                                """));
+        var request = new AgentReportInsightRequest("diagnostic", AgentPlan.FREE, List.of("CHIP_MAKER"),
+                new AgentReportInsightRequest.ReportPayload(101L, "보고서", "DAILY",
+                        java.time.LocalDate.of(2026, 9, 30), null), List.of());
+
+        var failure = assertThrows(AgentClientException.class, () -> client.reportInsight(request));
+
+        assertEquals("SCHEMA_VIOLATION", failure.getCode());
+        assertEquals("EXPLAIN-002", failure.getValidationFailure().stage());
+        assertEquals("assessments[101].reason", failure.getValidationFailure().issues().getFirst().field());
+        assertEquals(30L, failure.getUsage().inputTokens());
+        assertEquals("COMPLETE", failure.getExecutionMetadata().usageCompleteness());
+        server.verify();
+    }
+
+    @Test
     void includesStatusAndBodyWhenAgentReturnsNonContractError() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();

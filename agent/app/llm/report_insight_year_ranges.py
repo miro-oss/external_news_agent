@@ -12,7 +12,9 @@ _TOPIC = re.compile(
 )
 
 
-def supported_year_range_context(value: str, source: str) -> bool:
+def supported_year_range_context(
+    value: str, source: str, *, quantity_source: str | None = None
+) -> bool:
     """Prove one adjacent range using a shared source clause, then recheck it.
 
     Merely finding both years anywhere is insufficient. They must be explicitly
@@ -44,6 +46,8 @@ def supported_year_range_context(value: str, source: str) -> bool:
         pair = years.search(clause)
         if pair is None or not target <= _tokens(clause[pair.end() :]):
             continue
-        if not factual_mismatches(expanded, clause) and not factual_mismatches(expanded, source):
+        if not factual_mismatches(
+            expanded, clause, quantity_source=quantity_source
+        ) and not factual_mismatches(expanded, source, quantity_source=quantity_source):
             return True
     return False
