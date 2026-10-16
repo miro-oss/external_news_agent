@@ -146,7 +146,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v58"
+PROMPT_VERSION = "report-insight.ko.v59"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -756,7 +756,17 @@ class ReportInsightService(ReportInsightLegacyService):
             pending_review_prose = set()
             completed_reviews = []
 
-            def evaluate_review(subset, review_index):
+            def review_explanation_reserve(*, mandatory):
+                if pending_review_prose:
+                    # A prior REVIEW now requires EXPLAIN, even for a source
+                    # with one claim. Later reviews must preserve that time.
+                    return pipeline.explanation_reserve_seconds
+                # Mandatory MAP recovery precedes optional explanation polish.
+                # REVIEW still leaves REDUCE headroom. Later required EXPLAIN
+                # shares the whole-request deadline and can consume that time.
+                return 0.0 if mandatory else explanation_reserve
+
+            def evaluate_review(subset, review_index, *, reserve_seconds):
                 schema = draft_schema(subset)
                 schema["description"] = f"reportInsightCall:REVIEW-{review_index:03d}"
                 failed_attempt = None
@@ -770,7 +780,7 @@ class ReportInsightService(ReportInsightLegacyService):
                         raise
 
                 try:
-                    with pipeline.optional_review_deadline(reserve_seconds=explanation_reserve):
+                    with pipeline.optional_review_deadline(reserve_seconds=reserve_seconds):
                         draft = self._call(
                             pipeline,
                             instruction=report_stage_instruction(request.audiences, "REVIEW"),
@@ -838,7 +848,8 @@ class ReportInsightService(ReportInsightLegacyService):
                 ]
             reviews = []
             for offset in range(0, len(required_findings), MAX_ASSESSMENT_BATCH):
-                if not pipeline.can_start_optional_review(reserve_seconds=explanation_reserve):
+                reserve_seconds = review_explanation_reserve(mandatory=True)
+                if not pipeline.can_start_optional_review(reserve_seconds=reserve_seconds):
                     logger.info(
                         "Report insight stage=REVIEW-%03d outcome=SKIPPED_TIME_BUDGET "
                         "required=True fallback=NONE findingCount=%d",
@@ -851,7 +862,9 @@ class ReportInsightService(ReportInsightLegacyService):
                 )
                 # Mandatory review uses fresh source/schema and must succeed:
                 # these MAP rows have never passed the public grounding guards.
-                reviews.append(evaluate_review(subset, len(reviews) + 1))
+                reviews.append(
+                    evaluate_review(subset, len(reviews) + 1, reserve_seconds=reserve_seconds)
+                )
             validated = merge_review_candidates(*drafts, *reviews)
             if review_ids is None:
                 review_ids = list(select_review(request, validated))[:MAX_REVIEW_FINDINGS]
@@ -864,7 +877,8 @@ class ReportInsightService(ReportInsightLegacyService):
             for review_index, offset in enumerate(
                 range(0, len(review_findings), MAX_ASSESSMENT_BATCH), start=next_review_index
             ):
-                if not pipeline.can_start_optional_review(reserve_seconds=explanation_reserve):
+                reserve_seconds = review_explanation_reserve(mandatory=False)
+                if not pipeline.can_start_optional_review(reserve_seconds=reserve_seconds):
                     logger.info(
                         "Report insight stage=REVIEW-%03d outcome=SKIPPED_TIME_BUDGET "
                         "fallback=VALIDATED_ASSESSMENTS_RETAINED findingCount=%d",
@@ -876,7 +890,7 @@ class ReportInsightService(ReportInsightLegacyService):
                     update={"findings": review_findings[offset : offset + MAX_ASSESSMENT_BATCH]}
                 )
                 try:
-                    review = evaluate_review(subset, review_index)
+                    review = evaluate_review(subset, review_index, reserve_seconds=reserve_seconds)
                 except StructuredOutputExhaustedError:
                     # This independent refinement failed. Keep the original
                     # validated MAP for its IDs; never accept its invalid draft.
@@ -3958,7 +3972,7 @@ def _report_factual_mismatches(
     binding_source: str | None = None,
     relation_mismatches: list[str] | None = None,
 ) -> list[str]:
-    mismatches = factual_mismatches(value, source)
+    mismatches = factual_mismatches(value, source, quantity_source=binding_source)
     modality = modality_overreach(value, source)
     only_hypothetical = not _asserted_event_stage(value) and _asserted_event_stage(
         value, include_hypothetical=True

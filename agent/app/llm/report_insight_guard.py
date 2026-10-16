@@ -633,7 +633,9 @@ def _production_reversal(value: str, source: str) -> bool:
     return False
 
 
-def _independent_parallel_numbers(value: str, source: str) -> bool:
+def _independent_parallel_numbers(
+    value: str, source: str, *, quantity_source: str | None = None
+) -> bool:
     """Recheck explicit, unshared facts instead of joining their numeric owners.
 
     The neutral reporting subject and the second fact's explicit possessive
@@ -647,10 +649,14 @@ def _independent_parallel_numbers(value: str, source: str) -> bool:
     facts = (match["left"], match["right"])
     if any(_SHARED_PARALLEL_CONTEXT.search(fact) for fact in facts):
         return False
-    return all(not factual_mismatches(fact, source) for fact in facts)
+    return all(
+        not factual_mismatches(fact, source, quantity_source=quantity_source) for fact in facts
+    )
 
 
-def _ordered_year_percentages(value: str, source: str) -> bool:
+def _ordered_year_percentages(
+    value: str, source: str, *, quantity_source: str | None = None
+) -> bool:
     """Expand one explicit series only after verifying both ordered source pairs.
 
     Rechecking the entire expanded prose preserves every remaining number,
@@ -676,7 +682,7 @@ def _ordered_year_percentages(value: str, source: str) -> bool:
         f"{match['reporter']}{year}년 {match['metric']} {percent}%" for year, percent in pairs
     )
     scoped = value[: match.start()] + expanded + "; " + value[match.end() :]
-    return not factual_mismatches(scoped, source)
+    return not factual_mismatches(scoped, source, quantity_source=quantity_source)
 
 
 def report_prose_mismatches(
@@ -722,17 +728,23 @@ def report_prose_mismatches(
         # Preserve independently issued relation/graph errors, including
         # quantity conflicts whose message shares the numeric prefix.
         original_numeric = {
-            item for item in factual_mismatches(value, source) if item.startswith(numeric_messages)
+            item
+            for item in factual_mismatches(value, source, quantity_source=actor_source)
+            if item.startswith(numeric_messages)
         }
         remaining = [item for item in remaining if item not in original_numeric] + [
             item
-            for item in factual_mismatches(numeric_value, numeric_source)
+            for item in factual_mismatches(
+                numeric_value,
+                numeric_source,
+                quantity_source=_without_supported_index_names(actor_source, actor_source),
+            )
             if item.startswith(numeric_messages)
         ]
     if any(item.startswith(_NUMERIC_CONTEXT_MESSAGE) for item in remaining) and (
-        _independent_parallel_numbers(value, source)
-        or _ordered_year_percentages(value, source)
-        or supported_year_range_context(value, source)
+        _independent_parallel_numbers(value, source, quantity_source=actor_source)
+        or _ordered_year_percentages(value, source, quantity_source=actor_source)
+        or supported_year_range_context(value, source, quantity_source=actor_source)
     ):
         remaining = [item for item in remaining if not item.startswith(_NUMERIC_CONTEXT_MESSAGE)]
     elif any(item.startswith(_NUMERIC_CONTEXT_MESSAGE) for item in remaining):

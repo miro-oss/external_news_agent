@@ -14,6 +14,8 @@ from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 
 from app.core.evidence import _COMPANY_ALIASES
+from app.core.numeric_quantities import QUANTITY_SCALES as _SCALE
+from app.core.numeric_quantities import QUANTITY_UNITS as _UNITS
 from app.llm.report_insight_index_identifiers import S_AND_P_INDEX, canonical_index_name
 
 
@@ -216,55 +218,8 @@ _RELATIVE = {
     "this year": "this_year",
 }
 _NUMBER = r"[+−-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
-_SCALE = {
-    "조": 10**12,
-    "억": 10**8,
-    "만": 10**4,
-    "천": 10**3,
-    "trillion": 10**12,
-    "billion": 10**9,
-    "million": 10**6,
-    "thousand": 10**3,
-}
 _SCALE_PATTERN = "|".join(_SCALE)
 _AMOUNT = rf"{_NUMBER}(?:\s*(?:{_SCALE_PATTERN})(?:\s*{_NUMBER})?)*"
-_UNITS = {
-    "원": ("krw", 1),
-    "달러": ("usd", 1),
-    "유로": ("eur", 1),
-    "usd": ("usd", 1),
-    "eur": ("eur", 1),
-    "krw": ("krw", 1),
-    "$": ("usd", 1),
-    "€": ("eur", 1),
-    "₩": ("krw", 1),
-    "개": ("count", 1),
-    "대": ("machines", 1),
-    "건": ("cases", 1),
-    "명": ("people", 1),
-    "units": ("count", 1),
-    "unit": ("count", 1),
-    "pieces": ("count", 1),
-    "톤": ("tonne", 1),
-    "tonnes": ("tonne", 1),
-    "%": ("percent", 1),
-    "퍼센트": ("percent", 1),
-    "percent": ("percent", 1),
-    "배": ("multiple", 1),
-    "times": ("multiple", 1),
-    "gw": ("watt", 10**9),
-    "기가와트": ("watt", 10**9),
-    "mw": ("watt", 10**6),
-    "메가와트": ("watt", 10**6),
-    "kw": ("watt", 10**3),
-    "킬로와트": ("watt", 10**3),
-    "w": ("watt", 1),
-    "nm": ("nm", 1),
-    "나노미터": ("nm", 1),
-    "년간": ("year", 1),
-    "years": ("year", 1),
-    "개월": ("month", 1),
-}
 _UNIT_PATTERN = "|".join(re.escape(s) for s in sorted(_UNITS, key=len, reverse=True))
 _QUANTITY = re.compile(
     rf"(?<![A-Za-z0-9+−\-])(?P<prefix>약\s*|대략\s*|최소\s*|적어도\s*|최대\s*|"
