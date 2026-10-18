@@ -30,9 +30,11 @@ public final class StoredReportDartFixture {
 
     public ReportDartService service() { return service; }
 
-    public void ready(NewsReport report) {
+    public void ready(NewsReport report) { stored(report, "READY", financials()); }
+
+    public void stored(NewsReport report, String status, FinancialData data) {
         when(attachments.find(report.getId())).thenReturn(List.of(new ReportDartRepository.Attachment(
-                report.getId(), COMPANY, "READY", "공시 자료를 확인했습니다.", financials())));
+                report.getId(), COMPANY, status, "공시 자료를 확인했습니다.", data)));
     }
 
     public void verifyStoredReads(long reportId, int count) {
@@ -55,8 +57,8 @@ public final class StoredReportDartFixture {
         return new FinancialData("CFS", "KRW", OffsetDateTime.parse("2026-10-14T16:30:00Z"), List.of(
                 new Quarter(2026, 1, "10000000000", "5000000000", null, false, List.of()),
                 new Quarter(2026, 2, "123456789012", "-1234567890", null, false, List.of())), List.of(
-                new Filing("20260814001234", "반기보고서 (가상 검증 자료)", "2026-08-14", FILING_URL, false),
-                new Filing("20260515001234", "이전 공시 (제외 대상)", "2026-05-15",
+                new Filing("20260814001234", "반기보고서 (가상 검증 자료)", "2026-08-14", FILING_URL, true),
+                new Filing("20260515001234", "이전 공시 (가상 검증 자료)", "2026-05-15",
                         "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260515001234", false)), List.of());
     }
 

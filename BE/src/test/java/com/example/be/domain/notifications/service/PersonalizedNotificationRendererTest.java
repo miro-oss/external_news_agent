@@ -17,16 +17,22 @@ import com.example.be.domain.feedback.service.FeedbackDeliveryService;
 import com.example.be.domain.feedback.service.ReportEventSnapshotFactory;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
+import com.example.be.domain.reports.dart.StoredReportDartFixture;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportContent;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import com.example.be.domain.reports.service.DailyReportFeedbackExclusions;
 import com.example.be.domain.reports.service.ReportFindings;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.interactive.action.PDActionURI;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -251,6 +257,53 @@ class PersonalizedNotificationRendererTest {
         assertFalse(view.getValue().readingContent().markdownBody().contains("개인 제외"));
         assertEquals(List.of("정상 후속 확인"), view.getValue().readingContent().structuredContent().watchItems()
                 .stream().map(ReportContent.WatchItem::topic).toList());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void topicWeeklyPreparedEmailContainsRealPdfWithStoredRecentFilings(boolean queuedDelivery) throws Exception {
+        var report = StoredReportDartFixture.topicWeekly();
+        var stored = new StoredReportDartFixture();
+        stored.ready(report);
+        var actualRenderer = new NotificationRenderer(findings, relevance, projection,
+                new NotificationDartSummary(stored.service()));
+        var actualPersonalized = new PersonalizedNotificationRenderer(reports, findings, relevance, feedback,
+                actualRenderer, projection, new ReportPdfRenderer(stored.service()));
+        var channel = NotificationChannel.builder().id(1L).channelType(ChannelType.EMAIL)
+                .maxLength(3500).active(true).build();
+        when(reports.findById(report.getId())).thenReturn(Optional.of(report));
+        when(store.eventFeedback(report.getId())).thenReturn(List.of());
+        when(feedback.prepare(eq(report), eq(RECIPIENT_ID), any(ReportEventFeedbackProjection.View.class)))
+                .thenReturn(new DeliveryFeedback(Set.of(), "synthetic-test-token"));
+
+        var rendered = queuedDelivery
+                ? actualPersonalized.render(report.getId(), channel, RECIPIENT_ID)
+                : actualPersonalized.render(report, channel, RECIPIENT_ID);
+
+        String html = String.join("\n", rendered.chunks());
+        assertTrue(html.contains("반기보고서 (가상 검증 자료)"));
+        assertFalse(html.contains("이전 공시 (가상 검증 자료)"), "The brief email keeps only the latest filing");
+        assertEquals(1, rendered.attachments().size());
+        var attachment = rendered.attachments().getFirst();
+        assertEquals("news-report-17.pdf", attachment.filename());
+        assertEquals("application/pdf", attachment.contentType());
+        try (var document = Loader.loadPDF(attachment.content())) {
+            String text = new PDFTextStripper().getText(document);
+            for (String expected : List.of("회사 실적 · 공시", "SK하이닉스", "최근 공시",
+                    "[정정] 반기보고서 (가상 검증 자료)", "공시일 2026-08-14", "이전 공시 (가상 검증 자료)",
+                    "공시일 2026-05-15")) assertTrue(text.contains(expected), expected);
+            var links = new ArrayList<String>();
+            for (var page : document.getPages()) for (var annotation : page.getAnnotations())
+                if (annotation instanceof PDAnnotationLink link && link.getAction() instanceof PDActionURI uri)
+                    links.add(uri.getURI());
+            assertTrue(links.contains(StoredReportDartFixture.FILING_URL));
+            assertTrue(links.contains("https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260515001234"));
+        }
+        verify(feedback).prepare(eq(report), eq(RECIPIENT_ID), any(ReportEventFeedbackProjection.View.class));
+        verify(reports, times(queuedDelivery ? 1 : 0)).findById(report.getId());
+        verifyNoMoreInteractions(reports, feedback);
+        verifyNoInteractions(pdfRenderer, findings, snapshots);
+        stored.verifyStoredReads(report.getId(), 2);
     }
 
     @Test

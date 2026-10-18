@@ -1,6 +1,7 @@
 package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.dart.model.DartModels.Filing;
 import com.example.be.domain.dart.model.DartModels.FinancialData;
 import com.example.be.domain.reports.dart.ReportDartService;
 import com.example.be.domain.reports.dto.res.ReportDartDTO.CompanyAttachment;
@@ -29,9 +30,9 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Offline attachment containing company performance, summaries, important events, watch items and
- * the selected audience's reading sections. Standalone article analysis, collection notes and
- * disclosure listings are intentionally omitted; the PDF is not an export of every web section.
+ * Offline attachment containing company performance and recent filings, summaries, important
+ * events, watch items and the selected audience's reading sections. Standalone article analysis,
+ * collection notes and per-quarter financial source appendices are intentionally omitted.
  */
 @Component
 @RequiredArgsConstructor
@@ -63,7 +64,7 @@ public class ReportPdfRenderer {
             if (report.getGeneratedAt() != null) pdf.muted("보고서 작성 " + report.getGeneratedAt().format(DATE_TIME) + " (한국시간)");
             if (report.getReportDate() != null) pdf.muted("보고서 기간 " + report.getReportDate()
                     + (report.getReportEndDate() == null ? "" : " ~ " + report.getReportEndDate()));
-            financials(pdf, report);
+            companyData(pdf, report);
 
             Map<Long, Finding> findings = new LinkedHashMap<>();
             view.findings().forEach(finding -> findings.putIfAbsent(finding.getId(), finding));
@@ -81,6 +82,7 @@ public class ReportPdfRenderer {
         pdf.section("핵심 요약");
         if (content.executiveSummary().isEmpty()) pdf.paragraph("근거가 확인된 요약이 없습니다.");
         for (String summary : content.executiveSummary()) pdf.bullet(summary);
+        pdf.reserve(140);
         pdf.section("중요 이벤트");
         var events = content.importantEvents().stream().filter(event -> !event.sourceFindingIds().isEmpty()
                 && findings.keySet().containsAll(event.sourceFindingIds())).toList();
@@ -114,19 +116,19 @@ public class ReportPdfRenderer {
         pdf.gap(3);
     }
 
-    /** Reads the report's stored financial snapshot without refreshing it or including filing lists. */
-    private void financials(ReportPdfLayout pdf, NewsReport report) throws IOException {
+    /** Reads only the report's stored company snapshot, including its recent disclosures. */
+    private void companyData(ReportPdfLayout pdf, NewsReport report) throws IOException {
         var result = dart.getStored(report);
         if (result == null || result.companies().isEmpty()) return;
         pdf.reserve(345);
-        pdf.section("회사 실적");
+        pdf.section("회사 실적 · 공시");
         for (CompanyAttachment entry : result.companies()) {
             if (entry.data() != null && !entry.data().quarters().isEmpty()
                     && ("READY".equals(entry.status()) || "PARTIAL".equals(entry.status()))) pdf.reserve(300);
             pdf.subheading(entry.company().corpName());
             pdf.muted(entry.company().stockCode() == null || entry.company().stockCode().isBlank() ? "비상장" : entry.company().stockCode());
             if (!("READY".equals(entry.status()) || "PARTIAL".equals(entry.status())) || entry.data() == null) {
-                pdf.paragraph("표시할 저장된 실적 자료가 없습니다.");
+                pdf.paragraph("표시할 저장된 실적·공시 자료가 없습니다.");
                 continue;
             }
             FinancialData data = entry.data();
@@ -152,6 +154,25 @@ public class ReportPdfRenderer {
             }
             for (String note : data.notes()) pdf.muted(note);
             pdf.muted("실적은 회사 전체 기준입니다. 자료 확인 시 확보한 내용을 보존하며, 이후 정정공시가 반영된 최신 수치와 다를 수 있습니다.");
+            recentFilings(pdf, data.disclosures());
+        }
+    }
+
+    private void recentFilings(ReportPdfLayout pdf, List<Filing> filings) throws IOException {
+        pdf.reserve(120);
+        pdf.subheading("최근 공시");
+        if (filings.isEmpty()) {
+            pdf.paragraph("저장된 최근 공시가 없습니다.");
+            return;
+        }
+        for (Filing filing : filings.stream().limit(5).toList()) {
+            pdf.reserve(90);
+            pdf.muted("공시일 " + (filing.filedAt() == null || filing.filedAt().isBlank() ? "미확인" : filing.filedAt()));
+            String title = (filing.corrected() ? "[정정] " : "")
+                    + (filing.reportName() == null || filing.reportName().isBlank() ? "공시 원문" : filing.reportName());
+            pdf.paragraph(title);
+            if (DartFilingLinks.isSafe(filing)) pdf.link("DART 원문 · " + filing.url(), filing.url());
+            pdf.gap(6);
         }
     }
 

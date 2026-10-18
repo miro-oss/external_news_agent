@@ -20,11 +20,13 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.interactive.action.PDActionURI;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.text.PDFTextStripperByArea;
 import org.apache.pdfbox.text.TextPosition;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.awt.geom.Rectangle2D;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.file.Files;
@@ -176,13 +178,15 @@ class ReportPdfRendererTests {
     }
 
     @Test
-    void allCompaniesHaveReadableFinancialTablesWithRepeatedUnitLabelsAndNoFilings() throws Exception {
+    void allCompaniesHaveReadableFinancialTablesAndRecentFilingsWithoutQuarterSourceAppendix() throws Exception {
         var report = report(ReportScope.RUN);
         var filing = filing("반기보고서", FILING_URL, true);
+        String sourceUrl = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260331000001";
+        var quarterSource = new DartModels.Filing("20260331000001", "분기 실적 근거 전용", "2026-03-31", sourceUrl, false);
         var financials = new DartModels.FinancialData("CFS", "KRW", OffsetDateTime.parse("2026-10-14T16:30:00Z"),
-                List.of(quarter(2026, 1, "10000000005000001.20", "-1", null, List.of(filing)),
+                List.of(quarter(2026, 1, "10000000005000001.20", "-1", null, List.of(quarterSource)),
                         quarter(2026, 2, null, "0", BigDecimal.ZERO, List.of()),
-                        quarter(2026, 4, "123456789012", "-1234567890", new BigDecimal("-1.00"), List.of(filing))),
+                        quarter(2026, 4, "123456789012", "-1234567890", new BigDecimal("-1.00"), List.of(quarterSource))),
                 List.of(filing, filing("최근 주요사항보고서", FILING_URL, false)), List.of("동일한 재무 기준으로 비교합니다."));
         when(dart.getStored(report)).thenReturn(new ReportDartDTO.Result(17L,
                 IntStream.rangeClosed(1, 5).mapToObj(i -> company("연결 회사 " + i, "PARTIAL", financials)).toList()));
@@ -194,15 +198,18 @@ class ReportPdfRendererTests {
                     "동일한 재무 기준으로 비교합니다", "차트 단위: 억원", "표 금액 단위: 억원", "매출액 (억원)", "영업이익 (억원)",
                     "소수 둘째 자리까지 반올림", "100,000,000.05", "1,234.57", "-12.35", "-0.01 < 값 < 0")) assertTrue(text.contains(expected), expected);
             assertFalse(text.replaceAll("\\s", "").contains("10,000,000,005,000,001.20"));
-            for (String hidden : List.of("근거 공시", "실적 근거 공시", "최근 공시", "최근 주요사항보고서", "반기보고서", "[1]"))
+            for (String expected : List.of("회사 실적 · 공시", "최근 공시", "최근 주요사항보고서", "반기보고서", "[정정]", "2026-08-14"))
+                assertTrue(text.contains(expected), expected);
+            for (String hidden : List.of("근거 공시", "실적 근거 공시", "분기 실적 근거 전용", "[1]"))
                 assertFalse(text.contains(hidden), hidden);
-            assertTrue(urls(document).isEmpty());
+            assertTrue(urls(document).contains(FILING_URL));
+            assertFalse(urls(document).contains(sourceUrl));
             assertWithinPageBounds(document);
         }
     }
 
     @Test
-    void topicWeeklyPdfIncludesStoredFinancialChartAndTableBeforeNewsWithoutPreparingData() throws Exception {
+    void topicWeeklyPdfIncludesStoredFinancialsAndRecentFilingsBeforeNewsWithoutPreparingData() throws Exception {
         var report = StoredReportDartFixture.topicWeekly();
         var stored = new StoredReportDartFixture();
         stored.ready(report);
@@ -218,9 +225,10 @@ class ReportPdfRendererTests {
                 assertTrue(text.contains(expected), expected + "\n" + text);
             assertTrue(text.indexOf("회사 실적") < text.indexOf("핵심 요약"));
             assertFalse(text.contains("표시하지 않는 추가 분석"));
-            assertFalse(text.contains("반기보고서"));
-            assertFalse(text.contains("이전 공시"));
-            assertFalse(urls(document).contains(StoredReportDartFixture.FILING_URL));
+            for (String expected : List.of("회사 실적 · 공시", "최근 공시", "[정정]", "반기보고서 (가상 검증 자료)",
+                    "2026-08-14", "이전 공시 (가상 검증 자료)", "2026-05-15")) assertTrue(text.contains(expected), expected);
+            assertTrue(text.indexOf("최근 공시") < text.indexOf("핵심 요약"));
+            for (var filing : StoredReportDartFixture.financials().disclosures()) assertTrue(urls(document).contains(filing.url()));
             assertTrue(urls(document).contains("https://example.com/article-1"));
             assertWithinPageBounds(document);
         }
@@ -231,6 +239,68 @@ class ReportPdfRendererTests {
     }
 
     @Test
+    void partialTopicWeeklyWithoutQuartersKeepsFirstFiveLongFilingsAcrossPages() throws Exception {
+        var report = StoredReportDartFixture.topicWeekly();
+        var stored = new StoredReportDartFixture();
+        var filings = IntStream.rangeClosed(1, 6).mapToObj(i -> {
+            String receipt = "2026101900000" + i;
+            String title = "공시 항목 " + i + ": "
+                    + "생산 설비 증설과 공급 계약 일정에 관한 확인 사항입니다. ".repeat(24) + "공시 끝 " + i;
+            return new DartModels.Filing(receipt, title, "2026-10-19",
+                    "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=" + receipt, i == 1);
+        }).toList();
+        var data = new DartModels.FinancialData("CFS", "KRW", OffsetDateTime.parse("2026-10-19T09:00:00+09:00"),
+                List.of(), filings, List.of("비교 가능한 분기 실적은 확보하지 못했습니다."));
+        stored.stored(report, "PARTIAL", data);
+        byte[] bytes = new ReportPdfRenderer(stored.service()).render(report, view(emptyContent(), List.of(), Set.of()), null);
+        try (PDDocument document = Loader.loadPDF(bytes)) {
+            String text = new PDFTextStripper().getText(document);
+            String compact = bodyText(document).replaceAll("\\s", "");
+            assertTrue(document.getNumberOfPages() >= 2, "long filing titles must continue onto later pages");
+            for (var filing : filings.subList(0, 5)) {
+                assertTrue(compact.contains(filing.reportName().replaceAll("\\s", "")), filing.reportName());
+                assertTrue(urls(document).contains(filing.url()), filing.url());
+            }
+            for (String expected : List.of("회사 실적 · 공시", "최근 공시", "[정정]", "2026-10-19",
+                    "표시할 분기 실적 자료가 없습니다.", "비교 가능한 분기 실적은 확보하지 못했습니다."))
+                assertTrue(text.contains(expected), expected);
+            for (String absent : List.of("공시 항목 6", "공시 끝 6", "저장된 최근 공시가 없습니다.", "차트 단위"))
+                assertFalse(text.contains(absent), absent);
+            assertFalse(urls(document).contains(filings.get(5).url()));
+            assertWithinPageBounds(document);
+            for (var page : document.getPages()) for (var annotation : page.getAnnotations())
+                if (annotation instanceof PDAnnotationLink link) {
+                    var rectangle = link.getRectangle();
+                    assertTrue(rectangle.getLowerLeftX() >= 40 && rectangle.getUpperRightX() <= 553);
+                    assertTrue(rectangle.getLowerLeftY() > 20 && rectangle.getUpperRightY() < page.getMediaBox().getHeight() - 20);
+                }
+        }
+        assertEquals(6, data.disclosures().size(), "rendering must not trim the stored disclosure list");
+        stored.verifyStoredReads(report.getId(), 1);
+        Path path = Path.of("build/reports/pdf/topic-weekly-long-filings-sample.pdf");
+        Files.createDirectories(path.getParent());
+        Files.write(path, bytes);
+    }
+
+    @Test
+    void readyTopicWeeklyExplainsMissingStoredDisclosuresWithoutDroppingFinancials() throws Exception {
+        var report = StoredReportDartFixture.topicWeekly();
+        var stored = new StoredReportDartFixture();
+        var data = StoredReportDartFixture.financials();
+        stored.stored(report, "READY", new DartModels.FinancialData(data.fsDiv(), data.currency(), data.fetchedAt(),
+                data.quarters(), List.of(), data.notes()));
+        try (PDDocument document = Loader.loadPDF(new ReportPdfRenderer(stored.service()).render(report,
+                view(emptyContent(), List.of(), Set.of()), null))) {
+            String text = new PDFTextStripper().getText(document);
+            for (String expected : List.of("차트 단위: 억원", "최근 공시", "저장된 최근 공시가 없습니다."))
+                assertTrue(text.contains(expected), expected);
+            assertTrue(urls(document).isEmpty());
+            assertWithinPageBounds(document);
+        }
+        stored.verifyStoredReads(report.getId(), 1);
+    }
+
+    @Test
     void ineligiblePdfReportsDoNotReadAttachmentsOrInheritHistoricalCompany() throws Exception {
         var stored = new StoredReportDartFixture();
         var actualRenderer = new ReportPdfRenderer(stored.service());
@@ -238,27 +308,34 @@ class ReportPdfRendererTests {
             String text = text(actualRenderer.render(report, view(emptyContent(), List.of(), Set.of()), null));
             assertFalse(text.contains("회사 실적"), report.getTitle());
             assertFalse(text.contains("연결재무제표"), report.getTitle());
+            assertFalse(text.contains("최근 공시"), report.getTitle());
         }
         stored.verifyNoPersistenceAccess();
     }
 
-    @Test
-    void rejectsUnsafeLinksAndNonReadyFinancialPayloadsWithoutReadingRemoteResources() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"https://evil.example/doc", "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260814009999", "javascript:alert(1)"})
+    void rejectsUnsafeLinksAndNonReadyFinancialPayloadsWithoutReadingRemoteResources(String unsafeUrl) throws Exception {
         var report = report(ReportScope.RUN);
         var payload = new DartModels.FinancialData("OFS", "USD", null, List.of(),
-                List.of(filing("안전하지 않은 공시 제목", "https://evil.example/doc", false)), List.of());
-        when(dart.getStored(report)).thenReturn(new ReportDartDTO.Result(17L, List.of(
-                company("비공개 대기 회사", "PENDING", new DartModels.FinancialData("CFS", "KRW", null,
-                        List.of(), List.of(filing("대기 자료 유출", FILING_URL, false)), List.of())), company("공시 회사", "READY", payload))));
+                List.of(filing("안전하지 않은 공시 제목", unsafeUrl, false)), List.of());
+        var companies = new ArrayList<ReportDartDTO.CompanyAttachment>();
+        for (String status : List.of("PENDING", "FAILED", "DISABLED")) companies.add(company("비공개 " + status + " 회사", status,
+                new DartModels.FinancialData("CFS", "KRW", null, List.of(),
+                        List.of(filing("상태 자료 유출 " + status, FILING_URL, false)), List.of())));
+        companies.add(company("공시 회사", "READY", payload));
+        when(dart.getStored(report)).thenReturn(new ReportDartDTO.Result(17L, companies));
         var finding = Finding.builder().id(1L).article(Article.builder().id(101L).title("외부 출처 제목")
                 .canonicalUrl("javascript:alert(1)").build()).summary("근거 분석").keyPoints(List.of(new FindingKeyPoint("근거", List.of(0), "grounded"))).build();
         var content = new ReportContent(List.of(), List.of(new ReportContent.ImportantEvent("외부 출처 제목",
                 "사건 내용", "주목할 이유", List.of(1L))), List.of(), List.of());
         try (PDDocument document = Loader.loadPDF(renderer.render(report, view(content, List.of(finding), Set.of()), null))) {
             String text = new PDFTextStripper().getText(document);
-            assertFalse(text.contains("안전하지 않은 공시 제목"));
+            assertTrue(text.contains("안전하지 않은 공시 제목"));
+            assertTrue(text.contains("2026-08-14"));
+            assertFalse(text.contains(unsafeUrl));
             assertTrue(text.contains("외부 출처 제목"));
-            assertFalse(text.contains("대기 자료 유출"));
+            assertFalse(text.contains("상태 자료 유출"));
             assertFalse(text.contains("javascript:"));
             assertTrue(urls(document).isEmpty());
         }
@@ -373,6 +450,19 @@ class ReportPdfRendererTests {
         for (var page : document.getPages()) for (var annotation : page.getAnnotations())
             if (annotation instanceof PDAnnotationLink link && link.getAction() instanceof PDActionURI action) urls.add(action.getURI());
         return urls;
+    }
+
+    private static String bodyText(PDDocument document) throws Exception {
+        var body = new StringBuilder();
+        for (var page : document.getPages()) {
+            var stripper = new PDFTextStripperByArea();
+            // Exclude the running header and page number so a title can continue across pages.
+            stripper.addRegion("body", new Rectangle2D.Float(0, 50,
+                    page.getMediaBox().getWidth(), page.getMediaBox().getHeight() - 95));
+            stripper.extractRegions(page);
+            body.append(stripper.getTextForRegion("body"));
+        }
+        return body.toString();
     }
 
     private static String text(byte[] bytes) throws Exception {
