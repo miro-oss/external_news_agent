@@ -5,7 +5,6 @@ import com.example.be.domain.dart.model.DartModels.FinancialData;
 import com.example.be.domain.reports.dart.ReportDartService;
 import com.example.be.domain.reports.dto.res.ReportDartDTO.CompanyAttachment;
 import com.example.be.domain.reports.entity.NewsReport;
-import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -27,7 +26,6 @@ public class NotificationDartSummary {
     private final ReportDartService reportDartService;
 
     public String render(NewsReport report, String reportUrl) {
-        if (report.getReportScope() != ReportScope.RUN) return "";
         var companies = reportDartService.getStored(report).companies();
         if (companies.isEmpty()) return "";
         var html = new StringBuilder("<table role=\"presentation\" width=\"100%\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" "
@@ -69,7 +67,7 @@ public class NotificationDartSummary {
             html.append("<p style=\"margin:2px 0 0;color:#4e5968;font-size:12px;line-height:1.6\">최근 공시 · ");
             if (filing.corrected()) html.append("[정정] ");
             String title = escape(limit(filing.reportName(), 70));
-            if (safeFilingUrl(filing)) html.append("<a href=\"").append(escape(filing.url())).append('"')
+            if (DartFilingLinks.isSafe(filing)) html.append("<a href=\"").append(escape(filing.url())).append('"')
                     .append(LINK_STYLE).append('>').append(title).append("</a>");
             else html.append(title);
             html.append(" · ").append(escape(limit(filing.filedAt(), 10))).append("</p>");
@@ -104,15 +102,6 @@ public class NotificationDartSummary {
         String unit = "KRW".equals(currency) ? "억원" : currency != null && currency.matches("[A-Z]{3}")
                 ? " " + currency : " (통화 미확인)";
         return format.format(amount) + unit;
-    }
-
-    private boolean safeFilingUrl(Filing filing) {
-        if (filing.rceptNo() == null || !filing.rceptNo().matches("[0-9]{14}")) return false;
-        URI uri = parseUrl(filing.url());
-        return uri != null && "https".equalsIgnoreCase(uri.getScheme()) && "dart.fss.or.kr".equalsIgnoreCase(uri.getHost())
-                && uri.getPort() == -1 && uri.getUserInfo() == null && uri.getFragment() == null
-                && "/dsaf001/main.do".equals(uri.getRawPath())
-                && ("rcpNo=" + filing.rceptNo()).equals(uri.getRawQuery());
     }
 
     private boolean safeReportUrl(String value) {

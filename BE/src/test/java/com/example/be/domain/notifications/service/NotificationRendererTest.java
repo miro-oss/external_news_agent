@@ -12,6 +12,7 @@ import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.dart.StoredReportDartFixture;
 import com.example.be.domain.reports.entity.ReportContent;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import com.example.be.domain.reports.service.DailyReportFeedbackExclusions;
@@ -26,6 +27,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.StringReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -67,6 +70,44 @@ class NotificationRendererTest {
             assertTrue(body.contains(reportUrl));
             assertEquals(1, org.jsoup.Jsoup.parse(body).select("p:contains(회사 실적 · 공시)").size());
         }
+    }
+
+    @Test
+    void topicWeeklyPreviewAndPersonalizedEmailIncludeRealStoredDartSummary() throws Exception {
+        var report = StoredReportDartFixture.topicWeekly();
+        var original = new ReportContent(List.of("공용 주간 핵심 요약"), List.of(), List.of(), List.of());
+        report.recordStructuredContent(original);
+        var stored = new StoredReportDartFixture();
+        stored.ready(report);
+        var actualRenderer = new NotificationRenderer(findingRepository, relevancePolicy, projection,
+                new NotificationDartSummary(stored.service()));
+        org.springframework.test.util.ReflectionTestUtils.setField(actualRenderer, "publicBaseUrl", "https://news.example/");
+        String preview = actualRenderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE)).chunks().getFirst();
+        var personalContent = new ReportContent(List.of("수신자에게 허용된 요약"), List.of(), List.of(), List.of());
+        var personalView = new ReportEventFeedbackProjection.View(List.of(), new ReportReadingContent("", personalContent), true);
+        String feedbackUrl = "https://news.example/#/feedback?token=test";
+        String personal = actualRenderer.render(report, channel(ChannelType.EMAIL, Integer.MAX_VALUE),
+                personalView, feedbackUrl).chunks().getFirst();
+
+        for (String body : List.of(preview, personal)) {
+            var document = org.jsoup.Jsoup.parse(body);
+            assertTrue(body.indexOf("</h1>") < body.indexOf("회사 실적 · 공시"));
+            assertTrue(body.indexOf("회사 실적 · 공시") < body.indexOf("핵심 요약"));
+            assertEquals(1, document.select("h2:containsOwn(회사 실적 · 공시)").size());
+            assertTrue(document.text().contains("SK하이닉스 2026년 2분기 · 연결 · 매출 1,234.6억원 · 영업이익 -12.3억원"));
+            assertTrue(document.select("a").eachAttr("href").contains(StoredReportDartFixture.FILING_URL));
+            assertFalse(document.text().contains("이전 공시"));
+        }
+        assertTrue(preview.contains("공용 주간 핵심 요약"));
+        assertFalse(preview.contains(feedbackUrl));
+        assertTrue(personal.contains("수신자에게 허용된 요약"));
+        assertTrue(personal.contains(feedbackUrl));
+        assertFalse(personal.contains("공용 주간 핵심 요약"));
+        assertEquals(original, report.getStructuredContent());
+        stored.verifyStoredReads(report.getId(), 2);
+        Path path = Path.of("build/reports/notifications/topic-weekly-dart-email.html");
+        Files.createDirectories(path.getParent());
+        Files.writeString(path, personal);
     }
 
     @Test
