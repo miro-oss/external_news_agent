@@ -27,6 +27,15 @@ final class DartReportFixtures {
                 .title("공시 첨부 검증").markdownBody("보고서").modelName("test").generatedAt(LocalDateTime.of(2026, 10, 14, 10, 0))
                 .collectionContexts(List.of(new ReportCollectionContext(42L, topics))).build();
     }
+    static NewsReport topicWeekly(Company company, ReportStatus status) {
+        return NewsReport.builder().id(17L).reportScope(ReportScope.WEEKLY).topicId(1L).topicName("생성 당시 주제")
+                .topicDartCorpCode(company == null ? null : company.corpCode())
+                .topicDartCorpName(company == null ? null : company.corpName())
+                .topicDartStockCode(company == null ? null : company.stockCode())
+                .reportStatus(status).title("주제 주간").markdownBody("보고서").modelName("test")
+                .generatedAt(LocalDateTime.of(2026, 10, 14, 10, 0))
+                .collectionContexts(List.of(new ReportCollectionContext(42L, List.of(topic(1L, HYNIX))))).build();
+    }
     static FinancialData data() {
         var quarters = IntStream.range(0, 12).mapToObj(i -> new Quarter(2023 + i / 4, i % 4 + 1,
                 "10000000000000001", "1230000000000000", new BigDecimal("12.30"), i % 4 == 3, List.of())).toList();

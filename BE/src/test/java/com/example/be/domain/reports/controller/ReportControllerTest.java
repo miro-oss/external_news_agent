@@ -132,7 +132,26 @@ class ReportControllerTest {
                 .andExpect(jsonPath("$.result.sourceAnalysisDates[0]").value("2026-09-21"))
                 .andExpect(jsonPath("$.result.sourceReportIds").isEmpty())
                 .andExpect(jsonPath("$.result.sourceReportDates").isEmpty())
-                .andExpect(jsonPath("$.result.sourceReportCount").value(0));
+                .andExpect(jsonPath("$.result.sourceReportCount").value(0))
+                .andExpect(jsonPath("$.result.dartCompanies").isArray())
+                .andExpect(jsonPath("$.result.dartCompanies").isEmpty());
+    }
+
+    @Test
+    void topicCompanyMetadataIsReturnedByDetailAndLatestWithoutFindings() throws Exception {
+        var company = new com.example.be.domain.dart.model.DartModels.Company("00126380", "삼성전자", "005930");
+        var detail = ReportResDTO.Detail.builder().id(301L).reportScope(com.example.be.domain.reports.entity.ReportScope.WEEKLY)
+                .topicId(29L).dartCompanies(List.of(company)).build();
+        when(reportQueryService.getReport(301L, false)).thenReturn(detail);
+        when(reportQueryService.getLatest(false)).thenReturn(detail);
+        for (var path : List.of("/api/news/reports/301", "/api/news/reports/latest")) {
+            mockMvc.perform(get(path).param("includeFindings", "false"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.result.dartCompanies[0].corpCode").value("00126380"))
+                    .andExpect(jsonPath("$.result.dartCompanies[0].corpName").value("삼성전자"))
+                    .andExpect(jsonPath("$.result.dartCompanies[0].stockCode").value("005930"))
+                    .andExpect(jsonPath("$.result.findings").doesNotExist());
+        }
     }
 
     @Test

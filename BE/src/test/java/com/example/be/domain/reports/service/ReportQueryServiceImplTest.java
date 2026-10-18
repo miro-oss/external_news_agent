@@ -291,6 +291,45 @@ class ReportQueryServiceImplTest {
     }
 
     @Test
+    void detailAndLatestExposeFrozenDartCompaniesRegardlessOfFindings() {
+        var selected = new com.example.be.domain.dart.model.DartModels.Company("00126380", "삼성전자", "005930");
+        var historical = new com.example.be.domain.dart.model.DartModels.Company("00164779", "SK하이닉스", "000660");
+        var context = new ReportCollectionContext(42L, List.of(new CollectionTopicSnapshot(1L, "수집 당시", null,
+                List.of(), List.of(), List.of(), 10, 60, historical)));
+        var report = NewsReport.builder().id(17L).reportScope(ReportScope.WEEKLY).topicId(1L)
+                .topicDartCorpCode(selected.corpCode()).topicDartCorpName(selected.corpName())
+                .topicDartStockCode(selected.stockCode()).collectionContexts(List.of(context)).build();
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(reportRepository.findFirstByReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
+                .thenReturn(Optional.of(report));
+        when(reportRepository.findFirstByReportScopeAndReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(
+                ReportScope.WEEKLY, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        for (boolean includeFindings : new boolean[] {false, true}) {
+            assertEquals(List.of(selected), service.getReport(17L, includeFindings).getDartCompanies());
+            assertEquals(List.of(selected), service.getLatest(includeFindings).getDartCompanies());
+            assertEquals(List.of(selected), service.getLatest(includeFindings, ReportScope.WEEKLY).getDartCompanies());
+            assertEquals(List.of(context), service.getReport(17L, includeFindings).getCollectionContexts());
+        }
+    }
+
+    @Test
+    void dartCompanyMetadataUsesRunSnapshotsAndLeavesAggregatesAndLegacyTopicReportsEmpty() {
+        var company = new com.example.be.domain.dart.model.DartModels.Company("00126380", "삼성전자", "005930");
+        var context = new ReportCollectionContext(42L, List.of(new CollectionTopicSnapshot(1L, "당시 주제", null,
+                List.of(), List.of(), List.of(), 10, 60, company)));
+        for (var scope : ReportScope.values()) {
+            var report = NewsReport.builder().id(17L).reportScope(scope)
+                    .collectionContexts(List.of(context, context)).build();
+            when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+            assertEquals(scope == ReportScope.RUN ? List.of(company) : List.of(), service.getReport(17L, false).getDartCompanies());
+        }
+        var legacy = NewsReport.builder().id(17L).reportScope(ReportScope.WEEKLY).topicId(1L)
+                .collectionContexts(List.of(context)).build();
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(legacy));
+        assertEquals(List.of(), service.getReport(17L, false).getDartCompanies());
+    }
+
+    @Test
     void rejectsInvertedPeriodWithSpecifiedMessage() {
         GeneralException exception = assertThrows(GeneralException.class,
                 () -> service.getReports("2026-08-18", "2026-08-17", 0, 20));

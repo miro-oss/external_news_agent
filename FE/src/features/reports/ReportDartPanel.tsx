@@ -44,7 +44,7 @@ function ConnectedReportDartPanel({ reportId, companies }: { reportId: number; c
   return <section className="report-dart-panel" aria-labelledby={headingId} aria-busy={busy}>
     <div className="report-dart-heading"><div>
       <h3 id={headingId}>회사 실적 · 공시</h3>
-      <p>수집할 때 연결한 회사의 최근 12분기 실적과 공시입니다.</p>
+      <p>보고서에 연결된 회사의 최근 12분기 실적과 공시입니다.</p>
     </div></div>
     {choices.length > 1 && <Segmented label="공시 회사 선택" className="report-dart-tabs"
       options={choices.map(company => ({ value: company.corpCode, label: company.corpName }))}

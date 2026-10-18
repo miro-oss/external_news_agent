@@ -500,6 +500,7 @@ export interface ReportDetail {
   generatedAt: string
   summaryStats: ReportSummaryStats
   structuredContent?: ReportContent | null
+  dartCompanies?: import('./dart').DartCompany[]
   collectionContexts?: ReportCollectionContext[]
   articleStats?: { totalCount: number; newCount: number; existingCount: number }
   findings?: ReportFinding[]

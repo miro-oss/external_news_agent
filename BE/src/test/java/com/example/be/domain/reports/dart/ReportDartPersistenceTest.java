@@ -31,6 +31,33 @@ class ReportDartPersistenceTest {
         verify(repository, never()).enqueue(eq(18L), any(), anyBoolean(), any());
     }
 
+    @Test void topicWeeklyEnqueueRetryAndClaimUseOnlyTheFrozenCompany() {
+        var report = topicWeekly(SAMSUNG, com.example.be.domain.reports.entity.ReportStatus.GENERATED);
+        when(reports.findByIdForUpdate(17L)).thenReturn(Optional.of(report));
+        when(reports.findById(17L)).thenReturn(Optional.of(report));
+        properties.setApiKey("unit-test-key");
+        var selected = new ReportDartRepository.Job(17L, SAMSUNG, 0);
+        when(repository.claim(eq(selected), eq("selected"), any(), any())).thenReturn(true);
+
+        persistence.enqueue(17L);
+        persistence.retry(17L);
+        assertTrue(persistence.claim(selected, "selected"));
+        assertFalse(persistence.claim(new ReportDartRepository.Job(17L, HYNIX, 0), "historical"));
+
+        verify(repository, times(2)).enqueue(eq(17L), eq(SAMSUNG), eq(true), any());
+        verify(repository).retry(eq(17L), eq(true), any());
+        verify(repository, never()).enqueue(eq(17L), eq(HYNIX), anyBoolean(), any());
+        verify(repository, never()).claim(any(), eq("historical"), any(), any());
+    }
+
+    @Test void topicWeeklyWithoutReservationCompanyDoesNotEnqueueOrRetryHistoricalCompany() {
+        when(reports.findByIdForUpdate(17L)).thenReturn(Optional.of(
+                topicWeekly(null, com.example.be.domain.reports.entity.ReportStatus.GENERATED)));
+        persistence.enqueue(17L);
+        persistence.retry(17L);
+        verifyNoInteractions(repository);
+    }
+
     @Test void enqueueCopiesExpiredCompanySnapshotEvenWhenProviderIsDisabled() {
         when(reports.findByIdForUpdate(17L)).thenReturn(Optional.of(report(ReportScope.RUN, SAMSUNG)));
         when(repository.cached(SAMSUNG.corpCode())).thenReturn(Optional.of(

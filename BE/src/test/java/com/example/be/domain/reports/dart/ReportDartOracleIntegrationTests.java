@@ -11,10 +11,13 @@ import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportCollectionContext;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
+import com.example.be.domain.reports.entity.WeeklyReportInput;
 import com.example.be.domain.reports.repository.NewsReportRepository;
 import com.example.be.global.config.ApiTimeZone;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -55,26 +58,52 @@ class ReportDartOracleIntegrationTests {
     }
 
     private NewsReport create(boolean selected, ReportStatus status) {
+        return create(ReportScope.RUN, selected, status);
+    }
+
+    private NewsReport create(ReportScope scope, boolean selected, ReportStatus status) {
         var now = LocalDateTime.now(ApiTimeZone.ZONE);
         var run = runs.saveAndFlush(CollectionRun.builder().status(RunStatus.SUCCESS)
                 .triggerType(TriggerType.MANUAL).startedAt(now).build());
         runIds.add(run.getId());
-        var value = reports.saveAndFlush(NewsReport.builder().run(run).reportScope(ReportScope.RUN)
-                .title("DART 첨부 통합검증").markdownBody("검증 보고서").modelName("test").reportStatus(status).generatedAt(now)
-                .collectionContexts(List.of(new ReportCollectionContext(run.getId(), List.of(topic(1L, selected ? COMPANY : null)))))
-                .build());
+        var builder = NewsReport.builder().reportScope(scope)
+                .title("DART 첨부 통합검증").markdownBody("검증 보고서").modelName("test").reportStatus(status).generatedAt(now);
+        if (scope == ReportScope.WEEKLY) {
+            var monday = now.toLocalDate().with(java.time.DayOfWeek.MONDAY).minusWeeks(1);
+            builder.topicId(run.getId()).topicName("주제 주간 검증").reportDate(monday).reportEndDate(monday.plusDays(6))
+                    .weeklyInput(new WeeklyReportInput(monday, monday.plusDays(6), List.of(), List.of(), run.getId(), "주제 주간 검증"))
+                    .sourceRunIds(List.of(run.getId())).sourceReportCount(0L)
+                    .topicDartCorpCode(selected ? COMPANY.corpCode() : null)
+                    .topicDartCorpName(selected ? COMPANY.corpName() : null)
+                    .topicDartStockCode(selected ? COMPANY.stockCode() : null)
+                    // Old collection settings must not supply a company to legacy/unselected topic reports.
+                    .collectionContexts(List.of(new ReportCollectionContext(run.getId(), List.of(topic(1L, HYNIX)))));
+        } else {
+            builder.run(run).collectionContexts(List.of(new ReportCollectionContext(run.getId(), List.of(topic(1L, selected ? COMPANY : null)))));
+        }
+        var value = reports.saveAndFlush(builder.build());
         reportIds.add(value.getId());
         return value;
     }
 
-    @Test void snapshotIntentRecoversMissedCompletionAndEnqueueIsIdempotent() {
-        var eligible = create(true, ReportStatus.GENERATED);
-        var legacy = create(false, ReportStatus.GENERATED);
-        var pending = create(true, ReportStatus.PENDING);
+    @ParameterizedTest
+    @EnumSource(value = ReportScope.class, names = {"RUN", "WEEKLY"})
+    void snapshotIntentRecoversMissedCompletionAndEnqueueIsIdempotent(ReportScope scope) {
+        var eligible = create(scope, true, ReportStatus.GENERATED);
+        var legacy = create(scope, false, ReportStatus.GENERATED);
+        var pending = create(scope, true, ReportStatus.PENDING);
+        var hidden = create(scope, true, ReportStatus.GENERATED);
+        hidden.hide(LocalDateTime.now(ApiTimeZone.ZONE));
+        reports.saveAndFlush(hidden);
+        if (scope == ReportScope.WEEKLY) {
+            assertEquals(COMPANY, reports.findById(eligible.getId()).orElseThrow().getTopicDartCompany());
+            assertNull(reports.findById(legacy.getId()).orElseThrow().getTopicDartCompany());
+        }
         var missing = repository.missing();
         assertTrue(missing.contains(eligible.getId()));
         assertFalse(missing.contains(legacy.getId()));
         assertFalse(missing.contains(pending.getId()));
+        assertFalse(missing.contains(hidden.getId()));
         persistence.enqueue(eligible.getId());
         persistence.enqueue(eligible.getId());
         assertEquals(1, repository.find(eligible.getId()).size());
@@ -125,8 +154,10 @@ class ReportDartOracleIntegrationTests {
         verifyNoInteractions(financials);
     }
 
-    @Test void interruptedWorkIsBoundedAndLateOwnerCannotOverwriteRecoveredAttempt() {
-        var report = create(true, ReportStatus.GENERATED);
+    @ParameterizedTest
+    @EnumSource(value = ReportScope.class, names = {"RUN", "WEEKLY"})
+    void interruptedWorkIsBoundedAndLateOwnerCannotOverwriteRecoveredAttempt(ReportScope scope) {
+        var report = create(scope, true, ReportStatus.GENERATED);
         persistence.enqueue(report.getId());
         var job = new ReportDartRepository.Job(report.getId(), COMPANY, 0);
         assertTrue(persistence.claim(job, "expired"));
@@ -154,10 +185,12 @@ class ReportDartOracleIntegrationTests {
         assertEquals("PENDING", repository.find(report.getId()).getFirst().status());
     }
 
-    @Test void expiredCacheIsImmediatelyCopiedToNewReportWithoutChangingItsFetchTime() {
+    @ParameterizedTest
+    @EnumSource(value = ReportScope.class, names = {"RUN", "WEEKLY"})
+    void expiredCacheIsImmediatelyCopiedToNewReportWithoutChangingItsFetchTime(ReportScope scope) {
         var now = LocalDateTime.now(ApiTimeZone.ZONE);
         seedCache(data(), now.minusDays(2));
-        var report = create(true, ReportStatus.GENERATED);
+        var report = create(scope, true, ReportStatus.GENERATED);
 
         persistence.enqueue(report.getId());
 
@@ -170,11 +203,13 @@ class ReportDartOracleIntegrationTests {
         verifyNoInteractions(financials);
     }
 
-    @Test void waitingReportsReuseCacheDespiteRetryDelayDisabledKeyOrActiveAttachmentLease() {
+    @ParameterizedTest
+    @EnumSource(value = ReportScope.class, names = {"RUN", "WEEKLY"})
+    void waitingReportsReuseCacheDespiteRetryDelayDisabledKeyOrActiveAttachmentLease(ReportScope scope) {
         var now = LocalDateTime.now(ApiTimeZone.ZONE);
         var waiting = new ArrayList<NewsReport>();
         for (var status : List.of("PENDING", "RUNNING", "FAILED", "DISABLED")) {
-            var report = create(true, ReportStatus.GENERATED);
+            var report = create(scope, true, ReportStatus.GENERATED);
             persistence.enqueue(report.getId());
             jdbc.update("""
                     UPDATE news_report_dart_attachments SET status = ?, next_attempt_at = ?,

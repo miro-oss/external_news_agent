@@ -8,22 +8,30 @@ import com.example.be.domain.reports.entity.ReportStatus;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-/** Only explicit companies captured for this RUN are eligible; live topics are never consulted. */
-final class ReportDartEligibility {
+/** Explicit RUN or topic weekly company snapshots only; live topics are never consulted. */
+public final class ReportDartEligibility {
     private ReportDartEligibility() { }
 
-    static List<Company> companies(NewsReport report) {
-        if (report.getReportScope() != ReportScope.RUN || report.getReportStatus() == ReportStatus.PENDING
-                || report.getDeletedAt() != null || report.getCollectionContexts() == null) return List.of();
+    public static List<Company> companies(NewsReport report) {
+        if (report.getReportStatus() == ReportStatus.PENDING || report.getDeletedAt() != null) return List.of();
+        if (report.getReportScope() == ReportScope.WEEKLY && report.getTopicId() != null) {
+            Company company = report.getTopicDartCompany();
+            return valid(company) ? List.of(company) : List.of();
+        }
+        if (report.getReportScope() != ReportScope.RUN || report.getCollectionContexts() == null) return List.of();
         var companies = new LinkedHashMap<String, Company>();
         for (var context : report.getCollectionContexts()) {
             for (var topic : context.topics()) {
                 Company company = topic.dartCompany();
-                if (company != null && company.corpCode() != null && company.corpCode().matches("[0-9]{8}")) {
+                if (valid(company)) {
                     companies.putIfAbsent(company.corpCode(), company);
                 }
             }
         }
         return List.copyOf(companies.values());
+    }
+
+    private static boolean valid(Company company) {
+        return company != null && company.corpCode() != null && company.corpCode().matches("[0-9]{8}");
     }
 }

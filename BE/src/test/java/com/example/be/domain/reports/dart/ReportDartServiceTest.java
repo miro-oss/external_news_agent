@@ -48,6 +48,30 @@ class ReportDartServiceTest {
         verifyNoInteractions(repository, persistence);
     }
 
+    @Test void topicWeeklyUsesReservationCompanyInsteadOfHistoricalCollectionCompanies() {
+        var report = topicWeekly(SAMSUNG, ReportStatus.GENERATED);
+        when(reports.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(repository.find(17L)).thenReturn(List.of(
+                new ReportDartRepository.Attachment(17L, SAMSUNG, "READY", ReportDartMessages.READY, data()),
+                new ReportDartRepository.Attachment(17L, HYNIX, "READY", ReportDartMessages.READY, data())));
+
+        var result = service.get(17L);
+
+        assertEquals(List.of(SAMSUNG), result.companies().stream().map(ReportDartDTO.CompanyAttachment::company).toList());
+        assertEquals(data(), result.companies().getFirst().data());
+        verifyNoInteractions(persistence);
+    }
+
+    @Test void legacyPendingAndHiddenTopicReportsNeverExposeHistoricalCompanies() {
+        var hidden = topicWeekly(SAMSUNG, ReportStatus.GENERATED);
+        hidden.hide(java.time.LocalDateTime.now());
+        for (var report : List.of(topicWeekly(null, ReportStatus.GENERATED),
+                topicWeekly(SAMSUNG, ReportStatus.PENDING), hidden)) {
+            assertTrue(service.getStored(report).companies().isEmpty());
+        }
+        verifyNoInteractions(repository, persistence);
+    }
+
     @Test void missingKeyReturnsDisabledWithoutBlockingReportAndRunningMapsToPending() {
         when(reports.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report(ReportScope.RUN, SAMSUNG)));
         assertEquals("DISABLED", service.get(17L).companies().getFirst().status());

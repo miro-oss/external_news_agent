@@ -45,6 +45,7 @@ public class TopicWeeklyReportPersistenceService {
             return new Reservation(existing.getId(), false, existing.getReportStatus() != ReportStatus.PENDING, existing.getWeeklyInput());
         }
         if (weekly.hasUnfinishedTopicInputs(topicId, monday)) throw new ReportException(ReportErrorCode.TOPIC_INPUT_PENDING);
+        var company = topic.getDartCompany();
         // This preparation only reads DB-backed evidence. Paid evaluation belongs to the reservation owner.
         var prepared = monday.datesUntil(monday.plusWeeks(1))
                 .map(date -> selector.prepare(topicId, topic.getName(), date)).toList();
@@ -62,6 +63,9 @@ public class TopicWeeklyReportPersistenceService {
                         .filter(snapshot -> snapshot.topicId().equals(topicId)).toList())).toList();
         NewsReport report = reports.saveAndFlush(NewsReport.builder().reportScope(ReportScope.WEEKLY)
                 .reportDate(monday).reportEndDate(monday.plusDays(6)).topicId(topicId).topicName(topic.getName())
+                .topicDartCorpCode(company == null ? null : company.corpCode())
+                .topicDartCorpName(company == null ? null : company.corpName())
+                .topicDartStockCode(company == null ? null : company.stockCode())
                 .sourceReportCount(0L).sourceRunIds(runs.stream().map(run -> run.getId()).toList())
                 .collectionContexts(contexts).missingReportDates(missingDates).weeklyInput(input)
                 .reflectedFindingIds(input.sourceFindingIds()).coverageRecorded(true).comparisonInputUsable(false)
