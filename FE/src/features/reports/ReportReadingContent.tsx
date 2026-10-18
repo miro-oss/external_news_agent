@@ -3,7 +3,7 @@ import Markdown from 'react-markdown'
 import type { ReportContent, ReportDetail } from '../../api/types'
 import { CollapsibleSection } from '../../components/CollapsibleSection'
 import { prefersReducedMotion } from '../../lib/motion'
-import { collectionHighlightTerms, groupLegacyReportSections, rehypeCollectionHighlights, reportSourceFindings, splitReportMarkdown } from './reportReading'
+import { collectionHighlightTerms, groupLegacyReportSections, rehypeCollectionHighlights, rehypeWeeklyEventSummary, reportSourceFindings, splitReportMarkdown } from './reportReading'
 import { ReportKeywordText } from './ReportKeywordText'
 
 export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnalysis, eventFeedback, feedbackNotice }: {
@@ -15,7 +15,8 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
 }) {
   const content = report.structuredContent
   const terms = collectionHighlightTerms(report.collectionContexts ?? [])
-  if (!content) return <LegacyReportBody key={report.id} markdown={report.markdownBody} terms={terms} beforeOtherAnalysis={beforeOtherAnalysis} />
+  const weekly = report.reportScope === 'WEEKLY'
+  if (!content) return <LegacyReportBody key={report.id} markdown={report.markdownBody} weekly={weekly} terms={terms} beforeOtherAnalysis={beforeOtherAnalysis} />
   const eventKeys = importantEventKeys(report.id, content.importantEvents)
   const byId = new Map((report.findings ?? []).map(finding => [finding.id, finding]))
   const referenced = new Set([...content.importantEvents, ...content.watchItems].flatMap(item => item.sourceFindingIds))
@@ -45,7 +46,7 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
           {content.importantEvents.map((event, index) => <article className="report-event-card" key={eventKeys[index]}>
             <h4><ReportKeywordText text={event.title} terms={terms} /></h4>
             <p><ReportKeywordText text={event.summaryKo} terms={terms} /></p>
-            {event.significance && event.significance !== event.summaryKo && <p className="report-event-significance"><ReportKeywordText text={event.significance} terms={terms} /></p>}
+            {!weekly && event.significance && event.significance !== event.summaryKo && <p className="report-event-significance"><ReportKeywordText text={event.significance} terms={terms} /></p>}
             {references(event.sourceFindingIds)}
             {eventFeedback?.(event, index)}
           </article>)}
@@ -117,12 +118,13 @@ function PaginatedAnalysis({ children }: { children: ReactNode[] }) {
   </>
 }
 
-function LegacyReportBody({ markdown, terms, beforeOtherAnalysis }: {
+function LegacyReportBody({ markdown, weekly, terms, beforeOtherAnalysis }: {
   markdown: string
+  weekly: boolean
   terms: string[]
   beforeOtherAnalysis?: ReactNode
 }) {
-  const groups = groupLegacyReportSections(markdown)
+  const groups = groupLegacyReportSections(markdown, weekly)
   const sections = groups.map((group, index) => {
     if (group.kind === 'other') {
       return <ReadingDisclosure key={index} title={group.title}>
@@ -149,7 +151,7 @@ function LegacyReportBody({ markdown, terms, beforeOtherAnalysis }: {
     if (group.kind === 'events') {
       return <section className="card report-important-events" key={index}><h3>중요 이벤트</h3><div className="report-event-list">
         {splitReportMarkdown(section.body, 3).map((event, eventIndex) => <article className="report-event-card" key={eventIndex}>
-          {event.title && <h4><ReportKeywordText text={event.title} terms={terms} /></h4>}<MarkdownText text={event.body} terms={terms} />
+          {event.title && <h4><ReportKeywordText text={event.title} terms={terms} /></h4>}<MarkdownText text={event.body} terms={terms} weeklyEvent={weekly} />
         </article>)}
       </div></section>
     }
@@ -165,8 +167,10 @@ function LegacyReportBody({ markdown, terms, beforeOtherAnalysis }: {
   return <div className="report-reading-content">{sections}</div>
 }
 
-function MarkdownText({ text, terms }: { text: string; terms: string[] }) {
-  return <div className="report-markdown-text"><Markdown rehypePlugins={[[rehypeCollectionHighlights, { terms }]]} components={{
+function MarkdownText({ text, terms, weeklyEvent = false }: { text: string; terms: string[]; weeklyEvent?: boolean }) {
+  return <div className="report-markdown-text"><Markdown rehypePlugins={weeklyEvent
+    ? [rehypeWeeklyEventSummary, [rehypeCollectionHighlights, { terms }]]
+    : [[rehypeCollectionHighlights, { terms }]]} components={{
     h1: ({ children }) => <h4>{children}</h4>,
     h2: ({ children }) => <h4>{children}</h4>,
     h3: ({ children }) => <h4>{children}</h4>,
