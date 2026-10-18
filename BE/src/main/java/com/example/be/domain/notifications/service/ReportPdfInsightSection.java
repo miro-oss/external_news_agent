@@ -21,10 +21,10 @@ final class ReportPdfInsightSection {
     private ReportPdfInsightSection() { }
 
     /**
-     * Appends the selected audience's overview, issue explanations and follow-up checks.
+     * Appends the selected audience's overview and follow-up checks.
      * Every included interpretation must be bound to grounded facts that remain visible to the recipient.
      * A null selection omits this section; an empty eligible selection prints the unavailable notice.
-     * Scoring, conditional implications and the evidence appendix are outside the PDF reading scope.
+     * Issue explanations, scoring, conditional implications and the evidence appendix are outside the PDF reading scope.
      */
     static void write(ReportPdfLayout pdf, ReportInsightDTO.AudienceInsight insight,
                       ReportEventFeedbackProjection.View view) throws IOException {
@@ -47,14 +47,11 @@ final class ReportPdfInsightSection {
         }
         var overview = list(insight.overview()).stream()
                 .filter(item -> supported(item.basisClaimIds(), allowed) && StringUtils.hasText(item.text())).toList();
-        var issues = list(insight.issues()).stream()
-                .filter(item -> visible.containsKey(item.findingId())
-                        && supported(item.basisClaimIds(), allowed) && StringUtils.hasText(item.reason())).toList();
         var watches = list(insight.watchItems()).stream()
                 .filter(item -> supported(item.basisClaimIds(), allowed) && StringUtils.hasText(item.topic())).toList();
         String heading = "리포트 관점 분석 · " + audience(insight.audience());
         // The aggregate headline and importance have no claim bindings and can repeat excluded evidence.
-        if (overview.isEmpty() && issues.isEmpty() && watches.isEmpty()) {
+        if (overview.isEmpty() && watches.isEmpty()) {
             pdf.reserve(110);
             pdf.section(heading);
             pdf.muted(NotificationInsightBrief.AI_NOTICE);
@@ -66,14 +63,6 @@ final class ReportPdfInsightSection {
             groups.add(new ReportPdfLayout.ReadingGroup("리포트 종합 판단", overview.stream().map(item ->
                     new ReportPdfLayout.ReadingItem("해석", item.text(),
                             List.of(new ReportPdfLayout.ReadingField("해석의 조건", item.assumption())))).toList()));
-        }
-        if (!issues.isEmpty()) {
-            groups.add(new ReportPdfLayout.ReadingGroup("먼저 살펴볼 이슈", issues.stream().map(item -> {
-                Finding finding = visible.get(item.findingId());
-                String title = finding.getArticle() == null ? null : finding.getArticle().getTitle();
-                return new ReportPdfLayout.ReadingItem(StringUtils.hasText(title) ? "기사" : null, title,
-                        List.of(new ReportPdfLayout.ReadingField("해석", item.reason())));
-            }).toList()));
         }
         if (!watches.isEmpty()) {
             groups.add(new ReportPdfLayout.ReadingGroup("다음 확인 항목", watches.stream().map(item ->

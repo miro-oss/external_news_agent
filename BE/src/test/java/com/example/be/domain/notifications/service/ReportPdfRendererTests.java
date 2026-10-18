@@ -59,8 +59,8 @@ class ReportPdfRendererTests {
         try (PDDocument document = Loader.loadPDF(bytes)) {
             String text = new PDFTextStripper().getText(document);
             for (String expected : List.of("핵심 요약", "네 번째 전체 요약", "중요 이벤트", "중요 사건 7", "사건 전체 내용 7",
-                    "주목할 이유 7", "관찰 항목", "후속 확인할 조건")) assertTrue(text.contains(expected), expected);
-            for (String absent : List.of("기타 분석", "기사 분석 9", "수집 상태", "절대 표시하지", "기사 분석 10", "원본 보고서에만 남은 비공개 내용", "리포트 관점 분석"))
+                    "관찰 항목", "후속 확인할 조건")) assertTrue(text.contains(expected), expected);
+            for (String absent : List.of("주목할 이유", "기타 분석", "기사 분석 9", "수집 상태", "절대 표시하지", "기사 분석 10", "원본 보고서에만 남은 비공개 내용", "리포트 관점 분석"))
                 assertFalse(text.contains(absent), absent);
             assertFalse(urls(document).contains("https://example.com/article-9"));
             assertFalse(text.contains("https://example.com/article-9"));
@@ -69,6 +69,59 @@ class ReportPdfRendererTests {
             assertFalse(urls(document).contains("https://example.com/article-10"));
             for (var page : document.getPages()) for (var name : page.getResources().getFontNames())
                 assertTrue(page.getResources().getFont(name).isEmbedded(), "Korean fonts must travel with the attachment");
+        }
+    }
+
+    @Test
+    void weeklyPdfKeepsOnlyEventSummaryAndSourceWithoutDatedAnalysis() throws Exception {
+        String summary = "아마존이 데카르트를 약 70억달러(약 9조4000억원)에 인수하는 방안을 논의하고 있다.";
+        String chronology = "2026-10-12 주제별 분석 결과: " + summary
+                + "\n2026-10-12 주제별 분석 결과: [전망] 소식통들은 조만간 거래가 성사될 수 있다고 말했다."
+                + "\n2026-10-12 주제별 분석 결과: [근거 제한: 스타트업이라는 표현은 명시되지 않음.] 데카르트는 소프트웨어 기업이다."
+                + "\n2026-10-13 주제별 분석 결과: " + summary;
+        var content = new ReportContent(List.of("이번 주 주요 인수 논의"),
+                List.of(new ReportContent.ImportantEvent("아마존의 데카르트 인수 논의", summary, chronology, List.of(1L))),
+                List.of(), List.of());
+        var report = NewsReport.builder().id(17L).reportScope(ReportScope.WEEKLY)
+                .title("주간 PDF 형식 검증 · 사용자 제공 문구")
+                .reportDate(java.time.LocalDate.of(2026, 10, 12)).reportEndDate(java.time.LocalDate.of(2026, 10, 18)).build();
+        byte[] bytes = renderer.render(report, view(content,
+                List.of(finding(1, "아마존의 데카르트 인수 논의", summary)), Set.of()), null);
+        try (PDDocument document = Loader.loadPDF(bytes)) {
+            String text = new PDFTextStripper().getText(document);
+            assertTrue(text.replaceAll("\\s", "").contains(summary.replaceAll("\\s", "")), text);
+            assertEquals(1, text.split("논의하고 있다\\.", -1).length - 1, text);
+            for (String omitted : List.of("주제별 분석 결과", "[전망]", "소식통", "근거 제한", "스타트업", "먼저 살펴볼 이슈"))
+                assertFalse(text.contains(omitted), omitted);
+            assertTrue(urls(document).contains("https://example.com/article-1"));
+            assertWithinPageBounds(document);
+        }
+        assertEquals(chronology, content.importantEvents().getFirst().significance());
+        Path path = Path.of("build/reports/pdf/weekly-summary-sample.pdf");
+        Files.createDirectories(path.getParent());
+        Files.write(path, bytes);
+        verifyNoInteractions(dart);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"주제별 분석 결과", "일일 보고서"})
+    void legacyWeeklyPdfOmitsChronologyAndPriorityIssuesButKeepsSummaryAndLinks(String sourceLabel) throws Exception {
+        String markdown = "# 주간 보고서\n\n## 주요 이슈와 주간 흐름\n\n### 인수 논의\n\n"
+                + "인수하는 방안을 논의하고 있다. 2026-10-12 " + sourceLabel + ": 반복된 인수 논의.\n"
+                + "[같은 문단의 원문](https://example.com/article-2)\n\n"
+                + "- 2026-10-13 " + sourceLabel + ": [전망] 제거할 추가 설명. <https://example.com/article-3>\n\n"
+                + "[기사 원문](https://example.com/article-1)\n\n"
+                + "## 먼저 살펴볼 이슈\n\n### 제거할 이슈\n\n제거할 이슈 설명\n\n"
+                + "## 다음 확인 항목\n\n공식 발표를 확인합니다.\n";
+        var view = new ReportEventFeedbackProjection.View(List.of(), new ReportReadingContent(markdown, null), false, Set.of());
+        try (PDDocument document = Loader.loadPDF(renderer.render(report(ReportScope.WEEKLY), view, null))) {
+            String text = new PDFTextStripper().getText(document);
+            assertTrue(text.contains("인수하는 방안을 논의하고 있다."), text);
+            assertTrue(text.contains("공식 발표를 확인합니다."), text);
+            for (String omitted : List.of(sourceLabel, "반복된", "제거할", "먼저 살펴볼 이슈"))
+                assertFalse(text.contains(omitted), omitted);
+            for (long id : List.of(1L, 2L, 3L))
+                assertTrue(urls(document).contains("https://example.com/article-" + id));
         }
     }
 
@@ -98,7 +151,7 @@ class ReportPdfRendererTests {
             String text = new PDFTextStripper().getText(document);
             assertTrue(document.getNumberOfPages() >= 3);
             for (int i = 1; i <= 90; i++) assertTrue(text.contains("완전한 문장 " + i + ":"), "missing prose " + i);
-            assertTrue(text.contains("마지막 중요성도 보존합니다"));
+            assertFalse(text.contains("마지막 중요성도 보존합니다"));
             assertTrue(text.replaceAll("\\s", "").contains(longUrl));
             assertTrue(urls(document).contains(longUrl));
             assertWithinPageBounds(document);
@@ -252,9 +305,10 @@ class ReportPdfRendererTests {
         try (PDDocument document = Loader.loadPDF(bytes)) {
             assertWithinPageBounds(document);
             String text = new PDFTextStripper().getText(document);
-            for (String expected : List.of("리포트 관점 분석 · 장비·소재사", "리포트 종합 판단", "먼저 살펴볼 이슈", "다음 확인 항목"))
+            for (String expected : List.of("리포트 관점 분석 · 장비·소재사", "리포트 종합 판단", "다음 확인 항목"))
                 assertTrue(text.contains(expected), expected);
-            for (String omitted : List.of("기타 분석", "우선순위", "중요도", "직접 관련성", "영향 크기", "조건부 해석"))
+            for (String omitted : List.of("먼저 살펴볼 이슈", "생산라인 증설은 장비 반입과 설치 수요에 직접 연결됩니다.",
+                    "기타 분석", "우선순위", "중요도", "직접 관련성", "영향 크기", "조건부 해석"))
                 assertFalse(text.contains(omitted), omitted);
         }
     }
