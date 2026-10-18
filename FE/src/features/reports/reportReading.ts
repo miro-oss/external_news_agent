@@ -49,12 +49,12 @@ export interface LegacyReportGroup {
 }
 
 /** Keep saved order, collecting all secondary analysis into its first disclosure. */
-export function groupLegacyReportSections(markdown: string): LegacyReportGroup[] {
+export function groupLegacyReportSections(markdown: string, weekly = false): LegacyReportGroup[] {
   const groups: LegacyReportGroup[] = []
   for (const section of splitReportMarkdown(markdown)) {
     const kind = /수집 및 출처 참고|수집 상태/.test(section.title) ? 'notes'
       : /기타\s*분석|기사별\s*분석|보고서\s*제외/.test(section.title) ? 'other'
-      : /중요 이벤트/.test(section.title) ? 'events' : 'section'
+      : /중요 이벤트/.test(section.title) || (weekly && /주요 이슈와 주간 흐름/.test(section.title)) ? 'events' : 'section'
     if (kind === 'notes' && /제외 사항이 없습니다/.test(section.body)
       && section.body.split('\n').filter(line => line.trim()).length === 1) continue
     if ((kind === 'other' || kind === 'notes') && !section.body.trim()) continue
@@ -133,6 +133,44 @@ interface MarkdownTextTree {
   tagName?: string
   properties?: Record<string, unknown>
   children?: MarkdownTextTree[]
+}
+
+/** Saved weekly events put the summary first, followed by evidence chronology and source links. */
+export function rehypeWeeklyEventSummary() {
+  return (tree: MarkdownTextTree) => {
+    const summary = tree.children?.find(node => node.type === 'element' && node.tagName === 'p')
+    if (!summary) return
+    const textOf = (node: MarkdownTextTree): string => node.type === 'text' ? node.value ?? ''
+      : (node.children ?? []).map(textOf).join('')
+    const text = textOf(summary)
+    const chronology = /\b\d{4}-\d{2}-\d{2}\s+(?:주제별 분석 결과|일일 보고서):/.exec(text)
+    let remaining = chronology ? chronology.index : text.length
+    function keepSummary(node: MarkdownTextTree): MarkdownTextTree[] {
+      if (remaining <= 0) return []
+      const length = textOf(node).length
+      if (length <= remaining) { remaining -= length; return [node] }
+      if (node.type === 'text') {
+        const value = node.value?.slice(0, remaining)
+        remaining = 0
+        return [{ ...node, value }]
+      }
+      return [{ ...node, children: (node.children ?? []).flatMap(keepSummary) }]
+    }
+    const visible = keepSummary(summary)
+    function linksIn(node: MarkdownTextTree): MarkdownTextTree[] {
+      if (node.type === 'element' && node.tagName === 'a') return [node]
+      return (node.children ?? []).flatMap(linksIn)
+    }
+    const shownUrls = new Set(visible.flatMap(linksIn).map(link => link.properties?.href))
+    // Use parsed anchors so reference links, autolinks and URLs with parentheses stay intact.
+    const sources = linksIn(tree).filter(link => {
+      const href = link.properties?.href
+      if (!href || shownUrls.has(href)) return false
+      shownUrls.add(href)
+      return true
+    }).map(link => ({ type: 'element', tagName: 'p', properties: {}, children: [link] }))
+    tree.children = [...visible, ...sources]
+  }
 }
 
 /** Transform rendered prose text nodes only; URLs, HTML source, code, and element properties stay untouched. */
