@@ -61,16 +61,37 @@ final class ReportPdfInsightSection {
         List<ReportPdfLayout.ReadingGroup> groups = new ArrayList<>();
         if (!overview.isEmpty()) {
             groups.add(new ReportPdfLayout.ReadingGroup("리포트 종합 판단", overview.stream().map(item ->
-                    new ReportPdfLayout.ReadingItem("해석", item.text(),
-                            List.of(new ReportPdfLayout.ReadingField("해석의 조건", item.assumption())))).toList()));
+                    new ReportPdfLayout.ReadingItem("해석", separateQuotedText(item.text()),
+                            List.of(new ReportPdfLayout.ReadingField("해석의 조건", separateQuotedText(item.assumption()))))).toList()));
         }
         if (!watches.isEmpty()) {
             groups.add(new ReportPdfLayout.ReadingGroup("다음 확인 항목", watches.stream().map(item ->
-                    new ReportPdfLayout.ReadingItem(null, item.topic(), List.of(
-                            new ReportPdfLayout.ReadingField("확인할 지표", item.indicator()),
-                            new ReportPdfLayout.ReadingField("판단 기준", item.trigger())))).toList()));
+                    new ReportPdfLayout.ReadingItem(null, separateQuotedText(item.topic()), List.of(
+                            new ReportPdfLayout.ReadingField("확인할 지표", separateQuotedText(item.indicator())),
+                            new ReportPdfLayout.ReadingField("판단 기준", separateQuotedText(item.trigger()))))).toList()));
         }
         pdf.readingSection(heading, NotificationInsightBrief.AI_NOTICE, groups);
+    }
+
+    /** Separate the generated source quotation from its prose without changing either text. */
+    private static String separateQuotedText(String value) {
+        String prefix = "원문: 「";
+        if (value == null || !value.startsWith(prefix)) return value;
+        int depth = 1;
+        for (int index = prefix.length(); index < value.length(); index++) {
+            char character = value.charAt(index);
+            if (character == '「') depth++;
+            if (character == '」' && --depth == 0) {
+                String remainder = value.substring(index + 1);
+                String prose = remainder.stripLeading();
+                boolean labeled = List.of("해석:", "미확인 가정:", "반증 조건:", "관찰 항목:").stream()
+                        .anyMatch(label -> prose.startsWith(label) && StringUtils.hasText(prose.substring(label.length())));
+                String separator = remainder.substring(0, remainder.length() - prose.length());
+                if (!labeled || separator.contains("\n") || separator.contains("\r")) return value;
+                return value.substring(0, index + 1) + "\n\n" + prose;
+            }
+        }
+        return value;
     }
 
     private static boolean supported(List<String> ids, Set<String> allowed) {

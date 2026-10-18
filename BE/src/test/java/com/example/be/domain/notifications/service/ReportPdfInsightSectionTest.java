@@ -17,7 +17,10 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -133,12 +136,59 @@ class ReportPdfInsightSectionTest {
     }
 
     @Test
+    void separatesQuotedSourcesFromInterpretationConditionsAndWatchProseInPdf() throws Exception {
+        String overview = "원문: 「회사 측은 「해석: 검토 중」이라고 밝혔다.」 해석: 생산라인 투자 계획의 집행 시점을 확인해야 합니다.";
+        String assumption = "원문: 「회사는 장비 반입 일정을 아직 확정하지 않았다.」 미확인 가정: 투자 계획이 실제 발주로 이어진다는 전제입니다.";
+        String topic = "원문: 「신규 공장의 가동 일정은 공급사와 협의 중이다.」 관찰 항목: 공식 가동 일정의 변경 여부를 확인합니다.";
+        String indicator = "원문: 「분기별 장비 발주 규모를 공개할 예정이다.」 해석: 공개되는 발주 금액과 전분기 수치를 비교합니다.";
+        String trigger = "원문: 「생산 확대는 고객사의 주문 확보를 전제로 한다.」 반증 조건: 주문 취소나 투자 연기가 발표되면 판단을 다시 검토합니다.";
+        var insight = insight(List.of(fact(11, "grounded", List.of(0))),
+                List.of(new Overview(overview, List.of("11:0"), assumption)), List.of(), List.of(),
+                List.of(new WatchItem(topic, indicator, trigger, List.of("11:0"))));
+        byte[] bytes;
+        try (PDDocument document = new PDDocument(); ReportPdfLayout pdf = new ReportPdfLayout(document)) {
+            ReportPdfInsightSection.write(pdf, insight, view(List.of(finding(11)), Set.of()));
+            bytes = pdf.save();
+        }
+        try (PDDocument document = Loader.loadPDF(bytes)) {
+            StringBuilder renderedCharacters = new StringBuilder();
+            List<PdfCharacter> positions = new ArrayList<>();
+            String text = new PDFTextStripper() {
+                @Override protected void processTextPosition(TextPosition position) {
+                    renderedCharacters.append(position.getUnicode());
+                    for (int index = 0; index < position.getUnicode().length(); index++)
+                        positions.add(new PdfCharacter(getCurrentPageNo(), position.getYDirAdj()));
+                    assertTrue(position.getXDirAdj() >= 40);
+                    assertTrue(position.getXDirAdj() + position.getWidthDirAdj() <= PDRectangle.A4.getWidth() - 40);
+                    assertTrue(position.getYDirAdj() > 20 && position.getYDirAdj() < 820);
+                    super.processTextPosition(position);
+                }
+            }.getText(document);
+            for (String original : List.of(overview, assumption, topic, indicator, trigger)) {
+                assertTrue(text.replaceAll("\\s", "").contains(original.replaceAll("\\s", "")), original + "\n" + text);
+            }
+            assertTrue(text.contains("「해석: 검토 중」"), text);
+            for (String suffix : List.of("해석: 생산라인", "미확인 가정:", "관찰 항목:", "해석: 공개되는", "반증 조건:"))
+                assertTrue(text.contains("\n" + suffix), suffix + "\n" + text);
+            assertParagraphGap(renderedCharacters.toString(), positions, "이라고 밝혔다.」", "해석: 생산라인");
+            assertParagraphGap(renderedCharacters.toString(), positions, "확정하지 않았다.」", "미확인 가정:");
+            assertParagraphGap(renderedCharacters.toString(), positions, "협의 중이다.」", "관찰 항목:");
+            assertParagraphGap(renderedCharacters.toString(), positions, "공개할 예정이다.」", "해석: 공개되는");
+            assertParagraphGap(renderedCharacters.toString(), positions, "전제로 한다.」", "반증 조건:");
+        }
+        Path path = Path.of("build/reports/pdf/insight-paragraphs-sample.pdf");
+        Files.createDirectories(path.getParent());
+        Files.write(path, bytes);
+    }
+
+    @Test
     void readingBlocksKeepTheirOpeningTogetherAndSplitOversizedItemsWithoutLosingText() throws Exception {
         String longText = IntStream.range(0, 120).mapToObj(index -> "긴 문단 기록 " + index)
                 .collect(Collectors.joining("\n"));
         var insight = insight(List.of(fact(11, "grounded", List.of(0))),
                 List.of(new Overview("첫 묶음 해석", List.of("11:0"), "첫 묶음 조건"),
-                        new Overview(longText, List.of("11:0"), "긴 문단 마지막 조건")),
+                        new Overview("원문: 「" + longText + "」 해석: 긴 문단 전체의 판단도 보존합니다.",
+                                List.of("11:0"), "긴 문단 마지막 조건")),
                 List.of(new ReportInsightDTO.Issue(11L, "high", "기사 해석 본문", List.of("11:0"), null, 1)),
                 List.of(), List.of(new WatchItem("마지막 관찰 주제", "마지막 지표", "마지막 기준", List.of("11:0"))));
         byte[] bytes;
@@ -169,6 +219,7 @@ class ReportPdfInsightSectionTest {
                 }
             }.getText(document);
             for (int index = 0; index < 120; index++) assertTrue(text.contains("긴 문단 기록 " + index));
+            assertTrue(text.contains("\n해석: 긴 문단 전체의 판단도 보존합니다."), text);
             assertTrue(text.contains("긴 문단 마지막 조건"));
             assertFalse(text.contains("먼저 살펴볼 이슈"));
             assertFalse(text.contains("기사 제목 11"));
@@ -222,6 +273,18 @@ class ReportPdfInsightSectionTest {
         ReportPdfLayout pdf = mock(ReportPdfLayout.class);
         ReportPdfInsightSection.write(pdf, null, view(List.of(), Set.of()));
         verifyNoInteractions(pdf);
+    }
+
+    private record PdfCharacter(int page, float y) { }
+
+    private static void assertParagraphGap(String text, List<PdfCharacter> positions, String quoteEnd, String suffix) {
+        int quoteStart = text.indexOf(quoteEnd);
+        int suffixStart = text.indexOf(suffix);
+        assertTrue(quoteStart >= 0 && suffixStart > quoteStart, quoteEnd + " / " + suffix);
+        PdfCharacter quote = positions.get(quoteStart + quoteEnd.length() - 1);
+        PdfCharacter prose = positions.get(suffixStart);
+        assertTrue(prose.page() > quote.page() || prose.page() == quote.page() && prose.y() - quote.y() >= 30,
+                "Expected a blank line between the source quote and " + suffix + ": " + quote + " -> " + prose);
     }
 
     private static String render(ReportInsightDTO.AudienceInsight insight, ReportEventFeedbackProjection.View view) throws Exception {
