@@ -5,9 +5,10 @@ import {
   useGenerateReportInsight, useReportInsight, useReportInsightGenerating, useReportInsightQueued,
   type ReportAudienceInsight, type ReportImportance, type ReportInsightFact, type ReportInsightIssue, type ReportInsightResult,
 } from '../../api/reportInsights'
-import { AUDIENCE_LABELS, type Audience, type ReportDetail, type ReportFinding } from '../../api/types'
+import { AUDIENCE_LABELS, type Audience, type ReportContent, type ReportDetail, type ReportFinding, type ReportScope } from '../../api/types'
 import { formatFullDate } from '../../lib/datetime'
 import { safeReportEvidenceUrl } from './reportChangesDisplay'
+import { groupReportInsightIssues } from './reportInsightGroups'
 import './report-insights.css'
 
 type EvidenceSelect = (articleId: number, runId: number, sentences: number[]) => void
@@ -74,24 +75,28 @@ export function ReportInsightsPanel({ report, audience, selector, onEvidenceSele
         </button></>}
     </div>}
     {insight && stored.data && !generating && <ReportInsightsContent result={stored.data} insight={insight}
-      findings={report.findings ?? []} onEvidenceSelect={onEvidenceSelect} />}
+      findings={report.findings ?? []} reportScope={report.reportScope}
+      importantEvents={report.structuredContent?.importantEvents} onEvidenceSelect={onEvidenceSelect} />}
   </section>
 }
 
-export function ReportInsightsContent({ result, insight, findings, onEvidenceSelect }: {
+export function ReportInsightsContent({ result, insight, findings, reportScope = 'RUN', importantEvents = [], onEvidenceSelect }: {
   result: ReportInsightResult
   insight: ReportAudienceInsight
   findings: ReportFinding[]
+  reportScope?: ReportScope
+  importantEvents?: ReportContent['importantEvents']
   onEvidenceSelect: EvidenceSelect
 }) {
   const byFinding = new Map(findings.map(finding => [finding.id, finding]))
   const facts = new Map(insight.facts.map(fact => [fact.id, fact]))
+  const issueGroups = groupReportInsightIssues(insight.issues, byFinding, reportScope, importantEvents)
   const evidence = (ids: string[]) => <ClaimEvidence ids={ids} facts={facts} findings={byFinding} onEvidenceSelect={onEvidenceSelect} />
   const hasSynthesis = insight.overview.length + insight.implications.length + insight.watchItems.length > 0
   return <div className="report-insights-content">
     <div className="report-insights-meta"><Importance value={insight.importance} report />
       <span>{AUDIENCE_LABELS[insight.audience]} 관점</span><span>{result.cached ? '저장된 분석' : '새로 생성한 분석'}</span>
-      <span>근거 이슈 {result.inputFindingCount}건</span><time dateTime={insight.createdAt}>{formatFullDate(insight.createdAt)}</time>
+      <span>근거 분석 {result.inputFindingCount}건</span><time dateTime={insight.createdAt}>{formatFullDate(insight.createdAt)}</time>
     </div>
     <h4 className="report-insights-headline">{insight.headline}</h4>
     {!hasSynthesis && <p>이 관점의 종합 해석이 없습니다.{insight.issues.length > 0 && ' 아래 이슈별 판단 사유와 원문 근거를 확인해 주세요.'}</p>}
@@ -99,16 +104,21 @@ export function ReportInsightsContent({ result, insight, findings, onEvidenceSel
       <p>{item.text}</p><p className="report-insights-condition">해석의 조건 · {item.assumption}</p>{evidence(item.basisClaimIds)}
     </li>)}</ul>}
     {insight.issues.length > 0 && <section aria-label="관점별 주요 이슈 우선순위"><h4>먼저 살펴볼 이슈</h4>
-      <ol className="report-insights-issues">{insight.issues.map(issue => <li className="report-insights-issue" key={issue.findingId}>
-        <div className="report-insights-issue-header"><span className="report-insights-rank">우선순위 {issue.rank}</span><Importance value={issue.importance} /></div>
-        <h5>{byFinding.get(issue.findingId)?.articleTitle ?? `보고서 근거 #${issue.findingId}`}</h5><p>{issue.reason}</p>
-        <IssueAssessmentNote issue={issue} />
-        <dl className="report-insights-axes">
-          <div><dt>직접 관련성</dt><dd>{axisScore(issue.axes.directness)}</dd></div>
-          <div><dt>영향 크기</dt><dd>{axisScore(issue.axes.impact)}</dd></div>
-          <div><dt>시급성</dt><dd>{axisScore(issue.axes.urgency)}</dd></div>
-          <div><dt>새 변화</dt><dd>비교 근거 없음</dd></div>
-        </dl>{evidence(issue.basisClaimIds)}
+      <ol className="report-insights-issues">{issueGroups.map((group, index) => <li className="report-insights-issue" key={group.key}>
+        <div className="report-insights-issue-header"><span className="report-insights-rank">우선순위 {index + 1}</span><Importance value={group.issues[0].importance} />
+          {group.issues.length > 1 && <span className="report-insights-judgment-count">판단 {group.issues.length}개</span>}
+        </div>
+        <h5>{group.title}</h5>
+        <ul className="report-insights-assessments">{group.issues.map((issue, judgmentIndex) => <li className="report-insights-assessment" key={issue.findingId}>
+          {group.issues.length > 1 && <div className="report-insights-assessment-header"><span>판단 {judgmentIndex + 1}</span><Importance value={issue.importance} /></div>}
+          <p>{issue.reason}</p><IssueAssessmentNote issue={issue} />
+          <dl className="report-insights-axes">
+            <div><dt>직접 관련성</dt><dd>{axisScore(issue.axes.directness)}</dd></div>
+            <div><dt>영향 크기</dt><dd>{axisScore(issue.axes.impact)}</dd></div>
+            <div><dt>시급성</dt><dd>{axisScore(issue.axes.urgency)}</dd></div>
+            <div><dt>새 변화</dt><dd>비교 근거 없음</dd></div>
+          </dl>{evidence(issue.basisClaimIds)}
+        </li>)}</ul>
       </li>)}</ol>
     </section>}
     {insight.implications.length > 0 && <section aria-label="조건부 해석"><h4>조건부 해석</h4><ul className="report-insights-implications">{insight.implications.map((item, index) => <li className="report-insights-implication" key={index}>
@@ -121,7 +131,7 @@ export function ReportInsightsContent({ result, insight, findings, onEvidenceSel
     </li>)}</ul></section>}
     {insight.facts.length > 0 && <ClaimEvidence ids={insight.facts.map(fact => fact.id)} facts={facts} findings={byFinding}
       onEvidenceSelect={onEvidenceSelect} label={`리포트에 저장된 주장 ${insight.facts.length}개 보기`} />}
-    <p className="report-insights-footnote">리포트 중요도는 이 관점에서 가장 우선하는 이슈의 중요도입니다. 저장된 주장 목록은 원본이며, 분석에 인용한 근거는 각 항목에 표시됩니다. 계획·전망과 의견은 확인된 사실과 구분해 읽어 주세요.</p>
+    <p className="report-insights-footnote">같은 사건의 판단은 한 카드에 모아 표시하며, 카드의 중요도와 순서는 가장 우선하는 판단을 따릅니다. 리포트 중요도는 이 관점에서 가장 우선하는 이슈의 중요도입니다. 저장된 주장 목록은 원본이며, 분석에 인용한 근거는 각 항목에 표시됩니다. 계획·전망과 의견은 확인된 사실과 구분해 읽어 주세요.</p>
     <details className="report-insights-rubric"><summary>중요도 판단 기준 보기</summary>
       <p>직접 관련성·영향 크기·시급성을 각각 0~3점으로 평가합니다. 직접 관련성과 영향 크기의 비중은 각각 40%, 시급성은 20%입니다. 시급성 근거가 없으면 나머지 기준으로 계산합니다. 2.25점 이상은 높음, 1.25점 이상은 중간입니다. 직접 관련성이 0이면 영향 크기가 미확인이어도 낮음입니다. 그 외에 직접 관련성이 미확인이면 관련성 미확인으로, 관련성은 확인했지만 영향 크기가 미확인이면 영향 규모 미확인으로 표시하고 중요도 판단을 보류합니다. 이전 보고서와의 비교 근거가 없어 새 변화는 평가하지 않습니다.</p>
     </details>

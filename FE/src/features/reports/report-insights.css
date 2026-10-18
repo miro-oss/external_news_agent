@@ -27,7 +27,11 @@
 .report-insights-issue-header { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; }
 .report-insights-rank { color: var(--fg-3); font-size: .75rem; }
 .report-insights-issue h5 { margin: .6rem 0 .4rem; font-size: .91rem; line-height: 1.6; }
-.report-insights-issue > p { margin: .4rem 0 .7rem; }
+.report-insights-judgment-count { color: var(--fg-3); font-size: .75rem; }
+.report-insights-assessments { display: grid; gap: 1rem; margin: 0; padding: 0; list-style: none; }
+.report-insights-assessment + .report-insights-assessment { padding-top: 1rem; border-top: 1px solid var(--line); }
+.report-insights-assessment-header { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; margin-top: .5rem; color: var(--fg-3); font-size: .75rem; }
+.report-insights-assessment > p { margin: .4rem 0 .7rem; }
 .report-insights-axes { display: flex; flex-wrap: wrap; gap: .45rem 1rem; margin: 0; font-size: .74rem; }
 .report-insights-axes > div { display: flex; gap: .3rem; }
 .report-insights-axes dt { color: var(--fg-3); }

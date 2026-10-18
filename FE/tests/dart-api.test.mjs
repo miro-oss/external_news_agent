@@ -50,13 +50,31 @@ test('late search responses cannot replace a newer query and changing queries cl
   assert.equal(client.getQueryData(oldOptions.queryKey).content[0].corpName, '삼성전자')
 })
 
-test('only RUN snapshots opt into the panel, with stable company deduplication and legacy null support', () => {
+test('legacy RUN snapshots retain stable company deduplication and null support', () => {
   const another = { ...company, corpCode: '00164779', corpName: 'SK하이닉스' }
   const collectionContexts = [{ topics: [{ dartCompany: company }, {}, { dartCompany: null }] }, { topics: [{ dartCompany: company }, { dartCompany: another }] }]
   assert.deepEqual(reportDartCompanies({ reportScope: 'RUN', collectionContexts }), [company, another])
   for (const reportScope of ['DAILY', 'WEEKLY']) assert.deepEqual(reportDartCompanies({ reportScope, collectionContexts }), [])
   assert.deepEqual(reportDartCompanies({ reportScope: 'RUN' }), [])
   assert.deepEqual(reportDartCompanies({ reportScope: 'RUN', collectionContexts: [{ topics: [{}] }] }), [])
+})
+
+test('RUN and topic weekly reports use explicit company selections, including an authoritative empty selection', () => {
+  const historical = { ...company, corpCode: '00164779', corpName: 'SK하이닉스' }
+  const collectionContexts = [{ topics: [{ topicId: 29, dartCompany: historical }] }]
+  for (const reportScope of ['RUN', 'WEEKLY']) {
+    const report = { reportScope, topicId: reportScope === 'WEEKLY' ? 29 : null, collectionContexts }
+    assert.deepEqual(reportDartCompanies({ ...report, dartCompanies: [company] }), [company])
+    assert.deepEqual(reportDartCompanies({ ...report, dartCompanies: [] }), [])
+  }
+  assert.deepEqual(reportDartCompanies({ reportScope: 'WEEKLY', topicId: 29, collectionContexts }), [])
+})
+
+test('aggregate reports cannot opt into DART through companies or source collection snapshots', () => {
+  for (const reportScope of ['DAILY', 'WEEKLY']) {
+    assert.deepEqual(reportDartCompanies({ reportScope, topicId: null, dartCompanies: [company],
+      collectionContexts: [{ topics: [{ dartCompany: company }] }] }), [])
+  }
 })
 
 test('polls only pending data for a bounded window; completion, disabled, errors, or no companies stop polling', () => {

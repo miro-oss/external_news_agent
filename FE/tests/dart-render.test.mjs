@@ -102,7 +102,11 @@ test('unsupported financial statements show notes without fabricated charts and 
 test('legacy, unlinked and aggregate reports render nothing without requiring a query provider', () => {
   const contexts = [{ topics: [{ dartCompany: company }] }]
   for (const report of [{ id: 17, reportScope: 'RUN' }, { id: 17, reportScope: 'RUN', collectionContexts: [{ topics: [{ dartCompany: null }] }] },
-    { id: 17, reportScope: 'DAILY', collectionContexts: contexts }, { id: 17, reportScope: 'WEEKLY', collectionContexts: contexts }]) {
+    { id: 17, reportScope: 'RUN', dartCompanies: [], collectionContexts: contexts },
+    { id: 17, reportScope: 'WEEKLY', topicId: 29, collectionContexts: contexts },
+    { id: 17, reportScope: 'WEEKLY', topicId: 29, dartCompanies: [], collectionContexts: contexts },
+    { id: 17, reportScope: 'DAILY', dartCompanies: [company], collectionContexts: contexts },
+    { id: 17, reportScope: 'WEEKLY', dartCompanies: [company], collectionContexts: contexts }]) {
     assert.equal(renderToStaticMarkup(createElement(Panel, { report })), '')
   }
 })
@@ -119,6 +123,26 @@ test('multi-company panel uses the report snapshot and offers individual company
     assert.match(html, /aria-pressed="true"[^>]*>삼성전자/)
     assert.match(html, /aria-pressed="false"[^>]*>SK하이닉스/)
     assert.match(html, /최근 12분기 추이/)
+  } finally { client.clear() }
+})
+
+test('topic weekly report displays its saved company financials and disclosures instead of historical collection companies', () => {
+  const client = new QueryClient()
+  try {
+    const historical = { corpCode: '00164779', corpName: 'SK하이닉스', stockCode: '000660' }
+    client.setQueryData(['report-dart', 217], { reportId: 217,
+      companies: [{ company, status: 'READY', message: '공시 자료를 확인했습니다.', data: data() }] })
+    const report = { id: 217, reportScope: 'WEEKLY', topicId: 29, dartCompanies: [company],
+      collectionContexts: [{ topics: [{ topicId: 29, dartCompany: historical }] }] }
+    const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(Panel, { report })))
+    assert.match(html, /회사 실적 · 공시/)
+    assert.match(html, /보고서에 연결된 회사의 최근 12분기 실적과 공시입니다/)
+    assert.match(html, /삼성전자/)
+    assert.match(html, /최근 12분기 추이/)
+    assert.equal((html.match(/<th scope="row">/g) ?? []).length, 12)
+    assert.match(html, /최근 공시 보기/)
+    assert.match(html, /반기보고서 \(2026\.06\)/)
+    assert.doesNotMatch(html, /SK하이닉스|공시 회사 선택/)
   } finally { client.clear() }
 })
 

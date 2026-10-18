@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.analysis.entity.Finding;
+import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.collection.entity.*;
 import com.example.be.domain.reports.entity.*;
 import com.example.be.domain.reports.exception.ReportException;
@@ -65,9 +66,16 @@ class TopicWeeklyReportPersistenceServiceTest {
         verifyNoInteractions(selector, weekly);
     }
 
-    @Test void usesEligibleDaysWithoutDailyReportsAndFiltersOtherTopicContexts() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void usesEligibleDaysAndFreezesCurrentCompanyWithoutChangingHistoricalContexts(boolean linked) {
+        var selectedCompany = new Company("00126380", "삼성전자", "005930");
+        var previousCompany = new Company("00164779", "SK하이닉스", "000660");
+        var liveTopic = Topic.builder().id(1L).name("HBM").build();
+        liveTopic.changeDartCompany(linked ? selectedCompany : null);
+        when(topics.findById(1L)).thenReturn(Optional.of(liveTopic));
         var run = CollectionRun.builder().id(7L).startedAt(monday.atTime(9, 0)).build();
-        var selectedTopic = new CollectionTopicSnapshot(1L, "당시 HBM", null, List.of(), List.of(), List.of(), 10, 60);
+        var selectedTopic = new CollectionTopicSnapshot(1L, "당시 HBM", null, List.of(), List.of(), List.of(), 10, 60, previousCompany);
         var otherTopic = new CollectionTopicSnapshot(2L, "다른 주제", null, List.of(), List.of(), List.of(), 10, 60);
         run.getItems().add(CollectionRunItem.builder().topicSnapshot(selectedTopic).build());
         run.getItems().add(CollectionRunItem.builder().topicSnapshot(otherTopic).build());
@@ -85,6 +93,32 @@ class TopicWeeklyReportPersistenceServiceTest {
         assertEquals(List.of(), saved.getSourceReportIds()); assertEquals(List.of(), saved.getSourceReportDates());
         assertEquals(0L, saved.getSourceReportCount()); assertEquals(List.of(7L), saved.getSourceRunIds());
         assertEquals(List.of(selectedTopic), saved.getCollectionContexts().getFirst().topics());
+        assertEquals(linked ? selectedCompany : null, saved.getTopicDartCompany());
+        liveTopic.changeDartCompany(previousCompany);
+        assertEquals(linked ? selectedCompany : null, saved.getTopicDartCompany());
+        liveTopic.changeDartCompany(null);
+        assertEquals(linked ? selectedCompany : null, saved.getTopicDartCompany());
         verify(reports, never()).findByReportScopeAndReportDateBetweenOrderByReportDateAsc(any(), any(), any());
+    }
+
+    @Test void restoringExistingReportsPreservesFrozenCompanyAndNeverBackfillsLegacyReports() {
+        var current = new Company("00164779", "SK하이닉스", "000660");
+        var original = new Company("00126380", "삼성전자", "005930");
+        var topic = Topic.builder().id(1L).name("현재 주제").build();
+        topic.changeDartCompany(current);
+        when(topics.findById(1L)).thenReturn(Optional.of(topic));
+        for (boolean legacy : new boolean[] {false, true}) {
+            var existing = NewsReport.builder().id(42L).topicId(1L).reportScope(ReportScope.WEEKLY)
+                    .topicDartCorpCode(legacy ? null : original.corpCode())
+                    .topicDartCorpName(legacy ? null : original.corpName())
+                    .topicDartStockCode(legacy ? null : original.stockCode()).reportStatus(ReportStatus.FALLBACK).build();
+            existing.hide(monday.plusWeeks(1).atStartOfDay());
+            when(reports.findByReportScopeAndReportDateAndTopicId(ReportScope.WEEKLY, monday, 1L)).thenReturn(Optional.of(existing));
+            assertFalse(service.reserve(1L, monday, monday.plusWeeks(1).atStartOfDay()).owner());
+            assertNull(existing.getDeletedAt());
+            assertEquals(legacy ? null : original, existing.getTopicDartCompany());
+        }
+        verify(reports, never()).saveAndFlush(any());
+        verifyNoInteractions(selector, weekly);
     }
 }

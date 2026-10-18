@@ -50,14 +50,21 @@ class ReportPersistenceServiceTest {
                     notificationAutomation, observationRepository,
                     events, CompanyInterestSelectionTestSupport.passThrough());
 
-    @Test
-    void manualTopicWeeklyCompletionAndRecoveryNeverEnqueueAutomaticDelivery() {
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void manualTopicWeeklyCompletionAndRecoveryPreserveCompanyWithoutAutomaticDelivery(boolean recovered) {
+        var company = new com.example.be.domain.dart.model.DartModels.Company("00126380", "삼성전자", "005930");
         var report = NewsReport.builder().id(101L).topicId(1L).reportScope(ReportScope.WEEKLY)
-                .reportStatus(ReportStatus.PENDING).build();
+                .topicDartCorpCode(company.corpCode()).topicDartCorpName(company.corpName())
+                .topicDartStockCode(company.stockCode()).reportStatus(ReportStatus.PENDING).build();
         when(reportRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(report));
-        service.complete(101L, new ReportDocument("주제 주간", "저장된 근거", "fallback"), LocalDateTime.now());
+        var document = new ReportDocument("주제 주간", "저장된 근거", "fallback");
+        if (recovered) service.completeRecovered(101L, document, LocalDateTime.now());
+        else service.complete(101L, document, LocalDateTime.now());
         verifyNoInteractions(notificationAutomation);
         assertEquals("주제 주간", report.getTitle());
+        assertEquals(company, report.getTopicDartCompany());
+        verify(events).publishEvent(new com.example.be.domain.reports.comparison.ReportCompleted(101L));
     }
 
     @org.junit.jupiter.api.Test

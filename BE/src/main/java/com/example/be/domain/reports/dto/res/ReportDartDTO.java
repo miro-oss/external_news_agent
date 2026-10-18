@@ -9,7 +9,7 @@ import java.util.List;
 public final class ReportDartDTO {
     private ReportDartDTO() { }
 
-    @Schema(name = "ReportDartResponse", description = "실행 당시 선택한 회사의 보고서별 공시·실적 자료. RUN 외 범위와 회사 미선택은 빈 배열")
+    @Schema(name = "ReportDartResponse", description = "RUN 접수 당시 선택한 회사 또는 주제별 WEEKLY 생성 요청 당시 연결한 회사의 공시·실적 자료. 전체 DAILY/WEEKLY·회사 미선택·회사 스냅샷 없는 이전 보고서는 빈 배열")
     public record Result(Long reportId, List<CompanyAttachment> companies) { }
 
     @Schema(name = "ReportDartCompanyAttachment")

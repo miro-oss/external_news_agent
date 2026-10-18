@@ -49,8 +49,11 @@ public class ReportDartRepository {
     List<Long> missing() {
         return jdbc.query("""
                 SELECT report.id FROM news_reports report
-                WHERE report.report_scope = 'RUN' AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
-                  AND JSON_EXISTS(report.collection_contexts, '$[*].topics[*].dartCompany.corpCode')
+                WHERE report.report_status <> 'PENDING' AND report.deleted_at IS NULL
+                  AND ((report.report_scope = 'RUN'
+                        AND JSON_EXISTS(report.collection_contexts, '$[*].topics[*].dartCompany.corpCode'))
+                       OR (report.report_scope = 'WEEKLY' AND report.topic_id IS NOT NULL
+                           AND report.topic_dart_corp_code IS NOT NULL))
                   AND NOT EXISTS (SELECT 1 FROM news_report_dart_attachments attachment WHERE attachment.report_id = report.id)
                 ORDER BY report.generated_at, report.id FETCH FIRST 20 ROWS ONLY
                 """, (rs, row) -> rs.getLong(1));
@@ -65,7 +68,9 @@ public class ReportDartRepository {
                 WHERE attachment.payload_json IS NULL
                   AND attachment.status IN ('PENDING', 'RUNNING', 'FAILED', 'DISABLED')
                   AND cache.payload_json IS NOT NULL
-                  AND report.report_scope = 'RUN' AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
+                  AND (report.report_scope = 'RUN' OR (report.report_scope = 'WEEKLY'
+                       AND report.topic_id IS NOT NULL AND report.topic_dart_corp_code = attachment.corp_code))
+                  AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
                 ORDER BY attachment.report_id FETCH FIRST 20 ROWS ONLY
                 """, (rs, row) -> rs.getLong(1));
     }
@@ -100,7 +105,9 @@ public class ReportDartRepository {
                 WHERE cache.payload_json IS NOT NULL AND cache.cached_at <= ?
                   AND (cache.lease_token IS NULL OR cache.lease_expires_at <= ?)
                   AND attachment.created_at > cache.cached_at
-                  AND report.report_scope = 'RUN' AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
+                  AND (report.report_scope = 'RUN' OR (report.report_scope = 'WEEKLY'
+                       AND report.topic_id IS NOT NULL AND report.topic_dart_corp_code = attachment.corp_code))
+                  AND report.report_status <> 'PENDING' AND report.deleted_at IS NULL
                 GROUP BY attachment.corp_code, cache.cached_at
                 ORDER BY cache.cached_at, attachment.corp_code FETCH FIRST 5 ROWS ONLY
                 """, (rs, row) -> new Company(rs.getString(1), rs.getString(2), rs.getString(3)), ts(before), ts(now));

@@ -64,8 +64,11 @@ export function dartCompanySearchOptions(query: string, page = 0) {
   }
 }
 
-/** The run snapshot is the only source of historical company selection. */
-export function reportDartCompanies(report: Pick<ReportDetail, 'reportScope' | 'collectionContexts'>): DartCompany[] {
+/** Use the report's frozen company selection, with a legacy fallback only for RUN snapshots. */
+export function reportDartCompanies(report: Pick<ReportDetail, 'reportScope' | 'topicId' | 'dartCompanies' | 'collectionContexts'>): DartCompany[] {
+  const supported = report.reportScope === 'RUN' || (report.reportScope === 'WEEKLY' && report.topicId != null)
+  if (!supported) return []
+  if (report.dartCompanies !== undefined) return report.dartCompanies
   if (report.reportScope !== 'RUN') return []
   const companies = new Map<string, DartCompany>()
   for (const context of report.collectionContexts ?? []) {

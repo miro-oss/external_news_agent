@@ -18,6 +18,7 @@ import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.notifications.entity.DeliveryStatus;
 import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
+import com.example.be.domain.reports.dart.ReportDartEligibility;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
@@ -232,6 +233,7 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .summaryStats(summaryStats)
                 .structuredContent(readingContent.structuredContent())
                 .collectionContexts(report.getCollectionContexts())
+                .dartCompanies(ReportDartEligibility.companies(report))
                 .articleStats(articleStats(report))
                 .findings(includeFindings ? findings.stream()
                         .map(finding -> {

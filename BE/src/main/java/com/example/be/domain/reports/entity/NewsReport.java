@@ -1,6 +1,7 @@
 package com.example.be.domain.reports.entity;
 
 import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.reports.converter.ReportContentConverter;
 import com.example.be.domain.reports.converter.LocalDateListConverter;
 import com.example.be.domain.reports.converter.WeeklyReportInputConverter;
@@ -66,6 +67,21 @@ public class NewsReport {
 
     @Column(name = "topic_name", length = 255)
     private String topicName;
+
+    /** Company linked when a new topic weekly report is reserved; never reconstructed from live topics. */
+    @Column(name = "topic_dart_corp_code", length = 8)
+    private String topicDartCorpCode;
+
+    @Column(name = "topic_dart_corp_name", length = 512)
+    private String topicDartCorpName;
+
+    @Column(name = "topic_dart_stock_code", length = 6)
+    private String topicDartStockCode;
+
+    public Company getTopicDartCompany() {
+        return topicDartCorpCode == null ? null : new Company(topicDartCorpCode, topicDartCorpName,
+                topicDartStockCode == null ? "" : topicDartStockCode);
+    }
 
     public List<LocalDate> getSourceAnalysisDates() {
         return topicId == null || weeklyInput == null ? List.of()
