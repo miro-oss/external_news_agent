@@ -46,8 +46,12 @@ before(async () => {
 })
 afterEach(() => setGenerationFixture?.())
 after(async () => { await server?.close(); if (emptyEnvDir) await rm(emptyEnvDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
-function render(result, findings = report.findings) {
-  return renderToStaticMarkup(createElement(Content, { result, insight: result.insights[0], findings, onEvidenceSelect() {} }))
+function render(result, findings = report.findings, options = {}) {
+  return renderToStaticMarkup(createElement(Content, { result, insight: result.insights[0], findings, onEvidenceSelect() {}, ...options }))
+}
+function issueCards(html) {
+  const list = html.match(/<ol class="report-insights-issues">([\s\S]*?)<\/section>/)?.[1] ?? ''
+  return list.split(/<li class="report-insights-issue"(?: [^>]*)?>/).slice(1)
 }
 function renderPanel(state, panelReport = report) {
   // Freeze the supplied lifecycle state; API tests exercise the actual reads and retries.
@@ -172,6 +176,144 @@ test('unresolvable evidence cannot link to a later or different article', () => 
   const html = render(result)
   assert.match(html, /현재 보고서에서 근거 기사를 확인할 수 없습니다/)
   assert.doesNotMatch(html, /href="https:\/\/example.invalid\/news\/0"/)
+})
+test('one event card retains every judgment and evidence while ranking groups without changing saved input', () => {
+  const findings = structuredClone(report.findings.slice(0, 3))
+  Object.assign(findings[1], { issueId: findings[0].issueId, issue: findings[0].issue,
+    articleId: findings[0].articleId, articleTitle: findings[0].articleTitle, canonicalUrl: findings[0].canonicalUrl })
+  const result = reportInsightFixture({ ...report, findings })
+  const [first, second, third] = result.insights[0].issues
+  Object.assign(first, { rank: 1, reason: '전력과 냉각 준비가 필요한 판단입니다.' })
+  Object.assign(second, { rank: 3, reason: '대규모 배치 계획의 영향 규모는 확인하지 못했습니다.', importance: 'unavailable',
+    axes: { directness: 2, impact: null, urgency: null, novelty: null } })
+  Object.assign(third, { rank: 5, reason: '다른 사건의 별도 판단입니다.', importance: 'medium' })
+  result.insights[0].issues = [second, third, first]
+  const savedInput = structuredClone({ result, findings })
+  const cards = issueCards(render(result, findings))
+
+  assert.equal(cards.length, 2)
+  assert.match(cards[0], /우선순위 1/)
+  assert.match(cards[0], /report-insights-issue-header[^]*?data-importance="high"/)
+  assert.match(cards[1], /우선순위 2/)
+  assert.doesNotMatch(cards.join(''), /우선순위 [35]/)
+  assert.ok(cards[0].includes(first.reason))
+  assert.ok(cards[0].includes(second.reason))
+  assert.ok(!cards[0].includes(third.reason))
+  assert.ok(cards[1].includes(third.reason))
+  assert.equal(cards[0].split(`<h5>${findings[0].articleTitle}</h5>`).length - 1, 1)
+  assert.match(cards[0], /<dt>직접 관련성<\/dt><dd>3 \/ 3/)
+  assert.match(cards[0], /<dt>직접 관련성<\/dt><dd>2 \/ 3/)
+  assert.match(cards[0], /<dt>영향 크기<\/dt><dd>미확인/)
+  assert.match(cards[0], /영향 규모 미확인/)
+  for (const finding of findings.slice(0, 2)) assert.ok(cards[0].includes(finding.keyPoints[0].text))
+  assert.equal(cards[0].match(/원문 근거 문장 1 보기/g)?.length, 2)
+  assert.deepEqual({ result, findings }, savedInput)
+})
+test('findings for one original article share a card by article ID or canonical URL when an event is absent', () => {
+  for (const identity of ['articleId', 'canonicalUrl']) {
+    const findings = structuredClone(report.findings.slice(0, 2))
+    for (const finding of findings) Object.assign(finding, { issueId: null, issue: null })
+    findings[1][identity] = findings[0][identity]
+    const result = reportInsightFixture({ ...report, findings })
+    const cards = issueCards(render(result, findings))
+    assert.equal(cards.length, 1, identity)
+    for (const issue of result.insights[0].issues) assert.ok(cards[0].includes(issue.reason), identity)
+  }
+})
+test('a later judgment linking earlier groups by article and event preserves all judgments in server rank order', () => {
+  const findings = structuredClone(report.findings.slice(0, 3))
+  Object.assign(findings[2], { articleId: findings[0].articleId, issueId: findings[1].issueId, issue: findings[1].issue })
+  const result = reportInsightFixture({ ...report, findings })
+  const rankedIssues = result.insights[0].issues
+  const reasons = ['첫 번째 원문에 대한 판단입니다.', '같은 사건의 다른 원문에 대한 판단입니다.', '두 기록의 연결을 확인하는 판단입니다.']
+  rankedIssues.forEach((issue, index) => { issue.reason = reasons[index] })
+  result.insights[0].issues = [rankedIssues[2], rankedIssues[0], rankedIssues[1]]
+  const cards = issueCards(render(result, findings, { reportScope: 'RUN' }))
+
+  assert.equal(cards.length, 1)
+  const positions = reasons.map(reason => cards[0].indexOf(reason))
+  assert.ok(positions.every(position => position >= 0), 'all three reasons remain in the merged card')
+  assert.ok(positions[0] < positions[1] && positions[1] < positions[2], 'judgments retain their server rank order')
+  for (const finding of findings) assert.ok(cards[0].includes(finding.keyPoints[0].text))
+  assert.equal(cards[0].match(/원문 근거 문장 1 보기/g)?.length, 3)
+})
+test('equal article titles do not merge unrelated events', () => {
+  const findings = structuredClone(report.findings.slice(0, 2))
+  findings[1].articleTitle = findings[0].articleTitle
+  const result = reportInsightFixture({ ...report, findings })
+  const cards = issueCards(render(result, findings))
+  assert.equal(cards.length, 2)
+  for (const card of cards) assert.ok(card.includes(findings[0].articleTitle))
+})
+test('judgments with missing findings remain separate and retain their reasons and unresolved evidence', () => {
+  const result = reportInsightFixture({ ...report, findings: report.findings.slice(0, 2) })
+  const cards = issueCards(render(result, []))
+  assert.equal(cards.length, 2)
+  result.insights[0].issues.forEach((issue, index) => {
+    assert.ok(cards[index].includes(`보고서 근거 #${issue.findingId}`))
+    assert.ok(cards[index].includes(issue.reason))
+    assert.match(cards[index], /현재 보고서에서 근거 기사를 확인할 수 없습니다/)
+  })
+})
+test('historical reports use saved event membership even when current event IDs differ', () => {
+  const findings = structuredClone(report.findings.slice(0, 3))
+  findings[2].issueId = findings[0].issueId
+  findings[2].issue = findings[0].issue
+  const result = reportInsightFixture({ ...report, findings })
+  result.insights[0].issues[1].reason = '같은 저장 사건의 추가 판단입니다.'
+  result.insights[0].issues[2].reason = '나중에 같은 사건으로 연결된 다른 기록입니다.'
+  const importantEvents = [{ title: '보고서 작성 시 저장한 사건', summaryKo: '당시의 사건 요약', significance: null,
+    sourceFindingIds: findings.slice(0, 2).map(finding => finding.id) }]
+  for (const reportScope of ['DAILY', 'WEEKLY']) {
+    const cards = issueCards(render(result, findings, { reportScope, importantEvents }))
+    assert.equal(cards.length, 2, reportScope)
+    assert.ok(cards[0].includes(importantEvents[0].title))
+    for (const issue of result.insights[0].issues.slice(0, 2)) assert.ok(cards[0].includes(issue.reason), reportScope)
+    assert.ok(!cards[0].includes(result.insights[0].issues[2].reason), reportScope)
+  }
+})
+test('historical reports do not merge separate articles solely because current event IDs match', () => {
+  const findings = structuredClone(report.findings.slice(0, 2))
+  Object.assign(findings[1], { issueId: findings[0].issueId, issue: findings[0].issue })
+  const result = reportInsightFixture({ ...report, findings })
+  assert.equal(issueCards(render(result, findings, { reportScope: 'RUN' })).length, 1)
+  for (const reportScope of ['DAILY', 'WEEKLY']) {
+    assert.equal(issueCards(render(result, findings, { reportScope })).length, 2, reportScope)
+  }
+})
+test('explicit separate saved events stay separate despite a shared current event ID', () => {
+  const findings = structuredClone(report.findings.slice(0, 2))
+  Object.assign(findings[1], { issueId: findings[0].issueId, issue: findings[0].issue })
+  const result = reportInsightFixture({ ...report, findings })
+  const importantEvents = findings.map((finding, index) => ({ title: `저장 사건 ${index + 1}`, summaryKo: '',
+    significance: null, sourceFindingIds: [finding.id] }))
+  assert.equal(issueCards(render(result, findings, { importantEvents })).length, 2)
+})
+test('separate saved events sharing article ID, canonical URL and current event ID keep their own cards', () => {
+  const findings = structuredClone(report.findings.slice(0, 2))
+  Object.assign(findings[1], { articleId: findings[0].articleId, canonicalUrl: findings[0].canonicalUrl,
+    issueId: findings[0].issueId, issue: findings[0].issue })
+  const result = reportInsightFixture({ ...report, findings })
+  const importantEvents = findings.map((finding, index) => ({ title: `별도로 저장한 사건 ${index + 1}`, summaryKo: '',
+    significance: null, sourceFindingIds: [finding.id] }))
+  const cards = issueCards(render(result, findings, { reportScope: 'RUN', importantEvents }))
+
+  assert.equal(cards.length, 2)
+  cards.forEach((card, index) => {
+    assert.ok(card.includes(importantEvents[index].title))
+    assert.ok(card.includes(result.insights[0].issues[index].reason))
+    assert.ok(!card.includes(result.insights[0].issues[1 - index].reason))
+  })
+})
+test('ambiguous saved event membership does not bridge otherwise separate cards', () => {
+  const findings = structuredClone(report.findings.slice(0, 3))
+  for (const finding of findings) Object.assign(finding, { issueId: null, issue: null })
+  const result = reportInsightFixture({ ...report, findings })
+  const importantEvents = [
+    { title: '첫 번째 사건', summaryKo: '', significance: null, sourceFindingIds: [findings[0].id, findings[1].id] },
+    { title: '두 번째 사건', summaryKo: '', significance: null, sourceFindingIds: [findings[1].id, findings[2].id] },
+  ]
+  assert.equal(issueCards(render(result, findings, { importantEvents })).length, 3)
 })
 test('an automatically queued report shows preparation and no manual generation prerequisite', () => {
   const reason = new ApiError('COMMON409', '동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.', 409)
