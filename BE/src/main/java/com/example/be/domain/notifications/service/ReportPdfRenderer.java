@@ -6,7 +6,6 @@ import com.example.be.domain.reports.dart.ReportDartService;
 import com.example.be.domain.reports.dto.res.ReportDartDTO.CompanyAttachment;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportContent;
-import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.insight.ReportInsightDTO;
 import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import com.example.be.global.config.ApiTimeZone;
@@ -117,7 +116,6 @@ public class ReportPdfRenderer {
 
     /** Reads the report's stored financial snapshot without refreshing it or including filing lists. */
     private void financials(ReportPdfLayout pdf, NewsReport report) throws IOException {
-        if (report.getReportScope() != ReportScope.RUN) return;
         var result = dart.getStored(report);
         if (result == null || result.companies().isEmpty()) return;
         pdf.reserve(345);

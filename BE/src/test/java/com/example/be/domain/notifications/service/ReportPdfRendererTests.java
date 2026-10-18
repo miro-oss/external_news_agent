@@ -7,6 +7,7 @@ import com.example.be.domain.analysis.entity.FindingKeyPoint;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.dart.model.DartModels;
 import com.example.be.domain.reports.dart.ReportDartService;
+import com.example.be.domain.reports.dart.StoredReportDartFixture;
 import com.example.be.domain.reports.dto.res.ReportDartDTO;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportContent;
@@ -100,7 +101,8 @@ class ReportPdfRendererTests {
         Path path = Path.of("build/reports/pdf/weekly-summary-sample.pdf");
         Files.createDirectories(path.getParent());
         Files.write(path, bytes);
-        verifyNoInteractions(dart);
+        verify(dart).getStored(report);
+        verifyNoMoreInteractions(dart);
     }
 
     @ParameterizedTest
@@ -134,7 +136,8 @@ class ReportPdfRendererTests {
         assertFalse(text.contains("제외할"));
         assertFalse(text.contains("유효한 분석"));
         assertFalse(text.contains("기타 분석"));
-        verifyNoInteractions(dart);
+        verify(dart).getStored(report);
+        verifyNoMoreInteractions(dart);
     }
 
     @Test
@@ -196,6 +199,47 @@ class ReportPdfRendererTests {
             assertTrue(urls(document).isEmpty());
             assertWithinPageBounds(document);
         }
+    }
+
+    @Test
+    void topicWeeklyPdfIncludesStoredFinancialChartAndTableBeforeNewsWithoutPreparingData() throws Exception {
+        var report = StoredReportDartFixture.topicWeekly();
+        var stored = new StoredReportDartFixture();
+        stored.ready(report);
+        var content = new ReportContent(List.of("주간 뉴스 요약은 그대로 유지합니다."),
+                List.of(new ReportContent.ImportantEvent("주간 주요 이슈", "저장한 뉴스 내용", "표시하지 않는 추가 분석", List.of(1L))),
+                List.of(), List.of());
+        byte[] bytes = new ReportPdfRenderer(stored.service()).render(report,
+                view(content, List.of(finding(1, "주간 뉴스 기사", "저장한 뉴스 내용")), Set.of()), null);
+        try (PDDocument document = Loader.loadPDF(bytes)) {
+            String text = new PDFTextStripper().getText(document);
+            for (String expected : List.of("회사 실적", "SK하이닉스", "000660", "연결재무제표", "2026년 1분기", "2026년 2분기",
+                    "차트 단위: 억원", "표 금액 단위: 억원", "1,234.57", "-12.35", "주간 뉴스 요약", "저장한 뉴스 내용"))
+                assertTrue(text.contains(expected), expected + "\n" + text);
+            assertTrue(text.indexOf("회사 실적") < text.indexOf("핵심 요약"));
+            assertFalse(text.contains("표시하지 않는 추가 분석"));
+            assertFalse(text.contains("반기보고서"));
+            assertFalse(text.contains("이전 공시"));
+            assertFalse(urls(document).contains(StoredReportDartFixture.FILING_URL));
+            assertTrue(urls(document).contains("https://example.com/article-1"));
+            assertWithinPageBounds(document);
+        }
+        stored.verifyStoredReads(report.getId(), 1);
+        Path path = Path.of("build/reports/pdf/topic-weekly-dart-sample.pdf");
+        Files.createDirectories(path.getParent());
+        Files.write(path, bytes);
+    }
+
+    @Test
+    void ineligiblePdfReportsDoNotReadAttachmentsOrInheritHistoricalCompany() throws Exception {
+        var stored = new StoredReportDartFixture();
+        var actualRenderer = new ReportPdfRenderer(stored.service());
+        for (var report : StoredReportDartFixture.withoutEligibleCompany()) {
+            String text = text(actualRenderer.render(report, view(emptyContent(), List.of(), Set.of()), null));
+            assertFalse(text.contains("회사 실적"), report.getTitle());
+            assertFalse(text.contains("연결재무제표"), report.getTitle());
+        }
+        stored.verifyNoPersistenceAccess();
     }
 
     @Test

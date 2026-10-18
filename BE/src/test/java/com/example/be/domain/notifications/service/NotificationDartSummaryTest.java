@@ -5,6 +5,7 @@ import com.example.be.domain.dart.model.DartModels.Filing;
 import com.example.be.domain.dart.model.DartModels.FinancialData;
 import com.example.be.domain.dart.model.DartModels.Quarter;
 import com.example.be.domain.reports.dart.ReportDartService;
+import com.example.be.domain.reports.dart.StoredReportDartFixture;
 import com.example.be.domain.reports.dto.res.ReportDartDTO;
 import com.example.be.domain.reports.dto.res.ReportDartDTO.CompanyAttachment;
 import com.example.be.domain.reports.entity.NewsReport;
@@ -12,7 +13,6 @@ import com.example.be.domain.reports.entity.ReportScope;
 import org.jsoup.Jsoup;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.OffsetDateTime;
@@ -23,7 +23,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class NotificationDartSummaryTest {
@@ -162,12 +161,31 @@ class NotificationDartSummaryTest {
         assertFalse(html.contains("실적·공시 자세히"));
     }
 
-    @ParameterizedTest
-    @EnumSource(value = ReportScope.class, names = {"DAILY", "WEEKLY"})
-    void aggregateReportsDoNotReadDartAttachments(ReportScope scope) {
-        var aggregate = NewsReport.builder().id(18L).reportScope(scope).build();
-        assertEquals("", summary.render(aggregate, REPORT_URL));
-        verifyNoInteractions(service);
+    @Test
+    void topicWeeklyUsesStoredCompanyForLatestQuarterAndFirstFilingWithoutPreparingNewData() {
+        var stored = new StoredReportDartFixture();
+        var weekly = StoredReportDartFixture.topicWeekly();
+        stored.ready(weekly);
+
+        String html = new NotificationDartSummary(stored.service()).render(weekly, REPORT_URL);
+        var document = Jsoup.parse(html);
+        assertTrue(document.text().contains("SK하이닉스 2026년 2분기 · 연결 · 매출 1,234.6억원 · 영업이익 -12.3억원"));
+        assertTrue(document.text().contains("반기보고서 (가상 검증 자료)"));
+        assertTrue(document.text().contains("자료 확인 2026-10-15 (한국시간)"));
+        assertFalse(document.text().contains("2026년 1분기"));
+        assertFalse(document.text().contains("이전 공시"));
+        assertEquals(List.of(StoredReportDartFixture.FILING_URL, REPORT_URL),
+                document.select("a").eachAttr("href"));
+        stored.verifyStoredReads(weekly.getId(), 1);
+    }
+
+    @Test
+    void ineligibleReportsNeverReadAttachmentsOrInheritHistoricalCompany() {
+        var stored = new StoredReportDartFixture();
+        var actualSummary = new NotificationDartSummary(stored.service());
+        for (var ineligible : StoredReportDartFixture.withoutEligibleCompany())
+            assertEquals("", actualSummary.render(ineligible, REPORT_URL), ineligible.getTitle());
+        stored.verifyNoPersistenceAccess();
     }
 
     @Test

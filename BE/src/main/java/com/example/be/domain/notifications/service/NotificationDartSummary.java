@@ -5,7 +5,6 @@ import com.example.be.domain.dart.model.DartModels.FinancialData;
 import com.example.be.domain.reports.dart.ReportDartService;
 import com.example.be.domain.reports.dto.res.ReportDartDTO.CompanyAttachment;
 import com.example.be.domain.reports.entity.NewsReport;
-import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -27,7 +26,6 @@ public class NotificationDartSummary {
     private final ReportDartService reportDartService;
 
     public String render(NewsReport report, String reportUrl) {
-        if (report.getReportScope() != ReportScope.RUN) return "";
         var companies = reportDartService.getStored(report).companies();
         if (companies.isEmpty()) return "";
         var html = new StringBuilder("<table role=\"presentation\" width=\"100%\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" "
