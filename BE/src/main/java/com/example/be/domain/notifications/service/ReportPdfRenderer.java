@@ -41,6 +41,8 @@ public class ReportPdfRenderer {
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[([^]\\r\\n]+)]\\(([^)\\r\\n]+)\\)");
     private static final Pattern AUTOLINK = Pattern.compile("<(https?://[^>\\r\\n]+)>");
+    private static final Pattern WEEKLY_CHRONOLOGY = Pattern.compile(
+            "\\b\\d{4}-\\d{2}-\\d{2}\\s+(?:주제별 분석 결과|일일 보고서):");
 
     /**
      * Builds an in-memory PDF using embedded fonts and saved report data only.
@@ -87,7 +89,6 @@ public class ReportPdfRenderer {
         for (var event : events) {
             pdf.subheading(event.title());
             pdf.paragraph(event.summaryKo());
-            if (event.significance() != null && !event.significance().equals(event.summaryKo())) pdf.paragraph(event.significance());
             sources(pdf, event.sourceFindingIds(), findings);
         }
         var watches = content.watchItems().stream().filter(item -> !item.sourceFindingIds().isEmpty()
@@ -201,7 +202,7 @@ public class ReportPdfRenderer {
                 int level = heading.group(1).length();
                 String title = heading.group(2);
                 if (skippedLevel > 0 && level <= skippedLevel) skippedLevel = 0;
-                if (title.matches(".*(?:기타\\s*분석|기사별\\s*분석|보고서\\s*제외|수집\\s*상태|수집\\s*및\\s*출처\\s*참고).*")
+                if (title.matches(".*(?:기타\\s*분석|기사별\\s*분석|보고서\\s*제외|수집\\s*상태|수집\\s*및\\s*출처\\s*참고|먼저\\s*살펴볼\\s*이슈).*")
                         && skippedLevel == 0) skippedLevel = level;
                 if (skippedLevel > 0) continue;
                 if (firstContent && level == 1) { firstContent = false; continue; }
@@ -224,10 +225,16 @@ public class ReportPdfRenderer {
     }
 
     private void legacyText(ReportPdfLayout pdf, String text, boolean bullet) throws IOException {
-        if (bullet) pdf.bullet(plain(text)); else pdf.paragraph(plain(text));
-        var links = MARKDOWN_LINK.matcher(text);
+        // Older weekly reports embed the saved evidence chronology after the event summary.
+        String sourceText = text;
+        var chronology = WEEKLY_CHRONOLOGY.matcher(text);
+        if (chronology.find()) text = text.substring(0, chronology.start()).strip();
+        if (!text.isBlank()) {
+            if (bullet) pdf.bullet(plain(text)); else pdf.paragraph(plain(text));
+        }
+        var links = MARKDOWN_LINK.matcher(sourceText);
         while (links.find()) if (ReportPdfLayout.safeUrl(links.group(2))) pdf.link(links.group(2), links.group(2));
-        var autolinks = AUTOLINK.matcher(text);
+        var autolinks = AUTOLINK.matcher(sourceText);
         while (autolinks.find()) if (ReportPdfLayout.safeUrl(autolinks.group(1))) pdf.link(autolinks.group(1), autolinks.group(1));
     }
 
