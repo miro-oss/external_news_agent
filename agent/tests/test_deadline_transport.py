@@ -14,6 +14,7 @@ import pytest
 
 from app.core.config import Settings
 from app.core.errors import AgentError
+from app.llm import deadline_transport
 from app.llm.deadline_transport import DeadlineHttpx2Transport, DeadlineHttpxTransport
 from app.llm.mindlogic_provider import MindlogicAnalyzeProvider
 from app.llm.openai_provider import OpenAIAnalyzeProvider
@@ -185,24 +186,43 @@ def test_deadline_cancels_tls_handshake_and_closes_the_socket(library, transport
 
 
 @pytest.mark.parametrize("library,transport", TRANSPORTS)
-def test_redirect_exchanges_share_one_deadline(library, transport):
-    with local_server(b"x" * 100, chunk_delay=0.02, chunk_size=1, redirect_delay=0.12) as (
-        url,
-        requests,
-        disconnected,
-        completed,
-    ):
+def test_redirect_exchanges_share_one_deadline(monkeypatch, library, transport):
+    now = 100.0
+    exchanges = []
+
+    async def send_request(request, body, deadline, request_library):
+        nonlocal now
+        exchanges.append((request.url.path, body, deadline))
+        assert request_library is library
+        # Each redirect consumes six seconds of the original ten-second budget.
+        now += 6.0
+        target = "/finish" if request.url.path == "/start" else "/expired"
+        return library.Response(307, headers={"Location": target})
+
+    monkeypatch.setattr(deadline_transport, "monotonic", lambda: now)
+    monkeypatch.setattr(deadline_transport, "_send_request", send_request)
+    with library.Client(transport=transport(110.0), follow_redirects=True) as client:
+        with pytest.raises(library.ReadTimeout, match="deadline exceeded"):
+            client.post("http://deadline-test.invalid/start", content=b"preserved redirect body")
+
+    assert exchanges == [
+        ("/start", b"preserved redirect body", 110.0),
+        ("/finish", b"preserved redirect body", 110.0),
+    ]
+
+
+@pytest.mark.parametrize("library,transport", TRANSPORTS)
+def test_redirect_preserves_post_body_on_the_wire(library, transport):
+    with local_server(b'{"ok":true}', redirect_delay=0) as (url, requests, _, completed):
         with library.Client(
-            transport=transport(monotonic() + 0.3), timeout=0.5, follow_redirects=True
+            transport=transport(monotonic() + 5), timeout=1, follow_redirects=True
         ) as client:
-            started = monotonic()
-            with pytest.raises(library.ReadTimeout, match="deadline exceeded"):
-                client.post(url + "/start", content=b"preserved redirect body")
-            assert monotonic() - started < 0.65
+            response = client.post(url + "/start", content=b"preserved redirect body")
         assert [request["path"] for request in requests] == ["/start", "/finish"]
         assert all(request["body"] == b"preserved redirect body" for request in requests)
-        assert disconnected.wait(timeout=0.5)
-        assert not completed.is_set()
+        assert response.status_code == 200
+        assert response.json() == {"ok": True}
+        assert completed.wait(timeout=1)
 
 
 @pytest.mark.parametrize("library,transport", TRANSPORTS)
