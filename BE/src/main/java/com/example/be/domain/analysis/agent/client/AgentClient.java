@@ -61,6 +61,10 @@ public class AgentClient {
     private final RestClient insightClient;
     private final RestClient reportClient;
     private final RestClient reportInsightClient;
+    private AdmissionSleeper admissionSleeper = Thread::sleep;
+
+    @FunctionalInterface
+    interface AdmissionSleeper { void sleep(long millis) throws InterruptedException; }
 
     @Autowired
     public AgentClient(RestClientFactory restClientFactory, AgentProperties properties) {
@@ -80,6 +84,11 @@ public class AgentClient {
 
     AgentClient(RestClient.Builder builder, AgentProperties properties) {
         this(builder, builder, builder, properties);
+    }
+
+    AgentClient(RestClient.Builder builder, AgentProperties properties, AdmissionSleeper sleeper) {
+        this(builder, properties);
+        this.admissionSleeper = sleeper;
     }
 
     AgentClient(RestClient.Builder analyzeBuilder,
@@ -181,7 +190,20 @@ public class AgentClient {
     }
 
     public AgentTopicRelevanceResponse topicRelevance(AgentTopicRelevanceRequest request) {
-        return post(relevanceClient, "/v1/topic-relevance", request, AgentTopicRelevanceResponse.class);
+        for (int attempt = 0; ; attempt++) {
+            try {
+                return post(relevanceClient, "/v1/topic-relevance", request, AgentTopicRelevanceResponse.class);
+            } catch (AgentClientException failure) {
+                // This endpoint alone attests that no stage of the entire request reached a provider.
+                // Keep the same reservation and key. Timeout, repair and partial-use failures never retry.
+                if (!failure.isRequestAdmissionRejected() || attempt >= 2) throw failure;
+                try { admissionSleeper.sleep(1_000L << attempt); }
+                catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw failure;
+                }
+            }
+        }
     }
 
     public JsonNode feedbackReview(JsonNode request) {
@@ -223,7 +245,9 @@ public class AgentClient {
                     error == null ? null : error.usage(),
                     AgentClientException.TimeoutPhase.NONE,
                     error == null ? null : error.executionMetadata(),
-                    error == null ? null : error.validationFailure());
+                    error == null ? null : error.validationFailure(), null,
+                    exception.getStatusCode().value() == 503 && "/v1/topic-relevance".equals(uri)
+                            && error != null ? error.admissionRejection() : null);
         } catch (RestClientException exception) {
             AgentClientException.TimeoutPhase timeoutPhase = timeoutPhase(exception);
             var kind = clientFailureKind(exception, timeoutPhase);

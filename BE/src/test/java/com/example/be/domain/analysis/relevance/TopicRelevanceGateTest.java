@@ -128,6 +128,65 @@ class TopicRelevanceGateTest {
         verify(writer).addAgentWarning(eq(42L), eq("TOPIC_RELEVANCE_UNCERTAIN"), anyString());
     }
 
+    @Test void admissionSaturationDefersRemainingArticlesWithoutQuotaOrAuditAndReentryUsesNewAttemptKey() {
+        reserve();
+        Map<TopicRelevanceGate.Key, TopicRelevanceStore.Assessment> saved = new HashMap<>();
+        when(store.findByRun(42L)).thenAnswer(call -> new ArrayList<>(saved.values()));
+        doAnswer(call -> {
+            List<TopicRelevanceStore.Assessment> values = call.getArgument(0);
+            values.forEach(a -> saved.put(new TopicRelevanceGate.Key(a.articleId(), a.topicId()), a));
+            return null;
+        }).when(store).saveAll(anyList());
+        doAnswer(call -> {
+            List<TopicRelevanceStore.Assessment> values = call.getArgument(2);
+            values.forEach(a -> saved.put(new TopicRelevanceGate.Key(a.articleId(), a.topicId()), a));
+            return null;
+        }).when(finalizer).failure(eq(42L), any(), anyList(), anyString(), any(), any(), any());
+        var busy = new AgentClientException("PROVIDER_UNAVAILABLE", "busy", null, null,
+                AgentClientException.TimeoutPhase.NONE, null, null, null,
+                new AgentClientException.AdmissionRejection());
+        when(client.topicRelevance(any())).thenThrow(busy);
+        var candidates = List.of(candidate(1L, 7L), candidate(2L, 7L), candidate(3L, 8L));
+
+        assertTrue(gate.assess(42L, AgentPlan.FREE, candidates).isEmpty());
+        assertEquals(3, saved.size());
+        assertTrue(saved.values().stream().allMatch(a -> a.status() == TopicRelevanceStatus.DEFERRED));
+        verify(client).topicRelevance(any());
+        verify(quota).reserve(anyLong(), anyString(), any(), any());
+        verify(finalizer).failure(anyLong(), any(), anyList(), anyString(), any(), any(), same(busy));
+
+        when(quota.reserve(anyLong(), anyString(), eq(AgentTask.TOPIC_RELEVANCE), any())).thenAnswer(call ->
+                new QuotaReservation(2L, 42L, call.<String>getArgument(1) + ":admission:1",
+                        AgentTask.TOPIC_RELEVANCE, AgentPlan.FREE, BigDecimal.ONE));
+        doAnswer(call -> {
+            AgentTopicRelevanceRequest request = call.getArgument(0);
+            assertTrue(request.idempotencyKey().endsWith(":admission:1"));
+            return response(request.articles().stream().map(a -> new AgentTopicRelevanceResponse.Decision(
+                    a.articleId(), "RELEVANT", "관련", List.of(a.title()))).toList());
+        }).when(client).topicRelevance(any());
+        assertEquals(3, gate.assess(42L, AgentPlan.FREE, candidates).size());
+        verify(client, times(4)).topicRelevance(any());
+        verify(finalizer, times(3)).success(eq(42L), any(), any(), anyList(), anyString(), any(), any());
+    }
+
+    @Test void successfulUncertainJudgmentIsCachedAndDoesNotBecomeDeferred() {
+        reserve();
+        Map<TopicRelevanceGate.Key, TopicRelevanceStore.Assessment> saved = new HashMap<>();
+        when(store.findByRun(42L)).thenAnswer(call -> new ArrayList<>(saved.values()));
+        doAnswer(call -> {
+            List<TopicRelevanceStore.Assessment> values = call.getArgument(3);
+            values.forEach(a -> saved.put(new TopicRelevanceGate.Key(a.articleId(), a.topicId()), a));
+            return null;
+        }).when(finalizer).success(eq(42L), any(), any(), anyList(), anyString(), any(), any());
+        when(client.topicRelevance(any())).thenReturn(response(List.of(
+                new AgentTopicRelevanceResponse.Decision(1L, "UNCERTAIN", "자료 부족", List.of()))));
+        var candidates = List.of(candidate(1L, 7L));
+        assertTrue(gate.assess(42L, AgentPlan.FREE, candidates).isEmpty());
+        assertTrue(gate.assess(42L, AgentPlan.FREE, candidates).isEmpty());
+        verify(client).topicRelevance(any());
+        assertEquals(TopicRelevanceStatus.UNCERTAIN, saved.values().iterator().next().status());
+    }
+
     @Test void quotaExhaustionIsHeldAndNeverCallsProvider() {
         when(quota.reserve(anyLong(), anyString(), eq(AgentTask.TOPIC_RELEVANCE), any()))
                 .thenThrow(new QuotaExceededException(AgentPlan.FREE, "예산 부족"));

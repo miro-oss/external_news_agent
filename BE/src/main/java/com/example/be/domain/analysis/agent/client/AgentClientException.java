@@ -12,6 +12,7 @@ public class AgentClientException extends RuntimeException {
     private final ExecutionMetadata executionMetadata;
     private final ValidationFailure validationFailure;
     private final ClientFailureKind clientFailureKind;
+    private final AdmissionRejection admissionRejection;
 
     public AgentClientException(String code, String message) {
         this(code, message, null, null, TimeoutPhase.NONE);
@@ -51,6 +52,14 @@ public class AgentClientException extends RuntimeException {
     public AgentClientException(String code, String message, Throwable cause, Usage usage,
                                 TimeoutPhase timeoutPhase, ExecutionMetadata executionMetadata,
                                 ValidationFailure validationFailure, ClientFailureKind clientFailureKind) {
+        this(code, message, cause, usage, timeoutPhase, executionMetadata, validationFailure,
+                clientFailureKind, null);
+    }
+
+    public AgentClientException(String code, String message, Throwable cause, Usage usage,
+                                TimeoutPhase timeoutPhase, ExecutionMetadata executionMetadata,
+                                ValidationFailure validationFailure, ClientFailureKind clientFailureKind,
+                                AdmissionRejection admissionRejection) {
         super(message, cause);
         this.code = code;
         this.usage = usage;
@@ -58,6 +67,7 @@ public class AgentClientException extends RuntimeException {
         this.executionMetadata = executionMetadata;
         this.validationFailure = validationFailure;
         this.clientFailureKind = clientFailureKind;
+        this.admissionRejection = admissionRejection;
     }
 
     public String getCode() {
@@ -77,6 +87,20 @@ public class AgentClientException extends RuntimeException {
     }
 
     public ClientFailureKind getClientFailureKind() { return clientFailureKind; }
+
+    public AdmissionRejection getAdmissionRejection() { return admissionRejection; }
+
+    /** Only a whole-request attestation may permit another paid request; last-attempt flags cannot. */
+    public boolean isRequestAdmissionRejected() {
+        return admissionRejection != null && "PROVIDER_UNAVAILABLE".equals(code)
+                && timeoutPhase == TimeoutPhase.NONE
+                && (usage == null || Long.valueOf(0).equals(usage.inputTokens())
+                    && Long.valueOf(0).equals(usage.outputTokens())
+                    && usage.costUsd() != null && usage.costUsd().signum() == 0
+                    && usage.credits() != null && usage.credits().signum() == 0);
+    }
+
+    public record AdmissionRejection() { }
 
     /** Local HTTP client observations, not a claim about provider usage or retry safety. */
     public enum ClientFailureKind {

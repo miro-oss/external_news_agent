@@ -76,16 +76,24 @@ public class TopicRelevanceGate {
                     + "\n" + candidate.article().getTitle() + "\n" + candidate.article().getSummary()
                     + "\n" + candidate.article().getBody());
             var cached = previous.get(key);
-            if (cached != null && cached.inputHash().equals(inputHash)) {
+            if (cached != null && cached.inputHash().equals(inputHash)
+                    && cached.status() != TopicRelevanceStatus.DEFERRED) {
                 if (cached.status() == TopicRelevanceStatus.RELEVANT) accepted.add(key);
                 continue;
             }
             pending.computeIfAbsent(topic.id(), ignored -> new ArrayList<>())
                     .add(new Prepared(topic, article, inputHash, candidate.article().hasFullText(), examples));
         }
+        boolean admissionDeferred = false;
         for (List<Prepared> topicCandidates : pending.values()) {
             for (Prepared candidate : topicCandidates) {
-                accepted.addAll(assessArticle(runId, plan, candidate));
+                if (admissionDeferred) {
+                    // Never reserve or issue every remaining article while the Agent is saturated.
+                    store.saveAll(deferred(runId, List.of(candidate)));
+                    continue;
+                }
+                try { accepted.addAll(assessArticle(runId, plan, candidate)); }
+                catch (AdmissionDeferred ignored) { admissionDeferred = true; }
             }
         }
         return Set.copyOf(accepted);
@@ -122,6 +130,8 @@ public class TopicRelevanceGate {
             hold(runId, ready, "예산 부족 또는 진행 중인 동일 요청으로 주제 적합성 판정을 보류했습니다.");
             return Set.of();
         }
+        request = new AgentTopicRelevanceRequest(reservation.idempotencyKey(), request.plan(), request.topic(),
+                request.articles(), request.feedbackExamples());
         LocalDateTime startedAt = LocalDateTime.now(ApiTimeZone.ZONE);
         AgentTopicRelevanceResponse response = null;
         try {
@@ -144,9 +154,13 @@ public class TopicRelevanceGate {
                     .map(a -> new Key(a.articleId(), a.topicId())).collect(java.util.stream.Collectors.toSet());
         } catch (RuntimeException error) {
             AgentClientException failure = failure(error, response);
-            finalizer.failure(runId, request, held(runId, ready, "주제 적합성 판정 실패로 분석을 보류했습니다."),
+            boolean deferred = failure.isRequestAdmissionRejected();
+            finalizer.failure(runId, request, deferred ? deferred(runId, ready)
+                            : held(runId, ready, "주제 적합성 판정 실패로 분석을 보류했습니다."),
                     hash(mapper.writeValueAsString(request)), reservation, startedAt, failure);
-            warn(runId, "주제 적합성 판정 실패로 해당 기사 분석을 보류했습니다.");
+            warn(runId, deferred ? "Agent 처리 여유가 없어 아직 실행하지 않은 기사 판정을 보류했습니다."
+                    : "주제 적합성 판정 실패로 해당 기사 분석을 보류했습니다.");
+            if (deferred) throw new AdmissionDeferred();
             return Set.of();
         }
     }
@@ -189,7 +203,8 @@ public class TopicRelevanceGate {
     private AgentClientException failure(RuntimeException error, AgentTopicRelevanceResponse response) {
         if (error instanceof AgentClientException failure && failure.getUsage() != null) {
             return new AgentClientException(failure.getCode(), failure.getMessage(), failure,
-                    safeUsage(failure.getUsage()), failure.getTimeoutPhase(), failure.getExecutionMetadata());
+                    safeUsage(failure.getUsage()), failure.getTimeoutPhase(), failure.getExecutionMetadata(),
+                    failure.getValidationFailure(), failure.getClientFailureKind(), failure.getAdmissionRejection());
         }
         if (response != null && response.meta() != null) {
             var meta = response.meta();
@@ -222,6 +237,12 @@ public class TopicRelevanceGate {
         return batch.stream().map(p -> new TopicRelevanceStore.Assessment(runId, p.topic().id(), p.article().articleId(),
                 TopicRelevanceStatus.UNCERTAIN, reason, p.inputHash(), PROMPT_VERSION, null, "[]")).toList();
     }
+    private List<TopicRelevanceStore.Assessment> deferred(Long runId, List<Prepared> batch) {
+        return batch.stream().map(p -> new TopicRelevanceStore.Assessment(runId, p.topic().id(), p.article().articleId(),
+                TopicRelevanceStatus.DEFERRED, "Agent 처리 여유를 기다리며 판정을 보류했습니다.",
+                p.inputHash(), PROMPT_VERSION, null, "[]")).toList();
+    }
+    private static final class AdmissionDeferred extends RuntimeException { }
     private AgentTopicRelevanceRequest.TopicInput topicInput(Topic topic) {
         return new AgentTopicRelevanceRequest.TopicInput(topic.getId(), topic.getName(), topic.getQueryText(),
                 keywords(topic.getRequiredKeywords()), keywords(topic.getOptionalKeywords()), keywords(topic.getExcludedKeywords()));

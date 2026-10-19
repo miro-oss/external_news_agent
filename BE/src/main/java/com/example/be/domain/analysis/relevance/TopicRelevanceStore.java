@@ -54,6 +54,7 @@ public class TopicRelevanceStore {
         List<DailyAssessment> result = new ArrayList<>();
         var named = new NamedParameterJdbcTemplate(jdbc);
         for (List<Long> batch : OracleInClause.batches(articleIds)) {
+            // Unstarted work must not replace the latest actual judgment for daily reports.
             result.addAll(named.query("""
                     SELECT * FROM (
                         SELECT r.article_id, r.topic_id, r.run_id, r.status, c.started_at,
@@ -62,6 +63,7 @@ public class TopicRelevanceStore {
                         FROM news_topic_relevance r JOIN news_collection_runs c ON c.id = r.run_id
                         WHERE c.started_at >= :fromDate AND c.started_at < :toDate
                             AND r.article_id IN (:articleIds)
+                            AND r.status <> 'DEFERRED'
                     ) WHERE position = 1
                     """, Map.of("fromDate", date.atStartOfDay(), "toDate", date.plusDays(1).atStartOfDay(),
                     "articleIds", batch), (rs, row) -> new DailyAssessment(

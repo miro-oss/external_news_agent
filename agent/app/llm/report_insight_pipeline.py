@@ -75,8 +75,8 @@ class ReportInsightPipelineProvider:
             return 1
         explicit = 3 if self.provider is None else self.provider.report_insight_max_concurrency
         # Keep one shared slot available for another request when possible.
-        # Four shared slots therefore allow three MAP workers, while the
-        # provider guard still bounds all reports together to four calls.
+        # Four shared slots therefore allow three MAP workers. The guard also
+        # bounds all report-insight requests together to three active calls.
         report_slots = max(1, self.settings.provider_concurrency - 1)
         return min(3, report_slots, explicit)
 
@@ -290,13 +290,16 @@ class ReportInsightPipelineProvider:
                     error.details = details
                 raise
 
-        return run_guarded(
-            guard,
-            paced_call,
-            credits=lambda response: response.usage.credits,
-            usage_details=lambda response: _usage_dict(response.usage),
-            admission_remaining_seconds=self._admission_remaining_seconds,
-        )
+        # All stages (including repair/review/explanation) use this shared
+        # report limit, before reserving any ordinary provider capacity.
+        with guard.report_insight_capacity(self._admission_remaining_seconds):
+            return run_guarded(
+                guard,
+                paced_call,
+                credits=lambda response: response.usage.credits,
+                usage_details=lambda response: _usage_dict(response.usage),
+                admission_remaining_seconds=self._admission_remaining_seconds,
+            )
 
     def annotate_failure(self, error: AgentError, prompt_version: str) -> None:
         with self._lock:

@@ -9,6 +9,26 @@ import java.util.Set;
 
 public record AgentErrorResponse(ErrorDetail error) {
 
+    public AgentClientException.AdmissionRejection admissionRejection() {
+        if (error == null || !"PROVIDER_UNAVAILABLE".equals(error.code())
+                || !(error.details() instanceof Map<?, ?> details)
+                || !(details.get("admission") instanceof Map<?, ?> admission)
+                || !admission.keySet().equals(Set.of("scope", "reason", "providerInvoked", "retryable"))
+                || !"REQUEST".equals(admission.get("scope"))
+                || !"CAPACITY".equals(admission.get("reason"))
+                || !Boolean.FALSE.equals(admission.get("providerInvoked"))
+                || !Boolean.TRUE.equals(admission.get("retryable"))) return null;
+        // A supplied malformed/partial usage block must not look like an absent measurement.
+        if (details.containsKey("usage")) {
+            var measured = usage();
+            if (measured == null || !Long.valueOf(0).equals(measured.inputTokens())
+                    || !Long.valueOf(0).equals(measured.outputTokens())
+                    || measured.costUsd() == null || measured.costUsd().signum() != 0
+                    || measured.credits() == null || measured.credits().signum() != 0) return null;
+        }
+        return new AgentClientException.AdmissionRejection();
+    }
+
     private static final Set<String> EXECUTION_METADATA_FIELDS =
             Set.of("provider", "model", "promptVersion", "source", "usageCompleteness");
     private static final Set<String> USAGE_COMPLETENESS_VALUES =
