@@ -239,6 +239,50 @@ class AgentQuotaServiceTest {
         verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
     }
 
+    @Test void unstartedAdmissionSettlesZeroWithoutDiscardingReservation() {
+        var reservation = reservation(AgentTask.TOPIC_RELEVANCE, AgentPlan.FREE);
+        var failure = new AgentClientException("PROVIDER_UNAVAILABLE", "busy", null, null,
+                AgentClientException.TimeoutPhase.NONE, null, null, null,
+                new AgentClientException.AdmissionRejection());
+        service.completeFailure(reservation, failure);
+        verify(repository).consume(eq(reservation), eq(BigDecimal.ZERO), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test void admissionReentryRequiresZeroSettlementAndMatchingAuditBeforeUsingNewKey() {
+        String key = "topic-relevance:42:7:hash";
+        String next = key + ":admission:1";
+        var reservation = new QuotaReservation(2L, 42L, next, AgentTask.TOPIC_RELEVANCE, AgentPlan.FREE, BigDecimal.ONE);
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of("CONSUMED"));
+        when(repository.isUnstartedRelevanceAdmission(key)).thenReturn(true);
+        when(repository.findByIdempotencyKey(next)).thenReturn(Optional.of(reservation));
+        assertEquals(reservation, service.reserve(42L, key, AgentTask.TOPIC_RELEVANCE, AgentPlan.FREE));
+        verify(repository).insert(eq(42L), eq(next), eq(AgentTask.TOPIC_RELEVANCE), eq(AgentPlan.FREE),
+                eq(BigDecimal.ONE), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+        verify(repository, never()).consume(any(), any(), any());
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"RESERVED", "RELEASED", "CONSUMED"})
+    void otherRelevanceFailuresCannotBeResubmittedAsAdmissionRetries(String status) {
+        String key = "topic-relevance:42:7:hash";
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of(status));
+        assertThrows(DuplicateQuotaReservationException.class,
+                () -> service.reserve(42L, key, AgentTask.TOPIC_RELEVANCE, AgentPlan.FREE));
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test void admissionFlagWithObservedPaidUsageStillSettlesActualCharge() {
+        var reservation = reservation(AgentTask.TOPIC_RELEVANCE, AgentPlan.PAID);
+        var failure = new AgentClientException("PROVIDER_UNAVAILABLE", "later busy", null,
+                new AgentClientException.Usage(10L, 3L, new BigDecimal("0.1"), BigDecimal.ONE),
+                AgentClientException.TimeoutPhase.NONE, null, null, null,
+                new AgentClientException.AdmissionRejection());
+        service.completeFailure(reservation, failure);
+        verify(repository).consume(eq(reservation), eq(BigDecimal.ONE), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
     @Test
     void reservesFirstInsightWithBaseKeyUnderExistingQuotaLock() {
         String key = "insight:ISSUE:88:first";

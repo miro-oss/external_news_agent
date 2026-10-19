@@ -37,11 +37,17 @@ public class AgentQuotaService {
                                     AgentPlan plan) {
         repository.lockSingletonSettings();
         releaseExpiredReservations();
-        Optional<String> existingStatus = repository.findStatusByIdempotencyKey(idempotencyKey);
-        if (existingStatus.isPresent()) {
-            throw new DuplicateQuotaReservationException(idempotencyKey, existingStatus.get());
+        String candidate = idempotencyKey;
+        for (int attempt = 0; ; attempt++) {
+            Optional<String> existingStatus = repository.findStatusByIdempotencyKey(candidate);
+            if (existingStatus.isEmpty()) return createReservation(runId, candidate, task, plan);
+            if (task != AgentTask.TOPIC_RELEVANCE || !"CONSUMED".equals(existingStatus.get())
+                    || !repository.isUnstartedRelevanceAdmission(candidate)) {
+                throw new DuplicateQuotaReservationException(candidate, existingStatus.get());
+            }
+            // Only a proven, fully settled non-execution can be re-entered; preserve prior audit rows.
+            candidate = idempotencyKey + ":admission:" + (attempt + 1);
         }
-        return createReservation(runId, idempotencyKey, task, plan);
     }
 
     @Transactional
@@ -137,6 +143,11 @@ public class AgentQuotaService {
 
     @Transactional
     public void completeFailure(QuotaReservation reservation, AgentClientException exception) {
+        if (reservation.task() == AgentTask.TOPIC_RELEVANCE && exception.isRequestAdmissionRejected()) {
+            // A terminal zero settlement excludes its audit row from legacy usage counting.
+            repository.consume(reservation, BigDecimal.ZERO, now());
+            return;
+        }
         BigDecimal observedCredits = exception.getUsage() == null
                 ? null
                 : exception.getUsage().credits();

@@ -44,6 +44,97 @@ class TopicRelevanceOracleIntegrationTests {
     @Autowired ArticleRepository articles;
     @Autowired ArticleBodyStorage bodies;
     @Autowired JdbcTemplate jdbc;
+    @Autowired com.example.be.domain.analysis.agent.quota.AgentQuotaJdbcRepository reservations;
+    @Autowired TopicRelevancePolicy policy;
+
+    @Test void unstartedAdmissionRoundTripsDeferredAndResumesWithPreservedZeroAudit() {
+        LocalDateTime started = LocalDateTime.now(ApiTimeZone.ZONE).minusMinutes(1);
+        var run = runs.saveAndFlush(CollectionRun.builder().status(RunStatus.RUNNING)
+                .triggerType(TriggerType.MANUAL).startedAt(started).build());
+        var topic = topic("장비 수요");
+        var source = sources.saveAndFlush(Source.builder().name("deferred-test " + UUID.randomUUID())
+                .sourceKind(Source.KIND_FEED).urlTemplate("https://example.com/" + UUID.randomUUID())
+                .country("KR").language("ko").active(true).robotsStatus(Source.ROBOTS_STATUS_ALLOWED)
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_RESPECT, 30, true)).build());
+        var article = articles.saveAndFlush(Article.builder().title("장비 수요 발표").topic(topic).source(source)
+                .urlHash(TopicRelevanceGate.hash(UUID.randomUUID().toString()))
+                .canonicalUrl("https://example.com/" + UUID.randomUUID()).contentHash("b".repeat(64))
+                .storedBody(bodies.intern("장비 수요가 증가했다고 발표했다."))
+                .fetchStatus(FetchStatus.FULLTEXT).firstSeenRun(run).lastSeenRun(run).collectedAt(started).build());
+        String key = "relevance-deferred:" + UUID.randomUUID();
+        var request = new AgentTopicRelevanceRequest(key, AgentPlan.FREE,
+                new AgentTopicRelevanceRequest.TopicInput(topic.getId(), topic.getName(), topic.getQueryText(), List.of(), List.of(), List.of()),
+                List.of(new AgentTopicRelevanceRequest.ArticleInput(article.getId(), article.getTitle(), null, article.getBody())));
+        var original = quota.reserve(run.getId(), key, AgentTask.TOPIC_RELEVANCE, AgentPlan.FREE);
+        var rejected = new com.example.be.domain.analysis.agent.client.AgentClientException(
+                "PROVIDER_UNAVAILABLE", "busy", null, null,
+                com.example.be.domain.analysis.agent.client.AgentClientException.TimeoutPhase.NONE,
+                null, null, null, new com.example.be.domain.analysis.agent.client.AgentClientException.AdmissionRejection());
+        finalizer.failure(run.getId(), request,
+                List.of(assessment(run.getId(), topic.getId(), article.getId(), TopicRelevanceStatus.DEFERRED)),
+                "a".repeat(64), original, started, rejected);
+
+        assertEquals(TopicRelevanceStatus.DEFERRED, store.findByRun(run.getId()).getFirst().status());
+        assertTrue(store.latestOnDate(started.toLocalDate(), List.of(article.getId())).isEmpty());
+        assertTrue(reservations.isUnstartedRelevanceAdmission(key));
+        assertEquals("CONSUMED", jdbc.queryForObject("SELECT status FROM agent_quota_reservations WHERE idempotency_key = ?", String.class, key));
+        assertEquals(0, jdbc.queryForObject("SELECT consumed_units FROM agent_quota_reservations WHERE idempotency_key = ?", BigDecimal.class, key).signum());
+
+        var retry = quota.reserve(run.getId(), key, AgentTask.TOPIC_RELEVANCE, AgentPlan.FREE);
+        assertEquals(key + ":admission:1", retry.idempotencyKey());
+        var retryRequest = new AgentTopicRelevanceRequest(retry.idempotencyKey(), request.plan(), request.topic(), request.articles());
+        var response = new AgentTopicRelevanceResponse(List.of(new AgentTopicRelevanceResponse.Decision(
+                article.getId(), "RELEVANT", "장비 수요 관련", List.of("장비 수요가 증가"))),
+                new AgentTopicRelevanceResponse.Meta("openai", "fixture-model", TopicRelevanceGate.PROMPT_VERSION,
+                        10L, 5L, BigDecimal.ZERO, BigDecimal.ZERO, false, false));
+        finalizer.success(run.getId(), retryRequest, response,
+                List.of(assessment(run.getId(), topic.getId(), article.getId(), TopicRelevanceStatus.RELEVANT)),
+                "a".repeat(64), retry, started.plusSeconds(5));
+
+        assertEquals(TopicRelevanceStatus.RELEVANT, store.findByRun(run.getId()).getFirst().status());
+        assertTrue(reservations.isUnstartedRelevanceAdmission(key));
+        assertFalse(reservations.isUnstartedRelevanceAdmission(retry.idempotencyKey()));
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM agent_runs WHERE idempotency_key IN (?, ?)", Integer.class, key, retry.idempotencyKey()));
+        assertEquals(0, jdbc.queryForObject("SELECT consumed_units FROM agent_quota_reservations WHERE id = ?", BigDecimal.class, original.id()).signum());
+        assertEquals(0, BigDecimal.ONE.compareTo(jdbc.queryForObject("SELECT consumed_units FROM agent_quota_reservations WHERE id = ?", BigDecimal.class, retry.id())));
+        assertThrows(com.example.be.domain.analysis.agent.quota.DuplicateQuotaReservationException.class,
+                () -> quota.reserve(run.getId(), key, AgentTask.TOPIC_RELEVANCE, AgentPlan.FREE));
+    }
+
+    @Test void deferredObservationNeitherHidesEarlierVerdictNorApprovesItsOwnRun() {
+        LocalDateTime started = LocalDateTime.now(ApiTimeZone.ZONE).toLocalDate().atTime(9, 0);
+        var acceptedRun = runs.saveAndFlush(CollectionRun.builder().status(RunStatus.SUCCESS)
+                .triggerType(TriggerType.MANUAL).startedAt(started).finishedAt(started.plusMinutes(1)).build());
+        var deferredRun = runs.saveAndFlush(CollectionRun.builder().status(RunStatus.SUCCESS)
+                .triggerType(TriggerType.MANUAL).startedAt(started.plusHours(2)).finishedAt(started.plusHours(2).plusMinutes(1)).build());
+        var topic = topic("장비 이력");
+        var source = sources.saveAndFlush(Source.builder().name("verdict-test " + UUID.randomUUID())
+                .sourceKind(Source.KIND_FEED).urlTemplate("https://example.com/" + UUID.randomUUID())
+                .country("KR").language("ko").active(true).robotsStatus(Source.ROBOTS_STATUS_ALLOWED)
+                .crawlPolicy(new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_RESPECT, 30, true)).build());
+        var article = articles.saveAndFlush(Article.builder().title("장비 수요 발표").topic(topic).source(source)
+                .urlHash(TopicRelevanceGate.hash(UUID.randomUUID().toString()))
+                .canonicalUrl("https://example.com/" + UUID.randomUUID()).contentHash("b".repeat(64))
+                .storedBody(bodies.intern("장비 수요가 증가했다고 발표했다."))
+                .fetchStatus(FetchStatus.FULLTEXT).firstSeenRun(acceptedRun).lastSeenRun(deferredRun).collectedAt(started).build());
+        store.saveAll(List.of(assessment(acceptedRun.getId(), topic.getId(), article.getId(), TopicRelevanceStatus.RELEVANT),
+                assessment(deferredRun.getId(), topic.getId(), article.getId(), TopicRelevanceStatus.DEFERRED)));
+        var previous = com.example.be.domain.analysis.entity.Finding.builder().id(123L).run(acceptedRun).article(article).build();
+        var deferred = com.example.be.domain.analysis.entity.Finding.builder().id(124L).run(deferredRun).article(article).build();
+
+        assertEquals(acceptedRun.getId(), store.latestOnDate(started.toLocalDate(), List.of(article.getId())).getFirst().runId());
+        assertEquals(List.of(previous), policy.filterDailyFindings(started.toLocalDate(), List.of(previous)));
+        assertTrue(policy.filterFindings(List.of(deferred)).isEmpty());
+
+        var rejectedRun = runs.saveAndFlush(CollectionRun.builder().status(RunStatus.SUCCESS)
+                .triggerType(TriggerType.MANUAL).startedAt(started.plusHours(1)).finishedAt(started.plusHours(1).plusMinutes(1)).build());
+        store.saveAll(List.of(assessment(rejectedRun.getId(), topic.getId(), article.getId(), TopicRelevanceStatus.IRRELEVANT)));
+        var latest = store.latestOnDate(started.toLocalDate(), List.of(article.getId())).getFirst();
+        assertEquals(rejectedRun.getId(), latest.runId());
+        assertEquals(TopicRelevanceStatus.IRRELEVANT, latest.status());
+        assertTrue(policy.filterDailyFindings(started.toLocalDate(), List.of(previous)).isEmpty());
+        assertTrue(policy.filterFindings(List.of(deferred)).isEmpty());
+    }
 
     @Test void migrationRoundTripsScopedDecisionsAndAtomicallySettlesAuditAndQuota() {
         LocalDateTime started = LocalDateTime.now(ApiTimeZone.ZONE).minusMinutes(1);

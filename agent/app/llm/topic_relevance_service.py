@@ -152,6 +152,7 @@ class TopicRelevanceService:
                         previous_usage=usage + completed_usage,
                     )
             except AgentError as error:
+                _annotate_capacity_admission(error, provider_responded=identity is not None)
                 previous_usage = usage + completed_usage
                 if previous_usage != ProviderUsage():
                     _include_previous_usage(error, previous_usage)
@@ -165,6 +166,31 @@ class TopicRelevanceService:
             decisions=decisions,
             meta=_meta(last_response, usage),
         )
+
+
+def _annotate_capacity_admission(error: AgentError, *, provider_responded: bool) -> None:
+    if not isinstance(error.details, dict):
+        return
+    details = dict(error.details)
+    # Only this request boundary can certify that replay will not repeat an
+    # earlier article, repair or negative review, including zero-usage responses.
+    details.pop("admission", None)
+    if (
+        not provider_responded
+        and error.status_code == 503
+        and error.code == "PROVIDER_UNAVAILABLE"
+        and details.get("concurrencyLimited") is True
+        and details.get("requestNotStarted") is True
+        and "usage" not in details
+        and (details.get("retryable") is None or details.get("retryable") is True)
+        and all(details.get(flag) is None or details.get(flag) is False for flag in (
+            "circuitOpen", "requestDeadlineExceeded", "pipelineCancelled", "rateLimited",
+        ))
+    ):
+        details["admission"] = {
+            "scope": "REQUEST", "reason": "CAPACITY", "providerInvoked": False, "retryable": True,
+        }
+    error.details = details
 
 
 def _include_previous_usage(error: AgentError, previous: ProviderUsage) -> None:

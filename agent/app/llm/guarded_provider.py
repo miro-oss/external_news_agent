@@ -1,4 +1,5 @@
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from decimal import Decimal
 from threading import BoundedSemaphore
 
@@ -20,9 +21,28 @@ class ProviderGuard:
         hard_cap_credits: Decimal,
     ) -> None:
         self.semaphore = BoundedSemaphore(concurrency)
+        # Shared by every report-insight request using this plan's guard.
+        # Acquire this before the provider semaphore so queued report work
+        # cannot occupy the slot reserved for ordinary analysis.
+        self.report_insight_semaphore = BoundedSemaphore(max(1, concurrency - 1))
         self.acquire_timeout_seconds = acquire_timeout_seconds
         self.breaker = CircuitBreaker(failure_threshold, cooldown_seconds)
         self.hard_cap_credits = hard_cap_credits
+
+    @contextmanager
+    def report_insight_capacity(
+        self, admission_remaining_seconds: Callable[[], float]
+    ) -> Iterator[None]:
+        while not self.report_insight_semaphore.acquire(
+            timeout=min(self.acquire_timeout_seconds, admission_remaining_seconds())
+        ):
+            pass
+        try:
+            # Cancellation/deadline may have arrived while acquiring the slot.
+            admission_remaining_seconds()
+            yield
+        finally:
+            self.report_insight_semaphore.release()
 
 
 class GuardedAnalyzeProvider:

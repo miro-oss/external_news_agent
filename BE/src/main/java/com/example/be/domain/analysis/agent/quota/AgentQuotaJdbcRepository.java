@@ -159,6 +159,18 @@ public class AgentQuotaJdbcRepository {
         return count != null && count > 0;
     }
 
+    public boolean isUnstartedRelevanceAdmission(String idempotencyKey) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM agent_runs run
+                JOIN agent_quota_reservations reservation ON reservation.idempotency_key = run.idempotency_key
+                WHERE run.idempotency_key = ? AND run.agent_task = 'TOPIC_RELEVANCE'
+                  AND run.status = 'FAILED' AND run.failure_code = 'ADMISSION_REJECTED'
+                  AND run.input_tokens = 0 AND run.output_tokens = 0 AND run.cost_usd = 0 AND run.credits = 0
+                  AND reservation.status = 'CONSUMED' AND reservation.consumed_units = 0
+                """, Integer.class, idempotencyKey);
+        return count != null && count > 0;
+    }
+
     public void insert(Long collectionRunId,
                        String idempotencyKey,
                        AgentTask task,

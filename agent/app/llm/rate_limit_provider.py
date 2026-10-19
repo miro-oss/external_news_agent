@@ -207,6 +207,12 @@ def run_with_request_policy[ResponseT](
         try:
             return call()
         except AgentError as error:
+            if (attempt > 0 and isinstance(error.details, dict)
+                    and error.details.get("concurrencyLimited") is True
+                    and error.details.get("requestNotStarted") is True):
+                # This capacity rejection did not call the provider, but an
+                # earlier 429 attempt did. Do not certify the whole call as new.
+                error.details = {**error.details, "requestNotStarted": False}
             if not _is_rate_limited(error) or not _is_retryable(error):
                 raise
             retry_number = attempt + 1

@@ -10,7 +10,7 @@ from app.core.breaker import CircuitState
 from app.core.config import Settings
 from app.core.errors import AgentError
 from app.llm.base import ProviderResponse, ProviderUsage
-from app.llm.guarded_provider import ProviderGuard
+from app.llm.guarded_provider import GuardedAnalyzeProvider, ProviderGuard
 from app.llm.rate_limit_provider import ProviderRequestCoordinator, ProviderRequestPolicy
 from app.llm.report_insight_map_execution import run_report_maps
 from app.llm.report_insight_pipeline import ReportInsightPipelineProvider
@@ -229,14 +229,12 @@ def test_unknown_exception_closes_admission_without_inventing_usage():
     assert len(provider.calls) == 1
 
 
-def test_two_reports_share_four_guard_slots_without_rejecting_their_map_batches(monkeypatch):
-    gate = Barrier(4, timeout=3)
-    first_ready = Event()
+def test_two_reports_leave_shared_capacity_for_ordinary_analysis(monkeypatch):
+    release, first_ready, queued = Event(), Event(), Event()
     lock = Lock()
     active = {"first": 0, "second": 0}
     peaks = {"first": 0, "second": 0, "total": 0}
     issued, closed = [], []
-    opening_wave = []
 
     class Transport:
         def __init__(self, *args, **kwargs):
@@ -252,10 +250,8 @@ def test_two_reports_share_four_guard_slots_without_rejecting_their_map_batches(
                 peaks["total"] = max(peaks["total"], sum(active.values()))
                 if report == "first" and active[report] == 3:
                     first_ready.set()
-                if len(issued) == 4:
-                    opening_wave.append(dict(active))
             try:
-                gate.wait()
+                assert release.wait(3)
                 return answer()
             finally:
                 with lock:
@@ -271,6 +267,30 @@ def test_two_reports_share_four_guard_slots_without_rejecting_their_map_batches(
         failure_threshold=1,
         cooldown_seconds=30,
         hard_cap_credits=Decimal(5),
+    )
+    semaphore = guard.report_insight_semaphore
+
+    class ObservedSemaphore:
+        def acquire(self, *, timeout):
+            acquired = semaphore.acquire(timeout=timeout)
+            if not acquired:
+                queued.set()
+            return acquired
+
+        def release(self):
+            semaphore.release()
+
+    guard.report_insight_semaphore = ObservedSemaphore()
+    ordinary_calls = []
+
+    class OrdinaryProvider:
+        def generate(self, **kwargs):
+            ordinary_calls.append(kwargs["prompt"])
+            return answer()
+
+    ordinary = GuardedAnalyzeProvider(
+        OrdinaryProvider(), concurrency=4, acquire_timeout_seconds=0.01,
+        failure_threshold=1, cooldown_seconds=30, hard_cap_credits=Decimal(5), guard=guard,
     )
     coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0))
     monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
@@ -298,17 +318,25 @@ def test_two_reports_share_four_guard_slots_without_rejecting_their_map_batches(
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(report_maps, pipelines[0], "first")
-        # The first report fills only three slots. The second can issue into
-        # the remaining slot before the first report releases any calls.
-        assert first_ready.wait(3)
-        second = pool.submit(report_maps, pipelines[1], "second")
+        try:
+            assert first_ready.wait(3)
+            second = pool.submit(report_maps, pipelines[1], "second")
+            assert queued.wait(3)
+            # The second report waits without reserving the fourth global slot.
+            # Analysis can keep issuing while both reports are still active.
+            for index in range(10):
+                assert call(ordinary, f"ordinary:{index}") == answer()
+            with lock:
+                assert active == {"first": 3, "second": 0}
+        finally:
+            release.set()
         futures = [first, second]
         assert [future.result(timeout=5) for future in futures] == [list(range(4))] * 2
 
-    assert opening_wave == [{"first": 3, "second": 1}]
+    assert len(ordinary_calls) == 10
     assert peaks["first"] == 3
     assert 1 <= peaks["second"] <= 3
-    assert peaks["total"] == 4
+    assert peaks["total"] == 3
     assert len(issued) == len(set(issued)) == len(closed) == 8
     assert guard.breaker.state is CircuitState.CLOSED
     for pipeline in pipelines:
@@ -353,7 +381,7 @@ def test_four_audiences_wait_for_shared_capacity_without_cancelling_their_maps(m
         cooldown_seconds=30,
         hard_cap_credits=Decimal(5),
     )
-    semaphore = guard.semaphore
+    semaphore = guard.report_insight_semaphore
 
     class ObservedSemaphore:
         def acquire(self, *, timeout):
@@ -365,7 +393,7 @@ def test_four_audiences_wait_for_shared_capacity_without_cancelling_their_maps(m
         def release(self):
             semaphore.release()
 
-    guard.semaphore = ObservedSemaphore()
+    guard.report_insight_semaphore = ObservedSemaphore()
     coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0))
     monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
     monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
@@ -379,7 +407,12 @@ def test_four_audiences_wait_for_shared_capacity_without_cancelling_their_maps(m
 
     def report_maps(pipeline, audience):
         def evaluate(index, item):
-            call(pipeline, f"{audience}:{item}")
+            stage = ("MAP", "REVIEW", "EXPLAIN", "REDUCE")[index]
+            pipeline.generate(
+                system_instruction="offline",
+                prompt=f"{audience}:{item}",
+                response_schema={"description": f"reportInsightCall:{stage}-001"},
+            )
             return item
 
         return run_report_maps(
@@ -400,7 +433,7 @@ def test_four_audiences_wait_for_shared_capacity_without_cancelling_their_maps(m
             release.set()
         assert [future.result(timeout=5) for future in futures] == [list(range(4))] * 4
 
-    assert peak == 4
+    assert peak == 3
     assert len(issued) == len(set(issued)) == len(closed) == 16
     assert guard.breaker.state is CircuitState.CLOSED
     for pipeline in pipelines:
@@ -410,7 +443,120 @@ def test_four_audiences_wait_for_shared_capacity_without_cancelling_their_maps(m
         assert pipeline._reserved_credits == 0
 
 
-def test_queued_deadline_stops_before_provider_and_releases_half_open_probe(monkeypatch):
+def test_single_provider_slot_still_allows_reports_and_returns_capacity(monkeypatch):
+    release, started, queued = Event(), Event(), Event()
+    issued = []
+
+    class Transport:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def generate(self, **kwargs):
+            issued.append(kwargs["prompt"])
+            started.set()
+            assert release.wait(3)
+            return answer()
+
+        def close(self):
+            pass
+
+    guard = ProviderGuard(
+        concurrency=1, acquire_timeout_seconds=0.01, failure_threshold=1,
+        cooldown_seconds=30, hard_cap_credits=Decimal(5),
+    )
+    semaphore = guard.report_insight_semaphore
+
+    class ObservedSemaphore:
+        def acquire(self, *, timeout):
+            acquired = semaphore.acquire(timeout=timeout)
+            if not acquired:
+                queued.set()
+            return acquired
+
+        def release(self):
+            semaphore.release()
+
+    guard.report_insight_semaphore = ObservedSemaphore()
+    coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0))
+    monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
+    monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
+    monkeypatch.setattr(
+        "app.llm.report_insight_pipeline.get_provider_coordinator", lambda *_: coordinator
+    )
+    settings = config(OPENAI_API_KEY="offline-test-only", AGENT_PROVIDER_CONCURRENCY=1)
+    first, second = [ReportInsightPipelineProvider(settings, "FREE") for _ in range(2)]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        running = pool.submit(call, first, "first")
+        try:
+            assert started.wait(3)
+            waiting = pool.submit(call, second, "second")
+            assert queued.wait(3)
+            assert issued == ["first"]
+        finally:
+            release.set()
+        assert running.result(timeout=3) == waiting.result(timeout=3) == answer()
+
+    assert issued == ["first", "second"]
+    for capacity in (guard.semaphore, guard.report_insight_semaphore):
+        assert capacity.acquire(timeout=0)
+        assert not capacity.acquire(timeout=0)
+        capacity.release()
+    assert first.calls == second.calls == 1
+    assert first.usage == second.usage == answer().usage
+
+
+@pytest.mark.parametrize("failure", [
+    AgentError(503, "PROVIDER_UNAVAILABLE", "offline"),
+    RuntimeError("offline"),
+    KeyboardInterrupt("offline"),
+])
+def test_failed_report_returns_both_permits_to_another_request(monkeypatch, failure):
+    issued, closed = [], []
+
+    class Transport:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def generate(self, **kwargs):
+            issued.append(kwargs["prompt"])
+            if len(issued) == 1:
+                raise failure
+            return answer()
+
+        def close(self):
+            closed.append(self)
+
+    guard = ProviderGuard(
+        concurrency=2, acquire_timeout_seconds=0.01, failure_threshold=3,
+        cooldown_seconds=30, hard_cap_credits=Decimal(5),
+    )
+    coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0))
+    monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
+    monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
+    monkeypatch.setattr(
+        "app.llm.report_insight_pipeline.get_provider_coordinator", lambda *_: coordinator
+    )
+    settings = config(OPENAI_API_KEY="offline-test-only", AGENT_PROVIDER_CONCURRENCY=2)
+    failed, next_request = [ReportInsightPipelineProvider(settings, "FREE") for _ in range(2)]
+    with pytest.raises(type(failure)) as caught:
+        call(failed, "failed")
+    assert caught.value is failure
+    assert call(next_request, "next") == answer()
+    assert issued == ["failed", "next"] and len(closed) == 2
+    assert failed.calls == 0 and failed.usage == ProviderUsage()
+    assert next_request.calls == 1 and next_request.usage == answer().usage
+    for capacity, limit in ((guard.semaphore, 2), (guard.report_insight_semaphore, 1)):
+        for _ in range(limit):
+            assert capacity.acquire(timeout=0)
+        assert not capacity.acquire(timeout=0)
+        for _ in range(limit):
+            capacity.release()
+
+
+@pytest.mark.parametrize("capacity", ["semaphore", "report_insight_semaphore"])
+def test_queued_deadline_stops_before_provider_and_releases_half_open_probe(
+    monkeypatch, capacity
+):
     clock = [0.0]
     waits, issued, closed = [], [], []
     monkeypatch.setattr("app.llm.report_insight_pipeline.monotonic", lambda: clock[0])
@@ -442,7 +588,7 @@ def test_queued_deadline_stops_before_provider_and_releases_half_open_probe(monk
         cooldown_seconds=0,
         hard_cap_credits=Decimal(5),
     )
-    guard.semaphore = BusySemaphore()
+    setattr(guard, capacity, BusySemaphore())
     guard.breaker.record_failure()
     assert guard.breaker.state is CircuitState.HALF_OPEN
     coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0), clock=lambda: clock[0])
@@ -467,6 +613,12 @@ def test_queued_deadline_stops_before_provider_and_releases_half_open_probe(monk
     assert guard.breaker.state is CircuitState.HALF_OPEN
     guard.breaker.before_call()
     guard.breaker.cancel_call()
+    untouched = (
+        guard.report_insight_semaphore if capacity == "semaphore" else guard.semaphore
+    )
+    assert untouched.acquire(timeout=0)
+    assert not untouched.acquire(timeout=0)
+    untouched.release()
 
 
 def test_queued_call_uses_latest_pacing_and_constructs_client_with_remaining_time(monkeypatch):
@@ -605,7 +757,7 @@ def test_waiting_call_cancellation_does_not_make_drained_usage_partial(monkeypat
         cooldown_seconds=30,
         hard_cap_credits=Decimal(5),
     )
-    semaphore = guard.semaphore
+    semaphore = guard.report_insight_semaphore
 
     class WaitingSemaphore:
         def acquire(self, *, timeout):
@@ -617,7 +769,7 @@ def test_waiting_call_cancellation_does_not_make_drained_usage_partial(monkeypat
         def release(self):
             semaphore.release()
 
-    guard.semaphore = WaitingSemaphore()
+    guard.report_insight_semaphore = WaitingSemaphore()
     coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0))
     monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
     monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
@@ -676,7 +828,7 @@ def test_scoped_native_parallel_calls_own_and_close_separate_clients(monkeypatch
             closed.append(self)
 
     guard = ProviderGuard(
-        concurrency=3,
+        concurrency=4,
         acquire_timeout_seconds=1,
         failure_threshold=1,
         cooldown_seconds=30,
@@ -700,9 +852,10 @@ def test_scoped_native_parallel_calls_own_and_close_separate_clients(monkeypatch
     assert pipeline.usage.input_tokens == 30
 
 
-def test_cancellation_after_shared_semaphore_wait_never_calls_or_charges_provider(monkeypatch):
+@pytest.mark.parametrize("capacity", ["semaphore", "report_insight_semaphore"])
+def test_cancellation_after_capacity_wait_never_calls_or_charges_provider(monkeypatch, capacity):
     waiting, release = Event(), Event()
-    called, closed = [], []
+    called, closed, released = [], [], []
 
     class PausedSemaphore:
         def acquire(self, *, timeout):
@@ -711,7 +864,7 @@ def test_cancellation_after_shared_semaphore_wait_never_calls_or_charges_provide
             return True
 
         def release(self):
-            pass
+            released.append(True)
 
     class Transport:
         def __init__(self, *args, **kwargs):
@@ -731,7 +884,7 @@ def test_cancellation_after_shared_semaphore_wait_never_calls_or_charges_provide
         cooldown_seconds=30,
         hard_cap_credits=Decimal(5),
     )
-    guard.semaphore = PausedSemaphore()
+    setattr(guard, capacity, PausedSemaphore())
     coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(0))
     monkeypatch.setattr("app.llm.report_insight_pipeline.OpenAIAnalyzeProvider", Transport)
     monkeypatch.setattr("app.llm.report_insight_pipeline.get_provider_guard", lambda *_: guard)
@@ -751,6 +904,13 @@ def test_cancellation_after_shared_semaphore_wait_never_calls_or_charges_provide
     assert pipeline.calls == 0 and pipeline.usage == ProviderUsage()
     assert not pipeline.unknown_failure_usage
     assert guard.breaker.state == CircuitState.CLOSED
+    assert released == [True]
+    untouched = (
+        guard.report_insight_semaphore if capacity == "semaphore" else guard.semaphore
+    )
+    assert untouched.acquire(timeout=0)
+    assert not untouched.acquire(timeout=0)
+    untouched.release()
 
 
 def test_concurrent_model_mismatch_accounts_both_responses_before_failure():

@@ -44,11 +44,15 @@ public class TopicRelevanceFinalizer {
                         List<TopicRelevanceStore.Assessment> assessments, String requestHash,
                         QuotaReservation reservation, LocalDateTime startedAt, AgentClientException failure) {
         store.saveAll(assessments);
-        var usage = failure.getUsage();
+        boolean deferred = failure.isRequestAdmissionRejected();
+        var usage = deferred ? new AgentClientException.Usage(0L, 0L, BigDecimal.ZERO, BigDecimal.ZERO)
+                : failure.getUsage();
         runs.insertIfAbsent(base(runId, request, requestHash, startedAt)
-                .status(AgentRunStatus.FAILED).failureCode(failure.getCode() == null ? "INTERNAL_ERROR"
+                .status(AgentRunStatus.FAILED).failureCode(deferred ? "ADMISSION_REJECTED"
+                        : failure.getCode() == null ? "INTERNAL_ERROR"
                         : failure.getCode().substring(0, Math.min(100, failure.getCode().length())))
-                .failureMessage("주제 적합성 판정을 완료하지 못해 분석을 보류했습니다.")
+                .failureMessage(deferred ? "Agent 처리 여유를 기다리며 미실행 판정을 보류했습니다."
+                        : "주제 적합성 판정을 완료하지 못해 분석을 보류했습니다.")
                 .timeoutPhase(failure.isReadTimeout() ? AgentTimeoutPhase.READ
                         : failure.isConnectTimeout() ? AgentTimeoutPhase.CONNECT : null)
                 .inputTokens(usage == null ? null : usage.inputTokens())
