@@ -42,6 +42,9 @@ _TARGET_MONEY_VALUE = re.compile(
     re.IGNORECASE,
 )
 _PRICE_BEFORE_TARGET = re.compile(_PRICE_AMOUNT.pattern + r"(?:으로|로|인)?\s*$")
+_PREFIX_PRICE_BEFORE_TARGET = re.compile(
+    _PREFIX_CURRENCY_AMOUNT.pattern + r"(?:으로|로|인)?\s*$", re.IGNORECASE
+)
 _AMOUNT_PROPOSAL = re.compile(
     _PRICE_AMOUNT.pattern + r"(?:으로|로|를|을|이)?\s*(?:새롭게\s*)?(?:제시|설정|산정|추천)"
 )
@@ -316,6 +319,7 @@ def _price_targets(value: str) -> tuple[re.Match[str], ...]:
         or _BARE_TARGET_PRICE.match(value, match.start())
         or _TARGET_MONEY_VALUE.match(value, match.end())
         or _PRICE_BEFORE_TARGET.search(value[: match.start()])
+        or _PREFIX_PRICE_BEFORE_TARGET.search(value[: match.start()])
     )
 
 
@@ -347,9 +351,43 @@ def _target_direction(value: str) -> str | None:
     return match.lastgroup if match is not None else None
 
 
+def _without_currency_conversion_notes(value: str) -> str:
+    """Ignore only complete parenthesized money notes while reading source state.
+
+    A conversion between an amount and its case particle must not hide a
+    completed price change. Arbitrary parenthetical prose is kept, including
+    denials, forecasts and recommendations. The original source and generated
+    wording are never rewritten by this check-only projection.
+    """
+    omitted = set()
+    for pattern in (_CURRENCY_AMOUNT, _PREFIX_CURRENCY_AMOUNT):
+        for amount in pattern.finditer(value):
+            start = amount.end()
+            opening = start + len(value[start:]) - len(value[start:].lstrip(" \t"))
+            if value[opening : opening + 1] != "(":
+                continue
+            close = value.find(")", opening + 1, opening + 81)
+            if close < 0:
+                continue
+            note = value[opening + 1 : close]
+            if "\n" in note or "\r" in note:
+                continue
+            note = note.strip()
+            note = re.sub(r"^약\s*", "", note)
+            if not any(
+                currency.fullmatch(note)
+                for currency in (_CURRENCY_AMOUNT, _PREFIX_CURRENCY_AMOUNT)
+            ):
+                continue
+            omitted.add((start, close + 1))
+    for start, end in sorted(omitted, reverse=True):
+        value = value[:start] + value[end:]
+    return value
+
+
 def _has_reported_target_change(source: str, direction: str | None = None) -> bool:
     for match in _price_targets(source):
-        clause = _target_clause(source, match.end())
+        clause = _without_currency_conversion_notes(_target_clause(source, match.end()))
         prefix = _OBSERVATION_CLAUSE_BREAK.split(source[: match.start()])[-1] + match.group()
         context = prefix + clause
         change = _TARGET_COMPLETED_CHANGE.match(context, len(prefix))
@@ -368,8 +406,10 @@ def _is_target_change_observation(value: str, match: re.Match[str]) -> bool:
     if (
         _OWN_TARGET.search(value[: match.start()])
         or _PRICE_BEFORE_TARGET.search(value[: match.start()])
+        or _PREFIX_PRICE_BEFORE_TARGET.search(value[: match.start()])
         or _TARGET_NUMERIC_VALUE.match(clause)
         or _PRICE_AMOUNT.search(clause)
+        or _PREFIX_CURRENCY_AMOUNT.search(clause)
         or _TARGET_DIRECT_PROPOSAL.search(clause)
     ):
         return False

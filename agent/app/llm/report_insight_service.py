@@ -146,7 +146,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v60"
+PROMPT_VERSION = "report-insight.ko.v61"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -3601,6 +3601,7 @@ def _validated_output(
         if len(ids) != len(set(ids)) or set(ids) != set(findings):
             raise ValueError("각 audience는 모든 input finding을 정확히 한 번 판정해야 합니다.")
         assessment_errors: list[tuple[ReportInsightAssessment, str, ValueError]] = []
+        assessment_validation_refs = {}
         for assessment in insight.assessments:
             local_ids = {claim.id for claim in findings[assessment.finding_id].claims}
             if not set(assessment.basis_claim_ids) <= local_ids:
@@ -3626,6 +3627,11 @@ def _validated_output(
                 value is None for value in assessment.axes.model_dump().values()
             ):
                 reason_refs = [claim.id for claim in findings[assessment.finding_id].claims]
+            # Diagnostics must retain the exact evidence scope used below.
+            # Unknown decisions intentionally have no public basis, but their
+            # prose still uses local sources; empty diagnostic refs would drop
+            # the source-bound repair details for those failures.
+            assessment_validation_refs[assessment.finding_id] = tuple(reason_refs)
             assessment_errors.extend(
                 (assessment, field, error)
                 for field, error in _assessment_prose_errors(
@@ -3655,7 +3661,7 @@ def _validated_output(
             )
             diagnostics = tuple(
                 f"findingId={assessment.finding_id} field=assessments.{field} "
-                f"refs={assessment.basis_claim_ids}: {error}"
+                f"refs={list(assessment_validation_refs[assessment.finding_id])}: {error}"
                 for assessment, field, error in assessment_errors
             )
             kinds = tuple(
@@ -3694,7 +3700,7 @@ def _validated_output(
                         insight.audience,
                         f"assessments[{assessment.finding_id}].{native_field}",
                         kind,
-                        tuple(assessment.basis_claim_ids),
+                        assessment_validation_refs[assessment.finding_id],
                         rule_id=rule,
                         details=getattr(error, "repair_details", {}).get(rule, ()),
                     )
@@ -3713,7 +3719,7 @@ def _validated_output(
                 ),
                 repair_action_diagnostics=tuple(
                     f"findingId={assessment.finding_id} field=assessments.{action_field} "
-                    f"refs={assessment.basis_claim_ids}: "
+                    f"refs={list(assessment_validation_refs[assessment.finding_id])}: "
                     + _repair_action_message(
                         str(error),
                         getattr(error, "error_kinds", ()),

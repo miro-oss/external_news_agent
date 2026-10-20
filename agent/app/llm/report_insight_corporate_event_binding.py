@@ -28,6 +28,21 @@ _FUNDING_AFTER_AMOUNT = re.compile(
     r"\s*(?:\((?P<conversion>[^()\n]{1,60})\))?\s*(?:을|를)?\s*조달"
     r"(?=$|[^가-힣A-Za-z0-9]|하|할|했|되|된|됐|될|돼|함|한)"
 )
+# A security is the object of listing, while its issuer owns the corporate
+# event. Keep this vocabulary bounded to financial instruments; an arbitrary
+# company being listed is not an interchangeable object. Explicit subjects or
+# possessives ("ADR의") remain actor candidates even when their name overlaps.
+_LISTED_INSTRUMENT = re.compile(
+    r"(?<![가-힣A-Za-z0-9])(?:ADR|GDR|(?:주식\s*)?예탁증서|보통주|우선주|주식)"
+    r"(?:을|를)?(?=\s*(?:상장|$))",
+    re.IGNORECASE,
+)
+_EVENT_CONNECTIVE = re.compile(r"(?:해|하여|하고|하며|했으며|했고)(?=\s|$)")
+_MONEY_PREFIX = re.compile(r"(?<![가-힣A-Za-z0-9_])(?:약|총)\s*$")
+_MONEY_PARTICLE = re.compile(
+    r"(?:으로|에서|까지|부터|보다|의|을|를|은|는|이|가|에|로|와|과|도|만)?"
+    r"(?=$|[^가-힣A-Za-z0-9_])"
+)
 _FINANCE_ATTRIBUTE = r"(?:여력|구조|조건|비용|환경|위험|수요|역량|전략|방안|업무|경로)"
 _ANALYTICAL_OUTCOMES = frozenset({"영향", "효과", "결과", "평가", "변화"})
 _FINANCE_NOMINAL = re.compile(
@@ -67,7 +82,7 @@ _OBLIQUE_PARTICLE = re.compile(r"(?:에서|에게|으로|부터|까지|보다|�
 _BARE_OBLIQUE_END = re.compile(r"(?:으로|로|에)$")
 _BARE_CONNECTIVE_END = re.compile(r"(?:라면|다면|으?므로)$")
 _REPORTED_PREDICATE_END = re.compile(r"(?:다고|라고)\s+[가-힣]{2,}해\s*$")
-_OWNER_DESCRIPTION = re.compile(r"(?:자회사|모회사|계열사|관계사|기업|회사|법인)\s*$")
+_OWNER_DESCRIPTION = re.compile(r"(?:자회사|모회사|계열사|관계사|기업|회사|법인)(?:인)?\s*$")
 _JOINT = re.compile(r"\s*(?:와|과|및|·|,|and|&)\s*", re.IGNORECASE)
 _JOINT_END = re.compile(r"(?:와|과|및|·|,|\band|&)\s*$", re.IGNORECASE)
 _NON_OWNER_END = re.compile(r"(?:에도|에서|에게|으로|보다|통해|따라|위해|때문에|하여|하며|하고)$")
@@ -211,8 +226,47 @@ def _non_owner(value: str, particle: str | None = None) -> bool:
     )
 
 
-def _owners(prefix: str) -> frozenset[str]:
+def _owner_view(prefix: str, *, listing: bool) -> str:
+    """Preserve issuer syntax while excluding proven money/object/verb spans.
+
+    Mask complete source spans instead of adding their fragments to an actor
+    blacklist. Thus "12억 원의" cannot become the issuer "원의", while an
+    actual company such as "원테크의" keeps its grammatical role.
+    """
+    spans = []
+    for pattern in (_CURRENCY_AMOUNT, _PREFIX_CURRENCY_AMOUNT):
+        for amount in pattern.finditer(prefix):
+            start = amount.start()
+            # The shared quantity lexer permits Korean adjacency. An amount
+            # substring inside an issuer ("노을3원테크") is not a money role.
+            # Closed approximation/total prefixes still permit "약12억원".
+            if start and re.match(r"[가-힣A-Za-z0-9_]", prefix[start - 1]):
+                approximation = _MONEY_PREFIX.search(prefix[:start])
+                if approximation is None:
+                    continue
+                start = approximation.start()
+            end = amount.end()
+            particle = _MONEY_PARTICLE.match(prefix, end)
+            if particle is not None:
+                spans.append((start, particle.end()))
+    for instrument in _LISTED_INSTRUMENT.finditer(prefix):
+        # A bare security noun is only an object directly before listing, not
+        # before an unrelated event (a company named ADR can raise funds).
+        if (
+            listing or prefix[instrument.end() :].lstrip().startswith("상장")
+        ) and not _OWNER_DESCRIPTION.search(prefix[: instrument.start()]):
+            spans.append(instrument.span())
+    for event in _EVENT.finditer(prefix):
+        if connective := _EVENT_CONNECTIVE.match(prefix, event.end()):
+            spans.append((event.start(), connective.end()))
+    for start, end in sorted(spans, reverse=True):
+        prefix = prefix[:start] + " " * (end - start) + prefix[end:]
+    return prefix
+
+
+def _owners(prefix: str, *, listing: bool = False) -> frozenset[str]:
     """Use the nearest owner, not every company mentioned in the sentence."""
+    prefix = _owner_view(prefix, listing=listing)
     # Only a completed, separate assessment/report ends inherited ownership.
     # A source modifier does not end a company's continuing plan/subject:
     # "가온의 계획은, 기사에서 언급된 IPO를 추진하는 것이다" still means 가온.
@@ -371,7 +425,11 @@ def _events(value: str) -> Iterator[_Event]:
             negative = bool(_NEGATIVE_EVENT.search(tail)) or bool(
                 re.search(r"(?:취소|철회|무산|중단|보류|불발|포기)(?:된|한)\s*$", clause[:start])
             )
-            yield _Event(kind, _owners(clause[:start]), negative)
+            yield _Event(
+                kind,
+                _owners(clause[:start], listing=clause[start:event_end].endswith("상장")),
+                negative,
+            )
 
 
 def corporate_event_mismatches(value: str, sources: Sequence[str]) -> list[str]:
