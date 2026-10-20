@@ -17,23 +17,26 @@ from app.llm import report_insight_service as service
 
 AUDIENCE = "MARKET_INVESTOR"
 SOURCE_RULE = "report_trading_observation_source"
+TARGET_SOURCE_RULE = "report_target_price_observation_source"
 PLAIN_SOURCE = "생산라인 전체의 가동 중단이 현재 계속된다."
 TRADE_SOURCE = PLAIN_SOURCE + " 기관 순매수 기록이 관찰됐다."
 GOOD_REASON = "생산 제약은 시장 전망 업무를 검토할 근거다."
 OBSERVATION = "기관 순매수 기록은 수급을 검토할 관찰 정보다."
+TARGET_SOURCE = PLAIN_SOURCE + " 증권사가 목표주가를 상향 조정했다."
+TARGET_OBSERVATION = "목표주가 상향 보도는 전망을 검토할 관찰 정보다."
 
 
-def source_case():
-    # Synthetic source: the trade exists in this finding but is not selected.
+def source_case(observation_source=TRADE_SOURCE):
+    # Synthetic source: the observation exists in this finding but is not selected.
     source = request(ids=(101, 102), audiences=(AUDIENCE,), text=PLAIN_SOURCE)
     finding = source.findings[0]
     finding.claims.append(
         finding.claims[0].model_copy(
-            update={"id": "101:1", "text": TRADE_SOURCE, "evidence_sentence_ids": [1]}
+            update={"id": "101:1", "text": observation_source, "evidence_sentence_ids": [1]}
         )
     )
     finding.sentences.append(
-        finding.sentences[0].model_copy(update={"index": 1, "text": TRADE_SOURCE})
+        finding.sentences[0].model_copy(update={"index": 1, "text": observation_source})
     )
     value = payload(source)
     for entry in value["assessments"][AUDIENCE].values():
@@ -41,10 +44,25 @@ def source_case():
     return source, value
 
 
-def test_only_selected_trade_evidence_can_authorize_the_same_finding_observation():
-    source, value = source_case()
+@pytest.mark.parametrize(
+    "observation,observation_source,source_rule,source_message",
+    [
+        (OBSERVATION, TRADE_SOURCE, SOURCE_RULE, service._INVESTMENT_OBSERVATION_SOURCE_MESSAGE),
+        (
+            TARGET_OBSERVATION,
+            TARGET_SOURCE,
+            TARGET_SOURCE_RULE,
+            service._INVESTMENT_TARGET_SOURCE_MESSAGE,
+        ),
+    ],
+    ids=["trading", "target-price-change"],
+)
+def test_only_selected_evidence_can_authorize_the_same_finding_observation(
+    observation, observation_source, source_rule, source_message
+):
+    source, value = source_case(observation_source)
     entry = value["assessments"][AUDIENCE]["finding101"]
-    entry["reason"] = OBSERVATION
+    entry["reason"] = observation
     original = source.model_dump_json(), deepcopy(value)
     with pytest.raises(service.ReportAssessmentValidationError) as caught:
         full_validate(response(value, source), source)
@@ -52,24 +70,24 @@ def test_only_selected_trade_evidence_can_authorize_the_same_finding_observation
     assert issue.field == "assessments[101].reason"
     assert issue.claim_ids == ("101:0",)
     assert issue.error_kind == "report_expression_policy"
-    assert issue.rule == SOURCE_RULE
-    assert service._INVESTMENT_OBSERVATION_SOURCE_MESSAGE in str(caught.value)
+    assert issue.rule == source_rule
+    assert source_message in str(caught.value)
     assert original == (source.model_dump_json(), value)
 
     selected = deepcopy(value)
     for field in ("relationBasis", "impactBasis", "urgencyBasis"):
         selected["assessments"][AUDIENCE]["finding101"][field] = {
             "claimId": "101:1",
-            "quote": TRADE_SOURCE,
+            "quote": observation_source,
         }
     accepted = full_validate(response(selected, source), source)
-    assert accepted.evidence[AUDIENCE][101].reason == OBSERVATION
+    assert accepted.evidence[AUDIENCE][101].reason == observation
     assert accepted.mapped.insights[0].assessments[0].basis_claim_ids == ["101:1"]
     assert original == (source.model_dump_json(), value)
 
 
-def run_pipeline(failed_stage):
-    source, value = source_case()
+def run_pipeline(failed_stage, observation=OBSERVATION, observation_source=TRADE_SOURCE):
+    source, value = source_case(observation_source)
     original = source.model_dump_json(), deepcopy(value)
 
     def hook(stage, occurrence, data, proposed):
@@ -82,13 +100,13 @@ def run_pipeline(failed_stage):
                 if key in wanted
             }
             if stage == failed_stage and occurrence == 1:
-                proposed["assessments"][AUDIENCE]["finding101"]["reason"] = OBSERVATION
+                proposed["assessments"][AUDIENCE]["finding101"]["reason"] = observation
         else:
             proposed["insights"][0].update(
                 headline="생산 제약의 확인 사항을 검토한다.",
                 overview=[
                     {
-                        "text": OBSERVATION
+                        "text": observation
                         if stage == failed_stage and occurrence == 1
                         else GOOD_REASON,
                         "basisClaimIds": ["101:0"],
@@ -114,15 +132,30 @@ def run_pipeline(failed_stage):
 
 
 @pytest.mark.parametrize("stage", ["MAP-001", "REVIEW-001", "REDUCE-001"])
-def test_source_specific_repair_guidance_reaches_actual_provider_and_preserves_scope(stage):
-    source, provider, result, failures = run_pipeline(stage)
+@pytest.mark.parametrize(
+    "observation,observation_source,source_rule,source_message",
+    [
+        (OBSERVATION, TRADE_SOURCE, SOURCE_RULE, service._INVESTMENT_OBSERVATION_SOURCE_MESSAGE),
+        (
+            TARGET_OBSERVATION,
+            TARGET_SOURCE,
+            TARGET_SOURCE_RULE,
+            service._INVESTMENT_TARGET_SOURCE_MESSAGE,
+        ),
+    ],
+    ids=["trading", "target-price-change"],
+)
+def test_source_specific_repair_guidance_reaches_actual_provider_and_preserves_scope(
+    stage, observation, observation_source, source_rule, source_message
+):
+    source, provider, result, failures = run_pipeline(stage, observation, observation_source)
     expected = ["MAP-001", "REVIEW-001", "EXPLAIN-001", "REDUCE-001"]
     expected.insert(expected.index(stage), stage)
     assert stages(provider) == expected
     assert len(failures) == 1
     error = failures[0][3]
     (issue,) = error.validation_issues
-    assert issue.rule == SOURCE_RULE
+    assert issue.rule == source_rule
     assert issue.claim_ids == ("101:0",)
     assert issue.error_kind == (
         "report_synthesis_invalid" if stage == "REDUCE-001" else "report_expression_policy"
@@ -132,19 +165,20 @@ def test_source_specific_repair_guidance_reaches_actual_provider_and_preserves_s
     if stage == "REDUCE-001":
         assert issue.reason in retry["prompt"]
     else:
-        assert service._INVESTMENT_OBSERVATION_SOURCE_MESSAGE in retry["prompt"]
+        assert source_message in retry["prompt"]
         assert instructions.REPORT_ANALYSIS_ONLY_RULE in retry["prompt"]
     for call in provider.calls:
         assert instructions.REPORT_ANALYSIS_ONLY_RULE in (
             call["prompt"] + call["system_instruction"]
         )
         assert len(call["system_instruction"]) <= 3500
+        assert instructions.REPORT_INVESTMENT_PROSE_RULE in call["system_instruction"]
     if stage != "REDUCE-001":
         (finding,) = framed(retry["prompt"])["findings"]
         assert finding["id"] == 101
         assert [claim["id"] for claim in finding["claims"]] == ["101:0"]
         assert finding["sentences"] == [{"index": 0, "text": PLAIN_SOURCE}]
-        assert TRADE_SOURCE not in json.dumps(finding, ensure_ascii=False)
+        assert observation_source not in json.dumps(finding, ensure_ascii=False)
         assert finding["proseRepair"]["editableFields"] == ["reason"]
         before = provider.wire_payloads[index]["assessments"][AUDIENCE]
         after = provider.wire_payloads[index + 1]["assessments"][AUDIENCE]
@@ -156,7 +190,7 @@ def test_source_specific_repair_guidance_reaches_actual_provider_and_preserves_s
         (job,) = repair_jobs(retry["prompt"])
         assert (job["group"], job["index"]) == ("overview", 0)
         assert any(
-            rule["rule"] == SOURCE_RULE
+            rule["rule"] == source_rule
             for diagnostic in job["diagnostics"]
             for rule in diagnostic["rules"]
         )
@@ -189,6 +223,35 @@ def test_real_advice_and_meta_disclaimers_keep_existing_policy_rejection(prose):
     assert all(issue.rule != SOURCE_RULE for issue in caught.value.validation_issues)
 
 
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "목표주가를 10만원으로 제시한다.",
+        "매수 의견 유지 보도는 전망 판단과 연결된다.",
+        TARGET_OBSERVATION + " 매수해야 한다.",
+    ],
+)
+def test_target_amount_rating_and_recommendation_keep_wording_repair_instead_of_source_gap(prose):
+    source = request(
+        audiences=(AUDIENCE,),
+        text=PLAIN_SOURCE + " 증권사는 목표주가를 10만원으로 제시하고 매수 의견을 유지했다.",
+    )
+    value = payload(source)
+    value["assessments"][AUDIENCE]["finding101"]["reason"] = prose
+    with pytest.raises(service.ReportAssessmentValidationError) as caught:
+        full_validate(response(value, source), source)
+    policy = [
+        issue
+        for issue in caught.value.validation_issues
+        if issue.error_kind == "report_expression_policy"
+    ]
+    assert policy and all(i.rule == "report_expression_policy" for i in policy)
+    actions = "\n".join(caught.value.repair_action_diagnostics)
+    assert service._INVESTMENT_ADVICE_MESSAGE in actions
+    assert service._INVESTMENT_TARGET_SOURCE_MESSAGE not in actions
+    assert instructions.REPORT_INVESTMENT_PROSE_RULE in actions
+
+
 @pytest.fixture(scope="module")
 def native_repair_context():
     source, provider, _, failures = run_pipeline("MAP-001")
@@ -203,10 +266,16 @@ def native_repair_context():
     "prose,rule",
     [
         (OBSERVATION, SOURCE_RULE),
+        (TARGET_OBSERVATION, TARGET_SOURCE_RULE),
         ("매수·매도 권고나 목표가 제시는 하지 않는다.", "report_expression_policy"),
         ("지금 매수해야 한다.", "report_expression_policy"),
     ],
-    ids=["unsupported-observation-retained", "disclaimer-repair", "recommendation-repair"],
+    ids=[
+        "unsupported-observation-retained",
+        "unsupported-target-observation-retained",
+        "disclaimer-repair",
+        "recommendation-repair",
+    ],
 )
 def test_partial_native_repair_still_rejects_invalid_replacements(
     native_repair_context, prose, rule
@@ -252,3 +321,12 @@ def test_reduce_full_validator_keeps_policy_and_disclaimer_rejection(
         issue.error_kind == "report_synthesis_invalid" and issue.rule != SOURCE_RULE
         for issue in caught.value.validation_issues
     )
+
+
+def test_reduce_full_validator_retains_target_source_gap_until_rewritten(reduce_validation_context):
+    base, corrected, validate = reduce_validation_context
+    value = deepcopy(corrected)
+    value["insights"][0]["overview"][0]["text"] = TARGET_OBSERVATION
+    with pytest.raises(OutputValidationError) as caught:
+        validate(replace(base, text=json.dumps(value, ensure_ascii=False)))
+    assert any(issue.rule == TARGET_SOURCE_RULE for issue in caught.value.validation_issues)

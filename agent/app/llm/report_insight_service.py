@@ -83,6 +83,7 @@ from app.llm.report_insight_instructions import (
     ASSESSMENT_PROCEDURE_RULE,
     ASSESSMENT_REASON_RULE,
     REPORT_ANALYSIS_ONLY_RULE,
+    REPORT_INVESTMENT_PROSE_RULE,
     REPORT_YEAR_UNIT_RULE,
     report_stage_instruction,
 )
@@ -146,7 +147,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v61"
+PROMPT_VERSION = "report-insight.ko.v62"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -332,14 +333,18 @@ LEGACY_SYSTEM_INSTRUCTION = "\n\n".join(
     for version in (LEGACY_PROMPT_VERSION, LEGACY_RUBRIC_VERSION)
 )
 _INVESTMENT_ADVICE_MESSAGE = (
-    "MARKET_INVESTOR는 투자 자문 표현을 포함할 수 없습니다. "
-    "선택 원문의 거래 동향·기록과 목표주가 조정 보도는 서술하되, "
-    "독자의 매매를 권고하거나 목표가격을 제시하지 마세요."
+    "MARKET_INVESTOR는 투자 자문 표현을 포함할 수 없습니다. " + REPORT_INVESTMENT_PROSE_RULE
 )
 _INVESTMENT_OBSERVATION_SOURCE_MESSAGE = (
     "MARKET_INVESTOR의 투자 자문 표현 검증: 현재 필드에 선택한 claim의 연결 원문이 "
     "해당 거래 관찰의 방향·주체·맥락을 지원하지 않습니다. 최종 선택하지 않은 claim이나 제목의 거래 "
     "내용을 가져오지 말고, 최종 선택 근거가 지원하는 사건과 판단 근거로 다시 작성하세요. "
+    "Schema const로 고정된 decision·basis는 유지하세요."
+)
+_INVESTMENT_TARGET_SOURCE_MESSAGE = (
+    "MARKET_INVESTOR의 목표주가 조정 관찰 검증: 현재 필드에 선택한 claim의 연결 원문이 "
+    "해당 목표주가 조정 사실·방향을 지원하지 않습니다. 다른 claim이나 제목의 조정 보도를 "
+    "가져오지 말고, 최종 선택 근거가 지원하는 사건과 판단 근거로 다시 작성하세요. "
     "Schema const로 고정된 decision·basis는 유지하세요."
 )
 
@@ -350,17 +355,18 @@ def _investment_policy_message(value: str, source: str) -> str | None:
         return None
     if violation == "trading_observation_source":
         return _INVESTMENT_OBSERVATION_SOURCE_MESSAGE
+    if violation == "target_price_observation_source":
+        return _INVESTMENT_TARGET_SOURCE_MESSAGE
     return _INVESTMENT_ADVICE_MESSAGE
 
 
 def _investment_source_rule(message: str) -> str | None:
     # Only a closed, server-owned cause becomes a diagnostic rule. Rejected
     # prose and exception text never supply rule names or repair locations.
-    return (
-        "report_trading_observation_source"
-        if message == _INVESTMENT_OBSERVATION_SOURCE_MESSAGE
-        else None
-    )
+    return {
+        _INVESTMENT_OBSERVATION_SOURCE_MESSAGE: "report_trading_observation_source",
+        _INVESTMENT_TARGET_SOURCE_MESSAGE: "report_target_price_observation_source",
+    }.get(message)
 
 
 _PREPARATION_RECOMMENDATION = re.compile(r"(?:필요|조건|확인|검토|부족|준비.*(?:일정|시점))")
@@ -2885,9 +2891,11 @@ def _report_insight_repair_call(prompt, schema, raw, error, validate):
 def _repair_action_message(
     message: str, kinds: tuple[str, ...], *, fact_kinds: tuple[str, ...] = ()
 ) -> str:
-    if message in {_INVESTMENT_ADVICE_MESSAGE, _INVESTMENT_OBSERVATION_SOURCE_MESSAGE} and set(
-        kinds
-    ).intersection({"report_expression_policy", "report_synthesis_invalid"}):
+    if message in {
+        _INVESTMENT_ADVICE_MESSAGE,
+        _INVESTMENT_OBSERVATION_SOURCE_MESSAGE,
+        _INVESTMENT_TARGET_SOURCE_MESSAGE,
+    } and set(kinds).intersection({"report_expression_policy", "report_synthesis_invalid"}):
         return message + " " + REPORT_ANALYSIS_ONLY_RULE
     if _PROSE_FACT_KINDS.intersection(kinds):
         generic = (

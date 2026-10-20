@@ -63,6 +63,11 @@ REPORT_WORK_SCOPE_RULE = (
     "같은 동작·기업이라도 원문 대상이 다르면 해당 업무의 사실로 대체하지 않는다. "
     "수반될 수 있는 업무와 실제 확인된 업무를 구분하고, 미확인 연결 전제는 condition에 쓴다."
 )
+REPORT_INVESTMENT_PROSE_RULE = (
+    "거래 동향·기록과 목표주가 조정은 선택 원문이 지원할 때만 서술한다. "
+    "원문 인용·facts와 달리 해석에 매수·매도 등급·목표가격 수치를 옮기지 않는다. "
+    "매매 권고·목표가격 제시는 금지한다."
+)
 
 _ROLES = {
     "CHIP_MAKER": "칩 제조: 공정 인증·설계 IP/공정 적용·계측/공정 제어 검증 "
@@ -75,8 +80,7 @@ _ROLES = {
     "MAINTENANCE_SERVICE.",
     "MARKET_INVESTOR": "투자 판단: 전망 GUIDANCE, 투자 집행 CAPEX_EXECUTION, 매출 인식 "
     "REVENUE_RECOGNITION, 이익률 PROFITABILITY, 수급 제약 SUPPLY_DEMAND_CONSTRAINT. "
-    "공시 전망과 실제 실적을 구분한다. 선택 원문의 거래 동향·기록과 목표주가 조정 "
-    "보도는 서술할 수 있으나 독자의 매매를 권고하거나 목표가격을 제시하지 않는다.",
+    "전망과 실적을 구분한다. " + REPORT_INVESTMENT_PROSE_RULE,
     "IT_INFRA": "IT 운영: 시스템·구성품의 가격/공급 조건·전망을 포함한 조달 "
     "SYSTEM_PROCUREMENT, 호환성 COMPATIBILITY, 전력/냉각 POWER_COOLING, "
     "네트워크 NETWORK, 도입/운영 DEPLOYMENT_OPERATIONS.",

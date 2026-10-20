@@ -38,9 +38,11 @@ _FORECAST_DENIAL = re.compile(
 )
 # A different event or an unresolved action clause is not a forecast-only case.
 # Do not infer whether these mixed contexts establish a particular impact here.
+# A signing action remains mixed even when its object is an acronym; neither
+# the action word nor its presence proves execution, a project or a schedule.
 _OTHER_EVENT = re.compile(
     r"프로젝트|발주|납품|착공|준공|설치|배포|도입|개발|공사|"
-    r"예산|인력|준비|구매\s*계획|조달\s*계획|계약|협약|검증|승인"
+    r"예산|인력|준비|구매\s*계획|조달\s*계획|계약|협약|체결|서명|검증|승인"
 )
 _FIXED_PRICE = re.compile(
     r"(?:가격|단가|요금|견적)[^.!?。;；\n]{0,45}"

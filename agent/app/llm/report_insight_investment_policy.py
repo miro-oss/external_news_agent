@@ -42,6 +42,10 @@ _TARGET_MONEY_VALUE = re.compile(
     re.IGNORECASE,
 )
 _PRICE_BEFORE_TARGET = re.compile(_PRICE_AMOUNT.pattern + r"(?:으로|로|인)?\s*$")
+_SUFFIX_PRICE_AMOUNT = re.compile(_CURRENCY_AMOUNT.pattern + _PRICE_UNIT_END, re.IGNORECASE)
+_SUFFIX_PRICE_BEFORE_TARGET = re.compile(
+    _CURRENCY_AMOUNT.pattern + r"(?:으로|로|인)?\s*$", re.IGNORECASE
+)
 _PREFIX_PRICE_BEFORE_TARGET = re.compile(
     _PREFIX_CURRENCY_AMOUNT.pattern + r"(?:으로|로|인)?\s*$", re.IGNORECASE
 )
@@ -50,18 +54,26 @@ _AMOUNT_PROPOSAL = re.compile(
 )
 _TARGET_NUMERIC_VALUE = re.compile(_TARGET_PARTICLE + r"(?::\s*)?(?:주당\s*)?(?:약\s*)?[0-9]")
 _CHANGE_VERB = (
-    r"(?:(?:상향|하향|인상|인하|조정|변경)(?:\s*조정)?\s*(?:했|하였|됐|되었)|"
-    r"높였|낮췄|올렸|내렸)"
-    r"(?:다|다고|다는|으며|고|지만|는데)"
+    r"(?:(?:(?:상향|하향|인상|인하|조정|변경)(?:\s*조정)?\s*(?:했|하였|됐|되었)|"
+    r"높였|낮췄|올렸|내렸|높이었|낮추었|올리었|내리었)"
+    r"(?:다|다고|다는|으며|고|지만|는데)|"
+    r"(?:높인|낮춘|올린|내린)(?![가-힣]))"
 )
-_TARGET_COMPLETED_CHANGE = re.compile(
+_TARGET_CHANGE_PREFIX = (
     _TARGET_PARTICLE
     + r"(?:(?:잇달아|일제히|각각|모두|추가로|대폭|소폭)\s*)*"
-    + r"(?:기존\s*)?(?:"
+    + r"(?:기존\s*)?"
+)
+_TARGET_COMPLETED_CHANGE = re.compile(
+    _TARGET_CHANGE_PREFIX
+    + r"(?:"
     + _PRICE_AMOUNT.pattern
     + r"(?:에서|으로|로)?\s*)*"
     + _CHANGE_VERB
 )
+_TARGET_SOURCE_PREFIX = re.compile(_TARGET_CHANGE_PREFIX)
+_TARGET_SOURCE_AMOUNT_END = re.compile(r"(?:에서|으로|로)?\s*")
+_TARGET_SOURCE_VERB = re.compile(_CHANGE_VERB)
 _TARGET_CHANGE_REPORT = re.compile(
     _TARGET_PARTICLE + r"(?:(?:(?:상향|하향|인상|인하)\s*)?(?:조정|변경)|"
     r"상향|하향|인상|인하|산정\s*근거\s*변경)"
@@ -78,15 +90,34 @@ _TARGET_DIRECT_PROPOSAL = re.compile(
     r"(?:상향|하향|인상|인하|조정|변경)(?:\s*조정)?\s*(?:한다|합니다|하겠다)"
 )
 _TARGET_CHANGE_DENIAL = re.compile(r"부인|사실(?:이|은)\s*아니|확인되지|하지\s*않")
-_TARGET_UNASSERTED_SUFFIX = re.compile(
-    r"[\"'”’」』\s]*(?:(?:다고|고|다는|는)?\s*(?:가정|전제)|"
-    r"(?:다고|고|다는|는)?\s*"
-    r"(?:(?:보도|기사|주장|사실|것|뜻|의미)(?:은|는|이|가|을|를)?\s*)?"
-    r"(?:은|는|이|가|을|를)?\s*(?:허위|거짓|사실무근|아니|부인|부정|"
-    r"볼\s*수\s*없|(?:확인|단정|확정|판단|인정)(?:할\s*수\s*없|하기\s*어렵)|"
-    r"(?:확인|보도|발표|공개)(?:되|하)지\s*않))"
+# Uncertainty must be predicated of this change. An analytical object such as
+# "전망을 검토한다" or "전망에 영향을 준다" does not make it hypothetical.
+_TARGET_EPISTEMIC_PREDICATE = (
+    r"(?:(?:가정|전제|예상|전망|추정|추측|짐작|모양)(?:"
+    r"(?=\s*(?:$|[.,;!?。]))|"
+    r"(?:이(?:었)?(?:다|다고|다는|고|며|면|지만)|이라(?:고|는|면)|입니다|인|일|다|"
+    r"(?:하|되)(?:는|며|고|면|지|어|여|다)|(?:한|된)(?:다|다고|다는|다면)?|"
+    r"(?:했|됐|하였|되었)(?:다|다고|다는|으며|고|지만|는데)|할|될|함|됨|해)(?![가-힣]))|"
+    r"(?:가정|전제)(?:에\s*(?:따라|따른|따르면|근거)|하에)|"
+    r"(?:예상|전망|추정|추측|짐작)(?:에\s*불과|일\s*뿐))"
 )
-_TARGET_DIRECTION = re.compile(r"(?P<up>상향|인상|높였|올렸)|(?P<down>하향|인하|낮췄|내렸)")
+_TARGET_UNASSERTED_SUFFIX = re.compile(
+    r"[\"'”’」』\s]*(?:(?:다고|고|다는|라는|는)\s*)?"
+    r"(?:(?:보도|기사|주장|사실|내용|것|뜻|의미|적|게)"
+    r"(?:이라는|이라고|처럼|으로|인|은|는|이|가|을|를|로)?\s*){0,2}"
+    r"(?:은|는|이|가|을|를)?\s*(?:"
+    + _TARGET_EPISTEMIC_PREDICATE
+    + r"|"
+    r"듯(?=$|[^가-힣]|하|한|해|했|싶|이)|일\s*수(?:도)?\s*(?:있|없)|"
+    r"보이|보인|같(?:다|다고|다는|아|은|으며|습니다)|"
+    r"허위|거짓|사실무근|아니|없|부인|부정|"
+    r"볼\s*수\s*없|(?:확인|단정|확정|판단|인정)(?:할\s*수\s*없|하기\s*어렵)|"
+    r"(?:확인|보도|발표|공개)(?:되|하)지\s*않)"
+)
+_TARGET_DIRECTION = re.compile(
+    r"(?P<up>상향|인상|높였|높이었|높인|올렸|올리었|올린)|"
+    r"(?P<down>하향|인하|낮췄|낮추었|낮춘|내렸|내리었|내린)"
+)
 _TARGET_CLAUSE_BREAK = re.compile(
     r"(?<![0-9])\.|\.(?![0-9])|[;!?。\n]|목표\s*(?:주가|가격)|주가\s*목표|목표가"
 )
@@ -309,6 +340,20 @@ def _normalized(value: str) -> str:
     return unicodedata.normalize("NFKC", value)
 
 
+def _price_before_target(value: str) -> bool:
+    # A currency conversion cannot disguise a price preceding the target name.
+    # This view is used only to veto prices, never to excuse generated amounts.
+    value = _without_currency_conversion_notes(value)
+    return any(
+        pattern.search(value)
+        for pattern in (
+            _PRICE_BEFORE_TARGET,
+            _SUFFIX_PRICE_BEFORE_TARGET,
+            _PREFIX_PRICE_BEFORE_TARGET,
+        )
+    )
+
+
 def _price_targets(value: str) -> tuple[re.Match[str], ...]:
     # Bare "목표가" can also be "goal" plus the subject particle, as in
     # "양산 목표가 유지된다". Preserve that non-price reading.
@@ -318,8 +363,7 @@ def _price_targets(value: str) -> tuple[re.Match[str], ...]:
         if match.group() != "목표가"
         or _BARE_TARGET_PRICE.match(value, match.start())
         or _TARGET_MONEY_VALUE.match(value, match.end())
-        or _PRICE_BEFORE_TARGET.search(value[: match.start()])
-        or _PREFIX_PRICE_BEFORE_TARGET.search(value[: match.start()])
+        or _price_before_target(value[: match.start()])
     )
 
 
@@ -352,7 +396,7 @@ def _target_direction(value: str) -> str | None:
 
 
 def _without_currency_conversion_notes(value: str) -> str:
-    """Ignore only complete parenthesized money notes while reading source state.
+    """Ignore only complete parenthesized money notes in price check views.
 
     A conversion between an amount and its case particle must not hide a
     completed price change. Arbitrary parenthetical prose is kept, including
@@ -390,7 +434,7 @@ def _has_reported_target_change(source: str, direction: str | None = None) -> bo
         clause = _without_currency_conversion_notes(_target_clause(source, match.end()))
         prefix = _OBSERVATION_CLAUSE_BREAK.split(source[: match.start()])[-1] + match.group()
         context = prefix + clause
-        change = _TARGET_COMPLETED_CHANGE.match(context, len(prefix))
+        change = _source_target_change(context, len(prefix))
         if (
             change
             and not _TARGET_CHANGE_DENIAL.search(clause)
@@ -401,14 +445,36 @@ def _has_reported_target_change(source: str, direction: str | None = None) -> bo
     return False
 
 
+def _source_target_change(value: str, start: int) -> re.Match[str] | None:
+    """Read source amounts with the same currency grammar used by fact checks.
+
+    Only the source-state reader consumes these amounts. Output observations
+    retain the independent target-price veto and cannot copy an ISO amount.
+    """
+    prefix = _TARGET_SOURCE_PREFIX.match(value, start)
+    position = prefix.end()
+    while True:
+        amounts = [
+            match
+            for pattern in (_PRICE_AMOUNT, _CURRENCY_AMOUNT, _PREFIX_CURRENCY_AMOUNT)
+            if (match := pattern.match(value, position)) is not None
+        ]
+        if not amounts:
+            break
+        position = _TARGET_SOURCE_AMOUNT_END.match(
+            value, max(match.end() for match in amounts)
+        ).end()
+    return _TARGET_SOURCE_VERB.match(value, position)
+
+
 def _is_target_change_observation(value: str, match: re.Match[str]) -> bool:
     clause = _target_clause(value, match.end())
     if (
         _OWN_TARGET.search(value[: match.start()])
-        or _PRICE_BEFORE_TARGET.search(value[: match.start()])
-        or _PREFIX_PRICE_BEFORE_TARGET.search(value[: match.start()])
+        or _price_before_target(value[: match.start()])
         or _TARGET_NUMERIC_VALUE.match(clause)
         or _PRICE_AMOUNT.search(clause)
+        or _SUFFIX_PRICE_AMOUNT.search(clause)
         or _PREFIX_CURRENCY_AMOUNT.search(clause)
         or _TARGET_DIRECT_PROPOSAL.search(clause)
     ):
@@ -434,9 +500,9 @@ def _has_trading_recommendation(value: str) -> bool:
 def investment_policy_violation(value: str, source: str = "") -> str | None:
     """Return a closed diagnostic reason without changing policy acceptance.
 
-    ``trading_observation_source`` means an observational trading form lacks
-    its selected-source support. Every other rejection is ``investment_wording``;
-    that reason takes priority if a field contains both types of violation.
+    ``trading_observation_source`` and ``target_price_observation_source`` mean
+    valid observational forms lack their selected-source support. Every other
+    rejection is ``investment_wording``; it takes priority in mixed fields.
 
     ``source`` must contain only original sentences permitted for this field's
     selected claims, not claim summaries or the rest of the report. Without
@@ -472,15 +538,15 @@ def investment_policy_violation(value: str, source: str = "") -> str | None:
     if targets and (
         _TARGET_ACTION_ADVICE.search(value)
         or _AMOUNT_PROPOSAL.search(value)
-        or any(
-            not _is_target_change_observation(value, match)
-            or not _has_reported_target_change(
-                source, _target_direction(_target_clause(value, match.end()))
-            )
-            for match in targets
-        )
+        or any(not _is_target_change_observation(value, match) for match in targets)
     ):
         return "investment_wording"
+    target_source_missing = any(
+        not _has_reported_target_change(
+            source, _target_direction(_target_clause(value, match.end()))
+        )
+        for match in targets
+    )
     source_missing = False
     for match in trades:
         trade = match.group()
@@ -532,6 +598,8 @@ def investment_policy_violation(value: str, source: str = "") -> str | None:
                 source_missing = True
             continue
         return "investment_wording"
+    if target_source_missing:
+        return "target_price_observation_source"
     return "trading_observation_source" if source_missing else None
 
 

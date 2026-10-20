@@ -259,6 +259,10 @@ _RULE_REASONS = {
         "현재 필드에 선택한 claim의 연결 원문이 해당 거래 관찰의 방향·주체·맥락을 "
         "지원하지 않습니다. 최종 선택 근거로 설명을 다시 작성하세요."
     ),
+    "report_target_price_observation_source": (
+        "현재 필드에 선택한 claim의 연결 원문이 해당 목표주가 조정 사실·방향을 "
+        "지원하지 않습니다. 최종 선택 근거가 지원하는 판단으로 설명을 다시 작성하세요."
+    ),
     "report_assessment_draft_invalid": "평가의 판단·업무·근거·조건 사이의 계약이 맞지 않습니다.",
     "report_assessment_finding_id_mismatch": "평가의 findingId가 요청한 항목의 ID와 다릅니다.",
     "report_assessment_claimless_contract": (
