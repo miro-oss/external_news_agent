@@ -146,8 +146,11 @@ def test_required_review_and_its_repair_share_unchanged_reduce_boundary(
     )
     if succeeds:
         result = generate(provider, source, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=180)
-        assert_usage(result.meta.model_dump(by_alias=True), 6)
-        assert stages(provider)[-2:] == ["EXPLAIN-001", "REDUCE-001"]
+        # The repaired REVIEW prose is valid. Its optional EXPLAIN is skipped
+        # at this late boundary, leaving the original REDUCE reserve intact.
+        assert_usage(result.meta.model_dump(by_alias=True), 5)
+        assert stages(provider)[-2:] == ["REVIEW-001", "REDUCE-001"]
+        assert provider.stages["EXPLAIN-001"] == 0
     else:
         with pytest.raises(AgentError) as caught:
             generate(provider, source, AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=180)

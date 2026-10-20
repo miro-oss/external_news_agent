@@ -216,6 +216,17 @@ class ReportInsightPipelineProvider:
             + min(REPORT_INSIGHT_REVIEW_MIN_ADMISSION_SECONDS, self._review_budget_seconds)
         )
 
+    def can_start_optional_explanation(self) -> bool:
+        """Admit prose polish only with an explanation window and synthesis headroom.
+
+        The caller must first revalidate the final prose it can retain. Required
+        prose repairs bypass this admission rule, and issued calls still share
+        the original deadline and propagate provider/budget/deadline failures.
+        """
+        return self._admission_remaining_seconds() >= (
+            self._reduce_reserve_seconds + self.explanation_reserve_seconds
+        )
+
     @contextmanager
     def optional_review_deadline(self, reserve_seconds: float = 0.0):
         """Share one bounded window across a REVIEW draft and its repair.

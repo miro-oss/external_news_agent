@@ -42,10 +42,10 @@ from app.llm.report_insight_assessment import (
     draft_schema,
     draft_to_wire,
     review_prompt,
-    source_span_choices,
 )
 from app.llm.report_insight_fact_index import prompt_fact_index
 from app.llm.report_insight_fact_rendering import fact_text_slots_payload
+from app.llm.report_insight_prose_repair import focus_prose_repair_finding
 
 GOOD_SOURCE_REASON = "삼성전자의 2026년 검증 계획은 공정 검증과 연결된다."
 GOOD_CONDITION = "삼성전자의 공정 검증 일정에 필요한 경우"
@@ -124,6 +124,120 @@ def repair_for(source, value, prompt=draft_prompt):
     return repair, caught.value, raw, calls
 
 
+@pytest.mark.parametrize("prompt", [draft_prompt, review_prompt], ids=["MAP", "REVIEW"])
+@pytest.mark.parametrize(
+    "summary, rejected_reason, error_kind",
+    [
+        (
+            "애플은 생산라인 가동 중단과 검증 계획을 발표했다.",
+            "TSMC의 공정 검증 영향을 확인한다.",
+            "report_evidence_insufficient",
+        ),
+        (
+            "삼성전자는 438억원 규모의 공정 검증 계획을 발표했다.",
+            "삼성전자의 762억원 규모 검증 계획은 공정 검증과 연결된다.",
+            "report_evidence_insufficient",
+        ),
+        (
+            "원문 문장(claim 101:0)은 삼성전자의 공정 검증 계획을 설명한다.",
+            "원문 문장(claim 800:0)의 검증 계획은 공정 검증과 연결된다.",
+            "report_expression_policy",
+        ),
+    ],
+    ids=["title-alias", "summary-number", "internal-reference"],
+)
+def test_focused_retry_reads_original_sentences_without_summary_copying(
+    prompt, summary, rejected_reason, error_kind
+):
+    source, value = focus_case()
+    finding = source.findings[0]
+    # Claims are generated summaries. Their origin metadata remains useful,
+    # but wording absent from the linked source must not anchor a prose retry.
+    finding.claims[0].text = summary
+    finding.article_title = summary
+    value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = rejected_reason
+    original = source.model_dump_json(), deepcopy(value)
+
+    repair, error, raw, calls = repair_for(source, value, prompt)
+    assert error_kind in error.error_kinds
+    focused = framed(repair.prompt)["findings"][0]
+    before = framed(prompt(source))["findings"][0]
+    assert focused["claims"] == [
+        {key: val for key, val in claim.items() if key != "text"}
+        for claim in before["claims"][:3]
+    ]
+    assert focused["sentences"] == before["sentences"][:4]
+    assert focused["sourceFactIndex"] == prompt_fact_index(
+        source, {"101:0", "101:1", "101:2"}, finding_id=101
+    )
+    assert summary not in repair.prompt
+    assert rejected_reason not in repair.prompt
+    # Prompt simplification is not a grounding exemption. The immutable
+    # original request and the validators still reject unsupported prose.
+    with pytest.raises(service.ReportAssessmentValidationError) as rejected:
+        repair.validate(raw)
+    assert error_kind in rejected.value.error_kinds
+    good = repair_payload(repair, source, corrected_focus(value))
+    wire_validator(repair).validate(good)
+    accepted = repair.validate(replace(raw, text=json.dumps(good, ensure_ascii=False)))
+    actual = draft_to_wire(accepted.draft, source)["assessments"]["CHIP_MAKER"]["finding101"]
+    assert actual["decision"] == json.loads(raw.text)["assessments"]["CHIP_MAKER"][
+        "finding101"
+    ]["decision"]
+    assert actual["reason"] == GOOD_SOURCE_REASON
+    assert len(calls) == 2
+    assert original == (source.model_dump_json(), value)
+
+
+def test_focused_retry_preserves_summary_span_basis_but_reads_linked_original_sentences():
+    source, value = focus_case()
+    claim = source.findings[0].claims[0]
+    claim.text = "삼성전자는 생산라인의 가동 중단이 현재 계속된다고 밝혔다."
+    value["assessments"]["CHIP_MAKER"]["finding101"]["relationBasis"]["quote"] = claim.text
+    repair, _, raw, _ = repair_for(source, value)
+    focused = framed(repair.prompt)["findings"][0]
+    decision = json.loads(raw.text)["assessments"]["CHIP_MAKER"]["finding101"]["decision"]
+
+    assert claim.text not in repair.prompt
+    assert focused["proseRepair"]["selectedEvidence"][0] == {
+        "axis": "connection",
+        **decision["connection"]["basis"],
+        "evidenceSentenceIds": [0, 3],
+    }
+    assert [sentence["text"] for sentence in focused["sentences"]] == [
+        sentence.text for sentence in source.findings[0].sentences[:4]
+    ]
+    accepted = repair.validate(response(corrected_focus(value), source))
+    assert accepted.evidence["CHIP_MAKER"][101].relation_basis.quote == claim.text
+
+
+@pytest.mark.parametrize("selector", ["reason", "condition"])
+def test_display_quote_selection_retains_original_source_catalog(selector):
+    source, value = focus_case()
+    _, error, raw, _ = repair_for(source, value)
+    original = framed(draft_prompt(source))
+    finding = original["findings"][0]
+    snapshot, fields = error.native_prose_repairs[101]
+    decision = json.loads(raw.text)["assessments"]["CHIP_MAKER"]["finding101"]["decision"]
+    quotes = {"reason": None, "condition": None}
+    quotes[selector] = "existing-display-source"
+    before = deepcopy(finding)
+
+    focused = focus_prose_repair_finding(
+        finding,
+        error.native_prose_sources[101],
+        snapshot,
+        fields,
+        {},
+        decision,
+        audience="CHIP_MAKER",
+        reference_date=original["reportReferenceDate"],
+        source_quotes=quotes,
+    )
+    assert focused is finding
+    assert focused == before
+
+
 def frozen_values(record, fields):
     decision = record["decision"]
     expected = {
@@ -162,13 +276,13 @@ def test_prose_focus_keeps_axis_union_and_all_selected_claim_sentences(prompt, f
     focused = framed(repair.prompt)["findings"][0]
     before = framed(prompt(source))["findings"][0]
     selected = {"101:0", "101:1", "101:2"}
-    assert focused["claims"] == [claim for claim in before["claims"] if claim["id"] in selected]
+    assert focused["claims"] == [
+        {key: val for key, val in claim.items() if key != "text"}
+        for claim in before["claims"]
+        if claim["id"] in selected
+    ]
     assert focused["sentences"] == before["sentences"][:4]
-    assert focused["sourceQuoteChoices"] == {
-        identifier: choices
-        for identifier, choices in before["sourceQuoteChoices"].items()
-        if identifier in selected
-    }
+    assert "sourceQuoteChoices" not in focused
     assert focused["sourceFactIndex"] == prompt_fact_index(source, selected, finding_id=101)
     # Neither an unselected claim nor its claim alias on a shared sentence leaks.
     for omitted in ("101:3", "101:4", "TSMC", "999"):
@@ -181,9 +295,11 @@ def test_prose_focus_keeps_axis_union_and_all_selected_claim_sentences(prompt, f
             {
                 "axis": axis,
                 **record["decision"][axis]["basis"],
-                "text": source_span_choices(source.findings[0])[
-                    record["decision"][axis]["basis"]["claimId"]
-                ][record["decision"][axis]["basis"]["sourceSpanId"]],
+                "evidenceSentenceIds": next(
+                    claim.evidence_sentence_ids
+                    for claim in source.findings[0].claims
+                    if claim.id == record["decision"][axis]["basis"]["claimId"]
+                ),
             }
             for axis in ("connection", "effect", "timing")
         ],
@@ -217,7 +333,11 @@ def test_no_basis_focus_keeps_all_eligible_sources_without_promoting_scoring_pro
     repair, _, raw, _ = repair_for(source, value)
     before = framed(draft_prompt(source))["findings"][0]
     focused = framed(repair.prompt)["findings"][0]
-    assert {key: val for key, val in focused.items() if key != "proseRepair"} == before
+    expected = deepcopy(before)
+    for claim in expected["claims"]:
+        claim.pop("text")
+    expected.pop("sourceQuoteChoices")
+    assert {key: val for key, val in focused.items() if key != "proseRepair"} == expected
     assert focused["proseRepair"]["selectedEvidence"] == []
     fixed = deepcopy(value)
     fixed["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = (

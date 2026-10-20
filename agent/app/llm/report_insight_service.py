@@ -146,7 +146,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v59"
+PROMPT_VERSION = "report-insight.ko.v60"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -954,6 +954,15 @@ class ReportInsightService(ReportInsightLegacyService):
                         # EXPLAIN may still fix this prose, but it cannot be
                         # retained if that independent refinement also fails.
                         pass
+
+                if fallback is not None and not pipeline.can_start_optional_explanation():
+                    logger.info(
+                        "Report insight stage=EXPLAIN-%03d outcome=SKIPPED_TIME_BUDGET "
+                        "fallback=VALIDATED_ASSESSMENTS_RETAINED findingCount=%d",
+                        index + 1,
+                        len(batch.finding_ids),
+                    )
+                    return fallback
 
                 try:
                     return self._call(
@@ -2370,8 +2379,9 @@ def _preserve_native_decisions(repair, raw, error):
             "Schema에 허용된 선택지 또는 null로 수정하세요. condition=null이면 "
             "sourceQuotes.condition도 null이어야 합니다. "
             "proseRepair가 있는 항목은 preservedValues의 검증된 판단과 selectedEvidence의 "
-            "원문을 먼저 읽고 editableFields에 지정된 설명만 작성하세요. 이 항목의 claims와 "
-            "sentences는 고정된 모든 basis의 claim과 연결 문장 전체입니다. basis가 모두 "
+            "원문을 먼저 읽고 editableFields에 지정된 설명만 작성하세요. 이 항목의 claims는 "
+            "요약 문구를 제외한 출처 메타데이터이며, 설명의 사실은 sentences의 연결 원문에서만 "
+            "가져오세요. 고정된 모든 basis의 claim과 연결 문장 전체를 유지합니다. basis가 모두 "
             "null이면 판단 보류 사유를 확인할 전체 유효 근거를 유지합니다. 선택 근거의 "
             "주체·발언자·사건 단계와 미확인 전제를 보존하세요. 미선택 근거가 입력에 없는 "
             "것은 원문 부재를 뜻하지 않습니다. 다른 finding은 각 진단과 Schema에 지정된 "

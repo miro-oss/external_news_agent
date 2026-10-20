@@ -19,6 +19,7 @@ _MAX_SPAN = 240
 _MAX_DETAILS = 4
 _MAX_EVIDENCE = 4
 _CLAIM_ID = re.compile(r"[1-9][0-9]{0,18}:(?:0|[1-9][0-9]{0,18})")
+_RELATIONAL_BINDING_PREFIX = "근거의 주체·사건 연결과 다릅니다:"
 _LITERAL_PREFIXES = {
     "unsupported_number": ("근거에서 확인되지 않는 숫자: ", "근거에서 확인되지 않는 숫자 배수: "),
     "currency_amount": ("근거와 일치하지 않는 통화·금액 숫자: ",),
@@ -275,6 +276,8 @@ def prose_repair_details(
 
     Literal locations come only from the guard's known message format and an
     actual slice of this field. Unknown/normalized literals keep a null range.
+    A relational binding rejection can instead carry the entire short field as
+    context: its normalized owner/event message is not a literal token location.
     Explicit indexed conflicts supply the exact opposite source relation/value.
     """
     if (
@@ -323,5 +326,21 @@ def prose_repair_details(
                         continue
                     details[rule].append(RepairDetail(diagnostic_category(rule), span, context))
         if not details[rule]:
-            details[rule].append(RepairDetail(diagnostic_category(rule), None, context))
+            # A binding diagnosis often names a normalized owner and event
+            # ("owner → IPO"), not text that can be located in the generated
+            # field. Without that field, a source-only retry cannot see the
+            # rejected relationship. Preserve the complete bounded field as
+            # context; do not guess a token range, replacement, or contradiction.
+            binding_context = (
+                RepairTextSpan.checked(value, 0, len(value))
+                if rule == "source_binding"
+                and any(
+                    type(message) is str and message.startswith(_RELATIONAL_BINDING_PREFIX)
+                    for message in mismatches
+                )
+                else None
+            )
+            details[rule].append(
+                RepairDetail(diagnostic_category(rule), binding_context, context)
+            )
     return {rule: tuple(items[: _MAX_DETAILS + 1]) for rule, items in details.items()}
