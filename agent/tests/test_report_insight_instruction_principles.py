@@ -28,8 +28,7 @@ def test_stages_use_source_and_work_principles_without_event_specific_role_ancho
     assert "과거 기한·발행일·전망 기간은 즉시 대응이나 준비 기한이 아니다" in instruction
     assert all(anchor not in instruction for anchor in ("메모리/HBM", "직원·본사", "자금 조달"))
     if audience == "MARKET_INVESTOR":
-        assert "거래 동향·기록과 목표주가 조정 보도는 서술할 수" in instruction
-        assert "독자의 매매를 권고하거나 목표가격을 제시하지 않는다" in instruction
+        assert instructions.REPORT_INVESTMENT_PROSE_RULE in instruction
 
 
 def test_selected_basis_principle_applies_to_each_axis_and_the_final_explanation():

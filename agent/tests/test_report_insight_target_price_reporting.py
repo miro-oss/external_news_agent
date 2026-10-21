@@ -200,7 +200,7 @@ def test_each_reduce_field_uses_only_its_own_selected_source(group, field):
             for other in items:
                 other.basis_claim_ids = ["102:0"]
         candidate = replace(raw, text=native.model_dump_json(by_alias=True))
-    with pytest.raises(ValueError, match="투자 자문 표현"):
+    with pytest.raises(ValueError, match="목표주가 조정 사실·방향") as caught:
         service._validated_v4_reduce_output(
             candidate,
             source,
@@ -209,3 +209,10 @@ def test_each_reduce_field_uses_only_its_own_selected_source(group, field):
             native_assessments=draft.evidence,
             template_wire=True,
         )
+    expected_field = "headline" if group is None else f"{group}[0].{field}"
+    assert any(
+        issue.rule == "report_target_price_observation_source"
+        and issue.field == expected_field
+        and issue.claim_ids == ("102:0",)
+        for issue in caught.value.validation_issues
+    )

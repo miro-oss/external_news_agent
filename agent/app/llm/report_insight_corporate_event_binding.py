@@ -28,6 +28,39 @@ _FUNDING_AFTER_AMOUNT = re.compile(
     r"\s*(?:\((?P<conversion>[^()\n]{1,60})\))?\s*(?:을|를)?\s*조달"
     r"(?=$|[^가-힣A-Za-z0-9]|하|할|했|되|된|됐|될|돼|함|한)"
 )
+# A security is the object of listing, while its issuer owns the corporate
+# event. Keep this vocabulary bounded to financial instruments; an arbitrary
+# company being listed is not an interchangeable object. Explicit subjects or
+# possessives ("ADR의") remain actor candidates even when their name overlaps.
+_LISTED_INSTRUMENT = re.compile(
+    r"(?<![가-힣A-Za-z0-9])(?:ADR|GDR|(?:주식\s*)?예탁증서|보통주|우선주|주식)"
+    r"(?:을|를)?(?=\s*(?:상장|$))",
+    re.IGNORECASE,
+)
+_EVENT_CONNECTIVE = re.compile(r"(?:해|하여|하고|하며|했으며|했고)(?=\s|$)")
+# A repeated event can follow an embedded outcome clause, e.g. "상장으로
+# 주주의 이익이 희석될 우려와 상장 일정". The subjects inside that completed
+# nominal clause are not new issuers of the following event. Require both an
+# adnominal predicate and a complete clause nominal; company names containing
+# 우려/전망, or an explicit possessive issuer after the clause, remain visible.
+_NOMINALIZED_EVENT_TAIL = re.compile(
+    r"[^,.;!?。；\n]*?[가-힣]+(?:될|할|릴|을|다는|되는|하는)\s+"
+    r"(?:우려|전망|가능성|예상|사실|점)(?:은|는|이|가|을|를|와|과)?"
+    r"(?=$|[\s,.;!?。；])"
+)
+# Headlines can compress the same outcome clause into a complete financial
+# noun phrase. Only this phrase role disambiguates its final 와/과: globally
+# stripping them would erase an unmarked issuer actually named "노을과".
+_COMPACT_FINANCIAL_RISK = re.compile(
+    r"\s*(?:(?:주주|투자자)(?:의)?\s+)?(?:경제적\s+)?"
+    r"(?:이익|지분|지분율|기업가치|주주가치)(?:의)?\s+"
+    r"(?:희석|하락|할인)\s+(?:우려|위험|가능성)(?:와|과)(?=\s|$)"
+)
+_MONEY_PREFIX = re.compile(r"(?<![가-힣A-Za-z0-9_])(?:약|총)\s*$")
+_MONEY_PARTICLE = re.compile(
+    r"(?:으로|에서|까지|부터|보다|의|을|를|은|는|이|가|에|로|와|과|도|만)?"
+    r"(?=$|[^가-힣A-Za-z0-9_])"
+)
 _FINANCE_ATTRIBUTE = r"(?:여력|구조|조건|비용|환경|위험|수요|역량|전략|방안|업무|경로)"
 _ANALYTICAL_OUTCOMES = frozenset({"영향", "효과", "결과", "평가", "변화"})
 _FINANCE_NOMINAL = re.compile(
@@ -67,7 +100,7 @@ _OBLIQUE_PARTICLE = re.compile(r"(?:에서|에게|으로|부터|까지|보다|�
 _BARE_OBLIQUE_END = re.compile(r"(?:으로|로|에)$")
 _BARE_CONNECTIVE_END = re.compile(r"(?:라면|다면|으?므로)$")
 _REPORTED_PREDICATE_END = re.compile(r"(?:다고|라고)\s+[가-힣]{2,}해\s*$")
-_OWNER_DESCRIPTION = re.compile(r"(?:자회사|모회사|계열사|관계사|기업|회사|법인)\s*$")
+_OWNER_DESCRIPTION = re.compile(r"(?:자회사|모회사|계열사|관계사|기업|회사|법인)(?:인)?\s*$")
 _JOINT = re.compile(r"\s*(?:와|과|및|·|,|and|&)\s*", re.IGNORECASE)
 _JOINT_END = re.compile(r"(?:와|과|및|·|,|\band|&)\s*$", re.IGNORECASE)
 _NON_OWNER_END = re.compile(r"(?:에도|에서|에게|으로|보다|통해|따라|위해|때문에|하여|하며|하고)$")
@@ -211,8 +244,60 @@ def _non_owner(value: str, particle: str | None = None) -> bool:
     )
 
 
-def _owners(prefix: str) -> frozenset[str]:
+def _owner_view(prefix: str, *, listing: bool) -> str:
+    """Preserve issuer syntax while excluding proven money/object/verb spans.
+
+    Mask complete source spans instead of adding their fragments to an actor
+    blacklist. Thus "12억 원의" cannot become the issuer "원의", while an
+    actual company such as "원테크의" keeps its grammatical role.
+    """
+    spans = []
+    if risk := _COMPACT_FINANCIAL_RISK.match(prefix):
+        spans.append(risk.span())
+    for pattern in (_CURRENCY_AMOUNT, _PREFIX_CURRENCY_AMOUNT):
+        for amount in pattern.finditer(prefix):
+            start = amount.start()
+            # The shared quantity lexer permits Korean adjacency. An amount
+            # substring inside an issuer ("노을3원테크") is not a money role.
+            # Closed approximation/total prefixes still permit "약12억원".
+            if start and re.match(r"[가-힣A-Za-z0-9_]", prefix[start - 1]):
+                approximation = _MONEY_PREFIX.search(prefix[:start])
+                if approximation is None:
+                    continue
+                start = approximation.start()
+            end = amount.end()
+            particle = _MONEY_PARTICLE.match(prefix, end)
+            if particle is not None:
+                spans.append((start, particle.end()))
+    for instrument in _LISTED_INSTRUMENT.finditer(prefix):
+        # A bare security noun is only an object directly before listing, not
+        # before an unrelated event (a company named ADR can raise funds).
+        if (
+            listing or prefix[instrument.end() :].lstrip().startswith("상장")
+        ) and not _OWNER_DESCRIPTION.search(prefix[: instrument.start()]):
+            spans.append(instrument.span())
+    events = sorted(
+        {event.span() for event in _EVENT.finditer(prefix)}
+        | {(start, end) for start, end, _ in _funding_amount_spans(prefix)}
+    )
+    for index, (start, event_end) in enumerate(events):
+        if connective := _EVENT_CONNECTIVE.match(prefix, event_end):
+            spans.append((start, connective.end()))
+        # Bound the clause by the next event, so "A의 IPO로 B가 IPO를 추진할
+        # 전망과 상장 일정" preserves B as the most recent explicit issuer.
+        # Currency-only funding ("B가 100억원을 조달할 전망") is a boundary
+        # too, matching the same event set used by the actual binding guard.
+        end = events[index + 1][0] if index + 1 < len(events) else len(prefix)
+        if nominal := _NOMINALIZED_EVENT_TAIL.match(prefix, event_end, end):
+            spans.append((event_end, nominal.end()))
+    for start, end in sorted(spans, reverse=True):
+        prefix = prefix[:start] + " " * (end - start) + prefix[end:]
+    return prefix
+
+
+def _owners(prefix: str, *, listing: bool = False) -> frozenset[str]:
     """Use the nearest owner, not every company mentioned in the sentence."""
+    prefix = _owner_view(prefix, listing=listing)
     # Only a completed, separate assessment/report ends inherited ownership.
     # A source modifier does not end a company's continuing plan/subject:
     # "가온의 계획은, 기사에서 언급된 IPO를 추진하는 것이다" still means 가온.
@@ -371,7 +456,11 @@ def _events(value: str) -> Iterator[_Event]:
             negative = bool(_NEGATIVE_EVENT.search(tail)) or bool(
                 re.search(r"(?:취소|철회|무산|중단|보류|불발|포기)(?:된|한)\s*$", clause[:start])
             )
-            yield _Event(kind, _owners(clause[:start]), negative)
+            yield _Event(
+                kind,
+                _owners(clause[:start], listing=clause[start:event_end].endswith("상장")),
+                negative,
+            )
 
 
 def corporate_event_mismatches(value: str, sources: Sequence[str]) -> list[str]:

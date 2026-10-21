@@ -102,9 +102,25 @@ def test_year_guidance_reaches_actual_initial_and_retry_calls_without_rewriting_
         data = framed(call["prompt"])
         if "findings" in data:
             (finding,) = data["findings"]
-            for field in ("id", "claims", "sentences", "sourceQuoteChoices", "sourceFactIndex"):
+            for field in ("id", "sentences", "sourceFactIndex"):
                 assert finding[field] == original_finding[field]
-            assert finding["sourceQuoteChoices"] == {"101:0": {"s101_0_0": SOURCE}}
+            if "proseRepair" in finding:
+                # A prose retry keeps raw source years and claim provenance,
+                # while omitting summaries and their selectable text catalog.
+                assert finding["claims"] == [
+                    {key: value for key, value in claim.items() if key != "text"}
+                    for claim in original_finding["claims"]
+                ]
+                assert "sourceQuoteChoices" not in finding
+                assert all(
+                    evidence["claimId"] == "101:0"
+                    and evidence["evidenceSentenceIds"] == [0]
+                    and "text" not in evidence
+                    for evidence in finding["proseRepair"]["selectedEvidence"]
+                )
+            else:
+                assert finding["claims"] == original_finding["claims"]
+                assert finding["sourceQuoteChoices"] == {"101:0": {"s101_0_0": SOURCE}}
     reduce_calls = [
         call for call in provider.calls if "REDUCE" in call["response_schema"]["description"]
     ]

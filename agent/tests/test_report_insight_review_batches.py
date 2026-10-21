@@ -90,7 +90,15 @@ def test_review_selection_is_once_and_late_partial_repair_preserves_full_source_
         for finding in data["findings"]:
             original = next(f for f in source.findings if f.id == finding["id"])
             assert finding["articleId"] == original.article_id
-            assert finding["claims"] == [c.model_dump(by_alias=True) for c in original.claims]
+            claims = [c.model_dump(by_alias=True) for c in original.claims]
+            if "proseRepair" in finding:
+                # Only prose is editable here; keep origin metadata and the
+                # original sentences without reintroducing claim summaries.
+                claims = [
+                    {key: val for key, val in claim.items() if key != "text"}
+                    for claim in claims
+                ]
+            assert finding["claims"] == claims
             assert finding["sentences"] == [s.model_dump(by_alias=True) for s in original.sentences]
     # Public grounding and every merged retry retain the full-report date.
     assert (list(range(107, 113)), date(2026, 9, 30)) in validation_contexts

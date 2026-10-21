@@ -70,6 +70,15 @@ def focus_prose_repair_finding(
     ):
         return source
     focused = deepcopy(context.focused)
+    # Decisions are already authenticated. As in EXPLAIN, retain claim origin
+    # metadata but write prose from linked original sentences, not summaries
+    # that can introduce names, numbers or internal identifiers absent there.
+    for claim in focused["claims"]:
+        claim.pop("text")
+    # This catalog also contains summary-derived spans. All basis selectors
+    # are already fixed, so prose only needs their original-sentence links.
+    focused.pop("sourceQuoteChoices")
+    claim_sentences = {claim["id"]: claim["evidenceSentenceIds"] for claim in focused["claims"]}
     focused["proseRepair"] = {
         "editableFields": [field for field in fields if field not in fixed],
         "preservedValues": deepcopy(fixed),
@@ -77,7 +86,7 @@ def focus_prose_repair_finding(
             {
                 "axis": axis,
                 **basis,
-                "text": source["sourceQuoteChoices"][basis["claimId"]][basis["sourceSpanId"]],
+                "evidenceSentenceIds": claim_sentences[basis["claimId"]],
             }
             for axis, value in decision.items()
             if (basis := value["basis"]) is not None

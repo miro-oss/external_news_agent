@@ -51,7 +51,6 @@ def test_observational_form_without_matching_selected_source_has_specific_diagno
         "외국인 순매도(전략)는 관찰 정보다.",
         "외국인 순매도(10억원 매수)는 관찰 정보다.",
         "목표가격을 10만원으로 제시한다.",
-        "목표주가 조정 보도가 투자 판단과 연결된다.",
         "독자에 대한 매매 권고나 목표가격 제시는 포함하지 않는다.",
         "원문: 「매수해야 한다.」",
     ],
@@ -59,6 +58,13 @@ def test_observational_form_without_matching_selected_source_has_specific_diagno
 @pytest.mark.parametrize("source", [SOURCE, ""])
 def test_advice_targets_unknown_forms_and_meta_denials_keep_wording_diagnostic(value, source):
     assert investment_policy_violation(value, source) == "investment_wording"
+    assert has_investment_advice(value, source) is True
+
+
+@pytest.mark.parametrize("source", [SOURCE, "", "증권사가 목표주가를 하향 조정했다."])
+def test_target_observation_without_matching_source_has_its_own_diagnostic(source):
+    value = "목표주가 상향 보도가 투자 판단과 연결된다."
+    assert investment_policy_violation(value, source) == "target_price_observation_source"
     assert has_investment_advice(value, source) is True
 
 

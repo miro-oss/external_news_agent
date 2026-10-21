@@ -846,3 +846,100 @@ def test_reported_predicate_and_joint_filter_preserve_explicit_unknown_company_n
     assert corporate_event_mismatches(
         "새봄과 가온의 IPO는 투자 판단에 연결된다.", ["가온은 IPO를 추진한다."]
     )
+
+
+def test_report_2086_listing_risk_nominal_clauses_do_not_invent_issuers():
+    sources = [
+        "솔리다임의 해외 상장으로 SK하이닉스 주주의 경제적 이익이 희석되고 기업가치가 "
+        "중복으로 할인될 우려가 있다는 뜻이다.",
+        "이에 따라 향후 상장 일정에 제동이 걸릴 것으로 전망된다.",
+    ]
+    value = (
+        "솔리다임의 해외 상장으로 SK하이닉스 주주의 경제적 이익이 희석될 우려와 "
+        "상장 일정에 제동이 걸릴 전망은 주주가치와 상장 리스크 판단에 직접 연결된다."
+    )
+    assert corporate_event_mismatches(value, sources) == []
+    assert corporate_event_mismatches(value.replace("솔리다임", "새봄"), sources)
+    assert corporate_event_mismatches(value, ["솔리다임의 실적이 늘었다."])
+    assert corporate_event_mismatches(value + " 자금 조달 전망을 확인한다.", sources)
+
+
+@pytest.mark.parametrize("issuer", ["우려테크", "전망산업", "제동산업", "새봄"])
+def test_listing_outcome_clause_preserves_an_unknown_issuer(issuer):
+    value = (
+        f"{issuer}의 상장으로 주주의 이익이 희석될 우려와 상장 일정에 제동이 걸릴 "
+        "전망은 상장 리스크 판단에 연결된다."
+    )
+    assert corporate_event_mismatches(value, [f"{issuer}는 상장을 추진한다."]) == []
+    assert corporate_event_mismatches(value, ["가온은 상장을 추진한다."])
+
+
+@pytest.mark.parametrize("owner", ["가온의", "가온은", "가온 및 누리의"])
+def test_a_new_explicit_issuer_after_a_nominal_clause_keeps_its_own_event(owner):
+    value = f"새봄의 상장으로 주주의 이익이 희석될 우려와 {owner} 상장은 판단 근거다."
+    assert corporate_event_mismatches(value, ["새봄은 상장을 추진한다."])
+    assert corporate_event_mismatches(
+        value, ["새봄은 상장을 추진한다.", f"{owner} 상장은 예정됐다."]
+    ) == []
+
+
+def test_outcome_clauses_keep_the_most_recent_issuer_and_sentence_boundary():
+    value = "새봄의 IPO로 가온이 IPO를 추진할 전망과 상장 일정은 판단 근거다."
+    assert corporate_event_mismatches(value, ["새봄은 IPO를 추진한다."])
+    assert corporate_event_mismatches(
+        value, ["새봄은 IPO를 추진한다.", "가온은 IPO를 추진한다."]
+    ) == []
+    assert corporate_event_mismatches(
+        "새봄의 IPO가 추진될 전망이다. 가온의 상장은 판단 근거다.",
+        ["새봄은 IPO를 추진한다."],
+    )
+
+
+def test_a_currency_funding_clause_preserves_its_explicit_issuer_before_later_listing():
+    value = "새봄의 IPO 이후 가온이 100억원을 조달할 전망과 상장 일정은 투자 판단에 연결된다."
+    sources = ["새봄은 IPO를 추진한다.", "가온은 100억원을 조달할 전망이다."]
+    assert corporate_event_mismatches(value, sources)
+    assert corporate_event_mismatches(value, [*sources, "가온은 IPO를 추진한다."]) == []
+
+
+def test_compact_risk_coordination_is_an_outcome_phrase_not_a_corporate_issuer():
+    value = "주주 이익 희석 우려와 상장 일정 전망을 점검한다."
+    assert corporate_event_mismatches(value, ["향후 상장 일정에 제동이 걸릴 전망이다."]) == []
+    assert corporate_event_mismatches(value, ["새봄의 실적이 늘었다."])
+    # Keep genuinely coordinated companies and explicit names ending in what
+    # otherwise looks like a coordination particle.
+    for issuer in ("우려", "제동", "노을과", "새봄와"):
+        assert corporate_event_mismatches(
+            f"{issuer} 및 가온의 IPO는 판단 근거다.", ["가온은 IPO를 추진한다."]
+        )
+        assert corporate_event_mismatches(
+            f"{issuer}의 IPO는 판단 근거다.", [f"{issuer}는 IPO를 추진한다."]
+        ) == []
+
+
+@pytest.mark.parametrize("issuer", ["노을과", "우려와", "다온과", "새봄와"])
+def test_unmarked_unknown_issuer_names_keep_a_coordination_like_suffix(issuer):
+    value = f"{issuer} IPO는 판단 근거다."
+    assert corporate_event_mismatches(value, [f"{issuer}는 IPO를 추진한다."]) == []
+    assert corporate_event_mismatches(value, [f"{issuer[:-1]}는 IPO를 추진한다."])
+
+
+def test_compact_financial_risk_keeps_a_following_explicit_issuer():
+    value = "주주 이익 희석 우려와 가온의 상장 일정 전망을 점검한다."
+    assert corporate_event_mismatches(value, ["가온은 상장을 추진한다."]) == []
+    assert corporate_event_mismatches(value, ["새봄은 상장을 추진한다."])
+
+
+def test_nominal_clause_does_not_mask_an_adnominally_modified_issuer():
+    value = "새봄의 IPO를 도울 누리의 상장은 판단 근거다."
+    assert corporate_event_mismatches(value, ["새봄은 IPO를 추진한다."])
+    assert corporate_event_mismatches(
+        value, ["새봄은 IPO를 추진한다.", "누리는 상장을 추진한다."]
+    ) == []
+
+
+@pytest.mark.parametrize("cancelled", ["취소됐다", "취소되지 않았다"])
+def test_outcome_clause_does_not_erase_event_polarity(cancelled):
+    value = "새봄의 상장으로 이익이 희석될 우려와 상장 일정은 판단 근거다."
+    mismatches = corporate_event_mismatches(value, [f"새봄의 상장은 {cancelled}."])
+    assert bool(mismatches) == (cancelled == "취소됐다")

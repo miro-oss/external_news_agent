@@ -320,11 +320,26 @@ def test_fact_only_condition_repair_does_not_replace_event_state_with_invented_p
     assert ASSESSMENT_CONDITION_RULE in json.dumps(repair.response_schema, ensure_ascii=False)
     repair_input = framed(repair.prompt)
     focus = repair_input["findings"][0].pop("proseRepair")
-    assert repair_input == framed(draft_prompt(source))
+    original_input = framed(draft_prompt(source))
+    expected_input = deepcopy(original_input)
+    expected_finding = expected_input["findings"][0]
+    for claim in expected_finding["claims"]:
+        claim.pop("text")
+    expected_finding.pop("sourceQuoteChoices")
+    assert repair_input == expected_input
     assert focus["editableFields"] == ["decision.connection.condition"]
     assert focus["preservedValues"]["reason"] == entry["reason"]
     assert "decision.connection.condition" not in focus["preservedValues"]
-    assert focus["selectedEvidence"][0]["text"] == source.findings[0].claims[0].text
+    assert focus["selectedEvidence"] == [
+        {
+            "axis": "connection",
+            **json.loads(raw.text)["assessments"]["IT_INFRA"]["finding101"]["decision"][
+                "connection"
+            ]["basis"],
+            "evidenceSentenceIds": source.findings[0].claims[0].evidence_sentence_ids,
+        }
+    ]
+    assert framed(draft_prompt(source)) == original_input
     with pytest.raises(service.ReportAssessmentValidationError):
         repair.validate(raw)
 

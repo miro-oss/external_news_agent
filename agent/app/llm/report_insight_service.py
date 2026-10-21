@@ -83,6 +83,7 @@ from app.llm.report_insight_instructions import (
     ASSESSMENT_PROCEDURE_RULE,
     ASSESSMENT_REASON_RULE,
     REPORT_ANALYSIS_ONLY_RULE,
+    REPORT_INVESTMENT_PROSE_RULE,
     REPORT_YEAR_UNIT_RULE,
     report_stage_instruction,
 )
@@ -146,7 +147,7 @@ from app.schemas.report_insight import (
 from app.schemas.report_insight_assessment import ReportFindingAssessmentDraft
 from app.schemas.report_insight_source_quotes import ReportInsightStructuredReduceOutput
 
-PROMPT_VERSION = "report-insight.ko.v59"
+PROMPT_VERSION = "report-insight.ko.v63"
 COMMON_PROMPT_VERSION = "report-insight.ko.v15"
 RUBRIC_VERSION = "report-importance.v6"
 LEGACY_PROMPT_VERSION = "report-insight.ko.v3"
@@ -332,14 +333,18 @@ LEGACY_SYSTEM_INSTRUCTION = "\n\n".join(
     for version in (LEGACY_PROMPT_VERSION, LEGACY_RUBRIC_VERSION)
 )
 _INVESTMENT_ADVICE_MESSAGE = (
-    "MARKET_INVESTOR는 투자 자문 표현을 포함할 수 없습니다. "
-    "선택 원문의 거래 동향·기록과 목표주가 조정 보도는 서술하되, "
-    "독자의 매매를 권고하거나 목표가격을 제시하지 마세요."
+    "MARKET_INVESTOR는 투자 자문 표현을 포함할 수 없습니다. " + REPORT_INVESTMENT_PROSE_RULE
 )
 _INVESTMENT_OBSERVATION_SOURCE_MESSAGE = (
     "MARKET_INVESTOR의 투자 자문 표현 검증: 현재 필드에 선택한 claim의 연결 원문이 "
     "해당 거래 관찰의 방향·주체·맥락을 지원하지 않습니다. 최종 선택하지 않은 claim이나 제목의 거래 "
     "내용을 가져오지 말고, 최종 선택 근거가 지원하는 사건과 판단 근거로 다시 작성하세요. "
+    "Schema const로 고정된 decision·basis는 유지하세요."
+)
+_INVESTMENT_TARGET_SOURCE_MESSAGE = (
+    "MARKET_INVESTOR의 목표주가 조정 관찰 검증: 현재 필드에 선택한 claim의 연결 원문이 "
+    "해당 목표주가 조정 사실·방향을 지원하지 않습니다. 다른 claim이나 제목의 조정 보도를 "
+    "가져오지 말고, 최종 선택 근거가 지원하는 사건과 판단 근거로 다시 작성하세요. "
     "Schema const로 고정된 decision·basis는 유지하세요."
 )
 
@@ -350,17 +355,18 @@ def _investment_policy_message(value: str, source: str) -> str | None:
         return None
     if violation == "trading_observation_source":
         return _INVESTMENT_OBSERVATION_SOURCE_MESSAGE
+    if violation == "target_price_observation_source":
+        return _INVESTMENT_TARGET_SOURCE_MESSAGE
     return _INVESTMENT_ADVICE_MESSAGE
 
 
 def _investment_source_rule(message: str) -> str | None:
     # Only a closed, server-owned cause becomes a diagnostic rule. Rejected
     # prose and exception text never supply rule names or repair locations.
-    return (
-        "report_trading_observation_source"
-        if message == _INVESTMENT_OBSERVATION_SOURCE_MESSAGE
-        else None
-    )
+    return {
+        _INVESTMENT_OBSERVATION_SOURCE_MESSAGE: "report_trading_observation_source",
+        _INVESTMENT_TARGET_SOURCE_MESSAGE: "report_target_price_observation_source",
+    }.get(message)
 
 
 _PREPARATION_RECOMMENDATION = re.compile(r"(?:필요|조건|확인|검토|부족|준비.*(?:일정|시점))")
@@ -954,6 +960,15 @@ class ReportInsightService(ReportInsightLegacyService):
                         # EXPLAIN may still fix this prose, but it cannot be
                         # retained if that independent refinement also fails.
                         pass
+
+                if fallback is not None and not pipeline.can_start_optional_explanation():
+                    logger.info(
+                        "Report insight stage=EXPLAIN-%03d outcome=SKIPPED_TIME_BUDGET "
+                        "fallback=VALIDATED_ASSESSMENTS_RETAINED findingCount=%d",
+                        index + 1,
+                        len(batch.finding_ids),
+                    )
+                    return fallback
 
                 try:
                     return self._call(
@@ -2370,8 +2385,9 @@ def _preserve_native_decisions(repair, raw, error):
             "Schema에 허용된 선택지 또는 null로 수정하세요. condition=null이면 "
             "sourceQuotes.condition도 null이어야 합니다. "
             "proseRepair가 있는 항목은 preservedValues의 검증된 판단과 selectedEvidence의 "
-            "원문을 먼저 읽고 editableFields에 지정된 설명만 작성하세요. 이 항목의 claims와 "
-            "sentences는 고정된 모든 basis의 claim과 연결 문장 전체입니다. basis가 모두 "
+            "원문을 먼저 읽고 editableFields에 지정된 설명만 작성하세요. 이 항목의 claims는 "
+            "요약 문구를 제외한 출처 메타데이터이며, 설명의 사실은 sentences의 연결 원문에서만 "
+            "가져오세요. 고정된 모든 basis의 claim과 연결 문장 전체를 유지합니다. basis가 모두 "
             "null이면 판단 보류 사유를 확인할 전체 유효 근거를 유지합니다. 선택 근거의 "
             "주체·발언자·사건 단계와 미확인 전제를 보존하세요. 미선택 근거가 입력에 없는 "
             "것은 원문 부재를 뜻하지 않습니다. 다른 finding은 각 진단과 Schema에 지정된 "
@@ -2875,9 +2891,11 @@ def _report_insight_repair_call(prompt, schema, raw, error, validate):
 def _repair_action_message(
     message: str, kinds: tuple[str, ...], *, fact_kinds: tuple[str, ...] = ()
 ) -> str:
-    if message in {_INVESTMENT_ADVICE_MESSAGE, _INVESTMENT_OBSERVATION_SOURCE_MESSAGE} and set(
-        kinds
-    ).intersection({"report_expression_policy", "report_synthesis_invalid"}):
+    if message in {
+        _INVESTMENT_ADVICE_MESSAGE,
+        _INVESTMENT_OBSERVATION_SOURCE_MESSAGE,
+        _INVESTMENT_TARGET_SOURCE_MESSAGE,
+    } and set(kinds).intersection({"report_expression_policy", "report_synthesis_invalid"}):
         return message + " " + REPORT_ANALYSIS_ONLY_RULE
     if _PROSE_FACT_KINDS.intersection(kinds):
         generic = (
@@ -3591,6 +3609,7 @@ def _validated_output(
         if len(ids) != len(set(ids)) or set(ids) != set(findings):
             raise ValueError("각 audience는 모든 input finding을 정확히 한 번 판정해야 합니다.")
         assessment_errors: list[tuple[ReportInsightAssessment, str, ValueError]] = []
+        assessment_validation_refs = {}
         for assessment in insight.assessments:
             local_ids = {claim.id for claim in findings[assessment.finding_id].claims}
             if not set(assessment.basis_claim_ids) <= local_ids:
@@ -3616,6 +3635,11 @@ def _validated_output(
                 value is None for value in assessment.axes.model_dump().values()
             ):
                 reason_refs = [claim.id for claim in findings[assessment.finding_id].claims]
+            # Diagnostics must retain the exact evidence scope used below.
+            # Unknown decisions intentionally have no public basis, but their
+            # prose still uses local sources; empty diagnostic refs would drop
+            # the source-bound repair details for those failures.
+            assessment_validation_refs[assessment.finding_id] = tuple(reason_refs)
             assessment_errors.extend(
                 (assessment, field, error)
                 for field, error in _assessment_prose_errors(
@@ -3645,7 +3669,7 @@ def _validated_output(
             )
             diagnostics = tuple(
                 f"findingId={assessment.finding_id} field=assessments.{field} "
-                f"refs={assessment.basis_claim_ids}: {error}"
+                f"refs={list(assessment_validation_refs[assessment.finding_id])}: {error}"
                 for assessment, field, error in assessment_errors
             )
             kinds = tuple(
@@ -3684,7 +3708,7 @@ def _validated_output(
                         insight.audience,
                         f"assessments[{assessment.finding_id}].{native_field}",
                         kind,
-                        tuple(assessment.basis_claim_ids),
+                        assessment_validation_refs[assessment.finding_id],
                         rule_id=rule,
                         details=getattr(error, "repair_details", {}).get(rule, ()),
                     )
@@ -3703,7 +3727,7 @@ def _validated_output(
                 ),
                 repair_action_diagnostics=tuple(
                     f"findingId={assessment.finding_id} field=assessments.{action_field} "
-                    f"refs={assessment.basis_claim_ids}: "
+                    f"refs={list(assessment_validation_refs[assessment.finding_id])}: "
                     + _repair_action_message(
                         str(error),
                         getattr(error, "error_kinds", ()),
