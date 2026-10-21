@@ -18,6 +18,8 @@ import com.example.be.domain.topics.repository.TopicRepository;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -153,6 +155,19 @@ class TopicCommandServiceImplTest {
         verify(sourceRepository, never()).findAllById(any());
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {60, 720, 1440, 10080})
+    void createTopicAcceptsSupportedCollectionIntervals(int intervalMinutes) {
+        TopicReqDTO.Create request = new TopicReqDTO.Create();
+        request.setName("주기 선택");
+        request.setIntervalMinutes(intervalMinutes);
+        when(topicRepository.saveAndFlush(any(Topic.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        TopicResDTO.Created result = topicCommandService.createTopic(request);
+
+        assertEquals(intervalMinutes, result.getIntervalMinutes());
+    }
+
     @Test
     void createTopicRejectsDuplicatedName() {
         TopicReqDTO.Create request = createRequest();
@@ -189,10 +204,11 @@ class TopicCommandServiceImplTest {
         assertEquals(TopicErrorCode.INVALID_SCHEDULE, exception.getCode());
     }
 
-    @Test
-    void createTopicRejectsUnsupportedCollectionInterval() {
+    @ParameterizedTest
+    @ValueSource(ints = {30, 10079, 10081})
+    void createTopicRejectsUnsupportedCollectionInterval(int intervalMinutes) {
         TopicReqDTO.Create request = createRequest();
-        request.setIntervalMinutes(30);
+        request.setIntervalMinutes(intervalMinutes);
 
         TopicException exception = assertThrows(TopicException.class,
                 () -> topicCommandService.createTopic(request));
@@ -259,6 +275,52 @@ class TopicCommandServiceImplTest {
         assertEquals(720, topic.getIntervalMinutes());
         assertEquals("HBM4 반도체", result.getQueryText());
         assertEquals(20, result.getBatchSize());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {60, 720, 1440, 10080})
+    void updateTopicAcceptsSupportedCollectionIntervals(int intervalMinutes) {
+        Topic topic = existingTopic();
+        var snapshot = CollectionTopicSnapshot.capture(topic);
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
+        TopicReqDTO.Update request = new TopicReqDTO.Update();
+        request.setIntervalMinutes(intervalMinutes);
+
+        TopicResDTO.Updated result = topicCommandService.updateTopic(1L, request);
+
+        assertEquals(intervalMinutes, result.getIntervalMinutes());
+        assertEquals(intervalMinutes, topic.getIntervalMinutes());
+        assertEquals(60, snapshot.intervalMinutes());
+        verify(topicRepository).flush();
+    }
+
+    @Test
+    void updateTopicKeepsWeeklyIntervalWhenScheduleIsOmitted() {
+        Topic topic = Topic.builder().id(1L).name("주간 수집")
+                .batchSize(100).intervalMinutes(10080).active(true).build();
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
+        TopicReqDTO.Update request = new TopicReqDTO.Update();
+        request.setName("주간 수집 이름 수정");
+
+        TopicResDTO.Updated result = topicCommandService.updateTopic(1L, request);
+
+        assertEquals(10080, result.getIntervalMinutes());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {30, 10079, 10081})
+    void updateTopicRejectsUnsupportedCollectionInterval(int intervalMinutes) {
+        Topic topic = existingTopic();
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
+        TopicReqDTO.Update request = new TopicReqDTO.Update();
+        request.setIntervalMinutes(intervalMinutes);
+
+        TopicException exception = assertThrows(TopicException.class,
+                () -> topicCommandService.updateTopic(1L, request));
+
+        assertEquals(TopicErrorCode.INVALID_SCHEDULE, exception.getCode());
+        assertEquals(60, topic.getIntervalMinutes());
+        verify(topicRepository, never()).flush();
     }
 
     @Test

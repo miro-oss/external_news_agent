@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
@@ -255,6 +257,49 @@ class TopicRepositoryIntegrationTests {
         assertTrue(dueTopicIds.contains(savedNeverCollected.getId()));
         assertTrue(dueTopicIds.contains(savedDue.getId()));
         assertFalse(dueTopicIds.contains(savedNotDue.getId()));
+    }
+
+    @Test
+    void persistsWeeklyIntervalAndFindsItDueExactlySevenDaysAfterLastCollection() {
+        LocalDateTime startedAt = LocalDateTime.of(2026, 10, 1, 10, 0);
+        Source activeSource = sourceRepository.save(source(Source.KIND_FEED, "주간 만료 확인 소스",
+                "https://example.com/weekly-due"));
+        Topic weekly = Topic.builder().name("주간 만료 확인 주제").batchSize(100)
+                .intervalMinutes(10080).active(true).build();
+        weekly.replaceSources(List.of(activeSource));
+        weekly.recordCollectionStartedAt(startedAt);
+        Long topicId = topicRepository.saveAndFlush(weekly).getId();
+        entityManager.clear();
+
+        assertEquals(10080, topicRepository.findById(topicId).orElseThrow().getIntervalMinutes());
+        assertFalse(topicRepository.findDueCollectionTopicIds(startedAt.plusDays(1)).contains(topicId));
+        assertFalse(topicRepository.findDueCollectionTopicIds(startedAt.plusDays(7).minusSeconds(1)).contains(topicId));
+        assertTrue(topicRepository.findDueCollectionTopicIds(startedAt.plusDays(7)).contains(topicId));
+    }
+
+    @Test
+    void databaseIntervalConstraintStillRejectsUnsupportedIntervals() {
+        Topic invalid = Topic.builder().name("허용하지 않는 주기 확인 주제").batchSize(100)
+                .intervalMinutes(10081).active(true).build();
+
+        DataIntegrityViolationException error = assertThrows(DataIntegrityViolationException.class,
+                () -> topicRepository.saveAndFlush(invalid));
+
+        assertTrue(error.getMostSpecificCause().getMessage().contains("CK_TOPIC_INTERVAL"));
+    }
+
+    @Test
+    void databaseDefaultIntervalRemainsTwentyFourHours() {
+        entityManager.createNativeQuery("INSERT INTO news_topics (name) VALUES (:name)")
+                .setParameter("name", "주기 기본값 확인 주제")
+                .executeUpdate();
+
+        Number intervalMinutes = (Number) entityManager.createNativeQuery(
+                        "SELECT interval_minutes FROM news_topics WHERE name = :name")
+                .setParameter("name", "주기 기본값 확인 주제")
+                .getSingleResult();
+
+        assertEquals(1440, intervalMinutes.intValue());
     }
 
     @Test

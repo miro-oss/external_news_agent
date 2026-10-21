@@ -183,6 +183,32 @@ class CollectionRunCreatorTest {
     }
 
     @Test
+    void weeklyCollectionIsQueuedOnlyAfterSevenDaysAndCapturesItsInterval() {
+        var target = target(1L);
+        Topic topic = target.getTopic();
+        topic.update(topic.getName(), topic.getQueryText(), topic.getRequiredKeywords(),
+                topic.getOptionalKeywords(), topic.getExcludedKeywords(), topic.getBatchSize(), 10080, true);
+        var startedAt = LocalDateTime.of(2026, 10, 1, 10, 0);
+        topic.recordCollectionStartedAt(startedAt);
+        when(topicRepository.lockByIds(List.of(1L))).thenReturn(List.of(topic));
+
+        assertFalse(creator.createScheduled(1L, AgentPlan.FREE, startedAt.plusDays(1)));
+        assertFalse(creator.createScheduled(1L, AgentPlan.FREE, startedAt.plusDays(7).minusSeconds(1)));
+        verify(topicRepository, never()).findActiveCollectionTargetsByTopicIds(any());
+        verify(runRepository, never()).saveAndFlush(any());
+
+        when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L))).thenReturn(List.of(target));
+        when(runRepository.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
+        assertTrue(creator.createScheduled(1L, AgentPlan.FREE, startedAt.plusDays(7)));
+
+        ArgumentCaptor<CollectionRun> saved = ArgumentCaptor.forClass(CollectionRun.class);
+        verify(runRepository).saveAndFlush(saved.capture());
+        assertEquals(startedAt.plusDays(7), saved.getValue().getQueuedAt());
+        assertEquals(10080, saved.getValue().getItems().getFirst().getTopicSnapshot().intervalMinutes());
+        assertEquals(startedAt, topic.getLastCollectedAt());
+    }
+
+    @Test
     void preservesUniqueKeyRaceRecoveryWithoutSwallowingOtherConstraints() {
         when(topicRepository.findActiveCollectionTargetsByTopicIds(List.of(1L))).thenReturn(List.of(target(1L)));
         when(runRepository.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("UQ_RUN_ACTIVE_IDEMPOTENCY_KEY"));
