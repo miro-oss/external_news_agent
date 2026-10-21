@@ -24,7 +24,7 @@ test('opening the editor fetches the latest topic schedule and passes its cancel
   assert.deepEqual(calls, [{ url: '/api/news/topics/31', method: undefined, signal: controller.signal }])
 })
 
-test('schedule save sends only intervalMinutes and updates cached rows without losing topic data', async context => {
+test('weekly schedule save sends only intervalMinutes and updates cached rows without losing topic data', async context => {
   const client = new QueryClient()
   context.after(() => client.clear())
   const other = { ...summary, id: 29, name: 'AI' }
@@ -36,18 +36,18 @@ test('schedule save sends only intervalMinutes and updates cached rows without l
   const requests = []
   context.mock.method(globalThis, 'fetch', async (url, init) => {
     requests.push({ url, method: init.method, body: JSON.parse(init.body) })
-    return response({ ...topic, intervalMinutes: 720 })
+    return response({ ...topic, intervalMinutes: 10080 })
   })
   await client.getMutationCache().build(client, saveTopicScheduleOptions(client, 31))
-    .execute({ intervalMinutes: 720, active: true, requiredKeywords: [] })
-  assert.deepEqual(requests, [{ url: '/api/news/topics/31', method: 'PATCH', body: { intervalMinutes: 720 } }])
+    .execute({ intervalMinutes: 10080, active: true, requiredKeywords: [] })
+  assert.deepEqual(requests, [{ url: '/api/news/topics/31', method: 'PATCH', body: { intervalMinutes: 10080 } }])
   for (const filter of ['all', false]) {
-    assert.deepEqual(client.getQueryData(['topics', filter]), page([{ ...summary, intervalMinutes: 720 }, other]))
+    assert.deepEqual(client.getQueryData(['topics', filter]), page([{ ...summary, intervalMinutes: 10080 }, other]))
     assert.equal(client.getQueryState(['topics', filter]).isInvalidated, true)
   }
-  assert.deepEqual(client.getQueryData(topicScheduleOptions(31).queryKey), { ...detail, intervalMinutes: 720 })
+  assert.deepEqual(client.getQueryData(topicScheduleOptions(31).queryKey), { ...detail, intervalMinutes: 10080 })
   const combinations = client.getQueryData(['topic-sources'])
-  assert.deepEqual(combinations.content.map(row => row.intervalMinutes), [720, 720, 1440])
+  assert.deepEqual(combinations.content.map(row => row.intervalMinutes), [10080, 10080, 1440])
   assert.equal(combinations.content[0].active, false)
   assert.equal(combinations.combinationCount, 3)
 })

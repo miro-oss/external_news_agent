@@ -45,7 +45,8 @@ public class TopicController {
                     새 수집 주제를 등록합니다. 설정 화면의 주제 등록 폼에 대응합니다.
                     sourceIds를 함께 보내면 등록과 동시에 소스 연결까지 끝납니다.
                     주제명은 중복할 수 없고, SEARCH 소스를 연결하려면 queryText가 필요합니다.
-                    수집 주기를 생략하면 24시간(1440분)마다 수집합니다.
+                    수집 주기는 60분, 12시간(720분), 24시간(1440분), 1주(10080분) 중 선택하며,
+                    생략하면 24시간(1440분)마다 수집합니다.
                     dartCorpCode로 공시 회사 한 곳을 선택할 수 있으며 생략/null은 미연결입니다.
                     """
     )
@@ -270,7 +271,7 @@ public class TopicController {
             description = """
                     수집 주제를 부분 수정합니다. dartCorpCode 생략은 회사 유지, null은 해제, 8자리 문자열은 회사 교체입니다. 전달한 필드만 반영됩니다.
                     키워드 배열은 부분 병합이 아니라 전체 교체입니다. 빈 배열을 보내면 해당 필터가 사라집니다.
-                    intervalMinutes는 60분, 12시간(720분), 24시간(1440분) 중 하나이며,
+                    intervalMinutes는 60분, 12시간(720분), 24시간(1440분), 1주(10080분) 중 하나이며,
                     바꾸면 스케줄러가 다음 실행부터 바뀐 주기를 적용합니다.
                     """
     )
@@ -304,7 +305,7 @@ public class TopicController {
                             {
                               "isSuccess": false,
                               "code": "TOPIC400",
-                              "message": "batchSize는 1 이상 300 이하, intervalMinutes는 60, 720, 1440 중 하나여야 합니다.",
+                              "message": "batchSize는 1 이상 300 이하, intervalMinutes는 60, 720, 1440, 10080 중 하나여야 합니다.",
                               "result": {}
                             }
                             """))),

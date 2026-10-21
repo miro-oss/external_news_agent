@@ -13,7 +13,7 @@ public enum TopicErrorCode implements BaseErrorCode {
             "선택한 공시 회사를 찾을 수 없습니다."),
 
     INVALID_SCHEDULE(HttpStatus.BAD_REQUEST, "TOPIC400",
-            "batchSize는 1 이상 300 이하, intervalMinutes는 60, 720, 1440 중 하나여야 합니다."),
+            "batchSize는 1 이상 300 이하, intervalMinutes는 60, 720, 1440, 10080 중 하나여야 합니다."),
     QUERY_TEXT_REQUIRED(HttpStatus.BAD_REQUEST, "TOPIC400",
             "SEARCH 소스를 연결하려면 검색어가 필요합니다."),
     INVALID_KEYWORD_PROPOSAL_SELECTION(HttpStatus.BAD_REQUEST, "TOPIC400",
