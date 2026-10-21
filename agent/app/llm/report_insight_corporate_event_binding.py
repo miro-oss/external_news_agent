@@ -38,6 +38,24 @@ _LISTED_INSTRUMENT = re.compile(
     re.IGNORECASE,
 )
 _EVENT_CONNECTIVE = re.compile(r"(?:해|하여|하고|하며|했으며|했고)(?=\s|$)")
+# A repeated event can follow an embedded outcome clause, e.g. "상장으로
+# 주주의 이익이 희석될 우려와 상장 일정". The subjects inside that completed
+# nominal clause are not new issuers of the following event. Require both an
+# adnominal predicate and a complete clause nominal; company names containing
+# 우려/전망, or an explicit possessive issuer after the clause, remain visible.
+_NOMINALIZED_EVENT_TAIL = re.compile(
+    r"[^,.;!?。；\n]*?[가-힣]+(?:될|할|릴|을|다는|되는|하는)\s+"
+    r"(?:우려|전망|가능성|예상|사실|점)(?:은|는|이|가|을|를|와|과)?"
+    r"(?=$|[\s,.;!?。；])"
+)
+# Headlines can compress the same outcome clause into a complete financial
+# noun phrase. Only this phrase role disambiguates its final 와/과: globally
+# stripping them would erase an unmarked issuer actually named "노을과".
+_COMPACT_FINANCIAL_RISK = re.compile(
+    r"\s*(?:(?:주주|투자자)(?:의)?\s+)?(?:경제적\s+)?"
+    r"(?:이익|지분|지분율|기업가치|주주가치)(?:의)?\s+"
+    r"(?:희석|하락|할인)\s+(?:우려|위험|가능성)(?:와|과)(?=\s|$)"
+)
 _MONEY_PREFIX = re.compile(r"(?<![가-힣A-Za-z0-9_])(?:약|총)\s*$")
 _MONEY_PARTICLE = re.compile(
     r"(?:으로|에서|까지|부터|보다|의|을|를|은|는|이|가|에|로|와|과|도|만)?"
@@ -234,6 +252,8 @@ def _owner_view(prefix: str, *, listing: bool) -> str:
     actual company such as "원테크의" keeps its grammatical role.
     """
     spans = []
+    if risk := _COMPACT_FINANCIAL_RISK.match(prefix):
+        spans.append(risk.span())
     for pattern in (_CURRENCY_AMOUNT, _PREFIX_CURRENCY_AMOUNT):
         for amount in pattern.finditer(prefix):
             start = amount.start()
@@ -256,9 +276,20 @@ def _owner_view(prefix: str, *, listing: bool) -> str:
             listing or prefix[instrument.end() :].lstrip().startswith("상장")
         ) and not _OWNER_DESCRIPTION.search(prefix[: instrument.start()]):
             spans.append(instrument.span())
-    for event in _EVENT.finditer(prefix):
-        if connective := _EVENT_CONNECTIVE.match(prefix, event.end()):
-            spans.append((event.start(), connective.end()))
+    events = sorted(
+        {event.span() for event in _EVENT.finditer(prefix)}
+        | {(start, end) for start, end, _ in _funding_amount_spans(prefix)}
+    )
+    for index, (start, event_end) in enumerate(events):
+        if connective := _EVENT_CONNECTIVE.match(prefix, event_end):
+            spans.append((start, connective.end()))
+        # Bound the clause by the next event, so "A의 IPO로 B가 IPO를 추진할
+        # 전망과 상장 일정" preserves B as the most recent explicit issuer.
+        # Currency-only funding ("B가 100억원을 조달할 전망") is a boundary
+        # too, matching the same event set used by the actual binding guard.
+        end = events[index + 1][0] if index + 1 < len(events) else len(prefix)
+        if nominal := _NOMINALIZED_EVENT_TAIL.match(prefix, event_end, end):
+            spans.append((event_end, nominal.end()))
     for start, end in sorted(spans, reverse=True):
         prefix = prefix[:start] + " " * (end - start) + prefix[end:]
     return prefix
