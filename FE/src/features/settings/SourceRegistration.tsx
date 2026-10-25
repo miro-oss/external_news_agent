@@ -161,10 +161,13 @@ function SourceDialog({ id, onDismiss }: { id: string; onDismiss: () => void }) 
     <dialog ref={dialog} id={id} className="recipient-selection-dialog source-registration-dialog"
       aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`}
       onCancel={event => { event.preventDefault(); dismiss() }}
-      onClick={event => {
-        if (event.target !== event.currentTarget) return
+      onMouseDown={event => {
+        if (event.button !== 0 || event.target !== event.currentTarget) return
         const bounds = event.currentTarget.getBoundingClientRect()
-        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dismiss()
+        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+          event.preventDefault()
+          dismiss()
+        }
       }}>
       <header className="recipient-selection-heading">
         <div><h2 id={`${id}-title`}>RSS 피드 등록</h2><p id={`${id}-description`}>추가로 수집할 RSS 피드 주소를 입력해 주세요.</p></div>
