@@ -102,10 +102,13 @@ export function TopicEditDialog({ id, initial, pending = false, error, onDismiss
   return <dialog ref={dialog} id={id} className="recipient-selection-dialog topic-edit-dialog"
     aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} aria-busy={pending}
     onCancel={event => { event.preventDefault(); dismiss() }}
-    onClick={event => {
-      if (event.target !== event.currentTarget) return
+    onMouseDown={event => {
+      if (event.button !== 0 || event.target !== event.currentTarget) return
       const bounds = event.currentTarget.getBoundingClientRect()
-      if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dismiss()
+      if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+        event.preventDefault()
+        dismiss()
+      }
     }}>
     <header className="recipient-selection-heading">
       <div><h2 id={`${id}-title`}>수집 편집</h2><p id={`${id}-description`}>{initial.name}</p></div>
