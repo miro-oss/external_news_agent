@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 
 from app.core.config import Settings
+from app.core.errors import OutputValidationError
 from app.core.parser import parse_json_object
 from app.llm.base import AnalyzeProvider, ProviderResponse, ProviderUsage
 from app.llm.router import get_analyze_provider
@@ -15,7 +16,7 @@ from app.schemas.keyword_strategy import (
     KeywordStrategyResponse,
 )
 
-PROMPT_VERSION = "keyword-strategy.ko.v1"
+PROMPT_VERSION = "keyword-strategy.ko.v2"
 SYSTEM_INSTRUCTION = (
     Path(__file__).resolve().parents[1] / "prompts" / f"{PROMPT_VERSION}.md"
 ).read_text(encoding="utf-8").strip()
@@ -75,12 +76,31 @@ def _validated_output(
     } | {
         ("EXCLUDED", keyword.casefold()) for keyword in request.topic.excluded_keywords
     }
-    for proposal in output.proposals:
+    violations: list[tuple[int, str]] = []
+    for index, proposal in enumerate(output.proposals):
         key = (proposal.bucket, proposal.keyword.casefold())
         if proposal.action == "ADD" and key in current:
-            raise ValueError("이미 있는 keyword를 같은 bucket에 ADD할 수 없습니다.")
+            violations.append((index, "keyword_add_exists"))
         if proposal.action == "REMOVE" and key not in current:
-            raise ValueError("없는 keyword를 REMOVE할 수 없습니다.")
+            violations.append((index, "keyword_remove_missing"))
+    if violations:
+        # Keep all 12 possible locations inside the shared repair prompt's 1000-char limit.
+        # Neither the diagnostic nor its log kinds needs untrusted keyword/reason text.
+        locations = "\n".join(
+            f"proposals[{index}]: {kind}" for index, kind in violations
+        )
+        raise OutputValidationError(
+            f"{locations}\n"
+            "위 위치는 이전 proposals 배열의 0-based 인덱스입니다.\n"
+            "keyword_add_exists: 같은 bucket에 이미 있는 keyword의 ADD입니다.\n"
+            "keyword_remove_missing: 같은 bucket에 없는 keyword의 REMOVE입니다.\n"
+            "현재 keyword의 기준은 원본 topic의 requiredKeywords / optionalKeywords / "
+            "excludedKeywords입니다. 잘못된 항목은 제외하고 근거가 있는 유효한 제안은 "
+            "유지하세요. 오류를 피하려고 bucket/action/keyword를 임의로 바꾸지 마세요. "
+            "남은 제안에 맞게 summary도 수정하세요. 남는 제안이 없으면 proposals=[]와 "
+            "변경 제안이 없다는 summary를 반환하세요.",
+            error_kinds=tuple(kind for _, kind in violations),
+        )
     return output
 
 

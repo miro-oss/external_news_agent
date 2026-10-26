@@ -45,7 +45,13 @@ public class AgentQuotaJdbcRepository {
     private static final String RESERVATION_TASK_USAGE_SQL = RESERVATION_USAGE_SQL
             + " AND agent_task = ?";
     private static final String RESERVATION_ANALYSIS_USAGE_SQL = RESERVATION_USAGE_SQL
-            + " AND agent_task IN ('ANALYZE', 'SELF_CRITIQUE', 'KEYWORD_STRATEGY', 'REPORT_CHANGES')";
+            + " AND agent_task IN ('ANALYZE', 'SELF_CRITIQUE', 'KEYWORD_STRATEGY', 'REPORT_CHANGES', 'TOPIC_RELEVANCE', 'FEEDBACK_REVIEW', 'FEEDBACK_EVALUATE')";
+    private static final String FREE_COST_SQL = """
+            SELECT COALESCE(SUM(cost_usd), 0)
+            FROM agent_runs
+            WHERE llm_plan = 'FREE'
+              AND started_at >= ? AND started_at < ?
+            """;
     private static final String LEGACY_PAID_USAGE_SQL = """
             SELECT COALESCE(SUM(COALESCE(run.credits, 0)), 0)
             FROM agent_runs run
@@ -55,7 +61,8 @@ public class AgentQuotaJdbcRepository {
                   run.status = 'FAILED'
                   AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
                   AND (run.timeout_phase IS NULL OR run.timeout_phase <> 'READ')
-                  AND NOT (run.agent_task = 'REPORT_CHANGES' AND COALESCE(run.credits, 0) > 0)
+                  AND NOT ((run.agent_task IN ('REPORT_CHANGES', 'TOPIC_RELEVANCE', 'FEEDBACK_REVIEW', 'FEEDBACK_EVALUATE')
+                      OR (run.agent_task = 'INSIGHT' AND run.target_type = 'REPORT')) AND COALESCE(run.credits, 0) > 0)
               )
               AND NOT EXISTS (
                   SELECT 1 FROM agent_quota_reservations reservation
@@ -89,7 +96,8 @@ public class AgentQuotaJdbcRepository {
                   run.status = 'FAILED'
                   AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
                   AND (run.timeout_phase IS NULL OR run.timeout_phase <> 'READ')
-                  AND NOT (run.agent_task = 'REPORT_CHANGES' AND COALESCE(run.credits, 0) > 0)
+                  AND NOT ((run.agent_task IN ('REPORT_CHANGES', 'TOPIC_RELEVANCE', 'FEEDBACK_REVIEW', 'FEEDBACK_EVALUATE')
+                      OR (run.agent_task = 'INSIGHT' AND run.target_type = 'REPORT')) AND COALESCE(run.credits, 0) > 0)
               )
               AND NOT EXISTS (
                   SELECT 1 FROM agent_quota_reservations reservation
@@ -102,12 +110,12 @@ public class AgentQuotaJdbcRepository {
             FROM agent_runs run
             WHERE run.llm_plan = 'PAID'
               AND run.started_at >= ? AND run.started_at < ?
-              AND run.agent_task IN ('ANALYZE', 'SELF_CRITIQUE', 'KEYWORD_STRATEGY', 'REPORT_CHANGES')
+              AND run.agent_task IN ('ANALYZE', 'SELF_CRITIQUE', 'KEYWORD_STRATEGY', 'REPORT_CHANGES', 'TOPIC_RELEVANCE', 'FEEDBACK_REVIEW', 'FEEDBACK_EVALUATE')
               AND NOT (
                   run.status = 'FAILED'
                   AND run.failure_code IN ('PROVIDER_UNAVAILABLE', 'SCHEMA_VIOLATION')
                   AND (run.timeout_phase IS NULL OR run.timeout_phase <> 'READ')
-                  AND NOT (run.agent_task = 'REPORT_CHANGES' AND COALESCE(run.credits, 0) > 0)
+                  AND NOT (run.agent_task IN ('REPORT_CHANGES', 'TOPIC_RELEVANCE', 'FEEDBACK_REVIEW', 'FEEDBACK_EVALUATE') AND COALESCE(run.credits, 0) > 0)
               )
               AND NOT EXISTS (
                   SELECT 1 FROM agent_quota_reservations reservation
@@ -143,6 +151,26 @@ public class AgentQuotaJdbcRepository {
                 idempotencyKey).stream().findFirst();
     }
 
+    public boolean isFailedReportInsight(String idempotencyKey) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM agent_runs WHERE idempotency_key = ?
+                  AND agent_task = 'INSIGHT' AND target_type = 'REPORT' AND status = 'FAILED'
+                """, Integer.class, idempotencyKey);
+        return count != null && count > 0;
+    }
+
+    public boolean isUnstartedRelevanceAdmission(String idempotencyKey) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM agent_runs run
+                JOIN agent_quota_reservations reservation ON reservation.idempotency_key = run.idempotency_key
+                WHERE run.idempotency_key = ? AND run.agent_task = 'TOPIC_RELEVANCE'
+                  AND run.status = 'FAILED' AND run.failure_code = 'ADMISSION_REJECTED'
+                  AND run.input_tokens = 0 AND run.output_tokens = 0 AND run.cost_usd = 0 AND run.credits = 0
+                  AND reservation.status = 'CONSUMED' AND reservation.consumed_units = 0
+                """, Integer.class, idempotencyKey);
+        return count != null && count > 0;
+    }
+
     public void insert(Long collectionRunId,
                        String idempotencyKey,
                        AgentTask task,
@@ -174,6 +202,14 @@ public class AgentQuotaJdbcRepository {
                 start,
                 end);
         return nonNull(reserved).add(nonNull(legacy));
+    }
+
+    public BigDecimal freeEstimatedCost(LocalDateTime from, LocalDateTime to) {
+        return nonNull(jdbcTemplate.queryForObject(
+                FREE_COST_SQL,
+                BigDecimal.class,
+                Timestamp.valueOf(from),
+                Timestamp.valueOf(to)));
     }
 
     public BigDecimal usage(AgentPlan plan,

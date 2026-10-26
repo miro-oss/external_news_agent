@@ -172,7 +172,7 @@ def wait_until_healthy(container: str, run_id: str, environment: dict[str, str],
 
 def child_environment(environment: dict[str, str]) -> dict[str, str]:
     prefixes = ("SPRING_", "SPRING.", "NEWS_", "NEWS.", "AGENT_", "NAVER_", "TAVILY_",
-                "SERPAPI_", "OPENAI_", "MINDLOGIC_", "SMTP_", "TELEGRAM_", "BREAKING_",
+                "SERPAPI_", "OPENAI_", "MINDLOGIC_", "SMTP_", "TELEGRAM_", "BREAKING_", "DART_",
                 "ORG_GRADLE_PROJECT_")
     jvm_options = {"JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "JAVA_OPTS", "GRADLE_OPTS"}
     return {key: value for key, value in environment.items()

@@ -8,6 +8,8 @@ import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.notifications.repository.NotificationChannelRepository;
 import com.example.be.domain.notifications.service.ReportDeliveryOutboxStore;
 import com.example.be.domain.notifications.service.ReportDeliveryWorker;
+import com.example.be.domain.notifications.service.PersonalizedNotificationRenderer;
+import com.example.be.domain.notifications.service.RenderedNotification;
 import com.example.be.domain.notifications.service.TelegramConnectionPoller;
 import com.example.be.domain.notifications.service.TelegramConnectionService;
 import com.example.be.domain.reports.repository.DailyReportJdbcRepository;
@@ -53,6 +55,9 @@ class NotificationSchedulingIntegrationTest {
         var channels = mock(NotificationChannelRepository.class);
         var senders = mock(NotificationSenderRegistry.class);
         var sender = mock(NotificationSender.class);
+        var personalized = mock(PersonalizedNotificationRenderer.class);
+        when(personalized.render(any(Long.class),any(),any())).thenReturn(
+                new RenderedNotification("개인 제목",null,List.of("개인 본문")));
         var deliverySession = mock(NotificationSender.DeliverySession.class);
         var claimed = new AtomicBoolean();
         var work = new ReportDeliveryOutboxStore.Work(1L, 42L, 3L, 2L, "batch",
@@ -89,6 +94,7 @@ class NotificationSchedulingIntegrationTest {
                 .withBean(ReportDeliveryOutboxStore.class, () -> store)
                 .withBean(NotificationChannelRepository.class, () -> channels)
                 .withBean(NotificationSenderRegistry.class, () -> senders)
+                .withBean(PersonalizedNotificationRenderer.class, () -> personalized)
                 .withBean(TelegramConnectionAdapter.class, () -> telegram)
                 .withBean(TelegramConnectionService.class, () -> connections)
                 .withPropertyValues("news.scheduling.enabled=true", "news.reports.daily.enabled=true",
@@ -96,6 +102,7 @@ class NotificationSchedulingIntegrationTest {
                         "news.notifications.telegram.connection-poll-ms=10")
                 .run(context -> {
                     try {
+                        assertTrue(context.getStartupFailure() == null, "스케줄러 컨텍스트가 정상적으로 시작되어야 합니다.");
                         assertTrue(dailyStarted.await(2, TimeUnit.SECONDS), "일일 보고서 생성이 시작되어야 합니다.");
                         assertTrue(deliveryStarted.await(2, TimeUnit.SECONDS),
                                 "일일 보고서 생성이 대기해도 기존 보고서 전달은 시작되어야 합니다.");

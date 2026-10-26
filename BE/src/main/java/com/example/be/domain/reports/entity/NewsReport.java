@@ -1,7 +1,10 @@
 package com.example.be.domain.reports.entity;
 
 import com.example.be.domain.collection.entity.CollectionRun;
+import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.reports.converter.ReportContentConverter;
+import com.example.be.domain.reports.converter.LocalDateListConverter;
+import com.example.be.domain.reports.converter.WeeklyReportInputConverter;
 import com.example.be.domain.reports.converter.ReportCollectionContextConverter;
 import com.example.be.global.converter.LongListJsonConverter;
 import com.example.be.global.converter.YnBooleanConverter;
@@ -58,6 +61,61 @@ public class NewsReport {
     @Column(name = "report_date")
     private LocalDate reportDate;
 
+    /** Manual weekly topic identity and reservation-time display name; null means global scope. */
+    @Column(name = "topic_id")
+    private Long topicId;
+
+    @Column(name = "topic_name", length = 255)
+    private String topicName;
+
+    /** Company linked when a new topic weekly report is reserved; never reconstructed from live topics. */
+    @Column(name = "topic_dart_corp_code", length = 8)
+    private String topicDartCorpCode;
+
+    @Column(name = "topic_dart_corp_name", length = 512)
+    private String topicDartCorpName;
+
+    @Column(name = "topic_dart_stock_code", length = 6)
+    private String topicDartStockCode;
+
+    public Company getTopicDartCompany() {
+        return topicDartCorpCode == null ? null : new Company(topicDartCorpCode, topicDartCorpName,
+                topicDartStockCode == null ? "" : topicDartStockCode);
+    }
+
+    public List<LocalDate> getSourceAnalysisDates() {
+        return topicId == null || weeklyInput == null ? List.of()
+                : weeklyInput.sources().stream().map(WeeklyReportInput.DailySource::reportDate).toList();
+    }
+
+    public void restore() { deletedAt = null; }
+
+    @Column(name = "report_end_date")
+    private LocalDate reportEndDate;
+
+    @Builder.Default
+    @Convert(converter = LongListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "source_report_ids", nullable = false)
+    private List<Long> sourceReportIds = List.of();
+
+    @Builder.Default
+    @Convert(converter = LocalDateListConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "source_report_dates", nullable = false)
+    private List<LocalDate> sourceReportDates = List.of();
+
+    @Builder.Default
+    @Convert(converter = LocalDateListConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "missing_report_dates", nullable = false)
+    private List<LocalDate> missingReportDates = List.of();
+
+    @Convert(converter = WeeklyReportInputConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "weekly_input")
+    private WeeklyReportInput weeklyInput;
+
     @Builder.Default
     @Convert(converter = LongListJsonConverter.class)
     @JdbcTypeCode(SqlTypes.CLOB)
@@ -109,6 +167,14 @@ public class NewsReport {
     /** Recovery which used live findings cannot attest to the original detached generation input. */
     public void invalidateComparisonInput() { this.comparisonInputUsable = false; }
 
+    /** Durable completion intent; legacy reports are not automatically backfilled. */
+    @Convert(converter = YnBooleanConverter.class)
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "insight_auto_requested_yn", nullable = false, length = 1)
+    private boolean automaticInsightsRequested;
+
+    public void requestAutomaticInsights() { this.automaticInsightsRequested = true; }
+
     @Column(name = "model_name", nullable = false, length = MAX_MODEL_NAME_LENGTH)
     private String modelName;
 
@@ -148,6 +214,18 @@ public class NewsReport {
     @Column(name = "coverage_recorded_yn", nullable = false, length = 1)
     private boolean coverageRecorded;
 
+    @Convert(converter = YnBooleanConverter.class)
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "company_selection_recorded_yn", nullable = false, length = 1)
+    private boolean companySelectionRecorded;
+
+    /** Independent of generator coverage: completion and recovery must preserve this exclusion snapshot. */
+    @Builder.Default
+    @Convert(converter = LongListJsonConverter.class)
+    @JdbcTypeCode(SqlTypes.CLOB)
+    @Column(name = "company_suppressed_finding_ids", nullable = false)
+    private List<Long> companySuppressedFindingIds = List.of();
+
     @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(name = "report_status", nullable = false, length = 30)
@@ -155,6 +233,21 @@ public class NewsReport {
 
     @Column(name = "generated_at", nullable = false)
     private LocalDateTime generatedAt;
+
+    /** Freeze selection before generation; interrupted work must never consult newly activated criteria. */
+    public void freezeCompanySelection(List<Long> selectedFindingIds, WeeklyReportInput selectedWeeklyInput) {
+        freezeCompanySelection(selectedFindingIds, List.of(), selectedWeeklyInput);
+    }
+
+    public void freezeCompanySelection(List<Long> selectedFindingIds, List<Long> suppressedFindingIds,
+                                       WeeklyReportInput selectedWeeklyInput) {
+        if (reportStatus != ReportStatus.PENDING) throw new IllegalStateException("완료된 보고서의 선정 근거는 변경할 수 없습니다.");
+        reflectedFindingIds = List.copyOf(selectedFindingIds);
+        companySuppressedFindingIds = List.copyOf(suppressedFindingIds);
+        coverageRecorded = true;
+        companySelectionRecorded = true;
+        if (selectedWeeklyInput != null) weeklyInput = selectedWeeklyInput;
+    }
 
     public void complete(String title,
                          String markdownBody,

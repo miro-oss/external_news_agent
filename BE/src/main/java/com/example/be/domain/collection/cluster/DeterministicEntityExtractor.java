@@ -85,7 +85,8 @@ public final class DeterministicEntityExtractor {
             "WILL", "TIME", "YEAR", "WEEK", "CLASS", "ROOM", "WAVE", "PASS", "PLUS", "SEED",
             "PREMIUM", "EXCLUSIVE", "INTERVIEW", "REPORT", "PRESS", "TECH", "LIVE");
     private static final Pattern TECHNICAL_ANCHOR = Pattern.compile(
-            "(?<![A-Za-z0-9])(?:[A-Z]{2,}[A-Z0-9-]*|[A-Za-z]+[0-9][A-Za-z0-9-]*)(?![A-Za-z0-9])");
+            "(?<![A-Za-z0-9])(?:[A-Z]{2,}[A-Z0-9-]*(?:\\.[0-9]+[A-Za-z0-9-]*)*"
+                    + "|[A-Za-z]+[0-9][A-Za-z0-9-]*(?:\\.[0-9]+[A-Za-z0-9-]*)*)(?![A-Za-z0-9]|\\.[0-9])");
 
     public Set<String> extract(String title,
                                String summary,

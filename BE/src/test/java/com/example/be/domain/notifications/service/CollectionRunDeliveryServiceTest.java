@@ -99,6 +99,36 @@ class CollectionRunDeliveryServiceTest {
     }
 
     @Test
+    void weeklyOnlyIsSavedAsRecurringPolicyWithDisabledRunSnapshot() {
+        var request = enabled("TOPIC");
+        request.setRun(false);
+        request.setDaily(false);
+        request.setWeekly(true);
+        stubEligibleTarget(channel(ChannelType.EMAIL), true);
+        var prepared = service.prepare(request);
+        service.save(42L, List.of(1L), prepared);
+
+        assertThat(prepared.policy().enabled()).isTrue();
+        assertThat(prepared.policy().weekly()).isTrue();
+        assertThat(prepared.snapshot().enabled()).isFalse();
+        assertThat(prepared.snapshot().run()).isFalse();
+        assertThat(prepared.snapshot().daily()).isFalse();
+        verify(automation).savePolicy(1L, prepared.policy());
+    }
+
+    @Test
+    void rejectsWeeklyOnceEvenWhenDisabledAndDefaultsOldRequestsToNoWeeklyConsent() {
+        var once = enabled("ONCE");
+        once.setWeekly(true);
+        assertThatThrownBy(() -> service.prepare(once)).isInstanceOf(GeneralException.class)
+                .hasMessage("주간 보고서 알림은 주제에 계속 적용하는 설정에서만 사용할 수 있습니다.");
+        once.setEnabled(false);
+        assertThatThrownBy(() -> service.prepare(once)).isInstanceOf(GeneralException.class);
+        once.setWeekly(null);
+        assertThat(service.prepare(once).policy().weekly()).isFalse();
+    }
+
+    @Test
     void rejectsMissingOrInvalidModeEnabledAndIds() {
         var request = enabled("UNKNOWN");
         assertThatThrownBy(() -> service.prepare(request)).isInstanceOf(GeneralException.class);

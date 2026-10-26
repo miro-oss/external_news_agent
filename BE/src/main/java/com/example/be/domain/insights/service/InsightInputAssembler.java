@@ -2,6 +2,9 @@ package com.example.be.domain.insights.service;
 
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+import com.example.be.domain.feedback.model.FeedbackModels.Category;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.entity.FindingSection;
@@ -26,6 +29,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
@@ -49,6 +53,7 @@ public class InsightInputAssembler {
     private final FindingRepository findingRepository;
     private final ObjectMapper objectMapper;
     private final InsightEntityNormalizer entityNormalizer;
+    private final FeedbackLearningService feedbackLearning;
 
     @Transactional(readOnly = true)
     public Snapshot assemble(Long issueId) {
@@ -60,7 +65,9 @@ public class InsightInputAssembler {
                 topic.getQueryText(),
                 listOrEmpty(topic.getRequiredKeywords()),
                 listOrEmpty(topic.getOptionalKeywords()),
-                listOrEmpty(topic.getExcludedKeywords()));
+                listOrEmpty(topic.getExcludedKeywords()), topic.getId());
+        var feedbackExamples = feedbackLearning.forTopic(topic, LocalDateTime.now(ApiTimeZone.ZONE),
+                Set.of(Category.TOPIC_MISMATCH, Category.SUMMARY_ERROR, Category.WRONG_CLUSTER, Category.OTHER));
 
         List<IssueArticle> memberships =
                 issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(issueId);
@@ -106,9 +113,9 @@ public class InsightInputAssembler {
                 .collect(Collectors.toUnmodifiableMap(
                         selected -> selected.finding().getId(),
                         selected -> selected.finding().getArticle().getId()));
-        String inputHash = hash(new Fingerprint(topicPayload, findingPayloads));
+        String inputHash = hash(new Fingerprint(topicPayload, findingPayloads, feedbackExamples));
         return new Snapshot(
-                issueId, runId, inputHash, topicPayload, findingPayloads, articleIdsByFinding);
+                issueId, runId, inputHash, topicPayload, findingPayloads, articleIdsByFinding, feedbackExamples);
     }
 
     private List<SelectedFinding> historyFindings(Long topicId,
@@ -232,7 +239,8 @@ public class InsightInputAssembler {
     }
 
     private record Fingerprint(AgentInsightRequest.TopicPayload topic,
-                               List<AgentInsightRequest.FindingPayload> findings) {
+                               List<AgentInsightRequest.FindingPayload> findings,
+                               List<AgentFeedbackExample> feedbackExamples) {
     }
 
     private record SelectedFinding(Finding finding,
@@ -244,6 +252,12 @@ public class InsightInputAssembler {
                            String inputHash,
                            AgentInsightRequest.TopicPayload topic,
                            List<AgentInsightRequest.FindingPayload> findings,
-                           Map<Long, Long> articleIdsByFinding) {
+                           Map<Long, Long> articleIdsByFinding,
+                           List<AgentFeedbackExample> feedbackExamples) {
+        public Snapshot { feedbackExamples = feedbackExamples == null ? List.of() : List.copyOf(feedbackExamples); }
+        public Snapshot(Long issueId, Long runId, String inputHash, AgentInsightRequest.TopicPayload topic,
+                        List<AgentInsightRequest.FindingPayload> findings, Map<Long, Long> articleIdsByFinding) {
+            this(issueId, runId, inputHash, topic, findings, articleIdsByFinding, List.of());
+        }
     }
 }

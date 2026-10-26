@@ -1,10 +1,14 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.agent.client.AgentClient;
 import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+import com.example.be.domain.feedback.model.FeedbackModels.Category;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
 import com.example.be.domain.analysis.agent.entity.AgentTimeoutPhase;
@@ -22,6 +26,7 @@ import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.FetchStatus;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.collection.service.command.CollectionResultWriter;
 import com.example.be.domain.issues.entity.IssueArticle;
 import com.example.be.domain.issues.entity.IssueArticleRole;
@@ -68,18 +73,28 @@ public class AgentReportOrchestrator {
     private final CollectionResultWriter resultWriter;
     private final IssueArticleRepository issueArticleRepository;
     private final SensitivityCalculator sensitivityCalculator;
+    private final TopicRelevancePolicy relevancePolicy;
+    private final FeedbackLearningService feedbackLearning;
+    private final CollectionRunItemRepository runItems;
+
+    public List<Finding> companySelectionCandidates(List<Finding> findings) {
+        return representativeFindings(relevancePolicy.filterFindings(findings)).stream()
+                .filter(ReportFindings::hasFullText)
+                .filter(finding -> AnalysisSource.isLlmDerived(finding.getAnalysisSource()))
+                .filter(FindingEvidencePolicy::hasSupportedEvidence).toList();
+    }
 
     public ReportDocument generate(CollectionRun run,
                                    List<Finding> findings,
                                    LocalDateTime generatedAt) {
-        List<Finding> representativeFindings = representativeFindings(findings);
+        List<Finding> representativeFindings = representativeFindings(relevancePolicy.filterFindings(findings));
         ReportSourceStats sourceStats = sourceStats(run, representativeFindings);
         return generate(new GenerationContext(run, null, null), representativeFindings, sourceStats, generatedAt);
     }
 
     public ReportDocument generateDaily(Long reportId, LocalDate date, List<Finding> findings,
                                         ReportSourceStats sourceStats, LocalDateTime generatedAt) {
-        return generate(new GenerationContext(null, reportId, date), findings,
+        return generate(new GenerationContext(null, reportId, date), relevancePolicy.filterFindings(findings),
                 sourceStats, generatedAt);
     }
 
@@ -94,6 +109,15 @@ public class AgentReportOrchestrator {
             return fallback(context, representativeFindings, generatedAt, sourceStats);
         }
 
+        LearningInput learning;
+        try {
+            learning = learningInput(context, eligible, generatedAt);
+        } catch (RuntimeException exception) {
+            log.warn("보고서 피드백 입력을 불러오지 못해 안전한 fallback을 사용한다. runId={} reportId={}",
+                    context.runId(), context.reportId());
+            return fallback(context, representativeFindings, generatedAt, sourceStats);
+        }
+        // Freeze database-backed learning input before reserving any paid work.
         ReservationSelection selection = reserve(context);
         if (selection == null) {
             return fallback(context, representativeFindings, generatedAt, sourceStats);
@@ -107,6 +131,7 @@ public class AgentReportOrchestrator {
                     eligible,
                     generatedAt,
                     sourceStats,
+                    learning,
                     selection.plan(),
                     selection.reservation().idempotencyKey());
             AgentReportResponse response = client.report(request);
@@ -144,6 +169,7 @@ public class AgentReportOrchestrator {
                                        List<Finding> findings,
                                        LocalDateTime generatedAt,
                                        ReportSourceStats sourceStats,
+                                       LearningInput learning,
                                        AgentPlan plan,
                                        String idempotencyKey) {
         CollectionRun run = context.run();
@@ -159,7 +185,7 @@ public class AgentReportOrchestrator {
                         topics(run, findings),
                         context.daily() ? ReportScope.DAILY : ReportScope.RUN,
                         context.reportId(), context.date()),
-                findings.stream().map(finding -> findingPayload(finding, context.daily())).toList(),
+                findings.stream().map(finding -> findingPayload(finding, context.daily(), learning.topicIds())).toList(),
                 List.of(),
                 new AgentReportRequest.SourceStatsPayload(
                         sourceStats.collected(),
@@ -169,7 +195,24 @@ public class AgentReportOrchestrator {
                         sourceStats.stubExcluded()),
                 context.daily()
                         ? dailySourceNotes(context.date(), sourceStats)
-                        : ReportSourceNotes.from(sourceStats));
+                        : ReportSourceNotes.from(sourceStats), learning.examples());
+    }
+
+    private LearningInput learningInput(GenerationContext context, List<Finding> findings,
+                                        LocalDateTime generatedAt) {
+        CollectionRun run = context.run();
+        Map<Long, Set<Long>> topicIds = relevancePolicy.relevantTopicIdsByFinding(findings);
+        Set<Long> selectedTopics = findings.stream().flatMap(finding -> findingTopicIds(finding, topicIds).stream())
+                .collect(Collectors.toSet());
+        List<Long> sourceRunIds = run == null ? findings.stream().map(Finding::getRun)
+                .filter(java.util.Objects::nonNull).map(CollectionRun::getId).distinct().toList() : List.of(run.getId());
+        var scopes = sourceRunIds.stream().flatMap(id -> runItems.findExecutionItemsByRunId(id).stream())
+                .map(CollectionRunItem::getTopicSnapshot).filter(java.util.Objects::nonNull)
+                .filter(topic -> selectedTopics.contains(topic.topicId())).distinct().toList();
+        LocalDateTime asOf = run == null || run.getStartedAt() == null ? generatedAt : run.getStartedAt();
+        List<AgentFeedbackExample> examples = feedbackLearning.forSnapshots(scopes, asOf,
+                Set.of(Category.TOPIC_MISMATCH, Category.SUMMARY_ERROR, Category.WRONG_CLUSTER, Category.OTHER));
+        return new LearningInput(topicIds, examples);
     }
 
     private List<String> dailySourceNotes(LocalDate date, ReportSourceStats stats) {
@@ -261,7 +304,8 @@ public class AgentReportOrchestrator {
         return AgentTimeoutPhase.valueOf(exception.getTimeoutPhase().name());
     }
 
-    private AgentReportRequest.FindingPayload findingPayload(Finding finding, boolean compact) {
+    private AgentReportRequest.FindingPayload findingPayload(Finding finding, boolean compact,
+                                                            Map<Long, Set<Long>> topicIds) {
         FetchStatus fetchStatus = finding.getArticle().getFetchStatus();
         return new AgentReportRequest.FindingPayload(
                 finding.getId(),
@@ -287,7 +331,14 @@ public class AgentReportOrchestrator {
                 sensitivityPayload(finding),
                 finding.getRelevance().toApiValue(),
                 finding.getCategory(),
-                fetchStatus == null ? FetchStatus.METADATA_ONLY.name() : fetchStatus.name());
+                fetchStatus == null ? FetchStatus.METADATA_ONLY.name() : fetchStatus.name(),
+                findingTopicIds(finding, topicIds).stream().sorted().toList());
+    }
+
+    private Set<Long> findingTopicIds(Finding finding, Map<Long, Set<Long>> topicIds) {
+        var topic = finding.getArticle().getTopic();
+        return topicIds.getOrDefault(finding.getId(), topic == null || topic.getId() == null
+                ? Set.of() : Set.of(topic.getId()));
     }
 
     private AgentReportRequest.SensitivityPayload sensitivityPayload(Finding finding) {
@@ -513,7 +564,11 @@ public class AgentReportOrchestrator {
         if (!fromItems.isEmpty()) {
             return fromItems;
         }
+        Map<Long, Set<Long>> assessedTopics = relevancePolicy.relevantTopicIdsByFinding(findings);
         return findings.stream()
+                .filter(finding -> !assessedTopics.containsKey(finding.getId())
+                        || finding.getArticle().getTopic() != null && assessedTopics.get(finding.getId())
+                        .contains(finding.getArticle().getTopic().getId()))
                 .map(finding -> finding.getArticle().getTopic())
                 .filter(topic -> topic != null && StringUtils.hasText(topic.getName()))
                 .map(topic -> topic.getName().trim())
@@ -589,5 +644,8 @@ public class AgentReportOrchestrator {
     }
 
     private record ReservationSelection(AgentPlan plan, QuotaReservation reservation) {
+    }
+
+    private record LearningInput(Map<Long, Set<Long>> topicIds, List<AgentFeedbackExample> examples) {
     }
 }

@@ -1,0 +1,10 @@
+.saved-topic-schedule { display: grid; justify-items: start; gap: .45rem; }
+.saved-topic-schedule > small { color: var(--fg-3); font-size: .75rem; line-height: 1.5; }
+.saved-topic-schedule > .field-error { color: var(--danger-strong); white-space: normal; overflow-wrap: anywhere; }
+.recipient-selection-dialog.topic-schedule-dialog { height: fit-content; max-height: calc(100dvh - 2rem); }
+.topic-schedule-dialog[open] { grid-template-rows: auto minmax(0, 1fr); }
+.topic-schedule-dialog .recipient-selection-heading > div { min-width: 0; }
+.topic-schedule-dialog .recipient-selection-heading p { overflow-wrap: anywhere; }
+.topic-schedule-form { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; gap: 1rem; }
+.topic-schedule-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: .2rem; }
+.topic-schedule-body .field { margin-bottom: 0; }

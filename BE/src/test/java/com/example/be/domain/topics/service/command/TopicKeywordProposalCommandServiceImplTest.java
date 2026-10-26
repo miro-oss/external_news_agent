@@ -14,6 +14,7 @@ import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -23,6 +24,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -30,6 +32,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -55,6 +58,100 @@ class TopicKeywordProposalCommandServiceImplTest {
         assertThat(proposal.getAppliedChanges().getFirst().after()).isEqualTo("HBM4");
         assertThat(response.getStatus()).isEqualTo("APPROVED");
         assertThat(response.getCurrentKeywords().getOptionalKeywords()).containsExactly("SK하이닉스", "HBM4");
+        assertThat(response.getSelectedChangeIndexes()).containsExactly(0, 1);
+        assertThat(proposal.getSelectedChangeIndexes()).containsExactly(0, 1);
+    }
+
+    @Test
+    void partialApprovalAppliesSelectedAdditionsAndRemovalsInOriginalOrderAndKeepsOriginalProposal() {
+        Topic topic = topic("SK하이닉스", "잡음");
+        var proposal = proposal(topic, TopicKeywordProposalStatus.PENDING,
+                add("HBM4"), add("미선택"), remove("잡음"), remove("SK하이닉스"), add("HBM5"));
+        var original = proposal.getChanges();
+        loaded(proposal);
+
+        var response = service.approve(1L, List.of(4, 2, 0));
+
+        assertThat(topic.getOptionalKeywords()).containsExactly("SK하이닉스", "HBM4", "HBM5");
+        assertThat(topic.getKeywordRevisions()).doesNotContainKeys("OPTIONAL:미선택", "OPTIONAL:sk하이닉스");
+        assertThat(proposal.getAppliedChanges()).hasSize(3);
+        assertThat(proposal.getSelectedChangeIndexes()).containsExactly(0, 2, 4);
+        assertThat(response.getSelectedChangeIndexes()).containsExactly(0, 2, 4);
+        assertThat(proposal.getChanges()).isSameAs(original);
+        assertThat(response.getChanges()).hasSize(5);
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidSelections")
+    void invalidSelectionDoesNotMutateKeywordsProposalOrRevisionOwnership(List<Integer> selection) {
+        Topic topic = spy(topic("SK하이닉스"));
+        var proposal = spy(proposal(topic, TopicKeywordProposalStatus.PENDING, add("HBM4"), add("HBM5")));
+        loaded(proposal);
+
+        assertThatThrownBy(() -> service.approve(1L, selection)).isInstanceOf(TopicException.class)
+                .extracting("code").isEqualTo(TopicErrorCode.INVALID_KEYWORD_PROPOSAL_SELECTION);
+
+        verify(topic, never()).applyKeywordChanges(any());
+        verify(proposal, never()).approve(any(), any(), any());
+        assertThat(topic.getOptionalKeywords()).containsExactly("SK하이닉스");
+        assertThat(topic.getKeywordRevisions()).isEmpty();
+        assertThat(proposal.getStatus()).isEqualTo(TopicKeywordProposalStatus.PENDING);
+        assertThat(proposal.getReviewedAt()).isNull();
+        assertThat(proposal.getAppliedChanges()).isNull();
+        assertThat(proposal.getSelectedChangeIndexes()).isNull();
+    }
+
+    static Stream<List<Integer>> invalidSelections() {
+        return Stream.of(List.of(), Arrays.asList(0, null), List.of(0, 0), List.of(-1), List.of(2));
+    }
+
+    @Test
+    void rejectingPartialApprovalUndoesOnlyTheSelectedChangesAndReapprovalCanChooseADifferentSubset() {
+        Topic topic = topic("SK하이닉스", "잡음");
+        var proposal = proposal(topic, TopicKeywordProposalStatus.PENDING,
+                add("HBM4"), add("HBM5"), remove("잡음"));
+        var original = proposal.getChanges();
+        loaded(proposal);
+
+        service.approve(1L, List.of(0, 2));
+        replaceOptional(topic, "SK하이닉스", "HBM4", "HBM5");
+        var rejected = service.reject(1L);
+        assertThat(topic.getOptionalKeywords()).containsExactly("SK하이닉스", "HBM5", "잡음");
+        assertThat(rejected.getSelectedChangeIndexes()).containsExactly(0, 2);
+
+        var reapproved = service.approve(1L, List.of(1));
+        assertThat(reapproved.getSelectedChangeIndexes()).containsExactly(1);
+        assertThat(proposal.getAppliedChanges()).isEmpty();
+        service.reject(1L);
+        assertThat(topic.getOptionalKeywords()).containsExactly("SK하이닉스", "HBM5", "잡음");
+        assertThat(proposal.getChanges()).isSameAs(original);
+    }
+
+    @Test
+    void retryingApprovalWithDifferentValidSelectionReturnsThePersistedSelectionWithoutMutatingAnything() {
+        Topic topic = topic("SK하이닉스");
+        var proposal = proposal(topic, TopicKeywordProposalStatus.PENDING, add("HBM4"), add("HBM5"));
+        loaded(proposal);
+        service.approve(1L, List.of(0));
+        var reviewedAt = proposal.getReviewedAt();
+        var revisions = topic.getKeywordRevisions();
+
+        var response = service.approve(1L, List.of(1));
+
+        assertThat(response.getSelectedChangeIndexes()).containsExactly(0);
+        assertThat(topic.getOptionalKeywords()).containsExactly("SK하이닉스", "HBM4");
+        assertThat(proposal.getReviewedAt()).isEqualTo(reviewedAt);
+        assertThat(topic.getKeywordRevisions()).isEqualTo(revisions);
+    }
+
+    @Test
+    void legacyApprovedRetryKeepsNullSelectionAndInvalidRetriesStillFailValidation() {
+        var proposal = proposal(topic("HBM4"), TopicKeywordProposalStatus.APPROVED, add("HBM4"));
+        loaded(proposal);
+        assertThat(service.approve(1L, List.of(0)).getSelectedChangeIndexes()).isNull();
+        assertThatThrownBy(() -> service.approve(1L, List.of())).isInstanceOf(TopicException.class)
+                .extracting("code").isEqualTo(TopicErrorCode.INVALID_KEYWORD_PROPOSAL_SELECTION);
+        assertThat(proposal.getSelectedChangeIndexes()).isNull();
     }
 
     @Test
@@ -143,6 +240,21 @@ class TopicKeywordProposalCommandServiceImplTest {
         loaded(proposal);
         service.reject(1L);
         assertThat(current.getOptionalKeywords()).containsExactly("SK하이닉스", "HBM4");
+    }
+
+    @Test
+    void legacyReversalDoesNotTreatAnUnselectedLaterSuggestionAsAnApproval() {
+        var original = proposal(topic("SK하이닉스"), TopicKeywordProposalStatus.APPROVED, add("HBM4"));
+        Topic current = topic("SK하이닉스", "HBM4", "HBM5");
+        var proposal = withCurrentTopic(original, current);
+        var later = proposal(current, TopicKeywordProposalStatus.APPROVED, add("HBM4"), add("HBM5"));
+        later.approve(later.getReviewedAt().plusMinutes(1), List.of(), List.of(1));
+        when(proposalRepository.findOtherApprovedByTopicId(7L, 1L)).thenReturn(List.of(later));
+        loaded(proposal);
+
+        service.reject(1L);
+
+        assertThat(current.getOptionalKeywords()).containsExactly("SK하이닉스", "HBM5");
     }
 
     @Test
@@ -279,7 +391,7 @@ class TopicKeywordProposalCommandServiceImplTest {
     void keywordAndProposalStatusChangesShareTheSameRollbackBoundary() {
         var proposal = spy(proposal(topic("SK하이닉스"), TopicKeywordProposalStatus.PENDING, add("HBM4")));
         loaded(proposal);
-        doThrow(new IllegalStateException("review persistence failed")).when(proposal).approve(any(), anyList());
+        doThrow(new IllegalStateException("review persistence failed")).when(proposal).approve(any(), anyList(), anyList());
         var transactions = mock(PlatformTransactionManager.class);
         var transaction = new SimpleTransactionStatus();
         when(transactions.getTransaction(any())).thenReturn(transaction);

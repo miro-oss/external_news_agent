@@ -37,7 +37,8 @@ public class LlmSettingController {
     }
 
     @GetMapping("/usage/llm")
-    @Operation(summary = "LLM 일·월 사용량 조회")
+    @Operation(summary = "LLM 일·월 사용량 및 일일 예상 비용 조회",
+            description = "FREE 경로의 예상 비용은 한국시간 오늘 시작한 작업에 기록된 USD 비용으로 집계합니다.")
     public ApiResponse<LlmSettingDTO.UsageResponse> getUsage() {
         return ApiResponse.of(GeneralSuccessCode.OK, quotaService.usage());
     }

@@ -1,6 +1,10 @@
 package com.example.be.domain.reports.controller;
 
 import com.example.be.domain.reports.dto.res.ReportResDTO;
+import com.example.be.domain.reports.dto.req.ReportReqDTO;
+import com.example.be.domain.reports.service.TopicWeeklyReportCreationService;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.service.ReportQueryService;
 import com.example.be.domain.reports.service.ReportCommandService;
@@ -25,11 +29,39 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/news/reports")
-@Tag(name = "보고서", description = "실행별·일일 통합 보고서 조회·삭제 API")
+@Tag(name = "보고서", description = "실행별·일일·주간 통합 보고서 조회·삭제 API")
 public class ReportController {
 
     private final ReportQueryService reportQueryService;
     private final ReportCommandService reportCommandService;
+    private final TopicWeeklyReportCreationService topicWeeklyReportCreationService;
+
+    @PostMapping("/weekly")
+    @Operation(summary = "주제별 주간 보고서 생성", description = "종료된 월~일의 저장 분석을 주제로 먼저 모아 동기 생성합니다. 같은 주제·주차는 같은 ID를 반환하며, 삭제한 보고서는 복원합니다. 기존 생성 중이면 created=false/reportReady=false입니다. 새 수집·재분석·자동 발송은 하지 않습니다.")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다.",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                            {"isSuccess":true,"code":"COMMON200","message":"성공입니다.","result":{"reportId":301,"created":true,"reportReady":true}}
+                            """))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "COMMON400. 필수값·양의 주제 ID·날짜 형식 오류 또는 종료되지 않은 주차",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = @ExampleObject(value = """
+                            {"isSuccess":false,"code":"COMMON400","message":"주간 보고서는 종료된 월요일~일요일 기간만 집계할 수 있습니다.","result":{}}
+                            """))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "TOPIC404. 수집 주제를 찾을 수 없습니다."),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "입력 수집·분석 진행 중 또는 사용 가능한 분석 자료 없음",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = {
+                            @ExampleObject(name = "수집 중", value = """
+                                    {"isSuccess":false,"code":"REPORT409","message":"선택한 주제의 수집·분석이 진행 중입니다. 완료 후 다시 시도해 주세요.","result":{}}
+                                    """),
+                            @ExampleObject(name = "자료 없음", value = """
+                                    {"isSuccess":false,"code":"REPORT409","message":"선택한 주제와 기간에 보고서를 만들 수 있는 분석 자료가 없습니다.","result":{}}
+                                    """)
+                    }))
+    })
+    public ApiResponse<ReportResDTO.WeeklyCreated> createWeekly(@RequestBody ReportReqDTO.WeeklyCreate request) {
+        return ApiResponse.of(GeneralSuccessCode.OK,
+                topicWeeklyReportCreationService.generate(request.topicId(), request.weekStartDate()));
+    }
 
     @DeleteMapping("/{reportId}")
     @Operation(summary = "보고서 삭제", description = "보고서를 목록·최신·상세 조회와 새 공유 대상에서 제외합니다. 원문·분석·발송 이력 및 기존 일일 통합 내용은 보존합니다. 이미 삭제한 보고서도 같은 성공 응답을 반환합니다.")
@@ -52,7 +84,7 @@ public class ReportController {
     }
 
     @GetMapping
-    @Operation(summary = "보고서 목록 조회", description = "본문 없이 생성 시각·집계값·저장된 수집 조건을 페이징 조회합니다. collectionStartedAt은 RUN 원본 실행의 시작 시각(Asia/Seoul)이며 DAILY 또는 기록이 없으면 null입니다. from/to는 기존 생성일 기준을 유지합니다.")
+    @Operation(summary = "보고서 목록 조회", description = "본문 없이 생성 시각·집계값·저장된 수집 조건을 페이징 조회합니다. collectionStartedAt은 RUN 원본 실행의 시작 시각(Asia/Seoul)이며 DAILY/WEEKLY 또는 기록이 없으면 null입니다. from/to는 기존 생성일 기준을 유지합니다.")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다."),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -68,7 +100,7 @@ public class ReportController {
             @RequestParam(required = false) String to,
             @RequestParam(defaultValue = "" + PageResponse.DEFAULT_PAGE) int page,
             @RequestParam(defaultValue = "" + PageResponse.DEFAULT_SIZE) int size,
-            @Parameter(description = "RUN 실행별 / DAILY 일일 통합. 생략하면 전체")
+            @Parameter(description = "RUN 실행별 / DAILY 일일 통합 / WEEKLY 주간 통합. 생략하면 전체")
             @RequestParam(required = false) ReportScope reportScope
     ) {
         return ApiResponse.of(GeneralSuccessCode.OK, reportScope == null
@@ -77,10 +109,10 @@ public class ReportController {
     }
 
     @GetMapping("/latest")
-    @Operation(summary = "최신 보고서 조회", description = "저장된 보고서 구조·수집 조건·고유 기사 통계를 함께 조회합니다. 보고서가 없으면 200과 null을 반환합니다.")
+    @Operation(summary = "최신 보고서 조회", description = "저장된 보고서 구조·수집 조건·고유 기사 통계와 dartCompanies 회사 스냅샷을 includeFindings와 관계없이 함께 조회합니다. 보고서가 없으면 200과 null을 반환합니다.")
     public ApiResponse<ReportResDTO.Detail> getLatest(
             @RequestParam(defaultValue = "true") boolean includeFindings,
-            @Parameter(description = "RUN 실행별 / DAILY 일일 통합. 생략하면 전체에서 최신")
+            @Parameter(description = "RUN 실행별 / DAILY 일일 통합 / WEEKLY 주간 통합. 생략하면 전체에서 최신")
             @RequestParam(required = false) ReportScope reportScope
     ) {
         ReportResDTO.Detail result = reportScope == null ? reportQueryService.getLatest(includeFindings)
@@ -91,7 +123,7 @@ public class ReportController {
     }
 
     @GetMapping("/{reportId}")
-    @Operation(summary = "보고서 상세 조회", description = "마크다운과 구조화 본문, 실행 접수 당시 수집 조건, 고유 기사 통계 및 근거 findings를 조회합니다. 이전 보고서의 structuredContent는 null일 수 있습니다.")
+    @Operation(summary = "보고서 상세 조회", description = "마크다운과 구조화 본문, 실행 접수 당시 수집 조건, 고유 기사 통계 및 근거 findings를 조회합니다. WEEKLY는 월~일 집계 기간과 입력 일일 보고서 ID·날짜 및 빠진 날짜를 함께 반환합니다. dartCompanies는 RUN 접수 또는 주제별 WEEKLY 생성 요청 당시 저장한 공시 대상 회사이며 includeFindings와 관계없이 반환합니다. 이전 보고서의 structuredContent는 null일 수 있습니다.")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "성공입니다."),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(

@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { useQueryClient } from '@tanstack/react-query'
+import type { TopicWeeklyReportCreated } from '../../api/topicWeeklyReport'
 import {
   useAudienceSetting,
   useIssue,
@@ -17,6 +20,7 @@ import {
   type ReportDetail,
   type ReportFinding,
   type ReportSummary,
+  type ReportScope,
   type SensitivityLevel,
 } from '../../api/types'
 import { KeyPointList } from '../../components/KeyPointList'
@@ -26,27 +30,37 @@ import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { prefersReducedMotion } from '../../lib/motion'
 import { ArticleDetailModal } from '../articles/ArticleDetailModal'
 import { ReportSharePanel } from '../notifications/ReportSharePanel'
-import { ReportReadingContent } from './ReportReadingContent'
+import { ReportReadingWithFeedback } from './ReportReadingWithFeedback'
 import { ReportChangesPanel } from './ReportChangesPanel'
+import { refreshReportReading } from './reportRefresh'
+import { ReportInsightsPanel } from './ReportInsightsPanel'
+import { ReportDartPanel } from './ReportDartPanel'
+import { reportInsightSnapshotKey } from '../../api/reportInsights'
 import { IssueTonePanel } from './IssueTonePanel'
 import { collectionHighlightTerms, collectionKeywords } from './reportReading'
 import { ReportKeywordText } from './ReportKeywordText'
 import { categoryTone, dailyReportTopics, defaultSensitivity } from './reportDisplay'
 import { reportDisplayTitle } from './reportTitle'
+import { WeeklyReportSources } from './WeeklyReportSources'
+import { reportHash, reportScopeFromHash } from './reportNavigation'
 import { ReportDetailSkeleton, ReportWorkspaceSkeleton, RelatedArticlesSkeleton } from './ReportSkeletons'
 import { ReportFiltersBar } from './ReportFiltersBar'
-import { DEFAULT_REPORT_FILTERS, filterReports, reportFilterDate, reportTopicOptions, type ReportFilters } from './reportFilters'
+import { TopicWeeklyReportCreate } from './TopicWeeklyReportCreate'
+import { TransientStatus } from '../../components/TransientStatus'
+import { DEFAULT_REPORT_FILTERS, filterReports, reportFilterDate, reportTopicOptions, sortReportsByAggregationDate, type ReportFilters } from './reportFilters'
 
-type ReportScopeTab = 'DAILY' | 'RUN'
+type ReportScopeTab = ReportScope
 
 const REPORT_SCOPE_OPTIONS: ReadonlyArray<SegmentedOption<ReportScopeTab>> = [
   { value: 'RUN', label: '실행별' },
   { value: 'DAILY', label: '일일 통합' },
+  { value: 'WEEKLY', label: '주간 보고서' },
 ]
 
 // 이름만으로는 두 보고서의 차이가 서지 않는다. 고른 범위가 무엇을 담는지 한 줄로 붙여 둔다.
 const REPORT_SCOPE_HINTS: Record<ReportScopeTab, string> = {
   DAILY: '하루 동안 모인 같은 이슈를 한 장으로 묶었습니다.',
+  WEEKLY: '월요일부터 일요일까지의 소식을 전체 통합 또는 주제별로 확인합니다.',
   RUN: '수집을 실행할 때마다 만들어진 보고서입니다.',
 }
 
@@ -92,10 +106,15 @@ function useReportFilterClock() {
 }
 
 export function ReportsPage() {
-  const [reportScope, setReportScope] = useState<ReportScopeTab>('RUN')
+  const queryClient = useQueryClient()
+  const [reportScope, setReportScope] = useState<ReportScopeTab>(() => reportScopeFromHash(window.location.hash))
   const [selectedId, setSelectedId] = useState<number | null>(reportIdFromHash)
   const [filters, setFilters] = useState<ReportFilters>(DEFAULT_REPORT_FILTERS)
   const filterNow = useReportFilterClock()
+  const [creatingWeekly, setCreatingWeekly] = useState(false)
+  const [weeklyNotice, setWeeklyNotice] = useState<string | null>(null)
+  const weeklyTrigger = useRef<HTMLButtonElement>(null)
+  const weeklyDialogId = useId()
   const [audienceOverride, setAudienceOverride] = useState<Audience | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
     articleId: number | null
@@ -106,9 +125,13 @@ export function ReportsPage() {
   const scopeFilter = selectedReport.data?.reportScope ?? reportScope
   const reports = useReports(scopeFilter)
   const audienceSetting = useAudienceSetting()
-  const filteredReports = useMemo(() => filterReports(reports.data?.content ?? [], filters, filterNow), [reports.data?.content, filters, filterNow])
+  const orderedReports = useMemo(() => {
+    const items = reports.data?.content ?? []
+    return scopeFilter === 'RUN' ? items : sortReportsByAggregationDate(items)
+  }, [reports.data?.content, scopeFilter])
+  const filteredReports = useMemo(() => filterReports(orderedReports, filters, filterNow), [orderedReports, filters, filterNow])
   const topicOptions = useMemo(() => reportTopicOptions(reports.data?.content ?? []), [reports.data?.content])
-  // A direct link may refer to DAILY while the default RUN list is still loading.
+  // A direct link may refer to an aggregate while the default RUN list is still loading.
   const isResolvingSelection = selectedId !== null && selectedReport.isPending
     && !reports.data?.content.some(report => report.id === selectedId)
   const activeId = isResolvingSelection ? null
@@ -118,6 +141,7 @@ export function ReportsPage() {
   const removeReport = useDeleteReport()
   useEffect(() => {
     const sync = () => {
+      setReportScope(reportScopeFromHash(window.location.hash))
       setSelectedId(reportIdFromHash())
       setFilters(DEFAULT_REPORT_FILTERS)
       setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
@@ -130,24 +154,33 @@ export function ReportsPage() {
     setReportScope(scopeFilter)
     setSelectedId(id)
     setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
-    window.history.replaceState(null, '', `#/reports?reportId=${id}`)
+    window.history.replaceState(null, '', reportHash(scopeFilter, id))
   }
   function changeFilters(nextFilters: ReportFilters) {
-    const matches = filterReports(reports.data?.content ?? [], nextFilters, filterNow)
+    const matches = filterReports(orderedReports, nextFilters, filterNow)
     const nextId = matches.find(report => report.id === activeId)?.id ?? matches[0]?.id ?? null
     setReportScope(scopeFilter)
     setFilters(nextFilters)
     setSelectedId(nextId)
     setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
-    window.history.replaceState(null, '', nextId === null ? '#/reports' : `#/reports?reportId=${nextId}`)
+    window.history.replaceState(null, '', reportHash(scopeFilter, nextId))
   }
   function changeScope(scope: ReportScopeTab) {
     setReportScope(scope)
     setSelectedId(null)
     setFilters(DEFAULT_REPORT_FILTERS)
     setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
-    window.history.replaceState(null, '', '#/reports')
+    window.history.replaceState(null, '', reportHash(scope))
   }
+  const openCreatedWeekly = useCallback((result: TopicWeeklyReportCreated) => {
+    setCreatingWeekly(false)
+    setReportScope('WEEKLY')
+    setFilters(DEFAULT_REPORT_FILTERS)
+    setSelectedId(result.reportId)
+    setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
+    setWeeklyNotice(result.created ? '주제별 주간 보고서를 만들었습니다.' : '같은 주제·주차의 기존 보고서를 열었습니다.')
+    window.history.replaceState(null, '', reportHash('WEEKLY', result.reportId))
+  }, [])
   async function deleteReport(id: number) {
     const nextId = filteredReports.find(report => report.id !== id)?.id ?? null
     const currentHash = window.location.hash
@@ -156,7 +189,7 @@ export function ReportsPage() {
     setReportScope(scopeFilter)
     setSelectedId(nextId)
     setEvidenceSelection({ articleId: null, runId: null, sentences: [] })
-    window.history.replaceState(null, '', nextId === null ? '#/reports' : `#/reports?reportId=${nextId}`)
+    window.history.replaceState(null, '', reportHash(scopeFilter, nextId))
   }
   const isInitialLoading = reports.isPending || isResolvingSelection
   const initialError = reports.isError ? reports.error : null
@@ -175,7 +208,7 @@ export function ReportsPage() {
         </div>
       </header>
 
-      <div className="report-scope-bar">
+      <div className={`report-scope-bar${scopeFilter === 'WEEKLY' ? ' report-scope-with-create' : ''}`}>
         <Segmented
           className="report-scope-tabs"
           label="보고서 범위"
@@ -184,8 +217,15 @@ export function ReportsPage() {
           disabled={removeReport.isPending}
           onSelect={changeScope}
         />
+        {scopeFilter === 'WEEKLY' && <button ref={weeklyTrigger} type="button" className="primary-button report-weekly-create"
+          disabled={removeReport.isPending} aria-haspopup="dialog" aria-expanded={creatingWeekly}
+          aria-controls={creatingWeekly ? weeklyDialogId : undefined}
+          onClick={() => { setWeeklyNotice(null); setCreatingWeekly(true) }}>
+          <span aria-hidden="true">＋</span> 주제별 보고서 만들기
+        </button>}
         <p className="report-scope-hint">{REPORT_SCOPE_HINTS[scopeFilter]}</p>
       </div>
+      <TransientStatus as="p" className="report-weekly-notice" message={weeklyNotice} />
 
       <ReportFiltersBar
         filters={filters}
@@ -199,7 +239,7 @@ export function ReportsPage() {
         onReset={() => changeFilters(DEFAULT_REPORT_FILTERS)}
       />
 
-      {isInitialLoading && !hasWorkspace && !initialError && <ReportWorkspaceSkeleton daily={scopeFilter === 'DAILY'} />}
+      {isInitialLoading && !hasWorkspace && !initialError && <ReportWorkspaceSkeleton daily={scopeFilter !== 'RUN'} />}
       {initialError && <div className="state-panel error" role="alert">보고서를 불러오지 못했습니다. {initialError.message}</div>}
       {selectedReport.isError && !reports.data?.content.some(report => report.id === selectedId) && (
         <div className="state-panel error" role="alert">선택한 보고서를 불러오지 못했습니다. {selectedReport.error.message}</div>
@@ -208,7 +248,9 @@ export function ReportsPage() {
         <div className="state-panel report-empty">
           <span className="empty-mark" aria-hidden="true">⌁</span>
           <strong>표시할 보고서가 없습니다.</strong>
-          <span>{scopeFilter === 'DAILY'
+          <span>{scopeFilter === 'WEEKLY'
+            ? '주제별 보고서 만들기에서 주제와 지난 주차를 선택해 보세요. 전체 통합은 매주 월요일에 자동으로 만들어집니다.'
+            : scopeFilter === 'DAILY'
             ? '하루의 수집이 모두 끝나면 다음 날 일일 통합 보고서가 자동으로 만들어집니다.'
             : '수집을 실행하면 분석 완료 후 첫 보고서가 자동으로 만들어집니다.'}</span>
         </div>
@@ -243,7 +285,7 @@ export function ReportsPage() {
           </aside>
 
           <section className="report-detail-shell" aria-live="polite">
-            {activeReport.isPending && <ReportDetailSkeleton daily={scopeFilter === 'DAILY'} />}
+            {activeReport.isPending && <ReportDetailSkeleton daily={scopeFilter !== 'RUN'} />}
             {activeReport.isError && (
               <div className="report-detail-state error" role="alert">{activeReport.error.message}</div>
             )}
@@ -255,6 +297,8 @@ export function ReportsPage() {
                 defaultAudience={audienceSetting.data?.audience}
                 onAudienceSelect={setAudienceOverride}
                 onDelete={() => deleteReport(activeReportData.id)}
+                onRefreshReport={() => refreshReportReading(queryClient, activeReportData,
+                  () => activeReport.refetch({ throwOnError: true }))}
                 onEvidenceSelect={(articleId, runId, sentences) => {
                   setEvidenceSelection({
                     articleId,
@@ -276,6 +320,9 @@ export function ReportsPage() {
         collectionContexts={activeReportData?.collectionContexts ?? []}
         onClose={closeArticle}
       />
+      {creatingWeekly && createPortal(<TopicWeeklyReportCreate id={weeklyDialogId} initialTopicId={filters.topicId}
+        now={filterNow} returnFocusRef={weeklyTrigger} onDismiss={() => setCreatingWeekly(false)}
+        onReady={openCreatedWeekly} />, document.body)}
     </main>
   )
 }
@@ -286,13 +333,14 @@ function ReportListItem({ report, active, onSelect, disabled }: {
   onSelect: () => void
   disabled: boolean
 }) {
-  const topicNames = [...new Set((report.collectionContexts ?? [])
-    .flatMap(context => context.topics.map(topic => topic.topicName.trim())).filter(Boolean))]
+  const topicNames = report.topicId != null ? [report.topicName?.trim() || `주제 #${report.topicId}`]
+    : [...new Set((report.collectionContexts ?? [])
+      .flatMap(context => context.topics.map(topic => topic.topicName.trim())).filter(Boolean))]
   const filterDate = reportFilterDate(report)
   const collectionTime = report.collectionStartedAt && filterDate && report.reportScope === 'RUN'
     ? collectionClock.format(new Date(report.collectionStartedAt))
     : null
-  const dateLabel = report.reportScope === 'DAILY' ? '집계일' : '수집일'
+  const dateLabel = report.reportScope === 'WEEKLY' ? '집계 기간' : report.reportScope === 'DAILY' ? '집계일' : '수집일'
   return (
     <button
       type="button"
@@ -301,24 +349,28 @@ function ReportListItem({ report, active, onSelect, disabled }: {
       disabled={disabled}
       onClick={onSelect}
     >
-      <strong title={report.reportScope === 'DAILY' ? reportDisplayTitle(report) : report.title}>{reportDisplayTitle(report)}</strong>
+      {report.reportScope === 'WEEKLY' && <span className={`report-kind-label${report.topicId != null ? ' is-topic' : ''}`}>
+        {report.topicId != null ? '주제별' : '전체 통합'}
+      </span>}
+      <strong title={report.reportScope !== 'RUN' ? reportDisplayTitle(report) : report.title}>{reportDisplayTitle(report)}</strong>
       <span className="report-list-topics" title={topicNames.join(' · ')}>{topicNames.length ? topicNames.join(' · ') : '수집 주제 기록 없음'}</span>
       {filterDate ? (
-        <time className="report-list-date" dateTime={report.reportScope === 'DAILY' ? filterDate : report.collectionStartedAt ?? undefined}>
-          {dateLabel} {filterDate}{collectionTime ? ` ${collectionTime}` : ''}
+        <time className="report-list-date" dateTime={report.reportScope !== 'RUN' ? filterDate : report.collectionStartedAt ?? undefined}>
+          {dateLabel} {filterDate}{report.reportScope === 'WEEKLY' && report.reportEndDate ? ` ~ ${report.reportEndDate}` : ''}{collectionTime ? ` ${collectionTime}` : ''}
         </time>
       ) : <span className="report-list-date">{dateLabel} 기록 없음</span>}
     </button>
   )
 }
 
-function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvidenceSelect, onDelete }: {
+function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvidenceSelect, onDelete, onRefreshReport }: {
   report: ReportDetail
   audience: Audience
   defaultAudience?: Audience
   onAudienceSelect: (audience: Audience) => void
   onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
   onDelete: () => Promise<void>
+  onRefreshReport: () => Promise<unknown>
 }) {
   const [sensitivityOverride, setSensitivityOverride] = useState<ReportFindingFilters['sensitivityLevel'] | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -330,7 +382,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
   const keywords = collectionKeywords(contexts, null)
   const dailyTopics = dailyReportTopics(report)
   const findings = useMemo(
-    () => report.reportScope === 'DAILY'
+    () => report.reportScope !== 'RUN'
       ? sortFindingsForAudience(report.findings ?? [], audience)
       : selectFindingsForAudience(report.findings ?? [], audience),
     [audience, report.findings, report.reportScope],
@@ -360,8 +412,11 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
   return (
     <article className="report-document report-document-enter" data-report-scope={report.reportScope}>
       <header className="report-document-header">
+        {report.reportScope === 'WEEKLY' && <span className={`report-kind-label${report.topicId != null ? ' is-topic' : ''}`}>
+          {report.topicId != null ? '주제별' : '전체 통합'}
+        </span>}
         <div className="report-title-row">
-          <h2 title={report.reportScope === 'DAILY' ? reportDisplayTitle(report) : report.title}><ReportKeywordText text={reportDisplayTitle(report)} terms={highlightTerms} /></h2>
+          <h2 title={report.reportScope !== 'RUN' ? reportDisplayTitle(report) : report.title}><ReportKeywordText text={reportDisplayTitle(report)} terms={highlightTerms} /></h2>
           <button type="button" className="text-button report-delete-button" aria-label="이 보고서 삭제" aria-expanded={confirmDelete}
             onClick={() => { setConfirmDelete(value => !value); setDeleteError('') }} disabled={deleting}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6" /></svg>
@@ -377,16 +432,19 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
           {deleteError && <p className="field-error" role="alert">{deleteError}</p>}
         </div>}
         <time dateTime={report.generatedAt}>{formatFullDate(report.generatedAt)}</time>
-        {report.reportScope !== 'DAILY' && <div className="report-collection-context">
+        {report.reportScope === 'RUN' && <div className="report-collection-context">
           {topicNames.length > 0 ? <>
             <p><span>수집 주제</span><strong>{topicNames.join(' · ')}</strong></p>
             {keywords.length > 0 && <p><span>키워드</span><span className="report-context-keywords">{keywords.join(' · ')}</span></p>}
           </> : <p className="report-context-unavailable">수집 당시 주제·키워드 기록이 없는 보고서입니다.</p>}
         </div>}
-        {report.reportScope === 'DAILY' ? <div className="report-daily-summary">
-          <span className="report-daily-date">{report.reportDate ?? '집계일 미상'}</span>
-          {dailyTopics.names.length > 0 && <p className="report-daily-topics"><span>{dailyTopics.label}</span><strong>{dailyTopics.names.join(' · ')}</strong></p>}
-          {report.sourceReportCount != null && report.sourceReportCount > 0
+        <ReportDartPanel report={report} />
+        {report.reportScope !== 'RUN' ? <div className="report-daily-summary">
+          <span className="report-daily-date">{report.reportDate ?? '집계일 미상'}{report.reportScope === 'WEEKLY' && report.reportEndDate ? ` ~ ${report.reportEndDate}` : ''}</span>
+          {report.topicId != null
+            ? <p className="report-daily-topics"><span>수집 주제</span><strong>{report.topicName || `주제 #${report.topicId}`}</strong></p>
+            : dailyTopics.names.length > 0 && <p className="report-daily-topics"><span>{dailyTopics.label}</span><strong>{dailyTopics.names.join(' · ')}</strong></p>}
+          {report.reportScope === 'WEEKLY' ? <WeeklyReportSources report={report} /> : report.sourceReportCount != null && report.sourceReportCount > 0
             && <p className="report-daily-count">실행별 보고서 <strong>{report.sourceReportCount}개</strong>를 통합했습니다.</p>}
           {keywords.length > 0 && <p className="report-daily-keywords"><span>키워드</span>{keywords.join(' · ')}</p>}
         </div> : report.articleStats && <div className="report-stat-row" aria-label="수집 기사 통계">
@@ -396,8 +454,12 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
         </div>}
       </header>
 
-      <ReportReadingContent report={report} onEvidenceSelect={onEvidenceSelect} />
-      {report.reportScope === 'DAILY' && <ReportChangesPanel reportId={report.id} />}
+      <ReportReadingWithFeedback report={report} onEvidenceSelect={onEvidenceSelect} onRefreshReport={onRefreshReport}
+        beforeOtherAnalysis={report.reportScope === 'DAILY' ? <ReportChangesPanel reportId={report.id} /> : undefined} />
+
+      <ReportInsightsPanel key={`${report.id}:${audience}:${reportInsightSnapshotKey(report)}`} report={report} audience={audience}
+        selector={<ReportPerspectiveSelector audience={audience} defaultAudience={defaultAudience} onSelect={onAudienceSelect} />}
+        onEvidenceSelect={onEvidenceSelect} />
 
       <section className="report-findings">
         <div className="section-heading report-section-heading">
@@ -410,11 +472,6 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
           </span>
         </div>
         <div className="report-finding-controls">
-          <ReportPerspectiveSelector
-            audience={audience}
-            defaultAudience={defaultAudience}
-            onSelect={onAudienceSelect}
-          />
           <ReportFindingFilterBar
             filters={filters}
             onChange={(_, value) => setSensitivityOverride(value)}
@@ -427,8 +484,9 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
                 finding={finding}
                 key={finding.id}
                 audience={audience}
-                daily={report.reportScope === 'DAILY'}
-                reportDate={report.reportScope === 'DAILY' ? report.reportDate : null}
+                historical={report.reportScope !== 'RUN'}
+                reportDate={report.reportScope !== 'RUN' ? report.reportDate : null}
+                reportEndDate={report.reportScope === 'WEEKLY' ? report.reportEndDate : null}
                 highlightTerms={collectionHighlightTerms(contexts, finding.runId)}
                 onEvidenceSelect={onEvidenceSelect}
               />
@@ -440,7 +498,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
       </section>
 
       <div className="report-sharing-section">
-        <ReportSharePanel reportId={report.id} />
+        <ReportSharePanel reportId={report.id} reportScope={report.reportScope} topicId={report.topicId} />
       </div>
       <ReportDisclaimer report={report} audience={audience} />
     </article>
@@ -546,10 +604,11 @@ function ReportStat({ value, label, tone }: { value: number; label: string; tone
   )
 }
 
-function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect, highlightTerms }: {
+function IssueCard({ finding, audience, historical, reportDate, reportEndDate, onEvidenceSelect, highlightTerms }: {
   finding: ReportFinding
   audience: Audience
-  daily: boolean
+  historical: boolean
+  reportEndDate?: string | null
   reportDate: string | null
   onEvidenceSelect: (articleId: number, runId: number, sentences: number[]) => void
   highlightTerms: string[]
@@ -563,9 +622,9 @@ function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect, hig
   const issueInfo = finding.issue ?? issue.data
   const keyPoints = useMemo(() => normalizeKeyPoints(finding.keyPoints), [finding.keyPoints])
   const perspective = perspectiveFor(finding, audience)
-  // 일일 보고서는 이후 갱신된 이슈 제목 대신 저장된 근거 분석을 보여준다.
-  const title = daily ? finding.articleTitle : issueInfo?.title || finding.articleTitle
-  const summary = limitText(daily ? finding.summary : issueInfo?.summary || finding.summary, 120)
+  // 통합 보고서는 이후 갱신된 이슈 제목 대신 저장된 근거 분석을 보여준다.
+  const title = historical ? finding.articleTitle : issueInfo?.title || finding.articleTitle
+  const summary = limitText(historical ? finding.summary : issueInfo?.summary || finding.summary, 120)
   const relatedArticles = issue.data?.articles ?? []
   const relatedArticleCount = issue.data ? relatedArticles.length : issueInfo?.articleCount ?? 1
   const visibleRelatedArticles = relatedArticles.slice(0, visibleRelatedCount)
@@ -599,15 +658,15 @@ function IssueCard({ finding, audience, daily, reportDate, onEvidenceSelect, hig
             {SENSITIVITY_LEVEL_LABELS[finding.sensitivity.level]} · {finding.sensitivity.score.toFixed(1)}
           </span>
           <span className={`issue-category-tag category-${categoryTone(finding.category)}`}>{finding.category}</span>
-          {daily
-            ? <time dateTime={reportDate ?? undefined}>{reportDate ?? '집계일 미상'} 집계</time>
+          {historical
+            ? <time dateTime={reportDate ?? undefined}>{reportDate ?? '집계일 미상'}{reportEndDate ? ` ~ ${reportEndDate}` : ''} 집계</time>
             : issueInfo && <time dateTime={issueInfo.lastSeenAt}>{formatShortDate(issueInfo.lastSeenAt)}</time>}
         </div>
         <h4><ReportKeywordText text={title} terms={highlightTerms} /></h4>
         <p className="issue-card-summary"><ReportKeywordText text={summary} terms={highlightTerms} /></p>
         <div className="issue-card-footer">
           <span className="issue-source-count">
-            {daily && '현재 '}
+            {historical && '현재 '}
             {issue.isError && issueId !== null
               ? '관련 기사 상세 불러오기 실패'
               : issue.isLoading && issueId !== null

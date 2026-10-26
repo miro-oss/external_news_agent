@@ -1,6 +1,7 @@
 package com.example.be.domain.topics.entity;
 
 import com.example.be.domain.sources.entity.Source;
+import com.example.be.domain.dart.model.DartModels;
 import com.example.be.domain.topics.converter.TopicKeywordRevisionMapConverter;
 import com.example.be.global.converter.StringListJsonConverter;
 import com.example.be.global.converter.YnBooleanConverter;
@@ -52,7 +53,7 @@ public class Topic {
      */
     public static final int DEFAULT_BATCH_SIZE = 100;
     public static final int DEFAULT_INTERVAL_MINUTES = 1440;
-    public static final Set<Integer> ALLOWED_INTERVAL_MINUTES = Set.of(60, 720, 1440);
+    public static final Set<Integer> ALLOWED_INTERVAL_MINUTES = Set.of(60, 720, 1440, 10080);
     public static final int MIN_BATCH_SIZE = 1;
     public static final int MAX_BATCH_SIZE = 300;
     public static final int MAX_NAME_LENGTH = 200;
@@ -68,6 +69,15 @@ public class Topic {
 
     @Column(name = "query_text", length = MAX_QUERY_TEXT_LENGTH)
     private String queryText;
+
+    @Column(name = "dart_corp_code", length = 8)
+    private String dartCorpCode;
+
+    @Column(name = "dart_corp_name", length = 512)
+    private String dartCorpName;
+
+    @Column(name = "dart_stock_code", length = 6)
+    private String dartStockCode;
 
     @Convert(converter = StringListJsonConverter.class)
     @JdbcTypeCode(SqlTypes.CLOB)
@@ -136,6 +146,17 @@ public class Topic {
 
     public void changeActive(boolean active) {
         this.active = active;
+    }
+
+    public DartModels.Company getDartCompany() {
+        return dartCorpCode == null ? null : new DartModels.Company(
+                dartCorpCode, dartCorpName, dartStockCode == null ? "" : dartStockCode);
+    }
+
+    public void changeDartCompany(DartModels.Company company) {
+        dartCorpCode = company == null ? null : company.corpCode();
+        dartCorpName = company == null ? null : company.corpName();
+        dartStockCode = company == null ? null : company.stockCode();
     }
 
     public void replaceSources(List<Source> sources) {

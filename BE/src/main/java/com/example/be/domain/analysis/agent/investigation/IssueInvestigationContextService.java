@@ -3,6 +3,8 @@ package com.example.be.domain.analysis.agent.investigation;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.dto.AgentExploreRequest;
 import com.example.be.domain.analysis.repository.FindingRepository;
+import com.example.be.domain.analysis.relevance.TopicRelevanceGate;
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.analysis.service.SentenceSplitter;
 import com.example.be.domain.collection.cluster.BreakingNewsDetector;
@@ -46,11 +48,14 @@ public class IssueInvestigationContextService {
     private final SourceRepository sourceRepository;
     private final BreakingNewsDetector breakingNewsDetector;
     private final AgentProperties properties;
+    private final TopicRelevancePolicy relevancePolicy;
 
     public List<InvestigationContext> candidates(Long runId) {
+        Set<TopicRelevanceGate.Key> excluded = relevancePolicy.excludedKeys(runId);
         Map<Long, IssueArticle> representatives = new LinkedHashMap<>();
-        issueArticleRepository.findRepresentativesForRun(runId).forEach(membership ->
-                representatives.putIfAbsent(membership.getIssue().getId(), membership));
+        issueArticleRepository.findRepresentativesForRun(runId).stream()
+                .filter(membership -> permitted(membership, excluded))
+                .forEach(membership -> representatives.putIfAbsent(membership.getIssue().getId(), membership));
         List<IssueArticle> ordered = representatives.values().stream()
                 .sorted(Comparator.comparing(
                                 (IssueArticle value) -> value.getIssue().getImportanceScore(),
@@ -72,7 +77,8 @@ public class IssueInvestigationContextService {
                 continue;
             }
             List<IssueArticle> memberships = issueArticleRepository
-                    .findByIssueIdOrderByJoinedAtAsc(representative.getIssue().getId());
+                    .findByIssueIdOrderByJoinedAtAsc(representative.getIssue().getId()).stream()
+                    .filter(membership -> permitted(membership, excluded)).toList();
             Long topicId = representative.getIssue().getTopic().getId();
             SourceAccess sourceAccess = sourceAccessByTopic.computeIfAbsent(
                     topicId, this::sourceAccess);
@@ -87,7 +93,9 @@ public class IssueInvestigationContextService {
     }
 
     public InvestigationContext current(Long runId, Long issueId) {
-        List<IssueArticle> memberships = issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(issueId);
+        Set<TopicRelevanceGate.Key> excluded = relevancePolicy.excludedKeys(runId);
+        List<IssueArticle> memberships = issueArticleRepository.findByIssueIdOrderByJoinedAtAsc(issueId).stream()
+                .filter(membership -> permitted(membership, excluded)).toList();
         IssueArticle representative = memberships.stream()
                 .filter(value -> value.getRole() == IssueArticleRole.REPRESENTATIVE)
                 .findFirst()
@@ -96,6 +104,11 @@ public class IssueInvestigationContextService {
                 runArticleRepository.findArticleIdsByRunId(runId));
         return context(runId, representative, memberships, observedArticleIds,
                 sourceAccess(representative.getIssue().getTopic().getId()));
+    }
+
+    private boolean permitted(IssueArticle membership, Set<TopicRelevanceGate.Key> excluded) {
+        return !excluded.contains(new TopicRelevanceGate.Key(
+                membership.getArticle().getId(), membership.getIssue().getTopic().getId()));
     }
 
     private InvestigationContext context(Long runId,

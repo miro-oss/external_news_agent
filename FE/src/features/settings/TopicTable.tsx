@@ -1,37 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { FEEDBACK_DURATION_MS } from '../../lib/feedback'
 import type { TopicRelatedKeyword, TopicSurgeKeyword } from '../../api/types'
 import { useSetTopicActivation, useTopics } from '../../api/queries'
 import { ApiError } from '../../api/client'
 import { MutationStatus } from './MutationStatus'
 import { TopicTableSkeleton } from './SettingsSkeletons'
-
-/** 오프셋이 붙은 ISO-8601을 그대로 보여 주면 열이 넘친다. 날짜와 분까지만 남긴다. */
-function formatCollectedAt(value: string | null) {
-  if (!value) return '—'
-
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return value
-
-  return parsed.toLocaleString('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-/** 저장된 분 값을 설정 화면에서 쓰는 주기 표현으로 바꾼다. 기존 사용자 지정 값도 읽을 수 있게 남긴다. */
-function formatInterval(minutes: number) {
-  if (minutes === 1440) return '24시간마다'
-  if (minutes % 1440 === 0) return `${minutes / 1440}일마다`
-  if (minutes % 60 === 0) return `${minutes / 60}시간마다`
-  return `${minutes}분마다`
-}
-
-function formatKeywords(keywords: string[]) {
-  return keywords.length > 0 ? keywords.join(', ') : '—'
-}
+import { TopicDeliverySettings } from './TopicDeliverySettings'
+import { TopicScheduleSettings } from './TopicScheduleSettings'
+import { TopicEditSettings } from './TopicEditSettings'
 
 function formatSignedDelta(value: number) {
   return value > 0 ? `+${value}` : `${value}`
@@ -51,6 +27,13 @@ export function TopicTable() {
   const [success, setSuccess] = useState<string | null>(null)
   const topics = useTopics(!showInactive)
   const activation = useSetTopicActivation()
+
+  // 목록 조회 오류로 알림이 잠시 사라져도 예전 성공 상태가 복구 시 다시 표시되지 않게 한다.
+  useEffect(() => {
+    if (!success) return
+    const timer = window.setTimeout(() => setSuccess(null), FEEDBACK_DURATION_MS)
+    return () => window.clearTimeout(timer)
+  }, [success])
 
   if (topics.isPending) return <TopicTableSkeleton />
 
@@ -86,20 +69,20 @@ export function TopicTable() {
             <colgroup>
               <col className="topic-name-column" />
               <col className="topic-query-column" />
-              <col className="topic-conditions-column" />
               <col className="topic-surge-column" />
               <col className="topic-related-column" />
               <col className="topic-schedule-column" />
+              <col className="topic-delivery-column" />
               <col className="topic-actions-column" />
             </colgroup>
             <thead>
               <tr>
                 <th>주제</th>
                 <th>검색 키워드</th>
-                <th>기사 조건</th>
                 <th title="최근 7일에 전주보다 언급이 늘어난 키워드입니다. 숫자는 관련 주제 묶음의 증가 건수입니다.">지난주 대비 증가</th>
                 <th title="최근 7일에 함께 등장한 키워드와 비중입니다.">연관 키워드</th>
                 <th>수집 일정</th>
+                <th>보고서 알림</th>
                 <th>관리</th>
               </tr>
             </thead>
@@ -109,14 +92,6 @@ export function TopicTable() {
                   <td className="topic-name-cell"><strong className="topic-name-scroll" title={topic.name}
                     tabIndex={topic.name.length > 24 ? 0 : undefined}>{topic.name}</strong></td>
                   <td>{topic.queryText ?? '—'}</td>
-                  <td className="topic-conditions-cell">
-                    <div className="topic-condition-lines">
-                      {topic.requiredKeywords.length > 0 && <span className="topic-condition-row"><small>모두</small><span>{formatKeywords(topic.requiredKeywords)}</span></span>}
-                      {topic.optionalKeywords.length > 0 && <span className="topic-condition-row"><small>하나 이상</small><span>{formatKeywords(topic.optionalKeywords)}</span></span>}
-                      {topic.excludedKeywords.length > 0 && <span className="topic-condition-row"><small>제외</small><span>{formatKeywords(topic.excludedKeywords)}</span></span>}
-                      {topic.requiredKeywords.length + topic.optionalKeywords.length + topic.excludedKeywords.length === 0 && '—'}
-                    </div>
-                  </td>
                   <td className="topic-signal-cell"><KeywordSignalList items={topic.surgeKeywords ?? []} emptyLabel="—"
                     renderLabel={(keyword) => `${keyword.keyword} ${formatSignedDelta(keyword.deltaIssueCount)}`}
                     isEmphasized={(keyword) => keyword.deltaIssueCount > 50}
@@ -124,17 +99,24 @@ export function TopicTable() {
                   <td className="topic-signal-cell"><KeywordSignalList items={topic.relatedKeywords ?? []} emptyLabel="—"
                     renderLabel={(keyword) => `${keyword.keyword} ${keyword.sharePercent.toFixed(0)}%`}
                     renderTitle={relatedKeywordTitle} /></td>
-                  <td><div className="topic-condition-lines"><span>{formatInterval(topic.intervalMinutes)}</span>
-                    <small title="마지막 수집">{formatCollectedAt(topic.lastCollectedAt)}</small></div></td>
+                  <td><TopicScheduleSettings topic={topic} /></td>
+                  <td><TopicDeliverySettings topicId={topic.id} topicName={topic.name} /></td>
                   <td><div className="topic-management-actions"><button type="button" className="ghost-button topic-management-action" disabled={activation.isPending}
                     onClick={() => setActive(topic.id, !topic.active)}>
                     {activation.isPending && activation.variables?.topicId === topic.id ? '처리 중…' : topic.active ? '수집 중지' : '수집 재개'}
                   </button>
+                  <TopicEditSettings topic={topic} />
                   </div></td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {topics.data.content.length > 0 && (
+        <div className="hint topic-signal-help">
+          <p>지난주 대비 증가: 최근 7일의 키워드별 이슈 수가 직전 7일보다 늘어난 수입니다. 같은 사건의 기사들은 하나의 이슈로 셉니다.</p>
+          <p>연관 키워드: 최근 7일 해당 주제에서 함께 등장한 키워드와, 전체 이슈 중 그 키워드가 포함된 비율입니다.</p>
         </div>
       )}
     </>

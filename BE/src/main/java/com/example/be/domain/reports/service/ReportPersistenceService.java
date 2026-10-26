@@ -1,6 +1,8 @@
 package com.example.be.domain.reports.service;
 
 import com.example.be.domain.reports.comparison.ReportCompleted;
+import com.example.be.domain.companyinterest.CompanyInterestSelection;
+import com.example.be.domain.reports.entity.WeeklyReportInput;
 import org.springframework.context.ApplicationEventPublisher;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.entity.CollectionRun;
@@ -31,6 +33,23 @@ public class ReportPersistenceService {
     private final ReportNotificationAutomationService notificationAutomation;
     private final CollectionRunArticleRepository observationRepository;
     private final ApplicationEventPublisher events;
+    private final CompanyInterestSelection companyInterests;
+
+    @Transactional
+    public void freezeCompanySelection(Long reportId, List<Long> findingIds, WeeklyReportInput weeklyInput,
+                                       List<CompanyInterestSelection.Application> applications, LocalDateTime now) {
+        freezeCompanySelection(reportId, findingIds, List.of(), weeklyInput, applications, now);
+    }
+
+    @Transactional
+    public void freezeCompanySelection(Long reportId, List<Long> findingIds, List<Long> suppressedFindingIds,
+                                       WeeklyReportInput weeklyInput,
+                                       List<CompanyInterestSelection.Application> applications, LocalDateTime now) {
+        NewsReport report = lockedReport(reportId);
+        if (report.getReportStatus() != ReportStatus.PENDING) throw new IllegalStateException("이미 완료된 보고서입니다.");
+        report.freezeCompanySelection(findingIds, suppressedFindingIds, weeklyInput);
+        companyInterests.record(reportId, applications, now);
+    }
 
     @Transactional
     public Reservation reserve(Long runId, LocalDateTime generatedAt) {
@@ -61,18 +80,55 @@ public class ReportPersistenceService {
 
     @Transactional
     public Long completeRecovered(Long reportId, ReportDocument document, LocalDateTime generatedAt) {
-        NewsReport report = reportRepository.findByIdForUpdate(reportId)
-                .orElseThrow(() -> new IllegalStateException("복구할 보고서가 없습니다. reportId=" + reportId));
+        NewsReport report = lockedReport(reportId);
         if (report.getReportStatus() != ReportStatus.PENDING) return report.getId();
         // Flag travels in the report completion write itself, without a separate fallible comparison DB write.
         report.invalidateComparisonInput();
-        return complete(reportId, document, generatedAt);
+        return completeLocked(report, document, generatedAt);
     }
 
     @Transactional
     public Long complete(Long reportId, ReportDocument document, LocalDateTime generatedAt) {
-        NewsReport report = reportRepository.findByIdForUpdate(reportId)
+        return completeLocked(lockedReport(reportId), document, generatedAt);
+    }
+
+    /** 운영 복구에서 예약된 보고서를 완성하거나 기존 내용을 교체한다. 자동 전달과 완료 이벤트는 발생시키지 않는다. */
+    @Transactional
+    public Long replace(Long reportId, ReportDocument document, LocalDateTime generatedAt) {
+        NewsReport report = lockedReport(reportId);
+        if (report.getRunId() == null) {
+            throw new IllegalArgumentException("실행별 보고서만 복구할 수 있습니다. reportId=" + reportId);
+        }
+        String title = ReportTitles.forReport(report, document.title(), generatedAt);
+        report.complete(
+                title,
+                document.title().equals(title) ? document.markdownBody()
+                        : ReportTitles.alignMarkdownTitle(document.markdownBody(), title),
+                document.modelName(),
+                document.promptVersion(),
+                document.llmProvider(),
+                document.inputTokens(),
+                document.outputTokens(),
+                document.costUsd(),
+                document.credits(),
+                document.reflectedFindingIds(),
+                document.excludedFindingIds(),
+                document.status(),
+                generatedAt);
+        report.recordStructuredContent(document.structuredContent());
+        return report.getId();
+    }
+
+    private NewsReport lockedReport(Long reportId) {
+        // Use the same run -> report order as reservation and delivery edits. Completion
+        // and outbox creation remain inside this lock until the transaction commits.
+        reportRepository.findRunIdById(reportId).ifPresent(this::lockedRun);
+        return reportRepository.findByIdForUpdate(reportId)
                 .orElseThrow(() -> new IllegalStateException("완료할 보고서가 없습니다. reportId=" + reportId));
+    }
+
+    private Long completeLocked(NewsReport report, ReportDocument document, LocalDateTime generatedAt) {
+        Long reportId = report.getId();
         if (report.getReportStatus() != ReportStatus.PENDING) {
             return report.getId();
         }
@@ -93,7 +149,9 @@ public class ReportPersistenceService {
                 document.status(),
                 generatedAt);
         report.recordStructuredContent(document.structuredContent());
-        notificationAutomation.enqueueCompletedReport(report);
+        if (report.getTopicId() == null) notificationAutomation.enqueueCompletedReport(report);
+        // Written atomically with completion. A crash before the after-commit listener is recoverable.
+        report.requestAutomaticInsights();
         events.publishEvent(new ReportCompleted(reportId));
         return report.getId();
     }

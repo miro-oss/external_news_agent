@@ -1,0 +1,67 @@
+.company-interests-page { max-width: 1180px; }
+.company-interests-page .page-header > button { flex-shrink: 0; }
+.company-interest-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.2rem; list-style: none; padding: 1.25rem 1.4rem; margin: 0; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.company-interest-steps li { display: grid; gap: .4rem; }
+.company-interest-steps strong { font-size: .86rem; }
+.company-interest-steps span, .company-interest-scope { color: var(--fg-3); font-size: .8rem; line-height: 1.7; }
+.company-interest-scope { margin: .8rem 0 1.7rem; }
+.company-interest-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .8rem; margin-bottom: 1.2rem; }
+.company-interest-toolbar > span { color: var(--fg-3); font-size: .8rem; }
+.company-interest-list { display: grid; gap: 1.25rem; }
+.company-interest-card { padding: 1.5rem; border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-sm); scroll-margin-top: 145px; }
+.company-interest-card.is-highlighted { box-shadow: 0 0 0 2px var(--primary); }
+.company-interest-card-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.3rem; }
+.company-interest-card-heading h2 { font-size: 1.05rem; margin-top: .65rem; line-height: 1.6; overflow-wrap: anywhere; }
+.company-interest-review-status { font-size: .73rem; font-weight: 600; color: var(--fg-3); }
+.company-interest-id { color: var(--fg-3); font-size: .73rem; white-space: nowrap; padding-top: .1rem; }
+.company-interest-card-body { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 1.75rem; }
+.company-interest-origin { padding: 1.1rem; border-radius: var(--radius-sm); background: var(--surface-sunken); align-self: start; }
+.company-interest-origin h3 { color: var(--fg-3); font-size: .77rem; }
+.company-interest-origin p { font-size: .82rem; color: var(--fg-2); line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; margin: .45rem 0 1.2rem; }
+.company-interest-origin .company-interest-comment { color: var(--fg); }
+.company-interest-origin .company-interest-origin-meta { color: var(--fg-3); font-size: .71rem; }
+.company-interest-origin details { font-size: .78rem; color: var(--fg-3); }
+.company-interest-origin summary { cursor: pointer; }
+.company-interest-origin details p { margin-bottom: 0; font-size: .78rem; }
+.company-interest-form fieldset { border: 0; padding: 0; margin: 0 0 1rem; min-width: 0; }
+.company-interest-form legend { font-size: .9rem; font-weight: 650; margin-bottom: 1.1rem; padding: 0; }
+.company-interest-form label { display: grid; gap: .5rem; font-size: .8rem; font-weight: 600; }
+.company-interest-form textarea, .company-interest-form select { width: 100%; font: inherit; font-weight: 400; border: 1px solid var(--line); border-radius: var(--radius-xs); padding: .75rem; color: var(--fg); background: var(--surface); box-sizing: border-box; }
+.company-interest-form textarea { resize: vertical; min-height: 110px; line-height: 1.7; }
+.company-interest-input-help { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .25rem .5rem; color: var(--fg-3); font-size: .72rem; line-height: 1.6; margin: .4rem 0 1rem; }
+.company-interest-input-help > span:last-child { white-space: nowrap; }
+.company-interest-progress { display: grid; gap: .5rem; font-size: .78rem; }
+.company-interest-status { width: fit-content; padding: .3rem .65rem; border-radius: 999px; font-size: .73rem; background: var(--warning-weak); color: var(--warning-strong); }
+.company-interest-status.is-active { background: var(--primary-weak); color: var(--primary-strong); }
+.company-interest-status.is-active.has-application { background: var(--success-weak); color: var(--success-strong); }
+.company-interest-status.is-revoked { background: var(--line-soft); color: var(--fg-3); }
+.company-interest-progress > p { margin: 0; font-size: .78rem; color: var(--fg-3); line-height: 1.7; }
+.company-interest-receipt { display: flex; flex-wrap: wrap; gap: .35rem .75rem; color: var(--fg-3); font-size: .75rem; }
+.company-interest-receipt > span:last-child { flex-basis: 100%; }
+.company-interest-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: 1.2rem; }
+.company-interest-actions button { font-size: .78rem; min-height: 40px; }
+.company-interest-actions .company-interest-stop { color: var(--fg-3); }
+.company-interest-notice, .company-interest-edit-notice { background: var(--primary-weak); border-radius: var(--radius-xs); padding: .8rem 1rem; color: var(--primary-strong); font-size: .8rem; line-height: 1.7; }
+.company-interest-edit-notice { margin: 1rem 0 0; }
+.company-interest-error { font-size: .8rem; margin-top: .8rem; color: var(--danger-strong); }
+.company-interest-error p { margin: .4rem 0; }
+.company-interest-error button { padding-left: 0; font-size: .8rem; }
+.company-interest-empty { line-height: 1.8; }
+.report-feedback-company-interest { display: grid; gap: .65rem; margin-top: .5rem; padding: 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-xs); }
+.report-feedback-company-interest > a { width: fit-content; font-size: .8rem; }
+.report-event-card .report-feedback-company-interest .company-interest-progress p { font-size: .78rem; margin: 0; }
+.report-feedback-company-interest .company-interest-receipt a { font-size: .75rem; }
+@media (max-width: 760px) {
+  .company-interest-card-body { grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
+  .company-interest-steps { gap: .8rem; padding: 1rem; }
+  .company-interest-steps strong { font-size: .78rem; }
+  .company-interest-steps span { font-size: .73rem; }
+}
+@media (max-width: 600px) {
+  .company-interest-card { padding: 1.1rem; scroll-margin-top: 175px; }
+  .company-interest-steps { grid-template-columns: 1fr; }
+  .company-interest-steps li + li { padding-top: .8rem; border-top: 1px solid var(--line); }
+  .company-interest-actions > button { flex: 1 1 auto; }
+  .company-interest-toolbar .segmented { width: 100%; }
+  .company-interest-toolbar .segmented-option { flex: 1; min-width: 0; padding-inline: .6rem; }
+}

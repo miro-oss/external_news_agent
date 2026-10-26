@@ -7,6 +7,10 @@ import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.entity.TopicKeywordProposal;
 import com.example.be.domain.topics.entity.TopicKeywordProposalStatus;
+import com.example.be.domain.topics.entity.TopicKeywordBucket;
+import com.example.be.domain.topics.entity.TopicKeywordChange;
+import com.example.be.domain.topics.entity.TopicKeywordChangeAction;
+import com.example.be.domain.topics.service.command.TopicKeywordProposalCommandService;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -33,6 +37,72 @@ class TopicKeywordProposalRepositoryIntegrationTests {
     @Autowired private TopicRepository topics;
     @Autowired private CollectionRunRepository runs;
     @Autowired private EntityManager entityManager;
+    @Autowired private TopicKeywordProposalCommandService commands;
+
+    @Test
+    void selectedChangesAndOriginalProposalSurviveReloadRejectionAndReapproval() {
+        Topic topic = topic("선택 저장 주제", true);
+        CollectionRun run = runs.save(CollectionRun.builder().status(RunStatus.SUCCESS)
+                .triggerType(TriggerType.SCHEDULED).build());
+        var changes = List.of(
+                new TopicKeywordChange(TopicKeywordBucket.OPTIONAL, TopicKeywordChangeAction.ADD, "HBM4", "추가"),
+                new TopicKeywordChange(TopicKeywordBucket.OPTIONAL, TopicKeywordChangeAction.ADD, "HBM5", "추가"),
+                new TopicKeywordChange(TopicKeywordBucket.REQUIRED, TopicKeywordChangeAction.REMOVE, "HBM", "제거"));
+        var proposal = proposals.save(TopicKeywordProposal.builder().topic(topic).collectionRunId(run.getId())
+                .idempotencyKey("proposal-selection:" + run.getId()).summary("일부 선택 저장")
+                .changes(changes).baselineRequiredKeywords(topic.getRequiredKeywords())
+                .baselineOptionalKeywords(topic.getOptionalKeywords()).baselineExcludedKeywords(topic.getExcludedKeywords())
+                .status(TopicKeywordProposalStatus.PENDING).createdAt(LocalDateTime.of(2026, 9, 22, 9, 0)).build());
+        flushAndClear();
+        assertThat(proposals.findById(proposal.getId()).orElseThrow().getSelectedChangeIndexes()).isNull();
+
+        commands.approve(proposal.getId(), List.of(2, 0));
+        flushAndClear();
+        var approved = proposals.findById(proposal.getId()).orElseThrow();
+        assertThat(approved.getSelectedChangeIndexes()).containsExactly(0, 2);
+        assertThat(approved.getChanges()).isEqualTo(changes);
+        assertThat(approved.getAppliedChanges()).hasSize(2);
+        assertThat(approved.getTopic().getOptionalKeywords()).containsExactly("HBM4");
+        assertThat(approved.getTopic().getRequiredKeywords()).isEmpty();
+
+        commands.reject(proposal.getId());
+        flushAndClear();
+        var rejected = proposals.findById(proposal.getId()).orElseThrow();
+        assertThat(rejected.getSelectedChangeIndexes()).containsExactly(0, 2);
+        assertThat(rejected.getTopic().getOptionalKeywords()).isEmpty();
+        assertThat(rejected.getTopic().getRequiredKeywords()).containsExactly("HBM");
+
+        commands.approve(proposal.getId(), List.of(1));
+        flushAndClear();
+        var reapproved = proposals.findById(proposal.getId()).orElseThrow();
+        assertThat(reapproved.getSelectedChangeIndexes()).containsExactly(1);
+        assertThat(reapproved.getTopic().getOptionalKeywords()).containsExactly("HBM5");
+        assertThat(reapproved.getChanges()).isEqualTo(changes);
+    }
+
+    @Test
+    void pendingQueryFiltersTopicAndStatusAndFetchesKeywordsForDetachedFreshnessChecks() {
+        Topic topic = topic("제안 기준 조회 주제", true);
+        var pending = proposal(topic, TopicKeywordProposalStatus.PENDING);
+        proposal(topic, TopicKeywordProposalStatus.APPROVED);
+        proposal(topic, TopicKeywordProposalStatus.REJECTED);
+        proposal(topic("다른 제안 주제", true), TopicKeywordProposalStatus.PENDING);
+        flushAndClear();
+
+        var found = proposals.findByTopic_IdAndStatus(topic.getId(), TopicKeywordProposalStatus.PENDING);
+        entityManager.clear();
+
+        assertThat(found).extracting(TopicKeywordProposal::getId).containsExactly(pending.getId());
+        assertThat(found.getFirst().matchesCurrentTopicKeywords()).isTrue();
+        assertThat(found.getFirst().getTopic().getRequiredKeywords()).containsExactly("HBM");
+    }
+
+    @Test
+    void legacyApprovedRowRetainsNullSelectionAfterReload() {
+        var proposal = proposal(topic("레거시 선택 주제", true), TopicKeywordProposalStatus.APPROVED);
+        flushAndClear();
+        assertThat(proposals.findById(proposal.getId()).orElseThrow().getSelectedChangeIndexes()).isNull();
+    }
 
     @ParameterizedTest
     @EnumSource(TopicKeywordProposalStatus.class)
@@ -113,6 +183,9 @@ class TopicKeywordProposalRepositoryIntegrationTests {
                 .triggerType(TriggerType.SCHEDULED).build());
         return proposals.save(TopicKeywordProposal.builder().topic(topic).collectionRunId(run.getId())
                 .idempotencyKey("proposal-visibility:" + run.getId()).summary("저장된 키워드 제안")
+                .baselineRequiredKeywords(topic.getRequiredKeywords())
+                .baselineOptionalKeywords(topic.getOptionalKeywords())
+                .baselineExcludedKeywords(topic.getExcludedKeywords())
                 .changes(List.of()).status(status).createdAt(LocalDateTime.of(2026, 9, 8, 16, 0)).build());
     }
 

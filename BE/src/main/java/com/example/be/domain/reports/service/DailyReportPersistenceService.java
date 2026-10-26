@@ -2,6 +2,7 @@ package com.example.be.domain.reports.service;
 
 import com.example.be.domain.reports.comparison.ReportComparisonRepository;
 import com.example.be.domain.reports.comparison.ReportComparisonSnapshot;
+import com.example.be.domain.companyinterest.CompanyInterestSelection;
 import lombok.extern.slf4j.Slf4j;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportScope;
@@ -28,6 +29,18 @@ public class DailyReportPersistenceService {
     private final NewsReportRepository reportRepository;
     private final CollectionRunRepository runRepository;
     private final ReportComparisonRepository comparisons;
+    private final CompanyInterestSelection companyInterests;
+
+    @Transactional
+    public void freezeSelection(Long reportId, DailyReportSelector.Selection selection, LocalDateTime now) {
+        NewsReport report = reportRepository.findByIdForUpdate(reportId).orElseThrow();
+        report.freezeCompanySelection(selection.findings().stream().map(com.example.be.domain.analysis.entity.Finding::getId).toList(), null);
+        companyInterests.record(reportId, selection.applications(), now);
+        if (selection.comparisonSnapshot() != null) {
+            try { comparisons.captureInput(report, selection.comparisonSnapshot(), now); }
+            catch (RuntimeException exception) { log.warn("일일 보고서 비교 입력 저장 실패. reportId={}", reportId, exception); }
+        }
+    }
 
     @Transactional
     public ReportPersistenceService.Reservation reserve(LocalDate date, List<Long> sourceRunIds,

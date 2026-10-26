@@ -183,8 +183,8 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                         truncate(topic.getQueryText(), MAX_TOPIC_QUERY_LENGTH),
                         listOrEmpty(topic.getRequiredKeywords()),
                         listOrEmpty(topic.getOptionalKeywords()),
-                        listOrEmpty(topic.getExcludedKeywords())),
-                null);
+                        listOrEmpty(topic.getExcludedKeywords()), topic.getId()),
+                null, false, context.feedbackExamples());
     }
 
     private AnalysisResult selfCritiqueSafely(AnalysisContext context,
@@ -292,7 +292,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 base.issueMembers(),
                 base.topic(),
                 previous,
-                true);
+                true, base.feedbackExamples());
     }
 
     private AgentAnalyzeRequest.PreviousBulletPayload toPreviousBullet(
@@ -647,7 +647,7 @@ public class AgentAnalysisOrchestrator implements ArticleAnalysisOrchestrator {
                 .orElseThrow();
         // 승격 호출은 해당 기사 자체만 분석한다. 이슈 멤버를 다시 보내 교차 비교를 재귀 실행하지 않는다.
         AnalysisContext promotedContext = new AnalysisContext(
-                context.runId(), article, context.plan(), null, false, context.topicOverride());
+                context.runId(), article, context.plan(), null, false, context.topicOverride(), context.feedbackExamples());
         String idempotencyKey = "run:" + context.runId()
                 + ":issue:" + context.issue().issueId()
                 + ":promotion:article:" + articleId;

@@ -1,6 +1,9 @@
 package com.example.be.domain.topics.dto.req;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -18,6 +21,9 @@ public class TopicReqDTO {
     @NoArgsConstructor
     @Schema(name = "TopicCreateRequest", description = "수집 주제 등록 요청")
     public static class Create {
+
+        @Schema(description = "공시 회사 DART 고유번호(8자리). 생략/null이면 미연결", example = "00126380", nullable = true)
+        private String dartCorpCode;
 
         @Schema(description = "주제명. 중복 불가. 최대 200자", example = "HBM", requiredMode = Schema.RequiredMode.REQUIRED)
         private String name;
@@ -37,8 +43,8 @@ public class TopicReqDTO {
         @Schema(description = "1회 수집 건수. 1 이상 300 이하이며 SEARCH 소스 한 곳당 요청 건수. 기본값은 100", example = "100")
         private Integer batchSize;
 
-        @Schema(description = "자동 수집 주기(분). 60, 720, 1440만 허용하며 기본값은 1440(24시간)",
-                example = "1440", allowableValues = {"60", "720", "1440"}, defaultValue = "1440")
+        @Schema(description = "자동 수집 주기(분). 60, 720, 1440, 10080(1주)만 허용하며 기본값은 1440(24시간)",
+                example = "1440", allowableValues = {"60", "720", "1440", "10080"}, defaultValue = "1440")
         private Integer intervalMinutes;
 
         @Schema(description = "활성 여부. 기본값 true", example = "true")
@@ -53,6 +59,26 @@ public class TopicReqDTO {
     @NoArgsConstructor
     @Schema(name = "TopicUpdateRequest", description = "수집 주제 수정 요청. 전달한 필드만 반영되고, 키워드 배열은 전체 교체된다")
     public static class Update {
+
+        @Schema(description = "공시 회사 DART 고유번호(8자리). 생략은 기존 유지, null은 연결 해제", example = "00126380", nullable = true)
+        private String dartCorpCode;
+
+        @JsonIgnore
+        @Getter(AccessLevel.NONE)
+        @Setter(AccessLevel.NONE)
+        private boolean dartCorpCodePresent;
+
+        @JsonSetter("dartCorpCode")
+        public void setDartCorpCode(String dartCorpCode) {
+            this.dartCorpCode = dartCorpCode;
+            this.dartCorpCodePresent = true;
+        }
+
+        @JsonIgnore
+        @Schema(hidden = true)
+        public boolean hasDartCorpCode() {
+            return dartCorpCodePresent;
+        }
 
         @Schema(description = "주제명. 중복 불가. 최대 200자", example = "HBM")
         private String name;
@@ -72,8 +98,8 @@ public class TopicReqDTO {
         @Schema(description = "1회 수집 건수. 1 이상 300 이하", example = "300")
         private Integer batchSize;
 
-        @Schema(description = "자동 수집 주기(분). 60, 720, 1440만 허용",
-                example = "720", allowableValues = {"60", "720", "1440"})
+        @Schema(description = "자동 수집 주기(분). 60, 720, 1440, 10080(1주)만 허용. 생략하면 기존 주기 유지",
+                example = "720", allowableValues = {"60", "720", "1440", "10080"})
         private Integer intervalMinutes;
 
         @Schema(description = "활성 여부", example = "true")

@@ -15,7 +15,16 @@ import {
 } from './client'
 import { saveRecipientEmail } from '../lib/recipientEmail'
 import { cacheDeletedNotificationRecipient, notificationRecipientsKey } from './notificationRecipientCache'
-import { cacheDeletedNotificationGroup, notificationGroupsKey } from './notificationGroupCache'
+import {
+  cacheDeletedNotificationGroup,
+  cacheReplacedNotificationGroupMembers,
+  cacheUpdatedNotificationGroup,
+  notificationGroupRecipientsKey,
+  notificationGroupsKey,
+} from './notificationGroupCache'
+import { getAllNotificationPages } from './notificationPages'
+import { approveTopicKeywordProposalOptions, rejectTopicKeywordProposalOptions } from './topicKeywordProposalReview'
+import { reportPreviewOptions } from './reportShare'
 import type { CollectionRunDelivery } from './notificationConnections'
 import type {
   ArticleDetail,
@@ -35,13 +44,14 @@ import type {
   InsightResult,
   NotificationChannel,
   NotificationGroup,
-  NotificationPreview,
+  NotificationGroupMembers,
   NotificationRecipient,
   NotificationSendBatch,
   PaidExhaustedAction,
   PageResult,
   ReportDetail,
   ReportSummary,
+  ReportScope,
   Source,
   SourceCreateRequest,
   TopicCreated,
@@ -99,16 +109,6 @@ async function getAllPages<T, TPage extends PageResult<T> = PageResult<T>>(
   return { ...first, content, hasNext: false }
 }
 
-async function getAllNotificationPages<T>(path: string): Promise<PageResult<T>> {
-  const first = await notificationGet<PageResult<T>>(path, { page: 0, size: PAGE_SIZE })
-  const content = [...first.content]
-  for (let page = first.page + 1; page < first.totalPages; page += 1) {
-    const next = await notificationGet<PageResult<T>>(path, { page, size: PAGE_SIZE })
-    content.push(...next.content)
-  }
-  return { ...first, content, hasNext: false }
-}
-
 /** 수집 실행 범위 계산에 쓰는 (주제 × 소스) 조합 목록. */
 export function useCombinations() {
   return useQuery({
@@ -126,11 +126,15 @@ export function useSources() {
 }
 
 /** 설정 화면의 등록 주제 목록과 주제 등록 후 캐시 갱신에 쓰는 주제 목록. */
-export function useTopics(active?: boolean) {
-  return useQuery({
+export function topicListOptions(active?: boolean) {
+  return {
     queryKey: [...keys.topics, active ?? 'all'],
     queryFn: () => getAllPages<TopicSummary>('/topics', { active }),
-  })
+  }
+}
+
+export function useTopics(active?: boolean) {
+  return useQuery(topicListOptions(active))
 }
 
 export function useTopicKeywordProposals(status: TopicKeywordProposalFilter = 'PENDING') {
@@ -152,14 +156,6 @@ function useRefreshOnSuccess() {
   return () => {
     void queryClient.invalidateQueries({ queryKey: keys.combinations })
     void queryClient.invalidateQueries({ queryKey: keys.sources })
-    void queryClient.invalidateQueries({ queryKey: keys.topics })
-  }
-}
-
-function useRefreshTopicKeywordProposals() {
-  const queryClient = useQueryClient()
-  return () => {
-    void queryClient.invalidateQueries({ queryKey: ['topic-keyword-proposals'] })
     void queryClient.invalidateQueries({ queryKey: keys.topics })
   }
 }
@@ -194,21 +190,11 @@ export function useSetTopicActivation() {
 }
 
 export function useApproveTopicKeywordProposal() {
-  const refresh = useRefreshTopicKeywordProposals()
-  return useMutation({
-    mutationFn: (proposalId: number) =>
-      post<TopicKeywordProposal>(`/topics/keyword-proposals/${proposalId}/approve`, {}),
-    onSuccess: refresh,
-  })
+  return useMutation(approveTopicKeywordProposalOptions(useQueryClient()))
 }
 
 export function useRejectTopicKeywordProposal() {
-  const refresh = useRefreshTopicKeywordProposals()
-  return useMutation({
-    mutationFn: (proposalId: number) =>
-      post<TopicKeywordProposal>(`/topics/keyword-proposals/${proposalId}/reject`, {}),
-    onSuccess: refresh,
-  })
+  return useMutation(rejectTopicKeywordProposalOptions(useQueryClient()))
 }
 
 export function useArticles(filters: ArticleFilters) {
@@ -237,14 +223,15 @@ export function useArticle(articleId: number | null, runId?: number) {
   })
 }
 
-export function useReports(reportScope?: 'RUN' | 'DAILY') {
+export function useReports(reportScope?: ReportScope, options?: { enabled?: boolean; refetchInterval?: number | false }) {
   return useQuery({
     queryKey: [...keys.reports, reportScope ?? 'ALL'],
     queryFn: () => getAllPages<ReportSummary>('/reports', { reportScope }),
+    ...options,
   })
 }
 
-export function useLatestReport(reportScope?: 'RUN' | 'DAILY') {
+export function useLatestReport(reportScope?: ReportScope) {
   return useQuery({
     queryKey: [...keys.latestReport, reportScope ?? 'ALL'],
     queryFn: () => get<ReportDetail | null>('/reports/latest', { includeFindings: true, reportScope }),
@@ -327,6 +314,14 @@ export function useNotificationRecipients() {
   })
 }
 
+export function useNotificationGroupRecipients(groupId: number) {
+  return useQuery({
+    queryKey: notificationGroupRecipientsKey(groupId),
+    queryFn: () => getAllNotificationPages<NotificationRecipient>('/recipients', { groupId }),
+    staleTime: 0,
+  })
+}
+
 export function useNotificationGroups() {
   return useQuery({
     queryKey: keys.notificationGroups,
@@ -356,6 +351,7 @@ function useRefreshNotifications() {
     void queryClient.invalidateQueries({ queryKey: keys.notificationRecipients })
     void queryClient.invalidateQueries({ queryKey: keys.notificationGroups })
     void queryClient.invalidateQueries({ queryKey: ['notifications', 'delivery-logs'] })
+    void queryClient.invalidateQueries({ queryKey: ['notifications', 'report-subscriptions'] })
     void queryClient.invalidateQueries({ queryKey: keys.reports })
   }
 }
@@ -460,11 +456,34 @@ export function useDeleteNotificationGroup() {
   })
 }
 
-export function usePreviewNotification() {
+export function useUpdateNotificationGroup() {
+  const client = useQueryClient()
+  const refresh = useRefreshNotifications()
   return useMutation({
-    mutationFn: ({ reportId, channelId }: { reportId: number; channelId: number }) =>
-      notificationPost<NotificationPreview>(`/reports/${reportId}/preview`, { channelId }),
+    mutationFn: ({ groupId, name }: { groupId: number; name: string }) =>
+      notificationPatch<NotificationGroup>(`/groups/${groupId}`, { name }),
+    onSuccess: async group => {
+      await cacheUpdatedNotificationGroup(client, group)
+      refresh()
+    },
   })
+}
+
+export function useReplaceNotificationGroupMembers() {
+  const client = useQueryClient()
+  const refresh = useRefreshNotifications()
+  return useMutation({
+    mutationFn: ({ groupId, recipientIds }: { groupId: number; recipientIds: number[] }) =>
+      notificationPut<NotificationGroupMembers>(`/groups/${groupId}/members`, { recipientIds }),
+    onSuccess: async members => {
+      await cacheReplacedNotificationGroupMembers(client, members)
+      refresh()
+    },
+  })
+}
+
+export function usePreviewNotification() {
+  return useMutation(reportPreviewOptions())
 }
 
 export function useSendNotification() {
@@ -541,6 +560,7 @@ export function useStartCollectionRun() {
       void queryClient.invalidateQueries({ queryKey: keys.llmUsage })
       void queryClient.invalidateQueries({ queryKey: ['collection-queue'] })
       void queryClient.invalidateQueries({ queryKey: ['delivery-policy'] })
+      void queryClient.invalidateQueries({ queryKey: ['notifications', 'report-subscriptions'] })
     },
   })
 }

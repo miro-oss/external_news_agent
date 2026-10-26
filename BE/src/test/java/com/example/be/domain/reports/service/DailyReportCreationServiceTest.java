@@ -1,5 +1,7 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
+import com.example.be.domain.analysis.relevance.TopicRelevanceTestSupport;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportScope;
@@ -21,6 +23,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class DailyReportCreationServiceTest {
+    private final TopicRelevancePolicy relevancePolicy = TopicRelevanceTestSupport.legacyPolicy();
     private final DailyReportJdbcRepository daily = mock(DailyReportJdbcRepository.class);
     private final NewsReportRepository reports = mock(NewsReportRepository.class);
     private final FindingRepository findings = mock(FindingRepository.class);
@@ -30,12 +33,15 @@ class DailyReportCreationServiceTest {
     private final AgentReportOrchestrator orchestrator = mock(AgentReportOrchestrator.class);
     private final ReportGenerator fallback = mock(ReportGenerator.class);
     private final DailyReportCreationService service = new DailyReportCreationService(
-            daily, reports, findings, selector, reservation, persistence, orchestrator, fallback);
+            daily, reports, findings, selector, reservation, persistence, orchestrator, fallback, relevancePolicy);
     private final LocalDate date = LocalDate.of(2026, 8, 1);
 
     @BeforeEach
     void selectionStats() {
-        when(selector.selectWithStats(date, 10)).thenReturn(new DailyReportSelector.Selection(List.of(), 2, 3));
+        var prepared = new DailyReportSelector.Prepared(List.of(), 2, 3, java.util.Map.of(), 10);
+        when(selector.prepare(date, 10)).thenReturn(prepared);
+        when(selector.preview(prepared)).thenReturn(new DailyReportSelector.Selection(List.of(), 2, 3));
+        when(selector.selectPrepared(prepared)).thenReturn(new DailyReportSelector.Selection(List.of(), 2, 3));
         when(daily.sourceStats(date)).thenReturn(ReportSourceStats.empty());
     }
 
@@ -52,6 +58,8 @@ class DailyReportCreationServiceTest {
                 .thenReturn(new ReportPersistenceService.Reservation(77L, false));
         assertEquals(77L, service.generate(date));
         verifyNoInteractions(orchestrator);
+        verify(selector, never()).selectPrepared(any());
+        verify(reservation, never()).freezeSelection(any(), any(), any());
     }
 
     @Test
@@ -91,6 +99,6 @@ class DailyReportCreationServiceTest {
         when(fallback.generateDaily(anyList(), any(), any())).thenReturn(new ReportDocument("복구", "근거 없음", "fallback"));
         service.recoverInterrupted(cutoff);
         verify(persistence).completeRecovered(eq(77L), any(), any());
-        verifyNoInteractions(orchestrator, reservation);
+        verifyNoInteractions(orchestrator, reservation, selector);
     }
 }

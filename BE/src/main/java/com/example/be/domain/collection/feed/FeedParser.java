@@ -3,6 +3,8 @@ package com.example.be.domain.collection.feed;
 import com.example.be.domain.collection.connector.converter.CollectedArticleConverter;
 import com.example.be.domain.collection.connector.converter.HtmlTextSanitizer;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
+import com.example.be.domain.collection.entity.Article;
+import com.example.be.global.config.PublicDestinationPolicy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 import org.w3c.dom.Document;
@@ -17,6 +19,8 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 
 import java.io.ByteArrayInputStream;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -96,14 +100,40 @@ public final class FeedParser {
             return java.util.Optional.empty();
         }
 
+        link = link.trim();
+        try {
+            // Feed links become persisted article URLs. Keep executable/local URLs out of that boundary.
+            // Relative links have no trusted base in this parser and cannot be fetched by ArticleContentClient.
+            PublicDestinationPolicy.validate(URI.create(link));
+        } catch (IllegalArgumentException exception) {
+            log.debug("공개 HTTP(S) 원문 URL이 아닌 피드 항목을 건너뛴다.");
+            return java.util.Optional.empty();
+        }
+
+        String title = HtmlTextSanitizer.sanitize(textOf(element, "title"));
+        String sourceName = CollectedArticleConverter.toSourceName(link);
+        if (!fitsColumn(title, Article.MAX_TITLE_LENGTH)
+                || !fitsColumn(link, Article.MAX_CANONICAL_URL_LENGTH)
+                || !fitsColumn(sourceName, Article.MAX_SOURCE_NAME_LENGTH)) {
+            // A single malformed item must not roll back the other articles in the source's DB batch.
+            log.debug("저장 가능한 기사 메타데이터가 아닌 피드 항목을 건너뛴다.");
+            return java.util.Optional.empty();
+        }
+
         return java.util.Optional.of(new CollectedArticle(
-                HtmlTextSanitizer.sanitize(textOf(element, "title")),
-                link.trim(),
+                title,
+                link,
                 HtmlTextSanitizer.sanitize(summaryOf(element)),
                 CollectedArticleConverter.toPublishedAt(publishedAtOf(element)),
-                CollectedArticleConverter.toSourceName(link.trim()),
+                sourceName,
                 fallbackLanguage
         ));
+    }
+
+    private static boolean fitsColumn(String value, int limit) {
+        // Existing Oracle VARCHAR2 columns can use BYTE semantics; multibyte text must fit that too.
+        return StringUtils.hasText(value) && value.length() <= limit
+                && value.getBytes(StandardCharsets.UTF_8).length <= limit;
     }
 
     /**

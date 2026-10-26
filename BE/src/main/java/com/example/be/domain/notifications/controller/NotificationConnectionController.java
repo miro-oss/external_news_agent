@@ -55,7 +55,7 @@ public class NotificationConnectionController {
             """;
 
     private static final String POLICY_EXAMPLE = """
-            {"isSuccess":true,"code":"COMMON200","message":"성공입니다.","result":{"enabled":true,"run":true,"daily":false,"groupIds":[1],"recipientIds":[2],"channelIds":[1,2]}}
+            {"isSuccess":true,"code":"COMMON200","message":"성공입니다.","result":{"enabled":true,"run":true,"daily":false,"weekly":false,"groupIds":[1],"recipientIds":[2],"channelIds":[1,2]}}
             """;
 
     private static final String DELIVERIES_EXAMPLE = """
@@ -220,7 +220,7 @@ public class NotificationConnectionController {
     }
 
     @PutMapping("/topics/{topicId}/delivery-policy")
-    @Operation(summary = "주제 자동 전달 설정 저장", description = "enabled/run/daily/groupIds/recipientIds/channelIds 전체 교체. enabled=true일 때 활성 대상·채널을 검증합니다. false이면 중지·삭제된 기존 선택도 보존하여 끌 수 있습니다.")
+    @Operation(summary = "주제 자동 전달 설정 저장", description = "enabled/run/daily/weekly/groupIds/recipientIds/channelIds 전체 교체. weekly 생략 시 false이며 기존 RUN/DAILY 동의로 주간 보고서를 보내지 않습니다. enabled=true일 때 보고서 종류 하나 이상과 활성 대상·채널을 검증합니다. false이면 중지·삭제된 기존 선택도 보존하여 끌 수 있습니다. 개인 제외 설정은 유지합니다.")
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "전체 교체한 자동 전달 설정",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = {

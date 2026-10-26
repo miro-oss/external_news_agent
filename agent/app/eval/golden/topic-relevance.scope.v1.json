@@ -1,0 +1,186 @@
+{
+  "datasetId": "topic-relevance.scope.v1",
+  "description": "작성한 합성 회귀 사례. 실제 수집 기사 원문이나 독립된 인간 평가 데이터가 아니며 expectedStatus는 개발 검증용 기대값이다.",
+  "cases": [
+    {
+      "id": "game-item-equipment",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 1,
+        "name": "MEASURE4-제조장비-20260901",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": ["장비", "공정", "라인"],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1,
+        "title": "신작 MMORPG, 장비 제작과 성장 시스템 공개",
+        "summary": "게임사는 캐릭터 성장 방식과 전투 콘텐츠를 소개했다.",
+        "bodyText": "새 MMORPG는 PC와 모바일을 지원한다. 캐릭터의 무기와 방어구를 강화하고, 사용하지 않는 장비를 분해해 재료를 얻을 수 있다. 이 재료로 새로운 장비를 제작하며 퀘스트와 파티 전투를 통해 성장한다. 제작진은 신작의 세계관과 전투 시스템을 소개했다."
+      }
+    },
+    {
+      "id": "software-launch-without-chip-demand-evidence",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 1,
+        "name": "제조장비",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": ["플랫폼", "개발", "신규"],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2,
+        "title": "게임사, 신규 멀티 플랫폼 액션 게임 출시",
+        "summary": null,
+        "bodyText": "게임 개발사가 신규 액션 게임을 PC와 모바일에서 동시에 출시했다. 플랫폼 간 계정 연동과 친구 초대 기능을 제공하며 신규 이용자에게 게임 아이템을 지급한다."
+      }
+    },
+    {
+      "id": "gaming-chip-fab-capacity",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 1,
+        "name": "제조장비",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": ["장비", "공정", "라인"],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 3,
+        "title": "게임기용 칩 증산 위해 웨이퍼 가공 설비 추가",
+        "summary": null,
+        "bodyText": "반도체 제조사는 게임기용 칩의 추가 주문을 받아 공장 생산능력을 늘린다. 신규 웨이퍼 가공 라인에 증착·식각 장비를 설치하고 공정 검증을 진행한다."
+      }
+    },
+    {
+      "id": "game-engine-industrial-digital-twin",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 1,
+        "name": "제조장비",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": ["장비", "공정", "라인"],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 4,
+        "title": "게임 엔진 기반 가상 팹으로 식각 설비 검증",
+        "summary": null,
+        "bodyText": "제조사는 게임 엔진으로 반도체 공장의 디지털 트윈을 구축했다. 실제 식각 설비의 센서 데이터를 가상 팹과 연결해 웨이퍼 가공 조건을 시험하고 설비 동작을 검증한다."
+      }
+    },
+    {
+      "id": "same-game-under-gaming-topic",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 2,
+        "name": "게임 산업",
+        "queryText": "MMORPG 신작과 게임 시스템",
+        "requiredKeywords": [],
+        "optionalKeywords": ["장비", "제작", "전투"],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1,
+        "title": "신작 MMORPG, 장비 제작과 성장 시스템 공개",
+        "summary": "게임사는 캐릭터 성장 방식과 전투 콘텐츠를 소개했다.",
+        "bodyText": "새 MMORPG는 PC와 모바일을 지원한다. 캐릭터의 무기와 방어구를 강화하고, 사용하지 않는 장비를 분해해 재료를 얻을 수 있다. 이 재료로 새로운 장비를 제작하며 퀘스트와 파티 전투를 통해 성장한다. 제작진은 신작의 세계관과 전투 시스템을 소개했다."
+      }
+    },
+    {
+      "id": "peripheral-navigation-is-not-main-event",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 1,
+        "name": "제조장비",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": ["장비", "공정", "라인"],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 5,
+        "title": "신작 모바일 게임, 주말 길드 대전 개최",
+        "summary": "이용자들이 게임 속 길드 전투에 참여한다.",
+        "bodyText": "게임사는 모바일 게임에서 주말 길드 대전을 연다. 참가자는 게임 속 장비를 강화하고 길드원과 대결해 보상을 받는다. [이 기사 끝] 많이 본 다른 기사: 반도체 장비 공정 투자 확대."
+      }
+    },
+    {
+      "id": "financial-regulator-homonym",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 1,
+        "name": "제조장비",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": ["장비", "공정", "라인"],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 6,
+        "title": "공정위, 온라인 결제업체의 수수료 조사",
+        "summary": null,
+        "bodyText": "공정위는 온라인 결제 플랫폼이 가맹점에 부과한 수수료를 조사한다. 금융 플랫폼 간 경쟁과 가맹점의 비용 부담이 쟁점이다."
+      }
+    },
+    {
+      "id": "manufacturing-merger-regulatory-news",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 1,
+        "name": "제조장비",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": ["장비", "공정", "라인"],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 7,
+        "title": "공정위, 웨이퍼 검사장비 업체 인수 심사",
+        "summary": null,
+        "bodyText": "공정위는 반도체 웨이퍼 검사장비 제조업체 간 기업결합을 심사한다. 합병으로 검사장비 공급 시장의 경쟁이 제한되는지 확인한다."
+      }
+    },
+    {
+      "id": "ambiguous-topic-needs-context",
+      "expectedStatus": "UNCERTAIN",
+      "topic": {
+        "id": 3,
+        "name": "MEASURE4-20260901",
+        "queryText": null,
+        "requiredKeywords": [],
+        "optionalKeywords": ["장비", "라인"],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 8,
+        "title": "장비 업데이트 안내",
+        "summary": null,
+        "bodyText": "장비 시스템을 업데이트하고 신규 라인을 추가한다는 안내가 게시됐다."
+      }
+    },
+    {
+      "id": "missing-body-context",
+      "expectedStatus": "UNCERTAIN",
+      "topic": {
+        "id": 1,
+        "name": "제조장비",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": ["장비", "공정", "라인"],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 9,
+        "title": "장비업계 소식",
+        "summary": null,
+        "bodyText": "로그인이 필요합니다. 해당 기사에 접근할 권한이 없습니다."
+      }
+    }
+  ]
+}

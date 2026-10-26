@@ -13,6 +13,7 @@ import com.example.be.domain.sources.exception.code.SourceErrorCode;
 import com.example.be.domain.sources.repository.SourceRepository;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
+import com.example.be.global.config.PublicDestinationPolicy;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -32,8 +33,6 @@ import java.util.Map;
 public class SourceCommandServiceImpl implements SourceCommandService {
 
     private static final String SOURCE_UNIQUE_CONSTRAINT = "UQ_NEWS_SOURCE";
-    private static final String HTTP_PREFIX = "http://";
-    private static final String HTTPS_PREFIX = "https://";
 
     private final SourceRepository sourceRepository;
     private final RobotsPolicyService robotsPolicyService;
@@ -225,13 +224,10 @@ public class SourceCommandServiceImpl implements SourceCommandService {
      * 자리표시자가 든 값은 여기서 걸린다 — FEED는 고정 URL이어야 하므로 그게 맞는 판정이다.
      */
     private boolean isHttpUrl(String value) {
-        String lowered = value.toLowerCase(Locale.ROOT);
-        if (!lowered.startsWith(HTTP_PREFIX) && !lowered.startsWith(HTTPS_PREFIX)) {
-            return false;
-        }
-
         try {
-            return StringUtils.hasText(URI.create(value).getHost());
+            // Validate names/literals at registration too; transport still checks actual DNS/socket addresses.
+            PublicDestinationPolicy.validate(URI.create(value));
+            return true;
         } catch (IllegalArgumentException exception) {
             return false;
         }

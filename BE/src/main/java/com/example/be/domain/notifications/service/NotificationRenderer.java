@@ -1,11 +1,15 @@
 package com.example.be.domain.notifications.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.entity.ReportContent;
+import com.example.be.domain.reports.insight.ReportInsightDTO;
 import com.example.be.domain.reports.service.ReportFindings;
+import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import com.example.be.domain.reports.service.ReportReadingContent;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -15,24 +19,76 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
-/** 외부 채널에는 보고서 원문 대신 요약과 원문 링크만 렌더링한다. */
+/** 저장된 보고서의 근거를 채널별 브리핑으로 렌더링한다. 기사 전문은 포함하지 않는다. */
 @Component
 public class NotificationRenderer {
 
-    private final FindingRepository findingRepository;
+    private static final int EMAIL_MAX_ISSUES = 5;
+    private static final int TELEGRAM_MAX_ISSUES = 3;
 
-    public NotificationRenderer(FindingRepository findingRepository) {
+    // Inline styles and presentation tables keep the site's palette readable in mail clients.
+    private static final String EMAIL_TABLE = "<table role=\"presentation\" width=\"100%\" border=\"0\" "
+            + "cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;border-spacing:0;"
+            + "text-align:left;mso-table-lspace:0pt;mso-table-rspace:0pt\"><tbody>";
+    private static final String EMAIL_LINK_STYLE = " style=\"color:#1b64da;text-decoration:underline;"
+            + "overflow-wrap:anywhere;word-break:break-word\"";
+
+    private final FindingRepository findingRepository;
+    private final TopicRelevancePolicy relevancePolicy;
+    private final ReportEventFeedbackProjection feedbackProjection;
+    private final NotificationDartSummary dartSummary;
+
+    public NotificationRenderer(FindingRepository findingRepository, TopicRelevancePolicy relevancePolicy,
+                                ReportEventFeedbackProjection feedbackProjection, NotificationDartSummary dartSummary) {
         this.findingRepository = findingRepository;
+        this.relevancePolicy = relevancePolicy;
+        this.feedbackProjection = feedbackProjection;
+        this.dartSummary = dartSummary;
     }
 
     public RenderedNotification render(NewsReport report, NotificationChannel channel) {
-        ReportFindings.Visible visible = ReportFindings.loadVisible(report, findingRepository);
-        List<Finding> findings = visible.findings();
-        ReportReadingContent content = ReportReadingContent.from(report, visible);
-        return channel.getChannelType() == ChannelType.EMAIL
-                ? renderEmail(report, findings, content)
-                : renderTelegram(report, findings, content, channel.getMaxLength());
+        return render(report, channel, (ReportInsightDTO.AudienceInsight) null);
+    }
+
+    public RenderedNotification render(NewsReport report, NotificationChannel channel,
+                                       ReportInsightDTO.AudienceInsight insight) {
+        ReportFindings.Visible visible = ReportFindings.loadVisible(report, findingRepository, relevancePolicy);
+        var view = feedbackProjection.projectForDelivery(report, visible, feedbackProjection.reviews(report.getId()));
+        return render(report, channel, view, null, insight);
+    }
+
+    /** Personalization is already evaluated and persisted; rendering never calls the agent. */
+    public RenderedNotification render(NewsReport report, NotificationChannel channel,
+                                       ReportEventFeedbackProjection.View view, String feedbackUrl) {
+        return render(report, channel, view, feedbackUrl, null);
+    }
+
+    public RenderedNotification render(NewsReport report, NotificationChannel channel,
+                                       ReportEventFeedbackProjection.View view, String feedbackUrl,
+                                       ReportInsightDTO.AudienceInsight insight) {
+        List<Finding> findings = view.findings();
+        ReportReadingContent content = view.readingContent();
+        NotificationInsightBrief brief = NotificationInsightBrief.from(insight, findings, view.excludedEvidenceFindingIds());
+        String link = safeUrl(feedbackUrl) ? "<a href=\"" + attribute(feedbackUrl)
+                + "\">이슈 피드백 · 내 수신 기준</a>" : "";
+        if (channel.getChannelType() == ChannelType.EMAIL) {
+            RenderedNotification rendered = renderEmail(report, findings, content, brief);
+            if (link.isEmpty()) return rendered;
+            String footer = "<p style=\"margin:24px 0;color:#636c78;font-size:13px\">" + link
+                    + "<br>이 링크는 수신자 전용입니다.</p>";
+            return new RenderedNotification(rendered.subject(), rendered.parseMode(),
+                    rendered.chunks().stream().map(body -> body.replace("<!-- feedback-footer -->", footer)).toList());
+        }
+        String footer = link.isEmpty() ? "" : "\n\n" + link;
+        if (footer.length() + 80 >= channel.getMaxLength()) footer = "";
+        int available = channel.getMaxLength() - footer.length();
+        String insightBlock = telegramInsight(brief, Math.max(0, Math.min(1200, available / 2)));
+        RenderedNotification rendered = renderTelegram(report, findings, content, available - insightBlock.length());
+        return new RenderedNotification(rendered.subject(), rendered.parseMode(),
+                List.of(rendered.chunks().getFirst() + insightBlock + footer));
     }
 
     public RenderedNotification renderBreakingAlert(String issueTitle,
@@ -40,8 +96,10 @@ public class NotificationRenderer {
                                                      NotificationChannel channel) {
         if (channel.getChannelType() == ChannelType.EMAIL) {
             String subject = "[속보 후속] " + singleLine(issueTitle);
-            String html = "<html><body><h2>속보 후속</h2><p>" + escape(message) + "</p></body></html>";
-            return new RenderedNotification(subject, null, List.of(html));
+            StringBuilder html = emailStart("속보 후속");
+            html.append("<p style=\"margin:0;color:#4e5968;font-size:15px;line-height:1.8\">")
+                    .append(escape(message)).append("</p>");
+            return new RenderedNotification(subject, null, List.of(emailEnd(html)));
         }
         String body = "<b>속보 후속</b>\n" + escape(message);
         if (body.length() > channel.getMaxLength()) {
@@ -50,22 +108,152 @@ public class NotificationRenderer {
         return new RenderedNotification(null, "HTML", List.of(body));
     }
 
-    private RenderedNotification renderEmail(NewsReport report, List<Finding> findings, ReportReadingContent content) {
+    private RenderedNotification renderEmail(NewsReport report, List<Finding> findings, ReportReadingContent content,
+                                             NotificationInsightBrief brief) {
         String subject = "[뉴스 보고서] " + singleLine(normalize(report.getTitle()));
-        StringBuilder html = new StringBuilder("<html><body><h2>")
-                .append(escape(report.getTitle())).append("</h2><h3>핵심 요약</h3><ul>");
-        digest(content, findings).forEach(line -> html.append("<li>").append(escape(line)).append("</li>"));
-        html.append("</ul>");
+        StringBuilder html = emailStart(report.getTitle());
+        String dartBlock = dartSummary.render(report, reportUrl(report));
+        if (StringUtils.hasText(dartBlock)) html.append(dartBlock);
+        html.append(EMAIL_TABLE).append("<tr><td class=\"email-card\" bgcolor=\"#e8f3ff\" "
+                + "style=\"padding:24px;background:#e8f3ff;border-radius:16px\">"
+                + "<h2 style=\"margin:0 0 12px;color:#1b64da;font-size:14px;font-weight:700\">핵심 요약</h2>");
+        // Mail clients can override list indentation; use cells to keep summary bullets at the left edge.
+        html.append(EMAIL_TABLE);
+        digest(content, findings, 700).forEach(line -> html.append("<tr><td width=\"20\" valign=\"top\" aria-hidden=\"true\" "
+                        + "style=\"width:20px;padding:4px 0;color:#1b64da;font-size:15px;line-height:1.8\">•</td>"
+                        + "<td valign=\"top\" style=\"padding:4px 0;color:#191f28;font-size:15px;line-height:1.8\">")
+                .append(escape(line)).append("</td></tr>"));
+        html.append("</tbody></table></td></tr></tbody></table>");
+        appendEmailInsight(html, brief);
+        List<NewsCard> cards = cards(content, findings, EMAIL_MAX_ISSUES);
+        for (int i = 0; i < cards.size(); i++) {
+            NewsCard card = cards.get(i);
+            html.append(EMAIL_TABLE).append("<tr><td height=\"20\" style=\"height:20px;font-size:0;line-height:0\"></td></tr>"
+                            + "<tr><td class=\"email-card\" bgcolor=\"#f9fafb\" "
+                            + "style=\"padding:24px;background:#f9fafb;border-radius:16px\">"
+                            + "<p style=\"margin:0 0 12px;color:#1b64da;font-size:12px;font-weight:700\">"
+                            + "<span style=\"display:inline-block;padding:4px 10px;background:#e8f3ff;border-radius:8px\">주요 이슈 ")
+                    .append(i + 1).append("</span></p><h2 style=\"margin:0 0 20px;color:#191f28;"
+                            + "font-size:21px;font-weight:700;line-height:1.45;letter-spacing:-0.5px\">")
+                    .append(escape(limit(card.title(), 180)))
+                    .append("</h2><p style=\"margin:0 0 6px;color:#191f28;font-size:13px;font-weight:700\">주요 내용</p>"
+                            + "<p style=\"margin:0;color:#4e5968;font-size:15px;line-height:1.8\">")
+                    .append(escape(limit(card.summary(), 1200))).append("</p>");
+            if (!card.watches().isEmpty()) {
+                html.append(EMAIL_TABLE).append("<tr><td style=\"padding:20px 0 6px;color:#191f28;font-size:13px;line-height:1.7\">"
+                        + "<strong>후속 확인</strong></td></tr>");
+                card.watches().forEach(watch -> html.append("<tr><td valign=\"top\" "
+                                + "style=\"padding:0 0 4px;color:#4e5968;font-size:14px;line-height:1.8\">")
+                        .append(escape(limit(watch, 600))).append("</td></tr>"));
+                html.append("</tbody></table>");
+            }
+            appendCardSources(html, card.urls(), true);
+            html.append("</td></tr></tbody></table>");
+        }
+        if (cards.isEmpty()) appendSources(html, findings, true);
         appendReportLink(html, report, true);
-        appendSources(html, findings, true);
-        return new RenderedNotification(subject, null, List.of(html.append("</body></html>").toString()));
+        return new RenderedNotification(subject, null, List.of(emailEnd(html)));
+    }
+
+    private void appendEmailInsight(StringBuilder html, NotificationInsightBrief brief) {
+        if (brief == null) return;
+        html.append(EMAIL_TABLE).append("<tr><td class=\"email-card\" style=\"padding:24px 0 4px\">"
+                        + "<h2 style=\"margin:0 0 8px;color:#1b64da;font-size:16px\">")
+                .append(escape(brief.label())).append("</h2><p style=\"margin:0 0 12px;color:#636c78;font-size:12px\">")
+                .append(escape(NotificationInsightBrief.AI_NOTICE)).append("</p>");
+        if (brief.items().isEmpty()) html.append("<p>").append(NotificationInsightBrief.UNAVAILABLE).append("</p>");
+        for (var item : brief.items()) {
+            html.append("<p style=\"margin:0 0 12px;color:#4e5968;font-size:14px;line-height:1.8\">")
+                    .append(escape(emailInsightText(item.text())));
+            html.append("</p>");
+        }
+        html.append("</td></tr></tbody></table>");
+    }
+
+    private static String emailInsightText(String value) {
+        String text = prose(value == null ? "" : value.replaceAll("\\\\[\\t ]*(?:\\r?\\n|$)", " "));
+        String prefix = "원문: 「";
+        if (!text.startsWith(prefix)) return text;
+        // Source sentences can contain quoted terms or the word '해석'; find the outer quote.
+        int depth = 1;
+        for (int index = prefix.length(); index < text.length(); index++) {
+            char character = text.charAt(index);
+            if (character == '「') depth++;
+            if (character == '」' && --depth == 0) {
+                String suffix = text.substring(index + 1).stripLeading();
+                if (suffix.startsWith("해석:") && StringUtils.hasText(suffix.substring(3))) {
+                    return suffix.substring(3).strip();
+                }
+                break;
+            }
+        }
+        return text;
+    }
+
+    /** An interpretation and its assumptions are indivisible; budget pressure drops whole items. */
+    private String telegramInsight(NotificationInsightBrief brief, int budget) {
+        if (brief == null) return "";
+        String heading = "\n\n<b>" + escape(brief.label()) + "</b>\n" + escape(NotificationInsightBrief.AI_NOTICE) + "\n";
+        StringBuilder result = new StringBuilder(heading);
+        for (var item : brief.items()) {
+            String block = "• " + escape(prose(item.text()))
+                    + (StringUtils.hasText(item.assumption()) ? "\n전제: " + escape(prose(item.assumption())) : "") + "\n";
+            if (result.length() + block.length() <= budget) result.append(block);
+        }
+        if (result.length() == heading.length()) {
+            result.append(brief.items().isEmpty() ? NotificationInsightBrief.UNAVAILABLE
+                    : "길이 제한으로 인사이트를 생략했습니다. 보고서에서 확인하세요.");
+        }
+        return result.length() <= budget ? result.toString() : "";
+    }
+
+    private StringBuilder emailStart(String title) {
+        return new StringBuilder("""
+                <!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>@media only screen and (max-width:600px){.email-content{padding:24px 20px!important}.email-card{padding:20px!important}.email-title{font-size:25px!important}}</style>
+                </head><body style="margin:0;padding:0;background:#f2f4f6;color:#191f28;font-family:Pretendard,-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif;line-height:1.7;-webkit-text-size-adjust:100%">
+                <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#f2f4f6" style="background:#f2f4f6"><tbody><tr><td align="center" style="padding:32px 12px">
+                <!--[if mso]><table role="presentation" width="680" border="0" cellpadding="0" cellspacing="0"><tr><td><![endif]-->
+                <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" bgcolor="#ffffff" style="width:100%;max-width:680px;table-layout:fixed;background:#ffffff;border-radius:20px;border-spacing:0;overflow-wrap:anywhere;word-break:break-word;text-align:left"><tbody>
+                <tr><td class="email-content" style="padding:32px;border-top:4px solid #3182f6;border-radius:20px 20px 0 0">
+                <p style="margin:0;color:#1b64da;font-size:20px;font-weight:800;letter-spacing:-0.6px">BISTelligence</p>
+                <p style="margin:2px 0 28px;color:#636c78;font-size:11px;letter-spacing:0.6px">News Signal Desk</p>
+                <p style="margin:0 0 10px;color:#1b64da;font-size:11px;font-weight:700;letter-spacing:1.6px">NEWS BRIEFING</p>
+                <h1 class="email-title" style="margin:0 0 24px;color:#191f28;font-size:30px;font-weight:800;line-height:1.4;letter-spacing:-0.8px">
+                """).append(escape(title)).append("</h1>");
+    }
+
+    private String emailEnd(StringBuilder html) {
+        return html.append("""
+                <!-- feedback-footer -->
+                </td></tr></tbody></table>
+                <!--[if mso]></td></tr></table><![endif]-->
+                <p style="margin:20px 0 0;color:#636c78;font-size:12px;line-height:1.6">BISTelligence · News Signal Desk</p>
+                </td></tr></tbody></table></body></html>
+                """).toString();
     }
 
     private RenderedNotification renderTelegram(NewsReport report, List<Finding> findings,
                                                  ReportReadingContent content, int maxLength) {
+        List<NewsCard> cards = cards(content, findings, TELEGRAM_MAX_ISSUES);
+        // Fit whole cards and links first. Shorten prose before discarding lower-priority cards.
+        for (int count = cards.size(); count > 0; count--) {
+            for (int summaryLimit : new int[]{480, 320, 200, 120}) {
+                String body = telegramCards(report, cards.subList(0, count), cards.size(), summaryLimit, true, 2);
+                if (body.length() <= maxLength) return new RenderedNotification(null, "HTML", List.of(body));
+            }
+            String body = telegramCards(report, cards.subList(0, count), cards.size(), 120, false, 1);
+            if (body.length() <= maxLength) return new RenderedNotification(null, "HTML", List.of(body));
+        }
+        // Very long source URLs must not replace all issue content with the legacy digest.
+        for (int count = cards.size(); count > 0; count--) {
+            String body = telegramCards(report, cards.subList(0, count), cards.size(), 120, false, 0);
+            if (body.length() <= maxLength) return new RenderedNotification(null, "HTML", List.of(body));
+        }
         StringBuilder body = new StringBuilder("<b>").append(escape(limit(normalize(report.getTitle()), 140)))
                 .append("</b>\n\n");
-        digest(content, findings).forEach(line -> body.append("• ").append(escape(line)).append("\n"));
+        digest(content, findings, 280).forEach(line -> body.append("• ").append(escape(line)).append("\n"));
         appendReportLink(body, report, false);
         appendSources(body, findings, false);
         String rendered = body.toString();
@@ -74,7 +262,74 @@ public class NotificationRenderer {
         return new RenderedNotification(null, "HTML", List.of(rendered));
     }
 
-    private List<String> digest(ReportReadingContent content, List<Finding> findings) {
+    private String telegramCards(NewsReport report, List<NewsCard> cards, int total,
+                                 int summaryLimit, boolean includeWatches, int sourceLimit) {
+        StringBuilder body = new StringBuilder("<b>").append(escape(limit(normalize(report.getTitle()), 100)))
+                .append("</b>\n");
+        for (int i = 0; i < cards.size(); i++) {
+            NewsCard card = cards.get(i);
+            body.append("\n<b>").append(i + 1).append(". ").append(escape(limit(card.title(), 90)))
+                    .append("</b>\n").append(escape(limit(card.summary(), summaryLimit))).append("\n");
+            if (includeWatches) {
+                card.watches().forEach(watch -> body.append("확인할 점: ")
+                        .append(escape(limit(watch, summaryLimit / 2))).append("\n"));
+            }
+            appendCardSources(body, card.urls().stream().limit(sourceLimit).toList(), false);
+        }
+        if (cards.size() < total) body.append("\n길이 제한으로 주요 이슈 ").append(cards.size())
+                .append("건을 표시합니다.\n");
+        appendReportLink(body, report, false);
+        return body.toString();
+    }
+
+    private List<NewsCard> cards(ReportReadingContent content, List<Finding> findings, int maxCards) {
+        if (content.structuredContent() == null) return List.of();
+        Map<Long, Finding> visible = new LinkedHashMap<>();
+        findings.forEach(finding -> visible.put(finding.getId(), finding));
+        ReportContent structured = content.structuredContent();
+        return structured.importantEvents().stream()
+                .filter(event -> StringUtils.hasText(event.title()) && StringUtils.hasText(event.summaryKo()))
+                .filter(event -> supported(event.sourceFindingIds(), visible))
+                .limit(maxCards)
+                .map(event -> new NewsCard(prose(event.title()), prose(event.summaryKo()),
+                        structured.watchItems().stream()
+                                .filter(watch -> supported(watch.sourceFindingIds(), visible))
+                                .filter(watch -> watch.sourceFindingIds().stream().anyMatch(event.sourceFindingIds()::contains))
+                                .map(watch -> watchText(watch)).filter(StringUtils::hasText).distinct().limit(2).toList(),
+                        event.sourceFindingIds().stream().map(visible::get)
+                                .map(finding -> finding.getArticle().getCanonicalUrl())
+                                .filter(this::safeUrl).distinct().limit(2).toList()))
+                .toList();
+    }
+
+    private boolean supported(List<Long> ids, Map<Long, Finding> visible) {
+        return !ids.isEmpty() && ids.stream().allMatch(visible::containsKey);
+    }
+
+    private String watchText(ReportContent.WatchItem watch) {
+        String topic = prose(watch.topic());
+        String reason = prose(watch.reason());
+        if (topic.isEmpty()) return reason;
+        return reason.isEmpty() || reason.equals(topic) ? topic : topic + " — " + reason;
+    }
+
+    private void appendCardSources(StringBuilder body, List<String> urls, boolean email) {
+        if (urls.isEmpty()) return;
+        if (email) body.append("<p style=\"margin:20px 0 0;padding-top:16px;border-top:1px solid #e5e8eb;"
+                + "color:#636c78;font-size:12px;line-height:1.8\">");
+        for (int i = 0; i < urls.size(); i++) {
+            if (i > 0) body.append(" · ");
+            String url = urls.get(i);
+            body.append("<a href=\"").append(attribute(url)).append("\"")
+                    .append(email ? EMAIL_LINK_STYLE : "").append(">원문 ").append(i + 1)
+                    .append(" · ").append(escape(URI.create(url).getHost())).append("</a>");
+        }
+        body.append(email ? "</p>" : "\n");
+    }
+
+    private record NewsCard(String title, String summary, List<String> watches, List<String> urls) {}
+
+    private List<String> digest(ReportReadingContent content, List<Finding> findings, int maxLength) {
         List<String> summary = new ArrayList<>();
         if (content.structuredContent() != null) {
             content.structuredContent().executiveSummary().stream()
@@ -92,29 +347,47 @@ public class NotificationRenderer {
         if (summary.isEmpty()) findings.stream().map(Finding::getSummary)
                 .filter(StringUtils::hasText).distinct().limit(3).forEach(summary::add);
         if (summary.isEmpty()) summary.add("이번 수집에서 새롭게 정리할 주요 내용이 없습니다.");
-        return summary.stream().map(NotificationRenderer::normalize)
-                .map(line -> line.replaceAll("\\[([^]]+)]\\([^)]*\\)", "$1").replace("**", ""))
-                .map(line -> limit(line, 280)).limit(3).toList();
+        return summary.stream().map(NotificationRenderer::prose)
+                .map(line -> limit(line, maxLength)).limit(3).toList();
+    }
+
+    private static String prose(String value) {
+        return normalize(value).replaceAll("\\[([^]]+)]\\([^)]*\\)", "$1").replace("**", "");
     }
 
     @org.springframework.beans.factory.annotation.Value("${news.notifications.public-base-url:}")
     private String publicBaseUrl = "";
 
+    private String reportUrl(NewsReport report) {
+        return safeUrl(publicBaseUrl)
+                ? publicBaseUrl.replaceAll("/+$", "") + "/#/reports?reportId=" + report.getId() : "";
+    }
+
     private void appendReportLink(StringBuilder body, NewsReport report, boolean email) {
-        if (!safeUrl(publicBaseUrl)) return;
-        String url = publicBaseUrl.replaceAll("/+$", "") + "/#/reports?reportId=" + report.getId();
-        body.append(email ? "<p>" : "\n").append("<a href=\"").append(attribute(url))
-                .append("\">보고서 전체 보기</a>").append(email ? "</p>" : "\n");
+        String url = reportUrl(report);
+        if (url.isEmpty()) return;
+        if (email) {
+            body.append(EMAIL_TABLE).append("<tr><td align=\"center\" style=\"padding:28px 0 0\">"
+                            + "<table role=\"presentation\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\"><tbody><tr>"
+                            + "<td align=\"center\" bgcolor=\"#1b64da\" style=\"background:#1b64da;border-radius:12px;mso-padding-alt:14px 24px\">"
+                            + "<a href=\"").append(attribute(url)).append("\" style=\"display:inline-block;padding:14px 24px;"
+                            + "color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;line-height:1.5\">"
+                            + "보고서 전체 보기</a></td></tr></tbody></table></td></tr></tbody></table>");
+        } else {
+            body.append("\n<a href=\"").append(attribute(url)).append("\">보고서 전체 보기</a>\n");
+        }
     }
 
     private void appendSources(StringBuilder body, List<Finding> findings, boolean email) {
         List<String> urls = findings.stream().map(f -> f.getArticle().getCanonicalUrl())
                 .filter(this::safeUrl).distinct().limit(3).toList();
         if (urls.isEmpty()) return;
-        body.append(email ? "<p>대표 원문: " : "\n대표 원문: ");
+        body.append(email ? "<p style=\"margin:20px 0 0;color:#636c78;font-size:13px;line-height:1.8\">참고 원문: "
+                : "\n참고 원문: ");
         for (int i = 0; i < urls.size(); i++) {
             if (i > 0) body.append(" · ");
-            body.append("<a href=\"").append(attribute(urls.get(i))).append("\">자료 ").append(i + 1).append("</a>");
+            body.append("<a href=\"").append(attribute(urls.get(i))).append("\"")
+                    .append(email ? EMAIL_LINK_STYLE : "").append(">자료 ").append(i + 1).append("</a>");
         }
         if (email) body.append("</p>");
     }
@@ -155,7 +428,7 @@ public class NotificationRenderer {
         StringBuilder shortened = new StringBuilder();
         for (int offset = 0; offset < plain.length();) {
             int codePoint = plain.codePointAt(offset);
-            String token = escape(new String(Character.toChars(codePoint)));
+            String token = HtmlUtils.htmlEscape(new String(Character.toChars(codePoint)), "UTF-8");
             if (shortened.length() + token.length() > budget) {
                 break;
             }

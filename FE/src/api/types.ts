@@ -83,6 +83,7 @@ export interface TopicCreateRequest {
   batchSize?: number
   intervalMinutes?: number
   sourceIds?: number[]
+  dartCorpCode?: string | null
 }
 
 export interface TopicSourceBrief {
@@ -101,6 +102,13 @@ export interface Topic {
   batchSize: number
   intervalMinutes: number
   active: boolean
+  dartCompany?: import('./dart').DartCompany | null
+}
+
+/** GET /topics/{topicId} 응답. 편집 시 연결된 소스의 검색어 필수 여부를 확인한다. */
+export interface TopicDetail extends Topic {
+  lastCollectedAt: string | null
+  sources: (TopicSourceBrief & Pick<Source, 'language' | 'robotsStatus' | 'active'>)[]
 }
 
 export interface TopicSurgeKeyword {
@@ -168,6 +176,7 @@ export interface TopicKeywordProposal {
   createdAt: string
   currentKeywords: TopicKeywordProposalCurrentKeywords
   changes: TopicKeywordProposalChange[]
+  selectedChangeIndexes?: number[] | null
 }
 
 export type ChangeType = 'NEW' | 'UPDATED'
@@ -394,11 +403,20 @@ export interface ReportChanges {
   items: ReportChangeItem[]
 }
 
+export type ReportScope = 'RUN' | 'DAILY' | 'WEEKLY'
+
 export interface ReportSummary {
   id: number
   runId: number | null
-  reportScope: 'RUN' | 'DAILY'
+  reportScope: ReportScope
+  topicId?: number | null
+  topicName?: string | null
   reportDate: string | null
+  reportEndDate?: string | null
+  sourceReportIds?: number[]
+  sourceReportDates?: string[]
+  sourceAnalysisDates?: string[]
+  missingReportDates?: string[]
   sourceRunIds: number[]
   sourceReportCount?: number | null
   title: string
@@ -463,8 +481,15 @@ export interface ReportIssueSummary {
 export interface ReportDetail {
   id: number
   runId: number | null
-  reportScope: 'RUN' | 'DAILY'
+  reportScope: ReportScope
+  topicId?: number | null
+  topicName?: string | null
   reportDate: string | null
+  reportEndDate?: string | null
+  sourceReportIds?: number[]
+  sourceReportDates?: string[]
+  sourceAnalysisDates?: string[]
+  missingReportDates?: string[]
   sourceRunIds: number[]
   sourceReportCount?: number | null
   title: string
@@ -475,6 +500,7 @@ export interface ReportDetail {
   generatedAt: string
   summaryStats: ReportSummaryStats
   structuredContent?: ReportContent | null
+  dartCompanies?: import('./dart').DartCompany[]
   collectionContexts?: ReportCollectionContext[]
   articleStats?: { totalCount: number; newCount: number; existingCount: number }
   findings?: ReportFinding[]
@@ -491,6 +517,7 @@ export interface ReportCollectionContext {
     excludedKeywords: string[]
     batchSize: number
     intervalMinutes: number
+    dartCompany?: import('./dart').DartCompany | null
   }>
 }
 
@@ -595,6 +622,15 @@ export interface NotificationGroup {
   members?: Array<{ recipientId: number; name: string; active: boolean }>
 }
 
+export interface NotificationGroupMembers {
+  groupId: number
+  members: Array<{ recipientId: number; name: string; active: boolean }>
+  addedCount: number
+  removedCount: number
+  memberCount: number
+  activeMemberCount: number
+}
+
 export interface NotificationPreview {
   reportId: number
   channelId: number
@@ -668,6 +704,7 @@ export interface LlmUsage {
     dailyCallsUsed: number
     dailyCallsLimit: number
     dailyCallsRemaining: number
+    dailyEstimatedCostUsd: number
     resetAt: string
   }
   paid: {

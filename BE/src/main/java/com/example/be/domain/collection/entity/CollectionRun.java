@@ -51,6 +51,10 @@ public class CollectionRun {
     private RunStatus status;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "stage", length = 30)
+    private RunStage stage;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "trigger_type", nullable = false, length = 20)
     private TriggerType triggerType;
 
@@ -121,12 +125,14 @@ public class CollectionRun {
 
     public void start(LocalDateTime now) {
         this.status = RunStatus.RUNNING;
+        this.stage = RunStage.COLLECTING;
         this.startedAt = now;
         items.forEach(CollectionRunItem::markRunning);
     }
 
     public void returnToQueue() {
         this.status = RunStatus.PENDING;
+        this.stage = null;
         this.startedAt = null;
         items.forEach(CollectionRunItem::markPending);
     }
@@ -143,11 +149,13 @@ public class CollectionRun {
         this.updatedCount = items.stream().mapToInt(CollectionRunItem::getUpdatedCount).sum();
         this.skippedCount = this.scannedCount - this.newCount - this.updatedCount;
         this.status = resolveStatus();
+        this.stage = null;
         this.finishedAt = finishedAt;
     }
 
     public void fail(LocalDateTime finishedAt) {
         this.status = RunStatus.FAILED;
+        this.stage = null;
         this.finishedAt = finishedAt;
     }
 

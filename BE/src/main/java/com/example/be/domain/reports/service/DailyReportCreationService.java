@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.reports.entity.NewsReport;
@@ -30,6 +31,7 @@ public class DailyReportCreationService {
     private final ReportPersistenceService persistence;
     private final AgentReportOrchestrator orchestrator;
     private final ReportGenerator fallbackGenerator;
+    private final TopicRelevancePolicy relevancePolicy;
 
     @Value("${news.reports.daily.max-issues:10}")
     private int maxIssues = 10;
@@ -49,14 +51,17 @@ public class DailyReportCreationService {
             return null;
         }
         List<Long> sourceRunIds = dailyRepository.findSourceRunIds(date);
-        DailyReportSelector.Selection selection = selector.selectWithStats(date, maxIssues);
-        List<Finding> selected = selection.findings();
-        ReportSourceStats stats = selection.applyTo(dailyRepository.sourceStats(date));
+        var prepared = selector.prepare(date, maxIssues);
+        var provisional = selector.preview(prepared);
         ReportPersistenceService.Reservation reservation = dailyPersistence.reserveWithSnapshot(
-                date, sourceRunIds, selected.stream().map(Finding::getId).toList(), now, selection.comparisonSnapshot());
+                date, sourceRunIds, provisional.findings().stream().map(Finding::getId).toList(), now, null);
         if (!reservation.owner()) {
             return reservation.reportId();
         }
+        var selection = selector.selectPrepared(prepared);
+        List<Finding> selected = selection.findings();
+        ReportSourceStats stats = selection.applyTo(dailyRepository.sourceStats(date));
+        dailyPersistence.freezeSelection(reservation.reportId(), selection, now);
         ReportDocument document;
         try {
             document = orchestrator.generateDaily(reservation.reportId(), date, selected, stats, now);
@@ -64,7 +69,7 @@ public class DailyReportCreationService {
             log.error("일일 보고서 생성 실패. date={}", date, exception);
             document = fallbackGenerator.generateDaily(selected, date, stats);
         }
-        return persistence.complete(reservation.reportId(), document, now);
+        return persistence.complete(reservation.reportId(), document, LocalDateTime.now(ApiTimeZone.ZONE));
     }
 
     /** 예약 뒤 프로세스가 중단되면 저장된 근거로 복구한다. 불확실한 LLM 호출을 반복하지 않는다. */
@@ -72,10 +77,9 @@ public class DailyReportCreationService {
         for (NewsReport report : reportRepository.findByReportScopeAndReportStatusAndGeneratedAtBefore(
                 ReportScope.DAILY, ReportStatus.PENDING, before)) {
             try {
-                List<Finding> findings = ReportFindings.load(report, findingRepository);
+                List<Finding> findings = ReportFindings.load(report, findingRepository, relevancePolicy);
                 LocalDateTime now = LocalDateTime.now(ApiTimeZone.ZONE);
-                ReportSourceStats stats = selector.selectWithStats(report.getReportDate(), maxIssues)
-                        .applyTo(dailyRepository.sourceStats(report.getReportDate()));
+                ReportSourceStats stats = dailyRepository.sourceStats(report.getReportDate());
                 ReportDocument fallback = fallbackGenerator.generateDaily(findings, report.getReportDate(), stats);
                 persistence.completeRecovered(report.getId(), fallback, now);
             } catch (RuntimeException exception) {

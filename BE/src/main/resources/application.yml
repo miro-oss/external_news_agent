@@ -1,3 +1,8 @@
+server:
+  # Product APIs are an unauthenticated, local-only PoC.
+  address: 127.0.0.1
+  forward-headers-strategy: none
+
 spring:
   application:
     name: BE
@@ -44,7 +49,20 @@ springdoc:
     path: /v3/api-docs
 
 news:
+  dart:
+    # A missing key disables only DART. Credentials are sent only to the fixed OpenDART HTTPS origin.
+    enabled: ${DART_ENABLED:true}
+    api-key: ${DART_API_KEY:}
+    connect-timeout: 5s
+    read-timeout: 10s
+    catalog:
+      initial-delay-ms: 5000
+      sync-interval-ms: 86400000
   reports:
+    weekly:
+      enabled: true
+      backfill-weeks: 4
+      poll-interval-ms: 300000
     daily:
       enabled: true
       max-issues: 10
@@ -78,6 +96,7 @@ news:
     # 잘린 요약·매체 푸터만으로 동일 본문 그룹을 만들지 않는다.
     min-article-content-length: 200
   notifications:
+    public-base-url: ${NOTIFICATION_PUBLIC_BASE_URL:}
     # 미설정 시 자동 속보 알림은 전송하지 않는다. 활성 알림 그룹 ID를 명시적으로 지정해야 한다.
     breaking-group-id: ${BREAKING_NOTIFICATION_GROUP_ID:}
     telegram:
@@ -88,6 +107,9 @@ news:
       password: ${SMTP_PASSWORD:}
     connect-timeout: 5s
     read-timeout: 10s
+  feedback:
+    enabled: ${FEEDBACK_ENABLED:true}
+    poll-interval-ms: 15000
   agent:
     enabled: ${AGENT_ENABLED:false}
     base-url: ${AGENT_BASE_URL:http://127.0.0.1:8088}
@@ -97,6 +119,8 @@ news:
     # Agent provider 기본 60초보다 네트워크·응답 직렬화 여유를 둔다.
     insight-timeout: ${AGENT_INSIGHT_TIMEOUT:75s}
     report-timeout: 120s
+    # Agent report-insight 전체 최대 기한 180초 + 응답 직렬화·전송 여유 30초. 210초 미만은 시작 시 거부한다.
+    report-insight-timeout: ${AGENT_REPORT_INSIGHT_TIMEOUT:210s}
     default-plan: FREE
     allow-run-override: true
     # 분석 캐시는 콘텐츠뿐 아니라 현재 프롬프트·플랜별 모델 계약까지 같을 때만 사용한다.
@@ -104,6 +128,7 @@ news:
     free-analysis-prompt-version: ${AGENT_FREE_ANALYSIS_PROMPT_VERSION:analyze.ko.v10+perspective.ko.v1+sensitivity.ko.v2}
     insight-prompt-version: ${AGENT_INSIGHT_PROMPT_VERSION:insight.ko.v2+perspective.ko.v1}
     free-model: ${OPENAI_MODEL:gpt-4.1-nano}
+    relevance-free-model: ${TOPIC_RELEVANCE_OPENAI_MODEL:gpt-4.1-nano}
     paid-model: ${MINDLOGIC_CLAUDE_MODEL:}
     insight-history:
       days: 30
@@ -114,7 +139,7 @@ news:
       search-batch-size: 10
       daily-budget-percent: 15
     quota:
-      free-daily-calls: 1500
+      free-daily-calls: 3000
       paid-monthly-credits: 3000
       paid-daily-credits: 90
       paid-daily-report-reserve: 20

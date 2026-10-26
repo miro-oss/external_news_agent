@@ -25,6 +25,11 @@
   --primary: #3182f6;
   --primary-strong: #1b64da;
   --primary-weak: #e8f3ff;
+  /* 채운 버튼과 강조 글자는 어두운 테마에서 필요한 밝기가 다르다. */
+  --primary-button: #3182f6;
+  --primary-button-hover: #1b64da;
+  --primary-hover: #d8eaff;
+  --primary-chip-hover: #d3e7ff;
 
   --danger: #f04452;
   --danger-weak: #fdeced;
@@ -41,6 +46,23 @@
   --danger-strong: #c62b38;
   --warning-strong: #a05e00;
   --success-strong: #067448;
+
+  --nav-surface: rgba(255, 255, 255, 0.72);
+  --nav-surface-scrolled: rgba(255, 255, 255, 0.86);
+  --backdrop: rgba(25, 31, 40, 0.4);
+  --dialog-backdrop: rgb(16 24 40 / 42%);
+  --selection-backdrop: rgba(25, 31, 40, 0.32);
+  /* 분석 패널의 밝은 글자는 화면 테마와 무관하게 어두운 면 위에 놓인다. */
+  --analysis-surface: #191f28;
+  --skeleton-base: #e9eef4;
+  --skeleton-highlight: #f6f8fb;
+  --telegram-fg: #129bd8;
+  --telegram-bg: #e8f7ff;
+  --category-technology-fg: #6550a2;
+  --category-technology-bg: #f0edfb;
+  --category-market-fg: #88602c;
+  --category-market-bg: #f8f0e3;
+  --field-shadow: 0 1px 2px rgba(25, 31, 40, 0.03);
 
   --radius-lg: 20px;
   --radius: 16px;
@@ -87,6 +109,62 @@
   font-size: 16px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+/* html에 테마를 두어 body로 포털을 연 대화상자에도 같은 토큰을 전달한다. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #101722;
+  --surface: #192330;
+  --surface-sunken: #141d29;
+  --fg: #f0f4f8;
+  --fg-2: #ced6e0;
+  --fg-3: #a4b1c2;
+  --fg-4: #718096;
+  --line: #344255;
+  --line-soft: #253244;
+
+  --primary: #8bb8ff;
+  --primary-strong: #a7cbff;
+  --primary-weak: #203a5b;
+  --primary-button: #2f75d6;
+  --primary-button-hover: #2766be;
+  --primary-hover: #2c4b70;
+  --primary-chip-hover: #315377;
+  --danger: #ff8590;
+  --danger-strong: #ffb1b9;
+  --danger-weak: #42252f;
+  --success: #59d8a2;
+  --success-strong: #8be6bd;
+  --success-weak: #173f34;
+  --warning: #ffc06b;
+  --warning-strong: #ffd18b;
+  --warning-weak: #43341f;
+
+  --nav-surface: rgba(25, 35, 48, 0.8);
+  --nav-surface-scrolled: rgba(25, 35, 48, 0.94);
+  --backdrop: rgba(0, 0, 0, 0.62);
+  --dialog-backdrop: rgba(0, 0, 0, 0.62);
+  --selection-backdrop: rgba(0, 0, 0, 0.56);
+  --analysis-surface: #111923;
+  --skeleton-base: #253244;
+  --skeleton-highlight: #34465c;
+  --telegram-fg: #7bd6f3;
+  --telegram-bg: #173a4b;
+  --category-technology-fg: #d0bbff;
+  --category-technology-bg: #362d4e;
+  --category-market-fg: #f0cca2;
+  --category-market-bg: #413324;
+  --hairline: 0 0 0 1px rgba(214, 228, 245, 0.08);
+  --shadow-sm: var(--hairline), 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow: var(--hairline), 0 12px 28px rgba(0, 0, 0, 0.3);
+  --shadow-lg: var(--hairline), 0 16px 48px rgba(0, 0, 0, 0.5);
+  --field-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* 어두운 면에서는 원본 로고의 짙은 파랑 대신 흰색 워드마크를 사용한다. */
+:root[data-theme='dark'] :is(.app-logo-wordmark, .feedback-brand img) {
+  filter: brightness(0) invert(1);
 }
 
 body {
@@ -179,7 +257,7 @@ body {
   height: 64px;
   padding: 0 var(--gutter);
   box-shadow: 0 1px 0 transparent;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--nav-surface);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   transition: box-shadow var(--dur-2) var(--ease-out), background var(--dur-2) var(--ease-out);
@@ -187,7 +265,7 @@ body {
 
 .app-nav[data-scrolled='true'] {
   box-shadow: 0 1px 0 var(--line);
-  background: rgba(255, 255, 255, 0.86);
+  background: var(--nav-surface-scrolled);
 }
 
 /* 회사 로고 아래 서비스명을 보조로 둔다. 이미지 비율과 44px 클릭 영역을 함께 유지한다. */
@@ -407,7 +485,7 @@ button {
   padding: 0.75rem 1.15rem;
   border: 0;
   border-radius: var(--radius-sm);
-  background: var(--primary);
+  background: var(--primary-button);
   color: #fff;
   font: inherit;
   font-size: 0.94rem;
@@ -424,7 +502,7 @@ button {
   아래 button:disabled가 뒤에 있으므로 여기서 빼도 비활성 버튼은 그대로 회색으로 남는다.
 */
 button:hover {
-  background: var(--primary-strong);
+  background: var(--primary-button-hover);
 }
 
 /*
@@ -460,7 +538,7 @@ button:disabled {
 }
 
 .ghost-button:hover:not(:disabled) {
-  background: #d8eaff;
+  background: var(--primary-hover);
   color: var(--primary-strong);
 }
 
@@ -648,7 +726,7 @@ select:disabled {
 }
 
 .chip-button:hover:not(:disabled) {
-  background: #d3e7ff;
+  background: var(--primary-chip-hover);
   color: var(--primary-strong);
 }
 
@@ -1519,7 +1597,7 @@ tbody tr:hover td {
 }
 
 .audience-chip.active {
-  background: var(--primary);
+  background: var(--primary-button);
   color: #fff;
 }
 
@@ -1889,12 +1967,28 @@ body.modal-open {
   position: fixed;
   z-index: 100;
   inset: 0;
-  display: flex;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
   justify-content: flex-end;
-  background: rgba(25, 31, 40, 0.4);
+  color: inherit;
+  background: var(--backdrop);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
   animation: backdrop-in var(--dur-3) var(--ease-out);
+}
+
+.modal-backdrop[open] {
+  display: flex;
+}
+
+.modal-backdrop::backdrop {
+  background: transparent;
 }
 
 @keyframes backdrop-in {
@@ -2003,7 +2097,7 @@ body.modal-open {
   margin: 0.5rem 2.75rem 2rem;
   padding: 1.6rem;
   border-radius: var(--radius);
-  background: var(--fg);
+  background: var(--analysis-surface);
   color: #fff;
 }
 
@@ -2141,7 +2235,7 @@ body.modal-open {
 }
 
 .perspective-tab.active {
-  background: var(--primary);
+  background: var(--primary-button);
   color: #fff;
 }
 
@@ -2232,7 +2326,7 @@ body.modal-open {
 .perspective-insight-action button {
   flex: 0 0 auto;
   padding: 0.55rem 0.75rem;
-  background: var(--primary);
+  background: var(--primary-button);
   font-size: 0.74rem;
 }
 
@@ -2870,6 +2964,13 @@ body.modal-open {
 .report-daily-topics > span,
 .report-daily-keywords > span { flex: none; color: var(--fg-3); font-size: .8rem; }
 .report-daily-summary .report-daily-keywords { font-size: .82rem; }
+.report-weekly-sources { margin-top: .6rem; }
+.report-weekly-sources .report-weekly-missing { margin-top: .7rem; padding: .65rem .8rem; border-left: 2px solid var(--border); background: var(--surface); font-size: .8rem; overflow-wrap: anywhere; }
+.report-weekly-originals { margin-top: .75rem; }
+.report-weekly-originals > span { color: var(--fg-3); font-size: .78rem; }
+.report-weekly-originals ul { display: flex; flex-wrap: wrap; gap: .35rem .8rem; padding: 0; margin: .3rem 0 0; list-style: none; }
+.report-weekly-originals a { color: var(--primary-strong); font-size: .8rem; text-underline-offset: .2rem; }
+.report-weekly-originals a:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 2px; }
 
 .report-ai-context {
   display: flex;
@@ -3660,8 +3761,8 @@ body.modal-open {
 }
 
 .channel-mark.telegram {
-  background: #e8f7ff;
-  color: #129bd8;
+  background: var(--telegram-bg);
+  color: var(--telegram-fg);
 }
 
 .channel-card > button {
@@ -3738,7 +3839,7 @@ body.modal-open {
 .delivery-filter-bar select {
   border-color: var(--line);
   background-color: var(--surface);
-  box-shadow: 0 1px 2px rgba(25, 31, 40, 0.03);
+  box-shadow: var(--field-shadow);
 }
 
 .notification-form > button {
@@ -4398,6 +4499,8 @@ body.modal-open {
   .segmented-nav .segmented-option {
     flex: 1;
     min-width: 0;
+    padding-inline: .35rem;
+    font-size: .77rem;
   }
 
   .segmented-nav .segmented-option:hover:not(.active) {
@@ -4432,7 +4535,8 @@ body.modal-open {
 /* 보고서의 읽기 구획은 수집 설정의 card/collapsible 토큰을 그대로 따른다. */
 .report-reading-content { display: grid; gap: 1.25rem; margin-top: 1.25rem; }
 .report-reading-content > .card,
-.report-reading-content > .collapsible { margin: 0; }
+.report-reading-content > .collapsible,
+.report-reading-content > .report-changes-panel { margin: 0; }
 .report-sharing-section {
   margin-top: 1.5rem;
   padding-top: 1.5rem;
@@ -4446,21 +4550,25 @@ body.modal-open {
   background: var(--surface);
   box-shadow: var(--shadow-sm);
 }
-.report-reading-content h3 { margin: 0 0 1rem; font-size: 1.1rem; letter-spacing: -0.03em; }
-.report-reading-content h4 { margin: 0 0 0.65rem; font-size: 1rem; line-height: 1.5; }
-.report-reading-content p,
-.report-reading-content li { color: var(--fg-2); font-size: 0.92rem; line-height: 1.8; }
-.report-reading-content ul { margin: 0; padding-left: 1.2rem; }
+.report-reading-content > :where(.card, .collapsible) h3 { margin: 0 0 1rem; font-size: 1.1rem; letter-spacing: -0.03em; }
+.report-reading-content > :where(.card, .collapsible) h4 { margin: 0 0 0.65rem; font-size: 1rem; line-height: 1.5; }
+.report-reading-content > :where(.card, .collapsible) p,
+.report-reading-content > :where(.card, .collapsible) li { color: var(--fg-2); font-size: 0.92rem; line-height: 1.8; }
+.report-reading-content > :where(.card, .collapsible) ul { margin: 0; padding-left: 1.2rem; }
 .report-summary-card li + li { margin-top: 0.7rem; }
 .report-event-list { display: grid; gap: 1rem; }
 .report-event-card { min-width: 0; padding: 1.5rem; border-radius: var(--radius); background: var(--surface-sunken); }
 .report-event-card + .report-event-card { margin-top: 1rem; }
-.report-reading-content > .collapsible > .collapsible-body > .report-event-card {
+.report-reading-content > .collapsible > .collapsible-body > .report-event-card:not(.report-analysis-card) {
   padding: 0;
   border-radius: 0;
   background: transparent;
 }
 .report-event-list > .report-event-card + .report-event-card { margin-top: 0; }
+.report-analysis-list { scroll-margin-top: 7.5rem; }
+.report-analysis-pagination { flex-wrap: wrap; gap: 0.5rem; margin-top: 1.25rem; }
+.report-analysis-pagination button { min-width: 2.75rem; min-height: 2.75rem; padding: 0.5rem; font-variant-numeric: tabular-nums; }
+.report-analysis-pagination button[aria-current='page'] { background: var(--primary-weak); color: var(--primary-strong); font-weight: 700; }
 .report-event-card p { margin: 0; }
 .report-event-card .report-event-significance { margin-top: 0.65rem; }
 .report-event-sources { display: grid; gap: 0.3rem; margin-top: 0.8rem; }
@@ -4473,8 +4581,8 @@ body.modal-open {
 .issue-card-topline .category-supply { color: var(--success-strong); background: var(--success-weak); }
 .issue-card-topline .category-company { color: var(--primary-strong); background: var(--primary-weak); }
 .issue-card-topline .category-policy { color: var(--warning-strong); background: var(--warning-weak); }
-.issue-card-topline .category-technology { color: #6550a2; background: #f0edfb; }
-.issue-card-topline .category-market { color: #88602c; background: #f8f0e3; }
+.issue-card-topline .category-technology { color: var(--category-technology-fg); background: var(--category-technology-bg); }
+.issue-card-topline .category-market { color: var(--category-market-fg); background: var(--category-market-bg); }
 .issue-tone-explanation { color: var(--fg-3); font-size: 0.76rem; line-height: 1.65; }
 .issue-tone-explanation summary { cursor: pointer; }
 .collection-keyword-match {

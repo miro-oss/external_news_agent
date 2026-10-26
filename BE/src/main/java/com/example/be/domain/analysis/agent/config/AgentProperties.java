@@ -13,14 +13,19 @@ public class AgentProperties implements InitializingBean {
 
     public static final int MAX_INSIGHT_FINDINGS = 16;
     public static final int MAX_CURRENT_INSIGHT_FINDINGS = 10;
+    // Report-insight's entire pipeline is bounded to 180 seconds; leave time for its final response.
+    private static final Duration MIN_REPORT_INSIGHT_TIMEOUT = Duration.ofSeconds(210);
 
     private boolean enabled = false;
     private String baseUrl = "http://127.0.0.1:8088";
     private String token = "";
     private Duration connectTimeout = Duration.ofSeconds(5);
     private Duration analyzeTimeout = Duration.ofSeconds(90);
+    // HTTP response wait only; this is not an end-to-end deadline for provider retries.
+    private Duration relevanceTimeout = Duration.ofSeconds(240);
     private Duration insightTimeout = Duration.ofSeconds(60);
     private Duration reportTimeout = Duration.ofSeconds(120);
+    private Duration reportInsightTimeout = MIN_REPORT_INSIGHT_TIMEOUT;
     private AgentPlan defaultPlan = AgentPlan.FREE;
     private boolean allowRunOverride = true;
     private String analysisPromptVersion =
@@ -29,6 +34,7 @@ public class AgentProperties implements InitializingBean {
             "analyze.ko.v11+perspective.ko.v1+sensitivity.ko.v2";
     private String insightPromptVersion = "insight.ko.v2+perspective.ko.v1";
     private String freeModel = "";
+    private String relevanceFreeModel = "gpt-4.1-nano";
     private String paidModel = "";
     private final Quota quota = new Quota();
     private final InsightHistory insightHistory = new InsightHistory();
@@ -36,6 +42,13 @@ public class AgentProperties implements InitializingBean {
 
     @Override
     public void afterPropertiesSet() {
+        if (reportInsightTimeout == null || reportInsightTimeout.compareTo(MIN_REPORT_INSIGHT_TIMEOUT) < 0) {
+            throw new IllegalStateException(
+                    "news.agent.report-insight-timeout은 Agent 최대 기한 180초에 여유 30초를 더한 210초 이상이어야 합니다.");
+        }
+        if (relevanceTimeout == null || relevanceTimeout.isNegative() || relevanceTimeout.isZero()) {
+            throw new IllegalStateException("news.agent.relevance-timeout은 양수여야 합니다.");
+        }
         if (enabled && !StringUtils.hasText(token)) {
             throw new IllegalStateException(
                     "news.agent.enabled=true이면 AGENT_SHARED_SECRET을 설정해야 합니다.");
@@ -115,9 +128,20 @@ public class AgentProperties implements InitializingBean {
         this.analyzeTimeout = analyzeTimeout;
     }
 
+    public Duration getRelevanceTimeout() {
+        return relevanceTimeout;
+    }
+
+    public void setRelevanceTimeout(Duration relevanceTimeout) {
+        this.relevanceTimeout = relevanceTimeout;
+    }
+
     public Duration getReportTimeout() {
         return reportTimeout;
     }
+
+    public Duration getReportInsightTimeout() { return reportInsightTimeout; }
+    public void setReportInsightTimeout(Duration timeout) { this.reportInsightTimeout = timeout; }
 
     public Duration getInsightTimeout() {
         return insightTimeout;
@@ -177,6 +201,14 @@ public class AgentProperties implements InitializingBean {
 
     public void setFreeModel(String freeModel) {
         this.freeModel = freeModel;
+    }
+
+    public String getRelevanceFreeModel() {
+        return relevanceFreeModel;
+    }
+
+    public void setRelevanceFreeModel(String relevanceFreeModel) {
+        this.relevanceFreeModel = relevanceFreeModel;
     }
 
     public String getPaidModel() {
@@ -263,7 +295,7 @@ public class AgentProperties implements InitializingBean {
 
     public static class Quota {
 
-        private int freeDailyCalls = 1500;
+        private int freeDailyCalls = 3000;
         private int paidMonthlyCredits = 3000;
         private int paidDailyCredits = 90;
         private int paidDailyReportReserve = 20;

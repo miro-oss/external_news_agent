@@ -3,7 +3,7 @@
   "baselinePromptVersion": "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2",
   "claimLabelsVersion": "claims.ko.v1",
   "analyzePromptVersion": "analyze.ko.v6+perspective.ko.v1+sensitivity.ko.v2",
-  "reportPromptVersion": "report.ko.v1.4",
+  "reportPromptVersion": "report.ko.v1.6",
   "profile": "replay",
   "plan": "FREE",
   "config": {

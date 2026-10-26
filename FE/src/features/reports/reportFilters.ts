@@ -32,15 +32,26 @@ function validCalendarDate(value: string) {
 }
 
 export function reportFilterDate(report: ReportSummary): string | null {
-  if (report.reportScope === 'DAILY') {
+  if (report.reportScope !== 'RUN') {
     return report.reportDate && validCalendarDate(report.reportDate) ? report.reportDate : null
   }
   return report.collectionStartedAt ? kstDate(new Date(report.collectionStartedAt)) : null
 }
 
+export function sortReportsByAggregationDate(reports: readonly ReportSummary[]): ReportSummary[] {
+  return [...reports].sort((left, right) =>
+    (reportFilterDate(right) ?? '').localeCompare(reportFilterDate(left) ?? ''))
+}
+
 export function reportTopicOptions(reports: readonly ReportSummary[]): Array<{ id: number; label: string }> {
   const names = new Map<number, Set<string>>()
   for (const report of reports) {
+    if (report.topicId != null) {
+      const savedNames = names.get(report.topicId) ?? new Set<string>()
+      if (report.topicName?.trim()) savedNames.add(report.topicName.trim())
+      names.set(report.topicId, savedNames)
+      continue
+    }
     for (const context of report.collectionContexts ?? []) {
       for (const topic of context.topics) {
         const savedNames = names.get(topic.topicId) ?? new Set<string>()
@@ -84,9 +95,11 @@ export function filterReports(reports: readonly ReportSummary[], filters: Report
 
   return reports.filter(report => {
     const topics = (report.collectionContexts ?? []).flatMap(context => context.topics)
-    if (filters.topicId !== null && !topics.some(topic => topic.topicId === filters.topicId)) return false
+    if (filters.topicId !== null && (report.topicId != null
+      ? report.topicId !== filters.topicId : !topics.some(topic => topic.topicId === filters.topicId))) return false
     if (search && ![
       report.title,
+      report.topicName ?? '',
       ...topics.flatMap(topic => [
         topic.topicName, topic.queryText ?? '',
         ...topic.requiredKeywords, ...topic.optionalKeywords, ...topic.excludedKeywords,
@@ -94,7 +107,9 @@ export function filterReports(reports: readonly ReportSummary[], filters: Report
     ].some(value => value.toLocaleLowerCase('ko-KR').includes(search))) return false
     if (filters.period !== 'ALL') {
       const date = reportFilterDate(report)
-      if (!date || (from && date < from) || (to && date > to)) return false
+      const endDate = report.reportScope === 'WEEKLY' && report.reportEndDate ? report.reportEndDate : date
+      if (!date || !endDate || !validCalendarDate(endDate) || endDate < date
+        || (from && endDate < from) || (to && date > to)) return false
     }
     return true
   })

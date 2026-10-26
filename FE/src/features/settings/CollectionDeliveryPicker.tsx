@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { CollectionRunDelivery, DeliveryTargets } from '../../api/notificationConnections'
 import { Segmented } from '../../components/Segmented'
@@ -10,7 +10,7 @@ import '../notifications/notifications-refinement.css'
 import './collection-delivery.css'
 
 const EMPTY_DELIVERY: CollectionRunDelivery = {
-  enabled: true, mode: 'ONCE', run: true, daily: false,
+  enabled: true, mode: 'ONCE', run: true, daily: false, weekly: false,
   groupIds: [], recipientIds: [], channelIds: [],
 }
 const MODE_OPTIONS = [
@@ -48,19 +48,26 @@ export function CollectionDeliveryPicker({ value, onChange, disabled }: {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
       </span>
     </button>
-    {open && createPortal(<DeliveryDialog id={id} value={value} onDismiss={() => setOpen(false)}
+    {open && createPortal(<CollectionDeliveryDialog id={id} value={value} onDismiss={() => setOpen(false)}
       onApply={next => { onChange(next); setOpen(false) }} />, document.body)}
   </>
 }
 
-function DeliveryDialog({ id, value, onDismiss, onApply }: {
+export function CollectionDeliveryDialog({ id, value, onDismiss, onApply, onDraftChange, context, pending = false, error, status, readOnly = false }: {
   id: string
   value?: CollectionRunDelivery
   onDismiss: () => void
   onApply: (value: CollectionRunDelivery | undefined) => void
+  onDraftChange?: () => void
+  context?: { scope: 'TOPIC' | 'RUN'; name: string; description?: string; inherited?: boolean }
+  pending?: boolean
+  error?: string | null
+  status?: ReactNode
+  readOnly?: boolean
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
-  const [draft, setDraft] = useState(value ?? EMPTY_DELIVERY)
+  const [draft, setDraft] = useState(() => ({ ...(value ?? EMPTY_DELIVERY),
+    weekly: (context?.scope === 'TOPIC' || (!context && value?.mode === 'TOPIC')) && (value?.weekly ?? false) }))
   const [tab, setTab] = useState<TargetTab>('groupIds')
   const [search, setSearch] = useState('')
   const [creatingGroup, setCreatingGroup] = useState(false)
@@ -84,21 +91,28 @@ function DeliveryDialog({ id, value, onDismiss, onApply }: {
   ].filter(selection => selection.count > SELECTION_LIMIT)
   const selectionLimitMessage = oversizedSelections.length
     ? `${oversizedSelections.map(selection => selection.label).join(', ')}까지 선택할 수 있어요.` : null
-  const canApply = !selectionLimitMessage && (!draft.enabled || (availability.valid && hasTargets && draft.channelIds.length > 0 && (draft.run || draft.daily)))
+  const allowWeekly = context?.scope === 'TOPIC' || (!context && draft.mode === 'TOPIC')
+  const canApply = !pending && !readOnly && !selectionLimitMessage && (!draft.enabled || (availability.valid && hasTargets && draft.channelIds.length > 0 && (draft.run || draft.daily || (allowWeekly && draft.weekly))))
+
+  function updateDraft(update: (current: CollectionRunDelivery) => CollectionRunDelivery) {
+    if (pending || readOnly) return
+    setDraft(update)
+    onDraftChange?.()
+  }
 
   function toggle(key: keyof DeliveryTargets, targetId: number) {
-    setDraft(current => ({ ...current, [key]: current[key].includes(targetId)
+    updateDraft(current => ({ ...current, [key]: current[key].includes(targetId)
       ? current[key].filter(selected => selected !== targetId) : [...current[key], targetId] }))
   }
 
   function toggleAll() {
     const ids = new Set(matches.map(target => target.id))
-    setDraft(current => ({ ...current, [tab]: allSelected
+    updateDraft(current => ({ ...current, [tab]: allSelected
       ? current[tab].filter(targetId => !ids.has(targetId)) : [...new Set([...current[tab], ...ids])] }))
   }
 
   function dismiss() {
-    if (createGroup.isPending) return
+    if (createGroup.isPending || pending) return
     if (creatingGroup) { setCreatingGroup(false); createGroup.reset() }
     else onDismiss()
   }
@@ -121,7 +135,7 @@ function DeliveryDialog({ id, value, onDismiss, onApply }: {
   }, [])
 
   return <dialog ref={dialog} id={id} className="recipient-selection-dialog collection-delivery-dialog"
-    data-enabled={draft.enabled}
+    data-enabled={draft.enabled} aria-busy={pending}
     aria-labelledby={`${id}-title`} onCancel={event => { event.preventDefault(); dismiss() }}
     onClick={event => {
       if (event.target !== event.currentTarget) return
@@ -129,34 +143,40 @@ function DeliveryDialog({ id, value, onDismiss, onApply }: {
       if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dismiss()
     }}>
     <header className="recipient-selection-heading">
-      <div><h2 id={`${id}-title`}>{creatingGroup ? '새 수신 그룹' : '보고서 자동 전달'}</h2><p>{creatingGroup ? '같은 보고서를 받을 사람들을 묶어 주세요.' : '보고서가 완성되면 핵심 요약을 보내드려요.'}</p></div>
-      <button type="button" className="text-button recipient-selection-close" disabled={createGroup.isPending}
+      <div><h2 id={`${id}-title`}>{creatingGroup ? '새 수신 그룹' : context?.scope === 'RUN' ? '이번 수집 보고서 알림' : context ? '주제 보고서 알림' : '보고서 자동 전달'}</h2><p>{creatingGroup ? '같은 보고서를 받을 사람들을 묶어 주세요.' : context?.name ?? '보고서가 완성되면 핵심 요약을 보내드려요.'}</p></div>
+      <button type="button" className="text-button recipient-selection-close" disabled={createGroup.isPending || pending}
         aria-label={creatingGroup ? '그룹 만들기 닫기' : '자동 전달 설정 닫기'} onClick={dismiss}>×</button>
     </header>
     {creatingGroup ? <CollectionDeliveryGroupForm recipients={recipients} create={createGroup} onCancel={dismiss}
       onCreated={group => {
-        setDraft(current => ({ ...current, groupIds: [...new Set([...current.groupIds, group.id])] }))
+        updateDraft(current => ({ ...current, groupIds: [...new Set([...current.groupIds, group.id])] }))
         setTab('groupIds'); setSearch(''); setCreatingGroup(false)
       }} /> : <>
     <div className="collection-delivery-body">
+      {status && <div className="collection-delivery-status" role="status">{status}</div>}
+      <fieldset className="collection-delivery-fields" disabled={pending || readOnly}>
       <div className="collection-delivery-enabled">
-        <span id={`${id}-enabled`}>완성된 보고서 보내기</span>
+        <span id={`${id}-enabled`}>{context?.inherited ? '이번 수집에 별도로 보내기' : '완성된 보고서 보내기'}</span>
         <button type="button" className="collection-delivery-switch" role="switch" aria-checked={draft.enabled}
-          aria-labelledby={`${id}-enabled`} onClick={() => setDraft(current => ({ ...current, enabled: !current.enabled }))}><span /></button>
+          aria-labelledby={`${id}-enabled`} onClick={() => updateDraft(current => ({ ...current, enabled: !current.enabled }))}><span /></button>
       </div>
-      <div className="collection-delivery-scope">
+      {context ? <p className="collection-delivery-note">{context.description ?? (context.scope === 'TOPIC'
+        ? '이 주제의 보고서에 계속 적용해요. 수집별·일일 알림은 이번 수집에 별도 저장한 설정이 있으면 그 설정을 사용합니다.'
+        : '이번 수집에만 적용해요. 주제에 저장된 설정은 유지됩니다.')}</p> : <div className="collection-delivery-scope">
         <Segmented label="전달 설정 적용 범위" value={draft.mode} options={MODE_OPTIONS}
-          onSelect={mode => setDraft(current => ({ ...current, mode }))} />
+          onSelect={mode => { if (mode !== draft.mode) updateDraft(current => ({ ...current, mode, weekly: mode === 'TOPIC' && current.weekly })) }} />
         <p>{draft.mode === 'ONCE'
           ? '이번 수집에만 적용해요. 주제에 저장된 설정은 유지됩니다.'
           : '수집을 시작하면 선택한 주제의 정기 수집에도 적용해요.'}</p>
-      </div>
+      </div>}
       {draft.enabled && <>
         <div className="collection-delivery-options-row">
         <fieldset className="collection-delivery-options"><legend>보낼 보고서</legend>
           <div className="collection-delivery-checks">
-            <label><input type="checkbox" checked={draft.run} onChange={event => setDraft(current => ({ ...current, run: event.target.checked }))} />수집별 보고서</label>
-            <label><input type="checkbox" checked={draft.daily} onChange={event => setDraft(current => ({ ...current, daily: event.target.checked }))} />일일 통합 보고서</label>
+            <label><input type="checkbox" checked={draft.run} onChange={event => updateDraft(current => ({ ...current, run: event.target.checked }))} />수집별 보고서</label>
+            <label><input type="checkbox" checked={draft.daily} onChange={event => updateDraft(current => ({ ...current, daily: event.target.checked }))} />일일 통합 보고서</label>
+            {context?.scope !== 'RUN' && <label><input type="checkbox" checked={allowWeekly && draft.weekly} disabled={!allowWeekly}
+              onChange={event => updateDraft(current => ({ ...current, weekly: event.target.checked }))} />주간 통합 보고서</label>}
           </div>
         </fieldset>
           <fieldset className="collection-delivery-options"><legend>전달 방식</legend>
@@ -168,6 +188,9 @@ function DeliveryDialog({ id, value, onDismiss, onApply }: {
           </fieldset>
         </div>
         {draft.daily && <p className="collection-delivery-note">일일 통합에는 같은 날 수집한 다른 주제도 함께 담깁니다.</p>}
+        {!allowWeekly && context?.scope !== 'RUN' && <p className="collection-delivery-note">주간 통합은 주제에 계속 적용하는 설정에서 선택할 수 있습니다.</p>}
+        {allowWeekly && draft.weekly && <p className="collection-delivery-note">주간 통합은 월요일부터 일요일까지의 보고서가 완성되면 보내며, 다른 주제도 함께 담깁니다.</p>}
+        {!draft.run && !draft.daily && !(allowWeekly && draft.weekly) && <p className="collection-delivery-note">보낼 보고서를 하나 이상 선택해 주세요.</p>}
         {availability.pending ? <SkeletonRegion label="전달 대상을 불러오는 중" contentClassName="collection-delivery-loading">
           <Skeleton width="7rem" /><Skeleton height="2.75rem" /><Skeleton height="12rem" />
         </SkeletonRegion> : availability.error ? <p className="field-error" role="alert">전달 대상을 불러오지 못했습니다. 잠시 후 다시 열어 주세요.</p> : <>
@@ -195,17 +218,19 @@ function DeliveryDialog({ id, value, onDismiss, onApply }: {
           </div>}
         </>}
       </>}
+      </fieldset>
     </div>
     <footer className="recipient-selection-actions collection-delivery-actions">
+      {error && <p className="collection-delivery-save-error field-error" role="alert">{error}</p>}
       {selectionLimitMessage && <div className="collection-delivery-limit" role="alert">
         <p id={`${id}-selection-limit`}>{selectionLimitMessage}</p>
         {!draft.enabled && <button type="button" className="text-button"
-          onClick={() => setDraft(current => ({ ...current, groupIds: [], recipientIds: [], channelIds: [] }))}>선택 비우기</button>}
+          disabled={pending || readOnly} onClick={() => updateDraft(current => ({ ...current, groupIds: [], recipientIds: [], channelIds: [] }))}>선택 비우기</button>}
       </div>}
-      <button type="button" className="text-button" onClick={() => onApply(undefined)}>기존 설정 사용</button>
-      <button type="button" className="secondary-button" onClick={onDismiss}>취소</button>
-      <button type="button" className="primary-button" disabled={!canApply}
-        aria-describedby={selectionLimitMessage ? `${id}-selection-limit` : undefined} onClick={() => onApply(draft)}>선택 완료</button>
+      {!context && <button type="button" className="text-button" onClick={() => onApply(undefined)}>기존 설정 사용</button>}
+      <button type="button" className="secondary-button" disabled={pending} onClick={onDismiss}>{readOnly ? '닫기' : '취소'}</button>
+      {!readOnly && <button type="button" className="primary-button" disabled={!canApply}
+        aria-describedby={selectionLimitMessage ? `${id}-selection-limit` : undefined} onClick={() => onApply(draft)}>{pending ? '저장 중…' : context?.inherited && !draft.enabled ? '이번 수집 알림 끄기' : context ? '저장' : '선택 완료'}</button>}
     </footer>
     </>}
   </dialog>

@@ -2,10 +2,12 @@ package com.example.be.domain.collection.repository;
 
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.RunStatus;
+import com.example.be.domain.collection.entity.RunStage;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -21,6 +23,14 @@ public interface CollectionRunRepository
         extends JpaRepository<CollectionRun, Long>, JpaSpecificationExecutor<CollectionRun> {
 
     long countByStatus(RunStatus status);
+
+    /** 단계만 갱신한다. 실행이 이미 닫혔으면 상태를 되살리거나 마지막 결과를 덮어쓰지 않는다. */
+    @Modifying
+    @Query("""
+            UPDATE CollectionRun run SET run.stage = :stage
+            WHERE run.id = :runId AND run.status = com.example.be.domain.collection.entity.RunStatus.RUNNING
+            """)
+    int updateRunningStage(@Param("runId") Long runId, @Param("stage") RunStage stage);
 
     @Query("SELECT run.id FROM CollectionRun run WHERE run.status = :status ORDER BY run.id")
     List<Long> findQueueIds(@Param("status") RunStatus status, Pageable pageable);

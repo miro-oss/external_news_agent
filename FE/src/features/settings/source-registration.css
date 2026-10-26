@@ -1,5 +1,9 @@
 .source-registration-entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem 1rem;
   margin-top: .25rem;
+  scroll-margin-top: 5rem;
 }
 
 .source-registration-trigger {
@@ -30,6 +34,112 @@
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
   .source-registration-trigger:hover:not(:disabled) > svg {
     transform: translateX(2px);
+  }
+}
+
+.recipient-selection-dialog.source-feed-dialog {
+  width: min(36rem, calc(100vw - 2rem));
+  height: fit-content;
+  max-height: min(34rem, calc(100dvh - 2rem));
+}
+
+.source-feed-dialog[open] {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.source-feed-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+.source-feed-status {
+  margin: .75rem 0 0;
+  font-size: .86rem;
+  line-height: 1.6;
+}
+
+.source-feed-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: .2rem;
+  border-top: 1px solid var(--line);
+}
+
+.source-feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.source-feed-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem .25rem;
+}
+
+.source-feed-item + .source-feed-item {
+  border-top: 1px solid var(--line);
+}
+
+.source-feed-info {
+  display: grid;
+  min-width: 0;
+  gap: .3rem;
+  overflow-wrap: anywhere;
+}
+
+.source-feed-info strong {
+  font-size: .9rem;
+}
+
+.source-feed-info a,
+.source-feed-url {
+  color: var(--fg-3);
+  font-size: .8rem;
+  line-height: 1.5;
+}
+
+.source-feed-info a:hover {
+  color: var(--primary-strong);
+}
+
+.source-feed-meta {
+  display: flex;
+  flex: none;
+  gap: 1.25rem;
+  margin: 0;
+  font-size: .8rem;
+}
+
+.source-feed-meta > div {
+  display: grid;
+  min-width: 3rem;
+  gap: .3rem;
+}
+
+.source-feed-meta dt {
+  color: var(--fg-3);
+}
+
+.source-feed-meta dd {
+  margin: 0;
+  color: var(--fg-2);
+}
+
+@media (max-width: 600px) {
+  .source-feed-item {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: .65rem;
+  }
+
+  .source-feed-meta > div {
+    display: flex;
+    gap: .4rem;
   }
 }
 

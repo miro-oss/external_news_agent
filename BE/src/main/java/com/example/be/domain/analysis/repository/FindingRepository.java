@@ -21,6 +21,15 @@ import java.util.Optional;
 
 public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpecificationExecutor<Finding> {
 
+    // Shared with report visibility: historical findings remain available; any accepted topic admits a shared article.
+    String REPORT_TOPIC_ELIGIBLE_SQL = """
+              AND (NOT EXISTS (SELECT 1 FROM news_topic_relevance relevance
+                               WHERE relevance.run_id = finding.run_id AND relevance.article_id = finding.article_id)
+                   OR EXISTS (SELECT 1 FROM news_topic_relevance relevance
+                              WHERE relevance.run_id = finding.run_id AND relevance.article_id = finding.article_id
+                                AND relevance.status = 'RELEVANT'))
+            """;
+
     @Override
     @EntityGraph(attributePaths = {"article", "article.topic", "article.source", "article.storedBody"})
     Page<Finding> findAll(Specification<Finding> specification, Pageable pageable);
@@ -159,10 +168,18 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             JOIN news_findings finding ON finding.id = selected.finding_id
             JOIN news_articles article ON article.id = finding.article_id
             JOIN news_article_bodies stored_body ON stored_body.body_hash = article.body_hash
-            WHERE report.id IN (:reportIds) AND report.report_scope = 'DAILY'
+            WHERE report.id IN (:reportIds) AND report.report_scope IN ('DAILY', 'WEEKLY')
               AND article.fetch_status = 'FULLTEXT'
               AND REGEXP_INSTR(stored_body.body, '[^[:space:]]') > 0
-            GROUP BY report.id
+            """ + REPORT_TOPIC_ELIGIBLE_SQL + """
+              AND (report.topic_id IS NULL
+                   OR (NOT EXISTS (SELECT 1 FROM news_topic_relevance r
+                                   WHERE r.run_id = finding.run_id AND r.article_id = finding.article_id)
+                       AND article.topic_id = report.topic_id)
+                   OR EXISTS (SELECT 1 FROM news_topic_relevance r
+                              WHERE r.run_id = finding.run_id AND r.article_id = finding.article_id
+                                AND r.topic_id = report.topic_id AND r.status = 'RELEVANT'))
+              GROUP BY report.id
             """, nativeQuery = true)
     List<DailyReportCount> countForDailyReports(@Param("reportIds") Collection<Long> reportIds,
                                                @Param("highThreshold") BigDecimal highThreshold);
@@ -189,23 +206,24 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             @Param("since") LocalDateTime since,
             @Param("before") LocalDateTime before);
 
-    @Query("""
+    @Query(value = """
             SELECT finding.category AS category,
-                   finding.changeType AS changeType,
-                   COUNT(finding) AS findingCount,
-                   SUM(CASE WHEN finding.sensitivity.score >= :highThreshold
+                   finding.change_type AS changeType,
+                   COUNT(finding.id) AS findingCount,
+                   SUM(CASE WHEN finding.sensitivity_score >= :highThreshold
                             THEN 1 ELSE 0 END) AS highSensitivityCount,
-                   SUM(CASE WHEN finding.sensitivity.score >= :mediumThreshold
-                                 AND finding.sensitivity.score < :highThreshold
+                   SUM(CASE WHEN finding.sensitivity_score >= :mediumThreshold
+                                 AND finding.sensitivity_score < :highThreshold
                             THEN 1 ELSE 0 END) AS mediumSensitivityCount,
-                   SUM(CASE WHEN finding.sensitivity.score < :mediumThreshold
+                   SUM(CASE WHEN finding.sensitivity_score < :mediumThreshold
                             THEN 1 ELSE 0 END) AS lowSensitivityCount
-            FROM Finding finding
-            WHERE finding.run.id = :runId
-              AND finding.article.fetchStatus = com.example.be.domain.collection.entity.FetchStatus.FULLTEXT
-              AND function('regexp_instr', finding.article.storedBody.body, '[^[:space:]]') > 0
-            GROUP BY finding.category, finding.changeType
-            """)
+            FROM news_findings finding
+            JOIN news_articles article ON article.id = finding.article_id
+            JOIN news_article_bodies stored_body ON stored_body.body_hash = article.body_hash
+            WHERE finding.run_id = :runId
+              AND article.fetch_status = 'FULLTEXT'
+              AND REGEXP_INSTR(stored_body.body, '[^[:space:]]') > 0
+            """ + REPORT_TOPIC_ELIGIBLE_SQL + " GROUP BY finding.category, finding.change_type", nativeQuery = true)
     List<ReportStatsCount> countStatsByRunId(
             @Param("runId") Long runId,
             @Param("mediumThreshold") BigDecimal mediumThreshold,
@@ -221,20 +239,32 @@ public interface FindingRepository extends JpaRepository<Finding, Long>, JpaSpec
             """)
     long countWithoutFullTextForReportByRunId(@Param("runId") Long runId);
 
-    @Query("""
-            SELECT finding.run.id AS runId,
-                   COUNT(finding) AS findingCount,
-                   SUM(CASE WHEN finding.sensitivity.score >= :highThreshold
+    @Query(value = """
+            SELECT finding.run_id AS runId,
+                   COUNT(finding.id) AS findingCount,
+                   SUM(CASE WHEN finding.sensitivity_score >= :highThreshold
                             THEN 1 ELSE 0 END) AS highSensitivityCount
-            FROM Finding finding
-            WHERE finding.run.id IN :runIds
-              AND finding.article.fetchStatus = com.example.be.domain.collection.entity.FetchStatus.FULLTEXT
-              AND function('regexp_instr', finding.article.storedBody.body, '[^[:space:]]') > 0
-            GROUP BY finding.run.id
-            """)
+            FROM news_findings finding
+            JOIN news_articles article ON article.id = finding.article_id
+            JOIN news_article_bodies stored_body ON stored_body.body_hash = article.body_hash
+            WHERE finding.run_id IN (:runIds)
+              AND article.fetch_status = 'FULLTEXT'
+              AND REGEXP_INSTR(stored_body.body, '[^[:space:]]') > 0
+            """ + REPORT_TOPIC_ELIGIBLE_SQL + " GROUP BY finding.run_id", nativeQuery = true)
     List<ReportCount> countForReports(
             @Param("runIds") Collection<Long> runIds,
             @Param("highThreshold") BigDecimal highThreshold);
+
+    @Query(value = """
+            SELECT COUNT(finding.id) FROM news_findings finding
+            WHERE finding.run_id = :runId
+              AND EXISTS (SELECT 1 FROM news_topic_relevance relevance
+                          WHERE relevance.run_id = finding.run_id AND relevance.article_id = finding.article_id)
+              AND NOT EXISTS (SELECT 1 FROM news_topic_relevance relevance
+                              WHERE relevance.run_id = finding.run_id AND relevance.article_id = finding.article_id
+                                AND relevance.status = 'RELEVANT')
+            """, nativeQuery = true)
+    long countTopicExcludedForReportByRunId(@Param("runId") Long runId);
 
     interface ReportCount {
 

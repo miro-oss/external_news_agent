@@ -1,0 +1,155 @@
+"""One repair receives independent native and public defects in the same record."""
+
+import json
+
+import pytest
+from test_report_insight_assessment import framed, payload, request
+from test_report_insight_repair_actions import structured_diagnostics
+from test_report_insight_v4_pipeline import (
+    V4Provider,
+    _expected_fixture_display_reason,
+    generate,
+    stages,
+)
+
+from app.core.errors import AgentError
+from app.llm import report_insight_service as service
+from app.llm.base import ProviderResponse, ProviderUsage
+from app.llm.report_insight_assessment import draft_to_wire
+from app.llm.report_insight_service import _native_assessment_repair_errors
+
+
+def test_native_semantic_failure_does_not_hide_same_finding_fact_mismatch():
+    source = request(ids=(101, 102))
+    value = payload(source)
+    value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = (
+        "영향 범위는 미확인이다. 9999년의 공정 검증 업무를 검토해야 한다."
+    )
+    wire = draft_to_wire(value, source)
+    response = ProviderResponse(
+        json.dumps(wire, ensure_ascii=False), "mock", "offline", ProviderUsage()
+    )
+
+    error = _native_assessment_repair_errors(response, source)
+
+    assert error.failed_finding_ids == (101,)
+    assert error.error_kinds == ("report_assessment_draft_invalid", "report_evidence_insufficient")
+    assert "effect.impactScope" in str(error)
+    assert "근거에서 확인되지 않는 숫자: 9999" in str(error)
+    assert json.loads(response.text) == wire
+
+
+def test_diagnostic_projection_cannot_resolve_a_foreign_source_handle():
+    source = request(ids=(101, 102))
+    value = draft_to_wire(payload(source), source)
+    item = value["assessments"]["CHIP_MAKER"]["finding101"]
+    item["decision"]["connection"]["basis"]["sourceSpanId"] = "s9999_0_0"
+    item["reason"] = "9999년의 공정 검증 업무를 검토해야 한다."
+    response = ProviderResponse(
+        json.dumps(value, ensure_ascii=False), "mock", "offline", ProviderUsage()
+    )
+
+    error = _native_assessment_repair_errors(response, source)
+
+    assert error.failed_finding_ids == (101,)
+    assert error.error_kinds == ("report_assessment_draft_invalid",)
+    assert "sourceSpanId" in str(error)
+
+
+@pytest.mark.parametrize("retained_defect", [None, "native", "public"])
+def test_partial_repair_gets_both_causes_and_full_validation_still_gates_acceptance(
+    retained_defect,
+    monkeypatch,
+):
+    source = request(
+        ids=(101, 102), text="도서관은 독서 모임의 참가 신청이 현재 계속된다고 밝혔다."
+    )
+    reasons = {
+        101: "관점 업무와의 연결 조건을 확인해야 한다.",
+        102: "원문 사건과 관점 업무의 연결 여부를 검토해야 한다.",
+    }
+    captured = []
+    collect = service._native_assessment_repair_errors
+
+    def record_error(response, request, **kwargs):
+        error = collect(response, request, **kwargs)
+        if error is not None:
+            captured.append((error, str(error), error.repair_diagnostics, error.error_kinds))
+        return error
+
+    monkeypatch.setattr(service, "_native_assessment_repair_errors", record_error)
+
+    def hook(stage, occurrence, _, value):
+        for record in value["assessments"]["CHIP_MAKER"].values():
+            record["reason"] = reasons[record["findingId"]]
+        if stage.startswith("EXPLAIN") and retained_defect == "public":
+            value["assessments"]["CHIP_MAKER"]["finding101"]["reason"] = (
+                "9999년의 업무 연결 조건을 검토해야 한다."
+            )
+            return value
+        if stage == "MAP-001" or (retained_defect == "public" and stage.startswith("REVIEW")):
+            item = value["assessments"]["CHIP_MAKER"]["finding101"]
+            if occurrence == 1:
+                item["reason"] = "제공된 claim이 없다. 9999년의 업무 연결 조건을 검토해야 한다."
+            elif retained_defect == "native":
+                item["reason"] = "제공된 claim이 없다."
+            elif retained_defect == "public":
+                item["reason"] = "9999년의 업무 연결 조건을 검토해야 한다."
+        return value
+
+    provider = V4Provider(source, relation="UNRELATED", hook=hook)
+    if retained_defect is None:
+        result = generate(provider, source)
+        assert [item.reason for item in result.insights[0].assessments] == [
+            _expected_fixture_display_reason(source, identifier, reason)
+            for identifier, reason in reasons.items()
+        ]
+        assert result.meta.input_tokens == 22
+        assert result.meta.output_tokens == 14
+        assert result.meta.credits == 0.4
+    else:
+        with pytest.raises(AgentError) as caught:
+            generate(provider, source)
+        assert caught.value.code == "SCHEMA_VIOLATION"
+        calls = 6 if retained_defect == "public" else 2
+        assert caught.value.details["usage"]["inputTokens"] == 11 * calls
+        assert caught.value.details["usage"]["outputTokens"] == 7 * calls
+
+    expected = ["MAP-001", "MAP-001"]
+    if retained_defect == "public":
+        expected += ["REVIEW-001", "REVIEW-001", "EXPLAIN-001", "EXPLAIN-001"]
+        assert caught.value.details["validationFailure"]["stage"] == "EXPLAIN-001"
+    assert stages(provider) == expected
+    assert provider.schema_validity == [True] * len(expected)
+    repair = provider.calls[1]
+    assert [finding["id"] for finding in framed(repair["prompt"])["findings"]] == [101]
+    actions = repair["prompt"].split("<validation-error>", 1)[1].split("</validation-error>", 1)[0]
+    assert "reason: 원문 claim이 존재합니다." in actions
+    assert "report_evidence_insufficient" in actions
+    assert "findingId=101" in actions and "reason" in actions
+    rows = structured_diagnostics(repair["prompt"])
+    assert {row["field"] for row in rows} == {"assessments[101].reason"}
+    assert {row["rule"] for row in rows} == {
+        "report_assessment_reason_claim_absence",
+        "unsupported_number",
+    }
+    (fact,) = [row for row in rows if row["rule"] == "unsupported_number"]
+    assert fact["field"] == "assessments[101].reason"
+    assert fact["claimIds"] == ["101:0"]
+    span = fact["details"][0]["generatedSpan"]
+    original = provider.wire_payloads[0]["assessments"]["CHIP_MAKER"]["finding101"]["reason"]
+    assert original[span["start"] : span["end"]] == span["text"] == "9999"
+    error, message, diagnostics, kinds = captured[0]
+    assert error.failed_finding_ids == (101,)
+    assert set(kinds) == {"report_assessment_draft_invalid", "report_evidence_insufficient"}
+    assert "근거에서 확인되지 않는 숫자: 9999" in message
+    assert (str(error), error.repair_diagnostics, error.error_kinds) == (
+        message,
+        diagnostics,
+        kinds,
+    )
+    assert (
+        framed(repair["prompt"])["findings"][0]
+        == framed(provider.calls[0]["prompt"])["findings"][0]
+    )
+    assert "<invalid-output>" not in repair["prompt"]

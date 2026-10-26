@@ -37,17 +37,33 @@ public class AgentQuotaService {
                                     AgentPlan plan) {
         repository.lockSingletonSettings();
         releaseExpiredReservations();
-        Optional<String> existingStatus = repository.findStatusByIdempotencyKey(idempotencyKey);
-        if (existingStatus.isPresent()) {
-            throw new DuplicateQuotaReservationException(idempotencyKey, existingStatus.get());
+        String candidate = idempotencyKey;
+        for (int attempt = 0; ; attempt++) {
+            Optional<String> existingStatus = repository.findStatusByIdempotencyKey(candidate);
+            if (existingStatus.isEmpty()) return createReservation(runId, candidate, task, plan);
+            if (task != AgentTask.TOPIC_RELEVANCE || !"CONSUMED".equals(existingStatus.get())
+                    || !repository.isUnstartedRelevanceAdmission(candidate)) {
+                throw new DuplicateQuotaReservationException(candidate, existingStatus.get());
+            }
+            // Only a proven, fully settled non-execution can be re-entered; preserve prior audit rows.
+            candidate = idempotencyKey + ":admission:" + (attempt + 1);
         }
-        return createReservation(runId, idempotencyKey, task, plan);
     }
 
     @Transactional
     public QuotaReservation reserveInsight(Long runId,
                                            String baseKey,
                                            AgentPlan plan) {
+        return reserveInsightAttempt(runId, baseKey, plan, false);
+    }
+
+    @Transactional
+    public QuotaReservation reserveReportInsight(Long runId, String baseKey, AgentPlan plan) {
+        return reserveInsightAttempt(runId, baseKey, plan, true);
+    }
+
+    private QuotaReservation reserveInsightAttempt(Long runId, String baseKey, AgentPlan plan,
+            boolean allowChargedReportFailure) {
         repository.lockSingletonSettings();
         releaseExpiredReservations();
         String candidate = baseKey;
@@ -57,7 +73,8 @@ public class AgentQuotaService {
             if (existingStatus.isEmpty()) {
                 return createReservation(runId, candidate, AgentTask.INSIGHT, plan);
             }
-            if (!"RELEASED".equals(existingStatus.get())) {
+            if (!"RELEASED".equals(existingStatus.get()) && !(allowChargedReportFailure
+                    && "CONSUMED".equals(existingStatus.get()) && repository.isFailedReportInsight(candidate))) {
                 throw new DuplicateQuotaReservationException(candidate, existingStatus.get());
             }
             // Preserve each attempt so a late completion cannot settle the retry's reservation.
@@ -126,10 +143,17 @@ public class AgentQuotaService {
 
     @Transactional
     public void completeFailure(QuotaReservation reservation, AgentClientException exception) {
+        if (reservation.task() == AgentTask.TOPIC_RELEVANCE && exception.isRequestAdmissionRejected()) {
+            // A terminal zero settlement excludes its audit row from legacy usage counting.
+            repository.consume(reservation, BigDecimal.ZERO, now());
+            return;
+        }
         BigDecimal observedCredits = exception.getUsage() == null
                 ? null
                 : exception.getUsage().credits();
-        if (reservation.task() == AgentTask.REPORT_CHANGES && exception.getUsage() != null) {
+        if ((reservation.task() == AgentTask.REPORT_CHANGES || reservation.task() == AgentTask.TOPIC_RELEVANCE
+                || reservation.task() == AgentTask.FEEDBACK_REVIEW || reservation.task() == AgentTask.FEEDBACK_EVALUATE)
+                && exception.getUsage() != null) {
             // A schema-repair failure can still incur provider charges. Keep known exposure
             // in the work budget, including a guard-reported charge above the reservation.
             BigDecimal units = reservation.plan() == AgentPlan.FREE ? BigDecimal.ONE
@@ -151,6 +175,47 @@ public class AgentQuotaService {
         repository.consume(reservation, reservation.reservedUnits(), now());
     }
 
+    /** Preserve observed charges, retaining report-insight allowance for unobserved calls. */
+    @Transactional
+    public void completeObservedFailure(QuotaReservation reservation, AgentClientException exception) {
+        if (reservation.task() == AgentTask.INSIGHT && incompleteReportInsightUsage(exception)) {
+            BigDecimal observed = exception.getUsage() == null ? BigDecimal.ZERO
+                    : nonNegative(exception.getUsage().credits());
+            BigDecimal units = reservation.plan() == AgentPlan.FREE ? BigDecimal.ONE
+                    : reservation.reservedUnits().max(observed);
+            // A known stage subtotal cannot free allowance for a later potentially billed call.
+            // Above-reservation exposure still comes from the atomically recorded agent_runs audit.
+            settleObservedFailure(reservation, units);
+            return;
+        }
+        if (exception.getUsage() == null) {
+            completeFailure(reservation, exception);
+            return;
+        }
+        BigDecimal observed = exception.getUsage().credits();
+        BigDecimal units = reservation.plan() == AgentPlan.FREE ? BigDecimal.ONE
+                : observed == null || observed.signum() < 0 ? reservation.reservedUnits() : observed;
+        settleObservedFailure(reservation, units);
+    }
+
+    private boolean incompleteReportInsightUsage(AgentClientException exception) {
+        var metadata = exception.getExecutionMetadata();
+        if (metadata != null && "AGENT_ERROR".equals(metadata.source())
+                && !"COMPLETE".equals(metadata.usageCompleteness())) {
+            return true;
+        }
+        var usage = exception.getUsage();
+        if (usage == null) {
+            // A backend connect failure proves the Agent request was never dispatched.
+            return !exception.isConnectTimeout();
+        }
+        // Full RESPONSE totals and legacy complete measurements remain exact settlements.
+        return usage.inputTokens() == null || usage.inputTokens() < 0
+                || usage.outputTokens() == null || usage.outputTokens() < 0
+                || usage.costUsd() == null || usage.costUsd().signum() < 0
+                || usage.credits() == null || usage.credits().signum() < 0;
+    }
+
     @Transactional
     public void completeFailure(QuotaReservation reservation, String failureCode) {
         if ("PROVIDER_UNAVAILABLE".equals(failureCode)
@@ -166,6 +231,9 @@ public class AgentQuotaService {
         repository.lockSingletonSettings();
         releaseExpiredReservations();
         UsageWindow usage = usageWindow();
+        LocalDateTime dailyResetAt = usage.dailyResetAt().toLocalDateTime();
+        BigDecimal freeDailyEstimatedCost = nonNegative(repository.freeEstimatedCost(
+                dailyResetAt.minusDays(1), dailyResetAt));
         BigDecimal paidDailyRemaining = remaining(paidDailyLimit(), usage.paidDailyUsed());
         BigDecimal insightRemaining = remaining(insightCap(), usage.paidInsightDailyUsed());
         BigDecimal analysisRemaining = remaining(
@@ -179,6 +247,7 @@ public class AgentQuotaService {
                         usage.freeDailyUsed(),
                         freeDailyLimit(),
                         remaining(freeDailyLimit(), usage.freeDailyUsed()),
+                        freeDailyEstimatedCost,
                         usage.dailyResetAt()),
                 new LlmSettingDTO.PaidUsage(
                         usage.paidDailyUsed(),
@@ -226,7 +295,9 @@ public class AgentQuotaService {
         boolean analysisTask = task == AgentTask.ANALYZE
                 || task == AgentTask.SELF_CRITIQUE
                 || task == AgentTask.KEYWORD_STRATEGY
-                || task == AgentTask.REPORT_CHANGES;
+                || task == AgentTask.REPORT_CHANGES
+                || task == AgentTask.TOPIC_RELEVANCE
+                || task == AgentTask.FEEDBACK_REVIEW || task == AgentTask.FEEDBACK_EVALUATE;
         boolean insightTask = task == AgentTask.INSIGHT;
         boolean investigationTask = task == AgentTask.INVESTIGATE;
         BigDecimal workUsed = usage.paidAnalysisDailyUsed()

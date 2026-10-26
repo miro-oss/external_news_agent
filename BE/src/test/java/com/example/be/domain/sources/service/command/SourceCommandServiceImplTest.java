@@ -12,6 +12,9 @@ import com.example.be.domain.topics.entity.Topic;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -376,6 +379,50 @@ class SourceCommandServiceImplTest {
                 () -> sourceCommandService.deleteSource(99L));
 
         assertEquals(SourceErrorCode.SOURCE_NOT_FOUND, exception.getCode());
+    }
+
+    @ParameterizedTest
+    @MethodSource("unsafeFeedUrls")
+    void createSourceRejectsUnsafeFeedDestinationsBeforeSaving(String url) {
+        SourceException exception = assertThrows(SourceException.class,
+                () -> sourceCommandService.createSource(feedRequest(url)));
+
+        assertEquals(SourceErrorCode.INVALID_FEED_URL_TEMPLATE, exception.getCode());
+        verify(sourceRepository, never()).saveAndFlush(any(Source.class));
+    }
+
+    @ParameterizedTest
+    @MethodSource("unsafeFeedUrls")
+    void updateSourceRejectsUnsafeFeedDestinationsWithoutChangingTheSource(String url) {
+        Source source = existingFeedSource();
+        String originalUrl = source.getUrlTemplate();
+        when(sourceRepository.findById(1L)).thenReturn(Optional.of(source));
+        SourceReqDTO.Update request = new SourceReqDTO.Update();
+        request.setUrlTemplate(url);
+
+        SourceException exception = assertThrows(SourceException.class,
+                () -> sourceCommandService.updateSource(1L, request));
+
+        assertEquals(SourceErrorCode.INVALID_FEED_URL_TEMPLATE, exception.getCode());
+        assertEquals(originalUrl, source.getUrlTemplate());
+        verify(sourceRepository, never()).flush();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://news.example/feed.xml", "https://news.example/feed.xml", "HTTPS://news.example/feed.xml"})
+    void acceptsPublicHttpAndHttpsFeeds(String url) {
+        when(sourceRepository.saveAndFlush(any(Source.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertEquals(url, sourceCommandService.createSource(feedRequest(url)).getUrlTemplate());
+    }
+
+    private static java.util.stream.Stream<String> unsafeFeedUrls() {
+        return java.util.stream.Stream.of(
+                "javascript:alert(1)", "data:text/html,example", "file:///tmp/example.xml",
+                "http://localhost/feed", "http://127.0.0.1/feed", "http://10.0.0.1/feed",
+                "http://169.254.169.254/metadata", "https://metadata.google.internal/feed",
+                "http://[::1]/feed", "https://user:pass@news.example/feed",
+                "https://news.example:0/feed", "https://news.example:65536/feed", "/feed.xml");
     }
 
     private SourceReqDTO.Create feedRequest(String urlTemplate) {

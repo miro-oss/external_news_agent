@@ -1,4 +1,5 @@
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from decimal import Decimal
 from threading import BoundedSemaphore
 
@@ -20,9 +21,28 @@ class ProviderGuard:
         hard_cap_credits: Decimal,
     ) -> None:
         self.semaphore = BoundedSemaphore(concurrency)
+        # Shared by every report-insight request using this plan's guard.
+        # Acquire this before the provider semaphore so queued report work
+        # cannot occupy the slot reserved for ordinary analysis.
+        self.report_insight_semaphore = BoundedSemaphore(max(1, concurrency - 1))
         self.acquire_timeout_seconds = acquire_timeout_seconds
         self.breaker = CircuitBreaker(failure_threshold, cooldown_seconds)
         self.hard_cap_credits = hard_cap_credits
+
+    @contextmanager
+    def report_insight_capacity(
+        self, admission_remaining_seconds: Callable[[], float]
+    ) -> Iterator[None]:
+        while not self.report_insight_semaphore.acquire(
+            timeout=min(self.acquire_timeout_seconds, admission_remaining_seconds())
+        ):
+            pass
+        try:
+            # Cancellation/deadline may have arrived while acquiring the slot.
+            admission_remaining_seconds()
+            yield
+        finally:
+            self.report_insight_semaphore.release()
 
 
 class GuardedAnalyzeProvider:
@@ -89,29 +109,64 @@ def _is_rate_limited(error: AgentError) -> bool:
     return isinstance(error.details, dict) and error.details.get("rateLimited") is True
 
 
+def _is_cancelled_before_call(error: AgentError) -> bool:
+    return (
+        error.code == "PROVIDER_UNAVAILABLE"
+        and isinstance(error.details, dict)
+        and error.details.get("requestNotStarted") is True
+    )
+
+
 def run_guarded[ResponseT](
     guard: ProviderGuard,
     call: Callable[[], ResponseT],
     *,
     credits: Callable[[ResponseT], Decimal],
     usage_details: Callable[[ResponseT], dict[str, int | float]],
+    admission_remaining_seconds: Callable[[], float] | None = None,
 ) -> ResponseT:
     """Apply the shared provider guard to any non-streaming provider call."""
-    guard.breaker.before_call()
-    acquired = guard.semaphore.acquire(timeout=guard.acquire_timeout_seconds)
-    if not acquired:
-        guard.breaker.cancel_call()
-        raise AgentError(
-            status_code=503,
-            code="PROVIDER_UNAVAILABLE",
-            message="Provider 동시 호출 한도에 도달했습니다.",
-            details={"concurrencyLimited": True},
-        )
+    if admission_remaining_seconds is None:
+        guard.breaker.before_call()
+    try:
+        while True:
+            timeout = guard.acquire_timeout_seconds
+            if admission_remaining_seconds is not None:
+                # Reports share the same semaphore but can queue within their
+                # request budget. Recheck cancellation between short waits.
+                timeout = min(timeout, admission_remaining_seconds())
+            if guard.semaphore.acquire(timeout=timeout):
+                break
+            if admission_remaining_seconds is None:
+                raise AgentError(
+                    status_code=503,
+                    code="PROVIDER_UNAVAILABLE",
+                    message="Provider 동시 호출 한도에 도달했습니다.",
+                    details={"concurrencyLimited": True, "requestNotStarted": True},
+                )
+    except BaseException:
+        if admission_remaining_seconds is None:
+            guard.breaker.cancel_call()
+        raise
+
+    if admission_remaining_seconds is not None:
+        try:
+            admission_remaining_seconds()
+            # The circuit may have opened while this report waited. Do not
+            # reserve a half-open probe until the call actually has capacity.
+            guard.breaker.before_call()
+        except BaseException as error:
+            if isinstance(error, AgentError):
+                details = dict(error.details) if isinstance(error.details, dict) else {}
+                details["requestNotStarted"] = True
+                error.details = details
+            guard.semaphore.release()
+            raise
 
     try:
         response = call()
     except AgentError as error:
-        if _is_rate_limited(error):
+        if _is_rate_limited(error) or _is_cancelled_before_call(error):
             guard.breaker.cancel_call()
         elif error.code == "PROVIDER_UNAVAILABLE":
             guard.breaker.record_failure()

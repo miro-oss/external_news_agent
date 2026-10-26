@@ -1,11 +1,21 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { notificationPost } from './client.ts'
 import type { DeliveryTargets } from './notificationConnections'
-import type { NotificationSendBatch } from './types'
+import type { Audience, NotificationPreview, NotificationSendBatch } from './types'
+
+export type ReportShareInsight = { insightAudience?: Audience | null }
+
+export function reportPreviewOptions() {
+  return {
+    mutationFn: ({ reportId, ...body }: { reportId: number; channelId: number } & ReportShareInsight) =>
+      notificationPost<NotificationPreview>(`/reports/${reportId}/preview`, body),
+    retry: false,
+  }
+}
 
 export function reportShareOptions(client: QueryClient, reportId: number) {
   return {
-    mutationFn: (body: DeliveryTargets & { idempotencyKey: string }) =>
+    mutationFn: (body: DeliveryTargets & ReportShareInsight & { idempotencyKey: string }) =>
       notificationPost<NotificationSendBatch>(`/reports/${reportId}/send`, body),
     // 응답이 유실되었을 때 자동으로 새 발송을 만들지 않는다.
     retry: false,

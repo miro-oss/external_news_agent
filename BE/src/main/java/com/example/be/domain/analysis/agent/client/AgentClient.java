@@ -14,24 +14,41 @@ import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyRequest;
 import com.example.be.domain.analysis.agent.dto.AgentKeywordStrategyResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentReportInsightRequest;
+import com.example.be.domain.analysis.agent.dto.AgentReportInsightResponse;
+import com.example.be.domain.analysis.agent.dto.AgentWeeklyReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportChangesRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportChangesResponse;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
+import com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceRequest;
+import com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceResponse;
 import com.example.be.global.config.RestClientFactory;
+import tools.jackson.databind.JsonNode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.UnknownContentTypeException;
 
+import java.io.IOException;
+import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpTimeoutException;
+import java.nio.channels.UnresolvedAddressException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Locale;
+import javax.net.ssl.SSLException;
 
 @Component
 public class AgentClient {
@@ -40,8 +57,14 @@ public class AgentClient {
     private static final int MAX_ERROR_BODY_LENGTH = 500;
 
     private final RestClient analyzeClient;
+    private final RestClient relevanceClient;
     private final RestClient insightClient;
     private final RestClient reportClient;
+    private final RestClient reportInsightClient;
+    private AdmissionSleeper admissionSleeper = Thread::sleep;
+
+    @FunctionalInterface
+    interface AdmissionSleeper { void sleep(long millis) throws InterruptedException; }
 
     @Autowired
     public AgentClient(RestClientFactory restClientFactory, AgentProperties properties) {
@@ -52,6 +75,10 @@ public class AgentClient {
                         properties.getConnectTimeout(), properties.getInsightTimeout()),
                 restClientFactory.create(
                         properties.getConnectTimeout(), properties.getReportTimeout()),
+                restClientFactory.create(
+                        properties.getConnectTimeout(), properties.getRelevanceTimeout()),
+                restClientFactory.create(
+                        properties.getConnectTimeout(), properties.getReportInsightTimeout()),
                 properties);
     }
 
@@ -59,14 +86,35 @@ public class AgentClient {
         this(builder, builder, builder, properties);
     }
 
+    AgentClient(RestClient.Builder builder, AgentProperties properties, AdmissionSleeper sleeper) {
+        this(builder, properties);
+        this.admissionSleeper = sleeper;
+    }
+
     AgentClient(RestClient.Builder analyzeBuilder,
                 RestClient.Builder insightBuilder,
                 RestClient.Builder reportBuilder,
                 AgentProperties properties) {
+        this(analyzeBuilder, insightBuilder, reportBuilder, analyzeBuilder, properties);
+    }
+
+    AgentClient(RestClient.Builder analyzeBuilder,
+                RestClient.Builder insightBuilder,
+                RestClient.Builder reportBuilder,
+                RestClient.Builder relevanceBuilder,
+                AgentProperties properties) {
+        this(analyzeBuilder, insightBuilder, reportBuilder, relevanceBuilder, reportBuilder, properties);
+    }
+
+    AgentClient(RestClient.Builder analyzeBuilder, RestClient.Builder insightBuilder,
+                RestClient.Builder reportBuilder, RestClient.Builder relevanceBuilder,
+                RestClient.Builder reportInsightBuilder, AgentProperties properties) {
         validateSecureBaseUrl(properties);
         this.analyzeClient = configured(analyzeBuilder, properties).build();
         this.insightClient = configured(insightBuilder, properties).build();
         this.reportClient = configured(reportBuilder, properties).build();
+        this.relevanceClient = configured(relevanceBuilder, properties).build();
+        this.reportInsightClient = configured(reportInsightBuilder, properties).build();
     }
 
     private RestClient.Builder configured(RestClient.Builder builder, AgentProperties properties) {
@@ -121,6 +169,14 @@ public class AgentClient {
         return post(reportClient, "/v1/report", request, AgentReportResponse.class);
     }
 
+    public AgentReportResponse weeklyReport(AgentWeeklyReportRequest request) {
+        return post(reportClient, "/v1/weekly-report", request, AgentReportResponse.class);
+    }
+
+    public AgentReportInsightResponse reportInsight(AgentReportInsightRequest request) {
+        return post(reportInsightClient, "/v1/report-insight", request, AgentReportInsightResponse.class);
+    }
+
     public AgentReportChangesResponse reportChanges(AgentReportChangesRequest request) {
         return post(reportClient, "/v1/report-changes", request, AgentReportChangesResponse.class);
     }
@@ -131,6 +187,31 @@ public class AgentClient {
 
     public AgentKeywordStrategyResponse keywordStrategy(AgentKeywordStrategyRequest request) {
         return post(insightClient, "/v1/keyword-strategy", request, AgentKeywordStrategyResponse.class);
+    }
+
+    public AgentTopicRelevanceResponse topicRelevance(AgentTopicRelevanceRequest request) {
+        for (int attempt = 0; ; attempt++) {
+            try {
+                return post(relevanceClient, "/v1/topic-relevance", request, AgentTopicRelevanceResponse.class);
+            } catch (AgentClientException failure) {
+                // This endpoint alone attests that no stage of the entire request reached a provider.
+                // Keep the same reservation and key. Timeout, repair and partial-use failures never retry.
+                if (!failure.isRequestAdmissionRejected() || attempt >= 2) throw failure;
+                try { admissionSleeper.sleep(1_000L << attempt); }
+                catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw failure;
+                }
+            }
+        }
+    }
+
+    public JsonNode feedbackReview(JsonNode request) {
+        return post(relevanceClient, "/v1/feedback/review", request, JsonNode.class);
+    }
+
+    public JsonNode feedbackEvaluate(JsonNode request) {
+        return post(relevanceClient, "/v1/feedback/evaluate", request, JsonNode.class);
     }
 
     public AgentEvidenceResponse verifyEvidence(AgentEvidenceRequest request) {
@@ -150,7 +231,9 @@ public class AgentClient {
                     .retrieve()
                     .body(responseType);
             if (response == null) {
-                throw new AgentClientException("SCHEMA_VIOLATION", "Agent 응답 본문이 비어 있습니다.");
+                throw new AgentClientException("SCHEMA_VIOLATION", "Agent 응답 본문이 비어 있습니다.",
+                        null, null, AgentClientException.TimeoutPhase.NONE, null, null,
+                        AgentClientException.ClientFailureKind.EMPTY_RESPONSE);
             }
             return response;
         } catch (RestClientResponseException exception) {
@@ -161,26 +244,31 @@ public class AgentClient {
                     exception,
                     error == null ? null : error.usage(),
                     AgentClientException.TimeoutPhase.NONE,
-                    error == null ? null : error.executionMetadata());
+                    error == null ? null : error.executionMetadata(),
+                    error == null ? null : error.validationFailure(), null,
+                    exception.getStatusCode().value() == 503 && "/v1/topic-relevance".equals(uri)
+                            && error != null ? error.admissionRejection() : null);
         } catch (RestClientException exception) {
             AgentClientException.TimeoutPhase timeoutPhase = timeoutPhase(exception);
+            var kind = clientFailureKind(exception, timeoutPhase);
+            boolean invalidResponse = kind == AgentClientException.ClientFailureKind.RESPONSE_DECODE;
             throw new AgentClientException(
-                    "PROVIDER_UNAVAILABLE",
-                    timeoutPhase == AgentClientException.TimeoutPhase.READ
+                    invalidResponse ? "SCHEMA_VIOLATION" : "PROVIDER_UNAVAILABLE",
+                    invalidResponse ? "Agent 응답 형식을 해석할 수 없습니다."
+                            : timeoutPhase == AgentClientException.TimeoutPhase.READ
                             ? "Agent 응답 대기 시간이 초과되었습니다."
                             : "Agent에 연결할 수 없습니다.",
                     exception,
                     null,
-                    timeoutPhase);
+                    timeoutPhase, null, null, kind);
         }
     }
 
     AgentClientException.TimeoutPhase timeoutPhase(RestClientException exception) {
-        if (!(exception instanceof ResourceAccessException)) {
-            return AgentClientException.TimeoutPhase.NONE;
-        }
-        Throwable cause = exception;
-        while (cause != null) {
+        // This phase also controls quota release; preserve the pre-response
+        // ResourceAccessException requirement independently of diagnostics.
+        if (!(exception instanceof ResourceAccessException)) return AgentClientException.TimeoutPhase.NONE;
+        for (Throwable cause : causes(exception)) {
             if (cause instanceof HttpConnectTimeoutException) {
                 return AgentClientException.TimeoutPhase.CONNECT;
             }
@@ -193,9 +281,40 @@ public class AgentClient {
                         ? AgentClientException.TimeoutPhase.CONNECT
                         : AgentClientException.TimeoutPhase.READ;
             }
-            cause = cause.getCause();
         }
         return AgentClientException.TimeoutPhase.NONE;
+    }
+
+    private AgentClientException.ClientFailureKind clientFailureKind(RestClientException exception,
+            AgentClientException.TimeoutPhase timeoutPhase) {
+        if (timeoutPhase == AgentClientException.TimeoutPhase.CONNECT)
+            return AgentClientException.ClientFailureKind.CONNECT_TIMEOUT;
+        if (timeoutPhase == AgentClientException.TimeoutPhase.READ)
+            return AgentClientException.ClientFailureKind.READ_TIMEOUT;
+        var chain = causes(exception);
+        if (chain.stream().anyMatch(cause -> cause instanceof UnknownHostException
+                || cause instanceof UnresolvedAddressException))
+            return AgentClientException.ClientFailureKind.DNS_FAILURE;
+        if (chain.stream().anyMatch(SSLException.class::isInstance))
+            return AgentClientException.ClientFailureKind.TLS_FAILURE;
+        if (chain.stream().anyMatch(ConnectException.class::isInstance))
+            return AgentClientException.ClientFailureKind.CONNECTION_FAILURE;
+        if (exception instanceof ResourceAccessException)
+            return AgentClientException.ClientFailureKind.IO_FAILURE;
+        if (chain.stream().anyMatch(cause -> cause instanceof HttpMessageNotReadableException
+                || cause instanceof UnknownContentTypeException))
+            return AgentClientException.ClientFailureKind.RESPONSE_DECODE;
+        if (chain.stream().anyMatch(IOException.class::isInstance))
+            return AgentClientException.ClientFailureKind.IO_FAILURE;
+        return AgentClientException.ClientFailureKind.UNKNOWN;
+    }
+
+    private List<Throwable> causes(Throwable exception) {
+        var result = new ArrayList<Throwable>();
+        var seen = Collections.newSetFromMap(new IdentityHashMap<Throwable, Boolean>());
+        for (Throwable cause = exception; cause != null && seen.add(cause) && result.size() < 32;
+                cause = cause.getCause()) result.add(cause);
+        return result;
     }
 
     private AgentErrorResponse errorResponse(RestClientResponseException exception) {

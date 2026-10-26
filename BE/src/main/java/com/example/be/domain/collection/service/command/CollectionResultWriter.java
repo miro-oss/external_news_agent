@@ -30,8 +30,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 읽어 온 결과를 저장한다. <b>여기서만 트랜잭션을 연다.</b>
@@ -128,15 +130,20 @@ public class CollectionResultWriter {
 
         int observed = 0;
         int changed = 0;
+        Set<Long> observedIds = new LinkedHashSet<>();
+        Set<Long> changedIds = new LinkedHashSet<>();
         for (CollectedArticle article : dedupeByUrl(
                 TopicKeywordFilter.filter(collectionTopic, outcome.fetch().articles()))) {
-            ChangeType changeType = save(run, topic, source, article);
+            SavedArticle saved = save(run, topic, source, article);
+            ChangeType changeType = saved.changeType();
             observed++;
+            observedIds.add(saved.articleId());
             if (changeType == ChangeType.NEW || changeType == ChangeType.UPDATED) {
                 changed++;
+                changedIds.add(saved.articleId());
             }
         }
-        return new InvestigationWriteResult(observed, changed);
+        return new InvestigationWriteResult(observed, changed, observedIds, changedIds);
     }
 
     private void writeArticles(CollectionRun run,
@@ -149,7 +156,7 @@ public class CollectionResultWriter {
         int newCount = 0;
         int updatedCount = 0;
         for (CollectedArticle article : articles) {
-            ChangeType changeType = save(run, topic, source, article);
+            ChangeType changeType = save(run, topic, source, article).changeType();
             if (changeType == ChangeType.NEW) {
                 newCount++;
             } else if (changeType == ChangeType.UPDATED) {
@@ -309,7 +316,7 @@ public class CollectionResultWriter {
      * url_hash로 이미 있는 기사인지 보고 NEW / UPDATED / UNCHANGED를 정한다. 판정과 무관하게
      * 관측은 매번 남긴다 — 그래야 "이 실행에서 본 기사"를 나중에 복원할 수 있다.
      */
-    private ChangeType save(CollectionRun run, Topic topic, Source source, CollectedArticle collected) {
+    private SavedArticle save(CollectionRun run, Topic topic, Source source, CollectedArticle collected) {
         String canonicalUrl = ArticleHasher.normalizeUrl(collected.canonicalUrl());
         String urlHash = ArticleHasher.urlHash(canonicalUrl);
         String contentHash = ArticleHasher.contentHash(collected.title(), collected.summary(), null);
@@ -336,7 +343,7 @@ public class CollectionResultWriter {
         }
 
         runArticleRepository.save(CollectionRunArticle.observe(run, article, topic, source, changeType, now));
-        return changeType;
+        return new SavedArticle(article.getId(), changeType);
     }
 
     private Article newArticle(CollectionRun run,
@@ -372,10 +379,18 @@ public class CollectionResultWriter {
                 .orElse(ArticleVersion.FIRST_VERSION_NO);
     }
 
-    public record InvestigationWriteResult(int observedArticleCount, int changedArticleCount) {
+    private record SavedArticle(Long articleId, ChangeType changeType) {}
+
+    public record InvestigationWriteResult(int observedArticleCount, int changedArticleCount,
+                                           Set<Long> observedArticleIds, Set<Long> changedArticleIds) {
+
+        public InvestigationWriteResult {
+            observedArticleIds = Set.copyOf(observedArticleIds);
+            changedArticleIds = Set.copyOf(changedArticleIds);
+        }
 
         static InvestigationWriteResult empty() {
-            return new InvestigationWriteResult(0, 0);
+            return new InvestigationWriteResult(0, 0, Set.of(), Set.of());
         }
     }
 

@@ -1,6 +1,7 @@
 package com.example.be.domain.collection.service.command;
 
 import com.example.be.domain.analysis.repository.FindingRepository;
+import com.example.be.domain.analysis.relevance.TopicRelevanceGate;
 import com.example.be.domain.collection.content.ArticleContentClient;
 import com.example.be.domain.collection.content.ArticleContentResult;
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
@@ -10,6 +11,7 @@ import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
 import com.example.be.domain.collection.entity.CollectionRunWarning;
 import com.example.be.domain.collection.entity.RunItemStatus;
+import com.example.be.domain.collection.entity.RunStage;
 import com.example.be.domain.collection.entity.RunStatus;
 import com.example.be.domain.collection.entity.TriggerType;
 import com.example.be.domain.collection.feed.FeedClient;
@@ -45,6 +47,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -53,6 +56,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -78,11 +83,13 @@ class CollectionNoChangeReportIntegrationTests {
     @Autowired private SourceRepository sourceRepository;
     @Autowired private EntityManager entityManager;
 
+    @MockitoBean private TopicRelevanceGate relevanceGate;
     @MockitoBean private FeedClient feedClient;
     @MockitoBean private ArticleContentClient contentClient;
     @MockitoBean private RobotsPolicyService robotsPolicyService;
     @MockitoBean private ReportNotificationAutomationService notificationAutomation;
     @MockitoBean private TopicKeywordStrategyOrchestrator keywordStrategyOrchestrator;
+    @MockitoBean private CollectionRunStageWriter stageWriter;
 
     private Topic topic;
     private Source source;
@@ -90,6 +97,15 @@ class CollectionNoChangeReportIntegrationTests {
 
     @BeforeEach
     void setUp() {
+        // Report fixtures stay uncommitted for rollback isolation. The real worker receives a
+        // committed run; independent stage commits are covered by CollectionRunStageWriterIntegrationTests.
+        when(stageWriter.updateStage(anyLong(), any(RunStage.class))).thenReturn(true);
+        // These HBM fixtures test change/report history; relevance itself has separate gate tests.
+        when(relevanceGate.assess(anyLong(), any(), anyList())).thenAnswer(invocation -> {
+            List<TopicRelevanceGate.Candidate> candidates = invocation.getArgument(2);
+            return candidates.stream().map(candidate -> new TopicRelevanceGate.Key(
+                    candidate.article().getId(), candidate.topic().getId())).collect(Collectors.toSet());
+        });
         String suffix = UUID.randomUUID().toString();
         topic = topicRepository.save(Topic.builder().name("HBM " + suffix).queryText("HBM")
                 .requiredKeywords(List.of("HBM")).optionalKeywords(List.of()).excludedKeywords(List.of())
@@ -101,7 +117,7 @@ class CollectionNoChangeReportIntegrationTests {
         articleUrl = "https://example.com/articles/" + suffix;
         when(robotsPolicyService.evaluate(any())).thenAnswer(invocation ->
                 RobotsDecision.skipped(invocation.getArgument(0)));
-        when(contentClient.fetch(any(), any(), any())).thenReturn(
+        when(contentClient.fetch(any(), any(), any(), eq(false))).thenReturn(
                 ArticleContentResult.fullText("HBM 양산 일정을 발표했다. 고객사에 공급할 제품의 양산 계획을 확인했다."));
     }
 
@@ -211,7 +227,7 @@ class CollectionNoChangeReportIntegrationTests {
         source = sourceRepository.findById(source.getId()).orElseThrow();
         source.update(source.getName(), source.getUrlTemplate(), source.getCountry(), source.getLanguage(),
                 new CrawlPolicy(CrawlPolicy.ROBOTS_MODE_IGNORE, 10, true), source.getReliabilityScore(), true);
-        when(contentClient.fetch(articleUrl, null, "HBM 양산 일정 발표")).thenReturn(
+        when(contentClient.fetch(articleUrl, null, "HBM 양산 일정 발표", false)).thenReturn(
                 ArticleContentResult.fullText("HBM 양산 일정에 대한 상세 내용을 새 본문으로 확보했다."));
 
         CollectionRun refreshed = execute(TriggerType.SCHEDULED);
@@ -221,7 +237,7 @@ class CollectionNoChangeReportIntegrationTests {
         assertEquals(0, refreshed.getUpdatedCount());
         assertEquals(1, observationRepository.countByRunIdAndChangeType(refreshed.getId(), ChangeType.UNCHANGED));
         assertTrue(findingRepository.existsByRunId(refreshed.getId()));
-        verify(contentClient).fetch(articleUrl, null, "HBM 양산 일정 발표");
+        verify(contentClient).fetch(articleUrl, null, "HBM 양산 일정 발표", false);
     }
 
     @Test

@@ -14,6 +14,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ReportDeliveryOutboxStore {
     private final JdbcTemplate jdbc;
+    private final ReportSubscriptionStore subscriptions;
     public record Work(Long id, Long reportId, Long recipientId, Long channelId, String batchId,
                        String name, String address, String subject, String body, int attempts) { }
     public record Delivery(Long id, String recipientName, String channelType, String status, int attempts, String message) { }
@@ -51,7 +52,8 @@ public class ReportDeliveryOutboxStore {
 
     @Transactional(readOnly = true)
     public boolean destinationStillActive(Work work) {
-        return destinationStillActive(work.recipientId(), work.channelId(), work.address());
+        return destinationStillActive(work.recipientId(), work.channelId(), work.address())
+                && subscriptions.stillAllowed(work.id(), work.reportId(), work.recipientId());
     }
 
     @Transactional(readOnly = true)
@@ -64,6 +66,17 @@ public class ReportDeliveryOutboxStore {
                   AND d.use_yn='Y' AND d.address=? AND (c.channel_type='EMAIL' OR d.onboarded_yn='Y')
                 """, Integer.class, recipientId, channelId, address);
         return count != null && count > 0;
+    }
+
+    @Transactional
+    public void deferPersonalization(Work work) {
+        // No transport has started; a pending personal evaluation must not consume a send attempt.
+        jdbc.update("""
+                UPDATE report_notification_outbox SET status='PENDING',processing_at=NULL,
+                  attempt_count=GREATEST(0,attempt_count-1),available_at=?,last_error=?
+                WHERE id=? AND status='PROCESSING' AND attempt_count=?
+                """, LocalDateTime.now(ApiTimeZone.ZONE).plusSeconds(15),
+                "개인 수신 기준을 적용하고 있습니다.", work.id(), work.attempts());
     }
 
     @Transactional

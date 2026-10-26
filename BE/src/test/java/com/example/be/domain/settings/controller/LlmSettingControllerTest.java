@@ -69,8 +69,8 @@ class LlmSettingControllerTest {
         when(quotaService.usage()).thenReturn(new LlmSettingDTO.UsageResponse(
                 AgentPlan.PAID,
                 new LlmSettingDTO.FreeUsage(
-                        new BigDecimal("12"), new BigDecimal("1500"),
-                        new BigDecimal("1488"), reset),
+                        new BigDecimal("12"), new BigDecimal("3000"),
+                        new BigDecimal("2988"), new BigDecimal("0.123456"), reset),
                 new LlmSettingDTO.PaidUsage(
                         new BigDecimal("71"), new BigDecimal("90"), new BigDecimal("19"),
                         BigDecimal.ZERO,
@@ -82,6 +82,8 @@ class LlmSettingControllerTest {
         mockMvc.perform(get("/api/usage/llm"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.currentPlan").value("PAID"))
+                .andExpect(jsonPath("$.result.free.dailyCallsLimit").value(3000))
+                .andExpect(jsonPath("$.result.free.dailyEstimatedCostUsd").value(0.123456))
                 .andExpect(jsonPath("$.result.paid.dailyCreditsRemaining").value(19))
                 .andExpect(jsonPath("$.result.paid.analysisCreditsRemaining").value(0))
                 .andExpect(jsonPath("$.result.paid.insightCreditsUsed").value(7))

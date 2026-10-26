@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { reportChangesFixture, reportChangesVariants } from './report-changes-fixtures.mjs';
+import { reportInsightFixture, reportInsightVariants } from './report-insight-fixtures.mjs';
+import { weeklyReportFixture, topicWeeklyReportFixture } from './weekly-report-fixtures.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const portFlag = process.argv.indexOf('--port');
 const port = Number(portFlag >= 0 ? process.argv[portFlag + 1] : 5187);
@@ -18,6 +20,12 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535)
 // A newly created empty directory prevents Vite from loading the application's .env files.
 const emptyEnvDir = mkdtempSync(join(tmpdir(), 'refactor-preview-env-'));
 const page = (content) => ({ content, page: 0, size: 100, totalElements: content.length, totalPages: content.length ? 1 : 0, hasNext: false });
+const requestedPage = (content, url) => {
+    const pageNumber = Math.max(0, Number(url.searchParams.get('page') || 0));
+    const size = Math.max(1, Math.min(100, Number(url.searchParams.get('size') || 20)));
+    return { content: content.slice(pageNumber * size, (pageNumber + 1) * size), page: pageNumber, size,
+        totalElements: content.length, totalPages: Math.ceil(content.length / size), hasNext: (pageNumber + 1) * size < content.length };
+};
 const sources = [{ id: 1, sourceKind: 'SEARCH', name: 'NAVER', urlTemplate: 'NAVER', country: 'KR', language: 'ko', crawlPolicy: null, robotsStatus: 'allowed', robotsCheckedAt: null, reliabilityScore: 80, active: true }, { id: 2, sourceKind: 'FEED', name: '반도체 뉴스 RSS', urlTemplate: 'https://example.invalid/rss', language: 'ko', active: true }];
 const initialTopics = [
     { id: 31, name: '반도체 수출 규제와 공급망', queryText: '반도체 수출', requiredKeywords: ['반도체'], optionalKeywords: ['수출 규제', '공급망'], excludedKeywords: ['채용'], active: true },
@@ -28,7 +36,7 @@ const initialTopics = [
 const initialProposals = initialTopics.map((t, i) => ({ id: 100 + i, topicId: t.id, topicName: t.name, collectionRunId: 148, status: 'PENDING', summary: i === 0 ? '수출 규제와 공급망 재편에 반복 등장한 키워드를 추가하는 제안입니다.' : '최근 수집한 기사에서 반복 등장한 키워드를 추가합니다.', createdAt: '2026-09-08T09:30:00+09:00', reviewedAt: null, currentKeywords: { requiredKeywords: t.requiredKeywords, optionalKeywords: t.optionalKeywords, excludedKeywords: t.excludedKeywords }, changes: [{ bucket: 'OPTIONAL', action: 'ADD', keyword: i === 0 ? '첨단 패키징' : 'HBM4', reason: '최근 수집에서 반복 등장했으며 현재 주제와 관련성이 높습니다.' }, { bucket: 'EXCLUDED', action: 'ADD', keyword: '채용 공고', reason: '분석 대상에서 채용 안내를 제외합니다.' }] }));
 const fixture = JSON.parse(readFileSync(new URL('../tests/fixtures/refactor-report.json', import.meta.url), 'utf8'));
 const now = () => new Date().toISOString();
-const disabledPolicy = () => ({ enabled: false, run: true, daily: false, channelIds: [], groupIds: [], recipientIds: [] });
+const disabledPolicy = () => ({ enabled: false, run: true, daily: false, weekly: false, channelIds: [], groupIds: [], recipientIds: [] });
 const initialChannels = [{ id: 1, channelType: 'EMAIL', name: '이메일', config: {}, maxLength: 20000, active: true, tokenConfigured: false }, { id: 2, channelType: 'TELEGRAM', name: '텔레그램', config: {}, maxLength: 4096, active: true, tokenConfigured: true }, { id: 3, channelType: 'EMAIL', name: '사용 중지한 메일', config: {}, maxLength: 20000, active: false, tokenConfigured: false }];
 const initialRecipients = [{ id: 1, name: '김수신', email: 'reader@example.invalid', phone: null, memo: '검증용 수신자', active: true, groupNames: ['반도체 전략팀'], destinations: [{ channelId: 1, channelType: 'EMAIL', address: 'reader@example.invalid', use: true, onboarded: true }, { channelId: 2, channelType: 'TELEGRAM', address: null, use: false, onboarded: false }] }, { id: 2, name: '이구독', email: 'reviewer@example.invalid', phone: null, memo: null, active: true, groupNames: ['반도체 전략팀'], destinations: [{ channelId: 1, channelType: 'EMAIL', address: 'reviewer@example.invalid', use: true, onboarded: true }, { channelId: 2, channelType: 'TELEGRAM', address: 'fixture-chat-2', use: true, onboarded: true }] }, { id: 3, name: '중지한 수신자', email: 'paused@example.invalid', phone: null, memo: null, active: false, groupNames: [], destinations: [] }];
 const initialGroups = [{ id: 1, name: '반도체 전략팀', perspective: 'TECHNOLOGY', active: true, memberCount: 2, activeMemberCount: 2, members: [{ recipientId: 1, name: '김수신', active: true }, { recipientId: 2, name: '이구독', active: true }] }, { id: 2, name: '사용 중지한 그룹', perspective: null, active: false, memberCount: 1, activeMemberCount: 0, members: [{ recipientId: 3, name: '중지한 수신자', active: false }] }];
@@ -37,11 +45,24 @@ let telegramLinkError = false;
 let showDeliveryLogs = false;
 let recipientProfileError = false;
 let recipientDeleteError = false;
+let reportSubscriptionsLoadError = false;
+let reportSubscriptionsSaveError = false;
+let subscriptionExclusions = {};
+let subscriptionInclusions = {};
+let aggregateSubscriptions = {};
+let groupMembersLoadError = false;
+let groupNameSaveError = false;
+let groupMembersSaveError = false;
 let loadingDelayMs = 0;
 let loadingPath = '/api/';
 let usageCalls = 12;
-let usageLimit = 100;
+let usageLimit = 3000;
 let proposalRevision = 0;
+let notificationSettingsSaveError = false;
+let completeRunOnSettingsSave = false;
+let topicScheduleLoadError = false;
+let topicScheduleSaveError = false;
+let proposalReviewError = false;
 const proposalAppliedChanges = new Map();
 const proposalKeywordRevisions = new Map();
 const deliveryLogFixtures = ['SENT', 'FAILED', 'SKIPPED'].map((status, i) => ({
@@ -52,22 +73,121 @@ const deliveryLogFixtures = ['SENT', 'FAILED', 'SKIPPED'].map((status, i) => ({
     chunkSeq: 1, chunkCount: 1, errorMessage: status === 'FAILED' ? '메일 서버에 연결하지 못했습니다.' : status === 'SKIPPED' ? '수신 설정이 꺼져 있습니다.' : null,
     sentAt: '2026-09-08T12:30:00+09:00',
 }));
-function reset() { topics = structuredClone(initialTopics); proposals = structuredClone(initialProposals); channels = structuredClone(initialChannels); recipients = structuredClone(initialRecipients); groups = structuredClone(initialGroups); requests = []; runs = []; runDeliverySettings = []; policies = { 31: { enabled: true, run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1, 2] } }; telegram = { 1: { status: 'DISCONNECTED', expiresAt: null }, 2: { status: 'CONNECTED', expiresAt: null }, 3: { status: 'DISCONNECTED', expiresAt: null } }; readiness = { mode: 'LOCAL_CAPTURE', configured: false, message: '로컬 검증 모드입니다. 이메일은 실제 수신함으로 전달되지 않습니다.' }; audience = { audience: 'CHIP_MAKER' }; plan = { plan: 'FREE', paidExhaustedAction: 'FALLBACK_FREE', allowRunOverride: true }; autoDeliveries = []; sendCache = {}; resetProposalHistory(); }
+function reset() { topics = structuredClone(initialTopics); proposals = structuredClone(initialProposals); channels = structuredClone(initialChannels); recipients = structuredClone(initialRecipients); groups = structuredClone(initialGroups); requests = []; runs = []; runDeliverySettings = []; policies = { 31: { enabled: true, run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1, 2] } }; telegram = { 1: { status: 'DISCONNECTED', expiresAt: null }, 2: { status: 'CONNECTED', expiresAt: null }, 3: { status: 'DISCONNECTED', expiresAt: null } }; readiness = { mode: 'LOCAL_CAPTURE', configured: false, message: '로컬 검증 모드입니다. 이메일은 실제 수신함으로 전달되지 않습니다.' }; audience = { audience: 'CHIP_MAKER' }; plan = { plan: 'FREE', paidExhaustedAction: 'FALLBACK_FREE', allowRunOverride: true }; autoDeliveries = []; sendCache = {}; notificationSettingsSaveError = false; completeRunOnSettingsSave = false; topicScheduleLoadError = false; topicScheduleSaveError = false; groupMembersLoadError = false; groupNameSaveError = false; groupMembersSaveError = false; resetProposalHistory(); }
+const groupSummary = group => Object.fromEntries(['id', 'name', 'perspective', 'active', 'memberCount', 'activeMemberCount']
+    .map(field => [field, group[field]]));
+function syncRecipientGroups() {
+    for (const recipient of recipients)
+        recipient.groupNames = groups.filter(group => group.active && group.members.some(member => member.recipientId === recipient.id))
+            .map(group => group.name);
+}
+function replaceGroupMembers(group, recipientIds) {
+    const previousIds = new Set(group.members.map(member => member.recipientId));
+    const nextIds = new Set(recipientIds);
+    group.members = [...nextIds].map(id => recipients.find(recipient => recipient.id === id)).filter(Boolean)
+        .map(recipient => ({ recipientId: recipient.id, name: recipient.name, active: recipient.active }));
+    group.memberCount = group.members.length;
+    group.activeMemberCount = group.members.filter(member => member.active).length;
+    return { groupId: group.id, addedCount: group.members.filter(member => !previousIds.has(member.recipientId)).length,
+        removedCount: [...previousIds].filter(id => !nextIds.has(id)).length,
+        memberCount: group.memberCount, activeMemberCount: group.activeMemberCount, members: group.members };
+}
+const topicFields = topic => Object.fromEntries(['id', 'name', 'queryText', 'requiredKeywords', 'optionalKeywords',
+    'excludedKeywords', 'batchSize', 'intervalMinutes', 'active'].map(field => [field, topic[field]]));
+const policyFields = value => ({ enabled: value.enabled, run: value.run, daily: value.daily,
+    groupIds: [...value.groupIds], recipientIds: [...value.recipientIds], channelIds: [...value.channelIds] });
+const topicPolicyFields = value => ({ ...policyFields(value), weekly: value.weekly ?? false });
+function reportSubscriptions(recipientId) {
+    const recipient = recipients.find(item => item.id === recipientId);
+    const subscriptionTopics = topics.flatMap(topic => {
+        const policy = policies[topic.id];
+        const direct = policy?.recipientIds.includes(recipientId) ?? false;
+        const memberGroups = groups.filter(group => policy?.groupIds.includes(group.id)
+            && group.members.some(member => member.recipientId === recipientId));
+        const excludedScopes = subscriptionExclusions[`${recipientId}:${topic.id}`] ?? [];
+        const includedScopes = subscriptionInclusions[`${recipientId}:${topic.id}`] ?? [];
+        if (!direct && memberGroups.length === 0 && excludedScopes.length === 0 && includedScopes.length === 0) return [];
+        const targeted = direct || memberGroups.length > 0;
+        const reachable = recipient.active && (direct || memberGroups.some(group => group.active));
+        return [{ topicId: topic.id, topicName: topic.name, enabled: targeted && (policy?.enabled ?? false),
+            configuredScopes: targeted ? ['RUN', 'DAILY', 'WEEKLY'].filter(scope => policy?.[scope.toLowerCase()]) : [],
+            includedScopes, excludedScopes, direct, groupNames: memberGroups.map(group => group.name),
+            channelTypes: reachable ? [...new Set(recipient.destinations.filter(destination =>
+                policy?.channelIds.includes(destination.channelId) && destination.use && destination.onboarded && destination.address?.trim()
+                && channels.some(channel => channel.id === destination.channelId && channel.active)).map(destination => destination.channelType))] : [],
+        }];
+    }).sort((a, b) => a.topicName.localeCompare(b.topicName, 'ko') || a.topicId - b.topicId);
+    const inherited = scope => subscriptionTopics.some(topic => topic.enabled && topic.channelTypes.length > 0
+        && (topic.configuredScopes.includes(scope) || topic.includedScopes.includes(scope)) && !topic.excludedScopes.includes(scope));
+    return { recipientId, topics: subscriptionTopics, aggregates: {
+        daily: aggregateSubscriptions[`${recipientId}:DAILY`] ?? inherited('DAILY'),
+        weekly: aggregateSubscriptions[`${recipientId}:WEEKLY`] ?? inherited('WEEKLY'),
+        channelTypes: recipient.active ? [...new Set(recipient.destinations.filter(destination =>
+            destination.use && destination.onboarded && destination.address?.trim()
+            && channels.some(channel => channel.id === destination.channelId && channel.active)).map(destination => destination.channelType))] : [],
+    } };
+}
+function runSettings(run) {
+    const delivery = runDeliverySettings.find(settings => settings.runId === run.runId)?.delivery;
+    const saved = delivery?.mode === 'TOPIC' ? null : delivery;
+    const reportReady = run.reportReady ?? run.reportId !== null;
+    return { runId: run.runId, editable: ['PENDING', 'RUNNING'].includes(run.status) && !reportReady,
+        reportId: run.reportId, reportReady, source: saved ? 'RUN' : 'TOPIC',
+        ...(saved ? policyFields(saved) : disabledPolicy()),
+        topicPolicies: saved ? [] : run.targetTopicIds.map(topicId => ({ topicId,
+            topicName: topics.find(topic => topic.id === topicId)?.name ?? `주제 ${topicId}`,
+            ...structuredClone(policies[topicId] ?? disabledPolicy()) })) };
+}
+// Seed before opening the page to verify that old active runs survive browser reloads.
+// These controls change fixtures only and never send or schedule notifications.
+function notificationSettingsFixtures(variant) {
+    const stages = ['COLLECTING', 'CLUSTERING', 'ANALYZING', 'INVESTIGATING', 'GENERATING_REPORT', 'FINALIZING', null];
+    const count = variant === 'many-runs' ? 205 : variant === 'stages' ? stages.length : 2;
+    notificationSettingsSaveError = variant === 'save-error';
+    completeRunOnSettingsSave = variant === 'completion-race';
+    runs = Array.from({ length: count }, (_, index) => ({
+        runId: 601 + index, status: index % 2 ? 'PENDING' : 'RUNNING', triggerType: index % 2 ? 'MANUAL' : 'SCHEDULED',
+        stage: index % 2 ? null : 'COLLECTING',
+        idempotencyKey: `fixture-existing-${index}`, llmPlan: 'FREE', targetTopicIds: index % 2 ? [31, 29] : [31],
+        targetCombinationCount: index % 2 ? 4 : 2, queuedAt: new Date(Date.now() - (count - index) * 60000).toISOString(),
+        startedAt: index % 2 ? null : new Date(Date.now() - (count - index) * 60000 + 1000).toISOString(),
+        finishedAt: null, reportId: null,
+    }));
+    if (variant === 'stages') runs.forEach((run, index) => {
+        run.status = 'RUNNING';
+        run.stage = stages[index];
+        run.startedAt = run.queuedAt;
+    });
+    const delivery = variant === 'stale-targets'
+        ? { enabled: true, run: true, daily: false, channelIds: [3, 99], groupIds: [2, 99], recipientIds: [3, 99] }
+        : { enabled: true, run: true, daily: false, channelIds: [1], groupIds: [1], recipientIds: [] };
+    runDeliverySettings = [{ runId: 601, targetTopicIds: [31], delivery, updatedTopicIds: [] }];
+    policies[31] = structuredClone(variant === 'stale-targets' ? delivery
+        : { enabled: true, run: true, daily: false, groupIds: [1], recipientIds: [], channelIds: [1, 2] });
+    policies[29] = disabledPolicy();
+    return { variant, runCount: runs.length, runIds: runs.map(run => run.runId),
+        saveError: notificationSettingsSaveError, completeOnSave: completeRunOnSettingsSave };
+}
 const keywordFields = { REQUIRED: 'requiredKeywords', OPTIONAL: 'optionalKeywords', EXCLUDED: 'excludedKeywords' };
 const currentTopicKeywords = topic => Object.fromEntries(Object.values(keywordFields).map(field => [field, [...topic[field]]]));
 const normalizedKeyword = keyword => keyword.trim().toLowerCase();
-const proposalResult = proposal => ({ ...proposal, currentKeywords: currentTopicKeywords(topics.find(topic => topic.id === proposal.topicId)) });
-function resetProposalHistory() { proposalRevision = 0; proposalAppliedChanges.clear(); proposalKeywordRevisions.clear(); }
+const proposalResult = proposal => {
+    const topic = topics.find(topic => topic.id === proposal.topicId);
+    return { ...proposal, topicName: topic.name, currentKeywords: currentTopicKeywords(topic) };
+};
+function resetProposalHistory() { proposalRevision = 0; proposalReviewError = false; proposalAppliedChanges.clear(); proposalKeywordRevisions.clear(); }
 function matchingProposalBaseline(proposal, topic) {
     const normalized = values => [...new Set(values.map(normalizedKeyword))].sort().join('\u0000');
     return Object.values(keywordFields).every(field => normalized(proposal.currentKeywords[field]) === normalized(topic[field]));
 }
-function reviewProposal(proposal, status) {
+function reviewProposal(proposal, status, selectedChangeIndexes = null) {
     if (proposal.status === status) return proposalResult(proposal);
     const topic = topics.find(item => item.id === proposal.topicId);
     if (status === 'APPROVED') {
         const touched = new Map();
-        for (const change of proposal.changes) {
+        const indexes = selectedChangeIndexes == null ? proposal.changes.map((_, index) => index) : [...selectedChangeIndexes].sort((a, b) => a - b);
+        for (const index of indexes) {
+            const change = proposal.changes[index];
             const field = keywordFields[change.bucket];
             const normalized = normalizedKeyword(change.keyword);
             const key = `${topic.id}:${change.bucket}:${normalized}`;
@@ -86,6 +206,7 @@ function reviewProposal(proposal, status) {
             if (entry.before !== after) deltas.push({ ...entry, after, revision });
         }
         proposalAppliedChanges.set(proposal.id, deltas);
+        proposal.selectedChangeIndexes = [...indexes];
     }
     else if (proposal.status === 'APPROVED') {
         for (const delta of proposalAppliedChanges.get(proposal.id) ?? []) {
@@ -154,9 +275,15 @@ initialReports.at(-1).collectionContexts.push({ ...structuredClone(fixture.repor
 initialReports.push({ ...structuredClone(initialReports.at(-1)), id: 116, reportDate: '2026-09-07', title: '이전 일일 통합 보고서', collectionContexts: [], structuredContent: null,
     markdownBody: fixture.report.markdownBody.replace('수집 또는 분석 제외 사항이 없습니다.', '본문을 확인하지 못한 기사 1건은 분석에서 제외했습니다.'),
     findings: structuredClone(fixture.report.findings).map((finding, index) => ({ ...finding, issue: { ...finding.issue, topicName: index === 1 ? 'AI 인프라' : 'HBM 시장' } })) });
+initialReports.push(weeklyReportFixture(initialReports.find(report => report.id === 117)));
 let reports = structuredClone(initialReports);
 let reportDeleteError = false;
 let reportChangesVariant = 'ready';
+let reportInsightVariant = 'ready';
+const savedReportInsights = new Map();
+let topicWeeklyVariant = 'ready';
+let pendingTopicWeekly = null;
+let pendingTopicWeeklyPolls = 0;
 // This scenario includes a matching report beyond the API's first 100 items.
 function reportFilterFixtures() {
     const result = Array.from({ length: 105 }, (_, index) => {
@@ -176,7 +303,7 @@ function reportFilterFixtures() {
     });
     result[4].collectionStartedAt = null;
     result[4].collectionContexts = [];
-    return [...result, ...structuredClone(initialReports.filter(report => report.reportScope === 'DAILY'))];
+    return [...result, ...structuredClone(initialReports.filter(report => report.reportScope !== 'RUN'))];
 }
 const json = (res, value, status = 200) => { res.statusCode = status; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(value)); };
 const server = await createServer({ root, configFile: false, envDir: emptyEnvDir, plugins: [react(), { name: 'isolated-qa-fixtures', configureServer(server) {
@@ -197,23 +324,58 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 reports = structuredClone(initialReports);
                                 reportDeleteError = false;
                                 reportChangesVariant = 'ready';
+                                reportInsightVariant = 'ready';
+                                savedReportInsights.clear();
+                                topicWeeklyVariant = 'ready';
+                                pendingTopicWeekly = null;
+                                pendingTopicWeeklyPolls = 0;
                                 telegramLinkError = false;
                                 showDeliveryLogs = false;
                                 recipientProfileError = false;
                                 recipientDeleteError = false;
+                                reportSubscriptionsLoadError = false;
+                                reportSubscriptionsSaveError = false;
+                                subscriptionExclusions = {};
+                                subscriptionInclusions = {};
+                                aggregateSubscriptions = {};
                                 loadingDelayMs = 0;
                                 loadingPath = '/api/';
                                 usageCalls = 12;
-                                usageLimit = 100;
+                                usageLimit = 3000;
                                 return json(res, { reset: true });
                             }
                             if (path === '/__qa/report-filters') {
                                 reports = reportFilterFixtures();
                                 return json(res, { count: reports.length });
                             }
+                            if (path === '/__qa/topic-weekly') {
+                                topicWeeklyVariant = body.variant ?? url.searchParams.get('variant') ?? 'ready';
+                                topics = structuredClone(initialTopics);
+                                if (topicWeeklyVariant === 'topics-empty') topics = [];
+                                if (topicWeeklyVariant === 'many-topics') topics.push(...Array.from({ length: 105 }, (_, index) => ({
+                                    ...structuredClone(initialTopics[0]), id: 1000 + index,
+                                    name: index === 0 ? '두 번째 페이지의 중지한 주제' : `추가 주제 ${index + 1}`, active: index !== 0,
+                                })));
+                                return json(res, { variant: topicWeeklyVariant, topicCount: topics.length });
+                            }
+                            if (path === '/__qa/report-subscriptions') {
+                                const variant = body.variant ?? url.searchParams.get('variant') ?? 'default';
+                                reportSubscriptionsLoadError = variant === 'load-error';
+                                reportSubscriptionsSaveError = variant === 'save-error';
+                                policies = variant === 'empty' ? {} : {
+                                    31: { enabled: true, run: true, daily: true, weekly: variant !== 'opt-in' && variant !== 'opt-in-save-error', groupIds: [1], recipientIds: [1], channelIds: [1, 2] },
+                                    29: { enabled: true, run: false, daily: false, weekly: true, groupIds: [], recipientIds: [1], channelIds: [2] },
+                                    25: { enabled: false, run: false, daily: true, weekly: false, groupIds: [1], recipientIds: [], channelIds: [1] },
+                                };
+                                subscriptionExclusions = variant === 'empty' ? {} : { '1:31': ['DAILY'], '1:9': ['WEEKLY'] };
+                                subscriptionInclusions = {};
+                                aggregateSubscriptions = {};
+                                reportSubscriptionsSaveError ||= variant === 'opt-in-save-error';
+                                return json(res, { variant });
+                            }
                             if (path === '/__qa/usage') {
                                 const used = Number(body.used ?? url.searchParams.get('used') ?? 12);
-                                const limit = Number(body.limit ?? url.searchParams.get('limit') ?? 100);
+                                const limit = Number(body.limit ?? url.searchParams.get('limit') ?? 3000);
                                 if (![used, limit].every(value => Number.isSafeInteger(value) && value >= 0))
                                     return json(res, { error: 'Use nonnegative integer used and limit values.' }, 400);
                                 usageCalls = used;
@@ -255,12 +417,49 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 recipientDeleteError = body.enabled ?? url.searchParams.get('enabled') === 'true';
                                 return json(res, { enabled: recipientDeleteError });
                             }
+                            if (path === '/__qa/group-edit-errors') {
+                                groupMembersLoadError = body.loadError ?? groupMembersLoadError;
+                                groupNameSaveError = body.nameSaveError ?? groupNameSaveError;
+                                groupMembersSaveError = body.membersSaveError ?? groupMembersSaveError;
+                                return json(res, { loadError: groupMembersLoadError, nameSaveError: groupNameSaveError,
+                                    membersSaveError: groupMembersSaveError });
+                            }
+                            if (path === '/__qa/group-members') {
+                                const groupId = Number(body.groupId ?? url.searchParams.get('groupId') ?? 1);
+                                const group = groups.find(group => group.id === groupId);
+                                if (!group) return json(res, { error: 'Unknown fixture group.' }, 404);
+                                const recipientIds = body.recipientIds ?? [1, 2, 3];
+                                if (!Array.isArray(recipientIds) || recipientIds.some(id => !recipients.some(recipient => recipient.id === id)))
+                                    return json(res, { error: 'Use recipientIds from the current fixture recipients.' }, 400);
+                                const updated = replaceGroupMembers(group, recipientIds);
+                                syncRecipientGroups();
+                                return json(res, updated);
+                            }
+                            if (path === '/__qa/notification-settings') {
+                                const variant = body.variant ?? url.searchParams.get('variant') ?? 'existing';
+                                const variants = ['existing', 'many-runs', 'save-error', 'completion-race', 'stale-targets', 'stages'];
+                                if (!variants.includes(variant)) return json(res, { variants }, 400);
+                                return json(res, notificationSettingsFixtures(variant));
+                            }
+                            if (path === '/__qa/notification-settings-errors') {
+                                notificationSettingsSaveError = body.saveError ?? notificationSettingsSaveError;
+                                completeRunOnSettingsSave = body.completeOnSave ?? completeRunOnSettingsSave;
+                                return json(res, { saveError: notificationSettingsSaveError, completeOnSave: completeRunOnSettingsSave });
+                            }
+                            if (path === '/__qa/topic-schedule-errors' || path === '/__qa/topic-edit-errors') {
+                                topicScheduleLoadError = body.loadError ?? topicScheduleLoadError;
+                                topicScheduleSaveError = body.saveError ?? topicScheduleSaveError;
+                                return json(res, { loadError: topicScheduleLoadError, saveError: topicScheduleSaveError });
+                            }
                             if (path === '/__qa/recipients') {
                                 const count = Math.max(0, Math.min(500, Number(body.count ?? url.searchParams.get('count') ?? 80)));
                                 recipients = count <= 2 ? structuredClone(initialRecipients.filter(r => r.active).slice(0, count)) : [
                                     ...structuredClone(initialRecipients),
                                     ...Array.from({ length: count - 2 }, (_, i) => ({ id: 1000 + i, name: `검증 수신자 ${String(i + 1).padStart(3, '0')}`, email: `reader-${i + 1}@example.invalid`, phone: null, memo: null, active: true, groupNames: [], destinations: [] })),
                                 ];
+                                for (const group of groups)
+                                    replaceGroupMembers(group, group.members.map(member => member.recipientId));
+                                syncRecipientGroups();
                                 return json(res, { activeCount: recipients.filter(r => r.active).length });
                             }
                             if (path === '/__qa/groups') {
@@ -275,8 +474,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                     active: true, memberCount: members.length, activeMemberCount: members.length,
                                     members: structuredClone(members),
                                 }));
-                                for (const recipient of recipients)
-                                    recipient.groupNames = groups.filter(group => group.members.some(member => member.recipientId === recipient.id)).map(group => group.name);
+                                syncRecipientGroups();
                                 return json(res, { activeCount: groups.length });
                             }
                             if (path === '/__qa/proposals') {
@@ -291,6 +489,10 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 }
                                 return json(res, { variant, count: proposals.filter(proposal => topics.some(topic => topic.id === proposal.topicId && topic.active)).length,
                                     proposals: proposals.map(proposal => ({ id: proposal.id, topicId: proposal.topicId, status: proposal.status, changeCount: proposal.changes.length })) });
+                            }
+                            if (path === '/__qa/proposal-review-error') {
+                                proposalReviewError = body.enabled ?? url.searchParams.get('enabled') === 'true';
+                                return json(res, { enabled: proposalReviewError });
                             }
                             if (path === '/__qa/findings') {
                                 const count = Number(body.count ?? url.searchParams.get('count') ?? 8);
@@ -320,6 +522,13 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 });
                                 return json(res, { reportCount: reports.length, count, highCount: count - mediumCount, mediumCount });
                             }
+                            if (path === '/__qa/report-insights') {
+                                const variant = body.variant ?? url.searchParams.get('variant') ?? 'ready';
+                                if (!reportInsightVariants.includes(variant)) return json(res, { error: 'Unknown report insight variant.' }, 400);
+                                reportInsightVariant = variant;
+                                savedReportInsights.clear();
+                                return json(res, { variant });
+                            }
                             if (path === '/__qa/requests')
                                 return json(res, requests);
                             if (path === '/__qa/state')
@@ -329,9 +538,14 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 if (!run)
                                     return json(res, { error: '먼저 수집 요청을 눌러 주세요.' }, 404);
                                 run.status = body.status || url.searchParams.get('status') || (run.status === 'PENDING' ? 'RUNNING' : 'SUCCESS');
+                                run.stage = run.status === 'RUNNING' ? body.stage ?? run.stage ?? 'COLLECTING' : null;
                                 run.startedAt = run.status === 'PENDING' ? null : run.startedAt || now();
                                 run.finishedAt = ['PENDING', 'RUNNING'].includes(run.status) ? null : now();
                                 run.reportId = ['SUCCESS', 'PARTIAL'].includes(run.status) ? 17 : null;
+                                if (body.reportReady !== undefined) {
+                                    run.reportReady = body.reportReady;
+                                    run.reportId = body.reportReady ? 17 : null;
+                                }
                                 return json(res, run);
                             }
                             if (path === '/__qa/telegram') {
@@ -373,7 +587,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         if (path === '/api/usage/llm') {
                             const resetAt = '2026-09-09T00:00:00+09:00';
                             result = { currentPlan: plan.plan,
-                                free: { dailyCallsUsed: usageCalls, dailyCallsLimit: usageLimit, dailyCallsRemaining: Math.max(0, usageLimit - usageCalls), resetAt },
+                                free: { dailyCallsUsed: usageCalls, dailyCallsLimit: usageLimit, dailyCallsRemaining: Math.max(0, usageLimit - usageCalls), dailyEstimatedCostUsd: usageCalls * 0.0009, resetAt },
                                 paid: { dailyCreditsUsed: 0, dailyCreditsLimit: 100, dailyCreditsRemaining: 100,
                                     analysisCreditsRemaining: 80, insightCreditsUsed: 0, insightCreditsCap: 20, insightCreditsRemaining: 20,
                                     reportReserve: 20, monthlyCreditsUsed: 0, monthlyCreditsLimit: 3000, monthlyCreditsRemaining: 3000,
@@ -392,15 +606,34 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         else if (path === '/api/news/sources')
                             result = page(sources);
                         else if (path === '/api/news/topic-sources')
-                            result = { ...page(topics.flatMap(t => sources.map(s => ({ topicId: t.id, topicName: t.name, sourceId: s.id, sourceName: s.name, sourceKind: s.sourceKind, queryText: t.queryText, active: t.active, batchSize: 100, intervalMinutes: 1440, lastCollectedAt: t.lastCollectedAt, lastCollectedCount: 12 })))), combinationCount: topics.length * 2 };
+                            result = { ...page(topics.flatMap(t => sources.map(s => ({ topicId: t.id, topicName: t.name, sourceId: s.id, sourceName: s.name, sourceKind: s.sourceKind, queryText: t.queryText, active: t.active, batchSize: t.batchSize, intervalMinutes: t.intervalMinutes, lastCollectedAt: t.lastCollectedAt, lastCollectedCount: 12 })))), combinationCount: topics.length * 2 };
                         else if (path === '/api/news/topics' && method === 'POST') {
                             result = { id: Math.max(...topics.map(t => t.id)) + 1, ...body, active: true, lastCollectedAt: null, linkedSourceCount: 2, sources, surgeKeywords: [], relatedKeywords: [] };
                             topics.unshift(result);
                             status = 201;
                         }
                         else if (path === '/api/news/topics') {
+                            if (topicWeeklyVariant === 'topics-error') return json(res, { isSuccess: false, code: 'COMMON500', message: '수집 주제 목록을 불러오지 못했습니다.', result: {} }, 500);
                             const active = url.searchParams.get('active');
-                            result = page(topics.filter(t => active === null || t.active === (active === 'true')).sort((a, b) => b.id - a.id));
+                            result = requestedPage(topics.filter(t => active === null || t.active === (active === 'true')).sort((a, b) => b.id - a.id), url);
+                        }
+                        else if ((match = path.match(/^\/api\/news\/topics\/(\d+)$/)) && ['GET', 'PATCH'].includes(method)) {
+                            const topic = topics.find(t => t.id === Number(match[1]));
+                            if (!topic) return json(res, { isSuccess: false, code: 'TOPIC404', message: '수집 주제를 찾을 수 없습니다.', result: {} }, 404);
+                            if (method === 'GET') {
+                                if (topicScheduleLoadError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류입니다.', result: {} }, 500);
+                                result = { ...topicFields(topic), lastCollectedAt: topic.lastCollectedAt,
+                                    sources: sources.map(({ id, name, sourceKind, language, robotsStatus, active }) => ({ id, name, sourceKind, language, robotsStatus, active })) };
+                            }
+                            else {
+                                if (topicScheduleSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류입니다.', result: {} }, 500);
+                                if ((body.intervalMinutes != null && ![60, 720, 1440].includes(body.intervalMinutes))
+                                    || (body.batchSize != null && (!Number.isInteger(body.batchSize) || body.batchSize < 1 || body.batchSize > 300)))
+                                    return json(res, { isSuccess: false, code: 'TOPIC400', message: 'batchSize는 1 이상 300 이하, intervalMinutes는 60, 720, 1440 중 하나여야 합니다.', result: {} }, 400);
+                                for (const field of Object.keys(topicFields(topic)))
+                                    if (field !== 'id' && body[field] != null) topic[field] = structuredClone(body[field]);
+                                return json(res, { isSuccess: true, code: 'COMMON200', message: '수정되었습니다.', result: topicFields(topic) });
+                            }
                         }
                         else if ((match = path.match(/^\/api\/news\/topics\/(\d+)\/activation$/))) {
                             const topic = topics.find(t => t.id === Number(match[1]));
@@ -414,11 +647,20 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         else if ((match = path.match(/keyword-proposals\/(\d+)\/(approve|reject)$/))) {
                             const proposal = proposals.find(p => p.id === Number(match[1]));
                             if (!proposal) return json(res, { isSuccess: false, code: 'TOPIC404', message: '키워드 제안을 찾을 수 없습니다.', result: null }, 404);
+                            if (proposalReviewError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: null }, 500);
                             const nextStatus = match[2] === 'approve' ? 'APPROVED' : 'REJECTED';
+                            const indexes = body.selectedChangeIndexes;
+                            if (nextStatus === 'APPROVED' && indexes != null && (!Array.isArray(indexes)
+                                || indexes.some(index => index !== null && (!Number.isInteger(index) || index < -2147483648 || index > 2147483647))))
+                                return json(res, { isSuccess: false, code: 'COMMON400', message: '입력값 검증 실패입니다.', result: null }, 400);
+                            if (nextStatus === 'APPROVED' && indexes != null && (indexes.length === 0
+                                || indexes.some(index => index === null || index < 0 || index >= proposal.changes.length)
+                                || new Set(indexes).size !== indexes.length))
+                                return json(res, { isSuccess: false, code: 'TOPIC400', message: '적용할 키워드 변경 항목을 올바르게 선택해 주세요.', result: null }, 400);
                             if (nextStatus === 'APPROVED' && proposal.status === 'PENDING'
                                 && !matchingProposalBaseline(proposal, topics.find(topic => topic.id === proposal.topicId)))
                                 return json(res, { isSuccess: false, code: 'TOPIC409', message: '제안 생성 후 주제 키워드가 변경되었습니다. 새 제안을 기다려 주세요.', result: null }, 409);
-                            result = reviewProposal(proposal, nextStatus);
+                            result = reviewProposal(proposal, nextStatus, indexes);
                         }
                         else if (path === '/api/news/runs' && method === 'POST') {
                             result = runs.find(r => r.idempotencyKey === body.idempotencyKey);
@@ -430,7 +672,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 const delivery = body.delivery === undefined ? null : structuredClone(body.delivery);
                                 const updatedTopicIds = delivery?.mode === 'TOPIC' ? [...targetTopicIds] : [];
                                 if (updatedTopicIds.length) {
-                                    const policy = { enabled: delivery.enabled, run: delivery.run, daily: delivery.daily,
+                                    const policy = { enabled: delivery.enabled, run: delivery.run, daily: delivery.daily, weekly: delivery.weekly ?? false,
                                         groupIds: delivery.groupIds, recipientIds: delivery.recipientIds, channelIds: delivery.channelIds };
                                     for (const topicId of updatedTopicIds)
                                         policies[topicId] = structuredClone(policy);
@@ -442,18 +684,62 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         }
                         else if (path === '/api/news/runs') {
                             const status = url.searchParams.get('status');
-                            result = page(runs.filter(r => !status || r.status === status).toReversed());
+                            result = requestedPage(runs.filter(r => !status || r.status === status)
+                                .map(run => ({ ...run, stage: run.status === 'RUNNING' ? run.stage ?? null : null })).toReversed(), url);
                         }
-                        else if ((match = path.match(/^\/api\/news\/runs\/(\d+)$/)))
-                            result = runs.find(r => r.runId === Number(match[1]));
+                        else if ((match = path.match(/^\/api\/news\/runs\/(\d+)$/))) {
+                            const run = runs.find(r => r.runId === Number(match[1]));
+                            result = run ? { ...run, stage: run.status === 'RUNNING' ? run.stage ?? null : null, breakdown: run.targetTopicIds.flatMap(topicId => sources.map(source => ({
+                                topicId, topicName: topics.find(topic => topic.id === topicId)?.name ?? `주제 ${topicId}`,
+                                sourceId: source.id, sourceName: source.name,
+                                status: run.status, scannedCount: 0, newCount: 0, updatedCount: 0,
+                            }))) } : undefined;
+                        }
+                        else if (path === '/api/news/reports/weekly' && method === 'POST') {
+                            const topic = topics.find(item => item.id === body.topicId);
+                            if (!topic) return json(res, { isSuccess: false, code: 'TOPIC404', message: '수집 주제를 찾을 수 없습니다.', result: {} }, 404);
+                            const date = new Date(`${body.weekStartDate}T00:00:00Z`);
+                            const todayKst = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+                            if (!/^\d{4}-\d{2}-\d{2}$/.test(body.weekStartDate ?? '') || Number.isNaN(date.getTime())
+                                || date.toISOString().slice(0, 10) !== body.weekStartDate || date.getUTCDay() !== 1
+                                || new Date(date.getTime() + 6 * 86400000).toISOString().slice(0, 10) >= todayKst)
+                                return json(res, { isSuccess: false, code: 'COMMON400', message: '주간 보고서는 종료된 월요일~일요일 기간만 집계할 수 있습니다.', result: {} }, 400);
+                            if (['no-evidence', 'unfinished'].includes(topicWeeklyVariant))
+                                return json(res, { isSuccess: false, code: 'REPORT409', message: topicWeeklyVariant === 'unfinished'
+                                    ? '선택한 주제의 수집·분석이 진행 중입니다. 완료 후 다시 시도해 주세요.'
+                                    : '선택한 주제와 기간에 보고서를 만들 수 있는 분석 자료가 없습니다.', result: {} }, 409);
+                            const existing = reports.find(report => report.topicId === body.topicId && report.reportDate === body.weekStartDate);
+                            if (existing) result = { reportId: existing.id, created: false, reportReady: true };
+                            else if (pendingTopicWeekly) result = { reportId: pendingTopicWeekly.id, created: false, reportReady: false };
+                            else {
+                                const saved = topicWeeklyReportFixture(initialReports.find(report => report.id === 117), topic, body.weekStartDate,
+                                    Math.max(300, ...reports.map(report => report.id)) + 1);
+                                if (topicWeeklyVariant === 'pending') {
+                                    pendingTopicWeekly = saved;
+                                    pendingTopicWeeklyPolls = 0;
+                                    result = { reportId: saved.id, created: false, reportReady: false };
+                                } else {
+                                    reports.unshift(saved);
+                                    result = { reportId: saved.id, created: true, reportReady: true };
+                                }
+                            }
+                        }
                         else if (path === '/api/news/reports') {
                             const scope = url.searchParams.get('reportScope');
+                            if (scope === 'WEEKLY' && pendingTopicWeekly && ++pendingTopicWeeklyPolls >= 3) {
+                                reports.unshift(pendingTopicWeekly);
+                                pendingTopicWeekly = null;
+                            }
                             const filtered = reports.filter(r => !scope || r.reportScope === scope);
                             const pageNumber = Number(url.searchParams.get('page') || 0);
                             const size = Number(url.searchParams.get('size') || 20);
                             const summaries = filtered.slice(pageNumber * size, (pageNumber + 1) * size).map(report => ({
                                 id: report.id, runId: report.runId, reportScope: report.reportScope,
+                                topicId: report.topicId ?? null, topicName: report.topicName ?? null,
                                 reportDate: report.reportDate ?? null, sourceRunIds: report.sourceRunIds,
+                                reportEndDate: report.reportEndDate ?? null, sourceReportIds: report.sourceReportIds ?? [],
+                                sourceReportDates: report.sourceReportDates ?? [], missingReportDates: report.missingReportDates ?? [],
+                                sourceAnalysisDates: report.sourceAnalysisDates ?? [],
                                 sourceReportCount: report.sourceReportCount ?? null, title: report.title,
                                 generatedAt: report.generatedAt, modelName: report.modelName,
                                 findingCount: report.findingCount, highSensitivityCount: report.highSensitivityCount,
@@ -465,6 +751,33 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                         }
                         else if (path === '/api/news/reports/latest')
                             result = reports.find(r => r.reportScope === (url.searchParams.get('reportScope') || 'RUN')) || null;
+                        else if ((match = path.match(/^\/api\/news\/reports\/(\d+)\/insights$/))) {
+                            const id = Number(match[1]);
+                            const report = reports.find(item => item.id === id);
+                            if (!report) return json(res, { isSuccess: false, code: 'REPORT404', message: '보고서를 찾을 수 없습니다.', result: {} }, 404);
+                            const audience = method === 'POST' ? body.audiences?.[0] : url.searchParams.get('audience');
+                            if (!['CHIP_MAKER', 'EQUIPMENT_MAKER', 'IT_INFRA', 'MARKET_INVESTOR'].includes(audience))
+                                return json(res, { isSuccess: false, code: 'AUDIENCE400', message: '지원하지 않는 관점입니다.', result: {} }, 400);
+                            const key = `${id}:${audience}:${JSON.stringify(report.findings)}`;
+                            const cached = savedReportInsights.get(key);
+                            const variants = {
+                                'no-evidence': ['COMMON409', 409, '이 리포트는 인사이트에 사용할 검증된 근거가 없습니다.'],
+                                disabled: ['COMMON409', 409, '리포트 관점 인사이트 기능이 현재 비활성화되어 있습니다.'],
+                                inflight: ['COMMON409', 409, '동일한 리포트 관점 인사이트 생성 요청이 진행 중입니다. 잠시 후 다시 확인해주세요.'],
+                                quota: ['QUOTA429', 429, '인사이트 크레딧을 모두 사용했습니다.'],
+                                error: ['COMMON500', 500, '리포트 관점 인사이트 생성에 실패했습니다.'],
+                            };
+                            if (reportInsightVariant === 'lookup-error' && method === 'GET')
+                                return json(res, { isSuccess: false, code: 'COMMON500', message: '저장된 관점 분석을 불러오지 못했습니다.', result: {} }, 500);
+                            if (variants[reportInsightVariant] && (method === 'POST' || (method === 'GET' && !cached && reportInsightVariant === 'inflight'))) {
+                                const [code, status, message] = variants[reportInsightVariant];
+                                return json(res, { isSuccess: false, code, message, result: {} }, status);
+                            }
+                            if (method === 'GET' && !cached && ['missing', 'disabled', 'quota', 'error', 'no-evidence'].includes(reportInsightVariant))
+                                return json(res, { isSuccess: false, code: 'COMMON404', message: '저장된 리포트 관점 인사이트가 없습니다.', result: {} }, 404);
+                            result = cached ?? reportInsightFixture(report, audience, reportInsightVariant);
+                            if (method === 'POST') { result = { ...result, cached: Boolean(cached) }; savedReportInsights.set(key, { ...result, cached: true }); }
+                        }
                         else if ((match = path.match(/^\/api\/news\/reports\/(\d+)\/changes$/))) {
                             const id = Number(match[1]);
                             const report = reports.find(r => r.id === id);
@@ -505,8 +818,18 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             result = { id, ...body, active: true, phone: null, memo: body.memo || null, groupNames: [], destinations: body.destinations.map(d => ({ ...d, channelType: channels.find(c => c.id === d.channelId)?.channelType, onboarded: d.channelId === 1 })) };
                             recipients.push(result);
                         }
-                        else if (path === '/api/notifications/recipients')
-                            result = page(recipients);
+                        else if (path === '/api/notifications/recipients' && method === 'GET') {
+                            const groupId = url.searchParams.get('groupId');
+                            const group = groupId === null ? null : groups.find(group => group.id === Number(groupId));
+                            if (groupId !== null && !group)
+                                return json(res, { isSuccess: false, code: 'GROUP404', message: '수신 그룹을 찾을 수 없습니다.', result: {} }, 404);
+                            if (group && groupMembersLoadError)
+                                return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: {} }, 500);
+                            const active = url.searchParams.get('active');
+                            result = requestedPage(recipients.filter(recipient =>
+                                (!group || group.members.some(member => member.recipientId === recipient.id))
+                                && (active === null || recipient.active === (active === 'true'))), url);
+                        }
                         else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)\/destinations$/)) && method === 'PUT') {
                             const recipient = recipients.find(r => r.id === Number(match[1]));
                             if (!recipient) return json(res, { isSuccess: false, code: 'RECIPIENT404', message: '수신자를 찾을 수 없습니다.', result: {} }, 404);
@@ -521,6 +844,50 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 return { ...d, address, channelType: type, onboarded: type === 'EMAIL' || Boolean(old?.onboarded) };
                             });
                             result = { recipientId: recipient.id, destinations: recipient.destinations };
+                        }
+                        else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)\/report-subscriptions(?:\/(\d+))?$/))) {
+                            const recipientId = Number(match[1]);
+                            if (!recipients.some(recipient => recipient.id === recipientId))
+                                return json(res, { isSuccess: false, code: 'RECIPIENT404', message: '수신자를 찾을 수 없습니다.', result: {} }, 404);
+                            if (method === 'PATCH' && !match[2]) {
+                                if (reportSubscriptionsSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '알림 설정을 저장하지 못했습니다. 다시 시도해 주세요.', result: {} }, 500);
+                                const choices = body.topics ?? [];
+                                if (body.daily == null && body.weekly == null && choices.length === 0)
+                                    return json(res, { isSuccess: false, code: 'COMMON400', message: '변경할 알림 설정을 선택해 주세요.', result: {} }, 400);
+                                if (!Array.isArray(choices) || choices.some(choice => !Number.isSafeInteger(choice?.topicId) || choice.topicId <= 0 || typeof choice.subscribed !== 'boolean')
+                                    || new Set(choices.map(choice => choice.topicId)).size !== choices.length)
+                                    return json(res, { isSuccess: false, code: 'COMMON400', message: '주제 수신 설정이 올바르지 않습니다.', result: {} }, 400);
+                                if (choices.some(choice => !topics.some(topic => topic.id === choice.topicId)))
+                                    return json(res, { isSuccess: false, code: 'COMMON404', message: '수집 주제를 찾을 수 없습니다.', result: {} }, 404);
+                                for (const scope of ['DAILY', 'WEEKLY']) if (body[scope.toLowerCase()] != null)
+                                    aggregateSubscriptions[`${recipientId}:${scope}`] = body[scope.toLowerCase()];
+                                for (const choice of choices) {
+                                    const key = `${recipientId}:${choice.topicId}`;
+                                    subscriptionExclusions[key] = (subscriptionExclusions[key] ?? []).filter(scope => scope !== 'RUN');
+                                    subscriptionInclusions[key] = (subscriptionInclusions[key] ?? []).filter(scope => scope !== 'RUN');
+                                    if (!choice.subscribed) subscriptionExclusions[key].push('RUN');
+                                    else if (!policies[choice.topicId]?.run) subscriptionInclusions[key].push('RUN');
+                                }
+                                result = reportSubscriptions(recipientId);
+                            } else if (method === 'PUT' && match[2]) {
+                                if (reportSubscriptionsSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '알림 설정을 저장하지 못했습니다. 다시 시도해 주세요.', result: {} }, 500);
+                                if (!Array.isArray(body.excludedScopes) || body.excludedScopes.length > 3 || body.excludedScopes.some(scope => !['RUN', 'DAILY', 'WEEKLY'].includes(scope)))
+                                    return json(res, { isSuccess: false, code: 'COMMON400', message: '제외할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.', result: {} }, 400);
+                                if (body.includedScopes != null && (!Array.isArray(body.includedScopes) || body.includedScopes.length > 3 || body.includedScopes.some(scope => !['RUN', 'DAILY', 'WEEKLY'].includes(scope))))
+                                    return json(res, { isSuccess: false, code: 'COMMON400', message: '추가할 보고서 종류는 RUN, DAILY, WEEKLY 중에서 선택해 주세요.', result: {} }, 400);
+                                if (body.includedScopes?.some(scope => body.excludedScopes.includes(scope)))
+                                    return json(res, { isSuccess: false, code: 'COMMON400', message: '같은 보고서 종류를 추가와 제외에 동시에 선택할 수 없습니다.', result: {} }, 400);
+                                const topicId = Number(match[2]);
+                                const previous = reportSubscriptions(recipientId).topics.find(topic => topic.topicId === topicId);
+                                subscriptionExclusions[`${recipientId}:${topicId}`] = [...new Set(body.excludedScopes)];
+                                subscriptionInclusions[`${recipientId}:${topicId}`] = [...new Set(body.includedScopes
+                                    ?? (subscriptionInclusions[`${recipientId}:${topicId}`] ?? []).filter(scope => !body.excludedScopes.includes(scope)))];
+                                result = reportSubscriptions(recipientId).topics.find(topic => topic.topicId === topicId)
+                                    ?? { ...previous, includedScopes: [], excludedScopes: [] };
+                            } else if (method === 'GET' && !match[2]) {
+                                if (reportSubscriptionsLoadError) return json(res, { isSuccess: false, code: 'COMMON500', message: '주제 보고서 알림을 불러오지 못했습니다.', result: {} }, 500);
+                                result = reportSubscriptions(recipientId);
+                            } else return json(res, { isSuccess: false, code: 'QA_BLOCKED', message: '지원하지 않는 검증 요청입니다.', result: {} }, 400);
                         }
                         else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)$/)) && method === 'PATCH') {
                             if (recipientProfileError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: {} }, 500);
@@ -540,6 +907,7 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                                 group.activeMemberCount = group.members.filter(member => member.active).length;
                             }
                             Object.assign(recipient, { active: false, destinations: [], groupNames: [] });
+                            syncRecipientGroups();
                             result = { id: recipient.id, active: false, deletedAt: now(), removedGroupCount: removedGroups.length };
                         }
                         else if ((match = path.match(/^\/api\/notifications\/recipients\/(\d+)\/telegram(\/link)?$/))) {
@@ -563,18 +931,78 @@ const server = await createServer({ root, configFile: false, envDir: emptyEnvDir
                             const members = recipients.filter(r => body.recipientIds.includes(r.id));
                             result = { id: Math.max(0, ...groups.map(g => g.id)) + 1, name: body.name, perspective: body.perspective || null, active: true, memberCount: members.length, activeMemberCount: members.filter(r => r.active).length, members: members.map(r => ({ recipientId: r.id, name: r.name, active: r.active })) };
                             groups.push(result);
+                            syncRecipientGroups();
                             status = 201;
                         }
-                        else if (path === '/api/notifications/groups')
-                            result = page(groups);
+                        else if (path === '/api/notifications/groups' && method === 'GET') {
+                            const active = url.searchParams.get('active');
+                            result = requestedPage(groups.filter(group => active === null || group.active === (active === 'true'))
+                                .map(groupSummary), url);
+                        }
+                        else if ((match = path.match(/^\/api\/notifications\/groups\/(\d+)$/)) && method === 'PATCH') {
+                            const group = groups.find(group => group.id === Number(match[1]));
+                            if (!group) return json(res, { isSuccess: false, code: 'GROUP404', message: '수신 그룹을 찾을 수 없습니다.', result: {} }, 404);
+                            if (groupNameSaveError)
+                                return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: {} }, 500);
+                            if (typeof body.name !== 'string' || !body.name.trim())
+                                return json(res, { isSuccess: false, code: 'COMMON400', message: '그룹명은 필수입니다.', result: {} }, 400);
+                            const name = body.name.trim();
+                            if (name.length > 100)
+                                return json(res, { isSuccess: false, code: 'COMMON400', message: '그룹명은 100자 이하여야 합니다.', result: {} }, 400);
+                            if (groups.some(existing => existing.id !== group.id && existing.name === name))
+                                return json(res, { isSuccess: false, code: 'GROUP409', message: '이미 존재하는 그룹명입니다.', result: {} }, 409);
+                            group.name = name;
+                            syncRecipientGroups();
+                            result = groupSummary(group);
+                        }
+                        else if ((match = path.match(/^\/api\/notifications\/groups\/(\d+)\/members$/)) && method === 'PUT') {
+                            const group = groups.find(group => group.id === Number(match[1]));
+                            if (!group) return json(res, { isSuccess: false, code: 'GROUP404', message: '수신 그룹을 찾을 수 없습니다.', result: {} }, 404);
+                            if (groupMembersSaveError)
+                                return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: {} }, 500);
+                            const recipientIds = body.recipientIds ?? [];
+                            if (recipientIds.includes(null))
+                                return json(res, { isSuccess: false, code: 'RECIPIENT400', message: 'recipientIds에는 null을 포함할 수 없습니다.', result: {} }, 400);
+                            const notFoundRecipientIds = [...new Set(recipientIds)].filter(id => !recipients.some(recipient => recipient.id === id));
+                            if (notFoundRecipientIds.length)
+                                return json(res, { isSuccess: false, code: 'RECIPIENT404', message: '수신자를 찾을 수 없습니다.', result: { notFoundRecipientIds } }, 404);
+                            result = replaceGroupMembers(group, recipientIds);
+                            syncRecipientGroups();
+                        }
                         else if ((match = path.match(/^\/api\/notifications\/groups\/(\d+)$/)) && method === 'DELETE') {
+                            if (!groups.some(group => group.id === Number(match[1])))
+                                return json(res, { isSuccess: false, code: 'GROUP404', message: '수신 그룹을 찾을 수 없습니다.', result: {} }, 404);
                             groups = groups.filter(g => g.id !== Number(match[1]));
+                            syncRecipientGroups();
                             result = null;
                         }
-                        else if ((match = path.match(/^\/api\/notifications\/topics\/(\d+)\/delivery-policy$/))) {
-                            if (method === 'PUT')
-                                policies[match[1]] = body;
+                        else if ((match = path.match(/^\/api\/notifications\/topics\/(\d+)\/delivery-policy$/)) && ['GET', 'PUT'].includes(method)) {
+                            if (!topics.some(topic => topic.id === Number(match[1])))
+                                return json(res, { isSuccess: false, code: 'COMMON404', message: '수집 주제를 찾을 수 없습니다.', result: {} }, 404);
+                            if (method === 'PUT') {
+                                if (notificationSettingsSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: null }, 500);
+                                policies[match[1]] = topicPolicyFields(body);
+                            }
                             result = policies[match[1]] || disabledPolicy();
+                        }
+                        else if ((match = path.match(/^\/api\/notifications\/runs\/(\d+)\/delivery-settings$/)) && ['GET', 'PUT'].includes(method)) {
+                            const run = runs.find(run => run.runId === Number(match[1]));
+                            if (!run) return json(res, { isSuccess: false, code: 'RUN404', message: '수집 실행 이력을 찾을 수 없습니다.', result: {} }, 404);
+                            if (method === 'PUT') {
+                                if (completeRunOnSettingsSave) {
+                                    Object.assign(run, { status: 'SUCCESS', reportId: 17, reportReady: true,
+                                        startedAt: run.startedAt ?? now(), finishedAt: now() });
+                                    completeRunOnSettingsSave = false;
+                                }
+                                if (!runSettings(run).editable)
+                                    return json(res, { isSuccess: false, code: 'COMMON409', message: '보고서가 완성되었거나 수집이 종료되어 알림 설정을 변경할 수 없습니다.', result: {} }, 409);
+                                if (notificationSettingsSaveError) return json(res, { isSuccess: false, code: 'COMMON500', message: '서버 내부 오류가 발생했습니다.', result: null }, 500);
+                                const saved = runDeliverySettings.find(settings => settings.runId === run.runId);
+                                if (saved) saved.delivery = policyFields(body);
+                                else runDeliverySettings.push({ runId: run.runId, targetTopicIds: [...run.targetTopicIds],
+                                    delivery: policyFields(body), updatedTopicIds: [] });
+                            }
+                            result = runSettings(run);
                         }
                         else if (path === '/api/notifications/email-readiness')
                             result = readiness;

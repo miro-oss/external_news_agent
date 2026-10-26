@@ -17,10 +17,13 @@ import com.example.be.domain.collection.repository.CollectionRunRepository;
 import com.example.be.domain.collection.service.command.CollectionResultWriter;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.entity.TopicKeywordChange;
+import com.example.be.domain.topics.entity.TopicKeywordProposal;
 import com.example.be.domain.topics.entity.TopicKeywordProposalStatus;
 import com.example.be.domain.topics.repository.TopicKeywordProposalRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
@@ -72,9 +75,12 @@ class TopicKeywordStrategyOrchestratorTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
-    @Test
-    void storesPendingProposalWithoutChangingTopicKeywords() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void storesNewProposalWhenNoCurrentPendingProposalExistsWithoutChangingKeywordsOrOldReviewState(
+            boolean hasStalePending) {
         Topic topic = topic();
+        var pending = hasStalePending ? List.of(pendingProposal(topic, true)) : List.<TopicKeywordProposal>of();
         CollectionRun run = run(TriggerType.SCHEDULED);
         CollectionRunItem item = CollectionRunItem.builder()
                 .id(11L)
@@ -103,8 +109,8 @@ class TopicKeywordStrategyOrchestratorTest {
         AgentKeywordStrategyResponse response = response();
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(item));
-        when(proposalRepository.existsByTopic_IdAndStatus(7L, TopicKeywordProposalStatus.PENDING))
-                .thenReturn(false);
+        when(proposalRepository.findByTopic_IdAndStatus(7L, TopicKeywordProposalStatus.PENDING))
+                .thenReturn(pending);
         when(inputAssembler.assemble(42L, 7L)).thenReturn(snapshot);
         when(quotaService.reserve(
                 42L,
@@ -129,6 +135,11 @@ class TopicKeywordStrategyOrchestratorTest {
                 .extracting(TopicKeywordChange::keyword)
                 .isEqualTo("HBM4");
         assertThat(topic.getOptionalKeywords()).containsExactly("SK하이닉스");
+        assertThat(pending).allSatisfy(proposal -> {
+            assertThat(proposal.getStatus()).isEqualTo(TopicKeywordProposalStatus.PENDING);
+            assertThat(proposal.getReviewedAt()).isNull();
+            assertThat(proposal.getBaselineOptionalKeywords()).containsExactly("이전 키워드");
+        });
     }
 
     @Test
@@ -137,23 +148,31 @@ class TopicKeywordStrategyOrchestratorTest {
 
         orchestrator.strategize(42L);
 
-        verifyNoInteractions(runItemRepository, inputAssembler, agentClient, quotaService);
+        verifyNoInteractions(runItemRepository, proposalRepository, inputAssembler, agentClient, quotaService);
     }
 
-    @Test
-    void skipsTopicThatAlreadyHasPendingProposal() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void skipsTopicWithCurrentPendingProposalEvenWhenStalePendingProposalAlsoExists(boolean hasStalePending) {
         Topic topic = topic();
+        var currentPending = pendingProposal(topic, false);
+        var pending = hasStalePending
+                ? List.of(pendingProposal(topic, true), currentPending) : List.of(currentPending);
         CollectionRun run = run(TriggerType.SCHEDULED);
         CollectionRunItem item = CollectionRunItem.builder().id(11L).run(run).topic(topic).build();
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(item));
-        when(proposalRepository.existsByTopic_IdAndStatus(7L, TopicKeywordProposalStatus.PENDING))
-                .thenReturn(true);
+        when(proposalRepository.findByTopic_IdAndStatus(7L, TopicKeywordProposalStatus.PENDING))
+                .thenReturn(pending);
 
         orchestrator.strategize(42L);
 
         verify(inputAssembler, never()).assemble(42L, 7L);
-        verifyNoInteractions(agentClient, quotaService);
+        verifyNoInteractions(agentClient, quotaService, finalizer);
+        assertThat(pending).allSatisfy(proposal -> {
+            assertThat(proposal.getStatus()).isEqualTo(TopicKeywordProposalStatus.PENDING);
+            assertThat(proposal.getReviewedAt()).isNull();
+        });
     }
 
     @Test
@@ -180,8 +199,8 @@ class TopicKeywordStrategyOrchestratorTest {
         AgentKeywordStrategyResponse response = response();
         when(runRepository.findById(42L)).thenReturn(Optional.of(run));
         when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of(item));
-        when(proposalRepository.existsByTopic_IdAndStatus(7L, TopicKeywordProposalStatus.PENDING))
-                .thenReturn(false);
+        when(proposalRepository.findByTopic_IdAndStatus(7L, TopicKeywordProposalStatus.PENDING))
+                .thenReturn(List.of());
         when(inputAssembler.assemble(42L, 7L)).thenReturn(snapshot);
         when(quotaService.reserve(
                 42L,
@@ -209,6 +228,16 @@ class TopicKeywordStrategyOrchestratorTest {
                 eq(42L),
                 eq("LLM_KEYWORD_STRATEGY_FAILED"),
                 any(String.class));
+    }
+
+    private TopicKeywordProposal pendingProposal(Topic topic, boolean stale) {
+        return TopicKeywordProposal.builder()
+                .topic(topic)
+                .baselineRequiredKeywords(topic.getRequiredKeywords())
+                .baselineOptionalKeywords(stale ? List.of("이전 키워드") : topic.getOptionalKeywords())
+                .baselineExcludedKeywords(topic.getExcludedKeywords())
+                .status(TopicKeywordProposalStatus.PENDING)
+                .build();
     }
 
     private CollectionRun run(TriggerType triggerType) {

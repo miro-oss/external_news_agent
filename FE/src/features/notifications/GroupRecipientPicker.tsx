@@ -61,13 +61,13 @@ function RecipientSelectionDialog({ id, recipients, selected, onDismiss, onApply
     document.body.classList.add('modal-open')
     return () => {
       element?.close()
-      document.body.classList.remove('modal-open')
+      if (!document.querySelector('dialog[open]')) document.body.classList.remove('modal-open')
       if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus()
     }
   }, [])
 
   return <dialog ref={dialog} id={id} className="recipient-selection-dialog" aria-labelledby={`${id}-title`}
-    onCancel={event => { event.preventDefault(); onDismiss() }}
+    onCancel={event => { event.preventDefault(); event.stopPropagation(); onDismiss() }}
     onClick={event => {
       if (event.target !== event.currentTarget) return
       const bounds = event.currentTarget.getBoundingClientRect()
@@ -91,7 +91,7 @@ function RecipientSelectionDialog({ id, recipients, selected, onDismiss, onApply
     <div className="member-choice-list recipient-selection-list" role="group" aria-label="선택 가능한 수신자">
       {matches.map(recipient => <label key={recipient.id}>
         <input type="checkbox" checked={validDraft.includes(recipient.id)} onChange={() => setDraft(current => current.includes(recipient.id) ? current.filter(value => value !== recipient.id) : [...current, recipient.id])} />
-        <span><strong>{recipient.name}</strong></span>
+        <span><strong>{recipient.name}</strong>{!recipient.active && <small>수신 중지</small>}</span>
       </label>)}
       {!matches.length && <p className="recipient-selection-empty">{recipients.length ? '검색 결과가 없습니다.' : '수신자를 먼저 등록해 주세요.'}</p>}
     </div>

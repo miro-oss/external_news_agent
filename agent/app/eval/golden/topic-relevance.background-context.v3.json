@@ -1,0 +1,284 @@
+{
+  "datasetId": "topic-relevance.background-context.v3",
+  "description": "개발자가 작성한 가상 사실의 합성 대조 사례 12건(6쌍). v2의 10개 사례와 기대값을 그대로 보존하고, 동일한 풍력 전방 수요 회복·공급사 판매 증가를 담은 투자 추천 기사에 사용자가 종목 추천 제외 조건을 설정한 경우와 설정하지 않은 경우를 대조한다. 새 두 사례의 제목·요약·본문은 동일하다. expectedStatus는 명세 검증용 개발 기대값이며 사람 정답, 실제 기사 원문, 신규 독립 품질 평가 자료가 아니다. 실제 업황과 수요 연결은 구체적인 공장·계약·수치가 없거나 여러 수요 산업이 함께 등장해도 관련 근거가 될 수 있지만, 문맥상 명확히 해당하는 사용자 제외 조건이 있으면 적용한다. 배경 명분·미래 희망·막연한 협의 약속과 직접적인 생산·공급·동향을 구분하고, 아직 승인 전이라도 실행 내용이 구체적인 계획은 관련으로 유지한다. 실제 회사·기사 식별자에 따른 예외 규칙이나 사람 라벨 변경의 근거로 사용하지 않는다.",
+  "cases": [
+    {
+      "id": "semiconductor-concrete-industrial-water-plan",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 301,
+        "name": "반도체 산업 동향",
+        "queryText": "반도체",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "칩",
+          "웨이퍼",
+          "생산",
+          "공급"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 3001,
+        "title": "가람수자원, 새 정수 설비 기본계획 마련",
+        "summary": null,
+        "bodyText": "가람수자원은 새 정수 설비의 기본계획을 마련했다. 설비는 누리칩이 조성하는 반도체 생산단지에 공업용수를 공급할 목적으로 추진된다. 계획에는 단지까지 연결하는 전용 배관과 하루 2만 톤의 공급량이 포함됐다. 회사는 예비 설계를 거쳐 내년에 시공사를 선정할 예정이다."
+      }
+    },
+    {
+      "id": "semiconductor-rhetorical-justification-for-civic-work",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 301,
+        "name": "반도체 산업 동향",
+        "queryText": "반도체",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "칩",
+          "웨이퍼",
+          "생산",
+          "공급"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 3002,
+        "title": "가람수자원, 도심 급수관 교체 일정 설명",
+        "summary": null,
+        "bodyText": "가람수자원은 오래된 주택가 급수관을 교체하고 주민에게 공사 중 단수 일정을 설명했다. 사업은 가정의 누수 피해를 줄이고 수압을 개선하기 위해 추진된다. 설명회에서 담당자는 반도체 산업이 지역의 미래인 만큼 기반을 잘 갖춰야 한다며, 산업계와 연계할 여지가 있는지는 앞으로 관계자들과 상의하겠다고 말했다."
+      }
+    },
+    {
+      "id": "battery-tentative-but-concrete-recycling-plant",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 302,
+        "name": "이차전지 산업 동향",
+        "queryText": "이차전지",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "배터리",
+          "전지",
+          "양극재",
+          "재활용"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 3003,
+        "title": "새별순환, 회수 소재 생산공장 투자안 검토",
+        "summary": null,
+        "bodyText": "새별순환은 전기차용 이차전지에서 나온 폐양극재를 처리해 니켈과 리튬을 회수하는 공장 투자안을 검토한다. 계획상 공장은 연간 폐양극재 6천 톤을 처리하며 회수 소재는 이차전지 양극재 생산업체에 공급한다. 회사는 후보 부지 두 곳의 인허가 조건을 확인한 뒤 최종 투자 여부를 정할 예정이다."
+      }
+    },
+    {
+      "id": "battery-future-consultation-without-business-plan",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 302,
+        "name": "이차전지 산업 동향",
+        "queryText": "이차전지",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "배터리",
+          "전지",
+          "양극재",
+          "재활용"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 3004,
+        "title": "새별시, 옛 창고 활용 설명회 개최",
+        "summary": null,
+        "bodyText": "새별시는 옛 창고를 공방과 주민 모임 공간으로 바꾸는 활용안을 설명했다. 참가자들은 개방 시간과 방문객 주차 문제를 논의했다. 시 관계자는 이차전지가 지역의 성장 동력인 만큼 이 공간과 산업을 연결할 방안도 앞으로 기업들과 만나 검토하겠다고 밝혔다. 다음 설명회는 주민 의견을 모은 뒤 열기로 했다."
+      }
+    },
+    {
+      "id": "vaccine-explicit-manufacturing-cold-storage-purpose",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 303,
+        "name": "백신 산업 동향",
+        "queryText": "백신",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "생산",
+          "항원",
+          "공급",
+          "보관"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 3005,
+        "title": "해온보관, 전용 저온 창고 구축 계약",
+        "summary": null,
+        "bodyText": "해온보관은 온유백신과 생산 원료용 저온 창고 구축 계약을 체결했다. 창고에는 백신 항원 생산에 투입할 세포 배양 원료를 보관하며, 온유백신 공장의 생산 일정에 맞춰 원료를 출고한다. 계약은 온도 기록 장치 설치와 원료 보관 조건 검증을 포함한다."
+      }
+    },
+    {
+      "id": "vaccine-background-aspiration-for-unrelated-storage",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 303,
+        "name": "백신 산업 동향",
+        "queryText": "백신",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "생산",
+          "항원",
+          "공급",
+          "보관"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 3006,
+        "title": "해온보관, 전통시장 공동 냉장 공간 개장",
+        "summary": null,
+        "bodyText": "해온보관은 전통시장 상인들이 과일과 채소를 보관할 공동 냉장 공간을 열었다. 상인회가 신청 물량을 모으고 식자재를 나눠 출고한다. 개장식 연설에서는 백신 자립이 중요한 시대라는 말과 함께 지역의 보관 시설도 새로운 역할을 할 수 있을지 향후 보건 분야 관계자들과 논의하겠다는 구상이 나왔다."
+      }
+    },
+    {
+      "id": "steel-explicit-product-transport-infrastructure",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 304,
+        "name": "철강 산업 동향",
+        "queryText": "철강",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "제철",
+          "강판",
+          "생산",
+          "운송"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 3007,
+        "title": "단비물류, 철도 인입선 건설 추진",
+        "summary": null,
+        "bodyText": "단비물류는 하람제철의 새 강판 생산라인과 화물역을 잇는 철도 인입선 건설을 추진한다. 철도는 생산된 강판을 수출항으로 운송할 목적으로 설계되며 사업에는 강판 적재장과 화차 반입 시설이 포함된다. 양사는 생산라인 가동 일정에 맞춰 운송을 시작하도록 기본 협약을 체결했다."
+      }
+    },
+    {
+      "id": "steel-industry-rhetoric-for-community-project",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 304,
+        "name": "철강 산업 동향",
+        "queryText": "철강",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "제철",
+          "강판",
+          "생산",
+          "운송"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 3008,
+        "title": "단비시, 폐선 산책길 운영 방안 논의",
+        "summary": null,
+        "bodyText": "단비시는 폐철도 부지를 산책길과 주민 장터로 활용하는 방안을 논의했다. 회의에서는 벤치 배치와 주말 장터 운영 시간에 관한 의견을 받았다. 시장은 철강도시의 재도약을 위해 주민 공간을 잘 꾸며야 한다며, 산업계와 어떻게 힘을 모을지는 앞으로 소통하며 정하겠다고 말했다."
+      }
+    },
+    {
+      "id": "shipbuilding-actual-sector-boom-in-macro-analysis",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 305,
+        "name": "조선 산업 동향",
+        "queryText": "조선",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "선박",
+          "조선소",
+          "수주",
+          "업황"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 3009,
+        "title": "해온지역 경기 보고서, 고용 개선과 물가 부담 함께 진단",
+        "summary": null,
+        "bodyText": "해온경제연구소는 지역 고용 회복의 주요 원인으로 조선업 호황을 꼽았다. 선박 수주가 확대되고 조선소 가동이 늘면서 협력업체의 채용과 근로자 소득이 증가하고 있다는 분석이다. 보고서는 이러한 업황 개선이 지역 소비와 수출을 끌어올리는 한편, 늘어난 수요가 임대료와 서비스 물가에도 부담을 주고 있다고 설명했다. 연구소는 경기 회복의 효과가 업종별로 다르게 나타나고 있다고 덧붙였다."
+      }
+    },
+    {
+      "id": "shipbuilding-normative-boom-hope-in-unrelated-policy",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 305,
+        "name": "조선 산업 동향",
+        "queryText": "조선",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "선박",
+          "조선소",
+          "수주",
+          "업황"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 3010,
+        "title": "해온시, 생활 민원 신청 절차 간소화",
+        "summary": null,
+        "bodyText": "해온시는 생활 민원 신청서를 통합하고 주민 안내 창구의 운영 시간을 늘리기로 했다. 주민은 여러 부서에 같은 서류를 내지 않고 한 창구에서 신청할 수 있다. 설명회에서 시장은 지역 경제가 살아나려면 조선업에도 다시 호황이 와야 한다며, 기업에 힘이 될 방법은 앞으로 관계자들과 상의해 찾겠다고 말했다. 시는 다음 달부터 새 민원 접수 방식을 시범 운영한다."
+      }
+    },
+    {
+      "id": "wind-actual-multi-industry-demand-without-exclusion",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 306,
+        "name": "풍력 산업 동향",
+        "queryText": "풍력",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "풍력 발전",
+          "터빈",
+          "수요",
+          "공급"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 3011,
+        "title": "모람소재·다원기기, 이번 주 유망주",
+        "summary": null,
+        "bodyText": "솔길증권은 이번 주 투자자가 눈여겨볼 상장기업으로 모람소재와 다원기기를 제시했다. 모람소재는 해상풍력·철도·조선 분야의 전방 수요 회복으로 구조용 강재 판매가 늘고 있으며, 고객사의 주문 증가가 실적 개선을 이끌고 있다고 분석했다. 다원기기는 식품 포장 설비의 교체 수요가 늘면서 유지보수 매출이 증가하고 있다는 평가를 받았다."
+      }
+    },
+    {
+      "id": "wind-same-demand-article-with-semantic-stock-exclusion",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 306,
+        "name": "풍력 산업 동향",
+        "queryText": "풍력",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "풍력 발전",
+          "터빈",
+          "수요",
+          "공급"
+        ],
+        "excludedKeywords": [
+          "종목 추천"
+        ]
+      },
+      "article": {
+        "articleId": 3012,
+        "title": "모람소재·다원기기, 이번 주 유망주",
+        "summary": null,
+        "bodyText": "솔길증권은 이번 주 투자자가 눈여겨볼 상장기업으로 모람소재와 다원기기를 제시했다. 모람소재는 해상풍력·철도·조선 분야의 전방 수요 회복으로 구조용 강재 판매가 늘고 있으며, 고객사의 주문 증가가 실적 개선을 이끌고 있다고 분석했다. 다원기기는 식품 포장 설비의 교체 수요가 늘면서 유지보수 매출이 증가하고 있다는 평가를 받았다."
+      }
+    }
+  ]
+}

@@ -9,9 +9,12 @@ import com.example.be.domain.analysis.agent.dto.AgentInsightRequest;
 import com.example.be.domain.analysis.agent.dto.AgentInsightResponse;
 import com.example.be.domain.analysis.agent.dto.AgentReportRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportResponse;
+import com.example.be.domain.analysis.agent.dto.AgentReportInsightRequest;
 import com.example.be.domain.analysis.agent.dto.AgentReportChangesRequest;
 import com.example.be.domain.analysis.agent.dto.AgentSelfCritiqueResponse;
+import com.example.be.domain.analysis.agent.dto.AgentTopicRelevanceRequest;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
+import com.example.be.global.config.RestClientFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -35,6 +38,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -43,6 +50,154 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
 class AgentClientTest {
+
+    @Test
+    void reportInsightUsesReportClientAndPreservesOriginalClaimAttributionAndEvidenceIndices() {
+        RestClient.Builder analyzeBuilder = RestClient.builder();
+        RestClient.Builder insightBuilder = RestClient.builder();
+        RestClient.Builder reportBuilder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(reportBuilder).build();
+        AgentClient client = new AgentClient(analyzeBuilder, insightBuilder, reportBuilder, properties());
+        var request = new AgentReportInsightRequest("report-insight:test", AgentPlan.PAID, List.of("CHIP_MAKER"),
+                new AgentReportInsightRequest.ReportPayload(101L, "일일 보고서", "DAILY", java.time.LocalDate.of(2026, 9, 30), null),
+                List.of(new AgentReportInsightRequest.FindingPayload(50L, 150L, "당시 제목", "https://example.com/150",
+                        "2026-09-30", "HBM", List.of(new AgentReportInsightRequest.ClaimPayload("50:0", "의견 원문", "OPINION", "발언자", List.of(0))),
+                        List.of(new AgentReportInsightRequest.SentencePayload(0, "발언자가 의견을 밝혔다.")))));
+        server.expect(requestTo("http://127.0.0.1:8088/v1/report-insight"))
+                .andExpect(method(HttpMethod.POST)).andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
+                .andExpect(jsonPath("$.report.id").value(101)).andExpect(jsonPath("$.report.reportDate").value("2026-09-30"))
+                .andExpect(jsonPath("$.findings[0].claims[0].claimType").value("OPINION"))
+                .andExpect(jsonPath("$.findings[0].claims[0].attributedTo").value("발언자"))
+                .andExpect(jsonPath("$.findings[0].claims[0].evidenceSentenceIds[0]").value(0))
+                .andRespond(withSuccess("""
+                        {"insights":[],"meta":{"provider":"mock","model":"mock-v1","promptVersion":"report-insight.ko.v1",
+                         "inputTokens":0,"outputTokens":0,"costUsd":0,"credits":0,"mock":true,"truncated":false}}
+                        """, MediaType.APPLICATION_JSON));
+        assertEquals("report-insight.ko.v1", client.reportInsight(request).meta().promptVersion());
+        server.verify();
+    }
+
+    @Test
+    void weeklyRequestSerializesFrozenDailyContentWithDatesAndKnownIssueIds() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        var date = java.time.LocalDate.of(2026, 9, 14);
+        var content = new com.example.be.domain.reports.entity.ReportContent(List.of("생산 계획 발표"), List.of(
+                new com.example.be.domain.reports.entity.ReportContent.ImportantEvent(
+                        "생산 계획", "생산 계획 발표", null, List.of(501L))), List.of(), List.of());
+        var source = new com.example.be.domain.analysis.agent.dto.AgentWeeklyReportRequest.DailySource(
+                101L, date, "일일 통합", content, List.of(501L), java.util.Map.of(501L, 20L));
+        server.expect(requestTo("http://127.0.0.1:8088/v1/weekly-report"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
+                .andExpect(jsonPath("$.reportId").value(77))
+                .andExpect(jsonPath("$.reportDate").value("2026-09-14"))
+                .andExpect(jsonPath("$.reportEndDate").value("2026-09-20"))
+                .andExpect(jsonPath("$.sources[0].reportId").value(101))
+                .andExpect(jsonPath("$.sources[0].structuredContent.importantEvents[0].sourceFindingIds[0]").value(501))
+                .andExpect(jsonPath("$.sources[0].structuredContent.importantEvents[0].significance").doesNotExist())
+                .andExpect(jsonPath("$.sources[0].issueIdsByFinding['501']").value(20))
+                .andExpect(jsonPath("$.sources[0].markdownBody").doesNotExist())
+                .andRespond(withSuccess("""
+                        {"title":"주간 통합", "executiveSummary":["생산 계획 발표"], "importantEvents":[],
+                         "watchItems":[], "sourceNotes":[], "markdownBody":"주간 통합",
+                         "meta":{"provider":"mock","model":"weekly-mock","promptVersion":"weekly-report.ko.v1",
+                         "inputTokens":0,"outputTokens":0,"costUsd":0,"credits":0,"mock":true,"truncated":false}}
+                        """, MediaType.APPLICATION_JSON));
+        var result = client.weeklyReport(new com.example.be.domain.analysis.agent.dto.AgentWeeklyReportRequest(
+                "weekly-report:77", AgentPlan.FREE, 77L, date, date.plusDays(6), List.of(source),
+                java.util.stream.IntStream.rangeClosed(1, 6).mapToObj(date::plusDays).toList(), List.of("자료 범위")));
+        assertEquals("weekly-report.ko.v1", result.meta().promptVersion());
+        server.verify();
+    }
+
+    @Test
+    void postsTopicRelevanceWithTopicContextAndReadsGroundedDecisions() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/topic-relevance"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
+                .andExpect(jsonPath("$.topic.queryText").value("반도체 장비 공정"))
+                .andExpect(jsonPath("$.articles[0].articleId").value(5))
+                .andRespond(withSuccess("""
+                        {"decisions":[{"articleId":5,"status":"IRRELEVANT","reason":"금융 분쟁 기사입니다.",
+                         "evidenceQuotes":["토스 공정위 분쟁"]}],"meta":{"provider":"openai","model":"fixture",
+                         "promptVersion":"topic-relevance.ko.v22","inputTokens":10,"outputTokens":5,
+                         "costUsd":0.0000004,"credits":0,"mock":false,"truncated":false}}
+                        """, MediaType.APPLICATION_JSON));
+        var response = client.topicRelevance(relevanceRequest());
+        assertEquals("IRRELEVANT", response.decisions().getFirst().status());
+        assertEquals(List.of("토스 공정위 분쟁"), response.decisions().getFirst().evidenceQuotes());
+        server.verify();
+    }
+
+    @Test
+    void routesRelevanceThroughItsConfiguredTimeoutWithoutChangingOtherClients() {
+        AgentProperties properties = properties();
+        properties.setAnalyzeTimeout(Duration.ofSeconds(91));
+        properties.setInsightTimeout(Duration.ofSeconds(61));
+        properties.setReportTimeout(Duration.ofSeconds(121));
+        properties.setReportInsightTimeout(Duration.ofSeconds(211));
+        properties.setRelevanceTimeout(Duration.ofSeconds(240));
+        RestClientFactory factory = mock(RestClientFactory.class);
+        RestClient.Builder analyzeBuilder = RestClient.builder();
+        RestClient.Builder insightBuilder = RestClient.builder();
+        RestClient.Builder reportBuilder = RestClient.builder();
+        RestClient.Builder relevanceBuilder = RestClient.builder();
+        RestClient.Builder reportInsightBuilder = RestClient.builder();
+        MockRestServiceServer analyzeServer = MockRestServiceServer.bindTo(analyzeBuilder).build();
+        MockRestServiceServer insightServer = MockRestServiceServer.bindTo(insightBuilder).build();
+        MockRestServiceServer reportServer = MockRestServiceServer.bindTo(reportBuilder).build();
+        MockRestServiceServer relevanceServer = MockRestServiceServer.bindTo(relevanceBuilder).build();
+        MockRestServiceServer reportInsightServer = MockRestServiceServer.bindTo(reportInsightBuilder).build();
+        when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(91))).thenReturn(analyzeBuilder);
+        when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(61))).thenReturn(insightBuilder);
+        when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(121))).thenReturn(reportBuilder);
+        when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(240))).thenReturn(relevanceBuilder);
+        when(factory.create(properties.getConnectTimeout(), Duration.ofSeconds(211))).thenReturn(reportInsightBuilder);
+        AgentClient client = new AgentClient(factory, properties);
+        analyzeServer.expect(requestTo("http://127.0.0.1:8088/v1/analyze"))
+                .andRespond(withSuccess(responseJson(), MediaType.APPLICATION_JSON));
+        insightServer.expect(requestTo("http://127.0.0.1:8088/v1/insight"))
+                .andRespond(withSuccess(insightResponseJson(), MediaType.APPLICATION_JSON));
+        reportServer.expect(requestTo("http://127.0.0.1:8088/v1/report"))
+                .andRespond(withSuccess(reportResponseJson(), MediaType.APPLICATION_JSON));
+        reportInsightServer.expect(requestTo("http://127.0.0.1:8088/v1/report-insight"))
+                .andRespond(withSuccess("""
+                        {"insights":[],"meta":{"provider":"mock","model":"mock-v1","promptVersion":"report-insight.ko.v1",
+                        "inputTokens":0,"outputTokens":0,"costUsd":0,"credits":0,"mock":true,"truncated":false}}
+                        """, MediaType.APPLICATION_JSON));
+        relevanceServer.expect(requestTo("http://127.0.0.1:8088/v1/topic-relevance"))
+                .andExpect(header(AgentClient.AGENT_TOKEN_HEADER, "test-agent-token"))
+                .andRespond(withSuccess("""
+                        {"decisions":[{"articleId":5,"status":"IRRELEVANT","reason":"금융 분쟁 기사입니다.",
+                         "evidenceQuotes":["토스 공정위 분쟁"]}],"meta":{"provider":"openai","model":"fixture",
+                         "promptVersion":"topic-relevance.ko.v22","inputTokens":10,"outputTokens":5,
+                         "costUsd":0,"credits":0,"mock":false,"truncated":false}}
+                        """, MediaType.APPLICATION_JSON));
+
+        assertEquals("topic-relevance.ko.v22", client.topicRelevance(relevanceRequest()).meta().promptVersion());
+        client.analyze(request());
+        client.insight(insightRequest());
+        client.report(reportRequest());
+        client.reportInsight(new AgentReportInsightRequest("test-report-insight", AgentPlan.FREE, List.of("CHIP_MAKER"),
+                new AgentReportInsightRequest.ReportPayload(101L, "보고서", "DAILY", java.time.LocalDate.of(2026, 9, 30), null), List.of()));
+
+        analyzeServer.verify();
+        insightServer.verify();
+        reportServer.verify();
+        relevanceServer.verify();
+        reportInsightServer.verify();
+        verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(91));
+        verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(61));
+        verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(121));
+        verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(240));
+        verify(factory).create(properties.getConnectTimeout(), Duration.ofSeconds(211));
+        verifyNoMoreInteractions(factory);
+    }
 
     @Test
     void postsReportChangesWithSharedAuthenticationAndPreservesResponseReferences() {
@@ -272,6 +427,65 @@ class AgentClientTest {
     }
 
     @Test
+    void reportValidationDiagnosticSurvivesLongProviderMetadataAndKeepsUsage() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/report-insight"))
+                .andRespond(withStatus(HttpStatus.BAD_GATEWAY).contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"error":{"code":"SCHEMA_VIOLATION","message":"출력 오류","details":{
+                                "validationFailure":{"stage":"REDUCE-001","attempt":2,"errorType":"OutputValidationError","errorCount":1,"errorKinds":["report_falsification_missing_observation"],"issues":[{"audience":"CHIP_MAKER","field":"implications[0].falsifiedBy","errorKind":"report_falsification_missing_observation","claimIds":["101:0"]}],"issuesTruncated":false},
+                                "usage":{"inputTokens":30,"outputTokens":15,"costUsd":0.25,"credits":2},
+                                "executionMetadata":{"provider":"openai","model":"%s","promptVersion":"report-insight.ko.v9","source":"AGENT_ERROR","usageCompleteness":"COMPLETE"}}}}
+                                """.formatted("m".repeat(900))));
+
+        var request = new AgentReportInsightRequest("diagnostic", AgentPlan.FREE, List.of("CHIP_MAKER"),
+                new AgentReportInsightRequest.ReportPayload(101L, "보고서", "DAILY",
+                        java.time.LocalDate.of(2026, 9, 30), null), List.of());
+        var failure = assertThrows(AgentClientException.class, () -> client.reportInsight(request));
+
+        assertEquals(new AgentClientException.ValidationFailure("REDUCE-001", 2,
+                "OutputValidationError", 1, List.of("report_falsification_missing_observation"),
+                        List.of(new AgentClientException.ValidationIssue("CHIP_MAKER", "implications[0].falsifiedBy",
+                                "report_falsification_missing_observation", List.of("101:0"))), false),
+                failure.getValidationFailure());
+        assertEquals(30L, failure.getUsage().inputTokens());
+        assertNull(failure.getExecutionMetadata());
+        assertTrue(failure.getMessage().substring(0, 1000).contains("report_falsification_missing_observation"));
+        assertTrue(failure.getMessage().substring(0, 1000).contains("implications[0].falsifiedBy"));
+        assertTrue(failure.getMessage().substring(0, 1000).contains("101:0"));
+        server.verify();
+    }
+
+    @Test
+    void preservesReportExplanationFailureAndUsageAcrossHttpBoundary() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentClient client = new AgentClient(builder, properties());
+        server.expect(requestTo("http://127.0.0.1:8088/v1/report-insight"))
+                .andRespond(withStatus(HttpStatus.BAD_GATEWAY).contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"error":{"code":"SCHEMA_VIOLATION","message":"출력 오류","details":{
+                                "validationFailure":{"stage":"EXPLAIN-002","attempt":2,"errorType":"OutputValidationError","errorCount":1,"errorKinds":["report_evidence_insufficient"],"issues":[{"audience":"CHIP_MAKER","field":"assessments[101].reason","errorKind":"report_evidence_insufficient","claimIds":["101:0"]}],"issuesTruncated":false},
+                                "usage":{"inputTokens":30,"outputTokens":15,"costUsd":0.25,"credits":2},
+                                "executionMetadata":{"provider":"openai","model":"model","promptVersion":"report-insight.ko.v56","source":"AGENT_ERROR","usageCompleteness":"COMPLETE"}}}}
+                                """));
+        var request = new AgentReportInsightRequest("diagnostic", AgentPlan.FREE, List.of("CHIP_MAKER"),
+                new AgentReportInsightRequest.ReportPayload(101L, "보고서", "DAILY",
+                        java.time.LocalDate.of(2026, 9, 30), null), List.of());
+
+        var failure = assertThrows(AgentClientException.class, () -> client.reportInsight(request));
+
+        assertEquals("SCHEMA_VIOLATION", failure.getCode());
+        assertEquals("EXPLAIN-002", failure.getValidationFailure().stage());
+        assertEquals("assessments[101].reason", failure.getValidationFailure().issues().getFirst().field());
+        assertEquals(30L, failure.getUsage().inputTokens());
+        assertEquals("COMPLETE", failure.getExecutionMetadata().usageCompleteness());
+        server.verify();
+    }
+
+    @Test
     void includesStatusAndBodyWhenAgentReturnsNonContractError() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -327,6 +541,14 @@ class AgentClientTest {
         properties.setInsightTimeout(Duration.ofSeconds(1));
         properties.setReportTimeout(Duration.ofSeconds(2));
         return properties;
+    }
+
+    private static AgentTopicRelevanceRequest relevanceRequest() {
+        return new AgentTopicRelevanceRequest("test-relevance", AgentPlan.FREE,
+                new AgentTopicRelevanceRequest.TopicInput(
+                        7L, "제조장비", "반도체 장비 공정", List.of("공정"), List.of("공정"), List.of()),
+                List.of(new AgentTopicRelevanceRequest.ArticleInput(
+                        5L, "토스 공정위 분쟁", null, "토스와 네이버의 금융 플랫폼 분쟁")));
     }
 
     private static AgentReportRequest reportRequest() {

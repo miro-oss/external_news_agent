@@ -1,7 +1,7 @@
 import type { ReportSummary } from '../../api/types'
 
 type DisplayReport = Pick<ReportSummary, 'reportScope' | 'title' | 'generatedAt'>
-  & Partial<Pick<ReportSummary, 'reportDate'>>
+  & Partial<Pick<ReportSummary, 'reportDate' | 'reportEndDate' | 'topicId' | 'topicName'>>
 
 const titleDate = new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric' })
 
@@ -28,6 +28,14 @@ function reportSubject(title: string) {
 }
 
 export function reportDisplayTitle(report: DisplayReport) {
+  if (report.reportScope === 'WEEKLY') {
+    if (report.topicId != null && report.reportDate && report.reportEndDate) {
+      return `${report.topicName?.trim() || `주제 #${report.topicId}`} · ${report.reportDate} ~ ${report.reportEndDate} 주간 보고서`
+    }
+    return report.reportDate && report.reportEndDate
+      ? `${report.reportDate} ~ ${report.reportEndDate} 주간 통합 뉴스 보고서`
+      : report.title
+  }
   if (report.reportScope === 'DAILY') {
     return report.reportDate ? `${report.reportDate} 일일 통합 뉴스 보고서` : report.title
   }

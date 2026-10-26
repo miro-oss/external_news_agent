@@ -1,7 +1,13 @@
 package com.example.be.domain.analysis.service;
 
+import com.example.be.domain.analysis.agent.dto.AgentFeedbackExample;
+import com.example.be.domain.feedback.model.FeedbackModels.Category;
+
+import com.example.be.domain.feedback.service.FeedbackLearningService;
+
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.config.AnalysisSelectionProperties;
+import com.example.be.domain.analysis.relevance.TopicRelevanceGate;
 import com.example.be.domain.analysis.entity.AnalysisSource;
 import com.example.be.domain.collection.entity.Article;
 import com.example.be.domain.collection.entity.ChangeType;
@@ -29,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -51,6 +58,8 @@ class ArticleAnalysisPipelineTest {
     private final IssueArticleRepository issueArticleRepository = mock(IssueArticleRepository.class);
     private final ArticleAnalysisOrchestrator orchestrator = mock(ArticleAnalysisOrchestrator.class);
     private final FindingReuseCache reuseCache = mock(FindingReuseCache.class);
+    private final FeedbackLearningService feedbackLearning = mock(FeedbackLearningService.class);
+    private final TopicRelevanceGate relevanceGate = mock(TopicRelevanceGate.class);
     private final FindingWriter findingWriter = mock(FindingWriter.class);
     private final AnalysisSelectionProperties selectionProperties = new AnalysisSelectionProperties();
     private Map<String, Double> topicWeights = Map.of();
@@ -58,11 +67,17 @@ class ArticleAnalysisPipelineTest {
             new ArticleAnalysisPipeline(
                     runArticleRepository, runRepository, runItemRepository, issueArticleRepository,
                     orchestrator, reuseCache, findingWriter, selectionProperties,
-                    new TopicFitScorer((language, keywords) -> topicWeights));
+                    new TopicFitScorer((language, keywords) -> topicWeights), relevanceGate, feedbackLearning);
 
     @BeforeEach
     void loadRunPlan() {
         topicWeights = Map.of();
+        when(relevanceGate.assess(eq(42L), any(AgentPlan.class), anyList())).thenAnswer(invocation -> {
+            List<TopicRelevanceGate.Candidate> candidates = invocation.getArgument(2);
+            return candidates.stream().map(candidate -> new TopicRelevanceGate.Key(
+                    candidate.article().getId(), candidate.topic() == null ? null : candidate.topic().getId()))
+                    .collect(Collectors.toSet());
+        });
         when(runRepository.findById(42L)).thenReturn(java.util.Optional.of(
                 CollectionRun.builder().id(42L).llmPlan(AgentPlan.FREE).build()));
         when(reuseCache.lookupContexts(anyList(), any(AgentPlan.class))).thenAnswer(invocation -> {
@@ -74,6 +89,30 @@ class ArticleAnalysisPipelineTest {
                             FindingReuseCache.inputHash(context), Optional.empty())));
             return Map.copyOf(lookups);
         });
+    }
+
+    @Test
+    void freezesReviewedExamplesAtRunStartForBothCacheAndProvider() {
+        var started = java.time.LocalDateTime.of(2026, 10, 7, 9, 0);
+        var topic = Topic.builder().id(7L).name("HBM").build();
+        var article = Article.builder().id(10L).title("기사").topic(topic).body("확보한 전문").fetchStatus(FetchStatus.FULLTEXT).build();
+        var example = new AgentFeedbackExample(12L, 7L, "SUMMARY_ERROR", "과거 사건", "과거 요약",
+                "추정과 확정을 구분해야 합니다.", List.of(new AgentFeedbackExample.Evidence(11L, "추정했다")));
+        when(runRepository.findById(42L)).thenReturn(Optional.of(CollectionRun.builder().id(42L)
+                .startedAt(started).llmPlan(AgentPlan.FREE).build()));
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
+                .thenReturn(List.of(observation(article, ChangeType.NEW)));
+        when(feedbackLearning.forTopic(topic, started, Set.of(Category.SUMMARY_ERROR, Category.OTHER)))
+                .thenReturn(List.of(example));
+        when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
+
+        pipeline.analyze(42L);
+
+        var provider = ArgumentCaptor.forClass(AnalysisContext.class);
+        verify(orchestrator).analyze(provider.capture());
+        assertEquals(List.of(example), provider.getValue().feedbackExamples());
+        verify(reuseCache).lookupContexts(List.of(provider.getValue()), AgentPlan.FREE);
+        verify(feedbackLearning).forTopic(topic, started, Set.of(Category.SUMMARY_ERROR, Category.OTHER));
     }
 
     @Test
@@ -173,6 +212,28 @@ class ArticleAnalysisPipelineTest {
         pipeline.analyze(42L, Set.of(10L));
 
         verify(findingWriter).write(42L, 10L, ChangeType.UPDATED, inputHash(article), result);
+    }
+
+    @Test
+    void recoveryRefreshesExistingFindingForObservedRepresentative() {
+        Article article = Article.builder()
+                .id(10L)
+                .title("복구 대상 기사")
+                .body("확보한 전문")
+                .fetchStatus(FetchStatus.FULLTEXT)
+                .build();
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
+                .thenReturn(List.of(observation(article, ChangeType.NEW)));
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunIdAndArticleIdIn(42L, List.of(10L)))
+                .thenReturn(List.of(observation(article, ChangeType.NEW)));
+        AnalysisResult result = mock(AnalysisResult.class);
+        when(orchestrator.analyze(new AnalysisContext(42L, article, AgentPlan.FREE))).thenReturn(result);
+
+        pipeline.recover(42L, Set.of(10L));
+
+        verify(findingWriter).recordTargetCount(42L, 1);
+        verify(findingWriter).refresh(42L, 10L, ChangeType.NEW, inputHash(article), result);
+        verify(findingWriter, never()).write(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -363,9 +424,9 @@ class ArticleAnalysisPipelineTest {
         pipeline.analyze(42L);
 
         org.mockito.InOrder order = org.mockito.Mockito.inOrder(orchestrator);
-        order.verify(orchestrator).analyze(new AnalysisContext(42L, high, AgentPlan.FREE));
-        order.verify(orchestrator).analyze(new AnalysisContext(42L, medium, AgentPlan.FREE));
-        verify(orchestrator, never()).analyze(new AnalysisContext(42L, low, AgentPlan.FREE));
+        order.verify(orchestrator).analyze(context(high, topic));
+        order.verify(orchestrator).analyze(context(medium, topic));
+        verify(orchestrator, never()).analyze(context(low, topic));
     }
 
     @Test
@@ -384,8 +445,8 @@ class ArticleAnalysisPipelineTest {
 
         pipeline.analyze(42L);
 
-        verify(orchestrator).analyze(new AnalysisContext(42L, rare, AgentPlan.FREE));
-        verify(orchestrator, never()).analyze(new AnalysisContext(42L, common, AgentPlan.FREE));
+        verify(orchestrator).analyze(context(rare, topic));
+        verify(orchestrator, never()).analyze(context(common, topic));
     }
 
     @Test
@@ -429,6 +490,131 @@ class ArticleAnalysisPipelineTest {
         assertEquals(10L, eligible.getFirst().article().getId());
         assertTrue(eligible.getFirst().issue().present());
         assertEquals(new BigDecimal("90.00"), eligible.getFirst().issue().importanceScore());
+    }
+
+    @Test
+    void rejectsIrrelevantCandidatesBeforeCacheAndDoesNotConsumeAnalysisLimit() {
+        Topic topic = Topic.builder().id(7L).name("반도체 제조 장비")
+                .optionalKeywords(List.of("공정", "라인")).build();
+        Article unrelated = fullTextArticle(10L, "공정위 토스 오프라인 조사", topic);
+        Article related = fullTextArticle(11L, "웨이퍼 식각 장비 증설", topic);
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
+                observation(unrelated, topic, ChangeType.NEW), observation(related, topic, ChangeType.NEW)));
+        when(relevanceGate.assess(eq(42L), eq(AgentPlan.FREE), anyList()))
+                .thenReturn(Set.of(new TopicRelevanceGate.Key(11L, 7L)));
+        when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
+        selectionProperties.setIssueLimitPerRun(1);
+
+        pipeline.analyze(42L);
+
+        verify(findingWriter).recordTargetCount(42L, 1);
+        verify(orchestrator).analyze(context(related, topic));
+        verify(orchestrator, never()).analyze(context(unrelated, topic));
+        verify(reuseCache).lookupContexts(List.of(context(related, topic)), AgentPlan.FREE);
+    }
+
+    @Test
+    void gatesSharedArticlePerObservedTopicBeforeSelectingAnalysisContext() {
+        Topic unrelatedTopic = Topic.builder().id(7L).name("제조 장비")
+                .optionalKeywords(List.of("공정", "라인")).build();
+        Topic relatedTopic = Topic.builder().id(8L).name("플랫폼 규제").optionalKeywords(List.of()).build();
+        Article article = fullTextArticle(10L, "공정위 토스 오프라인 조사", unrelatedTopic);
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L)).thenReturn(List.of(
+                observation(article, unrelatedTopic, ChangeType.NEW),
+                observation(article, relatedTopic, ChangeType.UPDATED)));
+        when(relevanceGate.assess(eq(42L), eq(AgentPlan.FREE), anyList()))
+                .thenReturn(Set.of(new TopicRelevanceGate.Key(10L, 8L)));
+        AnalysisResult result = mock(AnalysisResult.class);
+        when(orchestrator.analyze(any())).thenReturn(result);
+
+        pipeline.analyze(42L);
+
+        verify(relevanceGate).assess(42L, AgentPlan.FREE, List.of(
+                new TopicRelevanceGate.Candidate(article, unrelatedTopic),
+                new TopicRelevanceGate.Candidate(article, relatedTopic)));
+        verify(orchestrator).analyze(context(article, relatedTopic));
+        verify(findingWriter).write(42L, 10L, ChangeType.UPDATED,
+                FindingReuseCache.inputHash(context(article, relatedTopic)), result);
+    }
+
+    @Test
+    void rejectsHistoricalRepresentativesAndInvestigationRefreshBeforeCache() {
+        Topic topic = Topic.builder().id(7L).name("반도체 장비").build();
+        Article representative = fullTextArticle(10L, "토스 분쟁", topic);
+        IssueArticle membership = IssueArticle.builder().article(representative)
+                .issue(NewsIssue.builder().id(100L).topic(topic).build())
+                .role(IssueArticleRole.REPRESENTATIVE).build();
+        when(issueArticleRepository.findRepresentativesForRun(42L)).thenReturn(List.of(membership));
+        when(issueArticleRepository.findRepresentativesForRunAndObservedArticleIdIn(42L, List.of(19L)))
+                .thenReturn(List.of(membership));
+        when(relevanceGate.assess(eq(42L), eq(AgentPlan.FREE), anyList())).thenReturn(Set.of());
+
+        pipeline.analyze(42L);
+        pipeline.analyzeInvestigation(42L, Set.of(19L));
+
+        verify(findingWriter).recordTargetCount(42L, 0);
+        verifyNoMoreInteractions(findingWriter);
+        verifyNoInteractions(orchestrator, reuseCache);
+        verify(relevanceGate, times(2)).assess(42L, AgentPlan.FREE,
+                List.of(new TopicRelevanceGate.Candidate(representative, topic)));
+    }
+
+    @Test
+    void clusteringFailureStillRequiresRelevantAssessment() {
+        Topic topic = Topic.builder().id(7L).name("반도체 장비").build();
+        Article article = fullTextArticle(10L, "토스 분쟁", topic);
+        when(runArticleRepository.findUnclusteredAnalysisTargetsByRunId(42L))
+                .thenReturn(List.of(observation(article, topic, ChangeType.NEW)));
+        when(relevanceGate.assess(eq(42L), eq(AgentPlan.FREE), anyList())).thenReturn(Set.of());
+
+        pipeline.analyzeWithoutClustering(42L, Set.of());
+
+        verifyNoInteractions(orchestrator, reuseCache);
+        verify(findingWriter).recordTargetCount(42L, 0);
+        verifyNoMoreInteractions(findingWriter);
+    }
+
+    @Test
+    void removesRejectedComparisonMembersAndOtherTopicIssueContexts() {
+        Topic topic = Topic.builder().id(7L).name("반도체 장비").build();
+        Topic otherTopic = Topic.builder().id(8L).name("플랫폼 규제").build();
+        Article representative = fullTextArticle(10L, "장비 투자", topic);
+        Article relatedMember = fullTextArticle(11L, "식각 장비 투자", topic);
+        Article unrelatedMember = fullTextArticle(12L, "토스 분쟁", topic);
+        NewsIssue issue = NewsIssue.builder().id(100L).topic(topic).build();
+        NewsIssue otherIssue = NewsIssue.builder().id(200L).topic(otherTopic).build();
+        when(runArticleRepository.findRepresentativeAnalysisTargetsByRunId(42L))
+                .thenReturn(List.of(observation(representative, topic, ChangeType.NEW)));
+        when(issueArticleRepository.findIssueContextsByRepresentativeArticleIds(Set.of(10L))).thenReturn(List.of(
+                IssueArticle.builder().article(representative).issue(otherIssue)
+                        .role(IssueArticleRole.REPRESENTATIVE).build(),
+                IssueArticle.builder().article(representative).issue(issue)
+                        .role(IssueArticleRole.REPRESENTATIVE).build(),
+                IssueArticle.builder().article(relatedMember).issue(issue).role(IssueArticleRole.MEMBER).build(),
+                IssueArticle.builder().article(unrelatedMember).issue(issue).role(IssueArticleRole.MEMBER).build()));
+        when(relevanceGate.assess(eq(42L), eq(AgentPlan.FREE), anyList())).thenReturn(Set.of(
+                new TopicRelevanceGate.Key(10L, 7L), new TopicRelevanceGate.Key(11L, 7L)));
+        when(orchestrator.analyze(any())).thenReturn(mock(AnalysisResult.class));
+
+        pipeline.analyze(42L);
+
+        ArgumentCaptor<AnalysisContext> contexts = ArgumentCaptor.forClass(AnalysisContext.class);
+        verify(orchestrator).analyze(contexts.capture());
+        assertEquals(100L, contexts.getValue().issue().issueId());
+        assertEquals(List.of(representative, relatedMember), contexts.getValue().issue().articles());
+        verify(relevanceGate).assess(42L, AgentPlan.FREE, List.of(
+                new TopicRelevanceGate.Candidate(representative, topic),
+                new TopicRelevanceGate.Candidate(relatedMember, topic),
+                new TopicRelevanceGate.Candidate(unrelatedMember, topic)));
+    }
+
+    private Article fullTextArticle(Long id, String title, Topic topic) {
+        return Article.builder().id(id).title(title).topic(topic).body("확보한 전문")
+                .fetchStatus(FetchStatus.FULLTEXT).build();
+    }
+
+    private AnalysisContext context(Article article, Topic topic) {
+        return new AnalysisContext(42L, article, AgentPlan.FREE, IssueAnalysisContext.empty(), false, topic);
     }
 
     private List<Article> unavailableArticles() {

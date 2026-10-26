@@ -31,10 +31,20 @@ public interface NewsReportRepository
     @Query("SELECT report FROM NewsReport report WHERE report.run.id = :runId")
     Optional<NewsReport> findByRunId(@Param("runId") Long runId);
 
-    Optional<NewsReport> findByReportScopeAndReportDate(ReportScope scope, LocalDate date);
+    /** Scalar lookup avoids loading stale report state before taking its run lock. DAILY has no run. */
+    @Query("SELECT report.run.id FROM NewsReport report WHERE report.id = :reportId")
+    Optional<Long> findRunIdById(@Param("reportId") Long reportId);
+
+    @Query("SELECT report FROM NewsReport report WHERE report.reportScope = :scope AND report.reportDate = :date AND report.topicId IS NULL")
+    Optional<NewsReport> findByReportScopeAndReportDate(@Param("scope") ReportScope scope, @Param("date") LocalDate date);
+
+    Optional<NewsReport> findByReportScopeAndReportDateAndTopicId(ReportScope scope, LocalDate date, Long topicId);
 
     Optional<NewsReport> findFirstByReportScopeAndReportDateBeforeAndReportStatusNotAndDeletedAtIsNullOrderByReportDateDescIdDesc(
             ReportScope scope, LocalDate before, ReportStatus status);
+
+    List<NewsReport> findByReportScopeAndReportDateBetweenOrderByReportDateAsc(
+            ReportScope scope, LocalDate from, LocalDate through);
 
     List<NewsReport> findByReportScopeAndReportStatusAndGeneratedAtBefore(
             ReportScope scope, ReportStatus status, LocalDateTime before);

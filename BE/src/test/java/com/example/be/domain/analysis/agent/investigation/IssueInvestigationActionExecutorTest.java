@@ -18,6 +18,8 @@ import com.example.be.domain.sources.repository.SourceRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -31,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -99,7 +102,7 @@ class IssueInvestigationActionExecutorTest {
         assertEquals(0, result.addedArticleCount());
         assertEquals(1, result.addedEvidenceCount());
         verify(contentEnricher).enrichArticle(42L, 101L);
-        verify(issueClusteringService).cluster(42L);
+        verify(issueClusteringService).clusterChanges(42L, Set.of(101L), Set.of(101L));
         verify(analysisPipeline).analyzeInvestigation(42L, Set.of(101L));
     }
 
@@ -124,7 +127,7 @@ class IssueInvestigationActionExecutorTest {
         when(sourceRepository.findActiveByTopicId(7L)).thenReturn(List.of(source));
         when(collectionExecutor.collectInvestigation("HBM 투자", 10, source)).thenReturn(outcome);
         when(resultWriter.writeInvestigation(42L, 7L, 11L, outcome))
-                .thenReturn(new CollectionResultWriter.InvestigationWriteResult(2, 2));
+                .thenReturn(new CollectionResultWriter.InvestigationWriteResult(2, 2, Set.of(102L, 103L), Set.of(102L, 103L)));
         when(contentEnricher.enrich(42L)).thenReturn(Set.of(102L, 103L));
         when(contextService.current(42L, 88L)).thenReturn(clustered, after);
         AgentExploreResponse.Proposal proposal = new AgentExploreResponse.Proposal(
@@ -135,8 +138,32 @@ class IssueInvestigationActionExecutorTest {
         assertEquals(2, result.addedArticleCount());
         assertEquals(1, result.addedEvidenceCount());
         verify(contentEnricher).enrich(42L);
-        verify(issueClusteringService).cluster(42L);
+        verify(issueClusteringService).clusterChanges(42L, Set.of(102L, 103L), Set.of(102L, 103L));
         verify(analysisPipeline).analyzeInvestigation(42L, Set.of(102L, 103L));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void searchPassesOnlyThisActionsMetadataChangesEvenWhenNoBodyWasRefreshed(boolean metadataChanged) {
+        Source source = Source.builder().id(11L).sourceKind(Source.KIND_SEARCH)
+                .name("네이버").urlTemplate("NAVER").language("ko").active(true).build();
+        InvestigationContext before = context(2, 5, List.of(101L), Map.of("NAVER", 11L));
+        CollectionOutcome outcome = CollectionOutcome.of(FetchResult.ok(List.of()), RobotsDecision.skipped(source));
+        Set<Long> changed = metadataChanged ? Set.of(101L) : Set.of();
+        when(sourceRepository.findActiveByTopicId(7L)).thenReturn(List.of(source));
+        when(collectionExecutor.collectInvestigation("HBM 투자", 10, source)).thenReturn(outcome);
+        when(resultWriter.writeInvestigation(42L, 7L, 11L, outcome)).thenReturn(
+                new CollectionResultWriter.InvestigationWriteResult(1, changed.size(), Set.of(101L), changed));
+        when(contentEnricher.enrich(42L)).thenReturn(Set.of());
+        when(contextService.current(42L, 88L)).thenReturn(before);
+
+        InvestigationActionResult result = executor.execute(42L, before,
+                new AgentExploreResponse.Proposal("SEARCH_MORE", "NAVER", "HBM 투자", null,
+                        List.of(), null, "추가 검색"));
+
+        assertEquals(0, result.addedEvidenceCount());
+        verify(issueClusteringService).clusterChanges(42L, changed, Set.of(101L));
+        verifyNoInteractions(analysisPipeline);
     }
 
     private InvestigationContext context() {

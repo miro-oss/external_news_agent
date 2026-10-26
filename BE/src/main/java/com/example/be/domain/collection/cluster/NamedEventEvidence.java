@@ -16,6 +16,9 @@ import java.util.regex.Pattern;
 /** Named participants and dated occasions from the primary report, never shared background. */
 final class NamedEventEvidence {
     private static final int LEAD_LIMIT = 600;
+    private static final Pattern PHOTO_CREDIT = Pattern.compile("[\\[(]\\s*(?:자료\\s*)?사진\\s*[=:：]");
+    private static final Pattern PHOTO_ACTION = Pattern.compile("기념\\s*촬영|(?:단체|기념)\\s*사진|모습(?:이다|입니다)");
+    private static final Pattern INNER_SENTENCE_END = Pattern.compile("[.!?](?=\\s+\\S)");
     private static final Pattern BACKGROUND = Pattern.compile(
             "(?:^|[.!?]\\s+|\\n+)(?:한편|앞서|과거|일례로|관련\\s*소식)\\s*");
     private static final Pattern TITLE_SUBJECT = Pattern.compile("^([a-z0-9가-힣]{2,30})(?=[,，\\s])");
@@ -45,7 +48,8 @@ final class NamedEventEvidence {
     NamedEventEvidence(List<ClusterArticle> articles, BreakingNewsDetector detector) {
         for (ClusterArticle article : articles) {
             String rawTitle = detector.coreTitle(article.title()).replaceFirst("^(?:\\s*\\[[^]]+])*\\s*", "");
-            String rawLead = foreground(bound(ArticleEvidenceText.primary(article), LEAD_LIMIT));
+            String rawLead = foreground(withoutPhotoCaptions(
+                    bound(ArticleEvidenceText.primary(article), LEAD_LIMIT)));
             String title = normalize(rawTitle);
             String lead = normalize(rawLead);
             profiles.put(article.articleId(), new Profile(
@@ -218,6 +222,23 @@ final class NamedEventEvidence {
     private static String foreground(String text) {
         Matcher background = BACKGROUND.matcher(text);
         return background.find() ? text.substring(0, background.start()) : text;
+    }
+
+    private static String withoutPhotoCaptions(String lead) {
+        StringBuilder result = new StringBuilder();
+        for (String line : lead.split("\\n", -1)) {
+            Matcher credit = PHOTO_CREDIT.matcher(line);
+            if (credit.find()) {
+                String caption = line.substring(0, credit.start()).strip();
+                // A dedicated credited photo cannot supply the first agreement or its parties.
+                // Keep mixed prose/caption lines; never extend the original evidence budget.
+                if (PHOTO_ACTION.matcher(caption).find() && !INNER_SENTENCE_END.matcher(caption).find()) {
+                    continue;
+                }
+            }
+            result.append(line).append('\n');
+        }
+        return result.toString().strip();
     }
 
     private static String normalize(String value) {

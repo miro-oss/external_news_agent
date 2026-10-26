@@ -32,6 +32,7 @@ public class TopicKeywordProposalConverter {
                         .excludedKeywords(keywordsOrEmpty(topic.getExcludedKeywords()))
                         .build())
                 .changes(proposal.getChanges().stream().map(TopicKeywordProposalConverter::toChange).toList())
+                .selectedChangeIndexes(proposal.getSelectedChangeIndexes())
                 .build();
     }
 

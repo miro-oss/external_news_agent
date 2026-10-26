@@ -1,17 +1,19 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
+import { AUDIENCES, AUDIENCE_LABELS, type Audience, type ReportScope } from '../../api/types'
 import { usePreviewNotification } from '../../api/queries'
 import { useAutoDeliveries, useRetryAutoDeliveries, useShareReport, type DeliveryTargets } from '../../api/notificationConnections'
 import { DeliveryTargetPicker } from './DeliveryTargetPicker'
 import { useDeliveryTargetAvailability } from './useDeliveryTargetAvailability'
 import { MutationStatus } from '../settings/MutationStatus'
 import { MessagePreviewSkeleton } from './NotificationSkeletons'
-import { failedDeliveryBatchId, reportShareFeedback } from './reportShareFeedback'
+import { canRetryFailedReportShare, failedDeliveryBatchId, reportShareFeedback, reportShareInsightGuidance, reportShareRequestKey } from './reportShareFeedback'
 import { ReportShareDeliveryLogs } from './ReportShareDeliveryLogs'
 import './notifications-refinement.css'
 
 const LABELS: Record<string, string> = { PENDING: '전달 대기', PROCESSING: '전달 중', SENT: '전달됨', FAILED: '전달 실패', SKIPPED: '전달 제외', UNKNOWN: '수신 확인 필요' }
-export function ReportSharePanel({ reportId }: { reportId: number }) {
+export function ReportSharePanel({ reportId, reportScope, topicId }: { reportId: number; reportScope?: ReportScope; topicId?: number | null }) {
   const [targets, setTargets] = useState<DeliveryTargets>({ groupIds: [], recipientIds: [], channelIds: [] })
+  const [insightAudience, setInsightAudience] = useState<Audience | ''>('')
   const [requestKey, setRequestKey] = useState(() => `r${reportId}-${crypto.randomUUID()}`)
   const send = useShareReport(reportId)
   const preview = usePreviewNotification()
@@ -20,31 +22,64 @@ export function ReportSharePanel({ reportId }: { reportId: number }) {
   const availability = useDeliveryTargetAvailability(targets)
   const feedback = reportShareFeedback(send.data)
   const failureBatchId = failedDeliveryBatchId(send.error)
+  const canRetryFailed = canRetryFailedReportShare(send.data, send.error)
   const resultBatchId = failureBatchId ?? (send.data && (send.data.failedCount || send.data.skippedCount) ? send.data.deliveryBatchId : null)
-  function change(next: DeliveryTargets) { setTargets(next); setRequestKey(`r${reportId}-${crypto.randomUUID()}`); send.reset(); preview.reset() }
+  const insightGuidance = insightAudience ? reportShareInsightGuidance(send.error ?? preview.error) : null
+  const insightSelection = insightAudience ? { insightAudience } : {}
+  function resetRequest() { setRequestKey(`r${reportId}-${crypto.randomUUID()}`); send.reset(); preview.reset() }
+  function change(next: DeliveryTargets) { setTargets(next); resetRequest() }
+  function changeInsight(next: Audience | '') { setInsightAudience(next); resetRequest() }
   const canSend = availability.valid && targets.channelIds.length > 0 && (targets.groupIds.length > 0 || targets.recipientIds.length > 0)
+  function share() {
+    const key = reportShareRequestKey(reportId, requestKey, send.data, send.error)
+    setRequestKey(key)
+    send.mutate({ ...targets, ...insightSelection, idempotencyKey: key })
+  }
   return <section className="report-delivery-panel report-share-card" aria-label="보고서 공유">
     <div className="report-share-heading">
       <h3>다른 사람에게 공유</h3>
-      <p className="muted">이 보고서의 핵심 요약을 추가로 전달할 수 있습니다.</p>
+        <p className="muted">이메일은 요약과 상세 PDF를 함께 전달합니다. PDF에는 핵심 요약·중요 이벤트·관찰 항목과 준비된 회사 실적이 포함됩니다. 텔레그램은 뉴스 카드로 전달합니다.</p>
     </div>
     {!!deliveries.data?.length && <details className="auto-delivery-status"><summary>자동 전달 상태</summary>
       <ul>{deliveries.data.map((delivery) => <li key={delivery.id}>{delivery.recipientName} · {delivery.channelType === 'EMAIL' ? '이메일' : '텔레그램'} · {LABELS[delivery.status] ?? delivery.status}{delivery.message && <p className="muted">{delivery.message}</p>}</li>)}</ul>
       {deliveries.data.some((delivery) => delivery.status === 'FAILED') && <button className="secondary-button" type="button" disabled={retry.isPending} onClick={() => retry.mutate()}>실패한 대상만 다시 전달</button>}
       <MutationStatus error={retry.error} success={retry.data ? `${retry.data.queuedCount}명에게 다시 전달합니다.` : null} />
     </details>}
-    {deliveries.isSuccess && deliveries.data.length === 0 && <p className="muted">이 보고서에 예약된 자동 전달이 없습니다. 다음 수집에서 자동으로 받으려면 수집 설정의 ‘보고서 자동 전달’에서 대상과 전달 방식을 선택해 주세요.</p>}
+    {deliveries.isSuccess && deliveries.data.length === 0 && <p className="muted">{reportScope === 'WEEKLY' && topicId != null
+      ? '이 주제별 보고서는 수동으로 만든 보고서입니다. 아래에서 원하는 수신자에게 전달할 수 있습니다.'
+      : reportScope === 'WEEKLY'
+      ? '이 보고서에 예약된 자동 전달이 없습니다. 다음 주간 보고서부터 받으려면 수집 설정의 주제 보고서 알림에서 ‘주간 통합 보고서’를 선택해 주세요.'
+      : '이 보고서에 예약된 자동 전달이 없습니다. 다음 수집에서 자동으로 받으려면 수집 설정의 ‘보고서 자동 전달’에서 대상과 전달 방식을 선택해 주세요.'}</p>}
     <DeliveryTargetPicker value={targets} disabled={send.isPending} onChange={change} />
+    <ReportShareInsightSelector value={insightAudience} disabled={send.isPending} onChange={changeInsight} />
     <div className="report-share-actions">
-      <button type="button" className="secondary-button" disabled={!availability.valid || !targets.channelIds.length || preview.isPending} onClick={() => preview.mutate({ reportId, channelId: targets.channelIds[0] })}>{preview.isPending ? '준비 중…' : '내용 미리보기'}</button>
-      <button type="button" className="primary-button" disabled={!canSend || send.isPending || send.isSuccess || !!failureBatchId} onClick={() => send.mutate({ ...targets, idempotencyKey: requestKey })}>{send.isPending ? '전달 중…' : failureBatchId ? '전달 실패' : send.error ? '같은 요청 다시 확인' : feedback.label}</button>
+      <button type="button" className="secondary-button" disabled={!availability.valid || !targets.channelIds.length || preview.isPending || send.isPending} onClick={() => preview.mutate({ reportId, channelId: targets.channelIds[0], ...insightSelection })}>{preview.isPending ? '준비 중…' : '내용 미리보기'}</button>
+      <button type="button" className="primary-button" disabled={!canSend || send.isPending || (!canRetryFailed && (send.isSuccess || !!failureBatchId))} onClick={share}>{send.isPending ? '전달 중…' : canRetryFailed ? '새 요청으로 다시 전달' : failureBatchId ? '전달 실패' : send.error ? insightGuidance ? '인사이트 확인 후 다시 전달' : '같은 요청 다시 확인' : feedback.label}</button>
     </div>
+    {canRetryFailed && <p className="muted">새 요청은 중복 전달될 수 있으니 연결 설정과 수신함을 확인한 뒤 다시 전달해 주세요.</p>}
     <MutationStatus error={send.error ?? preview.error ?? deliveries.error}
       success={feedback.success} warning={feedback.warning} />
+    {insightGuidance && <p className="report-share-insight-guidance" role="status">{insightGuidance}</p>}
     {resultBatchId && <ReportShareDeliveryLogs key={resultBatchId} reportId={reportId} deliveryBatchId={resultBatchId} />}
     {preview.isPending && !preview.data && <MessagePreviewSkeleton />}
-    {preview.data && <div className="report-message-preview"><strong>{preview.data.subject ?? '텔레그램 요약'}</strong>{preview.data.chunks.map((chunk) => <p key={chunk.seq}>{plainPreview(chunk.body)}</p>)}</div>}
+    {preview.data && <div className="report-message-preview"><strong>{preview.data.subject ?? '텔레그램 요약'}</strong>{preview.data.channelType === 'EMAIL' && <p className="muted">이메일 본문 미리보기입니다. 실제 이메일에는 수신자별 표시 기준을 적용한 상세 PDF도 첨부됩니다.</p>}{preview.data.chunks.map((chunk) => <p key={chunk.seq}>{plainPreview(chunk.body)}</p>)}</div>}
   </section>
+}
+export function ReportShareInsightSelector({ value, disabled, onChange }: {
+  value: Audience | ''; disabled: boolean; onChange: (value: Audience | '') => void
+}) {
+  const id = useId()
+  return <div className="report-share-insight">
+    <div className="report-share-insight-description">
+      <label htmlFor={id}>함께 보낼 관점 분석</label>
+      <p id={`${id}-help`}>선택한 관점 하나의 저장된 분석을 함께 보냅니다. 이메일·텔레그램에는 요약을, 이메일 PDF에는 상세 분석을 담습니다. 이번 전달에만 적용됩니다.</p>
+    </div>
+    <select id={id} value={value} disabled={disabled} aria-describedby={`${id}-help`}
+      onChange={(event) => onChange(event.target.value as Audience | '')}>
+      <option value="">포함 안 함</option>
+      {AUDIENCES.map((audience) => <option key={audience} value={audience}>{AUDIENCE_LABELS[audience]}</option>)}
+    </select>
+  </div>
 }
 function plainPreview(html: string) {
   const document = new DOMParser().parseFromString(html.replace(/<\/(p|li|h[1-6]|ul)>/gi, '$&\n'), 'text/html')

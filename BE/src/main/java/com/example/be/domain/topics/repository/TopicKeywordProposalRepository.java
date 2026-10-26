@@ -48,5 +48,6 @@ public interface TopicKeywordProposalRepository extends JpaRepository<TopicKeywo
     List<TopicKeywordProposal> findOtherApprovedByTopicId(@Param("topicId") Long topicId,
                                                         @Param("proposalId") Long proposalId);
 
-    boolean existsByTopic_IdAndStatus(Long topicId, TopicKeywordProposalStatus status);
+    @EntityGraph(attributePaths = {"topic"})
+    List<TopicKeywordProposal> findByTopic_IdAndStatus(Long topicId, TopicKeywordProposalStatus status);
 }

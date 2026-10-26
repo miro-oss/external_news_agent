@@ -130,7 +130,11 @@ public class CollectionRunController {
     @GetMapping
     @Operation(
             summary = "수집 실행 내역 조회",
-            description = "수집 실행 이력을 접수 시각 최신순으로 조회합니다. 수동 실행과 스케줄 실행이 모두 포함됩니다."
+            description = """
+                    수집 실행 이력을 접수 시각 최신순으로 조회합니다. 수동 실행과 스케줄 실행이 모두 포함됩니다.
+                    stage는 RUNNING의 현재 단계(COLLECTING/CLUSTERING/ANALYZING/INVESTIGATING/GENERATING_REPORT/FINALIZING)이며,
+                    대기·종료 실행과 기존 단계 미상 RUNNING 실행은 null입니다.
+                    """
     )
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -146,6 +150,7 @@ public class CollectionRunController {
                                   {
                                     "runId": 42,
                                     "status": "SUCCESS",
+                                    "stage": null,
                                     "triggerType": "MANUAL",
                                     "queuedAt": "2026-08-10T10:00:00+09:00",
                                     "startedAt": "2026-08-10T10:00:00+09:00",
@@ -209,7 +214,11 @@ public class CollectionRunController {
     @GetMapping("/{runId}")
     @Operation(
             summary = "수집 실행 상세 조회",
-            description = "수집 실행 1건의 대기·진행 상황과 결과를 조회합니다. queuedAt은 접수 시각이며 PENDING의 startedAt은 null입니다. 단계별 coverage, 조합별 breakdown과 warnings를 포함합니다."
+            description = """
+                    수집 실행 1건의 대기·진행 상황과 결과를 조회합니다. queuedAt은 접수 시각이며 PENDING의 startedAt은 null입니다.
+                    stage는 RUNNING의 현재 단계(COLLECTING/CLUSTERING/ANALYZING/INVESTIGATING/GENERATING_REPORT/FINALIZING)이며,
+                    대기·종료 실행과 기존 단계 미상 RUNNING 실행은 null입니다. 단계별 coverage, 조합별 breakdown과 warnings를 포함합니다.
+                    """
     )
     @ApiResponses({
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -223,6 +232,7 @@ public class CollectionRunController {
                               "result": {
                                 "runId": 42,
                                 "status": "PARTIAL",
+                                "stage": null,
                                 "triggerType": "MANUAL",
                                 "idempotencyKey": "2026-08-10-manual-001",
                                 "queuedAt": "2026-08-10T10:00:00+09:00",

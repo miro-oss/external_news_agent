@@ -1,5 +1,6 @@
 package com.example.be.domain.topics.controller;
 
+import com.example.be.domain.topics.dto.req.TopicKeywordProposalReqDTO;
 import com.example.be.domain.topics.dto.res.TopicKeywordProposalResDTO;
 import com.example.be.domain.topics.service.command.TopicKeywordProposalCommandService;
 import com.example.be.domain.topics.service.query.TopicKeywordProposalQueryService;
@@ -17,6 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -37,6 +39,7 @@ public class TopicKeywordProposalController {
                     활성 수집 주제에 대해 수집 전략가가 만든 키워드 제안을 조회합니다.
                     status를 생략하면 모든 검토 상태를, PENDING을 주면 검토 대기 제안만 반환합니다.
                     비활성 주제의 제안은 목록과 전체 건수에서 제외합니다.
+                    changes는 원본 제안이며 selectedChangeIndexes는 마지막 승인에서 선택한 항목입니다.
                     """
     )
     @ApiResponses({
@@ -56,6 +59,7 @@ public class TopicKeywordProposalController {
                                     "topicName": "HBM",
                                     "collectionRunId": 148,
                                     "status": "PENDING",
+                                    "selectedChangeIndexes": null,
                                     "summary": "HBM4와 경쟁사 확장 키워드를 추가하고 잡음 키워드를 정리합니다.",
                                     "reviewedAt": null,
                                     "createdAt": "2026-09-03T10:15:00+09:00",
@@ -112,8 +116,12 @@ public class TopicKeywordProposalController {
             summary = "키워드 제안 승인",
             description = """
                     검토 대기 또는 반려 상태의 키워드 제안을 승인하고 현재 주제 키워드에 반영합니다.
+                    selectedChangeIndexes로 원본 changes 배열의 0-based 인덱스를 선택합니다.
+                    본문이나 필드를 생략하거나 null로 보내면 전체 적용하며, 새 승인에서는 전체 인덱스를 저장합니다.
+                    선택 인덱스는 오름차순으로 저장하고 원본 제안 순서대로 적용합니다. changes는 그대로 보존합니다.
+                    빈 배열, null 원소, 중복, 음수, 범위 밖 인덱스는 TOPIC400으로 거부합니다.
                     대기 제안은 생성 당시 키워드와 일치해야 하며, 반려 제안의 재승인은 현재 키워드에 적용합니다.
-                    이미 승인된 제안을 다시 승인하면 키워드나 검토 시각을 바꾸지 않고 현재 결과를 반환합니다.
+                    이미 승인된 제안을 다시 승인하면 선택값 검증 후 키워드, 검토 시각, 저장된 선택을 바꾸지 않고 현재 결과를 반환합니다.
                     실제 변경만 저장하며 주제별 잠금 안에서 상태와 키워드를 함께 반영합니다.
                     """
     )
@@ -132,6 +140,7 @@ public class TopicKeywordProposalController {
                                 "topicName": "HBM",
                                 "collectionRunId": 148,
                                 "status": "APPROVED",
+                                "selectedChangeIndexes": [0],
                                 "summary": "HBM4와 경쟁사 확장 키워드를 추가하고 잡음 키워드를 정리합니다.",
                                 "reviewedAt": "2026-09-03T11:20:00+09:00",
                                 "createdAt": "2026-09-03T10:15:00+09:00",
@@ -151,6 +160,27 @@ public class TopicKeywordProposalController {
                               }
                             }
                             """))),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "400",
+                    description = "선택 인덱스가 유효하지 않거나 요청 JSON 형식이 잘못된 경우",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE, examples = {
+                            @ExampleObject(name = "잘못된 선택", value = """
+                                    {
+                                      "isSuccess": false,
+                                      "code": "TOPIC400",
+                                      "message": "적용할 키워드 변경 항목을 올바르게 선택해 주세요.",
+                                      "result": {}
+                                    }
+                                    """),
+                            @ExampleObject(name = "잘못된 JSON 형식", value = """
+                                    {
+                                      "isSuccess": false,
+                                      "code": "COMMON400",
+                                      "message": "입력값 검증 실패입니다.",
+                                      "result": {}
+                                    }
+                                    """)
+                    })),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "404",
                     description = "제안이 없는 경우",
@@ -178,9 +208,11 @@ public class TopicKeywordProposalController {
     })
     public ApiResponse<TopicKeywordProposalResDTO.Item> approve(
             @Parameter(description = "키워드 제안 ID")
-            @PathVariable Long proposalId
+            @PathVariable Long proposalId,
+            @RequestBody(required = false) TopicKeywordProposalReqDTO.Approve request
     ) {
-        return ApiResponse.of(GeneralSuccessCode.UPDATED, commandService.approve(proposalId));
+        return ApiResponse.of(GeneralSuccessCode.UPDATED,
+                commandService.approve(proposalId, request == null ? null : request.selectedChangeIndexes()));
     }
 
     @PostMapping("/{proposalId}/reject")
@@ -194,6 +226,7 @@ public class TopicKeywordProposalController {
                     현재 값이 예상과 다르거나 이후 승인·변경 기록이 있으면 해당 키워드를 유지합니다.
                     이전 이관으로 생성 당시 키워드가 모두 빈 배열인 승인 건도 키워드를 유지합니다.
                     이미 반려된 제안을 다시 반려하면 키워드나 검토 시각을 바꾸지 않고 현재 결과를 반환합니다.
+                    changes 원본과 마지막 selectedChangeIndexes는 반려 후에도 유지됩니다.
                     """
     )
     @ApiResponses({
@@ -211,6 +244,7 @@ public class TopicKeywordProposalController {
                                 "topicName": "HBM",
                                 "collectionRunId": 148,
                                 "status": "REJECTED",
+                                "selectedChangeIndexes": [0],
                                 "summary": "HBM4와 경쟁사 확장 키워드를 추가하고 잡음 키워드를 정리합니다.",
                                 "reviewedAt": "2026-09-03T11:20:00+09:00",
                                 "createdAt": "2026-09-03T10:15:00+09:00",

@@ -5,6 +5,7 @@ import com.example.be.domain.analysis.agent.investigation.IssueInvestigationOrch
 import com.example.be.domain.collection.cluster.IssueClusteringService;
 import com.example.be.domain.collection.entity.CollectionRun;
 import com.example.be.domain.collection.entity.CollectionRunItem;
+import com.example.be.domain.collection.entity.RunStage;
 import com.example.be.domain.collection.repository.CollectionRunItemRepository;
 import com.example.be.domain.insights.service.InsightHypothesisTracker;
 import com.example.be.domain.reports.service.ReportCreationService;
@@ -12,6 +13,7 @@ import com.example.be.domain.sources.entity.Source;
 import com.example.be.domain.topics.entity.Topic;
 import com.example.be.domain.topics.service.strategy.TopicKeywordStrategyOrchestrator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.mockito.InOrder;
 
 import java.util.List;
@@ -24,6 +26,9 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 class CollectionRunExecutionServiceTest {
 
@@ -40,10 +45,16 @@ class CollectionRunExecutionServiceTest {
     private final TopicKeywordStrategyOrchestrator keywordStrategyOrchestrator =
             mock(TopicKeywordStrategyOrchestrator.class);
     private final CollectionResultWriter resultWriter = mock(CollectionResultWriter.class);
+    private final CollectionRunStageWriter stageWriter = mock(CollectionRunStageWriter.class);
     private final CollectionRunExecutionService service = new CollectionRunExecutionService(
             runItemRepository, collectionExecutor, candidatePrioritizer, contentEnricher, issueClusteringService,
             analysisPipeline, investigationOrchestrator, hypothesisTracker, reportCreationService,
-            keywordStrategyOrchestrator, resultWriter);
+            keywordStrategyOrchestrator, resultWriter, stageWriter);
+
+    @BeforeEach
+    void allowRunningStageChanges() {
+        when(stageWriter.updateStage(eq(42L), any(RunStage.class))).thenReturn(true);
+    }
 
     @Test
     void createsReportAfterAnalysisBeforeClosingRun() {
@@ -54,13 +65,21 @@ class CollectionRunExecutionServiceTest {
         service.executeRun(42L);
 
         InOrder order = inOrder(
+                stageWriter, contentEnricher,
                 issueClusteringService, analysisPipeline, investigationOrchestrator,
                 hypothesisTracker, reportCreationService, keywordStrategyOrchestrator, resultWriter);
-        order.verify(issueClusteringService).cluster(42L);
+        order.verify(stageWriter).updateStage(42L, RunStage.COLLECTING);
+        order.verify(contentEnricher).enrich(42L);
+        order.verify(stageWriter).updateStage(42L, RunStage.CLUSTERING);
+        order.verify(issueClusteringService).cluster(42L, Set.of());
+        order.verify(stageWriter).updateStage(42L, RunStage.ANALYZING);
         order.verify(analysisPipeline).analyze(42L, Set.of());
+        order.verify(stageWriter).updateStage(42L, RunStage.INVESTIGATING);
         order.verify(investigationOrchestrator).investigate(42L);
         order.verify(hypothesisTracker).track(42L);
+        order.verify(stageWriter).updateStage(42L, RunStage.GENERATING_REPORT);
         order.verify(reportCreationService).generate(42L);
+        order.verify(stageWriter).updateStage(42L, RunStage.FINALIZING);
         order.verify(keywordStrategyOrchestrator).strategize(42L);
         order.verify(resultWriter).finishRun(42L);
         verify(reportCreationService, times(1)).generate(42L);
@@ -181,15 +200,81 @@ class CollectionRunExecutionServiceTest {
         when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
         when(contentEnricher.enrich(42L)).thenReturn(Set.of(10L));
         doThrow(new IllegalStateException("cluster failure"))
-                .when(issueClusteringService).cluster(42L);
+                .when(issueClusteringService).cluster(42L, Set.of(10L));
 
         service.executeRun(42L);
 
-        verify(resultWriter).addIssueClusteringFailedWarning(42L, "cluster failure");
-        verify(analysisPipeline).analyzeWithoutClustering(42L, Set.of(10L));
+        InOrder order = inOrder(stageWriter, resultWriter, analysisPipeline);
+        order.verify(stageWriter).updateStage(42L, RunStage.CLUSTERING);
+        order.verify(resultWriter).addIssueClusteringFailedWarning(42L, "cluster failure");
+        order.verify(stageWriter).updateStage(42L, RunStage.ANALYZING);
+        order.verify(analysisPipeline).analyzeWithoutClustering(42L, Set.of(10L));
         verify(reportCreationService).generate(42L);
         verify(resultWriter).finishRun(42L);
         verify(resultWriter, never()).failRun(42L);
+    }
+
+    @Test
+    void advancesStagesThroughRecoverableAnalysisInvestigationAndReportFailures() {
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
+        when(contentEnricher.enrich(42L)).thenReturn(Set.of());
+        doThrow(new IllegalStateException("analysis failed")).when(analysisPipeline).analyze(42L, Set.of());
+        doThrow(new IllegalStateException("investigation failed")).when(investigationOrchestrator).investigate(42L);
+        when(reportCreationService.generate(42L)).thenThrow(new IllegalStateException("report failed"));
+
+        service.executeRun(42L);
+
+        InOrder order = inOrder(stageWriter, resultWriter, keywordStrategyOrchestrator);
+        order.verify(stageWriter).updateStage(42L, RunStage.ANALYZING);
+        order.verify(resultWriter).addAnalysisFailedWarning(42L, "analysis failed");
+        order.verify(stageWriter).updateStage(42L, RunStage.INVESTIGATING);
+        order.verify(resultWriter).addAgentWarning(42L, "LLM_INVESTIGATION_FAILED",
+                "추가 조사 단계 실패로 기존 분석을 유지했습니다.");
+        order.verify(stageWriter).updateStage(42L, RunStage.GENERATING_REPORT);
+        order.verify(resultWriter).addReportGenerationFailedWarning(42L, "report failed");
+        order.verify(stageWriter).updateStage(42L, RunStage.FINALIZING);
+        order.verify(keywordStrategyOrchestrator).strategize(42L);
+        order.verify(resultWriter).finishRun(42L);
+        verify(resultWriter, never()).failRun(42L);
+    }
+
+    @Test
+    void doesNotStartAnExecutionThatAlreadyStopped() {
+        when(stageWriter.updateStage(42L, RunStage.COLLECTING)).thenReturn(false);
+
+        service.executeRun(42L);
+
+        verifyNoInteractions(runItemRepository, collectionExecutor, contentEnricher,
+                issueClusteringService, analysisPipeline, investigationOrchestrator,
+                reportCreationService, keywordStrategyOrchestrator, resultWriter);
+    }
+
+    @Test
+    void doesNotContinueOrOverwriteResultWhenRunStopsBetweenStages() {
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
+        when(contentEnricher.enrich(42L)).thenReturn(Set.of());
+        when(stageWriter.updateStage(42L, RunStage.INVESTIGATING)).thenReturn(false);
+
+        service.executeRun(42L);
+
+        verify(analysisPipeline).analyze(42L, Set.of());
+        verifyNoInteractions(investigationOrchestrator, hypothesisTracker, reportCreationService,
+                keywordStrategyOrchestrator, resultWriter);
+    }
+
+    @Test
+    void stagePersistenceFailureDoesNotMasqueradeAsAnAnalysisFailure() {
+        when(runItemRepository.findExecutionItemsByRunId(42L)).thenReturn(List.of());
+        when(contentEnricher.enrich(42L)).thenReturn(Set.of());
+        when(stageWriter.updateStage(42L, RunStage.ANALYZING))
+                .thenThrow(new IllegalStateException("stage write failure"));
+
+        service.executeRun(42L);
+
+        verify(resultWriter).failRun(42L);
+        verify(resultWriter, never()).addAnalysisFailedWarning(eq(42L), any());
+        verifyNoInteractions(analysisPipeline, investigationOrchestrator, reportCreationService,
+                keywordStrategyOrchestrator);
     }
 
     @Test

@@ -138,7 +138,7 @@ public class InsightService {
                 missing.stream().map(Enum::name).toList(),
                 new AgentInsightRequest.TargetPayload(targetType.name(), targetId),
                 snapshot.topic(),
-                snapshot.findings());
+                snapshot.findings(), snapshot.feedbackExamples());
         InsightAuditContext auditContext = InsightAuditContext.capture(
                 snapshot.inputHash(), snapshot.findings(), audiences.size(),
                 audiences.size() - missing.size(), true, properties.getInsightPromptVersion(),

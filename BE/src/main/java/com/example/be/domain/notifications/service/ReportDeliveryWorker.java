@@ -4,6 +4,8 @@ import com.example.be.domain.notifications.channel.NotificationSender;
 import com.example.be.domain.notifications.channel.NotificationSenderRegistry;
 import com.example.be.domain.notifications.repository.NotificationChannelRepository;
 import com.example.be.domain.notifications.exception.NotificationTransportException;
+import com.example.be.global.apiPayload.code.GeneralErrorCode;
+import com.example.be.global.apiPayload.exception.GeneralException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -18,6 +20,7 @@ public class ReportDeliveryWorker {
     private final ReportDeliveryOutboxStore store;
     private final NotificationChannelRepository channels;
     private final NotificationSenderRegistry senders;
+    private final PersonalizedNotificationRenderer personalizedRenderer;
 
     @Scheduled(fixedDelayString="${news.notifications.delivery-poll-ms:5000}", scheduler="reportDeliveryScheduler")
     public void deliverPending() {
@@ -33,12 +36,26 @@ public class ReportDeliveryWorker {
         if (channel == null) return; // FK prevents removal while a delivery exists.
         String type = channel.getChannelType().name();
         if (!store.destinationStillActive(work)) {
-            finish(work, type, "SKIPPED", null, "수신 설정이 변경되었거나 텔레그램 연결이 완료되지 않았습니다.", false);
+            finish(work, type, "SKIPPED", null, "보고서 수신이 해제되었거나 수신 채널 연결이 변경되었습니다.", false);
             return;
         }
         NotificationSender sender = senders.get(channel.getChannelType());
         if (!sender.isConfigured(channel)) {
             finish(work, type, "FAILED", null, "전달 채널 연결을 확인해 주세요.", true);
+            return;
+        }
+        final RenderedNotification personalized;
+        try {
+            personalized = personalizedRenderer.render(work.reportId(), channel, work.recipientId());
+        } catch (GeneralException failure) {
+            if (failure.getCode() == GeneralErrorCode.CONFLICT) {
+                store.deferPersonalization(work);
+            } else {
+                finish(work, type, "FAILED", null, "개인 전달 내용을 준비하지 못했습니다.", true);
+            }
+            return;
+        } catch (RuntimeException failure) {
+            finish(work, type, "FAILED", null, "개인 전달 내용을 준비하지 못했습니다.", true);
             return;
         }
         NotificationSender.DeliverySession session;
@@ -48,7 +65,12 @@ public class ReportDeliveryWorker {
             return;
         }
         String externalId;
-        try { externalId = session.send(work.address(),work.subject(),work.body()); }
+        try {
+            String body = String.join("\n", personalized.chunks());
+            externalId = personalized.attachments().isEmpty()
+                    ? session.send(work.address(), personalized.subject(), body)
+                    : session.send(work.address(), personalized.subject(), body, personalized.attachments());
+        }
         catch (RuntimeException failure) {
             // A transport timeout may occur after the provider accepted a message.
             boolean knownFailure = failure instanceof NotificationTransportException transport && transport.isDefinitelyRejected();

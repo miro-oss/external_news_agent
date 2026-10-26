@@ -4,6 +4,8 @@ import com.example.be.domain.analysis.agent.client.AgentClientException;
 import com.example.be.domain.analysis.agent.config.AgentProperties;
 import com.example.be.domain.analysis.agent.entity.AgentPlan;
 import com.example.be.domain.analysis.agent.entity.AgentTask;
+import com.example.be.domain.settings.dto.LlmSettingDTO;
+import com.example.be.domain.settings.entity.PaidExhaustedAction;
 import com.example.be.domain.settings.exception.LlmException;
 import com.example.be.domain.settings.service.LlmPlanService;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,20 +13,24 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -49,6 +55,138 @@ class AgentQuotaServiceTest {
         service = new AgentQuotaService(repository, properties, planService);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "1.5", "5"})
+    void weeklySchemaFailureRetainsObservedPaidUsage(String credits) {
+        var reservation = new QuotaReservation(1L, null, "weekly-report:77", AgentTask.REPORT,
+                AgentPlan.PAID, new BigDecimal("5"));
+        var actual = new BigDecimal(credits);
+        service.completeObservedFailure(reservation, new AgentClientException("SCHEMA_VIOLATION", "invalid", null,
+                new AgentClientException.Usage(30L, 20L, BigDecimal.ZERO, actual)));
+        verify(repository).consume(eq(reservation), eq(actual), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test
+    void weeklyReadTimeoutWithoutMeasuredUsageStillConsumesReservedQuota() {
+        var reservation = reservation(AgentTask.REPORT, AgentPlan.PAID);
+        service.completeObservedFailure(reservation, new AgentClientException("PROVIDER_UNAVAILABLE", "timeout", null,
+                null, AgentClientException.TimeoutPhase.READ));
+        verify(repository).consume(eq(reservation), eq(reservation.reservedUnits()), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test
+    void weeklyConnectFailureWithoutUsageReleasesReservation() {
+        var reservation = reservation(AgentTask.REPORT, AgentPlan.PAID);
+        service.completeObservedFailure(reservation, new AgentClientException("PROVIDER_UNAVAILABLE", "offline", null,
+                null, AgentClientException.TimeoutPhase.CONNECT));
+        verify(repository).release(eq(reservation), any(LocalDateTime.class));
+        verify(repository, never()).consume(any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"PARTIAL,0", "PARTIAL,1", "PARTIAL,5", "UNKNOWN,0", "UNKNOWN,1", "UNKNOWN,5"})
+    void reportInsightIncompleteStageTotalsRetainFullPaidAllowance(String completeness, String credits) {
+        var reservation = reservation(AgentTask.INSIGHT, AgentPlan.PAID);
+        service.completeObservedFailure(reservation, reportFailure(completeness, new BigDecimal(credits)));
+        verify(repository).consume(eq(reservation), eq(reservation.reservedUnits()), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test
+    void reportInsightCompleteFailureSettlesExactObservedUsage() {
+        var reservation = reservation(AgentTask.INSIGHT, AgentPlan.PAID);
+        service.completeObservedFailure(reservation, reportFailure("COMPLETE", BigDecimal.ONE));
+        verify(repository).consume(eq(reservation), eq(BigDecimal.ONE), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PARTIAL", "UNKNOWN"})
+    void reportInsightUnobservedCallsRetainReservationWithoutAnyUsage(String completeness) {
+        var reservation = reservation(AgentTask.INSIGHT, AgentPlan.PAID);
+        service.completeObservedFailure(reservation, new AgentClientException("PROVIDER_UNAVAILABLE", "failed", null,
+                null, AgentClientException.TimeoutPhase.NONE, new AgentClientException.ExecutionMetadata(
+                "openai", "model", "report-insight.ko.v4", "AGENT_ERROR", completeness)));
+        verify(repository).consume(eq(reservation), eq(reservation.reservedUnits()), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test
+    void reportInsightMalformedUsageCannotClaimAnExactSettlement() {
+        var reservation = reservation(AgentTask.INSIGHT, AgentPlan.PAID);
+        service.completeObservedFailure(reservation, new AgentClientException("SCHEMA_VIOLATION", "invalid", null,
+                new AgentClientException.Usage(30L, 20L, null, BigDecimal.ONE)));
+        verify(repository).consume(eq(reservation), eq(reservation.reservedUnits()), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test
+    void reportInsightUnknownFailureWithNoMetadataStillRetainsReservation() {
+        var reservation = reservation(AgentTask.INSIGHT, AgentPlan.PAID);
+        service.completeObservedFailure(reservation, new AgentClientException("PROVIDER_UNAVAILABLE", "failed"));
+        verify(repository).consume(eq(reservation), eq(reservation.reservedUnits()), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test
+    void reportInsightBackendConnectTimeoutBeforeDispatchReleasesReservation() {
+        var reservation = reservation(AgentTask.INSIGHT, AgentPlan.PAID);
+        service.completeObservedFailure(reservation, new AgentClientException("PROVIDER_UNAVAILABLE", "offline", null,
+                null, AgentClientException.TimeoutPhase.CONNECT));
+        verify(repository).release(eq(reservation), any(LocalDateTime.class));
+        verify(repository, never()).consume(any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PARTIAL", "UNKNOWN"})
+    void reportInsightKnownOverCapExposureKeepsAuditAsUsageAuthority(String completeness) {
+        var reservation = reservation(AgentTask.INSIGHT, AgentPlan.PAID);
+        service.completeObservedFailure(reservation, reportFailure(completeness, new BigDecimal("6")));
+        verify(repository).release(eq(reservation), any(LocalDateTime.class));
+        verify(repository, never()).consume(any(), any(), any());
+    }
+
+    @Test
+    void reportInsightUnknownPaidUsageDoesNotTurnFreeCallsIntoCredits() {
+        var reservation = new QuotaReservation(1L, null, "report-insight:77:hash", AgentTask.INSIGHT,
+                AgentPlan.FREE, BigDecimal.ONE);
+        service.completeObservedFailure(reservation, reportFailure("PARTIAL", new BigDecimal("6")));
+        verify(repository).consume(eq(reservation), eq(BigDecimal.ONE), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test
+    void uncertainChargeBlocksARepeatReportInsightWhenOnlyStageSubtotalWouldFit() {
+        properties.getQuota().setPaidDailyInsightCap(7);
+        var charged = new AtomicReference<>(BigDecimal.ZERO);
+        var original = new QuotaReservation(1L, null, "report-insight:77:hash", AgentTask.INSIGHT,
+                AgentPlan.PAID, new BigDecimal("5"));
+        doAnswer(call -> { charged.set(call.getArgument(1)); return null; })
+                .when(repository).consume(eq(original), any(), any());
+        when(repository.usage(any(AgentPlan.class), any(LocalDateTime.class), any(LocalDateTime.class)))
+                .thenAnswer(call -> call.getArgument(0) == AgentPlan.PAID ? charged.get() : BigDecimal.ZERO);
+        when(repository.usage(any(AgentPlan.class), any(LocalDateTime.class), any(LocalDateTime.class), any(AgentTask.class)))
+                .thenAnswer(call -> call.getArgument(0) == AgentPlan.PAID && call.getArgument(3) == AgentTask.INSIGHT
+                        ? charged.get() : BigDecimal.ZERO);
+        when(repository.findStatusByIdempotencyKey(original.idempotencyKey())).thenReturn(Optional.of("CONSUMED"));
+        when(repository.isFailedReportInsight(original.idempotencyKey())).thenReturn(true);
+
+        service.completeObservedFailure(original, reportFailure("PARTIAL", BigDecimal.ONE));
+        assertThrows(QuotaExceededException.class,
+                () -> service.reserveReportInsight(null, original.idempotencyKey(), AgentPlan.PAID));
+        assertEquals(new BigDecimal("5"), charged.get());
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    private AgentClientException reportFailure(String completeness, BigDecimal credits) {
+        return new AgentClientException("PROVIDER_UNAVAILABLE", "failed stage", null,
+                new AgentClientException.Usage(30L, 20L, BigDecimal.ZERO, credits),
+                AgentClientException.TimeoutPhase.NONE, new AgentClientException.ExecutionMetadata(
+                "openai", "model", "report-insight.ko.v4", "AGENT_ERROR", completeness));
+    }
+
     @Test
     void serializesCheckBeforeInsertAndLeavesReportReserveUntouched() {
         stubUsage(BigDecimal.ZERO, new BigDecimal("65"), new BigDecimal("65"), new BigDecimal("100"));
@@ -66,6 +204,25 @@ class AgentQuotaServiceTest {
         order.verify(repository).insert(
                 eq(42L), eq("run:42:article:10"), eq(AgentTask.ANALYZE),
                 eq(AgentPlan.PAID), eq(new BigDecimal("5")), any(LocalDateTime.class));
+        verify(repository, never()).freeEstimatedCost(any(), any());
+    }
+
+    @Test
+    void usageReportsRecordedEstimateForItsDailyWindow() {
+        when(planService.get()).thenReturn(new LlmSettingDTO.PlanResponse(
+                AgentPlan.FREE, true, PaidExhaustedAction.FALLBACK_FREE));
+        BigDecimal estimate = new BigDecimal("0.123456");
+        when(repository.freeEstimatedCost(any(), any())).thenReturn(estimate);
+
+        LlmSettingDTO.UsageResponse response = service.usage();
+
+        assertEquals(estimate, response.free().dailyEstimatedCostUsd());
+        ArgumentCaptor<LocalDateTime> start = ArgumentCaptor.forClass(LocalDateTime.class);
+        ArgumentCaptor<LocalDateTime> end = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(repository).freeEstimatedCost(start.capture(), end.capture());
+        assertEquals(response.free().resetAt().toLocalDateTime(), end.getValue());
+        assertEquals(end.getValue().minusDays(1), start.getValue());
+        assertEquals(0, start.getValue().getHour());
     }
 
     @Test
@@ -80,6 +237,50 @@ class AgentQuotaServiceTest {
                 AgentPlan.FREE));
 
         verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test void unstartedAdmissionSettlesZeroWithoutDiscardingReservation() {
+        var reservation = reservation(AgentTask.TOPIC_RELEVANCE, AgentPlan.FREE);
+        var failure = new AgentClientException("PROVIDER_UNAVAILABLE", "busy", null, null,
+                AgentClientException.TimeoutPhase.NONE, null, null, null,
+                new AgentClientException.AdmissionRejection());
+        service.completeFailure(reservation, failure);
+        verify(repository).consume(eq(reservation), eq(BigDecimal.ZERO), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
+    @Test void admissionReentryRequiresZeroSettlementAndMatchingAuditBeforeUsingNewKey() {
+        String key = "topic-relevance:42:7:hash";
+        String next = key + ":admission:1";
+        var reservation = new QuotaReservation(2L, 42L, next, AgentTask.TOPIC_RELEVANCE, AgentPlan.FREE, BigDecimal.ONE);
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of("CONSUMED"));
+        when(repository.isUnstartedRelevanceAdmission(key)).thenReturn(true);
+        when(repository.findByIdempotencyKey(next)).thenReturn(Optional.of(reservation));
+        assertEquals(reservation, service.reserve(42L, key, AgentTask.TOPIC_RELEVANCE, AgentPlan.FREE));
+        verify(repository).insert(eq(42L), eq(next), eq(AgentTask.TOPIC_RELEVANCE), eq(AgentPlan.FREE),
+                eq(BigDecimal.ONE), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+        verify(repository, never()).consume(any(), any(), any());
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"RESERVED", "RELEASED", "CONSUMED"})
+    void otherRelevanceFailuresCannotBeResubmittedAsAdmissionRetries(String status) {
+        String key = "topic-relevance:42:7:hash";
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of(status));
+        assertThrows(DuplicateQuotaReservationException.class,
+                () -> service.reserve(42L, key, AgentTask.TOPIC_RELEVANCE, AgentPlan.FREE));
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test void admissionFlagWithObservedPaidUsageStillSettlesActualCharge() {
+        var reservation = reservation(AgentTask.TOPIC_RELEVANCE, AgentPlan.PAID);
+        var failure = new AgentClientException("PROVIDER_UNAVAILABLE", "later busy", null,
+                new AgentClientException.Usage(10L, 3L, new BigDecimal("0.1"), BigDecimal.ONE),
+                AgentClientException.TimeoutPhase.NONE, null, null, null,
+                new AgentClientException.AdmissionRejection());
+        service.completeFailure(reservation, failure);
+        verify(repository).consume(eq(reservation), eq(BigDecimal.ONE), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
     }
 
     @Test
@@ -115,6 +316,28 @@ class AgentQuotaServiceTest {
         verify(repository, never()).insert(any(), eq(key), any(), any(), any(), any());
         verify(repository, never()).release(any(), any());
         verify(repository, never()).consume(any(), any(), any());
+    }
+
+    @Test
+    void chargedFailedReportInsightCanRetryWithoutReleasingOrReplacingOriginalCharge() {
+        String key = "report-insight:10:failed";
+        String retryKey = key + ":retry:1";
+        var retry = new QuotaReservation(2L, null, retryKey, AgentTask.INSIGHT, AgentPlan.FREE, BigDecimal.ONE);
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of("CONSUMED"));
+        when(repository.isFailedReportInsight(key)).thenReturn(true);
+        when(repository.findByIdempotencyKey(retryKey)).thenReturn(Optional.of(retry));
+        assertEquals(retry, service.reserveReportInsight(null, key, AgentPlan.FREE));
+        verify(repository).insert(eq(null), eq(retryKey), eq(AgentTask.INSIGHT), eq(AgentPlan.FREE), eq(BigDecimal.ONE), any());
+        verify(repository, never()).release(any(), any());
+        verify(repository, never()).consume(any(), any(), any());
+    }
+
+    @Test
+    void consumedReportInsightWithoutFailedAuditCannotRetry() {
+        String key = "report-insight:10:success";
+        when(repository.findStatusByIdempotencyKey(key)).thenReturn(Optional.of("CONSUMED"));
+        assertThrows(DuplicateQuotaReservationException.class, () -> service.reserveReportInsight(null, key, AgentPlan.FREE));
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -252,6 +475,26 @@ class AgentQuotaServiceTest {
         verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
     }
 
+    @ParameterizedTest
+    @EnumSource(value=AgentTask.class,names={"TOPIC_RELEVANCE","FEEDBACK_REVIEW","FEEDBACK_EVALUATE"})
+    void relevanceAndFeedbackCannotConsumePaidReportReserve(AgentTask task) {
+        stubUsage(BigDecimal.ZERO, new BigDecimal("70"), new BigDecimal("70"), new BigDecimal("100"));
+        assertThrows(QuotaExceededException.class, () -> service.reserve(
+                42L, "topic-relevance:42", task, AgentPlan.PAID));
+        verify(repository, never()).insert(any(), any(), any(), any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value=AgentTask.class,names={"TOPIC_RELEVANCE","FEEDBACK_REVIEW","FEEDBACK_EVALUATE"})
+    void relevanceAndFeedbackFailureWithKnownChargesConsumesObservedQuota(AgentTask task) {
+        QuotaReservation reservation = reservation(task, AgentPlan.PAID);
+        var credits = new BigDecimal("1.2345");
+        service.completeFailure(reservation, new AgentClientException("SCHEMA_VIOLATION", "invalid grounding", null,
+                new AgentClientException.Usage(100L, 25L, new BigDecimal("0.0000004"), credits)));
+        verify(repository).consume(eq(reservation), eq(credits), any(LocalDateTime.class));
+        verify(repository, never()).release(any(), any());
+    }
+
     @Test
     void selfCritiqueCannotConsumePaidReportReserve() {
         stubUsage(BigDecimal.ZERO, new BigDecimal("70"), new BigDecimal("70"),
@@ -313,12 +556,12 @@ class AgentQuotaServiceTest {
 
     @Test
     void investigationCannotReserveBeyondFifteenPercentOfFreeDailyCalls() {
-        stubUsage(new BigDecimal("225"), BigDecimal.ZERO, BigDecimal.ZERO,
+        stubUsage(new BigDecimal("450"), BigDecimal.ZERO, BigDecimal.ZERO,
                 BigDecimal.ZERO);
         when(repository.usage(
                 eq(AgentPlan.FREE), any(LocalDateTime.class), any(LocalDateTime.class),
                 eq(AgentTask.INVESTIGATE)))
-                .thenReturn(new BigDecimal("225"));
+                .thenReturn(new BigDecimal("450"));
         when(repository.usage(
                 eq(AgentPlan.PAID), any(LocalDateTime.class), any(LocalDateTime.class),
                 eq(AgentTask.INVESTIGATE)))

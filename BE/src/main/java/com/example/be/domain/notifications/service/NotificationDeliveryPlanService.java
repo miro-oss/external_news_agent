@@ -16,6 +16,8 @@ import com.example.be.domain.reports.entity.ReportStatus;
 import com.example.be.domain.reports.exception.ReportException;
 import com.example.be.domain.reports.exception.code.ReportErrorCode;
 import com.example.be.domain.reports.repository.NewsReportRepository;
+import com.example.be.global.apiPayload.code.GeneralErrorCode;
+import com.example.be.global.apiPayload.exception.GeneralException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,13 +39,15 @@ public class NotificationDeliveryPlanService {
     private final NotificationManagementService managementService;
     private final NotificationRenderer renderer;
     private final NotificationProperties properties;
+    private final PersonalizedNotificationRenderer personalizedRenderer;
+    private final ReportNotificationInsightService insightService;
 
     @Transactional(readOnly = true)
     public void requireReport(Long reportId) {
         findReport(reportId);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public PreparedDelivery prepare(Long reportId, NotificationReqDTO.Send request) {
         NewsReport report = findReport(reportId);
         List<NotificationChannel> channels = resolveChannels(request.getChannelIds());
@@ -55,9 +59,26 @@ public class NotificationDeliveryPlanService {
                     Map.of("groupIds", request.getGroupIds() == null ? List.of() : request.getGroupIds()));
         }
 
+        var insight = request.getInsightAudience() == null ? null : insightService.find(reportId, request.getInsightAudience());
         Map<Long, RenderedNotification> renderedByChannel = new LinkedHashMap<>();
-        channels.forEach(channel -> renderedByChannel.put(channel.getId(), renderer.render(report, channel)));
-        return new PreparedDelivery(reportId, targets, renderedByChannel);
+        channels.forEach(channel -> renderedByChannel.put(channel.getId(), insight == null
+                ? renderer.render(report, channel) : renderer.render(report, channel, insight)));
+        Map<String, RenderedNotification> renderedByTarget = new LinkedHashMap<>();
+        GeneralException personalizationPending = null;
+        for (PreparedTarget target : targets) {
+            try {
+                renderedByTarget.put(target.recipientId() + ":" + target.channel().getId(),
+                        insight == null ? personalizedRenderer.render(report, target.channel(), target.recipientId())
+                                : personalizedRenderer.render(report, target.channel(), target.recipientId(), insight));
+            } catch (GeneralException failure) {
+                if (failure.getCode() != GeneralErrorCode.CONFLICT) throw failure;
+                // Every selected recipient must enqueue its evaluation before the caller waits.
+                // Evaluation jobs commit independently; this plan never reaches external delivery.
+                if (personalizationPending == null) personalizationPending = failure;
+            }
+        }
+        if (personalizationPending != null) throw personalizationPending;
+        return new PreparedDelivery(reportId, targets, renderedByChannel, renderedByTarget);
     }
 
     @Transactional(readOnly = true)
@@ -144,7 +165,16 @@ public class NotificationDeliveryPlanService {
 
     public record PreparedDelivery(Long reportId,
                                    List<PreparedTarget> targets,
-                                   Map<Long, RenderedNotification> renderedByChannel) {
+                                   Map<Long, RenderedNotification> renderedByChannel,
+                                   Map<String, RenderedNotification> renderedByTarget) {
+        public PreparedDelivery(Long reportId, List<PreparedTarget> targets, Map<Long, RenderedNotification> renderedByChannel) {
+            this(reportId, targets, renderedByChannel, Map.of());
+        }
+
+        public RenderedNotification rendered(PreparedTarget target) {
+            return renderedByTarget.getOrDefault(target.recipientId() + ":" + target.channel().getId(),
+                    renderedByChannel.get(target.channel().getId()));
+        }
     }
 
     public record PreparedWatchDelivery(

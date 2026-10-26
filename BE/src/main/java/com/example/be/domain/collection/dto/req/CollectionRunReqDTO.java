@@ -52,6 +52,9 @@ public class CollectionRunReqDTO {
         @Schema(description = "이 실행을 포함하는 일일 통합 보고서 전달. 다른 주제 내용도 포함됩니다. 생략 시 false", defaultValue = "false")
         private Boolean daily;
 
+        @Schema(description = "주간 통합 보고서 정기 전달. TOPIC에서만 true 허용. 생략 시 false", defaultValue = "false")
+        private Boolean weekly;
+
         @Schema(description = "수신 그룹 ID. 양수 최대 100개, 중복 제거")
         private List<Long> groupIds;
 

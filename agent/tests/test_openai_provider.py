@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import httpx2
 import pytest
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 from pydantic import ValidationError
 
 from app.core.config import Settings
@@ -139,6 +139,9 @@ def assert_strict(schema):
         ("gpt-4.1-nano-2025-04-14", "0.000125"),
         ("gpt-4o-mini", "0.000195"),
         ("gpt-4o-mini-2024-07-18", "0.000195"),
+        ("gpt-5-mini", "0.000405"),
+        ("gpt-5-mini-2025-08-07", "0.000405"),
+        ("gpt-5.6-terra", "0.00284"),
         ("unknown-model", "0"),
     ],
 )
@@ -146,6 +149,82 @@ def test_model_specific_cost(model, cost):
     with client_for(lambda _: httpx2.Response(200, json=response_body())) as client:
         result = generate(OpenAIAnalyzeProvider(Settings(OPENAI_MODEL=model), client))
     assert result.model == model
+    assert result.usage.cost_usd == Decimal(cost)
+
+
+@pytest.mark.parametrize(("model", "effort", "token_limit", "cost"), [
+    ("gpt-5-mini", "low", 4096, "0.002405"),
+    ("gpt-5-mini-2025-08-07", "low", 4096, "0.002405"),
+    ("gpt-5.6-terra", "medium", 6144, "0.01484"),
+])
+def test_known_reasoning_models_omit_temperature_and_bill_total_output(
+    model, effort, token_limit, cost,
+):
+    requests = []
+    body = response_body()
+    body["model"] = model
+    body["output"].insert(0, {"id": "rs_test", "type": "reasoning", "summary": []})
+    body["usage"].update(output_tokens=1100, output_tokens_details={"reasoning_tokens": 1000},
+                         total_tokens=2100)
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx2.Response(200, json=body)
+
+    with client_for(handler) as client:
+        settings = Settings(OPENAI_MODEL=model, AGENT_MAX_OUTPUT_TOKENS=token_limit)
+        result = generate(OpenAIAnalyzeProvider(settings, client))
+
+    assert requests[0]["model"] == result.model == model
+    assert requests[0]["reasoning"] == {"effort": effort}
+    assert "temperature" not in requests[0]
+    assert requests[0]["max_output_tokens"] == token_limit
+    assert requests[0]["text"]["format"]["strict"] is True
+    assert requests[0]["store"] is False
+    assert result.text == '{"ok":true}'
+    assert result.usage.output_tokens == 1100
+    assert result.usage.cost_usd == Decimal(cost)
+
+
+@pytest.mark.parametrize("model", [
+    "gpt-4.1-nano-2025-04-14", "gpt-4o-mini", "gpt-4o-mini-2024-07-18",
+    "gpt-5-mini-experimental", "gpt-5.6-terra-experimental",
+])
+def test_reasoning_branch_does_not_change_other_or_unrecognized_models(model):
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx2.Response(200, json=response_body())
+
+    with client_for(handler) as client:
+        generate(OpenAIAnalyzeProvider(Settings(OPENAI_MODEL=model), client))
+
+    assert requests[0]["temperature"] == 0
+    assert "reasoning" not in requests[0]
+
+
+@pytest.mark.parametrize(("model", "token_limit", "cost"), [
+    ("gpt-5-mini", 4096, "0.008397"),
+    ("gpt-5.6-terra", 6144, "0.075368"),
+])
+def test_reasoning_only_token_limit_keeps_empty_output_and_billed_usage(
+    model, token_limit, cost,
+):
+    body = response_body(status="incomplete", reason="max_output_tokens")
+    body["model"] = model
+    body["output"] = [{"id": "rs_test", "type": "reasoning", "summary": []}]
+    body["usage"].update(output_tokens=token_limit,
+                         output_tokens_details={"reasoning_tokens": token_limit},
+                         total_tokens=1000 + token_limit)
+
+    with client_for(lambda _: httpx2.Response(200, json=body)) as client:
+        settings = Settings(OPENAI_MODEL=model, AGENT_MAX_OUTPUT_TOKENS=token_limit)
+        result = generate(OpenAIAnalyzeProvider(settings, client))
+
+    assert result.text == "" and result.truncated is True
+    assert result.usage.input_tokens == 1000
+    assert result.usage.output_tokens == token_limit
     assert result.usage.cost_usd == Decimal(cost)
 
 
@@ -261,13 +340,14 @@ def test_errors_are_sanitized_and_retries_are_bounded(status, code, retryable, c
     assert "private-upstream-text" not in str(error.value.details) + caplog.text
 
 
-def test_request_error_without_code_keeps_only_the_allowlisted_type(caplog):
+@pytest.mark.parametrize("code", [None, "private-unrecognized-code"])
+def test_request_error_without_recognized_code_keeps_only_the_allowlisted_type(code, caplog):
     def handler(_):
         return httpx2.Response(
             400,
             json={
                 "error": {
-                    "code": None,
+                    "code": code,
                     "type": "invalid_request_error",
                     "message": "private-schema-details",
                 }
@@ -280,6 +360,7 @@ def test_request_error_without_code_keeps_only_the_allowlisted_type(caplog):
     assert error.value.details["providerStatus"] == "invalid_request_error"
     assert error.value.details["retryable"] is False
     assert "private-schema-details" not in caplog.text + str(error.value.details)
+    assert "private-unrecognized-code" not in caplog.text + str(error.value.details)
 
 
 def test_shared_rate_limit_policy_retries_openai_429_then_succeeds():
@@ -312,18 +393,49 @@ def test_shared_rate_limit_policy_retries_openai_429_then_succeeds():
     assert waits == [2]
 
 
-def test_quota_exhaustion_is_not_retried_by_shared_policy():
+@pytest.mark.parametrize(
+    "code,error_type,expected_status",
+    [
+        ("insufficient_quota", None, "insufficient_quota"),
+        ("credit_balance_exhausted", "insufficient_quota", "insufficient_quota"),
+        ("private-unrecognized-code", "insufficient_quota", "insufficient_quota"),
+        ("credit_balance_exhausted", None, "credit_balance_exhausted"),
+        ("rate_limit_exceeded", "insufficient_quota", "insufficient_quota"),
+        ("insufficient_quota", "rate_limit_exceeded", "insufficient_quota"),
+    ],
+)
+def test_quota_exhaustion_is_not_retried_by_shared_policy(
+    code, error_type, expected_status, caplog
+):
     requests = []
 
     def handler(request):
         requests.append(request)
-        return httpx2.Response(429, json={"error": {"code": "insufficient_quota"}})
+        return httpx2.Response(
+            429,
+            headers={"retry-after": "2"},
+            json={"error": {"code": code, "type": error_type, "message": "private-quota-message"}},
+        )
 
-    coordinator = ProviderRequestCoordinator(ProviderRequestPolicy(request_interval_seconds=0))
+    waits = []
+    coordinator = ProviderRequestCoordinator(
+        ProviderRequestPolicy(request_interval_seconds=0, rate_limit_retry_attempts=2),
+        clock=lambda: 0,
+        sleeper=waits.append,
+    )
     with client_for(handler) as client:
-        with pytest.raises(AgentError):
+        with pytest.raises(AgentError) as caught:
             generate(PacedRetryProvider(OpenAIAnalyzeProvider(Settings(), client), coordinator))
     assert len(requests) == 1
+    assert waits == []
+    assert isinstance(caught.value.__cause__, RateLimitError)
+    assert caught.value.__cause__.code == code
+    assert caught.value.__cause__.type == error_type
+    assert caught.value.details["providerStatus"] == expected_status
+    assert caught.value.details["retryable"] is False
+    assert caught.value.details["rateLimited"] is True
+    assert "private-quota-message" not in caplog.text + str(caught.value.details)
+    assert "private-unrecognized-code" not in caplog.text + str(caught.value.details)
 
 
 @pytest.mark.parametrize("header", [None, "", "nan", "inf", "-1", "invalid"])

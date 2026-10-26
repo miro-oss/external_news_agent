@@ -9,6 +9,7 @@ from app.core.errors import AgentError
 from app.llm.base import ProviderResponse, ProviderUsage
 from app.llm.insight_draft import OpenAIInsightDraft
 from app.llm.insight_service import PROMPT_VERSION, SYSTEM_INSTRUCTION, InsightService
+from app.llm.request_contract import insight_schema
 from app.schemas.insight import InsightOutput, InsightRequest
 
 
@@ -264,6 +265,26 @@ def test_repairs_invalid_finding_reference_once() -> None:
     assert response.insights[0].facts[0].finding_id == 501
     assert len(provider.prompts) == 2
     assert "validation-error" in provider.prompts[1]
+    assert "findingId=999" in provider.prompts[1]
+    assert "allowedFindingIds=[501]" in provider.prompts[1]
+    assert provider.schemas[0] == provider.schemas[1]
+
+
+def test_repeated_invalid_finding_reference_fails_after_one_repair() -> None:
+    invalid = output()
+    invalid["insights"][0]["factGroups"][0]["facts"][0]["findingId"] = 999
+    provider = FakeProvider(provider_response(invalid), provider_response(invalid))
+
+    with pytest.raises(AgentError) as error:
+        InsightService(Settings(AGENT_MOCK=False), provider).generate(request())
+
+    assert error.value.status_code == 502
+    assert error.value.code == "SCHEMA_VIOLATION"
+    assert len(provider.prompts) == 2
+    assert "findingId=999" in provider.prompts[1]
+    assert "allowedFindingIds=[501]" in provider.prompts[1]
+    assert error.value.details["executionMetadata"]["provider"] == "openai"
+    assert error.value.details["executionMetadata"]["model"] == "gpt-4.1-nano"
 
 
 def test_accepts_fact_grounded_in_history_finding() -> None:
@@ -298,7 +319,7 @@ def test_openai_uses_group_schema_and_returns_only_public_ids() -> None:
 
     response = InsightService(Settings(AGENT_MOCK=False), provider).generate(request())
 
-    assert provider.schemas == [OpenAIInsightDraft.model_json_schema(by_alias=True)]
+    assert provider.schemas == [insight_schema(request())]
     assert "factGroups" in provider.system_instructions[0]
     assert "수집하지 않은 것과 존재하지 않는 것은 다르다" in provider.system_instructions[0]
     schema_text = json.dumps(provider.schemas[0])

@@ -1,0 +1,326 @@
+{
+  "datasetId": "topic-relevance.direct-evidence.v1",
+  "description": "개발자가 작성한 가상 사실의 합성 대조 사례 14건(7쌍). 실제 기사 원문, 사람 정답, 신규 독립 품질 평가 자료가 아니며 expectedStatus는 명세 검증용 개발 기대값이다. 기능·현재 사업 공급관계와 구호·회사 배경·과거 경력·다른 대상·추천 링크를 구별한다. editorial-briefing-substantive-event의 RELEVANT는 여러 사건을 본문에서 실질적으로 보도하면 각각 확인한다는 현재 프롬프트 정책의 기대값이며, 실제 편집 브리핑 기사에 대한 기존 사람 라벨을 수정하거나 그 정책을 새로 승인했다는 뜻이 아니다.",
+  "cases": [
+    {
+      "id": "library-secondary-ai-function",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 101,
+        "name": "인공지능 기술·산업 동향",
+        "queryText": "인공지능",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "AI",
+          "인공지능",
+          "AI 모델",
+          "AI 서비스"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1001,
+        "title": "솔빛도서관, 작은 지점의 장서 부족 줄인다",
+        "summary": null,
+        "bodyText": "솔빛도서관은 주민들이 먼 중앙관까지 가지 않아도 책을 빌릴 수 있도록 지점 운영을 개편한다. 야간 반납함을 늘리고 이동 도서관의 방문 시간을 조정한다. 이번 개편에는 대출 기록을 분석하는 AI 서비스도 포함된다. AI가 지점별 다음 달 도서 수요를 예측하면 도서관은 예측 결과에 따라 보관 중인 책을 지점 사이에 재배치한다. 도서관은 주민 설명회를 열어 변경된 운영 일정을 안내한다."
+      }
+    },
+    {
+      "id": "library-ai-era-slogan-only",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 101,
+        "name": "인공지능 기술·산업 동향",
+        "queryText": "인공지능",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "AI",
+          "인공지능",
+          "AI 모델",
+          "AI 서비스"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1002,
+        "title": "솔빛도서관, 주민 독서 행사 확대",
+        "summary": null,
+        "bodyText": "솔빛도서관은 야간 독서 모임과 작가 초청 행사를 늘린다. 이동 도서관의 방문 시간도 조정하고 자원봉사자가 어린이에게 책을 읽어 주는 시간을 마련한다. 관장은 AI 시대에도 함께 읽는 경험이 중요하다고 말했다. 행사 신청은 기존 전화 접수 방식으로 받는다."
+      }
+    },
+    {
+      "id": "industrial-gas-current-business-supply",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 102,
+        "name": "반도체 제조와 장비 사업",
+        "queryText": "반도체 제조",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "반도체 장비",
+          "반도체 공정",
+          "웨이퍼",
+          "공급계약"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1003,
+        "title": "다온가스, 고객사 장기 공급계약 체결",
+        "summary": null,
+        "bodyText": "산업용 가스 기업 다온가스는 반도체 장비 제조사 새온정밀과 질소 공급계약을 체결했다. 다온가스는 새온정밀 사업장에 저장 탱크를 설치하고 정기 충전과 배관 점검 서비스를 제공한다. 양사는 공급 중단을 막기 위한 비상 충전 일정도 계약에 포함했다. 이번 계약은 가스 공급과 설비 유지관리 사업이며 새로운 반도체 장비나 제조 공정을 개발하는 사업은 아니다."
+      }
+    },
+    {
+      "id": "industrial-gas-customer-background-only",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 102,
+        "name": "반도체 제조와 장비 사업",
+        "queryText": "반도체 제조",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "반도체 장비",
+          "반도체 공정",
+          "웨이퍼",
+          "공급계약"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1004,
+        "title": "다온가스, 지역 음악회 후원",
+        "summary": null,
+        "bodyText": "산업용 가스 기업 다온가스는 지역 청소년 음악회를 후원한다. 후원금은 악기 대여와 연습실 운영에 사용된다. 공연은 주말 시민회관에서 열리며 주민은 무료로 입장할 수 있다. 회사 소개에 따르면 다온가스는 식품·의료·반도체 장비 기업을 고객으로 두고 있다. 이번 발표에는 고객사와의 거래나 공급 조건 변경 내용이 없다."
+      }
+    },
+    {
+      "id": "coastal-cleanup-secondary-ai-function",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 101,
+        "name": "인공지능 기술·산업 동향",
+        "queryText": "인공지능",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "AI",
+          "인공지능",
+          "AI 모델",
+          "AI 서비스"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1005,
+        "title": "해솔군, 주민과 함께 해안 정화 사업 시작",
+        "summary": null,
+        "bodyText": "해솔군은 주민 봉사단과 함께 해안 쓰레기를 수거한다. 집결 장소와 안전교육 시간을 공지하고 수거 장갑을 나눠 준다. 새로 도입한 AI는 드론 영상에서 폐기물의 종류와 위치를 분류한다. 담당자는 이 분석 결과로 수거 차량의 방문 순서를 정한다. 행사 후에는 수거량을 공개하고 다음 봉사 일정을 안내한다."
+      }
+    },
+    {
+      "id": "coastal-cleanup-smart-dashboard-only",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 101,
+        "name": "인공지능 기술·산업 동향",
+        "queryText": "인공지능",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "AI",
+          "인공지능",
+          "AI 모델",
+          "AI 서비스"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1006,
+        "title": "해솔군, 스마트 해안 정화 게시판 운영",
+        "summary": null,
+        "bodyText": "해솔군은 주민 봉사단의 수거 기록을 모으는 온라인 게시판을 운영한다. 담당자가 폐기물 위치와 수량을 직접 입력하면 지도에 표시된다. 수거 차량의 방문 순서는 담당자가 전화로 조율한다. 군은 AI 시대를 준비하는 스마트 지역이라는 홍보 문구를 사용했지만 이번 게시판의 기능은 수기 입력 자료의 표시와 공유다."
+      }
+    },
+    {
+      "id": "solid-state-electrolyte-specific-target",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 103,
+        "name": "전고체 배터리 기술과 생산",
+        "queryText": "전고체 배터리",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "배터리",
+          "전해질",
+          "생산라인"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1007,
+        "title": "누리전지, 고체전해질 생산라인 가동",
+        "summary": null,
+        "bodyText": "누리전지는 전고체 배터리 셀에 사용할 황화물계 고체전해질 생산라인을 가동했다. 액체 대신 고체전해질을 사용하는 고객사의 셀 설계에 맞춰 입자 크기와 이온전도도를 검사한다. 회사는 이번 생산분을 전고체 셀 시험 생산에 공급한다고 밝혔다."
+      }
+    },
+    {
+      "id": "liquid-electrolyte-broader-target",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 103,
+        "name": "전고체 배터리 기술과 생산",
+        "queryText": "전고체 배터리",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "배터리",
+          "전해질",
+          "생산라인"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1008,
+        "title": "누리전지, 리튬이온 전지 소재 생산 확대",
+        "summary": null,
+        "bodyText": "누리전지는 액체전해질을 사용하는 기존 리튬이온 전지용 전해액 생산라인을 증설했다. 신규 물량은 전동공구용 전지에 공급한다. 이번 증설에는 고체전해질이나 전고체 배터리 제품이 포함되지 않는다. 회사는 일반 배터리 시장의 주문 증가에 대응한 투자라고 설명했다."
+      }
+    },
+    {
+      "id": "data-center-current-cooling-contract",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 104,
+        "name": "AI 데이터센터 냉각",
+        "queryText": "AI 데이터센터 냉각",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "데이터센터",
+          "서버",
+          "냉각",
+          "열관리"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1009,
+        "title": "마루열관리, 액침냉각 장치 공급계약 체결",
+        "summary": null,
+        "bodyText": "마루열관리는 새로 건설되는 AI 서버 데이터센터에 액침냉각 장치를 공급한다. 서버를 절연 냉각액에 담가 연산 중 발생하는 열을 제거하고, 회수한 열은 외부 열교환기로 전달한다. 공급계약에는 냉각장치 설치와 실제 서버 부하를 이용한 시운전이 포함된다."
+      }
+    },
+    {
+      "id": "data-center-founder-history-only",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 104,
+        "name": "AI 데이터센터 냉각",
+        "queryText": "AI 데이터센터 냉각",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "데이터센터",
+          "서버",
+          "냉각",
+          "열관리"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1010,
+        "title": "마루농업, 온실 관개 장치 출시",
+        "summary": null,
+        "bodyText": "마루농업은 토양 수분 센서가 밸브를 여닫는 온실 관개 장치를 출시했다. 이번 제품은 농가의 물 사용량을 줄이는 데 쓰인다. 창업자는 이전 직장에서 데이터센터 냉각 설비를 관리한 경력이 있다고 소개했다. 현재 제품과 사업은 온실 관개에 관한 것이며 데이터센터용 서비스는 제공하지 않는다."
+      }
+    },
+    {
+      "id": "editorial-briefing-substantive-event",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 102,
+        "name": "반도체 제조와 장비 사업",
+        "queryText": "반도체 제조",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "반도체 장비",
+          "반도체 공정",
+          "웨이퍼",
+          "공급계약"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1011,
+        "title": "지역 산업 주간 브리핑: 운송·제조·유통 소식",
+        "summary": null,
+        "bodyText": "편집부가 이번 주의 산업 소식 세 가지를 정리했다. 첫째, 지역 운송 조합은 버스 배차 간격을 조정한다. 둘째, 새길반도체는 새 웨이퍼 공장에 설치할 식각 장비를 주문했다. 장비는 생산라인에 반입된 뒤 공정 조건 검증을 거쳐 양산에 사용된다. 셋째, 지역 소매점 연합은 공동 배송 서비스를 시작한다. 각 항목은 이번 브리핑을 위해 편집부가 취재해 작성한 본문이다."
+      }
+    },
+    {
+      "id": "recommended-link-title-only",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 102,
+        "name": "반도체 제조와 장비 사업",
+        "queryText": "반도체 제조",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "반도체 장비",
+          "반도체 공정",
+          "웨이퍼",
+          "공급계약"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1012,
+        "title": "지역 소매점 연합, 공동 배송 시작",
+        "summary": null,
+        "bodyText": "지역 소매점 연합이 주민 대상 공동 배송 서비스를 시작했다. 가게별 주문을 한곳에 모아 하루 두 번 배송하고 배송비는 가게들이 나눠 부담한다. 시범 운영 이후 주문량과 주민 만족도를 조사한다. [기사 본문 끝] 추천 기사 링크: 새길반도체, 웨이퍼 공장용 식각 장비 주문. 인기 기사 링크: 버스 배차 시간 변경."
+      }
+    },
+    {
+      "id": "textile-robot-explicit-ai-function",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 101,
+        "name": "인공지능 기술·산업 동향",
+        "queryText": "인공지능",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "AI",
+          "인공지능",
+          "AI 모델",
+          "AI 서비스"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1013,
+        "title": "이음섬유, 폐의류 선별 로봇 도입",
+        "summary": null,
+        "bodyText": "이음섬유는 폐의류를 재활용하기 위해 선별 로봇을 도입했다. 로봇의 AI 모델은 분광 센서 측정값을 분석해 면·울·합성섬유의 재질을 분류한다. 분류 결과에 따라 집게가 의류를 서로 다른 수거함에 넣는다. 업체는 재질별 분류 정확도를 검증한 뒤 처리량을 늘릴 계획이다."
+      }
+    },
+    {
+      "id": "textile-robot-explicitly-without-ai",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 101,
+        "name": "인공지능 기술·산업 동향",
+        "queryText": "인공지능",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "AI",
+          "인공지능",
+          "AI 모델",
+          "AI 서비스"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 1014,
+        "title": "이음섬유, 색상별 폐의류 선별 로봇 도입",
+        "summary": null,
+        "bodyText": "이음섬유는 폐의류를 색상별로 나누는 선별 로봇을 도입했다. 로봇은 색상 센서의 고정 임계값에 따라 집게를 움직이며 AI 모델이나 학습 기능은 사용하지 않는다. 업체는 AI 전환 시대에 자동화의 기반을 다진다는 홍보 문구를 붙였다. 이번 설비의 동작 방식은 정해진 센서 규칙에 따른 색상 분리다."
+      }
+    }
+  ]
+}

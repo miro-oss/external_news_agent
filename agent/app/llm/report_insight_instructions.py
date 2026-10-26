@@ -1,0 +1,165 @@
+"""Source-bound stage instructions without fictional answer-copying anchors."""
+
+from pathlib import Path
+
+from app.schemas.analyze import Audience
+
+_ROOT = Path(__file__).resolve().parents[1] / "prompts"
+_BASE = (_ROOT / "report-insight.ko.v15.md").read_text(encoding="utf-8").strip()
+_RUBRIC = (_ROOT / "report-importance.v6.md").read_text(encoding="utf-8").strip()
+_REDUCE_RULES = (_ROOT / "report-insight-reduce.ko.v1.md").read_text(encoding="utf-8").strip()
+REPORT_YEAR_UNIT_RULE = (
+    "모델이 작성하는 자연어 설명에 연도를 쓰면 각 값에 '년'을 붙인다. "
+    "범위 양끝의 연도·단위를 생략하거나 두 자리로 줄이지 않는다. "
+    "선택 원문의 연도와 순서를 유지하며, 다른 수치·ID·원문 인용은 바꾸지 않는다."
+)
+REPORT_ANALYSIS_ONLY_RULE = (
+    "자연어 설명에는 최종 선택 근거에 따른 사건과 판단 근거·한계를 쓴다. "
+    "작성 규칙을 준수했다거나 금지 표현을 넣지 않았다는 설명·면책 문구·수정 보고는 "
+    "출력하지 않는다. 검증 오류 문구를 부정형으로 바꿔 반복하지 않는다."
+)
+ASSESSMENT_PROCEDURE_RULE = (
+    "원문에 없는 절차는 완료 여부가 미확인이라는 설명으로도 추가하지 않는다. "
+    "원문에 명시된 절차와 그 판단 한계는 유지한다."
+)
+ASSESSMENT_CONDITION_RULE = (
+    "condition은 원문 대상이 어떤 실제 업무 대상에 사용·적용되는 경우인지 "
+    "간결한 가정으로 쓴다. 그 가정의 성립이나 영향·완료를 확정하지 않는다. "
+    "절차·조직·부품은 선택한 claim과 연결 sentence에 명시된 경우만 전제로 쓰며, "
+    "원문에 있는 선행 절차는 유지한다."
+)
+ASSESSMENT_REASON_RULE = (
+    "reason은 선택 원문에 따른 업무 연결·영향·시점의 근거·한계를 완결된 1~2문장으로 "
+    "쓴다(120자 안팎, 최대 180자). ID는 구조화 필드에만 두고 근거 선택·검증 해설은 "
+    "덧붙이지 않는다. " + ASSESSMENT_PROCEDURE_RULE
+)
+ASSESSMENT_REPAIR_ORDER_RULE = (
+    "Schema const를 유지하고 decision·basis를 먼저 확정한 뒤 최종 근거로 reason을 쓴다."
+)
+ASSESSMENT_SELECTED_BASIS_RULE = (
+    "각 축은 그 축의 최종 non-null basis가 선택한 claim·연결 원문으로 판단한다. "
+    "reason은 최종 선택 근거만 다시 읽고 쓰며, 같은 finding의 미선택 claim을 섞지 않는다. "
+    "원문의 주체·대상·사건·단계와 조건·가능성을 유지한다. 지원되지 않는 연결을 사실로 "
+    "단정하지 말고, 선택한 사건 범위로 판단과 설명을 좁힌다."
+)
+ASSESSMENT_FINAL_BASIS_RULE = (
+    "보정은 최종 decision을 정한 뒤 마무리한다. connection/effect/timing의 최종 non-null "
+    "basis가 선택한 claim과 연결 sentence만 모아 수정 가능한 reason·condition의 사실 "
+    "표현을 다시 대조한다. 최초 출력에서 정상이었던 문구도 basis가 삭제·교체되면 다시 "
+    "확인한다. 삭제·교체한 basis에만 있던 기업·제품명·수치·날짜·사건은 최종 근거가 "
+    "지원하는 표현으로 다시 쓰고, 문구를 남기려고 지원되지 않는 범주나 basis를 유지하지 "
+    "않는다. Schema const로 고정된 값은 유지한다. 모든 축이 미확인이어도 claim이 있으면 "
+    "같은 finding의 제공 claim·연결 sentence로 보류 사유를 쓰고, 실제 claims=[]인 "
+    "경우에만 고정 reason을 쓴다. 출력 직전 수정 가능한 reason·condition을 확인한다. "
+    "선택 원문의 대상·사건·단계가 해당 업무 판단을 뒷받침하는 이유를 쓰며, "
+    "진단에 지목된 이름이나 표현이 없다는 안내로 대체하지 않는다. "
+    "claimId/sourceSpanId와 업무 범주 코드는 JSON 구조화 필드에만 두고, "
+    "괄호 인용·근거 목록 형태로도 자연어에 복사하지 않는다. "
+    "매매 권고·목표가격을 제시하지 않았다는 면책이나 오류 수정 보고를 덧붙이지 않는다. "
+    "원문에 실제로 명시된 조건·불확실성은 보존한다. " + ASSESSMENT_SELECTED_BASIS_RULE
+)
+
+REPORT_WORK_SCOPE_RULE = (
+    "같은 동작·기업이라도 원문 대상이 다르면 해당 업무의 사실로 대체하지 않는다. "
+    "수반될 수 있는 업무와 실제 확인된 업무를 구분하고, 미확인 연결 전제는 condition에 쓴다."
+)
+REPORT_INVESTMENT_PROSE_RULE = (
+    "거래 동향·기록과 목표주가 조정은 선택 원문이 지원할 때만 서술한다. "
+    "원문 인용·facts와 달리 해석에 매수·매도 등급·목표가격 수치를 옮기지 않는다. "
+    "매매 권고·목표가격 제시는 금지한다."
+)
+
+_ROLES = {
+    "CHIP_MAKER": "칩 제조: 공정 인증·설계 IP/공정 적용·계측/공정 제어 검증 "
+    "PROCESS_QUALIFICATION, "
+    "생산 일정·배분 PRODUCTION_SCHEDULE, "
+    "수율/능력·품질/처리량 분석 YIELD_CAPACITY, 고객 요구·공급 약정 CUSTOMER_REQUIREMENTS, "
+    "소재 확보 MATERIAL_SUPPLY.",
+    "EQUIPMENT_MAKER": "장비 공급: 공정 검증 PROCESS_VALIDATION, 설계 채택 DESIGN_IN, "
+    "실제 발주/수주 ORDER_BOOKING, 납품/설치 DELIVERY_INSTALLATION, 서비스 "
+    "MAINTENANCE_SERVICE.",
+    "MARKET_INVESTOR": "투자 판단: 전망 GUIDANCE, 투자 집행 CAPEX_EXECUTION, 매출 인식 "
+    "REVENUE_RECOGNITION, 이익률 PROFITABILITY, 수급 제약 SUPPLY_DEMAND_CONSTRAINT. "
+    "전망과 실적을 구분한다. " + REPORT_INVESTMENT_PROSE_RULE,
+    "IT_INFRA": "IT 운영: 시스템·구성품의 가격/공급 조건·전망을 포함한 조달 "
+    "SYSTEM_PROCUREMENT, 호환성 COMPATIBILITY, 전력/냉각 POWER_COOLING, "
+    "네트워크 NETWORK, 도입/운영 DEPLOYMENT_OPERATIONS.",
+}
+
+
+def report_stage_instruction(audiences: list[Audience], stage: str, *, repair: bool = False) -> str:
+    """Requested roles, active stage and source rules; schema defines the shape."""
+    if not audiences or stage not in {"MAP", "REVIEW", "EXPLAIN", "REDUCE"}:
+        raise ValueError("A report stage needs requested audiences and a known stage")
+    roles = "\n".join(f"{audience}: {_ROLES[audience]}" for audience in audiences)
+    common = _BASE + "\n\n" + REPORT_WORK_SCOPE_RULE + "\n\n" + roles
+    if "MARKET_INVESTOR" in audiences:
+        common += "\n\n" + REPORT_ANALYSIS_ONLY_RULE
+    if stage == "EXPLAIN":
+        stage_text = (
+            "현재 단계는 EXPLAIN. Schema const로 고정된 decision의 판단·work·basis와 "
+            "null condition은 유지한다. 선택된 claim·연결 원문만 읽고 수정 가능한 "
+            "reason과 non-null condition을 작성한다. claims는 출처 메타데이터이며 "
+            "설명의 사실은 sentences의 연결 원문에서만 가져온다. selectedEvidence가 "
+            "비어 있으면 같은 finding의 전체 연결 원문으로 판단 보류 이유를 쓴다. "
+            + ASSESSMENT_REASON_RULE
+            + " "
+            + ASSESSMENT_CONDITION_RULE
+            + " "
+            + ASSESSMENT_SELECTED_BASIS_RULE
+            + " 이 단계에서는 판단을 재판정하거나 basis를 새로 선택·교체·삭제하지 않는다. "
+        )
+        return common + "\n\n" + stage_text
+    if stage in {"MAP", "REVIEW"}:
+        conclusion = (
+            "4. "
+            + (
+                ASSESSMENT_REPAIR_ORDER_RULE
+                if repair
+                else "Schema const를 지키고 decision·basis를 먼저 확정한다."
+            )
+            + " 모두 미확인은 finding 원문, claims=[]만 고정 reason. "
+            + ASSESSMENT_REASON_RULE
+        )
+        stage_text = (
+            f"현재 단계는 {stage}.\n"
+            "1. 연결 sentence의 주체·대상·사건 단계를 읽는다. claim 요약이 강해도 원문의 "
+            "실험·계획·전망 수준을 유지한다. "
+            "\n2. 관점의 모든 업무로 connection을 판정한다. 원문에서 확인된 "
+            "사실을 미확인 condition으로 반복하지 않는다.\n"
+            "3. 업무 대상의 변경·준비 범위를 찾는다. 규모·성장률·기술 사양은 "
+            "실제 제약이 아니며 수요·가격 전망은 프로젝트 변경·준비가 아니다. "
+            "구체 계획의 자원·일정과 시제품의 준비 범위를 판단한다. "
+            "범위를 모르면 관계는 유지하고 effect만 UNDETERMINED로 둔다.\n" + conclusion
+        )
+        if stage == "REVIEW":
+            stage_text += " 검토 선정은 승격 근거가 아니며 원문으로 독립 재판정한다."
+        return common + "\n\n" + _RUBRIC + "\n\n" + stage_text
+    stage_text = (
+        "현재 단계는 REDUCE. decisionCandidates의 범주·순위는 판단 보조이며 원문은 "
+        "retrievedEvidence와 connectionBasis다. 원문 사건과 연결된 구체 업무, 결정하거나 "
+        "보류할 판단을 overview에 설명한다. 업무 관계가 알려졌는데 규모·시점만 불명인 "
+        "것을 관련 근거 부족으로 바꾸지 않는다. 같은 work나 같은 기업이 있어도 같은 "
+        "프로젝트·사건이라는 뜻은 아니다. 각 finding의 주체·대상·단계·날짜는 그 finding의 "
+        "원문 묶음 안에서 읽는다. 서로 다른 finding의 날짜·제품·시설·공정 정보를 이어 "
+        "하나의 사건으로 만들지 않는다. 실제 공통 대상의 관계가 원문에 있을 때만 복수 "
+        "finding을 연결하고, 공통 업무만 있으면 독립 사건으로 나란히 설명한다. "
+        "basisClaimIds는 필요한 최소 원문만 중복 없이 쓴다. "
+        "각 해석의 근거를 먼저 정하고 그 claim·연결 원문에서만 영향 경로를 설명한다. "
+        "같은 finding의 미선택 사실을 섞지 말고 선택 근거의 대상·단계·조건을 유지한다. "
+        "implications는 원문 사건→원문에 지원되는 중간 조건→업무 판단의 경로가 있을 때만 "
+        "작성한다. assumption은 같은 대상의 성립 조건, falsifiedBy는 같은 해석을 바꾸는 "
+        "관측 사건이다. falsifiedBy가 실제로 발생했을 때 text의 예상 결과가 약해지는지 "
+        "확인한다. 계획의 취소·연기가 발생하지 않았다는 관측은 계획 실현의 반증이 "
+        "아니다. 부정 표현이 있어도 예상 효과의 미달과 취소의 부재는 방향이 다르다. "
+        "이 필드를 채우려고 새 승인 절차·조직·부품을 만들지 않는다. 경로를 "
+        "특정할 수 없으면 implications를 비우고 알려진 사건은 overview에 남긴다. "
+        "headline과 권고의 확대·축소·유지 방향은 원문의 조건과 일치해야 한다. 방향을 "
+        "결정할 근거가 없으면 특정 방향의 실행이 필요하다고 단정하지 말고 확인할 변수와 "
+        "그 결과에 따라 바뀌는 판단을 설명한다. watchItems는 "
+        "원문의 실제 대상·변수·조건과 그 결과가 바꾸는 판단을 쓴다. 자료 부재는 반증이 아니다. "
+        "priorityRank는 기존 중요도 순서이며 unavailable은 무관을 뜻하지 않는다. 모두 "
+        "무관/미확인이면 종합 배열을 비운다. 원문 부재와 업무 관련성 미확인은 다르며 "
+        "최종 빈 해석 안내는 서버가 판정한다. assessments는 작성하지 않는다."
+    )
+    return common + "\n\n" + _REDUCE_RULES + "\n\n" + stage_text

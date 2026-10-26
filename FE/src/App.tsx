@@ -1,23 +1,29 @@
 import { useCallback, useEffect, useState } from 'react'
 import './App.css'
 import bistelligenceLogo from './assets/bistelligence-logo.png'
+import { ThemeSwitcher } from './components/ThemeSwitcher'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { Segmented, type SegmentedOption } from './components/Segmented'
 import { ReportsPage } from './features/reports/ReportsPage'
+import { TopicWeeklyReportTaskBanner, TopicWeeklyReportTaskProvider } from './features/reports/TopicWeeklyReportTaskProvider'
 import { NotificationsPage } from './features/notifications/NotificationsPage'
+import { CompanyInterestsPage } from './features/interests/CompanyInterestsPage'
 import { SettingsPage } from './features/settings/SettingsPage'
+import { FeedbackPage } from './features/feedback/FeedbackPage'
+import { feedbackTokenFromHash, isFeedbackHash } from './features/feedback/feedbackState'
 
-const PAGES = ['reports', 'notifications', 'settings'] as const
+const PAGES = ['reports', 'notifications', 'company-interests', 'settings'] as const
 
-type Page = (typeof PAGES)[number]
+type Page = (typeof PAGES)[number] | 'feedback'
 
 const DEFAULT_PAGE: Page = 'settings'
 
-/* 왼쪽부터 수집 설정 · 리포트 · 알림 관리 순서로 표시한다. */
+/* 회사 관심 기준은 알림 관리 바로 옆에서 관리한다. */
 const NAV_OPTIONS: ReadonlyArray<SegmentedOption<Page>> = [
   { value: 'settings', label: '수집 설정' },
   { value: 'reports', label: '리포트' },
   { value: 'notifications', label: '알림 관리' },
+  { value: 'company-interests', label: '회사 관심 기준' },
 ]
 
 function hashValue() {
@@ -29,10 +35,11 @@ function hashValue() {
  * 고칠 수 있고, 그때 빈 화면을 보여 주는 것보다 낫다.
  */
 function pageFromHash(): Page {
+  if (isFeedbackHash(window.location.hash)) return 'feedback'
   const value = hashValue()
   // P1-3 이전 북마크는 기사 화면을 가리킨다. 화면을 없애더라도 리포트로 이어 줘야 한다.
   if (value === 'articles') return 'reports'
-  return PAGES.includes(value as Page) ? (value as Page) : DEFAULT_PAGE
+  return PAGES.includes(value as (typeof PAGES)[number]) ? (value as Page) : DEFAULT_PAGE
 }
 
 /**
@@ -50,6 +57,7 @@ function pageFromHash(): Page {
  */
 function usePageRoute() {
   const [page, setPage] = useState<Page>(pageFromHash)
+  const [feedbackToken, setFeedbackToken] = useState(() => feedbackTokenFromHash(window.location.hash))
 
   useEffect(() => {
     function sync() {
@@ -58,8 +66,10 @@ function usePageRoute() {
         window.history.replaceState(null, '', '#/reports')
       }
       setPage(pageFromHash())
+      setFeedbackToken(feedbackTokenFromHash(window.location.hash))
     }
-    sync()
+    // The initial route is already captured. A feedback page removes its fragment token on mount.
+    if (hashValue() === 'articles') sync()
     window.addEventListener('hashchange', sync)
     return () => window.removeEventListener('hashchange', sync)
   }, [])
@@ -71,7 +81,7 @@ function usePageRoute() {
     setPage(next)
   }, [])
 
-  return { page, go }
+  return { page, go, feedbackToken }
 }
 
 /**
@@ -105,10 +115,16 @@ function useScrolled(threshold = 8) {
 }
 
 function App() {
-  const { page, go } = usePageRoute()
+  const { page, go, feedbackToken } = usePageRoute()
   const scrolled = useScrolled()
 
+  // Public capability links never mount the administrative navigation or its data queries.
+  if (page === 'feedback') return <ErrorBoundary key={feedbackToken ?? 'feedback-invalid'}>
+    <FeedbackPage key={feedbackToken ?? 'feedback-invalid'} token={feedbackToken} />
+  </ErrorBoundary>
+
   return (
+    <TopicWeeklyReportTaskProvider>
     <div className="app-shell">
       <nav className="app-nav" aria-label="주요 화면" data-scrolled={scrolled}>
         {/* 로고는 첫 화면인 수집 설정으로 돌아간다. */}
@@ -134,7 +150,9 @@ function App() {
           onSelect={go}
           activeAria="current"
         />
+        <ThemeSwitcher />
       </nav>
+      <TopicWeeklyReportTaskBanner />
       {/*
         key에 화면을 건다. 한 화면이 터진 뒤에도 다른 탭을 누르면 경계가 새로 붙어 상태가
         초기화된다 — key가 없으면 한 번 실패한 경계가 계속 실패 화면을 들고 있어서, 탭을
@@ -143,9 +161,11 @@ function App() {
       <ErrorBoundary key={page}>
         {page === 'reports' && <ReportsPage />}
         {page === 'notifications' && <NotificationsPage />}
+        {page === 'company-interests' && <CompanyInterestsPage />}
         {page === 'settings' && <SettingsPage />}
       </ErrorBoundary>
     </div>
+    </TopicWeeklyReportTaskProvider>
   )
 }
 

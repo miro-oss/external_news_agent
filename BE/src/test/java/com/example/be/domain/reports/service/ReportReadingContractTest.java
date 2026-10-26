@@ -16,6 +16,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ReportReadingContractTest {
     @Test
+    void weeklyTitleUsesSavedCalendarPeriodInsteadOfGenerationDate() {
+        var report = NewsReport.builder().reportScope(ReportScope.WEEKLY)
+                .reportDate(LocalDate.of(2026, 9, 14)).reportEndDate(LocalDate.of(2026, 9, 20)).build();
+        assertEquals("2026-09-14 ~ 2026-09-20 주간 통합 뉴스 보고서",
+                ReportTitles.forReport(report, "주간", LocalDateTime.of(2026, 9, 23, 10, 0)));
+    }
+
+    @Test
     void countsUniqueArticlesAcrossSourcesAndRunsWithoutCallingFindingsArticles() {
         var stats = ReportArticleStatistics.count(List.of(
                 observation(1, ChangeType.NEW), observation(1, ChangeType.UNCHANGED),
@@ -67,6 +75,25 @@ class ReportReadingContractTest {
         assertNull(converter.convertToEntityAttribute(null));
         assertNull(converter.convertToDatabaseColumn(null));
         assertEquals("기존 제목", ReportTitles.forReport(NewsReport.builder().build(), "기존 제목", LocalDateTime.now()));
+    }
+
+    @Test
+    void topicWeeklyInputLegacyJsonAndFilteredChronologyStaySafe() {
+        var converter = new com.example.be.domain.reports.converter.WeeklyReportInputConverter();
+        var legacy = converter.convertToEntityAttribute("""
+                {"reportDate":"2026-09-21","reportEndDate":"2026-09-27","sources":[],"missingReportDates":[]}
+                """);
+        assertNull(legacy.topicId()); assertNull(legacy.topicName());
+        var finding = com.example.be.domain.analysis.entity.Finding.builder().id(1L).build();
+        var content = new ReportContent(List.of("함께 저장된 요약"), List.of(
+                new ReportContent.ImportantEvent("남은 이슈", "긴 내용을 아래에서 확인", "2026-09-21: [전망] 증가할 수 있다.", List.of(1L)),
+                new ReportContent.ImportantEvent("숨겨진 이슈", "노출되면 안 됨", "숨김", List.of(2L))),
+                List.of(new ReportContent.WatchItem("남은 관찰", "후속 발표 확인", List.of(1L))), List.of());
+        var report = NewsReport.builder().topicId(1L).reportScope(ReportScope.WEEKLY).structuredContent(content).build();
+        var reading = ReportReadingContent.from(report, new ReportFindings.Visible(List.of(finding), true));
+        assertTrue(reading.markdownBody().contains(ReportMarkdown.text("2026-09-21: [전망] 증가할 수 있다.")));
+        assertTrue(reading.markdownBody().contains("후속 발표 확인"));
+        assertFalse(reading.markdownBody().contains("노출되면 안 됨"));
     }
 
     private ReportArticleObservation observation(long id, ChangeType type) {

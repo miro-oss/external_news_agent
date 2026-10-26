@@ -137,8 +137,64 @@ def test_generates_structured_report_and_deterministic_markdown() -> None:
     assert "STUB 분석 3건" in response.markdown_body
     assert "페이월" in response.markdown_body
     assert "수집 실패 1건" in response.markdown_body
-    assert response.meta.prompt_version == "report.ko.v1.5"
+    assert response.meta.prompt_version == "report.ko.v1.6"
     assert response.meta.mock is False
+
+
+@pytest.mark.parametrize(
+    ("source_finding_ids", "expected_ids", "expected_article_ids"),
+    [
+        ([501, 501, 501], [501], [1024]),
+        ([504, 502, 504, 501, 503], [504, 502, 501, 503], [1025, 1024]),
+    ],
+)
+def test_report_references_deduplicate_articles_and_preserve_distinct_findings(
+    source_finding_ids: list[int],
+    expected_ids: list[int],
+    expected_article_ids: list[int],
+) -> None:
+    report_request = request()
+    original_finding = report_request.findings[0]
+    report_request = report_request.model_copy(
+        update={
+            "findings": [
+                original_finding,
+                original_finding.model_copy(update={"id": 502}),
+                original_finding.model_copy(update={"id": 503}),
+                original_finding.model_copy(
+                    update={
+                        "id": 504,
+                        "article_id": 1025,
+                        "canonical_url": "https://example.com/1025",
+                    }
+                ),
+            ]
+        }
+    )
+    output = json.loads(valid_output(source_finding_ids))
+    output["watchItems"] = [
+        {
+            "topic": "HBM4 양산 일정",
+            "reason": "HBM4 양산 일정이 앞당겨졌다.",
+            "sourceFindingIds": source_finding_ids,
+        }
+    ]
+    provider = FakeProvider(provider_response(json.dumps(output, ensure_ascii=False)))
+
+    response = ReportWriterService(Settings(AGENT_MOCK=False), provider).write(report_request)
+
+    assert response.important_events[0].source_finding_ids == expected_ids
+    assert response.watch_items[0].source_finding_ids == expected_ids
+    assert [finding.id for finding in report_request.findings] == [501, 502, 503, 504]
+    expected_references = ", ".join(
+        f"[HBM4 양산 일정 단축](<https://example.com/{article_id}>)"
+        for article_id in expected_article_ids
+    )
+    reference_lines = [
+        line.strip() for line in response.markdown_body.splitlines() if "- 근거: " in line
+    ]
+    assert reference_lines == [f"- 근거: {expected_references}"] * 2
+    assert len(provider.prompts) == 1
 
 
 def test_replaces_unsupported_significance_without_another_provider_call() -> None:
@@ -441,14 +497,14 @@ def test_rejects_report_output_outside_readable_length(mutate) -> None:
         ReportOutput.model_validate(output)
 
 
-def test_mock_report_truncates_executive_summary_to_one_hundred_characters() -> None:
+def test_mock_report_keeps_complete_claims_within_summary_limits() -> None:
     payload = request().model_dump(by_alias=True, mode="json")
-    payload["findings"][0]["summaryKo"] = "가" * 200
+    payload["findings"][0]["summaryKo"] = "HBM4 양산 일정이 " + "매우 " * 60 + "앞당겨졌다."
 
     response = ReportWriterService(Settings()).write(ReportRequest.model_validate(payload))
 
-    assert len(response.executive_summary[0]) == 100
-    assert len(response.important_events[0].summary_ko) == 150
+    assert response.executive_summary == ["양산 일정이 앞당겨졌다."]
+    assert response.important_events[0].summary_ko == "양산 일정이 앞당겨졌다."
 
 
 def test_mock_report_does_not_repeat_important_finding_in_watch_items() -> None:
@@ -490,7 +546,10 @@ def test_markdown_escapes_markdown_metacharacters_without_html_entities() -> Non
     assert "TSMC & \\*삼성\\* \\[HBM\\]" in response.markdown_body
 
 
-def test_uses_report_specific_provider_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("report_timeout,expected_timeout", [(None, 120.0), (90, 90.0)])
+def test_uses_report_specific_provider_budget(
+    monkeypatch: pytest.MonkeyPatch, report_timeout, expected_timeout
+) -> None:
     captured: dict[str, float | int] = {}
     provider = FakeProvider(provider_response(valid_output()))
 
@@ -500,12 +559,17 @@ def test_uses_report_specific_provider_budget(monkeypatch: pytest.MonkeyPatch) -
         return provider
 
     monkeypatch.setattr("app.llm.report_service.get_analyze_provider", provider_for_report)
+    monkeypatch.delenv("AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS", raising=False)
+    report_settings = (
+        {} if report_timeout is None else {"AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS": report_timeout}
+    )
     settings = Settings(
         AGENT_MOCK=False,
         AGENT_REPORT_MAX_OUTPUT_TOKENS=12_000,
-        AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS=90,
+        AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS=180,
+        **report_settings,
     )
 
     ReportWriterService(settings).write(request())
 
-    assert captured == {"tokens": 12_000, "timeout": 90.0}
+    assert captured == {"tokens": 12_000, "timeout": expected_timeout}

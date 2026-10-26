@@ -126,13 +126,61 @@
 .compact-list .recipient-name-row .recipient-channel-tag.telegram { color: var(--primary-strong); background: var(--primary-weak); }
 .recipient-actions { display: flex; align-items: center; gap: .25rem; }
 .recipient-actions [aria-expanded='true'] { color: var(--primary); background: var(--primary-weak); }
-.recipient-settings { display: grid; grid-column: 1 / -1; gap: 1.1rem; padding: 1.1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunken); animation: collapsible-in var(--dur-2) var(--ease-out); }
+.recipient-settings-dialog[open] { width: min(38rem, calc(100vw - 2rem)); height: fit-content; max-height: calc(100dvh - 2rem); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.recipient-settings-tabs { display: flex; gap: .25rem; border-bottom: 1px solid var(--line); }
+.recipient-settings-tabs button { flex: 1; min-width: 0; padding: .75rem .4rem; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--fg-3); font-size: .87rem; }
+.recipient-settings-tabs button[aria-selected='true'] { color: var(--primary-strong); border-bottom-color: var(--primary); font-weight: 700; }
+.recipient-subscriptions-panel, .recipient-connections-panel { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.recipient-subscriptions-panel[hidden], .recipient-connections-panel[hidden] { display: none; }
+.recipient-settings-intro { margin: .5rem 0 1rem; color: var(--fg-3); font-size: .8rem; line-height: 1.65; }
+.recipient-subscriptions-loading { display: grid; gap: .8rem; }
+.recipient-subscription-note { margin: .4rem 0 0; color: var(--fg-3); font-size: .76rem; line-height: 1.65; }
+.recipient-simple-settings fieldset { border: 0; padding: 0; min-width: 0; margin: 0; }
+.recipient-simple-settings legend { font-size: .9rem; font-weight: 700; margin-bottom: .8rem; padding: 0; }
+.recipient-simple-settings label { display: flex; align-items: center; gap: .6rem; cursor: pointer; font-size: .87rem; }
+.recipient-simple-settings input { flex: 0 0 auto; width: 1rem; height: 1rem; margin: 0; accent-color: var(--primary); }
+.recipient-aggregate-choices { display: flex; flex-wrap: wrap; gap: 1rem 2rem; }
+.recipient-simple-settings .recipient-simple-topics { margin-top: 1.5rem; }
+.recipient-simple-topics ul { list-style: none; padding: 0; margin: 0; }
+.recipient-simple-topics li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .85rem 0; border-bottom: 1px solid var(--line); }
+.recipient-simple-topics li label { flex: 1; min-width: 0; }
+.recipient-simple-topics li span { overflow-wrap: anywhere; }
+.recipient-simple-topics li small { flex: 0 0 auto; font-size: .72rem; color: var(--fg-3); }
+.recipient-settings-save { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1rem; padding: .75rem 0; background: var(--surface); border-top: 1px solid var(--line); }
+.recipient-settings-save > span { font-size: .75rem; color: var(--fg-3); }
+.recipient-subscriptions-empty { padding: 2rem 1rem; color: var(--fg-3); text-align: center; font-size: .86rem; line-height: 1.7; }
+.recipient-subscriptions-empty strong { color: var(--fg-2); }
+.recipient-subscriptions-error { margin-bottom: 1rem; font-size: .85rem; }
+.recipient-connections-panel { padding: .25rem 0; }
+.recipient-connections-panel .telegram-connection { margin-top: 1.2rem; }
+@media (max-width: 540px) {
+  .recipient-settings-dialog[open] { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem); padding: 1rem; }
+  .recipient-settings-tabs button { font-size: .79rem; }
+}
+.recipient-selection-dialog.group-settings-dialog[open] { width: min(38rem, calc(100vw - 2rem)); height: fit-content; max-height: calc(100dvh - 2rem); grid-template-rows: auto minmax(0, 1fr) auto; }
+.group-settings-dialog .recipient-selection-heading > div { min-width: 0; }
+.group-settings-dialog .recipient-selection-heading h2 { overflow-wrap: anywhere; }
+.group-editor { display: grid; gap: 1rem; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.group-editor-help { margin: 0; font-size: .78rem; color: var(--fg-3); line-height: 1.6; }
+.group-members-form { display: grid; gap: .65rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.group-members-form > button { justify-self: start; }
+.group-row-status { grid-column: 1 / -1; }
+.group-row-status:empty { display: none; }
+.recipient-selection-list small { margin-left: .5rem; color: var(--fg-3); font-size: .75rem; }
+@media (max-width: 540px) {
+  .recipient-selection-dialog.group-settings-dialog[open] { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem); padding: 1rem; }
+}
+@media (max-width: 480px) {
+  .group-editor .recipient-email-fields { flex-wrap: wrap; }
+  .group-editor .recipient-email-fields input { flex-basis: 100%; }
+}
 .recipient-email-form { display: grid; gap: .4rem; }
 .recipient-email-form label,
 .telegram-connection-heading strong { font-size: .84rem; color: var(--fg-2); }
 .recipient-email-form label { font-weight: 700; }
 .recipient-email-fields { display: flex; align-items: center; gap: .5rem; }
-.recipient-email-fields input { flex: 1; min-width: 0; width: 100%; background: var(--surface); }
+.recipient-email-fields input { flex: 1; min-width: 0; width: 100%; border-color: var(--line); background: var(--surface); }
+.recipient-email-fields input:focus { border-color: var(--primary); }
 .recipient-email-fields button { flex: none; }
 .recipient-email-form > p { margin: .2rem 0 0; font-size: .8rem; line-height: 1.6; }
 .telegram-connection { display: grid; gap: .6rem; padding-top: 1rem; border-top: 1px solid var(--line); }
@@ -146,6 +194,13 @@
 .telegram-link-buttons { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .telegram-link-actions a { display: inline-flex; align-items: center; text-decoration: none; }
 .report-share-actions { display: flex; flex-wrap: wrap; gap: .65rem; }
+.report-share-insight { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.report-share-insight-description { min-width: 0; }
+.report-share-insight label { font-size: .86rem; font-weight: 700; color: var(--fg-2); }
+.report-share-insight p,
+.report-share-insight-guidance { margin: .4rem 0 0; color: var(--fg-3); font-size: .8rem; line-height: 1.65; }
+.report-share-insight select { width: auto; min-width: 11rem; flex: none; margin: 0; }
+.report-share-insight-guidance { margin: 0; }
 .report-message-preview,
 .auto-delivery-status { padding: 1.1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-sunken); }
 .report-message-preview p { white-space: pre-line; overflow-wrap: anywhere; color: var(--fg-2); line-height: 1.7; }
@@ -197,7 +252,7 @@
   box-shadow: var(--shadow-lg);
 }
 .recipient-selection-dialog[open] { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 1rem; animation: card-in var(--dur-2) var(--ease-out); }
-.recipient-selection-dialog::backdrop { background: rgba(25, 31, 40, .32); backdrop-filter: blur(3px); animation: backdrop-in var(--dur-2) var(--ease-out); }
+.recipient-selection-dialog::backdrop { background: var(--selection-backdrop); backdrop-filter: blur(3px); animation: backdrop-in var(--dur-2) var(--ease-out); }
 .recipient-selection-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 .recipient-selection-heading h2 { margin: 0; font-size: 1.2rem; letter-spacing: -.03em; }
 .recipient-selection-heading p { margin: .35rem 0 0; color: var(--fg-3); font-size: .84rem; line-height: 1.6; }
@@ -222,4 +277,6 @@
 @media(max-width: 640px) {
   .delivery-target-picker,
   .report-share-card .delivery-target-picker { grid-template-columns: minmax(0, 1fr); }
+  .report-share-insight { flex-direction: column; align-items: stretch; }
+  .report-share-insight select { width: 100%; min-width: 0; }
 }

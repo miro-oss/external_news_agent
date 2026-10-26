@@ -43,6 +43,7 @@ public class NotificationDeliveryService {
     private final NotificationDeliveryPlanService planService;
     private final NotificationDeliveryPersistenceService persistenceService;
     private final NotificationSenderRegistry senderRegistry;
+    private final ReportNotificationInsightService insightService;
 
     @Transactional(readOnly = true)
     public NotificationResDTO.Preview preview(Long reportId, NotificationReqDTO.Preview request) {
@@ -51,7 +52,9 @@ public class NotificationDeliveryService {
             throw new NotificationException(NotificationErrorCode.CHANNEL_NOT_FOUND);
         }
         NotificationChannel channel = managementService.findChannel(request.getChannelId(), true);
-        RenderedNotification rendered = renderer.render(report, channel);
+        var insight = request.getInsightAudience() == null ? null : insightService.find(reportId, request.getInsightAudience());
+        RenderedNotification rendered = insight == null ? renderer.render(report, channel)
+                : renderer.render(report, channel, insight);
         List<NotificationResDTO.PreviewChunk> chunks = new ArrayList<>();
         for (int index = 0; index < rendered.chunks().size(); index++) {
             String body = rendered.chunks().get(index);
@@ -155,7 +158,7 @@ public class NotificationDeliveryService {
             }
             try {
                 for (NotificationDeliveryPlanService.PreparedTarget target : targets) {
-                    results.add(deliverTarget(batch, plan.reportId(), target, rendered, sender, session));
+                    results.add(deliverTarget(batch, plan.reportId(), target, plan.rendered(target), sender, session));
                 }
             } finally {
                 try {
@@ -197,7 +200,9 @@ public class NotificationDeliveryService {
         for (int index = 0; index < rendered.chunks().size(); index++) {
             String externalId;
             try {
-                externalId = session.send(target.address(), rendered.subject(), rendered.chunks().get(index));
+                externalId = rendered.attachments().isEmpty()
+                        ? session.send(target.address(), rendered.subject(), rendered.chunks().get(index))
+                        : session.send(target.address(), rendered.subject(), rendered.chunks().get(index), rendered.attachments());
             } catch (RuntimeException exception) {
                 now = LocalDateTime.now(ApiTimeZone.ZONE);
                 String message = transportFailureMessage(exception);

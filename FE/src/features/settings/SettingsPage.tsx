@@ -5,6 +5,7 @@ import { TopicTable } from './TopicTable'
 import { SourceRegistration } from './SourceRegistration'
 import { TopicForm } from './TopicForm'
 import { CollectionRunPanel } from './CollectionRunPanel'
+import { ActiveCollectionRuns } from './ActiveCollectionRuns'
 import { TopicKeywordProposalPanel } from './TopicKeywordProposalPanel'
 import './settings-refinement.css'
 
@@ -44,10 +45,12 @@ export function SettingsPage() {
         </section>
       </div>
 
+      <ActiveCollectionRuns />
+
       <CollapsibleSection
         id="keyword-proposals"
         title="키워드 제안 검토"
-        description="자동 수집에서 찾은 키워드를 검토합니다. 승인하면 다음 수집부터 반영됩니다."
+        description="자동 수집에서 찾은 키워드를 검토합니다. 선택한 변경만 다음 수집부터 반영됩니다."
         count={pendingProposals.data?.totalElements}
         open={open.keywordProposals}
         onToggle={() => toggle('keywordProposals')}

@@ -3,6 +3,9 @@ import { useCreateTopic, useSources } from '../../api/queries'
 import { FormStatus } from './FormStatus'
 import { baseTopicKeywords, buildTopicKeywordInput } from './topicKeywordInput'
 import { TopicSourcesSkeleton } from './SettingsSkeletons'
+import { COLLECTION_INTERVALS } from './collectionIntervals'
+import type { DartCompany } from '../../api/dart'
+import { DartCompanyPicker } from './DartCompanyPicker'
 
 const EMPTY = {
   name: '',
@@ -13,18 +16,13 @@ const EMPTY = {
   intervalMinutes: '1440',
 }
 
-const COLLECTION_INTERVALS = [
-  { value: '60', label: '1시간마다' },
-  { value: '720', label: '12시간마다' },
-  { value: '1440', label: '24시간마다' },
-] as const
-
 export function TopicForm() {
   const [form, setForm] = useState(EMPTY)
   const [done, setDone] = useState<string | null>(null)
   const [queryTouched, setQueryTouched] = useState(false)
   const [conditionsOpen, setConditionsOpen] = useState(false)
   const [validation, setValidation] = useState<string | null>(null)
+  const [dartCompany, setDartCompany] = useState<DartCompany | null>(null)
   const sources = useSources()
   const { mutate, isPending, error, reset } = useCreateTopic()
 
@@ -64,10 +62,12 @@ export function TopicForm() {
         ...keywordInput,
         intervalMinutes,
         sourceIds: activeSources.map((source) => source.id),
+        ...(dartCompany ? { dartCorpCode: dartCompany.corpCode } : {}),
       },
       {
         onSuccess: (created) => {
           setForm(EMPTY)
+          setDartCompany(null)
           setQueryTouched(false)
           setConditionsOpen(false)
           setValidation(null)
@@ -135,6 +135,11 @@ export function TopicForm() {
                 onChange={(event) => update('excludedKeywords', event.target.value)} placeholder="광고, 채용" />
               <p className="hint">각 조건은 쉼표로 구분합니다. 제외 키워드가 들어간 기사는 모으지 않습니다.</p>
             </div>
+            <DartCompanyPicker value={dartCompany} disabled={isPending} onChange={company => {
+              setDartCompany(company)
+              setDone(null)
+              reset()
+            }} />
           </div>
         )}
       </div>

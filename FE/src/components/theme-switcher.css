@@ -1,0 +1,67 @@
+.theme-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  color: var(--fg-2);
+}
+
+.theme-switcher .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.theme-switcher svg { flex-shrink: 0; }
+
+.theme-switcher select {
+  width: auto;
+  min-height: 44px;
+  padding: 0.45rem 1.75rem 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background-color: var(--surface);
+  color: var(--fg-2);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app-nav > .theme-switcher { margin-left: auto; }
+
+/* Keep the theme beside the logo and give page navigation its own row. */
+@media (max-width: 960px) {
+  .app-nav:has(> .theme-switcher) {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    height: auto;
+    gap: 0.5rem 1rem;
+    padding-block: 0.65rem;
+  }
+
+  .app-nav > .segmented-nav {
+    order: 3;
+    flex-basis: 100%;
+  }
+}
+
+.feedback-brand:has(> .theme-switcher) { flex-wrap: wrap; padding-block: 0.75rem; }
+
+@media (max-width: 600px) {
+  .feedback-brand > .theme-switcher { margin-left: auto; }
+  .feedback-brand:has(> .theme-switcher) > .feedback-private-label { display: none; }
+  .feedback-brand:has(> .theme-switcher) > span { display: none; }
+}
+
+.theme-switcher select:focus-visible {
+  border-color: var(--primary);
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}

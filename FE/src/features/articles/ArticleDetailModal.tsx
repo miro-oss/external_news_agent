@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { ApiError } from '../../api/client'
 import { useArticle, useGenerateInsight, useInsight } from '../../api/queries'
 import {
   AUDIENCES,
@@ -15,6 +16,7 @@ import { formatMediumDate } from '../../lib/datetime'
 import { normalizeKeyPoints } from '../../lib/keyPoints'
 import { scrollIntoViewGently } from '../../lib/motion'
 import { ArticleDetailSkeleton, ArticleInsightSkeleton } from './ArticleSkeletons'
+import { withoutLeadingNavigation, withoutLeadingSentenceNavigation } from './articleBody'
 
 interface Props {
   articleId: number | null
@@ -34,7 +36,9 @@ export function ArticleDetailModal({
   onClose,
 }: Props) {
   const article = useArticle(articleId, runId)
+  const dialog = useRef<HTMLDialogElement>(null)
   const closeButton = useRef<HTMLButtonElement>(null)
+  const isOpen = articleId !== null
   const appliedInitialEvidence = useRef<string | null>(null)
   const [evidenceSelection, setEvidenceSelection] = useState<{
     articleId: number | null
@@ -47,18 +51,20 @@ export function ArticleDetailModal({
   }>({ articleId: null, audience: defaultAudience })
 
   useEffect(() => {
-    if (articleId === null) return undefined
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', onKeyDown)
+    if (!isOpen) return undefined
+    const element = dialog.current
+    const previousFocus = document.activeElement
+    element?.showModal()
     document.body.classList.add('modal-open')
-    closeButton.current?.focus()
+    closeButton.current?.focus({ preventScroll: true })
     return () => {
-      document.removeEventListener('keydown', onKeyDown)
+      element?.close()
       document.body.classList.remove('modal-open')
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+        previousFocus.focus({ preventScroll: true })
+      }
     }
-  }, [articleId, onClose])
+  }, [isOpen])
 
   useEffect(() => {
     if (articleId === null) {
@@ -88,6 +94,8 @@ export function ArticleDetailModal({
     ? perspectiveSelection.audience
     : defaultAudience
   const keywords = collectionKeywords(collectionContexts, runId ?? null, article.data?.topicId)
+  const bodyText = withoutLeadingNavigation(article.data?.bodyText ?? '')
+  const sentences = withoutLeadingSentenceNavigation(article.data?.sentences ?? [])
 
   const highlightEvidence = (evidence: number[]) => {
     setEvidenceSelection({ articleId, runId, sentences: evidence })
@@ -99,15 +107,40 @@ export function ArticleDetailModal({
     })
   }
 
+  const keepFocusInDialog = (event: KeyboardEvent<HTMLDialogElement>) => {
+    if (event.key !== 'Tab' || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
+    const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+      'a[href], button, input, select, textarea, summary, [tabindex]',
+    )).filter(element => element.tabIndex >= 0 && !element.matches(':disabled')
+      && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden')
+    const first = controls[0]
+    const last = controls.at(-1)
+    // Native dialogs can send Tab to the browser toolbar at either boundary.
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) {
+      event.preventDefault()
+      last?.focus()
+    } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === event.currentTarget)) {
+      event.preventDefault()
+      first?.focus()
+    }
+  }
+
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div
-        className="article-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={article.data ? 'article-modal-title' : undefined}
-        aria-label={article.data ? undefined : '기사 상세'}
-      >
+    <dialog
+      ref={dialog}
+      className="modal-backdrop"
+      aria-labelledby={article.data ? 'article-modal-title' : undefined}
+      aria-label={article.data ? undefined : '기사 상세'}
+      onCancel={(event) => { event.preventDefault(); onClose() }}
+      onKeyDown={keepFocusInDialog}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          event.preventDefault()
+          onClose()
+        }
+      }}
+    >
+      <div className="article-modal">
         <button ref={closeButton} type="button" className="modal-close" aria-label="본문보기 닫기" onClick={onClose}>×</button>
         {article.isPending && <ArticleDetailSkeleton />}
         {article.isError && <div className="modal-state error" role="alert">{article.error.message}</div>}
@@ -163,9 +196,9 @@ export function ArticleDetailModal({
                     : `분석 근거 본문 · 기사 #${article.data.analysisArticleId}`}
                 </h3>
               </div>
-              {article.data.bodyText && article.data.sentences.length > 0 ? (
+              {article.data.bodyText && sentences.length > 0 ? (
                 <div className="sentence-list">
-                  {article.data.sentences.map((sentence) => (
+                  {sentences.map((sentence) => (
                     <p
                       id={`article-${articleId}-sentence-${sentence.index}`}
                       className={highlightedSentences.includes(sentence.index) ? 'highlighted' : undefined}
@@ -177,9 +210,9 @@ export function ArticleDetailModal({
                     </p>
                   ))}
                 </div>
-              ) : article.data.bodyText?.trim() ? (
+              ) : bodyText.trim() ? (
                 <div className="sentence-list">
-                  {article.data.bodyText.split(/\n+/).filter((paragraph) => paragraph.trim()).map((paragraph, index) => (
+                  {bodyText.split(/\n+/).filter((paragraph) => paragraph.trim()).map((paragraph, index) => (
                     <p key={index}>{paragraph}</p>
                   ))}
                 </div>
@@ -193,7 +226,7 @@ export function ArticleDetailModal({
           </>
         )}
       </div>
-    </div>
+    </dialog>
   )
 }
 
@@ -316,6 +349,8 @@ function PerspectiveInsight({
     && generate.variables?.audience === audience
   const result = matchesCurrentSelection && generate.data ? generate.data : stored.data
   const insight = result?.insights.find((item) => item.audience === audience)
+  const hasNoStoredInsight = stored.error instanceof ApiError && stored.error.code === 'COMMON404'
+  const lookupError = !insight && !hasNoStoredInsight ? stored.error : null
   const error = matchesCurrentSelection ? generate.error : null
 
   return (
@@ -325,18 +360,30 @@ function PerspectiveInsight({
           <strong>관점 인사이트</strong>
           <span>검증된 사실과 조건부 해석을 분리해 생성합니다.</span>
         </div>
-        <button
-          type="button"
-          disabled={generate.isPending}
-          onClick={() => generate.mutate({ issueId, audience })}
-        >
-          {generate.isPending && matchesCurrentSelection
-            ? '인사이트 생성 중…'
-            : '이 관점으로 인사이트 보기 · 크레딧 1 사용'}
-        </button>
+        {!insight && hasNoStoredInsight && (
+          <button
+            type="button"
+            disabled={stored.isFetching || generate.isPending}
+            onClick={() => generate.mutate({ issueId, audience })}
+          >
+            {generate.isPending && matchesCurrentSelection
+              ? '인사이트 생성 중…'
+              : '이 관점으로 인사이트 보기 · 크레딧 1 사용'}
+          </button>
+        )}
+        {lookupError && (
+          <button
+            type="button"
+            disabled={stored.isFetching}
+            onClick={() => void stored.refetch()}
+          >
+            저장된 인사이트 다시 조회
+          </button>
+        )}
       </div>
+      {lookupError && <p className="perspective-insight-error" role="alert">{lookupError.message}</p>}
       {error && <p className="perspective-insight-error" role="alert">{error.message}</p>}
-      {stored.isPending && !insight && <ArticleInsightSkeleton />}
+      {stored.isFetching && !insight && <ArticleInsightSkeleton />}
       {insight && (
         <InsightContents
           insight={insight}

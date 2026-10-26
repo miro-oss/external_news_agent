@@ -5,6 +5,7 @@ from pydantic import Field, model_validator
 
 from app.schemas.analyze import Audience, Groundedness, Plan, ResponseMeta, TopicInput
 from app.schemas.common import AgentModel
+from app.schemas.feedback_learning import FeedbackLearningRequest
 
 MAX_INSIGHT_FINDINGS = 16
 
@@ -36,7 +37,7 @@ class InsightFinding(AgentModel):
         return self
 
 
-class InsightRequest(AgentModel):
+class InsightRequest(FeedbackLearningRequest):
     idempotency_key: str = Field(min_length=1, max_length=200)
     plan: Plan
     audiences: list[Audience] = Field(min_length=1, max_length=4)
@@ -46,6 +47,9 @@ class InsightRequest(AgentModel):
 
     @model_validator(mode="after")
     def validate_unique_values(self) -> "InsightRequest":
+        self.validate_feedback_scope(
+            {self.topic.topic_id} if self.topic.topic_id is not None else set()
+        )
         if len(self.audiences) != len(set(self.audiences)):
             raise ValueError("audiences는 중복될 수 없습니다.")
         finding_ids = [finding.id for finding in self.findings]

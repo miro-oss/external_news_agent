@@ -2,6 +2,10 @@ package com.example.be.domain.collection.feed;
 
 import com.example.be.domain.collection.connector.dto.res.CollectedArticle;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.Arguments;
 
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -243,6 +247,126 @@ class FeedParserTest {
     void rejectsEmptyBody() {
         assertThrows(FeedParseException.class, () -> FeedParser.parse((byte[]) null, "ko"));
         assertThrows(FeedParseException.class, () -> FeedParser.parse(new byte[0], "ko"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"javascript:alert(1)", "data:text/html,example", "file:///tmp/example.xml",
+            "http://localhost/article", "http://127.0.0.1/article", "http://10.0.0.1/article",
+            "http://169.254.169.254/metadata", "https://metadata.google.internal/article",
+            "http://[::1]/article", "https://user:pass@news.example/article",
+            "https://news.example:0/article", "https://news.example:65536/article",
+            "/relative-article", "//news.example/article"})
+    void skipsUnsafeRssAtomAndGuidLinksWhileKeepingValidArticles(String url) {
+        List<String> feeds = List.of(
+                "<rss><channel><item><title>unsafe</title><link>" + url + "</link></item>"
+                        + "<item><title>valid</title><link>https://news.example/valid</link></item></channel></rss>",
+                "<feed xmlns=\"http://www.w3.org/2005/Atom\"><entry><title>unsafe</title><link href=\"" + url + "\"/></entry>"
+                        + "<entry><title>valid</title><link href=\"https://news.example/valid\"/></entry></feed>",
+                "<rss><channel><item><title>unsafe</title><guid>" + url + "</guid></item>"
+                        + "<item><title>valid</title><link>https://news.example/valid</link></item></channel></rss>");
+
+        for (String feed : feeds) {
+            List<CollectedArticle> articles = parse(feed, "ko");
+            assertEquals(1, articles.size());
+            assertEquals("https://news.example/valid", articles.get(0).canonicalUrl());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://news.example/article", "https://news.example/article"})
+    void preservesPublicLinksAndTreatsHtmlTitlesAsPlainText(String url) {
+        String feed = "<rss><channel><item><title><![CDATA[<img src=x onerror=alert(1)>ordinary title]]></title>"
+                + "<link>" + url + "</link><description><![CDATA[<script>alert(1)</script>summary]]></description>"
+                + "</item></channel></rss>";
+
+        CollectedArticle article = parse(feed, "ko").get(0);
+
+        assertEquals(url, article.canonicalUrl());
+        assertEquals("ordinary title", article.title());
+        assertEquals("summary", article.summary());
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidArticleMetadata")
+    void skipsOnlyInvalidRssAndAtomMetadataBeforeItCanFailTheStorageBatch(String title, String url) {
+        String titleXml = title == null ? "" : "<title><![CDATA[" + title + "]]></title>";
+        List<String> feeds = List.of(
+                "<rss><channel><item>" + titleXml + "<link>" + url + "</link></item>"
+                        + "<item><title>valid</title><link>https://news.example/valid</link></item></channel></rss>",
+                "<feed xmlns=\"http://www.w3.org/2005/Atom\"><entry>" + titleXml + "<link href=\"" + url + "\"/></entry>"
+                        + "<entry><title>valid</title><link href=\"https://news.example/valid\"/></entry></feed>");
+
+        for (String feed : feeds) {
+            List<CollectedArticle> articles = parse(feed, "ko");
+            assertEquals(1, articles.size());
+            assertEquals("valid", articles.get(0).title());
+            assertEquals("https://news.example/valid", articles.get(0).canonicalUrl());
+        }
+    }
+
+    private static java.util.stream.Stream<Arguments> invalidArticleMetadata() {
+        String longHost = "a".repeat(63) + "." + "b".repeat(63) + "." + "c".repeat(63) + "." + "d".repeat(9);
+        String prefix = "https://news.example/";
+        return java.util.stream.Stream.of(
+                Arguments.of("x".repeat(1001), prefix + "article"),
+                Arguments.of(null, prefix + "article"),
+                Arguments.of("", prefix + "article"),
+                Arguments.of("   ", prefix + "article"),
+                Arguments.of("<script>alert(1)</script>", prefix + "article"),
+                Arguments.of("ordinary title", prefix + "x".repeat(2001 - prefix.length())),
+                Arguments.of("ordinary title", "https://" + longHost + "/article"));
+    }
+
+    @Test
+    void acceptsMetadataExactlyAtTheStorageLimits() {
+        String host = "a".repeat(63) + "." + "b".repeat(63) + "." + "c".repeat(63) + "." + "d".repeat(8);
+        String prefix = "https://" + host + "/";
+        String url = prefix + "x".repeat(2000 - prefix.length());
+        String title = "x".repeat(1000);
+        String feed = "<rss><channel><item><title>" + title + "</title><link>" + url
+                + "</link></item></channel></rss>";
+
+        CollectedArticle article = parse(feed, "ko").get(0);
+
+        assertEquals(title, article.title());
+        assertEquals(url, article.canonicalUrl());
+        assertEquals(host, article.sourceName());
+    }
+
+    @Test
+    void acceptsMultibyteMetadataAtTheUtf8ByteLimits() {
+        String title = "가".repeat(333) + "a";
+        String prefix = "https://news.example/";
+        int remaining = 2000 - prefix.length();
+        String url = prefix + "가".repeat(remaining / 3) + "a".repeat(remaining % 3);
+        String feed = "<rss><channel><item><title>" + title + "</title><link>" + url
+                + "</link></item></channel></rss>";
+
+        CollectedArticle article = parse(feed, "ko").get(0);
+
+        assertEquals(1000, title.getBytes(StandardCharsets.UTF_8).length);
+        assertEquals(2000, url.getBytes(StandardCharsets.UTF_8).length);
+        assertEquals(title, article.title());
+        assertEquals(url, article.canonicalUrl());
+    }
+
+    @Test
+    void skipsMultibyteMetadataBeyondUtf8LimitsEvenWhenCharacterCountsFit() {
+        String prefix = "https://news.example/";
+        List<String[]> metadata = List.of(
+                new String[]{"가".repeat(334), prefix + "article"},
+                new String[]{"😀".repeat(251), prefix + "article"},
+                new String[]{"ordinary title", prefix + "😀".repeat((2000 - prefix.length()) / 4 + 1)});
+
+        for (String[] item : metadata) {
+            assertTrue(item[0].length() <= 1000);
+            assertTrue(item[1].length() <= 2000);
+            String feed = "<rss><channel><item><title>" + item[0] + "</title><link>" + item[1] + "</link></item>"
+                    + "<item><title>valid</title><link>https://news.example/valid</link></item></channel></rss>";
+            List<CollectedArticle> articles = parse(feed, "ko");
+            assertEquals(1, articles.size());
+            assertEquals("valid", articles.get(0).title());
+        }
     }
 
     private List<CollectedArticle> parse(String xml, String fallbackLanguage) {

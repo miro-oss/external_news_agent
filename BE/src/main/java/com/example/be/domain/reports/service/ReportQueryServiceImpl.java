@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.agent.investigation.InvestigationTrace;
 import com.example.be.domain.analysis.agent.investigation.IssueInvestigationJdbcRepository;
 import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
@@ -10,12 +11,14 @@ import com.example.be.domain.analysis.service.FindingEvidencePolicy;
 import com.example.be.domain.analysis.service.SensitivityCalculator;
 import com.example.be.domain.collection.entity.ChangeType;
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
+import com.example.be.domain.feedback.model.FeedbackModels.Feedback;
 import com.example.be.domain.issues.entity.NewsIssue;
 import com.example.be.domain.issues.repository.IssueArticleRepository;
 import com.example.be.domain.issues.repository.NewsIssueRepository;
 import com.example.be.domain.notifications.entity.DeliveryStatus;
 import com.example.be.domain.notifications.repository.DeliveryLogRepository;
 import com.example.be.domain.reports.dto.res.ReportResDTO;
+import com.example.be.domain.reports.dart.ReportDartEligibility;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
@@ -66,6 +69,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     private final SensitivityCalculator sensitivityCalculator;
     private final IssueInvestigationJdbcRepository investigationRepository;
     private final CollectionRunArticleRepository runArticleRepository;
+    private final TopicRelevancePolicy relevancePolicy;
+    private final ReportEventFeedbackProjection feedbackProjection;
 
     @Override
     public PageResponse<ReportResDTO.Summary> getReports(String from, String to, int page, int size) {
@@ -90,12 +95,17 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 PageRequest.of(page, size, Sort.by(
                         Sort.Order.desc("generatedAt"), Sort.Order.desc("id"))));
         Map<Long, FindingRepository.ReportCount> counts = countsByRun(reports.getContent());
-        Map<Long, FindingRepository.DailyReportCount> dailyCounts = dailyCounts(reports.getContent());
+        Map<Long, FindingRepository.DailyReportCount> aggregateCounts = aggregateCounts(reports.getContent());
         Map<Long, String> deliveryStatuses = deliveryStatuses(reports.getContent());
+        Map<Long, List<Feedback>> reviewsByReport = feedbackProjection.reviewsByReport(
+                reports.getContent().stream().map(NewsReport::getId).toList());
+        Map<Long, Set<Long>> inheritedByReport = feedbackProjection.inheritedFindingIdsByReport(reports.getContent());
         List<ReportResDTO.Summary> content = reports.getContent().stream()
                 .map(report -> toSummary(report, report.getRunId() == null ? null : counts.get(report.getRunId()),
-                        dailyCounts.get(report.getId()),
-                        deliveryStatuses.getOrDefault(report.getId(), DELIVERY_STATUS_NOT_SENT)))
+                        aggregateCounts.get(report.getId()),
+                        deliveryStatuses.getOrDefault(report.getId(), DELIVERY_STATUS_NOT_SENT),
+                        reviewsByReport.getOrDefault(report.getId(), List.of()),
+                        inheritedByReport.getOrDefault(report.getId(), Set.of())))
                 .toList();
         return PageResponse.of(content, page, size, reports.getTotalElements());
     }
@@ -123,11 +133,28 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     private ReportResDTO.Summary toSummary(NewsReport report,
                                            FindingRepository.ReportCount count,
-                                           FindingRepository.DailyReportCount dailyCount, String deliveryStatus) {
+                                           FindingRepository.DailyReportCount aggregateCount, String deliveryStatus,
+                                           List<Feedback> reviews, Set<Long> inherited) {
+        long findingCount = report.getReportScope() != ReportScope.RUN
+                ? aggregateCount == null ? 0 : aggregateCount.getFindingCount()
+                : count == null ? 0 : count.getFindingCount();
+        long highSensitivityCount = report.getReportScope() != ReportScope.RUN
+                ? aggregateCount == null ? 0 : aggregateCount.getHighSensitivityCount()
+                : count == null ? 0 : count.getHighSensitivityCount();
+        if (feedbackProjection.hasConfirmedErrors(reviews) || !inherited.isEmpty()) {
+            var view = feedbackProjection.project(report,
+                    ReportFindings.loadVisible(report, findingRepository, relevancePolicy), reviews, inherited);
+            findingCount = view.findings().size();
+            highSensitivityCount = view.findings().stream().filter(finding ->
+                    finding.getSensitivity().getScore().compareTo(sensitivityCalculator.highThreshold()) >= 0).count();
+        }
         return ReportResDTO.Summary.builder()
                 .id(report.getId())
                 .runId(report.getRunId())
-                .reportScope(report.getReportScope()).reportDate(report.getReportDate())
+                .reportScope(report.getReportScope()).topicId(report.getTopicId()).topicName(report.getTopicName())
+                .sourceAnalysisDates(report.getSourceAnalysisDates()).reportDate(report.getReportDate())
+                .reportEndDate(report.getReportEndDate()).sourceReportIds(report.getSourceReportIds())
+                .sourceReportDates(report.getSourceReportDates()).missingReportDates(report.getMissingReportDates())
                 .sourceRunIds(sourceRunIds(report))
                 .sourceReportCount(report.getSourceReportCount())
                 .title(report.getTitle())
@@ -136,12 +163,8 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                         ? toOffset(report.getRun().getStartedAt()) : null)
                 .collectionContexts(report.getCollectionContexts())
                 .modelName(report.getModelName())
-                .findingCount(report.getReportScope() == ReportScope.DAILY
-                        ? dailyCount == null ? 0 : dailyCount.getFindingCount()
-                        : count == null ? 0 : count.getFindingCount())
-                .highSensitivityCount(report.getReportScope() == ReportScope.DAILY
-                        ? dailyCount == null ? 0 : dailyCount.getHighSensitivityCount()
-                        : count == null ? 0 : count.getHighSensitivityCount())
+                .findingCount(findingCount)
+                .highSensitivityCount(highSensitivityCount)
                 .deliveryStatus(deliveryStatus)
                 .build();
     }
@@ -164,22 +187,25 @@ public class ReportQueryServiceImpl implements ReportQueryService {
 
     private ReportResDTO.Detail toDetail(NewsReport report, boolean includeFindings) {
         Long runId = report.getRunId();
-        boolean daily = report.getReportScope() == ReportScope.DAILY;
-        boolean loadFindings = includeFindings || daily
-                || findingRepository.countWithoutFullTextForReportByRunId(runId) > 0;
-        ReportFindings.Visible visible = loadFindings ? ReportFindings.loadVisible(report, findingRepository)
+        boolean aggregate = report.getReportScope() != ReportScope.RUN;
+        var reviews = feedbackProjection.reviews(report.getId());
+        boolean loadFindings = includeFindings || aggregate || feedbackProjection.hasConfirmedErrors(reviews)
+                || findingRepository.countWithoutFullTextForReportByRunId(runId) > 0
+                || findingRepository.countTopicExcludedForReportByRunId(runId) > 0;
+        ReportFindings.Visible visible = loadFindings ? ReportFindings.loadVisible(report, findingRepository, relevancePolicy)
                 : new ReportFindings.Visible(List.of(), false);
-        List<Finding> findings = visible.findings();
-        ReportReadingContent readingContent = ReportReadingContent.from(report, visible);
-        Map<Long, Long> issueIdsByArticle = includeFindings
-                ? issueIdsByArticle(findings)
+        var view = feedbackProjection.project(report, visible, reviews);
+        List<Finding> findings = view.findings();
+        ReportReadingContent readingContent = view.readingContent();
+        Map<Long, Long> issueIdsByFinding = includeFindings
+                ? issueIdsByFinding(findings, report.getTopicId())
                 : Map.of();
         Map<Long, NewsIssue> issuesById = includeFindings
-                ? issuesById(issueIdsByArticle.values())
+                ? issuesById(issueIdsByFinding.values())
                 : Map.of();
         Map<Long, Map<Long, InvestigationTrace>> tracesByRun = new LinkedHashMap<>();
         if (includeFindings) {
-            if (daily) {
+            if (aggregate) {
                 tracesByRun.putAll(investigationRepository.findTraces(
                         findings.stream().map(f -> f.getRun().getId()).distinct().toList()));
             } else {
@@ -192,7 +218,10 @@ public class ReportQueryServiceImpl implements ReportQueryService {
         return ReportResDTO.Detail.builder()
                 .id(report.getId())
                 .runId(runId)
-                .reportScope(report.getReportScope()).reportDate(report.getReportDate())
+                .reportScope(report.getReportScope()).topicId(report.getTopicId()).topicName(report.getTopicName())
+                .sourceAnalysisDates(report.getSourceAnalysisDates()).reportDate(report.getReportDate())
+                .reportEndDate(report.getReportEndDate()).sourceReportIds(report.getSourceReportIds())
+                .sourceReportDates(report.getSourceReportDates()).missingReportDates(report.getMissingReportDates())
                 .sourceRunIds(sourceRunIds(report))
                 .sourceReportCount(report.getSourceReportCount())
                 .title(report.getTitle())
@@ -204,41 +233,54 @@ public class ReportQueryServiceImpl implements ReportQueryService {
                 .summaryStats(summaryStats)
                 .structuredContent(readingContent.structuredContent())
                 .collectionContexts(report.getCollectionContexts())
-                .articleStats(ReportArticleStatistics.count(OracleInClause.batches(sourceRunIds(report)).stream()
-                        .flatMap(ids -> runArticleRepository.findReportArticleObservations(ids).stream()).toList()))
+                .dartCompanies(ReportDartEligibility.companies(report))
+                .articleStats(articleStats(report))
                 .findings(includeFindings ? findings.stream()
                         .map(finding -> {
-                            Long issueId = issueIdsByArticle.get(finding.getArticle().getId());
+                            Long issueId = issueIdsByFinding.get(finding.getId());
                             NewsIssue issue = issueId == null ? null : issuesById.get(issueId);
                             return toFinding(
                                     finding, issueId, issue,
                                     issueId == null ? null : tracesByRun.getOrDefault(
-                                            daily ? finding.getRun().getId() : runId, Map.of()).get(issueId));
+                                            aggregate ? finding.getRun().getId() : runId, Map.of()).get(issueId));
                         })
                         .toList() : null)
                 .build();
     }
 
-    private Map<Long, Long> issueIdsByArticle(List<Finding> findings) {
+    private ReportResDTO.ArticleStats articleStats(NewsReport report) {
+        Set<Long> allowedArticles = report.getTopicId() == null || report.getWeeklyInput() == null ? null
+                : report.getWeeklyInput().sources().stream().filter(source -> source.evidenceSnapshot() != null)
+                        .flatMap(source -> source.evidenceSnapshot().issues().stream())
+                        .flatMap(issue -> issue.side().claims().stream()).flatMap(claim -> claim.evidence().stream())
+                        .map(evidence -> evidence.articleId()).collect(Collectors.toSet());
+        return ReportArticleStatistics.count(OracleInClause.batches(sourceRunIds(report)).stream()
+                .flatMap(ids -> runArticleRepository.findReportArticleObservations(ids).stream())
+                .filter(observation -> allowedArticles == null || allowedArticles.contains(observation.getArticleId())).toList());
+    }
+
+    private Map<Long, Long> issueIdsByFinding(List<Finding> findings, Long reportTopicId) {
         if (findings.isEmpty()) {
             return Map.of();
         }
         Set<Long> articleIds = findings.stream()
                 .map(finding -> finding.getArticle().getId())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        Map<Long, Long> topicIdsByArticle = findings.stream()
-                .collect(Collectors.toMap(
-                        finding -> finding.getArticle().getId(),
-                        finding -> finding.getArticle().getTopic().getId(),
-                        (first, ignored) -> first,
-                        LinkedHashMap::new));
+        Map<Long, Set<Long>> assessedTopics = relevancePolicy.relevantTopicIdsByFinding(findings);
+        Map<Long, List<IssueArticleRepository.CoverageMembership>> membershipsByArticle =
+                OracleInClause.batches(articleIds).stream()
+                        .flatMap(ids -> issueArticleRepository.findCoverageMembershipsByArticleIds(ids).stream())
+                        .collect(Collectors.groupingBy(IssueArticleRepository.CoverageMembership::getArticleId));
         Map<Long, Long> result = new LinkedHashMap<>();
-        OracleInClause.batches(articleIds).stream()
-                .flatMap(ids -> issueArticleRepository.findCoverageMembershipsByArticleIds(ids).stream())
-                .filter(membership -> membership.getTopicId()
-                        .equals(topicIdsByArticle.get(membership.getArticleId())))
-                .forEach(membership -> result.putIfAbsent(
-                        membership.getArticleId(), membership.getIssueId()));
+        for (Finding finding : findings) {
+            Set<Long> topics = assessedTopics.getOrDefault(finding.getId(),
+                    Set.of(finding.getArticle().getTopic().getId()));
+            membershipsByArticle.getOrDefault(finding.getArticle().getId(), List.of()).stream()
+                    .filter(membership -> topics.contains(membership.getTopicId())
+                            && (reportTopicId == null || reportTopicId.equals(membership.getTopicId())))
+                    .map(IssueArticleRepository.CoverageMembership::getIssueId).min(Long::compareTo)
+                    .ifPresent(issueId -> result.put(finding.getId(), issueId));
+        }
         return result;
     }
 
@@ -389,12 +431,12 @@ public class ReportQueryServiceImpl implements ReportQueryService {
     }
 
     private List<Long> sourceRunIds(NewsReport report) {
-        return report.getReportScope() == ReportScope.DAILY ? report.getSourceRunIds()
+        return report.getReportScope() != ReportScope.RUN ? report.getSourceRunIds()
                 : report.getRunId() == null ? List.of() : List.of(report.getRunId());
     }
 
-    private Map<Long, FindingRepository.DailyReportCount> dailyCounts(List<NewsReport> reports) {
-        List<Long> ids = reports.stream().filter(r -> r.getReportScope() == ReportScope.DAILY)
+    private Map<Long, FindingRepository.DailyReportCount> aggregateCounts(List<NewsReport> reports) {
+        List<Long> ids = reports.stream().filter(r -> r.getReportScope() != ReportScope.RUN)
                 .map(NewsReport::getId).toList();
         return OracleInClause.batches(ids).stream()
                 .flatMap(batch -> findingRepository.countForDailyReports(batch, sensitivityCalculator.highThreshold()).stream())

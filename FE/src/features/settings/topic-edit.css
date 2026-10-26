@@ -1,0 +1,24 @@
+.saved-topic-edit { display: grid; gap: .3rem; }
+.saved-topic-edit > small { color: var(--fg-3); font-size: .75rem; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+.saved-topic-edit > .field-error { color: var(--danger-strong); }
+.recipient-selection-dialog.topic-edit-dialog { width: min(38rem, calc(100vw - 2rem)); height: min(48rem, calc(100dvh - 2rem)); }
+.topic-edit-dialog[open] { grid-template-rows: auto minmax(0, 1fr); }
+.topic-edit-dialog .recipient-selection-heading > div { min-width: 0; }
+.topic-edit-dialog .recipient-selection-heading p { overflow-wrap: anywhere; }
+.topic-edit-form { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
+.topic-edit-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: .2rem .4rem .2rem .2rem; }
+.topic-edit-conditions { min-width: 0; margin: .25rem 0 0; padding: 1rem; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.topic-edit-conditions > legend { margin: 0; padding: 0 .35rem; }
+.topic-edit-conditions > .hint { margin: 0 0 1rem; }
+.topic-edit-conditions .field:last-child { margin-bottom: 0; }
+.topic-edit-dialog textarea { display: block; width: 100%; box-sizing: border-box; min-height: 5.4rem; padding: .78rem .9rem; border: 1.5px solid transparent; border-radius: var(--radius-sm); background: var(--bg); color: var(--fg); font: inherit; font-size: .94rem; line-height: 1.6; resize: vertical; transition: border-color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out); }
+.topic-edit-dialog textarea::placeholder { color: var(--fg-4); }
+.topic-edit-dialog textarea:focus { outline: none; border-color: var(--primary); background: var(--surface); }
+.topic-edit-dialog textarea:disabled { color: var(--fg-4); cursor: default; opacity: 1; }
+.topic-edit-application-hint { margin-bottom: 0; }
+.topic-edit-dialog .recipient-selection-actions { flex-wrap: wrap; }
+.topic-edit-save-error { flex: 0 0 100%; margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .recipient-selection-dialog.topic-edit-dialog { width: calc(100vw - 1.5rem); height: calc(100dvh - 1.5rem); }
+  .topic-edit-conditions { padding: .8rem; }
+}

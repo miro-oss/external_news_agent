@@ -7,13 +7,14 @@ from decimal import Decimal
 from email.utils import parsedate_to_datetime
 from typing import Any
 
-from openai import APIStatusError, OpenAI
+from openai import APIStatusError, DefaultHttpx2Client, OpenAI
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
 
 from app.core.config import Settings
 from app.core.errors import AgentError
 from app.core.safecast import safe_int
 from app.llm.base import ProviderResponse, ProviderUsage
+from app.llm.deadline_transport import DeadlineHttpx2Transport
 from app.llm.openai_contract import output_contract
 
 logger = logging.getLogger(__name__)
@@ -21,25 +22,38 @@ logger = logging.getLogger(__name__)
 # Standard USD per million tokens (input, cached input, output), checked 2026-09-07.
 # https://developers.openai.com/api/docs/models/gpt-4.1-nano
 # https://developers.openai.com/api/docs/models/gpt-4o-mini
+# https://developers.openai.com/api/docs/models/gpt-5-mini (checked 2026-09-22)
+# https://developers.openai.com/api/docs/models/gpt-5.6-terra (checked 2026-09-22)
 _MODEL_PRICES = {
     "gpt-4.1-nano": (Decimal("0.10"), Decimal("0.025"), Decimal("0.40")),
     "gpt-4o-mini": (Decimal("0.15"), Decimal("0.075"), Decimal("0.60")),
+    "gpt-5-mini": (Decimal("0.25"), Decimal("0.025"), Decimal("2.00")),
+    "gpt-5.6-terra": (Decimal("2.00"), Decimal("0.20"), Decimal("12.00")),
 }
 _MODEL_ALIASES = {
     "gpt-4.1-nano-2025-04-14": "gpt-4.1-nano",
     "gpt-4o-mini-2024-07-18": "gpt-4o-mini",
+    "gpt-5-mini-2025-08-07": "gpt-5-mini",
 }
 _ERROR_CODES = {
     "insufficient_quota",
+    "credit_balance_exhausted",
     "rate_limit_exceeded",
     "invalid_api_key",
     "invalid_json_schema",
     "invalid_request_error",
 }
+_QUOTA_ERROR_CODES = ("insufficient_quota", "credit_balance_exhausted")
 
 
 class OpenAIAnalyzeProvider:
-    def __init__(self, settings: Settings, client: OpenAI | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        client: OpenAI | None = None,
+        *,
+        request_deadline: float | None = None,
+    ) -> None:
         self._model = settings.openai_model
         self._max_output_tokens = settings.max_output_tokens
         self._retry_attempts = settings.provider_retry_attempts
@@ -55,12 +69,21 @@ class OpenAIAnalyzeProvider:
                 "OpenAI 모델 단가 미설정: costUsd는 0으로 기록됩니다. model=%s", self._model
             )
         self._owns_client = client is None
+        http_client = (
+            DefaultHttpx2Client(
+                timeout=settings.provider_timeout_seconds,
+                transport=DeadlineHttpx2Transport(request_deadline),
+            )
+            if client is None and request_deadline is not None
+            else None
+        )
         self._client = client or OpenAI(
             api_key=settings.openai_api_key,
             base_url="https://api.openai.com/v1",
             timeout=settings.provider_timeout_seconds,
             # 429 is retried by the shared coordinator; avoid hidden SDK retries.
             max_retries=0,
+            http_client=http_client,
         )
 
     def generate(
@@ -128,13 +151,19 @@ class OpenAIAnalyzeProvider:
     ) -> Any:
         schema = OpenAIJsonSchemaTransformer(deepcopy(response_schema), strict=True).walk()
         name = re.sub(r"[^a-zA-Z0-9_-]", "_", str(response_schema.get("title") or "output"))
+        # Use model-specific reasoning only for explicitly supported models;
+        # preserve the sampling contract for every other configured model.
+        effort = {"gpt-5-mini": "low", "gpt-5.6-terra": "medium"}.get(
+            _MODEL_ALIASES.get(self._model, self._model)
+        )
+        options = {"reasoning": {"effort": effort}} if effort is not None else {"temperature": 0}
         for attempt in range(self._retry_attempts + 1):
             try:
                 return self._client.responses.create(
                     model=self._model,
                     instructions=system_instruction,
                     input=prompt,
-                    temperature=0,
+                    **options,
                     max_output_tokens=self._max_output_tokens,
                     store=False,
                     text={
@@ -206,16 +235,24 @@ def _output_error(usage: ProviderUsage, truncated: bool) -> AgentError:
 
 def _provider_error_details(error: Exception) -> dict[str, object]:
     status = error.status_code if isinstance(error, APIStatusError) else 0
-    code = getattr(error, "code", None)
-    if code is None:
-        code = getattr(error, "type", None)
-    safe_code = code if isinstance(code, str) and code in _ERROR_CODES else "UNKNOWN"
+    safe_codes = [
+        value
+        for value in (getattr(error, "code", None), getattr(error, "type", None))
+        if isinstance(value, str) and value in _ERROR_CODES
+    ]
+    # A specific/unknown code must not hide an insufficient_quota type.
+    # Quota exhaustion is terminal even when HTTP 429 also denotes throttling.
+    safe_code = next(
+        (code for code in _QUOTA_ERROR_CODES if code in safe_codes),
+        next(iter(safe_codes), "UNKNOWN"),
+    )
     details: dict[str, object] = {
         "provider": "openai",
         "providerStatusCode": status,
         "providerStatus": safe_code,
         "rateLimited": status == 429,
-        "retryable": (status in {408, 429} or status >= 500) and safe_code != "insufficient_quota",
+        "retryable": (status in {408, 429} or status >= 500)
+        and safe_code not in _QUOTA_ERROR_CODES,
     }
     if isinstance(error, APIStatusError):
         retry_after = _retry_after_header_seconds(error.response.headers.get("retry-after"))

@@ -1,8 +1,11 @@
 package com.example.be.domain.reports.comparison;
 
+import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.reports.service.ReportFindings;
+import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
+import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.global.database.OracleInClause;
 import com.example.be.domain.reports.entity.ReportScope;
 import com.example.be.domain.reports.entity.ReportStatus;
@@ -14,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -25,12 +29,14 @@ public class ReportChangesQueryService {
     private final NewsReportRepository reports;
     private final ReportComparisonRepository comparisons;
     private final FindingRepository findings;
+    private final TopicRelevancePolicy relevancePolicy;
+    private final ReportEventFeedbackProjection feedbackProjection;
 
     @Transactional(readOnly = true)
     public ReportChanges get(long reportId) {
         var report = reports.findByIdAndReportStatusNot(reportId, ReportStatus.PENDING)
                 .orElseThrow(() -> new ReportException(ReportErrorCode.REPORT_NOT_FOUND));
-        if (report.getReportScope() == ReportScope.RUN) return new ReportChanges(reportId, null, null, null,
+        if (report.getReportScope() != ReportScope.DAILY) return new ReportChanges(reportId, null, null, null,
                 ReportChanges.Status.NOT_APPLICABLE, ReportChanges.Status.NOT_APPLICABLE.message, false, List.of(), List.of());
         var job = comparisons.find(reportId).orElse(null);
         if (job == null) {
@@ -39,8 +45,12 @@ public class ReportChangesQueryService {
         }
         var base = job.result().baseReportId() == null ? null : reports.findByIdAndReportStatusNot(
                 job.result().baseReportId(), ReportStatus.PENDING).orElse(null);
+        if (excludedEvent(report) || (base != null && excludedEvent(base))) {
+            // Every saved state can contain uncertainty notes quoting the unfiltered snapshots.
+            return unavailable(job.result());
+        }
         if (job.result().baseReportId() != null && base == null) {
-            return job.result().withStatus(ReportChanges.Status.UNAVAILABLE);
+            return unavailable(job.result());
         }
         if (job.status() == ReportChanges.Status.READY) {
             Set<Long> required = new LinkedHashSet<>(report.getReflectedFindingIds());
@@ -49,17 +59,34 @@ public class ReportChangesQueryService {
                     .filter(Objects::nonNull).flatMap(side -> side.claims().stream())
                     .flatMap(claim -> claim.evidence().stream()).map(ReportChanges.Evidence::findingId)
                     .forEach(required::add);
-            Set<Long> available = OracleInClause.batches(required).stream()
-                    .flatMap(ids -> findings.findForReportByIdIn(ids).stream())
+            List<Finding> loaded = OracleInClause.batches(required).stream()
+                    .flatMap(ids -> findings.findForReportByIdIn(ids).stream()).toList();
+            Set<Long> available = relevancePolicy.filterFindings(loaded).stream()
                     .filter(ReportFindings::hasFullText).map(Finding::getId).collect(Collectors.toSet());
-            if (!available.containsAll(required)) {
+            Map<Long, Set<Long>> acceptedTopics = relevancePolicy.relevantTopicIdsByFinding(loaded);
+            boolean acceptedInSavedTopics = job.result().items().stream()
+                    .flatMap(item -> Stream.of(item.previous(), item.current())).filter(Objects::nonNull)
+                    .allMatch(side -> side.claims().stream().flatMap(claim -> claim.evidence().stream())
+                            .allMatch(evidence -> !acceptedTopics.containsKey(evidence.findingId())
+                                    || acceptedTopics.get(evidence.findingId()).contains(side.topicId())));
+            if (!available.containsAll(required) || !acceptedInSavedTopics) {
                 // Check current visibility only; historical quoted text always stays in its saved snapshot.
-                var result = job.result();
-                var state = ReportChanges.Status.UNAVAILABLE;
-                return new ReportChanges(result.reportId(), result.reportDate(), result.baseReportId(),
-                        result.baseReportDate(), state, state.message, false, List.of(), List.of());
+                return unavailable(job.result());
             }
         }
         return job.result().withStatus(job.status());
+    }
+
+    private boolean excludedEvent(NewsReport report) {
+        var reviews = feedbackProjection.reviews(report.getId());
+        if (!feedbackProjection.hasConfirmedErrors(reviews)) return false;
+        return feedbackProjection.project(report, ReportFindings.loadVisible(report, findings, relevancePolicy), reviews)
+                .excludedEvents();
+    }
+
+    private static ReportChanges unavailable(ReportChanges result) {
+        var state = ReportChanges.Status.UNAVAILABLE;
+        return new ReportChanges(result.reportId(), result.reportDate(), result.baseReportId(),
+                result.baseReportDate(), state, state.message, false, List.of(), List.of());
     }
 }

@@ -31,6 +31,6 @@ public class SearchConnectorHttpConfig {
     @Bean
     @Scope("prototype")
     public RestClient.Builder searchRestClientBuilder() {
-        return restClientFactory.create(CONNECT_TIMEOUT, READ_TIMEOUT);
+        return restClientFactory.createPublic(CONNECT_TIMEOUT, READ_TIMEOUT);
     }
 }

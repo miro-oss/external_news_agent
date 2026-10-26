@@ -76,7 +76,7 @@ def test_concurrency_limit_rejects_second_call_without_calling_delegate() -> Non
                 prompt="second",
                 response_schema={},
             )
-        assert error.value.details == {"concurrencyLimited": True}
+        assert error.value.details == {"concurrencyLimited": True, "requestNotStarted": True}
     finally:
         release.set()
         thread.join(timeout=1)

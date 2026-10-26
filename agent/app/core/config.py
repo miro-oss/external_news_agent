@@ -1,5 +1,7 @@
 from decimal import Decimal
 from functools import lru_cache
+from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +22,11 @@ class Settings(BaseSettings):
         validation_alias="AGENT_SHARED_SECRET",
     )
     mock: bool = Field(default=True, validation_alias="AGENT_MOCK")
+    max_request_body_bytes: int = Field(
+        default=16 * 1024 * 1024,
+        ge=1,
+        validation_alias="AGENT_MAX_REQUEST_BODY_BYTES",
+    )
     max_body_chars: int = Field(
         default=20_000,
         ge=1,
@@ -59,6 +66,20 @@ class Settings(BaseSettings):
         default=120.0,
         gt=0,
         validation_alias="AGENT_REPORT_PROVIDER_TIMEOUT_SECONDS",
+    )
+    report_insight_timeout_seconds: float = Field(
+        default=180.0,
+        gt=0,
+        validation_alias="AGENT_REPORT_INSIGHT_TIMEOUT_SECONDS",
+    )
+    report_insight_source_cache_dir: str = Field(
+        default=str(Path(__file__).resolve().parents[2] / ".cache/report-insight/source-relations"),
+        validation_alias="AGENT_REPORT_INSIGHT_SOURCE_CACHE_DIR",
+    )
+    report_insight_source_extraction_model: str = Field(
+        default="gpt-5-mini",
+        min_length=1,
+        validation_alias="AGENT_REPORT_INSIGHT_SOURCE_EXTRACTION_MODEL",
     )
     provider_retry_attempts: int = Field(
         default=1,
@@ -158,6 +179,15 @@ class Settings(BaseSettings):
     )
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4.1-nano", validation_alias="OPENAI_MODEL")
+    topic_relevance_openai_model: Literal[
+        "gpt-4.1-nano",
+        "gpt-4.1-nano-2025-04-14",
+        "gpt-4o-mini",
+        "gpt-4o-mini-2024-07-18",
+        "gpt-5-mini",
+        "gpt-5-mini-2025-08-07",
+        "gpt-5.6-terra",
+    ] = Field(default="gpt-4.1-nano", validation_alias="TOPIC_RELEVANCE_OPENAI_MODEL")
     openai_input_cost_per_million: Decimal | None = Field(
         default=None, ge=0, validation_alias="OPENAI_INPUT_COST_PER_MILLION"
     )
@@ -189,9 +219,7 @@ class Settings(BaseSettings):
         ):
             raise ValueError("OpenAI 사용자 지정 토큰 단가는 세 값을 모두 설정해야 합니다.")
         if self.evidence_weak_overlap > self.evidence_grounded_overlap:
-            raise ValueError(
-                "AGENT_EVIDENCE_WEAK_OVERLAP은 GROUNDED_OVERLAP보다 클 수 없습니다."
-            )
+            raise ValueError("AGENT_EVIDENCE_WEAK_OVERLAP은 GROUNDED_OVERLAP보다 클 수 없습니다.")
         if self.rate_limit_max_backoff_seconds < self.rate_limit_backoff_seconds:
             raise ValueError(
                 "AGENT_RATE_LIMIT_MAX_BACKOFF_SECONDS는 기본 backoff보다 작을 수 없습니다."

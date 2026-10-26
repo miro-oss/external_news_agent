@@ -214,7 +214,7 @@ def test_keyword_strategy_returns_deterministic_mock_contract() -> None:
     payload = response.json()
     assert payload["proposals"][0]["keyword"] == "HBM4"
     assert payload["proposals"][0]["action"] == "ADD"
-    assert payload["meta"]["promptVersion"] == "keyword-strategy.ko.v1"
+    assert payload["meta"]["promptVersion"] == "keyword-strategy.ko.v2"
 
 
 def test_explore_returns_deterministic_mock_contract() -> None:

@@ -1,10 +1,16 @@
 package com.example.be.domain.collection.robots;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.mock.http.client.MockClientHttpResponse;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+
+import java.io.InputStream;
+import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -15,12 +21,23 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class RobotsTxtClientTest {
 
+    private static final int MAX_BODY_BYTES = 512 * 1024;
+
     private static final String FEED_URL = "https://www.hankyung.com/feed/economy";
     private static final String ROBOTS_URL = "https://www.hankyung.com/robots.txt";
 
     private final RestClient.Builder builder = RestClient.builder();
     private final MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
     private final RobotsTxtClient client = new RobotsTxtClient(builder, "external-news-agent");
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://127.0.0.1/private", "https://169.254.169.254/metadata",
+            "https://metadata.google.internal/a", "https://[::1]/a", "http://10.0.0.1/a",
+            "ftp://news.example/a", "https://user:pass@news.example/a"})
+    void neverRequestsRobotsAtPrivateOrInvalidDestinations(String url) {
+        assertEquals("INVALID_URL", client.lookup(url).reason());
+        server.verify();
+    }
 
     @Test
     void asksTheHostRootRegardlessOfFeedPath() {
@@ -92,5 +109,86 @@ class RobotsTxtClientTest {
         assertFalse(lookup.resolved());
         assertEquals("INVALID_URL", lookup.reason());
         server.verify();
+    }
+
+    @Test
+    void stopsReadingAnUnknownLengthBodyAtTheByteLimit() {
+        CountingBody body = new CountingBody(MAX_BODY_BYTES * 4);
+        server.expect(requestTo(ROBOTS_URL)).andRespond(request -> new MockClientHttpResponse(body, HttpStatus.OK));
+
+        assertEquals("TOO_LARGE", client.lookup(FEED_URL).reason());
+        assertEquals(MAX_BODY_BYTES + 1, body.consumed);
+        assertTrue(body.closed);
+        server.verify();
+    }
+
+    @Test
+    void rejectsDeclaredOversizeWithoutReadingTheBody() {
+        CountingBody body = new CountingBody(MAX_BODY_BYTES * 4);
+        server.expect(requestTo(ROBOTS_URL)).andRespond(request -> {
+            var response = new MockClientHttpResponse(body, HttpStatus.OK);
+            response.getHeaders().setContentLength(MAX_BODY_BYTES + 1);
+            return response;
+        });
+
+        assertEquals("TOO_LARGE", client.lookup(FEED_URL).reason());
+        assertEquals(0, body.consumed);
+        assertTrue(body.closed);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {301, 403, 404, 500})
+    void neverBuffersErrorOrRedirectBodies(int status) {
+        CountingBody body = new CountingBody(MAX_BODY_BYTES * 4);
+        server.expect(requestTo(ROBOTS_URL)).andRespond(request ->
+                new MockClientHttpResponse(body, HttpStatus.valueOf(status)));
+
+        RobotsLookup lookup = client.lookup(FEED_URL);
+
+        if (status == 404) assertTrue(lookup.resolved());
+        else assertEquals("HTTP_" + status, lookup.reason());
+        assertEquals(0, body.consumed);
+        assertTrue(body.closed);
+    }
+
+    @Test
+    void acceptsABodyExactlyAtTheLimit() {
+        CountingBody body = new CountingBody(MAX_BODY_BYTES);
+        server.expect(requestTo(ROBOTS_URL)).andRespond(request -> new MockClientHttpResponse(body, HttpStatus.OK));
+
+        assertTrue(client.lookup(FEED_URL).resolved());
+        assertEquals(MAX_BODY_BYTES, body.consumed);
+    }
+
+    private static final class CountingBody extends InputStream {
+        private final int length;
+        private int consumed;
+        private boolean closed;
+
+        private CountingBody(int length) {
+            this.length = length;
+        }
+
+        @Override
+        public int read() {
+            if (consumed == length) return -1;
+            consumed++;
+            return 'a';
+        }
+
+        @Override
+        public int read(byte[] bytes, int offset, int count) {
+            if (count == 0) return 0;
+            if (consumed == length) return -1;
+            int actual = Math.min(count, length - consumed);
+            Arrays.fill(bytes, offset, offset + actual, (byte) 'a');
+            consumed += actual;
+            return actual;
+        }
+
+        @Override
+        public void close() {
+            closed = true;
+        }
     }
 }

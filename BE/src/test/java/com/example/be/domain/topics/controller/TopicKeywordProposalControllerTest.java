@@ -9,6 +9,9 @@ import com.example.be.global.apiPayload.PageResponse;
 import com.example.be.global.apiPayload.code.GeneralErrorCode;
 import com.example.be.global.apiPayload.exception.GeneralException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.http.MediaType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -19,6 +22,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -53,13 +58,59 @@ class TopicKeywordProposalControllerTest {
 
     @Test
     void approvesProposalWithUpdatedEnvelope() throws Exception {
-        when(commandService.approve(1L)).thenReturn(proposal("APPROVED"));
+        when(commandService.approve(1L, null)).thenReturn(proposal("APPROVED"));
 
         mockMvc.perform(post("/api/news/topics/keyword-proposals/1/approve"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("COMMON200"))
                 .andExpect(jsonPath("$.message").value("수정되었습니다."))
                 .andExpect(jsonPath("$.result.status").value("APPROVED"));
+        verify(commandService).approve(1L, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "null", "{\"selectedChangeIndexes\":null}"})
+    void missingOrNullSelectionUsesLegacyFullApproval(String body) throws Exception {
+        when(commandService.approve(1L, null)).thenReturn(proposal("APPROVED"));
+        mockMvc.perform(post("/api/news/topics/keyword-proposals/1/approve")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.selectedChangeIndexes[0]").value(0));
+        verify(commandService).approve(1L, null);
+    }
+
+    @Test
+    void forwardsSelectedIndexesAndReturnsThePersistedSelection() throws Exception {
+        when(commandService.approve(1L, List.of(0))).thenReturn(proposal("APPROVED"));
+        mockMvc.perform(post("/api/news/topics/keyword-proposals/1/approve")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"selectedChangeIndexes\":[0]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.selectedChangeIndexes[0]").value(0))
+                .andExpect(jsonPath("$.result.changes[0].keyword").value("HBM4"));
+        verify(commandService).approve(1L, List.of(0));
+    }
+
+    @Test
+    void returnsDomainBadRequestForInvalidSelection() throws Exception {
+        when(commandService.approve(1L, List.of()))
+                .thenThrow(new TopicException(TopicErrorCode.INVALID_KEYWORD_PROPOSAL_SELECTION));
+        mockMvc.perform(post("/api/news/topics/keyword-proposals/1/approve")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"selectedChangeIndexes\":[]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("TOPIC400"))
+                .andExpect(jsonPath("$.message").value("적용할 키워드 변경 항목을 올바르게 선택해 주세요."));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"[0.5]", "[\"0\"]", "[true]", "[{}]", "[2147483648]", "0"})
+    void malformedSelectionCannotBeCoercedIntoApprovingADifferentKeyword(String selection) throws Exception {
+        mockMvc.perform(post("/api/news/topics/keyword-proposals/1/approve")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"selectedChangeIndexes\":" + selection + "}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("COMMON400"))
+                .andExpect(jsonPath("$.message").value("입력값 검증 실패입니다."));
+        verifyNoInteractions(commandService);
     }
 
     @Test
@@ -87,7 +138,7 @@ class TopicKeywordProposalControllerTest {
 
     @Test
     void returnsNotFoundWhenProposalDoesNotExist() throws Exception {
-        when(commandService.approve(99L))
+        when(commandService.approve(99L, null))
                 .thenThrow(new TopicException(TopicErrorCode.KEYWORD_PROPOSAL_NOT_FOUND));
 
         mockMvc.perform(post("/api/news/topics/keyword-proposals/99/approve"))
@@ -111,7 +162,7 @@ class TopicKeywordProposalControllerTest {
 
     @Test
     void returnsConflictWhenProposalBaselineIsStale() throws Exception {
-        when(commandService.approve(1L))
+        when(commandService.approve(1L, null))
                 .thenThrow(new TopicException(TopicErrorCode.KEYWORD_PROPOSAL_STALE));
 
         mockMvc.perform(post("/api/news/topics/keyword-proposals/1/approve"))
@@ -128,6 +179,7 @@ class TopicKeywordProposalControllerTest {
                 .topicName("HBM")
                 .collectionRunId(148L)
                 .status(status)
+                .selectedChangeIndexes("PENDING".equals(status) ? null : List.of(0))
                 .summary("HBM4를 선택 키워드로 추가합니다.")
                 .reviewedAt("PENDING".equals(status)
                         ? null

@@ -1,0 +1,435 @@
+{
+  "datasetId": "topic-relevance.scope-supply.v2",
+  "description": "개발자가 작성한 가상 사실의 합성 명세 대조 사례 19건. expectedStatus는 개발 기대값이며 사람 정답, 실제 기사 원문, 신규 독립 품질 평가 자료가 아니다. queryText의 자연스러운 의미 우선, 이름·키워드의 보충 역할, 특정 규격과 상위 범주의 구분, 질의 누락 시 주제 정보 활용, 명백히 상충하는 분야의 보류, 병렬 주제 범위, 원문에 명시된 제조용 공급·투자·생산망 영향과 배경·일반 용도·추론의 경계를 점검한다. HBM4 동의표현 사례는 규격 번호가 명시된 한글 표현이며 단순 세대 번호만으로 제품 규격을 추론하라는 기대값이 아니다. 실제 평가 자료의 사람 라벨을 변경하거나 독립 품질 통과를 주장하는 근거로 사용하지 않는다. v1의 18개 입력·기대값은 그대로 보존하고, 동일 소재의 일반 용도와 증산만으로 특정 산업 공급을 추론하지 않는 음성 사례를 추가했다.",
+  "cases": [
+    {
+      "id": "hbm4-explicit-product",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 201,
+        "name": "HBM4 기술과 생산",
+        "queryText": "HBM4",
+        "requiredKeywords": [
+          "HBM"
+        ],
+        "optionalKeywords": [
+          "고대역폭 메모리",
+          "메모리"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2001,
+        "title": "오름메모리, HBM4 생산 설비 발주",
+        "summary": null,
+        "bodyText": "오름메모리는 HBM4 제품을 생산할 신규 적층 설비를 발주했다. 주문한 설비는 HBM4 시제품의 접합 조건 검증에 사용하며, 검증을 마친 뒤 고객사에 평가용 샘플을 공급할 예정이다."
+      }
+    },
+    {
+      "id": "hbm3e-not-specific-hbm4",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 201,
+        "name": "HBM4 기술과 생산",
+        "queryText": "HBM4",
+        "requiredKeywords": [
+          "HBM"
+        ],
+        "optionalKeywords": [
+          "고대역폭 메모리",
+          "메모리"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2002,
+        "title": "오름메모리, HBM3E 출하 확대",
+        "summary": null,
+        "bodyText": "오름메모리는 HBM3E 제품 출하량을 늘렸다. 이번 출하분은 현재 주문받은 HBM3E 물량이며 회사는 납기 단축을 위해 기존 검사 인력을 늘린다고 밝혔다."
+      }
+    },
+    {
+      "id": "hbm4-korean-standard-equivalent",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 201,
+        "name": "HBM4 기술과 생산",
+        "queryText": "HBM4",
+        "requiredKeywords": [
+          "HBM"
+        ],
+        "optionalKeywords": [
+          "고대역폭 메모리",
+          "메모리"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2003,
+        "title": "마루메모리, 고대역폭 메모리 4 규격 검증 착수",
+        "summary": null,
+        "bodyText": "마루메모리는 고대역폭 메모리 4 규격에 맞춘 신제품의 검증을 시작했다. 회사는 이전 고대역폭 메모리 3 규격 제품과 구분해 새 규격용 접합 시험을 수행하고 있다고 밝혔다. 검증이 끝나면 이 4 규격 제품의 생산 설비를 늘릴 계획이다."
+      }
+    },
+    {
+      "id": "hbm-unspecified-generation",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 201,
+        "name": "HBM4 기술과 생산",
+        "queryText": "HBM4",
+        "requiredKeywords": [
+          "HBM"
+        ],
+        "optionalKeywords": [
+          "고대역폭 메모리",
+          "메모리"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2004,
+        "title": "마루메모리, 고대역폭 메모리 주문 증가",
+        "summary": null,
+        "bodyText": "마루메모리는 고대역폭 메모리의 전체 주문량이 전 분기보다 늘었다고 밝혔다. 발표는 여러 제품을 합친 매출과 전체 출하량을 다루며 제품별 규격이나 세대는 밝히지 않았다. 회사는 고객 문의 대응 인력을 늘렸다."
+      }
+    },
+    {
+      "id": "broad-query-not-narrowed-by-name",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 202,
+        "name": "반도체 공급망 재편",
+        "queryText": "반도체",
+        "requiredKeywords": [
+          "반도체"
+        ],
+        "optionalKeywords": [
+          "공급망",
+          "소재"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2005,
+        "title": "온길칩, 저전력 제어 반도체 출시",
+        "summary": null,
+        "bodyText": "온길칩은 가전용 저전력 제어 반도체를 출시했다. 새 칩은 대기 상태의 전력 소모를 줄이며 가전 제조사에 평가용 샘플을 공급한다. 이번 발표는 신제품의 기능과 출시 일정에 관한 것이다."
+      }
+    },
+    {
+      "id": "broad-query-industry-background-only",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 202,
+        "name": "반도체 공급망 재편",
+        "queryText": "반도체",
+        "requiredKeywords": [
+          "반도체"
+        ],
+        "optionalKeywords": [
+          "공급망",
+          "소재"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2006,
+        "title": "온길칩, 지역 청소년 합창단 후원",
+        "summary": null,
+        "bodyText": "온길칩은 지역 청소년 합창단의 악보 구입비와 연습실 대여료를 지원한다. 학생들은 다음 달 시민회관에서 공연한다. 온길칩은 가전용 반도체를 판매하는 회사로 소개됐으며 이번 발표의 내용은 합창단 지원이다."
+      }
+    },
+    {
+      "id": "missing-query-meaningful-topic-fallback",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 203,
+        "name": "해상 풍력 발전 설비",
+        "queryText": null,
+        "requiredKeywords": [
+          "풍력"
+        ],
+        "optionalKeywords": [
+          "해상",
+          "터빈",
+          "발전기"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2007,
+        "title": "푸른발전, 해상 풍력 터빈 설치 계약",
+        "summary": null,
+        "bodyText": "푸른발전은 연안 발전단지에 풍력 터빈을 설치하는 계약을 체결했다. 터빈 기초 구조물과 발전기를 선박으로 운송한 뒤 해상에서 조립한다. 설치 이후에는 발전기 출력과 송전 설비를 점검한다."
+      }
+    },
+    {
+      "id": "missing-query-background-only",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 203,
+        "name": "해상 풍력 발전 설비",
+        "queryText": null,
+        "requiredKeywords": [
+          "풍력"
+        ],
+        "optionalKeywords": [
+          "해상",
+          "터빈",
+          "발전기"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2008,
+        "title": "푸른발전, 직원 통근버스 노선 변경",
+        "summary": null,
+        "bodyText": "푸른발전은 사무직 직원의 통근버스 노선을 바꾸고 출발 시간을 조정했다. 변경된 노선은 다음 주부터 운행한다. 회사는 해상 풍력 사업을 운영하지만 이번 공지는 사무실 출퇴근 편의에 관한 내용이다."
+      }
+    },
+    {
+      "id": "genuinely-disjoint-topic-fields",
+      "expectedStatus": "UNCERTAIN",
+      "topic": {
+        "id": 204,
+        "name": "리튬이온 배터리 생산",
+        "queryText": "해상 풍력 발전",
+        "requiredKeywords": [
+          "배터리"
+        ],
+        "optionalKeywords": [
+          "전해액",
+          "양극재"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2009,
+        "title": "누리바람, 해상 풍력 발전단지 착공",
+        "summary": null,
+        "bodyText": "누리바람은 해상 풍력 발전단지를 착공했다. 발전용 터빈과 해저 송전 케이블을 설치하고 이듬해부터 전력을 공급할 계획이다. 사업 대상은 바닷바람을 이용하는 발전 설비다."
+      }
+    },
+    {
+      "id": "parallel-scope-export-control-only",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 205,
+        "name": "반도체 수출 규제와 공급망",
+        "queryText": "반도체 수출 규제 공급망",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "반도체",
+          "수출",
+          "공급망"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2010,
+        "title": "통상 당국, 첨단 반도체 수출 허가 대상 확대",
+        "summary": null,
+        "bodyText": "통상 당국은 특정 성능 기준을 넘는 반도체의 수출 허가 대상을 확대한다고 발표했다. 다음 분기부터 해당 제품을 해외에 판매하는 업체는 사전 허가를 받아야 하며 당국은 적용 기준과 시행일을 공고했다."
+      }
+    },
+    {
+      "id": "parallel-scope-supply-chain-only",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 205,
+        "name": "반도체 수출 규제와 공급망",
+        "queryText": "반도체 수출 규제 공급망",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "반도체",
+          "수출",
+          "공급망"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2011,
+        "title": "새린칩, 웨이퍼 조달처 다변화",
+        "summary": null,
+        "bodyText": "새린칩은 반도체 생산에 투입하는 웨이퍼의 조달처를 한 곳에서 세 곳으로 늘렸다. 신규 공급사에서 공정 적합성 시험을 마쳤으며 다음 달부터 정기적으로 납품받는다. 회사는 이번 조치가 자연재해에 따른 공급 중단에 대비하기 위한 것이라고 설명했다."
+      }
+    },
+    {
+      "id": "parallel-scope-generic-export-event",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 205,
+        "name": "반도체 수출 규제와 공급망",
+        "queryText": "반도체 수출 규제 공급망",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "반도체",
+          "수출",
+          "공급망"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2012,
+        "title": "무역협회, 생활용품 수출 상담회 개최",
+        "summary": null,
+        "bodyText": "무역협회는 생활용품 업체를 대상으로 수출 상담회를 개최했다. 참가 업체들은 컵과 수건의 포장 방식과 해외 전시회 참가 일정을 논의했다. 상담회는 완성 생활용품의 판매 지원을 목적으로 한다."
+      }
+    },
+    {
+      "id": "material-investment-explicit-semiconductor-destination",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 206,
+        "name": "반도체 장비·공정",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "생산",
+          "공장",
+          "장비"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2013,
+        "title": "다빛소재, 고순도 전구체 생산동 신설",
+        "summary": null,
+        "bodyText": "다빛소재는 반도체 박막 증착 공정에 공급할 고순도 하프늄 전구체 생산동을 신설하기로 했다. 투자금은 정제 설비와 충전 장치에 쓰이며 생산분은 웨이퍼 증착 공정을 운영하는 고객사에 납품한다. 이번 사업은 기존 제품의 공급량을 늘리기 위한 투자다."
+      }
+    },
+    {
+      "id": "material-generic-use-does-not-link-investment",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 206,
+        "name": "반도체 장비·공정",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "생산",
+          "공장",
+          "장비"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2014,
+        "title": "다빛소재, 공업용 분말 포장 창고 증설",
+        "summary": null,
+        "bodyText": "다빛소재는 공업용 분말을 보관하고 포장하는 창고를 증설한다. 증설 물량은 건축 도료 업체에 공급할 안료용 분말이다. 별도 산업 소개 문단은 일부 고순도 하프늄 화합물이 반도체 박막 증착에도 쓰인다고 설명하지만 이번 창고 사업의 제품과 납품처는 도료용이다."
+      }
+    },
+    {
+      "id": "regulation-explicit-production-network-change",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 206,
+        "name": "반도체 장비·공정",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "생산",
+          "공장",
+          "장비"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2015,
+        "title": "별하정밀, 허가 변경에 맞춰 장비 생산 거점 조정",
+        "summary": null,
+        "bodyText": "반도체 세정 장비 업체 별하정밀은 새 무역 허가 조건에 따라 장비 조립 물량 일부를 기존 해외 공장에서 국내 공장으로 옮긴다. 국내 생산라인에 조립 인력을 추가하고 해외 사업장은 부품 검사를 맡는다. 회사는 이 생산 거점 조정으로 고객사에 대한 장비 납기를 유지할 계획이라고 밝혔다."
+      }
+    },
+    {
+      "id": "regulation-company-industry-without-business-link",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 206,
+        "name": "반도체 장비·공정",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "생산",
+          "공장",
+          "장비"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2016,
+        "title": "별하정밀, 사내 식당 위생 점검 일정 공지",
+        "summary": null,
+        "bodyText": "별하정밀은 지방자치단체의 음식점 위생 점검 일정에 맞춰 사내 식당을 하루 휴업한다. 직원에게는 대체 식사 장소를 안내한다. 회사 소개에는 반도체 세정 장비 제조사라고 적혀 있지만 공지 내용은 식당의 청소와 운영 시간이다."
+      }
+    },
+    {
+      "id": "vaccine-material-explicit-manufacturing-destination",
+      "expectedStatus": "RELEVANT",
+      "topic": {
+        "id": 207,
+        "name": "백신 제조 공정",
+        "queryText": "백신 제조 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "바이오",
+          "배양",
+          "공급"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2017,
+        "title": "여울배지, 백신 생산용 배양 배지 공급 확대",
+        "summary": null,
+        "bodyText": "여울배지는 백신 제조사의 항원 생산 공정에 사용할 세포 배양 배지 생산라인을 증설한다. 신규 배지는 고객사의 백신용 세포 배양 조건에 맞춰 품질 검사를 거쳐 납품된다. 이번 투자는 이미 공급 중인 제품의 생산량을 늘리기 위한 것이다."
+      }
+    },
+    {
+      "id": "vaccine-material-general-use-only",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 207,
+        "name": "백신 제조 공정",
+        "queryText": "백신 제조 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "바이오",
+          "배양",
+          "공급"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2018,
+        "title": "여울배지, 식품 발효용 배지 공급 확대",
+        "summary": null,
+        "bodyText": "여울배지는 발효 음료 업체에 공급할 미생물 배양 배지 생산라인을 증설한다. 이번 물량은 식품 발효에 사용된다. 기사 후반의 일반 설명은 배양 배지가 연구나 백신 생산 등 여러 분야에 쓰일 수 있다고 소개한다."
+      }
+    },
+    {
+      "id": "same-material-generic-use-with-unspecified-destination",
+      "expectedStatus": "IRRELEVANT",
+      "topic": {
+        "id": 206,
+        "name": "반도체 장비·공정",
+        "queryText": "반도체 장비 공정",
+        "requiredKeywords": [],
+        "optionalKeywords": [
+          "생산",
+          "공장",
+          "장비"
+        ],
+        "excludedKeywords": []
+      },
+      "article": {
+        "articleId": 2019,
+        "title": "해솔자원, 광물 회수 생산량 확대",
+        "summary": null,
+        "bodyText": "해솔자원은 재활용 원료에서 텔루륨을 회수하는 설비를 늘려 연간 생산량을 확대한다. 회사는 추가 생산분의 품질 규격과 납품 산업, 수요처를 밝히지 않았다. 기사에는 텔루륨이 일반적으로 합금과 태양광, 반도체 등에 쓰인다는 용도 설명이 붙어 있다. 이번 증설분이 어느 용도에 공급되는지는 보도하지 않았다."
+      }
+    }
+  ]
+}
