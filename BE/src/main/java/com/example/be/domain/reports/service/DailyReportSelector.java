@@ -119,6 +119,9 @@ public class DailyReportSelector {
 
     private Selection finish(Prepared prepared, CompanyInterestSelection.Result companySelection) {
         var issueByFinding = prepared.issues();
+        Set<Long> companyRetained = companySelection.findings().stream().map(Finding::getId).collect(Collectors.toSet());
+        List<Long> companySuppressed = prepared.candidates().stream().map(Finding::getId)
+                .filter(id -> !companyRetained.contains(id)).distinct().sorted().toList();
         List<Finding> selected = companySelection.findings().stream()
                 .sorted(Comparator.comparing((Finding f) -> {
                     BigDecimal score = issueByFinding.get(f.getId()).getImportanceScore();
@@ -131,14 +134,23 @@ public class DailyReportSelector {
         } catch (RuntimeException exception) {
             log.warn("일일 보고서 비교 입력을 보존할 수 없어 비교를 제공하지 않습니다.", exception);
         }
-        return new Selection(selected, prepared.stubExcluded(), prepared.evidenceExcluded(), snapshot, companySelection.applications());
+        return new Selection(selected, prepared.stubExcluded(), prepared.evidenceExcluded(), snapshot,
+                companySelection.applications(), companySuppressed);
     }
 
     public record Prepared(List<Finding> candidates, int stubExcluded, int evidenceExcluded,
                            Map<Long, NewsIssue> issues, int limit) { }
 
     public record Selection(List<Finding> findings, int stubExcluded, int evidenceExcluded,
-                            ReportComparisonSnapshot comparisonSnapshot, List<CompanyInterestSelection.Application> applications) {
+                            ReportComparisonSnapshot comparisonSnapshot, List<CompanyInterestSelection.Application> applications,
+                            List<Long> companySuppressedFindingIds) {
+        public Selection {
+            companySuppressedFindingIds = List.copyOf(companySuppressedFindingIds);
+        }
+        public Selection(List<Finding> findings, int stubExcluded, int evidenceExcluded,
+                         ReportComparisonSnapshot comparisonSnapshot, List<CompanyInterestSelection.Application> applications) {
+            this(findings, stubExcluded, evidenceExcluded, comparisonSnapshot, applications, List.of());
+        }
         public Selection(List<Finding> findings, int stubExcluded, int evidenceExcluded, ReportComparisonSnapshot comparisonSnapshot) {
             this(findings, stubExcluded, evidenceExcluded, comparisonSnapshot, List.of());
         }

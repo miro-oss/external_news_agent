@@ -30,11 +30,13 @@ public class DailyReportPersistenceService {
     private final CollectionRunRepository runRepository;
     private final ReportComparisonRepository comparisons;
     private final CompanyInterestSelection companyInterests;
+    private final com.example.be.domain.reports.coverage.ReportCoverageCapture reportCoverage;
 
     @Transactional
     public void freezeSelection(Long reportId, DailyReportSelector.Selection selection, LocalDateTime now) {
         NewsReport report = reportRepository.findByIdForUpdate(reportId).orElseThrow();
-        report.freezeCompanySelection(selection.findings().stream().map(com.example.be.domain.analysis.entity.Finding::getId).toList(), null);
+        report.freezeCompanySelection(selection.findings().stream().map(com.example.be.domain.analysis.entity.Finding::getId).toList(),
+                selection.companySuppressedFindingIds(), null);
         companyInterests.record(reportId, selection.applications(), now);
         if (selection.comparisonSnapshot() != null) {
             try { comparisons.captureInput(report, selection.comparisonSnapshot(), now); }
@@ -51,6 +53,13 @@ public class DailyReportPersistenceService {
     @Transactional
     public ReportPersistenceService.Reservation reserveWithSnapshot(LocalDate date, List<Long> sourceRunIds,
             List<Long> findingIds, LocalDateTime now, ReportComparisonSnapshot snapshot) {
+        return reserveWithSnapshot(date, sourceRunIds, findingIds, now, snapshot, null);
+    }
+
+    @Transactional
+    public ReportPersistenceService.Reservation reserveWithSnapshot(LocalDate date, List<Long> sourceRunIds,
+            List<Long> findingIds, LocalDateTime now, ReportComparisonSnapshot snapshot,
+            DailyReportSelector.Prepared prepared) {
         dailyRepository.lockCreation();
         NewsReport existing = reportRepository.findByReportScopeAndReportDate(ReportScope.DAILY, date)
                 .orElse(null);
@@ -68,6 +77,7 @@ public class DailyReportPersistenceService {
                 .title(date + " 일일 통합 뉴스 보고서")
                 .markdownBody("보고서 생성이 진행 중입니다.").modelName("pending-report-v1")
                 .reportStatus(ReportStatus.PENDING).generatedAt(now).build());
+        report.freezeReportCoverageSnapshot(reportCoverage.captureDaily(report, prepared, now));
         if (snapshot != null) {
             try {
                 comparisons.captureInput(report, snapshot, now);

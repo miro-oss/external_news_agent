@@ -500,6 +500,7 @@ export interface ReportDetail {
   generatedAt: string
   summaryStats: ReportSummaryStats
   structuredContent?: ReportContent | null
+  coverage?: ReportCoverage | null
   dartCompanies?: import('./dart').DartCompany[]
   collectionContexts?: ReportCollectionContext[]
   articleStats?: { totalCount: number; newCount: number; existingCount: number }
@@ -526,6 +527,28 @@ export interface ReportContent {
   importantEvents: Array<{ title: string; summaryKo: string; significance: string | null; sourceFindingIds: number[] }>
   watchItems: Array<{ topic: string; reason: string; sourceFindingIds: number[] }>
   sourceNotes: string[]
+}
+
+export interface ReportCoverage {
+  ruleVersion: string | null
+  capturedAt: string | null
+  periodLabel: string
+  events: Array<ReportCoverageItem & { sourceFindingIds: number[] }>
+  findings: Array<ReportCoverageItem & { findingId: number }>
+}
+
+export interface ReportCoverageItem {
+  status: 'AVAILABLE' | 'UNAVAILABLE'
+  articleCount: number | null
+  publisherCount: number | null
+  unknownPublisherArticleCount: number | null
+  representativeArticles: Array<{
+    articleId: number
+    title: string
+    publisher: string | null
+    publishedAt: string | null
+    canonicalUrl: string | null
+  }>
 }
 
 export interface IssueArticle {

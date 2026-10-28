@@ -5,6 +5,7 @@ import com.example.be.domain.dart.model.DartModels.FinancialData;
 import com.example.be.domain.reports.dart.ReportDartService;
 import com.example.be.domain.reports.dto.res.ReportDartDTO.CompanyAttachment;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.service.ReportEventFeedbackProjection;
 import com.example.be.global.config.ApiTimeZone;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -17,6 +18,7 @@ import java.net.URISyntaxException;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.util.Locale;
+import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -26,13 +28,25 @@ public class NotificationDartSummary {
     private final ReportDartService reportDartService;
 
     public String render(NewsReport report, String reportUrl) {
-        var companies = reportDartService.getStored(report).companies();
+        return render(report, reportUrl, null, Map.of());
+    }
+
+    public String render(NewsReport report, String reportUrl, ReportEventFeedbackProjection.View view,
+                         Map<String, Integer> companyPages) {
+        var stored = reportDartService.getStored(report);
+        if (stored == null) return "";
+        var companies = NotificationCompanyVisibility.visible(report, view, stored.companies());
         if (companies.isEmpty()) return "";
         var html = new StringBuilder("<table role=\"presentation\" width=\"100%\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" "
-                + "style=\"border-collapse:collapse;text-align:left;margin:0 0 20px\"><tbody><tr><td "
+                + "style=\"border-collapse:collapse;text-align:left;margin:20px 0\"><tbody><tr><td "
                 + "style=\"padding:16px 18px;background:#f9fafb;border-radius:12px\">"
                 + "<h2 style=\"margin:0 0 8px;color:#4e5968;font-size:13px;font-weight:700\">회사 실적 · 공시</h2>");
-        companies.stream().limit(MAX_COMPANIES).forEach(company -> appendCompany(html, company));
+        companies.stream().limit(MAX_COMPANIES).forEach(company -> {
+            appendCompany(html, company);
+            Integer page = companyPages.get(company.company().corpCode());
+            html.append("<p style=\"margin:4px 0 8px;color:#636c78;font-size:12px\">첨부 PDF ")
+                    .append(page == null ? "회사별 부록" : "p. " + page).append("에서 상세 확인</p>");
+        });
         int remaining = companies.size() - MAX_COMPANIES;
         if (remaining > 0 || safeReportUrl(reportUrl)) {
             html.append("<p style=\"margin:8px 0 0;color:#636c78;font-size:12px\">");

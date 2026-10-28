@@ -4,6 +4,8 @@ import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.dart.model.DartModels.Filing;
 import com.example.be.domain.dart.model.DartModels.FinancialData;
 import com.example.be.domain.reports.dart.ReportDartService;
+import com.example.be.domain.reports.coverage.ReportCoverageDTO;
+import com.example.be.domain.reports.coverage.ReportCoverageService;
 import com.example.be.domain.reports.dto.res.ReportDartDTO.CompanyAttachment;
 import com.example.be.domain.reports.entity.NewsReport;
 import com.example.be.domain.reports.entity.ReportContent;
@@ -30,14 +32,17 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Offline attachment containing company performance and recent filings, summaries, important
- * events, watch items and the selected audience's reading sections. Standalone article analysis,
+ * Offline attachment containing summaries, important events, watch items, the selected audience's
+ * reading sections and a linked company performance/filings appendix. Standalone article analysis,
  * collection notes and per-quarter financial source appendices are intentionally omitted.
  */
 @Component
 @RequiredArgsConstructor
 public class ReportPdfRenderer {
     private final ReportDartService dart;
+    private ReportCoverageService coverageService;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setCoverageService(ReportCoverageService coverageService) { this.coverageService = coverageService; }
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
     private static final Pattern MARKDOWN_LINK = Pattern.compile("\\[([^]\\r\\n]+)]\\(([^)\\r\\n]+)\\)");
     private static final Pattern AUTOLINK = Pattern.compile("<(https?://[^>\\r\\n]+)>");
@@ -57,6 +62,22 @@ public class ReportPdfRenderer {
      */
     public byte[] render(NewsReport report, ReportEventFeedbackProjection.View view,
                          ReportInsightDTO.AudienceInsight insight) {
+        return renderDetailed(report, view, insight).bytes();
+    }
+
+    public record Result(byte[] bytes, Map<String, Integer> companyPages) {
+        public Result { bytes = bytes.clone(); companyPages = Map.copyOf(companyPages); }
+        @Override public byte[] bytes() { return bytes.clone(); }
+    }
+
+    public Result renderDetailed(NewsReport report, ReportEventFeedbackProjection.View view,
+                                 ReportInsightDTO.AudienceInsight insight) {
+        var coverage = coverageService == null ? null : coverageService.project(report, view);
+        return renderDetailed(report, view, insight, coverage);
+    }
+
+    public Result renderDetailed(NewsReport report, ReportEventFeedbackProjection.View view,
+                                 ReportInsightDTO.AudienceInsight insight, ReportCoverageDTO.View coverage) {
         try (PDDocument document = new PDDocument(); ReportPdfLayout pdf = new ReportPdfLayout(document)) {
             document.getDocumentInformation().setTitle(report.getTitle());
             document.getDocumentInformation().setAuthor("BISTelligence");
@@ -64,21 +85,29 @@ public class ReportPdfRenderer {
             if (report.getGeneratedAt() != null) pdf.muted("보고서 작성 " + report.getGeneratedAt().format(DATE_TIME) + " (한국시간)");
             if (report.getReportDate() != null) pdf.muted("보고서 기간 " + report.getReportDate()
                     + (report.getReportEndDate() == null ? "" : " ~ " + report.getReportEndDate()));
-            companyData(pdf, report);
+            pdf.muted("보도량: " + (coverage == null ? ReportCoverageService.periodLabel(report) : coverage.periodLabel())
+                    + " · 매체 수는 원문 사이트 기준이며 독립 검증 건수가 아닙니다.");
+            pdf.reserve(100);
+            pdf.anchor("summary");
+            var stored = dart.getStored(report);
+            List<CompanyAttachment> companies = NotificationCompanyVisibility.visible(report, view,
+                    stored == null ? List.of() : stored.companies());
 
             Map<Long, Finding> findings = new LinkedHashMap<>();
             view.findings().forEach(finding -> findings.putIfAbsent(finding.getId(), finding));
             ReportContent content = view.readingContent().structuredContent();
             if (content == null) legacy(pdf, view.readingContent().markdownBody());
-            else body(pdf, content, findings);
+            else body(pdf, content, findings, coverage);
             ReportPdfInsightSection.write(pdf, insight, view);
-            return pdf.save();
+            Map<String, Integer> companyPages = companyData(pdf, companies);
+            return new Result(pdf.save(), companyPages);
         } catch (IOException exception) {
             throw new UncheckedIOException("보고서 PDF를 준비하지 못했습니다.", exception);
         }
     }
 
-    private void body(ReportPdfLayout pdf, ReportContent content, Map<Long, Finding> findings) throws IOException {
+    private void body(ReportPdfLayout pdf, ReportContent content, Map<Long, Finding> findings,
+                      ReportCoverageDTO.View coverage) throws IOException {
         pdf.section("핵심 요약");
         if (content.executiveSummary().isEmpty()) pdf.paragraph("근거가 확인된 요약이 없습니다.");
         for (String summary : content.executiveSummary()) pdf.bullet(summary);
@@ -89,7 +118,12 @@ public class ReportPdfRenderer {
         if (events.isEmpty()) pdf.paragraph("중요 이벤트가 없습니다.");
         for (var event : events) {
             pdf.subheading(event.title());
+            var counts = coverage == null ? ReportCoverageDTO.unavailable(event.sourceFindingIds())
+                    : coverage.forSources(event.sourceFindingIds());
+            pdf.muted(NotificationCoverage.label(counts));
             pdf.paragraph(event.summaryKo());
+            representativeArticles(pdf, counts);
+            pdf.muted("요약의 직접 근거");
             sources(pdf, event.sourceFindingIds(), findings);
         }
         var watches = content.watchItems().stream().filter(item -> !item.sourceFindingIds().isEmpty()
@@ -105,6 +139,16 @@ public class ReportPdfRenderer {
         // Standalone findings and collection notes are intentionally outside the attachment's scope.
     }
 
+    private void representativeArticles(ReportPdfLayout pdf, ReportCoverageDTO.EventCoverage coverage) throws IOException {
+        if (coverage.representativeArticles().isEmpty()) return;
+        pdf.muted("대표 보도");
+        for (var article : coverage.representativeArticles().stream().limit(2).toList()) {
+            String label = article.title() + " · " + NotificationCoverage.metadata(article);
+            if (ReportPdfLayout.safeUrl(article.canonicalUrl())) pdf.link(label, article.canonicalUrl());
+            else pdf.muted(label);
+        }
+    }
+
     private void sources(ReportPdfLayout pdf, List<Long> ids, Map<Long, Finding> findings) throws IOException {
         Set<Long> articles = new HashSet<>();
         for (Long id : ids) {
@@ -117,16 +161,22 @@ public class ReportPdfRenderer {
     }
 
     /** Reads only the report's stored company snapshot, including its recent disclosures. */
-    private void companyData(ReportPdfLayout pdf, NewsReport report) throws IOException {
-        var result = dart.getStored(report);
-        if (result == null || result.companies().isEmpty()) return;
-        pdf.reserve(345);
-        pdf.section("회사 실적 · 공시");
-        for (CompanyAttachment entry : result.companies()) {
-            if (entry.data() != null && !entry.data().quarters().isEmpty()
-                    && ("READY".equals(entry.status()) || "PARTIAL".equals(entry.status()))) pdf.reserve(300);
+    private Map<String, Integer> companyData(ReportPdfLayout pdf, List<CompanyAttachment> companies) throws IOException {
+        if (companies.isEmpty()) return Map.of();
+        pdf.section("회사별 부록 바로가기");
+        pdf.muted("보고서에 연결해 둔 회사의 자료입니다. 회사명을 누르면 해당 부록으로 이동합니다.");
+        for (int index = 0; index < companies.size(); index++)
+            pdf.internalLink(companies.get(index).company().corpName(), "company-" + index);
+        Map<String, Integer> pages = new LinkedHashMap<>();
+        for (int index = 0; index < companies.size(); index++) {
+            CompanyAttachment entry = companies.get(index);
+            pdf.pageBreak();
+            pdf.anchor("company-" + index);
+            pages.putIfAbsent(entry.company().corpCode(), pdf.destinationPage("company-" + index));
+            pdf.section("회사 실적 · 공시");
             pdf.subheading(entry.company().corpName());
             pdf.muted(entry.company().stockCode() == null || entry.company().stockCode().isBlank() ? "비상장" : entry.company().stockCode());
+            pdf.internalLink("핵심 요약으로 돌아가기", "summary");
             if (!("READY".equals(entry.status()) || "PARTIAL".equals(entry.status())) || entry.data() == null) {
                 pdf.paragraph("표시할 저장된 실적·공시 자료가 없습니다.");
                 continue;
@@ -156,6 +206,7 @@ public class ReportPdfRenderer {
             pdf.muted("실적은 회사 전체 기준입니다. 자료 확인 시 확보한 내용을 보존하며, 이후 정정공시가 반영된 최신 수치와 다를 수 있습니다.");
             recentFilings(pdf, data.disclosures());
         }
+        return pages;
     }
 
     private void recentFilings(ReportPdfLayout pdf, List<Filing> filings) throws IOException {

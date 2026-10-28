@@ -1,6 +1,7 @@
 package com.example.be.domain.notifications.service;
 
 import com.example.be.domain.companyinterest.CompanyInterestSelectionTestSupport;
+import com.example.be.domain.reports.coverage.ReportCoverageCapture;
 
 import com.example.be.domain.collection.repository.CollectionRunArticleRepository;
 import com.example.be.domain.collection.repository.CollectionRunRepository;
@@ -107,7 +108,7 @@ class ReportCompletionTransactionTest {
         when(reports.findByIdForUpdate(117L)).thenReturn(Optional.of(report));
         when(renderer.render(report, email)).thenReturn(new RenderedNotification("보고서", null, List.of("요약")));
         var persistence = transactional(new ReportPersistenceService(mock(CollectionRunRepository.class), reports,
-                automation, mock(CollectionRunArticleRepository.class), mock(ApplicationEventPublisher.class), CompanyInterestSelectionTestSupport.passThrough()), transactions);
+                automation, mock(CollectionRunArticleRepository.class), mock(ApplicationEventPublisher.class), CompanyInterestSelectionTestSupport.passThrough(), mock(ReportCoverageCapture.class)), transactions);
         var document = new ReportDocument("일일 통합 보고서", "## 요약\n근거 요약", "fallback");
 
         assertDoesNotThrow(() -> {

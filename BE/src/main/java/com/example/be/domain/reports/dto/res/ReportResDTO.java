@@ -3,6 +3,7 @@ package com.example.be.domain.reports.dto.res;
 import com.example.be.domain.analysis.dto.res.SensitivityResDTO;
 import com.example.be.domain.dart.model.DartModels.Company;
 import com.example.be.domain.reports.entity.ReportScope;
+import com.example.be.domain.reports.coverage.ReportCoverageDTO;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.example.be.domain.reports.entity.ReportContent;
@@ -85,7 +86,7 @@ public class ReportResDTO {
     @AllArgsConstructor(access = AccessLevel.PRIVATE)
     @JsonPropertyOrder({
             "id", "runId", "reportScope", "topicId", "topicName", "sourceAnalysisDates", "reportDate", "reportEndDate", "sourceReportIds", "sourceReportDates", "missingReportDates", "sourceRunIds", "sourceReportCount", "title", "markdownBody", "modelName", "promptVersion", "llmProvider",
-            "generatedAt", "structuredContent", "collectionContexts", "dartCompanies", "articleStats", "summaryStats", "findings"
+            "generatedAt", "structuredContent", "collectionContexts", "dartCompanies", "articleStats", "summaryStats", "coverage", "findings"
     })
     @Schema(name = "ReportDetailResponse", description = "보고서 상세")
     public static class Detail {
@@ -135,6 +136,9 @@ public class ReportResDTO {
         private final List<Company> dartCompanies = List.of();
         @Schema(description = "RUN은 runId, DAILY/전체 WEEKLY는 sourceRunIds 전체에서 관측한 고유 articleId 집계. 주제별 WEEKLY는 저장된 분석 입력 기사의 관측만 집계. 동일 기사의 소스·실행 중복을 제거하며 분석 결과 수인 summaryStats와 다름. includeFindings=false에도 반환. 관측 데이터가 없으면 모든 수가 0", requiredMode = Schema.RequiredMode.REQUIRED)
         private final ArticleStats articleStats;
+
+        @Schema(description = "보고서 당시 범위의 이슈별 보도량. 현재 이슈 통계와 별개. 집계 자료가 없으면 UNAVAILABLE/null, 검증된 빈 집합은 AVAILABLE/0. includeFindings=false에도 events는 반환하고 findings는 []")
+        private final ReportCoverageDTO.View coverage;
 
         @JsonInclude(JsonInclude.Include.NON_NULL)
         private final List<Finding> findings;

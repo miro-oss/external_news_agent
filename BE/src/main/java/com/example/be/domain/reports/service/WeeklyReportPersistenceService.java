@@ -33,6 +33,7 @@ public class WeeklyReportPersistenceService {
     private final ReportComparisonRepository comparisons;
     private final ReportEventFeedbackProjection feedbackProjection;
     private final DailyReportFeedbackExclusions feedbackExclusions;
+    private final com.example.be.domain.reports.coverage.ReportCoverageCapture reportCoverage;
 
     @Transactional
     public Reservation reserve(LocalDate monday, LocalDateTime now) {
@@ -67,6 +68,7 @@ public class WeeklyReportPersistenceService {
                 .comparisonInputUsable(false)
                 .title(input.title()).markdownBody("보고서 생성이 진행 중입니다.").modelName("pending-report-v1")
                 .reportStatus(ReportStatus.PENDING).generatedAt(now).build());
+        report.freezeReportCoverageSnapshot(reportCoverage.mergeWeekly(report, sources, now));
         return new Reservation(report.getId(), true, input);
     }
 

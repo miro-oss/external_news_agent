@@ -54,7 +54,7 @@ public class DailyReportCreationService {
         var prepared = selector.prepare(date, maxIssues);
         var provisional = selector.preview(prepared);
         ReportPersistenceService.Reservation reservation = dailyPersistence.reserveWithSnapshot(
-                date, sourceRunIds, provisional.findings().stream().map(Finding::getId).toList(), now, null);
+                date, sourceRunIds, provisional.findings().stream().map(Finding::getId).toList(), now, null, prepared);
         if (!reservation.owner()) {
             return reservation.reportId();
         }

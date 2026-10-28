@@ -5,6 +5,8 @@ import { CollapsibleSection } from '../../components/CollapsibleSection'
 import { prefersReducedMotion } from '../../lib/motion'
 import { collectionHighlightTerms, groupLegacyReportSections, rehypeCollectionHighlights, rehypeWeeklyEventSummary, reportSourceFindings, splitReportMarkdown } from './reportReading'
 import { ReportKeywordText } from './ReportKeywordText'
+import { ReportCoverageSources, ReportCoverageSummary } from './ReportCoverage'
+import { eventCoverage } from './reportCoverageDisplay'
 
 export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnalysis, eventFeedback, feedbackNotice }: {
   report: ReportDetail
@@ -24,7 +26,7 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
   const notes = content.sourceNotes.filter(note => !/제외 사항이 없습니다/.test(note))
   function references(ids: number[]) {
     const findings = reportSourceFindings(ids, byId)
-    return <div className="report-event-sources">{findings.map(finding => (
+    return <div className="report-event-sources">{findings.length > 0 && <span className="report-source-label">요약 근거</span>}{findings.map(finding => (
       <button type="button" className="text-button" key={finding.id}
         onClick={() => onEvidenceSelect(finding.articleId, finding.runId, [])}>
         <ReportKeywordText text={finding.articleTitle} terms={terms} /> ↗
@@ -45,8 +47,10 @@ export function ReportReadingContent({ report, onEvidenceSelect, beforeOtherAnal
         {content.importantEvents.length > 0 ? <div className="report-event-list">
           {content.importantEvents.map((event, index) => <article className="report-event-card" key={eventKeys[index]}>
             <h4><ReportKeywordText text={event.title} terms={terms} /></h4>
+            <ReportCoverageSummary coverage={eventCoverage(report.coverage, event.sourceFindingIds)} />
             <p><ReportKeywordText text={event.summaryKo} terms={terms} /></p>
             {!weekly && event.significance && event.significance !== event.summaryKo && <p className="report-event-significance"><ReportKeywordText text={event.significance} terms={terms} /></p>}
+            <ReportCoverageSources coverage={eventCoverage(report.coverage, event.sourceFindingIds)} terms={terms} />
             {references(event.sourceFindingIds)}
             {eventFeedback?.(event, index)}
           </article>)}

@@ -55,13 +55,16 @@ public class PersonalizedNotificationRenderer {
         var reviewed = feedbackProjection.projectForDelivery(report, original, feedbackProjection.reviews(report.getId()));
         var prepared = feedback.prepare(report, recipientId, reviewed);
         var delivered = reviewed.suppress(report, prepared.suppressedFindingIds());
-        RenderedNotification rendered = renderer.render(report, channel, delivered, feedbackUrl(prepared.token()), insight);
-        if (channel.getChannelType() != ChannelType.EMAIL) return rendered;
+        if (channel.getChannelType() != ChannelType.EMAIL)
+            return renderer.render(report, channel, delivered, feedbackUrl(prepared.token()), insight);
         // Render from the same final view as the email: discarded evidence must never return in the PDF.
         // Preparation failure aborts before opening SMTP; never silently send a report without its PDF.
-        byte[] pdf = pdfRenderer.render(report, delivered, insight);
+        var coverage = renderer.projectCoverage(report, delivered);
+        ReportPdfRenderer.Result pdf = pdfRenderer.renderDetailed(report, delivered, insight, coverage);
+        RenderedNotification rendered = renderer.render(report, channel, delivered, feedbackUrl(prepared.token()), insight,
+                pdf.companyPages(), coverage);
         return new RenderedNotification(rendered.subject(), rendered.parseMode(), rendered.chunks(),
-                List.of(new NotificationAttachment("news-report-" + report.getId() + ".pdf", "application/pdf", pdf)));
+                List.of(new NotificationAttachment("news-report-" + report.getId() + ".pdf", "application/pdf", pdf.bytes())));
     }
 
     String feedbackUrl(String token) {

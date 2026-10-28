@@ -40,14 +40,15 @@ class TopicWeeklyReportCreationServiceTest {
                 new TopicWeeklyReportPersistenceService.Reservation(8L, false, false, input, List.of(prepared)),
                 new TopicWeeklyReportPersistenceService.Reservation(8L, true, false, input, List.of(prepared)));
         when(selector.selectWeek(List.of(prepared))).thenReturn(new TopicWeeklyReportSelector.WeekSelection(
-                List.of(new TopicWeeklyReportSelector.Selection(source, List.of())), List.of()));
+                List.of(new TopicWeeklyReportSelector.Selection(source, List.of())), List.of(), List.of(1L)));
         service.generate(1L, monday);
         verifyNoInteractions(selector);
         when(orchestrator.generate(eq(8L), any(), any())).thenThrow(new IllegalStateException("provider failed"));
         service.generate(1L, monday);
         verify(selector).selectWeek(List.of(prepared));
         var ordering = inOrder(persistence, orchestrator);
-        ordering.verify(persistence).freezeCompanySelection(eq(8L), eq(List.of()), argThat(value -> value.sourceFindingIds().isEmpty()), eq(List.of()), any());
+        ordering.verify(persistence).freezeCompanySelection(eq(8L), eq(List.of()), eq(List.of(1L)),
+                argThat(value -> value.sourceFindingIds().isEmpty()), eq(List.of()), any());
         ordering.verify(orchestrator).generate(eq(8L), argThat(value -> value.sourceFindingIds().isEmpty()), any());
         ordering.verify(persistence).complete(eq(8L), any(), any());
     }

@@ -6,6 +6,8 @@ import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.notifications.entity.ChannelType;
 import com.example.be.domain.notifications.entity.NotificationChannel;
 import com.example.be.domain.reports.entity.NewsReport;
+import com.example.be.domain.reports.coverage.ReportCoverageDTO;
+import com.example.be.domain.reports.coverage.ReportCoverageService;
 import com.example.be.domain.reports.entity.ReportContent;
 import com.example.be.domain.reports.insight.ReportInsightDTO;
 import com.example.be.domain.reports.service.ReportFindings;
@@ -40,6 +42,13 @@ public class NotificationRenderer {
     private final TopicRelevancePolicy relevancePolicy;
     private final ReportEventFeedbackProjection feedbackProjection;
     private final NotificationDartSummary dartSummary;
+    private ReportCoverageService coverageService;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setCoverageService(ReportCoverageService coverageService) { this.coverageService = coverageService; }
+
+    ReportCoverageDTO.View projectCoverage(NewsReport report, ReportEventFeedbackProjection.View view) {
+        return coverageService == null ? null : coverageService.project(report, view);
+    }
 
     public NotificationRenderer(FindingRepository findingRepository, TopicRelevancePolicy relevancePolicy,
                                 ReportEventFeedbackProjection feedbackProjection, NotificationDartSummary dartSummary) {
@@ -69,13 +78,27 @@ public class NotificationRenderer {
     public RenderedNotification render(NewsReport report, NotificationChannel channel,
                                        ReportEventFeedbackProjection.View view, String feedbackUrl,
                                        ReportInsightDTO.AudienceInsight insight) {
+        return render(report, channel, view, feedbackUrl, insight, Map.of());
+    }
+
+    public RenderedNotification render(NewsReport report, NotificationChannel channel,
+                                       ReportEventFeedbackProjection.View view, String feedbackUrl,
+                                       ReportInsightDTO.AudienceInsight insight, Map<String, Integer> companyPages) {
+        return render(report, channel, view, feedbackUrl, insight, companyPages,
+                channel.getChannelType() == ChannelType.EMAIL ? projectCoverage(report, view) : null);
+    }
+
+    public RenderedNotification render(NewsReport report, NotificationChannel channel,
+                                       ReportEventFeedbackProjection.View view, String feedbackUrl,
+                                       ReportInsightDTO.AudienceInsight insight, Map<String, Integer> companyPages,
+                                       ReportCoverageDTO.View coverage) {
         List<Finding> findings = view.findings();
         ReportReadingContent content = view.readingContent();
         NotificationInsightBrief brief = NotificationInsightBrief.from(insight, findings, view.excludedEvidenceFindingIds());
         String link = safeUrl(feedbackUrl) ? "<a href=\"" + attribute(feedbackUrl)
                 + "\">이슈 피드백 · 내 수신 기준</a>" : "";
         if (channel.getChannelType() == ChannelType.EMAIL) {
-            RenderedNotification rendered = renderEmail(report, findings, content, brief);
+            RenderedNotification rendered = renderEmail(report, view, brief, companyPages, coverage);
             if (link.isEmpty()) return rendered;
             String footer = "<p style=\"margin:24px 0;color:#636c78;font-size:13px\">" + link
                     + "<br>이 링크는 수신자 전용입니다.</p>";
@@ -108,12 +131,16 @@ public class NotificationRenderer {
         return new RenderedNotification(null, "HTML", List.of(body));
     }
 
-    private RenderedNotification renderEmail(NewsReport report, List<Finding> findings, ReportReadingContent content,
-                                             NotificationInsightBrief brief) {
+    private RenderedNotification renderEmail(NewsReport report, ReportEventFeedbackProjection.View view,
+                                             NotificationInsightBrief brief, Map<String, Integer> companyPages,
+                                             ReportCoverageDTO.View coverage) {
+        List<Finding> findings = view.findings();
+        ReportReadingContent content = view.readingContent();
         String subject = "[뉴스 보고서] " + singleLine(normalize(report.getTitle()));
         StringBuilder html = emailStart(report.getTitle());
-        String dartBlock = dartSummary.render(report, reportUrl(report));
-        if (StringUtils.hasText(dartBlock)) html.append(dartBlock);
+        html.append("<p style=\"margin:0 0 16px;color:#636c78;font-size:12px\">보도량: ")
+                .append(escape(coverage == null ? ReportCoverageService.periodLabel(report) : coverage.periodLabel()))
+                .append(" · 매체 수는 원문 사이트 기준입니다.</p>");
         html.append(EMAIL_TABLE).append("<tr><td class=\"email-card\" bgcolor=\"#e8f3ff\" "
                 + "style=\"padding:24px;background:#e8f3ff;border-radius:16px\">"
                 + "<h2 style=\"margin:0 0 12px;color:#1b64da;font-size:14px;font-weight:700\">핵심 요약</h2>");
@@ -136,7 +163,12 @@ public class NotificationRenderer {
                     .append(i + 1).append("</span></p><h2 style=\"margin:0 0 20px;color:#191f28;"
                             + "font-size:21px;font-weight:700;line-height:1.45;letter-spacing:-0.5px\">")
                     .append(escape(limit(card.title(), 180)))
-                    .append("</h2><p style=\"margin:0 0 6px;color:#191f28;font-size:13px;font-weight:700\">주요 내용</p>"
+                    .append("</h2>");
+            var counts = coverage == null ? ReportCoverageDTO.unavailable(card.sourceFindingIds())
+                    : coverage.forSources(card.sourceFindingIds());
+            html.append("<p style=\"margin:-12px 0 16px;color:#636c78;font-size:12px;line-height:1.7\">")
+                    .append(escape(NotificationCoverage.label(counts))).append("</p>")
+                    .append("<p style=\"margin:0 0 6px;color:#191f28;font-size:13px;font-weight:700\">주요 내용</p>"
                             + "<p style=\"margin:0;color:#4e5968;font-size:15px;line-height:1.8\">")
                     .append(escape(limit(card.summary(), 1200))).append("</p>");
             if (!card.watches().isEmpty()) {
@@ -147,10 +179,13 @@ public class NotificationRenderer {
                         .append(escape(limit(watch, 600))).append("</td></tr>"));
                 html.append("</tbody></table>");
             }
+            appendRepresentativeArticles(html, counts);
             appendCardSources(html, card.urls(), true);
             html.append("</td></tr></tbody></table>");
         }
         if (cards.isEmpty()) appendSources(html, findings, true);
+        String dartBlock = dartSummary.render(report, reportUrl(report), view, companyPages);
+        if (StringUtils.hasText(dartBlock)) html.append(dartBlock);
         appendReportLink(html, report, true);
         return new RenderedNotification(subject, null, List.of(emailEnd(html)));
     }
@@ -296,7 +331,7 @@ public class NotificationRenderer {
                                 .filter(watch -> supported(watch.sourceFindingIds(), visible))
                                 .filter(watch -> watch.sourceFindingIds().stream().anyMatch(event.sourceFindingIds()::contains))
                                 .map(watch -> watchText(watch)).filter(StringUtils::hasText).distinct().limit(2).toList(),
-                        event.sourceFindingIds().stream().map(visible::get)
+                        event.sourceFindingIds(), event.sourceFindingIds().stream().map(visible::get)
                                 .map(finding -> finding.getArticle().getCanonicalUrl())
                                 .filter(this::safeUrl).distinct().limit(2).toList()))
                 .toList();
@@ -316,7 +351,7 @@ public class NotificationRenderer {
     private void appendCardSources(StringBuilder body, List<String> urls, boolean email) {
         if (urls.isEmpty()) return;
         if (email) body.append("<p style=\"margin:20px 0 0;padding-top:16px;border-top:1px solid #e5e8eb;"
-                + "color:#636c78;font-size:12px;line-height:1.8\">");
+                + "color:#636c78;font-size:12px;line-height:1.8\">요약의 직접 근거<br>");
         for (int i = 0; i < urls.size(); i++) {
             if (i > 0) body.append(" · ");
             String url = urls.get(i);
@@ -327,7 +362,20 @@ public class NotificationRenderer {
         body.append(email ? "</p>" : "\n");
     }
 
-    private record NewsCard(String title, String summary, List<String> watches, List<String> urls) {}
+    private void appendRepresentativeArticles(StringBuilder html, ReportCoverageDTO.EventCoverage coverage) {
+        if (coverage.representativeArticles().isEmpty()) return;
+        html.append("<p style=\"margin:16px 0 4px;color:#636c78;font-size:12px\">대표 보도</p>");
+        for (var article : coverage.representativeArticles().stream().limit(2).toList()) {
+            html.append("<p style=\"margin:4px 0;color:#636c78;font-size:12px;line-height:1.7\">");
+            if (safeUrl(article.canonicalUrl())) html.append("<a href=\"").append(attribute(article.canonicalUrl()))
+                    .append('"').append(EMAIL_LINK_STYLE).append('>').append(escape(article.title())).append("</a>");
+            else html.append(escape(article.title()));
+            html.append("<br>").append(escape(NotificationCoverage.metadata(article))).append("</p>");
+        }
+    }
+
+    private record NewsCard(String title, String summary, List<String> watches, List<Long> sourceFindingIds,
+                            List<String> urls) {}
 
     private List<String> digest(ReportReadingContent content, List<Finding> findings, int maxLength) {
         List<String> summary = new ArrayList<>();

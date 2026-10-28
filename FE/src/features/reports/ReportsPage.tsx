@@ -18,6 +18,7 @@ import {
   type IssueArticle,
   type IssueDetail,
   type ReportDetail,
+  type ReportCoverageItem,
   type ReportFinding,
   type ReportSummary,
   type ReportScope,
@@ -39,6 +40,8 @@ import { reportInsightSnapshotKey } from '../../api/reportInsights'
 import { IssueTonePanel } from './IssueTonePanel'
 import { collectionHighlightTerms, collectionKeywords } from './reportReading'
 import { ReportKeywordText } from './ReportKeywordText'
+import { ReportCoverageSources, ReportCoverageSummary } from './ReportCoverage'
+import { coverageAvailable, findingCoverage } from './reportCoverageDisplay'
 import { categoryTone, dailyReportTopics, defaultSensitivity } from './reportDisplay'
 import { reportDisplayTitle } from './reportTitle'
 import { WeeklyReportSources } from './WeeklyReportSources'
@@ -432,6 +435,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
           {deleteError && <p className="field-error" role="alert">{deleteError}</p>}
         </div>}
         <time dateTime={report.generatedAt}>{formatFullDate(report.generatedAt)}</time>
+        <p className="report-coverage-period"><span>보도량 집계</span>{report.coverage?.periodLabel || '집계 자료 없음'}</p>
         {report.reportScope === 'RUN' && <div className="report-collection-context">
           {topicNames.length > 0 ? <>
             <p><span>수집 주제</span><strong>{topicNames.join(' · ')}</strong></p>
@@ -482,6 +486,7 @@ function ReportView({ report, audience, defaultAudience, onAudienceSelect, onEvi
             {(finding) => (
               <IssueCard
                 finding={finding}
+                coverage={findingCoverage(report.coverage, finding.id)}
                 key={finding.id}
                 audience={audience}
                 historical={report.reportScope !== 'RUN'}
@@ -604,8 +609,9 @@ function ReportStat({ value, label, tone }: { value: number; label: string; tone
   )
 }
 
-function IssueCard({ finding, audience, historical, reportDate, reportEndDate, onEvidenceSelect, highlightTerms }: {
+function IssueCard({ finding, coverage, audience, historical, reportDate, reportEndDate, onEvidenceSelect, highlightTerms }: {
   finding: ReportFinding
+  coverage: ReportCoverageItem | undefined
   audience: Audience
   historical: boolean
   reportEndDate?: string | null
@@ -622,9 +628,10 @@ function IssueCard({ finding, audience, historical, reportDate, reportEndDate, o
   const issueInfo = finding.issue ?? issue.data
   const keyPoints = useMemo(() => normalizeKeyPoints(finding.keyPoints), [finding.keyPoints])
   const perspective = perspectiveFor(finding, audience)
-  // 통합 보고서는 이후 갱신된 이슈 제목 대신 저장된 근거 분석을 보여준다.
-  const title = historical ? finding.articleTitle : issueInfo?.title || finding.articleTitle
-  const summary = limitText(historical ? finding.summary : issueInfo?.summary || finding.summary, 120)
+  // 고정 보도량 옆에는 이후 병합된 현재 이슈가 아닌, 저장된 분석의 제목과 요약을 보여준다.
+  const useSavedContent = historical || coverageAvailable(coverage)
+  const title = useSavedContent ? finding.articleTitle : issueInfo?.title || finding.articleTitle
+  const summary = limitText(useSavedContent ? finding.summary : issueInfo?.summary || finding.summary, 120)
   const relatedArticles = issue.data?.articles ?? []
   const relatedArticleCount = issue.data ? relatedArticles.length : issueInfo?.articleCount ?? 1
   const visibleRelatedArticles = relatedArticles.slice(0, visibleRelatedCount)
@@ -663,10 +670,11 @@ function IssueCard({ finding, audience, historical, reportDate, reportEndDate, o
             : issueInfo && <time dateTime={issueInfo.lastSeenAt}>{formatShortDate(issueInfo.lastSeenAt)}</time>}
         </div>
         <h4><ReportKeywordText text={title} terms={highlightTerms} /></h4>
+        <ReportCoverageSummary coverage={coverage} />
         <p className="issue-card-summary"><ReportKeywordText text={summary} terms={highlightTerms} /></p>
         <div className="issue-card-footer">
           <span className="issue-source-count">
-            {historical && '현재 '}
+            {'현재 '}
             {issue.isError && issueId !== null
               ? '관련 기사 상세 불러오기 실패'
               : issue.isLoading && issueId !== null
@@ -674,7 +682,7 @@ function IssueCard({ finding, audience, historical, reportDate, reportEndDate, o
               : issueInfo
                 ? `관련 ${relatedArticleCount}건 · 매체 ${issueInfo.publisherCount}곳`
                 : issueId === null
-                  ? '관련 1건 · 매체 1곳'
+                  ? '대표 기사 1건'
                   : '관련 기사 정보는 자세히에서 확인'}
           </span>
           <span className="issue-detail-toggle" aria-hidden="true">
@@ -682,6 +690,8 @@ function IssueCard({ finding, audience, historical, reportDate, reportEndDate, o
           </span>
         </div>
       </div>
+
+      <ReportCoverageSources coverage={coverage} terms={highlightTerms} />
 
       {open && (
         <div className="issue-card-details" id={panelId}>
@@ -716,7 +726,7 @@ function IssueCard({ finding, audience, historical, reportDate, reportEndDate, o
 
           <section className="issue-related-articles">
             <div className="issue-detail-heading">
-              <h5>관련 기사</h5>
+              <h5>현재 관련 기사</h5>
               <span>
                 {issue.data && relatedArticles.length > RELATED_ARTICLE_BATCH_SIZE
                   ? `${visibleRelatedArticles.length} / ${relatedArticles.length}건`

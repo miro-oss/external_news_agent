@@ -85,9 +85,11 @@ public class TopicWeeklyReportSelector {
         var result = companyInterests.select(prepared.stream().flatMap(day -> day.candidates().stream()).distinct().toList(),
                 prepared.getFirst().topicId());
         var retained = result.findings().stream().map(Finding::getId).collect(Collectors.toSet());
+        var suppressed = prepared.stream().flatMap(day -> day.candidates().stream()).map(Finding::getId)
+                .filter(id -> !retained.contains(id)).distinct().sorted().toList();
         return new WeekSelection(prepared.stream().map(day -> finish(day,
                 new CompanyInterestSelection.Result(day.candidates().stream().filter(f -> retained.contains(f.getId())).toList(), List.of()))).toList(),
-                result.applications());
+                result.applications(), suppressed);
     }
 
     private Selection finish(Prepared prepared, CompanyInterestSelection.Result companySelection) {
@@ -130,7 +132,13 @@ public class TopicWeeklyReportSelector {
     public record Prepared(Long topicId, String topicName, LocalDate date, List<Finding> candidates,
                            Map<Long, NewsIssue> issues) { }
 
-    public record WeekSelection(List<Selection> selections, List<CompanyInterestSelection.Application> applications) { }
+    public record WeekSelection(List<Selection> selections, List<CompanyInterestSelection.Application> applications,
+                                List<Long> companySuppressedFindingIds) {
+        public WeekSelection { companySuppressedFindingIds = List.copyOf(companySuppressedFindingIds); }
+        public WeekSelection(List<Selection> selections, List<CompanyInterestSelection.Application> applications) {
+            this(selections, applications, List.of());
+        }
+    }
 
     public record Selection(WeeklyReportInput.DailySource source, List<Finding> findings,
                             List<CompanyInterestSelection.Application> applications) {

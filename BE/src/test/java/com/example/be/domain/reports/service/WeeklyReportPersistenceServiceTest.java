@@ -1,5 +1,6 @@
 package com.example.be.domain.reports.service;
 
+import com.example.be.domain.reports.coverage.ReportCoverageCapture;
 import com.example.be.domain.analysis.entity.Finding;
 import com.example.be.domain.analysis.repository.FindingRepository;
 import com.example.be.domain.analysis.relevance.TopicRelevancePolicy;
@@ -30,7 +31,7 @@ class WeeklyReportPersistenceServiceTest {
     private final ReportEventFeedbackProjection feedbackProjection = mock(ReportEventFeedbackProjection.class);
     private final DailyReportFeedbackExclusions feedbackExclusions = mock(DailyReportFeedbackExclusions.class);
     private final WeeklyReportPersistenceService service = new WeeklyReportPersistenceService(
-            lock, weekly, reports, findings, relevance, comparisons, feedbackProjection, feedbackExclusions);
+            lock, weekly, reports, findings, relevance, comparisons, feedbackProjection, feedbackExclusions, mock(ReportCoverageCapture.class));
     private final LocalDate monday = LocalDate.of(2026, 9, 7);
     private final LocalDateTime now = monday.plusWeeks(1).atTime(0, 5);
 

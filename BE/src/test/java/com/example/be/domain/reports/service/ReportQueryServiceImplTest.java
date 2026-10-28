@@ -86,7 +86,8 @@ class ReportQueryServiceImplTest {
             newsIssueRepository, deliveryLogRepository,
             com.example.be.domain.analysis.service.SensitivityCalculator.defaults(),
             investigationRepository, mock(com.example.be.domain.collection.repository.CollectionRunArticleRepository.class), relevancePolicy,
-            feedbackProjection);
+            feedbackProjection, new com.example.be.domain.reports.coverage.ReportCoverageService(
+                    mock(com.example.be.domain.collection.repository.ArticleRepository.class), relevancePolicy));
 
     @Test
     void latestReturnsNullWhenNoReportExists() {
@@ -742,6 +743,33 @@ class ReportQueryServiceImplTest {
         verify(investigationRepository).findTraces(List.of(43L, 42L));
         verify(investigationRepository, never()).findTraces(any(Long.class));
         verify(findingRepository, times(2)).findForReportByIdIn(anyCollection());
+    }
+
+    @Test
+    void coverageSurvivesIncludeFindingsFalseAndLatestWithoutUsingLiveIssueCounts() {
+        var finding = finding(1L, SensitivityLevel.HIGH, Relevance.IMPORTANT);
+        var snapshot = new com.example.be.domain.reports.coverage.ReportCoverageSnapshot(
+                "report-coverage.v1", java.time.OffsetDateTime.parse("2026-10-29T09:00:00+09:00"),
+                "해당 실행 수집 기준", List.of(),
+                List.of(new com.example.be.domain.reports.coverage.ReportCoverageSnapshot.Binding(1L, 88L, 7L)));
+        var report = NewsReport.builder().id(17L).run(CollectionRun.builder().id(42L).build())
+                .reportCoverageSnapshot(snapshot).structuredContent(new ReportContent(List.of("요약"),
+                        List.of(new ReportContent.ImportantEvent("이슈", "요약", "", List.of(1L))), List.of(), List.of()))
+                .generatedAt(LocalDateTime.of(2026, 10, 29, 9, 0)).build();
+        when(reportRepository.findByIdAndReportStatusNot(17L, ReportStatus.PENDING)).thenReturn(Optional.of(report));
+        when(reportRepository.findFirstByReportStatusNotAndDeletedAtIsNullOrderByGeneratedAtDescIdDesc(ReportStatus.PENDING))
+                .thenReturn(Optional.of(report));
+        when(findingRepository.findForReportByRunId(42L)).thenReturn(List.of(finding));
+        var withFindings = service.getReport(17L, true);
+        var without = service.getReport(17L, false);
+        var latest = service.getLatest(false);
+        assertEquals(withFindings.getCoverage().events(), without.getCoverage().events());
+        assertEquals(without.getCoverage(), latest.getCoverage());
+        assertTrue(without.getCoverage().findings().isEmpty());
+        assertEquals(0, without.getCoverage().events().getFirst().articleCount());
+        assertNull(without.getFindings());
+        assertEquals(1, without.getSummaryStats().getFindingCount());
+        assertEquals("report-coverage.v1", latest.getCoverage().ruleVersion());
     }
 
     private Finding finding(Long id, SensitivityLevel sensitivityLevel, Relevance relevance) {

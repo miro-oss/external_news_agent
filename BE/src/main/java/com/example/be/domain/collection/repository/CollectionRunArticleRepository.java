@@ -22,6 +22,36 @@ public interface CollectionRunArticleRepository
 
     List<CollectionRunArticle> findByRunIdAndChangeTypeOrderByIdAsc(Long runId, ChangeType changeType);
 
+    /** Report coverage snapshots need all observed articles, independently of the representative top-N. */
+    @Query("""
+            SELECT observation FROM CollectionRunArticle observation
+            JOIN FETCH observation.run
+            JOIN FETCH observation.topic
+            JOIN FETCH observation.article article
+            LEFT JOIN FETCH article.storedBody
+            LEFT JOIN FETCH article.contentGroup
+            WHERE observation.run.id IN :runIds
+            ORDER BY observation.id ASC
+            """)
+    List<CollectionRunArticle> findReportCoverageByRunIds(@Param("runIds") Collection<Long> runIds);
+
+    /** Topic weekly coverage includes observations in runs without an eligible representative finding. */
+    @Query("""
+            SELECT observation FROM CollectionRunArticle observation
+            JOIN FETCH observation.run run
+            JOIN FETCH observation.topic
+            JOIN FETCH observation.article article
+            LEFT JOIN FETCH article.storedBody
+            LEFT JOIN FETCH article.contentGroup
+            WHERE observation.topic.id = :topicId
+              AND run.startedAt >= :since AND run.startedAt < :before
+              AND run.status NOT IN (com.example.be.domain.collection.entity.RunStatus.PENDING,
+                                     com.example.be.domain.collection.entity.RunStatus.RUNNING)
+            ORDER BY observation.id ASC
+            """)
+    List<CollectionRunArticle> findTopicReportCoverage(@Param("topicId") Long topicId,
+            @Param("since") java.time.LocalDateTime since, @Param("before") java.time.LocalDateTime before);
+
     @Query("""
             SELECT DISTINCT observation.article.id
             FROM CollectionRunArticle observation
